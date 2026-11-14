@@ -3,7 +3,7 @@ import { placeWindow, WindowStateFile, type Display, type Rect } from './window-
 import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { copyFileSync } from 'node:fs';
+import { copyFileSync, rmSync } from 'node:fs';
 import { linuxUpdatePlan } from './linux-update';
 import { diagnosticLog } from './diagnostic-log';
 import { installScope, isAdministrator, otherSessionsRunning, updaterArgs } from './install-scope';
@@ -256,7 +256,36 @@ if (process.platform === 'win32') {
   app.setAppUserModelId(id);
 }
 
+/**
+ * Development on Windows: Windows takes the taskbar button's and the notifications' icon from the Start Menu shortcut
+ * that carries the window's AppUserModelID. With none, Electron makes one itself on the first notification, named
+ * "Electron" with Electron's icon (it kept reappearing). So the dev app keeps its own, with the Yawble icon, and drops
+ * an Electron.lnk that carries the dev id. Installed builds get theirs from the installer and are left alone.
+ */
+function keepDevStartMenuShortcut(): void {
+  if (process.platform !== 'win32' || app.isPackaged) return;
+  try {
+    const programs = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+    const ours = path.join(programs, `${APP_DISPLAY_NAME} (dev).lnk`);
+    const want = {
+      target: process.execPath, args: `"${app.getAppPath()}"`, cwd: path.dirname(app.getAppPath()),
+      icon: appResource('icon.ico'), iconIndex: 0, appUserModelId: `${APP_ID}.dev`, description: `${APP_DISPLAY_NAME} (development build)`,
+    };
+    let current: Electron.ShortcutDetails | null = null;
+    try { current = shell.readShortcutLink(ours); } catch { current = null; }
+    if (!current || current.icon !== want.icon || current.appUserModelId !== want.appUserModelId || current.target !== want.target || current.args !== want.args)
+      shell.writeShortcutLink(ours, current ? 'replace' : 'create', want);
+    const electronLnk = path.join(programs, 'Electron.lnk');
+    try {
+      if (shell.readShortcutLink(electronLnk).appUserModelId === want.appUserModelId) { rmSync(electronLnk); report('removed Electron.lnk (it carried the dev app id)'); }
+    } catch { /* none, or not ours */ }
+  } catch (e) {
+    report(`dev Start Menu shortcut: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 app.whenReady().then(async () => {
+  keepDevStartMenuShortcut();
   // Everything is refused except writing text to the clipboard (the copy buttons on the Concierge's code blocks).
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'clipboard-sanitized-write'));
   coreStarts.push(Date.now());
