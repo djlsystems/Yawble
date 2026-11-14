@@ -8,8 +8,12 @@ roles: [manager, member]
 ```
 <team>/repo          the team's repository (the person's; no agent can reach it)
 <team>/shared.git    the shared view: every member's branch, kept up to date by the app; READ-ONLY to you
-<team>/members/<you>/repo   your own clone, on your branch members/<you> (the Manager's: team/<team>)
+<team>/members/<you>/repo   your own clone, on your branch members/<team>/<you> (the Manager's: team/<team>)
 ```
+
+`<team>` in a branch name is the team's slug, the same in `team/<team>` and `members/<team>/<you>`, so two teams on one
+repository never share a member branch. A clone still on an older `members/<you>` branch is moved to the new name by the
+app at the member's next start, with its commits.
 
 - You commit on your own branch only. When your run ends, the app fetches your branch into the team's
   repository and the shared view, and pushes it to the team repository's origin if there is one (never main,
@@ -24,13 +28,13 @@ roles: [manager, member]
 A teammate's work is visible once their run has ended (their branch is in the shared view then):
 
 ```powershell
-git fetch "$env:YAWBLE_TEAM_BUNDLE" members/developerpriya        # FETCH_HEAD = DeveloperPriya's latest commit
+git fetch "$env:YAWBLE_TEAM_BUNDLE" members/<team>/developerpriya # FETCH_HEAD = DeveloperPriya's latest commit
 git log --oneline -5 FETCH_HEAD                     # what you got
 git merge --no-edit FETCH_HEAD                      # bring it into your branch (a tester usually does this)
 ```
 
 To list every branch in the shared view: `git bundle list-heads "$env:YAWBLE_TEAM_BUNDLE"`.
-To look at history without fetching: `git --git-dir="$env:YAWBLE_TEAM_REPO" log --oneline -5 members/developerpriya`.
+To look at history without fetching: `git --git-dir="$env:YAWBLE_TEAM_REPO" log --oneline -5 members/<team>/developerpriya`.
 
 If the branch you were told about is not there yet, the teammate's run has not ended or it did not commit:
 say so with `blocked` (or tell your Manager) rather than guessing.

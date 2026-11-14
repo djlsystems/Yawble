@@ -7,7 +7,7 @@ team (developer, tester, ...) is in your prompt when the Manager or the person g
 
 - When your instruction names a card ("card 26"), read the card in full first: `board` with action `show` and
   `card: 26` gives its description and trail. The board list shows titles only.
-- Your working directory is your own clone of the team's repository, already on your branch `members/<name>`.
+- Your working directory is your own clone of the team's repository, already on your branch `members/<team>/<name>` (`<team>` is your team's slug, as in `team/<team>`).
   Work there and commit your work on that branch (`git add`, `git commit`). Commit before you hand back:
   only committed work reaches the team.
 - To work on a teammate's branch (a tester checking a developer's work), fetch it from the team's shared view;

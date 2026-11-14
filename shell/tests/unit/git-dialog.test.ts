@@ -83,6 +83,22 @@ describe('git dialog', () => {
     expect(w.find('[data-test=git-behind]').exists()).toBe(true);
   });
 
+  it('lists a nested members/<team>/<member> branch whole, beside a leftover old members/<member> one', async () => {
+    const { api } = fakeApi({
+      'git.status': () => ({ ...base, members: [
+        { branch: 'members/ops/ada', sha: 'dddddddddddd', aheadOfBase: 2, inTeamBranch: false },
+        { branch: 'members/ada', sha: 'cccccccccccc', aheadOfBase: 1, inTeamBranch: true },
+      ] }),
+    });
+    const w = mount(GitDialog, { props: { api, team } });
+    await flushPromises();
+    const rows = w.findAll('[data-test=git-members] tr').slice(1).map((r) => r.findAll('td').map((c) => c.text()));
+    expect(rows).toEqual([
+      ['members/ops/ada', 'dddddddddd', '2', 'not yet'],
+      ['members/ada', 'cccccccccc', '1', 'yes'],
+    ]);
+  });
+
   it('shows no behind line, and no Sync now, for a branch that is in step', async () => {
     const { api } = fakeApi({ 'git.status': () => base });
     const w = mount(GitDialog, { props: { api, team } });
