@@ -52,7 +52,7 @@ const leaseTitle = computed(() => {
 
 <style scoped>
 .card { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; padding: 9px 10px; border-radius: 10px;
-  border: 1px solid var(--line); border-left: 4px solid var(--status); background: color-mix(in srgb, var(--status) 5%, #fff); cursor: pointer; }
+  border: 1px solid var(--line); border-left: 4px solid var(--status); background: color-mix(in srgb, var(--status) 5%, var(--surface)); cursor: pointer; }
 .card:hover { border-color: color-mix(in srgb, var(--status) 55%, var(--line)); border-left-color: var(--status); }
 .card.selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 .top { display: flex; gap: 6px; align-items: flex-start; }
@@ -64,8 +64,8 @@ const leaseTitle = computed(() => {
 .foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .status { font-size: 11.5px; font-weight: 700; color: var(--status); }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; }
-.waiting { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
-.lease { font-weight: 600; --k: var(--state-running); color: var(--k); background: color-mix(in srgb, var(--k) 12%, #fff); border: 1px solid color-mix(in srgb, var(--k) 35%, transparent); }
+.waiting { background: var(--bad-bg-soft); color: var(--bad-ink); border: 1px solid var(--bad-line-soft); }
+.lease { font-weight: 600; --k: var(--state-running); color: var(--k); background: color-mix(in srgb, var(--k) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--k) 35%, transparent); }
 .lease.queued { --k: var(--state-waiting); }
 .muted { color: var(--muted); }
 .small { font-size: 11px; }

@@ -155,7 +155,7 @@ onBeforeUnmount(() => off?.());
 </template>
 
 <style scoped>
-.card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: #fff; }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--surface); }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
 .fld { margin-right: 12px; }

@@ -7,9 +7,11 @@ export const StatusLabel: Record<CardStatus, string> = {
   completed: 'Run finished', handback: 'Handed back', done: 'Done',
 };
 
+/** The colour is a theme variable (styles.css --status-*), so it has a light and a dark value. */
 export const StatusColor: Record<CardStatus, string> = {
-  queued: '#64748b', running: '#2563eb', blocked: '#b45309', 'needs-decision': '#c2410c', failed: '#b91c1c',
-  completed: '#0f766e', handback: '#0f766e', done: '#15803d',
+  queued: 'var(--status-queued)', running: 'var(--status-running)', blocked: 'var(--status-blocked)',
+  'needs-decision': 'var(--status-decision)', failed: 'var(--status-failed)',
+  completed: 'var(--status-completed)', handback: 'var(--status-completed)', done: 'var(--status-done)',
 };
 
 /** The ring a card's member wears: the member's own state when it is known, otherwise the card's. */

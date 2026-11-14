@@ -132,9 +132,9 @@ defineExpose({ checkNow, refresh });
 </template>
 
 <style scoped>
-.update-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 18px; margin: 0; border-bottom: 1px solid var(--line); background: #eef4ff; color: #1d2330; }
+.update-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 18px; margin: 0; border-bottom: 1px solid var(--line); background: var(--info-bg); color: var(--ink); }
 .update-banner .text { flex: 1 1 280px; }
 .update-banner .confirm, .update-banner .error { flex-basis: 100%; }
-.update-banner .error { color: #a01818; }
+.update-banner .error { color: var(--bad); }
 .told { padding: 6px 18px; margin: 0; }
 </style>
