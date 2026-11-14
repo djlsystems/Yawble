@@ -247,7 +247,8 @@ const config = {
     artifactName: `${name}.\${ext}`,
     category: 'Development',
     // install.sh (no root), uninstall.sh, and install-apparmor.sh (root, once) beside the executable.
-    extraFiles: [{ from: path.join(here, 'linux'), to: '.', filter: ['*.sh', '*.desktop.in'] }],
+    // The Yawble icon beside them, for the menu entry install.sh writes (the one in the app's archive is out of its reach).
+    extraFiles: [{ from: path.join(here, 'linux'), to: '.', filter: ['*.sh', '*.desktop.in'] }, { from: path.join(shell, 'resources'), to: '.', filter: ['icon.png'] }],
   },
 };
 const platform = { win: builder.Platform.WINDOWS, osx: builder.Platform.MAC, linux: builder.Platform.LINUX }[os];

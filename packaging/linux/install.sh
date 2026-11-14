@@ -60,6 +60,7 @@ desktop="$appsdir/yawble.desktop"
 while IFS= read -r line; do
   case "$line" in
     Exec=*) echo "Exec=\"$prefix/yawble-launch.sh\" %U" ;;
+    Icon=*) echo "Icon=$prefix/icon.png" ;;
     *) echo "$line" ;;
   esac
 done < "$prefix/yawble.desktop.in" > "$desktop"

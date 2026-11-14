@@ -1,8 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=Yawble
-Comment=Teams of agents, each in its own sandbox (unsigned dev build)
+Comment=AI teamwork: teams of coding agents, each in its own sandbox
 Exec=yawble %U
+Icon=yawble
 Terminal=false
 Categories=Development;
 StartupWMClass=Yawble
