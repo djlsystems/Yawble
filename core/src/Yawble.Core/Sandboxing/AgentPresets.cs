@@ -708,6 +708,10 @@ public static class AgentPresets
             {
                 ["permissions"] = new JsonObject { ["defaultMode"] = "bypassPermissions" },
                 ["skipDangerousModePermissionPrompt"] = true,
+                // Agents' commits and pull requests carry no AI attribution (no "Co-Authored-By: Claude" trailer, no
+                // "Generated with" line): "attribution" is the current key, includeCoAuthoredBy the older one.
+                ["attribution"] = new JsonObject { ["commit"] = "", ["pr"] = "" },
+                ["includeCoAuthoredBy"] = false,
             };
             var state = new JsonObject
             {
