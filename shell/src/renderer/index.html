@@ -3,9 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <!-- Until theme.ts (the first thing the page's script runs) sets data-theme on <html>, the page's own background follows
-         the OS, so a dark OS never sees a white page first. The inline-script way is closed by the CSP above. -->
     <meta name="color-scheme" content="light dark" />
+    <!-- Sets data-theme on <html> from the kept choice (else the OS) before the stylesheet paints, so a dark theme has no
+         white first frame. A classic script file from 'self', which the CSP above allows (an inline one it does not); it must
+         stay before the page's stylesheet and module script. theme.ts then takes over. -->
+    <script vite-ignore src="./theme-boot.js"></script>
     <title>Yawble</title>
   </head>
   <body>

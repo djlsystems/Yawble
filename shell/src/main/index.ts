@@ -13,7 +13,7 @@ import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, 
 import { CoreClient } from './core-client';
 import { locateCore, startCore, type RunningCore } from './core-process';
 import { WebsiteBridge, type PageWindow, type WindowFactory } from './website-host';
-import { TitleBars, TITLE_BAR, windowBackground } from './title-bar';
+import { ThemeFile, TitleBars, TITLE_BAR, windowBackground } from './title-bar';
 
 // Electron main: thin. It starts the core, relays the renderer's calls over IPC, forwards the
 // core's pushes, and draws windows (the main window and one terminal window per agent). It never opens a
@@ -160,8 +160,10 @@ async function restartCore(): Promise<void> {
 // leaves that corner free. macOS: the traffic lights stay at the top left, the page leaves room for them.
 const BAR_HEIGHT = 52;
 // The controls' colours follow the page's theme (title-bar.ts); a new window starts with the last theme a page said,
-// else the OS's, so its overlay and background match before its page loads.
-const titleBars = new TitleBars(() => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'));
+// else the OS's, so its overlay and background match before its page loads. The last theme is kept in theme.json
+// (next to window-state.json), so the first window of the next launch starts with the person's choice too.
+const titleBars = new TitleBars(() => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'), process.platform,
+  new ThemeFile(path.join(dataDir, 'theme.json')));
 const ownTitleBar = () => process.platform === 'darwin'
   ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 18 } }
   : { titleBarStyle: 'hidden' as const, titleBarOverlay: { ...TITLE_BAR[titleBars.startTheme()], height: BAR_HEIGHT } };

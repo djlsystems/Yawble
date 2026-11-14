@@ -7,7 +7,9 @@ import { reactive } from 'vue';
  * colours on. The desktop window also tells Electron main (setTheme), which colours the title-bar overlay controls.
  * A remote view (Cloud Link) keeps its own choice under its own key.
  *
- * main.ts imports this module first, so data-theme is on <html> before anything is mounted or painted.
+ * public/theme-boot.js (a classic script in each page's <head>) sets data-theme by the same rule before the stylesheet
+ * paints; main.ts imports this module first, so it takes over before anything is mounted. A switch made in another
+ * window of the app (same key in localStorage) arrives as a 'storage' event and is followed here.
  */
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type Theme = 'light' | 'dark';
@@ -24,6 +26,8 @@ export interface ThemeEnv {
   key?: string;
   /** Told the theme each time it is applied (the desktop window's title-bar overlay). */
   notify?: (theme: Theme) => void;
+  /** The page's window, for 'storage' events: a choice made in another window of the app (same key) is followed here. */
+  events?: Pick<Window, 'addEventListener' | 'removeEventListener'>;
 }
 
 export interface ThemeState {
@@ -71,6 +75,15 @@ export function createTheme(env: ThemeEnv): ThemeController {
   };
   const onOsChange = () => { if (state.mode === 'system') apply(); };
   try { media?.addEventListener?.('change', onOsChange); } catch { /* an old engine: no live follow */ }
+  // Another window of the app (an agent's terminal window, the main window) changed the choice: show it here too.
+  // key null is the whole storage cleared. Nothing is written back, so the windows never echo each other.
+  const onStorage = (e: Event) => {
+    const changed = (e as StorageEvent).key;
+    if (changed !== null && changed !== key) return;
+    state.mode = readMode(env, key);
+    apply();
+  };
+  try { env.events?.addEventListener('storage', onStorage); } catch { /* no window */ }
   apply();
 
   const setMode = (mode: ThemeMode) => {
@@ -82,7 +95,10 @@ export function createTheme(env: ThemeEnv): ThemeController {
     state,
     setMode,
     toggle: () => setMode(state.current === 'dark' ? 'light' : 'dark'),
-    dispose() { try { media?.removeEventListener?.('change', onOsChange); } catch { /* ignore */ } },
+    dispose() {
+      try { media?.removeEventListener?.('change', onOsChange); } catch { /* ignore */ }
+      try { env.events?.removeEventListener('storage', onStorage); } catch { /* ignore */ }
+    },
   };
 }
 
@@ -96,6 +112,7 @@ function pageTheme(): ThemeController {
     root: typeof document !== 'undefined' ? document.documentElement : undefined,
     key: yawble?.remote ? REMOTE_THEME_KEY : THEME_KEY,
     notify: yawble?.remote ? undefined : (t) => yawble?.setTheme?.(t),
+    events: w,
   });
 }
 

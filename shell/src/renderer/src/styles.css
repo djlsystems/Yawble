@@ -1,5 +1,5 @@
 /* The window's colours. Every colour in the renderer comes from these custom properties: :root holds the light
-   theme, [data-theme="dark"] on <html> the dark one (the theme module sets the attribute before first paint).
+   theme, [data-theme="dark"] on <html> the dark one (public/theme-boot.js sets the attribute before first paint).
    Components use only var(--...); a test fails on a hard-coded colour in a .vue <style> (theme-colours.test.ts).
    The Monitor (monitor/*) keeps its own dark look in both themes: the block that sets the light values also applies
    to .monitor in the dark theme, so everything inside it reads exactly what it reads in the light theme. */
@@ -23,6 +23,7 @@
   --on-accent: #ffffff;
   --selection: rgba(36, 87, 197, .22); --focus: #2457c5;
   --backdrop: rgba(20, 26, 36, .35); --shadow: rgba(0, 0, 0, .2); --shadow-soft: rgba(20, 28, 45, .07); --shadow-chip: rgba(0, 0, 0, .08);
+  --shadow-menu: rgba(20, 28, 45, .16);
   --scrim: rgba(0, 0, 0, .6); --on-scrim: #ffffff;
   --checker: #f3f4f6;
   /* notices: warning (amber), bad (red), ok (green), info (blue) */
@@ -64,6 +65,7 @@
   --on-accent: #10141c;
   --selection: rgba(124, 163, 245, .35); --focus: #7ca3f5;
   --backdrop: rgba(0, 0, 0, .55); --shadow: rgba(0, 0, 0, .55); --shadow-soft: rgba(0, 0, 0, .3); --shadow-chip: rgba(0, 0, 0, .4);
+  --shadow-menu: rgba(0, 0, 0, .5);
   --scrim: rgba(0, 0, 0, .7); --on-scrim: #ffffff;
   --checker: #2a2e36;
   --warn-bg: #2a2416; --warn-bg-soft: #26221a; --warn-soft: #332a15; --warn-chip: #5a4718;

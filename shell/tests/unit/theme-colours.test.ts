@@ -11,22 +11,40 @@ const shellSrc = resolve(__dirname, '../../src');
 const codeBrowserSrc = resolve(__dirname, '../../../code-browser/src');
 const stylesCss = readFileSync(join(shellSrc, 'renderer/src/styles.css'), 'utf8');
 const codeBrowserCss = readFileSync(join(codeBrowserSrc, 'theme.css'), 'utf8');
+const terminalCss = readFileSync(join(shellSrc, 'renderer/src/terminal-theme.css'), 'utf8');
 
 /** .vue files whose <style> may keep literal colours, each with its reason. */
 const AllowList: Record<string, string> = {
   // The member avatar's ring is cut with a mask; #000 there is the mask's opacity, not a colour on screen.
   'shell/src/renderer/src/faces/MemberAvatar.vue': 'mask alpha',
-  // DeveloperTomas's files for card 140 (B029: the theme toggle, the title bar and the terminals); he themes them.
-  'shell/src/renderer/src/components/MenuBar.vue': 'card 140',
-  'shell/src/renderer/src/TerminalApp.vue': 'card 140',
-  'shell/src/renderer/src/components/TerminalScreen.vue': 'card 140',
-  'shell/src/renderer/src/components/TerminalPane.vue': 'card 140',
-  'shell/src/renderer/src/components/TerminalView.vue': 'card 140',
 };
 /** The Monitor keeps its own dark look in both themes: its files are not swept. */
 const isMonitor = (rel: string) => rel.startsWith('shell/src/renderer/src/monitor/');
 
-const Colour = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(|(?<![\w-])(?:white|black)(?![\w-])/;
+const Colour = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/;
+/** The CSS named colours (CSS Color 4) and the system colours. transparent, currentColor and inherit are allowed. */
+const NamedColours = (
+  'aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood '
+  + 'cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray '
+  + 'darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen '
+  + 'darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue '
+  + 'firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew '
+  + 'hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan '
+  + 'lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray '
+  + 'lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue '
+  + 'mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred '
+  + 'midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid '
+  + 'palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple '
+  + 'rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue '
+  + 'slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white '
+  + 'whitesmoke yellow yellowgreen '
+  + 'canvas canvastext linktext visitedtext activetext buttonface buttontext buttonborder field fieldtext highlight '
+  + 'highlighttext selecteditem selecteditemtext mark marktext graytext accentcolor accentcolortext'
+).split(' ');
+/** A named colour as a word of its own: not part of a longer name, a variable (--red), a class (.gold) or an id. */
+const NamedColour = new RegExp(`(?<![\\w.#-])(?:${NamedColours.join('|')})(?![\\w-])`, 'i');
+/** A declaration's value ("prop: value"), at the start of a line or after "{" or ";"; a selector line starts with ".", "#" or ":" instead. */
+const Declaration = /(?:^|[{;])\s*[\w-]+\s*:\s*([^;{}]*)/g;
 
 /** Each line of a .vue file's <style> blocks that has a literal colour (comments ignored). */
 function literalColours(vue: string): { line: number; text: string }[] {
@@ -35,7 +53,8 @@ function literalColours(vue: string): { line: number; text: string }[] {
   vue.split(/\r?\n/).forEach((raw, i) => {
     if (/<style\b/.test(raw)) inStyle = true;
     const text = raw.replace(/\/\*.*?\*\//g, '').replace(/<\/?style[^>]*>/g, '');
-    if (inStyle && Colour.test(text)) hits.push({ line: i + 1, text: raw.trim() });
+    const named = [...text.matchAll(Declaration)].some((m) => NamedColour.test(m[1]!));
+    if (inStyle && (Colour.test(text) || named)) hits.push({ line: i + 1, text: raw.trim() });
     if (/<\/style>/.test(raw)) inStyle = false;
   });
   return hits;
@@ -79,6 +98,18 @@ describe('no hard-coded colours in components', () => {
     expect(literalColours(vue).map((h) => h.line)).toEqual([5, 6, 7]);
   });
 
+  it('finds CSS named colours in values, and keeps transparent, currentColor, inherit, variables and class names', () => {
+    const vue = '<style scoped>\n.a { background: whitesmoke; }\n.b { color: gray; }\n.c {\n  border: 1px solid Tomato;\n}\n'
+      + '.d { outline-color: canvastext; }\n.e { background: transparent; color: currentColor; fill: inherit; }\n'
+      + '.tag.red, .gold:hover { color: var(--red); }\n.f { --gray-line: var(--line); }\n.g { grid-area: main; }\n'
+      + '.h { background: color-mix(in srgb, var(--ink), var(--surface)); }\n</style>';
+    expect(literalColours(vue).map((h) => h.line)).toEqual([2, 3, 5, 7]);
+  });
+
+  it('allow-lists only the avatar mask (the menu bar and the terminals are scanned like every other component)', () => {
+    expect(Object.keys(AllowList)).toEqual(['shell/src/renderer/src/faces/MemberAvatar.vue']);
+  });
+
   it('every .vue outside monitor/ and the allow-list takes its colours from the theme variables', () => {
     expect(allVue.length).toBeGreaterThan(40); // the scan sees the components
     const found = allVue.filter((f) => !isMonitor(f.rel) && !(f.rel in AllowList))
@@ -87,7 +118,7 @@ describe('no hard-coded colours in components', () => {
   });
 
   it('every variable a component reads is defined (no fallback hides a missing one)', () => {
-    const defined = new Set([...`${stylesCss}\n${codeBrowserCss}`.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+    const defined = new Set([...`${stylesCss}\n${codeBrowserCss}\n${terminalCss}`.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
     const missing = allVue.filter((f) => !isMonitor(f.rel) && !(f.rel in AllowList)).flatMap((f) => {
       const src = readFileSync(f.abs, 'utf8');
       const local = new Set([...src.matchAll(/['"]?(--[\w-]+)['"]?\s*:/g)].map((m) => m[1])); // set by the component itself

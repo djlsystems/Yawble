@@ -57,7 +57,7 @@ void props;
 .top { border: 0; background: transparent; padding: 4px 9px; font-size: 13px; color: var(--ink); border-radius: 6px; }
 .top:hover, .top.on { background: var(--hover); }
 .drop { position: absolute; top: calc(100% + 2px); left: 0; min-width: 240px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(20, 28, 45, .16); padding: 4px; z-index: 1000; }
+  box-shadow: 0 8px 24px var(--shadow-menu); padding: 4px; z-index: 1000; }
 .item { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; width: 100%; border: 0; background: transparent;
   padding: 5px 10px 5px 6px; font-size: 13px; text-align: left; border-radius: 5px; color: var(--ink); }
 .item:hover:not(:disabled) { background: var(--hover); }

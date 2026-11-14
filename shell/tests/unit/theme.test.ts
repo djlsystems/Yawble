@@ -102,6 +102,40 @@ describe('theme mode (theme.ts)', () => {
     expect(os.listeners.size).toBe(0);
   });
 
+  it('follows a switch made in another window of the app (a storage event on its key), and stops on dispose', () => {
+    const s = fakeStorage();
+    const events = new EventTarget();
+    const root = document.createElement('html');
+    const told: string[] = [];
+    const t = createTheme({ storage: s.storage, matchMedia: fakeOs(false).matchMedia, root, events, notify: (x) => told.push(x) });
+    expect(t.state).toEqual({ mode: 'system', current: 'light' });
+
+    // The main window picks dark: its localStorage write reaches this window as a storage event.
+    s.map.set(THEME_KEY, 'dark');
+    events.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY, newValue: 'dark' }));
+    expect(t.state).toEqual({ mode: 'dark', current: 'dark' });
+    expect(root.getAttribute('data-theme')).toBe('dark');
+    expect(s.map.get(THEME_KEY)).toBe('dark'); // nothing written back
+
+    // Another key (the remote view's) changes nothing; "Use system setting" there (removed) follows the OS here.
+    s.map.set(REMOTE_THEME_KEY, 'light');
+    events.dispatchEvent(new StorageEvent('storage', { key: REMOTE_THEME_KEY, newValue: 'light' }));
+    expect(t.state.current).toBe('dark');
+    s.map.delete(THEME_KEY);
+    events.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY, newValue: null }));
+    expect(t.state).toEqual({ mode: 'system', current: 'light' });
+    // The whole storage cleared (key null) counts too.
+    s.map.set(THEME_KEY, 'dark');
+    events.dispatchEvent(new StorageEvent('storage', { key: null }));
+    expect(t.state.current).toBe('dark');
+    expect(told).toEqual(['light', 'dark', 'light', 'dark']);
+
+    t.dispose();
+    s.map.set(THEME_KEY, 'light');
+    events.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY, newValue: 'light' }));
+    expect(t.state.current).toBe('dark');
+  });
+
   it('labels the button with what one click does', () => {
     expect(toggleLabel('light')).toBe('Switch to dark theme');
     expect(toggleLabel('dark')).toBe('Switch to light theme');
@@ -163,6 +197,33 @@ describe('the page theme (module load)', () => {
     expect(localStorage.getItem(THEME_KEY)).toBe('dark');
     expect(setTheme).not.toHaveBeenCalled();
   });
+
+  it("an open terminal window follows a switch in the main window (the page listens to window's storage event)", async () => {
+    vi.stubGlobal('matchMedia', fakeOs(false).matchMedia);
+    const setTheme = vi.fn();
+    (window as any).yawble = { setTheme };
+    const { theme } = await import('../../src/renderer/src/theme');
+    expect(theme.state.current).toBe('light');
+    localStorage.setItem(THEME_KEY, 'dark'); // as the main window's toggle does
+    window.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY, newValue: 'dark' }));
+    expect(theme.state).toEqual({ mode: 'dark', current: 'dark' });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(setTheme).toHaveBeenLastCalledWith('dark'); // its own title bar and background follow too
+    theme.dispose();
+  });
+
+  it("a remote view ignores the desktop's key in storage events", async () => {
+    vi.stubGlobal('matchMedia', fakeOs(false).matchMedia);
+    (window as any).yawble = { remote: true };
+    const { theme } = await import('../../src/renderer/src/theme');
+    localStorage.setItem(THEME_KEY, 'dark');
+    window.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY, newValue: 'dark' }));
+    expect(theme.state.current).toBe('light');
+    localStorage.setItem(REMOTE_THEME_KEY, 'dark');
+    window.dispatchEvent(new StorageEvent('storage', { key: REMOTE_THEME_KEY, newValue: 'dark' }));
+    expect(theme.state.current).toBe('dark');
+    theme.dispose();
+  });
 });
 
 describe('title-bar overlay (main, title-bar.ts)', () => {
@@ -196,6 +257,28 @@ describe('title-bar overlay (main, title-bar.ts)', () => {
     expect(win.sent).toEqual([TITLE_BAR_DIMMED.dark]);
     bars.setTheme(win, 'light');
     expect(bars.startTheme()).toBe('light');
+  });
+
+  it('starts the next launch with the theme kept from the last one, and keeps each change (once)', () => {
+    const kept: string[] = [];
+    let stored: 'light' | 'dark' | null = 'dark';
+    const memory = { read: () => stored, write: (t: 'light' | 'dark') => { kept.push(t); stored = t; } };
+    const bars = new TitleBars(() => 'light', 'win32', memory);
+    expect(bars.startTheme()).toBe('dark'); // the person chose dark on a light OS last time
+    const win = fakeWindow();
+    bars.setTheme(win, 'dark');
+    bars.setTheme(fakeWindow(), 'dark'); // a second window saying the same: not written again
+    expect(kept).toEqual([]);
+    bars.setTheme(win, 'light');
+    expect(kept).toEqual(['light']);
+    expect(new TitleBars(() => 'dark', 'win32', memory).startTheme()).toBe('light');
+    // Nothing kept, or a memory that throws: the OS theme.
+    expect(new TitleBars(() => 'dark', 'win32', { read: () => null, write: () => {} }).startTheme()).toBe('dark');
+    const broken = { read: () => { throw new Error('io'); }, write: () => { throw new Error('io'); } };
+    const b = new TitleBars(() => 'light', 'win32', broken);
+    expect(b.startTheme()).toBe('light');
+    expect(() => b.setTheme(fakeWindow(), 'dark')).not.toThrow();
+    expect(b.startTheme()).toBe('dark');
   });
 
   it('does nothing on macOS, and survives a window without an overlay (a terminal window)', () => {

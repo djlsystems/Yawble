@@ -2,6 +2,9 @@
 // background and symbols follow the page's theme (the renderer says it over window:setTheme) and dim while a dialog
 // dims the page (window:dimTitleBar). macOS draws its traffic lights apart from the page: nothing to colour there.
 
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
 export type Theme = 'light' | 'dark';
 export interface Overlay { color: string; symbolColor: string }
 
@@ -34,24 +37,52 @@ export function overlayFor(theme: Theme, dimmed: boolean): Overlay {
   return (dimmed ? TITLE_BAR_DIMMED : TITLE_BAR)[theme];
 }
 
+/** Where the last theme a page said is kept between launches (main cannot read the renderer's localStorage at start). */
+export interface ThemeMemory { read(): Theme | null; write(theme: Theme): void }
+
+/** theme.json in the shell's data folder: {"theme":"dark"}. A missing or damaged file means "nothing kept". */
+export class ThemeFile implements ThemeMemory {
+  constructor(private readonly file: string) {}
+
+  read(): Theme | null {
+    try {
+      const raw = JSON.parse(readFileSync(this.file, 'utf8')) as { theme?: unknown };
+      return isTheme(raw?.theme) ? raw.theme : null;
+    } catch { return null; }
+  }
+
+  write(theme: Theme): void {
+    try {
+      mkdirSync(path.dirname(this.file), { recursive: true });
+      writeFileSync(this.file, JSON.stringify({ theme }));
+    } catch { /* a theme not kept only means the OS theme at the next launch */ }
+  }
+}
+
 /** A window whose title-bar controls can be coloured (BrowserWindow). */
 export interface OverlayWindow { setTitleBarOverlay(options: Overlay): void }
 
 /**
  * Each window's theme and dimmed state, and the overlay they make. A window that has not said its theme yet uses the
- * starting theme (the last one any window said, else the OS's).
+ * starting theme: the last one any window said (this session, else the one kept from the last session), else the OS's.
  */
 export class TitleBars {
   private readonly state = new WeakMap<OverlayWindow, { theme: Theme; dimmed: boolean }>();
   private last: Theme | null = null;
 
-  constructor(private readonly osTheme: () => Theme, private readonly platform: string = process.platform) {}
+  constructor(private readonly osTheme: () => Theme, private readonly platform: string = process.platform,
+    private readonly memory?: ThemeMemory) {
+    try { this.last = memory?.read() ?? null; } catch { this.last = null; }
+  }
 
   /** The theme a new window starts with, for its titleBarOverlay and background before its page says. */
   startTheme(): Theme { return this.last ?? this.osTheme(); }
 
   setTheme(win: OverlayWindow | null | undefined, theme: unknown): void {
     if (!win || !isTheme(theme)) return;
+    if (this.last !== theme) {
+      try { this.memory?.write(theme); } catch { /* not kept */ }
+    }
     this.last = theme;
     const s = this.state.get(win) ?? { theme, dimmed: false };
     s.theme = theme;
