@@ -60,6 +60,13 @@ public static class ToolCatalog
     }
 
     /// <summary>
+    /// Every catalog name that installs the same winget package as <paramref name="t"/> (itself included): one package is
+    /// one tool for the ask and the Not now hold, whichever name an agent used (dotnet-sdk-10 and dotnet-sdk-lts).
+    /// </summary>
+    public static IReadOnlyList<string> SamePackage(ToolEntry t) =>
+        All.Where(e => e.WingetId.Equals(t.WingetId, StringComparison.OrdinalIgnoreCase)).Select(e => e.Name).ToList();
+
+    /// <summary>
     /// The winget arguments an Install runs, exactly (the same form as git.install's): install from the winget source by
     /// the exact id, silently, accepting the agreements, with no prompts; --scope user where the package supports it.
     /// </summary>
@@ -139,7 +146,7 @@ public sealed record ToolAskRow(long Id, string At, long TeamId, string Team, st
 
 /// <summary>
 /// Host tool asks (B013): an agent's request_tool names a tool from <see cref="ToolCatalog"/>; the person is asked once
-/// per (team, tool) in Needs you. Install runs exactly the catalog's winget command in the app's process (the person, in
+/// per (team, package) in Needs you: catalog names that install the same winget package are one tool for the ask and Not now. Install runs exactly the catalog's winget command in the app's process (the person, in
 /// the window on this computer, only: never over the Cloud Link, from the companion, by an agent or the Concierge); the
 /// program is looked for again afterwards, and when it is found every open ask for the tool closes and each team's
 /// Manager is told to retry. A failed install leaves the ask open with winget's message (Try again). Not now: the team is
@@ -214,14 +221,27 @@ public sealed class ToolAskService
         {
             var now = _clock.GetUtcNow();
             using var c = Open();
-            if (Scalar(c, "SELECT decided_at FROM tool_asks WHERE team_id = $t AND tool = $tool AND state = 'dismissed' ORDER BY decided_at DESC LIMIT 1;",
-                    ("$t", member.TeamId), ("$tool", entry.Name)) is string dismissed
+            // The ask and the Not now hold are per package (winget id), not per catalog name: every name of the same package
+            // finds the same ask and the same hold.
+            var (inList, inArgs) = InNames(ToolCatalog.SamePackage(entry));
+            if (Scalar(c, $"SELECT decided_at FROM tool_asks WHERE team_id = $t AND tool IN ({inList}) AND state = 'dismissed' ORDER BY decided_at DESC LIMIT 1;",
+                    [("$t", member.TeamId), .. inArgs]) is string dismissed
                 && DateTimeOffset.TryParse(dismissed, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var at)
                 && now - at < NotNowQuiet)
                 return $"refused: the person chose Not now for {entry.DisplayName}; your team is not asked about it again before {at + NotNowQuiet:yyyy-MM-dd HH:mm} UTC. " +
                        "Carry on without it, or hand back blocked on it.";
+            // An open ask for the package under any of its names counts up; otherwise a new ask under the name asked for.
+            var open = Scalar(c, $"SELECT id FROM tool_asks WHERE team_id = $t AND tool IN ({inList}) AND state IN ('pending', 'installing') ORDER BY id LIMIT 1;",
+                [("$t", member.TeamId), .. inArgs]) as long?;
             using var tx = c.BeginTransaction();
-            using (var cmd = Command(c,
+            using (var cmd = open is { } openId
+                       ? Command(c,
+                           """
+                           UPDATE tool_asks SET count = count + 1, last_seen = $now, member = $m, reason = $r, workflow = $w, causation_seq = $c
+                           WHERE id = $id RETURNING id, count;
+                           """,
+                           ("$now", Stamp(now)), ("$m", qualified), ("$r", clean), ("$w", workflow), ("$c", causation), ("$id", openId))
+                       : Command(c,
                        """
                        INSERT INTO tool_asks (at, team_id, tool, member, reason, count, last_seen, workflow, causation_seq)
                        VALUES ($now, $t, $tool, $m, $r, 1, $now, $w, $c)
@@ -427,7 +447,8 @@ public sealed class ToolAskService
         List<ToolAskRow> closed;
         lock (_lock)
         {
-            closed = Asks().Where(a => a.Tool == tool.Name).ToList();
+            var package = ToolCatalog.SamePackage(tool);
+            closed = Asks().Where(a => package.Contains(a.Tool)).ToList();
             using var c = Open();
             using var tx = c.BeginTransaction();
             var now = Stamp(_clock.GetUtcNow());
@@ -555,6 +576,10 @@ public sealed class ToolAskService
         cmd.Transaction = tx;
         return cmd.ExecuteNonQuery();
     }
+
+    /// <summary>Parameters for "tool IN (...)": the placeholders and their values.</summary>
+    private static (string List, (string Name, object? Value)[] Args) InNames(IReadOnlyList<string> names) =>
+        (string.Join(", ", names.Select((_, i) => $"$n{i}")), names.Select((n, i) => ($"$n{i}", (object?)n)).ToArray());
 
     private static string? S(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
 

@@ -7,9 +7,16 @@ public sealed record LogColumn(string Key, string Label, string Sql, string Kind
 /// <summary>
 /// How old entries of a source are deleted: rows of <paramref name="Table"/> whose <paramref name="TimeColumn"/> is
 /// before the cutoff (and match <paramref name="Where"/>). <paramref name="FileColumn"/>: a file each row names, deleted
-/// with it. <paramref name="Loss"/>: what the person loses, said before they confirm.
+/// with it. <paramref name="Loss"/>: what the person loses, said before they confirm. <paramref name="Also"/>: more
+/// tables the log reads, pruned with it by the same cutoff (their own time column and Where; their own DefaultDays,
+/// Loss and FileColumn are not used).
 /// </summary>
-public sealed record LogPrune(string Table, string TimeColumn, int? DefaultDays, string Loss, string? Where = null, string? FileColumn = null);
+public sealed record LogPrune(string Table, string TimeColumn, int? DefaultDays, string Loss, string? Where = null, string? FileColumn = null,
+    IReadOnlyList<LogPrune>? Also = null)
+{
+    /// <summary>This table, then each in <see cref="Also"/>.</summary>
+    public IEnumerable<LogPrune> Tables => Also is null ? [this] : [this, .. Also];
+}
 
 /// <summary>
 /// A log in the database. <paramref name="From"/> is its FROM clause with the alias t; <paramref name="TeamWhere"/> and
@@ -126,7 +133,8 @@ public static class LogSources
                 new("decided", "Decided", "t.decided_at", "time"),
             ],
             "tm.name = @team", "t.member = @member",
-            new("integration_asks", "at", 365, "who approved or declined those requests. Requests still waiting for an answer are never pruned.", Where: "state <> 'pending'")),
+            new("integration_asks", "at", 365, "who approved or declined those requests, and who allowed or denied which host. Requests still waiting for an answer are never pruned.", Where: "state <> 'pending'",
+                Also: [new("network_asks", "at", null, "", Where: "state <> 'pending'")])),
 
         new("usage", "Model usage", "Usage",
             "Tokens for each model request: input, output and cache, by run, member and model.",
