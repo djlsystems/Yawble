@@ -137,12 +137,32 @@ async function askTeam() {
 // (git.deleteBranches without confirm) and the person reads that plan; Delete sends the plan's token back. An unmerged
 // branch is deleted only when the person ticks it, which re-plans with it in unmergedOk so the plan shown is the one
 // confirmed. A stale answer (the branches changed since the plan) is shown and planned again.
-interface DeleteTarget { branch: string; remote: boolean; unmerged: boolean }
+interface DeleteTarget { branch: string; remote: boolean; unmerged: boolean; mergeUnknown?: boolean }
 const deleting = ref<(DeleteTarget & { unmergedOk: boolean; plan: GitDeletePlan | null; note: string | null; error: string | null }) | null>(null);
 const oldBranches = computed(() => status.value?.oldBranches ?? []);
 const memberTarget = (b: TeamGitBranch): DeleteTarget => ({ branch: b.branch, remote: !!status.value?.origin, unmerged: !b.inTeamBranch && b.aheadOfBase > 0 });
 const oldTarget = (o: TeamGitOldBranch): DeleteTarget => ({ branch: o.name, remote: o.remote, unmerged: !o.merged });
 const oldWhere = (o: TeamGitOldBranch) => (o.local && o.remote ? 'here and on origin' : o.remote ? 'on origin' : 'here');
+
+// A members/<slug> branch named like this team's slug blocks its members/<slug>/<member> branches (git cannot hold
+// both). git.status lists one entry per ref (here, on origin); the dialog shows one per branch and repository. Whether
+// its commits are merged is not known here, so the person may tick to delete it anyway; the core's plan says which.
+interface BlockingRow { name: string; repo: string; local: boolean; remote: boolean }
+const blockingBranches = computed<BlockingRow[]>(() => {
+  const rows: BlockingRow[] = [];
+  for (const b of status.value?.blockingBranches ?? []) {
+    let row = rows.find((r) => r.name === b.name && r.repo === b.repo);
+    if (!row) rows.push(row = { name: b.name, repo: b.repo, local: false, remote: false });
+    if (b.location === 'remote') row.remote = true; else row.local = true;
+  }
+  return rows;
+});
+const blockingWhere = (b: BlockingRow) => (b.local && b.remote ? 'here and on origin' : b.remote ? 'on origin' : 'here');
+const memberPrefix = computed(() => {
+  const t = status.value?.teamBranch ?? '';
+  return t.startsWith('team/') ? `members/${t.slice('team/'.length)}/…` : 'members/<team>/…';
+});
+const blockingTarget = (b: BlockingRow): DeleteTarget => ({ branch: b.name, remote: b.remote, unmerged: true, mergeUnknown: true });
 
 function deleteParams(d: NonNullable<typeof deleting.value>, confirm?: string) {
   return {
@@ -264,12 +284,21 @@ onMounted(() => { void loadChoices(); void load(); });
       <p v-if="result" class="result" :class="{ ok: result.changed }" data-test="git-result">{{ result.message }}
         <template v-if="result.files?.length"> Files: <code>{{ result.files.join(', ') }}</code></template></p>
 
+      <section v-for="b in blockingBranches" :key="`blocking:${b.repo}:${b.name}`" class="blocking" data-test="git-blocking-branch">
+        <div><strong><code>{{ b.name }}</code> blocks this team's member branches</strong></div>
+        <div class="small">Git cannot keep it beside the <code>{{ memberPrefix }}</code> branches, so members cannot start until it is
+          deleted or renamed (or the team is renamed).</div>
+        <div class="muted small">Repository <span data-test="git-blocking-repo">{{ b.repo }}</span> · {{ blockingWhere(b) }}</div>
+        <div><button class="small-btn" :data-test="`git-delete-blocking-${b.name}`" :disabled="!!busy" @click="startDelete(blockingTarget(b))">Delete…</button></div>
+      </section>
+
       <section v-if="deleting" class="delete" data-test="git-delete">
         <div><strong>Delete <code>{{ deleting.branch }}</code></strong><template v-if="deleting.remote"> here and on origin</template></div>
         <p v-if="deleting.note" class="small note" data-test="git-delete-stale">{{ deleting.note }} Planned again below.</p>
         <label v-if="deleting.unmerged" class="small" data-test="git-delete-unmerged">
           <input type="checkbox" :checked="deleting.unmergedOk" :disabled="!!busy" @change="chooseUnmerged(($event.target as HTMLInputElement).checked)" />
-          Delete it although its commits are not merged (they are lost)
+          <template v-if="deleting.mergeUnknown">Delete it even if the plan keeps it as not merged (its unmerged commits are lost)</template>
+          <template v-else>Delete it although its commits are not merged (they are lost)</template>
         </label>
         <LoadingNote v-if="!deleting.plan && !deleting.error" text="Planning the delete…" />
         <pre v-if="deleting.plan" class="plan" data-test="git-delete-plan">{{ deleting.plan.plan }}</pre>
@@ -313,6 +342,7 @@ onMounted(() => { void loadChoices(); void load(); });
 .delete { padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--state-failed); background: var(--chip, #eef1f4); margin: 8px 0; }
 .delete .plan { white-space: pre-wrap; word-break: break-word; background: var(--bg); border-radius: 4px; padding: 6px 8px; margin: 6px 0; font-size: 12.5px; max-height: 240px; overflow: auto; }
 .delete .note { color: #8a5a00; }
+.blocking { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; border-left: 3px solid #c9a227; background: var(--chip, #eef1f4); margin: 8px 0; }
 .small-btn { font-size: 12px; padding: 1px 8px; }
 .result { padding: 6px 8px; border-left: 3px solid #c9a227; }
 .result.ok { border-left-color: #2e8b57; }
