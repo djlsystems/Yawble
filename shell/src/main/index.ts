@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, screen, session, shell } from 'electron';
 import { placeWindow, WindowStateFile, type Display, type Rect } from './window-state';
 import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
@@ -13,6 +13,7 @@ import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, 
 import { CoreClient } from './core-client';
 import { locateCore, startCore, type RunningCore } from './core-process';
 import { WebsiteBridge, type PageWindow, type WindowFactory } from './website-host';
+import { TitleBars, TITLE_BAR, windowBackground } from './title-bar';
 
 // Electron main: thin. It starts the core, relays the renderer's calls over IPC, forwards the
 // core's pushes, and draws windows (the main window and one terminal window per agent). It never opens a
@@ -158,11 +159,12 @@ async function restartCore(): Promise<void> {
 // window controls. Windows and Linux: the system draws the controls over the top right (titleBarOverlay), the page
 // leaves that corner free. macOS: the traffic lights stay at the top left, the page leaves room for them.
 const BAR_HEIGHT = 52;
-const BAR = { color: '#ffffff', symbolColor: '#3c4048' };
-const BAR_DIMMED = { color: '#adafb2', symbolColor: '#2a2d33' }; // white under the dialogs' backdrop, rgba(20, 26, 36, .35)
-const ownTitleBar = process.platform === 'darwin'
+// The controls' colours follow the page's theme (title-bar.ts); a new window starts with the last theme a page said,
+// else the OS's, so its overlay and background match before its page loads.
+const titleBars = new TitleBars(() => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'));
+const ownTitleBar = () => process.platform === 'darwin'
   ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: 18 } }
-  : { titleBarStyle: 'hidden' as const, titleBarOverlay: { ...BAR, height: BAR_HEIGHT } };
+  : { titleBarStyle: 'hidden' as const, titleBarOverlay: { ...TITLE_BAR[titleBars.startTheme()], height: BAR_HEIGHT } };
 
 /** A file in shell/resources: next to package.json in development, inside app.asar when installed (out/ is two levels deeper). */
 function appResource(name: string): string {
@@ -175,9 +177,9 @@ function newWindow(opts: { width: number; height: number; x?: number; y?: number
     height: opts.height,
     ...(opts.x !== undefined && opts.y !== undefined ? { x: opts.x, y: opts.y } : {}),
     title: opts.title,
-    ...(opts.hash ? {} : ownTitleBar), // terminal windows keep the system title bar
+    ...(opts.hash ? {} : ownTitleBar()), // terminal windows keep the system title bar
     show: false,
-    backgroundColor: opts.hash ? '#101418' : '#f6f7f9',
+    backgroundColor: windowBackground(titleBars.startTheme(), !!opts.hash),
     icon: appResource('icon.png'), // the Yawble mark (Windows and Linux; macOS uses the bundle's)
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'index.js'),
@@ -274,10 +276,9 @@ app.whenReady().then(async () => {
     const args = params && typeof params === 'object' && !Array.isArray(params) ? (params as Record<string, unknown>) : undefined;
     return (await requireClient()).call(method, args);
   });
-  ipcMain.on('window:dimTitleBar', (e, dim: unknown) => {
-    if (process.platform === 'darwin') return; // the traffic lights are not drawn over the page
-    BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay(dim === true ? BAR_DIMMED : BAR);
-  });
+  // The traffic lights (macOS) are not drawn over the page; TitleBars leaves them alone.
+  ipcMain.on('window:dimTitleBar', (e, dim: unknown) => titleBars.setDimmed(BrowserWindow.fromWebContents(e.sender), dim));
+  ipcMain.on(Channels.setTheme, (e, theme: unknown) => titleBars.setTheme(BrowserWindow.fromWebContents(e.sender), theme));
   // The page's menu bar (the window draws its own title bar, so the native menu bar is not shown): each command acts
   // on the window that asked. Only the listed commands; anything else is ignored.
   ipcMain.on(Channels.windowCommand, (e, command: unknown) => {

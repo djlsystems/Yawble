@@ -151,6 +151,8 @@ export interface YawbleApi {
   readonly platform?: string;
   /** Dims the window controls the system draws in the title bar while a dialog dims the page (desktop window only). */
   dimTitleBar?(dim: boolean): void;
+  /** Colours the window controls the system draws in the title bar for the page's theme (desktop window only). */
+  setTheme?(theme: 'light' | 'dark'): void;
   /** The app's own settings: running in the background, starting at sign-in (desktop window only). */
   shellSettings?(): Promise<ShellSettings>;
   setShellSettings?(patch: Partial<ShellSettings>): Promise<ShellSettings>;
@@ -194,6 +196,7 @@ export const Channels = {
   setShellSettings: 'shell:setSettings',
   openDocuments: 'window:openDocuments',
   windowCommand: 'window:command',
+  setTheme: 'window:setTheme',
   installUpdate: 'app:installUpdate',
   updateInfo: 'app:updateInfo',
 } as const;
@@ -795,6 +798,8 @@ export interface BoardCard {
   /** When the person cleared this Done card from the board view (0037); null or absent when it shows. */
   clearedAt?: string | null;
   memberState?: { state: AgentCard['state']; attention: AgentCard['attention'] };
+  /** The heavy-work lease of the card's member, on the card it is working on only: held, or waited for (queue position). */
+  lease?: { state: 'holding' | 'waiting'; what: string | null; position: number | null };
 }
 export interface BoardTrailLine { id: number; at: string; source: string; kind: string; text: string }
 export interface BoardCardDetail extends BoardCard { trail: BoardTrailLine[]; itemTitle?: string }

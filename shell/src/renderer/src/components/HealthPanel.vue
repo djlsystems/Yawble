@@ -121,8 +121,8 @@ onMounted(load);
 .checks { list-style: none; padding: 0; margin: 0; }
 .checks li { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); font-size: 13.5px; }
 .body { display: flex; flex-direction: column; gap: 4px; }
-.dot { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #fff; flex: none; }
-.ok .dot { background: var(--ok, #2a8a4a); }
+.dot { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--on-accent); flex: none; }
+.ok .dot { background: var(--ok); }
 .warn .dot { background: var(--warn); }
 .fail .dot { background: var(--bad); }
 .fixes { display: flex; gap: 6px; flex-wrap: wrap; }

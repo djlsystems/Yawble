@@ -41,19 +41,19 @@ const openable = (e: CodeEntry) => !e.hidden && e.kind !== 'link';
 .cb-list { list-style: none; margin: 0; padding: 0; }
 .cb-open { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 12px 18px minmax(0, 1fr) auto auto auto; gap: 6px; align-items: center;
   padding: 3px 8px; font-size: 13px; cursor: pointer; border-radius: 4px; }
-.cb-open:hover:not(:disabled) { background: var(--chip, #f0f1f4); }
+.cb-open:hover:not(:disabled) { background: var(--chip); }
 .cb-open:disabled { cursor: default; }
-.cb-entry.selected .cb-open { background: color-mix(in srgb, var(--accent, #2457c5) 10%, transparent); }
-.cb-entry.hidden, .cb-entry.link { color: var(--muted, #6b7384); }
+.cb-entry.selected .cb-open { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.cb-entry.hidden, .cb-entry.link { color: var(--muted); }
 .cb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cb-note { font-size: 11.5px; font-style: italic; white-space: nowrap; }
-.cb-size, .cb-ago { font-size: 11.5px; color: var(--muted, #6b7384); white-space: nowrap; text-align: right; }
+.cb-size, .cb-ago { font-size: 11.5px; color: var(--muted); white-space: nowrap; text-align: right; }
 .cb-ago { min-width: 92px; }
 .cb-empty { padding: 8px; font-size: 13px; }
 .cb-dot { width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; }
-.cb-dot.live { background: var(--state-running, #2e7d4f); animation: cb-pulse 1.4s ease-in-out infinite; }
-.cb-dot.recent { background: var(--state-waiting, #5f7385); }
-.cb-dot.branch { border: 1.5px solid var(--state-done, var(--ok, #1d6b2f)); }
-@keyframes cb-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running, #2e7d4f) 55%, transparent); } 50% { box-shadow: 0 0 0 4px transparent; opacity: .6; } }
+.cb-dot.live { background: var(--state-running); animation: cb-pulse 1.4s ease-in-out infinite; }
+.cb-dot.recent { background: var(--state-waiting); }
+.cb-dot.branch { border: 1.5px solid var(--ok); }
+@keyframes cb-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running) 55%, transparent); } 50% { box-shadow: 0 0 0 4px transparent; opacity: .6; } }
 @media (prefers-reduced-motion: reduce) { .cb-dot.live { animation: none; } }
 </style>

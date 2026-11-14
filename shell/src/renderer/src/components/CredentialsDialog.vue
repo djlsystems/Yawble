@@ -185,11 +185,11 @@ const remove = (which: string) => run(() => api.call('credentials.remove', { whi
 section { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px 12px; }
 h3 { margin: 4px 0 8px; font-size: 15px; }
 h4 { margin: 14px 0 4px; font-size: 13px; }
-.switch { display: flex; gap: 14px; background: #f1f3f6; padding: 6px 8px; border-radius: 6px; }
+.switch { display: flex; gap: 14px; background: var(--surface-sunken); padding: 6px 8px; border-radius: 6px; }
 .small { font-size: 12px; }
 .pane { margin-top: 8px; height: auto; }
 .pane :deep(.terminal-view) { height: 160px; }
 .paste { margin-top: 6px; }
-.fake-note { background: #fff4f4; border: 1px solid #f3c9c9; padding: 6px 10px; border-radius: 6px; }
+.fake-note { background: var(--bad-bg-soft); border: 1px solid var(--bad-line-soft); padding: 6px 10px; border-radius: 6px; }
 p { margin: 4px 0; }
 </style>

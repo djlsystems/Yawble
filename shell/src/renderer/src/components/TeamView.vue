@@ -11,7 +11,8 @@ import MemberActivity from './MemberActivity.vue';
 import { useTeamActivity } from '../monitor/teamActivity';
 import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
-import { memberCardsStore } from '../gripStore';
+import { memberActivityStore, memberCardsStore } from '../gripStore';
+import { activityWidth } from '../memberActivityWidth';
 import Icon from './Icon.vue';
 import TriggersDialog from './TriggersDialog.vue';
 import LoadingNote from './LoadingNote.vue';
@@ -278,7 +279,11 @@ defineExpose({ refresh, openWorkflows });
           :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
           @terminal="openTerminal(c)" @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
           @guardrail="emit('guardrail', c.member.id)" @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
-        <MemberActivity class="member-side" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" />
+        <!-- The bar in the gap to the left of the activity sets the width of every member's activity together. -->
+        <div class="member-side" :style="{ flexBasis: `${activityWidth}px` }">
+          <TileGrip class="activity-grip" axis="w" reverse :store="memberActivityStore" />
+          <MemberActivity class="member-activity" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" />
+        </div>
       </div>
       <TileGrip axis="h" :store="memberCardsStore" />
     </div>
@@ -297,39 +302,46 @@ h2 { font-size: 16px; margin: 0; }
 .teamhead { display: flex; flex-direction: column; gap: 8px; }
 .titleline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .titleline h2 { font-size: 18px; margin: 0 6px 0 0; }
-.kpi { font-size: 12.5px; color: var(--ink-soft); background: var(--chip, #f1f3f7); border-radius: 12px; padding: 2px 10px; white-space: nowrap; }
+.kpi { font-size: 12.5px; color: var(--ink-soft); background: var(--chip); border-radius: 12px; padding: 2px 10px; white-space: nowrap; }
 .kpi b { color: var(--ink); font-weight: 600; margin-right: 3px; }
-.kpi.live { background: #e7f5ec; color: #1d6b2f; }
-.kpi.live b { color: #1d6b2f; }
+.kpi.live { background: var(--ok-bg); color: var(--ok); }
+.kpi.live b { color: var(--ok); }
 /* In the text, not on screen: the title reads "Team X · 3 agents · 1 running · 0 queued". */
 .sep { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .actions button { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .team > * { margin-bottom: 10px; }
 .team > .member-cell { position: relative; margin-bottom: 14px; }
-.member-row { display: flex; gap: 10px; align-items: stretch; }
+.member-row { display: flex; gap: 14px; align-items: stretch; }
 .member-main { flex: 1 1 0; min-width: 0; }
-.member-side { flex: 0 0 clamp(16rem, 36%, 28rem); }
-@media (max-width: 900px) { .member-row { flex-direction: column; } .member-side { flex: none; height: 12rem; } }
-.decision { background: #fffaf0; border: 1px solid #e9d29a; border-radius: 6px; padding: 6px 10px; }
+.member-side { position: relative; display: flex; flex-grow: 0; flex-shrink: 1; min-width: 0; }
+.member-activity { flex: 1; min-width: 0; }
+/* The width bar fills the 14px gap between the card and the activity (TileGrip's gap handles sit outside what they size). */
+.member-side > .activity-grip { left: -14px; right: auto; }
+@media (max-width: 900px) {
+  .member-row { flex-direction: column; }
+  .member-side { flex-basis: auto !important; height: 12rem; }
+  .member-side > .activity-grip { display: none; }
+}
+.decision { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; }
 .decision p { margin: 0 0 6px; }
 .decision > .row { margin-top: 6px; }
-.question { font-size: 13.5px; background: #fff; border: 1px solid #f0e2bb; border-radius: 6px; padding: 4px 10px; overflow-x: auto; }
+.question { font-size: 13.5px; background: var(--surface); border: 1px solid var(--warn-line-soft); border-radius: 6px; padding: 4px 10px; overflow-x: auto; }
 .question :deep(table) { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 13px; }
 .question :deep(th), .question :deep(td) { border: 1px solid var(--line-soft); padding: 4px 8px; text-align: left; vertical-align: top; }
-.question :deep(th) { background: #faf7ee; font-weight: 600; }
+.question :deep(th) { background: var(--warn-bg-soft); font-weight: 600; }
 .question :deep(td:first-child), .question :deep(th:first-child) { width: 28px; color: var(--muted); }
 .quick { gap: 6px; flex-wrap: wrap; }
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .thumb { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
-.thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; line-height: 18px; }
+.thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: var(--scrim); color: var(--on-scrim); font-size: 10px; line-height: 18px; }
 .error { color: var(--bad); }
 .remember label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-soft); }
 .remember input { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
-.decision.ask code { background: #f3f4f7; padding: 1px 5px; border-radius: 4px; }
+.decision.ask code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 .muted { color: var(--muted); }
 .add { margin-top: 14px; }
-.paused { background: #fffaf0; border: 1px solid #e9d29a; border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
+.paused { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
 .small { font-size: 12px; }
 </style>
