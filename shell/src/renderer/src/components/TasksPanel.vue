@@ -296,17 +296,17 @@ onMounted(load);
 .intro { font-size: 13px; margin: 0 0 10px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
-.task { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0; background: #fff; }
-.form { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; background: #fff; }
+.task { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0; background: var(--surface); }
+.form { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; background: var(--surface); }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
 label { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
 label.block { margin-top: 8px; }
 label.check { flex-direction: row; gap: 5px; align-items: center; }
 input, select, textarea { font: inherit; font-size: 13px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; }
-.live { margin: 8px 0; padding: 6px 8px; background: #f6f6f6; border-radius: 6px; }
+.live { margin: 8px 0; padding: 6px 8px; background: var(--surface-sunken); border-radius: 6px; }
 .tbl { border-collapse: collapse; font-size: 12.5px; width: 100%; }
 .tbl td { padding: 3px 10px 3px 0; cursor: pointer; }
-.detail { background: #fafafa; padding: 6px 10px; cursor: default; }
+.detail { background: var(--surface-2); padding: 6px 10px; cursor: default; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .muted { color: var(--muted); font-weight: 400; }
 .small { font-size: 12px; margin: 2px 0; }

@@ -51,7 +51,7 @@ const style = computed(() => ({
 .is-idle .face { box-shadow: none; }
 .initials {
   display: flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--avatar-ring) 22%, var(--surface, #fff)); color: var(--ink, inherit);
+  background: color-mix(in srgb, var(--avatar-ring) 22%, var(--surface)); color: var(--ink, inherit);
   font-size: calc(var(--avatar-size) * 0.38); font-weight: 700; line-height: 1;
 }
 .ring { position: absolute; inset: calc(-1 * var(--ring-gap)); border-radius: 50%; pointer-events: none; }

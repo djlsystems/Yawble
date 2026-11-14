@@ -28,8 +28,8 @@ useEscapeClose(() => emit('close'), () => !props.inline);
 </template>
 
 <style scoped>
-.backdrop { position: fixed; inset: 0; background: rgba(20, 26, 36, .35); display: flex; align-items: flex-start; justify-content: center; padding-top: var(--dialog-top); z-index: 10; }
-.modal { background: #fff; border-radius: 8px; width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - var(--dialog-top) - 24px); display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+.backdrop { position: fixed; inset: 0; background: var(--backdrop); display: flex; align-items: flex-start; justify-content: center; padding-top: var(--dialog-top); z-index: 10; }
+.modal { background: var(--surface); border-radius: 8px; width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - var(--dialog-top) - 24px); display: flex; flex-direction: column; box-shadow: 0 10px 40px var(--shadow); }
 .modal.wide { width: min(980px, calc(100vw - 32px)); }
 .modal.full { width: min(1320px, calc(100vw - 32px)); height: calc(100vh - var(--dialog-top) - 24px); }
 .modal.full .body { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }

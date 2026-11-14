@@ -382,10 +382,10 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 .keep td { padding: 3px 8px 3px 0; vertical-align: top; }
 .keep .name { white-space: nowrap; font-weight: 600; }
 .count { margin: 0; min-height: 1.2em; }
-.ok { color: var(--ok, #1d6b2f); margin: 0; }
+.ok { color: var(--ok); margin: 0; }
 .scroll { flex: 1 1 0; min-height: 120px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
 .grid { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.grid thead th { position: sticky; top: 0; background: var(--panel, #f6f7f9); z-index: 1; text-align: left; border-bottom: 1px solid var(--line); padding: 0; white-space: nowrap; }
+.grid thead th { position: sticky; top: 0; background: var(--bg); z-index: 1; text-align: left; border-bottom: 1px solid var(--line); padding: 0; white-space: nowrap; }
 .grid th .head { width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 8px; font-weight: 600; cursor: pointer; }
 .grid th.number .head, .grid td.number { text-align: right; }
 .grid th.sorted .head { color: var(--accent); }

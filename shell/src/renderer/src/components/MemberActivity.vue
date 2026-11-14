@@ -25,11 +25,11 @@ defineProps<{ rows: readonly ActivityRow[]; loaded: boolean; now: number }>();
 </template>
 
 <style scoped>
-.activity { position: relative; display: flex; flex-direction: column; min-height: 9rem; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-header { flex: none; padding: 6px 10px; font-size: 12px; font-weight: 600; color: var(--ink-soft); border-bottom: 1px solid var(--line-soft, var(--line)); }
+.activity { position: relative; display: flex; flex-direction: column; min-height: 9rem; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+header { flex: none; padding: 6px 10px; font-size: 12px; font-weight: 600; color: var(--ink-soft); border-bottom: 1px solid var(--line-soft); }
 ol { list-style: none; margin: 0; padding: 2px 0; overflow-y: auto; overflow-x: hidden; position: absolute; top: 29px; left: 0; right: 0; bottom: 0; }
 li { padding: 5px 10px 5px 8px; border-left: 3px solid var(--tone); font-size: 12px; line-height: 1.4; min-width: 0; }
-li + li { border-top: 1px solid var(--line-soft, #eef0f4); }
+li + li { border-top: 1px solid var(--line-soft); }
 .text { color: var(--ink-soft); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .dim { color: var(--muted); }
 .none { border-left-color: transparent; }

@@ -100,14 +100,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 </template>
 
 <style scoped>
-.term-window { display: flex; flex-direction: column; height: 100vh; background: #101418; color: #d8dee9; }
+.term-window { display: flex; flex-direction: column; height: 100vh; background: var(--term-bg); color: var(--term-fg); }
 .term-window.embedded { height: 100%; }
-.banner { padding: 8px 12px; background: #1b222c; border-bottom: 1px solid #2c3542; }
-.title { font-size: 13px; color: #fff; }
-.details { font-size: 12px; color: #9aa6b8; margin-top: 2px; }
-.loosened { font-size: 12px; color: #f2b84b; margin-top: 2px; }
-.bar { padding: 4px 12px; font-size: 12px; background: #151b23; color: #9aa6b8; }
-.bar button { background: #222b36; color: #d8dee9; border-color: #36404e; }
+.banner { padding: 8px 12px; background: var(--term-head); border-bottom: 1px solid var(--term-line); }
+.title { font-size: 13px; color: var(--term-title); }
+.details { font-size: 12px; color: var(--term-muted); margin-top: 2px; }
+.loosened { font-size: 12px; color: var(--term-warn); margin-top: 2px; }
+.bar { padding: 4px 12px; font-size: 12px; background: var(--term-bar); color: var(--term-muted); }
+.bar button { background: var(--term-btn); color: var(--term-btn-ink); border-color: var(--term-btn-line); }
 .screen { flex: 1; min-height: 0; }
-.error { color: #ff8a8a; }
+.error { color: var(--term-bad); }
 </style>
