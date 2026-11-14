@@ -157,7 +157,7 @@ public sealed class TeamNetworkAllowTests : IAsyncLifetime
         var team = await CreateTeam("payments", "Ada");
         var ada = await IdOf(team, "Ada");
 
-        var e = Assert.Throws<PolicyException>(() => _policies.AddTeamHost(team, host, [(ada, _layout)], "pat", Actor.App));
+        var e = Assert.Throws<PolicyException>(() => _policies.AddTeamHost(team, host, _policies.TeamMemberIds(team).Select(id => (id, _layout)).ToList(), "pat", Actor.App));
 
         Assert.NotEmpty(e.Errors);
         Assert.Empty(_policies.TeamHosts(team));
@@ -228,7 +228,7 @@ public sealed class TeamNetworkAllowTests : IAsyncLifetime
     public async Task DeletingTheTeam_ForgetsItsList()
     {
         var team = await CreateTeam("payments", "Ada");
-        _policies.AddTeamHost(team, "pypi.org", [], "pat", Actor.App);
+        _policies.AddTeamHost(team, "pypi.org", _policies.TeamMemberIds(team).Select(id => (id, _layout)).ToList(), "pat", Actor.App);
         new IntegrationService(_db.ConnectionString, _bus).ForgetTeam(team, "payments");
         Assert.Empty(_policies.TeamHosts(team));
     }

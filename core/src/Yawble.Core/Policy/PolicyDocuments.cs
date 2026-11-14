@@ -4,10 +4,24 @@ using System.Text.Json.Nodes;
 namespace Yawble.Core.Policy;
 
 /// <summary>A policy document or save was refused; every reason is listed.</summary>
-public sealed class PolicyException(IReadOnlyList<string> errors)
+public class PolicyException(IReadOnlyList<string> errors)
     : Exception("policy refused: " + string.Join("; ", errors))
 {
     public IReadOnlyList<string> Errors { get; } = errors;
+}
+
+/// <summary>
+/// <see cref="PolicyStore.AddTeamHost"/> wrote nothing because the team's members are not the ones it was given (one hired
+/// or removed since the list was built): the caller builds the list again, with each member's run layout, and calls again.
+/// </summary>
+public sealed class TeamMembersChangedException(long teamId, IReadOnlyList<long> given, IReadOnlyList<long> current)
+    : PolicyException([$"the team's members changed while the host was checked (checked {Ids(given)}, now {Ids(current)}); nothing was written"])
+{
+    public long TeamId { get; } = teamId;
+    public IReadOnlyList<long> Given { get; } = given;
+    public IReadOnlyList<long> Current { get; } = current;
+
+    private static string Ids(IReadOnlyList<long> ids) => ids.Count == 0 ? "none" : string.Join(", ", ids);
 }
 
 public sealed record FilesystemPolicy(
