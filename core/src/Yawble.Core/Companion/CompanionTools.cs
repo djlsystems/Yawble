@@ -57,6 +57,21 @@ public static class CompanionTools
         return null;
     }
 
+    /// <summary>
+    /// The first parameter the tool's schema requires that the call leaves out or blank, or null. A destructive call is checked
+    /// before its plan goes to the window, so the person is never asked to approve a call that would only fail.
+    /// </summary>
+    public static string? MissingRequired(string tool, JsonObject args)
+    {
+        var def = Definitions(CompanionLevel.Destructive).OfType<JsonObject>().FirstOrDefault(d => d["name"]?.GetValue<string>() == tool);
+        if (def?["inputSchema"]?["required"] is not JsonArray required) return null;
+        return required.Select(r => r?.GetValue<string>()).OfType<string>().FirstOrDefault(r => Absent(args[r]));
+
+        // Left out, null, or a blank string; any other value (a number, a flag, a list) is the tool's own to check.
+        static bool Absent(JsonNode? node) =>
+            node is null || node is JsonValue v && v.TryGetValue<string>(out var s) && string.IsNullOrWhiteSpace(s);
+    }
+
     /// <summary>As ConciergeActions reads new_team: a non-blank string.</summary>
     internal static bool NewTeam(JsonObject args) => Text(args, "new_team") is not null;
 

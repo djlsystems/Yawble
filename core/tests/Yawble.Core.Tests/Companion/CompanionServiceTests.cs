@@ -565,6 +565,28 @@ public class CompanionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ADestructiveCallMissingARequiredValue_IsRefusedBeforeTheWindowIsAsked()
+    {
+        var rig = await MakeRigAsync();
+        var cc = rig.Client("cc", CompanionLevel.Destructive);
+        foreach (var args in new[] { new JsonObject(), new JsonObject { ["name"] = "  " }, new JsonObject { ["name"] = null, ["manager_cli"] = "claude" } })
+        {
+            var r = await rig.Service.CallAsync(cc, "team_create", args, Ct);
+            Assert.True(r.IsError);
+            Assert.Contains("'name' is required", r.Text);
+            Assert.Null(r.RequestId);
+        }
+        var noTeam = await rig.Service.CallAsync(cc, "team_delete", [], Ct);
+        Assert.True(noTeam.IsError);
+        Assert.Contains("'team' is required", noTeam.Text);
+        Assert.Equal(0, rig.Service.PendingCount);
+        Assert.Empty(rig.Methods);
+        // A complete call still waits for the window.
+        Assert.NotNull((await rig.Service.CallAsync(cc, "team_create", new JsonObject { ["name"] = "gamma" }, Ct)).RequestId);
+        Assert.Equal(1, rig.Service.PendingCount);
+    }
+
+    [Fact]
     public async Task DenyRunsNothing()
     {
         var rig = await MakeRigAsync();

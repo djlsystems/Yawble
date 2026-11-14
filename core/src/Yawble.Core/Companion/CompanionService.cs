@@ -235,6 +235,8 @@ public sealed partial class CompanionService(
         foreach (var (key, value) in args)
             if (key != "value" && value is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > MaxArgumentChars)
                 throw new ArgumentException($"refused: '{key}' is longer than 8 KB ({s.Length} characters); the person must be able to read in full what they approve, so shorten it");
+        // Checked before the window is asked: a plan with a blank where a required value goes would only fail once approved.
+        if (CompanionTools.MissingRequired(tool, args) is { } missing) throw new ArgumentException($"'{missing}' is required");
         lock (_gate)
         {
             Sweep();
