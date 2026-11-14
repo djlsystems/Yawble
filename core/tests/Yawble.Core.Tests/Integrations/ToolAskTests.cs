@@ -504,4 +504,81 @@ public sealed class ToolAskTests : IDisposable
             return Result;
         }
     }
+
+    // ------------------------------------------------------------------ B015 tester probes (card 70)
+
+    private long ProbeNotNowAt(string tool)
+    {
+        var id = _asks.Asks().Single(a => a.Tool == tool).Id;
+        AsWindow(() => _asks.NotNowAsync(id, null, Ct)).GetAwaiter().GetResult();
+        return id;
+    }
+
+    private long ProbePruneAll() => new LogService(_db.Dir, _db.ConnectionString, _clock).Prune("approvals", "9999-12-31");
+
+    private long ProbeCount(string sql) => Insert(sql);
+
+    [Fact]
+    public async Task Probe_B015_ANotNowForDotnetSdkLts_HoldsDotnetSdk10_ThroughPruningAll_UntilIts24HoursEnd()
+    {
+        // A Not now on dotnet-sdk-10 25 hours ago (its hold is over), then a Not now on dotnet-sdk-lts (the same package).
+        await Request(Priya, "dotnet-sdk-10");
+        ProbeNotNowAt("dotnet-sdk-10");
+        _clock.Advance(TimeSpan.FromHours(25));
+        Assert.DoesNotContain("refused", await Request(Priya, "dotnet-sdk-lts"));
+        ProbeNotNowAt("dotnet-sdk-lts");
+
+        // Pruning all an hour later: the old dotnet-sdk-10 Not now goes, the dotnet-sdk-lts one stays; dotnet-sdk-10 is still refused.
+        _clock.Advance(TimeSpan.FromHours(1));
+        Assert.True(ProbePruneAll() > 0);
+        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-10';"));
+        Assert.Equal(1, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-lts' AND state = 'dismissed';"));
+        Assert.StartsWith("refused: the person chose Not now", await Request(Priya, "dotnet-sdk-10"));
+        Assert.StartsWith("refused: the person chose Not now", await Request(Bo, "dotnet"));
+
+        // 23h59 after the Not now: pruning all keeps it, still refused.
+        _clock.Advance(TimeSpan.FromHours(22) + TimeSpan.FromMinutes(59));
+        ProbePruneAll();
+        Assert.Equal(1, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-lts' AND state = 'dismissed';"));
+        Assert.StartsWith("refused", await Request(Priya, "dotnet-sdk-10"));
+
+        // 24h01 after: the hold is over and pruning all removes the Not now with its events; a new ask is raised.
+        _clock.Advance(TimeSpan.FromMinutes(2));
+        ProbePruneAll();
+        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_asks;"));
+        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_ask_events;"));
+        Assert.DoesNotContain("refused", await Request(Priya, "dotnet-sdk-10"));
+        Assert.Equal("pending", Assert.Single(_asks.Asks()).State);
+        // Another team was never held.
+        Assert.DoesNotContain("refused", await Request(Wren, "dotnet-sdk-lts"));
+    }
+
+    [Fact]
+    public async Task Probe_B015_TheInterruptedRow_ReadsInTheApprovalsLog_AndSurvivesPruningAll()
+    {
+        await Request(Priya, "nodejs-lts");
+        var id = _asks.Asks().Single().Id;
+        _host.Gate = new TaskCompletionSource();
+        var install = AsWindow(() => _asks.InstallAsync(id, Ct)); // the real path to 'installing', with its install event
+        for (var i = 0; i < 200 && _asks.Asks().Single().State != "installing"; i++) await Task.Delay(10, Ct);
+        Assert.Equal("installing", _asks.Asks().Single().State);
+
+        NewService(); // the app starts again; the earlier install never finished
+
+        var logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
+        var rows = logs.Query(new LogQuery("approvals"))["rows"]!.AsArray().Select(r => r!.AsObject())
+            .Where(r => r["integration"]!.GetValue<string>() == "host tool").ToList();
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "b015-approvals-rows.json"),
+            new JsonArray(rows.Select(r => (JsonNode)r.DeepClone()).ToArray()).ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        var interrupted = Assert.Single(rows, r => r["args"]!.GetValue<string>().Contains(ToolAskService.InterruptedDetail));
+        Assert.Equal("failed", interrupted["state"]!.GetValue<string>());
+        Assert.Single(rows, r => r["state"]!.GetValue<string>() == "install");
+        Assert.Equal("pending", _asks.Asks().Single().State);
+
+        // The ask waits again, so pruning all keeps it and its interrupted row.
+        ProbePruneAll();
+        Assert.Contains(_asks.Events(id), e => e.Detail == ToolAskService.InterruptedDetail);
+        _host.Gate.TrySetResult();
+        await install;
+    }
 }

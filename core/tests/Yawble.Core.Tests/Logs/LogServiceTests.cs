@@ -424,4 +424,74 @@ public sealed class LogServiceTests : IDisposable
         Assert.False(AuditLog.IsReadOnly("teams.pause", null));
         Assert.False(AuditLog.IsReadOnly("logs.prune", null));
     }
+
+    // ------------------------------------------------------------------ B015 tester probes (card 70)
+
+    [Fact]
+    public void Probe_B015_ADenialAndANotNowAt23h59AreKept_At24h01Pruned()
+    {
+        static string Before(TimeSpan t) => (Now - t).ToString("O");
+        var in24 = Before(TimeSpan.FromHours(23) + TimeSpan.FromMinutes(59));
+        var past24 = Before(TimeSpan.FromHours(24) + TimeSpan.FromMinutes(1));
+        Exec("""
+            INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state, decided_by, decided_at) VALUES
+              (@in, 1, 'web/DeveloperAda', 'in24.example', 'CONNECT', @in, 'denied', 'pat', @in),
+              (@past, 1, 'web/DeveloperAda', 'past24.example', 'CONNECT', @past, 'denied', 'pat', @past);
+            """, ("@in", in24), ("@past", past24));
+        var keptTool = ToolAsk("python-3", "dismissed", in24, in24, ("asked", in24), ("not now", in24));
+        var goneTool = ToolAsk("nodejs-lts", "dismissed", past24, past24, ("asked", past24), ("not now", past24));
+        var answered = Count("SELECT count(*) FROM integration_asks WHERE state <> 'pending'");
+
+        var preview = _logs.PrunePreview("approvals", "9999-12-31");
+        Assert.Equal(answered + 1 + 1 + 2, preview.Count); // tool-call answers, past24 denial, past24 Not now and its 2 events
+        Assert.Equal(preview.Count, _logs.Prune("approvals", "9999-12-31"));
+        Assert.Equal("in24.example", Scalar("SELECT group_concat(host) FROM network_asks WHERE state = 'denied';"));
+        Assert.Equal(1, Count($"SELECT count(*) FROM tool_asks WHERE id = {keptTool}"));
+        Assert.Equal(2, Count($"SELECT count(*) FROM tool_ask_events WHERE ask_id = {keptTool}"));
+        Assert.Equal(0, Count($"SELECT count(*) FROM tool_asks WHERE id = {goneTool}"));
+        Assert.Equal(0, Count($"SELECT count(*) FROM tool_ask_events WHERE ask_id = {goneTool}"));
+
+        // Two more minutes: the 23h59 answers are now past 24 hours and go.
+        _clock.Advance(TimeSpan.FromMinutes(2));
+        Assert.Equal(1 + 1 + 2, _logs.Prune("approvals", "9999-12-31"));
+        Assert.Equal(0, Count("SELECT count(*) FROM network_asks WHERE state = 'denied'"));
+        Assert.Equal(0, Count("SELECT count(*) FROM tool_asks"));
+    }
+
+    [Fact]
+    public void Probe_B015_ThePreviewCountIsWhatIsDeleted_MixedNetworkAndToolAsks_AtEachCutoff()
+    {
+        Exec("""
+            INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state, scope, decided_by, decided_at) VALUES
+              (@d400, 1, 'web/DeveloperAda', 'a.example', 'CONNECT', @d400, 'allowed', 'everywhere', 'pat', @d400),
+              (@d400, 1, 'web/DeveloperAda', 'b.example', 'CONNECT', @d400, 'denied', NULL, 'pat', @d400),
+              (@d40, 1, 'web/DeveloperAda', 'c.example', 'CONNECT', @d40, 'denied', NULL, 'pat', @d40),
+              (@d700, 1, 'web/DeveloperAda', 'd.example', 'CONNECT', @d700, 'pending', NULL, NULL, NULL),
+              (@d5, 1, 'web/DeveloperAda', 'e.example', 'CONNECT', @d5, 'allowed', 'agent', 'pat', @d5),
+              (@d700, 1, 'web/DeveloperAda', 'f.example', 'CONNECT', @d700, 'denied', NULL, 'pat', @h2);
+            """, ("@d400", Ago(400)), ("@d40", Ago(40)), ("@d700", Ago(700)), ("@d5", Ago(5)), ("@h2", (Now - TimeSpan.FromHours(2)).ToString("O")));
+        ToolAsk("git", "installed", Ago(401), Ago(400), ("asked", Ago(401)), ("install", Ago(400)), ("installed", Ago(400)));
+        ToolAsk("python-3", "installed", Ago(41), Ago(40), ("asked", Ago(41)), ("install", Ago(40)), ("failed", Ago(40)), ("install", Ago(40)), ("installed", Ago(40)));
+        ToolAsk("gh", "dismissed", Ago(10), Ago(9), ("asked", Ago(10)), ("not now", Ago(9)));
+        ToolAsk("node-lts", "pending", Ago(800), null, ("asked", Ago(800)), ("failed", Ago(799)));
+        ToolAsk("dotnet-sdk-10", "installing", Ago(600), null, ("asked", Ago(600)), ("install", Ago(600)));
+        // Asked 500 days ago, answered (Not now) 3 hours ago: kept by when it was answered and by its 24-hour quiet.
+        ToolAsk("dotnet-sdk-lts", "dismissed", Ago(500), (Now - TimeSpan.FromHours(3)).ToString("O"), ("asked", Ago(500)), ("not now", Ago(0.1)));
+
+        long Total() => Count("SELECT (SELECT count(*) FROM integration_asks) + (SELECT count(*) FROM network_asks) + (SELECT count(*) FROM tool_asks) + (SELECT count(*) FROM tool_ask_events)");
+        foreach (var cutoff in new[] { _logs.CutoffFor(365), _logs.CutoffFor(30), _logs.CutoffFor(7), _logs.CutoffFor(1), "9999-12-31" })
+        {
+            var before = Total();
+            var preview = _logs.PrunePreview("approvals", cutoff);
+            var deleted = _logs.Prune("approvals", cutoff);
+            Assert.Equal(preview.Count, deleted);
+            Assert.Equal(before - deleted, Total());
+            Assert.Equal(0, Count("SELECT count(*) FROM tool_ask_events WHERE ask_id NOT IN (SELECT id FROM tool_asks)"));
+        }
+        // What stays after pruning all: the waiting and installing tool asks and the recent Not now (with their events),
+        // the waiting network ask and the recent denial.
+        Assert.Equal("dotnet-sdk-10,dotnet-sdk-lts,node-lts", Scalar("SELECT group_concat(tool) FROM (SELECT tool FROM tool_asks ORDER BY tool);"));
+        Assert.Equal(6, Count("SELECT count(*) FROM tool_ask_events"));
+        Assert.Equal("d.example,f.example", Scalar("SELECT group_concat(host) FROM (SELECT host FROM network_asks ORDER BY host);"));
+    }
 }
