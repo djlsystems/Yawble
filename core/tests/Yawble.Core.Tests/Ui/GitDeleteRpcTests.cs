@@ -97,4 +97,28 @@ public sealed class GitDeleteRpcTests : IAsyncLifetime
         Assert.Equal(next, AgentGit.Host(repo, "rev-parse", "members/web/ben"));
         Assert.Empty((await Call("git.status", new JsonObject { ["teamId"] = teamId }))["oldBranches"]!.AsArray());
     }
+
+    /// <summary>B020 / card 92: git.status's blockingBranches, the contract the Git dialog reads: always present, each
+    /// { name, repo, location: "local" | "remote" }, and deleted through git.deleteBranches like any other branch.</summary>
+    [Fact]
+    public async Task BlockingBranches_AreListedWithNameRepoAndLocation_AndDeleteThroughTheUsualPath()
+    {
+        var teamId = await _bus.CreateTeamAsync("docs", "Manager", "claude", null, Ct);
+        var status = await Call("git.status", new JsonObject { ["teamId"] = teamId });
+        Assert.Empty(status["blockingBranches"]!.AsArray());
+        var repo = status["repoPath"]!.GetValue<string>();
+        var baseSha = status["baseSha"]!.GetValue<string>();
+        AgentGit.Host(repo, "branch", "members/docs", baseSha); // another team's old member "Docs"
+
+        var b = Assert.Single((await Call("git.status", new JsonObject { ["teamId"] = teamId }))["blockingBranches"]!.AsArray())!.AsObject();
+        Assert.Equal(["location", "name", "repo"], b.Select(p => p.Key).Order());
+        Assert.Equal("members/docs", b["name"]!.GetValue<string>());
+        Assert.Equal("main", b["repo"]!.GetValue<string>());
+        Assert.Equal("local", b["location"]!.GetValue<string>());
+
+        var plan = await Call("git.deleteBranches", Args(teamId, null, "members/docs"));
+        var done = await Call("git.deleteBranches", Args(teamId, plan["token"]!.GetValue<string>(), "members/docs"));
+        Assert.Contains("deleted members/docs", done["result"]!.GetValue<string>());
+        Assert.Empty((await Call("git.status", new JsonObject { ["teamId"] = teamId }))["blockingBranches"]!.AsArray());
+    }
 }
