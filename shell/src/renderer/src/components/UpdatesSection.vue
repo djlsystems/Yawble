@@ -64,7 +64,8 @@ onBeforeUnmount(() => clearInterval(timer));
       <span>
         <b>Check for updates automatically</b>
         <span class="muted">On start and every 6 hours, from GitHub Releases. A newer version is downloaded and checked
-          (its SHA-256 and the publisher's signature); it is installed only when you choose Restart to update.</span>
+          ({{ status.checksPublisher === false ? 'its SHA-256 from the release, and what it holds' : "its SHA-256 and the publisher's signature" }});
+          it is installed only when you choose Restart to update.</span>
       </span>
     </label>
     <button v-if="!status?.managed" type="button" :disabled="checking" data-test="updates-check" @click="check"><BusyLabel :busy="checking" text="Checking…">Check now</BusyLabel></button>

@@ -142,7 +142,9 @@ const buildVersion = readBuildVersion(repo).version;
 const builder = require('electron-builder');
 const archName = rid.endsWith('arm64') ? 'arm64' : 'x64';
 const arch = builder.Arch[archName];
-const name = sign ? `Yawble-Setup-${buildVersion}-${archName}` : `yawble-${buildVersion}-${rid}-unsigned`;
+// Linux is never signed (its updates trust the release's SHA256SUMS-linux), so its tarball is named for the release:
+// yawble-<version>-linux-<arch>.tar.gz, what the app's updater looks for.
+const name = sign ? `Yawble-Setup-${buildVersion}-${archName}` : os === 'linux' ? `yawble-${buildVersion}-${rid}` : `yawble-${buildVersion}-${rid}-unsigned`;
 // The installed app's version where Windows shows it (Settings > Apps, inventory tools): electron-builder writes the
 // uninstall entry from package.json's version, which is not the build's (yyyy.mm.dd.N is not semver); this NSIS hook
 // runs after that entry is written and puts the build's version in it.
@@ -241,6 +243,13 @@ if (signing) {
   const { createHash } = await import('node:crypto');
   const sums = installers.map((f) => `${createHash('sha256').update(readFileSync(f)).digest('hex')}  ${path.basename(f)}`).join('\n') + '\n';
   writeFileSync(path.join(out, 'SHA256SUMS'), sums);
+}
+if (os === 'linux') {
+  // The Linux release's own checksum file (the Windows updater reads SHA256SUMS, which this never touches).
+  const { createHash } = await import('node:crypto');
+  const tarballs = installers.filter((f) => f.endsWith('.tar.gz'));
+  const sums = tarballs.map((f) => `${createHash('sha256').update(readFileSync(f)).digest('hex')}  ${path.basename(f)}`).join('\n') + '\n';
+  writeFileSync(path.join(out, 'SHA256SUMS-linux'), sums);
 }
 console.log('\ninstallers:');
 for (const f of installers) {

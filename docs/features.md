@@ -308,8 +308,15 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
   the installed app (your data stays), and the app starts again. While agents are working it asks first. **Later**
   hides the line until a newer version.
 - With automatic checks off, a newer release is offered with **Download** instead.
-- A Cloud Link viewer is told an update is available; it is installed on the computer itself. macOS and Linux get a
-  link to the release page.
+- A Cloud Link viewer is told an update is available; it is installed on the computer itself. macOS gets a link to the
+  release page.
+- On Linux the release's file is `yawble-<version>-linux-<arch>.tar.gz`, listed in the release's own
+  `SHA256SUMS-linux`. Linux builds are not signed: the tarball's SHA-256 must match that list, and it must hold one
+  app folder with nothing inside that leads outside it. **Restart to update** quits the app, a copy of the install's
+  `apply-update.sh` waits until nothing runs from the install, runs the new `install.sh` over the same folder and starts
+  Yawble again; it writes what it did to `<data>/logs/update.log`. This works for an `install.sh` install that you
+  may change (the default `~/.local/opt/yawble`). A system-wide install in `/opt`, or a run from source, gets a link
+  to the release page.
 
 ## Backups and doctor
 
