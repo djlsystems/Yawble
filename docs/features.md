@@ -267,7 +267,9 @@ a member's card opens it at that member's activity.
 Your CLIs (such as `gh`, `git` and `az`), local and remote MCP servers, web APIs described by OpenAPI, and websites
 can be offered to teams' agents as tools. Every call runs on this computer, under rules: allowed, ask first, or off.
 Calls that ask first wait for your approval. Sign-ins are Connections kept in the OS credential store, which agents
-never see. Host tasks run named programs for a team, under a standing approval. See
+never see. Host tasks run named programs for a team, under a standing approval.
+Host tasks can take environment variables from Connections (such as `GH_TOKEN` for a release script); the value is
+masked in the log and never reaches an agent. See
 [Connections and integrations](connections-and-integrations.md).
 
 ## Triggers

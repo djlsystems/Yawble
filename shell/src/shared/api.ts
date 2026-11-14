@@ -410,7 +410,11 @@ export type ConnectionKind = 'secret' | 'oauth' | 'website';
 export interface Connection {
   id: number; name: string; kind: ConnectionKind; fields: ConnectionField[];
   status: 'untested' | 'works' | 'needs_reconnect'; statusReason: string | null; testedAt: string | null; usedBy: string[];
+  /** The host tasks with an environment variable from this Connection (B023); removing it stops them starting. Absent from an older core. */
+  usedByTasks?: ConnectionTaskUse[];
 }
+/** A host task that binds a Connection: its team and its name. */
+export interface ConnectionTaskUse { teamId: number; taskName: string }
 /** A web service added by its URL (integrations.apiList). `signIn` says what to ask for, from the spec's auth; null when the auth is not known yet. */
 export interface ApiRow {
   /** 'website': a site the agents use in a browser window on this computer (six fixed actions); its sign-in is its Connection, never fields. */
@@ -460,7 +464,11 @@ export interface IntegrationAsk {
 export interface HostTaskDef {
   name: string; repo: string; program: string; args: string[]; workdir: string; timeoutSeconds: number; envNames: string[]; watch: string[];
   pinMode: 'files' | 'commit'; commandLineOnly: boolean;
+  /** Environment variables whose value is read from a Connection's secret field at start (B023). The binding is pinned, never the value. */
+  envFromConnections?: EnvFromConnection[];
 }
+/** One binding: variable `name` takes the secret `field` of Connection `connectionId`; `connectionName` is for display only. */
+export interface EnvFromConnection { name: string; connectionId: number; field: string; connectionName: string }
 /** A host task run record (tasks.runs / integrations.taskRuns). */
 export interface TaskRun {
   id: number; task: string; teamId: number; state: 'running' | 'done' | 'interrupted' | 'refused'; startedAt: string; endedAt: string | null; commit: string | null;

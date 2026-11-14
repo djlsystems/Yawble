@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { Connection, YawbleApi } from '../../../shared/api';
+import type { Connection, TeamSummary, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import ConnectionDialog from './ConnectionDialog.vue';
 import LoadingNote from './LoadingNote.vue';
@@ -10,7 +10,7 @@ import BusyLabel from './BusyLabel.vue';
  * Connections: the sign-ins (API keys and tokens) that APIs share, kept on this computer. Values are shown masked, never in full.
  * They are managed only on the computer itself, so a remote view shows a sentence and no list.
  */
-const props = defineProps<{ api?: YawbleApi }>();
+const props = defineProps<{ api?: YawbleApi; teams?: TeamSummary[] }>();
 const emit = defineEmits<{ (e: 'count', n: number): void }>();
 const api = resolveApi(props.api);
 const remote = computed(() => !!api.remote);
@@ -68,10 +68,16 @@ async function test(c: Connection) {
   } catch (e) { error.value = errorText(e); }
   finally { end(); }
 }
+/** The host tasks that take a variable from this Connection, as "release (team Ops)"; the team's id when its name is not known. */
+function taskUses(c: Connection): string[] {
+  return (c.usedByTasks ?? []).map((u) => `${u.taskName} (team ${props.teams?.find((t) => t.id === u.teamId)?.name ?? u.teamId})`);
+}
 async function remove(c: Connection) {
-  const msg = c.usedBy.length
-    ? `${c.name} is used by ${c.usedBy.join(', ')}. Remove it anyway? Those APIs will need a new connection.`
-    : `Remove the connection ${c.name}?`;
+  const tasks = taskUses(c);
+  const parts: string[] = [];
+  if (c.usedBy.length) parts.push(`${c.name} is used by ${c.usedBy.join(', ')}: those APIs will need a new connection.`);
+  if (tasks.length) parts.push(`${tasks.length === 1 ? 'The host task' : 'The host tasks'} ${tasks.join(', ')} take a variable from it and will not start without it.`);
+  const msg = parts.length ? `${parts.join(' ')} Remove it anyway?` : `Remove the connection ${c.name}?`;
   if (busy.value !== null || !window.confirm(msg)) return;
   if (!begin(c.id, 'remove')) return;
   error.value = null;
@@ -128,8 +134,9 @@ onBeforeUnmount(() => off?.());
             <div v-if="serverBound(c)" class="muted small" :data-test="`connection-mcp-note-${c.id}`">Sign in again from Settings → Integrations → MCP servers (Sign in).</div>
             <div class="small" data-test="connection-usedby">
               <template v-if="c.usedBy.length">Used by {{ c.usedBy.join(', ') }}</template>
-              <span v-else class="muted">not used yet</span>
+              <span v-else-if="!taskUses(c).length" class="muted">not used yet</span>
             </div>
+            <div v-if="taskUses(c).length" class="small" :data-test="`connection-usedby-tasks-${c.id}`">Used by host {{ taskUses(c).length === 1 ? 'task' : 'tasks' }} {{ taskUses(c).join(', ') }}: removing it stops {{ taskUses(c).length === 1 ? 'it' : 'them' }} from starting</div>
           </div>
           <template v-if="c.kind === 'website' && !remote">
             <button v-if="signingIn !== c.id" :disabled="busy === c.id" :data-test="`connection-signin-${c.id}`" @click="signIn(c)"><BusyLabel :busy="doing(c.id, 'signin')" text="Opening…">{{ c.status === 'needs_reconnect' ? 'Reconnect' : 'Sign in' }}</BusyLabel></button>
