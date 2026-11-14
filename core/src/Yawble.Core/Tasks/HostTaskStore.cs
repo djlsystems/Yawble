@@ -16,12 +16,18 @@ public sealed class HostTaskStore(string connectionString, TimeProvider clock)
 
     // ------------------------------------------------------------------ definitions
 
-    private const string TaskColumns = "id, team_id, name, repo, program, args, workdir, timeout_s, env_names, watch, pin_mode, command_line_only, updated_at, updated_by";
+    private const string TaskColumns = "id, team_id, name, repo, program, args, workdir, timeout_s, env_names, watch, pin_mode, command_line_only, updated_at, updated_by, env_from_connections";
 
     private static HostTask ReadTask(SqliteDataReader r) => new(r.GetInt64(0), r.GetInt64(1),
         new HostTaskDef(r.GetString(2), r.GetString(3), r.GetString(4), JsonSerializer.Deserialize<string[]>(r.GetString(5)) ?? [], r.GetString(6), r.GetInt32(7),
-            JsonSerializer.Deserialize<string[]>(r.GetString(8)) ?? [], JsonSerializer.Deserialize<string[]>(r.GetString(9)) ?? [], r.GetString(10), r.GetInt64(11) == 1),
+            JsonSerializer.Deserialize<string[]>(r.GetString(8)) ?? [], JsonSerializer.Deserialize<string[]>(r.GetString(9)) ?? [], r.GetString(10), r.GetInt64(11) == 1)
+        {
+            EnvFromConnections = JsonSerializer.Deserialize<EnvBinding[]>(r.GetString(14), BindingJson) ?? [],
+        },
         r.GetString(12), r.IsDBNull(13) ? null : r.GetString(13));
+
+    /// <summary>env_from_connections: [{name, connectionId, field, connectionName}], never a value.</summary>
+    private static readonly JsonSerializerOptions BindingJson = new(JsonSerializerDefaults.Web);
 
     public IReadOnlyList<HostTask> Tasks(long teamId) =>
         Query($"SELECT {TaskColumns} FROM host_tasks WHERE team_id = $t ORDER BY name;", ReadTask, ("$t", teamId));
@@ -38,21 +44,22 @@ public sealed class HostTaskStore(string connectionString, TimeProvider clock)
         var args = JsonSerializer.Serialize(d.Args);
         var env = JsonSerializer.Serialize(d.EnvNames);
         var watch = JsonSerializer.Serialize(d.Watch);
+        var bindings = JsonSerializer.Serialize(d.EnvFromConnections, BindingJson);
         if (existing is null)
         {
             Exec("""
-                INSERT INTO host_tasks (team_id, name, repo, program, args, workdir, timeout_s, env_names, watch, pin_mode, command_line_only, created_at, updated_at, updated_by)
-                VALUES ($t, $n, $repo, $p, $a, $w, $s, $e, $wa, $m, $c, $now, $now, $by);
+                INSERT INTO host_tasks (team_id, name, repo, program, args, workdir, timeout_s, env_names, watch, pin_mode, command_line_only, env_from_connections, created_at, updated_at, updated_by)
+                VALUES ($t, $n, $repo, $p, $a, $w, $s, $e, $wa, $m, $c, $ef, $now, $now, $by);
                 """, ("$t", teamId), ("$n", d.Name), ("$repo", d.Repo), ("$p", d.Program), ("$a", args), ("$w", d.Workdir), ("$s", d.TimeoutSeconds), ("$e", env),
-                ("$wa", watch), ("$m", d.PinMode), ("$c", d.CommandLineOnly ? 1 : 0), ("$now", Now()), ("$by", by));
+                ("$wa", watch), ("$m", d.PinMode), ("$c", d.CommandLineOnly ? 1 : 0), ("$ef", bindings), ("$now", Now()), ("$by", by));
         }
         else
         {
             Exec("""
                 UPDATE host_tasks SET repo = $repo, program = $p, args = $a, workdir = $w, timeout_s = $s, env_names = $e, watch = $wa, pin_mode = $m,
-                    command_line_only = $c, updated_at = $now, updated_by = $by WHERE id = $id;
+                    command_line_only = $c, env_from_connections = $ef, updated_at = $now, updated_by = $by WHERE id = $id;
                 """, ("$id", existing.Id), ("$repo", d.Repo), ("$p", d.Program), ("$a", args), ("$w", d.Workdir), ("$s", d.TimeoutSeconds), ("$e", env), ("$wa", watch),
-                ("$m", d.PinMode), ("$c", d.CommandLineOnly ? 1 : 0), ("$now", Now()), ("$by", by));
+                ("$m", d.PinMode), ("$c", d.CommandLineOnly ? 1 : 0), ("$ef", bindings), ("$now", Now()), ("$by", by));
             RevokeApproval(existing.Id);
         }
         return Task(teamId, d.Name)!;
