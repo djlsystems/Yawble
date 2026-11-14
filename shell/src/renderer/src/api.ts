@@ -11,6 +11,11 @@ export function errorText(e: unknown): string {
   return raw.replace(/^Error invoking remote method '[^']+': /, '').replace(/^(Core)?RpcError: /, '').replace(/^Error: /, '');
 }
 
+/** Whether a remote view's call was refused by the Cloud Link itself (error code remote_refused), not failed in the core. */
+export function isRemoteRefusal(api: { remote?: boolean }, e: unknown): boolean {
+  return !!api.remote && typeof e === 'object' && e !== null && (e as { code?: unknown }).code === 'remote_refused';
+}
+
 export function when(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);

@@ -104,12 +104,63 @@ describe('NetworkAskCard', () => {
     expect(w.emitted('answered')).toBeUndefined();
   });
 
-  it('ARemoteViewWhoseAnswerIsRefused_SaysToAnswerItInTheWindow', async () => {
-    const { api } = fakeApi({ 'network.answer': () => { throw new Error('this is not allowed over the Cloud Link'); } }, { remote: true } as Partial<YawbleApi>);
+  it('ARemoteViewWhoseAnswerTheCloudLinkRefuses_SaysToAnswerItInTheWindow', async () => {
+    const refusal = Object.assign(new Error("'network.answer' is not available through the Cloud Link"), { code: 'remote_refused' });
+    const { api } = fakeApi({ 'network.answer': () => { throw refusal; } }, { remote: true } as Partial<YawbleApi>);
     const w = mount(NetworkAskCard, { props: { ask: ask(), api } });
     await w.get('[data-test=network-ask-agent]').trigger('click');
     await flushPromises();
-    expect(w.get('[data-test=network-ask-error]').text()).toContain('answer it in the window');
+    const err = w.get('[data-test=network-ask-error]').text();
+    expect(err).toContain('This view cannot change the network policy: answer it in the window');
+    expect(err).toContain('not available through the Cloud Link');
+  });
+
+  it('ARemoteViewWhoseAnswerFailsOtherwise_ShowsTheRealErrorOnly', async () => {
+    const failed = Object.assign(new Error('the ask is already answered'), { code: 'invalid_params' });
+    const { api } = fakeApi({ 'network.answer': () => { throw failed; } }, { remote: true } as Partial<YawbleApi>);
+    const w = mount(NetworkAskCard, { props: { ask: ask(), api } });
+    await w.get('[data-test=network-ask-team]').trigger('click');
+    await flushPromises();
+    const err = w.get('[data-test=network-ask-error]').text();
+    expect(err).toBe('the ask is already answered');
+    expect(err).not.toContain('cannot change the network policy');
+  });
+
+  it('ARemoteViewWhoseConnectionDrops_ShowsTheRealError', async () => {
+    const { api } = fakeApi({ 'network.answer': () => { throw new Error('the connection to the instance closed'); } }, { remote: true } as Partial<YawbleApi>);
+    const w = mount(NetworkAskCard, { props: { ask: ask(), api } });
+    await w.get('[data-test=network-ask-deny]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=network-ask-error]').text()).toBe('the connection to the instance closed');
+  });
+
+  it('TheWindowNeverSaysTheViewCannotChangeThePolicy_EvenForTheCode', async () => {
+    const odd = Object.assign(new Error('refused'), { code: 'remote_refused' });
+    const { api } = fakeApi({ 'network.answer': () => { throw odd; } });
+    const w = mount(NetworkAskCard, { props: { ask: ask(), api } });
+    await w.get('[data-test=network-ask-agent]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=network-ask-error]').text()).toBe('refused');
+  });
+
+  it.each([['GET', '/index.html'], ['post', '/upload']])('APlainHttpRefusal_%s_SaysOnlyHttpsIsForwarded', (method, pathSample) => {
+    const { api } = fakeApi({});
+    const w = mount(NetworkAskCard, { props: { ask: ask({ method, pathSample, host: 'example.com', hint: null }), api } });
+    expect(w.get('[data-test=network-ask-http]').text()).toContain('only https is forwarded, even once the host is allowed');
+  });
+
+  it.each([['CONNECT', 'an https refusal'], [null, 'a request_host ask']])('NoHttpHintFor_%s (%s)', (method) => {
+    const { api } = fakeApi({});
+    const w = mount(NetworkAskCard, { props: { ask: ask({ method, reason: method ? null : 'restore packages' }), api } });
+    expect(w.find('[data-test=network-ask-http]').exists()).toBe(false);
+  });
+
+  it('TheCoresPlainHttpFlag_WinsOverTheMethod', () => {
+    const { api } = fakeApi({});
+    const flagged = mount(NetworkAskCard, { props: { ask: { ...ask({ method: 'CONNECT' }), plainHttp: true } as NetworkAsk, api } });
+    expect(flagged.find('[data-test=network-ask-http]').exists()).toBe(true);
+    const unflagged = mount(NetworkAskCard, { props: { ask: { ...ask({ method: 'GET' }), plainHttp: false } as NetworkAsk, api } });
+    expect(unflagged.find('[data-test=network-ask-http]').exists()).toBe(false);
   });
 });
 
