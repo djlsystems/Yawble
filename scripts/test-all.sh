@@ -14,6 +14,8 @@ dotnet run --project core/tools/Yawble.SandboxCheck --no-build -- ${YAWBLE_GATE_
 if command -v pwsh >/dev/null 2>&1; then pwsh -NoProfile -File scripts/tests/release-functions.tests.ps1
 elif command -v powershell.exe >/dev/null 2>&1; then powershell.exe -NoProfile -File scripts/tests/release-functions.tests.ps1
 else echo "skipped scripts/tests/release-functions.tests.ps1: no PowerShell on PATH"; fi
+# The version packaging/build.mjs stamps into installed files (pure; no installer is built).
+node --test scripts/tests/build-version-stamp.test.mjs
 
 cd shell
 [ -d node_modules ] || npm ci
