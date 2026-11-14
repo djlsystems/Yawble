@@ -42,7 +42,7 @@
     },
     {
       "path": "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home\\.claude\\settings.json",
-      "content": "{\n  \"permissions\": {\n    \"defaultMode\": \"bypassPermissions\"\n  },\n  \"skipDangerousModePermissionPrompt\": true\n}"
+      "content": "{\n  \"permissions\": {\n    \"defaultMode\": \"bypassPermissions\"\n  },\n  \"skipDangerousModePermissionPrompt\": true,\n  \"attribution\": {\n    \"commit\": \"\",\n    \"pr\": \"\"\n  },\n  \"includeCoAuthoredBy\": false\n}"
     },
     {
       "path": "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home\\.claude\\.claude.json",

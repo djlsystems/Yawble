@@ -775,10 +775,17 @@ public static class AgentPresets
                 },
             };
             var config = new JsonObject { ["trustedFolders"] = new JsonArray(l.ClonePath) };
+            // B028: includeCoAuthoredBy (default true) adds "Co-authored-by: Copilot" to the agent's commits. Copilot has
+            // no argument or variable for it, only this user setting. Current Copilot CLI reads user settings from
+            // settings.json and ignores them in config.json (docs.github.com, "Copilot CLI configuration directory");
+            // earlier versions read config.json, so it goes in both. Merged into what the CLI already wrote.
+            var settings = new JsonObject { ["includeCoAuthoredBy"] = false };
+            config["includeCoAuthoredBy"] = false;
             return
             [
                 new SeedFile(CopilotMcpConfigPath(l), mcp.ToJsonString(SandboxJson.Indented)),
                 new SeedFile(Join(l, l.Workspace, ".copilot", "config.json"), config.ToJsonString(SandboxJson.Indented)),
+                new SeedFile(Join(l, l.Workspace, ".copilot", "settings.json"), settings.ToJsonString(SandboxJson.Indented)),
             ];
         }
         if (cli == AgentCli.Antigravity)
