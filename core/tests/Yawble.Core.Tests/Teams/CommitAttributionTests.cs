@@ -27,6 +27,13 @@ public class CommitAttributionTests
     [InlineData("Co-Authored-By: Gemini <gemini@google.com>")]
     [InlineData("Co-Authored-By: Antigravity <a@b.c>")]
     [InlineData("  Co-Authored-By:Claude Sonnet 5.5")]
+    // Tools named like people: caught on their bot account, vendor domain or "AI"/"bot"/"Code" after the name.
+    [InlineData("Co-Authored-By: devin-ai-integration[bot] <158243242+devin-ai-integration[bot]@users.noreply.github.com>")]
+    [InlineData("Co-Authored-By: Devin AI <devin@example.com>")]
+    [InlineData("Co-Authored-By: Devin <devin@cognition.ai>")]
+    [InlineData("Co-Authored-By: Cody Bot <cody@example.com>")]
+    [InlineData("Co-Authored-By: Claude Code <claude@example.com>")]
+    [InlineData("Co-Authored-By: claude[bot] <209825114+claude[bot]@users.noreply.github.com>")]
     [InlineData("Claude-Session: 0f3c9a2e-1b2c")]
     [InlineData("claude-session: abc")]
     [InlineData("🤖 Generated with [Claude Code](https://claude.com/claude-code)")]
@@ -42,6 +49,12 @@ public class CommitAttributionTests
     [Theory]
     [InlineData("Co-Authored-By: Jane <jane@x>")]
     [InlineData("Co-Authored-By: Ivan Grokhov <ivan@example.com>")]
+    // People who share a first name with an AI tool.
+    [InlineData("Co-Authored-By: Devin Smith <devin.smith@example.com>")]
+    [InlineData("Co-Authored-By: Devin Aird <devin@example.com>")]
+    [InlineData("Co-Authored-By: Cody Botha <cody.botha@example.com>")]
+    [InlineData("Co-Authored-By: Claude Dupont <claude.dupont@example.fr>")]
+    [InlineData("Co-Authored-By: Bard Olsen <bard@example.no>")]
     [InlineData("Generated with the new protoc script")]
     [InlineData("Fix the Claude-Session header parsing")] // not a trailer: the line does not start with it
     [InlineData("Mention Claude and Copilot support in the docs")]
