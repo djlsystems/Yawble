@@ -24,7 +24,15 @@ public sealed partial class TeamRepos
     /// <summary>Moves the member's main clone (the caller holds the team's lock). True when the member is now on the new name.</summary>
     private async Task<bool> MoveLegacyBranchLockedAsync(MemberRef member, TeamRepo repo, CancellationToken ct)
     {
-        if (member.Role == MemberRole.Manager || Row(member.Id) is not { } row || !IsLegacyMemberBranch(row.Branch)) return false;
+        if (member.Role == MemberRole.Manager) return false;
+        if (Row(member.Id) is null && AdoptLegacyClone(member, CheckoutOf(member, repo).ClonePath) is { } adopted)
+        {
+            // A rehired member (its row went with RemoveMemberAsync) reusing a pre-B016 clone: record the branch the clone
+            // is on, then move it like any old-style member. If the move cannot be made, the row still names the clone's branch.
+            InsertClone(member.Id, CheckoutOf(member, repo).ClonePath, adopted);
+            _log?.Invoke($"{member.Qualified}: reusing the clone on disk, on {adopted}");
+        }
+        if (Row(member.Id) is not { } row || !IsLegacyMemberBranch(row.Branch)) return false;
         var target = BranchFor(member.Team, member.Name);
         if (!await MoveCloneBranchAsync(member, repo.Path, row.Path, row.Branch, target, ct)) return false;
         UpdateClone(member.Id, "branch = $b", ("$b", target));
@@ -42,6 +50,19 @@ public sealed partial class TeamRepos
         _log?.Invoke($"{member.Qualified}: {extra.Name}: moved from {row.Branch} to {target} (the old branch is kept)");
         return row with { Branch = target };
     }
+
+    /// <summary>A clone left on disk with no row (its member was removed, a same-named one hired): the old-style branch to
+    /// record for it when its HEAD is on <see cref="LegacyBranchFor"/> the member's name, else null (a new-style or missing
+    /// clone needs nothing: the member's own branch is the one recorded). Read by file, no git in the clone.</summary>
+    internal static string? AdoptLegacyClone(MemberRef member, string clonePath)
+    {
+        if (!Directory.Exists(clonePath) || !Directory.EnumerateFileSystemEntries(clonePath).Any() || CloneGitDirProblem(clonePath) is not null) return null;
+        return LegacyBranchToAdopt(member.Role, member.Name, CloneHead.Read(Path.Combine(clonePath, ".git"))?.Branch);
+    }
+
+    /// <summary>The decision of <see cref="AdoptLegacyClone"/>: the reused clone's branch when it is the member's old-style one.</summary>
+    internal static string? LegacyBranchToAdopt(MemberRole role, string memberName, string? cloneHeadBranch) =>
+        role != MemberRole.Manager && cloneHeadBranch is not null && cloneHeadBranch == LegacyBranchFor(memberName) ? cloneHeadBranch : null;
 
     private async Task<bool> MoveCloneBranchAsync(MemberRef member, string repoPath, string clonePath, string from, string to, CancellationToken ct)
     {
