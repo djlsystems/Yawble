@@ -555,14 +555,24 @@ export interface Trigger {
 }
 export interface TriggerFire { outcome: string; seq: number | null; reason: string | null }
 
-/** The Git dialog (git.status / git.fetch / git.bringCurrent / git.merge / git.askTeam; core Teams/TeamRepos.Git.cs). */
+/** The Git dialog (git.status / git.fetch / git.bringCurrent / git.merge / git.askTeam / git.deleteBranches; core Teams/TeamRepos.Git.cs). */
 export interface TeamGitBranch { branch: string; sha: string; aheadOfBase: number; inTeamBranch: boolean }
+/** An old-style members/<member> branch left from before member branches were named members/<team>/<member>:
+ * here (local) and/or on origin (remote), and whether its commits are merged. */
+export interface TeamGitOldBranch { name: string; local: boolean; remote: boolean; merged: boolean }
 export interface TeamGitStatus {
   repoPath: string; managed: boolean; baseBranch: string; checkedOut: string | null; dirty: boolean; origin: string | null;
   baseSha: string | null; originBaseSha: string | null; baseAheadOfOrigin: number | null; baseBehindOrigin: number | null;
   teamBranch: string; teamSha: string | null; teamAheadOfBase: number; teamBehindBase: number;
   merge: 'none' | 'up-to-date' | 'fast-forward' | 'merge' | 'conflict'; conflictFiles: string[]; members: TeamGitBranch[];
+  /** Old-style members/<member> branches (absent from a core that does not list them). */
+  oldBranches?: TeamGitOldBranch[];
 }
+/** git.deleteBranches without confirm: what would be deleted, as text for the person, and the token that confirms exactly
+ * that plan (empty: nothing to delete). With confirm: token it deletes and answers GitDeleteResult; error code stale
+ * means the branches changed since the plan. */
+export interface GitDeletePlan { plan: string; token: string; empty: boolean }
+export interface GitDeleteResult { result: string }
 /** teams.syncToBase: the team's "Bring branches up to <base> before new work" setting, the note of a sync or fetch-back
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {

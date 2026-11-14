@@ -114,7 +114,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
     team's Manager is told "<tool> is installed; retry what was blocked". When it is not, the item stays open with
     winget's message and **Try again**.
   - **Not now** closes it; the agent is told, and the team is not asked about that tool again for 24 hours.
-  On Linux and macOS the item shows the command to run yourself; the app installs nothing. Each request, answer and
+  On Linux and macOS the item shows the command to run yourself (on Linux for the distribution's package manager, from
+  `/etc/os-release`: dnf on Fedora and RHEL, pacman on Arch, otherwise apt-get); the app installs nothing. Each request, answer and
   result is in the **Approvals** log; the Concierge's status lists the open ones.
   The items show in the same **Needs you** strip above every view, and in the Board's **Needs You** lane when the Board
   is open (its team and member filters apply). A machine-wide tool says "Windows may ask for permission". While
@@ -213,8 +214,12 @@ a member's card opens it at that member's activity.
 
 - Each team has a team repository on this computer: a folder you pick, a clone of an address, or one the app makes.
 - A team can have several repositories, each with a base branch and an optional name members see.
-- Each member works in its own local clone on its own branch, `members/<name>`. The Manager's branch is
-  `team/<team>`.
+- Each member works in its own local clone on its own branch, `members/<team>/<name>`, for example
+  `members/yawble-engineering-team/developerines`. The Manager's branch is `team/<team>`. `<team>` is the same team
+  slug in both, so two teams on one repository with same-named members never push to the same branch.
+- A member whose clone is still on an older `members/<name>` branch moves to `members/<team>/<name>` at its next
+  start, with its commits: the app creates the new branch at the old one's commit and pushes it. The old branch on
+  origin is left for you to delete in the Git dialog, where it is listed as old.
 - Clones have no remote and no credential helper. After each run the app cleans the clone's git config and fetches
   the member's branch into the team repository. It never runs git inside a clone an agent used.
 - When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are
@@ -228,7 +233,11 @@ a member's card opens it at that member's activity.
   Git for Windows for everyone on the computer, so Windows asks for permission. The app finds a git installed while it
   runs without a restart.
 - **Git** on the team page: **Fetch**, **Sync now**, **Merge** (the team branch into the base branch, then pushed
-  to origin), and per-member branch state. The app never forces, rebases or stashes.
+  to origin), and per-member branch state. Old-style `members/<name>` branches are listed beside the member branches,
+  marked old. **Delete…** on a branch first shows exactly what will be deleted, here and on origin; nothing is deleted
+  until you press **Delete**. A branch whose commits are not merged is deleted only when you tick that you accept
+  losing them. If the branches changed since the plan, the dialog says so and shows the new plan. The app never
+  forces, rebases or stashes.
 - A banner shows when branches could not be brought up to date on their own.
 - Each member's working copy has a read-only code browser.
 

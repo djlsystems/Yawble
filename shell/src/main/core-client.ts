@@ -9,6 +9,9 @@ interface Pending {
 export class CoreRpcError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
+    // Electron hands the window only the error's text ("<name>: <message>"), so the code rides in the name:
+    // the renderer's errorCode reads it back and errorText leaves it out.
+    this.name = `CoreRpcError[${code}]`;
   }
 }
 

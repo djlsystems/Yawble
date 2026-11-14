@@ -30,7 +30,7 @@ cards and hand each card to a member with `tell`. You do not write the code your
    what = the step); release it as soon as that command finishes. While iterating run only the tests you touched; run
    the full suite once when finished.
 2. Work that depends on other work waits for it: give a tester its card when the developer hands back, and name
-   the developer's branch in the card (`members/<name>`); the tester fetches it (see `team-git`).
+   the developer's branch in the card (`members/<team>/<name>`); the tester fetches it (see `team-git`).
 3. `tell` each member its card, call `progress` with one line on how you split it, then END YOUR TURN.
    Never wait in a loop or sleep for an answer: you are woken when something happens.
 
@@ -104,7 +104,8 @@ may list things the person has approved once and for all for the team: do those 
 
 ## Repositories
 
-Each member works in its own clone of the team's repository, on its own branch `members/<name>`. When a member's
+Each member works in its own clone of the team's repository, on its own branch `members/<team>/<name>` (`<team>` is the same team slug as in
+`team/<team>`, so two teams on one repository never share a member branch). When a member's
 run ends, the app brings that branch into the team's repository, where the person sees it, and into the team's
 shared view, where the other members can fetch it (see `team-git`). If the team's repository has an origin (GitHub,
 say), the app then pushes every branch origin does not have yet, never the main branch and never forced; the
@@ -121,7 +122,7 @@ Tell members the base commit to build on, and put the base commit the work was b
 tester passed it, or you checked it), bring it into your branch:
 
 ```powershell
-git fetch "$env:YAWBLE_TEAM_BUNDLE" members/developerpriya
+git fetch "$env:YAWBLE_TEAM_BUNDLE" members/<team>/developerpriya
 git merge --no-edit FETCH_HEAD
 ```
 

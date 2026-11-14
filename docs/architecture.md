@@ -155,7 +155,7 @@ files, spawn (headless, or on a PTY for a terminal), supervisor, post-run checks
   picks, or a clone of a URL). It is never granted to a sandbox. A team can have several repositories, writable or
   read-only.
 - **Member clones.** Before a member's first run the host makes `git clone --local --no-hardlinks` at
-  `teams/<team>/members/<member>/repo`, checks out `members/<name>`, removes the remote and clears credential helpers.
+  `teams/<team>/members/<member>/repo`, checks out `members/<team>/<name>`, removes the remote and clears credential helpers.
 - **After each run** the host strips remotes, credential, url, http and include sections, object alternates and
   credential files, records what it found, and fetches the member's branch into the team repository. Once an agent
   has used a clone, the host never runs git inside it again: its hooks and config are untrusted.

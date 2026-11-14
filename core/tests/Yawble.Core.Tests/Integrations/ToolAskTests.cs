@@ -320,6 +320,43 @@ public sealed class ToolAskTests : IDisposable
     }
 
     [Fact]
+    public async Task OnFedora_TheAskCarriesTheDnfCommand()
+    {
+        _host.IsWindows = false;
+        _host.Packager = LinuxPackager.Dnf;
+        var text = await Request(Priya, "dotnet-sdk-10");
+        Assert.Contains("sudo dnf install -y dotnet-sdk-10.0", text);
+        var item = (await _asks.DispatchAsync("tools.asks", null, Ct))!.AsArray().Single()!.AsObject();
+        Assert.Equal("sudo dnf install -y dotnet-sdk-10.0", item["command"]!.GetValue<string>());
+        Assert.Empty(_host.Runs);
+    }
+
+    [Theory]
+    [InlineData("NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=44\n", LinuxPackager.Dnf)]
+    [InlineData("ID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\n", LinuxPackager.Dnf)]
+    [InlineData("ID=ubuntu\nID_LIKE=debian\n", LinuxPackager.Apt)]
+    [InlineData("ID=debian\n", LinuxPackager.Apt)]
+    [InlineData("ID=manjaro\nID_LIKE=arch\n", LinuxPackager.Pacman)]
+    [InlineData("ID=arch\n", LinuxPackager.Pacman)]
+    [InlineData("ID=opensuse-tumbleweed\nID_LIKE=\"opensuse suse\"\n", LinuxPackager.Apt)]
+    [InlineData("", LinuxPackager.Apt)]
+    [InlineData(null, LinuxPackager.Apt)]
+    public void ThePackageManagerComesFromOsRelease(string? osRelease, LinuxPackager expected) =>
+        Assert.Equal(expected, LinuxPackagers.FromOsRelease(osRelease));
+
+    [Fact]
+    public void EveryToolHasACommandForEachPackageManager()
+    {
+        foreach (var t in ToolCatalog.All)
+        {
+            Assert.StartsWith("sudo apt-get install -y ", t.ManualCommand(false, LinuxPackager.Apt));
+            Assert.StartsWith("sudo dnf install -y ", t.ManualCommand(false, LinuxPackager.Dnf));
+            Assert.StartsWith("sudo pacman -S --needed ", t.ManualCommand(false, LinuxPackager.Pacman));
+            Assert.StartsWith("brew ", t.ManualCommand(true));
+        }
+    }
+
+    [Fact]
     public async Task OnLinuxAndMacOS_TheAskCarriesTheCommand_AndNothingIsInstalled()
     {
         _host.IsWindows = false;
@@ -478,6 +515,8 @@ public sealed class ToolAskTests : IDisposable
         public bool IsWindows { get; set; } = true;
 
         public bool IsMac => false;
+
+        public LinuxPackager Packager { get; set; } = LinuxPackager.Apt;
 
         public string? WingetPath { get; set; } = Winget;
 
