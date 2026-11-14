@@ -11,7 +11,7 @@
 //      core/  yawble-core, self-contained (no .NET install needed), with the sandbox's native lib (and wxc-exec.exe on Windows)
 //      bin/   yawble-bridge, yawble-grok-auth and yawble-guardcheck (the guardrail check's probe), native AOT (the core's RunLayout.AppBinDir),
 //             and yawble, the companion client (Claude Code's MCP server and a CLI; README "Using Yawble from Claude Code")
-// 2. Package the built shell (shell/out, from `npm run build`) with Electron and that payload under resources/:
+// 2. Build the shell (`npm run build` in shell/, so shell/out matches this checkout) and package it with Electron and that payload under resources/:
 //      Windows  NSIS setup .exe, per-user, no admin, with an uninstaller in Settings > Apps
 //      macOS    .app in a .dmg and a .zip, arm64 only, ad-hoc signed (mac-adhoc-sign.cjs)
 //      Linux    .tar.gz with install.sh / uninstall.sh and install-apparmor.sh (root, once)
@@ -128,7 +128,11 @@ if (signing) signing.signFiles(signing.signableFiles(stage));
 
 // --- 2. Electron packaging -------------------------------------------------------------------------------
 const shell = path.join(repo, 'shell');
-mustExist(path.join(shell, 'out', 'main', 'main', 'index.js'), 'build the shell first: (cd shell && npm ci && npm run build)');
+mustExist(path.join(shell, 'node_modules', 'electron', 'package.json'), 'install the shell first: (cd shell && npm ci)');
+// Always rebuilt: a shell/out left from an earlier checkout would ship an old window with this checkout's core.
+// npm is npm.cmd on Windows, which Node starts only through a shell; the arguments are fixed.
+run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], { cwd: shell, shell: process.platform === 'win32' });
+mustExist(path.join(shell, 'out', 'main', 'main', 'index.js'), 'the shell build wrote no out/main/main/index.js');
 const electronVersion = JSON.parse(readFileSync(path.join(shell, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
 const version = JSON.parse(readFileSync(path.join(shell, 'package.json'), 'utf8')).version;
 const { readBuildVersion } = await import('../scripts/build-version.mjs');

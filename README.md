@@ -102,7 +102,8 @@ node packaging/build.mjs [--rid win-x64|win-arm64|osx-arm64|linux-x64|linux-arm6
 ```
 
 Each OS builds on its own machine. The script stages the payload in `packaging/stage/<rid>/` (`core/`: the
-self-contained `yawble-core`; `bin/`: the helper programs and the `yawble` companion; `roles/`) and writes the
+self-contained `yawble-core`; `bin/`: the helper programs and the `yawble` companion; `roles/`), builds the shell
+(`npm run build` in `shell/`, so it needs `npm ci` there first) and writes the
 installer to `artifacts/installers/<rid>/`: an NSIS setup on Windows, a `.dmg` and `.zip` on macOS, a `.tar.gz` with
 `install.sh` on Linux.
 
