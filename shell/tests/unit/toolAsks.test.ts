@@ -50,7 +50,7 @@ describe('ToolAskCard', () => {
     expect(w.get('[data-test=tool-ask-scope]').text()).toContain('Windows may ask for permission');
     expect(w.get('[data-test=tool-ask-count]').text()).toContain('2 times');
     expect(w.get('[data-test=tool-ask-command] code').text()).toBe(WINGET);
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Install', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Install', 'Not now']);
     expect(w.attributes('data-state')).toBe('asking');
     expect(w.find('[data-test=tool-ask-remote]').exists()).toBe(false);
   });
@@ -74,7 +74,7 @@ describe('ToolAskCard', () => {
     expect(calls).toEqual([{ method: 'tools.install', params: { id: 4 } }]);
     expect(w.attributes('data-state')).toBe('installing');
     expect(w.get('[data-test=tool-ask-install]').text()).toContain('Installing…');
-    expect(w.findAll('button').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
+    expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
     expect(w.get('[data-test=tool-ask-progress]').text()).toContain('Installing .NET SDK 10');
 
     emit('tools.installProgress', { id: 99, tool: 'nodejs-lts', phase: 'installing', message: 'Installing Node.js LTS', command: '' });
@@ -96,7 +96,7 @@ describe('ToolAskCard', () => {
     const w = mount(ToolAskCard, { props: { ask: ask({ state: 'installing', attempts: 1 }), api } });
     expect(w.attributes('data-state')).toBe('installing');
     expect(w.get('[data-test=tool-ask-progress]').exists()).toBe(true);
-    expect(w.findAll('button').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
+    expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
   });
 
   it('Failed_ShowsWingetsMessageAndTryAgain_WhichInstallsAgain', async () => {
@@ -136,7 +136,7 @@ describe('ToolAskCard', () => {
     const { api, calls } = fakeApi({ 'tools.notNow': (p) => ({ ok: true, id: p.id, tool: 'dotnet-sdk-10', told: null }) }, { remote: true } as Partial<YawbleApi>);
     const w = mount(ToolAskCard, { props: { ask: ask({ error: 'winget failed' }), api } });
     expect(w.find('[data-test=tool-ask-install]').exists()).toBe(false);
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Not now']);
     expect(w.get('[data-test=tool-ask-remote]').text()).toContain('Yawble window');
     await w.get('[data-test=tool-ask-notNow]').trigger('click');
     await flushPromises();
@@ -160,7 +160,7 @@ describe('ToolAskCard', () => {
     await flushPromises();
     expect(w.get('[data-test=tool-ask-error]').text()).toContain('only from the Yawble window');
     expect(w.emitted('answered')).toBeUndefined();
-    expect(w.findAll('button').every((b) => b.attributes('disabled') === undefined)).toBe(true);
+    expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') === undefined)).toBe(true);
   });
 });
 
@@ -185,7 +185,7 @@ describe('ToolAskCard on Linux', () => {
   it('WithInstall_ShowsInstallCheckAgainNotNow_ThePasswordPromptAndTheExactCommand', () => {
     const { api } = fakeApi({});
     const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
     expect(w.get('[data-test=tool-ask-password]').text()).toBe(PASSWORD);
     const cmd = w.findAll('[data-test=tool-ask-command]');
     expect(cmd).toHaveLength(1);
@@ -202,7 +202,7 @@ describe('ToolAskCard on Linux', () => {
     await flushPromises();
     expect(calls).toEqual([{ method: 'tools.install', params: { id: 4 } }]);
     expect(w.get('[data-test=tool-ask-progress]').text()).toContain(PASSWORD);
-    expect(w.findAll('button').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
+    expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
 
     emit('tools.installProgress', { id: 4, tool: 'dotnet-sdk-10', phase: 'installing', message: `Installing .NET SDK 10 with dnf. ${PASSWORD}...`, command: PKEXEC });
     await flushPromises();
@@ -250,14 +250,14 @@ describe('ToolAskCard on Linux', () => {
     expect(shown.attributes('data-result')).toBe(code);
     expect(shown.classes()).not.toContain('error');
     expect(w.emitted('installed')).toBeUndefined();
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
-    expect(w.findAll('button').every((b) => b.attributes('disabled') === undefined)).toBe(true);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') === undefined)).toBe(true);
   });
 
   it('WithoutInstall_ShowsTheManualCommandCheckAgainAndNotNow', () => {
     const { api } = fakeApi({});
     const w = mount(ToolAskCard, { props: { ask: manualAsk(), api } });
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Check again', 'Not now']);
     const cmd = w.get('[data-test=tool-ask-command]');
     expect(cmd.text()).toContain('then choose Check again');
     expect(cmd.get('code').text()).toBe(MANUAL);
@@ -268,7 +268,7 @@ describe('ToolAskCard on Linux', () => {
     const { api } = fakeApi({});
     const w = mount(ToolAskCard, { props: { ask: manualAsk({ command: 'brew install --cask dotnet-sdk', manualCommand: 'brew install --cask dotnet-sdk' }), api } });
     expect(w.get('[data-test=tool-ask-command] code').text()).toBe('brew install --cask dotnet-sdk');
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Check again', 'Not now']);
   });
 
   it('CheckAgain_Found_EmitsInstalled_SoTheItemCloses', async () => {
@@ -315,7 +315,7 @@ describe('ToolAskCard on Linux', () => {
     const { api, calls } = fakeApi({ 'tools.checkAgain': () => result('notFound', NOT_FOUND) }, { remote: true } as Partial<YawbleApi>);
     const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
     expect(w.find('[data-test=tool-ask-install]').exists()).toBe(false);
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Check again', 'Not now']);
     expect(w.get('[data-test=tool-ask-remote]').text()).toContain('Check again or Not now');
     await w.get('[data-test=tool-ask-checkAgain]').trigger('click');
     await flushPromises();
@@ -326,7 +326,7 @@ describe('ToolAskCard on Linux', () => {
   it('ARemoteView_ManualAsk_ShowsCheckAgain', () => {
     const { api } = fakeApi({}, { remote: true } as Partial<YawbleApi>);
     const w = mount(ToolAskCard, { props: { ask: manualAsk(), api } });
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Check again', 'Not now']);
   });
 
   // ---------------------------------------------------------------- B017 gap tests (card 84, TesterWren)
@@ -340,7 +340,7 @@ describe('ToolAskCard on Linux', () => {
     await w.setProps({ ask: linuxAsk({ error: failedMsg, attempts: 1 }) });
     expect(w.get('[data-test=tool-ask-failed]').classes()).toContain('error');
     expect(w.get('[data-test=tool-ask-failed]').classes()).not.toContain('hint');
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Try again', 'Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Try again', 'Check again', 'Not now']);
   });
 
   it.each([
@@ -464,7 +464,7 @@ describe('ToolAskCard on Linux', () => {
     expect(shown.classes()).toContain('hint');
     expect(shown.classes()).not.toContain('error');
     expect(shown.attributes('data-result')).toBe(code);
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Check again', 'Not now']);
   });
 
   it.each([
@@ -474,8 +474,8 @@ describe('ToolAskCard on Linux', () => {
     const { api } = fakeApi({});
     const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: words, attempts: 1, lastResult: code }), api } });
     expect(w.get('[data-test=tool-ask-failed]').classes()).toContain('hint');
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
-    expect(w.findAll('button').every((b) => b.attributes('disabled') === undefined)).toBe(true);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
+    expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') === undefined)).toBe(true);
   });
 
   it.each(['failed', 'notFound', 'homeOnly'] as const)('Gap_AfterAReload_%s_IsRedWithTryAgain', (code) => {
