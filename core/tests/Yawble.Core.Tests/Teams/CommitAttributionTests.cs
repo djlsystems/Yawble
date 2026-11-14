@@ -34,6 +34,9 @@ public class CommitAttributionTests
     [InlineData("Co-Authored-By: Cody Bot <cody@example.com>")]
     [InlineData("Co-Authored-By: Claude Code <claude@example.com>")]
     [InlineData("Co-Authored-By: claude[bot] <209825114+claude[bot]@users.noreply.github.com>")]
+    // Claude is caught on the bare word (spec, card 134 item 3), so a person named Claude is caught too: accepted.
+    [InlineData("Co-Authored-By: Claude <claude@example.com>")]
+    [InlineData("Co-Authored-By: Claude Dupont <claude.dupont@example.fr>")]
     [InlineData("Claude-Session: 0f3c9a2e-1b2c")]
     [InlineData("claude-session: abc")]
     [InlineData("🤖 Generated with [Claude Code](https://claude.com/claude-code)")]
@@ -53,7 +56,6 @@ public class CommitAttributionTests
     [InlineData("Co-Authored-By: Devin Smith <devin.smith@example.com>")]
     [InlineData("Co-Authored-By: Devin Aird <devin@example.com>")]
     [InlineData("Co-Authored-By: Cody Botha <cody.botha@example.com>")]
-    [InlineData("Co-Authored-By: Claude Dupont <claude.dupont@example.fr>")]
     [InlineData("Co-Authored-By: Bard Olsen <bard@example.no>")]
     [InlineData("Generated with the new protoc script")]
     [InlineData("Fix the Claude-Session header parsing")] // not a trailer: the line does not start with it
