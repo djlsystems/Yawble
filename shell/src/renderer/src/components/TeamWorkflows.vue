@@ -50,20 +50,20 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .twf { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-height: 0; }
 .twf-list { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .tiny { font-size: 11.5px; margin: 0; }
-.twf-head { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-soft, #64748b); margin-bottom: 2px; }
+.twf-head { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 2px; }
 .twf-row { --tone: var(--state-idle); display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 6px; width: 100%;
   border: 0; background: transparent; padding: 2px 4px; border-radius: 4px; text-align: left; font-size: 12px; cursor: pointer; }
 .twf-row:hover { background: color-mix(in srgb, var(--tone) 8%, transparent); }
-.twf-row.completed { --tone: var(--ok, #1d6b2f); }
-.twf-row.working { --tone: #0891b2; }
-.twf-row.waiting { --tone: var(--warn, #b26a00); }
-.twf-row.closed { --tone: var(--state-idle, #8a847c); }
+.twf-row.completed { --tone: var(--ok); }
+.twf-row.working { --tone: var(--info); }
+.twf-row.waiting { --tone: var(--warn); }
+.twf-row.closed { --tone: var(--state-idle); }
 .twf-icon { color: var(--tone); font-size: 11px; font-weight: 700; text-align: center; }
 .twf-row.working .twf-icon { animation: twf-pulse 1.6s ease-in-out infinite; }
 @keyframes twf-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .twf-row.working .twf-icon { animation: none; } }
 .twf-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.twf-row.closed .twf-title { color: var(--ink-soft, #64748b); }
-.twf-id { color: var(--ink-soft, #64748b); font-variant-numeric: tabular-nums; }
-.twf-time { color: var(--ink-soft, #64748b); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.twf-row.closed .twf-title { color: var(--ink-soft); }
+.twf-id { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.twf-time { color: var(--ink-soft); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 </style>

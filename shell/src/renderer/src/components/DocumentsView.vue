@@ -50,7 +50,7 @@ const team = computed(() => [...props.teams, ...props.archived].find((t) => t.id
 h2 { margin: 0 0 4px; font-size: 22px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin: 18px 0; }
 .folder { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); text-align: left; }
-.folder:hover { border-color: #b9c2d3; background: var(--hover); }
+.folder:hover { border-color: var(--line-strong); background: var(--hover); }
 .folder.archived { opacity: .75; }
 .ico { font-size: 20px; }
 .name { font-weight: 600; }

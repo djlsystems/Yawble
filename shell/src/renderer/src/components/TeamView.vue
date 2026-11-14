@@ -302,10 +302,10 @@ h2 { font-size: 16px; margin: 0; }
 .teamhead { display: flex; flex-direction: column; gap: 8px; }
 .titleline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .titleline h2 { font-size: 18px; margin: 0 6px 0 0; }
-.kpi { font-size: 12.5px; color: var(--ink-soft); background: var(--chip, #f1f3f7); border-radius: 12px; padding: 2px 10px; white-space: nowrap; }
+.kpi { font-size: 12.5px; color: var(--ink-soft); background: var(--chip); border-radius: 12px; padding: 2px 10px; white-space: nowrap; }
 .kpi b { color: var(--ink); font-weight: 600; margin-right: 3px; }
-.kpi.live { background: #e7f5ec; color: #1d6b2f; }
-.kpi.live b { color: #1d6b2f; }
+.kpi.live { background: var(--ok-bg); color: var(--ok); }
+.kpi.live b { color: var(--ok); }
 /* In the text, not on screen: the title reads "Team X · 3 agents · 1 running · 0 queued". */
 .sep { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -323,25 +323,25 @@ h2 { font-size: 16px; margin: 0; }
   .member-side { flex-basis: auto !important; height: 12rem; }
   .member-side > .activity-grip { display: none; }
 }
-.decision { background: #fffaf0; border: 1px solid #e9d29a; border-radius: 6px; padding: 6px 10px; }
+.decision { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; }
 .decision p { margin: 0 0 6px; }
 .decision > .row { margin-top: 6px; }
-.question { font-size: 13.5px; background: #fff; border: 1px solid #f0e2bb; border-radius: 6px; padding: 4px 10px; overflow-x: auto; }
+.question { font-size: 13.5px; background: var(--surface); border: 1px solid var(--warn-line-soft); border-radius: 6px; padding: 4px 10px; overflow-x: auto; }
 .question :deep(table) { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 13px; }
 .question :deep(th), .question :deep(td) { border: 1px solid var(--line-soft); padding: 4px 8px; text-align: left; vertical-align: top; }
-.question :deep(th) { background: #faf7ee; font-weight: 600; }
+.question :deep(th) { background: var(--warn-bg-soft); font-weight: 600; }
 .question :deep(td:first-child), .question :deep(th:first-child) { width: 28px; color: var(--muted); }
 .quick { gap: 6px; flex-wrap: wrap; }
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .thumb { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
-.thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; line-height: 18px; }
+.thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: var(--scrim); color: var(--on-scrim); font-size: 10px; line-height: 18px; }
 .error { color: var(--bad); }
 .remember label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-soft); }
 .remember input { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
-.decision.ask code { background: #f3f4f7; padding: 1px 5px; border-radius: 4px; }
+.decision.ask code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 .muted { color: var(--muted); }
 .add { margin-top: 14px; }
-.paused { background: #fffaf0; border: 1px solid #e9d29a; border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
+.paused { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
 .small { font-size: 12px; }
 </style>

@@ -9,3 +9,6 @@ declare module 'highlight.js/lib/languages/*' {
   const language: LanguageFn;
   export default language;
 }
+
+// A stylesheet imported for its side effect (theme.css, the highlight palette); the host's bundler loads it.
+declare module '*.css';

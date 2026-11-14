@@ -87,7 +87,7 @@ const height = outputHeight;
 </template>
 
 <style scoped>
-.card { width: 100%; background: #fff; border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 6px 12px 8px; }
+.card { width: 100%; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 6px 12px 8px; }
 .title { display: flex; align-items: center; gap: 8px; min-height: 32px; flex-wrap: wrap; }
 .title strong { font-size: 14px; }
 .spacer { flex: 1; }
@@ -95,10 +95,10 @@ const height = outputHeight;
 .icon.code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; letter-spacing: -.04em; }
 .label { font-weight: 600; font-size: 12px; color: var(--card-state); }
 .state { font-size: 12.5px; padding: 0 0 4px 36px; }
-.more { font-size: 12px; color: var(--muted, #6b7280); }
+.more { font-size: 12px; color: var(--muted); }
 .lease { font-weight: 600; color: var(--state-running, inherit); }
 .lease.waiting { color: var(--state-waiting, inherit); }
-.output { margin: 2px 0 0 36px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fafbfc; overflow-y: auto; overflow-x: hidden;
+.output { margin: 2px 0 0 36px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); overflow-y: auto; overflow-x: hidden;
   font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .output :deep(p) { margin: 0 0 6px; }
 /* The report's first paragraph is its summary. */
@@ -107,14 +107,14 @@ const height = outputHeight;
 .kind { display: inline-block; font-size: 11px; font-weight: 600; line-height: 1; padding: 3px 7px; margin-right: 6px; border-radius: 999px;
   --k: var(--state-idle); color: var(--k); background: color-mix(in srgb, var(--k) 12%, transparent); }
 .kind.handback { --k: var(--state-waiting); }
-.kind.complete { --k: var(--ok, #1d6b2f); }
+.kind.complete { --k: var(--ok); }
 .kind.blocked { --k: var(--state-blocked); }
 .kind.decision { --k: var(--state-decision); }
 .output :deep(p:last-child) { margin-bottom: 0; }
 .output :deep(ul), .output :deep(ol) { margin: 0 0 6px; padding-left: 20px; }
 .output :deep(li) { margin: 1px 0; }
 .output :deep(code) { background: var(--chip); padding: 0 4px; border-radius: 4px; font-size: 12px; }
-.output :deep(pre) { background: #1f2430; color: #e7e9ee; padding: 8px 10px; border-radius: 6px; overflow: auto; margin: 0 0 6px; }
+.output :deep(pre) { background: var(--code-block-bg); color: var(--code-block-ink); padding: 8px 10px; border-radius: 6px; overflow: auto; margin: 0 0 6px; }
 .output :deep(pre code) { background: transparent; padding: 0; }
 .output :deep(h1), .output :deep(h2), .output :deep(h3) { font-size: 13px; margin: 6px 0 4px; }
 .card { --card-state: var(--state-idle); }
