@@ -38,6 +38,7 @@ public class HeavyLeaseTests
         private readonly Dictionary<string, TaskCompletionSource<RunContext>> _started = [];
         private readonly Dictionary<string, TaskCompletionSource> _end = [];
         public FakeClock Clock { get; } = new(new DateTimeOffset(2026, 11, 12, 9, 0, 0, TimeSpan.Zero));
+        public string ConnectionString => _db.ConnectionString;
         public BusEngine Engine { get; private set; } = null!;
         public Dictionary<string, FakeIdle> Idle { get; } = [];
         public int Changes;
@@ -114,6 +115,36 @@ public class HeavyLeaseTests
     private static async Task<string[]> Holders(BusEngine engine) => [.. (await engine.LeaseSnapshotAsync(Ct)).Holders.Select(h => h.Member)];
 
     private static async Task<string[]> Queue(BusEngine engine) => [.. (await engine.LeaseSnapshotAsync(Ct)).Queue.Select(h => h.Member)];
+
+    /// <summary>The board shows the lease on the card its member is working on (its newest open card), held or waited for, and on no other card.</summary>
+    [Fact]
+    public async Task TheBoardShowsTheLease_OnTheCardTheMemberIsWorkingOn()
+    {
+        await using var kit = await Kit.StartAsync();
+        var store = new Yawble.Core.Board.BoardStore(kit.ConnectionString);
+        var adaOld = store.AddCard("Alpha", "Ada", null, "Older card", "", "queued", Yawble.Core.Board.Lanes.Todo, null, "2026-11-12T08:00:00Z");
+        var adaNow = store.AddCard("Alpha", "Ada", null, "Run the suite", "", "running", Yawble.Core.Board.Lanes.InProgress, null, "2026-11-12T08:30:00Z");
+        var benNow = store.AddCard("Alpha", "Ben", null, "Build it", "", "running", Yawble.Core.Board.Lanes.InProgress, null, "2026-11-12T08:31:00Z");
+        var cyNow = store.AddCard("Alpha", "Cy", null, "Something light", "", "running", Yawble.Core.Board.Lanes.InProgress, null, "2026-11-12T08:32:00Z");
+        var ada = await kit.RunAsync("Ada");
+        var ben = await kit.RunAsync("Ben");
+        await Lease(ada, "acquire", "full test suite");
+        await Lease(ben, "acquire", "build");
+
+        var list = (await new Yawble.Core.Board.BoardService(store, kit.Engine).DispatchAsync("board.list", new JsonObject(), Ct))!;
+        var cards = list["cards"]!.AsArray().Select(c => c!.AsObject()).ToList();
+        JsonObject? Card(long id) => cards.SingleOrDefault(c => c["id"]!.GetValue<long>() == id);
+        var adaWorking = store.OpenCardOf("Alpha", "Ada")!.Id;
+        var benWorking = store.OpenCardOf("Alpha", "Ben")!.Id;
+        Assert.Equal("holding", Card(adaWorking)!["lease"]!["state"]!.GetValue<string>());
+        Assert.Equal("full test suite", Card(adaWorking)!["lease"]!["what"]!.GetValue<string>());
+        Assert.Equal("waiting", Card(benWorking)!["lease"]!["state"]!.GetValue<string>());
+        Assert.Equal(1, Card(benWorking)!["lease"]!["position"]!.GetValue<int>());
+        // Only the card the member works on shows it: one chip per member, none on Cy (no lease) or on anyone's other cards.
+        Assert.Equal(2, cards.Count(c => c["lease"] is not null));
+        Assert.Null(Card(adaOld.Id)?["lease"]);
+        Assert.Null(Card(cyNow.Id)?["lease"]);
+    }
 
     [Fact]
     public async Task TheQueueKeepsOrder_AndAskingAgainKeepsYourPlace()

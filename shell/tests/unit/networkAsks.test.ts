@@ -46,7 +46,7 @@ describe('NetworkAskCard', () => {
     expect(w.find('[data-test=network-ask-reason]').exists()).toBe(false);
     expect(w.get('[data-test=network-ask-count]').text()).toContain('3 times');
     expect(w.get('[data-test=network-ask-hint]').text()).toContain('NuGet');
-    expect(w.findAll('button').map((b) => b.text())).toEqual(['Allow for this agent', 'Allow for this team', 'Allow everywhere', 'Deny']);
+    expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Allow for this agent', 'Allow for this team', 'Allow everywhere', 'Deny']);
   });
 
   it('ShowsTheAgentsReasonInsteadOfWhatWasRefused_AsPlainText', () => {
@@ -84,13 +84,13 @@ describe('NetworkAskCard', () => {
     const w = mount(NetworkAskCard, { props: { ask: ask(), api } });
     await w.get('[data-test=network-ask-team]').trigger('click');
     await flushPromises();
-    expect(w.findAll('button').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
+    expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
     expect(w.get('[data-test=network-ask-team]').text()).toContain('Allowing…');
     await w.get('[data-test=network-ask-agent]').trigger('click');
     expect(calls).toHaveLength(1);
     finish(answered('team'));
     await flushPromises();
-    expect(w.findAll('button').every((b) => b.attributes('disabled') === undefined)).toBe(true);
+    expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') === undefined)).toBe(true);
   });
 
   it('ShowsTheCoresRefusalInTheWindow', async () => {
