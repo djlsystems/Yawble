@@ -282,7 +282,8 @@ public sealed class SystemToolHost(IGitHost git, string appDataRoot) : IToolHost
 
 /// <summary>A tool ask (tool_asks, 0040). <paramref name="Member"/>: "Team/Name" of the latest member who asked.</summary>
 public sealed record ToolAskRow(long Id, string At, long TeamId, string Team, string Tool, string Member, string? Reason, int Count, string LastSeen,
-    long? Workflow, long? CausationSeq, string State, int Attempts, string? Error, string? DecidedBy, string? DecidedVia, string? DecidedAt, string? Note)
+    long? Workflow, long? CausationSeq, string State, int Attempts, string? Error, string? DecidedBy, string? DecidedVia, string? DecidedAt, string? Note,
+    string? LastResult = null)
 {
     public string MemberName => Member[(Member.IndexOf('/') + 1)..];
 }
@@ -341,7 +342,7 @@ public sealed class ToolAskService
         }
         foreach (var id in interrupted)
         {
-            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = 'the app closed while it was installing; try again' WHERE id = $id AND state = 'installing';", ("$id", id));
+            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = 'the app closed while it was installing; try again', last_result = 'failed' WHERE id = $id AND state = 'installing';", ("$id", id));
             Event(c, tx, id, "failed", null, null, InterruptedDetail);
         }
         tx.Commit();
@@ -443,7 +444,7 @@ public sealed class ToolAskService
         using var c = Open();
         using var cmd = Command(c,
             "SELECT a.id, a.at, a.team_id, COALESCE(t.name, ''), a.tool, a.member, a.reason, a.count, a.last_seen, a.workflow, a.causation_seq, a.state, " +
-            "a.attempts, a.error, a.decided_by, a.decided_via, a.decided_at, a.note FROM tool_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
+            "a.attempts, a.error, a.decided_by, a.decided_via, a.decided_at, a.note, a.last_result FROM tool_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
             (openOnly ? " AND a.state IN ('pending', 'installing')" : "") + (teamId is null ? "" : " AND a.team_id = $t") + " ORDER BY a.id;",
             ("$t", teamId));
         using var r = cmd.ExecuteReader();
@@ -451,7 +452,7 @@ public sealed class ToolAskService
         while (r.Read())
             list.Add(new ToolAskRow(r.GetInt64(0), r.GetString(1), r.GetInt64(2), r.GetString(3), r.GetString(4), r.GetString(5), S(r, 6), (int)r.GetInt64(7),
                 r.GetString(8), r.IsDBNull(9) ? null : r.GetInt64(9), r.IsDBNull(10) ? null : r.GetInt64(10), r.GetString(11), (int)r.GetInt64(12), S(r, 13),
-                S(r, 14), S(r, 15), S(r, 16), S(r, 17)));
+                S(r, 14), S(r, 15), S(r, 16), S(r, 17), S(r, 18)));
         return list;
     }
 
@@ -477,6 +478,9 @@ public sealed class ToolAskService
             ["scope"] = t is null ? null : t.UserScope ? "user" : "machine",
             ["reason"] = a.Reason, ["count"] = a.Count, ["lastSeen"] = a.LastSeen, ["workflow"] = a.Workflow,
             ["state"] = a.State, ["attempts"] = a.Attempts, ["error"] = a.Error,
+            // The result code of the last Install or Check again (0042), beside error: failed, cancelled, notAuthorized,
+            // homeOnly or notFound; null before the first attempt. A fresh card reads cancelled/notAuthorized from it.
+            ["lastResult"] = a.LastResult,
             ["decidedBy"] = a.DecidedBy, ["decidedVia"] = a.DecidedVia, ["decidedAt"] = a.DecidedAt,
             // Windows: Install (or Try again after an error) runs this command with winget. Linux with pkexec, a graphical
             // session and a recognised distribution: Install runs it through pkexec, and the system asks for the person's
@@ -536,7 +540,7 @@ public sealed class ToolAskService
                 // [{ name, displayName, publisher, wingetId, scope, program, command }]
                 "tools.catalog" => new JsonArray(ToolCatalog.All.Select(t => (JsonNode?)ToJson(t)).ToArray()),
                 // [{ id, at, teamId, team, member, memberName, tool, displayName, publisher, wingetId, scope, reason, count, lastSeen,
-                //    workflow, state, attempts, error, decidedBy, decidedVia, decidedAt, canInstall, command, choices }]
+                //    workflow, state, attempts, error, lastResult, decidedBy, decidedVia, decidedAt, canInstall, command, choices }]
                 "tools.asks" => new JsonArray(Asks(p?["all"]?.GetValue<bool>() != true, OptLong(p, "teamId")).Select(a => (JsonNode?)ToJson(a)).ToArray()),
                 "tools.notNow" => await NotNowAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"), OptStr(p, "note"), ct),
                 "tools.install" => await InstallAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"), ct),
@@ -626,7 +630,7 @@ public sealed class ToolAskService
             {
                 using var c = Open();
                 using var tx = c.BeginTransaction();
-                if (Exec(c, tx, "UPDATE tool_asks SET state = 'installing', attempts = attempts + 1, error = NULL WHERE id = $id AND state = 'pending';", ("$id", id)) == 0)
+                if (Exec(c, tx, "UPDATE tool_asks SET state = 'installing', attempts = attempts + 1, error = NULL, last_result = NULL WHERE id = $id AND state = 'pending';", ("$id", id)) == 0)
                     throw new ArgumentException($"tool request {id} is not waiting");
                 Event(c, tx, id, "install", who.User, who.Via, command);
                 tx.Commit();
@@ -665,7 +669,7 @@ public sealed class ToolAskService
             if (linux is not null && _host.FoundOnlyInHome(tool) is { } home)
             {
                 var words = r.ExitCode == 0 ? HomeOnlyMessage(tool, home) : $"{failed} {HomeOnlyMessage(tool, home)}";
-                Fail(id, tool, who, words, ran: true, command: command);
+                Fail(id, tool, who, words, ran: true, command: command, result: "homeOnly");
                 return Result(false, id, tool, words, "homeOnly");
             }
             Fail(id, tool, who, failed, ran: true, command: command);
@@ -701,7 +705,7 @@ public sealed class ToolAskService
         {
             using var c = Open();
             using var tx = c.BeginTransaction();
-            Exec(c, tx, "UPDATE tool_asks SET error = $e WHERE id = $id AND state = 'pending';", ("$e", message), ("$id", id));
+            Exec(c, tx, "UPDATE tool_asks SET error = $e, last_result = $r WHERE id = $id AND state = 'pending';", ("$e", message), ("$r", code), ("$id", id));
             tx.Commit();
         }
         Changed?.Invoke();
@@ -721,7 +725,7 @@ public sealed class ToolAskService
             var now = Stamp(_clock.GetUtcNow());
             foreach (var a in closed)
             {
-                Exec(c, tx, "UPDATE tool_asks SET state = 'installed', error = NULL, decided_by = $by, decided_via = $via, decided_at = $now, note = $note WHERE id = $id;",
+                Exec(c, tx, "UPDATE tool_asks SET state = 'installed', error = NULL, last_result = NULL, decided_by = $by, decided_via = $via, decided_at = $now, note = $note WHERE id = $id;",
                     ("$by", who.User), ("$via", who.Via), ("$now", now), ("$note", a.Id == ask.Id ? null : $"installed by tool request {ask.Id}"), ("$id", a.Id));
                 Event(c, tx, a.Id, "installed", who.User, who.Via, a.Id == ask.Id ? detail : $"installed by tool request {ask.Id}");
             }
@@ -747,15 +751,18 @@ public sealed class ToolAskService
 
     /// <summary>
     /// The ask waits again with the message (Try again). The Approvals log gets a failed row with <paramref name="detail"/>
-    /// (the message when null); the window's progress gets <paramref name="phase"/>.
+    /// (the message when null); the window's progress gets <paramref name="phase"/>; the ask keeps <paramref name="result"/>
+    /// (the phase when null) as last_result, which tools.asks sends as lastResult.
     /// </summary>
-    private void Fail(long id, ToolEntry tool, Provenance.Actor who, string message, bool ran, string phase = "failed", string? command = null, string? detail = null)
+    private void Fail(long id, ToolEntry tool, Provenance.Actor who, string message, bool ran, string phase = "failed", string? command = null, string? detail = null,
+        string? result = null)
     {
         lock (_lock)
         {
             using var c = Open();
             using var tx = c.BeginTransaction();
-            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = $e WHERE id = $id AND state IN ('pending', 'installing');", ("$e", Clip(message, 1000)), ("$id", id));
+            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = $e, last_result = $r WHERE id = $id AND state IN ('pending', 'installing');",
+                ("$e", Clip(message, 1000)), ("$r", result ?? phase), ("$id", id));
             Event(c, tx, id, "failed", who.User, who.Via, detail ?? message);
             tx.Commit();
         }
