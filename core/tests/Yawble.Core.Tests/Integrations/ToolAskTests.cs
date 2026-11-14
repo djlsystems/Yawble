@@ -348,6 +348,45 @@ public sealed class ToolAskTests : IDisposable
         Assert.Contains("try again", ask.Error);
     }
 
+    [Fact]
+    public async Task AnInstallTheAppClosedDuring_WritesOneInterruptedRow_InTheApprovalsLog()
+    {
+        await Request(Priya, "python-3");
+        var id = _asks.Asks().Single().Id;
+        await AsWindow(() => _asks.NotNowAsync(id, null, Ct));
+        await Request(Priya, "nodejs-lts");
+        var other = _asks.Asks().Single(a => a.Tool == "nodejs-lts").Id;
+        Insert("UPDATE tool_asks SET state = 'installing' WHERE id = $id RETURNING id;", ("$id", other));
+        Insert("INSERT INTO tool_ask_events (ask_id, at, kind, detail) VALUES ($id, '2026-01-01T00:00:00Z', 'install', 'winget install') RETURNING id;", ("$id", other));
+
+        NewService();
+        NewService(); // a second start finds nothing installing and writes nothing more
+
+        var events = _asks.Events(other);
+        Assert.Equal(["asked", "install", "failed"], events.Select(e => e.Kind));
+        Assert.Single(events, e => e.Detail == ToolAskService.InterruptedDetail);
+        Assert.DoesNotContain(_asks.Events(id), e => e.Detail == ToolAskService.InterruptedDetail);
+
+        var logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
+        var rows = logs.Query(new LogQuery("approvals"))["rows"]!.AsArray().Select(r => r!.AsObject())
+            .Where(r => r["integration"]!.GetValue<string>() == "host tool" && r["args"]!.GetValue<string>().StartsWith("nodejs-lts")).ToList();
+        var row = Assert.Single(rows, r => r["args"]!.GetValue<string>().Contains("install interrupted: the app closed"));
+        Assert.Equal("failed", row["state"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task AFailedInstall_ShowsWingetsExitCodeInHex()
+    {
+        Assert.Equal("winget exit code -1978335212 (0x8A150014)", ToolAskService.WingetExitCode(-1978335212));
+        Assert.Equal("winget exit code 0 (0x00000000)", ToolAskService.WingetExitCode(0));
+        await Request(Priya, "nodejs-lts");
+        var id = _asks.Asks().Single().Id;
+        _host.Result = new GitResult(-1978335212, "No package found matching input criteria.", "");
+        var r = await AsWindow(() => _asks.InstallAsync(id, Ct));
+        Assert.Contains("winget exit code -1978335212 (0x8A150014)", r["message"]!.GetValue<string>());
+        Assert.Contains("0x8A150014", _asks.Events(id).Last().Detail);
+    }
+
     // ------------------------------------------------------------------ the RPCs, the bus tool, the logs
 
     [Fact]
