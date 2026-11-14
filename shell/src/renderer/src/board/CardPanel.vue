@@ -8,6 +8,7 @@ import { displayName } from '../faces/faces';
 import { ago, cardFace, StatusColor, StatusLabel } from './cards';
 import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
+import { cardPrompt, discussWithConcierge } from '../conciergeDiscuss';
 
 // A card in full, on the right: its body, its trail (oldest first), and what the person can do. There is no "send an
 // instruction" box on purpose: every edit, move or comment is told to the team's Manager, which acts on it.
@@ -93,6 +94,8 @@ defineExpose({ load });
           · card {{ card.id }}<template v-if="card.workflow"> · workflow #{{ card.workflow }}</template>
         </div>
       </div>
+      <button v-if="card" class="discuss" title="Talk this card through with the Concierge" data-test="card-discuss"
+        @click="discussWithConcierge(card.teamId, cardPrompt(card, lanes.find((l) => l.id === card!.lane)?.label ?? card.lane, StatusLabel[card.status]))">Discuss with the Concierge</button>
       <button class="icon" title="Close" data-test="card-close" @click="emit('close')">✕</button>
     </header>
     <p v-if="error" class="error" data-test="card-error">{{ error }}</p>
@@ -145,6 +148,7 @@ defineExpose({ load });
 <style scoped>
 .panel { width: 380px; flex: none; border-left: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; overflow-y: auto; padding: 12px 16px 20px; gap: 10px; }
 header { display: flex; gap: 8px; align-items: flex-start; }
+.discuss { font-size: 12px; white-space: nowrap; }
 .head { flex: 1; min-width: 0; }
 .ttl { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
 .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }

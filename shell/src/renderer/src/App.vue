@@ -16,6 +16,7 @@ import LinkDialog from './components/LinkDialog.vue';
 import ConciergeView from './components/ConciergeView.vue';
 import MonitorView from './monitor/MonitorView.vue';
 import BoardView from './board/BoardView.vue';
+import { discussRequest } from './conciergeDiscuss';
 import DocumentsView from './components/DocumentsView.vue';
 import MenuBar, { type Menu } from './components/MenuBar.vue';
 import TerminalPane from './components/TerminalPane.vue';
@@ -162,6 +163,14 @@ function discuss(teamId: number, d: { from: string; question: string }) {
   conciergeDraft.value = `${name}'s ${d.from} asks me:\n\n${quoted}\n\nHelp me decide. What should I answer?`;
   askAbout(teamId);
 }
+
+// "Discuss with the Concierge" from Needs You or a Kanban card (conciergeDiscuss.ts): the same new chat, its text ready.
+watch(discussRequest, (r) => {
+  if (!r) return;
+  conciergeDraft.value = r.text;
+  if (r.teamId !== null) askAbout(r.teamId);
+  else newChat();
+});
 
 function askAbout(teamId: number) {
   focusTeamId.value = teamId;

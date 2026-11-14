@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { discussWithConcierge, syncNotePrompt } from '../conciergeDiscuss';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BranchSyncResult, YawbleApi, TeamSummary, TeamSyncState } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -46,7 +47,11 @@ defineExpose({ load });
 <template>
   <div v-if="state && (state.note || state.behind || done || error)" class="sync" data-test="team-sync">
     <div v-if="state.note" class="note" data-test="team-sync-note" role="alert">
-      <strong>Needs you: the branches could not be brought up automatically.</strong>
+      <div class="head">
+        <strong>Needs you: the branches could not be brought up automatically.</strong>
+        <button class="discuss" data-test="team-sync-discuss" title="Talk it through with the Concierge"
+          @click="discussWithConcierge(team.id, syncNotePrompt(team.name, state.note))">Discuss with the Concierge</button>
+      </div>
       <div v-for="(l, i) in lines(state.note)" :key="i" class="line" data-test="team-sync-note-line">
         <span>{{ l }}</span>
         <ul v-if="files(l).length" class="files" data-test="team-sync-files">
@@ -68,6 +73,8 @@ defineExpose({ load });
 .sync { margin: 6px 0; }
 .note { border: 1px solid var(--warn); border-radius: 6px; padding: 8px 10px; background: var(--warn-bg); }
 .note .line { margin-top: 4px; }
+.note .head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
+.discuss { flex: none; font-size: 12px; }
 .files { margin: 2px 0 0 18px; padding: 0; }
 .behind { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
 </style>

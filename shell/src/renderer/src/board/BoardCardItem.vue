@@ -10,6 +10,21 @@ import { cardFace, StatusColor, StatusLabel } from './cards';
 const props = defineProps<{ card: BoardCard; selected?: boolean }>();
 const emit = defineEmits<{ open: [] }>();
 const color = computed(() => StatusColor[props.card.status]);
+// The heavy-work lease (one full test suite, build or image build at a time on this computer), when this card's member
+// holds it or waits for it in the run working this card.
+const leaseLabel = computed(() => {
+  const l = props.card.lease;
+  if (!l) return '';
+  return l.state === 'holding' ? 'Heavy work' : `Waiting for heavy work${l.position ? ` (${l.position})` : ''}`;
+});
+const leaseTitle = computed(() => {
+  const l = props.card.lease;
+  if (!l) return '';
+  const what = l.what ? `: ${l.what}` : '';
+  return l.state === 'holding'
+    ? `Holds the heavy-work lease${what}. Heavy work (a full test suite, build or image build) runs one at a time on this computer.`
+    : `Waiting for the heavy-work lease${l.position ? `, position ${l.position}` : ''}${what}.`;
+});
 </script>
 
 <template>
@@ -28,6 +43,7 @@ const color = computed(() => StatusColor[props.card.status]);
     </div>
     <div class="foot">
       <span class="status" data-test="card-status">{{ StatusLabel[card.status] }}</span>
+      <span v-if="card.lease" class="badge lease" :class="card.lease.state === 'waiting' ? 'queued' : 'held'" :title="leaseTitle" data-test="card-lease">{{ leaseLabel }}</span>
       <span v-if="card.awaitingManager" class="badge waiting" title="You changed this card; the Manager has not acted on it yet">awaiting Manager</span>
       <span v-if="card.trailCount" class="muted small">{{ card.trailCount }} update{{ card.trailCount === 1 ? '' : 's' }}</span>
     </div>
@@ -49,6 +65,8 @@ const color = computed(() => StatusColor[props.card.status]);
 .status { font-size: 11.5px; font-weight: 700; color: var(--status); }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; }
 .waiting { background: var(--bad-bg-soft); color: var(--bad-ink); border: 1px solid var(--bad-line-soft); }
+.lease { font-weight: 600; --k: var(--state-running); color: var(--k); background: color-mix(in srgb, var(--k) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--k) 35%, transparent); }
+.lease.queued { --k: var(--state-waiting); }
 .muted { color: var(--muted); }
 .small { font-size: 11px; }
 </style>

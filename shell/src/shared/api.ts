@@ -795,6 +795,8 @@ export interface BoardCard {
   /** When the person cleared this Done card from the board view (0037); null or absent when it shows. */
   clearedAt?: string | null;
   memberState?: { state: AgentCard['state']; attention: AgentCard['attention'] };
+  /** The heavy-work lease of the card's member, on the card it is working on only: held, or waited for (queue position). */
+  lease?: { state: 'holding' | 'waiting'; what: string | null; position: number | null };
 }
 export interface BoardTrailLine { id: number; at: string; source: string; kind: string; text: string }
 export interface BoardCardDetail extends BoardCard { trail: BoardTrailLine[]; itemTitle?: string }

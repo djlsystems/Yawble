@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { discussWithConcierge, toolAskPrompt } from '../conciergeDiscuss';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { ToolAsk, ToolInstallCode, ToolInstallProgress, ToolInstallResult, ToolNotNowResult, YawbleApi } from '../../../shared/api';
 import { checkToolAgain } from '../../../shared/api';
@@ -152,6 +153,8 @@ async function notNow() {
         title="Closes it; the agent is told, and the team is not asked about this tool again for 24 hours" @click="notNow">
         <BusyLabel :busy="busy.is('answer', 'notNow')" text="Closing…">Not now</BusyLabel>
       </button>
+      <button v-if="!installing" class="discuss" data-test="tool-ask-discuss" title="Talk it through with the Concierge first; you still answer it here"
+        @click="discussWithConcierge(ask.teamId, toolAskPrompt(ask))">Discuss with the Concierge</button>
     </div>
     <p v-if="error" class="error small" data-test="tool-ask-error">{{ error }}</p>
   </article>
@@ -167,4 +170,5 @@ async function notNow() {
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .error { color: var(--bad); }
+.buttons .discuss { margin-left: auto; }
 </style>
