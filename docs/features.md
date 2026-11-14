@@ -116,8 +116,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   - **Not now** closes it; the agent is told, and the team is not asked about that tool again for 24 hours.
   On Linux the distribution's package manager comes from `/etc/os-release`: dnf on Fedora and RHEL, pacman on Arch,
   apt-get on Debian and Ubuntu.
-  - When `pkexec` is on PATH, a graphical session is running (`WAYLAND_DISPLAY` or `DISPLAY`) and the distribution is
-    one of those, the item offers **Install**, says "Your system asks for your password" and shows the exact command:
+  - When `pkexec` is installed (`/usr/bin/pkexec` or `/bin/pkexec`, never taken from PATH), a graphical session is
+    running (`WAYLAND_DISPLAY` or `DISPLAY`) and the distribution is one of those, the item offers **Install**, says "Your system asks for your password" and shows the exact command:
     `pkexec /usr/bin/dnf install -y <packages>`, `pkexec /usr/bin/apt-get install -y <packages>` or
     `pkexec /usr/bin/pacman -S --needed --noconfirm <packages>`. The package manager is always run from that fixed path,
     never found on PATH, and the packages are always the catalog's. Only from the window, one install at a time, with

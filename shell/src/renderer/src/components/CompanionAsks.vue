@@ -6,7 +6,7 @@ import { COMPANION_LEVEL_TEXT, levelsUpTo } from '../companionLevels';
 import BusyLabel from './BusyLabel.vue';
 
 /**
- * The yawble companion's asks, on the main window: a program that wants to pair (with the code its terminal shows), and
+ * yawble-companion's asks, on the main window: a program that wants to pair (with the code its terminal shows), and
  * each destructive call a paired program made, which runs only when the person approves it here. Plans and results are
  * agent-influenced text: always shown as plain text ({{ }} / <pre>), never as HTML. Nothing in a remote view: the
  * companion is managed only at this computer.

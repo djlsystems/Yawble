@@ -245,7 +245,7 @@ export interface RestoreStatus {
   last: { backup: string; state: 'restored' | 'pending' | 'failed'; reason: string | null; at: string } | null;
 }
 
-/** The yawble companion (core Companion/CompanionRpc.cs; the window only, never a remote view). Levels are cumulative. */
+/** yawble-companion (core Companion/CompanionRpc.cs; the window only, never a remote view). Levels are cumulative. */
 export type CompanionLevel = 'read' | 'act' | 'destructive';
 export interface CompanionClientInfo { name: string; level: CompanionLevel; pairedAt: string; pairedBy: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface CompanionPairing { id: string; name: string; level: CompanionLevel; code: string; expires: string }

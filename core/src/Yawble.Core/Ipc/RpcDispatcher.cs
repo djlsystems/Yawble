@@ -107,7 +107,7 @@ public sealed class RpcDispatcher(
             // The screens' methods (teams, members, policy, credentials, terminals).
             // Backups: list, back up now, restore (the person's window only).
             _ when backups is not null && Storage.BackupRpc.Handles(method) => backups.DispatchAsync(method, parameters, ct),
-            // The yawble companion (Companion/CompanionRpc.cs): pairings, approvals and revocations, the window on this computer only.
+            // yawble-companion (Companion/CompanionRpc.cs): pairings, approvals and revocations, the window on this computer only.
             _ when companion is not null && Companion.CompanionRpc.Handles(method) => companion.DispatchAsync(method, parameters, ct),
             _ when ui is not null && Ui.UiRpc.Handles(method) => ui.DispatchAsync(method, parameters, ct),
             // The Concierge: the person's chats with an agent that knows every team (Concierge/ConciergeService.cs).

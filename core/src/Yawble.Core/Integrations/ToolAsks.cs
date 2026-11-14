@@ -89,7 +89,7 @@ public static class LinuxPackagers
 }
 
 /// <summary>
-/// What an Install through pkexec runs on Linux: pkexec's path (found on PATH), the distribution's package manager and its
+/// What an Install through pkexec runs on Linux: pkexec's path (a fixed one, <see cref="SystemToolHost.PkexecPaths"/>), the distribution's package manager and its
 /// program at the fixed path (<see cref="LinuxPackagers.ProgramPath"/>).
 /// </summary>
 public sealed record LinuxInstaller(string Pkexec, LinuxPackager Packager, string PackageManager);
@@ -189,7 +189,7 @@ public interface IToolHost
     Task<GitResult> RunAsync(string exe, IReadOnlyList<string> args, TimeSpan limit, CancellationToken ct);
 
     /// <summary>
-    /// Linux: what an Install through pkexec runs, or null when it is not offered here: pkexec is not on PATH, there is no
+    /// Linux: what an Install through pkexec runs, or null when it is not offered here: pkexec is not at /usr/bin/pkexec or /bin/pkexec, there is no
     /// graphical session (neither WAYLAND_DISPLAY nor DISPLAY), the distribution is not recognised, or its package manager
     /// is not at its fixed path. Null on Windows and macOS.
     /// </summary>
@@ -258,7 +258,9 @@ public sealed class SystemToolHost(IGitHost git, string appDataRoot) : IToolHost
             if (!OperatingSystem.IsLinux()) return null;
             if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY")))
                 return null;
-            var pkexec = CorePath().Select(d => Path.Combine(d, "pkexec")).FirstOrDefault(p => Path.IsPathRooted(p) && File.Exists(p));
+            // pkexec from a fixed path only, never PATH: a program named pkexec earlier on PATH could show a password
+            // window of its own and keep the password.
+            var pkexec = PkexecPaths.FirstOrDefault(File.Exists);
             if (pkexec is null) return null;
             string? osRelease;
             try { osRelease = File.ReadAllText("/etc/os-release"); }
@@ -268,6 +270,9 @@ public sealed class SystemToolHost(IGitHost git, string appDataRoot) : IToolHost
             return File.Exists(pm) ? new LinuxInstaller(pkexec, packager, pm) : null;
         }
     }
+
+    /// <summary>Where polkit installs pkexec; the first that exists is the one Install runs.</summary>
+    public static IReadOnlyList<string> PkexecPaths { get; } = ["/usr/bin/pkexec", "/bin/pkexec"];
 
     public string? FoundOnlyInHome(ToolEntry tool)
     {

@@ -71,7 +71,7 @@ public sealed class ConciergeService
         Func<string, JsonObject?, CancellationToken, Task<JsonNode?>> ui,
         Func<Func<string, JsonObject?, CancellationToken, Task<JsonNode?>>?> board) =>
         (method, p, ct) => Companion.CompanionRpc.Handles(method)
-            // The yawble companion's pairings and approvals are the person's at the window, never a Concierge tool's.
+            // yawble-companion's pairings and approvals are the person's at the window, never a Concierge tool's.
             ? throw new RpcException("forbidden", Companion.CompanionRpc.WindowOnly)
             : Board.BoardService.Handles(method)
             ? (board() ?? throw new RpcException("not_ready", "the Board is still starting")).Invoke(method, p, ct)
