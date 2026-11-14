@@ -22,7 +22,7 @@ say "applying $tarball over $prefix"
 prefix=$(cd "$prefix" && pwd -P)
 
 # Wait for the window and the core (every process whose program is inside the install) to end.
-tries=0
+until=$(( $(date +%s) + 60 ))
 while :; do
   busy=
   for exe in /proc/[0-9]*/exe; do
@@ -30,8 +30,7 @@ while :; do
     case "$target" in "$prefix"/*) busy=$target; break ;; esac
   done
   [ -z "$busy" ] && break
-  tries=$((tries + 1))
-  if [ "$tries" -ge 120 ]; then say "$busy still runs after 60 s; nothing changed"; exit 1; fi
+  if [ "$(date +%s)" -ge "$until" ]; then say "$busy still runs after 60 s; nothing changed"; exit 1; fi
   sleep 0.5
 done
 
