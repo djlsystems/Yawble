@@ -88,8 +88,10 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
     `network.allowHosts + <host> (team)`. The team's settings list who added each host, how and when; a **Remove** of a
     host that is no longer on the list says so.
   - **Never asked about:** IP addresses, local and private-network names, the app's own hosts, floor-rule hosts, and names that are not plain ASCII. A plain ASCII name has only letters, digits, hyphens and dots. Internationalized names, including their `xn--` form, a name ending in a dot, and an underscore all fail this test.
-  - **Private-resolving names:** the gateway resolves a refused name first. A name that resolves only to loopback,
-    private or link-local addresses (`localtest.me`, `x.nip.io`) is a plain refusal and raises no request.
+  - **Private-resolving names:** the gateway never looks up a refused name, so an agent cannot make the app query a
+    domain of its choosing. An allow looks the name up once. A name that resolves only to loopback, private or
+    link-local addresses (`localtest.me`, `x.nip.io`) cannot be allowed, since agents can never reach those
+    addresses; Deny closes such a request.
   - **Plain http:** the gateway forwards only https. A request raised by a plain-http refusal says so, and the agent is
     told to use the https:// address: plain http is refused even once the host is allowed.
   - **Limit:** at most five different hosts wait per member at once. A repeat of a host already waiting only counts up.
@@ -130,8 +132,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   never written to the list. The team's settings show the list on their **Network** tab, and each member's settings
   show it on the **Policy** tab next to the member's own policy, each host with who added it, how and when, and **Remove**;
   a removed host is gone from the team's next runs (a member's own loosen block keeps what it has). Adding and removing
-  are in the audit log. Hosts that **Allow for this team** wrote into members' loosen blocks before the team list
-  existed stay in those blocks.
+  are in the audit log. A host in a member's own loosen block stays there until it is removed from that member's
+  policy.
 - Floor rules nobody can loosen:
   - model vendors' API and sign-in hosts are never allowed hosts;
   - no IP addresses or wildcards;

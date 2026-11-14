@@ -184,10 +184,10 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
         Assert.Contains("pypi.org", _policies.Effective(newAda, _layout).Policy.AllowHosts);
     }
 
-    // ------------------------------------------------------------------ the gateway's resolve before asking
+    // ------------------------------------------------------------------ the answer's lookup
 
     [Fact]
-    public async Task TheGateway_ANameWithAPublicAddressBesideAPrivateOne_IsStillAsked_AnUnresolvableOneToo()
+    public async Task TheAllow_APublicAddressBesideAPrivateOne_OrNoAnswer_IsAllowed_MappedAndUlaAreNot()
     {
         await using var f = await GatewayFixture.StartAsync();
         long team;
@@ -205,15 +205,18 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
         f.Dialer!.AddName("mixed.example.com", IPAddress.Parse("10.0.0.7"), IPAddress.Parse("93.184.216.34"));
         f.Dialer.AddName("mapped.example.com", IPAddress.Parse("::ffff:127.0.0.1"));
         f.Dialer.AddName("ula.example.com", IPAddress.Parse("fd00::1"));
+        asks.Resolve = f.Dialer.ResolveAsync;
         await using var gateway = f.StartRun(6);
+        foreach (var name in new[] { "mixed.example.com", "mapped.example.com", "ula.example.com", "unknown.example.com" })
+            await RefusedAsync(gateway, $"CONNECT {name}:443 HTTP/1.1\r\nHost: {name}:443\r\n\r\n");
+        Assert.Empty(f.Dialer.Resolved);
+        long Id(string h) => asks.Asks().Single(a => a.Host == h).Id;
 
         foreach (var name in new[] { "mapped.example.com", "ula.example.com" })
-            Assert.DoesNotContain("request_host", await RefusedAsync(gateway, $"CONNECT {name}:443 HTTP/1.1\r\nHost: {name}:443\r\n\r\n"));
-        Assert.Empty(asks.Asks(pendingOnly: false));
-
-        Assert.Contains("request_host", await RefusedAsync(gateway, "CONNECT mixed.example.com:443 HTTP/1.1\r\nHost: mixed.example.com:443\r\n\r\n"));
-        await RefusedAsync(gateway, "CONNECT unknown.example.com:443 HTTP/1.1\r\nHost: unknown.example.com:443\r\n\r\n");
-        Assert.Equal(["mixed.example.com", "unknown.example.com"], asks.Asks().Select(a => a.Host).Order());
+            await Assert.ThrowsAsync<ArgumentException>(() => asks.AnswerAsync(Id(name), NetworkAskChoices.Agent, null, Ct));
+        await asks.AnswerAsync(Id("mixed.example.com"), NetworkAskChoices.Agent, null, Ct);
+        await asks.AnswerAsync(Id("unknown.example.com"), NetworkAskChoices.Agent, null, Ct);
+        Assert.Equal(["mapped.example.com", "ula.example.com"], asks.Asks().Select(a => a.Host).Order());
     }
 
     private static async Task<string> RefusedAsync(RunGateway gateway, string request)

@@ -109,10 +109,16 @@ internal sealed class FakeConnectDialer : IConnectDialer
     /// <summary>Serves connections to <paramref name="port"/> (on any address) with <paramref name="serve"/>, which gets the server end.</summary>
     public void Serve(int port, Func<Stream, Task> serve) => _servers[port] = serve;
 
-    public Task<IPAddress[]> ResolveAsync(string host, CancellationToken ct) =>
-        _names.TryGetValue(host, out var addresses)
+    /// <summary>Every name looked up, in order.</summary>
+    public ConcurrentQueue<string> Resolved { get; } = new();
+
+    public Task<IPAddress[]> ResolveAsync(string host, CancellationToken ct)
+    {
+        Resolved.Enqueue(host);
+        return _names.TryGetValue(host, out var addresses)
             ? Task.FromResult(addresses)
             : throw new SocketException((int)SocketError.HostNotFound);
+    }
 
     public Task<Stream> ConnectAsync(IPAddress[] addresses, int port, CancellationToken ct)
     {

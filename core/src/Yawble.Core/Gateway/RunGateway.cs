@@ -610,13 +610,14 @@ public sealed class RunGateway : IAsyncDisposable
 
     /// <summary>
     /// Reports an allowlist miss to the network asks (never for the doctor's quiet self-test) and returns what the agent is
-    /// told. The name is resolved first (the dialer's resolver): one that resolves only to loopback, private or link-local
-    /// addresses (localtest.me, x.nip.io) stays a plain refusal and raises no ask, since allowing it would never reach it.
+    /// told. The refused name is never looked up here: a lookup driven by the agent's request would carry whatever it puts
+    /// in the name to that domain's DNS server, refused or not. A name that resolves only to private addresses is caught
+    /// when the person answers instead (NetworkAskService.AnswerAsync).
     /// </summary>
-    private async Task<string> AllowlistRefusalAsync(string host, string method, string? path, CancellationToken ct)
+    private Task<string> AllowlistRefusalAsync(string host, string method, string? path, CancellationToken ct)
     {
         var outcome = HostAskOutcome.None;
-        if (!_spec.Quiet && _host.Refusals is { } refusals && !await ResolvesOnlyPrivateAsync(host, ct))
+        if (!_spec.Quiet && _host.Refusals is { } refusals)
         {
             try
             {
@@ -628,28 +629,7 @@ public sealed class RunGateway : IAsyncDisposable
                 outcome = HostAskOutcome.None;
             }
         }
-        return AllowlistText(host, outcome);
-    }
-
-    /// <summary>
-    /// Whether every address the name resolves to is loopback, private or link-local (as the CONNECT check refuses them).
-    /// An address literal is left to the ask filter; a name that does not resolve is not this case (it may be asked about);
-    /// when private targets are allowed (tests), nothing is private.
-    /// </summary>
-    private async Task<bool> ResolvesOnlyPrivateAsync(string host, CancellationToken ct)
-    {
-        if (_host.Options.AllowPrivateConnectTargets || IPAddress.TryParse(host.Trim('[', ']'), out _)) return false;
-        try
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(_host.Options.ConnectTimeout);
-            var addresses = await Dialer.ResolveAsync(host.TrimEnd('.'), timeout.Token);
-            return addresses.Length > 0 && addresses.All(IsPrivate);
-        }
-        catch (Exception e) when (e is SocketException or OperationCanceledException or ArgumentException && !ct.IsCancellationRequested)
-        {
-            return false;
-        }
+        return Task.FromResult(AllowlistText(host, outcome));
     }
 
     /// <summary>What the agent reads in the 403 for an allowlist miss, by what became of the ask.</summary>

@@ -16,7 +16,7 @@ CREATE TABLE team_network_allows (
 
 -- network_asks gains member_id (the asking member's id: the 24-hour deny is that member's, so a later hire with the same
 -- name is asked again) and the 'closed' state (the member was removed from the team while the ask waited). Rebuilt
--- because SQLite cannot change a CHECK; rows are copied as they are, member_id filled from the members still there.
+-- because SQLite cannot change a CHECK; rows are copied as they are (but none of a team that is gone), member_id filled from the members still there.
 CREATE TABLE network_asks_v2 (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     at            TEXT    NOT NULL,
@@ -41,10 +41,11 @@ CREATE TABLE network_asks_v2 (
 INSERT INTO network_asks_v2 (id, at, team_id, member, member_id, host, reason, method, path_sample, count, last_seen, workflow, causation_seq,
                              state, scope, decided_by, decided_via, decided_at, note)
     SELECT a.id, a.at, a.team_id, a.member,
-           (SELECT m.id FROM members m JOIN teams t ON t.id = m.team_id WHERE t.id = a.team_id AND t.name || '/' || m.name = a.member),
+           (SELECT m.id FROM members m JOIN teams t ON t.id = m.team_id WHERE t.id = a.team_id AND lower(t.name || '/' || m.name) = lower(a.member)),
            a.host, a.reason, a.method, a.path_sample, a.count, a.last_seen, a.workflow, a.causation_seq,
            a.state, a.scope, a.decided_by, a.decided_via, a.decided_at, a.note
-      FROM network_asks a;
+      FROM network_asks a
+     WHERE a.team_id IN (SELECT id FROM teams); -- a row left from a deleted team would fail the foreign key
 DROP TABLE network_asks;
 ALTER TABLE network_asks_v2 RENAME TO network_asks;
 CREATE UNIQUE INDEX ux_network_asks_pending ON network_asks(team_id, member, host) WHERE state = 'pending';

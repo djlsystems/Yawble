@@ -225,6 +225,7 @@ var networkAsks = new Yawble.Core.Integrations.NetworkAskService($"Data Source={
         async ct => layouts.Sample(await bus.AllMemberRowsAsync(ct))),
     (team, member, text, causation, ct) => bus.PersonTellAsync(team, member, text, causation, ct));
 networkAsks.Changed = () => events.Publish(Yawble.Core.Integrations.NetworkAskService.ChangedEvent, null);
+networkAsks.Resolve = (host, ct) => System.Net.Dns.GetHostAddressesAsync(host, ct);
 bus.NetworkAsks = networkAsks;
 launch.HostRefusals = networkAsks;
 // Host tool asks: a tool from the app's catalog an agent asked for (request_tool) waits for the person in Needs you; Install

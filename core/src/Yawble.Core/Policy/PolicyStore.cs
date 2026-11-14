@@ -195,7 +195,8 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     /// </summary>
     public bool AddTeamHost(long teamId, string host, IReadOnlyList<(long MemberId, RunLayout Layout)> members, string addedBy, string? addedVia)
     {
-        if (FloorRules.HostProblem(host) is { } problem) throw new PolicyException([$"network.allowHosts: {problem}"]);
+        // The ask filter's rules too (ASCII names only, no trailing dot, not the app's own hosts), whoever calls this.
+        if ((Integrations.NetworkAskFilter.Problem(host) ?? FloorRules.HostProblem(host)) is { } problem) throw new PolicyException([$"network.allowHosts: {problem}"]);
         var current = TeamHosts(teamId).Select(t => t.Host).ToList();
         if (current.Contains(host, StringComparer.Ordinal)) return false;
         var global = GetGlobal();

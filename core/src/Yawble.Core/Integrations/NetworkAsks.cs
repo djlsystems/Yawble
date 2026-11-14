@@ -121,6 +121,17 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     // cloud viewer) cannot both change the policy; the second is told the request is being answered.
     private readonly HashSet<long> _answering = [];
 
+    /// <summary>
+    /// Looks a name up (production: the system resolver). Called only when the person answers with an allow, once per
+    /// answer: an allowed name that resolves only to loopback, private or link-local addresses would never be reachable
+    /// (the gateway refuses those addresses), so that answer is refused and the ask stays for Deny. Never called for an
+    /// agent's request, so an agent cannot make the app look up names it chooses. Null: no check.
+    /// </summary>
+    public Func<string, CancellationToken, Task<System.Net.IPAddress[]>>? Resolve { get; set; }
+
+    /// <summary>How long the answer's lookup may take before the allow goes ahead without it.</summary>
+    public static readonly TimeSpan ResolveLimit = TimeSpan.FromSeconds(5);
+
     public Action? Changed { get; set; }
 
     public static bool Handles(string method) => method.StartsWith("network.", StringComparison.Ordinal);
@@ -216,6 +227,21 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         // a repeat of the gateway's refusal changes only the count: no push for it (a restore loop would flood the window)
         if (count == 1 || reason is not null) Changed?.Invoke();
         return new Raised(count == 1 ? HostAskOutcome.Asked : HostAskOutcome.Pending, id, h);
+    }
+
+    private static async Task<bool> ResolvesOnlyPrivateAsync(Func<string, CancellationToken, Task<System.Net.IPAddress[]>> resolve, string host, CancellationToken ct)
+    {
+        try
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(ResolveLimit);
+            var addresses = await resolve(host, limit.Token).ConfigureAwait(false);
+            return addresses.Length > 0 && addresses.All(Gateway.RunGateway.IsPrivate);
+        }
+        catch (Exception e) when (e is System.Net.Sockets.SocketException or OperationCanceledException or ArgumentException && !ct.IsCancellationRequested)
+        {
+            return false; // not resolvable (now): nothing says it is private
+        }
     }
 
     /// <summary>A plain-http path as shown with the ask: no query (it may carry a token), at most 80 characters.</summary>
@@ -318,6 +344,8 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"network request {id} is not waiting");
         if (NetworkAskFilter.Problem(ask.Host) is { } problem) throw new ArgumentException(problem);
         var allow = choice != NetworkAskChoices.Deny;
+        if (allow && Resolve is { } resolve && await ResolvesOnlyPrivateAsync(resolve, ask.Host, ct))
+            throw new ArgumentException($"{ask.Host} resolves only to private or loopback addresses, which agents can never reach, so allowing it would change nothing; choose Deny");
         // The other waiting asks this answer covers, listed once before the policy writes: only these close with it,
         // so an ask raised while the writes run (its member never checked) stays waiting.
         List<NetworkAskRow> others = allow && choice != NetworkAskChoices.Agent
