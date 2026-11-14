@@ -111,6 +111,7 @@ public sealed class NetworkAskGapTests : IDisposable
         public bool AllowedFor(long memberId, string host) => false;
         public Task AllowForMemberAsync(long memberId, string host, CancellationToken ct) => throw new PolicyException(["the sandbox dry run refused it"]);
         public Task AllowEverywhereAsync(string host, CancellationToken ct) => throw new PolicyException(["the sandbox dry run refused it"]);
+        public Task AllowForTeamAsync(long teamId, string host, CancellationToken ct) => throw new PolicyException(["the sandbox dry run refused it"]);
     }
 
     [Theory]
@@ -220,8 +221,11 @@ public sealed class NetworkAskGapTests : IDisposable
 
         await asks.AnswerAsync(Assert.Single(asks.Asks()).Id, NetworkAskChoices.Team, null, Ct);
 
-        Assert.Contains("pypi.org", StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(_priya)));
-        Assert.Contains("pypi.org", StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(omar)));
+        // B014: the team's list (added after the override's narrowing), not the members' loosen blocks
+        Assert.Contains("pypi.org", _policies.Effective(_priya, _layout).Policy.AllowHosts);
+        Assert.Contains("pypi.org", _policies.Effective(omar, _layout).Policy.AllowHosts);
+        Assert.Null(_policies.GetMember(_priya).Loosen.Network);
+        Assert.Null(_policies.GetMember(omar).Loosen.Network);
         Assert.DoesNotContain("pypi.org", _policies.GetGlobal().Network.AllowHosts);
         Assert.Contains(_told, t => t.Text.StartsWith("pypi.org is now allowed for Priya", StringComparison.Ordinal));
         Assert.Equal(HostAskOutcome.AllowedNextRun, asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null));
@@ -233,6 +237,7 @@ public sealed class NetworkAskGapTests : IDisposable
         public bool AllowedFor(long memberId, string host) => false;
         public Task AllowForMemberAsync(long memberId, string host, CancellationToken ct) => Task.CompletedTask;
         public Task AllowEverywhereAsync(string host, CancellationToken ct) => Task.CompletedTask;
+        public Task AllowForTeamAsync(long teamId, string host, CancellationToken ct) => Task.CompletedTask;
     }
 
     [Theory]
@@ -265,6 +270,7 @@ public sealed class NetworkAskGapTests : IDisposable
             await inner.AllowForMemberAsync(memberId, host, ct);
         }
         public Task AllowEverywhereAsync(string host, CancellationToken ct) => inner.AllowEverywhereAsync(host, ct);
+        public Task AllowForTeamAsync(long teamId, string host, CancellationToken ct) => inner.AllowForTeamAsync(teamId, host, ct);
     }
 
     private StoreNetworkPolicy Store() => new(_policies, (_, _) => Task.FromResult(_layout), _ => Task.FromResult<RunLayout?>(_layout));

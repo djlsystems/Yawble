@@ -80,16 +80,21 @@ public sealed partial class BusEngine
         }), ct);
 
     /// <summary>Removes an agent. Refused for the Manager and while it runs; its queued work is dropped with it.</summary>
-    public Task RemoveMemberAsync(long memberId, CancellationToken ct = default) =>
-        WithGate(() => _store.InTransaction(() =>
+    public async Task RemoveMemberAsync(long memberId, CancellationToken ct = default)
+    {
+        var closedAsks = await WithGate(() => _store.InTransaction(() =>
         {
             var member = _store.Member(memberId) ?? throw new BusRefusal("no_such_member", $"there is no member {memberId}");
             if (member.Role == MemberRole.Manager) throw new BusRefusal("not_allowed", "a team's Manager cannot be removed");
             if (_active.Values.Any(a => a.Context.Member.Id == memberId) || HasSession(memberId))
                 throw new BusRefusal("running", $"{member.Name} is running; stop it first");
-            _store.DeleteMember(member);
+            var closed = _store.DeleteMember(member);
             _statusLines.Remove(memberId);
+            return closed;
         }), ct);
+        // Its waiting network asks closed with it: Needs you refreshes.
+        if (closedAsks > 0) NetworkAsks?.Changed?.Invoke();
+    }
 
     public async Task<MemberRow> UpdateMemberAsync(long memberId, string cli, string instructions, string model, string credential, CancellationToken ct = default)
     {
