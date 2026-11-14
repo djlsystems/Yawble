@@ -3,6 +3,8 @@ import { placeWindow, WindowStateFile, type Display, type Rect } from './window-
 import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { copyFileSync } from 'node:fs';
+import { linuxUpdatePlan } from './linux-update';
 import { diagnosticLog } from './diagnostic-log';
 import { installScope, isAdministrator, otherSessionsRunning, updaterArgs } from './install-scope';
 import { appFolder } from './app-folder';
@@ -326,14 +328,22 @@ app.whenReady().then(async () => {
     };
   });
   // Restart to update: the core hands over the downloaded installer it has just verified again (hash and publisher's
-  // signature); it runs silently over this install, in the scope it was installed in (an all-users install asks Windows
+  // signature; on Linux the tarball's hash and layout, see linux-update.ts); it runs silently over this install, in the scope it was installed in (an all-users install asks Windows
   // for administrator permission itself), and starts the app again (--force-run).
   ipcMain.handle(Channels.installUpdate, async () => {
     if (!app.isPackaged) throw new Error('a development run updates from its source, not from a release');
     const { path: installer } = (await (await requireClient()).call('updates.installer')) as { path: string };
-    const args = updaterArgs(installScope(app.getPath('exe'), process.env));
-    report(`updating: running ${installer} ${args.join(' ')}`);
-    spawn(installer, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    if (process.platform === 'linux') {
+      // Linux: a copy of the install's apply-update.sh replaces the install from the tarball once the app has quit.
+      const plan = linuxUpdatePlan(app.getPath('exe'), installer, os.tmpdir(), dataDir, process.pid);
+      copyFileSync(plan.script, plan.copy);
+      report(`updating: running ${plan.program} ${plan.args.join(' ')}`);
+      spawn(plan.program, plan.args, { detached: true, stdio: 'ignore' }).unref();
+    } else {
+      const args = updaterArgs(installScope(app.getPath('exe'), process.env));
+      report(`updating: running ${installer} ${args.join(' ')}`);
+      spawn(installer, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    }
     quitting = true;
     app.quit();
   });

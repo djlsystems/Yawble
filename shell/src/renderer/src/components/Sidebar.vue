@@ -36,7 +36,7 @@ const emit = defineEmits<{
 const railPlaces: { view: View; label: string; icon: string }[] = [
   { view: 'concierge', label: 'Concierge', icon: 'spark' }, { view: 'documents', label: 'Documents', icon: 'docs' },
   { view: 'backlog', label: 'Backlog', icon: 'backlog' }, { view: 'teams', label: 'Teams', icon: 'teams' },
-  { view: 'board', label: 'Board', icon: 'board' }, { view: 'monitor', label: 'Monitor', icon: 'monitor' },
+  { view: 'board', label: 'Kanban board', icon: 'board' }, { view: 'monitor', label: 'Monitor', icon: 'monitor' },
 ];
 
 const editing = ref<string | null>(null);
@@ -85,7 +85,7 @@ function finishRename(id: string) {
       <button class="item" :class="{ on: view === 'documents' }" data-test="nav-documents" @click="emit('go', 'documents')"><Icon name="docs" />Documents</button>
       <button class="item" :class="{ on: view === 'backlog' }" data-test="nav-backlog" @click="emit('go', 'backlog')"><Icon name="backlog" />Backlog</button>
       <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="slots?.running" class="badge" title="agents running">{{ slots.running }}</span></button>
-      <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Board</button>
+      <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Kanban board</button>
       <button class="item" :class="{ on: view === 'monitor' }" data-test="nav-monitor" @click="emit('go', 'monitor')"><Icon name="monitor" />Monitor</button>
       <button class="item" data-test="nav-logs" @click="emit('logs')"><Icon name="logs" />Logs</button>
     </nav>
