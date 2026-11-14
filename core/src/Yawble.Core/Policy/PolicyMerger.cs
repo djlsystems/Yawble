@@ -25,7 +25,7 @@ public sealed record EffectivePolicy(
 public sealed record MergeResult(EffectivePolicy Policy, IReadOnlyList<string> Violations, IReadOnlyList<string> Widening);
 
 /// <summary>
-/// The merge/tighten rule and the loosen block. A pure function of its inputs.
+/// The merge/tighten rule, the loosen block and the team's network allow list. A pure function of its inputs.
 /// </summary>
 public static class PolicyMerger
 {
@@ -33,7 +33,7 @@ public static class PolicyMerger
 
     public static MergeResult Merge(
         GlobalPolicy global, PolicyPatch? overridePatch, PolicyPatch? loosen, RunLayout layout,
-        Func<string, string>? canonicalize = null, long? machineMemoryMb = null)
+        Func<string, string>? canonicalize = null, long? machineMemoryMb = null, IReadOnlyList<string>? teamHosts = null)
     {
         overridePatch ??= PolicyPatch.Empty;
         loosen ??= PolicyPatch.Empty;
@@ -60,6 +60,16 @@ public static class PolicyMerger
             if (FloorRules.HostProblem(h) is not null || hosts.Contains(h, StringComparer.Ordinal)) continue;
             hosts.Add(h);
             loosened.Add($"network.allowHosts + {h}");
+        }
+        // The team's network allow list (team_network_allows, 0041): added as the loosen block adds, after the override's
+        // narrowing, under the same floor rules. A host the floor refuses is dropped with a note, never a violation: the list
+        // is checked when it is written, and a later floor change must not stop the whole team from launching.
+        foreach (var h in teamHosts ?? [])
+        {
+            if (FloorRules.HostProblem(h) is { } problem) { notes.Add($"network.allowHosts: the team's host is dropped: {problem}"); continue; }
+            if (hosts.Contains(h, StringComparer.Ordinal)) continue;
+            hosts.Add(h);
+            loosened.Add($"network.allowHosts + {h} (team)");
         }
         hosts = hosts.Where(h => FloorRules.HostProblem(h) is null).Distinct(StringComparer.Ordinal).ToList();
 

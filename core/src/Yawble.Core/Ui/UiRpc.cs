@@ -95,6 +95,9 @@ public sealed class UiRpc(
                 "policy.saveOverride" => await SaveOverrideAsync(p, ct),
                 "policy.previewLoosen" => await PreviewLoosenAsync(p, ct),
                 "policy.saveLoosen" => await SaveLoosenAsync(p, ct),
+                // The team's network allow list (0041): "Allow for this team" adds to it; the team's settings list it with Remove.
+                "policy.teamHosts" => await TeamHostsAsync(Long(p, "teamId"), ct),
+                "policy.removeTeamHost" => await RemoveTeamHostAsync(Long(p, "teamId"), Str(p, "host"), ct),
 
                 "credentials.status" => S(credentials.Status()),
                 "credentials.setClaudeSetupToken" => Then(() => credentials.SetClaudeSetupToken(Str(p, "token"))),
@@ -625,6 +628,8 @@ public sealed class UiRpc(
             ["loosen"] = stored.Loosen.ToJson(),
             ["loosenSummary"] = S(stored.LoosenSummary),
             ["loosenApprovedAt"] = stored.LoosenApprovedAt?.ToString("O"),
+            // The member's team's network allow list (policy.teamHosts has who added each and when).
+            ["teamHosts"] = S(policies.TeamHostsOfMember(memberId)),
             ["effective"] = new JsonObject
             {
                 ["readonly"] = S(e.Readonly),
@@ -670,6 +675,29 @@ public sealed class UiRpc(
     {
         var (member, layout, patch) = await PatchArgs(p, "loosen", PatchKind.Loosen, ct);
         return new JsonObject { ["loosened"] = S(policies.PreviewLoosen(member.Id, patch, layout)) };
+    }
+
+    /// <summary>policy.teamHosts {teamId}: { teamId, hosts: [{ host, addedBy, addedVia, addedAt }] }, oldest first.</summary>
+    private async Task<JsonNode?> TeamHostsAsync(long teamId, CancellationToken ct)
+    {
+        await TeamNameOf(teamId, ct);
+        return new JsonObject
+        {
+            ["teamId"] = teamId,
+            ["hosts"] = new JsonArray(policies.TeamHosts(teamId).Select(h => (JsonNode?)new JsonObject
+            {
+                ["host"] = h.Host, ["addedBy"] = h.AddedBy, ["addedVia"] = h.AddedVia, ["addedAt"] = h.AddedAt,
+            }).ToArray()),
+        };
+    }
+
+    /// <summary>policy.removeTeamHost {teamId, host}: takes it off the team's list (the dispatcher audits the call); answers as policy.teamHosts.</summary>
+    private async Task<JsonNode?> RemoveTeamHostAsync(long teamId, string host, CancellationToken ct)
+    {
+        await TeamNameOf(teamId, ct);
+        if (!policies.RemoveTeamHost(teamId, host))
+            throw new RpcException("not_found", $"'{host.Trim()}' is not on this team's network allow list");
+        return await TeamHostsAsync(teamId, ct);
     }
 
     private async Task<JsonNode?> SaveLoosenAsync(JsonObject? p, CancellationToken ct)

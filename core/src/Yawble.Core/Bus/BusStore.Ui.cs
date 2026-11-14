@@ -111,16 +111,19 @@ public sealed partial class BusStore
 
     /// <summary>
     /// Deletes a member with everything that addresses it: subscriptions, cursor, pending deliveries, queue entry,
-    /// runs (cascade), settings and policy. Its messages stay in the log.
+    /// runs (cascade), settings and policy. Its messages stay in the log. Its network asks still waiting for the person are
+    /// closed (a later hire with the same name starts with none); returns how many.
     /// </summary>
-    public void DeleteMember(MemberRef member)
+    public int DeleteMember(MemberRef member)
     {
+        var closed = Integrations.NetworkAskService.CloseForRemovedMember(_connection, _tx, member.Id, member.TeamId, member.Qualified, Now());
         Exec("DELETE FROM subscriptions WHERE subscriber = $s;", ("$s", member.Qualified));
         Exec("DELETE FROM cursors WHERE subscriber = $s;", ("$s", member.Qualified));
         Exec("DELETE FROM pending_deliveries WHERE subscriber = $s;", ("$s", member.Qualified));
         Exec("DELETE FROM member_settings WHERE member_id = $id;", ("$id", member.Id));
         Exec("DELETE FROM member_policy WHERE member_id = $id;", ("$id", member.Id));
         Exec("DELETE FROM members WHERE id = $id;", ("$id", member.Id));
+        return closed;
     }
 
     /// <summary>

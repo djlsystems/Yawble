@@ -170,8 +170,8 @@ public sealed class RunGateway : IAsyncDisposable
             Write(GatewayEventKinds.HostDenied, true, vhost, head.Method, Redact(head.Target), 403, "host not served by this run's gateway");
             // Plain http is never forwarded; a host name off the allowlist is still reported (allowed, it is reachable over https).
             var told = vhost.Length > 0 && !Vhosts.HostAllowed(vhost, _spec.AllowHosts) && !vhost.EndsWith("." + Policy.FloorRules.ReservedSuffix, StringComparison.OrdinalIgnoreCase)
-                ? $"{vhost} is not reachable from this agent: {AllowlistRefusal(vhost, head.Method, path)}"
-                : $"{vhost} is not reachable from this agent";
+                ? $"{vhost} is not reachable from this agent: {await AllowlistRefusalAsync(vhost, head.Method, path, ct)}. {PlainHttpNote}"
+                : $"{vhost} is not reachable from this agent. {PlainHttpNote}";
             await HttpWire.RespondJsonAsync(s, 403, "Forbidden", Error(told), keepAlive, ct);
             return keepAlive;
         }
@@ -506,7 +506,7 @@ public sealed class RunGateway : IAsyncDisposable
         if (Vhosts.IsNeverConnect(host)) { await Refuse("model vendor and sign-in hosts are never reachable directly"); return; }
         if (!Vhosts.HostAllowed(host, _spec.AllowHosts))
         {
-            await Refuse(NotOnAllowlist, AllowlistRefusal(host, "CONNECT", null));
+            await Refuse(NotOnAllowlist, await AllowlistRefusalAsync(host, "CONNECT", null, ct));
             return;
         }
 
@@ -602,14 +602,21 @@ public sealed class RunGateway : IAsyncDisposable
 
     private static string Redact(string target) => target.Length > 512 ? target[..512] : target;
 
+    /// <summary>What a plain-http refusal adds: the gateway forwards only https (CONNECT), even for an allowed host.</summary>
+    public const string PlainHttpNote = "Only https is forwarded: plain http is refused even for an allowed host; use the https:// address.";
+
     /// <summary>The gateway log's detail for an allowlist miss (GatewayVerdicts and the Logs dialog read it).</summary>
     public const string NotOnAllowlist = "host not on this agent's allowlist";
 
-    /// <summary>Reports an allowlist miss to the network asks (never for the doctor's quiet self-test) and returns what the agent is told.</summary>
-    private string AllowlistRefusal(string host, string method, string? path)
+    /// <summary>
+    /// Reports an allowlist miss to the network asks (never for the doctor's quiet self-test) and returns what the agent is
+    /// told. The name is resolved first (the dialer's resolver): one that resolves only to loopback, private or link-local
+    /// addresses (localtest.me, x.nip.io) stays a plain refusal and raises no ask, since allowing it would never reach it.
+    /// </summary>
+    private async Task<string> AllowlistRefusalAsync(string host, string method, string? path, CancellationToken ct)
     {
         var outcome = HostAskOutcome.None;
-        if (!_spec.Quiet && _host.Refusals is { } refusals)
+        if (!_spec.Quiet && _host.Refusals is { } refusals && !await ResolvesOnlyPrivateAsync(host, ct))
         {
             try
             {
@@ -622,6 +629,27 @@ public sealed class RunGateway : IAsyncDisposable
             }
         }
         return AllowlistText(host, outcome);
+    }
+
+    /// <summary>
+    /// Whether every address the name resolves to is loopback, private or link-local (as the CONNECT check refuses them).
+    /// An address literal is left to the ask filter; a name that does not resolve is not this case (it may be asked about);
+    /// when private targets are allowed (tests), nothing is private.
+    /// </summary>
+    private async Task<bool> ResolvesOnlyPrivateAsync(string host, CancellationToken ct)
+    {
+        if (_host.Options.AllowPrivateConnectTargets || IPAddress.TryParse(host.Trim('[', ']'), out _)) return false;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(_host.Options.ConnectTimeout);
+            var addresses = await Dialer.ResolveAsync(host.TrimEnd('.'), timeout.Token);
+            return addresses.Length > 0 && addresses.All(IsPrivate);
+        }
+        catch (Exception e) when (e is SocketException or OperationCanceledException or ArgumentException && !ct.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     /// <summary>What the agent reads in the 403 for an allowlist miss, by what became of the ask.</summary>

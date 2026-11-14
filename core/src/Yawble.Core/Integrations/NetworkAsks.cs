@@ -11,12 +11,17 @@ namespace Yawble.Core.Integrations;
 
 /// <summary>A host an agent was refused (or asked for), waiting for the person or decided (network_asks, 0039).</summary>
 /// <param name="Member">"Team/Name".</param>
-/// <param name="Scope">How it was allowed: agent, team or everywhere; null while pending or when denied.</param>
+/// <param name="Scope">How it was allowed: agent, team or everywhere; null while pending, when denied or closed.</param>
+/// <param name="State">pending, allowed, denied, or closed (the member was removed from the team while it waited).</param>
+/// <param name="MemberId">The asking member's id (0041); null for an ask from before it whose member is gone.</param>
 public sealed record NetworkAskRow(long Id, string At, long TeamId, string Team, string Member, string Host, string? Reason, string? Method,
     string? PathSample, int Count, string LastSeen, long? Workflow, long? CausationSeq, string State, string? Scope, string? DecidedBy,
-    string? DecidedVia, string? DecidedAt, string? Note)
+    string? DecidedVia, string? DecidedAt, string? Note, long? MemberId = null)
 {
     public string MemberName => Member[(Member.IndexOf('/') + 1)..];
+
+    /// <summary>The refusal was a plain-http request (not CONNECT, not request_host): only https is forwarded, even once the host is allowed.</summary>
+    public bool PlainHttp => Method is { Length: > 0 } m && !string.Equals(m, "CONNECT", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>The person's four answers to a network ask (network.answer's choice).</summary>
@@ -80,6 +85,9 @@ public interface INetworkPolicy
     /// <summary>Adds the host to the member's loosen block.</summary>
     Task AllowForMemberAsync(long memberId, string host, CancellationToken ct);
 
+    /// <summary>Adds the host to the team's network allow list (team_network_allows), in one write: every member's run has it, later hires too.</summary>
+    Task AllowForTeamAsync(long teamId, string host, CancellationToken ct);
+
     /// <summary>Adds the host to the global network.allowHosts.</summary>
     Task AllowEverywhereAsync(string host, CancellationToken ct);
 }
@@ -90,10 +98,11 @@ public delegate Task NetworkAskTell(string team, string member, string text, lon
 /// <summary>
 /// Network asks: a run's gateway refusing a host that is not on the agent's allowlist, or the agent's request_host tool,
 /// raises one pending ask per (team, member, host); repeats only count up. The person answers in Needs you: allow it for
-/// this agent (its loosen block), for the team (every member's), everywhere (the global allowlist), or deny it (not asked
-/// again for that member for 24 hours). The policy store makes every change; nothing is allowed without the person's
-/// answer. After an allow the team's Manager is told to retry; after a deny the agent is told. Each ask and its answer is
-/// in the Approvals log (Logs/LogSources.cs).
+/// this agent (its loosen block), for the team (the team's network allow list, which later hires get too), everywhere (the
+/// global allowlist), or deny it (not asked again for that member, by its id, for 24 hours). The policy store makes every
+/// change; nothing is allowed without the person's answer. After an allow the team's Manager is told to retry; after a
+/// deny the agent is told. A member removed from the team has its waiting asks closed (BusStore.DeleteMember). Each ask
+/// and its answer is in the Approvals log (Logs/LogSources.cs).
 /// </summary>
 public sealed class NetworkAskService(string connectionString, INetworkPolicy policy, NetworkAskTell tell, TimeProvider? clock = null) : IHostRefusals
 {
@@ -176,23 +185,28 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                     ("$t", who.TeamId), ("$m", who.Qualified), ("$h", h)) is 0L)
                 return new Raised(HostAskOutcome.None, null, h,
                     $"{MaxWaitingPerMember} of your requests already wait for the person; wait for their answers before asking for another host");
-            if (Scalar(c, "SELECT decided_at FROM network_asks WHERE team_id = $t AND member = $m AND host = $h AND state = 'denied' ORDER BY decided_at DESC LIMIT 1;",
-                    ("$t", who.TeamId), ("$m", who.Qualified), ("$h", h)) is string denied
+            // The 24-hour deny is the member's, by its id: a later hire with the same name is asked again.
+            if (Scalar(c, "SELECT decided_at FROM network_asks WHERE member_id = $id AND host = $h AND state = 'denied' ORDER BY decided_at DESC LIMIT 1;",
+                    ("$id", who.MemberId), ("$h", h)) is string denied
                 && DateTimeOffset.TryParse(denied, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var deniedAt)
                 && now - deniedAt < DenyQuiet)
                 return new Raised(HostAskOutcome.Denied, null, h, null, deniedAt + DenyQuiet);
+            // A plain-http refusal's method wins over CONNECT's or none, so the card can say only https is forwarded.
             using var cmd = Command(c,
                 """
-                INSERT INTO network_asks (at, team_id, member, host, reason, method, path_sample, count, last_seen, workflow, causation_seq)
-                VALUES ($now, $t, $m, $h, $r, $method, $p, 1, $now, $w, $c)
+                INSERT INTO network_asks (at, team_id, member, member_id, host, reason, method, path_sample, count, last_seen, workflow, causation_seq)
+                VALUES ($now, $t, $m, $mid, $h, $r, $method, $p, 1, $now, $w, $c)
                 ON CONFLICT (team_id, member, host) WHERE state = 'pending' DO UPDATE SET
                     count = count + 1, last_seen = excluded.last_seen,
+                    member_id = COALESCE(member_id, excluded.member_id),
                     reason = COALESCE(excluded.reason, reason),
-                    method = COALESCE(method, excluded.method), path_sample = COALESCE(path_sample, excluded.path_sample),
+                    method = CASE WHEN excluded.method IS NOT NULL AND excluded.method <> 'CONNECT' AND (method IS NULL OR method = 'CONNECT')
+                                  THEN excluded.method ELSE COALESCE(method, excluded.method) END,
+                    path_sample = COALESCE(path_sample, excluded.path_sample),
                     workflow = COALESCE(excluded.workflow, workflow), causation_seq = COALESCE(excluded.causation_seq, causation_seq)
                 RETURNING id, count;
                 """,
-                ("$now", Stamp(now)), ("$t", who.TeamId), ("$m", who.Qualified), ("$h", h), ("$r", reason), ("$method", method), ("$p", sample),
+                ("$now", Stamp(now)), ("$t", who.TeamId), ("$m", who.Qualified), ("$mid", who.MemberId), ("$h", h), ("$r", reason), ("$method", method), ("$p", sample),
                 ("$w", workflow), ("$c", causation));
             using var r = cmd.ExecuteReader();
             r.Read();
@@ -221,7 +235,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         using var c = Open();
         using var cmd = Command(c,
             "SELECT a.id, a.at, a.team_id, COALESCE(t.name, ''), a.member, a.host, a.reason, a.method, a.path_sample, a.count, a.last_seen, a.workflow, a.causation_seq, " +
-            "a.state, a.scope, a.decided_by, a.decided_via, a.decided_at, a.note FROM network_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
+            "a.state, a.scope, a.decided_by, a.decided_via, a.decided_at, a.note, a.member_id FROM network_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
             (pendingOnly ? " AND a.state = 'pending'" : "") + (teamId is null ? "" : " AND a.team_id = $t") + " ORDER BY a.id;",
             ("$t", teamId));
         using var r = cmd.ExecuteReader();
@@ -229,7 +243,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         while (r.Read())
             list.Add(new NetworkAskRow(r.GetInt64(0), r.GetString(1), r.GetInt64(2), r.GetString(3), r.GetString(4), r.GetString(5), S(r, 6), S(r, 7), S(r, 8),
                 (int)r.GetInt64(9), r.GetString(10), r.IsDBNull(11) ? null : r.GetInt64(11), r.IsDBNull(12) ? null : r.GetInt64(12), r.GetString(13), S(r, 14),
-                S(r, 15), S(r, 16), S(r, 17), S(r, 18)));
+                S(r, 15), S(r, 16), S(r, 17), S(r, 18), r.IsDBNull(19) ? null : r.GetInt64(19)));
         return list;
     }
 
@@ -240,6 +254,8 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         ["host"] = a.Host, ["reason"] = a.Reason, ["method"] = a.Method, ["pathSample"] = a.PathSample, ["count"] = a.Count, ["lastSeen"] = a.LastSeen,
         ["hint"] = NetworkAskFilter.Hint(a.Host), ["workflow"] = a.Workflow, ["state"] = a.State, ["scope"] = a.Scope,
         ["decidedBy"] = a.DecidedBy, ["decidedAt"] = a.DecidedAt,
+        // A plain-http refusal: the card says only https is forwarded, even once the host is allowed.
+        ["plainHttp"] = a.PlainHttp,
         ["choices"] = new JsonArray(NetworkAskChoices.All.Select(ch => (JsonNode?)ch).ToArray()),
     };
 
@@ -257,7 +273,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         {
             return method switch
             {
-                // [{ id, at, teamId, team, member, memberName, host, reason, method, pathSample, count, lastSeen, hint, workflow, state, scope, decidedBy, decidedAt, choices }]
+                // [{ id, at, teamId, team, member, memberName, host, reason, method, pathSample, count, lastSeen, hint, workflow, state, scope, decidedBy, decidedAt, plainHttp, choices }]
                 "network.asks" => new JsonArray(Asks(p?["all"]?.GetValue<bool>() != true, OptLong(p, "teamId")).Select(a => (JsonNode?)ToJson(a)).ToArray()),
                 "network.answer" => await AnswerAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"),
                     OptStr(p, "choice") ?? throw new ArgumentException("choice is required (agent, team, everywhere or deny)"), OptStr(p, "note"), ct),
@@ -309,14 +325,15 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
             : [];
         if (allow)
         {
-            var asker = Find(ask.Team, ask.MemberName) ?? throw new ArgumentException($"{ask.Member} is no longer on the team");
+            var asker = Asker(ask) ?? throw new ArgumentException($"{ask.Member} is no longer on the team");
             switch (choice)
             {
                 case NetworkAskChoices.Agent:
                     await policy.AllowForMemberAsync(asker.MemberId, ask.Host, ct);
                     break;
                 case NetworkAskChoices.Team:
-                    foreach (var m in TeamMembers(ask.TeamId)) await policy.AllowForMemberAsync(m, ask.Host, ct);
+                    // One write: the team's list, which every member's run (and every later hire's) gets at launch.
+                    await policy.AllowForTeamAsync(ask.TeamId, ask.Host, ct);
                     break;
                 default:
                     await policy.AllowEverywhereAsync(ask.Host, ct);
@@ -326,11 +343,13 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
             // The members this answer tells the Manager about: the asker, and for team or everywhere each member whose
             // waiting ask for the host closes with it. A member's own override can narrow the global list (it is an
             // intersection), so the global list alone does not reach it: that member also gets the host in its loosen block.
+            // The team's list is added after the override's narrowing, so a team answer never writes a loosen block.
             var reached = new List<Who> { asker };
             foreach (var a in others)
-                if (Find(a.Team, a.MemberName) is { } m && reached.All(r => r.MemberId != m.MemberId)) reached.Add(m);
-            foreach (var m in reached)
-                if (!policy.AllowedFor(m.MemberId, ask.Host)) await policy.AllowForMemberAsync(m.MemberId, ask.Host, ct);
+                if (Asker(a) is { } m && reached.All(r => r.MemberId != m.MemberId)) reached.Add(m);
+            if (choice != NetworkAskChoices.Team)
+                foreach (var m in reached)
+                    if (!policy.AllowedFor(m.MemberId, ask.Host)) await policy.AllowForMemberAsync(m.MemberId, ask.Host, ct);
             // Never tell the Manager a host is allowed unless the member's effective hosts now include it.
             if (reached.Where(m => !policy.AllowedFor(m.MemberId, ask.Host)).Select(m => m.Qualified).ToList() is { Count: > 0 } missed)
                 throw new PolicyException([$"{ask.Host} is still not allowed for {string.Join(", ", missed)} after the change; the request stays waiting"]);
@@ -417,14 +436,29 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         return r.Read() ? new Who(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetString(3)) : null;
     }
 
-    private List<long> TeamMembers(long teamId)
+    /// <summary>The member who asked, by its id (0041); by name only for an older ask without one. Null when it has left the team.</summary>
+    private Who? Asker(NetworkAskRow ask)
     {
+        if (ask.MemberId is not { } id) return Find(ask.Team, ask.MemberName);
         using var c = Open();
-        using var cmd = Command(c, "SELECT id FROM members WHERE team_id = $t ORDER BY id;", ("$t", teamId));
+        using var cmd = Command(c, "SELECT m.id, t.id, t.name, m.name FROM members m JOIN teams t ON t.id = m.team_id WHERE m.id = $id AND t.id = $t;", ("$id", id), ("$t", ask.TeamId));
         using var r = cmd.ExecuteReader();
-        var list = new List<long>();
-        while (r.Read()) list.Add(r.GetInt64(0));
-        return list;
+        return r.Read() ? new Who(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetString(3)) : null;
+    }
+
+    /// <summary>
+    /// Closes the member's waiting asks when it is removed from the team (within the removal's transaction): state closed,
+    /// with a note, so a later hire with the same name starts with none. Returns how many closed.
+    /// </summary>
+    public static int CloseForRemovedMember(SqliteConnection c, SqliteTransaction? tx, long memberId, long teamId, string qualified, string now)
+    {
+        using var cmd = Command(c,
+            "UPDATE network_asks SET state = 'closed', decided_by = $by, decided_via = $via, decided_at = $now, note = $note " +
+            "WHERE state = 'pending' AND (member_id = $id OR (member_id IS NULL AND team_id = $t AND member = $m));",
+            ("$by", Provenance.Actor.Current?.User ?? Provenance.Actor.LocalUser), ("$via", Provenance.Actor.Current?.Via ?? Provenance.Actor.Host), ("$now", now),
+            ("$note", $"closed: {qualified[(qualified.IndexOf('/') + 1)..]} was removed from the team"), ("$id", memberId), ("$t", teamId), ("$m", qualified));
+        cmd.Transaction = tx;
+        return cmd.ExecuteNonQuery();
     }
 
     private string? ManagerOf(long teamId) =>
@@ -482,21 +516,35 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
 
 /// <summary>
 /// The production <see cref="INetworkPolicy"/>: the policy store, with each member's run layout for its checks. A host for
-/// an agent goes in its loosen block, confirmed as exactly that one host (the click is the confirmation); a host for
+/// an agent goes in its loosen block, confirmed as exactly that one host (the click is the confirmation); a host for the
+/// team goes in the team's network allow list, checked against each current member's run, in one write; a host for
 /// everywhere goes in the global network.allowHosts, checked against a sample member's run.
 /// </summary>
 public sealed class StoreNetworkPolicy(PolicyStore store, Func<long, CancellationToken, Task<RunLayout>> layoutFor, Func<CancellationToken, Task<RunLayout?>> sample)
     : INetworkPolicy
 {
-    public bool AllowedFor(long memberId, string host) => EffectiveHosts(store.GetGlobal(), store.GetMember(memberId)).Contains(host, StringComparer.OrdinalIgnoreCase);
+    public bool AllowedFor(long memberId, string host) =>
+        EffectiveHosts(store.GetGlobal(), store.GetMember(memberId), store.TeamHostsOfMember(memberId)).Contains(host, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>network.allowHosts as <see cref="PolicyMerger.Merge"/> computes it: the global list, narrowed by an override, plus the loosen block.</summary>
-    public static IReadOnlyList<string> EffectiveHosts(GlobalPolicy global, MemberPolicy member)
+    /// <summary>
+    /// network.allowHosts as <see cref="PolicyMerger.Merge"/> computes it: the global list, narrowed by an override, plus
+    /// the loosen block and the member's team's list (<paramref name="teamHosts"/>).
+    /// </summary>
+    public static IReadOnlyList<string> EffectiveHosts(GlobalPolicy global, MemberPolicy member, IReadOnlyList<string>? teamHosts = null)
     {
         var hosts = global.Network.AllowHosts.ToList();
         if (member.Override.Network?.AllowHosts is { } narrowed) hosts = hosts.Where(h => narrowed.Contains(h, StringComparer.Ordinal)).ToList();
         hosts.AddRange(member.Loosen.Network?.AllowHosts ?? []);
+        hosts.AddRange(teamHosts ?? []);
         return hosts.Where(h => FloorRules.HostProblem(h) is null).Distinct(StringComparer.Ordinal).ToList();
+    }
+
+    public async Task AllowForTeamAsync(long teamId, string host, CancellationToken ct)
+    {
+        var members = new List<(long, RunLayout)>();
+        foreach (var id in store.TeamMemberIds(teamId)) members.Add((id, await layoutFor(id, ct)));
+        var who = Provenance.Actor.Current ?? Provenance.Actor.Window;
+        store.AddTeamHost(teamId, host, members, who.User ?? Provenance.Actor.LocalUser, who.Via);
     }
 
     public async Task AllowForMemberAsync(long memberId, string host, CancellationToken ct)
