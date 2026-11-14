@@ -149,7 +149,7 @@ describe('the Board: Needs You', () => {
     expect(item.text()).toContain('Developer Priya');
     expect(item.text()).toContain('Node.js LTS');
     expect(item.text()).toContain('build the site');
-    expect(item.findAll('button').map((b) => b.text())).toEqual(['Install', 'Not now']);
+    expect(item.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Install', 'Not now']);
     expect(lane.get('.count').text()).toBe('2'); // the question card and the tool ask
     expect(w.find('[data-test=tool-asks].banner').exists()).toBe(false);
 
