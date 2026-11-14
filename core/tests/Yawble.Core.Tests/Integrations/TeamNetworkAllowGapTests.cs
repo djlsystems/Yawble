@@ -78,6 +78,9 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
     private async Task<long> Hire(long teamId, string name) =>
         (await Call("members.add", new { teamId, name, cli = "claude" }))!["id"]!.GetValue<long>();
 
+    /// <summary>Every current member of the team with the test layout: what AddTeamHost must be given.</summary>
+    private List<(long, RunLayout)> Members(long teamId) => _policies.TeamMemberIds(teamId).Select(id => (id, _layout)).ToList();
+
     private void Exec(string sql)
     {
         using var c = new SqliteConnection(_db.ConnectionString);
@@ -130,10 +133,10 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
     public async Task TeamHosts_ListsOldestFirst_AndANoSuchTeamIsRefused()
     {
         var team = await CreateTeam("payments", "Ada");
-        _policies.AddTeamHost(team, "pypi.org", [], "pat", Actor.App);
+        _policies.AddTeamHost(team, "pypi.org", Members(team), "pat", Actor.App);
         await Task.Delay(15, Ct);
-        _policies.AddTeamHost(team, "registry.npmjs.org", [], "pat", Actor.App);
-        Assert.False(_policies.AddTeamHost(team, "pypi.org", [], "pat", Actor.App)); // a repeat adds nothing
+        _policies.AddTeamHost(team, "registry.npmjs.org", Members(team), "pat", Actor.App);
+        Assert.False(_policies.AddTeamHost(team, "pypi.org", Members(team), "pat", Actor.App)); // a repeat adds nothing
 
         var hosts = (await Call("policy.teamHosts", new { teamId = team }))!["hosts"]!.AsArray();
 
