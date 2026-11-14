@@ -116,13 +116,13 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     private async Task<JsonNode> ListAsync(string? team, bool cleared, bool includeCleared, CancellationToken ct)
     {
         var teams = await bus.TeamsAsync(ct);
-        var running = new Dictionary<string, (string State, string? Attention)>(StringComparer.OrdinalIgnoreCase);
+        var running = new Dictionary<string, (string State, string? Attention, string? Lease, string? LeaseWhat, int? LeasePosition)>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in teams.Where(t => team is null || string.Equals(t.Name, team, StringComparison.OrdinalIgnoreCase)))
         {
             var cards = await bus.AgentCardsAsync(t.Id, ct);
             var asking = (await bus.OpenDecisionsAsync(t.Name, ct)).Select(m => m.Source[(m.Source.IndexOf('/') + 1)..]).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var reports = await bus.LatestReportsAsync(t.Name, ct);
-            foreach (var c in cards) running[$"{t.Name}/{c.Member.Name}"] = (c.State, Ui.UiRpc.Attention(c, asking, reports));
+            foreach (var c in cards) running[$"{t.Name}/{c.Member.Name}"] = (c.State, Ui.UiRpc.Attention(c, asking, reports), c.Lease, c.LeaseWhat, c.LeasePosition);
         }
         var list = new JsonArray();
         var open = new HashSet<long>();
@@ -135,7 +135,13 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
                 shown = card with { Status = "running", Lane = card.Placed ? card.Lane : Lanes.InProgress };
             var node = CardJson(shown, teams);
             if (card.Member is { } who && running.TryGetValue($"{card.Team}/{who}", out var s))
+            {
                 node["memberState"] = new JsonObject { ["state"] = s.State, ["attention"] = s.Attention };
+                // The heavy-work lease is the member's, for one run: it shows on the card that member is working on (its
+                // newest open card), not on its other cards.
+                if (s.Lease is "holding" or "waiting" && store.OpenCardOf(card.Team, who)?.Id == card.Id)
+                    node["lease"] = new JsonObject { ["state"] = s.Lease, ["what"] = s.LeaseWhat, ["position"] = s.LeasePosition };
+            }
             list.Add(node);
         }
         return new JsonObject
