@@ -4,8 +4,11 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import NetworkAskCard from '../../src/renderer/src/components/NetworkAskCard.vue';
 import ToolAskCard from '../../src/renderer/src/components/ToolAskCard.vue';
 import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
+import TeamSyncBanner from '../../src/renderer/src/components/TeamSyncBanner.vue';
+import GitBanner from '../../src/renderer/src/components/GitBanner.vue';
+import HostChecksBanner from '../../src/renderer/src/components/HostChecksBanner.vue';
 import { discussRequest, networkAskPrompt, quoted } from '../../src/renderer/src/conciergeDiscuss';
-import type { BoardCardDetail, NetworkAsk, ToolAsk, YawbleApi } from '../../src/shared/api';
+import type { BoardCardDetail, NetworkAsk, TeamSummary, ToolAsk, YawbleApi } from '../../src/shared/api';
 
 // "Discuss with the Concierge" on network asks, tool asks and Kanban cards: the click opens a Concierge chat about the
 // team with the question ready (discussRequest, App.vue opens it); nothing is answered. A fake api only: no core, no network.
@@ -75,5 +78,33 @@ describe('Discuss with the Concierge', () => {
     const q = quoted('a\n'.repeat(2000), 50);
     expect(q.length).toBeLessThan(200);
     expect(q.split('\n').every((l) => l.startsWith('> '))).toBe(true);
+  });
+  it("on the branch sync notice: the team and the app's note, quoted", async () => {
+    const note = "DeveloperInes's new work does not merge cleanly (conflicts in: core/a.cs, core/b.cs), so it was left as it was.";
+    const syncApi = { call: async (m: string) => (m === 'teams.syncToBase' ? { note, behind: null, on: true } : null), onEvent: () => () => {} } as unknown as YawbleApi;
+    const team = { id: 3, name: 'Alpha', repoPath: null, members: 4, running: 0, queued: 0 } as TeamSummary;
+    const w = mount(TeamSyncBanner, { props: { team, api: syncApi, pollMs: 60_000 } });
+    await flushPromises();
+    await w.get('[data-test=team-sync-discuss]').trigger('click');
+    expect(discussRequest.value!.teamId).toBe(3);
+    expect(discussRequest.value!.text).toContain("Alpha's branches could not be brought up to date");
+    expect(discussRequest.value!.text).toContain('> DeveloperInes');
+    w.unmount();
+  });
+
+  it("on the git line and the not-ready box: a chat with no team, the app's own words", async () => {
+    const gitApi = { call: async () => ({ state: 'missing', version: null, path: null, minimum: '2.38', canInstall: true, detail: null, downloadUrl: 'https://git-scm.com' }) } as unknown as YawbleApi;
+    const g = mount(GitBanner, { props: { api: gitApi } });
+    await flushPromises();
+    await g.get('[data-test=git-discuss]').trigger('click');
+    expect(discussRequest.value!.teamId).toBeNull();
+    expect(discussRequest.value!.text).toContain('Git is not installed on this computer');
+
+    const hostApi = { getInfo: async () => ({ hostChecks: [{ id: 'bwrap', ok: false, message: 'bubblewrap is missing.', fix: 'sudo dnf install bubblewrap' }] }) } as unknown as YawbleApi;
+    const h = mount(HostChecksBanner, { props: { api: hostApi } });
+    await flushPromises();
+    await h.get('[data-test=host-checks-discuss]').trigger('click');
+    expect(discussRequest.value!.teamId).toBeNull();
+    expect(discussRequest.value!.text).toContain('- bubblewrap is missing. Fix: `sudo dnf install bubblewrap`');
   });
 });

@@ -59,3 +59,29 @@ export function cardPrompt(c: BoardCardDetail, laneLabel: string, statusLabel: s
     'Help me understand where this stands, whether it needs anything from me, and what I should do next.',
   ].join('\n\n');
 }
+
+/** The team page's branch sync notice: a member's work that could not be merged with the base, and its files. */
+export function syncNotePrompt(team: string, note: string): string {
+  return [
+    `The app says ${team}'s branches could not be brought up to date automatically:`,
+    quoted(note),
+    'Help me understand what this conflict means, who has to resolve it (the member, the Manager or me), and whether I need to do anything.',
+  ].join('\n\n');
+}
+
+/** The top line when git is missing, too old or not working. */
+export function gitPrompt(text: string): string {
+  return [
+    `The app says: ${text}`,
+    'Help me fix this: what should I install or change on this computer, and how do I check it worked?',
+  ].join('\n\n');
+}
+
+/** The startup box when this computer lacks what agents need (Linux: AppArmor, bubblewrap, slirp4netns). */
+export function hostChecksPrompt(checks: { message: string; fix?: string | null }[]): string {
+  return [
+    'The app says this computer is not ready to run agents:',
+    checks.map((c) => `- ${c.message}${c.fix ? ` Fix: \`${c.fix}\`` : ''}`).join('\n'),
+    'Help me understand what each of these means and fix them, one at a time.',
+  ].join('\n\n');
+}

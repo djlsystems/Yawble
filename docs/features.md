@@ -190,7 +190,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Kanban b
   Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
   their buttons. The card a member is working on says **Heavy work** while that member holds the heavy-work lease, and
   **Waiting for heavy work** (with its place in the queue) while it waits; the tooltip says what for.
-- **Discuss with the Concierge** sits on a member's question, a network request, a tool request and an open Kanban card:
+- **Discuss with the Concierge** sits on a member's question, a network request, a tool request, an open Kanban card,
+  the team page's branch sync notice, the Git notice and the not-ready-to-run-agents notice:
   it starts a Concierge chat about that team with the request written out (the agent's own words quoted), so you can
   talk it through first. The Concierge advises; you still answer the request yourself.
   - On a team with a tester, verify and test cards go to the tester. The tester tests the developer's branch as the
