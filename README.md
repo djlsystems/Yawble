@@ -32,7 +32,7 @@ not ship, pin or update them; it finds the ones you installed and runs them from
 - **Your repository.** Each team works in a team repository; every member has its own clone and branch. Branches
   reach the team branch and your remote only through steps you approve.
 - **Concierge.** A chat that sees the whole app: it answers questions, recommends, and makes changes when you ask.
-- **Board, backlog and documents.** Track the work, dispatch backlog items to a team, and share documents with it.
+- **Kanban board, backlog and documents.** Track the work, dispatch backlog items to a team, and share documents with it.
 - **Integrations.** Give agents your own CLIs, MCP servers, APIs and website logins as tools, under approval rules.
 - **Guardrails.** A per-member policy (files, network hosts, timeouts) and a guardrail check that tests the sandbox
   from the inside.

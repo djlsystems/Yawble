@@ -63,6 +63,9 @@ const verbs: Record<FeedKind, { verb: string; tone: Tone }> = {
 export const ActivityKeep = 80;
 
 export class MonitorModel {
+  /** keep: how many activity lines it holds (the Monitor's ActivityKeep; the team board keeps more of one team). */
+  constructor(private readonly keep = ActivityKeep) {}
+
   teams: TeamSnapshot[] = [];
   activity: ActivityRow[] = [];
   effects: Effect[] = [];
@@ -110,7 +113,7 @@ export class MonitorModel {
       verb: row.kind === 'instruction' ? `${row.from === 'person' ? 'You' : row.from === 'host' ? 'Schedule' : spaced(row.from)} told` : v.verb,
       who: spaced(whoName), text: row.text, at: row.at,
     });
-    if (this.activity.length > ActivityKeep) for (const gone of this.activity.splice(ActivityKeep)) this.gathered.delete(gone.key);
+    if (this.activity.length > this.keep) for (const gone of this.activity.splice(this.keep)) this.gathered.delete(gone.key);
     if (!live) return;
     this.recent.push(now);
     const source = row.from === 'person' || row.from === 'host' ? teamKey(row.team) : memberKey(row.team, row.from);
@@ -185,8 +188,8 @@ export class MonitorModel {
       key, seq: -step.id, tone: 'edit', team: step.team, member: step.member,
       verb: step.kind === 'create' ? 'wrote files' : 'edited files', who: spaced(step.member), text: name, at: step.at,
     });
-    if (this.activity.length > ActivityKeep) {
-      for (const gone of this.activity.splice(ActivityKeep)) this.gathered.delete(gone.key);
+    if (this.activity.length > this.keep) {
+      for (const gone of this.activity.splice(this.keep)) this.gathered.delete(gone.key);
     }
   }
 

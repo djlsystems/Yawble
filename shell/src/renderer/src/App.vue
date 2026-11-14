@@ -103,7 +103,7 @@ const title = computed(() => {
   if (view.value === 'teams') return team.value ? team.value.name : 'Teams';
   if (view.value === 'documents') return 'Documents';
   if (view.value === 'backlog') return 'Backlog';
-  return view.value === 'board' ? 'Board' : view.value === 'settings' ? 'Settings' : 'Monitor';
+  return view.value === 'board' ? 'Kanban board' : view.value === 'settings' ? 'Settings' : 'Monitor';
 });
 
 async function refresh() {
@@ -265,7 +265,7 @@ const menus = computed<Menu[]>(() => [
     { id: 'sidebar', label: 'Sidebar', keys: `${mod}B`, checked: !collapsed.value },
     { separator: true },
     { id: 'go:concierge', label: 'Concierge' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:backlog', label: 'Backlog' },
-    { id: 'go:teams', label: 'Teams' }, { id: 'go:board', label: 'Board' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
+    { id: 'go:teams', label: 'Teams' }, { id: 'go:board', label: 'Kanban board' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
     ...(desktop ? [
       { separator: true } as const,
       { id: 'zoomIn', label: 'Zoom in', keys: `${mod}=` }, { id: 'zoomOut', label: 'Zoom out', keys: `${mod}-` }, { id: 'zoomReset', label: 'Actual size', keys: `${mod}0` },

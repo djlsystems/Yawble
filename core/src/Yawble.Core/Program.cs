@@ -278,13 +278,17 @@ if (bus.Repos is { } actionRepos)
 // The doctor and log retention. Backups come from the BackupService lister.
 // Connections: read through ConnectionService.Index (no secret). Orphan secrets are offered only for keys this data folder's
 // issued-keys ledger recorded (the OS store is shared by every data folder), and only from a store that is a credential index.
-// Updates to the app itself, from GitHub Releases; installed only on Windows, from the window.
+// Updates to the app itself, from GitHub Releases; installed from the window on Windows, and on Linux over an install.sh
+// install the person may change (LinuxSelfUpdate).
+var linuxSelfUpdate = OperatingSystem.IsLinux() && Yawble.Core.Updates.LinuxSelfUpdate.InstallFolder(AppContext.BaseDirectory) is not null;
 var updateHttp = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
 updateHttp.DefaultRequestHeaders.UserAgent.ParseAdd("Yawble-Updater/1");
 var updateService = new Yawble.Core.Updates.UpdateService(options.DataDir!, $"Data Source={dbPath}", Yawble.Core.CoreInfo.Version,
-    new Yawble.Core.Updates.GitHubReleaseFeed(updateHttp), new Yawble.Core.Updates.AuthenticodeCheck(), canInstall: OperatingSystem.IsWindows(),
+    new Yawble.Core.Updates.GitHubReleaseFeed(updateHttp),
+    OperatingSystem.IsLinux() ? new Yawble.Core.Updates.LinuxTarballCheck() : new Yawble.Core.Updates.AuthenticodeCheck(),
+    canInstall: OperatingSystem.IsWindows() || linuxSelfUpdate,
     arch: System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64",
-    log: line => Console.Error.WriteLine(line), managed: Yawble.Core.Updates.UpdatePolicy.Managed);
+    log: line => Console.Error.WriteLine(line), managed: Yawble.Core.Updates.UpdatePolicy.Managed, os: OperatingSystem.IsLinux() ? "linux" : "win");
 // Every log, for the Logs dialog, its pruning and the daily retention sweep.
 var logService = new Yawble.Core.Logs.LogService(options.DataDir!, $"Data Source={dbPath}", log: line => Console.Error.WriteLine(line));
 var logFolders = new[] { Path.Combine(options.DataDir!, "logs"), Path.Combine(options.DataDir!, "transcripts") };

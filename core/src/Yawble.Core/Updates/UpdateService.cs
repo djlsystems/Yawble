@@ -28,8 +28,11 @@ public interface IReleaseFeed
 /// <summary>Whether a downloaded installer may run. Tests pass a fake.</summary>
 public interface IInstallerCheck
 {
-    /// <summary>Null when the file carries a valid signature by the app's publisher; otherwise why not.</summary>
+    /// <summary>Null when the file may run (a valid signature by the app's publisher, or on Linux a sound tarball); otherwise why not.</summary>
     string? Problem(string file);
+
+    /// <summary>Whether it checks the publisher's signature (Windows), or only what the file holds (Linux: no signature).</summary>
+    bool ChecksPublisher => true;
 }
 
 /// <summary>The release versions (yyyy.mm.dd.N) and how a build's version compares with them.</summary>
@@ -60,11 +63,13 @@ public static class ReleaseVersion
 /// as they are by default) or when the person asks. A newer release's installer for this computer is downloaded to
 /// &lt;data&gt;/updates/, then verified: its SHA-256 must match the release's SHA256SUMS, and it must carry a valid
 /// signature by the publisher. Only then is it ready, and only the window installs it (the shell quits and runs it).
-/// Windows only installs from here; elsewhere the release's page is offered.
+/// On Linux (os "linux") the file is the release's tarball, listed in SHA256SUMS-linux, and it has no signature: its
+/// SHA-256 and its layout (<see cref="LinuxTarballCheck"/>) are checked, and the shell's apply-update.sh installs it over
+/// an install.sh install. Where the app cannot replace itself (canInstall false) the release's page is offered.
 /// </summary>
 public sealed class UpdateService(
     string dataDir, string connectionString, string currentVersion, IReleaseFeed feed, IInstallerCheck check,
-    bool canInstall, string arch, TimeProvider? clock = null, Action<string>? log = null, Func<bool>? managed = null)
+    bool canInstall, string arch, TimeProvider? clock = null, Action<string>? log = null, Func<bool>? managed = null, string os = "win")
 {
     public const string ManagedMessage = "updates to this app are managed by your organization";
 
@@ -89,7 +94,14 @@ public sealed class UpdateService(
 
     public string Folder => Path.Combine(dataDir, "updates");
 
-    public string InstallerName(string version) => $"Yawble-Setup-{version}-{arch}.exe";
+    private bool Linux => os == "linux";
+
+    public string InstallerName(string version) => Linux ? $"yawble-{version}-linux-{arch}.tar.gz" : $"Yawble-Setup-{version}-{arch}.exe";
+
+    /// <summary>The release's checksum file for this computer's installer: Windows and Linux each have their own.</summary>
+    public string SumsName => Linux ? "SHA256SUMS-linux" : "SHA256SUMS";
+
+    private string OldPattern => Linux ? "yawble-*-linux-*" : "Yawble-Setup-*";
 
     public JsonObject Status()
     {
@@ -103,6 +115,7 @@ public sealed class UpdateService(
                 ["available"] = _latest is not null && ReleaseVersion.IsNewer(_latest.Version, currentVersion),
                 ["notesUrl"] = _latest?.PageUrl ?? ReleasesUrl,
                 ["canInstall"] = canInstall,
+                ["checksPublisher"] = check.ChecksPublisher,
                 ["auto"] = Auto(),
                 ["managed"] = Managed,
                 ["checkedAt"] = _checkedAt,
@@ -200,10 +213,10 @@ public sealed class UpdateService(
     {
         var name = InstallerName(release.Version);
         var asset = release.Assets.FirstOrDefault(a => a.Name == name);
-        var sums = release.Assets.FirstOrDefault(a => a.Name == "SHA256SUMS");
+        var sums = release.Assets.FirstOrDefault(a => a.Name == SumsName);
         if (asset is null || sums is null)
         {
-            Set("error", $"release {release.Version} has no {name} with a SHA256SUMS for this computer");
+            Set("error", $"release {release.Version} has no {name} with a {SumsName} for this computer");
             return;
         }
         if (!FromThisRepository(asset.Url) || !FromThisRepository(sums.Url))
@@ -218,24 +231,26 @@ public sealed class UpdateService(
         try
         {
             var expected = ExpectedHash(await feed.ReadTextAsync(sums.Url, ct).ConfigureAwait(false), name);
-            if (expected is null) { Set("error", $"SHA256SUMS does not list {name}"); return; }
+            if (expected is null) { Set("error", $"{SumsName} does not list {name}"); return; }
             File.Delete(part);
             await feed.DownloadAsync(asset.Url, part, n => { lock (_lock) _downloaded = n; }, ct).ConfigureAwait(false);
             if (!string.Equals(Hash(part), expected, StringComparison.OrdinalIgnoreCase))
             {
                 File.Delete(part);
-                Set("error", $"{name} did not match its SHA-256 in SHA256SUMS; it was deleted");
+                Set("error", $"{name} did not match its SHA-256 in {SumsName}; it was deleted");
                 return;
             }
             if (check.Problem(part) is { } problem)
             {
                 File.Delete(part);
-                Set("error", $"{name} is not signed by the publisher ({problem}); it was deleted");
+                Set("error", check.ChecksPublisher
+                    ? $"{name} is not signed by the publisher ({problem}); it was deleted"
+                    : $"{name} is not a sound Yawble tarball ({problem}); it was deleted");
                 return;
             }
             File.Move(part, file, overwrite: true);
             File.WriteAllText(file + ".sha256", expected);
-            foreach (var old in Directory.GetFiles(Folder, "Yawble-Setup-*").Where(f => !f.StartsWith(file, StringComparison.OrdinalIgnoreCase)))
+            foreach (var old in Directory.GetFiles(Folder, OldPattern).Where(f => !f.StartsWith(file, StringComparison.OrdinalIgnoreCase)))
                 TryDelete(old);
             lock (_lock) _installer = file;
             Set("ready");
