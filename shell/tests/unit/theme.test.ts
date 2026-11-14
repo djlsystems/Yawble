@@ -136,6 +136,46 @@ describe('theme mode (theme.ts)', () => {
     expect(t.state.current).toBe('dark');
   });
 
+  // Card 145 (tester): a storage event must never write to storage, or two windows would echo each other.
+  it('never writes to storage while following storage events (own key, key null, other key, remote key)', () => {
+    for (const key of [THEME_KEY, REMOTE_THEME_KEY]) {
+      const s = fakeStorage();
+      const writes: string[] = [];
+      const storage = () => {
+        const inner = s.storage();
+        return {
+          getItem: inner.getItem,
+          setItem: (k: string, v: string) => { writes.push(`set ${k}=${v}`); inner.setItem(k, v); },
+          removeItem: (k: string) => { writes.push(`remove ${k}`); inner.removeItem(k); },
+        };
+      };
+      const events = new EventTarget();
+      const root = document.createElement('html');
+      const t = createTheme({ storage, matchMedia: fakeOs(false).matchMedia, root, events, key });
+      const other = key === THEME_KEY ? REMOTE_THEME_KEY : THEME_KEY;
+
+      s.map.set(key, 'dark');
+      events.dispatchEvent(new StorageEvent('storage', { key, newValue: 'dark' }));
+      expect(t.state).toEqual({ mode: 'dark', current: 'dark' });
+      s.map.set(other, 'light');
+      events.dispatchEvent(new StorageEvent('storage', { key: other, newValue: 'light' }));
+      expect(t.state.current).toBe('dark'); // the other page's key is independent
+      s.map.delete(key);
+      events.dispatchEvent(new StorageEvent('storage', { key, newValue: null }));
+      expect(t.state).toEqual({ mode: 'system', current: 'light' });
+      s.map.set(key, 'dark');
+      events.dispatchEvent(new StorageEvent('storage', { key: null }));
+      expect(t.state.current).toBe('dark');
+      expect(writes).toEqual([]);
+      expect(root.getAttribute('data-theme')).toBe('dark');
+
+      // A click after following still keeps the choice under this page's key only.
+      t.toggle();
+      expect(writes).toEqual([`set ${key}=light`]);
+      t.dispose();
+    }
+  });
+
   it('labels the button with what one click does', () => {
     expect(toggleLabel('light')).toBe('Switch to dark theme');
     expect(toggleLabel('dark')).toBe('Switch to light theme');
