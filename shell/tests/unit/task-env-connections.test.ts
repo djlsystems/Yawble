@@ -41,7 +41,8 @@ const twoSecrets: Connection = {
 const task: HostTaskInfo = {
   id: 1,
   def: { name: 'linux-release', repo: 'main', program: 'bash', args: ['packaging/release.sh'], workdir: '.', timeoutSeconds: 900, envNames: [], watch: [], pinMode: 'files', commandLineOnly: false,
-    envFromConnections: [{ name: 'GH_TOKEN', connectionId: 7, field: 'token', connectionName: 'GitHub release (Yawble)' }] },
+    // As the core's tasks.list sends it: connectionId is a string.
+    envFromConnections: [{ name: 'GH_TOKEN', connectionId: '7', field: 'token', connectionName: 'GitHub release (Yawble)' }] },
   commandLine: 'bash packaging/release.sh', approval: 'asks', approvedAt: null, approvedCommit: null, approvedBy: null, programResolved: '/usr/bin/bash', commit: 'abcdef12',
   pinned: ['packaging/release.sh'], warnings: [], problem: null, runningRunId: null, pendingAskId: null, lastRun: null, updatedAt: '', updatedBy: null,
 };

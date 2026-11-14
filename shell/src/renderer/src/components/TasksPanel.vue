@@ -79,6 +79,10 @@ const bindingsProblem = computed(() => { const f = form.value; return !!f && f.b
 /** How a binding reads everywhere: the variable, the Connection's name and the field, never a value. */
 const bindingText = (b: Pick<EnvFromConnection, 'name' | 'connectionName' | 'field'>) => `${b.name} ← Connection '${b.connectionName}' (${b.field})`;
 
+/** A run refused for a binding could not read from a Connection; a true environment miss keeps its own label. */
+const missingEnvLabel = (r: TaskRun) =>
+  r.state === 'refused' || (r.missingEnv ?? '').includes('← Connection') ? 'Could not read from a Connection' : 'Not set in your environment';
+
 const loaded = ref(false); // the first answer arrived (or failed), or there is no team to ask about
 async function load() {
   if (teamId.value === null) { loaded.value = true; return; }
@@ -105,10 +109,17 @@ function startNew(draft?: string) {
   preview.value = null;
   void refreshPreview();
 }
+/** The core sends a binding's connectionId as a string ("7"); Connections have numeric ids. Normalised once, on load. */
+function connectionIdOf(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 function startEdit(t: HostTaskInfo) {
   const d = t.def;
   form.value = { original: d.name, name: d.name, repo: d.repo, program: d.program, args: d.args.join('\n'), workdir: d.workdir, timeoutSeconds: d.timeoutSeconds, envNames: d.envNames.join(', '),
-    watch: d.watch.join('\n'), pinMode: d.pinMode, commandLineOnly: d.commandLineOnly, bindings: (d.envFromConnections ?? []).map((b) => ({ ...b })) };
+    watch: d.watch.join('\n'), pinMode: d.pinMode, commandLineOnly: d.commandLineOnly,
+    bindings: (d.envFromConnections ?? []).map((b) => ({ ...b, connectionId: connectionIdOf(b.connectionId) })) };
   void loadConnections();
   preview.value = null;
   void refreshPreview();
@@ -272,7 +283,7 @@ onMounted(load);
           <div class="small">output {{ r.outputBytes ?? 0 }} bytes<template v-if="r.truncated"> (log cut at its cap)</template><template v-if="r.killedBy"> · killed by {{ r.killedBy }}</template></div>
           <div v-if="r.headAfter && r.commit && r.headAfter !== r.commit" class="small warn">The checkout moved to another commit during the run.</div>
           <div v-if="r.dirtyAfter" class="small warn">The checkout was left with uncommitted changes.</div>
-          <div v-if="r.missingEnv" class="small warn">Not set in your environment: {{ r.missingEnv }}</div>
+          <div v-if="r.missingEnv" class="small warn" data-test="run-missing-env">{{ missingEnvLabel(r) }}: {{ r.missingEnv }}</div>
           <div v-if="r.logPath" class="small">Log: <span class="mono" data-test="run-log">{{ r.logPath }}</span></div>
       </td></tr>
       </template>

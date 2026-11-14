@@ -451,6 +451,8 @@ export interface WatchInfo {
 export interface TaskAskDetail {
   commit: string; program: string; workdir: string; args: string[]; timeout_s: number; env_names: string[]; pin_mode: 'files' | 'commit';
   pinned: string[]; warnings: string[]; standingApproval: boolean;
+  /** Each binding as shown ("GH_TOKEN ← Connection 'Name' (field)"): names only, never a value (B023). */
+  env_from_connections?: string[];
   changed?: {
     approvedCommit: string; currentCommit: string; diffAvailable: boolean; definitionHashChanged: boolean; filesHashChanged: boolean;
     definition: { field: string; old: string | null; new: string | null }[];
@@ -470,7 +472,8 @@ export interface HostTaskDef {
   envFromConnections?: EnvFromConnection[];
 }
 /** One binding: variable `name` takes the secret `field` of Connection `connectionId`; `connectionName` is for display only. */
-export interface EnvFromConnection { name: string; connectionId: number; field: string; connectionName: string }
+/** The core sends connectionId as a string ("7") and accepts a number or a string back; the editor normalises it to a number on load. */
+export interface EnvFromConnection { name: string; connectionId: number | string; field: string; connectionName: string }
 /** A host task run record (tasks.runs / integrations.taskRuns). */
 export interface TaskRun {
   id: number; task: string; teamId: number; state: 'running' | 'done' | 'interrupted' | 'refused'; startedAt: string; endedAt: string | null; commit: string | null;
