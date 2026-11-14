@@ -7,6 +7,8 @@ import { errorText, resolveApi } from '../api';
 import { type AgentCliId } from '../agentClis';
 import { useAgentOptions } from '../agentOptions';
 import AgentCard from './AgentCard.vue';
+import MemberActivity from './MemberActivity.vue';
+import { useTeamActivity } from '../monitor/teamActivity';
 import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
 import { memberCardsStore } from '../gripStore';
@@ -34,6 +36,8 @@ const api = resolveApi(props.api);
 /** The member whose activity the Logs dialog shows ("Team/Name"), opened from its card. */
 const logsFor = ref<string | null>(null);
 const agentOptions = useAgentOptions(api);
+/** Each member's activity, beside its card: the Monitor's lines for that member. */
+const activity = useTeamActivity(api, () => props.team.name, () => props.pollMs);
 
 const cards = ref<Card[]>([]);
 const decisions = ref<Decision[]>([]);
@@ -267,12 +271,15 @@ defineExpose({ refresh, openWorkflows });
       </div>
     </div>
 
-    <!-- One column of cards: the 14px gap below each is a height handle for every member's output box (as on the Teams list). -->
+    <!-- One column of members, each its card and its activity side by side: the 14px gap below each is a height handle for every member's output box (as on the Teams list). -->
     <div v-for="c in cards" :key="c.member.id" class="member-cell">
-      <AgentCard :card="c"
-        :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
-        @terminal="openTerminal(c)" @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
-        @guardrail="emit('guardrail', c.member.id)" @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
+      <div class="member-row">
+        <AgentCard class="member-main" :card="c"
+          :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
+          @terminal="openTerminal(c)" @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
+          @guardrail="emit('guardrail', c.member.id)" @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
+        <MemberActivity class="member-side" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" />
+      </div>
       <TileGrip axis="h" :store="memberCardsStore" />
     </div>
 
@@ -300,6 +307,10 @@ h2 { font-size: 16px; margin: 0; }
 .actions button { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .team > * { margin-bottom: 10px; }
 .team > .member-cell { position: relative; margin-bottom: 14px; }
+.member-row { display: flex; gap: 10px; align-items: stretch; }
+.member-main { flex: 1 1 0; min-width: 0; }
+.member-side { flex: 0 0 clamp(16rem, 36%, 28rem); }
+@media (max-width: 900px) { .member-row { flex-direction: column; } .member-side { flex: none; height: 12rem; } }
 .decision { background: #fffaf0; border: 1px solid #e9d29a; border-radius: 6px; padding: 6px 10px; }
 .decision p { margin: 0 0 6px; }
 .decision > .row { margin-top: 6px; }

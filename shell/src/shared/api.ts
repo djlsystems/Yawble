@@ -271,6 +271,8 @@ export interface UpdateStatus {
   checkedAt: string | null; error: string | null; downloaded: number; size: number;
   /** The organization manages updates (a Windows policy): the app checks nothing. */
   managed?: boolean;
+  /** The download's publisher signature is checked (Windows); false on Linux, where only its SHA-256 and contents are. */
+  checksPublisher?: boolean;
 }
 
 /**

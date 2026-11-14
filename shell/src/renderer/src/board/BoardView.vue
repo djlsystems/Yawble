@@ -131,7 +131,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
 <template>
   <div class="board-place" data-test="board">
     <div class="board-main">
-      <h2 class="page-title">Board</h2>
+      <h2 class="page-title">Kanban board</h2>
       <div class="filters">
         <select v-model="team" data-test="board-team" @change="member = ''"><option value="">All teams</option><option v-for="t in board?.teams ?? []" :key="t.id" :value="t.name">{{ t.name }}</option></select>
         <select v-model="member" data-test="board-member"><option value="">Everyone</option><option v-for="m in members" :key="m" :value="m">{{ displayName(m) }}</option></select>
