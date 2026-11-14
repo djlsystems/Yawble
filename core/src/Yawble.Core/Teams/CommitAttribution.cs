@@ -1,0 +1,85 @@
+using System.Text.RegularExpressions;
+
+namespace Yawble.Core.Teams;
+
+/// <summary>One commit whose message carries AI attribution: its SHA and the offending lines.</summary>
+public sealed record AttributedCommit(string Sha, IReadOnlyList<string> Lines);
+
+/// <summary>
+/// Finds AI attribution lines in commit messages: a <c>Co-Authored-By:</c> trailer naming an AI vendor, model or tool,
+/// a <c>Claude-Session:</c> trailer, and a <c>Generated with ...</c> line naming one. A human co-author
+/// (<c>Co-Authored-By: Jane &lt;jane@x&gt;</c>) is left alone. Pure text: the caller reads the messages from git.
+/// The app refuses work that carries these and never rewrites it (see <see cref="RefusalText"/>).
+/// </summary>
+public static partial class CommitAttribution
+{
+    // Vendors, models, tools and their no-reply addresses. Word-bounded, so "Ivan Grokhov" or "Codexia" are not caught.
+    private const string Ai = @"(?:claude|anthropic|openai|chatgpt|gpt-?\d[\w.-]*|codex|copilot|github\s+copilot|grok|xai|x\.ai|gemini|"
+        + @"antigravity|bard|deepmind|mistral|devin|cursor|aider|windsurf|codeium|tabnine|amazon\s+q|codewhisperer|llama|"
+        + @"opus|sonnet|haiku|noreply@anthropic\.com|noreply@openai\.com)";
+
+    [GeneratedRegex(@"^\s*Co-Authored-By\s*:(?<who>.*)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CoAuthor();
+
+    [GeneratedRegex(@"(?<![\w])" + Ai + @"(?![\w])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex AiName();
+
+    [GeneratedRegex(@"^\s*Claude-Session\s*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex Session();
+
+    // "🤖 Generated with [Claude Code](https://...)": any symbols before it, then an AI name somewhere on the line.
+    [GeneratedRegex(@"^[\W_]*Generated\s+with\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex GeneratedWith();
+
+    /// <summary>The lines of <paramref name="message"/> that are AI attribution (trimmed), in order; empty when none.</summary>
+    public static IReadOnlyList<string> Find(string message)
+    {
+        var found = new List<string>();
+        foreach (var raw in message.ReplaceLineEndings("\n").Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0) continue;
+            var co = CoAuthor().Match(line);
+            if ((co.Success && AiName().IsMatch(co.Groups["who"].Value))
+                || Session().IsMatch(line)
+                || (GeneratedWith().IsMatch(line) && AiName().IsMatch(line)))
+                found.Add(line);
+        }
+        return found;
+    }
+
+    /// <summary>Whether <paramref name="message"/> carries any AI attribution line.</summary>
+    public static bool Has(string message) => Find(message).Count > 0;
+
+    /// <summary>The record separator <see cref="ParseLog"/> expects between commits (<c>git log --format=%H%x00%B%x1e</c>).</summary>
+    public const string LogFormat = "--format=%H%x00%B%x1e";
+
+    /// <summary>The commits in a <see cref="LogFormat"/> log that carry AI attribution, in log order.</summary>
+    public static IReadOnlyList<AttributedCommit> ParseLog(string log)
+    {
+        var list = new List<AttributedCommit>();
+        foreach (var record in log.Split('\x1e'))
+        {
+            var parts = record.Split('\0', 2);
+            if (parts.Length < 2) continue;
+            var lines = Find(parts[1]);
+            if (lines.Count > 0) list.Add(new AttributedCommit(parts[0].Trim(), lines));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// What the member (and through the run's failure, its Manager) is told when its work is refused: which commits,
+    /// which lines, and that it must amend its own unpushed commits. The app never strips or rewrites them.
+    /// </summary>
+    public static string RefusalText(string memberName, string branch, IReadOnlyList<AttributedCommit> commits)
+    {
+        var shown = string.Join("; ", commits.Take(5).Select(c => $"{c.Sha[..Math.Min(12, c.Sha.Length)]}: \"{string.Join("\", \"", c.Lines)}\""));
+        var more = commits.Count > 5 ? $" and {commits.Count - 5} more" : "";
+        return $"{memberName}'s new work on {branch} was not brought into the team repository: commit messages must carry no AI "
+            + $"attribution lines (Co-Authored-By naming an AI, Claude-Session, Generated with), and these do: {shown}{more}. "
+            + $"{memberName} must amend its own unpushed commits to remove those lines (git commit --amend for the last one; for older "
+            + "ones, git reset --soft to the commit before them and commit again), then end its run so the work is fetched again. "
+            + "The app never rewrites commits: nothing was changed.";
+    }
+}
