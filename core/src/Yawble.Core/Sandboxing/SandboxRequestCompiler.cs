@@ -275,7 +275,7 @@ public static partial class SandboxRequestCompiler
         }
         else
         {
-            var system = l.Os == TargetOs.MacOS ? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" : "/usr/local/bin:/usr/bin:/bin";
+            var system = l.Os == TargetOs.MacOS ? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" : string.Join(':', Launch.HostTools.LinuxRunPath);
             env["PATH"] = string.Join(':', [.. l.CliInstall.PathFolders, l.AppBinDir, system]);
             env["TMPDIR"] = l.Tmp;
             env["LANG"] = "C.UTF-8";
