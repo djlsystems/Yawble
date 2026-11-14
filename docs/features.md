@@ -114,7 +114,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
     team's Manager is told "<tool> is installed; retry what was blocked". When it is not, the item stays open with
     winget's message and **Try again**.
   - **Not now** closes it; the agent is told, and the team is not asked about that tool again for 24 hours.
-  On Linux and macOS the item shows the command to run yourself; the app installs nothing. Each request, answer and
+  On Linux and macOS the item shows the command to run yourself (on Linux for the distribution's package manager, from
+  `/etc/os-release`: dnf on Fedora and RHEL, pacman on Arch, otherwise apt-get); the app installs nothing. Each request, answer and
   result is in the **Approvals** log; the Concierge's status lists the open ones.
   The items show in the same **Needs you** strip above every view, and in the Board's **Needs You** lane when the Board
   is open (its team and member filters apply). A machine-wide tool says "Windows may ask for permission". While
