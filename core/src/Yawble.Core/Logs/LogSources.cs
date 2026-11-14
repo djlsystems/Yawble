@@ -133,8 +133,10 @@ public static class LogSources
                 new("decided", "Decided", "t.decided_at", "time"),
             ],
             "tm.name = @team", "t.member = @member",
-            new("integration_asks", "at", 365, "who approved or declined those requests, and who allowed or denied which host. Requests still waiting for an answer are never pruned.", Where: "state <> 'pending'",
-                Also: [new("network_asks", "at", null, "", Where: "state <> 'pending'")])),
+            // An answered ask goes by when it was answered, not raised: one that waited past the retention must not be
+            // pruned the moment the person answers it (for a denied network ask that would lift the 24-hour DenyQuiet).
+            new("integration_asks", AnsweredAt, 365, "who approved or declined those requests, and who allowed or denied which host. Requests still waiting for an answer are never pruned.", Where: "state <> 'pending'",
+                Also: [new("network_asks", AnsweredAt, null, "", Where: "state <> 'pending'")])),
 
         new("usage", "Model usage", "Usage",
             "Tokens for each model request: input, output and cache, by run, member and model.",
@@ -231,6 +233,9 @@ public static class LogSources
             "c.team = @team", "c.team = @team AND t.source = @name",
             null, "each card's history on the board is built from it"),
     ];
+
+    /// <summary>The prune time of an ask: when it was answered, or when it was raised if no answer time was kept.</summary>
+    private const string AnsweredAt = "COALESCE(decided_at, at)";
 
     public static LogSource? Find(string id) => All.FirstOrDefault(s => s.Id == id);
 
