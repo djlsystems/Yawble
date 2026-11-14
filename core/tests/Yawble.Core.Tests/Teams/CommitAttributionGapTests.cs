@@ -49,13 +49,40 @@ public class CommitAttributionGapTests
         Assert.Empty(CommitAttribution.Find("Subject\n\n" + line + "\n"));
     }
 
-    // FAILS on 9d7a1a9: "devin" is in the AI word list, so a human co-author whose first name is Devin is refused.
-    // Skipped so the suite stays green until the developer decides (for example "Devin" only with an AI address,
-    // or "Devin AI"); remove the Skip once fixed.
-    [Fact(Skip = "B028 fault found on card 121: a human co-author named Devin is caught as AI")]
+    // Fault found on 9d7a1a9 (a human Devin was caught because "devin" was in the AI word list); fixed on 0f8aa52.
+    [Fact]
     public void AHumanCoAuthorNamedDevin_IsNotAHit()
     {
         Assert.Empty(CommitAttribution.Find("Subject\n\nCo-Authored-By: Devin Smith <devin.smith@example.com>\n"));
+    }
+
+    // Card 121 re-check (0f8aa52): humans whose first name is shared with a tool pass; the tool's own accounts and
+    // names are caught. "Claude Dupont" is caught on purpose: the spec names Claude (the person accepted this).
+    [Theory]
+    [InlineData("Co-Authored-By: Devin Smith <devin.smith@example.com>")]
+    [InlineData("Co-Authored-By: Devin Aird <d.aird@example.com>")]
+    [InlineData("Co-Authored-By: Cody Botha <cody@example.com>")]
+    [InlineData("Co-Authored-By: Devin Aird")]
+    [InlineData("Co-Authored-By: Cody Botha")]
+    public void HumansNamedLikeATool_AreNotHits(string line)
+    {
+        Assert.Empty(CommitAttribution.Find("Subject\n\n" + line + "\n"));
+    }
+
+    [Theory]
+    [InlineData("Co-Authored-By: devin-ai-integration[bot] <158243242+devin-ai-integration[bot]@users.noreply.github.com>")]
+    [InlineData("Co-Authored-By: Devin AI <devin@example.com>")]
+    [InlineData("Co-Authored-By: Claude Code <noreply@example.com>")]
+    [InlineData("Co-Authored-By: claude[bot] <claude[bot]@users.noreply.github.com>")]
+    [InlineData("Co-Authored-By: Claude <claude@example.com>")]
+    [InlineData("Co-Authored-By: Claude Dupont <claude.dupont@example.com>")]
+    [InlineData("Co-Authored-By: Devin AI")]
+    [InlineData("Co-Authored-By: Claude Code")]
+    [InlineData("Co-Authored-By: claude[bot]")]
+    [InlineData("Co-Authored-By: Claude Dupont")]
+    public void ToolNamesAndAccounts_AreHits(string line)
+    {
+        Assert.Equal(new[] { line }, CommitAttribution.Find("Subject\n\n" + line + "\n"));
     }
 
     [Fact]
