@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vChange } from '../remoteAccess';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BacklogDispatch, BacklogItem, BacklogItemDetail, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -245,9 +246,9 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
           <option v-for="t in teamOptions" :key="t" :value="t">{{ t }}</option>
         </select>
         <template v-if="tab === 'live'">
-          <button data-test="backlog-upload" title="A Markdown or text file: its first # heading is the title" @click="picker?.click()">Upload document</button>
+          <button v-change data-test="backlog-upload" title="A Markdown or text file: its first # heading is the title" @click="picker?.click()">Upload document</button>
           <input ref="picker" type="file" accept=".md,.markdown,.txt,text/*" hidden data-test="backlog-upload-input" @change="upload(($event.target as HTMLInputElement).files)" />
-          <button class="primary" data-test="backlog-add" @click="adding = !adding">+ Add item</button>
+          <button class="primary" v-change data-test="backlog-add" @click="adding = !adding">+ Add item</button>
         </template>
       </header>
       <p class="muted intro">Work you want done, most important first. Mark an item ready once you have read it, then dispatch it to a team: its Manager cuts it into cards on the Board.</p>
@@ -256,7 +257,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
       <div v-if="adding" class="itemform" data-test="backlog-new">
         <input v-model="draft.title" placeholder="Title" :maxlength="TitleMax" data-test="backlog-new-title" />
         <textarea v-model="draft.body" rows="8" placeholder="The spec, in Markdown: what, why, and how you will know it is done" data-test="backlog-new-body"></textarea>
-        <div class="buttons"><button @click="adding = false; draft = { title: '', body: '' }">Cancel</button><button class="primary" :disabled="busy || !draft.title.trim()" data-test="backlog-new-save" :aria-busy="doing === 'backlog.add'" @click="add"><BusyLabel :busy="doing === 'backlog.add'" text="Adding…">Add</BusyLabel></button></div>
+        <div class="buttons"><button @click="adding = false; draft = { title: '', body: '' }">Cancel</button><button class="primary" :disabled="busy || !draft.title.trim()" v-change data-test="backlog-new-save" :aria-busy="doing === 'backlog.add'" @click="add"><BusyLabel :busy="doing === 'backlog.add'" text="Adding…">Add</BusyLabel></button></div>
       </div>
 
       <div class="split" :class="{ withItem: !!open }" data-test="backlog-split">
