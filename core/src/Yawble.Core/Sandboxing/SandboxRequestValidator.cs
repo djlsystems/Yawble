@@ -123,7 +123,7 @@ public static class SandboxRequestValidator
     /// The same request with a no-op command and a short timeout. Every policy field is unchanged except a granted
     /// path (readonlyPaths, readwritePaths) that is missing on this host: it is left out and named in
     /// <paramref name="leftOut"/>, and a missing cwd becomes the filesystem root. Sandbox release 1.0.1 cannot bind a
-    /// missing path: bwrap exits during setup and the Linux backend's network supervisor then reports "mxc: failed
+    /// missing path: bwrap exits during setup and the Linux backend's network supervisor then reports "failed
     /// to query Bubblewrap loopback readiness" (its nsenter finds no /proc/&lt;pid&gt;/ns/net). A real launch never gets
     /// there (<see cref="Launch.NativeSandboxBackend.Preflight"/> refuses it by name), so the dry run must not either:
     /// the golden files' fictional /home/alice paths printed that line once per Linux golden on a bwrap host.

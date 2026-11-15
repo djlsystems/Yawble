@@ -7,7 +7,7 @@ namespace Yawble.Core.Tests.Policy;
 
 /// <summary>
 /// B044: the dry run never asks the sandbox to bind a granted path that is missing on this host. Sandbox release 1.0.1
-/// cannot: bwrap exits during setup and the network supervisor prints "mxc: failed to query Bubblewrap loopback
+/// cannot: bwrap exits during setup and the network supervisor prints "failed to query Bubblewrap loopback
 /// readiness" - once per Linux golden file (fictional /home/alice paths) on a host with bwrap. A fake sandbox here
 /// records what the validator submits, so this runs on every OS.
 /// </summary>
@@ -99,7 +99,8 @@ public class SandboxRequestValidatorTests
     /// </summary>
     private sealed class FakeBubblewrap(int pollsUntilLoopbackUp = 0, bool exitsAtSetup = false)
     {
-        public const string Line = "mxc: failed to query Bubblewrap loopback readiness";
+        /// <summary>The line the supervisor prints, without the sandbox's own prefix.</summary>
+        public const string Line = "failed to query Bubblewrap loopback readiness";
         public int Lines { get; private set; }
         public int Polls { get; private set; }
 
