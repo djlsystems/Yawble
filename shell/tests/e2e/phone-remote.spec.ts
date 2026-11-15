@@ -109,10 +109,19 @@ for (const size of PHONES) {
       expect.soft(thread && thread.height, 'the chat thread has room on screen with asks pending').toBeGreaterThan(80);
       expect.soft(composer && composer.y + composer.height, 'the composer is on screen with asks pending').toBeLessThanOrEqual(size.h + 1);
       expect.soft(composer && composer.height, 'the composer is not squeezed').toBeGreaterThan(40);
+      // F1 re-verify: both banners together take at most 40% of the height (one box, data-test=banners) and scroll.
+      const banners = async (name: string) => {
+        const bb = await page.locator('[data-test=banners]').boundingBox();
+        results.push({ screen: `${name}-banners-px`, size: tag(size), audit: { bannersH: bb?.height ?? -1 } as unknown as Audit });
+        expect.soft(bb && bb.height, `${name} @${tag(size)}: banners' height (40% = ${Math.round(size.h * 0.4)} px)`).toBeLessThanOrEqual(size.h * 0.4 + 1);
+        expect.soft(bb && bb.height, `${name} @${tag(size)}: banners shown`).toBeGreaterThan(40);
+      };
+      await banners('concierge');
       // The same two banners on the other screens (all but the board, which shows asks in its Needs You lane).
       for (const [id, name, sel] of [['nav-monitor', 'monitor', '[data-test=monitor]'], ['nav-teams', 'teams', '[data-test=team-grid]'], ['nav-documents', 'documents', '[data-test=documents-view]']] as const) {
         await nav(page, id);
         await page.waitForTimeout(500);
+        await banners(name);
         await page.screenshot({ path: path.join(SHOTS, `${name}-with-asks-${tag(size)}.png`) });
         const b = await page.locator(sel).first().boundingBox();
         const shown = b ? Math.max(0, Math.min(b.y + b.height, size.h) - Math.max(b.y, 0)) : 0;
