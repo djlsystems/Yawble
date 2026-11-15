@@ -104,4 +104,82 @@ public class CoreLockReleaseTests
             try { Directory.Delete(dataDir, true); } catch (IOException) { }
         }
     }
+
+    // B033 verify (card 153): a real core whose core.lock is still held when it starts (as by a just-killed core whose handle
+    // is still closing) waits for it within the ~1 s budget instead of being refused at once.
+    [Fact]
+    public async Task ACoreLockLetGoWithinTheBudget_IsTakenByTheStartingCore()
+    {
+        var token = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
+        var dataDir = Directory.CreateTempSubdirectory("yawble-data-").FullName;
+        Process? core = null;
+        try
+        {
+            var held = new FileStream(Path.Combine(dataDir, DataFolderLock.LockFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            try
+            {
+                core = StartCore(dataDir, token);
+                await Task.Delay(300, Ct);
+                Assert.False(core.HasExited, "the starting core must still be waiting for the lock, not refused");
+            }
+            finally
+            {
+                held.Dispose();
+            }
+            await ReadyAsync(core);
+            Assert.Equal(core.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), FirstLine(Path.Combine(dataDir, DataFolderLock.PidFileName)));
+            core.StandardInput.Close();
+            await core.WaitForExitAsync(Ct).WaitAsync(TimeSpan.FromSeconds(15), Ct);
+            Assert.Equal(0, core.ExitCode);
+        }
+        finally
+        {
+            if (core is { HasExited: false }) core.Kill(entireProcessTree: true);
+            core?.Dispose();
+            try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        }
+    }
+
+    // B033 verify (card 153): a genuine second core on a folder a running core holds is still refused, after the retry
+    // budget (about 1 s) and not much longer: exit 5, the holder's pid on stderr, nothing on stdout.
+    [Fact]
+    public async Task AGenuineSecondCore_IsRefusedWithExit5AfterAboutTheBudget()
+    {
+        var token = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
+        var dataDir = Directory.CreateTempSubdirectory("yawble-data-").FullName;
+        var cores = new List<Process>();
+        try
+        {
+            var holder = StartCore(dataDir, token);
+            cores.Add(holder);
+            await ReadyAsync(holder);
+
+            var started = Stopwatch.StartNew();
+            var second = StartCore(dataDir, token);
+            cores.Add(second);
+            var stdout = second.StandardOutput.ReadToEndAsync(Ct);
+            var stderr = second.StandardError.ReadToEndAsync(Ct);
+            await second.WaitForExitAsync(Ct).WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            var took = started.Elapsed;
+
+            Assert.Equal(5, second.ExitCode);
+            Assert.Equal("", await stdout);
+            Assert.Equal($"fatal: another Yawble is using this data folder (pid {holder.Id})", (await stderr).Trim());
+            Assert.InRange(took, TimeSpan.FromMilliseconds(950), TimeSpan.FromSeconds(4));
+
+            holder.StandardInput.Close();
+            await holder.WaitForExitAsync(Ct).WaitAsync(TimeSpan.FromSeconds(15), Ct);
+            Assert.Equal(0, holder.ExitCode);
+            Assert.False(File.Exists(Path.Combine(dataDir, DataFolderLock.PidFileName)));
+        }
+        finally
+        {
+            foreach (var c in cores)
+            {
+                if (!c.HasExited) c.Kill(entireProcessTree: true);
+                c.Dispose();
+            }
+            try { Directory.Delete(dataDir, true); } catch (IOException) { }
+        }
+    }
 }
