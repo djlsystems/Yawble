@@ -7,6 +7,8 @@ for (const x of r) {
   if (only && !x.screen.includes(only)) continue;
   const a = x.audit;
   if ('bannersH' in a) { console.log(`== ${x.screen} ${x.size} banners=${Math.round(a.bannersH)} px`); continue; }
+  // The F7 / F8 measurements (composer, chip, bars, sheets) are not audits: printed as they are.
+  if (!Array.isArray(a.offScreen)) { console.log(`== ${x.screen} ${x.size} ${JSON.stringify(a)}`); continue; }
   console.log(`== ${x.screen} ${x.size} overflow=${a.overflow} scrollWidth=${a.scrollWidth} controls=${a.controls} off=${a.offScreen.length} small=${a.small.length}${a.overflow ? ` wide: ${a.wide.join('; ')}` : ''}`);
   for (const c of a.offScreen) console.log('  OFF  ', c.what, JSON.stringify(c.label), `${c.x},${c.y}`, `${c.w}x${c.h}`, c.inScroller ? '(in a sideways scroller)' : '');
   for (const c of a.small) console.log('  SMALL', c.what, JSON.stringify(c.label), `${c.x},${c.y}`, `${c.w}x${c.h}`);
