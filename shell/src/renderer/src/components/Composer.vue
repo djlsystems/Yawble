@@ -124,10 +124,13 @@ textarea { width: 100%; border: 0; outline: 0; resize: none; background: transpa
 .problem { color: var(--bad); font-size: 12px; margin: 2px 0; }
 /* A phone: full width, 16 px text, the box no taller than a third of the screen (the keyboard takes much of it). */
 .composer.phone { width: 100%; border-radius: 18px; padding: 8px 8px 6px 12px; }
-.phone textarea { font-size: 16px; max-height: 33dvh; }
+/* The box is a 44 px tap target even with one row (grow() sets its height to scrollHeight: border-box, padding included). */
+.phone textarea { font-size: 16px; max-height: 33dvh; min-height: 44px; box-sizing: border-box; padding: 10px 0; }
 .phone .bar { gap: 4px; }
 .phone .pick { min-height: 44px; padding: 0 6px; min-width: 0; }
-.phone .pick select { font-size: 14px; min-height: 0; max-width: 32vw; text-overflow: ellipsis; }
+/* The Attach button is an icon only: a 44 x 44 square that the bar never squeezes (the pickers' min-width: 0 is for the selects). */
+.phone .pick.attach { min-width: 44px; width: 44px; height: 44px; padding: 0; flex: none; justify-content: center; }
+.phone .pick select { font-size: 14px; min-height: 0; min-width: 0; max-width: 32vw; text-overflow: ellipsis; }
 .phone .round { width: 44px; height: 44px; flex: none; }
 .phone .thumb { width: 88px; height: 88px; }
 .phone .thumb .x { top: 0; right: 0; width: 44px; height: 44px; border-radius: 0 0 0 12px; font-size: 13px; line-height: 44px; }

@@ -13,7 +13,7 @@ import { usePhone } from '../phone';
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number; banner?: boolean; team?: string; member?: string }>();
 const emit = defineEmits<{ count: [n: number] }>();
-/** A phone (B037): the banner's cards edge to edge, the banner no taller than half the screen (it scrolls). */
+/** A phone (B037): the banner's cards edge to edge; App.vue's .banners box holds every banner in at most 40% of the screen (it scrolls). */
 const phone = usePhone();
 
 const asks = ref<NetworkAsk[]>([]);
@@ -57,5 +57,5 @@ defineExpose({ load });
 .network-asks { display: flex; flex-direction: column; gap: 8px; }
 .banner { padding: 8px 18px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--side); }
 .title { margin: 0; font-size: 13px; }
-.banner.phone { padding: 8px 8px; max-height: 50dvh; overflow: auto; }
+.banner.phone { padding: 8px 8px; }
 </style>
