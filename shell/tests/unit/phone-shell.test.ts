@@ -205,7 +205,14 @@ describe('the shell on a phone: the drawer', () => {
     await nextTick();
     expect(w.find('[data-test=menubar]').exists()).toBe(false);
     await w.get('[data-test=drawer-toggle]').trigger('click');
-    const items = w.findAll('[data-test=drawer-menu] button').map((b) => b.attributes('data-test'));
+    // Folded at first (F2): one row, Theme, terminal and help; a tap opens it.
+    const more = w.get('[data-test=drawer-more]');
+    expect(more.attributes('aria-expanded')).toBe('false');
+    expect((w.get('[data-test=drawer-menu-items]').element as HTMLElement).style.display).toBe('none');
+    await more.trigger('click');
+    expect(more.attributes('aria-expanded')).toBe('true');
+    expect((w.get('[data-test=drawer-menu-items]').element as HTMLElement).style.display).toBe('');
+    const items = w.findAll('[data-test=drawer-menu-items] button').map((b) => b.attributes('data-test'));
     expect(items).toEqual(['drawer-terminal', 'drawer-theme:system', 'drawer-theme:light', 'drawer-theme:dark', 'drawer-checkUpdates', 'drawer-about', 'drawer-go:settings-agents']);
     expect(w.get('[data-test="drawer-theme:system"]').attributes('aria-checked')).toBeDefined();
     // The read-only chip is on the page, outside the drawer, so it shows whether the drawer is open or not.
@@ -479,6 +486,111 @@ describe('tooltips by tap (no hover on a phone)', () => {
     off();
     expect(tapTitleTarget(document.getElementById('btn'))).toBeNull();
     expect(tapTitleTarget(document.getElementById('dot'))?.id).toBe('dot');
+  });
+});
+
+// TesterKofi's phone e2e (B037-report.md, card 167): F1 to F4. happy-dom has no layout, so the sizes are the CSS rules.
+describe('B037 e2e faults F1 to F4', () => {
+  const src = (file: string) => readFileSync(resolve(__dirname, `../../src/renderer/src/${file}`), 'utf8');
+  const asks = {
+    ...core,
+    'network.asks': () => [{ id: 7, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperInes', memberName: 'DeveloperInes',
+      host: 'api.nuget.org', reason: null, method: 'CONNECT', pathSample: null, count: 1, lastSeen: '2026-11-13T21:00:00Z', hint: null, workflow: 1,
+      state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'deny'] }],
+    'tools.asks': () => [{ id: 4, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperInes', memberName: 'DeveloperInes',
+      tool: 'dotnet-sdk-10', displayName: '.NET SDK 10', publisher: 'Microsoft', wingetId: 'Microsoft.DotNet.SDK.10', scope: 'machine', reason: 'build',
+      count: 1, lastSeen: '2026-11-13T21:00:00Z', workflow: 1, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
+      canInstall: false, command: null, choices: ['notNow'] }],
+  };
+  async function mountWithAsks(width: number) {
+    setWidth(width);
+    const f = fakeApi(asks, { remote: true });
+    const w = keep(mount(App, { props: { api: f.api, pollMs: 60_000 }, attachTo: document.body }));
+    await flushPromises();
+    await flushPromises();
+    return w;
+  }
+
+  it('F1: on a phone every banner is in one box above the view; the view and the composer stay outside it', async () => {
+    const w = await mountWithAsks(390);
+    const box = w.get('[data-test=banners]');
+    expect(box.find('[data-test=network-asks]').exists()).toBe(true);
+    expect(box.find('[data-test=tool-asks]').exists()).toBe(true);
+    expect(box.find('[data-test=concierge]').exists()).toBe(false);
+    expect(w.find('.content [data-test=composer]').exists()).toBe(true);
+    // The box is a sibling of .content in .main: the banners never sit inside the view's share.
+    expect(box.element.parentElement?.classList.contains('main')).toBe(true);
+    expect(box.element.nextElementSibling?.classList.contains('content')).toBe(true);
+  });
+
+  it('F1: the box holds them all in at most 40% of a phone\'s height and scrolls; no banner has its own half-screen cap', () => {
+    const app = src('App.vue');
+    expect(app).toContain('.phone .banners { display: block; flex: none; max-height: 40dvh; overflow-y: auto;');
+    expect(app).toMatch(/\.content \{ flex: 1; min-height: 0;/); // the view takes the rest
+    for (const file of ['components/NetworkAsks.vue', 'components/ToolAsks.vue']) {
+      expect(src(file), file).not.toMatch(/max-height: 50dvh/);
+      expect(src(file), file).toContain('.banner.phone { padding: 8px 8px; }');
+    }
+  });
+
+  it('F1: at 760 px and wider the box is display: contents, so each banner is a row of the page as before', async () => {
+    expect(src('App.vue')).toContain('.banners { display: contents; }');
+    const w = await mountWithAsks(760);
+    expect(w.get('.app').classes()).not.toContain('phone');
+    expect(w.get('[data-test=banners] [data-test=network-asks]').exists()).toBe(true);
+    expect(w.get('[data-test=banners] [data-test=tool-asks]').exists()).toBe(true);
+  });
+
+  const sidebarProps = {
+    view: 'concierge' as const, conversations: [core['concierge.list']()[0] as any], teams: [{ id: 1, name: 'payments', running: 0, queued: 0 } as any],
+    conversationId: null, teamId: null, slots: { running: 0, limit: 4, queued: 0 }, remote: true,
+    menu: [{ id: 'terminal', label: 'Terminal' }, { id: 'theme:dark', label: 'Dark', radio: true, checked: true }, { id: 'about', label: 'About' }] as any,
+  };
+
+  it('F2: the drawer\'s menu is one folded row; a tap shows its items and a second tap folds it again', async () => {
+    setWidth(390);
+    const w = keep(mount(Sidebar, { props: { ...sidebarProps, drawer: true, open: true } }));
+    const items = () => w.get('[data-test=drawer-menu-items]').element as HTMLElement;
+    expect(w.get('[data-test=drawer-more]').text()).toContain('Theme, terminal and help');
+    expect(items().style.display).toBe('none');
+    await w.get('[data-test=drawer-more]').trigger('click');
+    expect(items().style.display).toBe('');
+    expect(w.findAll('[data-test=drawer-menu-items] button').map((b) => b.attributes('data-test'))).toEqual(['drawer-terminal', 'drawer-theme:dark', 'drawer-about']);
+    await w.get('[data-test=drawer-about]').trigger('click');
+    expect(w.emitted('command')?.[0]).toEqual(['about']);
+    await w.get('[data-test=drawer-more]').trigger('click');
+    expect(items().style.display).toBe('none');
+    // Settings and the run-slots line are in the drawer, after the lists.
+    expect(w.find('[data-test=open-app-settings]').exists()).toBe(true);
+    expect(w.get('[data-test=slots]').text()).toContain('Run slots');
+  });
+
+  it('F2: the drawer scrolls when taller than the screen; the lists keep room for a heading and two 44 px rows', () => {
+    const css = src('components/Sidebar.vue');
+    expect(css).toContain('.side.drawer { overflow-y: auto;');
+    expect(css).toContain('.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot { flex: none; }');
+    const min = Number(/\.drawer \.lists \{ min-height: (\d+)px; \}/.exec(css)?.[1]);
+    expect(min).toBeGreaterThanOrEqual(33 + 2 * 44); // the "Teams" heading (14 + 15 + 4 px) and two rows
+    // The desktop sidebar keeps its rules: the lists flex, the sidebar itself does not scroll.
+    expect(css).toContain('.lists { flex: 1; overflow: auto; min-height: 0; }');
+    expect(css).toMatch(/\.side \{ [^}]*min-height: 0; padding: 8px 8px 6px; \}/);
+  });
+
+  it('F3 and F4: on a phone Attach is a 44 x 44 square and the text box is at least 44 px tall; the desktop rules are unchanged', () => {
+    const css = src('components/Composer.vue');
+    expect(css).toContain('.phone .pick.attach { min-width: 44px; width: 44px; height: 44px; padding: 0; flex: none;');
+    expect(css).toMatch(/\.phone textarea \{[^}]*min-height: 44px; box-sizing: border-box;/);
+    // The desktop's: unchanged.
+    expect(css).toContain('textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; font-size: 15px; line-height: 1.5; padding: 4px 0; max-height: 240px;');
+    expect(css).toContain('.attach { border: 0; background: transparent; cursor: pointer; }');
+  });
+
+  it('F3: the Attach button carries both classes, in a phone composer and for a Visitor', async () => {
+    setWidth(390);
+    applyRemoteAccess('read');
+    const w = keep(mount(Composer, { props: { teams: [], agents: [], cli: 'claude', teamId: null, running: false } }));
+    expect(w.get('[data-test=composer]').classes()).toContain('phone');
+    expect(w.get('[data-test=composer-attach]').classes()).toEqual(expect.arrayContaining(['pick', 'attach']));
   });
 });
 

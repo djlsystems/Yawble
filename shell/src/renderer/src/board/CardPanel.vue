@@ -182,6 +182,6 @@ h4 { margin: 6px 0; font-size: 13px; }
   .icon { min-width: 44px; font-size: 16px; }
   .row2 { grid-template-columns: 1fr; }
   .body { max-height: none; }
-  .sub a { display: inline-block; padding: 6px 0; }
+  .sub a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; box-sizing: border-box; padding: 0 4px; vertical-align: middle; }
 }
 </style>
