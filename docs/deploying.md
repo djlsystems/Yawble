@@ -72,11 +72,66 @@ installed version and keeps every user's data.
 
 ## Uninstalling
 
+An uninstall removes Yawble and its data. Updates and reinstalls never remove data.
+
+### Windows
+
+Uninstall from **Settings > Apps**, or run the uninstaller:
+
 ```
 "%ProgramFiles%\Yawble\Uninstall Yawble.exe" /S /allusers
+"%ProgramFiles%\Yawble\Uninstall Yawble.exe" /S /allusers --keep-data
 ```
 
-Each user's data in `%LOCALAPPDATA%\Yawble` is kept. Delete those folders to remove it.
+A per-user install's uninstaller is `%LOCALAPPDATA%\Programs\Yawble\Uninstall Yawble.exe` (`/S /currentuser`).
+
+- **What is removed:** the program, and the data of the account that runs the uninstaller:
+  - `%LOCALAPPDATA%\Yawble`: teams, chats, settings, the database, logs, backups, and the teams' copies of
+    repositories.
+  - `%APPDATA%\yawble-companion`: the companion's pairing keys.
+
+  Other users' data on the same computer stays. To remove it, delete those two folders in each profile.
+- **Keep my data:** run interactively, the uninstaller asks whether to remove the data. **No** keeps it, for a
+  reinstall that picks up where it left off. `--keep-data` keeps it without asking, with or without `/S`.
+- **Updates:** an update runs the old version's uninstaller and always keeps the data. So does any run started by an
+  installer (`--updated` or `/KEEP_APP_DATA`).
+- **Folders you chose:** a folder named by `YAWBLE_DATA_DIR` or `YAWBLE_HOME` is never removed. If one of the two data
+  folders is inside such a folder, or contains it, that data folder is kept too, and the uninstall log says so.
+- **Yawble running:** the uninstaller first asks to close Yawble in this install. If `yawble.exe` or
+  `yawble-core.exe` is still running for the user after that, for example from another install, it waits a few
+  seconds, then asks you to quit Yawble and choose **Retry**. **Cancel**, or a silent uninstall, stops with exit code 2
+  and removes nothing.
+- **Older versions:** builds released before this change keep all data on uninstall. To remove it, delete
+  `%LOCALAPPDATA%\Yawble` and `%APPDATA%\yawble-companion`.
+
+### Linux
+
+Run `uninstall.sh` in the install folder, as the user who installed Yawble:
+
+```
+<install dir>/uninstall.sh
+<install dir>/uninstall.sh --keep-data
+```
+
+- **What is removed:** the install folder, the `yawble` launcher, and the menu entry. Without `--keep-data`, it also
+  removes the data:
+  - `~/.local/share/yawble` (or `$XDG_DATA_HOME/yawble`): the app's folder.
+  - `~/.config/yawble-companion`: the companion's pairing keys.
+  - `~/.config/Yawble`: the folder older builds used.
+- **Folders you chose:** a `YAWBLE_DATA_DIR` folder is never removed.
+- **AppArmor profile:** if it is installed for this install, remove it first with
+  `sudo '<install dir>/uninstall-apparmor.sh'`. `uninstall.sh` refuses until you do.
+- **Yawble running:** `uninstall.sh` refuses while Yawble runs from the install. Unless you pass `--keep-data`, it also
+  refuses while any Yawble uses its data folder.
+
+### macOS
+
+The macOS build has no uninstaller yet. To uninstall, move `Yawble.app` to the Trash. The data stays in
+`~/Library/Application Support/Yawble` and `~/Library/Application Support/yawble-companion`; delete both folders to
+remove it.
+
+When macOS packaging gets an uninstaller, it will follow the Linux rules: data is removed by default, `--keep-data`
+keeps it, and the uninstall refuses while Yawble runs.
 
 ## Network
 

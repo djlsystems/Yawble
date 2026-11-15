@@ -163,16 +163,12 @@ const arch = builder.Arch[archName];
 // Linux is never signed (its updates trust the release's SHA256SUMS-linux), so its tarball is named for the release:
 // yawble-<version>-linux-<arch>.tar.gz, what the app's updater looks for.
 const name = sign ? `Yawble-Setup-${buildVersion}-${archName}` : os === 'linux' ? `yawble-${buildVersion}-${rid}` : `yawble-${buildVersion}-${rid}-unsigned`;
-// The installed app's version where Windows shows it (Settings > Apps, inventory tools): electron-builder writes the
-// uninstall entry from package.json's version, which is not the build's (yyyy.mm.dd.N is not semver); this NSIS hook
-// runs after that entry is written and puts the build's version in it.
-const nsisInclude = path.join(stage, 'installer-version.nsh');
-writeFileSync(nsisInclude, [
-  '!macro customInstall',
-  `  WriteRegStr SHELL_CONTEXT "\${UNINSTALL_REGISTRY_KEY}" "DisplayVersion" "${buildVersion.replace(/[^0-9A-Za-z.+-]/g, '')}"`,
-  '!macroend',
-  '',
-].join('\r\n'));
+// The NSIS hooks (nsis-include.mjs): customInstall puts the build's version in the uninstall entry (Settings > Apps,
+// inventory tools; electron-builder writes package.json's, and yyyy.mm.dd.N is not semver), and customUnInstall
+// removes the person's data on a real uninstall (never on an update; "Keep my data" and --keep-data keep it).
+const { nsisInclude: nsisIncludeText } = await import('./nsis-include.mjs');
+const nsisInclude = path.join(stage, 'installer.nsh');
+writeFileSync(nsisInclude, nsisIncludeText({ buildVersion }));
 const config = {
   appId: 'com.djlsystems.yawble',
   productName: 'Yawble',
@@ -229,6 +225,8 @@ const config = {
     // Settings > Apps lists the name and the version (DisplayVersion, from nsisInclude) apart.
     uninstallDisplayName: 'Yawble',
     include: nsisInclude,
+    // Off: electron-builder's would remove %APPDATA%\Yawble, where the app keeps nothing. customUnInstall removes the
+    // data where it is (%LOCALAPPDATA%\Yawble and %APPDATA%\yawble-companion).
     deleteAppDataOnUninstall: false,
   },
   mac: {
