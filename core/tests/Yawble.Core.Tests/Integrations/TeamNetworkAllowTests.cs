@@ -56,7 +56,7 @@ public sealed class TeamNetworkAllowTests : IAsyncLifetime
         {
             lock (_told) _told.Add((team, member, text));
             return Task.CompletedTask;
-        }) { Changed = () => Interlocked.Increment(ref _changed) };
+        }) { Changed = () => Interlocked.Increment(ref _changed), NoticeWindow = TimeSpan.Zero }; // told at once (the window: NetworkAskNoticeTests)
         _bus.NetworkAsks = _asks;
         _rpc = new RpcDispatcher(new Yawble.Core.Sandboxing.SandboxPlatformInfo(), () => [], ui: ui, audit: new AuditLog(_db.ConnectionString), networkAsks: _asks);
     }

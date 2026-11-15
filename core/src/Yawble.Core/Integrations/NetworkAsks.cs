@@ -404,21 +404,16 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         var told = new JsonArray();
         if (allow)
         {
-            // Each affected team's Manager: "<host> is now allowed for <member>; retry what was blocked".
+            // Each affected team's Manager: "<host> is now allowed for <member>; retry what was blocked". Notices to one
+            // Manager within NoticeWindow are gathered into one wake listing every host (AllowedText).
             foreach (var team in closed.GroupBy(a => a.TeamId))
             {
                 var first = team.First();
                 if (ManagerOf(team.Key) is not { } manager) continue;
                 var names = string.Join(" and ", team.Select(a => a.MemberName).Distinct(StringComparer.OrdinalIgnoreCase));
-                var scope = choice switch
-                {
-                    NetworkAskChoices.Team => $" The person allowed it for every member of {first.Team}.",
-                    NetworkAskChoices.Everywhere => " The person allowed it for every agent on this computer.",
-                    _ => "",
-                };
-                var text = $"{ask.Host} is now allowed for {names}; retry what was blocked.{scope} It applies to runs that start from now on.";
                 var causation = team.Select(a => a.CausationSeq).FirstOrDefault(s => s is not null);
-                if (await TellAsync(first.Team, manager, text, causation, ct)) told.Add($"{first.Team}/{manager}");
+                if (await NoticeAsync(team.Key, first.Team, manager, new AllowNotice(ask.Host, names, choice, first.Team, causation), ct))
+                    told.Add($"{first.Team}/{manager}");
             }
         }
         else
@@ -433,6 +428,92 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
             ["closed"] = new JsonArray(closed.Select(a => (JsonNode?)a.Id).ToArray()), ["told"] = told,
         };
     }
+
+    // ------------------------------------------------------------------ "now allowed" notices
+
+    /// <summary>
+    /// How long "now allowed" notices to one team's Manager are gathered before it is told once, listing every host
+    /// (B018: one dotnet restore needed four hosts, and each allow woke the Manager). The window opens with the first
+    /// notice; every notice to the same Manager before it closes joins it. Zero or less: each notice is told at once.
+    /// </summary>
+    public TimeSpan NoticeWindow { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>Waits out the notice window; null: a timer on the service's clock. Tests give a fake one.</summary>
+    public Func<TimeSpan, Task>? NoticeDelay { get; set; }
+
+    /// <summary>One allow to tell a Manager about: the host, the members it was allowed for, and the answer's scope.</summary>
+    internal sealed record AllowNotice(string Host, string Names, string Choice, string Team, long? Causation);
+
+    private sealed record NoticeBatch(string Team, string Manager, List<AllowNotice> Items);
+
+    // Open windows, by (team id, Manager); guarded by _lock.
+    private readonly Dictionary<(long TeamId, string Manager), NoticeBatch> _notices = [];
+
+    /// <summary>
+    /// Tells the Manager about an allow, or adds it to the Manager's open window (opening one when none is). True when
+    /// the Manager is told or will be at the window's end; false when it was told at once and is gone.
+    /// </summary>
+    private async Task<bool> NoticeAsync(long teamId, string team, string manager, AllowNotice notice, CancellationToken ct)
+    {
+        if (NoticeWindow <= TimeSpan.Zero) return await TellAsync(team, manager, AllowedText([notice]), notice.Causation, ct);
+        var key = (teamId, manager.ToLowerInvariant());
+        NoticeBatch batch;
+        lock (_lock)
+        {
+            if (_notices.TryGetValue(key, out var open))
+            {
+                open.Items.Add(notice);
+                return true;
+            }
+            _notices[key] = batch = new NoticeBatch(team, manager, [notice]);
+        }
+        _ = FlushLaterAsync(key, batch);
+        return true;
+    }
+
+    private async Task FlushLaterAsync((long, string) key, NoticeBatch batch)
+    {
+        try { await (NoticeDelay ?? (w => Task.Delay(w, _clock)))(NoticeWindow).ConfigureAwait(false); }
+        catch (Exception) { /* told now rather than never */ }
+        List<AllowNotice> items;
+        lock (_lock)
+        {
+            _notices.Remove(key);
+            items = [.. batch.Items];
+        }
+        try
+        {
+            // The window outlives the answer, so the answer's token does not apply; it joins the first ask's workflow that has one.
+            await TellAsync(batch.Team, batch.Manager, AllowedText(items), items.Select(i => i.Causation).FirstOrDefault(c => c is not null), CancellationToken.None);
+        }
+        catch (Exception e) { Console.Error.WriteLine($"network asks: telling {batch.Team}/{batch.Manager} a host is allowed failed: {e.Message}"); }
+    }
+
+    /// <summary>
+    /// What the Manager is told about one or more allows: "api.nuget.org is now allowed for Priya; retry what was
+    /// blocked. It applies to runs that start from now on." Allows for the same members at the same scope share one
+    /// sentence ("crl3.digicert.com and ocsp.digicert.com are now allowed for Priya; ..."), in the order they came.
+    /// </summary>
+    internal static string AllowedText(IReadOnlyList<AllowNotice> items)
+    {
+        var groups = items.GroupBy(i => (Names: i.Names.ToLowerInvariant(), i.Choice, i.Team)).Select(g =>
+        {
+            var hosts = g.Select(i => i.Host).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var it = hosts.Count == 1 ? "it" : "them";
+            var scope = g.Key.Choice switch
+            {
+                NetworkAskChoices.Team => $" The person allowed {it} for every member of {g.Key.Team}.",
+                NetworkAskChoices.Everywhere => $" The person allowed {it} for every agent on this computer.",
+                _ => "",
+            };
+            return $"{JoinAnd(hosts)} {(hosts.Count == 1 ? "is" : "are")} now allowed for {g.First().Names}; retry what was blocked.{scope}";
+        });
+        var many = items.Select(i => i.Host).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+        return $"{string.Join(" ", groups)} {(many ? "They apply" : "It applies")} to runs that start from now on.";
+    }
+
+    private static string JoinAnd(IReadOnlyList<string> parts) =>
+        parts.Count == 1 ? parts[0] : $"{string.Join(", ", parts.Take(parts.Count - 1))} and {parts[^1]}";
 
     /// <summary>Tells, in the ask's workflow when it has one (else a new one); false when the member or team is gone.</summary>
     private async Task<bool> TellAsync(string team, string member, string text, long? causation, CancellationToken ct)
