@@ -46,6 +46,34 @@ public class TeamBranchGapTests
         return repo;
     }
 
+    /// <summary>
+    /// Card 231: the origin and clone tests here need nothing Windows-only and nothing Linux lacks, only git's local transport
+    /// (clone of a folder, fetch and push to a folder, ls-remote of one). That starts git helper processes, which a
+    /// sandbox may refuse (in the Windows agents' sandbox Git for Windows' MSYS2 runtime fails to start, 0xC0000142).
+    /// So instead of a fixed skip they try one local clone first and run wherever it works (Linux, macOS, a Windows host).
+    /// </summary>
+    private static readonly Lazy<string?> LocalTransportFault = new(() =>
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "yawble-transport-probe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var src = Path.Combine(dir, "src");
+            Directory.CreateDirectory(src);
+            AgentGit.Host(src, "init", "-q", "-b", "trunk");
+            AgentGit.Host(src, "-c", "user.name=P", "-c", "user.email=p@x", "commit", "-q", "--allow-empty", "-m", "probe");
+            var r = AgentGit.Run(dir, dir, "-c", "protocol.file.allow=always", "clone", "-q", "--no-local", src, Path.Combine(dir, "dst"));
+            return r.ExitCode == 0 ? null : $"exit {r.ExitCode}: {r.Stderr}";
+        }
+        catch (Exception e) { return e.Message; }
+        finally { try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    });
+
+    private static void SkipUnlessLocalTransport(string needs) =>
+        Assert.SkipWhen(LocalTransportFault.Value is not null,
+            $"Needs git's local transport ({needs}), and a local 'git clone' of a folder fails here ({LocalTransportFault.Value}). " +
+            "That is a sandbox refusing git's helper process, not the OS: the test runs on Linux, macOS and a Windows host. " +
+            "The fault it covers is fixed (card 75).");
+
     private static string CommitOn(string repo, string parent, string message)
     {
         var tree = AgentGit.Host(repo, "rev-parse", parent + "^{tree}");
@@ -249,6 +277,7 @@ public class TeamBranchGapTests
     [Fact]
     public async Task ATeamSlugWithSpaces_PreparesAndPublishesOnItsSluggedBranch()
     {
+        SkipUnlessLocalTransport("push to a local origin, the member clone, fetch-back, publish");
         using var f = new TeamsFixture();
         const string team = "Yawble Engineering Team";
         var (_, ada, _) = f.Team(team);
@@ -268,6 +297,7 @@ public class TeamBranchGapTests
     [Fact]
     public async Task TwoTeamsSharingAnExtraRepository_WithASameNamedMember_PushToDifferentBranches()
     {
+        SkipUnlessLocalTransport("push to a local origin, a clone of it, the member clones, fetch-back, publish");
         using var f = new TeamsFixture();
         var (_, alphaAda, _) = f.Team("Alpha");
         var (_, betaAda, _) = f.Team("Beta");
@@ -296,6 +326,7 @@ public class TeamBranchGapTests
     [Fact]
     public async Task ARehiredSameNamedMember_AfterB016_GetsTheSameBranch_AndItsEarlierWorkComesBack()
     {
+        SkipUnlessLocalTransport("push to a local origin, the member clone, fetch-back");
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var (picked, _) = TeamReposTests.PersonsRepoWithOrigin(f);
@@ -319,9 +350,10 @@ public class TeamBranchGapTests
     /// the same name is hired. Its record must name the branch its clone is actually on, or the next fetch-back looks
     /// for a branch the clone does not have and the clone's work never comes back.
     /// </summary>
-    [Fact(Skip = "Needs git local transport (clone, fetch into the shared view, a local origin), which cannot start in the agents' sandbox (MSYS2 sh.exe 0xC0000142). The fault is fixed (card 75): run it outside the sandbox.")]
+    [Fact]
     public async Task ARehiredSameNamedMember_WhoseOldCloneIsStillOnTheOldBranch_IsMovedOrKeptConsistently()
     {
+        SkipUnlessLocalTransport("clone, fetch into the shared view, push to a local origin");
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var (picked, _) = TeamReposTests.PersonsRepoWithOrigin(f);
@@ -342,7 +374,7 @@ public class TeamBranchGapTests
 
     /// <summary>
     /// The same rehire as above on a person's repository with no origin (no push needed; it still needs git's local
-    /// transport for the first clone and the fetch-back, which cannot start in the agents' sandbox).
+    /// transport for the first clone and the fetch-back, so it skips only where that cannot start: SkipUnlessLocalTransport).
     /// Was a FAULT (core, card 77), fixed in card 75: RemoveMemberAsync deletes the member (its member_clones row goes) but leaves its clone on
     /// disk. The rehired member has no row, so MoveLegacyBranchLockedAsync does nothing, CheckoutOf names
     /// members/&lt;team&gt;/&lt;name&gt;, and PrepareAsync reuses the clone and records that branch while the clone's HEAD is
@@ -350,9 +382,10 @@ public class TeamBranchGapTests
     /// (the row's branch is not old-style). The unfetched work on members/&lt;name&gt; never comes back.
     /// Now the move at start adopts a clone on disk with no row when it is on members/&lt;name&gt; (records it, then moves it).
     /// </summary>
-    [Fact(Skip = "Needs git local transport (the first clone, the fetch into the shared view, the move's ls-remote of the clone, fetch-back), which cannot start in the agents' sandbox (MSYS2 sh.exe 0xC0000142). The fault is fixed (card 75); its no-transport tests are ACloneLeftOnDisk_... and ARehiredMembersReusedClone_...")]
+    [Fact]
     public async Task ARehiredSameNamedMember_WithAPreB016CloneOnDisk_NoOrigin_IsRecordedOnTheBranchItsCloneIsOn()
     {
+        SkipUnlessLocalTransport("the first clone, the fetch into the shared view, the move's ls-remote of the clone, fetch-back");
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var repo = LocalRepo(f);
@@ -375,6 +408,7 @@ public class TeamBranchGapTests
     [Fact]
     public async Task AnOldStyleBranchOnlyOnOrigin_ThatIsMergedIntoOriginsBase_IsMerged_AndDeletesWithoutTheUnmergedTick()
     {
+        SkipUnlessLocalTransport("push to a local origin, fetch from it, delete a branch on it");
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var (picked, bare) = TeamReposTests.PersonsRepoWithOrigin(f);
