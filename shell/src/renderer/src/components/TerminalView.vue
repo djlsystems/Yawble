@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { readOnly } from '../remoteAccess';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -53,7 +54,8 @@ function output(data: { channel: string; data: string; end: number }) {
 let sizedFor: string | null = null; // the live session the core last heard this terminal's size for
 
 function session(s: TerminalSessionInfo | null) {
-  inputEnabled = !!s && s.inputEnabled && !s.ended;
+  // A read-only remote viewer (a Visitor) never types into a terminal: the core refuses terminal.input for it anyway.
+  inputEnabled = !!s && s.inputEnabled && !s.ended && !readOnly.value;
   if (term) term.options.cursorBlink = inputEnabled;
   // A session's PTY starts at a default size, and this terminal is already fitted (xterm raises no resize of its
   // own), so tell the core the real size once per live session; otherwise the CLI draws for the wrong size.
@@ -112,7 +114,7 @@ onMounted(async () => {
   term.open(host.value!);
   try { fit.fit(); } catch { /* not laid out yet */ }
   term.onData((data) => {
-    if (inputEnabled) void api.call('terminal.input', { channel: props.channel, data });
+    if (inputEnabled && !readOnly.value) void api.call('terminal.input', { channel: props.channel, data });
   });
   term.onResize(({ cols, rows }) => void api.call('terminal.resize', { channel: props.channel, cols, rows }).catch(() => {}));
   resizeObserver = new ResizeObserver(() => { try { fit?.fit(); } catch { /* ignore */ } });

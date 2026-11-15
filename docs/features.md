@@ -217,6 +217,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - Each member shows its recent tool steps, changed files and what it is doing now.
 - Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
 - A timeline replays any moment. **● Back to live** returns.
+- The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
+  link strength, repulsion, gravity and friction, each a multiplier (0.25× to 3×) on the wall's own layout. They apply
+  as you drag and are remembered; **Reset** goes back to the defaults.
 
 ## Logs
 
