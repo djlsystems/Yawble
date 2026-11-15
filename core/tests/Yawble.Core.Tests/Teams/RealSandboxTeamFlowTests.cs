@@ -174,13 +174,21 @@ public class RealSandboxTeamFlowTests
             // ---- the person's origin: no push from inside a sandbox reached it (each failed, above; no from-sandbox ref),
             // its trunk is unchanged, and it gained exactly the members' branches the HOST published (B016/B020, as in
             // TeamFlowTests ...AndTheirBranchesArePushedButNotTrunk), at the team repository's commits, and nothing else.
+            // The rule (B038 card 210): every ref origin had before is unchanged (its trunk never moves, nothing is rewritten
+            // or force-pushed, nothing deleted); the only new refs are member branches, at the team repository's commits.
             var published = new[] { "ada", "ben" }
-                .Select(n => $"{AgentGit.Host(picked, "rev-parse", "members/acme/" + n)} commit\trefs/heads/members/acme/{n}");
+                .Select(n => $"{AgentGit.Host(picked, "rev-parse", "members/acme/" + n)} commit\trefs/heads/members/acme/{n}").ToList();
             var originAfter = AgentGit.Host(bare, "for-each-ref");
-            output.WriteLine("origin before:\n" + originBefore + "\norigin after:\n" + originAfter);
-            Assert.Equal(originBefore.Split('\n').Concat(published).Order(StringComparer.Ordinal),
-                originAfter.Split('\n').Order(StringComparer.Ordinal));
-            Assert.Contains(originBefore.Split('\n').Single(l => l.EndsWith("refs/heads/trunk", StringComparison.Ordinal)), originAfter.Split('\n'));
+            var before = originBefore.Split('\n').ToHashSet(StringComparer.Ordinal);
+            var after = originAfter.Split('\n').ToHashSet(StringComparer.Ordinal);
+            var gone = before.Except(after).ToList();   // a ref that moved or was deleted
+            var added = after.Except(before).ToList();  // a ref that is new, or the new value of a moved one
+            var diff = $"origin refs gone/moved: [{string.Join(" | ", gone)}]; added/now: [{string.Join(" | ", added)}]";
+            output.WriteLine("origin before:\n" + originBefore + "\norigin after:\n" + originAfter + "\n" + diff);
+            Assert.True(gone.Count == 0, "a ref origin already had moved or was deleted: " + diff);
+            Assert.All(added, l => Assert.True(l.Split('\t')[^1].StartsWith("refs/heads/members/acme/", StringComparison.Ordinal),
+                "origin gained a ref that is not a member branch: " + diff));
+            Assert.Equal(published.Order(StringComparer.Ordinal), added.Order(StringComparer.Ordinal));
             Assert.DoesNotContain("from-sandbox", originAfter);
 
             // ---- no remote and no git credential in any clone or home; the post-run check found nothing to remove
