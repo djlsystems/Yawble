@@ -69,4 +69,9 @@ const leaseTitle = computed(() => {
 .lease.queued { --k: var(--state-waiting); }
 .muted { color: var(--muted); }
 .small { font-size: 11px; }
+/* A phone (B037): a roomier card, at least a 44 px tap target. */
+@media (max-width: 759.98px) {
+  .card { min-height: 44px; padding: 10px 12px; }
+  .title { font-size: 14px; }
+}
 </style>

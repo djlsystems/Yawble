@@ -10,6 +10,7 @@ import { readStep, StepLook, type StepKind, type StepRow } from './steps';
 import Timeline from './Timeline.vue';
 import LoadingNote from '../components/LoadingNote.vue';
 import { heavyLine } from '../heavyLease';
+import { useNarrow } from '../narrowScreen';
 import {
   DefaultSpeed, DefaultWindowMinutes, MaxWindowMinutes, mergeByTime, ReplayClock, ReplayStates, Speeds, timeOf, trimByTime, Windows,
 } from './timeline';
@@ -62,9 +63,15 @@ function fitOnce(): void {
   if (!pinned.value) setPinned(true);
   scene?.fit();
 }
-const activityOpen = ref((() => { try { return localStorage.getItem('yawble.monitor.activity') !== 'collapsed'; } catch { return true; } })());
+/**
+ * A phone (B037): the wall fills the screen, the activity starts collapsed (a bar under the timeline; how it is left
+ * there is not kept, so the desktop's choice stands), and the camera and legend controls sit in one compact row.
+ */
+const phone = useNarrow();
+const activityOpen = ref(phone.value ? false : (() => { try { return localStorage.getItem('yawble.monitor.activity') !== 'collapsed'; } catch { return true; } })());
 function toggleActivity(): void {
   activityOpen.value = !activityOpen.value;
+  if (phone.value) return;
   try { localStorage.setItem('yawble.monitor.activity', activityOpen.value ? 'open' : 'collapsed'); } catch { /* not kept */ }
 }
 const counts = ref({ running: 0, waiting: 0, needYou: 0, members: 0, perMinute: 0 });
@@ -383,7 +390,7 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 </script>
 
 <template>
-  <div class="monitor" data-test="monitor">
+  <div class="monitor" :class="{ phone }" data-test="monitor">
     <div class="main">
       <div class="stage">
         <canvas ref="canvas" class="wall" data-test="monitor-canvas"></canvas>
@@ -407,8 +414,10 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
             <button class="ctl" :class="{ on: pinned }" :aria-pressed="pinned" data-test="monitor-pin"
               title="Pinned: the zoom and position stay where you put them" @click="setPinned(true)">Pinned</button>
           </div>
+          <button v-if="phone" class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
+            :aria-expanded="legendOpen" :title="legendOpen ? 'Hide the legend' : 'Show the legend'" @click="toggleLegend">{{ legendOpen ? 'Legend ▾' : 'Legend ▸' }}</button>
         </div>
-        <button class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
+        <button v-if="!phone" class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
           :aria-expanded="legendOpen" :title="legendOpen ? 'Hide the legend' : 'Show the legend'" @click="toggleLegend">{{ legendOpen ? 'Legend ▾' : 'Legend ▸' }}</button>
         <div v-if="legendOpen" class="legend" data-test="monitor-legend">
           <span v-for="s in states" :key="s"><i class="ring" :style="{ borderColor: stateColor(s) }" />{{ MemberStateLabel[s] }}</span>
@@ -599,4 +608,25 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 @keyframes row-in { from { opacity: 0; transform: translateX(12px); } }
 @media (prefers-reduced-motion: reduce) { .live, .activity li, .wfi.working circle { animation: none; } }
 @media (max-width: 900px) { .monitor { flex-direction: column; } .activity { width: auto; height: 40%; border-left: 0; border-top: 1px solid #1e293b; } .activity.collapsed { width: auto; height: 2.25rem; } .rail { flex-direction: row; justify-content: center; } .rail-label { writing-mode: horizontal-tb; transform: none; } }
+/* A phone (B037): the wall takes the screen, the HUD is compact, the camera and legend controls are one row of 44 px
+   buttons under it, the legend scrolls inside the wall, and the activity is a 44 px bar (open: half the height). Still dark. */
+@media (max-width: 759.98px) {
+  .hud { padding: 8px 10px 18px; }
+  .figures { gap: 10px; flex-wrap: wrap; }
+  .figures b { font-size: 16px; }
+  .heavy { max-width: 100%; }
+  .controls { top: auto; bottom: 8px; left: 8px; right: 8px; justify-content: space-between; z-index: 2; }
+  .controls .ctl { min-height: 44px; padding: 0 12px; font-size: 12px; }
+  .controls .legend-toggle { position: static; }
+  .legend { bottom: 60px; padding: 8px 10px; max-height: 40%; overflow-y: auto; pointer-events: auto; }
+  .tip { max-width: calc(100vw - 24px); }
+  .timebar { padding: 6px 8px 4px; }
+  .bar-controls { flex-wrap: wrap; }
+  .bar-controls .hint { display: none; }
+  .bar-controls .seg { min-height: 44px; min-width: 44px; }
+  .live-btn { min-height: 44px; }
+  .activity { height: 50%; }
+  .activity.collapsed { height: 44px; }
+  .activity header .ctl { min-height: 44px; min-width: 44px; }
+}
 </style>

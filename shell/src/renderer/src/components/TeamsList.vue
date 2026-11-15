@@ -183,4 +183,16 @@ const lab = (method: string, id: number, idle: string, busy: string) => (cardDoi
 .team-card.add-wrap { border-style: dashed; padding: 0; }
 .add-wrap .add { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; background: transparent; color: var(--muted); }
 .small { font-size: 12.5px; }
+/* A phone (B037): one column of team cards as tall as their content (the shared tile size and its grips do not
+   apply), the buttons 44 px. */
+@media (max-width: 759.98px) {
+  .team-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 12px; }
+  .tile-cell > .team-card { height: auto; }
+  .team-card { max-height: 22rem; }
+  .team-card.add-wrap { min-height: 64px; }
+  .card-actions { flex-wrap: wrap; }
+  .tile-btn { height: 44px; padding: 0 12px; }
+  .icons-only .tile-btn:not(.danger) { width: 44px; }
+  .link { min-height: 44px; }
+}
 </style>
