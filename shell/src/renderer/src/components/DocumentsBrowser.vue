@@ -245,8 +245,8 @@ onMounted(() => void load(''));
   .viewer { border: 0; padding: 0; }
   .browser:not(.fill) .viewer { min-height: 60vh; }
   .bar button, .naming button, .naming input, .vh button { min-height: 44px; box-sizing: border-box; }
-  .crumbs { flex: 1 1 100%; }
-  .crumbs a { display: inline-block; padding: 10px 0; }
+  .crumbs { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; }
+  .crumbs a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; box-sizing: border-box; padding: 0 4px; }
   .files li { padding: 0 6px; }
   .files .name { min-height: 44px; }
   .mini { min-width: 44px; min-height: 44px; font-size: 15px; }
