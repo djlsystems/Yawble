@@ -103,7 +103,8 @@ public class RealSandboxLauncherTests
         public static async Task<Kit> StartAsync(object scenario, int idleSec = 3600, int wallSec = 3600, double speed = 60, IReadOnlyList<string>? allowHosts = null, int limit = 4,
             Func<IAgentRunner, LaunchHost, string, IAgentRunner>? wrapRunner = null)
         {
-            var f = await GatewayFixture.StartAsync();
+            // Real loopback: the sandbox connects to the gateway's port through slirp4netns (10.0.2.2 -> the host's 127.0.0.1).
+            var f = await GatewayFixture.StartAsync(realSandbox: true);
             f.Credentials.Set(CredentialSlot.ClaudeSetupToken, FakeSecrets.SetupToken);
             FakeSecrets.WriteGrokAuth(f.GrokHome, FakeSecrets.GrokSession1, f.Clock.GetUtcNow() + TimeSpan.FromHours(6));
             var factory = new Recording(new GatewayRunFactory(f.Host));

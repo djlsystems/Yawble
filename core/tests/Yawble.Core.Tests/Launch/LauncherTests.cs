@@ -53,7 +53,7 @@ internal sealed class LaunchKit : IAsyncDisposable
     public static async Task<LaunchKit> StartAsync(int limit = 4, int idleSec = 60, int wallSec = 120, ICredentialModes? credentials = null,
         TempDb? db = null, IRunGatewayFactory? gateways = null, IRunTranscripts? transcripts = null, ISandboxBackend? realBackend = null,
         double speed = Speed, IReadOnlyList<string>? allowHosts = null, Func<IAgentRunner, LaunchHost, string, IAgentRunner>? wrapRunner = null,
-        ICliDetector? clis = null)
+        ICliDetector? clis = null, Func<string, string?>? realPath = null)
     {
         var ownsDb = db is null;
         db ??= new TempDb();
@@ -64,7 +64,7 @@ internal sealed class LaunchKit : IAsyncDisposable
         Directory.CreateDirectory(Path.Combine(root, "home"));
         clis ??= TestClis.StandIns(root, Path.Combine(root, "home"));
         var host = new LaunchHost(TargetOsExtensions.Host, Path.Combine(root, "home"), Path.Combine(root, "app"), Path.Combine(root, "install"),
-            clis, HostPathCanonicalizer.Canonicalize);
+            clis, HostPathCanonicalizer.Canonicalize, RealPath: realPath);
         // As LaunchWiring wires the real core: canonical paths, so a symlinked temp root (macOS /var) behaves as in the app.
         var policies = new PolicyStore(db.ConnectionString, canonicalize: HostPathCanonicalizer.Canonicalize);
         policies.SaveGlobal(GlobalPolicy.Default with

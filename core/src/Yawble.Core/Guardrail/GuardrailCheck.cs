@@ -368,6 +368,15 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
         if (DefaultGateway() is { } lan) Tcp("net.lan-gateway", lan, 80);
         var dns = new JsonArray(new JsonObject { ["id"] = "net.dns", ["category"] = "network", ["name"] = DeniedHost });
         plan.Expect["net.dns"] = new Expectation(Verdicts.Blocked);
+        // Linux: the host resolver's own sockets (systemd-resolved's varlink, the system bus, Avahi, nscd), connected to
+        // directly, around the name-service switch: each must be masked (LinuxResolverMasks).
+        var unix = new JsonArray();
+        if (Host.Os == TargetOs.Linux)
+            foreach (var (id, path) in LinuxResolverMasks.Sockets)
+            {
+                unix.Add(new JsonObject { ["id"] = id, ["category"] = "network", ["path"] = path });
+                plan.Expect[id] = new Expectation(Verdicts.Blocked);
+            }
 
         // The gateway: reachable with the run token (positive control); a guessed or missing token, a host off the
         // allowlist and every vendor host refused (and the CONNECTs logged).
@@ -411,6 +420,7 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
         plan.Wire["writes"] = writes;
         plan.Wire["tcp"] = tcp;
         plan.Wire["dns"] = dns;
+        plan.Wire["unix"] = unix;
         plan.Wire["gateway"] = new JsonObject
         {
             ["deniedHost"] = DeniedHost,
