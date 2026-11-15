@@ -36,7 +36,9 @@ public sealed record ValidationResult(ValidationLevel Level, int Status, string 
 /// When the request's backend is not available on this host, the exact JSON is submitted: it is parsed and
 /// then refused with BackendUnavailable, so nothing runs. When the backend IS available (a real launch would
 /// follow the parse), a copy with only the command replaced by a no-op and a 10-second timeout is submitted
-/// (<see cref="ProbeCopy"/>), so validation never starts the agent CLI.</item>
+/// (<see cref="ProbeCopy"/>), so validation never starts the agent CLI. A granted path missing on this host is
+/// left out of that copy (a real launch refuses it by name first); the result is then ContractParsed, never
+/// BackendAccepted, and names what was left out.</item>
 /// </list>
 /// </summary>
 public static class SandboxRequestValidator
@@ -95,8 +97,12 @@ public static class SandboxRequestValidator
         }
 
         var launchable = containment is not null && containment == host.Containment() && backendAvailable(containment);
-        var submitted = launchable ? ProbeCopy(request).ToJsonString(SandboxJson.Compact) : requestJson;
+        var left = new List<string>();
+        var submitted = launchable ? ProbeCopy(request, left).ToJsonString(SandboxJson.Compact) : requestJson;
         var outcome = runJson(submitted);
+        if (left.Count > 0 && outcome.Status == NativeSandbox.StatusSuccess)
+            return new ValidationResult(ValidationLevel.ContractParsed, 0,
+                $"launched a no-op under {containment} with this policy, exit code {outcome.ExitCode}, without the granted path(s) missing on this host: {string.Join(", ", left)}");
         return outcome.Status switch
         {
             NativeSandbox.StatusSuccess => new ValidationResult(ValidationLevel.BackendAccepted, 0,
@@ -113,8 +119,16 @@ public static class SandboxRequestValidator
         };
     }
 
-    /// <summary>The same request with a no-op command and a short timeout: every policy field unchanged.</summary>
-    public static JsonObject ProbeCopy(JsonObject request)
+    /// <summary>
+    /// The same request with a no-op command and a short timeout. Every policy field is unchanged except a granted
+    /// path (readonlyPaths, readwritePaths) that is missing on this host: it is left out and named in
+    /// <paramref name="leftOut"/>, and a missing cwd becomes the filesystem root. Sandbox release 1.0.1 cannot bind a
+    /// missing path: bwrap exits during setup and the Linux backend's network supervisor then reports "mxc: failed
+    /// to query Bubblewrap loopback readiness" (its nsenter finds no /proc/&lt;pid&gt;/ns/net). A real launch never gets
+    /// there (<see cref="Launch.NativeSandboxBackend.Preflight"/> refuses it by name), so the dry run must not either:
+    /// the golden files' fictional /home/alice paths printed that line once per Linux golden on a bwrap host.
+    /// </summary>
+    public static JsonObject ProbeCopy(JsonObject request, List<string>? leftOut = null)
     {
         var copy = (JsonObject)request.DeepClone();
         var process = (JsonObject)copy["process"]!;
@@ -125,6 +139,22 @@ public static class SandboxRequestValidator
             _ => "/bin/true",
         };
         process["timeout"] = 10_000;
+        if (copy["filesystem"] is JsonObject fs)
+            foreach (var key in new[] { "readonlyPaths", "readwritePaths" })
+            {
+                if (fs[key] is not JsonArray paths) continue;
+                foreach (var node in paths.ToList())
+                {
+                    if (node?.GetValue<string>() is not { } path || Path.Exists(path)) continue;
+                    paths.Remove(node);
+                    leftOut?.Add(path);
+                }
+            }
+        if (process["cwd"]?.GetValue<string>() is { } cwd && !Path.Exists(cwd))
+        {
+            process["cwd"] = TargetOsExtensions.Host == TargetOs.Windows ? Path.GetPathRoot(Environment.SystemDirectory) : "/";
+            leftOut?.Add("cwd " + cwd);
+        }
         return copy;
     }
 }
