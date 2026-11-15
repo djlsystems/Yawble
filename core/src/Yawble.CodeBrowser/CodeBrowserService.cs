@@ -414,7 +414,9 @@ public sealed class CodeBrowserService : IAsyncDisposable
 
     private static string Version(FileStream stream, long size)
     {
-        var mtime = File.GetLastWriteTimeUtc(stream.Name).Ticks;
+        // From the open handle, never the name: a stream opened from a raw POSIX handle (PosixHandles) has no path
+        // (its Name is "[Unknown]"), and a name would read whatever is at that path now rather than the file being sent.
+        var mtime = File.GetLastWriteTimeUtc(stream.SafeFileHandle).Ticks;
         return string.Create(CultureInfo.InvariantCulture, $"{size}-{mtime}");
     }
 
