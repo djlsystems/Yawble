@@ -8,6 +8,7 @@ import { displayName } from '../faces/faces';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { discussWithConcierge, networkAskPrompt } from '../conciergeDiscuss';
+import { usePhone } from '../phone';
 
 /**
  * One network ask in Needs you: a host a member's run was refused (or asked for with request_host), with who asked, the
@@ -21,6 +22,8 @@ import { discussWithConcierge, networkAskPrompt } from '../conciergeDiscuss';
  */
 const props = defineProps<{ ask: NetworkAsk; api: YawbleApi; group?: NetworkAsk[] }>();
 const emit = defineEmits<{ answered: [answer: NetworkAnswer] }>();
+// A phone (B037): the card takes the full width and its buttons stack, each a full-width tap target.
+const phone = usePhone();
 
 const CHOICES: { choice: NetworkAskChoice; label: string; busy: string; title: string }[] = [
   { choice: 'agent', label: 'Allow for this agent', busy: 'Allowing…', title: 'Adds the host to this member\'s allowed hosts, from its next run' },
@@ -75,7 +78,7 @@ async function answer(choice: NetworkAskChoice) {
 </script>
 
 <template>
-  <article class="network-ask" data-test="network-ask" :data-id="ask.id">
+  <article class="network-ask" :class="{ phone }" data-test="network-ask" :data-id="ask.id">
     <p class="head">
       <strong data-test="network-ask-member">{{ displayName(ask.memberName) }}</strong>
       <span class="muted"> · {{ ask.team }}</span> asks to reach
@@ -118,6 +121,11 @@ async function answer(choice: NetworkAskChoice) {
 .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .buttons button { font-size: 12.5px; }
 .buttons .discuss { margin-left: auto; }
+.network-ask.phone { width: 100%; padding: 10px 12px; font-size: 14px; }
+.phone .buttons { flex-direction: column; align-items: stretch; gap: 8px; }
+.phone .buttons button { width: 100%; font-size: 14px; }
+.phone .buttons .discuss { margin-left: 0; }
+.phone .note { min-height: 44px; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .error { color: var(--bad); }

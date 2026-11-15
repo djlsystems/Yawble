@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { NetworkAsk, YawbleApi } from '../../../shared/api';
 import NetworkAskCard from './NetworkAskCard.vue';
 import { groupAsks } from '../networkAskGroups';
+import { usePhone } from '../phone';
 
 /**
  * The waiting network asks in Needs you (network.asks, pending only): one card per team, member and registrable domain
@@ -14,6 +15,8 @@ import { groupAsks } from '../networkAskGroups';
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number; banner?: boolean; team?: string; member?: string }>();
 const emit = defineEmits<{ count: [n: number] }>();
+/** A phone (B037): the banner's cards edge to edge; App.vue's .banners box holds every banner in at most 40% of the screen (it scrolls). */
+const phone = usePhone();
 
 const asks = ref<NetworkAsk[]>([]);
 const shown = computed(() => asks.value.filter((a) => (!props.team || a.team === props.team) && (!props.member || a.memberName === props.member)));
@@ -47,7 +50,7 @@ defineExpose({ load });
 </script>
 
 <template>
-  <section v-if="items.length" class="network-asks" :class="{ banner }" data-test="network-asks">
+  <section v-if="items.length" class="network-asks" :class="{ banner, phone }" data-test="network-asks">
     <p v-if="banner" class="title"><b>Needs you</b>: {{ items.length === 1 ? 'an agent asks' : `${items.length} agents ask` }} to reach a host it was refused</p>
     <NetworkAskCard v-for="g in items" :key="g.key" :ask="g.asks[0]" :group="g.asks" :api="api" @answered="load" />
   </section>
@@ -57,4 +60,5 @@ defineExpose({ load });
 .network-asks { display: flex; flex-direction: column; gap: 8px; }
 .banner { padding: 8px 18px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--side); }
 .title { margin: 0; font-size: 13px; }
+.banner.phone { padding: 8px 8px; }
 </style>

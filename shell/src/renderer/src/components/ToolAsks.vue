@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ToolAsk, ToolInstallResult, YawbleApi } from '../../../shared/api';
 import ToolAskCard from './ToolAskCard.vue';
+import { usePhone } from '../phone';
 
 /**
  * The waiting tool asks in Needs you (tools.asks, pending and installing): one card per team and tool. Refreshed on
@@ -12,6 +13,8 @@ import ToolAskCard from './ToolAskCard.vue';
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number; banner?: boolean; team?: string; member?: string }>();
 const emit = defineEmits<{ count: [n: number] }>();
+/** A phone (B037): the banner's cards edge to edge; App.vue's .banners box holds every banner in at most 40% of the screen (it scrolls). */
+const phone = usePhone();
 
 const asks = ref<ToolAsk[]>([]);
 const shown = computed(() => asks.value.filter((a) => (!props.team || a.team === props.team) && (!props.member || a.memberName === props.member)));
@@ -46,7 +49,7 @@ defineExpose({ load });
 </script>
 
 <template>
-  <section v-if="shown.length || done" class="tool-asks" :class="{ banner }" data-test="tool-asks">
+  <section v-if="shown.length || done" class="tool-asks" :class="{ banner, phone }" data-test="tool-asks">
     <p v-if="banner && shown.length" class="title"><b>Needs you</b>: {{ shown.length === 1 ? 'an agent asks' : `${shown.length} agents ask` }} for a developer tool</p>
     <ToolAskCard v-for="a in shown" :key="a.id" :ask="a" :api="api" @installed="done = $event" @answered="load" />
     <p v-if="done" class="done small" data-test="tool-ask-done" role="status">
@@ -59,6 +62,7 @@ defineExpose({ load });
 .tool-asks { display: flex; flex-direction: column; gap: 8px; }
 .banner { padding: 8px 18px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--side); }
 .title { margin: 0; font-size: 13px; }
+.banner.phone { padding: 8px 8px; }
 .done { margin: 0; color: var(--ok); }
 .small { font-size: 12px; }
 </style>
