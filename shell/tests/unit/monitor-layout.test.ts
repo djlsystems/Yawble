@@ -90,6 +90,13 @@ describe('a two-finger pinch on the wall (scene.ts pinchCamera)', () => {
   });
 });
 
+describe('the default layout', () => {
+  it('is the tuned set', () => {
+    expect(LayoutDefaults).toEqual({ distance: 0.3, strength: 2.75, repulsion: 0.35, gravity: 2.4, friction: 0.45 });
+    for (const v of Object.values(LayoutDefaults)) expect(clampLayout(v)).toBe(v); // each on the sliders' range and step
+  });
+});
+
 describe('a poll that changes nothing does not wake the forces (scene.ts graphShape)', () => {
   const n = (key: string, over: Partial<{ r: number; homeX: number; homeY: number }> = {}) => ({ key, r: 14, homeX: 10, homeY: -5, ...over });
   it('is the same for the same nodes, whatever they say', () => {

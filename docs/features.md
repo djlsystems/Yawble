@@ -255,7 +255,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - A timeline replays any moment. **● Back to live** returns.
 - The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
   link strength, repulsion, gravity and friction, each a multiplier (0.25× to 3×) on the wall's own layout. They apply
-  as you drag and are remembered; **Reset** goes back to the defaults.
+  as you drag and are remembered; **Reset** goes back to the defaults: distance 0.3×, strength 2.75×, repulsion 0.35×,
+  gravity 2.4×, friction 0.45×.
 
 ## Logs
 

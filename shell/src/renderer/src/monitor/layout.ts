@@ -1,7 +1,7 @@
 /**
  * The Monitor's layout forces, as the person tunes them (the cog beside Pinned). Each is a multiplier on the scene's own
- * value (1 is the scene's own), so a setting keeps its meaning when the defaults change. Remembered in this app's storage,
- * a convenience only: storage may be missing or refuse, and the defaults stand.
+ * value (1 is the scene's own). The defaults are a tuned set: short, stiff links, little repulsion, strong pull home and
+ * low friction. Remembered in this app's storage, a convenience only: storage may be missing or refuse, and the defaults stand.
  */
 export interface LayoutSettings {
   /** How long the links are: members (and the workflow panel) from their team. */
@@ -18,7 +18,7 @@ export interface LayoutSettings {
 
 export type LayoutKey = keyof LayoutSettings;
 
-export const LayoutDefaults: Readonly<LayoutSettings> = { distance: 1, strength: 1, repulsion: 1, gravity: 1, friction: 1 };
+export const LayoutDefaults: Readonly<LayoutSettings> = { distance: 0.3, strength: 2.75, repulsion: 0.35, gravity: 2.4, friction: 0.45 };
 
 /** Every multiplier lies here; a stored one outside is brought inside, one that is not a number is the default. */
 export const LayoutMin = 0.25;

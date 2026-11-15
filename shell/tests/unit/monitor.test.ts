@@ -374,7 +374,7 @@ describe('the Monitor view', () => {
     const repulsion = w.get('[data-test=monitor-layout-repulsion]');
     (repulsion.element as HTMLInputElement).value = '1.8';
     await repulsion.trigger('input');
-    expect(JSON.parse(localStorage.getItem('yawble.monitor.layout')!)).toMatchObject({ repulsion: 1.8, distance: 1 });
+    expect(JSON.parse(localStorage.getItem('yawble.monitor.layout')!)).toMatchObject({ repulsion: 1.8, distance: 0.3 });
     expect(w.get('[data-test=monitor-layout-toggle]').classes()).toContain('changed');
     w.unmount();
 
