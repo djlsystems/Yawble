@@ -75,7 +75,7 @@ public class RealSandboxTeamFlowTests
     };
 
     [Fact]
-    public async Task TheManagerSplitsATask_TwoMembersCommitInsideRealSandboxes_AndTheWorkflowCompletes_WithNothingPushed()
+    public async Task TheManagerSplitsATask_TwoMembersCommitInsideRealSandboxes_AndTheWorkflowCompletes()
     {
         RealSandbox.SkipUnlessAvailable();
         var outside = Path.Combine(Path.GetTempPath(), "yawble-p6-" + Guid.NewGuid().ToString("N")[..8]);
@@ -149,7 +149,7 @@ public class RealSandboxTeamFlowTests
                 var git = o.GetProperty("steps").GetProperty("git").EnumerateArray().ToList();
                 JsonElement G(params string[] args) => git.Single(g => g.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(args));
                 int Code(JsonElement g) => g.GetProperty("code").GetInt32();
-                Assert.Equal("members/" + name, G("symbolic-ref", "--short", "HEAD").GetProperty("out").GetString());
+                Assert.Equal("members/acme/" + name, G("symbolic-ref", "--short", "HEAD").GetProperty("out").GetString());
                 Assert.All(git.Take(6), g => Assert.True(Code(g) == 0, $"{name}: {g}"));
                 Assert.Equal("", G("remote", "-v").GetProperty("out").GetString());
                 // The clone's empty helper is the last one and resets the list (a system-wide helper would come before it).
@@ -160,8 +160,8 @@ public class RealSandboxTeamFlowTests
                 Assert.Contains(" 403", connect.GetProperty("statusLine").GetString());
                 var sha = G("rev-parse", "HEAD").GetProperty("out").GetString()!;
                 // ---- the team's repository (the one the person picked) has the member's commit on its branch
-                Assert.Equal(sha, AgentGit.Host(picked, "rev-parse", "members/" + name));
-                Assert.Equal($"{name} (acme)", AgentGit.Host(picked, "log", "-1", "--format=%an", "members/" + name));
+                Assert.Equal(sha, AgentGit.Host(picked, "rev-parse", "members/acme/" + name));
+                Assert.Equal($"{name} (acme)", AgentGit.Host(picked, "log", "-1", "--format=%an", "members/acme/" + name));
             }
             Assert.Contains("return {\"ok\": True}", AgentGit.Host(picked, "show", "members/acme/ada:app/health.py"));
             Assert.Contains("def test_health", AgentGit.Host(picked, "show", "members/acme/ben:tests/test_health.py"));
@@ -171,8 +171,17 @@ public class RealSandboxTeamFlowTests
             Assert.Equal(picked, Path.GetFullPath(repos!.RepoOf(teamId)!.Path));
             output.WriteLine("team repo:\n" + AgentGit.Host(picked, "log", "--all", "--format=%h %d %an: %s"));
 
-            // ---- nothing pushed: the person's origin has exactly what it had
-            Assert.Equal(originBefore, AgentGit.Host(bare, "for-each-ref"));
+            // ---- the person's origin: no push from inside a sandbox reached it (each failed, above; no from-sandbox ref),
+            // its trunk is unchanged, and it gained exactly the members' branches the HOST published (B016/B020, as in
+            // TeamFlowTests ...AndTheirBranchesArePushedButNotTrunk), at the team repository's commits, and nothing else.
+            var published = new[] { "ada", "ben" }
+                .Select(n => $"{AgentGit.Host(picked, "rev-parse", "members/acme/" + n)} commit\trefs/heads/members/acme/{n}");
+            var originAfter = AgentGit.Host(bare, "for-each-ref");
+            output.WriteLine("origin before:\n" + originBefore + "\norigin after:\n" + originAfter);
+            Assert.Equal(originBefore.Split('\n').Concat(published).Order(StringComparer.Ordinal),
+                originAfter.Split('\n').Order(StringComparer.Ordinal));
+            Assert.Contains(originBefore.Split('\n').Single(l => l.EndsWith("refs/heads/trunk", StringComparison.Ordinal)), originAfter.Split('\n'));
+            Assert.DoesNotContain("from-sandbox", originAfter);
 
             // ---- no remote and no git credential in any clone or home; the post-run check found nothing to remove
             foreach (var m in members.Values.Where(m => m.Team == "acme"))
@@ -195,7 +204,7 @@ public class RealSandboxTeamFlowTests
             Assert.DoesNotContain(events, e => e.Kind is GatewayEventKinds.Forward or GatewayEventKinds.ConnectAllowed
                 && (e.Target ?? "").Contains("github", StringComparison.OrdinalIgnoreCase));
             RealSandbox.Report($"team flow, real sandboxes: runs {string.Join(", ", runs.Select(r => $"{members[r.MemberId].Name}#{r.Id}({r.State})"))}; " +
-                $"branches {AgentGit.Host(picked, "for-each-ref", "--format=%(refname:short)=%(objectname:short)", "refs/heads/").Replace('\n', ' ')}; origin unchanged");
+                $"branches {AgentGit.Host(picked, "for-each-ref", "--format=%(refname:short)=%(objectname:short)", "refs/heads/").Replace('\n', ' ')}; origin gained only the host-published members/acme/* branches");
         }
         finally
         {
