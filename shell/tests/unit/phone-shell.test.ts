@@ -608,6 +608,29 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(top.matches(selector)).toBe(true);
     expect(bar.matches(selector)).toBe(false);
   });
+
+  it('F8 (card 181): a sheet\'s header keeps the Visitor chip\'s 150 px room too; no bar in its body, nothing on the desktop', async () => {
+    const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
+    const at = css.indexOf('@media (max-width: 759.98px) {');
+    const m = /(:root\[data-remote-access="read"\][^{]*\.modal\.sheet[^{]*)\{ padding-right: calc\(150px/.exec(css);
+    expect(m).not.toBeNull();
+    expect(m!.index).toBeGreaterThan(at); // inside the phone block only
+    const selector = m![1].trim();
+    const host = defineComponent({ setup: () => () => h(Modal, { title: 'Logs', full: true }, () => h('header', { class: 'row bar' }, 'inner')) });
+    applyRemoteAccess('read');
+    setWidth(390);
+    const w = keep(mount(host, { attachTo: document.body }));
+    expect(w.get('.modal > header.row').element.matches(selector)).toBe(true);
+    expect(w.get('.body > header').element.matches(selector)).toBe(false);
+    w.unmount();
+    setWidth(760);
+    const d = keep(mount(host, { attachTo: document.body }));
+    expect(d.get('.modal > header.row').element.matches(selector)).toBe(false); // no sheet: the dialog as before
+    applyRemoteAccess('full');
+    setWidth(390);
+    const f = keep(mount(host, { attachTo: document.body }));
+    expect(f.get('.modal > header.row').element.matches(selector)).toBe(false);
+  });
 });
 
 describe('the page and the stylesheet', () => {

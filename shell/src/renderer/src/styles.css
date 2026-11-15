@@ -150,4 +150,7 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
   /* Only the shell's own top bar (App.vue's main > header.bar): a bare .bar also matched the Composer's, the Documents'
      and the Logs' bars, and squeezed the Composer's pickers for a Visitor (card 176). */
   :root[data-remote-access="read"] .app.phone > .main > header.bar { padding-right: calc(150px + env(safe-area-inset-right, 0px)); }
+  /* A dialog's sheet (Modal.vue) covers the top bar, so its own header keeps the chip's room: Close stays left of the
+     chip (card 181). Only a sheet's header: a bar inside the sheet's body is not hit. */
+  :root[data-remote-access="read"] .modal.sheet > header.row { padding-right: calc(150px + env(safe-area-inset-right, 0px)); }
 }
