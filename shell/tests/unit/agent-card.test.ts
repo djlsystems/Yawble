@@ -23,6 +23,17 @@ describe("a member's card", () => {
     for (const b of ['open-terminal', 'open-settings', 'stop', 'remove-agent']) expect(title.find(`[data-test=${b}]`).exists()).toBe(true);
   });
 
+  it('a loosened agent shows only a short marker, which opens its settings at the Policy tab; no guardrail button', async () => {
+    const w = mount(AgentCardView, { props: { card: card({ loosened: ['network.allowHosts + registry.npmjs.org', 'compute.wallTimeoutSec + 4 h'] }) } });
+    const chip = w.get('[data-test=loosened-chip]');
+    expect(chip.text()).toBe('⚠ loosened');
+    expect(chip.attributes('title')).toContain('registry.npmjs.org');
+    expect(w.find('[data-test=open-guardrail]').exists()).toBe(false);
+    await chip.trigger('click');
+    expect(w.emitted('policy')).toHaveLength(1);
+    expect(mount(AgentCardView, { props: { card: card() } }).find('[data-test=loosened-chip]').exists()).toBe(false);
+  });
+
   it("shows what the agent said as formatted text in its own box, not squeezed into the state line", () => {
     const w = mount(AgentCardView, { props: { card: card({ lastRunState: 'completed', statusLine: report }) } });
     const out = w.get('[data-test=agent-output]');

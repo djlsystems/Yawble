@@ -236,7 +236,7 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await shot(main, '06-agent-policy-saved');
     await main.locator('[data-test=modal-close]').click();
     await expect(main.locator('[data-test=agent-Ben] [data-test=agent-timeout]')).toHaveText('15 min');
-    await expect(main.locator('[data-test=agent-Ben] [data-test=loosened-chip]')).toContainText('registry.npmjs.org');
+    await expect(main.locator('[data-test=agent-Ben] [data-test=loosened-chip]')).toHaveAttribute('title', /registry\.npmjs\.org/);
     await expect(main.locator('[data-test=agent-Ada] [data-test=agent-timeout]')).toHaveText('2 h');
 
     // ---- The agent's settings, Guardrails tab, through Electron main's method

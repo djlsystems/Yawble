@@ -16,7 +16,7 @@ import { outputHeight } from '../agentOutputHeight';
 // of every member's box together (the gap handles under each card, see TeamView).
 /** pending: Stop or Remove was clicked and the core has not answered yet (that icon shows the spinner, both are held). */
 const props = defineProps<{ card: AgentCard; pending?: 'stop' | 'remove' | null }>();
-const emit = defineEmits<{ terminal: []; code: []; settings: []; logs: []; stop: []; remove: [] }>();
+const emit = defineEmits<{ terminal: []; code: []; settings: []; policy: []; logs: []; stop: []; remove: [] }>();
 
 const m = computed(() => props.card.member);
 const face = computed(() => memberStateOf(props.card));
@@ -53,8 +53,9 @@ const height = outputHeight;
       <strong data-test="agent-name" :title="m.name">{{ displayName(m.name) }}</strong>
       <span class="chip">{{ m.role }}</span>
       <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli">{{ m.cli }}</span>
-      <span v-if="card.loosened?.length" class="chip loosened" data-test="loosened-chip" :title="card.loosened.join('\n')">
-        loosened: {{ card.loosened.map((l) => l.replace(/^.*\+ /, '')).join(', ') }}</span>
+      <!-- Only a marker: what is loosened is listed on the agent's settings, Policy tab (and its Guardrails tab), which it opens. -->
+      <button v-if="card.loosened?.length" class="chip loosened" data-test="loosened-chip" :title="`Loosened beyond the global policy:\n${card.loosened.join('\n')}`"
+        @click="emit('policy')">⚠ loosened</button>
       <span class="label" data-test="agent-face-state">{{ MemberStateLabel[face] }}</span>
       <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
       <span class="spacer" />
