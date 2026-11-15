@@ -40,6 +40,10 @@ public static class Lanes
 /// </summary>
 public sealed class BoardProjector(BoardStore store)
 {
+    /// <summary>The team's testers (B019/B027); set by the board before each page of messages. None by default.</summary>
+    public Func<string, IReadOnlySet<string>> TestersOf { get; set; } = _ => NoTesters;
+    private static readonly IReadOnlySet<string> NoTesters = new HashSet<string>();
+
     /// <summary>When the message being applied happened: the cards and their trails carry the work's own times.</summary>
     private string? _at;
 
@@ -67,22 +71,22 @@ public sealed class BoardProjector(BoardStore store)
         switch (m.Type)
         {
             case MessageTypes.Progress:
-                Report(card, "running", Text(p, "status"), "progress", giveUp: false);
+                Report(card, sender, "running", Text(p, "status"), "progress", giveUp: false);
                 break;
             case MessageTypes.Blocked:
-                Report(card, "blocked", Text(p, "reason"), "blocked", giveUp: true);
+                Report(card, sender, "blocked", Text(p, "reason"), "blocked", giveUp: true);
                 break;
             case MessageTypes.NeedsDecision:
-                Report(card, "needs-decision", Text(p, "question"), "asked", giveUp: true);
+                Report(card, sender, "needs-decision", Text(p, "question"), "asked", giveUp: true);
                 break;
             case MessageTypes.Failed:
-                Report(card, "failed", Text(p, "reason"), "failed", giveUp: true);
+                Report(card, sender, "failed", Text(p, "reason"), "failed", giveUp: true);
                 break;
             case MessageTypes.Completed:
-                Report(card, "completed", null, "run ended", giveUp: false);
+                Report(card, sender, "completed", null, "run ended", giveUp: false);
                 break;
             case MessageTypes.Handback:
-                Report(card, "handback", Text(p, "delivered"), "handed back", giveUp: false);
+                Report(card, sender, "handback", Text(p, "delivered"), "handed back", giveUp: false);
                 break;
         }
     }
@@ -121,20 +125,40 @@ public sealed class BoardProjector(BoardStore store)
         store.AddTrail(fresh.Id, from, "told", text, _at);
     }
 
-    private void Report(CardRow card, string status, string? text, string kind, bool giveUp)
+    private void Report(CardRow card, string sender, string status, string? text, string kind, bool giveUp)
     {
         var louder = Lanes.Loudness(status) >= Lanes.Loudness(card.Status);
         var next = louder ? status : card.Status;
         var lane = card.Placed && !giveUp ? card.Lane : Lanes.Of(next);
+        store.AddTrail(card.Id, sender, kind, text ?? kind, _at);
+        // B027 item 3: someone else's hand-back or finished run does not put a tester's card in Done.
+        string? untested = null;
+        if (lane == Lanes.Done && card.Lane != Lanes.Done
+            && (untested = TesterRule.UntestedTester(card, store.Trail(card.Id), TestersOf(card.Team))) is not null)
+        {
+            lane = card.Lane == Lanes.Todo ? Lanes.InProgress : card.Lane;
+            store.AddTrail(card.Id, BoardSource, "comment", $"Not Done yet: {untested} has not tested it since it was last assigned. " +
+                $"Give it to {untested} with tell (card: {card.Id}), or move it to done with the reason in note.", _at);
+        }
         store.Save(card with { Status = next, Lane = lane }, _at);
-        store.AddTrail(card.Id, card.Member ?? "member", kind, text ?? kind, _at);
     }
+
+    /// <summary>Who the board's own comments are from.</summary>
+    public const string BoardSource = "board";
 
     private void WorkflowDone(Message m)
     {
         foreach (var card in store.CardsOfWorkflow(m.CorrelationId))
         {
             if (Lanes.Loudness(card.Status) > 0) continue;
+            // B027 item 1: declaring the workflow complete leaves out a tester's card the tester has not tested, and says why.
+            if (m.Type == MessageTypes.WorkflowCompleted && card.Lane != Lanes.Done
+                && TesterRule.UntestedTester(card, store.Trail(card.Id), TestersOf(card.Team)) is { } untested)
+            {
+                store.AddTrail(card.Id, BoardSource, "comment", $"Left out of Done when the workflow was declared complete: {untested} has not " +
+                    $"tested it since it was last assigned. Give it to {untested} with tell (card: {card.Id}), or move it to done with the reason in note.", _at);
+                continue;
+            }
             store.Save(card with { Status = "done", Lane = Lanes.Done }, _at);
             if (m.Type == MessageTypes.WorkflowClosed)
                 store.AddTrail(card.Id, Who(m.Source), "workflow closed", Text(Payload(m), "reason") ?? "closed without being declared complete", _at);
@@ -148,7 +172,7 @@ public sealed class BoardProjector(BoardStore store)
     public static string Title(string text)
     {
         var line = text.Split('\n').Select(l => l.Trim().TrimStart('#', '-', '*', ' ')).FirstOrDefault(l => l.Length > 0) ?? "(no text)";
-        return line.Length <= 80 ? line : line[..79] + "…";
+        return line.Length <= 80 ? line : line[..79] + "â€¦";
     }
 
     private static (string? Team, string? Member) Split(string qualified) =>
