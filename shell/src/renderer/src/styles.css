@@ -131,3 +131,26 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 /* A remote view with read-only access (a workgroup Visitor; remoteAccess.ts): the chip, bottom left, over the screens. */
 .remote-access-chip { position: fixed; left: 12px; bottom: 12px; z-index: 1000; font-size: 12px; padding: 3px 10px; border-radius: 10px;
   background: var(--warn-soft); color: var(--warn-ink); border: 1px solid var(--warn-line); box-shadow: 0 1px 3px var(--shadow-chip); pointer-events: none; }
+
+/* A title shown by a tap on a phone (phone.ts installTapTitles): a phone has no hover, so no tooltip otherwise. */
+.tap-tip { position: fixed; z-index: 1001; max-width: min(260px, calc(100vw - 16px)); padding: 6px 10px; border-radius: 8px; font-size: 12.5px; line-height: 1.4;
+  white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 8px 24px var(--shadow-menu); }
+
+/* ---- a phone (B037): below 760 px wide (phone.ts PHONE_QUERY; keep the two the same). At 760 px and wider none of this
+   applies. Everything a finger taps is at least 44 px each way; a checkbox or radio gets a bigger box (its label is
+   the tap target around it). Hover-only things show without hover: see the components' own .phone rules. */
+@media (max-width: 759.98px) {
+  button, select, input:not([type=checkbox], [type=radio], [type=hidden]) { min-height: 44px; }
+  button { min-width: 44px; }
+  input[type=checkbox], input[type=radio] { width: 22px; height: 22px; }
+  /* 16 px text in a field: a phone browser zooms the page into a smaller one when it gets the focus. */
+  input, select, textarea { font-size: 16px; }
+  /* The read-only chip moves to the top bar's right end (the top bar keeps that room free), clear of the message box. */
+  .remote-access-chip { left: auto; bottom: auto; right: calc(8px + env(safe-area-inset-right, 0px)); top: calc(15px + env(safe-area-inset-top, 0px)); }
+  /* Only the shell's own top bar (App.vue's main > header.bar): a bare .bar also matched the Composer's, the Documents'
+     and the Logs' bars, and squeezed the Composer's pickers for a Visitor (card 176). */
+  :root[data-remote-access="read"] .app.phone > .main > header.bar { padding-right: calc(150px + env(safe-area-inset-right, 0px)); }
+  /* A dialog's sheet (Modal.vue) covers the top bar, so its own header keeps the chip's room: Close stays left of the
+     chip (card 181). Only a sheet's header: a bar inside the sheet's body is not hit. */
+  :root[data-remote-access="read"] .modal.sheet > header.row { padding-right: calc(150px + env(safe-area-inset-right, 0px)); }
+}

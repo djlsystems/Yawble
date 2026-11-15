@@ -219,4 +219,8 @@ canvas { display: block; width: 100%; }
 .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row i.steps { background: rgba(147, 197, 253, .7); }
 .dim { color: #94a3b8; }
+/* A phone (B037): the tip fits the screen; the strip is the tap target (58 px tall). */
+@media (max-width: 759.98px) {
+  .tip { width: min(300px, calc(100vw - 24px)); }
+}
 </style>

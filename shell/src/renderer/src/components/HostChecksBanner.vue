@@ -44,4 +44,10 @@ onMounted(async () => {
 .host-checks ul { margin: 4px 0 8px; }
 .host-checks .head { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
 .discuss { flex: none; font-size: 12px; }
+/* A phone (B037): the heading over its button; tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .host-checks { padding: 4px 12px; }
+  .host-checks .head { flex-wrap: wrap; }
+  .discuss { min-height: 44px; }
+}
 </style>

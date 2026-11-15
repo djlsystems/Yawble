@@ -11,6 +11,7 @@ import BusyLabel from '../components/BusyLabel.vue';
 import NetworkAsks from '../components/NetworkAsks.vue';
 import ToolAsks from '../components/ToolAsks.vue';
 import { useBusy } from '../busy';
+import { useNarrow, useSwipe } from '../narrowScreen';
 
 /**
  * THE BOARD: every team's cards in four lanes - To Do, In Progress, Needs You, Done - newest change first in each.
@@ -116,6 +117,23 @@ const toolAsks = ref(0);
 
 function clear() { team.value = ''; member.value = ''; search.value = ''; }
 
+/** A lane's count: its cards shown, and in Needs You what else needs the person. */
+const laneCount = (id: string) => inLane(shown.value, id).length + (id === 'blocked' ? reconnect.value.length + networkAsks.value + toolAsks.value : 0);
+
+// A phone (B037): one lane at a time, chosen with the lane tabs (each with its count) or by swiping left or right.
+// The other lanes stay mounted (hidden), so Needs You's asks keep counting.
+const phone = useNarrow();
+const lane = ref<string>('todo');
+const laneIds = computed(() => board.value?.lanes.map((l) => l.id as string) ?? []);
+const activeLane = computed(() => (laneIds.value.includes(lane.value) ? lane.value : laneIds.value[0] ?? 'todo'));
+function stepLane(direction: -1 | 1) {
+  const ids = laneIds.value;
+  const at = ids.indexOf(activeLane.value);
+  const to = at - direction; // a swipe to the left (-1) shows the next lane
+  if (at >= 0 && to >= 0 && to < ids.length) lane.value = ids[to]!;
+}
+const swipe = useSwipe(stepLane);
+
 onMounted(() => {
   void load();
   void loadReconnect();
@@ -129,7 +147,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
 </script>
 
 <template>
-  <div class="board-place" data-test="board">
+  <div class="board-place" :class="{ phone, 'card-open': openCard !== null }" data-test="board">
     <div class="board-main">
       <h2 class="page-title">Kanban board</h2>
       <div class="filters">
@@ -143,9 +161,15 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
       </div>
       <p v-if="error" class="error" data-test="board-error">{{ error }}</p>
       <LoadingNote v-if="!board && !error" text="Loading the board…" />
-      <div v-if="board" class="lanes">
-        <section v-for="l in board.lanes" :key="l.id" class="lane" :class="`lane-${l.id}`" :data-test="`lane-${l.id}`">
-          <header><span class="lname">{{ l.label }}</span><span class="count">{{ inLane(shown, l.id).length + (l.id === 'blocked' ? reconnect.length + networkAsks + toolAsks : 0) }}</span>
+      <nav v-if="board && phone" class="lane-tabs" role="tablist" aria-label="Lanes" data-test="lane-tabs">
+        <button v-for="l in board.lanes" :key="l.id" type="button" role="tab" class="lane-tab" :class="[`lane-${l.id}`, { on: activeLane === l.id }]"
+          :aria-selected="activeLane === l.id" :data-test="`lane-tab-${l.id}`" @click="lane = l.id">
+          <span class="lname">{{ l.label }}</span><span class="count" data-test="lane-tab-count">{{ laneCount(l.id) }}</span>
+        </button>
+      </nav>
+      <div v-if="board" class="lanes" data-test="board-lanes" @pointerdown="phone && swipe.down($event)" @pointerup="phone && swipe.up($event)" @pointercancel="swipe.cancel()">
+        <section v-for="l in board.lanes" v-show="!phone || activeLane === l.id" :key="l.id" class="lane" :class="`lane-${l.id}`" :data-test="`lane-${l.id}`">
+          <header><span class="lname">{{ l.label }}</span><span class="count">{{ laneCount(l.id) }}</span>
             <button v-if="l.id === 'done' && shownDone.length" class="link small clear-done" data-test="board-clear-done"
               :title="clearTitle" :disabled="work.is('clear')" :aria-busy="work.is('clear')" @click="clearDone"><BusyLabel :busy="work.is('clear')" text="Clearing…">Clear</BusyLabel></button></header>
           <div v-if="l.id === 'blocked' && reconnect.length" class="cards reconnect">
@@ -219,4 +243,27 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
 .card-leave-active { position: absolute; }
 @media (prefers-reduced-motion: reduce) { .card-move, .card-enter-active, .card-leave-active { transition: none; } }
 .page-title { margin: 0 0 8px; font-size: 22px; }
+.lane-tabs { display: none; }
+/* A phone (B037): one column, one lane at a time under the lane tabs (swiped left or right), the card's panel over
+   the whole board, tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .board-main { padding: 4px 10px 10px; }
+  .filters { gap: 6px; }
+  .filters select, .filters input { min-height: 44px; box-sizing: border-box; }
+  .filters input { width: auto; flex: 1 1 100%; order: -1; }
+  .filters button { min-height: 44px; }
+  .lane-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 0 0 8px; flex: none; }
+  .lane-tab { flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 10px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
+  .lane-tab.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+  .lane-tab.lane-blocked .lname { color: var(--warn-edge); }
+  .lanes { display: flex; flex-direction: column; overflow: hidden; touch-action: pan-y; }
+  .lane { flex: 1 1 0; }
+  .lane header { display: none; }
+  .lane-done header { display: flex; justify-content: flex-end; padding: 6px 12px 0; }
+  .lane-done header .lname, .lane-done header .count { display: none; }
+  .cards { padding-top: 10px; }
+  .clear-done, .show-cleared, .cleared-card .link { min-height: 44px; }
+  .board-place.card-open > .board-main { display: none; }
+}
 </style>
