@@ -149,6 +149,9 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
                 $"echo \"@pointer=${variable}\"",
                 // Not readable: either refused, or the sandbox's empty mask (a byte count only, never the content).
                 $"echo \"@signin_bytes=$(cat {Q(signIn)} 2>/dev/null | wc -c | tr -d ' ')\"",
+                // What the sandbox sees of the folder, listed BEFORE the probe's own writes below: the touch and the mv may
+                // succeed inside the sandbox's writable mask, and their names (marker, *.moved) are the probe's, not the host's.
+                $"ls -A {Q(folder)} 2>/dev/null | tr '\\n' ' ' | sed 's/^/@folder_list=/'; echo",
                 // Not writable: a zero-byte append (nothing written even if it worked), in a subshell.
                 $"( : >> {Q(signIn)} ) 2>/dev/null; echo \"@append_signin=$?\"",
                 $"touch {Q(Path.Combine(folder, marker))} 2>/dev/null; echo \"@create_beside=$?\"",
@@ -156,7 +159,6 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
                 // The dummy beside it: not visible, not readable.
                 $"head -c 0 {Q(dummy)} 2>/dev/null; echo \"@open_dummy=$?\"",
                 $"echo \"@dummy_content=$(cat {Q(dummy)} 2>/dev/null | head -c 40)\"",
-                $"ls -A {Q(folder)} 2>/dev/null | tr '\\n' ' ' | sed 's/^/@folder_list=/'; echo",
                 $"head -c 0 {Q(Path.Combine(fakeHome, ".claude.json"))} 2>/dev/null; echo \"@open_claude_json=$?\"",
                 $"head -c 0 {Q(Path.Combine(folder, id == "grok" ? "auth.json.lock" : "settings.json"))} 2>/dev/null; echo \"@open_sibling=$?\"",
             ])]));
@@ -186,15 +188,13 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
             Assert.NotEqual("0", o["open_claude_json"]);
             Assert.NotEqual("0", o["open_sibling"]);
             // Every name the sandbox sees in the folder is an empty mask the sandbox made for a denied entry (names are
-            // visible, contents are not), the install (grok: ~/.grok/downloads), or the sandbox's own files that never reached
-            // the host: the marker it created and the name its own mv gave the sign-in inside the writable mask (both checked
-            // absent on the host below).
+            // visible, contents are not) or the install (grok: ~/.grok/downloads). The list is taken before the probe's own
+            // touch and mv, so no exemption for their names is needed; that they never reach the host is checked below.
             var denied = L("deniedPaths");
-            var moved = Path.GetFileName(signIn) + ".moved";
             foreach (var name in o.GetValueOrDefault("folder_list", "").Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
                 var host = HostPathCanonicalizer.Canonicalize(Path.Combine(folder, name));
-                Assert.True(denied.Contains(host) || IsInstall(host) || name == marker || name == moved,
+                Assert.True(denied.Contains(host) || IsInstall(host),
                     $"{folder}/{name} is visible in the sandbox and is neither the install nor a mask");
             }
             // The host's sign-in is unchanged (a fake, so its content is compared too) and nothing appeared beside it.
