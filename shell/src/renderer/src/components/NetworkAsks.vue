@@ -2,8 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { NetworkAsk, YawbleApi } from '../../../shared/api';
 import NetworkAskCard from './NetworkAskCard.vue';
-import { groupAsks } from '../networkAskGroups';
 import { usePhone } from '../phone';
+import { groupAsks } from '../networkAskGroups';
 
 /**
  * The waiting network asks in Needs you (network.asks, pending only): one card per team, member and registrable domain
