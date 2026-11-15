@@ -140,7 +140,9 @@ public class ConciergeWatchTests
         rig.Post(MessageTypes.Failed, new { reason = "tests failed", failureClass = "timeout" }, "beta/dev");
         await rig.Service.TickAsync(Ct);   // posts the update and, with no settle time in this test, starts the review turn
 
-        var update = Assert.Single(rig.Store.Messages("c2"), m => m.Role == "update");
+        // The dev's failure wakes beta's Manager too, and its run fails here (no agent launcher in this test); that update
+        // can land in the same tick, so pick the dev's.
+        var update = Assert.Single(rig.Store.Messages("c2"), m => m.Role == "update" && m.Text.Contains("dev's run ended"));
         Assert.Equal("**beta** · dev's run ended (timeout): tests failed", update.Text);
         await Wait.UntilAsync(() => { lock (rig.Launched) return rig.Launched.Count == 1; }, "the review turn");
         var prompt = rig.Launched[0].Prompt!;
