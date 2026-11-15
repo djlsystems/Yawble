@@ -160,7 +160,9 @@ public sealed partial class TeamRepos
     /// date, the member's clone of each writable one made if missing. A repository that cannot be prepared is left out
     /// of the run, with the reason logged, rather than failing the member's work on the primary.
     /// </summary>
-    private async Task<IReadOnlyList<ExtraCheckout>> PrepareExtrasLockedAsync(MemberRef member, string branch, CancellationToken ct)
+    /// <param name="moves">The B016 moves this start made so far (card 171): a refusal here says what moved, and each extra
+    /// clone moved here is added.</param>
+    private async Task<IReadOnlyList<ExtraCheckout>> PrepareExtrasLockedAsync(MemberRef member, string branch, List<string> moves, CancellationToken ct)
     {
         var list = new List<ExtraCheckout>();
         foreach (var extra in ExtrasOf(member.TeamId))
@@ -187,10 +189,22 @@ public sealed partial class TeamRepos
                     row = ExtraRow(member.Id, extra.Name);
                 }
                 // B016: an extra clone still on members/<name> moves too, before the shared view is updated.
-                if (row is not null) row = await MoveLegacyExtraBranchLockedAsync(member, extra, row, ct);
+                if (row is not null)
+                {
+                    var before = row.Branch;
+                    row = await MoveLegacyExtraBranchLockedAsync(member, extra, row, ct);
+                    if (row is not null && row.Branch != before) moves.Add(MoveLine(member.Name, $"repository {extra.Name}", before, row.Branch));
+                }
                 var cloneBranch = row?.Branch ?? branch;
                 // B020, again after the refresh from origin: a blocker fails the member's start (not caught here).
-                await CheckMemberBranchFreeAsync(member, cloneBranch, $"repository {extra.Name}", extra.Path, shared, clone, ct);
+                try
+                {
+                    await CheckMemberBranchFreeAsync(member, cloneBranch, $"repository {extra.Name}", extra.Path, clone, ct);
+                }
+                catch (MemberBranchBlockedException e) when (moves.Count > 0)
+                {
+                    throw WithMoves(e, moves);
+                }
                 await UpdateSharedAtAsync(shared, extra.Path, extra.BaseBranch, ct);
                 if (!(Directory.Exists(clone) && Directory.EnumerateFileSystemEntries(clone).Any()))
                 {
@@ -225,7 +239,7 @@ public sealed partial class TeamRepos
             try
             {
                 var cloneBranch = ExtraRow(member.Id, extra.Name)?.Branch ?? branch;
-                await CheckMemberBranchFreeAsync(member, cloneBranch, $"repository {extra.Name}", extra.Path, ExtraSharedPath(member.Team, extra.Name),
+                await CheckMemberBranchFreeAsync(member, cloneBranch, $"repository {extra.Name}", extra.Path,
                     ExtraClonePath(member.Team, member.Name, extra.Name), ct);
             }
             catch (Exception ex) when (ex is GitException or IOException or UnauthorizedAccessException or ArgumentException)
