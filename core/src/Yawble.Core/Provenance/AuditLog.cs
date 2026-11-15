@@ -29,6 +29,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who", "catalog",
         // The team's network allow list as shown (its Remove, policy.removeTeamHost, is audited).
         "teamHosts",
+        // The policy editors' host check (FloorRules.HostProblem for each entry typed).
+        "checkHosts",
     };
 
     /// <summary>Calls that read a setting, or set it when they carry <c>on</c>.</summary>

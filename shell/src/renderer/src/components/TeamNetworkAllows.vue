@@ -5,10 +5,11 @@ import { errorText, removeTeamHost, resolveApi, teamHosts, when } from '../api';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
+import { domainAllowNote } from '../hostChecks';
 
 /**
  * The team's network allow list (policy.teamHosts): every member's run gets these hosts, members hired later too.
- * "Allow for this team" on a network request adds to it. Each host says who added it, how and when, and has Remove
+ * "Allow for this team" on a network request adds to it: a host, or a domain allow ("*.digicert.com", every subdomain of digicert.com). Each host says who added it, how and when, and has Remove
  * (policy.removeTeamHost; the core audits it). A failed call shows its own error and the list is read again.
  */
 const props = defineProps<{ teamId: number; api?: YawbleApi }>();
@@ -46,12 +47,13 @@ defineExpose({ load });
 <template>
   <div class="team-hosts" data-test="team-hosts">
     <h4>The team's network allows</h4>
-    <p class="muted small">Every member of the team reaches these hosts from its next run, members hired later too. "Allow for this team" on a network request adds one.</p>
+    <p class="muted small">Every member of the team reaches these hosts from its next run, members hired later too. "Allow for this team" on a network request adds one: the host, or with "All of *.domain" every subdomain of that domain.</p>
     <p v-if="error" class="error small" data-test="team-hosts-error">{{ error }}</p>
     <LoadingNote v-if="!ready" text="Loading the team's hosts…" />
     <p v-else-if="!hosts.length" class="muted small" data-test="team-hosts-empty">No hosts are allowed for the whole team.</p>
     <div v-for="h in hosts" :key="h.host" class="row" :data-test="`team-host-${h.host}`">
       <span class="mono host">{{ h.host }}</span>
+      <span v-if="domainAllowNote(h.host)" class="muted small" data-test="team-host-domain">{{ domainAllowNote(h.host) }}</span>
       <span class="grow muted small" data-test="team-host-added">{{ how(h) }}</span>
       <button class="link" :data-test="`team-host-remove-${h.host}`" :disabled="work.any()" @click="remove(h.host)">
         <BusyLabel :busy="work.is('remove', h.host)" text="Removing…">Remove</BusyLabel>
