@@ -38,18 +38,30 @@ public sealed class DataFolderLock : IDisposable
         $"another Yawble is using this data folder ({(pid is { } p ? $"pid {p}" : "pid unknown")})";
 
     /// <summary>Takes the lock on <paramref name="dataDir"/> (which must exist) or says who holds it.</summary>
-    public static LockAttempt TryAcquire(string dataDir, int pid)
+    /// <remarks>
+    /// A refused open is retried for about a second (<see cref="LockWait.Default"/>) before the folder counts as in use: on
+    /// Windows a just-killed core's handle on core.lock can still be closing for a few ms after its WaitForExit returns, so an
+    /// immediate restart would otherwise be refused. On Linux and macOS the flock goes with the process; the retry is
+    /// harmless there.
+    /// </remarks>
+    public static LockAttempt TryAcquire(string dataDir, int pid) => TryAcquire(dataDir, pid, LockWait.Default, OpenLockFile);
+
+    /// <summary>
+    /// <see cref="TryAcquire(string, int)"/> with the wait and the open given: <paramref name="open"/> returns the held
+    /// core.lock stream, or null when another process holds it. Tests pass a fake clock and a fake lock.
+    /// </summary>
+    internal static LockAttempt TryAcquire(string dataDir, int pid, LockWait wait, Func<string, FileStream?> open)
     {
         var lockPath = Path.Combine(dataDir, LockFileName);
         var pidPath = Path.Combine(dataDir, PidFileName);
-        FileStream held;
-        try
+        var started = wait.Now();
+        FileStream? held;
+        while ((held = open(lockPath)) is null)
         {
-            held = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        }
-        catch (IOException e) when (IsInUse(e))
-        {
-            return new LockAttempt(null, HeldBy(pidPath));
+            var waited = wait.Now() - started;
+            if (waited >= wait.Budget) return new LockAttempt(null, HeldBy(pidPath, wait));
+            var left = wait.Budget - waited;
+            wait.Delay(left < wait.Step ? left : wait.Step);
         }
         var text = $"{pid}\n{Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16))}\n";
         try
@@ -97,7 +109,7 @@ public sealed class DataFolderLock : IDisposable
     }
 
     /// <summary>The pid in core.pid; null when it is missing or unreadable (a core that is just starting has not written it yet).</summary>
-    private static int? HeldBy(string pidPath)
+    private static int? HeldBy(string pidPath, LockWait wait)
     {
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -108,9 +120,22 @@ public sealed class DataFolderLock : IDisposable
                     return pid;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-            Thread.Sleep(100);
+            if (attempt < 2) wait.Delay(TimeSpan.FromMilliseconds(100));
         }
         return null;
+    }
+
+    /// <summary>The real open: core.lock with no sharing, or null when another process holds it.</summary>
+    internal static FileStream? OpenLockFile(string lockPath)
+    {
+        try
+        {
+            return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException e) when (IsInUse(e))
+        {
+            return null;
+        }
     }
 
     // Windows: ERROR_SHARING_VIOLATION (32) or ERROR_LOCK_VIOLATION (33). Linux and macOS: .NET's flock refusal (EWOULDBLOCK),
@@ -122,6 +147,20 @@ public sealed class DataFolderLock : IDisposable
         var code = e.HResult & 0xFFFF;
         return code is 32 or 33;
     }
+}
+
+/// <summary>
+/// How long <see cref="DataFolderLock.TryAcquire(string, int)"/> keeps retrying a held core.lock (<see cref="Budget"/>), how
+/// long it waits between tries (<see cref="Step"/>), and the clock and delay it uses (fakes in tests).
+/// </summary>
+internal sealed record LockWait(TimeSpan Budget, TimeSpan Step, Func<TimeSpan> Now, Action<TimeSpan> Delay)
+{
+    public static readonly TimeSpan DefaultBudget = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan DefaultStep = TimeSpan.FromMilliseconds(50);
+
+    private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
+
+    public static LockWait Default { get; } = new(DefaultBudget, DefaultStep, () => Clock.Elapsed, Thread.Sleep);
 }
 
 /// <summary>A lock taken (<see cref="Lock"/>), or refused because another core holds it (<see cref="HeldByPid"/>, null when unknown).</summary>
