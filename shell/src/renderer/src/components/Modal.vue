@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted } from 'vue';
 import { dimTitleBar } from '../titleBar';
 import { useEscapeClose } from '../escapeClose';
+import { usePhone } from '../phone';
 
 // A dialog over the page. With `inline` the same content sits in a page instead (the Settings page's tabs): no
 // backdrop, no header, nothing dimmed. `fill` (inline only): the panel is a flex column that takes the page's
@@ -12,15 +13,18 @@ const emit = defineEmits<{ close: [] }>();
 onMounted(() => { if (!props.inline) dimTitleBar(true); });
 onBeforeUnmount(() => { if (!props.inline) dimTitleBar(false); });
 useEscapeClose(() => emit('close'), () => !props.inline);
+// A phone (B037, phone.ts): every dialog is a full-screen sheet, its header (title and a tap-sized Close) kept at the top
+// and its body scrolling; there is no backdrop left to tap, so Close (or Escape) closes it.
+const phone = usePhone();
 </script>
 
 <template>
   <section v-if="inline" class="inline-panel" :class="{ fill }" :aria-label="title"><slot /></section>
-  <div v-else class="backdrop" @mousedown.self="emit('close')">
-    <section class="modal" :class="{ wide, full }" role="dialog" :aria-label="title">
+  <div v-else class="backdrop" :class="{ sheet: phone }" @mousedown.self="emit('close')">
+    <section class="modal" :class="{ wide, full, sheet: phone }" role="dialog" aria-modal="true" :aria-label="title" :data-sheet="phone ? 'true' : undefined">
       <header class="row">
         <h2 class="grow">{{ title }}</h2>
-        <button class="icon" data-test="modal-close" title="Close" @click="emit('close')">✕</button>
+        <button class="icon" data-test="modal-close" title="Close" aria-label="Close" @click="emit('close')">✕</button>
       </header>
       <div class="body"><slot /></div>
     </section>
@@ -40,4 +44,12 @@ h2 { margin: 0; font-size: 16px; }
 .inline-panel.fill { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
 /* A narrow window: normal flow, the Settings page scrolls. */
 @media (max-width: 720px) { .inline-panel.fill { display: block; } }
+/* The phone sheet: the whole screen (dvh: what the browser really shows), clear of a notch and the home bar. */
+.backdrop.sheet { padding: 0; align-items: stretch; }
+.modal.sheet, .modal.sheet.wide, .modal.sheet.full { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; box-shadow: none; }
+.modal.sheet header { position: sticky; top: 0; padding: calc(4px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) 4px calc(14px + env(safe-area-inset-left, 0px)); }
+.modal.sheet h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal.sheet header .icon { width: 44px; height: 44px; flex: none; }
+.modal.sheet:not(.full) .body { flex: 1 1 0; min-height: 0; overflow: auto; }
+.modal.sheet .body { padding: 12px calc(12px + env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
 </style>
