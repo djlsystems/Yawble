@@ -52,6 +52,10 @@ const groups = computed(() => {
 });
 const membersOfTeam = computed(() => who.value.members.filter((m) => !team.value || m.team === team.value));
 const local = computed(() => !props.api.remote);
+/** On a phone the filters fold behind a Filters button (closed at first), so the entries get the screen. */
+const filtersOpen = ref(false);
+/** How many filters are set (the search box apart): shown on the phone's Filters button. */
+const activeFilters = computed(() => [team.value, member.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
 const filtered = computed(() => !!(team.value || member.value || fromDay.value || toDay.value || text.value.trim() || Object.values(filters).some((v) => v)));
 
 function query(offset: number) {
@@ -249,14 +253,16 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
           </select>
         </label>
         <input v-model="text" class="search grow" type="search" placeholder="Search these entries" data-test="logs-text" />
+        <button v-if="phone" type="button" class="filters-toggle" :class="{ on: filtersOpen }" :aria-expanded="filtersOpen" data-test="logs-filters-toggle"
+          @click="filtersOpen = !filtersOpen">Filters{{ activeFilters ? ` (${activeFilters})` : '' }} {{ filtersOpen ? '▴' : '▾' }}</button>
         <template v-if="local">
           <button v-if="source?.prunable" type="button" :class="{ on: panel === 'prune' }" data-test="logs-prune-open" @click="panel = panel === 'prune' ? null : 'prune'; pruning = null">Prune…</button>
           <button type="button" :class="{ on: panel === 'retention' }" data-test="logs-retention-open" @click="panel = panel === 'retention' ? null : 'retention'">Retention…</button>
         </template>
       </div>
-      <p v-if="source" class="about muted small" data-test="logs-about">{{ source.about }}</p>
+      <p v-if="source && !phone" class="about muted small" data-test="logs-about">{{ source.about }}</p>
 
-      <div class="filters">
+      <div v-show="!phone || filtersOpen" class="filters" data-test="logs-filters">
         <label v-if="source?.team">Team
           <select v-model="team" data-test="logs-team">
             <option value="">All teams</option>
@@ -439,7 +445,9 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 .entry-card.open dd { white-space: pre-wrap; word-break: break-word; overflow: visible; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
 /* A phone (B037): the bars wrap into full-width rows, labels over their controls, tap targets 44 px. */
 @media (max-width: 759.98px) {
-  .bar .source, .bar .search { flex: 1 1 100%; min-width: 0; }
+  .bar .source { flex: 1 1 100%; min-width: 0; }
+  .bar .search { flex: 1 1 0; min-width: 0; }
+  .filters-toggle { flex: none; white-space: nowrap; }
   .bar .source { display: flex; align-items: center; gap: 6px; }
   .bar .source select { flex: 1; min-width: 0; margin-left: 0; }
   .filters label { flex: 1 1 calc(50% - 8px); flex-direction: column; align-items: stretch; }

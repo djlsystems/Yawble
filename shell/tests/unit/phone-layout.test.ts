@@ -502,6 +502,30 @@ describe('Logs on a phone', () => {
     expect(called('logs.query').at(-1)!.params.descending).toBe(true);
   });
 
+  it('the filters fold behind a Filters button (closed at first, counting what is set), so the entries get the screen', async () => {
+    screen(Phone);
+    const { api } = logsApi();
+    const w = keep(mount(LogsDialog, { props: { api, team: 'web' }, attachTo: document.body }));
+    await settle();
+    const filters = w.get('[data-test=logs-filters]').element as HTMLElement;
+    expect(filters.style.display).toBe('none');
+    expect(w.find('[data-test=logs-about]').exists()).toBe(false);
+    const toggle = w.get('[data-test=logs-filters-toggle]');
+    expect(toggle.text()).toBe('Filters (1) ▾'); // the team it was opened for
+    await toggle.trigger('click');
+    expect(filters.style.display).toBe('');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+  });
+
+  it('at desktop width the filters are always shown, with no Filters button', async () => {
+    screen(Desktop);
+    const { api } = logsApi();
+    const w = keep(mount(LogsDialog, { props: { api }, attachTo: document.body }));
+    await settle();
+    expect((w.get('[data-test=logs-filters]').element as HTMLElement).style.display).toBe('');
+    expect(w.find('[data-test=logs-filters-toggle]').exists()).toBe(false);
+  });
+
   it('at desktop width: the table with its sortable column headers, no cards', async () => {
     screen(Desktop);
     const { api } = logsApi();
