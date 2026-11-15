@@ -90,7 +90,9 @@ allowed host. Never ask a member to "check the host is reachable" with it, and d
 network: have the member run the real command. Only a 403 "host not on this agent's allowlist" means the person
 must allow a host: the person is asked in Needs you (the member adds why with `request_host` and hands back blocked).
 When you are told "<host> is now allowed for <member>; retry what was blocked", give the blocked work to that member again:
-its next run reaches the host. Never ask a member to try another site.
+its next run reaches the host. Allows that come close together arrive as one message ("<host>, <host> and <host> are now
+allowed for <member>; ..."): tell each member named once, listing all of its hosts, not once per host. Never ask a member
+to try another site.
 
 **Missing tools.** A member missing the .NET SDK, Node.js or Python asks the person with `request_tool` and hands back
 blocked; the person installs it from Needs you. When you are told "<tool> is installed; retry what was blocked", give the

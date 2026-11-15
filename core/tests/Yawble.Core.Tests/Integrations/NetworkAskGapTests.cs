@@ -54,7 +54,7 @@ public sealed class NetworkAskGapTests : IDisposable
                 lock (_told) _told.Add((team, member, text));
                 return Task.CompletedTask;
             },
-            _clock);
+            _clock) { NoticeWindow = TimeSpan.Zero }; // told at once: these check who is told, not the window (NetworkAskNoticeTests)
 
     // ------------------------------------------------------------------ never asked: more addresses and private names
 

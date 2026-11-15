@@ -212,8 +212,9 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     }
 
     /// <summary>
-    /// Adds a host to the team's network allow list, in one write. Checked first: the floor rules (no vendor host, no
-    /// wildcard, no address, a lower-case DNS name), then each member's merged policy with the host and the sandbox dry run
+    /// Adds a host, or a domain allow ("*.digicert.com": every subdomain, not the apex), to the team's network allow list,
+    /// in one write. Checked first: the floor rules (no vendor host, no wildcard but one leading "*." over a registrable
+    /// domain, no address, a lower-case DNS name), then each member's merged policy with the host and the sandbox dry run
     /// (<paramref name="members"/>: each current member's run layout, every member of the team exactly once). Any refusal
     /// throws and nothing is written. False when the host was on the list already.
     /// The write is one database transaction (BEGIN IMMEDIATE) that reads the team's list, the global policy, the team's
@@ -229,8 +230,9 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     /// </summary>
     public bool AddTeamHost(long teamId, string host, IReadOnlyList<(long MemberId, RunLayout Layout)> members, string addedBy, string? addedVia)
     {
-        // The ask filter's rules too (ASCII names only, no trailing dot, not the app's own hosts), whoever calls this.
-        if ((Integrations.NetworkAskFilter.Problem(host) ?? FloorRules.HostProblem(host)) is { } problem) throw new PolicyException([$"network.allowHosts: {problem}"]);
+        // The ask filter's rules too (ASCII names only, no trailing dot, not the app's own hosts), whoever calls this; for
+        // a domain allow ("*.digicert.com") they apply to its domain, and the floor rules to the whole pattern.
+        if ((Integrations.NetworkAskFilter.Problem(TeamHostFilterName(host)) ?? FloorRules.HostProblem(host)) is { } problem) throw new PolicyException([$"network.allowHosts: {problem}"]);
         var memberIds = members.Select(m => m.MemberId).ToList();
         for (var attempt = 1; ; attempt++)
         {
@@ -264,6 +266,9 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
             return added;
         }
     }
+
+    /// <summary>The name the ask filter checks: a domain allow's domain ("*.digicert.com" → digicert.com), else the host.</summary>
+    private static string TeamHostFilterName(string host) => host.StartsWith("*.", StringComparison.Ordinal) ? host[2..] : host;
 
     /// <summary>How many times <see cref="AddTeamHost"/> checks again after the policy changed under it before it refuses.</summary>
     public const int AddTeamHostAttempts = 3;

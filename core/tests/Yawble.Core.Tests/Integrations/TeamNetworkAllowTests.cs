@@ -56,7 +56,7 @@ public sealed class TeamNetworkAllowTests : IAsyncLifetime
         {
             lock (_told) _told.Add((team, member, text));
             return Task.CompletedTask;
-        }) { Changed = () => Interlocked.Increment(ref _changed) };
+        }) { Changed = () => Interlocked.Increment(ref _changed), NoticeWindow = TimeSpan.Zero }; // told at once (the window: NetworkAskNoticeTests)
         _bus.NetworkAsks = _asks;
         _rpc = new RpcDispatcher(new Yawble.Core.Sandboxing.SandboxPlatformInfo(), () => [], ui: ui, audit: new AuditLog(_db.ConnectionString), networkAsks: _asks);
     }
@@ -148,7 +148,9 @@ public sealed class TeamNetworkAllowTests : IAsyncLifetime
     [InlineData("api.anthropic.com")]    // a vendor host
     [InlineData("console.anthropic.com")] // under a vendor domain
     [InlineData("grok.com")]
-    [InlineData("*.example.com")]         // a wildcard
+    [InlineData("*.co.uk")]               // a domain allow over a public suffix
+    [InlineData("*.pat.github.io")]       // a domain allow under a shared (multi-tenant) suffix
+    [InlineData("a.*.example.com")]       // a wildcard that is not one leading "*."
     [InlineData("Example.com")]           // not lower case
     [InlineData("10.0.0.5")]              // an address
     [InlineData("gw.yawble.internal")]    // the gateway's own
