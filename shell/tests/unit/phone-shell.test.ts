@@ -592,6 +592,22 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(w.get('[data-test=composer]').classes()).toContain('phone');
     expect(w.get('[data-test=composer-attach]').classes()).toEqual(expect.arrayContaining(['pick', 'attach']));
   });
+
+  it('F7 (card 176): the Visitor chip\'s 150 px room is kept in the top bar only, never in the Composer\'s bar', async () => {
+    const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
+    const rule = /(:root\[data-remote-access="read"\][^{]*)\{ padding-right: calc\(150px/.exec(css);
+    expect(rule).not.toBeNull();
+    const selector = rule![1].trim();
+    expect(css).not.toContain('.app.phone .bar {'); // the bare .bar matched every bar under the shell
+    setWidth(390);
+    const { w } = await mountApp({ remote: true });
+    applyRemoteAccess('read');
+    await nextTick();
+    const top = w.get('.main > header.bar').element;
+    const bar = w.get('[data-test=composer] .bar').element;
+    expect(top.matches(selector)).toBe(true);
+    expect(bar.matches(selector)).toBe(false);
+  });
 });
 
 describe('the page and the stylesheet', () => {
