@@ -239,11 +239,12 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await expect(main.locator('[data-test=agent-Ben] [data-test=loosened-chip]')).toContainText('registry.npmjs.org');
     await expect(main.locator('[data-test=agent-Ada] [data-test=agent-timeout]')).toHaveText('2 h');
 
-    // ---- The card's guardrail button opens the agent's Guardrails tab, through Electron main's method
+    // ---- The agent's settings, Guardrails tab, through Electron main's method
     // allow-list to the core. By default this e2e installs no yawble-guardcheck probe (and runs no real sandbox), so the core
     // answers why the check is off and Run is disabled. With YAWBLE_E2E_GUARDCHECK_DIR (see installProbe) the window
     // runs the real check in the sandbox and it must pass. The check itself is covered by RealSandboxGuardrailTests.
-    await main.locator('[data-test=agent-Ben] [data-test=open-guardrail]').click();
+    await main.locator('[data-test=agent-Ben] [data-test=open-settings]').click();
+    await main.locator('[data-test=tab-guardrails]').click();
     await expect(main.locator('[data-test=tab-guardrails]')).toHaveClass(/on/);
     await expect(main.locator('[data-test=guardrail-panel]')).toContainText("Ben's effective policy");
     if (!realCheck) {

@@ -20,7 +20,7 @@ describe("a member's card", () => {
     const title = w.get('[data-test=agent-title]');
     expect(title.find('[data-test=agent-name]').exists()).toBe(true);
     expect(title.get('[data-test=agent-face-state]').text()).toBe('Running');
-    for (const b of ['open-terminal', 'open-settings', 'open-guardrail', 'stop', 'remove-agent']) expect(title.find(`[data-test=${b}]`).exists()).toBe(true);
+    for (const b of ['open-terminal', 'open-settings', 'stop', 'remove-agent']) expect(title.find(`[data-test=${b}]`).exists()).toBe(true);
   });
 
   it("shows what the agent said as formatted text in its own box, not squeezed into the state line", () => {

@@ -34,7 +34,7 @@ import { useNarrow } from '../narrowScreen';
 
 // A team's agent list: the Tell Manager box, open needs_decision questions, the cards, and Add agent.
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number }>();
-const emit = defineEmits<{ settings: [memberId: number]; guardrail: [memberId: number]; changed: []; deleted: []; discuss: [decision: Decision] }>();
+const emit = defineEmits<{ settings: [memberId: number]; changed: []; deleted: []; discuss: [decision: Decision] }>();
 const api = resolveApi(props.api);
 /** The member whose activity the Logs dialog shows ("Team/Name"), opened from its card. */
 const logsFor = ref<string | null>(null);
@@ -282,7 +282,7 @@ defineExpose({ refresh, openWorkflows });
         <AgentCard class="member-main" :card="c"
           :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
           @terminal="openTerminal(c)" @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
-          @guardrail="emit('guardrail', c.member.id)" @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
+          @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
         <!-- The bar in the gap to the left of the activity sets the width of every member's activity together. -->
         <div class="member-side" :style="phone ? undefined : { flexBasis: `${activityWidth}px` }">
           <TileGrip v-if="!phone" class="activity-grip" axis="w" reverse :store="memberActivityStore" />

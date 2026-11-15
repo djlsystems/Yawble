@@ -422,7 +422,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 
         <section v-else-if="view === 'teams'" class="teams-place">
           <TeamView v-if="team" :key="team.id" ref="teamView" :team="team" :api="api" :poll-ms="pollMs" @settings="settingsTab = 'general'; settingsFor = $event"
-            @guardrail="settingsTab = 'guardrails'; settingsFor = $event" @changed="refresh" @deleted="selected = null; refresh()"
+@changed="refresh" @deleted="selected = null; refresh()"
             @discuss="discuss(team.id, $event)" />
           <TeamsList v-else-if="overview" class="team-grid-wrap" :teams="teams" :archived="archivedTeams" :api="api" :poll-ms="pollMs" :refresh="refresh"
             @open="openTeam" @settings="manageTeam = $event" @new-team="dialog = 'newTeam'" />

@@ -416,7 +416,7 @@ for (const size of PHONES) {
       // Openers: Logs from the drawer, then each sheet the team page and its first agent card offer (when shown).
       const openers: { name: string; go: (page: Page) => Promise<boolean> }[] = [
         { name: 'logs', go: async (p) => { await nav(p, 'nav-logs'); return true; } },
-        ...['open-code', 'open-settings', 'open-guardrail', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
+        ...['open-code', 'open-settings', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
           name: id.replace('open-', 'team-'),
           go: async (p: Page) => {
             await nav(p, 'nav-teams');
