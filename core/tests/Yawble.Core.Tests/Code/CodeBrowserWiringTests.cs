@@ -151,6 +151,97 @@ public sealed class CodeBrowserWiringTests : IAsyncDisposable
         Assert.False(denied.IsDenied(Path.Combine(_clone, "src", "a.cs")));
     }
 
+    /// <summary>A real folder and a symlink to it under the test folder; skips where links cannot be made (Windows without developer mode).</summary>
+    private (string Real, string Link) LinkedFolder()
+    {
+        var real = Path.Combine(_tmp, "real");
+        Directory.CreateDirectory(Path.Combine(real, "secret"));
+        File.WriteAllText(Path.Combine(real, "secret", "key.txt"), "k");
+        Directory.CreateDirectory(Path.Combine(real, "open"));
+        var link = Path.Combine(_tmp, "link");
+        try { Directory.CreateSymbolicLink(link, real); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Assert.Skip("cannot make a symlink here (needs developer mode on Windows)"); }
+        return (real, link);
+    }
+
+    [Fact]
+    public void ADenyEntryThroughASymlink_DeniesTheRealPath()
+    {
+        var (real, link) = LinkedFolder();
+        var denied = new DeniedPaths(() => [Path.Combine(link, "secret")]);
+        Assert.True(denied.IsDenied(Path.Combine(real, "secret", "key.txt")));
+        Assert.True(denied.IsDenied(Path.Combine(real, "secret")));
+        Assert.True(denied.IsDenied(Path.Combine(link, "secret", "key.txt")));
+        Assert.False(denied.IsDenied(Path.Combine(real, "open", "a.txt")));
+    }
+
+    [Fact]
+    public void AQueryThroughASymlink_IsDeniedByTheRealEntry_EvenForAPathNotMadeYet()
+    {
+        var (real, link) = LinkedFolder();
+        var denied = new DeniedPaths(() => [Path.Combine(real, "secret")]);
+        Assert.True(denied.IsDenied(Path.Combine(link, "secret", "key.txt")));
+        Assert.True(denied.IsDenied(Path.Combine(link, "secret", "new", "later.txt"))); // deepest existing parent, rest appended
+        Assert.True(denied.IsDenied(Path.Combine(link, "open", "..", "secret", "key.txt")));
+        Assert.False(denied.IsDenied(Path.Combine(link, "open", "a.txt")));
+    }
+
+    [Fact]
+    public void ALinkThatIsItselfDenied_StaysDeniedWhereverItLeads()
+    {
+        var (real, link) = LinkedFolder();
+        var denied = new DeniedPaths(() => [link]);
+        Assert.True(denied.IsDenied(Path.Combine(link, "open", "a.txt")));
+        Assert.True(denied.IsDenied(Path.Combine(real, "open", "a.txt"))); // where it leads
+    }
+
+    [Fact]
+    public void AQueryThatCannotBeCanonicalised_IsDenied()
+    {
+        var secret = Path.Combine(_tmp, "secret");
+        var denied = new DeniedPaths(() => [secret], canonicalize: p => p.Contains("broken", StringComparison.Ordinal) ? null : p);
+        Assert.False(denied.IsDenied(Path.Combine(_clone, "src", "a.cs")));
+        Assert.True(denied.IsDenied(Path.Combine(_clone, "broken", "a.cs"))); // fail closed, never allowed
+        Assert.True(denied.IsDenied("relative/a.cs"));
+    }
+
+    [Fact]
+    public void ACanonicaliserMappingALink_IsAppliedToTheQueryLikeTheList()
+    {
+        // The macOS case without a real link: /var/... is /private/var/... once canonicalised.
+        var shown = Path.Combine(_tmp, "var");
+        var realRoot = Path.Combine(_tmp, "private", "var");
+        string? Map(string p) => p.StartsWith(shown, StringComparison.OrdinalIgnoreCase) ? realRoot + p[shown.Length..] : p;
+        var denied = new DeniedPaths(() => [Path.Combine(shown, "secret")], canonicalize: Map);
+        Assert.True(denied.IsDenied(Path.Combine(realRoot, "secret", "key.txt")));
+        Assert.True(denied.IsDenied(Path.Combine(shown, "secret", "key.txt")));
+        var reverse = new DeniedPaths(() => [Path.Combine(realRoot, "secret")], canonicalize: Map);
+        Assert.True(reverse.IsDenied(Path.Combine(shown, "secret", "key.txt")));
+        Assert.False(reverse.IsDenied(Path.Combine(shown, "open", "a.txt")));
+    }
+
+    [Fact]
+    public void TheHostCanonicaliser_FollowsAChainOfLinks_AndAppendsAMissingTail()
+    {
+        var (real, link) = LinkedFolder();
+        var second = Path.Combine(_tmp, "second");
+        Directory.CreateSymbolicLink(second, link); // second -> link -> real
+        var canonicalReal = Yawble.Core.Policy.HostPathCanonicalizer.TryCanonicalize(real)!;
+        Assert.Equal(Path.Combine(canonicalReal, "secret", "key.txt"), Yawble.Core.Policy.HostPathCanonicalizer.TryCanonicalize(Path.Combine(second, "secret", "key.txt")));
+        Assert.Equal(Path.Combine(canonicalReal, "secret", "not", "yet.txt"), Yawble.Core.Policy.HostPathCanonicalizer.TryCanonicalize(Path.Combine(second, "secret", "not", "yet.txt")));
+    }
+
+    [Fact]
+    public void TheHostCanonicaliser_GivesUpOnALinkLoop()
+    {
+        var a = Path.Combine(_tmp, "loop-a");
+        var b = Path.Combine(_tmp, "loop-b");
+        try { Directory.CreateSymbolicLink(a, b); Directory.CreateSymbolicLink(b, a); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Assert.Skip("cannot make a symlink here (needs developer mode on Windows)"); }
+        Assert.Null(Yawble.Core.Policy.HostPathCanonicalizer.TryCanonicalize(Path.Combine(a, "x")));
+        Assert.True(new DeniedPaths(() => []).IsDenied(Path.Combine(a, "x")));
+    }
+
     [Fact]
     public void AnyExceptionFromTheStoreFailsClosed()
     {

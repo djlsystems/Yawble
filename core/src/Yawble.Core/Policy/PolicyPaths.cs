@@ -119,30 +119,55 @@ public sealed class PolicyPaths
 /// </summary>
 public static class HostPathCanonicalizer
 {
-    public static string Canonicalize(string path)
+    /// <summary>The most links followed for one path before giving up (as the OS's own ELOOP limit).</summary>
+    private const int MaxLinks = 40;
+
+    /// <summary>The canonical path, or the path unchanged when it cannot be canonicalised (use for display and grants).</summary>
+    public static string Canonicalize(string path) => TryCanonicalize(path) ?? path;
+
+    /// <summary>
+    /// The canonical path, or null when it cannot be canonicalised (an unreadable link, a loop, a bad path). A security
+    /// check on a queried path uses this and fails closed on null: comparing an uncanonicalised path against a
+    /// canonicalised list misses through any symlink (macOS /var, /tmp, /etc; any symlinked folder on Linux).
+    /// </summary>
+    public static string? TryCanonicalize(string path)
     {
         try
         {
             var full = Path.GetFullPath(path);
-            var root = Path.GetPathRoot(full) ?? "";
-            var parts = full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-            var current = root;
-            for (var i = 0; i < parts.Length; i++)
+            var links = 0;
+            while (true)
             {
-                var next = Path.Combine(current, parts[i]);
-                FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
-                if (!info.Exists)
+                var root = Path.GetPathRoot(full) ?? "";
+                var parts = full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+                var current = root;
+                string? restart = null;
+                for (var i = 0; i < parts.Length; i++)
                 {
-                    return Path.Combine([current, .. parts[i..]]);
+                    var next = Path.Combine(current, parts[i]);
+                    FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
+                    if (info.LinkTarget is null && !info.Exists)
+                    {
+                        // The deepest existing parent is canonical; the missing tail is appended unchanged.
+                        return Path.Combine([current, .. parts[i..]]);
+                    }
+                    if (info.LinkTarget is { } target)
+                    {
+                        // Follow one link and start again from the root: the target may itself run through links.
+                        if (++links > MaxLinks) return null;
+                        var resolved = Path.IsPathRooted(target) ? target : Path.Combine(current, target);
+                        restart = Path.GetFullPath(Path.Combine([resolved, .. parts[(i + 1)..]]));
+                        break;
+                    }
+                    current = next;
                 }
-                var target = info.LinkTarget is null ? null : info.ResolveLinkTarget(returnFinalTarget: true);
-                current = target is null ? next : Path.GetFullPath(target.FullName);
+                if (restart is null) return current;
+                full = restart;
             }
-            return current;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return path;
+            return null;
         }
     }
 }

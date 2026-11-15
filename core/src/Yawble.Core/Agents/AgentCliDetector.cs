@@ -117,9 +117,11 @@ public abstract partial class AgentCliDetector
     private static string? Unsafe(DetectionHost h, string folder, IReadOnlyList<string> config)
     {
         if (h.RootOf(folder) is { } root && h.Paths.Same(folder, root)) return $"Not granted: {folder} is a whole drive.";
-        if (h.IsWithin(h.Home, folder)) return $"Not granted: {folder} would expose your whole home folder. Reinstall the CLI with its official installer.";
+        // The folder comes from the followed-link executable, so compare against the home and config folders with their
+        // links followed too (a symlinked home would otherwise pass a folder that holds it).
+        if (h.IsWithin(h.Home, folder) || h.IsWithin(h.Canonical(h.Home), folder)) return $"Not granted: {folder} would expose your whole home folder. Reinstall the CLI with its official installer.";
         foreach (var c in config)
-            if (h.IsWithin(c, folder)) return $"Not granted: {folder} holds the CLI's config/credential folder {c}.";
+            if (h.IsWithin(c, folder) || h.IsWithin(h.Canonical(c), folder)) return $"Not granted: {folder} holds the CLI's config/credential folder {c}.";
         return null;
     }
 
