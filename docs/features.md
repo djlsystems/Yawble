@@ -207,9 +207,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     back to a developer), the card stays In Progress. A comment says it is waiting for the tester.
   - When the workflow is declared complete, a tester's card the tester has not tested stays out of Done. A comment
     says why.
-  - The tester has tested a card only when it hands back, or one of its runs finishes, after the card was last
-    assigned or given new work. A run that failed, a run from before that assignment, and its progress notes or
-    comments do not count.
+  - The tester has tested a card only when it hands back, or one of its runs finishes having handed back, after the
+    card was last assigned or given new work. A run that failed, a run that ended without a hand-back (for example one
+    that was stopped or cut off), a run from before that assignment, and its progress notes or comments do not count.
   - How a tester is recognised: a member other than the Manager whose name starts with "Tester" (Tester Wren), or
     whose job title contains the word test, tester, testers, testing or QA, in any case. The job title is the job
     text before its first colon ("Tester: builds and tests"), or its first line if it has no colon. Only whole words

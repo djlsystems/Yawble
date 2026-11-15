@@ -187,6 +187,23 @@ public class BoardTesterDoneGapTests
         Assert.DoesNotContain(rig.Store.Trail(card.Id), t => t.Kind == "comment" && t.Source == "Manager");
     }
 
+    /// <summary>Card 170: the tester's run that was cut off (completed, exit -1, no hand-back) does not let the Manager
+    /// move the card to Done without a reason; one that handed back does.</summary>
+    [Fact]
+    public async Task ATestersRunCutOffWithoutAHandBack_StillNeedsAReasonForDone()
+    {
+        await using var rig = await Rig.StartAsync(("TesterWren", ""));
+        var card = rig.Card("TesterWren");
+        rig.Store.AddTrail(card.Id, "Manager", "assigned", "Assigned to TesterWren: verify");
+        rig.Store.AddTrail(card.Id, "TesterWren", "run ended",
+            TesterRule.RunEndedText(JsonNode.Parse("""{"handedBack":false,"run":{"exitCode":-1}}""")!.AsObject()));
+
+        Assert.StartsWith("refused needs_reason:", await rig.Move("Manager", card.Id, "done"));
+
+        rig.Store.AddTrail(card.Id, "TesterWren", "run ended", TesterRule.RunEndedText(JsonNode.Parse("""{"handedBack":true}""")!.AsObject()));
+        Assert.StartsWith("ok:", await rig.Move("Manager", card.Id, "done"));
+    }
+
     [Fact]
     public async Task ATestersHandBackBeforeTheCardWasReassigned_DoesNotLetTheManagerCloseIt()
     {

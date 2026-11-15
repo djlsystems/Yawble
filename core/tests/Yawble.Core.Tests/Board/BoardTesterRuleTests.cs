@@ -134,26 +134,67 @@ public class BoardTesterRuleTests
         Assert.Equal("TesterWren", TesterRule.UntestedTester(store.Card(card.Id)!, store.Trail(card.Id), Set("TesterWren")));
 
         p.Apply(Claim("TesterWren", card.Id, 41)); // given again: its run finishes this time
-        p.Apply(M(MessageTypes.Completed, new { reason = "ok" }, "payments/TesterWren", 41));
+        p.Apply(M(MessageTypes.Completed, new { reason = "ok", handedBack = true }, "payments/TesterWren", 41));
+        Assert.Null(TesterRule.UntestedTester(store.Card(card.Id)!, store.Trail(card.Id), Set("TesterWren")));
+        Assert.Equal(Lanes.Done, store.Card(card.Id)!.Lane);
+    }
+
+    /// <summary>Card 170: a tester's run that ended without handing back (stopped, or cut off after its final answer:
+    /// completed with exit -1) is not a test; workflow_complete leaves the card out. One that handed back is.</summary>
+    [Theory]
+    [InlineData("""{"reason":"ok","handedBack":false}""")]
+    [InlineData("""{"reason":"stopped","handedBack":false,"run":{"end":"stopped","exitCode":-1}}""")]
+    [InlineData("""{"reason":"ok","run":{"exitCode":-1}}""")] // no handedBack at all: not a hand-back
+    public void Item4_ATestersRunThatDidNotHandBack_DoesNotCount(string completed)
+    {
+        var (db, store, p) = Board("TesterWren");
+        using var _ = db;
+        var card = store.AddCard("payments", null, null, "Verify", "spec", "queued", Lanes.Todo, 44);
+        p.Apply(Claim("TesterWren", card.Id, 44));
+        p.Apply(new Message(++_seq, MessageTypes.Completed, completed, "payments/TesterWren", 44, null, 0, DateTimeOffset.UtcNow));
+
+        var ended = Assert.Single(store.Trail(card.Id), t => t.Kind == "run ended");
+        Assert.StartsWith("run ended (no hand-back", ended.Text);
+        Assert.Equal("TesterWren", TesterRule.UntestedTester(store.Card(card.Id)!, store.Trail(card.Id), Set("TesterWren")));
+        Assert.NotEqual(Lanes.Done, store.Card(card.Id)!.Lane);
+
+        p.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "done" }, "payments/Manager", 44));
+        Assert.NotEqual(Lanes.Done, store.Card(card.Id)!.Lane);
+        Assert.Contains(store.Trail(card.Id), t => t.Kind == "comment" && t.Text.StartsWith("Left out of Done") && t.Text.Contains("TesterWren has not tested it"));
+    }
+
+    [Fact]
+    public void Item4_ATestersRunThatHandedBack_Counts_AndSaysSoOnTheTrail()
+    {
+        var (db, store, p) = Board("TesterWren");
+        using var _ = db;
+        var card = store.AddCard("payments", null, null, "Verify", "spec", "queued", Lanes.Todo, 45);
+        p.Apply(Claim("TesterWren", card.Id, 45));
+        p.Apply(M(MessageTypes.Completed, new { reason = "ok", handedBack = true, run = new { exitCode = -1 } }, "payments/TesterWren", 45));
+
+        Assert.Contains(store.Trail(card.Id), t => t.Kind == "run ended" && t.Text == TesterRule.RanAndHandedBack);
         Assert.Null(TesterRule.UntestedTester(store.Card(card.Id)!, store.Trail(card.Id), Set("TesterWren")));
         Assert.Equal(Lanes.Done, store.Card(card.Id)!.Lane);
     }
 
     [Theory]
-    [InlineData("progress", false)]
-    [InlineData("comment", false)]
-    [InlineData("asked", false)]
-    [InlineData("failed", false)]
-    [InlineData("moved", false)]
-    [InlineData("handed back", true)]
-    [InlineData("run ended", true)]
-    public void Item4_OnlyAHandBackOrAFinishedRunCounts(string kind, bool counts)
+    [InlineData("progress", "x", false)]
+    [InlineData("comment", "x", false)]
+    [InlineData("asked", "x", false)]
+    [InlineData("failed", "x", false)]
+    [InlineData("moved", "x", false)]
+    [InlineData("handed back", "x", true)]
+    [InlineData("run ended", TesterRule.RanAndHandedBack, true)]
+    [InlineData("run ended", "run ended (no hand-back)", false)]          // card 170: a run that did not hand back
+    [InlineData("run ended", "run ended (no hand-back, exit -1)", false)] // nor one that was cut off
+    [InlineData("run ended", "run ended", false)]                         // nor an entry from before card 170
+    public void Item4_OnlyAHandBackOrAFinishedRunCounts(string kind, string text, bool counts)
     {
         var (db, store, _) = Board();
         using var __ = db;
         var card = store.AddCard("payments", "TesterWren", null, "Verify", "spec", "queued", Lanes.InProgress, null);
         store.AddTrail(card.Id, "Manager", "assigned", "Assigned to TesterWren: verify");
-        store.AddTrail(card.Id, "TesterWren", kind, "x");
+        store.AddTrail(card.Id, "TesterWren", kind, text);
         var untested = TesterRule.UntestedTester(card, store.Trail(card.Id), Set("TesterWren"));
         Assert.Equal(counts ? null : "TesterWren", untested);
     }
