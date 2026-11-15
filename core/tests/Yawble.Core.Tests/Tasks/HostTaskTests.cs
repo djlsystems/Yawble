@@ -452,6 +452,62 @@ public class HostTaskTests
         }
     }
 
+    [Fact]
+    public async Task OnPosix_TheTaskLeadsItsOwnProcessGroup_AndABackgroundChildGoesWhenItEnds()
+    {
+        if (TaskFixture.IsWin) Assert.Skip("process groups are Linux's and macOS's (Windows uses a Job Object)");
+        var dir = Directory.CreateTempSubdirectory("yawble-task-").FullName;
+        try
+        {
+            var pidFile = Path.Combine(dir, "child.pid");
+            // No setsid binary is involved: the group comes from posix_spawn. ps is on every Linux and macOS.
+            var s = Script(dir, "", $"echo \"pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ')\"\nsleep 300 &\necho $! > '{pidFile}'\nexit 3");
+            var r = await TaskProcess.RunAsync(Options(dir, s, TimeSpan.FromSeconds(60)), Ct);
+            Assert.Equal(3, r.ExitCode);
+            Assert.Null(r.KilledBy);
+            var m = System.Text.RegularExpressions.Regex.Match(r.Tail, @"pid=(\d+) pgid=(\d+)");
+            Assert.True(m.Success, r.Tail);
+            Assert.Equal(m.Groups[1].Value, m.Groups[2].Value);
+            var pid = int.Parse(File.ReadAllText(pidFile).Trim());
+            await Task.Delay(500, Ct);
+            Assert.False(IsAlive(pid), "the background child outlived the task");
+            Assert.DoesNotContain("No such process", r.Tail);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
+    public async Task OnPosix_ACancelKillsTheGroup_WithNoKillNoiseInTheLog()
+    {
+        if (TaskFixture.IsWin) Assert.Skip("process groups are Linux's and macOS's (Windows uses a Job Object)");
+        var dir = Directory.CreateTempSubdirectory("yawble-task-").FullName;
+        try
+        {
+            var pidFile = Path.Combine(dir, "child.pid");
+            var s = Script(dir, "", $"trap 'exit 0' TERM\nsleep 300 &\necho $! > '{pidFile}'\necho started\nwait");
+            using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+            var o = Options(dir, s, TimeSpan.FromSeconds(60));
+            var run = TaskProcess.RunAsync(o, cancel.Token);
+            for (var i = 0; i < 100 && !File.Exists(pidFile); i++) await Task.Delay(100, Ct);
+            cancel.Cancel();
+            var r = await run;
+            Assert.Equal("person", r.KilledBy);
+            var pid = int.Parse(File.ReadAllText(pidFile).Trim());
+            await Task.Delay(500, Ct);
+            Assert.False(IsAlive(pid), "the background child survived the cancel");
+            var log = File.ReadAllText(o.LogPath);
+            Assert.DoesNotContain("kill:", log);
+            Assert.DoesNotContain("No such process", log);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
     private static bool IsAlive(int pid)
     {
         try { using var p = Process.GetProcessById(pid); return !p.HasExited; }

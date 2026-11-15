@@ -120,7 +120,8 @@ public sealed record CliInstall
         var root = os == TargetOs.Windows ? null : "/";
         foreach (var f in readOnly)
         {
-            if (p.IsWithin(p.Home, f))
+            // The home both as given and canonicalised: this check must not depend on the caller passing a canonical home.
+            if (p.IsWithin(p.Home, f) || p.Resolve(p.Home) is { } realHome && p.IsWithin(realHome, f))
                 throw new ArgumentException($"{cli.CliId}: the install folder {f} contains the home folder; only the install itself may be granted");
             if (root is not null && p.Same(f, root) || f.Length <= 3 && os == TargetOs.Windows)
                 throw new ArgumentException($"{cli.CliId}: a whole drive cannot be an install folder ({f})");

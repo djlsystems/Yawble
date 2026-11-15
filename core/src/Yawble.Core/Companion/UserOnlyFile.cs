@@ -17,21 +17,24 @@ public static class UserOnlyFile
     private const UnixFileMode FileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
     /// <summary>
-    /// Creates <paramref name="dir"/> user-only (its parents keep their own rules). An existing folder that is already
-    /// user-only is left alone; one that is empty or holds only the companion's own files (control.json, clients\, *.key,
-    /// its .tmp files) is made user-only; any other existing folder is refused with <see cref="InvalidOperationException"/>
-    /// and left exactly as it was: re-securing it would rewrite the rules of everything inside (a profile, a repository).
+    /// Creates <paramref name="dir"/> user-only (its parents keep their own rules). An existing folder that is empty or
+    /// holds only the companion's own files (control.json, clients\, *.key, its .tmp files) is made user-only (left alone
+    /// when it already is); any other existing folder, user-only or not, is refused with
+    /// <see cref="InvalidOperationException"/> and left exactly as it was: re-securing it would rewrite the rules of
+    /// everything inside (a profile, a repository), and the companion's files do not belong among someone else's.
     /// </summary>
     public static void EnsureDirectory(string dir)
     {
         dir = Path.GetFullPath(dir);
         if (Directory.Exists(dir))
         {
-            if (IsUserOnly(dir)) return;
+            // What is inside is checked first, whatever the folder's rules: a folder that is already user-only (on POSIX,
+            // Directory.CreateTempSubdirectory and ~/.ssh are 0700) but holds someone else's files is refused the same.
             if (!HoldsOnlyCompanionFiles(dir))
                 throw new InvalidOperationException(
                     $"the folder '{dir}' already holds other files, so Yawble will not change who can open it; " +
                     "point YAWBLE_HOME at a new or empty folder for the companion's files");
+            if (IsUserOnly(dir)) return;
             if (OperatingSystem.IsWindows()) new DirectoryInfo(dir).SetAccessControl(DirectorySecurityForUser());
             else File.SetUnixFileMode(dir, DirMode);
             return;
@@ -97,6 +100,72 @@ public static class UserOnlyFile
         if (!isDir && !File.Exists(path)) return false;
         if (OperatingSystem.IsWindows()) return IsUserOnlyWindows(path, isDir);
         return File.GetUnixFileMode(path) == (isDir ? DirMode : FileMode);
+    }
+
+    private const UnixFileMode GroupOrOther =
+        UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+        UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute |
+        UnixFileMode.SetUser | UnixFileMode.SetGroup | UnixFileMode.StickyBit;
+
+    /// <summary>
+    /// POSIX: takes the group and other bits (and setuid/setgid/sticky) off <paramref name="path"/>, keeping the user's own
+    /// (so a 0644 file becomes 0600, a 0755 folder 0700, and an executable stays executable for its user). A symlink is
+    /// never followed or changed, and a file this user does not own is left alone (chmod refuses it). True when the mode
+    /// changed. Windows: does nothing (the data folder there inherits the user profile's rules), false.
+    /// </summary>
+    public static bool Tighten(string path)
+    {
+        if (OperatingSystem.IsWindows()) return false;
+        try
+        {
+            var info = new FileInfo(path);
+            if (info.LinkTarget is not null) return false;
+            if (!info.Exists && !Directory.Exists(path)) return false;
+            var mode = File.GetUnixFileMode(path);
+            if ((mode & GroupOrOther) == 0) return false;
+            File.SetUnixFileMode(path, mode & ~GroupOrOther);
+            return true;
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or IOException)
+        {
+            return false; // not this user's (EPERM), or gone meanwhile
+        }
+    }
+
+    /// <summary>Creates <paramref name="dir"/> (and missing parents) 0700 on POSIX; an existing one is left as it is. Windows: an ordinary folder.</summary>
+    public static void CreatePrivateDirectory(string dir)
+    {
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(dir);
+        else Directory.CreateDirectory(dir, DirMode);
+    }
+
+    /// <summary>Appends <paramref name="text"/> (UTF-8) to <paramref name="path"/>; a file this creates is 0600 on POSIX.</summary>
+    public static void AppendAllText(string path, string text)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            File.AppendAllText(path, text);
+            return;
+        }
+        using var stream = new FileStream(path, new FileStreamOptions
+        {
+            Mode = System.IO.FileMode.Append, Access = FileAccess.Write, Share = FileShare.Read, UnixCreateMode = FileMode,
+        });
+        stream.Write(System.Text.Encoding.UTF8.GetBytes(text));
+    }
+
+    /// <summary>Creates an empty <paramref name="path"/> 0600 when it does not exist yet (POSIX), so what opens it later keeps that mode.</summary>
+    public static void CreateEmptyIfMissing(string path)
+    {
+        if (OperatingSystem.IsWindows() || File.Exists(path)) return;
+        try
+        {
+            using var _ = new FileStream(path, new FileStreamOptions
+            {
+                Mode = System.IO.FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.ReadWrite, UnixCreateMode = FileMode,
+            });
+        }
+        catch (IOException) when (File.Exists(path)) { } // made meanwhile by someone else
     }
 
     private static FileStream CreateNew(string temp)
