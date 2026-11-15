@@ -43,7 +43,10 @@ public static class DataFolderAccess
             return 0;
         }
         var changed = new List<string>();
-        if (appRoot is not null && UserOnlyFile.Tighten(appRoot)) changed.Add(appRoot);
+        var root = AppRootToTighten(appRoot, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        if (appRoot is not null && root is null)
+            log($"data folder: {appRoot} is not Yawble's own app folder, so only the data folder is made user-only");
+        if (root is not null && UserOnlyFile.Tighten(root)) changed.Add(root);
         Walk(full, changed);
         if (changed.Count > 0)
         {
@@ -52,6 +55,24 @@ public static class DataFolderAccess
             log($"data folder: made {changed.Count} path(s) user-only (group and other access removed): {named}{more}");
         }
         return changed.Count;
+    }
+
+    /// <summary>The leaf names of the shell's own app folder (shell/src/main/app-folder.ts): macOS and Windows, Linux.</summary>
+    private static readonly string[] AppFolderNames = ["Yawble", "yawble"];
+
+    /// <summary>
+    /// The app root to make user-only, or null to leave it as it is. BusHost.AppRootFor gives the parent of any data folder
+    /// named "data", so a custom --data-dir ~/data or /srv/shared/data would name the home or a shared folder. Only the
+    /// shell's own app folder (named Yawble or yawble, as app-folder.ts makes it) is tightened, and never the home folder
+    /// or a filesystem root; anything else keeps its modes and only the data folder itself is tightened.
+    /// </summary>
+    public static string? AppRootToTighten(string? appRoot, string? home)
+    {
+        if (string.IsNullOrWhiteSpace(appRoot)) return null;
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(appRoot));
+        if (Path.GetPathRoot(full) is { } r && Path.TrimEndingDirectorySeparator(r) == full) return null;
+        if (!string.IsNullOrWhiteSpace(home) && Path.TrimEndingDirectorySeparator(Path.GetFullPath(home)) == full) return null;
+        return AppFolderNames.Contains(Path.GetFileName(full), StringComparer.Ordinal) ? full : null;
     }
 
     private static void Walk(string root, List<string> changed)

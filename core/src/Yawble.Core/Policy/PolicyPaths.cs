@@ -129,45 +129,116 @@ public static class HostPathCanonicalizer
     /// The canonical path, or null when it cannot be canonicalised (an unreadable link, a loop, a bad path). A security
     /// check on a queried path uses this and fails closed on null: comparing an uncanonicalised path against a
     /// canonicalised list misses through any symlink (macOS /var, /tmp, /etc; any symlinked folder on Linux).
+    /// On Linux and macOS a ".." is taken as the OS takes it: after a link it goes to the link's real parent, not back
+    /// lexically (l -> s/../y with s -> deep/dir is deep/y). Windows resolves ".." lexically, so there it is collapsed first.
     /// </summary>
-    public static string? TryCanonicalize(string path)
+    public static string? TryCanonicalize(string path) => TryCanonicalize(path, physicalDotDot: !OperatingSystem.IsWindows());
+
+    /// <summary>
+    /// <paramref name="physicalDotDot"/> true: the POSIX walk (each ".." in the path or in a link target goes to the real
+    /// parent of what has been resolved so far). False: the Windows rule (".." collapsed lexically before links are
+    /// followed). Exposed so the POSIX walk is tested on Windows too.
+    /// </summary>
+    internal static string? TryCanonicalize(string path, bool physicalDotDot)
     {
         try
         {
-            var full = Path.GetFullPath(path);
-            var links = 0;
-            while (true)
-            {
-                var root = Path.GetPathRoot(full) ?? "";
-                var parts = full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-                var current = root;
-                string? restart = null;
-                for (var i = 0; i < parts.Length; i++)
-                {
-                    var next = Path.Combine(current, parts[i]);
-                    FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
-                    if (info.LinkTarget is null && !info.Exists)
-                    {
-                        // The deepest existing parent is canonical; the missing tail is appended unchanged.
-                        return Path.Combine([current, .. parts[i..]]);
-                    }
-                    if (info.LinkTarget is { } target)
-                    {
-                        // Follow one link and start again from the root: the target may itself run through links.
-                        if (++links > MaxLinks) return null;
-                        var resolved = Path.IsPathRooted(target) ? target : Path.Combine(current, target);
-                        restart = Path.GetFullPath(Path.Combine([resolved, .. parts[(i + 1)..]]));
-                        break;
-                    }
-                    current = next;
-                }
-                if (restart is null) return current;
-                full = restart;
-            }
+            return physicalDotDot ? Physical(path) : Lexical(path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             return null;
         }
     }
+
+    private static string? Lexical(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var links = 0;
+        while (true)
+        {
+            var root = Path.GetPathRoot(full) ?? "";
+            var parts = Split(full[root.Length..]);
+            var current = root;
+            string? restart = null;
+            for (var i = 0; i < parts.Length; i++)
+            {
+                var next = Path.Combine(current, parts[i]);
+                var info = Info(next);
+                if (info.LinkTarget is null && !info.Exists)
+                {
+                    // The deepest existing parent is canonical; the missing tail is appended unchanged.
+                    return Path.Combine([current, .. parts[i..]]);
+                }
+                if (info.LinkTarget is { } target)
+                {
+                    // Follow one link and start again from the root: the target may itself run through links.
+                    if (++links > MaxLinks) return null;
+                    var resolved = Path.IsPathRooted(target) ? target : Path.Combine(current, target);
+                    restart = Path.GetFullPath(Path.Combine([resolved, .. parts[(i + 1)..]]));
+                    break;
+                }
+                current = next;
+            }
+            if (restart is null) return current;
+            full = restart;
+        }
+    }
+
+    /// <summary>
+    /// The POSIX walk: components are taken one at a time from a pending list. A link puts its target's components at
+    /// the front of the list (from the root for an absolute target, from the link's own folder for a relative one), and
+    /// ".." goes to the parent of the real folder reached so far.
+    /// </summary>
+    private static string? Physical(string path)
+    {
+        var full = Path.IsPathFullyQualified(path) ? path
+            : Path.IsPathRooted(path) ? Path.GetFullPath(path)
+            : Path.Combine(Directory.GetCurrentDirectory(), path);
+        var current = Path.GetPathRoot(full);
+        if (string.IsNullOrEmpty(current)) return null;
+        var pending = new List<string>(Split(full[current.Length..]));
+        var links = 0;
+        while (pending.Count > 0)
+        {
+            var part = pending[0];
+            pending.RemoveAt(0);
+            if (part == ".") continue;
+            if (part == "..")
+            {
+                current = Path.GetDirectoryName(current) ?? current; // ".." at the root stays at the root
+                continue;
+            }
+            var next = Path.Combine(current, part);
+            var info = Info(next);
+            if (info.LinkTarget is { } target)
+            {
+                if (++links > MaxLinks) return null;
+                var targetRoot = Path.IsPathRooted(target) ? Path.GetPathRoot(target) ?? "" : "";
+                if (targetRoot.Length > 0) current = targetRoot;
+                pending.InsertRange(0, Split(target[targetRoot.Length..]));
+                continue;
+            }
+            if (!info.Exists)
+            {
+                // The deepest existing folder is canonical and the missing tail is appended. A ".." left in the tail
+                // (from a link target) is collapsed and the result walked again, so a link it then leads to is followed.
+                List<string> tail = [part, .. pending];
+                if (!tail.Contains("..")) return Path.Combine([current, .. tail]);
+                if (++links > MaxLinks) return null;
+                var again = Path.GetFullPath(Path.Combine([current, .. tail]));
+                current = Path.GetPathRoot(again);
+                if (string.IsNullOrEmpty(current)) return null;
+                pending = [.. Split(again[current.Length..])];
+                continue;
+            }
+            current = next;
+        }
+        return current;
+    }
+
+    private static FileSystemInfo Info(string path) => Directory.Exists(path) ? new DirectoryInfo(path) : new FileInfo(path);
+
+    private static string[] Split(string relative) =>
+        relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 }

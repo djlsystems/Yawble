@@ -114,9 +114,10 @@ public sealed class DataFolderAccessTests : IDisposable
     public void ANewDataFolderIsMadeUserOnly_AndTheAppRootFolderItselfIsTightened()
     {
         SkipOnWindows();
-        var appRoot = Make("userData", Rwx | Wide, dir: true);
-        var teams = Make("userData/teams", Rwx | Wide, dir: true);
-        var clone = Make("userData/teams/t/members/m/repo/README.md", Rw | UnixFileMode.OtherRead);
+        // Named as the shell's own app folder (app-folder.ts): Yawble on macOS and Windows, yawble on Linux.
+        var appRoot = Make("Yawble", Rwx | Wide, dir: true);
+        var teams = Make("Yawble/teams", Rwx | Wide, dir: true);
+        var clone = Make("Yawble/teams/t/members/m/repo/README.md", Rw | UnixFileMode.OtherRead);
         var data = Path.Combine(appRoot, "data");
 
         DataFolderAccess.Secure(data, appRoot, _ => { });
