@@ -14,7 +14,8 @@ namespace Yawble.Core.Launch;
 /// person installed them; it is asked again at every launch (never cached across runs), so a CLI the person updated
 /// on the host is the one the next run gets. <paramref name="Folders"/> lists the host's folders for the CLI's config
 /// denials (tests pass a fake). <paramref name="ToolFoldersNow"/>, when set, is read at every launch in place of
-/// <paramref name="ToolFolders"/>.
+/// <paramref name="ToolFolders"/>. <paramref name="RealPath"/> finds the Linux resolver paths to mask
+/// (<see cref="LinuxResolverMasks.Present"/>; the real disk when null, tests pass a fake).
 /// </summary>
 public sealed record LaunchHost(
     TargetOs Os,
@@ -25,7 +26,8 @@ public sealed record LaunchHost(
     Func<string, string>? Canonicalize = null,
     IHostFolders? Folders = null,
     IReadOnlyList<string>? ToolFolders = null,
-    Func<IReadOnlyList<string>>? ToolFoldersNow = null);
+    Func<IReadOnlyList<string>>? ToolFoldersNow = null,
+    Func<string, string?>? RealPath = null);
 
 /// <summary>Host tools every run gets on PATH, read-only (<see cref="RunLayout.HostToolFolders"/>).</summary>
 public static class HostTools
@@ -370,7 +372,12 @@ public sealed class SandboxLauncher(
             string Root(string p) => host.Canonicalize is { } c ? c(p) : p;
             layout = RunLayout.Standard(host.Os, Root(host.Home), Root(host.AppDataRoot), Root(host.InstallDir),
                 new PolicyMember(member.Team, member.Name), member.Cli, cliInstall,
-                probe is null ? members.All() : [.. members.All(), .. probe.ExtraMembers]) with { HostToolFolders = host.ToolFoldersNow?.Invoke() ?? host.ToolFolders ?? [] };
+                probe is null ? members.All() : [.. members.All(), .. probe.ExtraMembers]) with
+                {
+                    HostToolFolders = host.ToolFoldersNow?.Invoke() ?? host.ToolFolders ?? [],
+                    // Looked at every launch: a resolver started or stopped on the host since the last run counts.
+                    ResolverMasks = host.Os == TargetOs.Linux ? LinuxResolverMasks.Present(host.RealPath ?? LinuxResolverMasks.RealPath) : [],
+                };
             // The team's shared view, once the host has made it (a member's first run makes it).
             if (synthetic is null && (host.Folders ?? DiskFolders.Instance).Exists(layout.SharedRepoCandidate))
                 layout = layout with { SharedRepo = layout.SharedRepoCandidate };

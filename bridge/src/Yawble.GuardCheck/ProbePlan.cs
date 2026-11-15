@@ -14,13 +14,16 @@ public sealed record TcpProbe(string Id, string Category, string Host, int Port)
 
 public sealed record DnsProbe(string Id, string Category, string Name);
 
+/// <summary>A connect(2) to a Unix socket on its path (Linux: the host resolver's sockets); nothing is sent.</summary>
+public sealed record UnixProbe(string Id, string Category, string Path);
+
 /// <summary>The gateway attempts: a host the gateway must refuse, an allowlisted host (optional), the vendor hosts.</summary>
 public sealed record GatewayProbe(string DeniedHost, string? AllowedHost, IReadOnlyList<string> VendorHosts);
 
 /// <summary>
 /// What the core asks the probe to try. Wire format (JSON, base64url on the command line), version 1:
 /// { "v":1, "nonce", "reads":[{id,category,path,mode,canary?}], "writes":[{id,category,path}],
-///   "tcp":[{id,category,host,port}], "dns":[{id,category,name}], "gateway":{deniedHost,allowedHost?,vendorHosts[]}|null,
+///   "tcp":[{id,category,host,port}], "dns":[{id,category,name}], "unix":[{id,category,path}], "gateway":{deniedHost,allowedHost?,vendorHosts[]}|null,
 ///   "hostPid":n|null, "scanDirs":[path], "keychainServices":[name] }
 /// </summary>
 public sealed record ProbePlan(
@@ -34,6 +37,9 @@ public sealed record ProbePlan(
     IReadOnlyList<string> ScanDirs,
     IReadOnlyList<string> KeychainServices)
 {
+    /// <summary>Absent from an older core's plan: none.</summary>
+    public IReadOnlyList<UnixProbe> Unix { get; init; } = [];
+
     public const int Version = 1;
 
     public static ProbePlan Parse(string json)
@@ -58,7 +64,10 @@ public sealed record ProbePlan(
             gateway,
             r.TryGetProperty("hostPid", out var pid) && pid.ValueKind == JsonValueKind.Number ? pid.GetInt32() : null,
             A(r, "scanDirs").Select(v => v.GetString()!).ToList(),
-            A(r, "keychainServices").Select(v => v.GetString()!).ToList());
+            A(r, "keychainServices").Select(v => v.GetString()!).ToList())
+        {
+            Unix = A(r, "unix").Select(e => new UnixProbe(S(e, "id"), S(e, "category"), S(e, "path"))).ToList(),
+        };
     }
 }
 

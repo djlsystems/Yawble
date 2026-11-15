@@ -13,9 +13,9 @@ namespace Yawble.Core.Tests.Agents;
 
 /// <summary>
 /// Host sign-in under a REAL sandbox with the REAL claude and grok of this host and the person's REAL home
-/// (HostSignInModes, as the core wires it): the CLI's own sign-in file is visible at its host path, readable (opened for
-/// zero bytes, never read) and NOT writable; a dummy file the test plants beside it in the same config folder, and the
-/// rest of the home, are not reachable; the host's sign-in file is unchanged afterwards (size and time, never content).
+/// (HostSignInModes, as the core wires it): the gateway holds the CLI's own sign-in, so the sandbox is granted none of it
+/// (no readable content, not writable, no variable pointing at it); a dummy file the test plants beside it in the same
+/// config folder, and the rest of the home, are not reachable; the host's sign-in file is unchanged afterwards (size and time, never content).
 /// The guardrail check under host sign-in passes against the real home. No value of a sign-in is read, copied or printed.
 /// <para>The real prompt (a model call on the person's account) runs only with YAWBLE_REAL_SIGNIN_PROMPT=1.</para>
 /// <para>Skipped when the CLI is not installed or not signed in on this host, or a proxy-mode sandbox cannot run here.</para>
@@ -71,12 +71,21 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
     [GeneratedRegex(@"(sk-ant-[A-Za-z0-9_\-]+|xai-[A-Za-z0-9_\-]{8,}|eyJ[A-Za-z0-9_\-\.]{20,}|[A-Za-z0-9_\-]{40,})")]
     private static partial Regex TokenLike();
 
+    /// <summary>
+    /// Host sign-in is held by the gateway (<see cref="AgentPresets.HostSignInMode"/>: ClaudeGatewaySignIn, GrokGatewaySignIn):
+    /// the CLI's sign-in file stays where the CLI keeps it on the host (Claude Code on Linux: $CLAUDE_CONFIG_DIR/.credentials.json,
+    /// default ~/.claude/.credentials.json, a plaintext file, no keyring; Grok: ~/.grok/auth.json), the core reads it for the
+    /// gateway, and the sandbox is granted none of it: not the file, not its folder, and no variable points at it.
+    /// <para>This replaces the older read-only-grant test (TheSignInFileIsReadableReadOnlyAndNothingElseOfItsFolderIs), which
+    /// expected the file in readonlyPaths and failed on a signed-in Fedora host for exactly that reason: the grant is gone by
+    /// design, the detection was right.</para>
+    /// </summary>
     [Theory]
     [InlineData("claude")]
     [InlineData("grok")]
-    public async Task TheSignInFileIsReadableReadOnlyAndNothingElseOfItsFolderIs(string id)
+    public async Task TheSignInFileIsHeldByTheGatewayAndNothingOfItsFolderIsReachable(string id)
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "a POSIX-shell probe with Linux error texts; on Windows TheGuardrailCheckPassesWithTheHostSignInGranted covers the read-only sign-in");
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "a POSIX-shell probe; on Windows TheGuardrailCheckPassesWithTheHostSignInGranted covers the sign-in");
         var (cli, detector, signIn) = SignedIn(id);
         var folder = Path.GetDirectoryName(signIn)!;
         var before = (new FileInfo(signIn).Length, File.GetLastWriteTimeUtc(signIn));
@@ -91,10 +100,10 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
             var probe = new ScriptProbe(id, l => CommandLine.Join(l.Os, ["/bin/sh", "-c", string.Join("\n",
             [
                 $"echo \"@pointer=${variable}\"",
-                // Readable: opened, zero bytes read.
-                $"head -c 0 {Q(signIn)}; echo \"@open_signin=$?\"",
+                // Not readable: either refused, or the sandbox's empty mask (a byte count only, never the content).
+                $"echo \"@signin_bytes=$(cat {Q(signIn)} 2>/dev/null | wc -c | tr -d ' ')\"",
                 // Not writable: a zero-byte append (nothing written even if it worked), in a subshell.
-                $"( : >> {Q(signIn)} ) 2>\"$TMPDIR/a.err\"; echo \"@append_signin=$?\"; echo \"@append_signin_error=$(head -c 200 \"$TMPDIR/a.err\")\"",
+                $"( : >> {Q(signIn)} ) 2>/dev/null; echo \"@append_signin=$?\"",
                 $"touch {Q(Path.Combine(folder, marker))} 2>/dev/null; echo \"@create_beside=$?\"",
                 $"mv {Q(signIn)} {Q(signIn + ".moved")} 2>/dev/null; echo \"@rename_signin=$?\"",
                 // The dummy beside it: not visible, not readable.
@@ -113,13 +122,16 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
 
             var fs = probe.Request!["filesystem"]!;
             List<string> L(string k) => fs[k]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
-            Assert.Contains(HostPathCanonicalizer.Canonicalize(signIn), L("readonlyPaths"));
-            Assert.DoesNotContain(L("readwritePaths"), g => g.StartsWith(HostPathCanonicalizer.Canonicalize(folder), StringComparison.Ordinal));
-            Assert.Equal(id == "claude" ? folder : signIn, o["pointer"]);
+            // Nothing of the sign-in's folder is granted (grok's install folder ~/.grok/downloads aside), and no variable
+            // points the CLI at the host's file.
+            var canonFolder = HostPathCanonicalizer.Canonicalize(folder);
+            bool IsInstall(string g) => cli.ReadOnlyFolders.Any(f => HostPathCanonicalizer.Canonicalize(f) == g);
+            Assert.DoesNotContain(L("readonlyPaths"), g => (g == canonFolder || g.StartsWith(canonFolder + "/", StringComparison.Ordinal)) && !IsInstall(g));
+            Assert.DoesNotContain(L("readwritePaths"), g => g == canonFolder || g.StartsWith(canonFolder + "/", StringComparison.Ordinal));
+            Assert.Equal("", o["pointer"]);
 
-            Assert.Equal("0", o["open_signin"]);
+            Assert.Equal("0", o["signin_bytes"]);
             Assert.NotEqual("0", o["append_signin"]);
-            Assert.Contains("Read-only file system", o["append_signin_error"]);
             // A create beside it may succeed INSIDE the sandbox only: the sandbox makes the folders on the way to a grant
             // as writable tmpfs mount points. It never reaches the host (asserted below).
             Assert.NotEqual("0", o["rename_signin"]);
@@ -127,15 +139,14 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
             Assert.Equal("", o["dummy_content"]);
             Assert.NotEqual("0", o["open_claude_json"]);
             Assert.NotEqual("0", o["open_sibling"]);
-            // Every name the sandbox sees in the folder is the sign-in itself, an empty mask the sandbox made for a denied entry
-            // (names are visible, contents are not), or the sandbox's own file that never reached the host.
+            // Every name the sandbox sees in the folder is an empty mask the sandbox made for a denied entry (names are
+            // visible, contents are not), the install (grok: ~/.grok/downloads), or the sandbox's own file that never reached the host.
             var denied = L("deniedPaths");
             foreach (var name in o.GetValueOrDefault("folder_list", "").Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
                 var host = HostPathCanonicalizer.Canonicalize(Path.Combine(folder, name));
-                var install = cli.ReadOnlyFolders.Any(f => HostPathCanonicalizer.Canonicalize(f) == host); // grok: ~/.grok/downloads
-                Assert.True(host == HostPathCanonicalizer.Canonicalize(signIn) || denied.Contains(host) || install || name == marker,
-                    $"{folder}/{name} is visible in the sandbox and is neither the sign-in, the install, nor a mask");
+                Assert.True(denied.Contains(host) || IsInstall(host) || name == marker,
+                    $"{folder}/{name} is visible in the sandbox and is neither the install nor a mask");
             }
             // The host's sign-in is unchanged and nothing appeared beside it.
             Assert.Equal(before, (new FileInfo(signIn).Length, File.GetLastWriteTimeUtc(signIn)));
