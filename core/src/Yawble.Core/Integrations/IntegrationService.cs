@@ -215,19 +215,44 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or KeyNotFoundException) { return null; }
     }
 
-    /// <summary>Opens a terminal window on this computer for the person to sign a CLI in (Windows only). Never from an agent: only the catalog and the stored path are used.</summary>
+    /// <summary>The OS whose terminal sign-in opens (this computer's; a test sets another).</summary>
+    public Policy.TargetOs TerminalOs { get; set; } = Policy.TargetOsExtensions.Host;
+
+    /// <summary>Finds a terminal program on the PATH (Linux); a test sets a fake.</summary>
+    public Func<string, string?> FindTerminal { get; set; } = CliRunner.Find;
+
+    /// <summary>Starts the terminal; a test sets a fake so no real window ever opens.</summary>
+    public Action<TerminalStart> StartTerminal { get; set; } = LaunchTerminal;
+
+    /// <summary>Opens a terminal window on this computer for the person to sign a CLI in. Never from an agent: only the catalog and the stored path are used.</summary>
     private JsonNode OpenLogin(string name)
     {
         var entry = CliCatalog.Of(name) ?? CliCatalog.Generic(CheckName(name));
         var path = Rows().FirstOrDefault(r => string.Equals(r.Name, entry.Name, StringComparison.OrdinalIgnoreCase))?.Path ?? CliRunner.Find(entry.Name);
-        var start = LoginTerminal.Build(path, entry, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
-        if (!OperatingSystem.IsWindows())
-            throw new RpcException("unsupported", $"Opening a terminal is Windows-only: run '{start.Command ?? entry.Name}' in your own terminal");
-        using var _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(start.FileName, start.Arguments)
+        TerminalStart start;
+        try { start = LoginTerminal.Build(path, entry, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), TerminalOs, FindTerminal, Path.GetTempPath()); }
+        catch (NoTerminalException e) { throw new RpcException("unsupported", e.Message); }
+        try { StartTerminal(start); }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = start.WorkingDirectory,
-        });
+            var what = start.Command is null ? $"open your own terminal in {start.WorkingDirectory}" : $"run '{start.Command}' in your own terminal in {start.WorkingDirectory}";
+            throw new RpcException("unsupported", $"Could not open a terminal ({e.Message}): {what}");
+        }
         return new JsonObject { ["ok"] = true, ["command"] = start.Command };
+    }
+
+    /// <summary>The real start: writes the .command script (owner-only, executable) when there is one, then starts the program.</summary>
+    private static void LaunchTerminal(TerminalStart start)
+    {
+        if (start.Script is { } script)
+        {
+            File.WriteAllText(script.Path, script.Text);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(script.Path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        var info = new System.Diagnostics.ProcessStartInfo(start.FileName) { UseShellExecute = false, WorkingDirectory = start.WorkingDirectory };
+        if (start.ArgumentList.Count > 0) foreach (var a in start.ArgumentList) info.ArgumentList.Add(a);
+        else { info.Arguments = start.Arguments; info.CreateNoWindow = true; }
+        using var _ = System.Diagnostics.Process.Start(info);
     }
 
     /// <summary>What a status command's output says, as stored and shown: "signed in: ..." or "not signed in: ...".</summary>

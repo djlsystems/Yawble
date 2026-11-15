@@ -1,3 +1,4 @@
+using Yawble.Core.Companion;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -95,7 +96,7 @@ public sealed class BackupService
     private BackupInfo BackupLocked(SqliteConnection connection, string reason)
     {
         if (!Regex.IsMatch(reason, "^[a-z0-9][a-z0-9_.-]*$")) throw new ArgumentException($"'{reason}' is not a usable backup reason");
-        Directory.CreateDirectory(BackupsDir);
+        UserOnlyFile.CreatePrivateDirectory(BackupsDir);
         var when = _now().ToUniversalTime();
         var name = FileName(when, reason);
         var target = Path.Combine(BackupsDir, name);
@@ -110,6 +111,7 @@ public sealed class BackupService
                 cmd.ExecuteNonQuery();
             }
             File.Move(partial, target);
+            UserOnlyFile.Tighten(target); // 0600 on POSIX, as everything in the data folder (DataFolderAccess)
             WriteSidecar(connection, target, when, reason);
         }
         catch
@@ -147,6 +149,7 @@ public sealed class BackupService
             connections = _connections().Select(c => new { id = c.Id, name = c.Name, kind = c.Kind, secretFields = c.SecretFields, secretFieldsUnknown = c.SecretFieldsUnknown is { Count: > 0 } u ? u : null }).ToArray(),
         };
         File.WriteAllText(SidecarOf(target), JsonSerializer.Serialize(sidecar, new JsonSerializerOptions { WriteIndented = true }));
+        UserOnlyFile.Tighten(SidecarOf(target));
     }
 
     private static string SidecarOf(string dbFile) => Path.ChangeExtension(dbFile, ".json");
@@ -268,7 +271,9 @@ public sealed class BackupService
             DeleteIfExists(ResultFile); // the last outcome is about an earlier restore
             File.Copy(source, partial, overwrite: false);
             File.Move(partial, StagedDb);
+            UserOnlyFile.Tighten(StagedDb);
             File.WriteAllText(StagedNote, backup);
+            UserOnlyFile.Tighten(StagedNote);
         }
         finally { _gate.Release(); }
         _log($"backup: {backup} staged; restarting to restore it");
@@ -330,8 +335,8 @@ public sealed class BackupService
                 }
                 catch (SqliteException) { /* a damaged or held database is moved aside as it is, if it can be */ }
                 SqliteConnection.ClearAllPools();
-                Directory.CreateDirectory(BackupsDir);
-                aside = Path.Combine(BackupsDir, FileName(_now(), "before-restore"));
+                UserOnlyFile.CreatePrivateDirectory(BackupsDir);
+                aside =Path.Combine(BackupsDir, FileName(_now(), "before-restore"));
                 try
                 {
                     // The -wal and -shm go with it, so nothing a failed checkpoint left behind is lost.
@@ -345,7 +350,7 @@ public sealed class BackupService
                     Record(name, RestoreResult.Pending, $"the database was still in use, so it was not replaced ({e.Message}); the next start tries again");
                     return null;
                 }
-                try { File.WriteAllText(SidecarOf(aside), JsonSerializer.Serialize(new { app = CoreInfo.ProductName, version = CoreInfo.Version, commit = CoreInfo.Commit, reason = "before-restore", restoredFrom = name })); }
+                try { File.WriteAllText(SidecarOf(aside), JsonSerializer.Serialize(new { app = CoreInfo.ProductName, version = CoreInfo.Version, commit = CoreInfo.Commit, reason = "before-restore", restoredFrom = name })); UserOnlyFile.Tighten(SidecarOf(aside)); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { _log($"backup: no sidecar for {aside}: {e.Message}"); }
             }
             else
