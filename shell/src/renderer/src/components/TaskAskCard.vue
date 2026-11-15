@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vChange } from '../remoteAccess';
 import { ref } from 'vue';
 import BusyLabel from './BusyLabel.vue';
 import type { IntegrationAsk } from '../../../shared/api';
@@ -53,9 +54,9 @@ const short = (s: string | null | undefined) => (s ?? '').slice(0, 8);
     </template>
     <div class="row">
       <input v-model="note" class="grow" placeholder="A note if you decline (optional)" />
-      <button class="primary" :disabled="busy" data-test="task-ask-once" @click="emit('once')"><BusyLabel :busy="pending === 'once'" text="Approving…">Run once</BusyLabel></button>
-      <button :disabled="busy" data-test="task-ask-always" title="Run now, and let this team run this task without asking while its definition and pinned files stay as shown" @click="emit('always')"><BusyLabel :busy="pending === 'always'" text="Approving…">Always for this team</BusyLabel></button>
-      <button :disabled="busy" data-test="task-ask-decline" @click="emit('decline', note)"><BusyLabel :busy="pending === 'decline'" text="Declining…">Decline</BusyLabel></button>
+      <button class="primary" :disabled="busy" v-change data-test="task-ask-once" @click="emit('once')"><BusyLabel :busy="pending === 'once'" text="Approving…">Run once</BusyLabel></button>
+      <button :disabled="busy" v-change data-test="task-ask-always" title="Run now, and let this team run this task without asking while its definition and pinned files stay as shown" @click="emit('always')"><BusyLabel :busy="pending === 'always'" text="Approving…">Always for this team</BusyLabel></button>
+      <button :disabled="busy" v-change data-test="task-ask-decline" @click="emit('decline', note)"><BusyLabel :busy="pending === 'decline'" text="Declining…">Decline</BusyLabel></button>
     </div>
   </div>
 </template>
