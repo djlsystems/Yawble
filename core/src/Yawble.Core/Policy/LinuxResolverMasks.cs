@@ -18,7 +18,20 @@ namespace Yawble.Core.Policy;
 /// 127.0.0.1:53, which inside the sandbox is the sandbox's own loopback: never the host's (Ubuntu's stub 127.0.0.53 is the
 /// host's loopback, which the private namespace cannot reach either). The sandbox's request contract can only mask
 /// these files, not bind other content over them; an empty file is the closest to "hosts: files dns" and "no nameserver".
-/// Plain DNS to any nameserver is closed by the sandbox's proxy-only firewall in any case.
+/// Plain DNS to any nameserver is closed by the sandbox's proxy-only firewall in any case; the guardrail check proves it
+/// for slirp4netns's own nameservers (B038: dns.slirp-udp, dns.slirp-tcp and dns.gateway-udp, raw queries to 10.0.2.3:53
+/// and 10.0.2.2:53 that never read resolv.conf) and for the user's session bus (dbus.user).
+///
+/// Users who exist only in sssd or LDAP (B038 decision: left as is). With nsswitch.conf empty, glibc looks users up in
+/// /etc/passwd and /etc/group only, so such a user has no passwd entry inside: getpwuid fails, Node's os.userInfo()
+/// throws, `id -un` prints the number. The launcher does not write a minimal passwd/group/nsswitch for the sandbox,
+/// because: (1) the sandbox's request contract can only grant a host path at its own place or mask it, never put a file
+/// of the launcher's over /etc/passwd or /etc/nsswitch.conf, so it would mean changing the host's /etc; (2) giving
+/// the switch "passwd: sss" back would reopen a host route of exactly this kind, sssd's socket in /var/lib/sss/pipes;
+/// (3) the usual paths do not need passwd: HOME is set to the workspace (os.homedir() and glibc-free tools read it
+/// first), git takes its identity from config, and nothing in the sandbox logs in or uses ssh. Revisit if a CLI is seen
+/// to fail on a missing passwd entry, or if the sandbox gains a bind of launcher content (then: files only, the run's
+/// uid only).
 /// </summary>
 public static class LinuxResolverMasks
 {

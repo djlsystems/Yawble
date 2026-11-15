@@ -36,7 +36,7 @@ public class GuardrailResolverProbeTests
             if (id == "write.clone") File.WriteAllText(w["path"]!.GetValue<string>(), plan["nonce"]!.GetValue<string>());
             lines.Add($"{{\"id\":\"{id}\",\"category\":\"t\",\"outcome\":\"allowed\",\"evidence\":\"x\",\"sandboxWrote\":true}}");
         }
-        foreach (var id in Ids(plan, "tcp").Concat(Ids(plan, "dns")).Concat(Ids(plan, "unix")))
+        foreach (var id in Ids(plan, "tcp").Concat(Ids(plan, "dns")).Concat(Ids(plan, "unix")).Concat(Ids(plan, "dnsRaw")))
             lines.Add(Line(id, allowed.Contains(id) ? "allowed" : "blocked"));
         return string.Join('\n', lines);
     }
@@ -57,7 +57,8 @@ public class GuardrailResolverProbeTests
             return;
         }
         Assert.Contains(("net.dns-varlink", LinuxResolverMasks.ResolvedVarlinkSocket), unix);
-        Assert.Equal(LinuxResolverMasks.Sockets.Select(s => s.Id), unix.Select(u => u.Id));
+        // The resolver's sockets, then the user's session bus (B038).
+        Assert.Equal(LinuxResolverMasks.Sockets.Select(s => s.Id).Append(GuardrailCheck.UserBusProbe), unix.Select(u => u.Id));
         foreach (var (id, _) in LinuxResolverMasks.Sockets)
         {
             var r = report.Results.Single(x => x.Id == id);

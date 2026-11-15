@@ -17,13 +17,22 @@ public sealed record DnsProbe(string Id, string Category, string Name);
 /// <summary>A connect(2) to a Unix socket on its path (Linux: the host resolver's sockets); nothing is sent.</summary>
 public sealed record UnixProbe(string Id, string Category, string Path);
 
+/// <summary>
+/// A raw DNS query (type A for <paramref name="Name"/>) sent straight to a nameserver address, around the resolver
+/// library: Transport "udp" (allowed = an answer with the query's id came back) or "tcp" (allowed = the connect
+/// succeeded; the answer, if any, is named in the evidence). Linux: slirp4netns's forwarder 10.0.2.3, which forwards to
+/// the host's own resolver, and 10.0.2.2:53, the host's loopback.
+/// </summary>
+public sealed record DnsRawProbe(string Id, string Category, string Host, int Port, string Transport, string Name);
+
 /// <summary>The gateway attempts: a host the gateway must refuse, an allowlisted host (optional), the vendor hosts.</summary>
 public sealed record GatewayProbe(string DeniedHost, string? AllowedHost, IReadOnlyList<string> VendorHosts);
 
 /// <summary>
 /// What the core asks the probe to try. Wire format (JSON, base64url on the command line), version 1:
 /// { "v":1, "nonce", "reads":[{id,category,path,mode,canary?}], "writes":[{id,category,path}],
-///   "tcp":[{id,category,host,port}], "dns":[{id,category,name}], "unix":[{id,category,path}], "gateway":{deniedHost,allowedHost?,vendorHosts[]}|null,
+///   "tcp":[{id,category,host,port}], "dns":[{id,category,name}], "unix":[{id,category,path}],
+///   "dnsRaw":[{id,category,host,port,transport:"udp"|"tcp",name}], "gateway":{deniedHost,allowedHost?,vendorHosts[]}|null,
 ///   "hostPid":n|null, "scanDirs":[path], "keychainServices":[name] }
 /// </summary>
 public sealed record ProbePlan(
@@ -39,6 +48,9 @@ public sealed record ProbePlan(
 {
     /// <summary>Absent from an older core's plan: none.</summary>
     public IReadOnlyList<UnixProbe> Unix { get; init; } = [];
+
+    /// <summary>Absent from an older core's plan: none.</summary>
+    public IReadOnlyList<DnsRawProbe> DnsRaw { get; init; } = [];
 
     public const int Version = 1;
 
@@ -67,6 +79,8 @@ public sealed record ProbePlan(
             A(r, "keychainServices").Select(v => v.GetString()!).ToList())
         {
             Unix = A(r, "unix").Select(e => new UnixProbe(S(e, "id"), S(e, "category"), S(e, "path"))).ToList(),
+            DnsRaw = A(r, "dnsRaw").Select(e => new DnsRawProbe(S(e, "id"), S(e, "category"), S(e, "host"), e.GetProperty("port").GetInt32(),
+                S(e, "transport"), S(e, "name"))).ToList(),
         };
     }
 }

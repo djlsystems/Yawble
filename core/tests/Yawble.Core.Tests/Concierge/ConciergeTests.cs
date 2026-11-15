@@ -175,8 +175,9 @@ public class ConciergeTests
         await Wait.UntilAsync(async () =>
         {
             conversation = await service.DispatchAsync("concierge.get", new JsonObject { ["id"] = id }, Ct);
-            return conversation!["messages"]!.AsArray().Count == 2;
-        }, "the answer kept");
+            // The answer is kept a moment before the turn is cleared: wait for both.
+            return conversation!["messages"]!.AsArray().Count == 2 && conversation["turn"] is null;
+        }, "the answer kept and the turn over");
 
         Assert.Equal(ConciergeService.Team, launched!.Team);
         Assert.Equal(ConciergeService.MemberOf(id), launched.Member);
