@@ -261,7 +261,7 @@ public class GuardrailServiceTests
         using var core = Process.Start(psi)!;
         try
         {
-            var ready = await core.StandardOutput.ReadLineAsync(Ct).AsTask().WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            var ready = await CoreLaunch.ReadReadyLineAsync(core.StandardOutput, Ct).WaitAsync(TimeSpan.FromSeconds(30), Ct);
             Assert.Equal($"YAWBLE-READY {address}", ready);
             await using var client = await TestIpcClient.ConnectAsync(address, Ct);
             await client.AuthAsync(token, Ct);

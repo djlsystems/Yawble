@@ -24,6 +24,16 @@ internal static class CoreLaunch
         return home;
     }
 
+    /// <summary>
+    /// The core's READY line: the first stdout line that is not YAWBLE-STARTING (printed once the core holds its data folder).
+    /// Null when stdout ends first.
+    /// </summary>
+    public static async Task<string?> ReadReadyLineAsync(StreamReader stdout, CancellationToken ct)
+    {
+        while (await stdout.ReadLineAsync(ct) is { } line)
+            if (line != "YAWBLE-STARTING") return line;
+        return null;
+    }
     /// <summary>The temp homes made here, removed when the test run ends (each core has exited by then).</summary>
     private static readonly List<string> Made = [];
 

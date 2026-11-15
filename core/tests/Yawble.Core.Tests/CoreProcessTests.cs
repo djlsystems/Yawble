@@ -34,7 +34,7 @@ public class CoreProcessTests
         using var core = Process.Start(start)!;
         try
         {
-            var ready = await core.StandardOutput.ReadLineAsync(Ct).AsTask().WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            var ready = await CoreLaunch.ReadReadyLineAsync(core.StandardOutput, Ct).WaitAsync(TimeSpan.FromSeconds(30), Ct);
             Assert.Equal($"YAWBLE-READY {address}", ready);
 
             await using var client = await TestIpcClient.ConnectAsync(address, Ct);
@@ -81,7 +81,7 @@ public class CoreProcessTests
         using var core = Process.Start(start)!;
         try
         {
-            var ready = await core.StandardOutput.ReadLineAsync(Ct).AsTask().WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            var ready = await CoreLaunch.ReadReadyLineAsync(core.StandardOutput, Ct).WaitAsync(TimeSpan.FromSeconds(30), Ct);
             Assert.Equal($"YAWBLE-READY {address}", ready);
 
             // Written before READY: a client started as soon as the window is up finds it.
@@ -113,6 +113,68 @@ public class CoreProcessTests
             if (!core.HasExited) core.Kill(entireProcessTree: true);
             try { Directory.Delete(dataDir, true); } catch (IOException) { }
             try { TestFiles.DeleteTree(Path.GetDirectoryName(home)!); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [Fact]
+    public async Task ASecondCoreOnTheSameDataFolderExitsWithCode5AndTheHoldersPid_AndEachRemovesItsLaunchFolder()
+    {
+        var token = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
+        var dataDir = Directory.CreateTempSubdirectory("yawble-data-").FullName;
+        // POSIX: the shell's layout, a yawble-XXXXXX folder holding core.sock (in a base of our own, never the real runtime
+        // folder). Windows: pipes, no folder.
+        var runtimeBase = Directory.CreateTempSubdirectory("yawble-rtbase-").FullName;
+        string Address(string id)
+        {
+            if (OperatingSystem.IsWindows()) return IpcEndpoint.NewAddress(dataDir);
+            var dir = Path.Combine(runtimeBase, "yawble-" + id);
+            Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            return Path.Combine(dir, "core.sock");
+        }
+        Process Start(string address)
+        {
+            var psi = new ProcessStartInfo("dotnet")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                ArgumentList = { Path.Combine(AppContext.BaseDirectory, "yawble-core.dll"), "--ipc", address, "--data-dir", dataDir, "--no-control" },
+                Environment = { ["YAWBLE_IPC_TOKEN"] = token },
+            };
+            CoreLaunch.IsolateCompanionHome(psi);
+            return Process.Start(psi)!;
+        }
+        var firstAddress = Address("first1");
+        var secondAddress = Address("secnd2");
+        using var first = Start(firstAddress);
+        Process? second = null;
+        try
+        {
+            Assert.Equal("YAWBLE-STARTING", await first.StandardOutput.ReadLineAsync(Ct).AsTask().WaitAsync(TimeSpan.FromSeconds(30), Ct));
+            Assert.Equal($"YAWBLE-READY {firstAddress}", await CoreLaunch.ReadReadyLineAsync(first.StandardOutput, Ct).WaitAsync(TimeSpan.FromSeconds(30), Ct));
+
+            second = Start(secondAddress);
+            var stderr = second.StandardError.ReadToEndAsync(Ct);
+            var stdout = second.StandardOutput.ReadToEndAsync(Ct);
+            await second.WaitForExitAsync(Ct).WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            Assert.Equal(Yawble.Core.Lifetime.DataFolderLock.InUseExitCode, second.ExitCode);
+            Assert.Contains($"fatal: another Yawble is using this data folder (pid {first.Id})", await stderr);
+            Assert.DoesNotContain("YAWBLE-", await stdout); // never STARTING, never READY
+            if (!OperatingSystem.IsWindows()) Assert.False(Directory.Exists(Path.GetDirectoryName(secondAddress)));
+
+            first.StandardInput.Close();
+            await first.WaitForExitAsync(Ct).WaitAsync(TimeSpan.FromSeconds(15), Ct);
+            Assert.Equal(0, first.ExitCode);
+            Assert.False(File.Exists(Path.Combine(dataDir, Yawble.Core.Lifetime.DataFolderLock.PidFileName)));
+            if (!OperatingSystem.IsWindows()) Assert.False(Directory.Exists(Path.GetDirectoryName(firstAddress))); // a clean exit
+        }
+        finally
+        {
+            if (!first.HasExited) first.Kill(entireProcessTree: true);
+            if (second is { HasExited: false }) second.Kill(entireProcessTree: true);
+            second?.Dispose();
+            try { Directory.Delete(dataDir, true); } catch (IOException) { }
+            try { Directory.Delete(runtimeBase, true); } catch (IOException) { }
         }
     }
 
