@@ -126,10 +126,11 @@ public class TeamBranchBlockingGapTests
         Assert.DoesNotContain("Could not read", report.Reason);
     }
 
-    /// <summary>Spec: the shared repo (the team's shared view). Its members/docs refuses the start before the view is
-    /// refreshed (no transport is reached), and the team repository is unchanged.</summary>
+    /// <summary>Card 171: the shared view follows the repository, so a members/docs only it has (deleted in the repository
+    /// since) does not refuse the start with a branch the Git dialog cannot delete: the refresh after the checks prunes it.
+    /// (Here the start may still fail later on local transport in a sandbox; never with the blocked refusal.)</summary>
     [Fact]
-    public async Task ASharedViewBlocker_FailsTheStartPlainly_BeforeAnyTransport()
+    public async Task AStaleSharedViewBlocker_DoesNotRefuseTheStart()
     {
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team("Docs");
@@ -137,14 +138,10 @@ public class TeamBranchBlockingGapTests
         var shared = f.Repos.SharedRepoPath("Docs");
         CopyDir(Path.Combine(repo.Path, ".git"), shared);
         AgentGit.Host(shared, "update-ref", "refs/heads/members/docs", AgentGit.Host(repo.Path, "rev-parse", "main"));
-        var before = Refs(repo.Path);
 
-        var e = await Assert.ThrowsAsync<MemberBranchBlockedException>(() => f.Repos.PrepareAsync(ada, Ct));
+        var e = await Record.ExceptionAsync(() => f.Repos.PrepareAsync(ada, Ct));
 
-        AssertPlain(e.Message, "members/docs", "shared view");
-        Assert.Equal(before, Refs(repo.Path));
-        Assert.Contains("refs/heads/members/docs ", Refs(shared));
-        Assert.Null(f.Repos.Row(ada.Id));
+        Assert.IsNotType<MemberBranchBlockedException>(e);
     }
 
     /// <summary>A Manager (team/docs) is never blocked by members/docs: its start does not run the check.</summary>
