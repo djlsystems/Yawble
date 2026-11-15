@@ -201,6 +201,65 @@ describe('NetworkAsks', () => {
     w.unmount();
   });
 
+  it('AnswerAll_ShowsOnlyForTwoOrMoreItems', async () => {
+    let pending = [ask()];
+    const { api, emit } = fakeApi({ 'network.asks': () => pending });
+    const w = mount(NetworkAsks, { props: { api, pollMs: 60_000, banner: true } });
+    await flushPromises();
+    expect(w.find('[data-test=network-asks-bulk]').exists()).toBe(false);
+    pending = [ask(), ask({ id: 8, host: 'registry.npmjs.org', memberName: 'TesterJo', member: 'Alpha/TesterJo' })];
+    emit('network.asksChanged');
+    await flushPromises();
+    expect(w.findAll('[data-test=network-asks-bulk] button').map((b) => b.text()))
+      .toEqual(['Allow all for their agents', 'Allow all for their teams', 'Allow all everywhere', 'Deny all']);
+    w.unmount();
+  });
+
+  it.each(['agent', 'team', 'everywhere', 'deny'])('AnswerAll_%s_ArmsThenConfirmAnswersEveryItemAndEveryIdOfAGroup', async (choice) => {
+    let pending = [
+      ask({ id: 1, host: 'crl3.digicert.com', domain: 'digicert.com', domainPattern: '*.digicert.com' } as any),
+      ask({ id: 2, host: 'ocsp.digicert.com', domain: 'digicert.com', domainPattern: '*.digicert.com' } as any),
+      ask({ id: 3, host: 'registry.npmjs.org', memberName: 'TesterJo', member: 'Alpha/TesterJo' }),
+    ];
+    const { api, calls } = fakeApi({
+      'network.asks': () => pending,
+      'network.answer': (p) => { const ids = p.ids ?? [p.id]; pending = pending.filter((a) => !ids.includes(a.id)); return answered(p.choice); },
+    });
+    const w = mount(NetworkAsks, { props: { api, pollMs: 60_000, banner: true } });
+    await flushPromises();
+    await w.get(`[data-test=network-asks-all-${choice}]`).trigger('click');
+    expect(calls.some((c) => c.method === 'network.answer')).toBe(false); // one click only arms it
+    expect(w.get('[data-test=network-asks-all-says]').text()).toContain('all 2 requests');
+    await w.get('[data-test=network-asks-all-confirm]').trigger('click');
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'network.answer').map((c) => c.params))
+      .toEqual([{ id: 1, choice, ids: [1, 2] }, { id: 3, choice }]); // never a domain allow
+    expect(w.find('[data-test=network-asks]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('AnswerAll_CancelSendsNothing_AndAFailureOrSkipIsSaid', async () => {
+    const pending = [ask({ id: 1 }), ask({ id: 2, host: 'x.example', memberName: 'TesterJo', member: 'Alpha/TesterJo' }),
+      ask({ id: 3, host: 'y.example', memberName: 'Ana', member: 'Alpha/Ana', choices: ['agent', 'deny'] })];
+    const { api, calls } = fakeApi({
+      'network.asks': () => pending,
+      'network.answer': (p) => { if (p.id === 2) throw new Error('refused by the core'); return answered(p.choice); },
+    });
+    const w = mount(NetworkAsks, { props: { api, pollMs: 60_000, banner: true } });
+    await flushPromises();
+    await w.get('[data-test=network-asks-all-team]').trigger('click');
+    await w.get('[data-test=network-asks-all-cancel]').trigger('click');
+    expect(w.find('[data-test=network-asks-all-team]').exists()).toBe(true);
+    await w.get('[data-test=network-asks-all-team]').trigger('click');
+    await w.get('[data-test=network-asks-all-confirm]').trigger('click');
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'network.answer').map((c) => c.params.id)).toEqual([1, 2]);
+    const err = w.get('[data-test=network-asks-all-error]').text();
+    expect(err).toContain('1 could not be answered (refused by the core)');
+    expect(err).toContain('1 skipped');
+    w.unmount();
+  });
+
   it('AnOlderCoreWithoutNetworkAsks_ShowsNothing', async () => {
     const { api } = fakeApi({});
     const w = mount(NetworkAsks, { props: { api, pollMs: 60_000, banner: true } });
