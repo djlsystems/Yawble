@@ -2,9 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { NetworkAsk, YawbleApi } from '../../../shared/api';
 import NetworkAskCard from './NetworkAskCard.vue';
+import { groupAsks } from '../networkAskGroups';
 
 /**
- * The waiting network asks in Needs you (network.asks, pending only): one card per team, member and host. Refreshed on
+ * The waiting network asks in Needs you (network.asks, pending only): one card per team, member and registrable domain
+ * (one member's crl3.digicert.com and ocsp.digicert.com are one item, answered together; networkAskGroups.ts). Refreshed on
  * network.asksChanged (an ask raised or answered, here or in another view) and on a slow poll (the count of a repeated
  * refusal changes without an event). `banner`: the window-wide strip above every view (App.vue); otherwise a plain list
  * (the Board's Needs You lane), filtered by the Board's team and member names. An older core without network.asks
@@ -15,7 +17,8 @@ const emit = defineEmits<{ count: [n: number] }>();
 
 const asks = ref<NetworkAsk[]>([]);
 const shown = computed(() => asks.value.filter((a) => (!props.team || a.team === props.team) && (!props.member || a.memberName === props.member)));
-watch(() => shown.value.length, (n) => emit('count', n), { immediate: true });
+const items = computed(() => groupAsks(shown.value));
+watch(() => items.value.length, (n) => emit('count', n), { immediate: true });
 
 let loading = false;
 let again = false;
@@ -44,9 +47,9 @@ defineExpose({ load });
 </script>
 
 <template>
-  <section v-if="shown.length" class="network-asks" :class="{ banner }" data-test="network-asks">
-    <p v-if="banner" class="title"><b>Needs you</b>: {{ shown.length === 1 ? 'an agent asks' : `${shown.length} agents ask` }} to reach a host it was refused</p>
-    <NetworkAskCard v-for="a in shown" :key="a.id" :ask="a" :api="api" @answered="load" />
+  <section v-if="items.length" class="network-asks" :class="{ banner }" data-test="network-asks">
+    <p v-if="banner" class="title"><b>Needs you</b>: {{ items.length === 1 ? 'an agent asks' : `${items.length} agents ask` }} to reach a host it was refused</p>
+    <NetworkAskCard v-for="g in items" :key="g.key" :ask="g.asks[0]" :group="g.asks" :api="api" @answered="load" />
   </section>
 </template>
 

@@ -183,31 +183,31 @@ public sealed class NetworkAskNoticeTests : IDisposable
         Assert.Equal("api.nuget.org is now allowed for Priya and Bo; retry what was blocked. The person allowed it for every member of Alpha. " +
                      "It applies to runs that start from now on.", text);
     }
+}
 
-    /// <summary>A fake clock with delays that complete only when <see cref="Advance"/> moves it past their end, inline.</summary>
-    private sealed class FakeTimers(DateTimeOffset start)
+/// <summary>A fake clock with delays that complete only when <see cref="Advance"/> moves it past their end, inline.</summary>
+internal sealed class FakeTimers(DateTimeOffset start)
+{
+    private readonly List<(DateTimeOffset Due, TaskCompletionSource Done)> _waiting = [];
+
+    public FakeClock Clock { get; } = new(start);
+
+    public Task Delay(TimeSpan by)
     {
-        private readonly List<(DateTimeOffset Due, TaskCompletionSource Done)> _waiting = [];
+        var done = new TaskCompletionSource();
+        lock (_waiting) _waiting.Add((Clock.Now + by, done));
+        return done.Task;
+    }
 
-        public FakeClock Clock { get; } = new(start);
-
-        public Task Delay(TimeSpan by)
+    public void Advance(TimeSpan by)
+    {
+        Clock.Advance(by);
+        List<TaskCompletionSource> due;
+        lock (_waiting)
         {
-            var done = new TaskCompletionSource();
-            lock (_waiting) _waiting.Add((Clock.Now + by, done));
-            return done.Task;
+            due = _waiting.Where(w => w.Due <= Clock.Now).Select(w => w.Done).ToList();
+            _waiting.RemoveAll(w => w.Due <= Clock.Now);
         }
-
-        public void Advance(TimeSpan by)
-        {
-            Clock.Advance(by);
-            List<TaskCompletionSource> due;
-            lock (_waiting)
-            {
-                due = _waiting.Where(w => w.Due <= Clock.Now).Select(w => w.Done).ToList();
-                _waiting.RemoveAll(w => w.Due <= Clock.Now);
-            }
-            foreach (var d in due) d.SetResult(); // the flush runs inline: the tell is recorded when this returns
-        }
+        foreach (var d in due) d.SetResult(); // the flush runs inline: the tell is recorded when this returns
     }
 }

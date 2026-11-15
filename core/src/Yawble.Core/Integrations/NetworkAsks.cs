@@ -76,7 +76,10 @@ public static class NetworkAskFilter
     };
 }
 
-/// <summary>The policy changes a network ask makes, through the policy store (its checks; it never writes a wildcard).</summary>
+/// <summary>
+/// The policy changes a network ask makes, through the policy store (its checks): an exact host, or the domain allow
+/// the person chose ("*.digicert.com", only ever <see cref="NetworkAskService.DomainPattern"/>).
+/// </summary>
 public interface INetworkPolicy
 {
     /// <summary>Whether the host is on the member's effective allowlist for its next run.</summary>
@@ -99,7 +102,10 @@ public delegate Task NetworkAskTell(string team, string member, string text, lon
 /// Network asks: a run's gateway refusing a host that is not on the agent's allowlist, or the agent's request_host tool,
 /// raises one pending ask per (team, member, host); repeats only count up. The person answers in Needs you: allow it for
 /// this agent (its loosen block), for the team (the team's network allow list, which later hires get too), everywhere (the
-/// global allowlist), or deny it (not asked again for that member, by its id, for 24 hours). The policy store makes every
+/// global allowlist), or deny it (not asked again for that member, by its id, for 24 hours). An allow is for the host, or
+/// (when <see cref="DomainPattern"/> offers one) for "*.&lt;registrable domain&gt;", which closes every waiting ask it covers
+/// at that scope. One member's waiting asks with one registrable domain are one item in Needs you, answered together
+/// (<see cref="AnswerGroupAsync"/>); the per-member cap still counts hosts. The policy store makes every
 /// change; nothing is allowed without the person's answer. After an allow the team's Manager is told to retry; after a
 /// deny the agent is told. A member removed from the team has its waiting asks closed (BusStore.DeleteMember). Each ask
 /// and its answer is in the Approvals log (Logs/LogSources.cs).
@@ -283,7 +289,21 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         // A plain-http refusal: the card says only https is forwarded, even once the host is allowed.
         ["plainHttp"] = a.PlainHttp,
         ["choices"] = new JsonArray(NetworkAskChoices.All.Select(ch => (JsonNode?)ch).ToArray()),
+        // Needs you shows one member's waiting asks with the same registrable domain as one item (null: the host alone).
+        ["domain"] = PublicSuffix.RegistrableDomain(a.Host),
+        // The domain allow offered with the ask ("All of *.digicert.com"); null when only the host may be allowed.
+        ["domainPattern"] = DomainPattern(a.Host),
     };
+
+    /// <summary>
+    /// The domain allow that may be offered for an ask's host (<see cref="PublicSuffix.DomainPatternFor"/>), or null. Null
+    /// too for the registrable domain itself (digicert.com): "*.digicert.com" never covers the apex.
+    /// </summary>
+    public static string? DomainPattern(string host) =>
+        PublicSuffix.DomainPatternFor(host) is { } pattern && Covers(pattern, host) ? pattern : null;
+
+    /// <summary>Whether an allowHosts entry (an exact host, or "*.example.com") covers the host, as the gateway matches it.</summary>
+    internal static bool Covers(string entry, string host) => Vhosts.HostAllowed(host, [entry]);
 
     /// <summary>The open asks as plain lines (the Concierge's and the companion's status reads).</summary>
     public IReadOnlyList<string> PendingLines() => Asks().Select(a =>
@@ -299,10 +319,13 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         {
             return method switch
             {
-                // [{ id, at, teamId, team, member, memberName, host, reason, method, pathSample, count, lastSeen, hint, workflow, state, scope, decidedBy, decidedAt, plainHttp, choices }]
+                // [{ id, at, teamId, team, member, memberName, host, reason, method, pathSample, count, lastSeen, hint, workflow, state, scope, decidedBy, decidedAt, plainHttp, choices, domain, domainPattern }]
                 "network.asks" => new JsonArray(Asks(p?["all"]?.GetValue<bool>() != true, OptLong(p, "teamId")).Select(a => (JsonNode?)ToJson(a)).ToArray()),
-                "network.answer" => await AnswerAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"),
-                    OptStr(p, "choice") ?? throw new ArgumentException("choice is required (agent, team, everywhere or deny)"), OptStr(p, "note"), ct),
+                // { id, choice, note?, domain?: bool (allow the ask's "*.<domain>"), ids?: [..] (a grouped item: every listed ask) }
+                "network.answer" => await AnswerGroupAsync(
+                    OptLong(p, "id") ?? throw new ArgumentException("id is required"), OptLongs(p, "ids"),
+                    OptStr(p, "choice") ?? throw new ArgumentException("choice is required (agent, team, everywhere or deny)"), OptStr(p, "note"),
+                    p?["domain"] is JsonValue dv && dv.TryGetValue<bool>(out var d) && d, ct),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -320,7 +343,53 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     /// The person's answer to one ask: the policy change first (through the policy store; a refusal leaves the ask
     /// waiting), then the ask closes (with any other waiting ask it covers), then the Manager or the agent is told.
     /// </summary>
-    public async Task<JsonObject> AnswerAsync(long id, string choice, string? note, CancellationToken ct)
+    /// <summary>
+    /// The person's answer to a grouped item in Needs you: <paramref name="id"/> and the other asks in
+    /// <paramref name="ids"/>, all waiting for one member with one registrable domain. Each is answered in turn with the
+    /// same choice (an ask an earlier answer already covered is skipped), so Allow answers every listed host; the notices
+    /// merge in the Manager's notice window. With no other ids it is <see cref="AnswerAsync"/>.
+    /// </summary>
+    public async Task<JsonObject> AnswerGroupAsync(long id, IReadOnlyList<long> ids, string choice, string? note, bool domain, CancellationToken ct)
+    {
+        var rest = ids.Where(i => i != id).Distinct().ToList();
+        if (rest.Count == 0) return await AnswerAsync(id, choice, note, ct, domain);
+        var waiting = Asks();
+        var first = waiting.FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"network request {id} is not waiting");
+        var key = PublicSuffix.RegistrableDomain(first.Host);
+        foreach (var other in rest)
+        {
+            if (waiting.FirstOrDefault(a => a.Id == other) is not { } o) continue; // answered meanwhile: nothing to do
+            if (!SameMember(o, first) || key is null || PublicSuffix.RegistrableDomain(o.Host) != key)
+                throw new ArgumentException($"network request {other} is not one of {first.MemberName}'s requests for {key ?? first.Host}; answer it on its own");
+        }
+
+        var result = await AnswerAsync(id, choice, note, ct, domain);
+        var closed = result["closed"]!.AsArray().Select(n => n!.GetValue<long>()).ToHashSet();
+        var told = result["told"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
+        var allowed = new List<string> { result["allowed"]?.GetValue<string>() ?? first.Host };
+        foreach (var other in rest)
+        {
+            if (closed.Contains(other) || Asks().All(a => a.Id != other)) continue;
+            var r = await AnswerAsync(other, choice, note, ct, domain);
+            foreach (var c in r["closed"]!.AsArray()) closed.Add(c!.GetValue<long>());
+            told.AddRange(r["told"]!.AsArray().Select(n => n!.GetValue<string>()));
+            if (r["allowed"]?.GetValue<string>() is { } a) allowed.Add(a);
+        }
+        result["closed"] = new JsonArray(closed.Order().Select(c => (JsonNode?)c).ToArray());
+        result["told"] = new JsonArray(told.Distinct().Select(t => (JsonNode?)t).ToArray());
+        if (choice != NetworkAskChoices.Deny) result["allowed"] = string.Join(", ", allowed.Distinct());
+        return result;
+    }
+
+    /// <summary>Two asks from the same member: by its id (0041), by name for an older ask without one.</summary>
+    private static bool SameMember(NetworkAskRow a, NetworkAskRow b) =>
+        a.TeamId == b.TeamId && (a.MemberId is { } x && b.MemberId is { } y ? x == y : string.Equals(a.Member, b.Member, StringComparison.Ordinal));
+
+    /// <param name="domain">
+    /// Allow the ask's domain ("*.digicert.com", <see cref="DomainPattern"/>) instead of the host alone; it closes every
+    /// waiting ask it covers at the chosen scope. Refused when no domain allow may be offered for the host. Ignored for Deny.
+    /// </param>
+    public async Task<JsonObject> AnswerAsync(long id, string choice, string? note, CancellationToken ct, bool domain = false)
     {
         var who = Provenance.Actor.Current ?? Provenance.Actor.Window;
         // Never without the person's click: an agent, the Concierge, a trigger or a paired program cannot answer.
@@ -331,7 +400,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
             if (!_answering.Add(id)) throw new ArgumentException($"network request {id} is being answered already");
         try
         {
-            return await AnswerClaimedAsync(id, choice, note, who, ct);
+            return await AnswerClaimedAsync(id, choice, note, who, domain, ct);
         }
         finally
         {
@@ -339,17 +408,32 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         }
     }
 
-    private async Task<JsonObject> AnswerClaimedAsync(long id, string choice, string? note, Provenance.Actor who, CancellationToken ct)
+    private async Task<JsonObject> AnswerClaimedAsync(long id, string choice, string? note, Provenance.Actor who, bool domain, CancellationToken ct)
     {
         var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"network request {id} is not waiting");
         if (NetworkAskFilter.Problem(ask.Host) is { } problem) throw new ArgumentException(problem);
         var allow = choice != NetworkAskChoices.Deny;
+        // What is written: the host, or for a domain allow "*.<registrable domain>". The registrable domain itself (the
+        // apex, which "*." never covers) is allowed as its host, so a grouped item's Allow still answers it.
+        var target = ask.Host;
+        if (allow && domain)
+        {
+            var pattern = PublicSuffix.DomainPatternFor(ask.Host)
+                ?? throw new ArgumentException($"{ask.Host} cannot be allowed as a whole domain (a shared or vendor domain, or not a registrable one); allow the host itself");
+            if (Covers(pattern, ask.Host)) target = pattern;
+        }
         if (allow && Resolve is { } resolve && await ResolvesOnlyPrivateAsync(resolve, ask.Host, ct))
             throw new ArgumentException($"{ask.Host} resolves only to private or loopback addresses, which agents can never reach, so allowing it would change nothing; choose Deny");
         // The other waiting asks this answer covers, listed once before the policy writes: only these close with it,
-        // so an ask raised while the writes run (its member never checked) stays waiting.
-        List<NetworkAskRow> others = allow && choice != NetworkAskChoices.Agent
-            ? Asks().Where(a => a.Id != id && a.Host == ask.Host && (choice == NetworkAskChoices.Everywhere || a.TeamId == ask.TeamId)).ToList()
+        // so an ask raised while the writes run (its member never checked) stays waiting. The same rules for a host and a
+        // domain allow: this member's asks for an agent answer, the team's for team, every team's for everywhere.
+        List<NetworkAskRow> others = allow
+            ? Asks().Where(a => a.Id != id && Covers(target, a.Host) && choice switch
+            {
+                NetworkAskChoices.Agent => SameMember(a, ask),
+                NetworkAskChoices.Team => a.TeamId == ask.TeamId,
+                _ => true,
+            }).ToList()
             : [];
         if (allow)
         {
@@ -357,30 +441,35 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
             switch (choice)
             {
                 case NetworkAskChoices.Agent:
-                    await policy.AllowForMemberAsync(asker.MemberId, ask.Host, ct);
+                    await policy.AllowForMemberAsync(asker.MemberId, target, ct);
                     break;
                 case NetworkAskChoices.Team:
                     // One write: the team's list, which every member's run (and every later hire's) gets at launch.
-                    await policy.AllowForTeamAsync(ask.TeamId, ask.Host, ct);
+                    await policy.AllowForTeamAsync(ask.TeamId, target, ct);
                     break;
                 default:
-                    await policy.AllowEverywhereAsync(ask.Host, ct);
+                    await policy.AllowEverywhereAsync(target, ct);
                     break;
             }
 
-            // The members this answer tells the Manager about: the asker, and for team or everywhere each member whose
-            // waiting ask for the host closes with it. A member's own override can narrow the global list (it is an
-            // intersection), so the global list alone does not reach it: that member also gets the host in its loosen block.
+            // The members this answer tells the Manager about: the asker, and each member whose waiting ask the answer
+            // covers, each with the hosts it waited for. A member's own override can narrow the global list (it is an
+            // intersection), so the global list alone does not reach it: that member also gets the entry in its loosen block.
             // The team's list is added after the override's narrowing, so a team answer never writes a loosen block.
-            var reached = new List<Who> { asker };
+            var reached = new List<(Who Member, List<string> Hosts)> { (asker, [ask.Host]) };
             foreach (var a in others)
-                if (Asker(a) is { } m && reached.All(r => r.MemberId != m.MemberId)) reached.Add(m);
+            {
+                if (Asker(a) is not { } m) continue;
+                var at = reached.FindIndex(r => r.Member.MemberId == m.MemberId);
+                if (at < 0) reached.Add((m, [a.Host]));
+                else reached[at].Hosts.Add(a.Host);
+            }
             if (choice != NetworkAskChoices.Team)
-                foreach (var m in reached)
-                    if (!policy.AllowedFor(m.MemberId, ask.Host)) await policy.AllowForMemberAsync(m.MemberId, ask.Host, ct);
+                foreach (var (m, hosts) in reached)
+                    if (hosts.Any(h => !policy.AllowedFor(m.MemberId, h))) await policy.AllowForMemberAsync(m.MemberId, target, ct);
             // Never tell the Manager a host is allowed unless the member's effective hosts now include it.
-            if (reached.Where(m => !policy.AllowedFor(m.MemberId, ask.Host)).Select(m => m.Qualified).ToList() is { Count: > 0 } missed)
-                throw new PolicyException([$"{ask.Host} is still not allowed for {string.Join(", ", missed)} after the change; the request stays waiting"]);
+            if (reached.Where(r => r.Hosts.Any(h => !policy.AllowedFor(r.Member.MemberId, h))).Select(r => r.Member.Qualified).ToList() is { Count: > 0 } missed)
+                throw new PolicyException([$"{target} is still not allowed for {string.Join(", ", missed)} after the change; the request stays waiting"]);
         }
 
         var cleanNote = string.IsNullOrWhiteSpace(note) ? null : Clip(note.Trim(), 500);
@@ -412,7 +501,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                 if (ManagerOf(team.Key) is not { } manager) continue;
                 var names = string.Join(" and ", team.Select(a => a.MemberName).Distinct(StringComparer.OrdinalIgnoreCase));
                 var causation = team.Select(a => a.CausationSeq).FirstOrDefault(s => s is not null);
-                if (await NoticeAsync(team.Key, first.Team, manager, new AllowNotice(ask.Host, names, choice, first.Team, causation), ct))
+                if (await NoticeAsync(team.Key, first.Team, manager, new AllowNotice(target, names, choice, first.Team, causation), ct))
                     told.Add($"{first.Team}/{manager}");
             }
         }
@@ -422,11 +511,14 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                        $"It is not asked again for you for 24 hours. Do not try another site or a way around it: carry on without it, or hand back blocked on {ask.Host}.";
             if (await TellAsync(ask.Team, ask.MemberName, text, ask.CausationSeq, ct)) told.Add(ask.Member);
         }
-        return new JsonObject
+        var answer = new JsonObject
         {
             ["ok"] = true, ["id"] = id, ["host"] = ask.Host, ["choice"] = choice,
             ["closed"] = new JsonArray(closed.Select(a => (JsonNode?)a.Id).ToArray()), ["told"] = told,
         };
+        // What the policy now lists: the host, or the domain allow ("*.digicert.com").
+        if (allow) answer["allowed"] = target;
+        return answer;
     }
 
     // ------------------------------------------------------------------ "now allowed" notices
@@ -619,6 +711,11 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     private static long? OptLong(JsonObject? p, string name) =>
         p?[name] is JsonValue v && (v.TryGetValue<long>(out var l) || (v.TryGetValue<string>(out var s) && long.TryParse(s, CultureInfo.InvariantCulture, out l))) ? l : null;
 
+    private static List<long> OptLongs(JsonObject? p, string name) =>
+        p?[name] is JsonArray a
+            ? a.Select(n => n is JsonValue v && v.TryGetValue<long>(out var l) ? l : throw new ArgumentException($"{name} is a list of request ids")).ToList()
+            : [];
+
     private static string? OptStr(JsonObject? p, string name) =>
         p?[name] is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s.Trim() : null;
 }
@@ -632,8 +729,9 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
 public sealed class StoreNetworkPolicy(PolicyStore store, Func<long, CancellationToken, Task<RunLayout>> layoutFor, Func<CancellationToken, Task<RunLayout?>> sample)
     : INetworkPolicy
 {
+    /// <summary>Whether the member's run reaches the host, matched as the gateway matches it (a "*.example.com" entry covers its subdomains).</summary>
     public bool AllowedFor(long memberId, string host) =>
-        EffectiveHosts(store.GetGlobal(), store.GetMember(memberId), store.TeamHostsOfMember(memberId)).Contains(host, StringComparer.OrdinalIgnoreCase);
+        Vhosts.HostAllowed(host, EffectiveHosts(store.GetGlobal(), store.GetMember(memberId), store.TeamHostsOfMember(memberId)));
 
     /// <summary>
     /// network.allowHosts as <see cref="PolicyMerger.Merge"/> computes it: the global list, narrowed by an override, plus
