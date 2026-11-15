@@ -50,6 +50,35 @@ with **Not now** only: it says to install it in the Yawble window on the compute
 Calls from a viewer run as that viewer. Every remote call that changes something, and every refused call, is
 written to `cloud-link-audit.log` in the app's data folder, with the time, the viewer and the method.
 
+## Read-only viewers (Visitors)
+
+The site marks each call with the viewer's access: `full` for an Owner or a workgroup Member, `read` for a workgroup
+Visitor. The app checks it on every call. A call with no access, or any value other than `read`, is full, so an
+older site works as before. The app's hello on the connection says `"caps": ["access"]`; the site lets a Visitor open
+only a computer that says it.
+
+A read-only viewer sees the same screens and gets the same live updates. They can:
+
+- see the overview, teams, members, the Monitor, workflows and the questions waiting;
+- read the board, the backlog, cards and the team's documents;
+- see integrations, their requests and calls, host tasks and their runs, network and tool requests;
+- read the logs, the backup list, the agents and their versions, settings and policies as shown;
+- browse members' code (when **Show members' code to cloud viewers** is on).
+
+They cannot change anything. Telling a manager, answering a question, approving or declining a request, answering a
+network or tool request, creating, editing, moving or deleting anything, running the guardrail check, saving a
+policy or a setting, git actions, and terminals (opening, typing into or stopping a member's terminal or a host
+terminal) are all refused with:
+
+> You have read-only access to this computer (Visitor). Ask a workgroup Member or an Owner for more.
+
+Each refusal is written to `cloud-link-audit.log` like other refusals. Every method the Cloud Link allows is listed in
+`RemoteAccess` as a read or a change; a method that is not listed counts as a change, so a new one is refused for
+read-only viewers until it is listed as a read.
+
+The remote view learns its access from `core.getInfo`: over the Cloud Link the answer carries
+`"remoteAccess": "full"` or `"remoteAccess": "read"`. In the window on the computer the field is absent.
+
 ## What only the person at the computer can do
 
 These are refused over Cloud Link. The viewer sees the reason.
