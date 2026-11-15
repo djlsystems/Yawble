@@ -128,7 +128,8 @@ public class BoardTesterDoneTests
     {
         await using var rig = await Rig.StartAsync(("TesterWren", ""));
         // The tester is given work (its card) and runs on it: the projector writes its report on the trail under its name.
-        await rig.InRunOf("TesterWren", (run, _) => run.ProgressAsync("checking the login page", Ct));
+        // B027 item 4: its hand-back (not a progress note) is what counts.
+        await rig.InRunOf("TesterWren", (run, _) => run.HandbackAsync("checked the login page: 3 passed", Ct));
         await rig.InRunOf("Manager", (_, service) => service.ProjectAsync(Ct));
         var card = rig.Store.Cards("payments").Single(c => c.Member == "TesterWren");
         rig.Store.Save(card with { Lane = Lanes.InProgress, Placed = true });

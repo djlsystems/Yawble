@@ -198,9 +198,23 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   talk it through first. The Concierge advises; you still answer the request yourself.
   - On a team with a tester, verify and test cards go to the tester. The tester tests the developer's branch as the
     developer left it, and reports what ran and the result on the card and in its hand-back.
-  - A developer's report never closes a verify card. When the Manager moves a tester's card to Done and the tester
-    has not run on it, the move needs a reason (for example "no tester on this team" or "the person asked to skip
-    testing"). Without one the app refuses the move; with one, the reason shows on the card as a comment.
+  - A developer's report never closes a verify card. A tester's card is a card the tester holds now or was ever
+    assigned. If anyone other than that tester (the Manager or a developer) moves it to Done before the tester has
+    tested it, the move needs a reason (for example "no tester on this team" or "the person asked to skip testing").
+    Without one the app refuses the move. With one, the reason shows on the card as a comment. Your own moves never
+    need a reason.
+  - If someone else's hand-back or finished run would put a tester's card in Done (for example after it was given
+    back to a developer), the card stays In Progress. A comment says it is waiting for the tester.
+  - When the workflow is declared complete, a tester's card the tester has not tested stays out of Done. A comment
+    says why.
+  - The tester has tested a card only when it hands back, or one of its runs finishes, after the card was last
+    assigned or given new work. A run that failed, a run from before that assignment, and its progress notes or
+    comments do not count.
+  - How a tester is recognised: a member other than the Manager whose name starts with "Tester" (Tester Wren), or
+    whose job title contains the word test, tester, testers, testing or QA, in any case. The job title is the job
+    text before its first colon ("Tester: builds and tests"), or its first line if it has no colon. Only whole words
+    count, so "latest" or "contest" do not make a tester. "tests" and "tested" do not count either, so
+    "Developer: writes the code and its unit tests" is not a tester.
   - Teams with no tester are not asked for a reason.
 - **Backlog**: work you want done, most important first.
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
