@@ -270,6 +270,9 @@ public class RealSandboxLauncherTests
         // Folders the sandbox may see only as its masks (an empty tmpfs, or /dev/null over a file): the names it may
         // list in each. None of the host's own entries (the database's content, auth.json, dev2's notes, keys).
         var home = kit.Launch.Host.Home;
+        // The host's own entries in its home (fake): neither may show in the sandbox's listing of the home.
+        File.WriteAllText(Path.Combine(home, "person-notes.txt"), "the person's own file");
+        Directory.CreateDirectory(Path.Combine(home, "Projects"));
         var dev2 = Path.Combine(l.AppDataRoot, "teams", "alpha", "members", "dev2");
         var masks = new Dictionary<string, string[]>
         {
@@ -277,7 +280,12 @@ public class RealSandboxLauncherTests
             [l.CredentialDir] = [],
             [l.HostGrokHome] = [],
             [dev2] = [],
-            [home] = [".aws", ".config", ".ssh", "src"],
+            // B038 decision: the home may show the names of the policy's own denied folders (~/.ssh, ~/Desktop,
+            // ~/Documents, ...) as empty masks. Those names are the global policy's fixed list, the same on every
+            // host and present whether or not the host has the folder, so they tell the sandbox nothing about the
+            // host; what must not show is anything of the host's own (checked by the fake home's other entries).
+            [home] = [".config", "src", .. GlobalPolicy.Default.Filesystem.Denied
+                .Where(d => d.StartsWith("~/", StringComparison.Ordinal) && !d[2..].Contains('/')).Select(d => d[2..])],
             [Path.Combine(home, ".ssh")] = [],
         };
         try

@@ -123,7 +123,8 @@ public class RealSandboxGuardrailTests
             Assert.Equal(Verdicts.Blocked, R(id).Verdict);
         Assert.Equal(Verdicts.Allowed, R("write.clone").Verdict);
         // Network holds: no direct path out, the gateway refuses and logs.
-        foreach (var id in new[] { "net.direct-ipv4", "net.direct-ipv6", "net.dns", "net.host-loopback", "net.host-loopback-slirp" })
+        foreach (var id in new[] { "net.direct-ipv4", "net.direct-ipv6", "net.dns", "net.host-loopback", "net.host-loopback-slirp",
+                     "dns.slirp-udp", "dns.slirp-tcp", "dns.gateway-udp", "dbus.user" })
             Assert.Equal(Verdicts.Blocked, R(id).Verdict);
         Assert.Equal(Verdicts.Allowed, R("gateway.reachable").Verdict);
         Assert.True(R("gateway.connect-denied-host").Logged);
