@@ -151,9 +151,13 @@ public class GuardrailCheckTests
         // The Linux tarball installs to ~/.local/opt/yawble, and every run grants its bin/ (the probe) and roles
         // read-only, so bwrap creates ~/.local as a mount point and a listing of the home folder shows it. An earlier run
         // (42168545756) failed home.list on exactly that. A real host entry beside it must still count as a leak.
+        // The host entry is one the policy neither denies nor grants: ~/Documents (which this test used before) is in the
+        // global policy's default denied list, so the sandbox masks it with an empty mount and its name in a listing is
+        // a mask point, rightly BLOCKED, on every Linux (Fedora was only where the Linux-only test first ran).
         Assert.SkipUnless(OperatingSystem.IsLinux(), "the plan's OS-specific attempts are asserted for Linux here");
         await using var kit = GuardrailKit.Create(installUnderHome: true);
         Directory.CreateDirectory(Path.Combine(kit.Home, "Documents"));
+        Directory.CreateDirectory(Path.Combine(kit.Home, "projects"));
         string Listing(params string[] names) =>
             Line("home.list", "allowed", extra: $"\"entries\":{names.Length},\"names\":[{string.Join(',', names.Select(n => $"\"{n}\""))}]");
 
@@ -163,8 +167,15 @@ public class GuardrailCheckTests
         Assert.Equal(Verdicts.Blocked, ok.Verdict);
         Assert.Contains(".local", ok.Evidence);
 
-        var withHostEntry = new ScriptedSandbox((_, plan) => new SandboxOutcome(0, 0, false,
+        // A denied folder's name is the sandbox's empty mask over it, not the host's folder.
+        var withDeniedMask = new ScriptedSandbox((_, plan) => new SandboxOutcome(0, 0, false,
             AllBlocked(plan, l => l.Contains("\"home.list\"") ? Listing(".local", "Documents") : null), "", null));
+        var masked = (await kit.Check(withDeniedMask).RunAsync("payments", "ada", Ct)).Results.Single(r => r.Id == "home.list");
+        Assert.Equal(Verdicts.Blocked, masked.Verdict);
+        Assert.Contains("Documents", masked.Evidence);
+
+        var withHostEntry = new ScriptedSandbox((_, plan) => new SandboxOutcome(0, 0, false,
+            AllBlocked(plan, l => l.Contains("\"home.list\"") ? Listing(".local", "Documents", "projects") : null), "", null));
         var leak = (await kit.Check(withHostEntry).RunAsync("payments", "ada", Ct)).Results.Single(r => r.Id == "home.list");
         Assert.Equal(Verdicts.Allowed, leak.Verdict);
         Assert.False(leak.AsExpected);
