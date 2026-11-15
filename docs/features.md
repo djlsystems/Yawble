@@ -67,23 +67,35 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - The run gets a random run token. It works only for that run and stops when the run ends.
 - Network: model and team traffic go through the gateway. Other hosts are reachable only if allowed; every refusal
   is logged.
-- **Network requests**: when a run is refused a host name that is not on its allowlist, you get one **Needs you** item
-  per team, member and host (repeats only count up). The agent can add why with its `request_host` tool. The items
+- **Network requests**: when a run is refused a host name that is not on its allowlist, the person is asked in
+  **Needs you**. There is one request per team, member and host (repeats only count up). The agent can add why with
+  its `request_host` tool. One member's waiting requests that share a registrable domain (the eTLD+1, by the bundled
+  Public Suffix List) are one item: "crl3.digicert.com, ocsp.digicert.com, crl4.digicert.com (3 hosts)". The items
   show in a **Needs you** strip above every view, and in the Board's **Needs You** lane instead when the Board is open
-  (its team and member filters apply). Each item shows the member, team, host, the agent's reason (or what was
-  refused: the method and a short path, without its query), how many times it was refused since when, and what a
+  (its team and member filters apply). Each item shows the member, team, host or hosts, the agent's reason (or what
+  was refused: the method and a short path, without its query), how many times it was refused since when, and what a
   package registry is for (api.nuget.org: NuGet; registry.npmjs.org: npm; pypi.org and files.pythonhosted.org: pip).
-  It has four buttons:
-  - **Allow for this agent** adds the host to the member's loosen block;
-  - **Allow for this team** adds it to the team's network allow list, and closes the team's other requests for that
-    host. Every run of every member of that team gets the list's hosts, members hired later too, and no other team;
-  - **Allow everywhere** adds it to the global allowed hosts, and closes every team's requests for that host;
+  - **This host / All of \*.domain**: above the buttons, an item offers what an allow adds: the host (or the item's
+    hosts), or the domain allow "All of *.digicert.com", which covers every subdomain of digicert.com but not
+    digicert.com itself. The domain choice is offered only when a domain allow may be: never under a shared suffix
+    (github.io, herokuapp.com), never over a domain with public suffixes under it (amazonaws.com), never over a
+    vendor's or the gateway's domains, and not for the registrable domain itself. On a grouped item that lists the
+    registrable domain too, that host is allowed as itself.
+  The item has four buttons; on a grouped item each answers every listed host:
+  - **Allow for this agent** adds the host (or the domain allow) to the member's loosen block, and closes the member's
+    other requests it covers;
+  - **Allow for this team** adds it to the team's network allow list, and closes the team's other requests it covers.
+    Every run of every member of that team gets the list's hosts, members hired later too, and no other team;
+  - **Allow everywhere** adds it to the global allowed hosts, and closes every team's requests it covers;
   - **Deny** closes it; the agent is told (with the note you type above the buttons, if any), and that host is not
     asked again for that member for 24 hours. The 24 hours belong to that member: a member hired later with the same
     name is asked again.
-  Only the exact host is allowed, only after your click, through the same checks as a policy change; it applies from
-  the member's next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
-  blocked". A member whose own override narrows the host list also gets the host in its loosen block for an everywhere
+  Only the host or the domain allow you chose is added, only after your click, through the same checks as a policy
+  change; it applies from the member's next run. A later refusal of a host the domain allow covers is not asked about:
+  the agent is told the host is allowed from its next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
+  blocked"; allows within 5 s of each other reach it as one message listing every host ("crl3.digicert.com and
+  ocsp.digicert.com are now allowed for Priya; ..."), so it runs once. A domain allow is one message too, naming the
+  pattern and every member whose requests it closed ("*.digicert.com is now allowed for Priya and Bo; ..."). A member whose own override narrows the host list also gets the host in its loosen block for an everywhere
   answer; a team's list is added after the override, so it reaches that member as it is. The Manager is told only once
   the member's effective hosts include it. If the policy store refuses the change, the item stays and shows why: in a
   remote view, a call the Cloud Link refuses says to answer it in the window, and any other failure shows its own
@@ -100,7 +112,12 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     told to use the https:// address: plain http is refused even once the host is allowed. Only a refused plain-http
     request to a real outside host carries this note. A gateway virtual host (`*.yawble.internal`), a model vendor or
     sign-in host, and an https refusal (CONNECT or `https://` absolute-form) never do.
-  - **Limit:** at most five different hosts wait per member at once. A repeat of a host already waiting only counts up.
+  - **Limit:** at most five different hosts wait per member at once, counted by host even when they are one grouped
+    item. A repeat of a host already waiting only counts up.
+  - **Domain allows in the policy editors:** the global allowed hosts (Settings > Guardrails) and a member's Loosen…
+    block take an exact host or one leading `*.` over a registrable domain (`*.digicert.com`), and show the core's own
+    reason under an entry it refuses (`*.com`, `*.github.io`, `a.*.b`). The team's allow list shows a domain allow with
+    what it covers ("every subdomain of digicert.com").
   - **Answering:** one request takes one answer at a time; a second answer given meanwhile is refused.
   - **A member who leaves:** removing a member closes its waiting requests (state closed, in the Approvals log).
 

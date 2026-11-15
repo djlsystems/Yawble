@@ -11,6 +11,7 @@ import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
+import { useHostProblems } from '../hostChecks';
 
 // ⚙ Settings: General (CLI preset, model, credential, instructions) and Policy (global, override
 // and effective per field, an "inherit" toggle, and the separate Loosen… section with its confirmation), and
@@ -34,6 +35,8 @@ const general = reactive({ cli: 'claude', model: '', credential: 'default', inst
 const rows = reactive<Record<string, { inherit: boolean; text: string }>>({});
 const loosenText = reactive<Record<string, string>>({});
 const preview = ref<string[] | null>(null);
+/** The loosen block's hosts the core refuses (FloorRules.HostProblem), in its words, as they are typed. */
+const loosenHostProblems = useHostProblems(api, () => (loosenText['network.allowHosts'] ?? '').split(/[\r\n,]+/));
 // The agents one can choose (built-ins then custom), the picked agent's default model and known models, and a live command line.
 const agentChoices = ref<AgentProfileRow[]>([]);
 const modelList = ref<string[]>([]);
@@ -296,16 +299,20 @@ const loosenChanged = () => { preview.value = null; };
 
       <section class="loosen" data-test="loosen-section">
         <h3>⚠ Loosen… (widens this agent beyond the global policy)</h3>
-        <p class="small">Only you can save this, after confirming exactly what it loosens. Vendor API and sign-in hosts, IP literals and wildcards are never allowed; no denial can be removed; timeouts up to 24 h; memory up to 75% of this machine.</p>
+        <p class="small">Only you can save this, after confirming exactly what it loosens. A host is an exact name or a domain allow such as *.digicert.com (every subdomain of digicert.com); vendor API and sign-in hosts, IP literals and any other wildcard are never allowed; no denial can be removed; timeouts up to 24 h; memory up to 75% of this machine.</p>
         <p v-if="view.loosenSummary.length" class="small" data-test="loosen-current">
           Currently loosened (confirmed {{ when(view.loosenApprovedAt) }}): <strong>{{ view.loosenSummary.join('; ') }}</strong>
         </p>
         <div class="loosen-grid">
           <label v-for="f in POLICY_FIELDS.filter((x) => x.loosen)" :key="f.path">
             {{ f.label }} <span v-if="f.hint" class="muted small">({{ f.hint }})</span>
-            <textarea v-if="f.kind === 'list'" v-model="loosenText[f.path]" rows="1" placeholder="add, one per line"
+            <textarea v-if="f.kind === 'list'" v-model="loosenText[f.path]" rows="1"
+              :placeholder="f.path === 'network.allowHosts' ? 'add, one per line: api.github.com or *.digicert.com' : 'add, one per line'"
               :data-test="`loosen-${testId(f.path)}`" @input="loosenChanged"></textarea>
             <input v-else v-model="loosenText[f.path]" inputmode="numeric" :data-test="`loosen-${testId(f.path)}`" @input="loosenChanged" />
+            <template v-if="f.path === 'network.allowHosts'">
+              <span v-for="p in loosenHostProblems" :key="p.host" class="problem" data-test="loosen-host-problem">{{ p.problem }}</span>
+            </template>
           </label>
         </div>
         <div class="row"><span class="grow"></span><button data-test="preview-loosen" :disabled="busy" :aria-busy="work.is('preview')" @click="previewLoosen"><BusyLabel :busy="work.is('preview')" text="Checking…">Preview loosening</BusyLabel></button></div>
@@ -335,6 +342,7 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
 td textarea, td input:not([type=checkbox]), td select { width: 100%; }
 .small { font-size: 12px; }
+.problem { font-size: 12px; color: var(--bad); }
 details { margin: 10px 0; }
 .loosen { border: 2px solid var(--warn-line-strong); background: var(--warn-bg); border-radius: 6px; padding: 8px 12px; margin-top: 12px; }
 .loosen h3 { margin: 2px 0 6px; font-size: 14px; color: var(--warn); }

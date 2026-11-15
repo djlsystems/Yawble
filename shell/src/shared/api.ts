@@ -513,13 +513,22 @@ export interface NetworkAsk {
   reason: string | null; method: string | null; pathSample: string | null; count: number; lastSeen: string; hint: string | null;
   workflow: number | null; state: 'pending' | 'allowed' | 'denied' | 'closed'; scope: Exclude<NetworkAskChoice, 'deny'> | null;
   decidedBy: string | null; decidedAt: string | null; plainHttp: boolean; choices: NetworkAskChoice[];
+  /** The host's registrable domain (digicert.com): one member's waiting asks with the same one are one item in Needs you. Null or absent: the host alone. */
+  domain?: string | null;
+  /** The domain allow that may be offered ("*.digicert.com"); null or absent when only the host may be allowed. */
+  domainPattern?: string | null;
 }
+/** policy.checkHosts {hosts}: each entry as the core's floor rule judges it (FloorRules.HostProblem); problem null means accepted. */
+export interface HostCheck { host: string; problem: string | null }
 /** One host on a team's network allow list (policy.teamHosts; core: Policy/PolicyStore.cs). addedVia: how it was added (app, cloud, ...). */
 export interface TeamHost { host: string; addedBy: string; addedVia: string | null; addedAt: string }
 /** policy.teamHosts {teamId} and policy.removeTeamHost {teamId, host}: the team's list, oldest first. */
 export interface TeamHosts { teamId: number; hosts: TeamHost[] }
-/** network.answer's reply: closed lists every ask the answer closed (the team's or everyone's for that host). */
-export interface NetworkAnswer { ok: boolean; id: number; host: string; choice: NetworkAskChoice; closed: number[]; told: string[] }
+/**
+ * network.answer's reply: closed lists every ask the answer closed (the team's or everyone's for that host or domain).
+ * allowed: what the policy now lists, the host or the domain allow ("*.digicert.com"); a grouped answer lists each, comma separated.
+ */
+export interface NetworkAnswer { ok: boolean; id: number; host: string; choice: NetworkAskChoice; closed: number[]; told: string[]; allowed?: string }
 /** One developer tool of the app's fixed catalog (tools.catalog; core: Integrations/ToolAsks.cs). command: the winget line, or the person's own command off Windows. */
 export interface ToolCatalogEntry {
   name: string; displayName: string; publisher: string; wingetId: string; scope: 'user' | 'machine'; program: string; command: string;
