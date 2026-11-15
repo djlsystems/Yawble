@@ -1,4 +1,4 @@
-import { computed, ref, watch, type Directive } from 'vue';
+import { computed, ref, watch, type Directive, type VNode } from 'vue';
 import type { CoreInfo, RemoteAccess } from '../../shared/api';
 
 // A remote view's access to the instance (B025): "full" (an Owner, or a workgroup Member) or "read" (a workgroup
@@ -51,9 +51,18 @@ export async function loadRemoteAccess(getInfo: () => Promise<CoreInfo>, doc: Do
 }
 
 // v-change: marks a button that changes something. In a read-only view it is disabled, with the reason as its title.
-// The element's own :disabled binding wins again when the view has full access (it is re-applied on every update).
+// The element's own :disabled binding wins again when the view has full access: it is read from the vnode on every
+// mount and update, so going from read back to full gives back what the screen says now (an invalid form, a busy
+// approval), not always "enabled".
 const marked = new Set<HTMLElement>();
 const ownTitle = new WeakMap<HTMLElement, string | null>();
+const ownDisabled = new WeakMap<HTMLElement, boolean>();
+
+/** The screen's own disabled for this element, as Vue renders a boolean attribute (truthy, or "" as in plain `disabled`). */
+function screenDisabled(vnode: VNode): boolean {
+  const v = (vnode.props as Record<string, unknown> | null)?.disabled;
+  return v === '' || !!v;
+}
 
 function apply(el: HTMLElement) {
   const control = el as HTMLButtonElement;
@@ -64,7 +73,7 @@ function apply(el: HTMLElement) {
     el.title = READ_ONLY_TITLE;
   } else if (el.dataset.readOnly === '1') {
     delete el.dataset.readOnly;
-    control.disabled = false;
+    control.disabled = ownDisabled.get(el) ?? false;
     const t = ownTitle.get(el);
     if (t === null || t === undefined) el.removeAttribute('title');
     else el.title = t;
@@ -72,8 +81,8 @@ function apply(el: HTMLElement) {
 }
 
 export const vChange: Directive<HTMLElement> = {
-  mounted(el) { marked.add(el); apply(el); },
-  updated(el) { apply(el); },
+  mounted(el, _binding, vnode) { ownDisabled.set(el, screenDisabled(vnode)); marked.add(el); apply(el); },
+  updated(el, _binding, vnode) { ownDisabled.set(el, screenDisabled(vnode)); apply(el); },
   unmounted(el) { marked.delete(el); },
 };
 
