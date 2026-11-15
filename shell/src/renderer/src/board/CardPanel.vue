@@ -173,4 +173,15 @@ h4 { margin: 6px 0; font-size: 13px; }
 .txt { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-soft); }
 .muted { color: var(--muted); font-weight: 400; }
 .error { color: var(--bad); font-size: 13px; }
+/* A phone (B037): the card takes the whole board (the board hides behind it), one column, tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .panel { width: auto; flex: 1 1 auto; min-width: 0; border-left: 0; padding: 8px 12px 16px; }
+  header { flex-wrap: wrap; }
+  .discuss { order: 3; flex: 1 1 100%; white-space: normal; }
+  button, .edit input, .edit select { min-height: 44px; box-sizing: border-box; }
+  .icon { min-width: 44px; font-size: 16px; }
+  .row2 { grid-template-columns: 1fr; }
+  .body { max-height: none; }
+  .sub a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; box-sizing: border-box; padding: 0 4px; vertical-align: middle; }
+}
 </style>

@@ -11,6 +11,7 @@ import FileList from './FileList.vue';
 import CodeLines from './CodeLines.vue';
 import { FallbackBusy, FallbackLoading } from './fallbacks';
 import { withoutImages } from './safeHtml';
+import { useNarrow } from './narrow';
 import './theme.css';
 
 // The read-only Code browser of one member's clone: a breadcrumb, the folder's listing with markers of
@@ -150,9 +151,21 @@ async function go(place: Place, opts: { push?: boolean; line?: number | null } =
   await listing;
 }
 
+// A phone (B037): the list first, then a file opened from it full-screen with a back control to the list. Following
+// edits changes the file shown, not which of the two is on screen.
+const phone = useNarrow();
+const phonePane = ref<'list' | 'file'>('list');
+const showList = computed(() => !phone.value || phonePane.value === 'list');
+const showFile = computed(() => !phone.value || phonePane.value === 'file');
+/** The file pane shown again: a hidden pane could not scroll, so go back to the line last jumped to. */
+function showFilePane(): void {
+  phonePane.value = 'file';
+  if (current.value > 1) void scrollTo(current.value);
+}
+
 function openEntry(e: CodeEntry): void {
   if (e.kind === 'dir') void go({ dir: e.path, file: null });
-  else void go({ dir: dir.value, file: e.path });
+  else { phonePane.value = 'file'; void go({ dir: dir.value, file: e.path }); }
 }
 function openFolder(path: string): void { void go({ dir: path, file: null }); }
 function back(): void { const p = history.back(); if (p) void go(p, { push: false }); }
@@ -326,7 +339,7 @@ defineExpose({ go, session });
 </script>
 
 <template>
-  <div class="cb" data-test="code-browser">
+  <div class="cb" :class="{ 'cb-phone': phone }" data-test="code-browser">
     <component :is="Loading" v-if="phase === 'opening'" :text="`Opening ${member}'s code…`" />
     <p v-else-if="phase === 'noClone'" class="cb-plain" data-test="code-no-clone">{{ member }} has no clone on this computer yet, so there is no code to show.</p>
     <p v-else-if="phase === 'failed'" class="error" data-test="code-error">{{ error }}</p>
@@ -349,13 +362,15 @@ defineExpose({ go, session });
       </div>
 
       <div class="cb-panes">
-        <div class="cb-side">
+        <div v-show="showList" class="cb-side" data-test="code-list-pane">
+          <button v-if="phone && filePath" type="button" class="cb-open-file" data-test="code-show-file" @click="showFilePane">{{ fileName }} →</button>
           <component :is="Loading" v-if="listLoading && !entries.length" text="Loading the folder…" />
           <p v-else-if="listError" class="error small" data-test="code-list-error">{{ listError }}</p>
           <FileList v-else :entries="entries" :now="nowMs" :only-changed="onlyChangedFiles" :selected="filePath" @open="openEntry" />
         </div>
 
-        <div class="cb-main">
+        <div v-show="showFile" class="cb-main" data-test="code-file-pane">
+          <button v-if="phone" type="button" class="cb-back" data-test="code-back-to-list" @click="phonePane = 'list'">← Files</button>
           <p v-if="!filePath" class="muted cb-plain" data-test="code-pick">Choose a file to preview it.</p>
           <template v-else>
             <div class="cb-filebar">
@@ -420,6 +435,18 @@ defineExpose({ go, session });
 .cb-md { overflow: auto; flex: 1 1 0; min-height: 0; font-size: 13.5px; line-height: 1.55; }
 .cb-md :deep(.cb-img-alt) { color: var(--muted); font-style: italic; }
 .small { font-size: 12px; }
+.cb-back, .cb-open-file { align-self: flex-start; border: 0; background: transparent; color: var(--accent); padding: 0 4px; min-height: 44px; font-size: 14px; text-align: left; }
+/* A phone (B037): one pane at a time (the list, or the file with "← Files"), as tall as the screen allows; tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .cb { height: calc(100vh - 140px); min-height: 280px; }
+  .cb-panes { grid-template-columns: minmax(0, 1fr); }
+  .cb-main { border: 0; padding: 0; }
+  .cb-bar button, .cb-filebar button { min-height: 44px; min-width: 44px; }
+  .cb-crumbs { flex: 1 1 100%; order: 3; }
+  .cb-crumb { padding: 10px 4px; }
+  .cb-check { min-height: 44px; }
+  .cb-chip { top: 96px; right: 8px; }
+}
 /* highlight.js classes, in the app's quiet palette (theme.css holds its light and dark values; no highlight.js theme is loaded). */
 .cb :deep(.hljs-comment), .cb :deep(.hljs-quote) { color: var(--cb-hl-comment); font-style: italic; }
 .cb :deep(.hljs-keyword), .cb :deep(.hljs-selector-tag), .cb :deep(.hljs-literal), .cb :deep(.hljs-doctag) { color: var(--cb-hl-keyword); }

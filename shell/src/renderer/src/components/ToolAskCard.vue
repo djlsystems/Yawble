@@ -8,6 +8,7 @@ import { errorText } from '../api';
 import { displayName } from '../faces/faces';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
+import { usePhone } from '../phone';
 
 /**
  * One tool ask in Needs you: a developer tool of the app's catalog a member asked for with request_tool, with who asked,
@@ -22,6 +23,8 @@ import { useBusy } from '../busy';
  */
 const props = defineProps<{ ask: ToolAsk; api: YawbleApi }>();
 const emit = defineEmits<{ installed: [r: ToolInstallResult]; answered: [r: ToolInstallResult | ToolNotNowResult] }>();
+// A phone (B037): the card takes the full width and its buttons stack, each a full-width tap target.
+const phone = usePhone();
 
 const name = computed(() => props.ask.displayName || props.ask.tool);
 const choices = computed(() => props.ask.choices ?? []);
@@ -110,7 +113,7 @@ async function notNow() {
 </script>
 
 <template>
-  <article class="tool-ask" data-test="tool-ask" :data-id="ask.id" :data-state="installing ? 'installing' : failed ? 'failed' : 'asking'">
+  <article class="tool-ask" :class="{ phone }" data-test="tool-ask" :data-id="ask.id" :data-state="installing ? 'installing' : failed ? 'failed' : 'asking'">
     <p class="head">
       <strong data-test="tool-ask-member">{{ displayName(ask.memberName) }}</strong>
       <span class="muted"> · {{ ask.team }}</span> asks for the <b data-test="tool-ask-tool">{{ name }}</b>
@@ -172,4 +175,10 @@ async function notNow() {
 .small { font-size: 12px; }
 .error { color: var(--bad); }
 .buttons .discuss { margin-left: auto; }
+.tool-ask.phone { width: 100%; padding: 10px 12px; font-size: 14px; }
+.phone .buttons { flex-direction: column; align-items: stretch; gap: 8px; }
+.phone .buttons button { width: 100%; font-size: 14px; }
+.phone .buttons .discuss { margin-left: 0; }
+.phone .note { min-height: 44px; }
+.phone code { overflow-wrap: anywhere; }
 </style>

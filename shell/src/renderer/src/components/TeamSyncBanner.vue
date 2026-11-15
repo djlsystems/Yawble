@@ -77,4 +77,9 @@ defineExpose({ load });
 .discuss { flex: none; font-size: 12px; }
 .files { margin: 2px 0 0 18px; padding: 0; }
 .behind { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+/* A phone (B037): the heading over its button, the text over Sync now; tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .note .head, .behind { flex-wrap: wrap; }
+  .sync button { min-height: 44px; }
+}
 </style>
