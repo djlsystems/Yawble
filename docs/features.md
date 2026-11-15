@@ -75,6 +75,11 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   (its team and member filters apply). Each item shows the member, team, host or hosts, the agent's reason (or what
   was refused: the method and a short path, without its query), how many times it was refused since when, and what a
   package registry is for (api.nuget.org: NuGet; registry.npmjs.org: npm; pypi.org and files.pythonhosted.org: pip).
+  The strip is one scrolling box at most half the window high (40% on a phone), so the view below stays usable.
+  - **Answer all**: with two or more items waiting, a bar above them answers every item at once: **Allow all for
+    their agents**, **Allow all for their teams**, **Allow all everywhere** or **Deny all**. The first click says what
+    it will do; **Confirm** sends it. Each item is answered as its own buttons would with the host choice (never the
+    domain allow); an item that does not offer that answer is skipped, and skips and failures are listed.
   - **This host / All of \*.domain**: above the buttons, an item offers what an allow adds: the host (or the item's
     hosts), or the domain allow "All of *.digicert.com", which covers every subdomain of digicert.com but not
     digicert.com itself. The domain choice is offered only when a domain allow may be: never under a shared suffix
