@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { readOnly, vChange } from '../remoteAccess';
 import { computed, ref } from 'vue';
 import type { NetworkAnswer, NetworkAsk, NetworkAskChoice, YawbleApi } from '../../../shared/api';
 import { errorText, isRemoteRefusal } from '../api';
@@ -46,8 +47,9 @@ async function answer(choice: NetworkAskChoice) {
       const r = await props.api.call<NetworkAnswer>('network.answer', { id: props.ask.id, choice, ...(choice === 'deny' && note.value.trim() ? { note: note.value.trim() } : {}) });
       emit('answered', r);
     } catch (e) {
-      // Only the Cloud Link's own refusal means "answer it in the window"; any other failure is shown as it is.
-      error.value = isRemoteRefusal(props.api, e) ? `This view cannot change the network policy: answer it in the window. (${errorText(e)})` : errorText(e);
+      // Only the Cloud Link's own refusal means "answer it in the window"; any other failure is shown as it is. A
+      // read-only viewer's refusal (Visitor) is shown as the core words it: answering in the window is not theirs to do.
+      error.value = isRemoteRefusal(props.api, e) && !readOnly.value ?`This view cannot change the network policy: answer it in the window. (${errorText(e)})` : errorText(e);
     }
   }, choice);
 }
@@ -67,7 +69,7 @@ async function answer(choice: NetworkAskChoice) {
     <p class="small muted" data-test="network-ask-count">Refused {{ times }} since {{ since }}</p>
     <input v-model="note" class="note" placeholder="A note for the agent if you deny (optional)" maxlength="500" data-test="network-ask-note" />
     <div class="buttons">
-      <button v-for="(c, i) in choices" :key="c.choice" :class="{ primary: i === 0 }" :title="c.title" :data-test="`network-ask-${c.choice}`"
+      <button v-for="(c, i) in choices" :key="c.choice" :class="{ primary: i === 0 }" :title="c.title" v-change :data-test="`network-ask-${c.choice}`"
         :disabled="busy.is('answer')" :aria-busy="busy.is('answer', c.choice)" @click="answer(c.choice)">
         <BusyLabel :busy="busy.is('answer', c.choice)" :text="c.busy">{{ c.label }}</BusyLabel>
       </button>
