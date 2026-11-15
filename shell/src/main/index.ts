@@ -11,7 +11,8 @@ import { appFolder } from './app-folder';
 import { Channels, isUiMethod, type Overview } from '../shared/api';
 import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, startedInBackground, type ShellSettings } from './background';
 import { CoreClient } from './core-client';
-import { locateCore, startCore, type RunningCore } from './core-process';
+import { DataFolderInUseError, locateCore, startCore, type RunningCore } from './core-process';
+import { inUseDialog, removedDialog, type LifetimeDialog } from './lifetime-dialogs';
 import { WebsiteBridge, type PageWindow, type WindowFactory } from './website-host';
 import { ThemeFile, TitleBars, TITLE_BAR, windowBackground } from './title-bar';
 
@@ -38,13 +39,27 @@ let quitting = false;
 let toldAboutTray = false;
 let running = 0;
 let needsYou: number | null = null; // the last count seen (null: not yet), for the "needs you" notification
+let onCoreStarting: (() => void) | null = null; // the core holds the data folder (its YAWBLE-STARTING line)
+let lifetimeDialogShown = false; // "already running" or "was removed": shown once, then the app quits
+
+/** A dialog whose only answer is Quit (another Yawble holds the data folder; the app was removed): show it, then quit. */
+async function showAndQuit(d: LifetimeDialog): Promise<void> {
+  if (lifetimeDialogShown) return;
+  lifetimeDialogShown = true;
+  report(`${d.message}: ${d.detail}`);
+  const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  if (owner) await dialog.showMessageBox(owner, d);
+  else await dialog.showMessageBox(d);
+  quitting = true;
+  app.quit();
+}
 
 async function connectCore(): Promise<CoreClient> {
   const launch = locateCore(repoRoot, app.isPackaged ? process.resourcesPath : undefined);
   // The app's install folder (bin/ with yawble-bridge, yawble-grok-auth, yawble-guardcheck; roles/). The agent CLIs are not in
   // it: the core runs the ones the person installed, found where they are at every launch.
   const installDir = process.env.YAWBLE_INSTALL_DIR ?? (app.isPackaged ? process.resourcesPath : undefined);
-  core = await startCore(launch, { dataDir, installDir });
+  core = await startCore(launch, { dataDir, installDir, onStarting: () => onCoreStarting?.() });
   report.file(`the core started (process ${core.child.pid ?? '?'})`);
   core.child.once('exit', (code) => {
     report(`the core exited (${code})`);
@@ -133,6 +148,8 @@ function startAndAttach(): Promise<CoreClient> {
     if (core) startWebsiteBridge(core.address, core.token); // a restarted core gets a new address and token
     // Pushes go to every window; each page keeps only its own channel.
     c.onEvent((event) => {
+      const removed = removedDialog(event); // the core's removal watch: uninstalled, or its data removed
+      if (removed) void showAndQuit(removed);
       for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && !websiteWindows.has(win)) win.webContents.send(Channels.event, event);
     });
     return c;
@@ -154,6 +171,8 @@ async function restartCore(): Promise<void> {
     await ready;
     for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && !websiteWindows.has(win)) win.webContents.reload();
   } catch (e) {
+    // Another Yawble took the data folder while ours was down: say so and quit, never a window on a core that is not there.
+    if (e instanceof DataFolderInUseError) { void showAndQuit(inUseDialog(e.message)); return; }
     report(`the core did not start again: ${e instanceof Error ? e.message : String(e)}`);
     // Reload anyway: each page's first call then fails with the core's reason (its "fatal:" lines), which it shows.
     for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && !websiteWindows.has(win)) win.webContents.reload();
@@ -301,6 +320,8 @@ app.whenReady().then(async () => {
   // Everything is refused except writing text to the clipboard (the copy buttons on the Concierge's code blocks).
   session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'clipboard-sanitized-write'));
   coreStarts.push(Date.now());
+  // No window until the core holds the data folder: a second Yawble on it gets the "already running" dialog instead.
+  const holdsDataFolder = new Promise<void>((resolve) => { onCoreStarting = resolve; });
   ready = startAndAttach();
   const first = ready;
   const requireClient = async () => {
@@ -415,8 +436,14 @@ app.whenReady().then(async () => {
       needsYou = needs;
     }, () => tray?.update(null));
   }, 5000);
-  if (!startedInBackground(process.argv)) showMain();
   first.catch((e) => report(`${e.message}`));
+  // A core that never says YAWBLE-STARTING (an older one through YAWBLE_CORE_PATH) is waited for until READY or its exit.
+  const refused = await Promise.race([holdsDataFolder.then(() => null), first.then(() => null, (e: unknown) => e)]);
+  if (refused instanceof DataFolderInUseError) {
+    await showAndQuit(inUseDialog(refused.message));
+    return;
+  }
+  if (!startedInBackground(process.argv)) showMain();
 });
 
 /** Opens the main window, or brings it forward. The core (and the teams' work) is already running either way. */

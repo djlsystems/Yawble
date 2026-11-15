@@ -38,10 +38,28 @@ if (options.Error is not null)
 
 // The data folder is user-only on Linux and macOS (0700 folders, 0600 files): made so when missing, tightened below when not.
 Yawble.Core.Companion.UserOnlyFile.CreatePrivateDirectory(options.DataDir!);
+// One core per data folder (Lifetime/DataFolderLock): <data>/core.lock is held until this process ends, and a second core
+// on the same folder stops here with exit code 5 and a "fatal:" line the shell shows in a dialog. The shell's per-launch
+// IPC folder (POSIX: yawble-XXXXXX holding the socket) is ours to remove when we leave, refused or not.
+var launchFolder = OperatingSystem.IsWindows() ? null : Yawble.Core.Lifetime.RuntimeFolders.LaunchFolderOf(options.IpcAddress!);
+var lockAttempt = Yawble.Core.Lifetime.DataFolderLock.TryAcquire(options.DataDir!, Environment.ProcessId);
+if (lockAttempt.Lock is not { } heldLock)
+{
+    Console.Error.WriteLine("fatal: " + Yawble.Core.Lifetime.DataFolderLock.InUseMessage(lockAttempt.HeldByPid));
+    if (launchFolder is not null) Yawble.Core.Lifetime.RuntimeFolders.RemoveOwn(launchFolder);
+    return Yawble.Core.Lifetime.DataFolderLock.InUseExitCode;
+}
+using var dataLock = heldLock;
+// The shell opens its window on this line (before it, a refused core may still exit with the dialog's message).
+Console.WriteLine("YAWBLE-STARTING");
 // Everything the core reports on standard error is also kept in <data>/logs/core-<day>.log (the Diagnostics log).
 Console.SetError(new Yawble.Core.Logs.DiagnosticLog(options.DataDir!, "core").Tee(Console.Error));
 Console.Error.WriteLine(CoreInfo.StartupLine());
 Yawble.Core.Storage.DataFolderAccess.Secure(options.DataDir!, Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!), line => Console.Error.WriteLine(line));
+// The IPC folders crashed launches left behind (no socket in them answers); never ours, never one that is still in use.
+if (launchFolder is not null && Path.GetDirectoryName(launchFolder) is { } runtimeBase)
+    new Yawble.Core.Lifetime.RuntimeFolders(Yawble.Core.Lifetime.RuntimeFolders.UnixSocketAnswers, log: line => Console.Error.WriteLine(line))
+        .SweepStale(runtimeBase, launchFolder);
 var dbPath = Path.Combine(options.DataDir!, "yawble.db");
 // Backups: one before the first pending migration (the update is refused if it fails), a daily one while running.
 Yawble.Core.Connections.ConnectionService? connectionsForBackup = null; // set once the Connection service exists
@@ -369,6 +387,8 @@ if (options.ExitOnStdinClose)
     });
 }
 
+// Disposed after the endpoints below (declared before them): on a clean exit the emptied launch folder goes too.
+using var launchFolderCleanup = new RunOnDispose(() => { if (launchFolder is not null) Yawble.Core.Lifetime.RuntimeFolders.RemoveOwn(launchFolder); });
 await using var server = IpcServer.Start(IpcEndpoint.Create(options.IpcAddress!), options.Token!, dispatcher, events, hostEvents, websiteHost,
     websiteSignedIn: id => _ = integrations.WebsiteSignedIn(id)); // starts the check and returns: it never throws
 // yawble-companion's control endpoint (its own pipe or socket, never the window's, never handed to the Cloud Link) and
@@ -387,6 +407,9 @@ _ = board.RunAsync(stop.Token);
 _ = logService.RunDailyAsync(stop.Token); // each log kept to its retention: on start, then daily
 _ = updateService.RunAsync(stop.Token); // updates to the app: a minute after start, then every 6 hours (when on)
 _ = integrations.RunWatchesAsync(stop.Token); // integrations' watches: their new items become events
+// About once a minute: was our executable deleted, or the data folder removed or replaced? The shell then offers Quit.
+_ = new Yawble.Core.Lifetime.RemovalWatch(new Yawble.Core.Lifetime.SystemInstallProbe(dataLock.StillOurs), events.Publish,
+    line => Console.Error.WriteLine(line)).RunAsync(stop.Token);
 try
 {
     await Task.Delay(Timeout.Infinite, stop.Token);
@@ -400,4 +423,10 @@ return 0;
 file sealed class BackupListerAdapter(BackupService s) : Yawble.Core.Ops.IBackupLister
 {
     public IReadOnlyList<Yawble.Core.Ops.BackupInfo> List() => s.List().Select(b => new Yawble.Core.Ops.BackupInfo(b.Name, b.Size, b.Reason, b.Time)).ToList();
+}
+
+/// <summary>Runs an action when disposed (the launch folder's removal, in the order of the using declarations).</summary>
+file sealed class RunOnDispose(Action action) : IDisposable
+{
+    public void Dispose() => action();
 }
