@@ -112,8 +112,9 @@ native library.
 - **Policy.** A global policy plus a per-member override. An override only tightens: hosts are intersected, timeouts
   and caps take the minimum, denials are a union, grants must lie inside the grantable roots. Only a separate
   **loosen** block widens, and saving it needs a confirmation that matches the exact list of what it loosens.
-- **Floor rules** nobody can loosen: no model-vendor API or sign-in host, no `*.yawble.internal`, no IP literals or
-  wildcards, no grant that equals, contains or lies inside an implicit denial or the app folder.
+- **Floor rules** nobody can loosen: no model-vendor API or sign-in host, no `*.yawble.internal`, no IP literals, no
+  wildcard other than one domain allow (below), no grant that equals, contains or lies inside an implicit denial or the
+  app folder.
 - **Implicit grants and denials.** Read/write: the member's `repo/`, `home/` and `tmp/`. Read-only: the detected CLI's
   install folders, the app's `bin/` and `roles/`. Denied: `data/`, the database, credentials, `grok-home/`, every
   other member and team, the CLI's own config and credential folders, and on macOS `~/.ssh` and `~/Library/Keychains`.
@@ -144,6 +145,26 @@ No model credential ever enters a sandbox.
   `model.yawble.internal` forward to the vendor's API: each forward checks the token and a path allowlist, swaps in the
   real credential, passes headers through and streams the response. `CONNECT host:443` is allowed only for the run's
   allowed hosts and never for vendor API or sign-in hosts or private addresses. Denials go to the gateway log.
+- **Allow matching.** An allowHosts entry is an exact host name or a domain allow, `*.<domain>`. An exact entry matches
+  that name only (case-insensitive, compared as sent, so a trailing dot is another name). `*.digicert.com` matches every
+  subdomain at any depth (`crl3.digicert.com`, `a.b.digicert.com`) and never the apex `digicert.com`, which is listed
+  separately when wanted; a lookalike such as `evil-digicert.com` never matches, because the name must end in
+  `.digicert.com`. The vendor floor wins over any entry (`Vhosts.HostAllowed`).
+- **Domain allows and the Public Suffix List.** `FloorRules.HostProblem` accepts exactly one leading `*.` over a
+  registrable domain (eTLD+1) and refuses everything else: bare `*`, `**.x`, `a.*.b`, a public suffix (`*.com`,
+  `*.co.uk`, `*.github.io`), a name below the registrable domain (`*.sub.example.com`), any domain whose suffix is in
+  the list's PRIVATE section (`*.pat.github.io`, `*.app.herokuapp.com`: anyone can own a sibling, so a wildcard there
+  reaches hosts someone else controls), any domain with public suffixes under it (`*.amazonaws.com`, `*.windows.net`),
+  a vendor or gateway domain, and the Codex and Copilot presets' own vendor domains (`FloorRules.PresetOnlyDomains`).
+  The domain is held to the exact-host rules too, in plain ASCII letters, digits and hyphens with no `xn--` label.
+  The same check runs for the member loosen block, the team allow list (`PolicyStore.AddTeamHost`, which also applies
+  the ask filter to the domain) and the global allowed hosts; none of them adds the apex.
+  `PublicSuffix.RegistrableDomain(host)` gives the eTLD+1 from both sections of the list (null for a suffix, a bare TLD,
+  an IP, an IDN or a malformed name), and `PublicSuffix.DomainPatternFor(host)` gives the `*.<eTLD+1>` that may be
+  offered, or null when only the exact host may be. The list is a pinned copy embedded in the core
+  (`core/src/Yawble.Core/Policy/public_suffix_list.dat`, VERSION 2026-11-13_14-44-35_UTC, publicsuffix/list commit
+  71c235dd3f88, SHA-256 8576b335b871dea99dc0fccd04138311bd43f7a8da256c31bf964f11e2f7c179) and is never fetched at run
+  time; a newer copy is a reviewed change to that file and to the hash in `PublicSuffixTests`.
 - **Credentials.** Kept in Windows Credential Manager, the macOS Keychain or the Linux Secret Service; when no Secret
   Service answers, in a 0600 file under `data/credentials/` with a warning. Sign-ins the CLIs make themselves run in
   host terminal panes outside any sandbox, with every other credential withheld from their environment.

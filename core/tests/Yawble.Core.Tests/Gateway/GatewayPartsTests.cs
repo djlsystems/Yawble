@@ -28,6 +28,40 @@ public class GatewayPartsTests
         Assert.False(Vhosts.HostAllowed("eu.api.x.ai", allow));
     }
 
+    // B018 (card 183): a domain allow ("*.digicert.com") matches every subdomain, never the apex, never a lookalike.
+    [Theory]
+    [InlineData("crl3.digicert.com", true)]
+    [InlineData("ocsp.digicert.com", true)]
+    [InlineData("a.b.c.digicert.com", true)] // any depth
+    [InlineData("CRL4.DigiCert.COM", true)] // host names compare case-insensitively
+    [InlineData("digicert.com", false)] // the apex is not included; list it separately
+    [InlineData("evil-digicert.com", false)] // a lookalike: no dot before the domain
+    [InlineData("evildigicert.com", false)]
+    [InlineData("crl3.evil-digicert.com", false)]
+    [InlineData("digicert.com.evil.com", false)]
+    [InlineData("crl3.digicert.com.evil.com", false)]
+    [InlineData("digicert.co", false)]
+    [InlineData(".digicert.com", false)] // an empty label is no subdomain
+    [InlineData("crl3.digicert.com.", false)] // compared as sent: a trailing dot is another name
+    [InlineData("crl3.digicert.org", false)]
+    [InlineData("", false)]
+    public void ADomainAllow_MatchesSubdomainsOnly_NotTheApex_NorALookalike(string host, bool allowed) =>
+        Assert.Equal(allowed, Vhosts.HostAllowed(host, ["*.digicert.com"]));
+
+    [Fact]
+    public void ADomainAllow_WithTheApexListedToo_MatchesBoth_AndTheVendorFloorStillWins()
+    {
+        Assert.True(Vhosts.HostAllowed("digicert.com", ["*.digicert.com", "digicert.com"]));
+        Assert.True(Vhosts.HostAllowed("www.bbc.co.uk", ["*.bbc.co.uk"]));
+        Assert.False(Vhosts.HostAllowed("bbc.co.uk", ["*.bbc.co.uk"]));
+        Assert.False(Vhosts.HostAllowed("www.notbbc.co.uk", ["*.bbc.co.uk"]));
+        // Whatever a list holds, a vendor's API or sign-in host is never reached by CONNECT.
+        Assert.False(Vhosts.HostAllowed("console.anthropic.com", ["*.anthropic.com"]));
+        Assert.False(Vhosts.HostAllowed("auth.x.ai", ["*.x.ai"]));
+        // An exact entry never matches a subdomain.
+        Assert.False(Vhosts.HostAllowed("crl3.digicert.com", ["digicert.com"]));
+    }
+
     [Theory]
     [InlineData("127.0.0.1", true)]
     [InlineData("10.1.2.3", true)]

@@ -92,7 +92,10 @@ public class PolicyMergeTests
     [InlineData("grok.com")]
     [InlineData("bus.yawble.internal")]
     [InlineData("127.0.0.1")]
-    [InlineData("*.example.com")]
+    [InlineData("*.com")] // a domain allow over a public suffix (B018)
+    [InlineData("*.github.io")]
+    [InlineData("*.anthropic.com")]
+    [InlineData("a.*.example.com")]
     public void NoOneCanAddAVendorOrReservedHost(string host)
     {
         var loosen = PolicyMerger.Merge(PolicyFixtures.Global, null, new PolicyPatch(Network: new NetworkPatch([host])), Linux);
