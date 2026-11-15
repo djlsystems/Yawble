@@ -117,6 +117,12 @@ public sealed record RunLayout
     /// </summary>
     public IReadOnlyList<string> HostToolFolders { get; init; } = [];
 
+    /// <summary>
+    /// Linux: the <see cref="LinuxResolverMasks"/> present on this host (set by the launcher, which looks at the host);
+    /// denied in every request. Empty elsewhere.
+    /// </summary>
+    public IReadOnlyList<string> ResolverMasks { get; init; } = [];
+
     /// <summary>The host's sign-in files whose access is read-write (none while the catalog says read-only).</summary>
     public IReadOnlyList<string> SignInReadwrite => CliInstall.SignInReadWrite;
 
@@ -137,6 +143,8 @@ public sealed record RunLayout
                 list.Add(Home.TrimEnd('/') + sep + ".ssh");
                 list.Add(Home.TrimEnd('/') + sep + "Library/Keychains");
             }
+            // The host resolver's sockets and the name-service files: no lookup inside reaches the host's resolver.
+            if (Os == TargetOs.Linux) list.AddRange(ResolverMasks);
             return list;
         }
     }

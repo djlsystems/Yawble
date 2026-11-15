@@ -31,8 +31,11 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
 
     // ------------------------------------------------------------------ delete branches
 
-    /// <summary>Plans deleting <paramref name="names"/> (or, when none, every merged branch) from the repository; refusals are listed with the reason.</summary>
-    public async Task<GitPlan> PlanDeleteAsync(ActionRepo repo, IReadOnlyList<string> names, IReadOnlyList<string> unmergedOk, bool remote, CancellationToken ct)
+    /// <summary>Plans deleting <paramref name="names"/> (or, when none, every merged branch) from the repository; refusals are listed with the reason.
+    /// <paramref name="refuse"/>: the caller's own refusal for a branch (why it is not deleted), or null; applied to every
+    /// branch considered, named or not (card 171: another team's member still on it).</summary>
+    public async Task<GitPlan> PlanDeleteAsync(ActionRepo repo, IReadOnlyList<string> names, IReadOnlyList<string> unmergedOk, bool remote, CancellationToken ct,
+        Func<string, string?>? refuse = null)
     {
         var path = repo.Path;
         var baseSha = await RevAsync(path, "refs/heads/" + repo.BaseBranch, ct)
@@ -65,6 +68,11 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
             if (Protected(repo, branch))
             {
                 if (names.Count > 0) sb.AppendLine($"- {branch}: REFUSED, it is the base/protected branch");
+                continue;
+            }
+            if (refuse?.Invoke(branch) is { } why)
+            {
+                sb.AppendLine($"- {branch}: REFUSED, {why}");
                 continue;
             }
             // Card 106: a checked-out branch is refused on origin's side too (a clone on it, only origin has it yet).
