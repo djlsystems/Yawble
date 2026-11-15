@@ -62,11 +62,26 @@ export function earlyExitError(code: number | null, stderr: string): Error {
   const lines = stderr.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
   const fatal = lines.filter((l) => l.startsWith('fatal: ')).map((l) => l.slice('fatal: '.length));
   const reason = fatal.length > 0 ? fatal.join(' ') : lines.at(-1);
+  if (code === CORE_IN_USE_EXIT_CODE) return new DataFolderInUseError(fatal.length > 0 ? fatal.join(' ') : 'another Yawble is using this data folder');
   return new Error(reason ? `the core exited with code ${code} before READY: ${reason}` : `the core exited with code ${code} before READY`);
 }
 
-/** Starts the core sidecar and resolves once it prints its READY line. */
-export function startCore(launch: CoreLaunch, opts: { dataDir: string; installDir?: string; timeoutMs?: number }): Promise<RunningCore> {
+/** The core's exit code when another core holds the data folder's core.lock (Lifetime/DataFolderLock.cs). */
+export const CORE_IN_USE_EXIT_CODE = 5;
+
+/** Another Yawble holds this data folder. The message is the core's own: "another Yawble is using this data folder (pid N)". */
+export class DataFolderInUseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DataFolderInUseError';
+  }
+}
+
+/**
+ * Starts the core sidecar and resolves once it prints its READY line. Before that it prints YAWBLE-STARTING once it holds the
+ * data folder (onStarting): until then it may still exit refused (DataFolderInUseError), so the shell opens no window yet.
+ */
+export function startCore(launch: CoreLaunch, opts: { dataDir: string; installDir?: string; timeoutMs?: number; onStarting?: () => void }): Promise<RunningCore> {
   const token = randomBytes(32).toString('hex');
   const address = newIpcAddress();
   const args = [...launch.args, '--ipc', address, '--data-dir', opts.dataDir];
@@ -83,7 +98,9 @@ export function startCore(launch: CoreLaunch, opts: { dataDir: string; installDi
     const timer = setTimeout(() => reject(new Error('the core did not report READY in time')), opts.timeoutMs ?? 30_000);
     const lines = readline.createInterface({ input: child.stdout! });
     lines.on('line', (line) => {
-      if (line.startsWith('YAWBLE-READY ')) {
+      if (line === 'YAWBLE-STARTING') {
+        opts.onStarting?.();
+      } else if (line.startsWith('YAWBLE-READY ')) {
         clearTimeout(timer);
         resolve({ child, address: line.slice('YAWBLE-READY '.length), token });
       } else {

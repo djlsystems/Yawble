@@ -51,6 +51,19 @@ sandbox.lock.json           the pinned sandbox release, request contract and tel
   connection must be `auth` with that token, or the core closes the connection.
 - **Lifetime.** The core prints `YAWBLE-READY <address>` when it listens and exits when its stdin closes, so it never
   outlives the shell.
+- **One core per data folder.** First the core takes `<data>/core.lock` with FileShare.None (flock `LOCK_EX|LOCK_NB` on
+  Linux and macOS) and holds it for its life; its pid goes into `core.lock` and `core.pid`. It then prints
+  `YAWBLE-STARTING`, and the shell opens its window only after that line. A second core on the folder prints
+  `fatal: another Yawble is using this data folder (pid N)` and exits with code 5, and the shell shows that line in a
+  dialog with Quit (`Lifetime/DataFolderLock.cs`, `shell/src/main/lifetime-dialogs.ts`).
+- **Removal notice.** Once a minute the core checks whether its executable was deleted (Linux: `/proc/self/exe` ends
+  in ` (deleted)`; elsewhere: the path is gone) and whether `core.pid` is still the one it wrote, which fails when the
+  data folder was removed or replaced. While either holds it pushes `app.removed`, and the shell shows "Yawble was
+  uninstalled or its data was removed" with Quit (`Lifetime/RemovalWatch.cs`).
+- **IPC folders (Linux, macOS).** The shell's `yawble-XXXXXX` folder is removed by the core on a clean exit, and
+  also on a refused start. At startup the core sweeps the stale ones beside it, which means older than 2 minutes,
+  holding only `*.sock` files and nested `yawble-*` folders, with no socket that answers. It deletes only dead sockets
+  and empty folders (`Lifetime/RuntimeFolders.cs`).
 - **Renderer.** `contextIsolation` and Chromium's sandbox are on; the renderer reaches the core only through
   `window.yawble` and only for the UI method prefixes the main process allows.
 
