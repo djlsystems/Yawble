@@ -68,6 +68,14 @@ export const FitOnceMs = 1_500;
  * Whether the camera aims at everything at `now`. Auto fit: unless the person moved the wall in the last 12 s. Pinned:
  * only during a one-off Fit (until `fitUntil`).
  */
+/**
+ * Where team i of count sits on the wall's oval (radians, 0 = right, clockwise on screen): the first on the left, the
+ * rest evenly round from there, so two teams sit side by side across the wide axis rather than one above the other.
+ */
+export function teamAngle(i: number, count: number): number {
+  return count <= 1 ? 0 : Math.PI + (i / count) * Math.PI * 2;
+}
+
 export function aimsAtEverything(pinned: boolean, now: number, movedAt: number, fitUntil: number): boolean {
   return pinned ? now < fitUntil : now - movedAt > RefitAfterMs;
 }
@@ -209,7 +217,7 @@ export class MonitorScene {
     const rx = Math.max(140, 150 + count * 34);
     const ry = rx * 0.62;
     teams.forEach((t, i) => {
-      const angle = count === 1 ? 0 : (i / count) * Math.PI * 2 - Math.PI / 2;
+      const angle = teamAngle(i, count);
       const homeX = count === 1 ? 0 : Math.cos(angle) * rx;
       const homeY = count === 1 ? 0 : Math.sin(angle) * ry;
       const hue = (i * 137.508 + 190) % 360;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { teamAngle } from '../../src/renderer/src/monitor/scene';
 import {
   clampLayout, isDefaultLayout, LayoutDefaults, LayoutMax, LayoutMin, LayoutStorageKey, readLayout, writeLayout,
 } from '../../src/renderer/src/monitor/layout';
@@ -48,5 +49,21 @@ describe('the Monitor layout forces (monitor/layout.ts)', () => {
     expect(readLayout(null)).toEqual(LayoutDefaults);
     expect(isDefaultLayout(LayoutDefaults)).toBe(true);
     expect(isDefaultLayout({ ...LayoutDefaults, friction: 1.05 })).toBe(false);
+  });
+});
+
+describe('where the teams sit on the wall (scene.ts teamAngle)', () => {
+  const at = (i: number, n: number) => {
+    const a = teamAngle(i, n);
+    return { x: Math.round(Math.cos(a) * 100) + 0, y: Math.round(Math.sin(a) * 100) + 0 }; // + 0: no -0
+  };
+  it('two teams sit side by side (left, right), not one above the other', () => {
+    expect(at(0, 2)).toEqual({ x: -100, y: 0 });
+    expect(at(1, 2)).toEqual({ x: 100, y: 0 });
+  });
+  it('the first team is on the left, and one team alone is at the middle', () => {
+    expect(at(0, 4)).toEqual({ x: -100, y: 0 });
+    expect(at(2, 4)).toEqual({ x: 100, y: 0 });
+    expect(teamAngle(0, 1)).toBe(0);
   });
 });
