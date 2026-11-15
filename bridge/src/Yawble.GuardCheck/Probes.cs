@@ -21,7 +21,7 @@ public sealed partial class Probes(ProbePlan plan, ProbeOutput output, Func<stri
         Context();
         foreach (var r in plan.Reads) Read(r);
         foreach (var w in plan.Writes) Write(w);
-        await Task.WhenAll(plan.Tcp.Select(TcpAsync).Concat(plan.Dns.Select(DnsAsync)));
+        await Task.WhenAll(plan.Tcp.Select(TcpAsync).Concat(plan.Dns.Select(DnsAsync)).Concat(plan.Unix.Select(UnixAsync)));
         await GatewayAsync();
         Processes();
         CredentialStores();
@@ -152,6 +152,31 @@ public sealed partial class Probes(ProbePlan plan, ProbeOutput output, Func<stri
         catch (SocketException e)
         {
             output.Result(d.Id, d.Category, Blocked, $"{d.Name} did not resolve ({e.SocketErrorCode})");
+        }
+    }
+
+    /// <summary>A connect to a host service's Unix socket (the resolver's varlink, the system bus): connected = allowed. Nothing is sent.</summary>
+    private async Task UnixAsync(UnixProbe u)
+    {
+        if (!File.Exists(u.Path) && !Directory.Exists(Path.GetDirectoryName(u.Path)))
+        {
+            output.Result(u.Id, u.Category, Blocked, $"not visible: {u.Path}");
+            return;
+        }
+        try
+        {
+            using var s = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            using var cts = new CancellationTokenSource(NetTimeout);
+            await s.ConnectAsync(new UnixDomainSocketEndPoint(u.Path), cts.Token);
+            output.Result(u.Id, u.Category, Allowed, $"connected to the host service's socket {u.Path}");
+        }
+        catch (OperationCanceledException)
+        {
+            output.Result(u.Id, u.Category, Blocked, $"no connection to {u.Path} (timed out after {NetTimeout.TotalSeconds:0} s)");
+        }
+        catch (SocketException e)
+        {
+            output.Result(u.Id, u.Category, Blocked, $"no connection to {u.Path} ({e.SocketErrorCode})");
         }
     }
 

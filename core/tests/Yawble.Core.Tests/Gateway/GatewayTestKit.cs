@@ -314,10 +314,15 @@ internal sealed class GatewayFixture : IAsyncDisposable
     }
 
     public static async Task<GatewayFixture> StartAsync(bool allowPrivateConnect = false, IReadOnlySet<int>? connectPorts = null, GrokKeeperOptions? keeper = null,
-        ClaudeHostSession? claudeHost = null, Func<string?>? copilotToken = null, CodexHostSession? codexHost = null, bool realLoopback = false)
+        ClaudeHostSession? claudeHost = null, Func<string?>? copilotToken = null, CodexHostSession? codexHost = null, bool realLoopback = false,
+        bool realSandbox = false)
     {
-        // A real-loopback fixture binds ports: only for tests gated on SkipUnlessRealLoopback.
-        if (realLoopback && !RealLoopbackEnabled)
+        // A real sandbox (the tests gated on RealSandbox.SkipUnlessAvailable) reaches the gateway over slirp4netns, i.e. on
+        // a real 127.0.0.1 port: an in-memory listener's port is bound by nothing, so the sandbox's connection was refused
+        // (Errno 111, B035). Those tests run real loopback without the opt-in variable.
+        realLoopback |= realSandbox;
+        // A real-loopback fixture binds ports: only for tests gated on SkipUnlessRealLoopback (or on a real sandbox).
+        if (realLoopback && !realSandbox && !RealLoopbackEnabled)
             throw new InvalidOperationException($"a real-loopback gateway fixture needs {RealLoopbackVariable}=1 (call SkipUnlessRealLoopback first)");
         var f = new GatewayFixture();
         f.Upstream = await FakeUpstream.StartAsync(realLoopback);

@@ -57,6 +57,32 @@ public class SignInTests
         Assert.Equal("/srv/claude-cfg", s.Environment["CLAUDE_SECURESTORAGE_CONFIG_DIR"]);
     }
 
+    /// <summary>
+    /// Claude Code on Linux keeps its sign-in in the plaintext file $CLAUDE_CONFIG_DIR/.credentials.json (default
+    /// ~/.claude/.credentials.json; no keyring). The file detection reports is the one the gateway reads, and every run
+    /// uses the gateway-held mode, which grants the sandbox none of it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheDetectedClaudeSignInIsTheFileTheGatewayReads(bool withConfigDir)
+    {
+        // The gateway's path is built for this OS (Path.Combine, the real home), so the detection runs as this OS too;
+        // macOS is the Keychain (pending, above). Linux is what the Fedora host ran.
+        Assert.SkipWhen(OperatingSystem.IsMacOS(), "Claude Code on macOS keeps its sign-in in the Keychain");
+        var os = OperatingSystem.IsWindows() ? TargetOs.Windows : TargetOs.Linux;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var configDir = withConfigDir ? Path.Combine(Path.GetTempPath(), "claude-cfg") : null;
+        var expected = Path.Combine(configDir ?? Path.Combine(home, ".claude"), ".credentials.json");
+        var host = new FakeHost(os, home).File(expected, "{}");
+        if (configDir is not null) host.Vars["CLAUDE_CONFIG_DIR"] = configDir;
+        var detected = Assert.Single(SignInCatalog.Claude(host.Host()).Files).Path;
+        Assert.Equal(expected, detected);
+        Assert.Equal(detected, Yawble.Core.Credentials.ClaudeHostSession.DefaultCredentialsFile(v => v == "CLAUDE_CONFIG_DIR" ? configDir : null));
+        Assert.Equal(CredentialMode.ClaudeGatewaySignIn, new Yawble.Core.Launch.HostSignInModes().ModeFor(AgentCli.Claude));
+        Assert.False(AgentPresets.IsHostSignIn(CredentialMode.ClaudeGatewaySignIn)); // no sign-in grant in this mode
+    }
+
     [Fact]
     public void ClaudeOnMacOsIsPendingNotSilentlyMissing()
     {
