@@ -57,7 +57,8 @@ Visitor. The app checks it on every call. A call with no access, or any value ot
 older site works as before. The app's hello on the connection says `"caps": ["access"]`; the site lets a Visitor open
 only a computer that says it.
 
-A read-only viewer sees the same screens and gets the same live updates. They can:
+A read-only viewer sees the same screens and gets the same live updates. The remote view shows a
+**Read-only (Visitor)** chip and turns off the buttons that would change something. They can:
 
 - see the overview, teams, members, the Monitor, workflows and the questions waiting;
 - read the board, the backlog, cards and the team's documents;
@@ -67,8 +68,9 @@ A read-only viewer sees the same screens and gets the same live updates. They ca
 
 They cannot change anything. Telling a manager, answering a question, approving or declining a request, answering a
 network or tool request, creating, editing, moving or deleting anything, running the guardrail check, saving a
-policy or a setting, git actions, and terminals (opening, typing into or stopping a member's terminal or a host
-terminal) are all refused with:
+policy or a setting, git actions, and terminals (opening, attaching to - even just to watch - typing into, resizing
+or stopping a member's terminal or a host terminal: `terminal.attach` is refused like the others, so there is no
+read-only terminal view) are all refused with:
 
 > You have read-only access to this computer (Visitor). Ask a workgroup Member or an Owner for more.
 
