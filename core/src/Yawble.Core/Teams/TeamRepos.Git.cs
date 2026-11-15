@@ -20,7 +20,7 @@ public sealed record TeamGitStatus(
     public IReadOnlyList<TeamGitOldBranch> OldBranches { get; init; } = [];
 
     /// <summary>B020: branches here or on origin (as of the last fetch) that block this team's members/&lt;team&gt;/&lt;name&gt;
-    /// branches (members/&lt;team&gt;, or members), for the dialog's Delete or Rename; empty when none. An old-style one is
+    /// branches (members/&lt;team&gt;, or members), for the dialog's Delete; empty when none. An old-style one is
     /// also in <see cref="OldBranches"/>.</summary>
     public IReadOnlyList<TeamGitBlockingBranch> BlockingBranches { get; init; } = [];
 }
@@ -289,12 +289,15 @@ public sealed partial class TeamRepos
         // Card 106 (F4): git on Windows and macOS finds a loose ref whatever its case, so the refusal below, the plan, its
         // token and the delete all work on the exact ref name each requested one resolves to (an ambiguous one is refused).
         var (exact, refusals) = await git.ResolveBranchNamesAsync(repo.Path, branches.Distinct(), remote, ct);
+        string? HeldElsewhere(string b) =>
+            users.FirstOrDefault(u => u.TeamId != teamId && string.Equals(u.Branch, b, StringComparison.OrdinalIgnoreCase)) is { } held
+                ? $"{Holder(held, teamId)} is still on it"
+                  + (IsLegacyMemberBranch(b) ? $" (its old branch: it moves to {BranchFor(held.Team, held.Member)} at that member's next start)" : "")
+                : null;
         var allowed = new List<string>();
         foreach (var b in exact)
         {
-            if (users.FirstOrDefault(u => u.TeamId != teamId && string.Equals(u.Branch, b, StringComparison.OrdinalIgnoreCase)) is { } held)
-                refusals.Add($"- {b}: REFUSED, {Holder(held, teamId)} is still on it"
-                    + (IsLegacyMemberBranch(b) ? $" (its old branch: it moves to {BranchFor(held.Team, held.Member)} at that member's next start)" : ""));
+            if (HeldElsewhere(b) is { } why) refusals.Add($"- {b}: REFUSED, {why}");
             else allowed.Add(b);
         }
         return await WithTeamLock(teamId, async () =>
@@ -305,7 +308,8 @@ public sealed partial class TeamRepos
                 var only = $"{name} ({repo.Path}), base {repo.BaseBranch}:\n{string.Join('\n', refusals)}";
                 return new TeamGitDelete(only, "", true, confirm is null ? null : "Nothing to delete.", false);
             }
-            var plan = await git.PlanDeleteAsync(action, allowed.Count > 0 ? allowed : branches, unmergedOk, remote, ct);
+            // Card 171: with no names ("every merged branch") the same in-use check applies to each branch the plan considers.
+            var plan = await git.PlanDeleteAsync(action, allowed.Count > 0 ? allowed : branches, unmergedOk, remote, ct, HeldElsewhere);
             if (refusals.Count > 0)
             {
                 var lines = plan.Text.Split('\n', 2);

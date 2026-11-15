@@ -343,17 +343,27 @@ public sealed partial class TeamRepos
             if (AppCloned(repo.Path)) await RefreshFromOriginAsync(repo.Path, repo.BaseBranch, ct);
             // B016: a member still on members/<name> moves to members/<team>/<name> (the old branch is kept).
             // Before the shared view is updated, so its bundle already has the new branch.
-            await MoveLegacyBranchLockedAsync(member, repo, ct);
-            // B020: a members/<team> ref (here, on origin, in the shared view or the clone) blocks the member's branch: a
-            // plain refusal before anything is made, never git's "cannot lock ref" later.
+            var moves = new List<string>();
+            if (await MoveLegacyBranchLockedAsync(member, repo, ct) is { } movedFrom)
+                moves.Add(MoveLine(member.Name, "the team's repository", movedFrom, BranchFor(member.Team, member.Name)));
+            // B020: a members/<team> ref (here, on origin or in the clone) blocks the member's branch: a plain refusal
+            // before anything is made, never git's "cannot lock ref" later. Card 171: every repository is checked here, and a
+            // refusal after the move above says what moved.
             var planned = CheckoutOf(member, repo);
-            await CheckMemberBranchFreeAsync(member, planned.Branch, "the team's repository", repo.Path, SharedRepoPath(member.Team), planned.ClonePath, ct);
-            await CheckExtrasFreeLockedAsync(member, planned.Branch, ct);
+            try
+            {
+                await CheckMemberBranchFreeAsync(member, planned.Branch, "the team's repository", repo.Path, planned.ClonePath, ct);
+                await CheckExtrasFreeLockedAsync(member, planned.Branch, ct);
+            }
+            catch (MemberBranchBlockedException e) when (moves.Count > 0)
+            {
+                throw WithMoves(e, moves);
+            }
             await UpdateSharedLockedAsync(member.Team, repo, ct);
             var checkout = CheckoutOf(member, repo);
             checkout = checkout with
             {
-                Extras = await PrepareExtrasLockedAsync(member, checkout.Branch, ct),
+                Extras = await PrepareExtrasLockedAsync(member, checkout.Branch, moves, ct),
                 BaseCommit = await BaseCommitAsync(repo.Path, repo.BaseBranch, ct),
             };
             var root = Path.GetDirectoryName(checkout.ClonePath)!;

@@ -21,7 +21,7 @@ public class BoardTesterDoneGapTests
         public BoardStore Store { get; private set; } = null!;
         public BusEngine Bus { get; private set; } = null!;
         public BoardService Service { get; private set; } = null!;
-        private Func<RunContext, Task>? _act;
+        private Func<RunContext, Task<bool>>? _act;
         private TaskCompletionSource? _done;
 
         public static async Task<Rig> StartAsync(params (string Name, string Job)[] members)
@@ -32,7 +32,7 @@ public class BoardTesterDoneGapTests
             foreach (var who in members.Select(m => m.Name).Prepend("Manager"))
                 runner.On("payments/" + who, async (run, ct) =>
                 {
-                    try { if (rig._act is { } a) await a(run); rig._done?.TrySetResult(); }
+                    try { if (rig._act is { } a && await a(run)) rig._done?.TrySetResult(); }
                     catch (Exception e) { rig._done?.TrySetException(e); }
                     return RunResult.Ok;
                 });
@@ -51,7 +51,7 @@ public class BoardTesterDoneGapTests
         public async Task InRunOf(string member, Func<RunContext, BoardService, Task> act)
         {
             _done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _act = run => act(run, Service);
+            _act = async run => { if (run.Member.Name != member) return false; await act(run, Service); return true; }; // only the named member's run
             await Bus.PersonTellAsync("payments", member, "go", ct: Ct);
             await _done.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
             _act = null;
@@ -100,13 +100,30 @@ public class BoardTesterDoneGapTests
     }
 
     [Fact]
-    public async Task ADevelopersMove_OfAnUntestedTesterCardToDone_IsUnchanged()
+    public async Task ADevelopersMove_OfAnUntestedTesterCardToDone_IsRefusedWithoutAReason()
     {
+        // B027 item 2: not only the Manager - any mover but the tester itself.
         await using var rig = await Rig.StartAsync(("DeveloperPriya", ""), ("TesterWren", ""));
         var card = rig.Card("TesterWren");
 
-        Assert.StartsWith("ok:", await rig.Move("DeveloperPriya", card.Id, "done"));
-        Assert.DoesNotContain(rig.Store.Trail(card.Id), t => t.Kind == "comment");
+        var said = await rig.Move("DeveloperPriya", card.Id, "done");
+        Assert.StartsWith("refused needs_reason:", said);
+        Assert.Contains($"card {card.Id} is TesterWren's", said);
+        Assert.Equal(Lanes.InProgress, rig.Store.Card(card.Id)!.Lane);
+        Assert.DoesNotContain(rig.Store.Trail(card.Id), t => t.Kind == "moved");
+
+        Assert.StartsWith("ok:", await rig.Move("DeveloperPriya", card.Id, "done", "the person asked to skip testing"));
+        var comment = Assert.Single(rig.Store.Trail(card.Id), t => t.Kind == "comment");
+        Assert.Equal(("DeveloperPriya", "Done without TesterWren's test: the person asked to skip testing"), (comment.Source, comment.Text));
+    }
+
+    [Fact]
+    public async Task AnotherTestersMove_OfThisTestersCard_NeedsAReasonToo()
+    {
+        await using var rig = await Rig.StartAsync(("TesterWren", ""), ("TesterKai", ""));
+        var card = rig.Card("TesterWren");
+        Assert.StartsWith("refused needs_reason:", await rig.Move("TesterKai", card.Id, "done"));
+        Assert.StartsWith("ok:", await rig.Move("TesterWren", card.Id, "done")); // its own move
     }
 
     [Fact]
@@ -136,11 +153,14 @@ public class BoardTesterDoneGapTests
     [Theory]
     [InlineData("testerkai", "", true)]             // the name starts with "Tester", any case
     [InlineData("TesterQa", "Developer", true)]      // the name alone is enough
-    [InlineData("Kai", "tester, end to end", true)]  // the job starts with the word Tester, any case
+    [InlineData("Kai", "tester, end to end", true)]  // the job title has the word, any case
     [InlineData("Kai", "  Tester: checks", true)]    // leading spaces in the job
-    [InlineData("Kai", "Testing lead", false)]       // "Testing" is not the word Tester
-    [InlineData("Kai", "Testers' guild", false)]     // nor is "Testers"
-    [InlineData("Kai", "Developer and Tester", false)] // the job must start with it
+    [InlineData("Kai", "Testing lead", true)]        // B027 item 5: testing, testers and QA count too
+    [InlineData("Kai", "Testers' guild", true)]
+    [InlineData("Kai", "Developer and Tester", true)] // anywhere in the title
+    [InlineData("Kai", "QA engineer", true)]
+    [InlineData("Kai", "Keeps the latest docs", false)] // whole words only
+    [InlineData("Kai", "Developer: writes code and unit tests", false)] // the title is before the colon
     [InlineData("DeveloperTester", "", false)]       // the name must start with it
     public async Task WhoCountsAsATester(string name, string job, bool tester)
     {
@@ -153,14 +173,32 @@ public class BoardTesterDoneGapTests
     }
 
     [Fact]
-    public async Task TheTestersOwnBoardComment_CountsAsHavingRun()
+    public async Task TheTestersOwnBoardComment_DoesNotCountAsHavingTested()
     {
+        // B027 item 4: only a hand-back or a finished run after the latest assignment counts; a comment does not.
         await using var rig = await Rig.StartAsync(("TesterWren", ""));
         var card = rig.Card("TesterWren");
 
         Assert.StartsWith("ok:", await rig.Tool("TesterWren", new JsonObject { ["action"] = "comment", ["card"] = card.Id, ["text"] = "ran Board tests: 12 passed" }));
+        Assert.StartsWith("refused needs_reason:", await rig.Move("Manager", card.Id, "done"));
+
+        rig.Store.AddTrail(card.Id, "TesterWren", "handed back", "12 passed");
         Assert.StartsWith("ok:", await rig.Move("Manager", card.Id, "done"));
         Assert.DoesNotContain(rig.Store.Trail(card.Id), t => t.Kind == "comment" && t.Source == "Manager");
+    }
+
+    [Fact]
+    public async Task ATestersHandBackBeforeTheCardWasReassigned_DoesNotLetTheManagerCloseIt()
+    {
+        await using var rig = await Rig.StartAsync(("DeveloperPriya", ""), ("TesterWren", ""));
+        var card = rig.Card("DeveloperPriya");
+        rig.Store.AddTrail(card.Id, "Manager", "assigned", "Assigned to TesterWren: verify");
+        rig.Store.AddTrail(card.Id, "TesterWren", "handed back", "FAILED");
+        rig.Store.AddTrail(card.Id, "TesterWren", "run ended", "run ended");
+        rig.Store.AddTrail(card.Id, "Manager", "assigned", "Assigned to DeveloperPriya: fix it");
+        rig.Store.AddTrail(card.Id, "DeveloperPriya", "handed back", "fixed");
+
+        Assert.StartsWith("refused needs_reason:", await rig.Move("Manager", card.Id, "done"));
     }
 
     [Fact]
