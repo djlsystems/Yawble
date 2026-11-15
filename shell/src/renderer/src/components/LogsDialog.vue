@@ -5,6 +5,7 @@ import { errorText } from '../api';
 import Modal from './Modal.vue';
 import BusyLabel from './BusyLabel.vue';
 import LoadingNote from './LoadingNote.vue';
+import { useNarrow } from '../narrowScreen';
 
 /**
  * Logs: every log the app keeps, one at a time, as a table. The source is chosen from a list; the team, the member,
@@ -16,6 +17,8 @@ import LoadingNote from './LoadingNote.vue';
 const props = defineProps<{ api: YawbleApi; source?: string; team?: string; member?: string }>();
 const emit = defineEmits<{ close: [] }>();
 
+/** A phone (B037): each entry is a card of its columns' values (tap for them in full), sorted with a select. */
+const phone = useNarrow();
 const pageSize = 100;
 const sources = ref<LogSourceInfo[]>([]);
 const who = ref<LogWho>({ teams: [], members: [] });
@@ -332,7 +335,31 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
       </p>
 
       <div ref="scroller" class="scroll" data-test="logs-scroll" @scroll.passive="onScroll">
-        <table class="grid">
+        <template v-if="phone">
+          <div class="phone-sort" data-test="logs-sort">
+            <label>Sort by
+              <select :value="sort" data-test="logs-sort-key" @change="sortBy(($event.target as HTMLSelectElement).value)">
+                <option v-for="c in columns" :key="c.key" :value="c.key">{{ c.label }}</option>
+              </select>
+            </label>
+            <button type="button" class="mini" :aria-label="descending ? 'Descending' : 'Ascending'" data-test="logs-sort-dir" @click="sortBy(sort)">{{ descending ? '▼' : '▲' }}</button>
+          </div>
+          <ol class="cards" data-test="logs-cards">
+            <li v-for="r in rows" :key="String(r._id)" class="entry-card" :class="{ open: open === String(r._id) }" data-test="logs-row"
+              role="button" tabindex="0" :aria-expanded="open === String(r._id)"
+              @click="open = open === String(r._id) ? null : String(r._id)" @keydown.enter.prevent="open = open === String(r._id) ? null : String(r._id)">
+              <dl>
+                <template v-for="c in columns" :key="c.key">
+                  <template v-if="open === String(r._id) || cell(r, c)">
+                    <dt>{{ c.label }}</dt>
+                    <dd :class="c.kind">{{ open === String(r._id) ? (r[c.key] ?? '') : cell(r, c) }}</dd>
+                  </template>
+                </template>
+              </dl>
+            </li>
+          </ol>
+        </template>
+        <table v-else class="grid">
           <thead>
             <tr>
               <th v-for="c in columns" :key="c.key" :class="[c.kind, { sorted: sort === c.key }]" :aria-sort="sort === c.key ? (descending ? 'descending' : 'ascending') : 'none'">
@@ -400,4 +427,26 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 .detail dd { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
 .empty { padding: 16px; margin: 0; }
 .more { margin: 8px; }
+.phone-sort { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg); border-bottom: 1px solid var(--line); font-size: 13px; }
+.phone-sort label { flex: 1; display: flex; align-items: center; gap: 6px; }
+.phone-sort select { flex: 1; min-width: 0; }
+.cards { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.entry-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--surface); cursor: pointer; font-size: 12.5px; }
+.entry-card.open { background: var(--hover); }
+.entry-card dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px; margin: 0; }
+.entry-card dt { color: var(--muted); font-weight: 600; }
+.entry-card dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-card.open dd { white-space: pre-wrap; word-break: break-word; overflow: visible; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+/* A phone (B037): the bars wrap into full-width rows, labels over their controls, tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .bar .source, .bar .search { flex: 1 1 100%; min-width: 0; }
+  .bar .source { display: flex; align-items: center; gap: 6px; }
+  .bar .source select { flex: 1; min-width: 0; margin-left: 0; }
+  .filters label { flex: 1 1 calc(50% - 8px); flex-direction: column; align-items: stretch; }
+  .filters select { max-width: none; }
+  button, select, input { min-height: 44px; box-sizing: border-box; }
+  .mini { min-width: 44px; }
+  .keep td { display: block; padding: 2px 0; }
+  .scroll { min-height: 200px; }
+}
 </style>

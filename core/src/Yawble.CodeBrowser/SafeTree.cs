@@ -19,7 +19,8 @@ public sealed record TreeEntry(string Name, string Path, string Kind, long Size,
 /// <item><c>.git</c> (at any depth) is not listed and not browsable;</item>
 /// <item>likely secrets (the deny list, plus the paths the global guardrail policy denies) are listed greyed out and
 ///   never read;</item>
-/// <item>a file is opened, then its final path (Windows: from the open handle) must still be under the root.</item>
+/// <item>a file is opened (POSIX: with O_NOFOLLOW), then its final path from the open handle (Windows, macOS, Linux)
+///   must still be under the root, not in .git, not hidden, and the file must have one name (no hard link).</item>
 /// </list>
 /// Nothing here writes to the clone.
 /// </summary>
@@ -188,7 +189,8 @@ public sealed class SafeTree
         FileStream stream;
         try
         {
-            stream = new FileStream(file.FullName, new FileStreamOptions
+            // POSIX: opened by libc with O_NOFOLLOW, so a file swapped for a link after Resolve is not opened at all.
+            stream = PosixHandles.Supported ? PosixHandles.OpenFileNoFollow(file.FullName) : new FileStream(file.FullName, new FileStreamOptions
             {
                 Mode = FileMode.Open, Access = FileAccess.Read, Share = FileShare.ReadWrite | FileShare.Delete, Options = FileOptions.SequentialScan,
             });
@@ -211,8 +213,11 @@ public sealed class SafeTree
 
     private void CheckOpened(FileStream stream, string fullName)
     {
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() || PosixHandles.Supported)
         {
+            // POSIX: what was opened must be a regular file (not a FIFO, device or folder swapped in).
+            if (!OperatingSystem.IsWindows() && PosixHandles.FStat(stream.SafeFileHandle) is not { IsRegular: true })
+                throw CodeBrowserException.Refuse("the file is not a regular file; it is not opened");
             var final = HandlePath(stream.SafeFileHandle);
             var root = FinalRoot();
             if (final is null || root is null || !IsUnder(final, root) || final.Length <= root.Length)
@@ -230,7 +235,7 @@ public sealed class SafeTree
         }
         else
         {
-            // No handle path on every POSIX: the entry must still be a plain file (not swapped for a link) after the open.
+            // Another OS or CPU (no handle calls covered here): the entry must still be a plain file (not swapped for a link) after the open.
             var again = new FileInfo(fullName);
             if (!again.Exists || IsLink(again)) throw CodeBrowserException.Refuse("the file changed into a link; it is not opened");
         }
@@ -329,7 +334,7 @@ public sealed class SafeTree
     // ------------------------------------------------------------------ seams (tests)
 
     /// <summary>The final path of an open handle (tests stand in a swapped folder here).</summary>
-    internal Func<SafeFileHandle, string?> HandlePath { get; set; } = FinalPath;
+    internal Func<SafeFileHandle, string?> HandlePath { get; set; } = HandleFinalPath;
 
     /// <summary>How many names an open file has (tests may stand in a hard link here).</summary>
     internal Func<SafeFileHandle, uint?> LinkCount { get; set; } = NumberOfLinks;
@@ -341,15 +346,30 @@ public sealed class SafeTree
     {
         if (_finalRoot is not null) return _finalRoot;
         using var handle = OpenFolder(Root);
-        return _finalRoot = handle.IsInvalid ? null : FinalPath(handle);
+        return _finalRoot = handle.IsInvalid ? null : HandleFinalPath(handle);
     }
 
     /// <summary>
     /// The folder a path names now, opened (links followed): its final path, which must be under the root and not in
-    /// .git, and its file id. Not Windows: the entry must still be a folder, not a link.
+    /// .git, and its file id. POSIX (macOS, Linux): opened with O_NOFOLLOW (a link is not opened, so refused), its final
+    /// path checked the same way, and (st_dev, st_ino) as the id. Another OS: the entry must still be a folder, not a link.
     /// </summary>
     private (string Path, ulong Volume, ulong Index) FolderIdentity(string full)
     {
+        if (PosixHandles.Supported)
+        {
+            using var folder = PosixHandles.OpenFolderNoFollow(full);
+            var stat = folder.IsInvalid ? null : PosixHandles.FStat(folder);
+            if (stat is not { IsDirectory: true }) throw CodeBrowserException.Refuse("the folder is not inside the clone any more");
+            var at = HandlePath(folder);
+            var top = FinalRoot();
+            if (at is null || top is null || !IsUnder(at, top))
+                throw CodeBrowserException.Refuse("the folder is not inside the clone any more");
+            if (at.Length > top.Length
+                && at[(top.Length + 1)..].Split(System.IO.Path.DirectorySeparatorChar).Any(s => s.Equals(".git", StringComparison.OrdinalIgnoreCase)))
+                throw CodeBrowserException.Refuse(".git is not browsable");
+            return (at, stat.Value.Device, stat.Value.Inode);
+        }
         if (!OperatingSystem.IsWindows())
         {
             var d = new DirectoryInfo(full);
@@ -369,10 +389,20 @@ public sealed class SafeTree
     }
 
     private static SafeFileHandle OpenFolder(string path) =>
-        CreateFileW(path, 0, FileShare.ReadWrite | FileShare.Delete, IntPtr.Zero, FileMode.Open, BackupSemantics, IntPtr.Zero);
+        PosixHandles.Supported ? PosixHandles.OpenFolderNoFollow(path)
+        : CreateFileW(path, 0, FileShare.ReadWrite | FileShare.Delete, IntPtr.Zero, FileMode.Open, BackupSemantics, IntPtr.Zero);
 
-    private static uint? NumberOfLinks(SafeFileHandle handle) =>
-        GetFileInformationByHandle(handle, out var fi) ? fi.NumberOfLinks : null;
+    /// <summary>How many names an open file has: Windows from GetFileInformationByHandle, POSIX fstat's st_nlink; null when not known.</summary>
+    private static uint? NumberOfLinks(SafeFileHandle handle)
+    {
+        if (PosixHandles.Supported)
+            return PosixHandles.FStat(handle) is { } st && st.Links <= uint.MaxValue ? (uint)st.Links : null;
+        return GetFileInformationByHandle(handle, out var fi) ? fi.NumberOfLinks : null;
+    }
+
+    /// <summary>The final path of an open handle: Windows from GetFinalPathNameByHandleW, POSIX from PosixHandles; null elsewhere.</summary>
+    private static string? HandleFinalPath(SafeFileHandle handle) =>
+        OperatingSystem.IsWindows() ? FinalPath(handle) : PosixHandles.FinalPath(handle);
 
     // ------------------------------------------------------------------ Windows: the final path of an open handle
 
