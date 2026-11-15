@@ -66,4 +66,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .twf-row.closed .twf-title { color: var(--ink-soft); }
 .twf-id { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .twf-time { color: var(--ink-soft); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* A phone (B037): each workflow row is a 44 px tap target. */
+@media (max-width: 759.98px) {
+  .twf-row { min-height: 44px; font-size: 13px; }
+}
 </style>
