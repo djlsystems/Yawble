@@ -398,10 +398,13 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
         </button>
         <ThemeToggle />
       </header>
+      <!-- The banners above every view. On the desktop this box is display: contents (each banner a row of .main, as
+           before); on a phone it is one scrolling box no taller than 40% of the screen, so the view below keeps its share
+           and the Concierge's composer stays on screen however many banners there are (B037 F1). -->
+      <div class="banners" data-test="banners">
       <p v-if="terminalPane.stopError" class="error banner" data-test="terminal-stop-error">{{ terminalPane.stopError }} <button class="mini" @click="terminalPane.stopError = null">Dismiss</button></p>
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
       <HostChecksBanner :api="api" />
-      <LogsDialog v-if="logsOpen" :api="api" @close="logsOpen = false" />
       <GitBanner :api="api" />
       <UpdateBanner ref="updateBanner" :api="api" />
       <CompanionAsks v-if="!api.remote" :api="api" :poll-ms="pollMs" />
@@ -409,6 +412,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <NetworkAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
       <!-- Developer tools agents asked for (request_tool): Install in the window only, Not now anywhere; on the Board, its Needs You lane. -->
       <ToolAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
+      </div>
+      <LogsDialog v-if="logsOpen" :api="api" @close="logsOpen = false" />
 
       <div class="content">
       <div class="place">
@@ -494,6 +499,9 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .phone .pill { min-width: 44px; justify-content: center; }
 .phone .pill .pill-text { display: none; }
 .phone .banner { padding: 6px 12px; }
+.banners { display: contents; }
+/* All the banners together: at most 40% of a phone's height, scrolling; the view (.content) gets the rest. */
+.phone .banners { display: block; flex: none; max-height: 40dvh; overflow-y: auto; overscroll-behavior: contain; }
 .phone .teams-place { padding: 4px 12px 16px; }
 .phone .pad { padding: 16px; }
 .scrim { position: fixed; inset: 0; background: var(--backdrop); z-index: 29; }

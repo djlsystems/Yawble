@@ -50,6 +50,8 @@ const railPlaces: { view: View; label: string; icon: string }[] = [
 const editing = ref<string | null>(null);
 const draft = ref('');
 const confirming = ref<string | null>(null);
+/** The drawer's menu group (a remote view on a phone) is open. */
+const menuOpen = ref(false);
 const editBox = ref<HTMLInputElement[] | null>(null);
 
 function startRename(c: ConversationSummary) {
@@ -137,11 +139,17 @@ function finishRename(id: string) {
     </div>
 
     <div class="foot">
+      <!-- Folded by default (B037 F2): seven items open would leave the Teams and Chats lists no room on a phone. -->
       <div v-if="menu?.length" class="drawer-menu" data-test="drawer-menu">
+        <button class="item small more" data-test="drawer-more" :aria-expanded="menuOpen" aria-controls="drawer-menu-items" @click="menuOpen = !menuOpen">
+          <span class="check" aria-hidden="true">{{ menuOpen ? '▾' : '▸' }}</span>Theme, terminal and help
+        </button>
+        <div v-show="menuOpen" id="drawer-menu-items" data-test="drawer-menu-items">
         <button v-for="m in menu" :key="m.id" class="item small" :role="m.radio ? 'menuitemradio' : undefined" :aria-checked="m.radio ? !!m.checked : undefined"
           :data-test="`drawer-${m.id}`" @click="emit('command', m.id)">
           <span class="check">{{ m.checked ? '✓' : '' }}</span>{{ m.label }}
         </button>
+        </div>
       </div>
       <button class="item" :class="{ on: view === 'settings' }" data-test="open-app-settings" @click="emit('go', 'settings')"><Icon name="settings" />Settings</button>
       <div class="status">
@@ -212,6 +220,11 @@ h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4
 .drawer .brand .icon-btn { width: 44px; height: 44px; }
 .drawer .chat .actions { display: flex; }
 .drawer .chat .actions .icon-btn { width: 44px; height: 44px; }
+/* The drawer scrolls as a whole when it is taller than the screen (a short phone, the menu group open), so Settings and
+   the run-slots line are always reachable; the Teams and Chats lists keep room for their heading and two rows. */
+.side.drawer { overflow-y: auto; overscroll-behavior: contain; }
+.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot { flex: none; }
+.drawer .lists { min-height: 150px; }
 .drawer-menu { border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; padding-bottom: 4px; }
 .drawer-menu .check { width: 14px; flex: none; color: var(--accent); font-size: 12px; }
 </style>
