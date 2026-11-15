@@ -8,6 +8,7 @@ import type { ConversationSummary, RunSlots, TeamSummary } from '../../../shared
 import Icon from './Icon.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import type { MenuItem as MenuBarItem } from './MenuBar.vue';
 
 // The app's left pane, like the chat apps people know: New chat, the places (Concierge, Teams, and what comes next),
 // the teams, and the person's chats with the Concierge; settings at the bottom.
@@ -28,10 +29,16 @@ defineProps<{
   loading?: { teams: boolean; chats: boolean };
   /** The chat being deleted (its row shows Deleting… until the core answers). */
   removing?: string | null;
+  /** A phone (B037): the sidebar is a drawer over the page, shown while `open`; its rows are tap-sized and a chat's
+   *  Rename and Delete always show (no hover on a phone). */
+  drawer?: boolean;
+  open?: boolean;
+  /** A remote view on a phone has no menu bar: these of its items (theme, terminal, Help) sit at the drawer's bottom. */
+  menu?: MenuBarItem[];
 }>();
 const emit = defineEmits<{
   newChat: []; openConversation: [id: string]; openTeam: [id: number]; go: [view: View]; logs: [];
-  rename: [id: string, title: string]; remove: [id: string]; newTeam: []; collapse: []; expand: [];
+  rename: [id: string, title: string]; remove: [id: string]; newTeam: []; collapse: []; expand: []; command: [id: string];
 }>();
 
 const railPlaces: { view: View; label: string; icon: string }[] = [
@@ -72,11 +79,13 @@ function finishRename(id: string) {
     <span class="grow" />
     <button class="rail-btn" :class="{ on: view === 'settings' }" title="Settings" data-test="rail-settings" @click="emit('go', 'settings')"><Icon name="settings" /></button>
   </aside>
-  <aside v-else class="side" data-test="sidebar">
+  <aside v-else class="side" :class="{ drawer, open: drawer && open }" data-test="sidebar" :data-drawer="drawer ? (open ? 'open' : 'closed') : undefined"
+    :inert="drawer && !open" :aria-hidden="drawer && !open ? 'true' : undefined" :aria-label="drawer ? 'Menu' : undefined">
     <div class="brand">
       <img class="logo" :src="wordmark" alt="Yawble" />
       <span class="grow" />
-      <button class="ghost icon-btn" title="Hide the sidebar" data-test="sidebar-collapse" @click="emit('collapse')"><Icon name="sidebar" /></button>
+      <button class="ghost icon-btn" :title="drawer ? 'Close the menu' : 'Hide the sidebar'" :aria-label="drawer ? 'Close the menu' : undefined" data-test="sidebar-collapse"
+        @click="emit('collapse')"><Icon :name="drawer ? 'close' : 'sidebar'" /></button>
     </div>
 
     <button class="item new" data-test="new-chat" @click="emit('newChat')"><Icon name="newChat" />New chat</button>
@@ -128,6 +137,12 @@ function finishRename(id: string) {
     </div>
 
     <div class="foot">
+      <div v-if="menu?.length" class="drawer-menu" data-test="drawer-menu">
+        <button v-for="m in menu" :key="m.id" class="item small" :role="m.radio ? 'menuitemradio' : undefined" :aria-checked="m.radio ? !!m.checked : undefined"
+          :data-test="`drawer-${m.id}`" @click="emit('command', m.id)">
+          <span class="check">{{ m.checked ? '✓' : '' }}</span>{{ m.label }}
+        </button>
+      </div>
       <button class="item" :class="{ on: view === 'settings' }" data-test="open-app-settings" @click="emit('go', 'settings')"><Icon name="settings" />Settings</button>
       <div class="status">
         <span class="muted tiny" data-test="slots" :title="'global run slots'">{{ slots ? `Run slots: ${slots.running} / ${slots.limit} in use · ${slots.queued} queued` : 'Starting…' }}</span>
@@ -187,4 +202,16 @@ h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4
 .icon-btn:hover { background: var(--hover-strong); color: var(--ink); }
 .foot { position: relative; border-top: 1px solid var(--line-soft); padding-top: 6px; }
 .status { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 10px 0; }
+/* A phone (App.vue, phone.ts): the drawer slides in from the left over the page; closed, it is off screen and inert. */
+.side.drawer { position: fixed; top: 0; bottom: 0; left: 0; z-index: 30; width: min(320px, 86vw); border-right: 1px solid var(--line);
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 8px calc(6px + env(safe-area-inset-bottom, 0px)) calc(8px + env(safe-area-inset-left, 0px));
+  transform: translateX(-105%); visibility: hidden; transition: transform .2s ease, visibility 0s linear .2s; }
+.side.drawer.open { transform: none; visibility: visible; transition: transform .2s ease; box-shadow: 0 10px 40px var(--shadow); }
+@media (prefers-reduced-motion: reduce) { .side.drawer, .side.drawer.open { transition: none; } }
+.drawer .item, .drawer .chat .open { min-height: 44px; }
+.drawer .brand .icon-btn { width: 44px; height: 44px; }
+.drawer .chat .actions { display: flex; }
+.drawer .chat .actions .icon-btn { width: 44px; height: 44px; }
+.drawer-menu { border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; padding-bottom: 4px; }
+.drawer-menu .check { width: 14px; flex: none; color: var(--accent); font-size: 12px; }
 </style>

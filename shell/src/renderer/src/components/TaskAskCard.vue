@@ -2,6 +2,7 @@
 import { vChange } from '../remoteAccess';
 import { ref } from 'vue';
 import BusyLabel from './BusyLabel.vue';
+import { usePhone } from '../phone';
 import type { IntegrationAsk } from '../../../shared/api';
 
 /**
@@ -13,11 +14,13 @@ import type { IntegrationAsk } from '../../../shared/api';
 defineProps<{ ask: IntegrationAsk; busy?: boolean; pending?: 'once' | 'always' | 'decline' | null }>();
 const emit = defineEmits<{ (e: 'once'): void; (e: 'always'): void; (e: 'decline', note: string): void }>();
 const note = ref('');
+// A phone (B037): the card takes the full width and the note and its buttons stack, each a full-width tap target.
+const phone = usePhone();
 const short = (s: string | null | undefined) => (s ?? '').slice(0, 8);
 </script>
 
 <template>
-  <div class="decision ask task-ask" data-test="task-ask">
+  <div class="decision ask task-ask" :class="{ phone }" data-test="task-ask">
     <p>
       <strong>{{ ask.member.split('/')[1] }} asks to run the host task</strong> <code data-test="task-ask-name">{{ ask.taskName }}</code>
       <span class="muted small"> on {{ short(ask.detail?.commit ?? ask.commit) }}</span>
@@ -52,7 +55,7 @@ const short = (s: string | null | undefined) => (s ?? '').slice(0, 8);
         <pre v-if="ask.detail.changed.stat" class="diff">{{ ask.detail.changed.stat }}</pre>
       </div>
     </template>
-    <div class="row">
+    <div class="row buttons" data-test="task-ask-buttons">
       <input v-model="note" class="grow" placeholder="A note if you decline (optional)" />
       <button class="primary" :disabled="busy" v-change data-test="task-ask-once" @click="emit('once')"><BusyLabel :busy="pending === 'once'" text="Approving…">Run once</BusyLabel></button>
       <button :disabled="busy" v-change data-test="task-ask-always" title="Run now, and let this team run this task without asking while its definition and pinned files stay as shown" @click="emit('always')"><BusyLabel :busy="pending === 'always'" text="Approving…">Always for this team</BusyLabel></button>
@@ -69,5 +72,9 @@ const short = (s: string | null | undefined) => (s ?? '').slice(0, 8);
 .muted { color: var(--muted); }
 .warn { color: var(--warn); }
 .changed { border-left: 3px solid var(--warn); padding-left: 8px; margin: 6px 0; }
+.task-ask.phone { width: 100%; overflow-wrap: anywhere; }
+.phone .buttons { flex-direction: column; align-items: stretch; }
+.phone .buttons > * { width: 100%; }
+.phone .diff { max-width: 100%; }
 .diff { max-height: 260px; overflow: auto; background: var(--surface-sunken); padding: 6px; font-size: 11.5px; margin: 3px 0; white-space: pre; }
 </style>

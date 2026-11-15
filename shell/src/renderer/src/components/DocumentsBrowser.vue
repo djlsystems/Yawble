@@ -7,6 +7,7 @@ import { renderMarkdown } from '../markdown';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
+import { useNarrow } from '../narrowScreen';
 
 /**
  * A team's documents: what its agents write for the person (reports, specs, plans) and anything the person adds. Browse
@@ -112,6 +113,11 @@ async function doUpload(files: FileList | null) {
   await load();
 }
 
+// A phone (B037): the list first; a file opened takes the browser's whole area, and Back returns to the list.
+const phone = useNarrow();
+const fileShown = computed(() => !!open.value || !!opening.value);
+function backToList() { open.value = null; editing.value = false; }
+
 const size = (n: number | null) => n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 
 onMounted(() => void load(''));
@@ -141,8 +147,8 @@ onMounted(() => void load(''));
       <button :disabled="acting" @click="naming = null">Cancel</button>
     </div>
     <p v-if="error" class="error" data-test="docs-error">{{ error }}</p>
-    <div class="split" data-test="docs-split">
-      <ul class="files" data-test="docs-list">
+    <div class="split" :class="{ reading: phone && fileShown }" data-test="docs-split">
+      <ul v-show="!(phone && fileShown)" class="files" data-test="docs-list">
         <li v-if="!list && !error" class="loading"><LoadingNote text="Loading documents…" /></li>
         <li v-for="e in list?.entries ?? []" :key="e.path" :class="{ on: open?.path === e.path }">
           <button class="name" :data-test="`doc-${e.path}`" @click="view(e)"><span class="ico">{{ e.folder ? '📁' : '📄' }}</span>{{ e.name }}</button>
@@ -160,7 +166,8 @@ onMounted(() => void load(''));
           Nothing here yet. The team writes reports, specs and plans here; you can add files too.
         </li>
       </ul>
-      <section class="viewer" data-test="docs-viewer">
+      <section v-show="!phone || fileShown" class="viewer" data-test="docs-viewer">
+        <button v-if="phone && fileShown" type="button" class="back" data-test="docs-back" :disabled="acting" @click="backToList">← {{ crumbs[crumbs.length - 1]?.label }}</button>
         <LoadingNote v-if="opening" :text="`Opening ${opening}…`" />
         <template v-else-if="open">
           <header class="vh">
@@ -230,4 +237,19 @@ onMounted(() => void load(''));
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .error { color: var(--bad); }
+.back { align-self: flex-start; border: 0; background: transparent; color: var(--accent); padding: 0 4px; margin-bottom: 6px; min-height: 44px; font-size: 14px; }
+/* A phone (B037): one column, the list or the opened file (with Back), each the browser's full height; tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .split { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .files, .viewer { max-height: none; }
+  .viewer { border: 0; padding: 0; }
+  .browser:not(.fill) .viewer { min-height: 60vh; }
+  .bar button, .naming button, .naming input, .vh button { min-height: 44px; box-sizing: border-box; }
+  .crumbs { flex: 1 1 100%; }
+  .crumbs a { display: inline-block; padding: 10px 0; }
+  .files li { padding: 0 6px; }
+  .files .name { min-height: 44px; }
+  .mini { min-width: 44px; min-height: 44px; font-size: 15px; }
+  .editor { min-height: 50vh; }
+}
 </style>

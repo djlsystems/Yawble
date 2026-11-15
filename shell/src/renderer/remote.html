@@ -5,6 +5,9 @@
     <!-- A remote view of an instance (the same screens as the desktop window, in a browser): it talks to the
          instance only through the socket next to this page. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <!-- A phone shows the page at its own width (below 760 px: the phone layout, src/phone.ts), edge to edge; the screens
+         keep clear of a notch and the home bar with env(safe-area-inset-*). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="light dark" />
     <!-- Sets data-theme on <html> from the kept choice (else the OS) before the stylesheet paints, so a dark theme has no
          white first frame. A classic script file from 'self', which the CSP above allows (an inline one it does not); it must
