@@ -90,6 +90,112 @@ public class SandboxRequestValidatorTests
         }
     }
 
+    /// <summary>
+    /// A model of sandbox release 1.0.1's Bubblewrap launch, from its network-supervisor script: bwrap binds every
+    /// readonly/readwrite path and the cwd; a missing one makes it exit during setup. The supervisor then polls
+    /// `nsenter --net=/proc/$child/ns/net -- ip -4 -o address show dev lo up` every 10 ms until 127.0.0.1/8 is up;
+    /// a poll that finds the loopback still down is retried, and only a poll that cannot enter the namespace (the
+    /// child has exited, or was cancelled, first) prints the line and fails the launch.
+    /// </summary>
+    private sealed class FakeBubblewrap(int pollsUntilLoopbackUp = 0, bool exitsAtSetup = false)
+    {
+        public const string Line = "mxc: failed to query Bubblewrap loopback readiness";
+        public int Lines { get; private set; }
+        public int Polls { get; private set; }
+
+        public NativeSandbox.Outcome Run(string json)
+        {
+            var request = JsonNode.Parse(json)!.AsObject();
+            var binds = Paths(request, "readonlyPaths").Concat(Paths(request, "readwritePaths"))
+                .Append(request["process"]!["cwd"]!.GetValue<string>());
+            var childAlive = !exitsAtSetup && binds.All(Path.Exists);
+            for (var poll = 0; ; poll++)
+            {
+                Polls++;
+                if (!childAlive)
+                {
+                    Lines++; // nsenter: no /proc/<pid>/ns/net
+                    return new NativeSandbox.Outcome(NativeSandbox.StatusBackendError, 1, Line);
+                }
+                if (poll >= pollsUntilLoopbackUp) return new NativeSandbox.Outcome(NativeSandbox.StatusSuccess, 0, null);
+            }
+        }
+    }
+
+    private static IEnumerable<string> LinuxGoldens => GoldenCases.All.Keys.Where(k => k.StartsWith("linux-", StringComparison.Ordinal));
+
+    /// <summary>The golden file as this host would launch it: only the containment changed to the host's.</summary>
+    private static string OnThisHost(string name)
+    {
+        var request = JsonNode.Parse(GoldenCases.Read(name + ".request.json"))!.AsObject();
+        request["containment"] = TargetOsExtensions.Host.Containment();
+        return request.ToJsonString();
+    }
+
+    [Fact]
+    public void TheLinuxGoldenFilesNoLongerMakeBwrapExitBeforeTheReadinessQuery()
+    {
+        Assert.Equal(10, LinuxGoldens.Count());
+        // Before B044 the dry run submitted the golden policy unchanged: the fictional /home/alice grants made bwrap
+        // exit at mount, once per Linux golden file - the ~10 lines of a Fedora Core.Tests run.
+        var before = new FakeBubblewrap();
+        // (the old ProbeCopy changed only the command and the timeout, so the binds were the golden file's own)
+        foreach (var name in LinuxGoldens) before.Run(OnThisHost(name));
+        Assert.Equal(10, before.Lines);
+
+        var after = new FakeBubblewrap(pollsUntilLoopbackUp: 3);
+        foreach (var name in LinuxGoldens)
+        {
+            var result = SandboxRequestValidator.Validate(OnThisHost(name), after.Run, windowsProbe: null, backendAvailable: _ => true);
+            Assert.True(result.Accepted, $"{name}: {result.Detail}");
+            Assert.Equal(ValidationLevel.ContractParsed, result.Level); // the backend did not see the /home/alice grants
+            Assert.Contains("/home/alice", result.Detail);
+        }
+        Assert.Equal(0, after.Lines);
+    }
+
+    [Fact]
+    public void ASlowLoopbackIsRetriedNotReported()
+    {
+        // The "race" reading: the namespace exists but lo is not up yet. The supervisor retries; nothing is printed.
+        var present = Directory.CreateTempSubdirectory("yawble-validate-").FullName;
+        try
+        {
+            var bwrap = new FakeBubblewrap(pollsUntilLoopbackUp: 500);
+            var result = SandboxRequestValidator.Validate(Request(present, [present], [present], []).ToJsonString(),
+                bwrap.Run, windowsProbe: null, backendAvailable: _ => true);
+            Assert.Equal(ValidationLevel.BackendAccepted, result.Level);
+            Assert.Equal(501, bwrap.Polls);
+            Assert.Equal(0, bwrap.Lines);
+        }
+        finally
+        {
+            Directory.Delete(present, true);
+        }
+    }
+
+    [Fact]
+    public void ASandboxThatExitsOrIsCancelledBeforeReadinessStillSurfacesAsALaunchFailure()
+    {
+        // Every path present, but the child dies first for another reason: the line is real then, and the validator
+        // does not call it BackendAccepted.
+        var present = Directory.CreateTempSubdirectory("yawble-validate-").FullName;
+        try
+        {
+            var bwrap = new FakeBubblewrap(exitsAtSetup: true);
+            var result = SandboxRequestValidator.Validate(Request(present, [present], [present], []).ToJsonString(),
+                bwrap.Run, windowsProbe: null, backendAvailable: _ => true);
+            Assert.Equal(1, bwrap.Lines);
+            Assert.Equal(ValidationLevel.ContractParsed, result.Level);
+            Assert.Equal(NativeSandbox.StatusBackendError, result.Status);
+            Assert.Contains(FakeBubblewrap.Line, result.Detail);
+        }
+        finally
+        {
+            Directory.Delete(present, true);
+        }
+    }
+
     [Fact]
     public void WhereTheBackendCannotRunTheExactJsonIsSubmitted()
     {
