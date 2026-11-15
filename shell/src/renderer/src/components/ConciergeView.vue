@@ -9,6 +9,7 @@ import Icon from './Icon.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
+import { useKeyboardInset, usePhone } from '../phone';
 
 // The Concierge (the app's home): a new chat (a greeting and the message box) or an open conversation. Each message
 // is answered by one headless run of the chosen agent, which sees every team and acts through its tools.
@@ -44,6 +45,14 @@ const composer = ref<InstanceType<typeof Composer> | null>(null);
 let off: (() => void) | null = null;
 // Stop and the watch chips' buttons await the core: held (and spinning) until it answers.
 const work = useBusy();
+// A phone (B037): one column edge to edge, the message box full width; while the on-screen keyboard is up, the page's
+// bottom is padded by what it covers (visualViewport), so the box and its Send button stay above it. The chat list is
+// the drawer's (Sidebar.vue).
+const phone = usePhone();
+const keyboard = useKeyboardInset();
+const phoneStyle = computed(() => (phone.value ? { '--keyboard': `${keyboard.value}px` } : undefined));
+// The keyboard coming up shrinks the thread: keep its last message in view.
+watch(keyboard, (k, before) => { if (phone.value && k > before) void scrollDown(); });
 
 const running = computed(() => turn.value?.state === 'running');
 const messages = computed(() => [...(conversation.value?.messages ?? []), ...(pending.value ? [pending.value] : [])]);
@@ -197,7 +206,7 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
 </script>
 
 <template>
-  <section class="concierge">
+  <section class="concierge" :class="{ phone, keyboard: phone && keyboard > 0 }" :style="phoneStyle" data-test="concierge">
     <!-- A new chat -->
     <div v-if="!conversationId && !pending" class="hero" data-test="concierge-hero">
       <h1><img class="mark" :src="mark" alt="" data-test="concierge-mark" />{{ greeting }}</h1>
@@ -262,4 +271,19 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
 .w-btn.on { color: var(--brand); }
 .hint { text-align: center; color: var(--muted); font-size: 12px; margin: 8px 0 0; }
 .center { text-align: center; }
+/* A phone: the thread and the message box take the width (12 px margins), the keyboard's height padded off the bottom. */
+.concierge.phone { padding-bottom: var(--keyboard, 0px); }
+.phone .hero { width: calc(100% - 24px); padding: 0 0 6vh; }
+.phone .hero h1 { font-size: 24px; }
+.phone .mark { width: 32px; height: 32px; }
+.phone .sub { font-size: 15px; margin-bottom: 16px; }
+.phone .suggest { justify-content: stretch; }
+.phone .chip-btn { width: 100%; min-height: 44px; text-align: left; }
+.phone .thread { width: calc(100% - 24px); padding-top: 14px; }
+.phone .dock { width: calc(100% - 16px); padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+.phone.keyboard .dock { padding-bottom: 6px; } /* the keyboard covers the home bar */
+.phone .w-what { max-width: 40vw; }
+.phone .w-btn { width: 44px; height: 44px; }
+.phone .hint { font-size: 11px; margin-top: 4px; }
+.phone.keyboard .hint { display: none; } /* typing: every line of the screen for the thread */
 </style>

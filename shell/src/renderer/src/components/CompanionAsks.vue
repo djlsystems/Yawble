@@ -4,6 +4,7 @@ import type { CompanionAction, CompanionActionStatus, CompanionLevel, CompanionL
 import { errorText } from '../api';
 import { COMPANION_LEVEL_TEXT, levelsUpTo } from '../companionLevels';
 import BusyLabel from './BusyLabel.vue';
+import { usePhone } from '../phone';
 
 /**
  * yawble-companion's asks, on the main window: a program that wants to pair (with the code its terminal shows), and
@@ -12,6 +13,8 @@ import BusyLabel from './BusyLabel.vue';
  * companion is managed only at this computer.
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number }>();
+// A phone (B037; a narrow desktop window, as this is never shown remotely): full-width cards, Approve and Deny stacked.
+const phone = usePhone();
 
 const pairings = ref<CompanionPairing[]>([]);
 const actions = ref<CompanionAction[]>([]);
@@ -112,7 +115,7 @@ onBeforeUnmount(() => { off?.(); if (timer) clearInterval(timer); });
 </script>
 
 <template>
-  <section v-if="!api.remote && (pairings.length || actions.length || outcomes.length || error)" class="companion-asks" data-test="companion-asks">
+  <section v-if="!api.remote && (pairings.length || actions.length || outcomes.length || error)" class="companion-asks" :class="{ phone }" data-test="companion-asks">
     <p v-if="error" class="error" data-test="companion-error">{{ error }}</p>
     <article v-for="p in pairings" :key="p.id" class="card" data-test="companion-pairing">
       <h3><b>{{ p.name }}</b> wants to connect to Yawble</h3>
@@ -157,6 +160,11 @@ onBeforeUnmount(() => { off?.(); if (timer) clearInterval(timer); });
 .level { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 .plan { white-space: pre-wrap; word-break: break-word; background: var(--bg); border-radius: 4px; padding: 6px 8px; margin: 6px 0; font-size: 12.5px; max-height: 240px; overflow: auto; }
 .buttons { display: flex; gap: 8px; margin-top: 6px; }
+.companion-asks.phone { padding: 8px; max-height: 50dvh; overflow: auto; }
+.phone .card { width: 100%; }
+.phone .level { flex-wrap: wrap; }
+.phone .buttons { flex-direction: column; align-items: stretch; }
+.phone .buttons button { width: 100%; }
 .muted { color: var(--muted); }
 .error { color: var(--bad); margin: 0; }
 </style>

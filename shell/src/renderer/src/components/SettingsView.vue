@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { usePhone } from '../phone';
 import type { YawbleApi, ShellSettings, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import AgentsDialog from './AgentsDialog.vue';
@@ -21,9 +22,26 @@ import LoadingNote from './LoadingNote.vue';
  */
 export type SettingsTab = 'general' | 'health' | 'companion' | MenuItem;
 
-const props = defineProps<{ api?: YawbleApi; tab: SettingsTab; teams: TeamSummary[]; pollMs?: number; integrationsTab?: 'cli' | 'api' | 'mcp' | 'connections' | null }>();
+const props = defineProps<{
+  api?: YawbleApi; tab: SettingsTab; teams: TeamSummary[]; pollMs?: number; integrationsTab?: 'cli' | 'api' | 'mcp' | 'connections' | null;
+  /** On a phone: start at the list of sections (Settings opened as a place) rather than in `tab` (a link to one section). */
+  landing?: boolean;
+}>();
 const emit = defineEmits<{ tab: [tab: SettingsTab]; connections: []; changed: []; link: [status: unknown] }>();
 const api = resolveApi(props.api);
+
+// A phone (B037): one section per screen. Settings opens at the list of its sections; a tap opens that section with a
+// Back to the list above it. A link to a section (Settings → Agents, Needs You's reconnect) opens it at once.
+const phone = usePhone();
+const sectionOpen = ref(!(props.landing ?? true));
+watch(() => props.tab, () => { sectionOpen.value = true; });
+function choose(id: SettingsTab) {
+  sectionOpen.value = true;
+  emit('tab', id);
+}
+const showList = computed(() => !phone.value || !sectionOpen.value);
+const showPane = computed(() => !phone.value || sectionOpen.value);
+const tabLabel = computed(() => tabs.value.find((t) => t.id === props.tab)?.label ?? 'Settings');
 
 const tabs = computed(() => [
   { id: 'general' as const, label: 'General', test: 'open-general' },
@@ -56,13 +74,17 @@ async function set(patch: Partial<ShellSettings>) {
 </script>
 
 <template>
-  <div class="settings-place" :class="{ fill }" data-test="settings">
-    <h2 class="page-title">Settings</h2>
-    <nav class="tabs" role="tablist">
-      <button v-for="t in tabs" :key="t.id" role="tab" :aria-selected="tab === t.id" :class="{ on: tab === t.id }" :data-test="t.test"
-        @click="emit('tab', t.id)">{{ t.label }}</button>
+  <div class="settings-place" :class="{ fill: fill && showPane, phone }" data-test="settings" :data-phone-screen="phone ? (sectionOpen ? 'section' : 'list') : undefined">
+    <div v-if="phone && sectionOpen" class="section-head">
+      <button class="back" data-test="settings-back" aria-label="Back to Settings" @click="sectionOpen = false"><span class="back-icon" aria-hidden="true">‹</span>Settings</button>
+      <h2 class="page-title" data-test="settings-section-title">{{ tabLabel }}</h2>
+    </div>
+    <h2 v-else class="page-title">Settings</h2>
+    <nav v-if="showList" class="tabs" :class="{ list: phone }" role="tablist" :aria-orientation="phone ? 'vertical' : undefined">
+      <button v-for="t in tabs" :key="t.id" role="tab" :aria-selected="tab === t.id" :class="{ on: tab === t.id && !phone }" :data-test="t.test"
+        @click="choose(t.id)">{{ t.label }}<span v-if="phone" class="go-icon" aria-hidden="true">›</span></button>
     </nav>
-    <div class="pane" :class="{ fill }" data-test="settings-pane">
+    <div v-if="showPane" class="pane" :class="{ fill }" data-test="settings-pane">
       <section v-if="tab === 'general'" class="general" data-test="settings-general">
         <h3>Running on this computer</h3>
         <template v-if="desktop">
@@ -126,4 +148,23 @@ async function set(patch: Partial<ShellSettings>) {
 .warn { color: var(--warn); font-size: 12.5px; }
 .error { color: var(--bad); }
 .page-title { margin: 0 0 8px; font-size: 22px; }
+/* ---- a phone: the list of sections (full-width rows), or one section under a Back to the list. Its panels' wide parts
+   (two-column facts, tables, long inputs) fold to one column or scroll on their own. */
+.settings-place.phone { padding: 4px calc(12px + env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
+.phone .tabs.list { flex-direction: column; flex-wrap: nowrap; gap: 0; border-bottom: 0; border-top: 1px solid var(--line-soft); }
+.phone .tabs.list button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 52px; padding: 0 6px 0 4px;
+  border-bottom: 1px solid var(--line-soft); text-align: left; font-weight: 500; color: var(--ink); font-size: 15px; }
+/* (no transform here: nothing on this page may be a containing block for a Modal's fixed backdrop) */
+.go-icon { color: var(--muted); font-size: 20px; line-height: 1; }
+.section-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 10px; }
+.back { display: inline-flex; align-items: center; gap: 2px; border: 0; background: transparent; color: var(--accent); padding: 0 8px 0 0; font-size: 15px; }
+.back-icon { font-size: 22px; line-height: 1; margin-right: 2px; }
+.phone .pane { max-width: none; }
+.phone .check { padding: 12px 0; }
+.phone :deep(table) { display: block; max-width: 100%; overflow-x: auto; }
+.phone :deep(dl), .phone :deep(.facts) { grid-template-columns: minmax(0, 1fr); }
+.phone :deep(dd) { margin-left: 0; overflow-wrap: anywhere; }
+.phone :deep(pre), .phone :deep(code) { overflow-wrap: anywhere; }
+.phone :deep(.add-cli input) { min-width: 0; width: 100%; }
+.phone :deep(.prow) { grid-template-columns: minmax(0, 1fr); }
 </style>

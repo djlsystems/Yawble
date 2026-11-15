@@ -6,12 +6,15 @@ import { COMPANION_LEVELS, COMPANION_LEVEL_TEXT } from '../companionLevels';
 import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import { usePhone } from '../phone';
 
 /**
  * Settings > Companion: whether a program can use Yawble right now (one plain sentence), the steps that connect Claude Code
  * (level, pair, add), and the paired programs (revoke asks first). Only at this computer, never remote.
  */
 const props = defineProps<{ api: YawbleApi }>();
+// A phone (B037): a command and its Copy button stack, the paired programs' table scrolls sideways on its own.
+const phone = usePhone();
 
 const clients = ref<CompanionClientInfo[]>([]);
 const status = ref<CompanionStatus | null>(null);
@@ -93,7 +96,7 @@ onBeforeUnmount(() => off?.());
 </script>
 
 <template>
-  <section class="companion" data-test="settings-companion">
+  <section class="companion" :class="{ phone }" data-test="settings-companion">
     <h3>Yawble companion</h3>
     <p class="muted">The <code>yawble-companion</code> program lets tools on this computer, such as Claude Code, see and work with your teams.
       Each program pairs once, with a code you check here; anything that can't be undone waits for your approval in this window.</p>
@@ -214,4 +217,9 @@ onBeforeUnmount(() => off?.());
 .muted { color: var(--muted); font-weight: 400; }
 .small { font-size: 12.5px; margin-top: 4px; }
 .error { color: var(--bad); }
+.phone .line { flex-direction: column; align-items: stretch; }
+.phone .list { display: block; overflow-x: auto; white-space: nowrap; }
+.phone .buttons { flex-direction: column; align-items: stretch; }
+.phone .linklike { min-height: 44px; min-width: 0; }
+.phone .steps { padding-left: 16px; }
 </style>
