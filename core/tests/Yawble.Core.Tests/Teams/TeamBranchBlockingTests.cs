@@ -61,8 +61,10 @@ public class TeamBranchBlockingTests
         Assert.Equal([new TeamGitBlockingBranch("members/docs", "main", "local")], s.BlockingBranches);
     }
 
+    /// <summary>Card 171: the shared view follows the repository. A members/docs it still has (deleted in the repository
+    /// since) is no refusal the Git dialog could act on: the start goes on, and its refresh (fetch --prune) removes it.</summary>
     [Fact]
-    public async Task ABlockingBranchInTheSharedView_FailsTheStartPlainly()
+    public async Task AStaleBlockerInTheSharedView_DoesNotRefuseTheStart_AndGoesAtTheRefresh()
     {
         using var f = new TeamsFixture();
         var (manager, ada, _) = f.Team("Docs");
@@ -70,14 +72,12 @@ public class TeamBranchBlockingTests
         var shared = f.Repos.SharedRepoPath("Docs");
         AgentGit.Host(shared, "branch", "members/docs", "main");
         var repo = f.Repos.RepoOf(ada.TeamId)!;
-        var before = Refs(repo.Path);
 
-        var e = await Assert.ThrowsAsync<MemberBranchBlockedException>(() => f.Repos.PrepareAsync(ada, Ct));
+        var c = await f.Repos.PrepareAsync(ada, Ct);
 
-        AssertPlain(e.Message, "members/docs", "shared view");
-        Assert.Equal(before, Refs(repo.Path));
-        Assert.Contains("refs/heads/members/docs ", Refs(shared));
-        Assert.False(Directory.Exists(f.Repos.CheckoutOf(ada, repo).ClonePath));
+        Assert.Equal("members/docs/ada", c.Branch);
+        Assert.DoesNotContain("refs/heads/members/docs ", Refs(shared));
+        Assert.True(Directory.Exists(f.Repos.CheckoutOf(ada, repo).ClonePath));
     }
 
     [Fact]

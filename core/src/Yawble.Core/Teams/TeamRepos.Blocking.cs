@@ -19,14 +19,16 @@ public sealed record TeamGitBlockingBranch(string Name, string Repo, string Loca
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? MovesTo { get; init; }
 }
 
-/// <summary>A member's start refused because a branch blocks its member branch (B020). Nothing was changed.</summary>
+/// <summary>A member's start refused because a branch blocks its member branch (B020). Nothing was changed, unless the
+/// message says what the start's B016 move already did (card 171).</summary>
 public sealed class MemberBranchBlockedException(string message) : InvalidOperationException(message);
 
 /// <summary>
 /// B020: before a member branch members/&lt;team&gt;/&lt;name&gt; is made or pushed, the refs that would block it are looked
-/// for: in the host repository (its branches, and origin's remote-tracking refs), its shared view, and the member's clone
-/// (read with upload-pack, never git in the clone). Found: the member's start fails with a plain message naming the branch,
-/// where it is and what to do, and nothing is deleted, renamed or moved. The same-team B016 move runs first (and itself
+/// for, ignoring case: in the host repository (its branches, and origin's remote-tracking refs) and the member's clone
+/// (read with upload-pack, never git in the clone); the shared view follows the repository (card 171). Found: the member's
+/// start fails with a plain message naming the branch, where it is and what to do, and nothing is deleted, renamed or moved
+/// (or, after a B016 move, the message says what moved). The same-team B016 move runs first (and itself
 /// refuses a move that would clash, except through the member's own old branch: team "Docs", member "Docs", card 104).
 /// The Git dialog lists the blockers (<see cref="TeamGitStatus.BlockingBranches"/>) for its Delete, under the usual approval
 /// rules; one a member of any team on the repository is still on is marked and never deleted from there.
@@ -44,31 +46,44 @@ public sealed partial class TeamRepos
     /// <summary>The names that block a team's member branches: the parents of members/&lt;team&gt;/&lt;anyone&gt;.</summary>
     internal static IReadOnlyList<string> BlockingNames(string team) => ParentPaths(MemberBranchPrefix(team) + "x");
 
-    /// <summary>The blocking refs in a repository the host owns or the person's (git runs there): its branches and, with
-    /// <paramref name="withRemote"/>, origin's remote-tracking ones. Each as (branch name, "local" | "remote").</summary>
+    /// <summary>
+    /// The blocking refs in a repository the host owns or the person's (git runs there): its branches and, with
+    /// <paramref name="withRemote"/>, origin's remote-tracking ones. Each as (branch name as git has it, "local" | "remote").
+    /// <para>Card 171: matched ignoring case. On Windows and macOS loose refs are files, so <c>Members/Docs</c> blocks
+    /// members/docs/&lt;name&gt; as surely as members/docs does; it gets the plain message, never git's "cannot lock ref".</para>
+    /// </summary>
     private async Task<IReadOnlyList<(string Name, string Location)>> BlockingRefsAsync(string path, IReadOnlyList<string> names, bool withRemote,
         CancellationToken ct)
     {
-        var wanted = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
-        foreach (var n in names)
-        {
-            wanted["refs/heads/" + n] = (n, "local");
-            if (withRemote) wanted["refs/remotes/origin/" + n] = (n, "remote");
-        }
-        var r = await Git.TryRunAsync(path, ["for-each-ref", "--format=%(refname)", .. wanted.Keys], ct);
+        (string Prefix, string Location)[] where = withRemote ? [("refs/heads/", "local"), ("refs/remotes/origin/", "remote")] : [("refs/heads/", "local")];
+        var r = await Git.TryRunAsync(path, ["for-each-ref", "--format=%(refname)", .. where.Select(w => w.Prefix)], ct);
         if (r.ExitCode != 0) throw new GitException($"could not read the branches of {path}: {r.Stderr}");
-        return r.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(wanted.ContainsKey).Select(x => wanted[x]).Distinct().ToList();
+        var found = new List<(string Name, string Location)>();
+        foreach (var line in r.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            foreach (var (prefix, location) in where)
+                if (line.StartsWith(prefix, StringComparison.Ordinal) && line[prefix.Length..] is var name
+                    && names.Contains(name, StringComparer.OrdinalIgnoreCase) && !found.Contains((name, location)))
+                    found.Add((name, location));
+        return found;
     }
 
-    /// <summary>The blocking branches in a member's clone (by upload-pack from the host repository; nothing runs in the clone).</summary>
+    /// <summary>The blocking branches in a member's clone, as the clone names them, matched ignoring case like
+    /// <see cref="BlockingRefsAsync"/> (by upload-pack from the host repository; nothing runs in the clone).</summary>
     private async Task<IReadOnlyList<string>> BlockingInCloneAsync(string repoPath, string clonePath, IReadOnlyList<string> names, CancellationToken ct)
     {
         if (!Directory.Exists(clonePath) || CloneGitDirProblem(clonePath) is not null) return [];
         var r = await Git.TryRunAsync(repoPath, ["ls-remote", "--heads", StrictUploadPack, "--", Path.Combine(clonePath, ".git")], ct);
         if (r.ExitCode != 0) throw new GitException($"could not read the branches of the clone {clonePath}: {r.Stderr}");
-        var heads = r.Stdout.Split('\n').Select(l => l.Split('\t', 2)).Where(p => p.Length == 2).Select(p => p[1].Trim()).ToHashSet(StringComparer.Ordinal);
-        return names.Where(n => heads.Contains("refs/heads/" + n)).ToList();
+        return BlockingHeads(r.Stdout, names);
+    }
+
+    /// <summary>The branches of ls-remote output (<c>sha\trefs/heads/x</c> lines) that equal one of <paramref name="names"/>
+    /// ignoring case, in the order of <paramref name="names"/>, each as the output spells it.</summary>
+    internal static IReadOnlyList<string> BlockingHeads(string lsRemote, IReadOnlyList<string> names)
+    {
+        var heads = lsRemote.Split('\n').Select(l => l.Split('\t', 2)).Where(p => p.Length == 2).Select(p => p[1].Trim())
+            .Where(h => h.StartsWith("refs/heads/", StringComparison.Ordinal)).Select(h => h["refs/heads/".Length..]).ToList();
+        return names.SelectMany(n => heads.Where(h => string.Equals(h, n, StringComparison.OrdinalIgnoreCase))).Distinct(StringComparer.Ordinal).ToList();
     }
 
     /// <summary>A member, of any team, whose clone of one repository (the team's main one or a writable extra) is recorded on
@@ -121,7 +136,7 @@ public sealed partial class TeamRepos
     internal static string BlockedMessage(string team, string branch, string where, bool inDialog, RepoUser? heldBy = null, long teamId = 0)
     {
         var head = $"The branch {branch} in {where} stops team {team}'s member branches ({MemberBranchPrefix(team)}<name>): git cannot keep a branch "
-            + "and branches under its name at once. Nothing was changed. ";
+            + "and branches under its name at once. " + NothingChanged;
         if (heldBy is not null)
             return head + $"It is the old branch of {Holder(heldBy, teamId)}, who is still on it, so it is not deleted: it moves to "
                 + $"{BranchFor(heldBy.Team, heldBy.Member)} at that member's next start. Start {heldBy.Member}"
@@ -131,16 +146,36 @@ public sealed partial class TeamRepos
             : $"To go on, delete {branch} there, then start the member again.");
     }
 
+    private const string NothingChanged = "Nothing was changed. ";
+
+    /// <summary>
+    /// Card 171: a refusal that comes after the start already moved a branch (the B016 move of an old-style member, which
+    /// runs before the checks) says what moved, instead of "Nothing was changed". <paramref name="moves"/>: one line each.
+    /// </summary>
+    internal static MemberBranchBlockedException WithMoves(MemberBranchBlockedException e, IReadOnlyList<string> moves) =>
+        moves.Count == 0 || !e.Message.Contains(NothingChanged, StringComparison.Ordinal) ? e
+            : new MemberBranchBlockedException(e.Message.Replace(NothingChanged,
+                $"Only this was changed before it was found: {string.Join("; ", moves)}. Nothing else was changed. ", StringComparison.Ordinal));
+
+    /// <summary>The line <see cref="WithMoves"/> gives for one B016 move.</summary>
+    internal static string MoveLine(string memberName, string repoLabel, string from, string to) =>
+        $"{memberName}'s branch in {repoLabel} moved from {from} to {to}"
+        + (to.StartsWith(from + "/", StringComparison.Ordinal) ? $" ({from} was renamed, git cannot keep both)" : $" ({from} is kept)");
+
     /// <summary>
     /// Throws <see cref="MemberBranchBlockedException"/> when a ref blocks the member's branch in one repository (the
     /// caller holds the team's lock). Only for a member branch of the team (a Manager's team/&lt;team&gt; and an old-style
     /// branch a member is still on are not made anew). <paramref name="repoLabel"/>: how the message names the repository.
+    /// Looked for in the repository (its branches and origin's, as of the last fetch) and the member's clone.
+    /// <para>Card 171: not in the team's shared view. It is a mirror of the repository's branches, refreshed with
+    /// <c>fetch --prune</c> (which prunes before it fetches) right after these checks, so a blocker it still has that the
+    /// repository has not (deleted there since) goes at that refresh; refusing for it named a branch the Git dialog, which
+    /// lists the repository's branches, could not act on. One the repository has is found there.</para>
     /// <para>The member's own old branch, just moved through (team "Docs", member "Docs": members/docs to members/docs/docs,
-    /// card 104), does not refuse its own start where it is still left: in the shared view when the repository no longer
-    /// has it (the shared view follows the repository, and is updated next), and on origin when the new branch holds its
-    /// commits (the push after the run replaces it, see <see cref="PublishRepoAsync"/>).</para>
+    /// card 104), does not refuse its own start on origin when the new branch holds its commits (the push after the run
+    /// replaces it, see <see cref="PublishRepoAsync"/>).</para>
     /// </summary>
-    private async Task CheckMemberBranchFreeAsync(MemberRef member, string branch, string repoLabel, string repoPath, string sharedPath,
+    private async Task CheckMemberBranchFreeAsync(MemberRef member, string branch, string repoLabel, string repoPath,
         string clonePath, CancellationToken ct)
     {
         if (member.Role == MemberRole.Manager || !branch.StartsWith(MemberBranchPrefix(member.Team), StringComparison.Ordinal)) return;
@@ -159,11 +194,6 @@ public sealed partial class TeamRepos
                 : BlockedMessage(member.Team, name, $"origin of {repoLabel} (origin/{name}, as of the last fetch)", inDialog: true, held, member.TeamId);
             break;
         }
-        if (message is null && Directory.Exists(Path.Combine(sharedPath, "objects"))
-            && (await BlockingRefsAsync(sharedPath, names, withRemote: false, ct)).Select(b => b.Name)
-                .FirstOrDefault(n => !(ownThrough && n == own && !here.Contains((n, "local")))) is { } inShared)
-            message = BlockedMessage(member.Team, inShared, $"the team's shared view of {repoLabel} ({sharedPath}), which follows that repository",
-                inDialog: true, OldBranchUser(users, inShared, clonePath), member.TeamId);
         if (message is null && (await BlockingInCloneAsync(repoPath, clonePath, names, ct)).FirstOrDefault() is { } inClone)
             message = BlockedMessage(member.Team, inClone, $"{member.Name}'s clone of {repoLabel} ({clonePath})", inDialog: false);
         if (message is null) return;
