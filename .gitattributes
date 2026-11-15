@@ -1,2 +1,5 @@
 # Help fixtures are compared line by line
 core/tests/Yawble.Core.Tests/Integrations/Fixtures/** text eol=lf
+
+# The pinned Public Suffix List is kept byte for byte as published (its SHA-256 is in docs/architecture.md)
+core/src/Yawble.Core/Policy/public_suffix_list.dat -text

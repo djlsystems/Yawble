@@ -19,6 +19,8 @@
     <!-- The manager and member role texts served by skills_get (Teams/RoleTexts.cs). -->
     <EmbeddedResource Include="Teams/Roles/*.md" LogicalName="Yawble.Core.Roles.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Teams/Skills/*.md" LogicalName="Yawble.Core.Skills.%(Filename)%(Extension)" />
+    <!-- The pinned Public Suffix List (Policy/PublicSuffix.cs); never fetched at run time. -->
+    <EmbeddedResource Include="Policy/public_suffix_list.dat" LogicalName="Yawble.Core.Policy.public_suffix_list.dat" />
     <Content Include="../../../sandbox.lock.json" Link="sandbox.lock.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

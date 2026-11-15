@@ -253,7 +253,7 @@ public class HiringAndSkillsTests
         var claude = SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, null, PolicyFixtures.Run(TargetOs.Windows, CredentialMode.ClaudeHostSignIn));
         Assert.DoesNotContain("chatgpt.com", claude.Gateway.AllowHosts);
         Assert.DoesNotContain("api.githubcopilot.com", claude.Gateway.AllowHosts);
-        // No policy can add them either: the floor rules refuse wildcards, and the vendor hosts stay preset-only.
+        // No policy can add them as a domain allow either: the floor rules refuse a pattern over a preset-only vendor domain.
         Assert.NotNull(FloorRules.HostProblem("*.githubcopilot.com"));
     }
 

@@ -5,6 +5,7 @@ import { errorText, resolveApi } from '../api';
 import { CLIPBOARD } from '../policyFields';
 import { fromSeconds, toSeconds, UNIT_SECONDS, type TimeUnit } from '../timeUnits';
 import { addEntries, hasEntries } from '../listEntries';
+import { useHostProblems } from '../hostChecks';
 import GuardrailPanel from './GuardrailPanel.vue';
 import ListEditor from './ListEditor.vue';
 import Modal from './Modal.vue';
@@ -48,6 +49,9 @@ const snapshot = () => JSON.stringify({
 });
 const dirty = computed(() => doc.value !== null && (snapshot() !== pristine.value || LIST_KEYS.some((k) => hasEntries(pending[k]))));
 watch(dirty, (d) => { if (d) saved.value = false; });
+
+/** The allowed hosts the core refuses (FloorRules.HostProblem), in its words: shown under the list before Save. */
+const hostProblems = useHostProblems(api, () => f.allowHosts);
 
 /** The hosts package managers download from: NuGet (api + its CDN), npm, and PyPI (index + files). */
 const PackageRegistries = ['api.nuget.org', 'globalcdn.nuget.org', 'registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org'];
@@ -188,7 +192,9 @@ const units = (offerSeconds: boolean): TimeUnit[] => (offerSeconds ? ['seconds',
           <div class="plabel">Allowed hosts
             <span class="hint">beyond the model API and the team bus</span></div>
           <div class="pctl col">
-            <ListEditor v-model="f.allowHosts" v-model:draft="pending.allowHosts" placeholder="Add host, e.g. api.github.com" data-test="global-allowHosts" />
+            <ListEditor v-model="f.allowHosts" v-model:draft="pending.allowHosts" placeholder="Add host, e.g. api.github.com or *.digicert.com" data-test="global-allowHosts" />
+            <span class="hint">A host, or a domain allow: <code>*.digicert.com</code> is every subdomain of digicert.com (list digicert.com itself separately).</span>
+            <p v-for="p in hostProblems" :key="p.host" class="problem" data-test="global-allowHosts-problem">{{ p.problem }}</p>
             <div class="presets">
               <button type="button" data-test="global-add-registries" title="Lets agents restore .NET, npm and Python packages (dotnet restore, npm ci, pip install)" @click="addHosts(PackageRegistries)">
                 + Package registries (NuGet, npm, PyPI)</button>
@@ -272,6 +278,7 @@ const units = (offerSeconds: boolean): TimeUnit[] => (offerSeconds ? ['seconds',
 .prow { display: grid; grid-template-columns: minmax(180px, 2fr) 3fr; gap: 6px 20px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line-soft); }
 .plabel { display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .hint { font-size: 12px; font-weight: 400; color: var(--muted); }
+.problem { margin: 0; font-size: 12px; color: var(--bad); }
 .pctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; font-size: 13px; }
 .pctl.col { flex-direction: column; align-items: stretch; }
 .num { width: 90px; }
