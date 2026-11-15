@@ -43,7 +43,8 @@ public sealed class NetworkAskTests : IDisposable
                 lock (_told) _told.Add((team, member, text, causation));
                 return Task.CompletedTask;
             },
-            _clock) { Changed = () => Interlocked.Increment(ref _changed) };
+            // told at once: these check who is told, not the window (NetworkAskNoticeTests)
+            _clock) { Changed = () => Interlocked.Increment(ref _changed), NoticeWindow = TimeSpan.Zero };
         _alpha = Team("Alpha");
         _beta = Team("Beta");
         _alphaManager = Member(_alpha, "Manager", "manager");

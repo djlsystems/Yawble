@@ -67,7 +67,7 @@ public static class RemoteAccess
             "docs.list", "docs.read", "docs.folder",
             "members.get",
             "bus.decisions", "bus.workflows",
-            "policy.getGlobal", "policy.getMember", "policy.previewLoosen", "policy.teamHosts",
+            "policy.getGlobal", "policy.getMember", "policy.previewLoosen", "policy.teamHosts", "policy.checkHosts",
             "credentials.status",
             "terminal.banner",
             "skills.list",

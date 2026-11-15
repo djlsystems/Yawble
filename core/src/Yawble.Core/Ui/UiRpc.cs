@@ -98,6 +98,8 @@ public sealed class UiRpc(
                 // The team's network allow list (0041): "Allow for this team" adds to it; the team's settings list it with Remove.
                 "policy.teamHosts" => await TeamHostsAsync(Long(p, "teamId"), ct),
                 "policy.removeTeamHost" => await RemoveTeamHostAsync(Long(p, "teamId"), Str(p, "host"), ct),
+                // The policy editors' check of each host typed: the floor's own rule, so the window never validates a second way.
+                "policy.checkHosts" => CheckHosts(p),
 
                 "credentials.status" => S(credentials.Status()),
                 "credentials.setClaudeSetupToken" => Then(() => credentials.SetClaudeSetupToken(Str(p, "token"))),
@@ -719,6 +721,17 @@ public sealed class UiRpc(
                 ["host"] = h.Host, ["addedBy"] = h.AddedBy, ["addedVia"] = h.AddedVia, ["addedAt"] = h.AddedAt,
             }).ToArray()),
         };
+    }
+
+    /// <summary>
+    /// policy.checkHosts {hosts: [..]}: [{ host, problem }] in the order given, problem null when the entry may be on an
+    /// allowHosts list (an exact host, or "*.example.com" over a registrable domain): <see cref="FloorRules.HostProblem"/>.
+    /// </summary>
+    internal static JsonArray CheckHosts(JsonObject? p)
+    {
+        var hosts = (p?["hosts"] as JsonArray ?? throw new RpcException("bad_params", "hosts is required (a list of host names)"))
+            .Select(n => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : "").Take(500).ToList();
+        return new JsonArray(hosts.Select(h => (JsonNode?)new JsonObject { ["host"] = h, ["problem"] = FloorRules.HostProblem(h) }).ToArray());
     }
 
     /// <summary>policy.removeTeamHost {teamId, host}: takes it off the team's list (the dispatcher audits the call); answers as policy.teamHosts.</summary>

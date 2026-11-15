@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import NetworkAskCard from '../../src/renderer/src/components/NetworkAskCard.vue';
 import NetworkAsks from '../../src/renderer/src/components/NetworkAsks.vue';
 import type { CoreEvent, NetworkAsk, YawbleApi } from '../../src/shared/api';
+import { groupAsks, hostsLabel } from '../../src/renderer/src/networkAskGroups';
 
 // A fake API only: no core, no network. Each method answers from `answers`; anything else fails the call.
 function fakeApi(answers: Record<string, (params: any) => unknown>, extra: Partial<YawbleApi> = {}) {
@@ -206,5 +207,90 @@ describe('NetworkAsks', () => {
     await flushPromises();
     expect(w.find('[data-test=network-asks]').exists()).toBe(false);
     w.unmount();
+  });
+});
+
+describe('grouped asks (one member, one registrable domain)', () => {
+  const digi = (id: number, host: string, over: Partial<NetworkAsk> = {}) =>
+    ask({ id, host, hint: null, count: 1, domain: 'digicert.com', domainPattern: '*.digicert.com', ...over });
+
+  it('GroupsOneMembersAsksByDomain_InTheOrderTheyCame', () => {
+    const groups = groupAsks([
+      digi(3, 'crl3.digicert.com'), ask({ id: 4, domain: 'nuget.org', domainPattern: '*.nuget.org' }), digi(5, 'ocsp.digicert.com'),
+      digi(6, 'crl4.digicert.com', { member: 'Alpha/TesterJo', memberName: 'TesterJo' }), digi(7, 'crl4.digicert.com'),
+      ask({ id: 8, host: 'someone.github.io', domain: 'someone.github.io', domainPattern: null }),
+    ]);
+    expect(groups.map((g) => g.asks.map((a) => a.id))).toEqual([[3, 5, 7], [4], [6], [8]]);
+    expect(hostsLabel(groups[0].hosts)).toBe('crl3.digicert.com, ocsp.digicert.com, crl4.digicert.com (3 hosts)');
+    expect(hostsLabel(groups[1].hosts)).toBe('api.nuget.org');
+    expect(groups[0].domainPattern).toBe('*.digicert.com');
+    expect(groups[3].domainPattern).toBeNull();
+  });
+
+  it('AnAskFromAnOlderCoreWithoutADomain_IsAnItemAlone', () => {
+    expect(groupAsks([ask({ id: 1, host: 'a.example.com' }), ask({ id: 2, host: 'b.example.com' })])).toHaveLength(2);
+  });
+
+  it('ShowsOneItemListingEveryHost_AndAllowAnswersEveryListedHost', async () => {
+    let pending = [digi(3, 'crl3.digicert.com', { count: 2 }), digi(5, 'ocsp.digicert.com'), digi(7, 'crl4.digicert.com'), ask({ id: 9 })];
+    const { api, calls } = fakeApi({
+      'network.asks': () => pending,
+      'network.answer': (p) => { pending = pending.filter((a) => !(p.ids ?? [p.id]).includes(a.id)); return answered(p.choice); },
+    });
+    const w = mount(NetworkAsks, { props: { api, pollMs: 60_000, banner: true } });
+    await flushPromises();
+    const cards = w.findAll('[data-test=network-ask]');
+    expect(cards).toHaveLength(2);
+    expect(w.emitted('count')?.at(-1)).toEqual([2]);
+    const item = w.get('[data-test=network-ask][data-id="3"]');
+    expect(item.get('[data-test=network-ask-host]').text()).toBe('crl3.digicert.com, ocsp.digicert.com, crl4.digicert.com (3 hosts)');
+    expect(item.get('[data-test=network-ask-count]').text()).toContain('4 times');
+
+    await item.get('[data-test=network-ask-agent]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'network.answer')?.params).toEqual({ id: 3, choice: 'agent', ids: [3, 5, 7] });
+    expect(w.findAll('[data-test=network-ask]').map((c) => c.attributes('data-id'))).toEqual(['9']);
+    w.unmount();
+  });
+
+  it('OffersThisHostOrTheWholeDomain_AboveTheScopeButtons_HostByDefault', async () => {
+    const { api, calls } = fakeApi({ 'network.answer': (p) => answered(p.choice) });
+    const w = mount(NetworkAskCard, { props: { ask: digi(3, 'crl3.digicert.com'), api } });
+    const target = w.get('[data-test=network-ask-target]');
+    expect(target.text()).toContain('This host');
+    expect(target.text()).toContain('All of *.digicert.com');
+    expect((w.get('[data-test=network-ask-target-host]').element as HTMLInputElement).checked).toBe(true);
+    // the choice sits above the four buttons, which stay four
+    expect(w.html().indexOf('network-ask-target')).toBeLessThan(w.html().indexOf('network-ask-agent'));
+    expect(w.findAll('button:not(.discuss)')).toHaveLength(4);
+
+    await w.get('[data-test=network-ask-team]').trigger('click');
+    await flushPromises();
+    expect(calls[0].params).toEqual({ id: 3, choice: 'team' });
+
+    await w.get('[data-test=network-ask-target-domain]').setValue(true);
+    await w.get('[data-test=network-ask-everywhere]').trigger('click');
+    await flushPromises();
+    expect(calls[1].params).toEqual({ id: 3, choice: 'everywhere', domain: true });
+  });
+
+  it('TheDomainChoiceOnAGroup_SendsEveryIdWithDomain_AndDenyNeverSendsDomain', async () => {
+    const { api, calls } = fakeApi({ 'network.answer': (p) => answered(p.choice) });
+    const group = [digi(3, 'crl3.digicert.com'), digi(5, 'ocsp.digicert.com')];
+    const w = mount(NetworkAskCard, { props: { ask: group[0], group, api } });
+    expect(w.get('[data-test=network-ask-target]').text()).toContain('These 2 hosts');
+    await w.get('[data-test=network-ask-target-domain]').setValue(true);
+    await w.get('[data-test=network-ask-agent]').trigger('click');
+    await flushPromises();
+    expect(calls[0].params).toEqual({ id: 3, choice: 'agent', ids: [3, 5], domain: true });
+    await w.get('[data-test=network-ask-deny]').trigger('click');
+    await flushPromises();
+    expect(calls[1].params).toEqual({ id: 3, choice: 'deny', ids: [3, 5] });
+  });
+
+  it.each([null, undefined])('NoDomainChoice_WhenTheCoreOffersNone (%s)', (domainPattern) => {
+    const { api } = fakeApi({});
+    const w = mount(NetworkAskCard, { props: { ask: ask({ host: 'someone.github.io', domainPattern }), api } });
+    expect(w.find('[data-test=network-ask-target]').exists()).toBe(false);
   });
 });
