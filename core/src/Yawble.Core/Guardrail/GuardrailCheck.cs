@@ -377,6 +377,21 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
                 unix.Add(new JsonObject { ["id"] = id, ["category"] = "network", ["path"] = path });
                 plan.Expect[id] = new Expectation(Verdicts.Blocked);
             }
+        // Linux (B038): the nameservers slirp4netns gives the sandbox's network, asked directly by a raw DNS query, around
+        // resolv.conf: its forwarder 10.0.2.3 (which forwards to the host's own resolver) over UDP and TCP, and 10.0.2.2:53
+        // (the host's loopback). The sandbox's proxy-only firewall must drop all three. Then the user's session bus: a
+        // route to the host's systemd user manager and the Secret Service, even if nothing inside names it.
+        var dnsRaw = new JsonArray();
+        if (Host.Os == TargetOs.Linux)
+        {
+            foreach (var (id, host, transport) in SlirpDnsProbes)
+            {
+                dnsRaw.Add(new JsonObject { ["id"] = id, ["category"] = "network", ["host"] = host, ["port"] = 53, ["transport"] = transport, ["name"] = DeniedHost });
+                plan.Expect[id] = new Expectation(Verdicts.Blocked);
+            }
+            unix.Add(new JsonObject { ["id"] = UserBusProbe, ["category"] = "network", ["path"] = UserBusPath() });
+            plan.Expect[UserBusProbe] = new Expectation(Verdicts.Blocked);
+        }
 
         // The gateway: reachable with the run token (positive control); a guessed or missing token, a host off the
         // allowlist and every vendor host refused (and the CONNECTs logged).
@@ -421,6 +436,7 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
         plan.Wire["tcp"] = tcp;
         plan.Wire["dns"] = dns;
         plan.Wire["unix"] = unix;
+        plan.Wire["dnsRaw"] = dnsRaw;
         plan.Wire["gateway"] = new JsonObject
         {
             ["deniedHost"] = DeniedHost,
@@ -682,6 +698,35 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
     }
 
     private static string? Trim(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Length > 2000 ? s[..2000] + "..." : s.Trim();
+
+    /// <summary>Linux: the raw DNS attempts at slirp4netns's nameservers (id, address, transport), each expected BLOCKED.</summary>
+    public static IReadOnlyList<(string Id, string Host, string Transport)> SlirpDnsProbes { get; } =
+    [
+        ("dns.slirp-udp", "10.0.2.3", "udp"),
+        ("dns.slirp-tcp", "10.0.2.3", "tcp"),
+        ("dns.gateway-udp", "10.0.2.2", "udp"),
+    ];
+
+    /// <summary>Linux: the connect to the host user's session bus, expected BLOCKED.</summary>
+    public const string UserBusProbe = "dbus.user";
+
+    /// <summary>The host user's session bus, /run/user/&lt;uid&gt;/bus, with the core's own (host) uid.</summary>
+    internal static string UserBusPath() => HostUid() is { } uid
+        ? $"/run/user/{uid}/bus"
+        : Path.Combine(Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? "/run/user/unknown", "bus");
+
+    /// <summary>The real uid from /proc/self/status ("Uid:\treal\teffective..."); null when it cannot be read.</summary>
+    internal static string? HostUid()
+    {
+        try
+        {
+            foreach (var line in File.ReadLines("/proc/self/status"))
+                if (line.StartsWith("Uid:", StringComparison.Ordinal))
+                    return line[4..].Split(['\t', ' '], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return null;
+    }
 
     private static string? DefaultGateway()
     {

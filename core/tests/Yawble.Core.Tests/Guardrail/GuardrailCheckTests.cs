@@ -35,6 +35,7 @@ public class GuardrailCheckTests
         foreach (var t in plan["tcp"]!.AsArray()) lines.Add(Line(t!["id"]!.GetValue<string>(), "blocked"));
         lines.Add(Line("net.dns", "blocked"));
         foreach (var u in plan["unix"]?.AsArray() ?? []) lines.Add(Line(u!["id"]!.GetValue<string>(), "blocked"));
+        foreach (var d in plan["dnsRaw"]?.AsArray() ?? []) lines.Add(Line(d!["id"]!.GetValue<string>(), "blocked"));
         lines.Add(Line("gateway.reachable", "allowed"));
         foreach (var id in new[] { "proc.host-signal", "proc.host-environ", "proc.host-ptrace", "credstore.dbus-session", "credstore.dbus-env", "display.env", "display.x11-socket", "secrets.scan" })
             lines.Add(Line(id, "blocked"));
