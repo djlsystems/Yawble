@@ -320,15 +320,16 @@ public class ReviewHardeningTests : IAsyncDisposable
 
     // ------------------------------------------------------------------ 4. a folder swapped while it is listed
 
-    private static void WindowsOnly()
+    /// <summary>The handle checks run on Windows and on macOS / Linux x64 and arm64 (PosixHandles); elsewhere they are not built.</summary>
+    private static void HandleChecks()
     {
-        if (!OperatingSystem.IsWindows()) Assert.Skip("the handle checks are Windows'");
+        if (!OperatingSystem.IsWindows() && !PosixHandles.Supported) Assert.Skip("no handle checks on this OS or CPU");
     }
 
     [Fact]
     public void AFolderWhoseHandleLeadsOutsideAfterListingIsRefused()
     {
-        WindowsOnly();
+        HandleChecks();
         var tree = new SafeTree(_clone);
         var real = tree.HandlePath;
         var swapped = false;
@@ -343,7 +344,7 @@ public class ReviewHardeningTests : IAsyncDisposable
     [Fact]
     public void AFolderSwappedForALinkWhileListedIsRefused()
     {
-        WindowsOnly();
+        HandleChecks();
         var tree = new SafeTree(_clone);
         var src = Path.Combine(_clone, "src");
         var made = false;
@@ -360,7 +361,7 @@ public class ReviewHardeningTests : IAsyncDisposable
     [Fact]
     public void AFolderReplacedByAnotherWhileListedIsRefused()
     {
-        WindowsOnly();
+        HandleChecks();
         var tree = new SafeTree(_clone);
         var src = Path.Combine(_clone, "src");
         tree.AfterEnumerate = _ =>
@@ -376,7 +377,7 @@ public class ReviewHardeningTests : IAsyncDisposable
     [Fact]
     public void TheOpenedFilesFinalPathIsCheckedAgainstGitAndTheDenyList()
     {
-        WindowsOnly();
+        HandleChecks();
         var tree = new SafeTree(_clone, p => p.EndsWith("blocked.cs", StringComparison.OrdinalIgnoreCase));
         var real = tree.HandlePath;
         string? swap = null;
@@ -398,12 +399,18 @@ public class ReviewHardeningTests : IAsyncDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateHardLinkW(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
 
+    [DllImport("libc", SetLastError = true)]
+    private static extern int link(string oldpath, string newpath);
+
+    private static bool HardLink(string link, string existing) =>
+        OperatingSystem.IsWindows() ? CreateHardLinkW(link, existing, IntPtr.Zero) : ReviewHardeningTests.link(existing, link) == 0;
+
     [Fact]
     public async Task AHardLinkIsNotReadOrDownloaded()
     {
-        WindowsOnly();
+        HandleChecks();
         var link = Path.Combine(_clone, "src", "linked.txt");
-        if (!CreateHardLinkW(link, Path.Combine(_outside, "secret.txt"), IntPtr.Zero)) Assert.Skip("hard links cannot be made here");
+        if (!HardLink(link, Path.Combine(_outside, "secret.txt"))) Assert.Skip("hard links cannot be made here");
         var tree = new SafeTree(_clone);
         Assert.Contains("hard link", Refused(() => tree.OpenFile("src/linked.txt").Stream.Dispose()));
         tree.OpenFile("src/app.cs").Stream.Dispose(); // one name: fine
@@ -419,7 +426,7 @@ public class ReviewHardeningTests : IAsyncDisposable
     [Fact]
     public void AFileWithMoreThanOneNameIsRefused_ThroughTheSeam()
     {
-        WindowsOnly();
+        HandleChecks();
         var tree = new SafeTree(_clone) { LinkCount = _ => 2 };
         Assert.Contains("hard link", Refused(() => tree.OpenFile("src/app.cs").Stream.Dispose()));
         tree.LinkCount = _ => null; // not known: refused too
