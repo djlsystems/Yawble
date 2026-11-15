@@ -36,10 +36,12 @@ if (options.Error is not null)
     return 2;
 }
 
-Directory.CreateDirectory(options.DataDir!);
+// The data folder is user-only on Linux and macOS (0700 folders, 0600 files): made so when missing, tightened below when not.
+Yawble.Core.Companion.UserOnlyFile.CreatePrivateDirectory(options.DataDir!);
 // Everything the core reports on standard error is also kept in <data>/logs/core-<day>.log (the Diagnostics log).
 Console.SetError(new Yawble.Core.Logs.DiagnosticLog(options.DataDir!, "core").Tee(Console.Error));
 Console.Error.WriteLine(CoreInfo.StartupLine());
+Yawble.Core.Storage.DataFolderAccess.Secure(options.DataDir!, Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!), line => Console.Error.WriteLine(line));
 var dbPath = Path.Combine(options.DataDir!, "yawble.db");
 // Backups: one before the first pending migration (the update is refused if it fails), a daily one while running.
 Yawble.Core.Connections.ConnectionService? connectionsForBackup = null; // set once the Connection service exists
@@ -60,6 +62,9 @@ catch (RestoreFatalException e)
     Console.Error.WriteLine("fatal: " + e.Message);
     return 4;
 }
+// A new database is made 0600 (POSIX) just before SQLite first opens it, which would make it 0644: SQLite gives the -wal
+// and -shm files the database file's own mode.
+Yawble.Core.Companion.UserOnlyFile.CreateEmptyIfMissing(dbPath);
 IReadOnlyList<string> applied;
 try
 {

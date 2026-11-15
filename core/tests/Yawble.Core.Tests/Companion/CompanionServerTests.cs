@@ -555,6 +555,20 @@ public class CompanionServerTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => UserOnlyFile.EnsureDirectory(odd));
     }
 
+    [Fact]
+    public void AnAlreadyUserOnlyFolderHoldingOtherFilesIsRefusedToo()
+    {
+        // On POSIX a temp folder (Directory.CreateTempSubdirectory) or ~/.ssh is 0700 already: its rules are not the test.
+        var secured = Path.Combine(_home, "secured");
+        UserOnlyFile.EnsureDirectory(secured);
+        Assert.True(UserOnlyFile.IsUserOnly(secured));
+        File.WriteAllText(Path.Combine(secured, "id_ed25519"), "someone's key");
+        var e = Assert.Throws<InvalidOperationException>(() => UserOnlyFile.EnsureDirectory(secured));
+        Assert.Contains("already holds other files", e.Message);
+        Assert.Contains("YAWBLE_HOME", e.Message);
+        Assert.Equal("someone's key", File.ReadAllText(Path.Combine(secured, "id_ed25519")));
+    }
+
     /// <summary>The folder's rules (Windows SDDL) or mode, and each child's.</summary>
     private static List<string> Snapshot(string dir)
     {

@@ -141,8 +141,9 @@ public sealed class DiagnosticLog(string dataDir, string origin, TimeProvider? c
         {
             try
             {
-                Directory.CreateDirectory(Folder);
-                File.AppendAllText(Path.Combine(Folder, $"{origin}-{now:yyyy-MM-dd}.log"), sb.ToString());
+                // User-only on POSIX: a 0700 folder and 0600 files (Storage.DataFolderAccess).
+                Companion.UserOnlyFile.CreatePrivateDirectory(Folder);
+                Companion.UserOnlyFile.AppendAllText(Path.Combine(Folder, $"{origin}-{now:yyyy-MM-dd}.log"), sb.ToString());
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
