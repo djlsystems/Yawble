@@ -348,6 +348,46 @@ describe('the Monitor view', () => {
     again.unmount();
     localStorage.removeItem('yawble.monitor.camera');
   });
+  it('the cog beside Pinned opens the network forces; a slider changes and remembers its multiplier; Reset clears it', async () => {
+    localStorage.removeItem('yawble.monitor.layout');
+    const api = {
+      call: async (method: string) => {
+        if (method === 'app.overview') return { slots: { running: 0, limit: 4, queued: 0 }, teams: [] };
+        if (method === 'teams.agents') return [];
+        if (method === 'monitor.messages') return { end: 0, messages: [] };
+        if (method === 'monitor.steps') return { end: 0, pending: false, steps: [] };
+        throw new Error(method);
+      },
+      onEvent: () => () => {},
+    } as unknown as YawbleApi;
+    const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    // The cog sits in the camera controls, right after the Auto fit | Fit | Pinned group; the panel is closed.
+    const controls = w.get('.controls');
+    expect(controls.element.lastElementChild?.getAttribute('data-test')).toBe('monitor-layout-toggle');
+    expect(w.find('[data-test=monitor-layout]').exists()).toBe(false);
+    await w.get('[data-test=monitor-layout-toggle]').trigger('click');
+    const panel = w.get('[data-test=monitor-layout]');
+    for (const key of ['distance', 'strength', 'repulsion', 'gravity', 'friction']) expect(panel.find(`[data-test=monitor-layout-${key}]`).exists()).toBe(true);
+    expect(w.get('[data-test=monitor-layout-reset]').attributes('disabled')).toBeDefined();
+
+    const repulsion = w.get('[data-test=monitor-layout-repulsion]');
+    (repulsion.element as HTMLInputElement).value = '1.8';
+    await repulsion.trigger('input');
+    expect(JSON.parse(localStorage.getItem('yawble.monitor.layout')!)).toMatchObject({ repulsion: 1.8, distance: 1 });
+    expect(w.get('[data-test=monitor-layout-toggle]').classes()).toContain('changed');
+    w.unmount();
+
+    const again = mount(MonitorView, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    await again.get('[data-test=monitor-layout-toggle]').trigger('click');
+    expect((again.get('[data-test=monitor-layout-repulsion]').element as HTMLInputElement).value).toBe('1.8'); // kept for next time
+    await again.get('[data-test=monitor-layout-reset]').trigger('click');
+    expect(localStorage.getItem('yawble.monitor.layout')).toBeNull();
+    await again.get('[data-test=monitor-layout]').trigger('keydown', { key: 'Escape' });
+    expect(again.find('[data-test=monitor-layout]').exists()).toBe(false);
+    again.unmount();
+  });
   it('collapses the activity pane to a thin rail and opens it again, and remembers that', async () => {
     localStorage.removeItem('yawble.monitor.activity');
     const api = {
