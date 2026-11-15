@@ -149,7 +149,7 @@ public class RealSandboxTeamFlowTests
                 var git = o.GetProperty("steps").GetProperty("git").EnumerateArray().ToList();
                 JsonElement G(params string[] args) => git.Single(g => g.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(args));
                 int Code(JsonElement g) => g.GetProperty("code").GetInt32();
-                Assert.Equal("members/" + name, G("symbolic-ref", "--short", "HEAD").GetProperty("out").GetString());
+                Assert.Equal("members/acme/" + name, G("symbolic-ref", "--short", "HEAD").GetProperty("out").GetString());
                 Assert.All(git.Take(6), g => Assert.True(Code(g) == 0, $"{name}: {g}"));
                 Assert.Equal("", G("remote", "-v").GetProperty("out").GetString());
                 // The clone's empty helper is the last one and resets the list (a system-wide helper would come before it).
@@ -160,8 +160,8 @@ public class RealSandboxTeamFlowTests
                 Assert.Contains(" 403", connect.GetProperty("statusLine").GetString());
                 var sha = G("rev-parse", "HEAD").GetProperty("out").GetString()!;
                 // ---- the team's repository (the one the person picked) has the member's commit on its branch
-                Assert.Equal(sha, AgentGit.Host(picked, "rev-parse", "members/" + name));
-                Assert.Equal($"{name} (acme)", AgentGit.Host(picked, "log", "-1", "--format=%an", "members/" + name));
+                Assert.Equal(sha, AgentGit.Host(picked, "rev-parse", "members/acme/" + name));
+                Assert.Equal($"{name} (acme)", AgentGit.Host(picked, "log", "-1", "--format=%an", "members/acme/" + name));
             }
             Assert.Contains("return {\"ok\": True}", AgentGit.Host(picked, "show", "members/acme/ada:app/health.py"));
             Assert.Contains("def test_health", AgentGit.Host(picked, "show", "members/acme/ben:tests/test_health.py"));

@@ -277,16 +277,21 @@ public class GuardrailServiceTests
             Assert.True(report["passed"]!.GetValue<bool>(), report.ToJsonString());
             Assert.True(File.Exists(Path.Combine(kit.Data, "guardrail", "payments__ada.json")));
             // The running core's own launcher ran it (LaunchWiring). Host sign-in: the kit's fake home holds a dummy sign-in for
-            // the CLI, so the member counts as signed in on this computer, and the check proves that dummy file is
-            // readable (opened, never read) and not writable, while the rest of its config folder stays blocked.
+            // the CLI, so the member counts as signed in on this computer. The gateway holds that sign-in, so the sandbox is
+            // granted none of it: the check emits no signin.* probe (those are only for a granted sign-in file), and the
+            // home probes it always emits for the sign-in files are BLOCKED (B038).
             Assert.Equal("yawble-ffi", report["run"]!["backend"]!.GetValue<string>());
             Assert.True(report["run"]!["credentialConfigured"]!.GetValue<bool>());
             var results = report["results"]!.AsArray();
-            string VerdictOf(string id) => results.Single(r => r!["id"]!.GetValue<string>() == id)!["verdict"]!.GetValue<string>();
-            Assert.Equal("ALLOWED", VerdictOf("signin.read:0"));
-            Assert.Equal("BLOCKED", VerdictOf("signin.write:0"));
-            Assert.Equal("BLOCKED", VerdictOf("signin.folder-write:0"));
-            Assert.Equal("BLOCKED", VerdictOf("cli.config-canary:0"));
+            string Id(JsonNode? r) => r!["id"]!.GetValue<string>();
+            string VerdictOf(string id) => results.Single(r => Id(r) == id)!["verdict"]!.GetValue<string>();
+            Assert.DoesNotContain(results, r => Id(r).StartsWith("signin.", StringComparison.Ordinal));
+            Assert.Equal("BLOCKED", VerdictOf("home.claude-credentials"));
+            Assert.Equal("BLOCKED", VerdictOf("home.claude-json"));
+            Assert.Equal("BLOCKED", VerdictOf("home.grok-auth"));
+            // The CLI's config folder probes depend on what the host's CLI detector reports; whichever are emitted stay closed.
+            Assert.All(results.Where(r => Id(r).StartsWith("cli.config-canary:", StringComparison.Ordinal) || Id(r).StartsWith("cli.config-file:", StringComparison.Ordinal)),
+                r => Assert.Equal("BLOCKED", r!["verdict"]!.GetValue<string>()));
         }
         finally
         {
