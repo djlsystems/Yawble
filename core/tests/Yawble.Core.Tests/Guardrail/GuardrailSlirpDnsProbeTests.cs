@@ -106,6 +106,12 @@ public class GuardrailSlirpDnsProbeTests
             .ToList();
         var unix = Ids(seen, "unix").ToList();
         // The fake answers every attempt the way the plan expects on this OS, so the check passes wherever it runs.
+        // Card 209: on Fedora the older fake (a09113a) failed Passed without naming a probe. It answered only the wire
+        // plan's lists, and those blocked/allowed without regard to the plan. So every attempt the probe makes on its
+        // own (gateway.*, proc.host-*, credstore.dbus-*, display.*, secrets.scan) came back MISSING. The positive
+        // controls (cli.read-program, cli.list-install:*) came back BLOCKED, and write.cli-program came back ALLOWED.
+        // Only on Linux did that test reach its Passed assert. The ids come first, so the next failure names the probe.
+        Assert.Equal(Array.Empty<string>(), report.Results.Where(r => !r.AsExpected).Select(r => $"{r.Id}={r.Verdict}").ToArray());
         Assert.True(report.Passed, "not as expected:\n" + NotAsExpected(report));
         if (!OperatingSystem.IsLinux())
         {
