@@ -301,6 +301,14 @@ a member's card opens it at that member's activity.
   forces, rebases or stashes.
 - A banner shows when branches could not be brought up to date on their own.
 - Each member's working copy has a read-only code browser.
+  - It never follows a link and never shows `.git` or likely secrets.
+  - After a file or folder is opened, it checks again what was actually opened, on Windows, macOS and Linux (x64 and
+    arm64). The real path must still be inside the working copy, not in `.git` and not hidden. A file must have only
+    one name, so a hard link is never read. A folder must be the same folder before and after it is listed.
+    Otherwise it is not shown.
+  - Windows does these checks with `GetFinalPathNameByHandleW` and `GetFileInformationByHandle`.
+  - macOS and Linux open with `O_NOFOLLOW` and check with `fstat` (link count, device and inode). The real path comes
+    from `F_GETPATH` on macOS and from `/proc/self/fd` on Linux.
 
 ## Integrations
 
