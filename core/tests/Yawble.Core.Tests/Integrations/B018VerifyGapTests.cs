@@ -209,16 +209,61 @@ public sealed class B018VerifyGapTests : IDisposable
     }
 
     /// <summary>
-    /// B018 finding F1 (pinned as it is today): the only notice the core sends a member itself, the Deny notice, is not
-    /// merged. Deny on a grouped item of three hosts tells the member three times. Flip to Assert.Single when merged.
+    /// B018 finding F1, fixed by B039 (card 227): Deny on a grouped item of three hosts tells the member once, and that
+    /// one message names every host. Each host is still denied with its own 24-hour quiet, and nothing is written.
     /// </summary>
     [Fact]
-    public async Task Finding_DenyOnAGroupOfThree_TellsTheMemberThreeTimes_NotMerged()
+    public async Task DenyOnAGroupOfThree_TellsTheMemberOnce_ListingEveryHost()
     {
         var ids = new[] { Ask("Alpha/Priya", "crl3.digicert.com"), Ask("Alpha/Priya", "ocsp.digicert.com"), Ask("Alpha/Priya", "crl4.digicert.com") };
-        await _asks.AnswerGroupAsync(ids[0], ids, NetworkAskChoices.Deny, null, false, Ct);
+        var r = await _asks.AnswerGroupAsync(ids[0], ids, NetworkAskChoices.Deny, null, false, Ct);
         _time.Advance(TimeSpan.FromSeconds(10));
-        Assert.Equal(3, _told.Count(t => t is { Team: "Alpha", Member: "Priya" }));
+
+        var told = Assert.Single(_told);
+        Assert.Equal(("Alpha", "Priya"), (told.Team, told.Member));
+        Assert.Contains("denied network access to crl3.digicert.com, ocsp.digicert.com and crl4.digicert.com", told.Text);
+        Assert.Contains("hand back blocked on crl3.digicert.com, ocsp.digicert.com and crl4.digicert.com", told.Text);
+        Assert.Equal(["Alpha/Priya"], r["told"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Equal(ids.Order(), r["closed"]!.AsArray().Select(n => n!.GetValue<long>()));
+        Assert.Null(r["allowed"]);
+        Assert.Empty(_asks.Asks());
+        Assert.True(NothingWritten());
+        // Every host is quiet for 24 hours: asking again is refused at once, told nothing more.
+        foreach (var host in new[] { "crl3.digicert.com", "ocsp.digicert.com", "crl4.digicert.com" })
+            Assert.Equal(HostAskOutcome.Denied, _asks.Refused("Alpha/Priya", host, "CONNECT", null));
+        Assert.Single(_told);
+    }
+
+    [Fact]
+    public async Task TwoMembersDenyingTheirGroups_AreEachToldOnce_WithOnlyTheirOwnHosts()
+    {
+        var priya = new[] { Ask("Alpha/Priya", "crl3.digicert.com"), Ask("Alpha/Priya", "ocsp.digicert.com") };
+        var bo = new[] { Ask("Alpha/Bo", "crl4.digicert.com"), Ask("Alpha/Bo", "cacerts.digicert.com"), Ask("Alpha/Bo", "ocsp.digicert.com") };
+
+        await _asks.AnswerGroupAsync(priya[0], priya, NetworkAskChoices.Deny, "not needed", false, Ct);
+        await _asks.AnswerGroupAsync(bo[0], bo, NetworkAskChoices.Deny, null, false, Ct);
+        _time.Advance(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(2, _told.Count);
+        var p = Assert.Single(_told, t => t.Member == "Priya").Text;
+        var b = Assert.Single(_told, t => t.Member == "Bo").Text;
+        Assert.Contains($"denied network access to crl3.digicert.com and ocsp.digicert.com (network requests {priya[0]} and {priya[1]}): not needed.", p);
+        Assert.DoesNotContain("crl4", p);
+        Assert.Contains("denied network access to crl4.digicert.com, cacerts.digicert.com and ocsp.digicert.com", b);
+        Assert.DoesNotContain("crl3", b);
+        Assert.DoesNotContain("not needed", b);
+        Assert.Empty(_asks.Asks());
+        Assert.True(NothingWritten());
+    }
+
+    [Fact]
+    public async Task ASingleDeny_StillTellsTheMemberOnce_AsBefore()
+    {
+        var id = Ask("Alpha/Priya", "api.nuget.org");
+        await _asks.AnswerGroupAsync(id, [id], NetworkAskChoices.Deny, null, false, Ct);
+        var told = Assert.Single(_told);
+        Assert.Equal($"The person denied network access to api.nuget.org (network request {id}). It is not asked again for you for 24 hours. " +
+                     "Do not try another site or a way around it: carry on without it, or hand back blocked on api.nuget.org.", told.Text);
     }
 
     // ------------------------------------------------------------------ policy.checkHosts

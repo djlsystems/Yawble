@@ -347,7 +347,8 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     /// The person's answer to a grouped item in Needs you: <paramref name="id"/> and the other asks in
     /// <paramref name="ids"/>, all waiting for one member with one registrable domain. Each is answered in turn with the
     /// same choice (an ask an earlier answer already covered is skipped), so Allow answers every listed host; the notices
-    /// merge in the Manager's notice window. With no other ids it is <see cref="AnswerAsync"/>.
+    /// merge in the Manager's notice window. Deny denies every listed host and tells the member once, listing them all.
+    /// With no other ids it is <see cref="AnswerAsync"/>.
     /// </summary>
     public async Task<JsonObject> AnswerGroupAsync(long id, IReadOnlyList<long> ids, string choice, string? note, bool domain, CancellationToken ct)
     {
@@ -363,17 +364,34 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                 throw new ArgumentException($"network request {other} is not one of {first.MemberName}'s requests for {key ?? first.Host}; answer it on its own");
         }
 
-        var result = await AnswerAsync(id, choice, note, ct, domain);
+        // A Deny tells each member once, after every ask is answered, listing all of its denied hosts (B039); an Allow's
+        // notices already merge in the Manager's notice window.
+        var deny = choice == NetworkAskChoices.Deny;
+        var denied = new List<NetworkAskRow>();
+        var result = await AnswerAsync(id, choice, note, ct, domain, tellDeny: !deny);
+        if (deny) denied.Add(first);
         var closed = result["closed"]!.AsArray().Select(n => n!.GetValue<long>()).ToHashSet();
         var told = result["told"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
         var allowed = new List<string> { result["allowed"]?.GetValue<string>() ?? first.Host };
         foreach (var other in rest)
         {
-            if (closed.Contains(other) || Asks().All(a => a.Id != other)) continue;
-            var r = await AnswerAsync(other, choice, note, ct, domain);
+            if (closed.Contains(other) || Asks().FirstOrDefault(a => a.Id == other) is not { } row) continue;
+            var r = await AnswerAsync(other, choice, note, ct, domain, tellDeny: !deny);
+            if (deny) denied.Add(row);
             foreach (var c in r["closed"]!.AsArray()) closed.Add(c!.GetValue<long>());
             told.AddRange(r["told"]!.AsArray().Select(n => n!.GetValue<string>()));
             if (r["allowed"]?.GetValue<string>() is { } a) allowed.Add(a);
+        }
+        if (deny)
+        {
+            var cleanNote = CleanNote(note);
+            foreach (var member in denied.GroupBy(a => (a.TeamId, Key: a.MemberId?.ToString() ?? a.Member)))
+            {
+                var asks = member.ToList();
+                var one = asks[0];
+                var causation = asks.Select(a => a.CausationSeq).FirstOrDefault(s => s is not null);
+                if (await TellAsync(one.Team, one.MemberName, DeniedText(asks, cleanNote), causation, ct)) told.Add(one.Member);
+            }
         }
         result["closed"] = new JsonArray(closed.Order().Select(c => (JsonNode?)c).ToArray());
         result["told"] = new JsonArray(told.Distinct().Select(t => (JsonNode?)t).ToArray());
@@ -389,7 +407,11 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     /// Allow the ask's domain ("*.digicert.com", <see cref="DomainPattern"/>) instead of the host alone; it closes every
     /// waiting ask it covers at the chosen scope. Refused when no domain allow may be offered for the host. Ignored for Deny.
     /// </param>
-    public async Task<JsonObject> AnswerAsync(long id, string choice, string? note, CancellationToken ct, bool domain = false)
+    public Task<JsonObject> AnswerAsync(long id, string choice, string? note, CancellationToken ct, bool domain = false) =>
+        AnswerAsync(id, choice, note, ct, domain, tellDeny: true);
+
+    /// <param name="tellDeny">False for a grouped Deny: <see cref="AnswerGroupAsync"/> tells the member once for the group.</param>
+    private async Task<JsonObject> AnswerAsync(long id, string choice, string? note, CancellationToken ct, bool domain, bool tellDeny)
     {
         var who = Provenance.Actor.Current ?? Provenance.Actor.Window;
         // Never without the person's click: an agent, the Concierge, a trigger or a paired program cannot answer.
@@ -400,7 +422,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
             if (!_answering.Add(id)) throw new ArgumentException($"network request {id} is being answered already");
         try
         {
-            return await AnswerClaimedAsync(id, choice, note, who, domain, ct);
+            return await AnswerClaimedAsync(id, choice, note, who, domain, tellDeny, ct);
         }
         finally
         {
@@ -408,7 +430,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         }
     }
 
-    private async Task<JsonObject> AnswerClaimedAsync(long id, string choice, string? note, Provenance.Actor who, bool domain, CancellationToken ct)
+    private async Task<JsonObject> AnswerClaimedAsync(long id, string choice, string? note, Provenance.Actor who, bool domain, bool tellDeny, CancellationToken ct)
     {
         var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"network request {id} is not waiting");
         if (NetworkAskFilter.Problem(ask.Host) is { } problem) throw new ArgumentException(problem);
@@ -472,7 +494,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                 throw new PolicyException([$"{target} is still not allowed for {string.Join(", ", missed)} after the change; the request stays waiting"]);
         }
 
-        var cleanNote = string.IsNullOrWhiteSpace(note) ? null : Clip(note.Trim(), 500);
+        var cleanNote = CleanNote(note);
         List<NetworkAskRow> closed;
         lock (_lock)
         {
@@ -505,11 +527,9 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                     told.Add($"{first.Team}/{manager}");
             }
         }
-        else
+        else if (tellDeny)
         {
-            var text = $"The person denied network access to {ask.Host} (network request {id}){(cleanNote is null ? "" : $": {cleanNote}")}. " +
-                       $"It is not asked again for you for 24 hours. Do not try another site or a way around it: carry on without it, or hand back blocked on {ask.Host}.";
-            if (await TellAsync(ask.Team, ask.MemberName, text, ask.CausationSeq, ct)) told.Add(ask.Member);
+            if (await TellAsync(ask.Team, ask.MemberName, DeniedText([ask], cleanNote), ask.CausationSeq, ct)) told.Add(ask.Member);
         }
         var answer = new JsonObject
         {
@@ -519,6 +539,23 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         // What the policy now lists: the host, or the domain allow ("*.digicert.com").
         if (allow) answer["allowed"] = target;
         return answer;
+    }
+
+    private static string? CleanNote(string? note) => string.IsNullOrWhiteSpace(note) ? null : Clip(note.Trim(), 500);
+
+    /// <summary>
+    /// What a member is told about a Deny: one ask ("The person denied network access to api.nuget.org (network request
+    /// 7). It is not asked again ...") or a grouped item's asks, every host in one message (B039).
+    /// </summary>
+    internal static string DeniedText(IReadOnlyList<NetworkAskRow> asks, string? note)
+    {
+        var hosts = JoinAnd(asks.Select(a => a.Host).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+        var reason = note is null ? "" : $": {note}";
+        if (asks.Count == 1)
+            return $"The person denied network access to {hosts} (network request {asks[0].Id}){reason}. " +
+                   $"It is not asked again for you for 24 hours. Do not try another site or a way around it: carry on without it, or hand back blocked on {hosts}.";
+        return $"The person denied network access to {hosts} (network requests {JoinAnd(asks.Select(a => a.Id.ToString()).ToList())}){reason}. " +
+               $"They are not asked again for you for 24 hours. Do not try another site or a way around them: carry on without them, or hand back blocked on {hosts}.";
     }
 
     // ------------------------------------------------------------------ "now allowed" notices
