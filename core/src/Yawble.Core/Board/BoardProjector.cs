@@ -83,7 +83,7 @@ public sealed class BoardProjector(BoardStore store)
                 Report(card, sender, "failed", Text(p, "reason"), "failed", giveUp: true);
                 break;
             case MessageTypes.Completed:
-                Report(card, sender, "completed", null, "run ended", giveUp: false);
+                Report(card, sender, "completed", TesterRule.RunEndedText(p), "run ended", giveUp: false);
                 break;
             case MessageTypes.Handback:
                 Report(card, sender, "handback", Text(p, "delivered"), "handed back", giveUp: false);
