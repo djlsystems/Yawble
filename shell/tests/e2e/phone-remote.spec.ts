@@ -319,6 +319,82 @@ for (const size of PHONES) {
       await check(page, 'visitor-board', size);
     });
 
+    // F7 re-verify (card 177): the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
+    test('Visitor (read-only) F7: the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
+      const composerBar = (page: Page) => page.locator('[data-test=composer] .bar').evaluate((bar) => {
+        const r = (sel: string) => { const e = bar.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
+        const bb = bar.getBoundingClientRect();
+        return { barRight: bb.right - parseFloat(getComputedStyle(bar).paddingRight), padR: getComputedStyle(bar).paddingRight, team: r('[data-test=composer-team]'), agent: r('[data-test=composer-agent]'), attach: r('[data-test=composer-attach]'), send: r('[data-test=composer-send]'), sw: document.documentElement.scrollWidth, iw: innerWidth };
+      });
+      const full = await open(browser, size, { asks: false });
+      const f = await composerBar(full.page);
+      await full.ctx.close();
+      const { page, errors } = await open(browser, size, { access: 'read', asks: false });
+      await expect(page.locator('[data-test=remote-access-chip]')).toBeVisible();
+      const v = await composerBar(page);
+      results.push({ screen: 'f7-composer', size: tag(size), audit: { full: f, visitor: v } as unknown as Audit });
+      await page.screenshot({ path: path.join(SHOTS, `reverify2-visitor-${tag(size)}.png`) });
+      expect.soft(Math.round(v.team!.w), 'Visitor team picker width = full access').toBe(Math.round(f.team!.w));
+      expect.soft(Math.round(v.agent!.w), 'Visitor agent picker width = full access').toBe(Math.round(f.agent!.w));
+      expect.soft(v.team!.w, 'team picker >= 44').toBeGreaterThanOrEqual(44);
+      expect.soft(v.agent!.w, 'agent picker >= 44').toBeGreaterThanOrEqual(44);
+      expect.soft(Math.round(v.attach!.w) + 'x' + Math.round(v.attach!.h), 'Attach 44x44').toBe('44x44');
+      expect.soft(Math.abs(v.send!.right - v.barRight), `Send at the bar's right end (send ${v.send!.right}, bar ${v.barRight})`).toBeLessThanOrEqual(2);
+      expect.soft(v.padR, "the Composer's bar has no 150 px padding").not.toBe(`150px`);
+      expect.soft(v.sw, 'no sideways scroll').toBeLessThanOrEqual(v.iw);
+      await check(page, 'reverify2-visitor-concierge', size);
+      // The chip clears the top bar's title and menu button.
+      const overlap = await page.evaluate(() => {
+        const chip = document.querySelector('[data-test=remote-access-chip]')!.getBoundingClientRect();
+        const hit = (sel: string) => { const e = document.querySelector(sel); if (!e) return 'missing'; const b = e.getBoundingClientRect();
+          return !(b.right <= chip.left || chip.right <= b.left || b.bottom <= chip.top || chip.bottom <= b.top) ? `overlaps (${Math.round(b.left)}-${Math.round(b.right)} vs chip ${Math.round(chip.left)}-${Math.round(chip.right)})` : 'clear'; };
+        const top = document.querySelector('.app.phone > .main > header.bar')!;
+        return { title: hit('[data-test=phone-title]'), menu: hit('[data-test=drawer-toggle]'), topPad: getComputedStyle(top).paddingRight };
+      });
+      results.push({ screen: 'f7-chip', size: tag(size), audit: overlap as unknown as Audit });
+      expect.soft(overlap.title, 'chip vs title').toBe('clear');
+      expect.soft(overlap.menu, 'chip vs menu button').toBe('clear');
+      expect.soft(parseFloat(overlap.topPad), "the shell's top bar keeps its 150 px room for the chip").toBeGreaterThanOrEqual(150);
+      // Documents and Logs bars for a Visitor: no 150 px padding, controls inside the bar and the screen.
+      const barInfo = (sel: string) => page.locator(sel).first().evaluate((bar) => {
+        const bb = bar.getBoundingClientRect();
+        const kids = [...bar.querySelectorAll<HTMLElement>('button, a, input, select')].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect());
+        return { padR: getComputedStyle(bar).paddingRight, w: bb.width, sw: bar.scrollWidth, cw: bar.clientWidth, maxRight: Math.max(0, ...kids.map((k) => k.right)), barRight: bb.right, n: kids.length };
+      });
+      await nav(page, 'nav-documents');
+      await expect(page.locator('[data-test=documents-view]')).toBeVisible();
+      await page.waitForTimeout(500);
+      await page.locator('[data-test=documents-view]').getByText('payments', { exact: true }).first().click();
+      await page.waitForTimeout(500);
+      const d = await barInfo('[data-test=docs-browser] > .bar');
+      results.push({ screen: 'f7-documents-bar', size: tag(size), audit: d as unknown as Audit });
+      expect.soft(parseFloat(d.padR), 'Documents bar padding-right under 150').toBeLessThan(150);
+      expect.soft(d.sw, 'Documents bar does not overflow').toBeLessThanOrEqual(d.cw + 1);
+      expect.soft(d.maxRight, 'Documents bar controls inside the bar').toBeLessThanOrEqual(d.barRight + 1);
+      await check(page, 'reverify2-visitor-documents', size);
+      await nav(page, 'nav-logs');
+      await expect(page.locator('.modal, [role=dialog]').first()).toBeVisible();
+      await page.waitForTimeout(600);
+      const l = await barInfo('.modal .bar, [role=dialog] .bar');
+      results.push({ screen: 'f7-logs-bar', size: tag(size), audit: l as unknown as Audit });
+      expect.soft(parseFloat(l.padR), 'Logs bar padding-right under 150').toBeLessThan(150);
+      expect.soft(l.sw, 'Logs bar does not overflow').toBeLessThanOrEqual(l.cw + 1);
+      expect.soft(l.maxRight, 'Logs bar controls inside the bar').toBeLessThanOrEqual(l.barRight + 1);
+      await check(page, 'reverify2-visitor-logs', size);
+      // A dialog sheet's Close (top right) must not be drawn under the chip (the chip lets taps through, but hides the ✕).
+      const close = await page.evaluate(() => {
+        const c = document.querySelector('[data-test=modal-close]')!.getBoundingClientRect();
+        const chip = document.querySelector('[data-test=remote-access-chip]')!.getBoundingClientRect();
+        const ow = Math.max(0, Math.min(c.right, chip.right) - Math.max(c.left, chip.left)), oh = Math.max(0, Math.min(c.bottom, chip.bottom) - Math.max(c.top, chip.top));
+        return { close: [Math.round(c.left), Math.round(c.top), Math.round(c.width), Math.round(c.height)], chip: [Math.round(chip.left), Math.round(chip.top), Math.round(chip.width), Math.round(chip.height)], coveredPct: Math.round((100 * ow * oh) / (c.width * c.height)) };
+      });
+      results.push({ screen: 'f8-logs-close', size: tag(size), audit: close as unknown as Audit });
+      expect.soft(close.coveredPct, `Logs sheet's Close under the Visitor chip (close ${close.close}, chip ${close.chip})`).toBe(0);
+      await page.locator('[data-test=modal-close]').click();
+      await expect(page.locator('[data-test=modal-close]')).toHaveCount(0);
+      expect(errors).toEqual([]);
+    });
+
     test('dark theme: the shell is dark, the Monitor is dark', async ({ browser }) => {
       const { page } = await open(browser, size, { theme: 'dark', asks: false });
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
