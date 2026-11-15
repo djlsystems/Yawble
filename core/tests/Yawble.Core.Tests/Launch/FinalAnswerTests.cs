@@ -129,7 +129,10 @@ public class FinalAnswerTests
         await kit.Bus.PersonTellAsync("alpha", member, "do the thing", ct: Ct);
         var outcome = await kit.OutcomeAsync(member);
         Assert.Equal(MessageTypes.Completed, outcome.Type);
-        Assert.Equal(1, kit.Backend.Spawned.Single().KillCalls);
+        // The member's own run is the first spawn; its Completed message wakes the Manager, whose run may already be a second one.
+        FakeProcess memberRun;
+        lock (kit.Backend.Spawned) memberRun = kit.Backend.Spawned[0];
+        Assert.Equal(1, memberRun.KillCalls);
     }
 
     [Fact]
