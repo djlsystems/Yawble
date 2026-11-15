@@ -4,6 +4,9 @@ import { computed } from 'vue';
 import type { ConciergeToolUse } from '../../../shared/api';
 import { copyCodeFrom, renderMarkdown } from '../markdown';
 import Icon from './Icon.vue';
+import { usePhone } from '../phone';
+// A phone (B037): wider bubbles, and a wide table or code block scrolls inside the message instead of the page.
+const phone = usePhone();
 
 // One message of a Concierge chat: the person's on the right, the Concierge's as rendered markdown with the tools it
 // used (what it looked at and did) and, for an answer that did not finish, why.
@@ -38,7 +41,7 @@ const time = computed(() => {
 </script>
 
 <template>
-  <div class="msg" :class="role" data-test="chat-message" :data-role="role">
+  <div class="msg" :class="[role, { phone }]" data-test="chat-message" :data-role="role">
     <div v-if="role === 'user'" class="bubble">{{ text }}</div>
     <div v-else-if="role === 'update'" class="ucard" :class="kind ? `k-${props.kind}` : ''" data-test="chat-update" :data-kind="props.kind">
       <span class="u-icon"><Icon :name="kind.icon" :size="14" /></span>
@@ -108,4 +111,9 @@ const time = computed(() => {
 .thinking span:nth-child(2) { animation-delay: .15s; }
 .thinking span:nth-child(3) { animation-delay: .3s; }
 @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+.msg.phone { margin-bottom: 16px; min-width: 0; }
+.phone .bubble { max-width: 88%; overflow-wrap: anywhere; }
+.phone .md :deep(table) { display: block; max-width: 100%; overflow-x: auto; }
+.phone .md :deep(pre) { max-width: 100%; }
+.phone .ucard { padding: 8px 10px; }
 </style>

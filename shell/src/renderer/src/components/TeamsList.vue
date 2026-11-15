@@ -10,6 +10,7 @@ import Icon from './Icon.vue';
 import TeamStateChip from './TeamStateChip.vue';
 import TeamWorkflows from './TeamWorkflows.vue';
 import TileGrip from './TileGrip.vue';
+import { usePhone } from '../phone';
 
 // The Teams page: one grid of equally sized tiles (every team, then "New team"), resized together by the grip on any
 // of them (teamTileSize.ts). A tile is the header (name, state, counts), a row of icon buttons, then the recent
@@ -67,10 +68,14 @@ onBeforeUnmount(() => { observer?.disconnect(); availableWidth.value = Infinity;
 watch([renderedWidth, () => props.teams.map((t) => `${t.id}:${t.paused}`).join(), showArchived, cardBusy, () => props.archived.length], () => void fit());
 const gridStyle = computed(() => ({ '--tile-w': `${renderedWidth.value}px`, '--tile-h': `${tileSize.value.h}px` }));
 const lab = (method: string, id: number, idle: string, busy: string) => (cardDoing(method, id) ? busy : idle);
+// A phone (B037): one tile per row, the full width, as tall as its content (the @media rules); no size grips (a drag handle in a 14 px
+// gap is no tap target, and one column has nothing to size). Labels and icons as long as the row fits, as on a desktop.
+const phone = usePhone();
+watch(phone, () => void fit());
 </script>
 
 <template>
-  <div ref="wrap" class="teams-list">
+  <div ref="wrap" class="teams-list" :class="{ phone }">
     <h2>Teams</h2>
     <p class="muted">Each team has a Manager that plans the work and members that do it, each agent in its own sandbox.</p>
     <p v-if="failure" class="error small" data-test="teams-action-error">{{ failure }}</p>
@@ -97,16 +102,16 @@ const lab = (method: string, id: number, idle: string, busy: string) => (cardDoi
           </template>
         </div>
         <TeamWorkflows :team-id="t.id" :api="api" :poll-ms="pollMs" @open="emit('open', t.id, 'workflows', $event)" />
-        <TileGrip />
+        <TileGrip v-if="!phone" />
       </div>
-      <TileGrip axis="w" /><TileGrip axis="h" />
+      <template v-if="!phone"><TileGrip axis="w" /><TileGrip axis="h" /></template>
       </div>
       <div class="tile-cell">
       <div class="team-card add-wrap" data-test="team-card-new-tile">
         <button class="add" data-test="team-card-new" @click="emit('new-team')"><Icon name="plus" />New team</button>
-        <TileGrip />
+        <TileGrip v-if="!phone" />
       </div>
-      <TileGrip axis="w" /><TileGrip axis="h" />
+      <template v-if="!phone"><TileGrip axis="w" /><TileGrip axis="h" /></template>
       </div>
     </div>
     <template v-if="archived.length">
@@ -129,9 +134,9 @@ const lab = (method: string, id: number, idle: string, busy: string) => (cardDoi
               <button class="tile-btn" data-test="card-delete-no" :disabled="cardBusy" @click.stop="confirmDelete = null">Cancel</button>
             </template>
           </div>
-          <TileGrip />
+          <TileGrip v-if="!phone" />
         </div>
-        <TileGrip axis="w" /><TileGrip axis="h" />
+        <template v-if="!phone"><TileGrip axis="w" /><TileGrip axis="h" /></template>
         </div>
       </div>
     </template>
@@ -183,4 +188,21 @@ const lab = (method: string, id: number, idle: string, busy: string) => (cardDoi
 .team-card.add-wrap { border-style: dashed; padding: 0; }
 .add-wrap .add { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; background: transparent; color: var(--muted); }
 .small { font-size: 12.5px; }
+/* A phone, set by usePhone()'s class: no size grips (in the template), tap-sized buttons; the column and the card height are the @media rules below. */
+.phone .team-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 12px 0; }
+.phone .tile-btn { height: 44px; min-width: 44px; padding: 0 10px; }
+.phone .icons-only .tile-btn:not(.danger) { width: 44px; }
+.phone .link { min-height: 44px; min-width: 0; }
+/* A phone (B037): one column of team cards as tall as their content (the shared tile size and its grips do not
+   apply), the buttons 44 px. */
+@media (max-width: 759.98px) {
+  .team-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 12px; }
+  .tile-cell > .team-card { height: auto; }
+  .team-card { max-height: 22rem; }
+  .team-card.add-wrap { min-height: 64px; }
+  .card-actions { flex-wrap: wrap; }
+  .tile-btn { height: 44px; padding: 0 12px; }
+  .icons-only .tile-btn:not(.danger) { width: 44px; }
+  .link { min-height: 44px; }
+}
 </style>

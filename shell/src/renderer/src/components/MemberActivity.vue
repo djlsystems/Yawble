@@ -33,4 +33,9 @@ li + li { border-top: 1px solid var(--line-soft); }
 .text { color: var(--ink-soft); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .dim { color: var(--muted); }
 .none { border-left-color: transparent; }
+/* A phone (B037): under its member's card, full width; a line's text may run to three lines. */
+@media (max-width: 759.98px) {
+  .activity { min-height: 8rem; }
+  .text { -webkit-line-clamp: 3; }
+}
 </style>

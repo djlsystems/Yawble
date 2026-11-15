@@ -130,4 +130,12 @@ const height = outputHeight;
 .is-decision { --card-state: var(--state-decision); border-left-color: var(--state-decision); }
 .is-blocked { --card-state: var(--state-blocked); border-left-color: var(--state-blocked); }
 .is-failed { --card-state: var(--state-failed); border-left-color: var(--state-failed); }
+/* A phone (B037): the actions get a row of their own with 44 px buttons; the state and output use the full width. */
+@media (max-width: 759.98px) {
+  .spacer { display: none; }
+  .actions { flex: 1 1 100%; flex-wrap: wrap; gap: 6px; }
+  .actions .icon { min-width: 44px; min-height: 44px; font-size: 16px; }
+  .state { padding-left: 0; }
+  .output { margin-left: 0; }
+}
 </style>

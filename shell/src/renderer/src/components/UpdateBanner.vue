@@ -137,4 +137,10 @@ defineExpose({ checkNow, refresh });
 .update-banner .confirm, .update-banner .error { flex-basis: 100%; }
 .update-banner .error { color: var(--bad); }
 .told { padding: 6px 18px; margin: 0; }
+/* A phone (B037): the text over the buttons; tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .update-banner { padding: 8px 12px; }
+  .update-banner .text { flex-basis: 100%; }
+  .update-banner button, .update-banner a, .told button { min-height: 44px; display: inline-flex; align-items: center; }
+}
 </style>

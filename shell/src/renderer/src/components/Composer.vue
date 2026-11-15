@@ -5,6 +5,7 @@ import type { TeamSummary } from '../../../shared/api';
 import Icon from './Icon.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useImageAttachments, type AttachedImage } from '../imageAttachments';
+import { usePhone } from '../phone';
 
 // The Concierge's message box: grows with the text, Enter sends (Shift+Enter: a new line). Below the text: the team in
 // focus and the agent that answers; while an answer is running, Send becomes Stop.
@@ -29,6 +30,10 @@ const text = ref('');
 const box = ref<HTMLTextAreaElement | null>(null);
 const picker = ref<HTMLInputElement | null>(null);
 const attach = useImageAttachments();
+// A phone (B037): the box takes the width its page gives it (ConciergeView), 16 px text (a phone browser zooms into a
+// smaller field), tap-sized pickers and buttons; Enter makes a new line there (the keyboard's own key), Send sends.
+// No autofocus on a phone: it would bring the keyboard up over a screen the person has only just opened.
+const phone = usePhone();
 const canSend = computed(() => (text.value.trim().length > 0 || attach.images.value.length > 0) && !props.running);
 
 function grow() {
@@ -47,7 +52,7 @@ function send() {
 }
 
 function key(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !phone.value) {
     e.preventDefault();
     send();
   }
@@ -57,11 +62,11 @@ function focus() { box.value?.focus(); }
 defineExpose({ focus, set: (t: string) => { text.value = t; void nextTick(() => { grow(); focus(); }); } });
 
 watch(text, () => void nextTick(grow));
-onMounted(() => { if (props.autofocus) focus(); });
+onMounted(() => { if (props.autofocus && !phone.value) focus(); });
 </script>
 
 <template>
-  <div class="composer" data-test="composer">
+  <div class="composer" :class="{ phone }" data-test="composer">
     <div v-if="attach.images.value.length" class="thumbs" data-test="composer-images">
       <span v-for="(im, i) in attach.images.value" :key="i" class="thumb">
         <img :src="im.url" :alt="im.name" :title="im.name" />
@@ -117,4 +122,16 @@ textarea { width: 100%; border: 0; outline: 0; resize: none; background: transpa
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
 .thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: var(--scrim); color: var(--on-scrim); font-size: 10px; line-height: 18px; }
 .problem { color: var(--bad); font-size: 12px; margin: 2px 0; }
+/* A phone: full width, 16 px text, the box no taller than a third of the screen (the keyboard takes much of it). */
+.composer.phone { width: 100%; border-radius: 18px; padding: 8px 8px 6px 12px; }
+/* The box is a 44 px tap target even with one row (grow() sets its height to scrollHeight: border-box, padding included). */
+.phone textarea { font-size: 16px; max-height: 33dvh; min-height: 44px; box-sizing: border-box; padding: 10px 0; }
+.phone .bar { gap: 4px; }
+.phone .pick { min-height: 44px; padding: 0 6px; min-width: 0; }
+/* The Attach button is an icon only: a 44 x 44 square that the bar never squeezes (the pickers' min-width: 0 is for the selects). */
+.phone .pick.attach { min-width: 44px; width: 44px; height: 44px; padding: 0; flex: none; justify-content: center; }
+.phone .pick select { font-size: 14px; min-height: 0; min-width: 0; max-width: 32vw; text-overflow: ellipsis; }
+.phone .round { width: 44px; height: 44px; flex: none; }
+.phone .thumb { width: 88px; height: 88px; }
+.phone .thumb .x { top: 0; right: 0; width: 44px; height: 44px; border-radius: 0 0 0 12px; font-size: 13px; line-height: 44px; }
 </style>

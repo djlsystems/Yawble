@@ -30,6 +30,7 @@ import { renderMarkdown } from '../markdown';
 import { asksForApproval, questionMarkdown, questionOptions } from '../questionFormat';
 import { useImageAttachments } from '../imageAttachments';
 import { showMemberTerminal } from '../terminalPane';
+import { useNarrow } from '../narrowScreen';
 
 // A team's agent list: the Tell Manager box, open needs_decision questions, the cards, and Add agent.
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number }>();
@@ -40,6 +41,8 @@ const logsFor = ref<string | null>(null);
 const agentOptions = useAgentOptions(api);
 /** Each member's activity, beside its card: the Monitor's lines for that member. */
 const activity = useTeamActivity(api, () => props.team.name, () => props.pollMs);
+/** A phone (B037): the members stacked, each one's Activity under its card, no resize handles (nothing to drag). */
+const phone = useNarrow();
 
 const cards = ref<Card[]>([]);
 const decisions = ref<Decision[]>([]);
@@ -173,7 +176,7 @@ defineExpose({ refresh, openWorkflows });
 </script>
 
 <template>
-  <section class="team">
+  <section class="team" :class="{ phone }">
     <header class="teamhead">
       <!-- One line: the name and three counts. The "·" separators stay in the text (what the title reads as, and what
            tests read) but are hidden: the counts show as chips. -->
@@ -281,12 +284,12 @@ defineExpose({ refresh, openWorkflows });
           @terminal="openTerminal(c)" @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
           @guardrail="emit('guardrail', c.member.id)" @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
         <!-- The bar in the gap to the left of the activity sets the width of every member's activity together. -->
-        <div class="member-side" :style="{ flexBasis: `${activityWidth}px` }">
-          <TileGrip class="activity-grip" axis="w" reverse :store="memberActivityStore" />
+        <div class="member-side" :style="phone ? undefined : { flexBasis: `${activityWidth}px` }">
+          <TileGrip v-if="!phone" class="activity-grip" axis="w" reverse :store="memberActivityStore" />
           <MemberActivity class="member-activity" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" />
         </div>
       </div>
-      <TileGrip axis="h" :store="memberCardsStore" />
+      <TileGrip v-if="!phone" axis="h" :store="memberCardsStore" />
     </div>
 
     <div class="add row">
@@ -345,4 +348,18 @@ h2 { font-size: 16px; margin: 0; }
 .add { margin-top: 14px; }
 .paused { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
 .small { font-size: 12px; }
+/* A phone (B037): one column; each member's Activity under its card; the actions, Tell and the asks wrap; tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .member-row { flex-direction: column; gap: 8px; }
+  .member-side { flex-basis: auto; height: 12rem; }
+  .member-side > .activity-grip { display: none; }
+  .team > .member-cell { margin-bottom: 16px; }
+  .actions button { flex: 1 1 auto; justify-content: center; }
+  .actions button, .row button, .row input, .row select, .paused button { min-height: 44px; box-sizing: border-box; }
+  .row { flex-wrap: wrap; }
+  .tell input.grow { flex: 1 1 100%; }
+  .add input { flex: 1 1 100%; }
+  .paused { flex-wrap: wrap; }
+  .thumb .x { width: 32px; height: 32px; line-height: 32px; font-size: 13px; }
+}
 </style>
