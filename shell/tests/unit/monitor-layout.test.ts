@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { MaxZoom, MinZoom, pinchCamera, teamAngle } from '../../src/renderer/src/monitor/scene';
+import { graphShape, MaxZoom, MinZoom, pinchCamera, teamAngle } from '../../src/renderer/src/monitor/scene';
 import {
   clampLayout, isDefaultLayout, LayoutDefaults, LayoutMax, LayoutMin, LayoutStorageKey, readLayout, writeLayout,
 } from '../../src/renderer/src/monitor/layout';
@@ -85,5 +87,23 @@ describe('a two-finger pinch on the wall (scene.ts pinchCamera)', () => {
   it('stays within the zoom limits, and a zero spread is not a division by zero', () => {
     expect(pinchCamera(start, 10_000, [400, 300], 800, 600).k).toBe(MaxZoom);
     expect(pinchCamera(start, 0, [400, 300], 800, 600).k).toBe(MinZoom);
+  });
+});
+
+describe('a poll that changes nothing does not wake the forces (scene.ts graphShape)', () => {
+  const n = (key: string, over: Partial<{ r: number; homeX: number; homeY: number }> = {}) => ({ key, r: 14, homeX: 10, homeY: -5, ...over });
+  it('is the same for the same nodes, whatever they say', () => {
+    expect(graphShape([n('a'), n('b')])).toBe(graphShape([{ ...n('a'), state: 'running' } as any, n('b')]));
+  });
+  it('changes when a node comes or goes, or its size or home moves', () => {
+    const base = graphShape([n('a'), n('b')]);
+    expect(graphShape([n('a')])).not.toBe(base);
+    expect(graphShape([n('a'), n('b'), n('c')])).not.toBe(base);
+    expect(graphShape([n('a'), n('b', { r: 17 })])).not.toBe(base);
+    expect(graphShape([n('a'), n('b', { homeX: 40 })])).not.toBe(base);
+  });
+  it('the scene returns from a rebuild early when the shape is unchanged', () => {
+    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/monitor/scene.ts'), 'utf8');
+    expect(src).toMatch(/if \(shape === this\.shape\) return;[\s\S]*this\.sim\.alpha\(Math\.max\(this\.sim\.alpha\(\), 0\.3\)\)/);
   });
 });
