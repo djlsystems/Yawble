@@ -147,5 +147,7 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
   input, select, textarea { font-size: 16px; }
   /* The read-only chip moves to the top bar's right end (the top bar keeps that room free), clear of the message box. */
   .remote-access-chip { left: auto; bottom: auto; right: calc(8px + env(safe-area-inset-right, 0px)); top: calc(15px + env(safe-area-inset-top, 0px)); }
-  :root[data-remote-access="read"] .app.phone .bar { padding-right: calc(150px + env(safe-area-inset-right, 0px)); }
+  /* Only the shell's own top bar (App.vue's main > header.bar): a bare .bar also matched the Composer's, the Documents'
+     and the Logs' bars, and squeezed the Composer's pickers for a Visitor (card 176). */
+  :root[data-remote-access="read"] .app.phone > .main > header.bar { padding-right: calc(150px + env(safe-area-inset-right, 0px)); }
 }
