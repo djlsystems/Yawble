@@ -27,7 +27,11 @@ public class TeamsUnderOneLimitTests
     {
         using var db = new TempDb();
         await using var sandboxes = new StandInSandboxes();
-        var runner = new ScriptedRunner { Default = (run, ct) => TeamScript(run, sandboxes, ct) };
+        // B038: the queue is watched by snapshots, and a queued entry can live for less than one snapshot interval (the
+        // Managers' runs end right after their tells). So each Manager holds its slot after telling until the watcher has
+        // seen agents of BOTH teams queued: the test waits for that state instead of hoping a snapshot catches it.
+        var bothTeamsSeenQueued = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new ScriptedRunner { Default = (run, ct) => TeamScript(run, sandboxes, bothTeamsSeenQueued.Task, ct) };
         var engine = new BusEngine(db.OpenStore(), runner, new BusOptions { MaxConcurrentAgents = () => 3, SafetyPoll = TimeSpan.FromMilliseconds(200) });
         try
         {
@@ -56,7 +60,11 @@ public class TeamsUnderOneLimitTests
                     Assert.Equal(Enumerable.Range(1, snap.Queue.Count), snap.Queue.Select(q => q.Position));
                     Assert.Equal(snap.Running, snap.Teams.Sum(t => t.Running));
                     Assert.Equal(snap.Queued, snap.Teams.Sum(t => t.Queued));
-                    lock (labels) labels.AddRange(snap.Queue);
+                    lock (labels)
+                    {
+                        labels.AddRange(snap.Queue);
+                        if (labels.Any(q => q.Team == "Alpha") && labels.Any(q => q.Team == "Beta")) bothTeamsSeenQueued.TrySetResult();
+                    }
                     try { await Task.Delay(10, watching.Token); } catch (OperationCanceledException) { }
                 }
             }, Ct);
@@ -119,7 +127,7 @@ public class TeamsUnderOneLimitTests
     }
 
     /// <summary>A Manager splits the task between ada and ben, then declares; members hold a stand-in sandbox.</summary>
-    private static async Task<RunResult> TeamScript(RunContext run, StandInSandboxes sandboxes, CancellationToken ct)
+    private static async Task<RunResult> TeamScript(RunContext run, StandInSandboxes sandboxes, Task bothTeamsSeenQueued, CancellationToken ct)
     {
         if (run.Member.Role == MemberRole.Manager)
         {
@@ -127,6 +135,9 @@ public class TeamsUnderOneLimitTests
             {
                 await run.TellAsync("ada", "part 1: the endpoint", ct);
                 await run.TellAsync("ben", "part 2: its test", ct);
+                // Hold the slot until both teams' agents have been seen queued (bounded: after a timeout the test's
+                // "agents of both teams waited" assertion reports it).
+                try { await bothTeamsSeenQueued.WaitAsync(TimeSpan.FromSeconds(20), ct); } catch (TimeoutException) { }
                 return RunResult.Ok;
             }
             try

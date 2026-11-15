@@ -17,6 +17,8 @@ namespace Yawble.Core.Tests.Agents;
 /// (no readable content, not writable, no variable pointing at it); a dummy file the test plants beside it in the same
 /// config folder, and the rest of the home, are not reachable; the host's sign-in file is unchanged afterwards (size and time, never content).
 /// The guardrail check under host sign-in passes against the real home. No value of a sign-in is read, copied or printed.
+/// <para>The folder probe (TheSignInFileIsHeldByTheGatewayAndNothingOfItsFolderIsReachable) tries to write and move the
+/// sign-in, so it runs the real CLI against a FAKE home with a fake sign-in, never the person's real one (B038).</para>
 /// <para>The real prompt (a model call on the person's account) runs only with YAWBLE_REAL_SIGNIN_PROMPT=1.</para>
 /// <para>Skipped when the CLI is not installed or not signed in on this host, or a proxy-mode sandbox cannot run here.</para>
 /// </summary>
@@ -86,16 +88,61 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
     public async Task TheSignInFileIsHeldByTheGatewayAndNothingOfItsFolderIsReachable(string id)
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "a POSIX-shell probe; on Windows TheGuardrailCheckPassesWithTheHostSignInGranted covers the sign-in");
-        var (cli, detector, signIn) = SignedIn(id);
+        // B038: a FAKE home with a FAKE sign-in and the host's REAL installed CLI. The probe tries to move and write the
+        // sign-in, so it must never run against the person's real ~/.claude or ~/.grok.
+        var fakeHome = Directory.CreateTempSubdirectory("yawble-signin-home-").FullName;
+        try
+        {
+            await SignInFolderProbe(id, fakeHome);
+        }
+        finally
+        {
+            Directory.Delete(fakeHome, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// The host's real CLI found the way the core finds it (PATH and the CLI's own install places), but with
+    /// <paramref name="fakeHome"/> as the home: the sign-in it reports is the fake one there. CLAUDE_CONFIG_DIR and GROK_HOME
+    /// are dropped so the sign-in cannot point back into the real home.
+    /// </summary>
+    private static (DetectedCli Cli, ICliDetector Detector, string SignIn) SignedInWithFakeHome(string id, string fakeHome)
+    {
+        var real = HostEnvironment.Current();
+        var vars = real.Variables.Where(kv => kv.Key is not ("CLAUDE_CONFIG_DIR" or "GROK_HOME" or "HOME"))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        vars["HOME"] = fakeHome;
+        var env = real with { Home = fakeHome, Variables = vars };
+        var detector = new CliDetectorRegistry(CliDetectorRegistry.Default, () => new DetectionHost(env, new RealHostFileSystem(), new RealCliProcessRunner()));
+        var cli = detector.DetectAllAsync(CancellationToken.None).GetAwaiter().GetResult().Single(c => c.CliId == id);
+        if (!cli.Found) Assert.Skip($"{id} is not installed on this host (looked up with a fake home; PATH as the host's)");
+        if (Launch.RealSandboxHost.Refusal is { } why) Assert.Skip($"{id} is installed, but the sandbox cannot run here: {why}");
+        Assert.True(cli.SignIn is { Status: SignInStatus.SignedIn }, $"{id}: the fake sign-in in {fakeHome} was not found: {cli.SignIn?.Detail}");
+        var signIn = cli.SignIn!.Files.Single().Path;
+        Assert.StartsWith(fakeHome + "/", signIn);
+        return (cli, detector, signIn);
+    }
+
+    private async Task SignInFolderProbe(string id, string fakeHome)
+    {
+        // The fake sign-in where the CLI keeps it (fake content only), and a fake ~/.claude.json.
+        var fakeFolder = Path.Combine(fakeHome, id == "grok" ? ".grok" : ".claude");
+        Directory.CreateDirectory(fakeFolder);
+        var fakeContent = id == "grok" ? "{\"key\":\"FAKE-grok-session\"}" : "{\"claudeAiOauth\":{\"accessToken\":\"FAKE-claude-token\"}}";
+        File.WriteAllText(Path.Combine(fakeFolder, id == "grok" ? "auth.json" : ".credentials.json"), fakeContent);
+        File.WriteAllText(Path.Combine(fakeHome, ".claude.json"), "{\"FAKE\":true}");
+        File.WriteAllText(Path.Combine(fakeFolder, id == "grok" ? "auth.json.lock" : "settings.json"), "{\"FAKE\":\"sibling\"}");
+
+        var (cli, detector, signIn) = SignedInWithFakeHome(id, fakeHome);
         var folder = Path.GetDirectoryName(signIn)!;
         var before = (new FileInfo(signIn).Length, File.GetLastWriteTimeUtc(signIn));
-        // A dummy beside the real sign-in, with fake content (never a real one), removed afterwards.
+        // A dummy beside the sign-in, with fake content.
         var dummy = Path.Combine(folder, ".yawble-test-dummy-" + Guid.NewGuid().ToString("N")[..8] + ".json");
         File.WriteAllText(dummy, "{\"FAKE\":\"dummy planted by the test\"}");
         var marker = ".yawble-test-w-" + Guid.NewGuid().ToString("N")[..8];
-        try
+        var hostFolderBefore = Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).Order().ToList();
         {
-            await using var kit = GuardrailKit.Create(realHome: RealHome, clis: detector, realGateway: true);
+            await using var kit = GuardrailKit.Create(realHome: fakeHome, clis: detector, realGateway: true);
             var variable = id == "claude" ? SignInCatalog.ClaudeStoreVariable : SignInCatalog.GrokAuthVariable;
             var probe = new ScriptProbe(id, l => CommandLine.Join(l.Os, ["/bin/sh", "-c", string.Join("\n",
             [
@@ -110,7 +157,7 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
                 $"head -c 0 {Q(dummy)} 2>/dev/null; echo \"@open_dummy=$?\"",
                 $"echo \"@dummy_content=$(cat {Q(dummy)} 2>/dev/null | head -c 40)\"",
                 $"ls -A {Q(folder)} 2>/dev/null | tr '\\n' ' ' | sed 's/^/@folder_list=/'; echo",
-                $"head -c 0 {Q(Path.Combine(RealHome, ".claude.json"))} 2>/dev/null; echo \"@open_claude_json=$?\"",
+                $"head -c 0 {Q(Path.Combine(fakeHome, ".claude.json"))} 2>/dev/null; echo \"@open_claude_json=$?\"",
                 $"head -c 0 {Q(Path.Combine(folder, id == "grok" ? "auth.json.lock" : "settings.json"))} 2>/dev/null; echo \"@open_sibling=$?\"",
             ])]));
             var outcome = await kit.Launcher(new NativeSandboxBackend(), new HostSignInModes())
@@ -130,32 +177,32 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
             Assert.DoesNotContain(L("readwritePaths"), g => g == canonFolder || g.StartsWith(canonFolder + "/", StringComparison.Ordinal));
             Assert.Equal("", o["pointer"]);
 
+            // Reads are checked in the sandbox: none of the sign-in's content is seen.
             Assert.Equal("0", o["signin_bytes"]);
-            Assert.NotEqual("0", o["append_signin"]);
-            // A create beside it may succeed INSIDE the sandbox only: the sandbox makes the folders on the way to a grant
-            // as writable tmpfs mount points. It never reaches the host (asserted below).
-            Assert.NotEqual("0", o["rename_signin"]);
+            // Writes (append, create beside, rename) are checked on the HOST, below: the sandbox's mask over the folder is a
+            // writable tmpfs, so they may succeed inside the sandbox; what counts is that none of them reaches the host.
             Assert.NotEqual("0", o["open_dummy"]);
             Assert.Equal("", o["dummy_content"]);
             Assert.NotEqual("0", o["open_claude_json"]);
             Assert.NotEqual("0", o["open_sibling"]);
             // Every name the sandbox sees in the folder is an empty mask the sandbox made for a denied entry (names are
-            // visible, contents are not), the install (grok: ~/.grok/downloads), or the sandbox's own file that never reached the host.
+            // visible, contents are not), the install (grok: ~/.grok/downloads), or the sandbox's own files that never reached
+            // the host: the marker it created and the name its own mv gave the sign-in inside the writable mask (both checked
+            // absent on the host below).
             var denied = L("deniedPaths");
+            var moved = Path.GetFileName(signIn) + ".moved";
             foreach (var name in o.GetValueOrDefault("folder_list", "").Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
                 var host = HostPathCanonicalizer.Canonicalize(Path.Combine(folder, name));
-                Assert.True(denied.Contains(host) || IsInstall(host) || name == marker,
+                Assert.True(denied.Contains(host) || IsInstall(host) || name == marker || name == moved,
                     $"{folder}/{name} is visible in the sandbox and is neither the install nor a mask");
             }
-            // The host's sign-in is unchanged and nothing appeared beside it.
+            // The host's sign-in is unchanged (a fake, so its content is compared too) and nothing appeared beside it.
             Assert.Equal(before, (new FileInfo(signIn).Length, File.GetLastWriteTimeUtc(signIn)));
+            Assert.Equal(fakeContent, File.ReadAllText(signIn));
             Assert.False(File.Exists(Path.Combine(folder, marker)));
             Assert.False(File.Exists(signIn + ".moved"));
-        }
-        finally
-        {
-            File.Delete(dummy);
+            Assert.Equal(hostFolderBefore, Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).Order().ToList());
         }
     }
 

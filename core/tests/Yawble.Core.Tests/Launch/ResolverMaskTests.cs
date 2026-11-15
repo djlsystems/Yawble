@@ -101,9 +101,13 @@ public class ResolverMaskTests
 
         string json;
         lock (kit.Backend.Requests) json = kit.Backend.Requests.Single().Json;
+        // The request's deniedPaths are canonicalized on the real host (HostPathCanonicalizer): on Fedora and RHEL
+        // /etc/nsswitch.conf is a symlink to /etc/authselect/nsswitch.conf, so compare canonical forms (B038).
         var denied = Denied(JsonNode.Parse(json)!.AsObject());
-        foreach (var m in new[] { "/run/systemd/resolve", "/run/dbus", "/run/avahi-daemon", "/etc/nsswitch.conf" }) Assert.Contains(m, denied);
+        static string C(string p) => HostPathCanonicalizer.Canonicalize(p);
+        foreach (var m in new[] { "/run/systemd/resolve", "/run/dbus", "/run/avahi-daemon", "/etc/nsswitch.conf" }) Assert.Contains(C(m), denied);
         Assert.DoesNotContain("/etc/resolv.conf", denied);
+        Assert.DoesNotContain(C("/etc/resolv.conf"), denied);
         Assert.DoesNotContain("/run/nscd", denied);
     }
 }
