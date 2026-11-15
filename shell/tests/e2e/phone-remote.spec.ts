@@ -395,6 +395,74 @@ for (const size of PHONES) {
       expect(errors).toEqual([]);
     });
 
+    // F8 re-verify (card 182): every phone sheet a Visitor can open keeps Close and its title clear of the chip; with
+    // full access the sheet header is as before (6 px right padding, Close at the right edge).
+    test('F8: every sheet - Close and title clear of the Visitor chip; full-access header unchanged', async ({ browser }) => {
+      test.setTimeout(240_000);
+      const sheetInfo = (page: Page) => page.evaluate(() => {
+        const sheets = [...document.querySelectorAll<HTMLElement>('.modal.sheet')];
+        const m = sheets[sheets.length - 1];
+        if (!m) return null;
+        const head = m.querySelector(':scope > header')!, h2 = head.querySelector('h2')!, c = head.querySelector('[data-test=modal-close]')!.getBoundingClientRect();
+        const chipEl = document.querySelector('[data-test=remote-access-chip]');
+        // The chip is position: fixed (offsetParent is always null): shown = a box and visible.
+        const chipBox = chipEl?.getBoundingClientRect();
+        const chip = chipBox && chipBox.width > 0 && chipEl!.checkVisibility() ? chipBox : null;
+        const t = h2.getBoundingClientRect();
+        const cover = (b: DOMRect) => { if (!chip) return 0; const ow = Math.max(0, Math.min(b.right, chip.right) - Math.max(b.left, chip.left)), oh = Math.max(0, Math.min(b.bottom, chip.bottom) - Math.max(b.top, chip.top)); return Math.round((100 * ow * oh) / (b.width * b.height)); };
+        return { title: h2.textContent!.trim(), padR: getComputedStyle(head).paddingRight, close: [Math.round(c.left), Math.round(c.right), Math.round(c.width), Math.round(c.height)], chip: chip ? [Math.round(chip.left), Math.round(chip.right)] : null,
+          closeCoveredPct: cover(c), titleCoveredPct: cover(t), titleW: Math.round(t.width), titleTruncated: h2.scrollWidth > h2.clientWidth + 1, sw: document.documentElement.scrollWidth, iw: innerWidth };
+      });
+      // Openers: Logs from the drawer, then each sheet the team page and its first agent card offer (when shown).
+      const openers: { name: string; go: (page: Page) => Promise<boolean> }[] = [
+        { name: 'logs', go: async (p) => { await nav(p, 'nav-logs'); return true; } },
+        ...['open-code', 'open-settings', 'open-guardrail', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
+          name: id.replace('open-', 'team-'),
+          go: async (p: Page) => {
+            await nav(p, 'nav-teams');
+            await p.locator('[data-test=team-open-payments]').click();
+            await expect(p.locator('[data-test=team-title]')).toBeVisible();
+            const b = p.locator(`[data-test=${id}]`).first();
+            if (!(await b.isVisible().catch(() => false))) return false;
+            return b.click({ timeout: 3000 }).then(() => true, () => false);
+          },
+        })),
+      ];
+      const seen: Record<string, Record<string, unknown>> = {};
+      for (const access of ['read', 'full'] as const) {
+        const { page, errors, ctx } = await open(browser, size, { access, asks: false });
+        for (const o of openers) {
+          if (!(await o.go(page))) { (seen[o.name] ??= {})[access] = 'no opener'; continue; }
+          await page.waitForTimeout(600);
+          const info = await sheetInfo(page);
+          (seen[o.name] ??= {})[access] = info ?? 'not a sheet';
+          if (!info) continue;
+          results.push({ screen: `f8-sheet-${o.name}-${access}`, size: tag(size), audit: info as unknown as Audit });
+          await page.screenshot({ path: path.join(SHOTS, `reverify3-${access === 'read' ? 'visitor' : 'full'}-${o.name}-${tag(size)}.png`) });
+          const where = `${o.name} sheet (${access}) @${tag(size)}`;
+          expect.soft(info.sw, `${where}: sideways scroll`).toBeLessThanOrEqual(info.iw);
+          expect.soft(info.close[2] + 'x' + info.close[3], `${where}: Close 44x44`).toBe('44x44');
+          if (access === 'read') {
+            expect.soft(info.chip, `${where}: chip shown`).not.toBeNull();
+            expect.soft(info.closeCoveredPct, `${where}: Close under the chip (close ${info.close}, chip ${info.chip})`).toBe(0);
+            expect.soft(info.titleCoveredPct, `${where}: title under the chip`).toBe(0);
+            expect.soft(info.titleW, `${where}: title has room to be read`).toBeGreaterThanOrEqual(80);
+          } else {
+            expect.soft(info.padR, `${where}: full-access header padding-right as before`).toBe('6px');
+            expect.soft(info.close[1], `${where}: Close at the right edge`).toBe(size.w - 6);
+          }
+          const close = page.locator('.modal.sheet [data-test=modal-close]').last();
+          await close.click();
+          await page.waitForTimeout(300);
+          while (await page.locator('.modal.sheet').count()) { await page.locator('.modal.sheet [data-test=modal-close]').last().click(); await page.waitForTimeout(200); }
+        }
+        expect(errors).toEqual([]);
+        await ctx.close();
+      }
+      console.log(`F8 sheets @${tag(size)}: ${JSON.stringify(seen)}`);
+      results.push({ screen: 'f8-sheets', size: tag(size), audit: seen as unknown as Audit });
+    });
+
     test('dark theme: the shell is dark, the Monitor is dark', async ({ browser }) => {
       const { page } = await open(browser, size, { theme: 'dark', asks: false });
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
