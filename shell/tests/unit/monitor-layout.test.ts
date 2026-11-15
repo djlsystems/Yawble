@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { teamAngle } from '../../src/renderer/src/monitor/scene';
+import { MaxZoom, MinZoom, pinchCamera, teamAngle } from '../../src/renderer/src/monitor/scene';
 import {
   clampLayout, isDefaultLayout, LayoutDefaults, LayoutMax, LayoutMin, LayoutStorageKey, readLayout, writeLayout,
 } from '../../src/renderer/src/monitor/layout';
@@ -65,5 +65,25 @@ describe('where the teams sit on the wall (scene.ts teamAngle)', () => {
     expect(at(0, 4)).toEqual({ x: -100, y: 0 });
     expect(at(2, 4)).toEqual({ x: 100, y: 0 });
     expect(teamAngle(0, 1)).toBe(0);
+  });
+});
+
+describe('a two-finger pinch on the wall (scene.ts pinchCamera)', () => {
+  const start = { dist: 100, k: 1, wx: 50, wy: -20 };
+  it('spreading the fingers to twice their distance doubles the zoom, keeping the world point between them', () => {
+    const cam = pinchCamera(start, 200, [400, 300], 800, 600);
+    expect(cam.k).toBe(2);
+    // The world point under the middle of the fingers (the wall's centre here) is still the start's.
+    expect(cam.x).toBe(50);
+    expect(cam.y).toBe(-20);
+  });
+  it('moving both fingers together pans: the start point follows them', () => {
+    const cam = pinchCamera(start, 100, [500, 300], 800, 600); // the fingers moved 100 px right
+    expect(cam.k).toBe(1);
+    expect(cam.x).toBe(50 - 100); // the camera's centre is 100 world units left of the point now under the fingers
+  });
+  it('stays within the zoom limits, and a zero spread is not a division by zero', () => {
+    expect(pinchCamera(start, 10_000, [400, 300], 800, 600).k).toBe(MaxZoom);
+    expect(pinchCamera(start, 0, [400, 300], 800, 600).k).toBe(MinZoom);
   });
 });

@@ -68,6 +68,20 @@ export const FitOnceMs = 1_500;
  * Whether the camera aims at everything at `now`. Auto fit: unless the person moved the wall in the last 12 s. Pinned:
  * only during a one-off Fit (until `fitUntil`).
  */
+/** The zoom limits, for the wheel and a pinch. */
+export const MinZoom = 0.15;
+export const MaxZoom = 4;
+
+/**
+ * The camera during a two-finger pinch: the zoom scales with the fingers' spread from where it started (within the limits),
+ * and the world point that was between the fingers at the start stays between them, so moving both fingers pans.
+ * The camera's x/y is the world point at the middle of the wall (w × h).
+ */
+export function pinchCamera(start: { dist: number; k: number; wx: number; wy: number }, dist: number, mid: readonly [number, number], w: number, h: number) {
+  const k = Math.min(MaxZoom, Math.max(MinZoom, start.k * (Math.max(1, dist) / start.dist)));
+  return { k, x: start.wx - (mid[0] - w / 2) / k, y: start.wy - (mid[1] - h / 2) / k };
+}
+
 /**
  * Where team i of count sits on the wall's oval (radians, 0 = right, clockwise on screen): the first on the left, the
  * rest evenly round from there, so two teams sit side by side across the wide axis rather than one above the other.
@@ -932,6 +946,7 @@ export class MonitorScene {
       return [e.clientX - b.left, e.clientY - b.top] as const;
     };
     const move = (e: PointerEvent) => {
+      if (touchMove(e)) return;
       const [sx, sy] = local(e);
       if (this.drag) {
         this.moved();
@@ -980,6 +995,7 @@ export class MonitorScene {
       this.onHover({ key: n.key, kind: n.kind === 'workflows' ? 'workflow' : n.kind, team: n.team, name: n.name, state: n.state, statusLine: n.statusLine, queued: n.queued, x: hx, y: hy - n.r * this.cam.k });
     };
     const down = (e: PointerEvent) => {
+      if (touchDown(e)) return;
       const [sx, sy] = local(e);
       const file = this.fileAt(sx, sy);
       if (file) { this.picked = file.member.key; this.onPick(file.member.key); }
@@ -991,6 +1007,7 @@ export class MonitorScene {
       if (n && n.kind !== 'workflows') { this.picked = n.key; this.onPick(n.key); }
     };
     const up = (e: PointerEvent) => {
+      if (touchUp(e)) return;
       const node = this.drag?.node;
       if (node?.kind === 'workflows') {
         const [sx, sy] = local(e);
@@ -1001,11 +1018,62 @@ export class MonitorScene {
       this.drag = null;
     };
     const leave = () => { this.hover = null; this.hoverFile = null; this.hoverPanel = null; this.onHover(null); };
+    // Touch (an iPad, a touch screen): two fingers pinch to zoom and move together to pan, the point between them staying
+    // under them; a double tap fits everything. One finger drags as the mouse does.
+    const touches = new Map<number, readonly [number, number]>();
+    let pinch: { dist: number; k: number; wx: number; wy: number } | null = null;
+    let lastTap = { at: -Infinity, x: 0, y: 0 };
+    const startPinch = () => {
+      const [a, b] = [...touches.values()];
+      const [mx, my] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const [wx, wy] = this.toWorld(mx, my);
+      pinch = { dist: Math.max(1, Math.hypot(a[0] - b[0], a[1] - b[1])), k: this.cam.k, wx, wy };
+      if (this.drag?.node) { this.drag.node.fx = null; this.drag.node.fy = null; }
+      this.drag = null;
+    };
+    const touchDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return false;
+      touches.set(e.pointerId, local(e));
+      if (touches.size === 2) { cv.setPointerCapture(e.pointerId); startPinch(); return true; }
+      return touches.size > 2;
+    };
+    const touchMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return false;
+      touches.set(e.pointerId, local(e));
+      if (!pinch || touches.size < 2) return false;
+      const [a, b] = [...touches.values()];
+      const cam = pinchCamera(pinch, Math.hypot(a[0] - b[0], a[1] - b[1]), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], this.w, this.h);
+      this.cam.k = this.target.k = cam.k;
+      this.cam.x = this.target.x = cam.x;
+      this.cam.y = this.target.y = cam.y;
+      this.moved();
+      return true;
+    };
+    const touchUp = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return false;
+      const at = touches.get(e.pointerId);
+      touches.delete(e.pointerId);
+      if (pinch) {
+        // Down to one finger: it pans from where it is; no fingers: the pinch is over.
+        if (touches.size === 1) {
+          const [[sx, sy]] = [...touches.values()];
+          this.drag = { node: null, x: sx, y: sy, cx: this.target.x, cy: this.target.y };
+        }
+        if (touches.size < 2) pinch = null;
+        return true;
+      }
+      if (at && e.type === 'pointerup') {
+        const now = performance.now();
+        if (now - lastTap.at < 320 && Math.hypot(at[0] - lastTap.x, at[1] - lastTap.y) < 30) { lastTap.at = -Infinity; this.fit(); }
+        else lastTap = { at: now, x: at[0], y: at[1] };
+      }
+      return false;
+    };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       const [sx, sy] = local(e);
       const [wx, wy] = this.toWorld(sx, sy);
-      const k = Math.min(4, Math.max(0.15, this.cam.k * Math.exp(-e.deltaY * 0.0015)));
+      const k = Math.min(MaxZoom, Math.max(MinZoom, this.cam.k * Math.exp(-e.deltaY * 0.0015)));
       this.cam.k = this.target.k = k;
       this.cam.x = this.target.x = wx - (sx - this.w / 2) / k;
       this.cam.y = this.target.y = wy - (sy - this.h / 2) / k;
@@ -1015,6 +1083,7 @@ export class MonitorScene {
     cv.addEventListener('pointermove', move);
     cv.addEventListener('pointerdown', down);
     cv.addEventListener('pointerup', up);
+    cv.addEventListener('pointercancel', up);
     cv.addEventListener('pointerleave', leave);
     cv.addEventListener('wheel', wheel, { passive: false });
     cv.addEventListener('dblclick', dbl);
@@ -1022,6 +1091,7 @@ export class MonitorScene {
       cv.removeEventListener('pointermove', move);
       cv.removeEventListener('pointerdown', down);
       cv.removeEventListener('pointerup', up);
+      cv.removeEventListener('pointercancel', up);
       cv.removeEventListener('pointerleave', leave);
       cv.removeEventListener('wheel', wheel);
       cv.removeEventListener('dblclick', dbl);
