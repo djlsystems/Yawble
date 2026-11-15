@@ -97,8 +97,8 @@ onMounted(() => { if (props.autofocus) focus(); });
 </template>
 
 <style scoped>
-.composer { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 12px 12px 8px 16px; box-shadow: 0 4px 18px rgba(20, 28, 45, .07); }
-.composer:focus-within { border-color: #c4ccda; }
+.composer { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 12px 12px 8px 16px; box-shadow: 0 4px 18px var(--shadow-soft); }
+.composer:focus-within { border-color: var(--line-strong); }
 textarea { width: 100%; border: 0; outline: 0; resize: none; background: transparent; font-size: 15px; line-height: 1.5; padding: 4px 0; max-height: 240px; color: var(--ink); }
 .bar { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .pick { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 13px; padding: 2px 6px; border-radius: 8px; }
@@ -106,14 +106,14 @@ textarea { width: 100%; border: 0; outline: 0; resize: none; background: transpa
 .pick select { border: 0; background: transparent; color: var(--ink); font-size: 13px; padding: 2px 0; cursor: pointer; appearance: none; }
 .pick select:focus { outline: none; }
 .round { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; padding: 0; border: 0; }
-.send { background: var(--ink); color: #fff; }
-.send:disabled { background: #c9ced8; opacity: 1; }
-.stop { background: var(--ink); color: #fff; }
+.send { background: var(--ink); color: var(--surface); }
+.send:disabled { background: var(--line-strong); opacity: 1; }
+.stop { background: var(--ink); color: var(--surface); }
 .grow { flex: 1; }
 .attach { border: 0; background: transparent; cursor: pointer; }
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .thumb { position: relative; width: 64px; height: 64px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
-.thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; font-size: 10px; line-height: 18px; }
+.thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: var(--scrim); color: var(--on-scrim); font-size: 10px; line-height: 18px; }
 .problem { color: var(--bad); font-size: 12px; margin: 2px 0; }
 </style>

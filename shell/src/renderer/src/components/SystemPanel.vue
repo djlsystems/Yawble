@@ -66,17 +66,17 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.phase { color: #5b6475; font-size: 13px; }
+.phase { color: var(--muted); font-size: 13px; }
 h2 { font-size: 15px; margin: 18px 0 6px; }
-section { background: #fff; border: 1px solid #dde1e8; border-radius: 6px; padding: 8px 14px 12px; margin-top: 12px; }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px 12px; margin-top: 12px; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
-dt { color: #5b6475; }
+dt { color: var(--muted); }
 dd { margin: 0; font-family: ui-monospace, monospace; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #eceef2; }
-pre { background: #f1f3f6; padding: 6px 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
-.error { color: #a01818; }
-.ok { color: #1d6b2f; margin: 0 8px; }
-.missing { color: #8a5a00; margin: 0 8px; }
-code { font-size: 12px; color: #5b6475; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line-soft); }
+pre { background: var(--surface-sunken); padding: 6px 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.error { color: var(--bad); }
+.ok { color: var(--ok); margin: 0 8px; }
+.missing { color: var(--warn-ink); margin: 0 8px; }
+code { font-size: 12px; color: var(--muted); }
 </style>

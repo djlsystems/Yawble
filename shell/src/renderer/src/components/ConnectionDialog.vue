@@ -306,8 +306,8 @@ async function save() {
 </template>
 
 <style scoped>
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto; z-index: 60; }
-.box { background: #fff; border-radius: 12px; padding: 14px 16px; width: min(560px, 100%); box-sizing: border-box; }
+.overlay { position: fixed; inset: 0; background: var(--backdrop); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto; z-index: 60; }
+.box { background: var(--surface); border-radius: 12px; padding: 14px 16px; width: min(560px, 100%); box-sizing: border-box; }
 h3 { margin: 0 0 4px; font-size: 16px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .block { display: block; }

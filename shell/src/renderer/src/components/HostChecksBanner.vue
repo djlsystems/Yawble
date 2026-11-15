@@ -39,8 +39,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.host-checks { border: 1px solid #c0392b; background: #fdecea; color: #1d2330; padding: 4px 18px; margin: 0; }
-.host-checks h2 { font-size: 15px; margin: 8px 0 4px; color: #a01818; }
+.host-checks { border: 1px solid var(--bad-line); background: var(--bad-bg); color: var(--ink); padding: 4px 18px; margin: 0; }
+.host-checks h2 { font-size: 15px; margin: 8px 0 4px; color: var(--bad); }
 .host-checks ul { margin: 4px 0 8px; }
 .host-checks .head { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
 .discuss { flex: none; font-size: 12px; }

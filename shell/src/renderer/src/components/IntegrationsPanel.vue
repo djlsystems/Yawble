@@ -147,9 +147,9 @@ onMounted(load);
 <style scoped>
 .intro { font-size: 13px; margin: 0 0 12px; }
 .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
-.pill { border: 1px solid var(--line); border-radius: 14px; padding: 3px 12px; background: #fff; }
-.pill.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-.cli { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: #fff; }
+.pill { border: 1px solid var(--line); border-radius: 14px; padding: 3px 12px; background: var(--surface); }
+.pill.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.cli { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--surface); }
 .cli.on { border-left: 4px solid var(--ok); }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }

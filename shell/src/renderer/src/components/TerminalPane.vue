@@ -91,14 +91,14 @@ async function close() {
 </template>
 
 <style scoped>
-.pane { position: relative; display: flex; flex-direction: column; min-width: 320px; max-width: 75vw; height: 100%; background: #101418; border-left: 1px solid var(--line); }
+.pane { position: relative; display: flex; flex-direction: column; min-width: 320px; max-width: 75vw; height: 100%; background: var(--term-bg); border-left: 1px solid var(--line); }
 .handle { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
-.handle:hover { background: rgba(80, 120, 200, .25); }
-.head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: #1b222c; color: #d8dee9; border-bottom: 1px solid #2c3542; }
+.handle:hover { background: var(--term-grip); }
+.head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--term-head); color: var(--term-fg); border-bottom: 1px solid var(--term-line); }
 .title { flex: 1; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mini { font-size: 12px; padding: 2px 8px; background: #222b36; color: #d8dee9; border: 1px solid #36404e; border-radius: 6px; }
+.mini { font-size: 12px; padding: 2px 8px; background: var(--term-btn); color: var(--term-btn-ink); border: 1px solid var(--term-btn-line); border-radius: 6px; }
 .mini:disabled { opacity: .5; }
 .body { flex: 1; min-height: 0; }
-.empty { color: #8a95a7; padding: 16px; font-size: 13px; }
-.empty code { background: #222b36; padding: 0 4px; border-radius: 3px; }
+.empty { color: var(--term-muted); padding: 16px; font-size: 13px; }
+.empty code { background: var(--term-btn-on); padding: 0 4px; border-radius: 3px; }
 </style>

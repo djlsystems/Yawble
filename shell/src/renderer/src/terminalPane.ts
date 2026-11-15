@@ -48,3 +48,24 @@ function readWidth(): number {
     return Number.isFinite(n) && n >= 320 ? n : 560;
   } catch { return 560; }
 }
+
+/**
+ * The terminals' xterm palettes (the chrome around them is in terminal-theme.css). Light: dark ink on near-white, with
+ * ANSI colours deep enough to read on it (xterm's defaults are made for a dark screen). Dark: the terminal as it always was.
+ */
+export interface XtermPalette {
+  background: string; foreground: string; cursor: string; cursorAccent: string; selectionBackground: string;
+  black?: string; red?: string; green?: string; yellow?: string; blue?: string; magenta?: string; cyan?: string; white?: string;
+  brightBlack?: string; brightRed?: string; brightGreen?: string; brightYellow?: string; brightBlue?: string;
+  brightMagenta?: string; brightCyan?: string; brightWhite?: string;
+}
+export const XTERM_PALETTES: Record<'light' | 'dark', XtermPalette> = {
+  light: {
+    background: '#fbfbfc', foreground: '#1d2330', cursor: '#1d2330', cursorAccent: '#fbfbfc', selectionBackground: '#c9d6f2',
+    black: '#1d2330', red: '#b42318', green: '#1d6b2f', yellow: '#8a5200', blue: '#2457c5', magenta: '#8a3fa8', cyan: '#0e6e7a', white: '#6b7384',
+    brightBlack: '#5b6475', brightRed: '#c9372c', brightGreen: '#2a7d3c', brightYellow: '#9a6200', brightBlue: '#3b6ad6',
+    brightMagenta: '#9b4fb8', brightCyan: '#13808d', brightWhite: '#3d4555',
+  },
+  dark: { background: '#101418', foreground: '#d8dee9', cursor: '#d8dee9', cursorAccent: '#101418', selectionBackground: '#3a4658' },
+};
+export const xtermTheme = (theme: 'light' | 'dark'): XtermPalette => XTERM_PALETTES[theme];

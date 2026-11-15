@@ -354,7 +354,7 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
 .block h4 { margin: 0 0 4px; font-size: 14px; }
 .block p { margin: 0 0 8px; }
 .check { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
-.note { background: #fffaf0; border: 1px solid #e9d29a; border-radius: 6px; padding: 6px 10px; margin: 0; }
+.note { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; margin: 0; }
 .env { width: 100%; border-collapse: collapse; }
 .env td { padding: 2px 4px 2px 0; }
 .env td:first-child { width: 230px; min-width: 160px; }
@@ -373,8 +373,8 @@ label { display: flex; flex-direction: column; gap: 4px; }
 label input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; max-width: 320px; }
 label.check { flex-direction: row; align-items: center; }
 label.check input { width: auto; padding: 0; }
-.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.danger { background: var(--bad); color: var(--on-accent); border-color: var(--bad); }
 .danger:disabled { opacity: .5; }
 .link { border: 0; background: transparent; color: var(--accent); }
 .icon { border: 0; background: transparent; }

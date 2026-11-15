@@ -146,7 +146,7 @@ defineExpose({ load });
 </template>
 
 <style scoped>
-.panel { width: 380px; flex: none; border-left: 1px solid var(--line); background: #fff; display: flex; flex-direction: column; overflow-y: auto; padding: 12px 16px 20px; gap: 10px; }
+.panel { width: 380px; flex: none; border-left: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; overflow-y: auto; padding: 12px 16px 20px; gap: 10px; }
 header { display: flex; gap: 8px; align-items: flex-start; }
 .discuss { font-size: 12px; white-space: nowrap; }
 .head { flex: 1; min-width: 0; }
@@ -156,14 +156,14 @@ header { display: flex; gap: 8px; align-items: flex-start; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { font-size: 11.5px; border: 1px solid var(--line); border-radius: 12px; padding: 1px 8px; }
 .chip.item { font-family: ui-monospace, Consolas, monospace; color: var(--accent); }
-.chip.waiting { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
-.body { font-size: 13px; border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; background: #fafbfc; max-height: 240px; overflow: auto; }
+.chip.waiting { color: var(--bad-ink); border-color: var(--bad-line-soft); background: var(--bad-bg-soft); }
+.body { font-size: 13px; border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; background: var(--surface-2); max-height: 240px; overflow: auto; }
 h4 { margin: 6px 0; font-size: 13px; }
 .edit label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
 .edit input, .edit select, .edit textarea { font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .buttons { display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 8px; }
-.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .trail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .trail li { font-size: 12.5px; border-left: 2px solid var(--line); padding-left: 8px; }
 .who { font-weight: 600; margin-right: 6px; }

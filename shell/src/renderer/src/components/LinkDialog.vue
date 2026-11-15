@@ -195,17 +195,17 @@ const phase = computed((): { key: string; text: string; detail: string } => {
 <style scoped>
 .intro { margin-top: 0; }
 .state { margin: 6px 0 12px; }
-.dot { width: 10px; height: 10px; border-radius: 50%; background: #aab; display: inline-block; flex: none; }
-.dot.connected { background: #2e9d4f; }
-.dot.connecting, .dot.pairing { background: #e0a400; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dot-off); display: inline-block; flex: none; }
+.dot.connected { background: var(--dot-ok); }
+.dot.connecting, .dot.pairing { background: var(--dot-wait); }
 .dot.pairing { animation: pulse 1.4s ease-in-out infinite; }
-.dot.offline, .dot.failed { background: #c9473d; }
+.dot.offline, .dot.failed { background: var(--dot-bad); }
 @keyframes pulse { 50% { opacity: .35; } }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .field input { font-size: 14px; padding: 6px 8px; }
 .pairing { text-align: center; padding: 4px 0 2px; }
 .pairing p { margin: 0; }
-.code { font: 600 34px/1.2 ui-monospace, Consolas, monospace; letter-spacing: .12em; padding: 10px 18px; background: #f1f4fa; border-radius: 8px; margin: 6px auto 14px; display: inline-block; }
+.code { font: 600 34px/1.2 ui-monospace, Consolas, monospace; letter-spacing: .12em; padding: 10px 18px; background: var(--surface-sunken); border-radius: 8px; margin: 6px auto 14px; display: inline-block; }
 .phase { justify-content: center; gap: 8px; }
 .detail { max-width: 460px; margin: 6px auto 0 !important; }
 .buttons { justify-content: center; gap: 8px; margin-top: 16px; }
@@ -216,5 +216,5 @@ const phase = computed((): { key: string; text: string; detail: string } => {
 .facts a:hover { text-decoration: underline; }
 .check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; }
 .small { font-size: 12px; }
-.danger { color: #b3261e; }
+.danger { color: var(--bad); }
 </style>

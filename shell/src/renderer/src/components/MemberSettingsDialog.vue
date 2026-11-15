@@ -326,20 +326,20 @@ const loosenChanged = () => { preview.value = null; };
 <style scoped>
 .team-allows { border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
-.tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tabs button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .general { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
 .general label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .general .wide { grid-column: 1 / -1; }
 .cmdline { display: flex; flex-direction: column; gap: 2px; word-break: break-all; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #eceef2; vertical-align: top; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
 td textarea, td input:not([type=checkbox]), td select { width: 100%; }
 .small { font-size: 12px; }
 details { margin: 10px 0; }
-.loosen { border: 2px solid #e9b84a; background: #fffaf0; border-radius: 6px; padding: 8px 12px; margin-top: 12px; }
+.loosen { border: 2px solid var(--warn-line-strong); background: var(--warn-bg); border-radius: 6px; padding: 8px 12px; margin-top: 12px; }
 .loosen h3 { margin: 2px 0 6px; font-size: 14px; color: var(--warn); }
 .loosen-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
 .loosen-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
-.confirm { border-top: 1px dashed #e9b84a; margin-top: 8px; padding-top: 6px; }
+.confirm { border-top: 1px dashed var(--warn-line-strong); margin-top: 8px; padding-top: 6px; }
 .confirm ul { margin: 4px 0; }
 </style>

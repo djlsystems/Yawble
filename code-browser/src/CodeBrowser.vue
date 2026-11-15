@@ -11,6 +11,7 @@ import FileList from './FileList.vue';
 import CodeLines from './CodeLines.vue';
 import { FallbackBusy, FallbackLoading } from './fallbacks';
 import { withoutImages } from './safeHtml';
+import './theme.css';
 
 // The read-only Code browser of one member's clone: a breadcrumb, the folder's listing with markers of
 // what the agent is working on, and the open file's preview with its recent changes. Everything comes from the core's
@@ -401,33 +402,33 @@ defineExpose({ go, session });
 .cb-bar, .cb-filebar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .cb-grow { flex: 1; }
 .cb-crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-width: 0; font-size: 13px; }
-.cb-crumb { all: unset; cursor: pointer; color: var(--accent, #2457c5); padding: 1px 3px; border-radius: 3px; }
+.cb-crumb { all: unset; cursor: pointer; color: var(--accent); padding: 1px 3px; border-radius: 3px; }
 .cb-crumb:hover { text-decoration: underline; }
-.cb-crumb.file { color: var(--ink, #1d2330); cursor: default; font-weight: 600; }
+.cb-crumb.file { color: var(--ink); cursor: default; font-weight: 600; }
 .cb-crumb.file:hover { text-decoration: none; }
-.cb-sep { color: var(--muted, #6b7384); }
+.cb-sep { color: var(--muted); }
 .cb-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; white-space: nowrap; }
 .cb-panes { display: grid; grid-template-columns: minmax(220px, 34%) minmax(0, 1fr); gap: 10px; flex: 1 1 0; min-height: 0; }
-.cb-side { overflow: auto; border: 1px solid var(--line, #e2e5eb); border-radius: 6px; padding: 4px; min-height: 0; }
-.cb-main { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; border: 1px solid var(--line, #e2e5eb); border-radius: 6px; padding: 6px 8px; position: relative; }
+.cb-side { overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 4px; min-height: 0; }
+.cb-main { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; position: relative; }
 .cb-filename { font-size: 13px; }
-.cb-chip { position: absolute; right: 18px; top: 44px; z-index: 3; font-size: 12px; border-radius: 999px; padding: 2px 10px; background: #fff;
-  border: 1px solid color-mix(in srgb, var(--state-running, #2e7d4f) 50%, var(--line, #e2e5eb)); color: var(--state-running, #2e7d4f); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-.cb-notshown { padding: 18px 8px; color: var(--ink-soft, #3d4555); }
+.cb-chip { position: absolute; right: 18px; top: 44px; z-index: 3; font-size: 12px; border-radius: 999px; padding: 2px 10px; background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--state-running) 50%, var(--line)); color: var(--state-running); box-shadow: 0 2px 8px var(--shadow-chip); }
+.cb-notshown { padding: 18px 8px; color: var(--ink-soft); }
 .cb-image { overflow: auto; flex: 1 1 0; min-height: 0; }
-.cb-image img { max-width: 100%; height: auto; background: repeating-conic-gradient(#f3f4f6 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+.cb-image img { max-width: 100%; height: auto; background: repeating-conic-gradient(var(--checker) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; }
 .cb-md { overflow: auto; flex: 1 1 0; min-height: 0; font-size: 13.5px; line-height: 1.55; }
-.cb-md :deep(.cb-img-alt) { color: var(--muted, #6b7280); font-style: italic; }
+.cb-md :deep(.cb-img-alt) { color: var(--muted); font-style: italic; }
 .small { font-size: 12px; }
-/* highlight.js classes, in the app's quiet palette (no theme stylesheet is loaded). */
-.cb :deep(.hljs-comment), .cb :deep(.hljs-quote) { color: #6a737d; font-style: italic; }
-.cb :deep(.hljs-keyword), .cb :deep(.hljs-selector-tag), .cb :deep(.hljs-literal), .cb :deep(.hljs-doctag) { color: #a626a4; }
-.cb :deep(.hljs-string), .cb :deep(.hljs-regexp), .cb :deep(.hljs-addition), .cb :deep(.hljs-meta .hljs-string) { color: #22863a; }
-.cb :deep(.hljs-number), .cb :deep(.hljs-symbol), .cb :deep(.hljs-bullet), .cb :deep(.hljs-variable), .cb :deep(.hljs-template-variable) { color: #b76b01; }
-.cb :deep(.hljs-title), .cb :deep(.hljs-section), .cb :deep(.hljs-name), .cb :deep(.hljs-selector-id), .cb :deep(.hljs-selector-class) { color: #2457c5; }
-.cb :deep(.hljs-attr), .cb :deep(.hljs-attribute), .cb :deep(.hljs-property), .cb :deep(.hljs-type), .cb :deep(.hljs-built_in) { color: #986801; }
-.cb :deep(.hljs-meta), .cb :deep(.hljs-tag) { color: #4078f2; }
-.cb :deep(.hljs-deletion) { color: #b31d28; }
+/* highlight.js classes, in the app's quiet palette (theme.css holds its light and dark values; no highlight.js theme is loaded). */
+.cb :deep(.hljs-comment), .cb :deep(.hljs-quote) { color: var(--cb-hl-comment); font-style: italic; }
+.cb :deep(.hljs-keyword), .cb :deep(.hljs-selector-tag), .cb :deep(.hljs-literal), .cb :deep(.hljs-doctag) { color: var(--cb-hl-keyword); }
+.cb :deep(.hljs-string), .cb :deep(.hljs-regexp), .cb :deep(.hljs-addition), .cb :deep(.hljs-meta .hljs-string) { color: var(--cb-hl-string); }
+.cb :deep(.hljs-number), .cb :deep(.hljs-symbol), .cb :deep(.hljs-bullet), .cb :deep(.hljs-variable), .cb :deep(.hljs-template-variable) { color: var(--cb-hl-number); }
+.cb :deep(.hljs-title), .cb :deep(.hljs-section), .cb :deep(.hljs-name), .cb :deep(.hljs-selector-id), .cb :deep(.hljs-selector-class) { color: var(--cb-hl-title); }
+.cb :deep(.hljs-attr), .cb :deep(.hljs-attribute), .cb :deep(.hljs-property), .cb :deep(.hljs-type), .cb :deep(.hljs-built_in) { color: var(--cb-hl-attr); }
+.cb :deep(.hljs-meta), .cb :deep(.hljs-tag) { color: var(--cb-hl-meta); }
+.cb :deep(.hljs-deletion) { color: var(--cb-hl-deletion); }
 .cb :deep(.hljs-emphasis) { font-style: italic; }
 .cb :deep(.hljs-strong) { font-weight: 600; }
 </style>

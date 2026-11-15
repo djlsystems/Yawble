@@ -16,6 +16,7 @@ const api: YawbleApi = {
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   platform: process.platform,
   dimTitleBar: (dim) => ipcRenderer.send('window:dimTitleBar', dim),
+  setTheme: (theme) => ipcRenderer.send('window:setTheme', theme),
   shellSettings: () => ipcRenderer.invoke('shell:settings'),
   setShellSettings: (patch) => ipcRenderer.invoke('shell:setSettings', patch ? JSON.parse(JSON.stringify(patch)) : {}),
   openDocuments: (teamId) => ipcRenderer.invoke('window:openDocuments', teamId),

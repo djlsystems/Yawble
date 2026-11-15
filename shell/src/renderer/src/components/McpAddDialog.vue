@@ -375,8 +375,8 @@ useEscapeClose(() => emit('close'));
 </template>
 
 <style scoped>
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: flex; align-items: flex-start; justify-content: center; padding: 28px 16px; overflow: auto; z-index: 50; }
-.box { background: #fff; border-radius: 12px; padding: 14px 16px; width: min(760px, 100%); box-sizing: border-box; }
+.overlay { position: fixed; inset: 0; background: var(--backdrop); display: flex; align-items: flex-start; justify-content: center; padding: 28px 16px; overflow: auto; z-index: 50; }
+.box { background: var(--surface); border-radius: 12px; padding: 14px 16px; width: min(760px, 100%); box-sizing: border-box; }
 h3 { margin: 0; font-size: 16px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
 .grow { flex: 1; min-width: 0; }
@@ -388,7 +388,7 @@ h3 { margin: 0; font-size: 16px; }
 .importbox, .signin-box { border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 .cand { margin: 6px 0; }
 .indent { margin-left: 22px; }
-.envrow.needed { background: #fff6e0; border-radius: 6px; padding: 2px 4px; }
+.envrow.needed { background: var(--warn-soft); border-radius: 6px; padding: 2px 4px; }
 .pick { display: block; margin: 3px 0; }
 fieldset { border: 0; margin: 0; padding: 0; }
 fieldset.signin-box { border: 1px solid var(--line-soft); padding: 8px 10px; }

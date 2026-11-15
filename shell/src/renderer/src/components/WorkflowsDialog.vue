@@ -113,16 +113,16 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 <style scoped>
 .intro { margin: 0 0 10px; font-size: 13px; }
 .wfs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.wf { border: 1px solid var(--line); border-left: 4px solid var(--state-running, #2457c5); border-radius: 8px; padding: 8px 10px; background: #fff; }
+.wf { border: 1px solid var(--line); border-left: 4px solid var(--state-running); border-radius: 8px; padding: 8px 10px; background: var(--surface); }
 .wf.completed { border-left-color: var(--ok); opacity: .85; }
 .wf.closed { border-left-color: var(--muted); opacity: .8; }
-.wf.idle { border-left-color: var(--warn); background: #fffaf0; }
+.wf.idle { border-left-color: var(--warn); background: var(--warn-bg); }
 .top { display: flex; gap: 8px; align-items: baseline; }
 .chip { font-size: 11px; font-weight: 700; border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; white-space: nowrap; }
-.wf.idle .chip { color: var(--warn); border-color: #e9d29a; }
+.wf.idle .chip { color: var(--warn); border-color: var(--warn-line); }
 /* The workflow you are on (clicked here, or on the Monitor): an accent outline round the card, with a short pulse on arrival. */
 .wf { cursor: default; }
-.wf.sel { opacity: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 6%, #fff); }
+.wf.sel { opacity: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
 .wf.flash { animation: wf-flash 1.6s ease-out 1; }
 @keyframes wf-flash { 0%, 30% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 45%, transparent); } 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .wf.flash { animation: none; } }
@@ -133,7 +133,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .actions { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
 .actions input { font: inherit; font-size: 13px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; }
 .grow { flex: 1; }
-.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .muted { color: var(--muted); }
 .error { color: var(--bad); }
 </style>

@@ -90,11 +90,11 @@ const found = computed(() => !!props.detected?.found);
 .bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 h3 { margin: 0; font-size: 14px; }
 .chip { margin-left: 0; }
-.chip.ok { background: #e3f4e6; color: #1f6b2e; }
-.chip.missing { background: #f6e7e7; color: #8a2a2a; }
+.chip.ok { background: var(--pill-green-bg); color: var(--pill-green-ink); }
+.chip.missing { background: var(--pill-red-bg); color: var(--pill-red-ink); }
 .chip.mine { background: var(--chip); color: var(--ink-soft); }
 .running { display: inline-flex; align-items: center; gap: 4px; }
-.chip.live { background: #e3ecfb; color: #1f4f9a; display: inline-flex; align-items: center; gap: 5px; }
+.chip.live { background: var(--pill-blue-bg); color: var(--pill-blue-ink); display: inline-flex; align-items: center; gap: 5px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }

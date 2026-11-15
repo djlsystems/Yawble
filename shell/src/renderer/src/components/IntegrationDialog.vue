@@ -540,8 +540,8 @@ onMounted(async () => { await load(); syncEdit(); });
 </template>
 
 <style scoped>
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: flex; align-items: flex-start; justify-content: center; padding: 28px 16px; overflow: auto; z-index: 50; }
-.box { background: #fff; border-radius: 12px; padding: 14px 16px; width: min(900px, 100%); box-sizing: border-box; }
+.overlay { position: fixed; inset: 0; background: var(--backdrop); display: flex; align-items: flex-start; justify-content: center; padding: 28px 16px; overflow: auto; z-index: 50; }
+.box { background: var(--surface); border-radius: 12px; padding: 14px 16px; width: min(900px, 100%); box-sizing: border-box; }
 h3 { margin: 0; font-size: 16px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
@@ -554,7 +554,7 @@ h3 { margin: 0; font-size: 16px; }
 .fld input { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; margin-top: 2px; }
 .signin-box { border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 .indent { margin-left: 22px; }
-.needed { background: #fff6e0; border-radius: 6px; padding: 2px 4px; }
+.needed { background: var(--warn-soft); border-radius: 6px; padding: 2px 4px; }
 fieldset { border: 0; margin: 0; padding: 0; }
 fieldset.signin-box { border: 1px solid var(--line-soft); padding: 8px 10px; }
 .link { border: 0; background: transparent; color: var(--accent); }

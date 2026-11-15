@@ -149,7 +149,7 @@ const lab = (method: string, id: number, idle: string, busy: string) => (cardDoi
 .tile-cell > .team-card { height: 100%; box-sizing: border-box; }
 .team-card { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 12px 12px 14px; min-width: 0; min-height: 0; overflow: hidden;
   border-radius: 14px; border: 1px solid var(--line); background: var(--surface); text-align: left; }
-.team-card:hover { border-color: #b9c2d3; }
+.team-card:hover { border-color: var(--line-strong); }
 .card-open { flex: none; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 4px; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; max-width: 100%; }
 .card-open > .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -163,7 +163,7 @@ const lab = (method: string, id: number, idle: string, busy: string) => (cardDoi
 .icons-only .tile-btn .lbl { display: none; }
 .confirm-q { flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .danger-text { color: var(--bad); }
-.tile-btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.tile-btn.danger { background: var(--bad); border-color: var(--bad); color: var(--on-accent); }
 .team-card.archived { opacity: .75; }
 /* A team's state: the outline says it at a glance, the chip says it in words; running breathes. */
 .team-card { --team-state: var(--state-idle); }

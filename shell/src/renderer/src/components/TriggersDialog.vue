@@ -264,10 +264,10 @@ onMounted(load);
 
 <style scoped>
 .list { width: 100%; border-collapse: collapse; margin: 8px 0; }
-.list th, .list td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border, #ddd); vertical-align: top; }
+.list th, .list td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .actions { white-space: nowrap; }
-.chip { margin-left: 6px; font-size: 11px; padding: 0 5px; border-radius: 8px; background: var(--chip, #eee); }
-.chip.warn { background: #f6d58a; }
+.chip { margin-left: 6px; font-size: 11px; padding: 0 5px; border-radius: 8px; background: var(--chip); }
+.chip.warn { background: var(--warn-chip); }
 .form { display: flex; flex-direction: column; gap: 12px; }
 /* Every field: its label above it. Checkboxes and radios keep theirs beside them. */
 .form > label:not(.check), .form .fields > label:not(.check) { display: flex; flex-direction: column; gap: 4px; }

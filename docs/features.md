@@ -6,6 +6,8 @@ side by side in one team. Each agent run is isolated in its own sandbox (Microso
 
 The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Kanban board**, **Monitor** and **Logs**, plus Settings.
 
+The window has light and dark themes: the sun or moon button right of the Cloud Link icon in the title bar switches them (also **View > Theme** and **Toggle theme**); until you choose, the theme follows the OS, and **Theme: Use system setting** follows it again. The Monitor is always dark.
+
 ## Teams and members
 
 - A team has one **Manager** and any number of **members**. You tell the Manager what you want. It splits the work,

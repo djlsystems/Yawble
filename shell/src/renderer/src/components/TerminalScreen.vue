@@ -43,10 +43,10 @@ defineExpose({ size: () => view.value?.size() ?? null, focus: () => view.value?.
 </template>
 
 <style scoped>
-.screen-wrap { position: relative; height: 100%; min-height: 160px; display: flex; flex-direction: column; background: #101418; }
-.modes { display: flex; gap: 2px; padding: 4px 6px; background: #151b23; border-bottom: 1px solid #2c3542; }
-.modes button { font-size: 11.5px; padding: 2px 10px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: #9aa6b8; }
-.modes button.on { background: #222b36; border-color: #36404e; color: #e6ebf2; }
+.screen-wrap { position: relative; height: 100%; min-height: 160px; display: flex; flex-direction: column; background: var(--term-bg); }
+.modes { display: flex; gap: 2px; padding: 4px 6px; background: var(--term-bar); border-bottom: 1px solid var(--term-line); }
+.modes button { font-size: 11.5px; padding: 2px 10px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--term-muted); }
+.modes button.on { background: var(--term-btn-on); border-color: var(--term-btn-line); color: var(--term-on-ink); }
 .modes button:disabled { opacity: .5; }
 .layer { flex: 1; min-height: 0; position: relative; }
 /* Hidden but laid out, so xterm keeps its size and keeps receiving output. */

@@ -76,9 +76,9 @@ defineExpose({ check });
 </template>
 
 <style scoped>
-.git-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 18px; margin: 0; border: 1px solid #c0392b; background: #fdecea; color: #1d2330; }
+.git-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 18px; margin: 0; border: 1px solid var(--bad-line); background: var(--bad-bg); color: var(--ink); }
 .git-banner .text { flex: 1 1 320px; }
 .git-banner .actions { display: inline-flex; gap: 8px; align-items: center; }
-.git-banner .error { flex-basis: 100%; color: #a01818; }
+.git-banner .error { flex-basis: 100%; color: var(--bad); }
 .ok-line { padding: 6px 18px; margin: 0; color: var(--ok); }
 </style>

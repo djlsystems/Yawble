@@ -59,6 +59,6 @@ defineExpose({ load });
 .tool-asks { display: flex; flex-direction: column; gap: 8px; }
 .banner { padding: 8px 18px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--side); }
 .title { margin: 0; font-size: 13px; }
-.done { margin: 0; color: var(--good, #15803d); }
+.done { margin: 0; color: var(--ok); }
 .small { font-size: 12px; }
 </style>

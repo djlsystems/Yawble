@@ -425,8 +425,8 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 .head select, .dispatch select, .dispatch input { font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; }
 .intro { margin: 6px 0 12px; font-size: 13px; }
 .grow { flex: 1; }
-.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.danger { background: var(--bad); color: var(--on-accent); border-color: var(--bad); }
 .split { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
 .split.withItem { grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); }
 .list { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -437,7 +437,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 .list tr[data-test=backlog-row] { cursor: pointer; }
 .list tr[draggable=true] { cursor: grab; }
 /* The chosen item: an accent bar on its left edge, a tinted row and an outline, so it stands out from the list. */
-.list tr.sel td { background: color-mix(in srgb, var(--accent) 9%, #fff); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+.list tr.sel td { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent); }
 .list tr.sel td:first-child { box-shadow: inset 4px 0 0 var(--accent), inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent); }
 .list tr.sel td:last-child { box-shadow: inset -1px 0 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent); }
 .list tr.drop td { border-top: 2px solid var(--accent); }
@@ -448,12 +448,12 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 .acts { white-space: nowrap; }
 .mini { padding: 0 6px; font-size: 12px; }
 .mini.on { border-color: var(--accent); color: var(--accent); }
-.state { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: #f1f5f9; color: #475569; white-space: nowrap; }
-.state.ready { background: #e0f2fe; color: #0369a1; }
-.state.dispatched { background: #ede9fe; color: #5b21b6; }
-.state.flight { background: #dbeafe; color: #1d4ed8; box-shadow: inset 0 0 0 1px #93c5fd; }
-.state.declared { background: #fef9c3; color: #854d0e; }
-.state.implemented { background: #dcfce7; color: #166534; }
+.state { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--pill-neutral-bg); color: var(--pill-neutral-ink); white-space: nowrap; }
+.state.ready { background: var(--pill-info-bg); color: var(--pill-info-ink); }
+.state.dispatched { background: var(--pill-violet-bg); color: var(--pill-violet-ink); }
+.state.flight { background: var(--pill-blue-bg); color: var(--pill-blue-ink); box-shadow: inset 0 0 0 1px var(--pill-blue-line); }
+.state.declared { background: var(--pill-yellow-bg); color: var(--pill-yellow-ink); }
+.state.implemented { background: var(--pill-green-bg); color: var(--pill-green-ink); }
 .item, .itemform { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
 .item { min-height: 0; overflow: auto; }
 .item > * { flex: none; }
@@ -487,10 +487,10 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 .history h4 { margin: 4px 0; font-size: 13px; }
 .disp { border: 1px solid var(--line-soft); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 2px; }
 .drow { display: flex; gap: 6px; align-items: baseline; }
-.dstate { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #f1f5f9; color: #475569; }
-.dstate.open { background: #e0f2fe; color: #0369a1; }
-.dstate.completed { background: #dcfce7; color: #166534; }
-.dstate.gone { background: #fee2e2; color: #991b1b; }
+.dstate { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--pill-neutral-bg); color: var(--pill-neutral-ink); }
+.dstate.open { background: var(--pill-info-bg); color: var(--pill-info-ink); }
+.dstate.completed { background: var(--pill-green-bg); color: var(--pill-green-ink); }
+.dstate.gone { background: var(--pill-red-bg); color: var(--pill-red-ink); }
 .links { display: flex; gap: 10px; }
 .link { border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 12px; }
 .warn { color: var(--warn); margin: 0; }

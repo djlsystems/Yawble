@@ -161,7 +161,7 @@ async function notNow() {
 </template>
 
 <style scoped>
-.tool-ask { display: flex; flex-direction: column; gap: 4px; border: 1px solid #f3c38b; border-left: 3px solid #b45309; border-radius: 10px; padding: 8px 10px; background: #fff; font-size: 13px; }
+.tool-ask { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--warn-edge-soft); border-left: 3px solid var(--warn-edge); border-radius: 10px; padding: 8px 10px; background: var(--surface); font-size: 13px; }
 .tool-ask p { margin: 0; overflow-wrap: anywhere; }
 .hint, .progress { color: var(--ink-soft); }
 .note { font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; margin-top: 2px; }

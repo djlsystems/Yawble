@@ -104,6 +104,6 @@ input, select { font: inherit; font-size: 13px; padding: 4px 7px; border: 1px so
 .small { font-size: 12px; }
 .ok { color: var(--ok); } .warn { color: var(--warn); }
 .mini { border: 0; background: transparent; padding: 0 4px; }
-.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .error { color: var(--bad); }
 </style>

@@ -1,0 +1,11 @@
+/* The code browser's syntax-highlighting palette, light and dark. The host sets data-theme="light"|"dark" on <html>
+   (the shell's theme module does); without it the light palette applies. Everything else in the code browser uses the
+   host's own variables (--ink, --surface, --line, --accent, --state-running ...). CodeBrowser.vue imports this file. */
+:root {
+  --cb-hl-comment: #6a737d; --cb-hl-keyword: #a626a4; --cb-hl-string: #22863a; --cb-hl-number: #9a5a00;
+  --cb-hl-title: #2457c5; --cb-hl-attr: #986801; --cb-hl-meta: #2f63d6; --cb-hl-deletion: #b31d28;
+}
+:root[data-theme="dark"] {
+  --cb-hl-comment: #8b949e; --cb-hl-keyword: #d38ae8; --cb-hl-string: #7ee787; --cb-hl-number: #f0a35e;
+  --cb-hl-title: #79a8ff; --cb-hl-attr: #e5c07b; --cb-hl-meta: #7fb0ff; --cb-hl-deletion: #ff8b8b;
+}

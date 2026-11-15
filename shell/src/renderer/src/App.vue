@@ -29,6 +29,8 @@ import LoadingNote from './components/LoadingNote.vue';
 import GitBanner from './components/GitBanner.vue';
 import LogsDialog from './components/LogsDialog.vue';
 import UpdateBanner from './components/UpdateBanner.vue';
+import ThemeToggle from './components/ThemeToggle.vue';
+import { theme } from './theme';
 import type { AgentOption } from './components/Composer.vue';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
@@ -273,6 +275,12 @@ const menus = computed<Menu[]>(() => [
     { id: 'terminal', label: 'Terminal', keys: `${mod}\``, checked: terminalPane.open },
     { id: 'sidebar', label: 'Sidebar', keys: `${mod}B`, checked: !collapsed.value },
     { separator: true },
+    // The theme (theme.ts): the three modes as a radio, and the title-bar button's flip as a command.
+    { id: 'theme:system', label: 'Theme: Use system setting', radio: true, checked: theme.state.mode === 'system' },
+    { id: 'theme:light', label: 'Theme: Light', radio: true, checked: theme.state.mode === 'light' },
+    { id: 'theme:dark', label: 'Theme: Dark', radio: true, checked: theme.state.mode === 'dark' },
+    { id: 'toggleTheme', label: 'Toggle theme' },
+    { separator: true },
     { id: 'go:concierge', label: 'Concierge' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:backlog', label: 'Backlog' },
     { id: 'go:teams', label: 'Teams' }, { id: 'go:board', label: 'Kanban board' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
     ...(desktop ? [
@@ -305,6 +313,10 @@ function command(id: string) {
     case 'sidebar': collapsed.value = !collapsed.value; break;
     case 'about': menu('system'); break;
     case 'checkUpdates': void updateBanner.value?.checkNow(); break;
+    case 'theme:system': theme.setMode('system'); break;
+    case 'theme:light': theme.setMode('light'); break;
+    case 'theme:dark': theme.setMode('dark'); break;
+    case 'toggleTheme': theme.toggle(); break;
     default: if (api.windowCommand) api.windowCommand(id as Parameters<NonNullable<typeof api.windowCommand>>[0]);
   }
 }
@@ -343,6 +355,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           <span class="cdot" />
           <span v-if="link?.state === 'connected' && link.viewers.length" class="cnum" data-test="cloud-link-viewers">{{ link.viewers.length }}</span>
         </button>
+        <ThemeToggle />
       </header>
       <p v-if="terminalPane.stopError" class="error banner" data-test="terminal-stop-error">{{ terminalPane.stopError }} <button class="mini" @click="terminalPane.stopError = null">Dismiss</button></p>
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
@@ -408,10 +421,10 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .cloud-ind { position: relative; display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 8px; color: var(--muted); }
 .cloud-ind:hover { background: var(--hover); color: var(--ink); }
 .cloud-ind.off { opacity: .7; }
-.cloud-ind.connected { color: #2e9d4f; } /* connected: the cloud itself is filled green, no dot */
+.cloud-ind.connected { color: var(--dot-ok); } /* connected: the cloud itself is filled green, no dot */
 .cdot { position: absolute; left: 21px; top: 17px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--surface); display: none; }
-.cloud-ind.connecting .cdot, .cloud-ind.pairing .cdot { display: block; background: #e0a400; }
-.cloud-ind.offline .cdot { display: block; background: #c9473d; }
+.cloud-ind.connecting .cdot, .cloud-ind.pairing .cdot { display: block; background: var(--dot-wait); }
+.cloud-ind.offline .cdot { display: block; background: var(--dot-bad); }
 .cnum { font-size: 12px; font-weight: 600; }
 /* Own title bar: drag by the top bar and the sidebar's top row; keep clear of the window controls. */
 .own-bar .bar { -webkit-app-region: drag; height: 52px; box-sizing: border-box;

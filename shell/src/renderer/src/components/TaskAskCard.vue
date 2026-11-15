@@ -68,5 +68,5 @@ const short = (s: string | null | undefined) => (s ?? '').slice(0, 8);
 .muted { color: var(--muted); }
 .warn { color: var(--warn); }
 .changed { border-left: 3px solid var(--warn); padding-left: 8px; margin: 6px 0; }
-.diff { max-height: 260px; overflow: auto; background: #f6f6f6; padding: 6px; font-size: 11.5px; margin: 3px 0; white-space: pre; }
+.diff { max-height: 260px; overflow: auto; background: var(--surface-sunken); padding: 6px; font-size: 11.5px; margin: 3px 0; white-space: pre; }
 </style>
