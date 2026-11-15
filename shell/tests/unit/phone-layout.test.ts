@@ -73,6 +73,11 @@ function fakeApi(answers: Record<string, (params: any) => unknown>) {
   return { api, calls, called: (m: string) => calls.filter((c) => c.method === m) };
 }
 
+/** A component's scoped style rules inside its phone @media block, and the rules outside it (the desktop ones). */
+const PhoneBlock = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/;
+const phoneRules = (src: string) => PhoneBlock.exec(src)?.[1] ?? '';
+const desktopRules = (src: string) => (/<style scoped>([\s\S]*?)<\/style>/.exec(src)?.[1] ?? '').replace(PhoneBlock, '');
+
 const pointer = (type: string, x: number, y: number, id = 1) => new PointerEvent(type, { clientX: x, clientY: y, pointerId: id, isPrimary: true, bubbles: true });
 
 // ---------------------------------------------------------------- the helper itself
@@ -210,6 +215,13 @@ describe('the Kanban board on a phone', () => {
     await flushPromises();
     expect(visibleLanes(w)).toEqual(['todo', 'in-progress', 'blocked', 'done']);
     expect(w.get('[data-test=lane-todo] .count').text()).toBe('2');
+  });
+
+  it("makes the team link in an opened card's subtitle a 44 px tap target at phone width only (F5)", () => {
+    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/board/CardPanel.vue'), 'utf8');
+    const rules = phoneRules(src);
+    expect(rules).toMatch(/\.sub a \{[^}]*min-height: 44px; min-width: 44px; box-sizing: border-box/);
+    expect(desktopRules(src)).not.toMatch(/\.sub a \{/);
   });
 });
 
@@ -542,6 +554,21 @@ describe('Documents on a phone', () => {
     await settle();
     expect(shown(w, '[data-test=docs-list]')).toBe(true);
     expect(w.find('[data-test=docs-back]').exists()).toBe(false);
+  });
+
+  it('every breadcrumb (the Documents link up and each folder) is at least 44x44 at phone width only (F6)', async () => {
+    screen(Phone);
+    const { api } = docsApi();
+    const w = keep(mount(DocumentsBrowser, { props: { api, team: team as any, fill: true, above: 'Documents' } }));
+    await settle();
+    // The crumbs the rules reach: the link up and the team's own folder, all <a> inside nav.crumbs.
+    const links = w.findAll('nav.crumbs > a');
+    expect(links.map((a) => a.text())).toEqual(['Documents', team.name]);
+    expect(links[0]!.attributes('data-test')).toBe('docs-up');
+    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/DocumentsBrowser.vue'), 'utf8');
+    expect(phoneRules(src)).toMatch(/\.crumbs a \{[^}]*min-height: 44px; min-width: 44px; box-sizing: border-box/);
+    expect(desktopRules(src)).toMatch(/\.crumbs a \{ color: var\(--accent\); text-decoration: none; \}/);
+    expect(desktopRules(src)).not.toMatch(/\.crumbs a \{[^}]*min-/);
   });
 });
 
