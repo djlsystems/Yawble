@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { format } from 'node:util';
+import { PRIVATE_DIR, PRIVATE_FILE } from './private-files';
 
 /**
  * The window process's diagnostic log, the same on every OS: <data>/logs/shell-<yyyy-mm-dd>.log (the UTC day), one
@@ -31,8 +32,8 @@ export function diagnosticLog(dataDir: string, now: () => Date = () => new Date(
     if (!lines) return;
     try {
       const target = shellLogFile(dataDir, at);
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.appendFileSync(target, lines);
+      fs.mkdirSync(path.dirname(target), PRIVATE_DIR);
+      fs.appendFileSync(target, lines, PRIVATE_FILE);
     } catch { /* the diagnostic log is best effort */ }
   };
   const log = ((text: string) => {
