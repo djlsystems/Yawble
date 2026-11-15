@@ -83,7 +83,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     name is asked again.
   Only the exact host is allowed, only after your click, through the same checks as a policy change; it applies from
   the member's next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
-  blocked". A member whose own override narrows the host list also gets the host in its loosen block for an everywhere
+  blocked"; allows within 5 s of each other reach it as one message listing every host ("crl3.digicert.com and
+  ocsp.digicert.com are now allowed for Priya; ..."), so it runs once. A member whose own override narrows the host list also gets the host in its loosen block for an everywhere
   answer; a team's list is added after the override, so it reaches that member as it is. The Manager is told only once
   the member's effective hosts include it. If the policy store refuses the change, the item stays and shows why: in a
   remote view, a call the Cloud Link refuses says to answer it in the window, and any other failure shows its own
