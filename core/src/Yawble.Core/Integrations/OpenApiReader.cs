@@ -580,7 +580,9 @@ public static class OpenApiReader
             foreach (var (name, v) in vars)
                 if (v is JsonObject vo && Str(vo["default"]) is { } def)
                     url = url.Replace("{" + name + "}", def);
-        if (Uri.TryCreate(url, UriKind.Absolute, out _)) return CleanHttp(url);
+        // Only an http(s) parse counts as absolute: on macOS and Linux "/api" parses as file:///api, and on every OS
+        // "//host/api" parses as a file: share. Everything else is resolved against the spec url, as a browser would.
+        if (Uri.TryCreate(url, UriKind.Absolute, out var abs) && abs.Scheme is "http" or "https") return CleanHttp(url);
         if (specUrl is { IsAbsoluteUri: true } && specUrl.Scheme is "http" or "https" && Uri.TryCreate(specUrl, url, out var resolved)) return CleanHttp(resolved.ToString());
         return null;
     }

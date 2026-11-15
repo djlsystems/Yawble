@@ -248,7 +248,7 @@ public sealed partial class IntegrationService
         Uri.TryCreate(a, UriKind.Absolute, out var ua) && HttpUrl(b) is { } ub && SameOrigin(ua, ub);
 
     private static string ResourceRefusal(ConnectionView view, string resource, ApiRecord api) =>
-        $"{view.Name} is a sign-in for {(Uri.TryCreate(resource, UriKind.Absolute, out var r) ? r.Host : resource)}, not for {HttpUrl(api.BaseUrl)?.Host ?? api.Name}; " +
+        $"{view.Name} is a sign-in for {(Uri.TryCreate(resource, UriKind.Absolute, out var r) && r.Host.Length > 0 ? r.Host : resource)}, not for {HttpUrl(api.BaseUrl)?.Host ?? api.Name}; " +
         $"give {api.Name} its own OAuth sign-in in {ApisPlace}";
 
     /// <summary>What the agent is told when a Connection needs the person (Needs You shows it).</summary>

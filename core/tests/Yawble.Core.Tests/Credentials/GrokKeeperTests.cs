@@ -181,11 +181,37 @@ public class GrokKeeperTests
         f.Upstream.RefuseAll = true;
         using (var first = await Ask()) Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode); // Grok re-runs yawble-grok-auth and retries
         await Wait.UntilAsync(() => f.Keeper!.CurrentSession()?.AccessToken == FakeSecrets.GrokSession2, "keeper refreshed after the 401");
-        Assert.Contains(f.Log.Read(21), e => e.Kind == GatewayEventKinds.CredentialProblem && e.Detail!.Contains("asked the Grok keeper to refresh"));
+        Assert.Contains(f.Log.Read(21), e => e.Kind == GatewayEventKinds.CredentialProblem && e.Detail!.Contains(GrokRefusedWording));
         f.Upstream.RefuseAll = false;
         using var second = await Ask();
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         Assert.Equal("grok-session-2", second.Headers.GetValues("x-fake-accepted").Single());
+    }
+
+    /// <summary>The card reason RunGateway writes for an upstream 401 on Grok's own sign-in (UpstreamRefused).</summary>
+    private const string GrokRefusedWording = "the app asked grok to renew it";
+
+    /// <summary>
+    /// The wording on every OS. The test above skips on Windows (its stub grok is a /bin/sh script), which is how its old
+    /// "asked the Grok keeper to refresh" went unseen there; this one needs no stub: the grok it names is not there, so the
+    /// refresh it starts fails, and the 401's reason is what it checks.
+    /// </summary>
+    [Fact]
+    public async Task Gateway_OnAnUpstream401ForGrok_SaysTheAppAskedGrokToRenewIt_OnEveryOs()
+    {
+        await using var f = await GatewayFixture.StartAsync(keeper: new GrokKeeperOptions { GrokBinary = Path.Combine(Path.GetTempPath(), "yawble-no-grok-" + Guid.NewGuid().ToString("N"), "grok") });
+        f.Clock.Now = DateTimeOffset.UtcNow;
+        FakeSecrets.WriteGrokAuth(f.GrokHome, FakeSecrets.GrokSession1, f.Clock.Now.AddHours(1)); // looks valid, but xAI revoked it
+        await using var gateway = f.StartRun(23);
+        using var http = ProxyClient.For(gateway);
+        f.Upstream.RefuseAll = true;
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{Vhosts.Grok}/v1/models");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gateway.Token.Value);
+        using var resp = await http.SendAsync(req, Ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        var problem = Assert.Single(f.Log.Read(23), e => e.Kind == GatewayEventKinds.CredentialProblem);
+        Assert.Contains(GrokRefusedWording, problem.Detail);
+        Assert.Contains("run 'grok' in your own terminal", problem.Detail);
     }
 
     [Fact]

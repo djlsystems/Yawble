@@ -345,12 +345,12 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
 dispatcherForLink = dispatcher;
 link.Start();
 
-// Not disposed: ProcessExit can still fire after Main returns.
-var stop = new CancellationTokenSource();
-Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
-AppDomain.CurrentDomain.ProcessExit += (_, _) => stop.Cancel();
+// Not disposed: ProcessExit can still fire after Main returns. The first way out writes "core stopping: <reason>" to the core log.
+var stop = new Yawble.Core.Logs.CoreStop(line => Console.Error.WriteLine(line));
+Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Request("Ctrl+C"); };
+AppDomain.CurrentDomain.ProcessExit += (_, _) => stop.Request("the process was asked to end (SIGTERM or the system shutting down)");
 // After a restore the database file is replaced: answer the call, then leave so the shell starts the core again.
-backupService.RestartRequested = () => _ = Task.Run(async () => { await Task.Delay(750); stop.Cancel(); });
+backupService.RestartRequested = () => _ = Task.Run(async () => { await Task.Delay(750); stop.Request("restarting after a backup was restored"); });
 _ = backupService.RunDailyAsync(stop.Token);
 if (options.ExitOnStdinClose)
 {
@@ -360,7 +360,7 @@ if (options.ExitOnStdinClose)
         var buffer = new byte[256];
         using var stdin = Console.OpenStandardInput();
         while (await stdin.ReadAsync(buffer).ConfigureAwait(false) > 0) { }
-        stop.Cancel();
+        stop.Request("the window closed its connection (the app is quitting)");
     });
 }
 
