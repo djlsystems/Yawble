@@ -34,6 +34,7 @@ public class GuardrailCheckTests
         }
         foreach (var t in plan["tcp"]!.AsArray()) lines.Add(Line(t!["id"]!.GetValue<string>(), "blocked"));
         lines.Add(Line("net.dns", "blocked"));
+        foreach (var u in plan["unix"]?.AsArray() ?? []) lines.Add(Line(u!["id"]!.GetValue<string>(), "blocked"));
         lines.Add(Line("gateway.reachable", "allowed"));
         foreach (var id in new[] { "proc.host-signal", "proc.host-environ", "proc.host-ptrace", "credstore.dbus-session", "credstore.dbus-env", "display.env", "display.x11-socket", "secrets.scan" })
             lines.Add(Line(id, "blocked"));
@@ -150,9 +151,13 @@ public class GuardrailCheckTests
         // The Linux tarball installs to ~/.local/opt/yawble, and every run grants its bin/ (the probe) and roles
         // read-only, so bwrap creates ~/.local as a mount point and a listing of the home folder shows it. An earlier run
         // (42168545756) failed home.list on exactly that. A real host entry beside it must still count as a leak.
+        // The host entry is one the policy neither denies nor grants: ~/Documents (which this test used before) is in the
+        // global policy's default denied list, so the sandbox masks it with an empty mount and its name in a listing is
+        // a mask point, rightly BLOCKED, on every Linux (Fedora was only where the Linux-only test first ran).
         Assert.SkipUnless(OperatingSystem.IsLinux(), "the plan's OS-specific attempts are asserted for Linux here");
         await using var kit = GuardrailKit.Create(installUnderHome: true);
         Directory.CreateDirectory(Path.Combine(kit.Home, "Documents"));
+        Directory.CreateDirectory(Path.Combine(kit.Home, "projects"));
         string Listing(params string[] names) =>
             Line("home.list", "allowed", extra: $"\"entries\":{names.Length},\"names\":[{string.Join(',', names.Select(n => $"\"{n}\""))}]");
 
@@ -162,8 +167,15 @@ public class GuardrailCheckTests
         Assert.Equal(Verdicts.Blocked, ok.Verdict);
         Assert.Contains(".local", ok.Evidence);
 
-        var withHostEntry = new ScriptedSandbox((_, plan) => new SandboxOutcome(0, 0, false,
+        // A denied folder's name is the sandbox's empty mask over it, not the host's folder.
+        var withDeniedMask = new ScriptedSandbox((_, plan) => new SandboxOutcome(0, 0, false,
             AllBlocked(plan, l => l.Contains("\"home.list\"") ? Listing(".local", "Documents") : null), "", null));
+        var masked = (await kit.Check(withDeniedMask).RunAsync("payments", "ada", Ct)).Results.Single(r => r.Id == "home.list");
+        Assert.Equal(Verdicts.Blocked, masked.Verdict);
+        Assert.Contains("Documents", masked.Evidence);
+
+        var withHostEntry = new ScriptedSandbox((_, plan) => new SandboxOutcome(0, 0, false,
+            AllBlocked(plan, l => l.Contains("\"home.list\"") ? Listing(".local", "Documents", "projects") : null), "", null));
         var leak = (await kit.Check(withHostEntry).RunAsync("payments", "ada", Ct)).Results.Single(r => r.Id == "home.list");
         Assert.Equal(Verdicts.Allowed, leak.Verdict);
         Assert.False(leak.AsExpected);
@@ -285,7 +297,10 @@ public class GuardrailCheckTests
     public async Task WithoutASandboxTheCheckFails()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "the unsandboxed run uses the POSIX probe wrapper");
-        await using var kit = GuardrailKit.Create();
+        // The probe is a real process making real connections, so the gateway and the decoy must be on real loopback
+        // ports: with the in-memory ones (the default for scripted sandboxes) nothing listens on 127.0.0.1:<decoy> and
+        // the probe truthfully reports net.host-loopback BLOCKED (what the Mac run saw).
+        await using var kit = GuardrailKit.Create(realGateway: true);
         var report = await kit.Check(new UnsandboxedRunner()).RunAsync("payments", "ada", Ct);
 
         Assert.False(report.Passed);
@@ -309,6 +324,20 @@ public class GuardrailCheckTests
         Assert.False(File.Exists(Path.Combine(kit.Home, ".yawble-guardcheck-" + report.Id + "-w")));
         // The secret scan only looks inside the member's own folders, where no secret is.
         Assert.Equal(Verdicts.Blocked, V("secrets.scan"));
+    }
+
+    /// <summary>
+    /// The production decoy (and gateway) listener binds IPv4 127.0.0.1 itself, not an IPv6 or dual-stack socket, so the
+    /// probe's IPv4 connect to 127.0.0.1:&lt;decoy&gt; reaches it on every OS whenever nothing isolates the probe.
+    /// </summary>
+    [Fact]
+    public async Task TheDecoyListensOnIPv4Loopback_WhereTheProbeConnects()
+    {
+        using var decoy = new LoopbackGatewayListener();
+        decoy.Start();
+        using var s = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        await s.ConnectAsync(new System.Net.IPEndPoint(System.Net.IPAddress.Parse("127.0.0.1"), decoy.Port), Ct);
+        Assert.True(s.Connected);
     }
 
     /// <summary>

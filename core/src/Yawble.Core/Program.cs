@@ -36,7 +36,8 @@ if (options.Error is not null)
     return 2;
 }
 
-Directory.CreateDirectory(options.DataDir!);
+// The data folder is user-only on Linux and macOS (0700 folders, 0600 files): made so when missing, tightened below when not.
+Yawble.Core.Companion.UserOnlyFile.CreatePrivateDirectory(options.DataDir!);
 // One core per data folder (Lifetime/DataFolderLock): <data>/core.lock is held until this process ends, and a second core
 // on the same folder stops here with exit code 5 and a "fatal:" line the shell shows in a dialog. The shell's per-launch
 // IPC folder (POSIX: yawble-XXXXXX holding the socket) is ours to remove when we leave, refused or not.
@@ -54,6 +55,7 @@ Console.WriteLine("YAWBLE-STARTING");
 // Everything the core reports on standard error is also kept in <data>/logs/core-<day>.log (the Diagnostics log).
 Console.SetError(new Yawble.Core.Logs.DiagnosticLog(options.DataDir!, "core").Tee(Console.Error));
 Console.Error.WriteLine(CoreInfo.StartupLine());
+Yawble.Core.Storage.DataFolderAccess.Secure(options.DataDir!, Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!), line => Console.Error.WriteLine(line));
 // The IPC folders crashed launches left behind (no socket in them answers); never ours, never one that is still in use.
 if (launchFolder is not null && Path.GetDirectoryName(launchFolder) is { } runtimeBase)
     new Yawble.Core.Lifetime.RuntimeFolders(Yawble.Core.Lifetime.RuntimeFolders.UnixSocketAnswers, log: line => Console.Error.WriteLine(line))
@@ -78,6 +80,9 @@ catch (RestoreFatalException e)
     Console.Error.WriteLine("fatal: " + e.Message);
     return 4;
 }
+// A new database is made 0600 (POSIX) just before SQLite first opens it, which would make it 0644: SQLite gives the -wal
+// and -shm files the database file's own mode.
+Yawble.Core.Companion.UserOnlyFile.CreateEmptyIfMissing(dbPath);
 IReadOnlyList<string> applied;
 try
 {
@@ -363,12 +368,12 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
 dispatcherForLink = dispatcher;
 link.Start();
 
-// Not disposed: ProcessExit can still fire after Main returns.
-var stop = new CancellationTokenSource();
-Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
-AppDomain.CurrentDomain.ProcessExit += (_, _) => stop.Cancel();
+// Not disposed: ProcessExit can still fire after Main returns. The first way out writes "core stopping: <reason>" to the core log.
+var stop = new Yawble.Core.Logs.CoreStop(line => Console.Error.WriteLine(line));
+Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Request("Ctrl+C"); };
+AppDomain.CurrentDomain.ProcessExit += (_, _) => stop.Request("the process was asked to end (SIGTERM or the system shutting down)");
 // After a restore the database file is replaced: answer the call, then leave so the shell starts the core again.
-backupService.RestartRequested = () => _ = Task.Run(async () => { await Task.Delay(750); stop.Cancel(); });
+backupService.RestartRequested = () => _ = Task.Run(async () => { await Task.Delay(750); stop.Request("restarting after a backup was restored"); });
 _ = backupService.RunDailyAsync(stop.Token);
 if (options.ExitOnStdinClose)
 {
@@ -378,7 +383,7 @@ if (options.ExitOnStdinClose)
         var buffer = new byte[256];
         using var stdin = Console.OpenStandardInput();
         while (await stdin.ReadAsync(buffer).ConfigureAwait(false) > 0) { }
-        stop.Cancel();
+        stop.Request("the window closed its connection (the app is quitting)");
     });
 }
 

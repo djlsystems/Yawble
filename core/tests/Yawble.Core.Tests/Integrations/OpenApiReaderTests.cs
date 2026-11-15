@@ -314,6 +314,33 @@ public class OpenApiReaderTests
         Assert.Equal("https://docs.example.com:8443/", spec.ServerUrl);
     }
 
+    [Theory]
+    [InlineData("/api/v2", "https://docs.example.com/api/v2")]               // a file:///api/v2 URI on macOS and Linux
+    [InlineData("v2", "https://docs.example.com/spec/v2")]
+    [InlineData("//cdn.example.com/api", "https://cdn.example.com/api")]    // a file: share on Windows
+    [InlineData("https://api.example.com/x", "https://api.example.com/x")]
+    public void RelativeServer_IsResolvedAgainstTheSpecUrl_OnEveryOs(string server, string expected)
+    {
+        var spec = OpenApiReader.Read($$$"""{"openapi":"3.0.0","servers":[{"url":"{{{server}}}"}],"paths":{}}""", new Uri("https://docs.example.com/spec/openapi.json"));
+        Assert.Equal(expected, spec.ServerUrl);
+    }
+
+    [Theory]
+    [InlineData("file:///etc/api")]
+    [InlineData("ftp://files.example.com/api")]
+    public void NonHttpServer_IsNoServer(string server)
+    {
+        var spec = OpenApiReader.Read($$$"""{"openapi":"3.0.0","servers":[{"url":"{{{server}}}"}],"paths":{}}""", new Uri("https://docs.example.com/spec/openapi.json"));
+        Assert.Null(spec.ServerUrl);
+    }
+
+    [Fact]
+    public void RelativeServer_WithoutASpecUrl_IsNoServer()
+    {
+        var spec = OpenApiReader.Read("""{"openapi":"3.0.0","servers":[{"url":"/api"}],"paths":{}}""", null);
+        Assert.Null(spec.ServerUrl);
+    }
+
     // ---- parameters ----------------------------------------------------------------------------------------------------------
 
     [Fact]

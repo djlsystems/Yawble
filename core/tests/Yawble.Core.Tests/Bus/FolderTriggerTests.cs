@@ -90,14 +90,16 @@ public class FolderTriggerTests
         Assert.Equal("inbox", row.Watch!.Path);
     }
 
+    private const string MissingFolder = "<a full path that is not there>";
+
     [Theory]
     [InlineData("documents", "../outside", "inside the team's documents")]
     [InlineData("host", "relative/path", "full path")]
-    [InlineData("host", @"Z:\definitely\not\here\yawble", "is not there")]
+    [InlineData("host", MissingFolder, "is not there")] // a rooted path on the host OS (Z:\... is relative on macOS and Linux)
     [InlineData("elsewhere", "x", "documents or host")]
     public async Task AWatchThatCannotWorkIsRefused(string root, string path, string why)
     {
-        using var db = new TempDb();
+        if (path == MissingFolder) path = Path.Combine(Path.GetTempPath(), "definitely-not-here-" + Guid.NewGuid().ToString("N"), "yawble");        using var db = new TempDb();
         await using var engine = new BusEngine(db.OpenStore(), new ScriptedRunner(), new BusOptions());
         await engine.CreateTeamAsync("Alpha", ct: Ct);
         var ada = await engine.AddMemberAsync("Alpha", "Ada", ct: Ct);

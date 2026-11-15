@@ -45,6 +45,12 @@ internal sealed class UnixSocketEndpoint : IpcEndpoint
         {
             Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
+        else if (Directory.EnumerateFileSystemEntries(dir).All(e => e.EndsWith(".sock", StringComparison.Ordinal)) && Companion.UserOnlyFile.Tighten(dir))
+        {
+            // An existing per-launch folder (the shell's mkdtemp one is 0700 already) that was wider: made user-only. Only
+            // a folder holding nothing but sockets: a socket path in a shared folder (the home, /tmp) never changes that folder.
+            Console.Error.WriteLine($"ipc: made the socket folder {dir} user-only (group and other access removed)");
+        }
         if (File.Exists(path)) File.Delete(path); // a stale socket from a crashed core
         _socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         _socket.Bind(new UnixDomainSocketEndPoint(path));

@@ -90,7 +90,7 @@ public static class FileLogs
 
     public static readonly FileLogSource Diagnostics = new(
         "diagnostics", "Diagnostics", "Diagnostics",
-        "What the app itself reported while it ran: start-up, cloning and syncing, background work, and errors. For finding out why something went wrong.",
+        "What the app itself reported while it ran, from its core and its window (From: core or shell): start-up and shutdown, cloning and syncing, background work, and errors. For finding out why something went wrong.",
         [new("at", "Time", "", "time"), new("origin", "From", "", Filter: true), new("text", "Message", "")],
         dataDir =>
         {
@@ -141,8 +141,9 @@ public sealed class DiagnosticLog(string dataDir, string origin, TimeProvider? c
         {
             try
             {
-                Directory.CreateDirectory(Folder);
-                File.AppendAllText(Path.Combine(Folder, $"{origin}-{now:yyyy-MM-dd}.log"), sb.ToString());
+                // User-only on POSIX: a 0700 folder and 0600 files (Storage.DataFolderAccess).
+                Companion.UserOnlyFile.CreatePrivateDirectory(Folder);
+                Companion.UserOnlyFile.AppendAllText(Path.Combine(Folder, $"{origin}-{now:yyyy-MM-dd}.log"), sb.ToString());
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
