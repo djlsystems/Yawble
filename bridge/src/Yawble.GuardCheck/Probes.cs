@@ -21,7 +21,7 @@ public sealed partial class Probes(ProbePlan plan, ProbeOutput output, Func<stri
         Context();
         foreach (var r in plan.Reads) Read(r);
         foreach (var w in plan.Writes) Write(w);
-        await Task.WhenAll(plan.Tcp.Select(TcpAsync).Concat(plan.Dns.Select(DnsAsync)).Concat(plan.Unix.Select(UnixAsync)));
+        await Task.WhenAll(plan.Tcp.Select(TcpAsync).Concat(plan.Dns.Select(DnsAsync)).Concat(plan.Unix.Select(UnixAsync)).Concat(plan.DnsRaw.Select(DnsRawAsync)));
         await GatewayAsync();
         Processes();
         CredentialStores();
@@ -178,6 +178,87 @@ public sealed partial class Probes(ProbePlan plan, ProbeOutput output, Func<stri
         {
             output.Result(u.Id, u.Category, Blocked, $"no connection to {u.Path} ({e.SocketErrorCode})");
         }
+    }
+
+    /// <summary>
+    /// A DNS query sent straight to a nameserver address (no resolver library, no resolv.conf). UDP: allowed only when an
+    /// answer carrying the query's id comes back; a send the firewall refuses (EPERM), an ICMP refusal or silence is
+    /// blocked. TCP: a completed connect is already a route out (slirp completes the sandbox's handshake only once its own
+    /// connect to the host's resolver has succeeded), so it is allowed; the answer, if one comes, is named.
+    /// </summary>
+    private async Task DnsRawAsync(DnsRawProbe d)
+    {
+        var target = d.Host.Contains(':') ? $"[{d.Host}]:{d.Port}" : $"{d.Host}:{d.Port}";
+        var tcp = string.Equals(d.Transport, "tcp", StringComparison.OrdinalIgnoreCase);
+        var proto = tcp ? "TCP" : "UDP";
+        byte[] query;
+        try { query = DnsQuery.Build(d.Name, (ushort)Random.Shared.Next(1, 0xFFFF)); }
+        catch (ArgumentException e)
+        {
+            output.Result(d.Id, d.Category, Skip, $"not tried: {e.Message}");
+            return;
+        }
+        var ip = IPAddress.Parse(d.Host);
+        using var cts = new CancellationTokenSource(NetTimeout);
+        var connected = false;
+        try
+        {
+            using var s = new Socket(ip.AddressFamily, tcp ? SocketType.Stream : SocketType.Dgram, tcp ? ProtocolType.Tcp : ProtocolType.Udp);
+            var ep = new IPEndPoint(ip, d.Port);
+            await s.ConnectAsync(ep, cts.Token); // UDP: only sets the peer, so ICMP refusals come back as errors
+            connected = tcp;
+            if (tcp)
+            {
+                var framed = new byte[query.Length + 2];
+                framed[0] = (byte)(query.Length >> 8);
+                framed[1] = (byte)query.Length;
+                query.CopyTo(framed, 2);
+                await s.SendAsync(framed, SocketFlags.None, cts.Token);
+                var answer = await ReadTcpAnswerAsync(s, cts.Token);
+                output.Result(d.Id, d.Category, Allowed, answer is { } a && DnsQuery.Matches(query, a)
+                    ? $"DNS over TCP to {target} answered {d.Name} ({DnsQuery.Describe(a)})"
+                    : $"TCP connected to {target} (no DNS answer read)");
+                return;
+            }
+            await s.SendAsync(query, SocketFlags.None, cts.Token);
+            var buffer = new byte[1500];
+            while (true)
+            {
+                var n = await s.ReceiveAsync(buffer, SocketFlags.None, cts.Token);
+                if (!DnsQuery.Matches(query, buffer.AsSpan(0, n))) continue; // not our answer: keep waiting
+                output.Result(d.Id, d.Category, Allowed, $"DNS over UDP to {target} answered {d.Name} ({DnsQuery.Describe(buffer.AsSpan(0, n))})");
+                return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (connected) output.Result(d.Id, d.Category, Allowed, $"TCP connected to {target} (no DNS answer within {NetTimeout.TotalSeconds:0} s)");
+            else output.Result(d.Id, d.Category, Blocked, $"no DNS over {proto} from {target} (no answer within {NetTimeout.TotalSeconds:0} s)");
+        }
+        catch (SocketException e)
+        {
+            if (connected) output.Result(d.Id, d.Category, Allowed, $"TCP connected to {target}, then {e.SocketErrorCode}");
+            else output.Result(d.Id, d.Category, Blocked, $"no DNS over {proto} from {target} ({e.SocketErrorCode})");
+        }
+    }
+
+    private static async Task<byte[]?> ReadTcpAnswerAsync(Socket s, CancellationToken ct)
+    {
+        var length = new byte[2];
+        if (!await ReadExactlyAsync(s, length, ct)) return null;
+        var answer = new byte[(length[0] << 8) | length[1]];
+        return await ReadExactlyAsync(s, answer, ct) ? answer : null;
+    }
+
+    private static async Task<bool> ReadExactlyAsync(Socket s, byte[] buffer, CancellationToken ct)
+    {
+        for (var got = 0; got < buffer.Length;)
+        {
+            var n = await s.ReceiveAsync(buffer.AsMemory(got), SocketFlags.None, ct);
+            if (n == 0) return false;
+            got += n;
+        }
+        return true;
     }
 
     private async Task GatewayAsync()
