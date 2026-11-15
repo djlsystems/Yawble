@@ -128,3 +128,6 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 .btn-spinner.solo { margin-right: 0; }
 @keyframes btn-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .btn-spinner { animation: none; border-top-color: currentColor; opacity: .6; } }
+/* A remote view with read-only access (a workgroup Visitor; remoteAccess.ts): the chip, bottom left, over the screens. */
+.remote-access-chip { position: fixed; left: 12px; bottom: 12px; z-index: 1000; font-size: 12px; padding: 3px 10px; border-radius: 10px;
+  background: var(--warn-soft); color: var(--warn-ink); border: 1px solid var(--warn-line); box-shadow: 0 1px 3px var(--shadow-chip); pointer-events: none; }

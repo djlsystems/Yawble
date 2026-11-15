@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vChange } from '../remoteAccess';
 import { discussWithConcierge, toolAskPrompt } from '../conciergeDiscuss';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { ToolAsk, ToolInstallCode, ToolInstallProgress, ToolInstallResult, ToolNotNowResult, YawbleApi } from '../../../shared/api';
@@ -141,15 +142,15 @@ async function notNow() {
 
     <input v-if="!installing" v-model="note" class="note" placeholder="A note for the agent if you say Not now (optional)" maxlength="500" data-test="tool-ask-note" />
     <div class="buttons">
-      <button v-if="canInstall" class="primary" data-test="tool-ask-install" :disabled="busy.is('answer') || installing" :aria-busy="installing"
+      <button v-if="canInstall" class="primary" v-change data-test="tool-ask-install" :disabled="busy.is('answer') || installing" :aria-busy="installing"
         :title="`Runs the command above on this computer, then looks for ${ask.tool} again`" @click="install">
         <BusyLabel :busy="installing" text="Installing…">{{ installLabel }}</BusyLabel>
       </button>
-      <button v-if="canCheckAgain" :class="{ primary: !canInstall }" data-test="tool-ask-checkAgain" :disabled="busy.is('answer') || installing" :aria-busy="busy.is('answer', 'checkAgain')"
+      <button v-if="canCheckAgain" :class="{ primary: !canInstall }" v-change data-test="tool-ask-checkAgain" :disabled="busy.is('answer') || installing" :aria-busy="busy.is('answer', 'checkAgain')"
         :title="`Looks for ${ask.tool} again where the team's runs look for it; installs nothing`" @click="checkAgain">
         <BusyLabel :busy="busy.is('answer', 'checkAgain')" text="Checking…">Check again</BusyLabel>
       </button>
-      <button data-test="tool-ask-notNow" :disabled="busy.is('answer') || installing" :aria-busy="busy.is('answer', 'notNow')"
+      <button v-change data-test="tool-ask-notNow" :disabled="busy.is('answer') || installing" :aria-busy="busy.is('answer', 'notNow')"
         title="Closes it; the agent is told, and the team is not asked about this tool again for 24 hours" @click="notNow">
         <BusyLabel :busy="busy.is('answer', 'notNow')" text="Closing…">Not now</BusyLabel>
       </button>

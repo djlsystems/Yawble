@@ -25,7 +25,12 @@ export interface CoreInfo {
   sandbox: SandboxInfo;
   schema: string[];
   hostChecks?: HostCheck[];
+  /** A remote view's access, over the Cloud Link (B025): "read" for a workgroup Visitor. Missing means "full". */
+  remoteAccess?: RemoteAccess;
 }
+
+/** What a remote viewer may do: everything ("full": an Owner or a workgroup Member) or only look ("read": a Visitor). */
+export type RemoteAccess = 'full' | 'read';
 
 /** This build's version (core app.version; scripts/build-version.mjs). */
 export interface AppVersion {

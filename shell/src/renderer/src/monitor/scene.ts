@@ -1,4 +1,5 @@
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Simulation, type SimulationNodeDatum } from 'd3-force';
+import { LayoutDefaults, type LayoutSettings } from './layout';
 import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type MemberState } from '../faces/faces';
 import { DoingMs, memberKey, teamKey, spaced, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
 import type { WorkflowSummary } from '../../../shared/api';
@@ -67,6 +68,14 @@ export const FitOnceMs = 1_500;
  * Whether the camera aims at everything at `now`. Auto fit: unless the person moved the wall in the last 12 s. Pinned:
  * only during a one-off Fit (until `fitUntil`).
  */
+/**
+ * Where team i of count sits on the wall's oval (radians, 0 = right, clockwise on screen): the first on the left, the
+ * rest evenly round from there, so two teams sit side by side across the wide axis rather than one above the other.
+ */
+export function teamAngle(i: number, count: number): number {
+  return count <= 1 ? 0 : Math.PI + (i / count) * Math.PI * 2;
+}
+
 export function aimsAtEverything(pinned: boolean, now: number, movedAt: number, fitUntil: number): boolean {
   return pinned ? now < fitUntil : now - movedAt > RefitAfterMs;
 }
@@ -112,6 +121,8 @@ export class MonitorScene {
   /** Pinned: the camera never fits on its own; Fit (or a double-click) fits once. */
   private pinned = false;
   private fitUntil = -Infinity;
+  /** The person's force multipliers (monitor/layout.ts); the scene's own values until setLayout. */
+  private layout: LayoutSettings = { ...LayoutDefaults };
   private raf = 0;
   private last = 0;
   private dpr = 1;
@@ -143,14 +154,12 @@ export class MonitorScene {
     this.ctx = canvas.getContext('2d')!;
     this.reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.sim = forceSimulation<Node>([])
-      .alphaDecay(0.02).velocityDecay(0.32).alphaTarget(this.reduced ? 0 : 0.012)
-      .force('charge', forceManyBody<Node>().strength((n) => (n.kind === 'team' ? -600 : n.kind === 'workflows' ? -320 : -280)))
-      .force('link', forceLink<Node, Link>([]).distance((l) => this.spoke(l.source.team)).strength(0.55))
-      .force('wflink', forceLink<Node, Link>([]).distance((l) => this.spoke(l.source.team) + WorkflowPast + l.target.r * 0.75).strength(0.35))
+      .alphaDecay(0.02).alphaTarget(this.reduced ? 0 : 0.012)
+      .force('link', forceLink<Node, Link>([]))
+      .force('wflink', forceLink<Node, Link>([]))
       .force('collide', forceCollide<Node>().radius((n) => n.r + (n.kind === 'team' ? 30 : n.kind === 'workflows' ? 12 : 24)))
-      .force('x', forceX<Node>((n) => n.homeX).strength((n) => (n.kind === 'team' ? 0.12 : 0.02)))
-      .force('y', forceY<Node>((n) => n.homeY).strength((n) => (n.kind === 'team' ? 0.12 : 0.02)))
       .stop();
+    this.applyLayout();
     void loadAvatarSheet();
     this.listen();
     this.raf = requestAnimationFrame(this.frame);
@@ -160,6 +169,27 @@ export class MonitorScene {
     cancelAnimationFrame(this.raf);
     this.sim.stop();
     this.unlisten?.();
+  }
+
+  /** The person's layout multipliers (the cog beside Pinned): from now on, and the graph is woken so it moves to them. */
+  setLayout(layout: LayoutSettings): void {
+    this.layout = { ...layout };
+    this.applyLayout();
+    this.sim.alpha(Math.max(this.sim.alpha(), 0.5));
+  }
+
+  /** The forces, at the scene's own values times the person's multipliers. Setting an accessor again makes d3 read it again. */
+  private applyLayout(): void {
+    const { distance, strength, repulsion, gravity, friction } = this.layout;
+    const link = this.sim.force('link') as ReturnType<typeof forceLink<Node, Link>>;
+    const wflink = this.sim.force('wflink') as ReturnType<typeof forceLink<Node, Link>>;
+    this.sim
+      .velocityDecay(Math.min(0.9, Math.max(0.05, 0.32 * friction)))
+      .force('charge', forceManyBody<Node>().strength((n) => (n.kind === 'team' ? -600 : n.kind === 'workflows' ? -320 : -280) * repulsion))
+      .force('x', forceX<Node>((n) => n.homeX).strength((n) => (n.kind === 'team' ? 0.12 : 0.02) * gravity))
+      .force('y', forceY<Node>((n) => n.homeY).strength((n) => (n.kind === 'team' ? 0.12 : 0.02) * gravity));
+    link.distance((l) => this.spoke(l.source.team) * distance).strength(Math.min(1, 0.55 * strength));
+    wflink.distance((l) => (this.spoke(l.source.team) + WorkflowPast) * distance + l.target.r * 0.75).strength(Math.min(1, 0.35 * strength));
   }
 
   /** How long a team's member spokes are. */
@@ -187,7 +217,7 @@ export class MonitorScene {
     const rx = Math.max(140, 150 + count * 34);
     const ry = rx * 0.62;
     teams.forEach((t, i) => {
-      const angle = count === 1 ? 0 : (i / count) * Math.PI * 2 - Math.PI / 2;
+      const angle = teamAngle(i, count);
       const homeX = count === 1 ? 0 : Math.cos(angle) * rx;
       const homeY = count === 1 ? 0 : Math.sin(angle) * ry;
       const hue = (i * 137.508 + 190) % 360;

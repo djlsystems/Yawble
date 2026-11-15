@@ -31,6 +31,130 @@ public static class RemoteAccess
         "code.",
     ];
 
+    /// <summary>A viewer who may change things: an Owner or a workgroup Member (the site's "full"; also a site that does not say).</summary>
+    public const string Full = "full";
+
+    /// <summary>A viewer who may only look: a workgroup Visitor (the site's "read").</summary>
+    public const string Read = "read";
+
+    /// <summary>What a read-only viewer reads when a call would change something.</summary>
+    public const string ReadOnlyRefusal = "You have read-only access to this computer (Visitor). Ask a workgroup Member or an Owner for more.";
+
+    /// <summary>A call's access as the site sent it (call["access"]): only "read" is read-only; missing or anything else is full (an older site).</summary>
+    public static string AccessOf(JsonNode? value) =>
+        value is JsonValue v && v.TryGetValue<string>(out var s) && s == Read ? Read : Full;
+
+    public enum Kind
+    {
+        /// <summary>Changes nothing: a read-only viewer may call it.</summary>
+        Reads,
+        /// <summary>Changes something: refused for a read-only viewer.</summary>
+        Changes,
+        /// <summary>Reads a setting, or sets it when the call carries "on" (teams.push, teams.syncToBase).</summary>
+        ReadsUnlessOn,
+    }
+
+    /// <summary>
+    /// Every method on the allow list above, read or change, for a read-only viewer (a Visitor). A method missing here
+    /// is a change, so a new method is refused for read-only viewers until it is listed as a read. Terminals (attach,
+    /// typing, resize, opening and stopping, host and agent) are changes: a read-only terminal view is not offered.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, Kind> Kinds = Table(
+        reads:
+        [
+            "app.overview", "app.version", "monitor.messages", "monitor.steps",
+            "teams.list", "teams.agents", "teams.quiet", "teams.env", "teams.approvals", "teams.repos",
+            "docs.list", "docs.read", "docs.folder",
+            "members.get",
+            "bus.decisions", "bus.workflows",
+            "policy.getGlobal", "policy.getMember", "policy.previewLoosen", "policy.teamHosts",
+            "credentials.status",
+            "terminal.banner",
+            "skills.list",
+            "triggers.list", "triggers.preview",
+            "git.status", "git.check",
+            "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
+            "guardrail.get",
+            "agents.detect", "agents.testSessions", "agents.commandLine", "agents.defaultModels", "agents.models", "agents.resolveModel",
+            "agents.runRecords", "agents.versionStatus",
+            "runs.list",
+            // concierge.read only clears the chat's unread marker: opening a chat is a read.
+            "concierge.list", "concierge.get", "concierge.read",
+            "board.list", "board.card", "backlog.list", "backlog.item",
+            "integrations.list", "integrations.asks", "integrations.calls", "integrations.checklist", "integrations.connectionAttention",
+            "integrations.connections", "integrations.discoverStatus", "integrations.mcpList", "integrations.apiList", "integrations.watches",
+            "integrations.taskRuns", "integrations.mcpParse",
+            "tasks.list", "tasks.asks", "tasks.runs",
+            "ops.backups",
+            "network.asks",
+            "tools.catalog", "tools.asks",
+            "logs.query", "logs.sources", "logs.values", "logs.who", "logs.prunePreview",
+            "updates.status",
+            "code.list", "code.open", "code.read", "code.close", "code.download",
+        ],
+        readsUnlessOn: ["teams.push", "teams.syncToBase"],
+        changes:
+        [
+            "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",
+            "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo",
+            "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
+            "members.add", "members.remove", "members.update",
+            "bus.tellManager", "bus.answer", "bus.closeWorkflow", "bus.stopWorkflow", "bus.nudgeWorkflow",
+            "policy.saveGlobal", "policy.saveOverride", "policy.saveLoosen", "policy.removeTeamHost",
+            "credentials.setClaudeSetupToken", "credentials.setAnthropicApiKey", "credentials.setXaiApiKey", "credentials.remove", "credentials.setMode",
+            "hostTerminal.start",
+            "terminal.attach", "terminal.input", "terminal.resize", "terminal.openInteractive", "terminal.stop",
+            "skills.save", "skills.delete",
+            "triggers.save", "triggers.delete", "triggers.runNow",
+            "git.fetch", "git.bringCurrent", "git.merge", "git.sync", "git.askTeam", "git.deleteBranches", "git.install",
+            "guardrail.start", "guardrail.stop",
+            "agents.test", "agents.stopTest", "agents.setDefaultModel", "agents.checkForUpdates", "agents.install",
+            "runs.stop",
+            "concierge.send", "concierge.stop", "concierge.rename", "concierge.delete", "concierge.setTeam", "concierge.unwatch", "concierge.setWatch",
+            "board.clearDone", "board.restore", "board.move", "board.edit", "board.comment",
+            "backlog.add", "backlog.archive", "backlog.delete", "backlog.dispatch", "backlog.dispatchNew", "backlog.edit", "backlog.move",
+            "backlog.position", "backlog.restore",
+            "integrations.apiDeleteRule", "integrations.apiEnable", "integrations.apiRemove", "integrations.apiSave", "integrations.approve",
+            "integrations.decline", "integrations.connectionRemove", "integrations.connectionSave", "integrations.connectionTest",
+            "integrations.deleteRule", "integrations.deleteWatch", "integrations.detect", "integrations.discover", "integrations.discoverCancel",
+            "integrations.enable", "integrations.mcpCheck", "integrations.mcpDeleteRule", "integrations.mcpEnable", "integrations.mcpImport",
+            "integrations.mcpImportScan", "integrations.mcpRemove", "integrations.mcpSave", "integrations.mcpSaveRule", "integrations.mcpSignIn",
+            "integrations.oauthDiscover", "integrations.oauthSignIn", "integrations.openLogin", "integrations.remove", "integrations.runWatch",
+            "integrations.saveChecklist", "integrations.saveRule", "integrations.saveWatch", "integrations.websiteSignIn",
+            "integrations.websiteSignInDone",
+            // A preview evaluates the definition against the checkout: part of editing a task, which a reader cannot save.
+            "tasks.preview", "tasks.approve", "tasks.cancel", "tasks.decline", "tasks.delete", "tasks.revoke", "tasks.runNow", "tasks.save",
+            "network.answer",
+            "tools.notNow", "tools.checkAgain",
+            "logs.prune", "logs.setRetention",
+        ]);
+
+    private static Dictionary<string, Kind> Table(string[] reads, string[] readsUnlessOn, string[] changes)
+    {
+        var table = new Dictionary<string, Kind>(StringComparer.Ordinal);
+        foreach (var m in reads) table.Add(m, Kind.Reads);
+        foreach (var m in readsUnlessOn) table.Add(m, Kind.ReadsUnlessOn);
+        foreach (var m in changes) table.Add(m, Kind.Changes);
+        return table;
+    }
+
+    /// <summary>Whether a method's name is on the allow list (before the per-call checks of <see cref="Refusal"/>).</summary>
+    internal static bool OnAllowList(string method) =>
+        Allowed.Any(p => p.EndsWith('.') ? method.StartsWith(p, StringComparison.Ordinal) : method == p);
+
+    /// <summary>Whether a call only reads, by the table: a method missing from it changes something.</summary>
+    public static bool Reads(string method, JsonObject? parameters) =>
+        Kinds.TryGetValue(method, out var kind) && (kind == Kind.Reads || kind == Kind.ReadsUnlessOn && parameters?["on"] is null);
+
+    /// <summary>Null when the call is allowed for a viewer with this access; otherwise the reason, as the remote person reads it.</summary>
+    /// <param name="access"><see cref="Full"/> or <see cref="Read"/> (<see cref="AccessOf"/>): a read-only viewer's change call gets
+    /// <see cref="ReadOnlyRefusal"/>, whatever else would refuse it; a read goes on to the checks every viewer has.</param>
+    public static string? Refusal(string method, JsonObject? parameters, bool allowHostTerminals, string access, Func<string, bool>? isIntegration = null,
+        Func<string, bool>? isRemoteMcp = null, bool showCode = true) =>
+        access == Read && !Reads(method, parameters)
+            ? ReadOnlyRefusal
+            : Refusal(method, parameters, allowHostTerminals, isIntegration, isRemoteMcp, showCode);
+
     /// <summary>Null when the call is allowed; otherwise the reason, as the remote person reads it.</summary>
     /// <param name="showCode">"Show members' code to cloud viewers" (Settings > Cloud Link, on by default): off refuses every code. call.</param>
     /// <param name="isIntegration">Whether a CLI name is already an integration detected on this computer (a stored path to a program): remote detect / enable / discover / saveRule of it is allowed.</param>
@@ -66,7 +190,7 @@ public static class RemoteAccess
             return Integrations.ToolAskService.InstallRefusal;
         if (method is "ops.backupNow" or "ops.restore")
             return "backups can only be made or restored on the computer itself";
-        if (!Allowed.Any(p => p.EndsWith('.') ? method.StartsWith(p, StringComparison.Ordinal) : method == p))
+        if (!OnAllowList(method))
             return $"'{method}' is not available through the Cloud Link";
         if (method == "integrations.openLogin")
             return "opening a terminal happens on the computer itself: sign in there";
