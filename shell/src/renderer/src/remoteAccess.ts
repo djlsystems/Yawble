@@ -51,9 +51,9 @@ export async function loadRemoteAccess(getInfo: () => Promise<CoreInfo>, doc: Do
 }
 
 // v-change: marks a button that changes something. In a read-only view it is disabled, with the reason as its title.
-// The element's own :disabled binding wins again when the view has full access: it is read from the vnode on every
-// mount and update, so going from read back to full gives back what the screen says now (an invalid form, a busy
-// approval), not always "enabled".
+// The element's own :disabled and :title bindings win again when the view has full access: they are read from the vnode
+// on every mount and update, so going from read back to full gives back what the screen says now (an invalid form, a
+// busy approval, a title changed while read), not always "enabled" or the title from before read.
 const marked = new Set<HTMLElement>();
 const ownTitle = new WeakMap<HTMLElement, string | null>();
 const ownDisabled = new WeakMap<HTMLElement, boolean>();
@@ -64,25 +64,35 @@ function screenDisabled(vnode: VNode): boolean {
   return v === '' || !!v;
 }
 
+/** The screen's own title for this element (null when it sets none), as Vue renders the attribute. */
+function screenTitle(vnode: VNode): string | null {
+  const v = (vnode.props as Record<string, unknown> | null)?.title;
+  return v === null || v === undefined || v === false ? null : String(v);
+}
+
+function remember(el: HTMLElement, vnode: VNode) {
+  ownDisabled.set(el, screenDisabled(vnode));
+  ownTitle.set(el, screenTitle(vnode));
+}
+
 function apply(el: HTMLElement) {
   const control = el as HTMLButtonElement;
   if (readOnly.value) {
-    if (el.dataset.readOnly !== '1') ownTitle.set(el, el.getAttribute('title'));
     control.disabled = true;
     el.dataset.readOnly = '1';
     el.title = READ_ONLY_TITLE;
   } else if (el.dataset.readOnly === '1') {
     delete el.dataset.readOnly;
     control.disabled = ownDisabled.get(el) ?? false;
-    const t = ownTitle.get(el);
-    if (t === null || t === undefined) el.removeAttribute('title');
+    const t = ownTitle.get(el) ?? null;
+    if (t === null) el.removeAttribute('title');
     else el.title = t;
   }
 }
 
 export const vChange: Directive<HTMLElement> = {
-  mounted(el, _binding, vnode) { ownDisabled.set(el, screenDisabled(vnode)); marked.add(el); apply(el); },
-  updated(el, _binding, vnode) { ownDisabled.set(el, screenDisabled(vnode)); apply(el); },
+  mounted(el, _binding, vnode) { remember(el, vnode); marked.add(el); apply(el); },
+  updated(el, _binding, vnode) { remember(el, vnode); apply(el); },
   unmounted(el) { marked.delete(el); },
 };
 
