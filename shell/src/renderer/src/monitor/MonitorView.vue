@@ -6,6 +6,7 @@ import MemberAvatar from '../faces/MemberAvatar.vue';
 import { MemberStateLabel, memberStateOf, type MemberState } from '../faces/faces';
 import { memberKey, MonitorModel, spaced, teamKey, type ActivityRow, type FeedRow, type TeamSnapshot } from './model';
 import { MonitorScene, Palette, type SceneHover } from './scene';
+import { clampLayout, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, LayoutStep, readLayout, writeLayout, type LayoutKey, type LayoutSettings } from './layout';
 import { readStep, StepLook, type StepKind, type StepRow } from './steps';
 import Timeline from './Timeline.vue';
 import LoadingNote from '../components/LoadingNote.vue';
@@ -57,6 +58,24 @@ function setPinned(on: boolean): void {
   pinned.value = on;
   scene?.setPinned(on);
   try { localStorage.setItem('yawble.monitor.camera', on ? 'pinned' : 'auto'); } catch { /* not kept */ }
+}
+// The layout forces (the cog beside Pinned): multipliers on the wall's link distance, link strength, repulsion,
+// gravity and friction, applied as they change and remembered in this app's storage.
+const layout = ref<LayoutSettings>(readLayout());
+const layoutOpen = ref(false);
+const layoutChanged = computed(() => !isDefaultLayout(layout.value));
+function setLayoutValue(key: LayoutKey, value: unknown): void {
+  layout.value = { ...layout.value, [key]: clampLayout(value, LayoutDefaults[key]) };
+  scene?.setLayout(layout.value);
+  writeLayout(layout.value);
+}
+function resetLayout(): void {
+  layout.value = { ...LayoutDefaults };
+  scene?.setLayout(layout.value);
+  writeLayout(layout.value);
+}
+function onLayoutKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') { e.stopPropagation(); layoutOpen.value = false; }
 }
 /** Fit: everything, once; from Auto fit it pins the camera there. */
 function fitOnce(): void {
@@ -371,6 +390,7 @@ onMounted(async () => {
     scene = new MonitorScene(canvas.value);
     scene.model = live;
     scene.setPinned(pinned.value);
+    if (layoutChanged.value) scene.setLayout(layout.value);
     scene.onHover = (h) => { hover.value = h; };
     scene.onPick = (k) => { picked.value = k; };
     scene.onOpenWorkflow = (team, id) => {
@@ -414,8 +434,34 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
             <button class="ctl" :class="{ on: pinned }" :aria-pressed="pinned" data-test="monitor-pin"
               title="Pinned: the zoom and position stay where you put them" @click="setPinned(true)">Pinned</button>
           </div>
+          <button class="ctl cog" :class="{ on: layoutOpen, changed: layoutChanged }" type="button" data-test="monitor-layout-toggle"
+            :aria-expanded="layoutOpen" aria-controls="monitor-layout" aria-label="Network forces"
+            :title="layoutChanged ? 'Network forces (changed from the defaults)' : 'Network forces'" @click="layoutOpen = !layoutOpen">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 5.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z" fill="none" stroke="currentColor" stroke-width="1.3" />
+              <path d="M6.9 1.5h2.2l.35 1.7 1.15.5 1.45-.95 1.55 1.55-.95 1.45.5 1.15 1.7.35v2.2l-1.7.35-.5 1.15.95 1.45-1.55 1.55-1.45-.95-1.15.5-.35 1.7H6.9l-.35-1.7-1.15-.5-1.45.95-1.55-1.55.95-1.45-.5-1.15-1.7-.35V6.9l1.7-.35.5-1.15-.95-1.45L3.95 2.4l1.45.95 1.15-.5z"
+                fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+            </svg>
+          </button>
           <button v-if="phone" class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
             :aria-expanded="legendOpen" :title="legendOpen ? 'Hide the legend' : 'Show the legend'" @click="toggleLegend">{{ legendOpen ? 'Legend ▾' : 'Legend ▸' }}</button>
+        </div>
+        <div v-if="layoutOpen" id="monitor-layout" class="forces" role="dialog" aria-label="Network forces" data-test="monitor-layout" @keydown="onLayoutKey">
+          <header>
+            <strong>Network forces</strong>
+            <button class="ctl close" type="button" aria-label="Close" data-test="monitor-layout-close" @click="layoutOpen = false">×</button>
+          </header>
+          <label v-for="f in LayoutFields" :key="f.key" class="force" :title="f.help">
+            <span class="name">{{ f.label }}</span>
+            <input type="range" :min="LayoutMin" :max="LayoutMax" :step="LayoutStep" :value="layout[f.key]" :data-test="`monitor-layout-${f.key}`"
+              @input="setLayoutValue(f.key, ($event.target as HTMLInputElement).value)" />
+            <span class="val">{{ layout[f.key].toFixed(2) }}×</span>
+            <span class="help">{{ f.help }}</span>
+          </label>
+          <footer>
+            <span class="dim">Saved for this app.</span>
+            <button class="ctl" type="button" :disabled="!layoutChanged" data-test="monitor-layout-reset" @click="resetLayout">Reset</button>
+          </footer>
         </div>
         <button v-if="!phone" class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
           :aria-expanded="legendOpen" :title="legendOpen ? 'Hide the legend' : 'Show the legend'" @click="toggleLegend">{{ legendOpen ? 'Legend ▾' : 'Legend ▸' }}</button>
@@ -561,6 +607,20 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 .seg .ctl:last-child { border-radius: 0 6px 6px 0; }
 .seg .ctl:hover { position: relative; }
 .seg .ctl.on { background: rgba(56, 189, 248, .18); border-color: #38bdf8; color: #e0f2fe; position: relative; }
+/* The cog beside Pinned, and the forces panel it opens under the controls. */
+.cog { display: inline-flex; align-items: center; padding: 3px 6px; color: #94a3b8; }
+.cog svg { width: 15px; height: 15px; }
+.cog:hover, .cog.on { color: #e0f2fe; }
+.cog.changed { color: #7dd3fc; }
+.forces { position: absolute; top: 44px; right: 12px; z-index: 3; width: 19rem; display: flex; flex-direction: column; gap: 10px;
+  background: rgba(12, 19, 34, .96); border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; font-size: 12px; }
+.forces header, .forces footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.forces .close { padding: 0 8px; }
+.force { display: grid; grid-template-columns: 1fr 3.4rem; grid-template-areas: 'name val' 'range range' 'help help'; gap: 2px 8px; }
+.force .name { grid-area: name; color: #e2e8f0; }
+.force .val { grid-area: val; text-align: right; color: #94a3b8; font-variant-numeric: tabular-nums; }
+.force input { grid-area: range; width: 100%; accent-color: #38bdf8; }
+.force .help { grid-area: help; color: #64748b; font-size: 11px; }
 .legend { position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 16px 8px 92px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #94a3b8;
   background: linear-gradient(rgba(7, 11, 20, 0), rgba(7, 11, 20, .9)); pointer-events: none; }
 .legend-toggle { position: absolute; left: 12px; bottom: 8px; z-index: 2; font-size: 11px; padding: 2px 8px; }
@@ -608,8 +668,8 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 @keyframes row-in { from { opacity: 0; transform: translateX(12px); } }
 @media (prefers-reduced-motion: reduce) { .live, .activity li, .wfi.working circle { animation: none; } }
 @media (max-width: 900px) { .monitor { flex-direction: column; } .activity { width: auto; height: 40%; border-left: 0; border-top: 1px solid #1e293b; } .activity.collapsed { width: auto; height: 2.25rem; } .rail { flex-direction: row; justify-content: center; } .rail-label { writing-mode: horizontal-tb; transform: none; } }
-/* A phone (B037): the wall takes the screen, the HUD is compact, the camera and legend controls are one row of 44 px
-   buttons under it, the legend scrolls inside the wall, and the activity is a 44 px bar (open: half the height). Still dark. */
+/* A phone (B037): the wall takes the screen, the HUD is compact, the camera, forces cog and legend controls are one row
+   of 44 px buttons under it (the forces panel opens above that row), the legend scrolls inside the wall, and the activity is a 44 px bar (open: half the height). Still dark. */
 @media (max-width: 759.98px) {
   .hud { padding: 8px 10px 18px; }
   .figures { gap: 10px; flex-wrap: wrap; }
@@ -618,6 +678,12 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
   .controls { top: auto; bottom: 8px; left: 8px; right: 8px; justify-content: space-between; z-index: 2; }
   .controls .ctl { min-height: 44px; padding: 0 12px; font-size: 12px; }
   .controls .legend-toggle { position: static; }
+  .controls .cog { min-width: 44px; justify-content: center; }
+  .controls .cog svg { width: 20px; height: 20px; }
+  /* The forces panel sits above the compact row, the screen's width less the margins, scrolling when it is taller. */
+  .forces { top: auto; bottom: 60px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 76px); overflow-y: auto; }
+  .forces .ctl { min-height: 44px; min-width: 44px; }
+  .force input { min-height: 44px; }
   .legend { bottom: 60px; padding: 8px 10px; max-height: 40%; overflow-y: auto; pointer-events: auto; }
   .tip { max-width: calc(100vw - 24px); }
   .timebar { padding: 6px 8px 4px; }

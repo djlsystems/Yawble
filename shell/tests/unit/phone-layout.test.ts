@@ -405,6 +405,27 @@ describe('the Monitor on a phone', () => {
     expect(w.get('[data-test=monitor-activity]').classes()).not.toContain('collapsed');
     expect(w.get('.controls').find('[data-test=monitor-legend-toggle]').exists()).toBe(false);
     expect(w.findAll('[data-test=monitor-legend-toggle]')).toHaveLength(1);
+    // The forces cog stays beside Pinned, as main has it.
+    const order = w.get('.controls').element.children;
+    expect((order[0] as HTMLElement).dataset.test).toBe('monitor-camera');
+    expect((order[1] as HTMLElement).dataset.test).toBe('monitor-layout-toggle');
+    expect(order).toHaveLength(2);
+  });
+
+  it('puts the forces cog in the compact row with the camera and the legend, and opens the forces panel from it', async () => {
+    screen(Phone);
+    const { api } = monitorApi();
+    const w = keep(mount(MonitorView, { props: { api, pollMs: 60_000 } }));
+    await settle();
+    const row = [...w.get('.controls').element.children].map((e) => (e as HTMLElement).dataset.test);
+    expect(row).toEqual(['monitor-camera', 'monitor-layout-toggle', 'monitor-legend-toggle']);
+    expect(w.findAll('[data-test=monitor-layout-toggle]')).toHaveLength(1);
+    expect(w.find('[data-test=monitor-layout]').exists()).toBe(false);
+    await w.get('[data-test=monitor-layout-toggle]').trigger('click');
+    expect(w.get('[data-test=monitor-layout-toggle]').attributes('aria-expanded')).toBe('true');
+    expect(w.find('[data-test=monitor-layout]').exists()).toBe(true);
+    await w.get('[data-test=monitor-layout-close]').trigger('click');
+    expect(w.find('[data-test=monitor-layout]').exists()).toBe(false);
   });
 
   it('stays dark at phone width: its phone rules use no theme variables', () => {
@@ -412,6 +433,15 @@ describe('the Monitor on a phone', () => {
     const rules = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
     expect(rules).toContain('.controls');
     expect(rules).not.toContain('var(--');
+  });
+
+  it('fits the forces panel to the phone screen, with 44 px tap targets', () => {
+    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/monitor/MonitorView.vue'), 'utf8');
+    const rules = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
+    expect(rules).toMatch(/\.controls \.cog \{[^}]*min-width: 44px/);
+    expect(rules).toMatch(/\.forces \{[^}]*left: 8px; right: 8px; width: auto;[^}]*overflow-y: auto/);
+    expect(rules).toMatch(/\.forces \.ctl \{[^}]*min-height: 44px; min-width: 44px/);
+    expect(rules).toMatch(/\.force input \{[^}]*min-height: 44px/);
   });
 });
 
