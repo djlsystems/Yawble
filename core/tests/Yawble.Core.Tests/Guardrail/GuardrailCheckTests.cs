@@ -285,7 +285,10 @@ public class GuardrailCheckTests
     public async Task WithoutASandboxTheCheckFails()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "the unsandboxed run uses the POSIX probe wrapper");
-        await using var kit = GuardrailKit.Create();
+        // The probe is a real process making real connections, so the gateway and the decoy must be on real loopback
+        // ports: with the in-memory ones (the default for scripted sandboxes) nothing listens on 127.0.0.1:<decoy> and
+        // the probe truthfully reports net.host-loopback BLOCKED (what the Mac run saw).
+        await using var kit = GuardrailKit.Create(realGateway: true);
         var report = await kit.Check(new UnsandboxedRunner()).RunAsync("payments", "ada", Ct);
 
         Assert.False(report.Passed);
@@ -309,6 +312,20 @@ public class GuardrailCheckTests
         Assert.False(File.Exists(Path.Combine(kit.Home, ".yawble-guardcheck-" + report.Id + "-w")));
         // The secret scan only looks inside the member's own folders, where no secret is.
         Assert.Equal(Verdicts.Blocked, V("secrets.scan"));
+    }
+
+    /// <summary>
+    /// The production decoy (and gateway) listener binds IPv4 127.0.0.1 itself, not an IPv6 or dual-stack socket, so the
+    /// probe's IPv4 connect to 127.0.0.1:&lt;decoy&gt; reaches it on every OS whenever nothing isolates the probe.
+    /// </summary>
+    [Fact]
+    public async Task TheDecoyListensOnIPv4Loopback_WhereTheProbeConnects()
+    {
+        using var decoy = new LoopbackGatewayListener();
+        decoy.Start();
+        using var s = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        await s.ConnectAsync(new System.Net.IPEndPoint(System.Net.IPAddress.Parse("127.0.0.1"), decoy.Port), Ct);
+        Assert.True(s.Connected);
     }
 
     /// <summary>

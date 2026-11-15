@@ -2,6 +2,7 @@ import { app, Menu, nativeImage, Tray } from 'electron';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PRIVATE_DIR, PRIVATE_FILE } from './private-files';
 
 /**
  * Running in the background: the app stays in the system tray when its window is closed, so the teams' work, schedules
@@ -36,8 +37,8 @@ export class ShellSettingsFile {
   }
 
   write(settings: ShellSettings): void {
-    mkdirSync(path.dirname(this.file), { recursive: true });
-    writeFileSync(this.file, JSON.stringify(settings, null, 2));
+    mkdirSync(path.dirname(this.file), PRIVATE_DIR);
+    writeFileSync(this.file, JSON.stringify(settings, null, 2), PRIVATE_FILE);
   }
 }
 

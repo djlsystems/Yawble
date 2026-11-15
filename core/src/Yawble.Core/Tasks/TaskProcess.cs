@@ -32,7 +32,8 @@ public sealed class TaskProcessOptions
 /// the cap never kills the process), a ring of the last lines for the wake-up, and the whole process tree killed on the
 /// time limit or a cancel. On Windows the process lives in a Job Object with KILL_ON_JOB_CLOSE, so grandchildren that
 /// detached from their parent die too, and so does everything if the app itself exits or crashes. On Linux and macOS
-/// it is started under <c>setsid</c> and the process group is killed.
+/// it is started with posix_spawn as the leader of its own process group (no setsid binary needed: macOS has none), and
+/// the group is signalled with kill(2), TERM then KILL, so nothing is printed when it is already gone.
 /// </summary>
 public static class TaskProcess
 {
@@ -121,15 +122,6 @@ public static class TaskProcess
     public static async Task<TaskProcessResult> RunAsync(TaskProcessOptions o, CancellationToken cancel)
     {
         var psi = CliRunner.Prepare(o.Program, o.Args);
-        if (!OperatingSystem.IsWindows() && Setsid is { } setsid)
-        {
-            var inner = psi.FileName;
-            var innerArgs = psi.ArgumentList.ToArray();
-            psi.FileName = setsid;
-            psi.ArgumentList.Clear();
-            psi.ArgumentList.Add(inner);
-            foreach (var a in innerArgs) psi.ArgumentList.Add(a);
-        }
         psi.WorkingDirectory = o.WorkingDirectory;
         psi.Environment.Clear();
         foreach (var (k, v) in o.Environment) psi.Environment[k] = v;
@@ -167,34 +159,59 @@ public static class TaskProcess
             }
         }
 
-        using var tree = ProcessTree.Create();
-        using var process = new Process { StartInfo = psi };
-        process.OutputDataReceived += (_, e) => Take(e.Data);
-        process.ErrorDataReceived += (_, e) => Take(e.Data);
-        process.Start();
-        tree.Adopt(process);
-        process.StandardInput.Close();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         limit.CancelAfter(o.Timeout);
         string? killedBy = null;
-        try
-        {
-            await process.WaitForExitAsync(limit.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            killedBy = cancel.IsCancellationRequested ? "person" : "timeout";
-            await tree.KillAsync(process, o.KillGrace);
-            try { process.WaitForExit(5000); } catch (InvalidOperationException) { }
-        }
-        // Anything that outlived the process but is still in its tree goes with it: nothing is left behind.
-        if (killedBy is null) tree.KillRemaining();
-
         int? exit = null;
-        try { if (process.HasExited) exit = process.ExitCode; } catch (InvalidOperationException) { }
+        if (!OperatingSystem.IsWindows() && SpawnInOwnGroup(psi, o, Take) is { } spawned)
+        {
+            using (spawned.Child)
+            {
+                try
+                {
+                    exit = await spawned.Exit.WaitAsync(limit.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    killedBy = cancel.IsCancellationRequested ? "person" : "timeout";
+                    PosixSpawn.SignalGroup(spawned.Child.Pid, PosixSpawn.SIGTERM);
+                    try { await spawned.Exit.WaitAsync(o.KillGrace); } catch (TimeoutException) { }
+                    PosixSpawn.SignalGroup(spawned.Child.Pid, PosixSpawn.SIGKILL);
+                    try { await spawned.Exit.WaitAsync(TimeSpan.FromSeconds(5)); } catch (TimeoutException) { }
+                }
+                // Anything that outlived the process but is still in its group goes with it: nothing is left behind.
+                PosixSpawn.SignalGroup(spawned.Child.Pid, PosixSpawn.SIGKILL);
+                // The rest of the output; bounded, since a descendant that left the group could hold the pipe open.
+                try { await spawned.Drained.WaitAsync(TimeSpan.FromSeconds(5)); } catch (TimeoutException) { }
+            }
+        }
+        else
+        {
+            using var tree = ProcessTree.Create();
+            using var process = new Process { StartInfo = psi };
+            process.OutputDataReceived += (_, e) => Take(e.Data);
+            process.ErrorDataReceived += (_, e) => Take(e.Data);
+            process.Start();
+            tree.Adopt(process);
+            process.StandardInput.Close();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            try
+            {
+                await process.WaitForExitAsync(limit.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                killedBy = cancel.IsCancellationRequested ? "person" : "timeout";
+                await tree.KillAsync(process, o.KillGrace);
+                try { process.WaitForExit(5000); } catch (InvalidOperationException) { }
+            }
+            // Anything that outlived the process but is still in its tree goes with it: nothing is left behind.
+            if (killedBy is null) tree.KillRemaining();
+
+            try { if (process.HasExited) exit = process.ExitCode; } catch (InvalidOperationException) { }
+        }
         string tailText;
         lock (gate)
         {
@@ -206,7 +223,34 @@ public static class TaskProcess
         return new TaskProcessResult(killedBy is null ? exit : null, killedBy == "timeout", killedBy, bytes, truncated, tailText, sha, watch.Elapsed);
     }
 
-    private static readonly string? Setsid = OperatingSystem.IsWindows() ? null : CliRunner.Find("setsid");
+    /// <summary>
+    /// Linux and macOS: the program started with posix_spawn as the leader of its own process group, its output read a
+    /// line at a time into <paramref name="take"/>. Null when this libc cannot (an old glibc without
+    /// posix_spawn_file_actions_addchdir_np): the caller falls back to a Process and <see cref="PosixGroup"/>.
+    /// </summary>
+    private static (PosixSpawn Child, Task<int> Exit, Task Drained)? SpawnInOwnGroup(ProcessStartInfo psi, TaskProcessOptions o, Action<string?> take)
+    {
+        PosixSpawn child;
+        try
+        {
+            child = PosixSpawn.Start(psi.FileName, psi.ArgumentList, o.WorkingDirectory, o.Environment);
+        }
+        catch (Exception e) when (e is EntryPointNotFoundException or DllNotFoundException)
+        {
+            return null;
+        }
+        var exit = Task.Factory.StartNew(child.WaitForExit, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        var drained = Task.Factory.StartNew(() =>
+        {
+            try
+            {
+                using var reader = new StreamReader(child.Output, Encoding.UTF8, detectEncodingFromByteOrderMarks: false);
+                while (reader.ReadLine() is { } line) take(line);
+            }
+            catch (Exception e) when (e is IOException or ObjectDisposedException) { }
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        return (child, exit, drained);
+    }
 }
 
 /// <summary>A Job Object (Windows) or a process group (elsewhere) holding one task process and everything it starts.</summary>
@@ -315,41 +359,35 @@ internal sealed class WindowsJob : ProcessTree
     private static extern bool CloseHandle(nint handle);
 }
 
-/// <summary>The process is a session leader (started under setsid), so its process group id is its pid.</summary>
+/// <summary>
+/// The fallback on a libc that cannot posix_spawn into a new process group (see <see cref="TaskProcess"/>): the process
+/// shares the app's group, so its tree is the descendants .NET finds at kill time (a grandchild that already detached
+/// to init is out of reach). The normal path signals the task's own group instead.
+/// </summary>
 internal sealed class PosixGroup : ProcessTree
 {
-    private int _pgid;
+    private Process? _process;
 
-    public override void Adopt(Process process) => _pgid = process.Id;
+    public override void Adopt(Process process) => _process = process;
 
     public override async Task KillAsync(Process process, TimeSpan grace)
     {
-        Signal("TERM");
+        Kill();
         try
         {
             using var wait = new CancellationTokenSource(grace);
             await process.WaitForExitAsync(wait.Token);
         }
         catch (OperationCanceledException) { }
-        Signal("KILL");
     }
 
-    public override void KillRemaining() => Signal("KILL");
+    public override void KillRemaining() { }
 
     public override void Dispose() { }
 
-    private void Signal(string name)
+    private void Kill()
     {
-        if (_pgid <= 0) return;
-        try
-        {
-            var psi = new ProcessStartInfo("kill") { UseShellExecute = false, CreateNoWindow = true };
-            psi.ArgumentList.Add("-" + name);
-            psi.ArgumentList.Add("--");
-            psi.ArgumentList.Add("-" + _pgid);
-            using var p = Process.Start(psi);
-            p?.WaitForExit(2000);
-        }
-        catch (Exception e) when (e is Win32Exception or InvalidOperationException) { }
+        try { _process?.Kill(entireProcessTree: true); }
+        catch (Exception e) when (e is Win32Exception or InvalidOperationException or NotSupportedException) { }
     }
 }

@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { PRIVATE_DIR, PRIVATE_FILE } from './private-files';
 
 /**
  * Where the main window was, so the next start puts it back: the same monitor, place and size, maximized or not.
@@ -104,8 +105,8 @@ export class WindowStateFile {
 
   write(state: SavedWindow): void {
     try {
-      mkdirSync(path.dirname(this.file), { recursive: true });
-      writeFileSync(this.file, JSON.stringify(state, null, 2));
+      mkdirSync(path.dirname(this.file), PRIVATE_DIR);
+      writeFileSync(this.file, JSON.stringify(state, null, 2), PRIVATE_FILE);
     } catch { /* a place not saved is not worth a failure */ }
   }
 }

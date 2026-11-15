@@ -268,7 +268,8 @@ public class HiringAndSkillsTests
         static string Auth(DateTimeOffset at, string token) => $$"""{"tokens":{"refresh_token":"{{token}}"},"last_refresh":"{{at:O}}"}""";
         File.WriteAllText(hostFile, Auth(now.AddDays(-1), "host"));
 
-        var layout = PolicyFixtures.Layout(TargetOs.Windows, AgentCli.Codex, signIn: true);
+        // the host's own OS: the copy-in and copy-back run on this computer's file system
+        var layout = PolicyFixtures.Layout(TargetOsExtensions.Host, AgentCli.Codex, signIn: true);
         var workspace = Path.Combine(db.Dir, "member-home");
         layout = layout with
         {

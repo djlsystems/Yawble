@@ -4,6 +4,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { PRIVATE_DIR, PRIVATE_FILE } from './private-files';
 
 export type Theme = 'light' | 'dark';
 export interface Overlay { color: string; symbolColor: string }
@@ -53,8 +54,8 @@ export class ThemeFile implements ThemeMemory {
 
   write(theme: Theme): void {
     try {
-      mkdirSync(path.dirname(this.file), { recursive: true });
-      writeFileSync(this.file, JSON.stringify({ theme }));
+      mkdirSync(path.dirname(this.file), PRIVATE_DIR);
+      writeFileSync(this.file, JSON.stringify({ theme }), PRIVATE_FILE);
     } catch { /* a theme not kept only means the OS theme at the next launch */ }
   }
 }

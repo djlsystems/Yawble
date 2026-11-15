@@ -140,13 +140,15 @@ public sealed class CodeHost : ICodeHost
 /// The global policy's denied paths, read at most every 30 seconds. Fails closed: when the policy cannot be read the
 /// last list read stands, and with none read yet every path counts as denied (shown as hidden), never allowed.
 /// </summary>
-internal sealed class DeniedPaths(Func<IReadOnlyList<string>> read, TimeProvider? clock = null)
+internal sealed class DeniedPaths(Func<IReadOnlyList<string>> read, TimeProvider? clock = null, Func<string, string?>? canonicalize = null)
 {
     public static readonly TimeSpan Every = TimeSpan.FromSeconds(30);
 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly Func<string, string?> canonicalize = canonicalize ?? Policy.HostPathCanonicalizer.TryCanonicalize;
     private readonly Lock _lock = new();
     private Policy.PolicyPaths? _paths;
+    private Policy.PolicyPaths? _lexical;
     private IReadOnlyList<string>? _denied; // the last list read
     private DateTimeOffset? _readAt;
 
@@ -162,9 +164,14 @@ internal sealed class DeniedPaths(Func<IReadOnlyList<string>> read, TimeProvider
                 _readAt = now; // tried: the next read is after the interval, whether or not this one works
                 try
                 {
-                    _paths ??= new Policy.PolicyPaths(Policy.TargetOsExtensions.Host, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        Policy.HostPathCanonicalizer.Canonicalize);
-                    _denied = read().Select(_paths.Resolve).OfType<string>().ToList();
+                    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    _paths ??= new Policy.PolicyPaths(Policy.TargetOsExtensions.Host, home, p => canonicalize(p) ?? p);
+                    _lexical ??= new Policy.PolicyPaths(Policy.TargetOsExtensions.Host, home);
+                    // Each entry both with its symlinks followed and as written: one through a link denies where the
+                    // link leads, and one whose links cannot be read still denies its own path.
+                    var entries = read();
+                    _denied = entries.Select(_paths.Resolve).Concat(entries.Select(_lexical.Resolve)).OfType<string>()
+                        .Distinct(_paths.Comparer).ToList();
                 }
                 catch (Exception)
                 {
@@ -177,8 +184,14 @@ internal sealed class DeniedPaths(Func<IReadOnlyList<string>> read, TimeProvider
         if (denied is null || paths is null) return true;
         try
         {
+            // The list was canonicalised (symlinks followed), so the queried path must be too, the same way: a path
+            // through a symlink (macOS /var -> /private/var, any symlinked folder) otherwise slips past. Fail closed.
+            // The path as asked is checked too, so a denied link itself (not only its target) stays hidden.
+            var query = canonicalize(fullPath) is { } c ? paths.Normalize(c) : null;
+            var asAsked = paths.Normalize(fullPath);
+            if (query is null || asAsked is null) return true;
             foreach (var d in denied)
-                if (paths.IsWithin(fullPath, d)) return true;
+                if (paths.IsWithin(query, d) || paths.IsWithin(asAsked, d)) return true;
             return false;
         }
         catch (Exception)
