@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { copyFileSync, rmSync } from 'node:fs';
 import { linuxUpdatePlan } from './linux-update';
-import { diagnosticLog } from './diagnostic-log';
+import { captureMainOutput, diagnosticLog, processGoneLine, shellStartLine } from './diagnostic-log';
 import { installScope, isAdministrator, otherSessionsRunning, updaterArgs } from './install-scope';
 import { appFolder } from './app-folder';
 import { Channels, isUiMethod, type Overview } from '../shared/api';
@@ -27,7 +27,11 @@ app.setPath('userData', appFolder(process.platform, process.env, os.homedir()));
 const dataDir = process.env.YAWBLE_DATA_DIR ?? path.join(app.getPath('userData'), 'data');
 const settingsFile = new ShellSettingsFile(path.join(dataDir, 'shell-settings.json'));
 const windowStateFile = new WindowStateFile(path.join(dataDir, 'window-state.json'));
+// The shell's log, <data>/logs/shell-<day>.log on every OS: under macOS `open` (or a Linux desktop entry) this process's
+// own output goes nowhere, so its console errors and uncaught errors are copied there too.
 const report = diagnosticLog(dataDir);
+captureMainOutput(report);
+report.file(shellStartLine({ version: app.getVersion(), electron: process.versions.electron, platform: process.platform, arch: process.arch, packaged: app.isPackaged, dataDir }));
 let settings: ShellSettings = settingsFile.read();
 let tray: AppTray | null = null;
 let quitting = false;
@@ -41,6 +45,7 @@ async function connectCore(): Promise<CoreClient> {
   // it: the core runs the ones the person installed, found where they are at every launch.
   const installDir = process.env.YAWBLE_INSTALL_DIR ?? (app.isPackaged ? process.resourcesPath : undefined);
   core = await startCore(launch, { dataDir, installDir });
+  report.file(`the core started (process ${core.child.pid ?? '?'})`);
   core.child.once('exit', (code) => {
     report(`the core exited (${code})`);
     client = null;
@@ -498,7 +503,10 @@ app.on('window-all-closed', () => {
   if (!quitting && settings.runInBackground) return; // keep running in the tray
   app.quit();
 });
+app.on('render-process-gone', (_e, _wc, details) => { const line = processGoneLine('a window\'s page', details); if (line) report(line); });
+app.on('child-process-gone', (_e, details) => { const line = processGoneLine(`the ${details.type} process`, details); if (line) report(line); });
 app.on('will-quit', () => {
+  report.file('shell stopping: the app is quitting');
   tray?.destroy();
   websiteBridge?.stop();
   client?.close();

@@ -21,7 +21,7 @@ function rowsOf(n: number, from = 0) {
   return Array.from({ length: n }, (_, i) => ({ _id: String(from + i), at: new Date(Date.UTC(2026, 10, 13, 12, 0, 0) - (from + i) * 60000).toISOString(), source: 'Runs', team: 'web', member: 'DeveloperAda', event: `run ${from + i}`, details: 'claude' }));
 }
 
-function fakeApi(remote = false) {
+function fakeApi(remote = false, extra: LogSourceInfo[] = []) {
   const calls: { method: string; params: any }[] = [];
   const api: YawbleApi = {
     getInfo: async () => { throw new Error('no'); },
@@ -29,9 +29,9 @@ function fakeApi(remote = false) {
     call: async (method: string, params?: Record<string, unknown>) => {
       calls.push({ method, params });
       switch (method) {
-        case 'logs.sources': return structuredClone(sources) as any;
+        case 'logs.sources': return structuredClone([...sources, ...extra]) as any;
         case 'logs.who': return { teams: ['web', 'docs'], members: [{ team: 'web', name: 'Manager', key: 'web/Manager' }, { team: 'web', name: 'DeveloperAda', key: 'web/DeveloperAda' }] } as any;
-        case 'logs.values': return (params?.column === 'via' ? ['app', 'cloud'] : ['Runs', 'Network']) as any;
+        case 'logs.values': return (params?.column === 'via' ? ['app', 'cloud'] : params?.column === 'origin' ? ['core', 'shell'] : ['Runs', 'Network']) as any;
         case 'logs.query': {
           const offset = (params?.offset as number) ?? 0;
           // 250 entries in pages of 100.
@@ -194,6 +194,28 @@ describe('LogsDialog', () => {
     await flushPromises();
     await w.find('[data-test=logs-row]').trigger('click');
     expect(w.find('[data-test=logs-detail]').text()).toContain('claude');
+    w.unmount();
+  });
+
+  it('ListsDiagnostics_WithTheShellsLogBesideTheCores_AndFiltersByFrom', async () => {
+    // As the core offers it (FileLogs.Diagnostics): every .log in <data>/logs, core-<day>.log and shell-<day>.log alike.
+    const diagnostics: LogSourceInfo = {
+      id: 'diagnostics', title: 'Diagnostics', group: 'Diagnostics',
+      about: 'What the app itself reported while it ran, from its core and its window (From: core or shell): start-up and shutdown, cloning and syncing, background work, and errors.',
+      columns: [col('at', 'Time', 'time'), col('origin', 'From', 'text', true), col('text', 'Message')],
+      prunable: true, loss: 'the app\'s own messages from those days.', keptBecause: null, defaultDays: 14, retentionDays: 14, team: false, member: false,
+    };
+    const { api, calls } = fakeApi(false, [diagnostics]);
+    const w = mount(LogsDialog, { props: { api, source: 'diagnostics' }, attachTo: document.body });
+    await flushPromises();
+    expect(w.find('[data-test=logs-source]').element).toHaveProperty('value', 'diagnostics');
+    expect(w.find('[data-test=logs-source]').text()).toContain('Diagnostics');
+    expect(w.find('[data-test=logs-about]').text()).toContain('core or shell');
+    expect(firsts(calls).at(-1)).toMatchObject({ source: 'diagnostics' });
+    await w.find('[data-test=logs-filter-origin]').setValue('shell');
+    await flushPromises();
+    expect(queries(calls).at(-1)).toMatchObject({ source: 'diagnostics', filters: { origin: 'shell' } });
+    expect(w.find('[data-test=logs-prune-open]').exists()).toBe(true); // kept to its retention, like the core's
     w.unmount();
   });
 });

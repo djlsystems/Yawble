@@ -90,7 +90,7 @@ public static class FileLogs
 
     public static readonly FileLogSource Diagnostics = new(
         "diagnostics", "Diagnostics", "Diagnostics",
-        "What the app itself reported while it ran: start-up, cloning and syncing, background work, and errors. For finding out why something went wrong.",
+        "What the app itself reported while it ran, from its core and its window (From: core or shell): start-up and shutdown, cloning and syncing, background work, and errors. For finding out why something went wrong.",
         [new("at", "Time", "", "time"), new("origin", "From", "", Filter: true), new("text", "Message", "")],
         dataDir =>
         {
