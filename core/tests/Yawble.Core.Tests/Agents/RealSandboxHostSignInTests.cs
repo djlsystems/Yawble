@@ -186,12 +186,15 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
             Assert.NotEqual("0", o["open_claude_json"]);
             Assert.NotEqual("0", o["open_sibling"]);
             // Every name the sandbox sees in the folder is an empty mask the sandbox made for a denied entry (names are
-            // visible, contents are not), the install (grok: ~/.grok/downloads), or the sandbox's own file that never reached the host.
+            // visible, contents are not), the install (grok: ~/.grok/downloads), or the sandbox's own files that never reached
+            // the host: the marker it created and the name its own mv gave the sign-in inside the writable mask (both checked
+            // absent on the host below).
             var denied = L("deniedPaths");
+            var moved = Path.GetFileName(signIn) + ".moved";
             foreach (var name in o.GetValueOrDefault("folder_list", "").Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
                 var host = HostPathCanonicalizer.Canonicalize(Path.Combine(folder, name));
-                Assert.True(denied.Contains(host) || IsInstall(host) || name == marker,
+                Assert.True(denied.Contains(host) || IsInstall(host) || name == marker || name == moved,
                     $"{folder}/{name} is visible in the sandbox and is neither the install nor a mask");
             }
             // The host's sign-in is unchanged (a fake, so its content is compared too) and nothing appeared beside it.
