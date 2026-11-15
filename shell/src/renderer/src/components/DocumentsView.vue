@@ -56,4 +56,10 @@ h2 { margin: 0 0 4px; font-size: 22px; }
 .name { font-weight: 600; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; font-weight: 400; }
+/* A phone (B037): one column of team folders, each a roomy tap target; the open browser uses the full width. */
+@media (max-width: 759.98px) {
+  .docs-place { padding: 4px 10px 16px; }
+  .grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .folder { min-height: 52px; }
+}
 </style>

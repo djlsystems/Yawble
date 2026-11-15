@@ -18,7 +18,7 @@ import MonitorView from './monitor/MonitorView.vue';
 import BoardView from './board/BoardView.vue';
 import { discussRequest } from './conciergeDiscuss';
 import DocumentsView from './components/DocumentsView.vue';
-import MenuBar, { type Menu } from './components/MenuBar.vue';
+import MenuBar, { type Menu, type MenuItem as MenuBarItem } from './components/MenuBar.vue';
 import TerminalPane from './components/TerminalPane.vue';
 import { terminalPane, toggleTerminalPane } from './terminalPane';
 import BacklogView from './board/BacklogView.vue';
@@ -32,6 +32,8 @@ import UpdateBanner from './components/UpdateBanner.vue';
 import ThemeToggle from './components/ThemeToggle.vue';
 import { theme } from './theme';
 import type { AgentOption } from './components/Composer.vue';
+import { installTapTitles, usePhone } from './phone';
+import { pushEscape } from './escapeClose';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
 // Concierge is home: a chat with an agent that knows every team. The same screens run in a browser through the
@@ -56,6 +58,21 @@ watch([view, conversationId, selected, collapsed], () => {
   try { sessionStorage.setItem('yawble.place', JSON.stringify(place)); } catch { /* storage blocked: a reload starts at home */ }
   try { localStorage.setItem('yawble.place', JSON.stringify({ collapsed: collapsed.value })); } catch { /* likewise */ }
 });
+
+// ---- the phone layout (B037, phone.ts): below 760 px wide the sidebar is a drawer, opened by the top bar's menu button
+// and closed by a tap on the scrim, Escape, or going anywhere. The folded rail is a desktop thing: a phone never shows it.
+const phone = usePhone();
+const drawerOpen = ref(false);
+let releaseDrawerEscape: (() => void) | null = null;
+watch(drawerOpen, (open) => {
+  releaseDrawerEscape?.();
+  releaseDrawerEscape = open ? pushEscape(() => { drawerOpen.value = false; }) : null;
+});
+watch(phone, (p) => { if (!p) drawerOpen.value = false; });
+watch([view, conversationId, selected], () => { drawerOpen.value = false; });
+/** Settings opened from the sidebar starts at its list of sections on a phone (a new key: a fresh list each time). */
+const settingsLanding = ref(true);
+const settingsKey = ref(0);
 
 const overview = ref<Overview | null>(null);
 const conversations = ref<ConversationSummary[]>([]);
@@ -198,12 +215,15 @@ async function remove(id: string) {
 
 /** A place in the sidebar. Teams always opens the list of teams, not the team last looked at. */
 function go(place: View) {
+  if (place === 'settings') { settingsLanding.value = true; if (phone.value) settingsKey.value++; }
   view.value = place;
   if (place === 'teams') selected.value = null;
 }
 
 /** Opens Settings at a tab (the hint "Settings → Agents", a member's link to the global guardrails). */
 function menu(item: SettingsTab) {
+  // File > Settings opens the list of sections on a phone; a link to one section (Agents, About) opens that section.
+  settingsLanding.value = item === 'general';
   prefTab.value = item;
   integrationsTab.value = null;
   view.value = 'settings';
@@ -211,6 +231,7 @@ function menu(item: SettingsTab) {
 /** Which Integrations tab Settings opens at (Needs You's "reconnect" link opens Connections). */
 const integrationsTab = ref<'cli' | 'api' | 'mcp' | 'connections' | null>(null);
 function openConnections() {
+  settingsLanding.value = false;
   prefTab.value = 'integrations';
   integrationsTab.value = 'connections';
   view.value = 'settings';
@@ -248,6 +269,9 @@ onMounted(() => {
   window.addEventListener('focus', loadAgentsOnFocus);
 });
 function loadAgentsOnFocus() { void loadAgents(); }
+let offTapTitles: (() => void) | null = null;
+onMounted(() => { offTapTitles = installTapTitles(() => phone.value); });
+onBeforeUnmount(() => { offTapTitles?.(); releaseDrawerEscape?.(); });
 onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); });
 
 // The window's own title (taskbar, Alt+Tab) follows the place; the page shows its own heading.
@@ -298,6 +322,7 @@ const menus = computed<Menu[]>(() => [
 ]);
 
 function command(id: string) {
+  if (id !== 'sidebar') drawerOpen.value = false;
   if (id.startsWith('go:')) {
     const place = id.slice(3);
     if (place === 'settings-agents') { menu('agents'); return; }
@@ -310,7 +335,7 @@ function command(id: string) {
     case 'newTeam': dialog.value = 'newTeam'; break;
     case 'settings': menu('general'); break;
     case 'terminal': toggleTerminalPane(); break;
-    case 'sidebar': collapsed.value = !collapsed.value; break;
+    case 'sidebar': if (phone.value) drawerOpen.value = !drawerOpen.value; else collapsed.value = !collapsed.value; break;
     case 'about': menu('system'); break;
     case 'checkUpdates': void updateBanner.value?.checkNow(); break;
     case 'theme:system': theme.setMode('system'); break;
@@ -320,6 +345,15 @@ function command(id: string) {
     default: if (api.windowCommand) api.windowCommand(id as Parameters<NonNullable<typeof api.windowCommand>>[0]);
   }
 }
+
+// A remote view on a phone has no menu bar (no room, and most of it is the desktop window's): what a viewer needs from
+// it (the theme, the terminal, Help) is at the bottom of the drawer instead. New chat, New team, Settings, Logs and the
+// places are in the drawer already.
+const menuInDrawer = computed(() => phone.value && !!api.remote);
+const DRAWER_COMMANDS = ['theme:system', 'theme:light', 'theme:dark', 'terminal', 'checkUpdates', 'about', 'go:settings-agents'];
+const drawerMenu = computed<MenuBarItem[]>(() => (menuInDrawer.value
+  ? menus.value.flatMap((m) => m.items).filter((i): i is MenuBarItem => !i.separator && DRAWER_COMMANDS.includes(i.id))
+  : []));
 
 /** The window's own shortcuts (the menu's); typing in a field keeps its own Ctrl+Z/C/V/A. */
 function shortcut(e: KeyboardEvent) {
@@ -338,17 +372,24 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 </script>
 
 <template>
-  <div class="app" :class="{ collapsed, 'own-bar': ownBar, mac }">
-    <Sidebar :rail="collapsed" :view="view" :conversations="conversations" :teams="teams" :conversation-id="conversationId"
+  <div class="app" :class="{ collapsed: collapsed && !phone, 'own-bar': ownBar, mac, phone, 'drawer-open': phone && drawerOpen }">
+    <div v-if="phone && drawerOpen" class="scrim" data-test="drawer-scrim" @click="drawerOpen = false" />
+    <Sidebar id="app-drawer" :rail="collapsed && !phone" :drawer="phone" :open="drawerOpen" :menu="drawerMenu" @command="command":view="view" :conversations="conversations" :teams="teams" :conversation-id="conversationId"
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
-      @rename="rename" @remove="remove" @new-team="dialog = 'newTeam'" @collapse="collapsed = true" @expand="collapsed = false" @logs="logsOpen = true" />
+      @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
+      @logs="drawerOpen = false; logsOpen = true" />
 
     <main class="main">
       <header class="bar">
-        <MenuBar :menus="menus" @command="command" />
+        <button v-if="phone" class="ghost icon-btn menu-btn" data-test="drawer-toggle" :aria-label="drawerOpen ? 'Close the menu' : 'Open the menu'" title="Menu"
+          :aria-expanded="drawerOpen" aria-controls="app-drawer" @click="drawerOpen = !drawerOpen">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </button>
+        <MenuBar v-if="!menuInDrawer" :menus="menus" @command="command" />
+        <span v-if="phone" class="title" data-test="phone-title">{{ title }}</span>
         <span class="grow" />
-        <button v-if="view === 'teams' && team" class="pill" data-test="ask-concierge" @click="askAbout(team.id)"><Icon name="spark" :size="14" />Ask the Concierge</button>
+        <button v-if="view === 'teams' && team" class="pill" data-test="ask-concierge" :aria-label="phone ? 'Ask the Concierge' : undefined" @click="askAbout(team.id)"><Icon name="spark" :size="14" /><span class="pill-text">Ask the Concierge</span></button>
         <button v-if="!api.remote" class="ghost cloud-ind" :class="linkState" data-test="cloud-link-indicator" :title="linkTitle"
           :aria-label="linkTitle" @click="dialog = 'link'">
           <Icon name="cloud" :size="18" :filled="linkState === 'connected'" />
@@ -357,10 +398,13 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
         </button>
         <ThemeToggle />
       </header>
+      <!-- The banners above every view. On the desktop this box is display: contents (each banner a row of .main, as
+           before); on a phone it is one scrolling box no taller than 40% of the screen, so the view below keeps its share
+           and the Concierge's composer stays on screen however many banners there are (B037 F1). -->
+      <div class="banners" data-test="banners">
       <p v-if="terminalPane.stopError" class="error banner" data-test="terminal-stop-error">{{ terminalPane.stopError }} <button class="mini" @click="terminalPane.stopError = null">Dismiss</button></p>
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
       <HostChecksBanner :api="api" />
-      <LogsDialog v-if="logsOpen" :api="api" @close="logsOpen = false" />
       <GitBanner :api="api" />
       <UpdateBanner ref="updateBanner" :api="api" />
       <CompanionAsks v-if="!api.remote" :api="api" :poll-ms="pollMs" />
@@ -368,6 +412,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <NetworkAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
       <!-- Developer tools agents asked for (request_tool): Install in the window only, Not now anywhere; on the Board, its Needs You lane. -->
       <ToolAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
+      </div>
+      <LogsDialog v-if="logsOpen" :api="api" @close="logsOpen = false" />
 
       <div class="content">
       <div class="place">
@@ -390,7 +436,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />
         <BacklogView v-else-if="view === 'backlog'" :teams="teams" :teams-loading="!overview && !error" :api="api" :poll-ms="pollMs" @open-team="openTeam"
           @board="focusTeamId = $event; go('board')" />
-        <SettingsView v-else-if="view === 'settings'" :api="api" :tab="prefTab" :teams="teams" :poll-ms="pollMs" :integrations-tab="integrationsTab" @tab="prefTab = $event; integrationsTab = null" @connections="openConnections" @changed="changed" @link="link = $event as LinkStatus" />
+        <SettingsView v-else-if="view === 'settings'" :key="settingsKey" :landing="settingsLanding" :api="api":tab="prefTab" :teams="teams" :poll-ms="pollMs" :integrations-tab="integrationsTab" @tab="prefTab = $event; integrationsTab = null" @connections="openConnections" @changed="changed" @link="link = $event as LinkStatus" />
 
       </div>
       <TerminalPane v-if="terminalPane.open" :api="api" :poll-ms="pollMs" />
@@ -442,4 +488,21 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .small { font-size: 12.5px; }
 .tiny { font-size: 11px; }
 .pad { padding: 24px; }
+/* ---- a phone (below 760 px; phone.ts): one column, a slim top bar with the menu button, the sidebar a drawer over the
+   page (Sidebar.vue) with a scrim behind it. dvh: the height a phone browser really shows, its own bars left out. */
+.app.phone { grid-template-columns: minmax(0, 1fr); height: 100dvh; }
+.phone .bar { gap: 2px; min-height: 52px;
+  padding: calc(4px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) 4px calc(4px + env(safe-area-inset-left, 0px)); }
+.own-bar.phone .bar { height: auto; }
+.menu-btn { width: 44px; height: 44px; flex: none; color: var(--ink); }
+.phone .title { flex: 0 1 auto; min-width: 0; padding-left: 2px; }
+.phone .pill { min-width: 44px; justify-content: center; }
+.phone .pill .pill-text { display: none; }
+.phone .banner { padding: 6px 12px; }
+.banners { display: contents; }
+/* All the banners together: at most 40% of a phone's height, scrolling; the view (.content) gets the rest. */
+.phone .banners { display: block; flex: none; max-height: 40dvh; overflow-y: auto; overscroll-behavior: contain; }
+.phone .teams-place { padding: 4px 12px 16px; }
+.phone .pad { padding: 16px; }
+.scrim { position: fixed; inset: 0; background: var(--backdrop); z-index: 29; }
 </style>

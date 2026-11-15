@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { usePhone } from '../phone';
 
 /**
  * The window's menu bar: File, Edit, View, Help, in the page's own title bar (the window draws its title bar itself,
@@ -30,11 +31,13 @@ function key(e: KeyboardEvent) { if (e.key === 'Escape') openIndex.value = null;
 onMounted(() => { document.addEventListener('mousedown', outside); document.addEventListener('keydown', key); });
 onBeforeUnmount(() => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', key); });
 const isSep = (x: MenuItem | MenuSeparator): x is MenuSeparator => x.separator === true;
+// A narrow desktop window (a remote view on a phone has no menu bar; App.vue): tap-sized rows, the drop kept on screen.
+const phone = usePhone();
 void props;
 </script>
 
 <template>
-  <nav ref="root" class="menubar" data-test="menubar">
+  <nav ref="root" class="menubar" :class="{ phone }" data-test="menubar">
     <div v-for="(m, i) in menus" :key="m.label" class="menu">
       <button class="top" :class="{ on: openIndex === i }" :data-test="`menu-${m.label.toLowerCase()}`" @mousedown.prevent @click="toggle(i)" @mouseenter="hover(i)">{{ m.label }}</button>
       <div v-if="openIndex === i" class="drop" role="menu">
@@ -65,4 +68,6 @@ void props;
 .check { color: var(--accent); font-size: 12px; }
 .keys { color: var(--muted); font-size: 12px; }
 .sep { height: 1px; background: var(--line-soft); margin: 4px 6px; }
+.phone .top, .phone .item { min-height: 44px; }
+.phone .drop { min-width: min(240px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100dvh - 72px); overflow: auto; }
 </style>
