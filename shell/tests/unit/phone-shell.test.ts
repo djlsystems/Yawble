@@ -525,7 +525,8 @@ describe('B037 e2e faults F1 to F4', () => {
 
   it('F1: the box holds them all in at most 40% of a phone\'s height and scrolls; no banner has its own half-screen cap', () => {
     const app = src('App.vue');
-    expect(app).toContain('.phone .banners { display: block; flex: none; max-height: 40dvh; overflow-y: auto;');
+    expect(app).toContain('.banners { display: block; flex: none; max-height: 50vh; overflow-y: auto;');
+    expect(app).toContain('.phone .banners { max-height: 40dvh; }');
     expect(app).toMatch(/\.content \{ flex: 1; min-height: 0;/); // the view takes the rest
     for (const file of ['components/NetworkAsks.vue', 'components/ToolAsks.vue']) {
       expect(src(file), file).not.toMatch(/max-height: 50dvh/);
@@ -533,8 +534,8 @@ describe('B037 e2e faults F1 to F4', () => {
     }
   });
 
-  it('F1: at 760 px and wider the box is display: contents, so each banner is a row of the page as before', async () => {
-    expect(src('App.vue')).toContain('.banners { display: contents; }');
+  it('at 760 px and wider the same box holds the banners in at most half the window and scrolls', async () => {
+    expect(src('App.vue')).not.toContain('.banners { display: contents; }');
     const w = await mountWithAsks(760);
     expect(w.get('.app').classes()).not.toContain('phone');
     expect(w.get('[data-test=banners] [data-test=network-asks]').exists()).toBe(true);

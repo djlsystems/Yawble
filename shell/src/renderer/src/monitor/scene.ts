@@ -86,6 +86,13 @@ export function pinchCamera(start: { dist: number; k: number; wx: number; wy: nu
  * Where team i of count sits on the wall's oval (radians, 0 = right, clockwise on screen): the first on the left, the
  * rest evenly round from there, so two teams sit side by side across the wide axis rather than one above the other.
  */
+/** What the forces depend on: each node's key, radius and home, in order. Equal shapes need no new forces and no wake. */
+export function graphShape(nodes: Iterable<{ key: string; r: number; homeX: number; homeY: number }>): string {
+  let s = '';
+  for (const n of nodes) s += `${n.key}|${n.r}|${n.homeX.toFixed(1)}|${n.homeY.toFixed(1)};`;
+  return s;
+}
+
 export function teamAngle(i: number, count: number): number {
   return count <= 1 ? 0 : Math.PI + (i / count) * Math.PI * 2;
 }
@@ -258,6 +265,11 @@ export class MonitorScene {
       }
     });
     for (const k of [...this.nodes.keys()]) if (!keep.has(k)) this.nodes.delete(k);
+    // A poll that changes no node, size or home (the usual case, every 1.2 s) only refreshes what the nodes say: waking
+    // the forces each time made the graph jerk once a second.
+    const shape = graphShape(this.nodes.values());
+    if (shape === this.shape) return;
+    this.shape = shape;
     const spokeTo = (kind: Node['kind']) => [...this.nodes.values()].filter((n) => n.kind === kind).map((n) => ({ source: this.nodes.get(teamKey(n.team))!, target: n }));
     this.links = spokeTo('member');
     this.wfLinks = spokeTo('workflows');
@@ -266,6 +278,9 @@ export class MonitorScene {
     (this.sim.force('wflink') as ReturnType<typeof forceLink<Node, Link>>).links(this.wfLinks);
     this.sim.alpha(Math.max(this.sim.alpha(), 0.3));
   }
+
+  /** The graph's shape at the last rebuild that woke the forces (graphShape). */
+  private shape = '';
 
   private upsert(key: string, data: Omit<Node, 'key'>, x?: number, y?: number): Node {
     const node = this.nodes.get(key);
