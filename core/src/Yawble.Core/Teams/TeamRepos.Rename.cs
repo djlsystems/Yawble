@@ -24,10 +24,11 @@ namespace Yawble.Core.Teams;
 /// </summary>
 public sealed partial class TeamRepos
 {
-    /// <summary>Moves the member's main clone (the caller holds the team's lock). True when the member is now on the new name.</summary>
-    private async Task<bool> MoveLegacyBranchLockedAsync(MemberRef member, TeamRepo repo, CancellationToken ct)
+    /// <summary>Moves the member's main clone (the caller holds the team's lock). The old branch it moved from when the
+    /// member is now on the new name, else null.</summary>
+    private async Task<string?> MoveLegacyBranchLockedAsync(MemberRef member, TeamRepo repo, CancellationToken ct)
     {
-        if (member.Role == MemberRole.Manager) return false;
+        if (member.Role == MemberRole.Manager) return null;
         if (Row(member.Id) is null && AdoptLegacyClone(member, CheckoutOf(member, repo).ClonePath) is { } adopted)
         {
             // A rehired member (its row went with RemoveMemberAsync) reusing a pre-B016 clone: record the branch the clone
@@ -35,12 +36,12 @@ public sealed partial class TeamRepos
             InsertClone(member.Id, CheckoutOf(member, repo).ClonePath, adopted);
             _log?.Invoke($"{member.Qualified}: reusing the clone on disk, on {adopted}");
         }
-        if (Row(member.Id) is not { } row || !IsLegacyMemberBranch(row.Branch)) return false;
+        if (Row(member.Id) is not { } row || !IsLegacyMemberBranch(row.Branch)) return null;
         var target = BranchFor(member.Team, member.Name);
-        if (!await MoveCloneBranchAsync(member, repo.Path, row.Path, row.Branch, target, ct)) return false;
+        if (!await MoveCloneBranchAsync(member, repo.Path, row.Path, row.Branch, target, ct)) return null;
         UpdateClone(member.Id, "branch = $b", ("$b", target));
         _log?.Invoke($"{member.Qualified}: moved from {row.Branch} to {target} (the old branch is kept)");
-        return true;
+        return row.Branch;
     }
 
     /// <summary>Moves the member's clone of a writable extra repository (the caller holds the team's lock).</summary>
