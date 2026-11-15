@@ -68,11 +68,47 @@ public class TeamBranchGapTests
         finally { try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     });
 
-    private static void SkipUnlessLocalTransport(string needs) =>
-        Assert.SkipWhen(LocalTransportFault.Value is not null,
-            $"Needs git's local transport ({needs}), and a local 'git clone' of a folder fails here ({LocalTransportFault.Value}). " +
-            "That is a sandbox refusing git's helper process, not the OS: the test runs on Linux, macOS and a Windows host. " +
-            "The fault it covers is fixed (card 75).");
+    private static void SkipUnlessLocalTransport(string needs)
+    {
+        if (TransportSkipReason(LocalTransportFault.Value, needs, OperatingSystem.IsWindows()) is { } reason) Assert.Skip(reason);
+    }
+
+    /// <summary>
+    /// The skip reason for a failed transport probe, or null when the probe worked (the test runs). It quotes git's own
+    /// error and names the likely cause for the OS it runs on: on Windows the agents' sandbox (MSYS2 failing to start);
+    /// elsewhere (Linux, Fedora included, and macOS) no sandbox is assumed, so it says git's transport helpers cannot run.
+    /// </summary>
+    internal static string? TransportSkipReason(string? fault, string needs, bool windows)
+    {
+        if (fault is null) return null;
+        var start = $"Needs git's local transport ({needs}), and the probe 'git clone --no-local' of a temp folder fails on this machine ({fault.Trim()}). ";
+        var cause = windows
+            ? "On Windows that is the agents' sandbox stopping Git for Windows' MSYS2 runtime from starting (0xC0000142); the test runs on a Windows host. "
+            : "Nothing in the test is OS-specific, so on Linux or macOS this means git or its transport helpers (git-upload-pack, git-receive-pack) cannot run here: check that git is installed and on PATH. ";
+        return start + cause + "The fault it covers is fixed (card 75).";
+    }
+
+    /// <summary>Card 231, with a faked probe result: the reason names git's error and the cause for the OS it is on,
+    /// and never blames the Windows sandbox on Linux.</summary>
+    [Theory]
+    [InlineData(false, "exit 128: fatal: Could not read from remote repository.")]
+    [InlineData(false, "An error occurred trying to start process 'git' with working directory '/tmp/x'. No such file or directory")]
+    [InlineData(true, "exit 128: error: cannot spawn sh: ... 0xC0000142")]
+    public void TheTransportSkipReason_QuotesGitsError_AndNamesTheCauseForItsOS(bool windows, string fault)
+    {
+        Assert.Null(TransportSkipReason(null, "clone", windows));
+        var reason = TransportSkipReason(fault, "clone, fetch-back", windows)!;
+        Assert.Contains("(clone, fetch-back)", reason);
+        Assert.Contains(fault, reason);
+        if (windows) Assert.Contains("MSYS2", reason);
+        else
+        {
+            Assert.DoesNotContain("MSYS2", reason);
+            Assert.DoesNotContain("sandbox", reason);
+            Assert.Contains("Linux", reason);
+            Assert.Contains("git-upload-pack", reason);
+        }
+    }
 
     private static string CommitOn(string repo, string parent, string message)
     {
