@@ -68,7 +68,7 @@ onBeforeUnmount(() => { observer?.disconnect(); availableWidth.value = Infinity;
 watch([renderedWidth, () => props.teams.map((t) => `${t.id}:${t.paused}`).join(), showArchived, cardBusy, () => props.archived.length], () => void fit());
 const gridStyle = computed(() => ({ '--tile-w': `${renderedWidth.value}px`, '--tile-h': `${tileSize.value.h}px` }));
 const lab = (method: string, id: number, idle: string, busy: string) => (cardDoing(method, id) ? busy : idle);
-// A phone (B037): one tile per row, the full width, its height the shared one; no size grips (a drag handle in a 14 px
+// A phone (B037): one tile per row, the full width, as tall as its content (the @media rules); no size grips (a drag handle in a 14 px
 // gap is no tap target, and one column has nothing to size). Labels and icons as long as the row fits, as on a desktop.
 const phone = usePhone();
 watch(phone, () => void fit());
@@ -188,9 +188,21 @@ watch(phone, () => void fit());
 .team-card.add-wrap { border-style: dashed; padding: 0; }
 .add-wrap .add { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; background: transparent; color: var(--muted); }
 .small { font-size: 12.5px; }
-/* A phone: one full-width tile per row, tap-sized buttons. */
+/* A phone, set by usePhone()'s class: no size grips (in the template), tap-sized buttons; the column and the card height are the @media rules below. */
 .phone .team-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 12px 0; }
 .phone .tile-btn { height: 44px; min-width: 44px; padding: 0 10px; }
 .phone .icons-only .tile-btn:not(.danger) { width: 44px; }
 .phone .link { min-height: 44px; min-width: 0; }
+/* A phone (B037): one column of team cards as tall as their content (the shared tile size and its grips do not
+   apply), the buttons 44 px. */
+@media (max-width: 759.98px) {
+  .team-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 12px; }
+  .tile-cell > .team-card { height: auto; }
+  .team-card { max-height: 22rem; }
+  .team-card.add-wrap { min-height: 64px; }
+  .card-actions { flex-wrap: wrap; }
+  .tile-btn { height: 44px; padding: 0 12px; }
+  .icons-only .tile-btn:not(.danger) { width: 44px; }
+  .link { min-height: 44px; }
+}
 </style>

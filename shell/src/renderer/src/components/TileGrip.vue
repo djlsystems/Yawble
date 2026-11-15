@@ -96,6 +96,8 @@ onBeforeUnmount(onCancel);
 .tile-grip.axis-w.dragging::before, .tile-grip.axis-h.dragging::before { opacity: 1; }
 .tile-grip.axis-w:focus-visible, .tile-grip.axis-h:focus-visible { outline: none; }
 .tile-grip.axis-both:focus-visible { outline: 2px solid var(--accent); }
+/* A phone (B037): one column of tiles and cards, nothing to resize: every grip and handle is hidden. */
+@media (max-width: 759.98px) { .tile-grip { display: none; } }
 :global(body.resizing-tiles) { cursor: nwse-resize; user-select: none; }
 :global(body.resizing-tiles-w) { cursor: col-resize; }
 :global(body.resizing-tiles-h) { cursor: row-resize; }

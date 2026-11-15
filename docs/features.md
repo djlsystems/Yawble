@@ -217,6 +217,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - Each member shows its recent tool steps, changed files and what it is doing now.
 - Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
 - A timeline replays any moment. **● Back to live** returns.
+- The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
+  link strength, repulsion, gravity and friction, each a multiplier (0.25× to 3×) on the wall's own layout. They apply
+  as you drag and are remembered; **Reset** goes back to the defaults.
 
 ## Logs
 
@@ -298,6 +301,14 @@ a member's card opens it at that member's activity.
   forces, rebases or stashes.
 - A banner shows when branches could not be brought up to date on their own.
 - Each member's working copy has a read-only code browser.
+  - It never follows a link and never shows `.git` or likely secrets.
+  - After a file or folder is opened, it checks again what was actually opened, on Windows, macOS and Linux (x64 and
+    arm64). The real path must still be inside the working copy, not in `.git` and not hidden. A file must have only
+    one name, so a hard link is never read. A folder must be the same folder before and after it is listed.
+    Otherwise it is not shown.
+  - Windows does these checks with `GetFinalPathNameByHandleW` and `GetFileInformationByHandle`.
+  - macOS and Linux open with `O_NOFOLLOW` and check with `fstat` (link count, device and inode). The real path comes
+    from `F_GETPATH` on macOS and from `/proc/self/fd` on Linux.
 
 ## Integrations
 

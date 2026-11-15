@@ -8,6 +8,7 @@ import { ago } from './cards';
 import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
 import Icon from '../components/Icon.vue';
+import { useNarrow } from '../narrowScreen';
 
 /**
  * The Backlog: the person's list of work not yet given to a team, in priority order. An item
@@ -107,8 +108,19 @@ function sortBy(key: SortKey) { sort.value = { key, desc: sort.value.key === key
 const arrow = (key: SortKey) => (sort.value.key === key ? (sort.value.desc ? ' ▾' : ' ▴') : '');
 const canDrag = computed(() => tab.value === 'live' && sort.value.key === 'pos' && !sort.value.desc && !search.value.trim() && !teamFilter.value);
 
+// ---- a phone (B037): the rows wrap (no table columns), sorting is a select, a row's actions are in its ⋯ menu, and an
+// opened item takes the page (Back returns to the list).
+const phone = useNarrow();
+const menuFor = ref<number | null>(null);
+const sortKeys = computed<{ key: SortKey; label: string }[]>(() => [
+  { key: 'pos', label: 'Priority' }, { key: 'label', label: 'Id' }, { key: 'title', label: 'Title' }, { key: 'state', label: 'Status' }, { key: 'team', label: 'Team' },
+  tab.value === 'archived' ? { key: 'archived', label: 'Archived' } : { key: 'updated', label: 'Modified' },
+]);
+function pickSort(key: SortKey) { sort.value = { key, desc: false }; }
+
 // ---- reorder
 async function step(item: BacklogItem, direction: 'up' | 'down') {
+  menuFor.value = null;
   const list = await act<BacklogItem[]>('backlog.move', { id: item.id, direction });
   if (list) items.value = list;
 }
@@ -231,7 +243,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 </script>
 
 <template>
-  <section class="backlog-place fill" data-test="backlog-view">
+  <section class="backlog-place fill" :class="{ phone }" data-test="backlog-view">
     <div class="wrap fill">
       <header class="head">
         <h2>Backlog</h2>
@@ -261,7 +273,15 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
       </div>
 
       <div class="split" :class="{ withItem: !!open }" data-test="backlog-split">
-        <div class="listwrap" data-test="backlog-listwrap">
+        <div v-show="!(phone && open)" class="listwrap" data-test="backlog-listwrap">
+        <div v-if="phone" class="phone-sort" data-test="backlog-sort">
+          <label>Sort by
+            <select :value="sort.key" data-test="backlog-sort-key" @change="pickSort(($event.target as HTMLSelectElement).value as SortKey)">
+              <option v-for="s in sortKeys" :key="s.key" :value="s.key">{{ s.label }}</option>
+            </select>
+          </label>
+          <button type="button" class="mini" :aria-label="sort.desc ? 'Descending' : 'Ascending'" data-test="backlog-sort-dir" @click="sort.desc = !sort.desc">{{ sort.desc ? '▾' : '▴' }}</button>
+        </div>
         <table class="list">
           <thead>
             <tr>
@@ -276,16 +296,24 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
           </thead>
           <tbody>
             <tr v-for="i in shown" :key="i.id" :class="{ sel: openId === i.id, drop: dropAt === i.id }" :aria-selected="openId === i.id" data-test="backlog-row"
-              :draggable="canDrag" @dragstart="dragging = i.id" @dragover.prevent="canDrag && (dropAt = i.id)" @dragleave="dropAt = null" @drop.prevent="drop(i)"
+              :draggable="canDrag && !phone" @dragstart="dragging = i.id" @dragover.prevent="canDrag && (dropAt = i.id)" @dragleave="dropAt = null" @drop.prevent="drop(i)"
               @click="select(i)">
-              <td class="muted">{{ position.get(i.id) }}</td>
-              <td class="mono">{{ i.label }}</td>
-              <td>{{ i.title }}</td>
-              <td><span class="state" :class="shownState(i)" data-test="backlog-status" :title="shownState(i) === 'flight' ? 'Its cards are being worked on' : shownState(i) === 'dispatched' ? 'Sent to ' + (i.dispatchedTeam ?? 'a team') + '; nothing is being worked right now' : ''">{{ ShownLabel[shownState(i)] }}</span></td>
-              <td class="muted">{{ i.dispatchedTeam ?? '—' }}<span v-if="i.dispatchCount > 1" class="muted small"> ×{{ i.dispatchCount }}</span></td>
-              <td class="muted small">{{ ago(tab === 'archived' ? (i.archivedAt ?? i.updatedAt) : i.updatedAt) }}</td>
+              <td class="muted pos">{{ position.get(i.id) }}</td>
+              <td class="mono lbl">{{ i.label }}</td>
+              <td class="ttl">{{ i.title }}</td>
+              <td class="st"><span class="state" :class="shownState(i)" data-test="backlog-status" :title="shownState(i) === 'flight' ? 'Its cards are being worked on' : shownState(i) === 'dispatched' ? 'Sent to ' + (i.dispatchedTeam ?? 'a team') + '; nothing is being worked right now' : ''">{{ ShownLabel[shownState(i)] }}</span></td>
+              <td class="muted tm">{{ i.dispatchedTeam ?? '—' }}<span v-if="i.dispatchCount > 1" class="muted small"> ×{{ i.dispatchCount }}</span></td>
+              <td class="muted small when">{{ ago(tab === 'archived' ? (i.archivedAt ?? i.updatedAt) : i.updatedAt) }}</td>
               <td class="acts" @click.stop>
-                <template v-if="tab === 'live' && canDrag">
+                <span v-if="phone && tab === 'live' && canDrag" class="row-menu">
+                  <button class="mini" title="Actions" aria-label="Actions" aria-haspopup="menu" :aria-expanded="menuFor === i.id" data-test="backlog-row-menu"
+                    @click="menuFor = menuFor === i.id ? null : i.id">⋯</button>
+                  <span v-if="menuFor === i.id" class="menu" role="menu" data-test="backlog-row-menu-list">
+                    <button role="menuitem" data-test="backlog-row-up" :disabled="busy || position.get(i.id) === 1" @click="step(i, 'up')">↑ Higher priority</button>
+                    <button role="menuitem" data-test="backlog-row-down" :disabled="busy || position.get(i.id) === items.length" @click="step(i, 'down')">↓ Lower priority</button>
+                  </span>
+                </span>
+                <template v-else-if="tab === 'live' && canDrag">
                   <button class="mini" title="Higher priority" :disabled="busy || position.get(i.id) === 1" @click="step(i, 'up')">↑</button>
                   <button class="mini" title="Lower priority" :disabled="busy || position.get(i.id) === items.length" @click="step(i, 'down')">↓</button>
                 </template>
@@ -301,7 +329,8 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
           <div class="ihead">
             <span class="mono">{{ open.label }}</span><span class="state" :class="shownState(open)">{{ ShownLabel[shownState(open)] }}</span>
             <span class="muted small">added {{ ago(open.createdAt) }}</span><span class="grow" />
-            <button class="tool" title="Close" aria-label="Close" @click="openId = null"><Icon name="close" :size="16" /></button>
+            <button v-if="phone" class="tool back" title="Back to the backlog" data-test="backlog-item-back" @click="openId = null">← Backlog</button>
+            <button v-else class="tool" title="Close" aria-label="Close" @click="openId = null"><Icon name="close" :size="16" /></button>
           </div>
 
           <!-- The item's toolbar: how the spec is shown (Read / Edit) on the left; what to do with the item on the right,
@@ -496,4 +525,39 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 .link { border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 12px; }
 .warn { color: var(--warn); margin: 0; }
 .error { color: var(--bad); }
+.row-menu { position: relative; display: inline-block; }
+.menu { position: absolute; right: 0; top: 100%; z-index: 3; display: flex; flex-direction: column; min-width: 190px; padding: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px var(--shadow); }
+.menu button { text-align: left; border: 0; background: transparent; padding: 0 10px; min-height: 44px; font-size: 13px; }
+.menu button:hover:not(:disabled) { background: var(--hover); }
+.phone-sort { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 13px; }
+.phone-sort label { display: flex; align-items: center; gap: 6px; flex: 1; }
+.phone-sort select { flex: 1; font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; }
+/* A phone (B037): one column; each row wraps (number, id, status and its ⋯ menu on top, the title under them, then
+   the team and when); an opened item takes the page; tap targets 44 px. */
+@media (max-width: 759.98px) {
+  .backlog-place { padding: 4px 10px 16px; }
+  .head h2 { flex: 1 1 100%; }
+  .search { flex: 1 1 auto; width: auto; min-width: 0; }
+  .head button, .head select, .head input, .phone-sort select, .phone-sort button, .tabs button { min-height: 44px; box-sizing: border-box; }
+  .split.withItem { grid-template-columns: minmax(0, 1fr); }
+  .list thead { display: none; }
+  .list, .list tbody { display: block; }
+  .list tr[data-test=backlog-row] { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 8px 6px; border-bottom: 1px solid var(--line-soft); }
+  .list tr[data-test=backlog-row] td { display: block; padding: 0; border: 0; }
+  .list tr.sel td, .list tr.sel td:first-child, .list tr.sel td:last-child { box-shadow: none; background: transparent; }
+  .list tr.sel { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); box-shadow: inset 4px 0 0 var(--accent); }
+  .list td.st { flex: 1; }
+  .list td.ttl { order: 5; flex: 1 1 100%; font-weight: 600; overflow-wrap: anywhere; }
+  .list td.tm, .list td.when { order: 6; }
+  .list td.acts { order: 4; }
+  .mini { min-width: 44px; min-height: 44px; font-size: 16px; }
+  .tool { width: 44px; height: 44px; }
+  .ihead .tool { width: 44px; height: 44px; }
+  .ihead .tool.back { width: auto; padding: 0 10px; font-size: 13px; color: var(--accent); }
+  .seg .tool { height: 44px; }
+  .toolbar { flex-wrap: wrap; }
+  .item input, .dispatch select, .dispatch input, .buttons button { min-height: 44px; box-sizing: border-box; }
+  .link { min-height: 44px; }
+}
 </style>
