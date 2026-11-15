@@ -31,24 +31,67 @@ public class GuardrailSlirpDnsProbeTests
     private static IEnumerable<string> Ids(JsonObject plan, string key) =>
         (plan[key]?.AsArray() ?? []).Select(n => n!["id"]!.GetValue<string>());
 
-    /// <summary>Every planned attempt reported, the given ids allowed, the rest blocked (the clone write reaches the host).</summary>
+    /// <summary>
+    /// A sandbox that holds: every attempt GuardCheck can plan, on any OS, answered the way the plan expects it (the
+    /// positive controls reachable, the clone write reaching the host, everything else blocked), except the given ids,
+    /// which are answered allowed.
+    /// </summary>
     private static string Report(JsonObject plan, params string[] allowed)
     {
         var lines = new List<string>();
-        foreach (var r in plan["reads"]!.AsArray())
-            lines.Add(r!["mode"]!.GetValue<string>() == "list"
-                ? $"{{\"id\":\"{r["id"]}\",\"category\":\"t\",\"outcome\":\"blocked\",\"evidence\":\"x\",\"entries\":0}}"
-                : Line(r["id"]!.GetValue<string>(), "blocked"));
-        foreach (var w in plan["writes"]!.AsArray())
+        var reads = plan["reads"]!.AsArray().Select(r => (Id: r!["id"]!.GetValue<string>(), Mode: r["mode"]!.GetValue<string>(), Path: r["path"]!.GetValue<string>())).ToList();
+        var writes = plan["writes"]!.AsArray().Select(w => (Id: w!["id"]!.GetValue<string>(), Mode: w["mode"]?.GetValue<string>(), Path: w["path"]!.GetValue<string>())).ToList();
+        // Positive controls: the CLI's program and install folders, its sign-in files (by any id that opens them, e.g.
+        // home.claude-credentials), and on Windows the home's and CLI config folder's names (the drive-root residual).
+        var signInPaths = reads.Where(r => r.Id.StartsWith("signin.read:", StringComparison.Ordinal)).Select(r => r.Path).ToHashSet();
+        bool ReadAllowed((string Id, string Mode, string Path) r) =>
+            r.Id == "cli.read-program" || r.Id.StartsWith("cli.list-install:", StringComparison.Ordinal) || signInPaths.Contains(r.Path)
+            || (OperatingSystem.IsWindows() && (r.Id == "home.list" || r.Id.StartsWith("cli.config-list:", StringComparison.Ordinal)));
+        foreach (var r in reads)
+            lines.Add(ReadAllowed(r)
+                ? Line(r.Id, "allowed") // a listing without entries: the judge keeps the probe's own outcome
+                : r.Mode == "list"
+                    ? $"{{\"id\":\"{r.Id}\",\"category\":\"t\",\"outcome\":\"blocked\",\"evidence\":\"x\",\"entries\":0}}"
+                    : Line(r.Id, "blocked"));
+        foreach (var w in writes)
         {
-            var id = w!["id"]!.GetValue<string>();
-            if (id == "write.clone") File.WriteAllText(w["path"]!.GetValue<string>(), plan["nonce"]!.GetValue<string>());
-            lines.Add($"{{\"id\":\"{id}\",\"category\":\"t\",\"outcome\":\"allowed\",\"evidence\":\"x\",\"sandboxWrote\":true}}");
+            if (w.Mode == "open")
+            {
+                // An existing host file opened for writing: allowed only for a read-write sign-in file (one with no
+                // signin.folder-write beside it); the CLI's program and read-only sign-in files refuse it.
+                var readWriteSignIn = w.Id.StartsWith("signin.write:", StringComparison.Ordinal)
+                                      && !writes.Any(x => x.Id == "signin.folder-write:" + w.Id["signin.write:".Length..]);
+                lines.Add(Line(w.Id, readWriteSignIn ? "allowed" : "blocked"));
+                continue;
+            }
+            if (w.Id == "write.clone") File.WriteAllText(w.Path, plan["nonce"]!.GetValue<string>());
+            lines.Add($"{{\"id\":\"{w.Id}\",\"category\":\"t\",\"outcome\":\"allowed\",\"evidence\":\"x\",\"sandboxWrote\":true}}");
         }
         foreach (var id in Ids(plan, "tcp").Concat(Ids(plan, "dns")).Concat(Ids(plan, "unix")).Concat(Ids(plan, "dnsRaw")))
             lines.Add(Line(id, allowed.Contains(id) ? "allowed" : "blocked"));
+        // The attempts the probe makes on its own (not listed in the wire plan), for every OS GuardCheck plans for: an id
+        // the plan does not expect on this OS is ignored by the judge. The gateway's positive controls are allowed; its
+        // refusals must also be in the gateway log, which this fake does not write, so they answer skip (not under test).
+        var gateway = plan["gateway"]!;
+        lines.Add(Line("gateway.reachable", "allowed"));
+        if (gateway["allowedHost"]?.GetValue<string>() is not null) lines.Add(Line("gateway.connect-allowed-host", "allowed"));
+        foreach (var id in new[] { "gateway.guessed-token", "gateway.no-token", "gateway.http-denied-host", "gateway.connect-denied-host" }
+                     .Concat((gateway["vendorHosts"]?.AsArray() ?? []).Select(v => "gateway.connect-vendor:" + v!.GetValue<string>())))
+            lines.Add(Line(id, "skip"));
+        foreach (var id in new[]
+                 {
+                     "proc.host-signal", "proc.host-environ", "proc.host-ptrace", "proc.host-open", "proc.host-memory",
+                     "credstore.dbus-session", "credstore.dbus-env", "credstore.cmdkey", "display.env", "display.x11-socket",
+                     "display.clipboard", "secrets.scan",
+                 }.Concat((plan["keychainServices"]?.AsArray() ?? []).Select(s => "credstore.keychain:" + s!.GetValue<string>())))
+            lines.Add(Line(id, "blocked"));
         return string.Join('\n', lines);
     }
+
+    /// <summary>The attempts that did not come out as expected, one per line, for an assert message.</summary>
+    private static string NotAsExpected(GuardrailReport report) =>
+        string.Join('\n', report.Results.Where(r => !r.AsExpected)
+            .Select(r => $"{r.Id} ({r.Category}): expected {r.Expected ?? "-"}, verdict {r.Verdict}: {r.Evidence}"));
 
     [Fact]
     public async Task TheSlirpNameserversAndTheUserBusAreTriedOnLinuxOnly()
@@ -62,6 +105,8 @@ public class GuardrailSlirpDnsProbeTests
             .Select(n => (Id: n!["id"]!.GetValue<string>(), Host: n["host"]!.GetValue<string>(), Port: n["port"]!.GetValue<int>(), Transport: n["transport"]!.GetValue<string>()))
             .ToList();
         var unix = Ids(seen, "unix").ToList();
+        // The fake answers every attempt the way the plan expects on this OS, so the check passes wherever it runs.
+        Assert.True(report.Passed, "not as expected:\n" + NotAsExpected(report));
         if (!OperatingSystem.IsLinux())
         {
             Assert.Empty(raw);
@@ -79,7 +124,6 @@ public class GuardrailSlirpDnsProbeTests
             Assert.Equal(Verdicts.Blocked, r.Verdict);
             Assert.True(r.AsExpected);
         }
-        Assert.True(report.Passed);
     }
 
     [Theory]
