@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vChange } from '../remoteAccess';
 import { computed, ref, watch } from 'vue';
 import type { BoardCardDetail, CardStatus, LaneId, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -122,11 +123,11 @@ defineExpose({ load });
         </div>
         <label>Note <input v-model="note" placeholder="Goes with the edit or the move" data-test="card-note" /></label>
         <div class="buttons">
-          <button data-test="card-save" :disabled="busy || (title === card.title && status === card.status)" :aria-busy="doing === 'board.edit'" @click="save"><BusyLabel :busy="doing === 'board.edit'" text="Saving…">Save</BusyLabel></button>
-          <button class="primary" data-test="card-move" :disabled="busy || (lane === card.lane && !note)" :aria-busy="doing === 'board.move'" @click="move"><BusyLabel :busy="doing === 'board.move'" text="Moving…">Move</BusyLabel></button>
+          <button v-change data-test="card-save" :disabled="busy || (title === card.title && status === card.status)" :aria-busy="doing === 'board.edit'" @click="save"><BusyLabel :busy="doing === 'board.edit'" text="Saving…">Save</BusyLabel></button>
+          <button class="primary" v-change data-test="card-move" :disabled="busy || (lane === card.lane && !note)" :aria-busy="doing === 'board.move'" @click="move"><BusyLabel :busy="doing === 'board.move'" text="Moving…">Move</BusyLabel></button>
         </div>
         <label>Comment<textarea v-model="comment" rows="2" placeholder="Ask or tell the Manager about this card" data-test="card-comment"></textarea></label>
-        <div class="buttons"><button data-test="card-comment-send" :disabled="busy || !comment.trim()" :aria-busy="doing === 'board.comment'" @click="say"><BusyLabel :busy="doing === 'board.comment'" text="Sending…">Comment</BusyLabel></button></div>
+        <div class="buttons"><button v-change data-test="card-comment-send" :disabled="busy || !comment.trim()" :aria-busy="doing === 'board.comment'" @click="say"><BusyLabel :busy="doing === 'board.comment'" text="Sending…">Comment</BusyLabel></button></div>
       </section>
 
       <section class="trail">

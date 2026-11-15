@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vChange } from '../remoteAccess';
 import TeamStateChip from './TeamStateChip.vue';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import TaskAskCard from './TaskAskCard.vue';
@@ -195,7 +196,7 @@ defineExpose({ refresh, openWorkflows });
     <p v-if="team.archived" class="paused" data-test="team-archived">This team is archived: it does no work and takes no instructions. Unarchive it from Settings.</p>
     <p v-else-if="team.paused" class="paused" data-test="team-paused">
       This team is paused: what it is told waits and runs when you resume it.
-      <button class="primary" data-test="team-resume-banner" :disabled="busy.is('resume')" :aria-busy="busy.is('resume')" @click="resume"><BusyLabel :busy="busy.is('resume')" text="Resuming…">Resume</BusyLabel></button>
+      <button class="primary" v-change data-test="team-resume-banner" :disabled="busy.is('resume')" :aria-busy="busy.is('resume')" @click="resume"><BusyLabel :busy="busy.is('resume')" text="Resuming…">Resume</BusyLabel></button>
     </p>
     <TeamSyncBanner :key="team.id" :api="api" :team="team" />
     <TriggersDialog v-if="showTriggers" :api="api" :team="team" :agents="cards" @close="showTriggers = false" />
@@ -213,7 +214,7 @@ defineExpose({ refresh, openWorkflows });
       <button title="Attach an image" data-test="tell-attach" @click="tellPicker?.click()">🖼</button>
       <input ref="tellPicker" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden data-test="tell-attach-input"
         @change="tellImages.add(($event.target as HTMLInputElement).files ?? []); ($event.target as HTMLInputElement).value = ''" />
-      <button class="primary" data-test="tell-send" :disabled="(!tell.trim() && !tellImages.images.value.length) || busy.is('tell')" :aria-busy="busy.is('tell')" @click="sendTell"><BusyLabel :busy="busy.is('tell')" text="Sending…">Tell Manager ✉</BusyLabel></button>
+      <button class="primary" v-change data-test="tell-send" :disabled="(!tell.trim() && !tellImages.images.value.length) || busy.is('tell')" :aria-busy="busy.is('tell')" @click="sendTell"><BusyLabel :busy="busy.is('tell')" text="Sending…">Tell Manager ✉</BusyLabel></button>
     </div>
     <div v-if="tellImages.images.value.length" class="thumbs" data-test="tell-images">
       <span v-for="(im, i) in tellImages.images.value" :key="i" class="thumb">
@@ -234,11 +235,11 @@ defineExpose({ refresh, openWorkflows });
       <p v-if="a.action" class="muted small" data-test="ask-action">remembers as <code>{{ a.action }}</code></p>
       <div class="row">
         <input v-model="declineNote[a.id]" class="grow" placeholder="A note if you decline (optional)" />
-        <button class="primary" data-test="ask-approve" :disabled="busy.is(`ask-${a.id}`)" @click="approve(a, 'once')"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'once')" text="Approving…">Approve once</BusyLabel></button>
-        <button v-if="a.canAlways !== false" data-test="ask-always" title="Approve, and let this run without asking from now on" :disabled="busy.is(`ask-${a.id}`)" @click="approve(a, 'always', scopeOf(a))"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'always')" text="Approving…">Always allow</BusyLabel></button>
-        <button data-test="ask-keep-asking" title="Approve this one and keep asking each time" :disabled="busy.is(`ask-${a.id}`)" @click="approve(a, 'ask', scopeOf(a))"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'ask')" text="Approving…">Keep asking</BusyLabel></button>
-        <button data-test="ask-decline" :disabled="busy.is(`ask-${a.id}`)" @click="decline(a)"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'decline')" text="Declining…">Decline</BusyLabel></button>
-        <button data-test="ask-never" title="Decline, and never allow this" :disabled="busy.is(`ask-${a.id}`)" @click="decline(a, 'never', scopeOf(a))"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'never')" text="Declining…">Never</BusyLabel></button>
+        <button class="primary" v-change data-test="ask-approve" :disabled="busy.is(`ask-${a.id}`)" @click="approve(a, 'once')"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'once')" text="Approving…">Approve once</BusyLabel></button>
+        <button v-if="a.canAlways !== false" v-change data-test="ask-always" title="Approve, and let this run without asking from now on" :disabled="busy.is(`ask-${a.id}`)" @click="approve(a, 'always', scopeOf(a))"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'always')" text="Approving…">Always allow</BusyLabel></button>
+        <button v-change data-test="ask-keep-asking" title="Approve this one and keep asking each time" :disabled="busy.is(`ask-${a.id}`)" @click="approve(a, 'ask', scopeOf(a))"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'ask')" text="Approving…">Keep asking</BusyLabel></button>
+        <button v-change data-test="ask-decline" :disabled="busy.is(`ask-${a.id}`)" @click="decline(a)"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'decline')" text="Declining…">Decline</BusyLabel></button>
+        <button v-change data-test="ask-never" title="Decline, and never allow this" :disabled="busy.is(`ask-${a.id}`)" @click="decline(a, 'never', scopeOf(a))"><BusyLabel :busy="busy.is(`ask-${a.id}`, 'never')" text="Declining…">Never</BusyLabel></button>
         <select :value="scopeOf(a)" data-test="ask-scope" title="Applies to Always allow, Keep asking and Never" @change="askScope[a.id] = ($event.target as HTMLSelectElement).value as Scope">
           <option value="team">this team</option>
           <option value="all">every team</option>
@@ -250,12 +251,12 @@ defineExpose({ refresh, openWorkflows });
       <div class="question md" data-test="decision-question" v-html="rendered(d)"></div>
       <div class="row quick">
         <template v-if="questionOptions(d.question).length">
-          <button v-for="o in questionOptions(d.question)" :key="o.n" class="primary" :title="o.text" :data-test="`decision-option-${o.n}`"
+          <button v-for="o in questionOptions(d.question)" :key="o.n" class="primary" :title="o.text" v-change :data-test="`decision-option-${o.n}`"
             :disabled="busy.is(`decision-${d.seq}`)" @click="chooseOption(d, o)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, `option-${o.n}`)" text="Answering…">{{ o.n }}. {{ o.label }}</BusyLabel></button>
         </template>
         <template v-else-if="asksForApproval(d.question)">
-          <button class="primary" data-test="decision-approve" :disabled="busy.is(`decision-${d.seq}`)" @click="approveDecision(d)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, 'approve')" text="Approving…">Approve</BusyLabel></button>
-          <button data-test="decision-always" title="Approve, and let the team go ahead with this kind of thing from now on without asking" @click="startRemember(d)">Always approve for this team…</button>
+          <button class="primary" v-change data-test="decision-approve" :disabled="busy.is(`decision-${d.seq}`)" @click="approveDecision(d)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, 'approve')" text="Approving…">Approve</BusyLabel></button>
+          <button v-change data-test="decision-always" title="Approve, and let the team go ahead with this kind of thing from now on without asking" @click="startRemember(d)">Always approve for this team…</button>
         </template>
         <button data-test="decision-discuss" title="Talk it through with the Concierge first" @click="emit('discuss', d)">Discuss with the Concierge</button>
       </div>
@@ -263,12 +264,12 @@ defineExpose({ refresh, openWorkflows });
         <label class="grow">What the team may do from now on without asking
           <input v-model="remembering[d.seq]" maxlength="500" data-test="decision-remember-text" />
         </label>
-        <button class="primary" data-test="decision-remember-save" :disabled="!(remembering[d.seq] ?? '').trim() || busy.is(`decision-${d.seq}`)" @click="approveAlways(d)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, 'remember')" text="Approving…">Approve and remember</BusyLabel></button>
+        <button class="primary" v-change data-test="decision-remember-save" :disabled="!(remembering[d.seq] ?? '').trim() || busy.is(`decision-${d.seq}`)" @click="approveAlways(d)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, 'remember')" text="Approving…">Approve and remember</BusyLabel></button>
         <button @click="delete remembering[d.seq]">Cancel</button>
       </div>
       <div class="row">
         <input v-model="answers[d.seq]" class="grow" placeholder="Or answer in your own words…" data-test="decision-answer" @keydown.enter="(answers[d.seq] ?? '').trim() && answer(d)" />
-        <button data-test="decision-send" :disabled="!(answers[d.seq] ?? '').trim() || busy.is(`decision-${d.seq}`)" @click="answer(d)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, 'answer')" text="Answering…">Answer</BusyLabel></button>
+        <button v-change data-test="decision-send" :disabled="!(answers[d.seq] ?? '').trim() || busy.is(`decision-${d.seq}`)" @click="answer(d)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, 'answer')" text="Answering…">Answer</BusyLabel></button>
       </div>
     </div>
 
@@ -291,7 +292,7 @@ defineExpose({ refresh, openWorkflows });
     <div class="add row">
       <input v-model="newAgent.name" placeholder="Job and first name, e.g. Developer Priya" title="Named for the job, a space, then a first name. Its id is the name without the space (DeveloperPriya)." maxlength="60" data-test="add-agent-name" />
       <select v-model="newAgent.cli" data-test="add-agent-cli"><option v-for="c in agentOptions" :key="c.id" :value="c.id">{{ c.label }}</option></select>
-      <button data-test="add-agent" :disabled="!newAgent.name.trim() || busy.is('add-agent')" :aria-busy="busy.is('add-agent')" @click="addAgent"><BusyLabel :busy="busy.is('add-agent')" text="Adding…">+ Add agent</BusyLabel></button>
+      <button v-change data-test="add-agent" :disabled="!newAgent.name.trim() || busy.is('add-agent')" :aria-busy="busy.is('add-agent')" @click="addAgent"><BusyLabel :busy="busy.is('add-agent')" text="Adding…">+ Add agent</BusyLabel></button>
     </div>
     <LogsDialog v-if="logsFor" :api="api" source="activity" :member="logsFor" @close="logsFor = null" />
   </section>

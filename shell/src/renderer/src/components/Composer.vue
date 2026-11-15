@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vChange } from '../remoteAccess';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { TeamSummary } from '../../../shared/api';
 import Icon from './Icon.vue';
@@ -91,7 +92,7 @@ onMounted(() => { if (props.autofocus) focus(); });
       </label>
       <button v-if="running" class="round stop" :title="stopping ? 'Stopping…' : 'Stop the answer'" data-test="composer-stop" :disabled="stopping" :aria-busy="stopping"
         @click="emit('stop')"><BusyLabel :busy="!!stopping"><Icon name="stop" :size="16" /></BusyLabel></button>
-      <button v-else class="round send" :disabled="!canSend" title="Send (Enter)" data-test="composer-send" @click="send"><Icon name="send" :size="18" /></button>
+      <button v-else class="round send" :disabled="!canSend" title="Send (Enter)" v-change data-test="composer-send" @click="send"><Icon name="send" :size="18" /></button>
     </div>
   </div>
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vChange } from '../remoteAccess';
 import { teamState, teamStateLabel } from '../teamState';
 import wordmark from '../assets/yawble-logo-light.png';
 import mark from '../assets/yawble-mark.png';
@@ -98,7 +99,7 @@ function finishRename(id: string) {
         <span class="label">{{ t.name }}</span>
         <span v-if="t.running || t.queued" class="muted tiny" data-test="team-counts">{{ t.running }} running · {{ t.queued }} queued</span>
       </button>
-      <button class="item small muted" data-test="new-team" @click="emit('newTeam')"><Icon name="plus" :size="15" />New team</button>
+      <button class="item small muted" v-change data-test="new-team" @click="emit('newTeam')"><Icon name="plus" :size="15" />New team</button>
 
       <h3>Chats</h3>
       <LoadingNote v-if="loading?.chats" class="side-note" text="Loading chats…" />
@@ -108,7 +109,7 @@ function finishRename(id: string) {
           @keydown.enter="finishRename(c.id)" @keydown.esc="editing = null" @blur="finishRename(c.id)" />
         <template v-else-if="confirming === c.id">
           <span class="label">Delete this chat?</span>
-          <button class="mini danger" data-test="chat-delete-yes" :disabled="!!removing" :aria-busy="removing === c.id" @click="emit('remove', c.id)"><BusyLabel :busy="removing === c.id" text="Deleting…">Delete</BusyLabel></button>
+          <button class="mini danger" v-change data-test="chat-delete-yes" :disabled="!!removing" :aria-busy="removing === c.id" @click="emit('remove', c.id)"><BusyLabel :busy="removing === c.id" text="Deleting…">Delete</BusyLabel></button>
           <button class="mini" data-test="chat-delete-no" @click="confirming = null">Keep</button>
         </template>
         <template v-else>
@@ -119,8 +120,8 @@ function finishRename(id: string) {
             <Icon v-else-if="c.watching > 0" name="eye" :size="13" class="watching" data-test="chat-watching" :title="`Keeping tabs on ${c.watching} thing${c.watching === 1 ? '' : 's'}`" />
           </button>
           <span class="actions">
-            <button class="ghost icon-btn" title="Rename" data-test="chat-rename" @click="startRename(c)"><Icon name="edit" :size="14" /></button>
-            <button class="ghost icon-btn" title="Delete" data-test="chat-delete" @click="confirming = c.id"><Icon name="trash" :size="14" /></button>
+            <button class="ghost icon-btn" title="Rename" v-change data-test="chat-rename" @click="startRename(c)"><Icon name="edit" :size="14" /></button>
+            <button class="ghost icon-btn" title="Delete" v-change data-test="chat-delete" @click="confirming = c.id"><Icon name="trash" :size="14" /></button>
           </span>
         </template>
       </div>

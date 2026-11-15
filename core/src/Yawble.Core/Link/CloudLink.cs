@@ -29,8 +29,9 @@ public sealed record LinkSettings(
 ///   the group the instance should join). Nothing is pasted into the app. The site answers the core's poll with this
 ///   instance's id and secret, kept in the data folder.</item>
 /// <item>Connected: ONE outbound WebSocket (no listening port). The site relays each viewer's JSON-RPC call
-///   ({type:"call", session, id, method, params, user}); the core answers it through the same dispatcher as the
-///   desktop window, after <see cref="RemoteAccess"/>. While anyone is viewing, the core's pushes (terminal output,
+///   ({type:"call", session, id, method, params, user, access}); the core answers it through the same dispatcher as the
+///   desktop window, after <see cref="RemoteAccess"/>. "access" is the viewer's: "read" (a workgroup Visitor) may only
+///   call reads; anything else, or none, is full. While anyone is viewing, the core's pushes (terminal output,
 ///   state) go up as {type:"event"}.</item>
 /// <item>Every remote call that changes something is written to cloud-link-audit.log with who made it.</item>
 /// </list>
@@ -372,6 +373,7 @@ public sealed class CloudLink : IAsyncDisposable
             SetState("connected", null);
             await ServeAsync(ws, s, ct).ConfigureAwait(false);
             lock (_lock) { _viewers = []; _cloudVersion = null; }
+            _sessionAccess.Clear();
             if (ct.IsCancellationRequested) return;
             SetState("offline", "the connection to the cloud site closed; reconnecting");
             try { await Task.Delay(delay, ct).ConfigureAwait(false); } catch (OperationCanceledException) { return; }
@@ -406,13 +408,7 @@ public sealed class CloudLink : IAsyncDisposable
         });
         try
         {
-            await Send(new JsonObject
-            {
-                ["type"] = "hello",
-                ["name"] = Environment.MachineName,
-                ["os"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
-                ["version"] = CoreInfo.Version,
-            }).ConfigureAwait(false);
+            await Send(Hello()).ConfigureAwait(false);
             while (!ct.IsCancellationRequested && await ReceiveAsync(ws, ct).ConfigureAwait(false) is { } text)
             {
                 if (JsonNode.Parse(text) is not JsonObject message) continue;
@@ -464,11 +460,37 @@ public sealed class CloudLink : IAsyncDisposable
         }
     }
 
-    private async Task AnswerAsync(JsonObject call, Func<JsonObject, Task> send, CancellationToken ct)
+    /// <summary>
+    /// This computer's hello on the link: who it is, and what it understands. "caps": ["access"] says it enforces each
+    /// call's "access" (a read-only viewer's change calls are refused here), so the site lets a Visitor open it.
+    /// </summary>
+    internal static JsonObject Hello() => new()
+    {
+        ["type"] = "hello",
+        ["name"] = Environment.MachineName,
+        ["os"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        ["version"] = CoreInfo.Version,
+        ["caps"] = new JsonArray(AccessCap),
+    };
+
+    /// <summary>The capability the hello announces: this computer reads and enforces call["access"].</summary>
+    public const string AccessCap = "access";
+
+    /// <summary>Each viewer session's access (full | read) as its latest call said, while the link is connected.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _sessionAccess = new(StringComparer.Ordinal);
+
+    /// <summary>A viewer session's access as its latest call said; full for a session that has not called yet.</summary>
+    internal string SessionAccess(string session) => _sessionAccess.TryGetValue(session, out var a) ? a : RemoteAccess.Full;
+
+    /// <summary>One relayed call: checked against <see cref="RemoteAccess"/> for this viewer's access, run, audited and answered.</summary>
+    internal async Task AnswerAsync(JsonObject call, Func<JsonObject, Task> send, CancellationToken ct)
     {
         var method = call["method"]?.GetValue<string>() ?? "";
         var parameters = call["params"] as JsonObject;
         var user = call["user"]?.GetValue<string>() ?? "unknown";
+        // "full" (Owner, workgroup Member) or "read" (workgroup Visitor); a site that does not say means full.
+        var access = RemoteAccess.AccessOf(call["access"]);
+        if ((call["session"] as JsonValue)?.TryGetValue<string>(out var session) == true) _sessionAccess[session] = access;
         var reply = new JsonObject { ["type"] = "result", ["session"] = call["session"]?.DeepClone(), ["id"] = call["id"]?.DeepClone() };
         bool allowHost, showCode;
         lock (_lock)
@@ -476,7 +498,7 @@ public sealed class CloudLink : IAsyncDisposable
             allowHost = _settings?.AllowHostTerminals ?? false;
             showCode = _settings?.ShowCode ?? true;
         }
-        var refusal = RemoteAccess.Refusal(method, parameters, allowHost, IsIntegration, IsRemoteMcp, showCode);
+        var refusal = RemoteAccess.Refusal(method, parameters, allowHost, access, IsIntegration, IsRemoteMcp, showCode);
         if (refusal is not null)
         {
             reply["error"] = new JsonObject { ["code"] = "remote_refused", ["message"] = refusal };
@@ -488,7 +510,10 @@ public sealed class CloudLink : IAsyncDisposable
                 parameters?.Parent?.AsObject().Remove("params");
                 // The call runs as this viewer: what it records says the cloud, and who.
                 using var acting = Provenance.Actor.Use(Provenance.Actor.CloudViewer(user));
-                reply["result"] = await _dispatch(method, parameters, ct).ConfigureAwait(false);
+                var result = await _dispatch(method, parameters, ct).ConfigureAwait(false);
+                // The remote view learns its access from the app info it already asks for (the window never sees this field).
+                if (method == "core.getInfo" && result is JsonObject info) info["remoteAccess"] = access;
+                reply["result"] = result;
             }
             catch (RpcException e)
             {
