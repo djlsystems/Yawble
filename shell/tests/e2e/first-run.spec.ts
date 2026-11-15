@@ -282,6 +282,9 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
 
     // ---- Ben's terminal during the run: banner and live output.
     let term = await terminalFor(app, main, 'Ben');
+    // The policy banner is folded behind the bar's Policy toggle (closed by default): open it to read it.
+    await expect(term.locator('[data-test=banner]')).toBeHidden();
+    await term.locator('[data-test=terminal-details-toggle]').click();
     await expect(term.locator('[data-test=banner-title]')).toHaveText(/^payments \/ Ben · sandbox · \w+ · grok · net: model \+ bus \+ registry\.npmjs\.org$/);
     await expect(term.locator('[data-test=terminal-pane-title]')).toContainText('Ben · payments');
     await expect(term.locator('[data-test=banner-details]')).toContainText('timeout 15 min');

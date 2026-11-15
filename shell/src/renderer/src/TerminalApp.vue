@@ -6,8 +6,10 @@ import type { YawbleApi, TerminalBanner, TerminalSessionInfo } from '../../share
 import { errorText, resolveApi } from './api';
 import TerminalScreen from './components/TerminalScreen.vue';
 
-// An agent's terminal window: titled with the effective-policy banner; attaches to a running
-// batch (input off) or shows the last transcript with "Open interactive CLI"; Stop. Closing only detaches.
+// An agent's terminal window: one slim bar (what the terminal shows, Open interactive CLI, Stop) over the screen; attaches
+// to a running batch (input off) or shows the last transcript. The effective-policy banner (sandbox, CLI, network,
+// timeouts, anything loosened) is folded behind the bar's "Policy" toggle, closed by default and remembered. Closing
+// only detaches.
 // Embedded: the same, in the main window's terminal pane (the window's title is left alone).
 const props = defineProps<{ memberId: number; api?: YawbleApi; pollMs?: number; embedded?: boolean }>();
 const emit = defineEmits<{ banner: [TerminalBanner] }>();
@@ -18,6 +20,15 @@ const session = ref<TerminalSessionInfo | null>(null);
 const error = ref<string | null>(null);
 const view = ref<InstanceType<typeof TerminalScreen> | null>(null);
 let timer: ReturnType<typeof setInterval> | null = null;
+
+const DetailsKey = 'yawble.terminal.details';
+/** The policy banner is shown: off unless the person opened it (remembered in this app's storage, a convenience only). */
+const showDetails = ref(readDetails());
+function readDetails(): boolean { try { return localStorage.getItem(DetailsKey) === '1'; } catch { return false; } }
+function toggleDetails() {
+  showDetails.value = !showDetails.value;
+  try { if (showDetails.value) localStorage.setItem(DetailsKey, '1'); else localStorage.removeItem(DetailsKey); } catch { /* storage refused */ }
+}
 
 const live = computed(() => !!session.value && !session.value.ended);
 const stateLine = computed(() => {
@@ -81,18 +92,21 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 
 <template>
   <div class="term-window" :class="{ embedded }">
-    <header class="banner" data-test="banner">
-      <div class="title mono" data-test="banner-title">{{ banner?.title ?? 'Sandbox terminal' }}</div>
-      <div class="details mono" data-test="banner-details">{{ banner?.details.join(' · ') }}</div>
-      <div v-if="banner?.loosened.length" class="loosened mono" data-test="banner-loosened">loosened: {{ banner.loosened.join('; ') }}</div>
-    </header>
     <div class="bar row">
       <LoadingNote v-if="!banner && !error" class="grow" text="Loading the terminal…" />
       <span v-else class="grow state" data-test="terminal-state">{{ stateLine }}</span>
       <span v-if="error" class="error" data-test="terminal-error">{{ error }}</span>
       <button v-if="banner && banner.state === 'idle' && !live" data-test="open-interactive" :disabled="!!doing" :aria-busy="doing === 'open'" @click="openInteractive"><BusyLabel :busy="doing === 'open'" text="Opening…">Open interactive CLI</BusyLabel></button>
+      <button v-if="banner" class="toggle" :class="{ on: showDetails, warn: banner.loosened.length }" data-test="terminal-details-toggle"
+        :aria-expanded="showDetails" :title="showDetails ? 'Hide this agent\'s sandbox policy' : 'Show this agent\'s sandbox policy'"
+        @click="toggleDetails">{{ banner.loosened.length ? '⚠ ' : '' }}Policy {{ showDetails ? '▴' : '▾' }}</button>
       <button data-test="terminal-stop" :disabled="!(banner?.state === 'running' || live) || !!doing" :aria-busy="doing === 'stop'" @click="stop"><BusyLabel :busy="doing === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
     </div>
+    <header v-show="showDetails" class="banner" data-test="banner">
+      <div class="title mono" data-test="banner-title">{{ banner?.title ?? 'Sandbox terminal' }}</div>
+      <div class="details mono" data-test="banner-details">{{ banner?.details.join(' · ') }}</div>
+      <div v-if="banner?.loosened.length" class="loosened mono" data-test="banner-loosened">loosened: {{ banner.loosened.join('; ') }}</div>
+    </header>
     <div class="screen">
       <TerminalScreen ref="view" :key="memberId" :channel="`member:${memberId}`" :api="api" @session="session = $event" />
     </div>
@@ -102,11 +116,15 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 <style scoped>
 .term-window { display: flex; flex-direction: column; height: 100vh; background: var(--term-bg); color: var(--term-fg); }
 .term-window.embedded { height: 100%; }
-.banner { padding: 8px 12px; background: var(--term-head); border-bottom: 1px solid var(--term-line); }
+.banner { padding: 6px 12px; background: var(--term-head); border-bottom: 1px solid var(--term-line); }
 .title { font-size: 13px; color: var(--term-title); }
 .details { font-size: 12px; color: var(--term-muted); margin-top: 2px; }
 .loosened { font-size: 12px; color: var(--term-warn); margin-top: 2px; }
-.bar { padding: 4px 12px; font-size: 12px; background: var(--term-bar); color: var(--term-muted); }
+.bar { padding: 4px 12px; font-size: 12px; background: var(--term-bar); color: var(--term-muted); flex-wrap: nowrap; }
+.state { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar button { white-space: nowrap; flex: none; }
+.toggle.on { background: var(--term-btn-on); }
+.toggle.warn { color: var(--term-warn); }
 .bar button { background: var(--term-btn); color: var(--term-btn-ink); border-color: var(--term-btn-line); }
 .screen { flex: 1; min-height: 0; }
 .error { color: var(--term-bad); }
