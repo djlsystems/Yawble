@@ -181,7 +181,8 @@ const DesktopCss: Record<string, string> = {
   'components/MemberPane.vue': '0dcbae2a8c95e6e4',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
-  'components/DocumentsBrowser.vue': 'e2d8b12b24e93037',
+  // The documents list's Modified column: a wider list and the size / modified cells.
+  'components/DocumentsBrowser.vue': '5adcd20e83bad36c',
 };
 
 /** Selectors that scroll vertically on the desktop (overflow / overflow-y auto or scroll). */

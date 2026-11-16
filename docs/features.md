@@ -34,8 +34,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     **■** Stop and **🗑** Remove, and an **Activity | Terminal** toggle.
   - Left: what the member last said, formatted. Right: its **Activity** (the Monitor's lines for that member: what it
     was told, its progress, runs and changed files, newest first) or its **Terminal**.
-  - The terminal is the same as the member terminal elsewhere: **Formatted** or **Raw**, the state line, and the
-    **Policy** banner. **Open interactive CLI** shows it and starts the CLI at its size.
+  - The terminal is just the screen, always formatted, with no bar of its own; an open interactive session shows as
+    the terminal itself. **Open interactive CLI** shows it and starts the CLI at its size. On a phone the full-screen
+    terminal's **⋯** holds the state line, Open interactive CLI and Stop.
   - The toggle is remembered per member. Only a terminal that is shown polls; several members' terminals can show at
     once. The Monitor, the palette and the remote view can open a member's terminal: the team page shows that pane's
     Terminal and scrolls it into view.
@@ -258,7 +259,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
   - Items can be archived and restored. **Dispatches** shows each dispatch with its token counts.
-- **Documents**: each team has a shared documents folder for reports, specs and plans.
+- **Documents**: each team has a shared documents folder for reports, specs and plans. The list shows each entry's
+  size and when it was last modified.
   - Every member reads and writes it as plain files.
   - You can browse, read, edit, upload (up to 25 MB), rename and delete there.
 
