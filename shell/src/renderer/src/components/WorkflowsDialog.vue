@@ -7,11 +7,12 @@ import { displayName } from '../faces/faces';
 import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import { vChange } from '../remoteAccess';
 
 /**
  * A team's workflows, newest activity first: open ones (and who is working them, or that nobody is), completed and
  * closed ones. On an open one the person can nudge it (its Manager is told to pick it up), stop what runs in it, or
- * close it. Everything is also on the bus, so the Board and the Monitor follow.
+ * close it (v-change: disabled in a read-only Visitor view, card 305; the core refuses them anyway). Everything is also on the bus, so the Board and the Monitor follow.
  */
 // focus: a workflow to show selected when the list opens (a workflow clicked on the Monitor).
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number; focus?: number | null }>();
@@ -95,14 +96,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
           <template v-if="acting?.id === w.id">
             <input v-model="acting.text" class="grow" :placeholder="acting.kind === 'nudge' ? 'A note for the Manager (optional)' : 'Why (optional)'"
               data-test="workflow-text" @keydown.enter="confirmAct" />
-            <button class="primary" :disabled="busy === w.id" data-test="workflow-confirm" @click="confirmAct"><BusyLabel :busy="busy === w.id" :text="acting.kind === 'nudge' ? 'Nudging…' : 'Closing…'">{{ acting.kind === 'nudge' ? 'Nudge' : 'Close it' }}</BusyLabel></button>
+            <button v-change class="primary" :disabled="busy === w.id" data-test="workflow-confirm" @click="confirmAct"><BusyLabel :busy="busy === w.id" :text="acting.kind === 'nudge' ? 'Nudging…' : 'Closing…'">{{ acting.kind === 'nudge' ? 'Nudge' : 'Close it' }}</BusyLabel></button>
             <button :disabled="busy === w.id" @click="acting = null">Cancel</button>
           </template>
           <template v-else>
-            <button :disabled="busy === w.id" data-test="workflow-nudge" title="Tell the Manager to pick this up" @click="acting = { id: w.id, kind: 'nudge', text: '' }">Nudge</button>
-            <button v-if="w.busy.some((b) => b.endsWith('is running'))" :disabled="busy === w.id" data-test="workflow-stop" title="Stop the runs working on it now"
+            <button v-change :disabled="busy === w.id" data-test="workflow-nudge" title="Tell the Manager to pick this up" @click="acting = { id: w.id, kind: 'nudge', text: '' }">Nudge</button>
+            <button v-if="w.busy.some((b) => b.endsWith('is running'))" v-change :disabled="busy === w.id" data-test="workflow-stop" title="Stop the runs working on it now"
               @click="run(w.id, 'bus.stopWorkflow', {})"><BusyLabel :busy="doing(w.id, 'bus.stopWorkflow')" text="Stopping…">Stop runs</BusyLabel></button>
-            <button :disabled="busy === w.id" data-test="workflow-close" title="End it without declaring it complete" @click="acting = { id: w.id, kind: 'close', text: '' }">Close</button>
+            <button v-change :disabled="busy === w.id" data-test="workflow-close" title="End it without declaring it complete" @click="acting = { id: w.id, kind: 'close', text: '' }">Close</button>
           </template>
         </div>
       </li>
