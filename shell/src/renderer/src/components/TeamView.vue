@@ -186,7 +186,7 @@ defineExpose({ refresh, openWorkflows });
       <!-- One line: the name and three counts. The "·" separators stay in the text (what the title reads as, and what
            tests read) but are hidden: the counts show as chips. -->
       <div class="titleline" data-test="team-title">
-        <h2>Team {{ team.name }}</h2>
+        <h2><span class="title-prefix">Team </span>{{ team.name }}</h2>
         <TeamStateChip :team="team" class="page-state" data-test="team-page-state" />
         <span class="kpi" data-test="kpi-agents"><span class="sep"> · </span><b>{{ loaded ? cards.length : '…' }}</b> agents</span>
         <span class="kpi" :class="{ live: team.running > 0 }" data-test="kpi-running"><span class="sep"> · </span><b>{{ team.running }}</b> running</span>
@@ -219,7 +219,8 @@ defineExpose({ refresh, openWorkflows });
       This team is paused: what it is told waits and runs when you resume it.
       <button class="primary" v-change data-test="team-resume-banner" :disabled="busy.is('resume')" :aria-busy="busy.is('resume')" @click="resume"><BusyLabel :busy="busy.is('resume')" text="Resuming…">Resume</BusyLabel></button>
     </p>
-    <TeamSyncBanner :key="team.id" :api="api" :team="team" />
+    <!-- A phone (card 282): the "commits behind" bar goes under Tell the Manager, so Tell stays the first row. -->
+    <TeamSyncBanner v-if="!phone" :key="team.id" :api="api" :team="team" />
     <TriggersDialog v-if="showTriggers" :api="api" :team="team" :agents="cards" @close="showTriggers = false" />
     <GitDialog v-if="showGit" :api="api" :team="team" @close="showGit = false" />
     <WorkflowsDialog v-if="showWorkflows" :key="workflowFocus ?? 0" :api="api" :team="team" :poll-ms="pollMs" :focus="workflowFocus" @close="showWorkflows = false" />
@@ -246,6 +247,7 @@ defineExpose({ refresh, openWorkflows });
     </div>
     <p v-if="tellImages.problem.value" class="error small">{{ tellImages.problem.value }}</p>
     <p v-if="told" class="muted small" data-test="tell-sent">{{ told }}</p>
+    <TeamSyncBanner v-if="phone" :key="team.id" :api="api" :team="team" />
 
     <LoadingNote v-if="!loaded && !error && !refreshError" text="Loading the team…" />
     <TaskAskCard v-for="a in asks.filter((x) => x.task)" :key="`task-ask-${a.id}`" :ask="a" :busy="busy.is(`ask-${a.id}`)"
@@ -378,7 +380,11 @@ h2 { font-size: 16px; margin: 0; }
   .teamhead { flex-direction: row; align-items: center; gap: 4px; height: 44px; }
   .titleline { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow: hidden; gap: 6px; }
   .titleline h2 { flex: 0 1 auto; min-width: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .titleline .kpi:not(.live) { display: none; }
+  /* Card 282: the name gets the room. "Team " is left out on screen (the top bar names the team too; the title still reads
+     "Team X"), every count chip is hidden (the state chip already says Running), and the state chip gives way first. */
+  .titleline .kpi { display: none; }
+  .title-prefix { display: none; }
+  .titleline .page-state { flex: 0 1000 auto; min-width: 0; overflow: hidden; }
   .phone-actions { flex: none; flex-wrap: nowrap; gap: 2px; }
   .hbtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; box-sizing: border-box; }
   .more-wrap { position: relative; display: inline-flex; }
