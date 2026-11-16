@@ -648,7 +648,7 @@ public sealed class ConciergeReadTools(
         if (!Directory.Exists(dir)) return;
         try
         {
-            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal); // git's objects are read-only
+            foreach (var f in Ops.FolderWalk.Files(dir)) f.Attributes = FileAttributes.Normal; // git's objects are read-only
             Directory.Delete(dir, true);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* a temp folder; the OS cleans it */ }
