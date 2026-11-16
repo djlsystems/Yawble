@@ -172,6 +172,9 @@ become `[redacted]`) and cut to one short line.
   | `completed` | Declared done. |
   | `closed` | Closed by a person. |
 
+  `completed` and `closed` are the ended states. Every other state, `failed` included, is open, so the workflow is
+  listed however long ago its last activity was.
+
 - **needsYou**: what waits for the person: decisions (questions), tool-call approvals, network requests and tool
   requests. The totals across every team, then per team the count and the first five short titles of each kind.
 - **problems**: the last 20 warning and error entries of the last hour, newest first: failed or cut-short runs,
