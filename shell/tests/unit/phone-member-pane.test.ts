@@ -11,7 +11,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { OUTPUT_DEFAULT, setOutputHeight } from '../../src/renderer/src/agentOutputHeight';
-import { focusMemberTerminal, resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
+import { focusMemberTerminal, getMemberView, resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
 import type { AgentCard, YawbleApi } from '../../src/shared/api';
 
 function screen(width: number) {
@@ -51,8 +51,8 @@ const api = {
 async function teamPage(width: number) {
   screen(width);
   const stubs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, WorkflowsDialog: true, DocumentsDialog: true, LogsDialog: true, TerminalScreen: true };
-  // In the document, as in the app: the terminal's bar and tabs teleport by id into its phone header row (PaneHeaderKey).
-  const w = mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs }, attachTo: document.body });
+  // In the document, as in the app: the phone terminal's bar teleports into its header's ⋯ menu by id.
+  const w = mount(TeamView, { props: { team, api, pollMs: 100_000 }, attachTo: document.body, global: { stubs } });
   wrappers.push(w);
   await settle();
   return w;
@@ -123,44 +123,93 @@ for (const frame of [Portrait, Landscape]) {
       expect(bar.find('[data-test=member-more-menu]').exists()).toBe(false);
     });
 
-    it("the terminal gets the right area full width: its transcript is at least 60% of the visible height and on screen", async () => {
-      setMemberView('payments', 'DeveloperAda', 'terminal');
+    // Card 307: B057's phone terminal followed it here - the whole screen, one 44 px header row (the full checks are in
+    // phone-sheets.test.ts, with the real cascade).
+    it("the terminal is the whole screen with one header row: its transcript is at least 60% of the visible height", async () => {
       const w = await teamPage(frame.width);
+      await paneOf(w, 'DeveloperAda').get('[data-test=member-view-terminal]').trigger('click');
+      await settle();
       const side = paneOf(w, 'DeveloperAda').get('[data-test=member-side]');
       const term = side.get('[data-test=member-terminal]');
+      expect(term.classes()).toContain('full');
       expect(term.find('.term-window').classes()).toContain('in-pane');
-      // The area is as tall as what it holds (no share of a fixed height the frame's borders could eat into, verify 288
-      // F3): the terminal's one 44 px header row (its tabs and ⋯) and the transcript at a height of its own, a little
-      // over 60% of the screen.
+      // Over the page: fixed to every edge at the screen's height; its place in the stack takes no height.
+      expect(value(term.element, st, 'position')).toBe('fixed');
+      expect(value(term.element, st, 'inset')).toBe('0');
+      expect(value(term.element, st, 'height')).toBe('100dvh');
       expect(value(side.element, st, 'height')).toBe('auto');
-      const head = term.get('[data-test=member-terminal-head]').element;
-      const headH = px(value(head, st, 'height')) + px(value(head, st, 'border-bottom')?.split(/\s+/)[0]);
-      expect(headH).toBe(45);
-      const app = phoneRules('TerminalApp.vue');
-      const screenRule = app.find((r) => r.sels.includes('.in-pane .screen'))!;
-      expect(screenRule.decls.flex).toBe('none');
-      const m = /^calc\(60dvh \+ (\d+)px\)$/.exec(screenRule.decls.height ?? '');
-      expect(m, screenRule.decls.height).not.toBeNull();
-      expect(app.find((r) => r.sels.includes('.in-pane :deep(.screen-wrap)'))?.decls['min-height']).toBe('0');
-      const transcript = frame.height * 0.6 + Number(m![1]);
+      // One 44 px header row: title, the tabs' slot, ⋯ and ✕; the terminal's bar (state, Open, Policy, Stop) in its ⋯.
+      const head = term.get('[data-test=terminal-pane-head]');
+      expect(px(value(head.element, st, 'height'))).toBe(44);
+      const own = [...head.element.querySelectorAll(':scope > button')];
+      expect(own.map((b) => b.getAttribute('data-test'))).toEqual(['terminal-pane-more', 'terminal-pane-close']);
+      for (const b of own) expect(px(value(b, st, 'height', 'min-height'))).toBeGreaterThanOrEqual(44);
+      const menu = term.get('[data-test=terminal-pane-menu]');
+      for (const sel of ['terminal-state', 'open-interactive', 'terminal-details-toggle', 'terminal-stop'])
+        expect(menu.find(`[data-test=${sel}]`).exists(), sel).toBe(true);
+      const transcript = frame.height - 44;
       expect(transcript / frame.height, `${transcript} of ${frame.height}`).toBeGreaterThanOrEqual(0.6);
-      // The whole terminal (1 px borders, the header, the transcript) fits under the app's top bar, so with the
-      // transcript scrolled into view its header row is not covered (verify 288, 667 x 263).
-      const appBar = px(rules(styleOf(read('App.vue'))).find((r) => r.sels.includes('.phone .bar'))?.decls['min-height']);
-      expect(appBar).toBeGreaterThan(0);
-      expect(2 + headH + transcript, `terminal under a ${appBar} px top bar`).toBeLessThanOrEqual(frame.height - appBar);
-      // The terminal's bar (what it shows, Policy) is in the header's ⋯ menu; Open and Stop are the pane's.
-      const menu = term.get('[data-test=member-terminal-menu]');
-      expect(menu.find('[data-test=terminal-state]').exists()).toBe(true);
-      expect(menu.find('[data-test=terminal-details-toggle]').exists()).toBe(true);
-      expect(term.find('[data-test=open-interactive]').exists()).toBe(false);
-      expect(term.find('[data-test=terminal-stop]').exists()).toBe(false);
-      const more = term.get('[data-test=member-terminal-more]').element;
-      expect(px(value(more, st, 'height'))).toBeGreaterThanOrEqual(44);
-      expect(px(value(more, st, 'min-width'))).toBeGreaterThanOrEqual(44);
+      // ✕: back to Activity.
+      await head.get('[data-test=terminal-pane-close]').trigger('click');
+      expect(paneOf(w, 'DeveloperAda').find('[data-test=member-terminal]').exists()).toBe(false);
+      expect(paneOf(w, 'DeveloperAda').find('.member-activity').exists()).toBe(true);
     });
   });
 }
+
+// B064 (card 310): on a phone the terminal is the whole screen, so one member's at a time; the page opens on Activity.
+const terminals = (w: VueWrapper) => w.findAll('[data-test=member-terminal]');
+/** The members whose terminal is open, in page order. */
+const openOn = (w: VueWrapper) => w.findAll('section.pane').filter((p) => p.find('[data-test=member-terminal]').exists())
+  .map((p) => p.attributes('data-test')!.replace(/^agent-/, ''));
+describe('member terminals on a phone at 375x521 (B064)', () => {
+  it('opening Terminal on one member and then another: only the second is open, the first is back on Activity', async () => {
+    const w = await teamPage(375);
+    await paneOf(w, 'Manager').get('[data-test=member-view-terminal]').trigger('click');
+    await settle();
+    expect(openOn(w)).toEqual(['Manager']);
+    await paneOf(w, 'DeveloperAda').get('[data-test=member-view-terminal]').trigger('click');
+    await settle();
+    expect(terminals(w)).toHaveLength(1);
+    expect(openOn(w)).toEqual(['DeveloperAda']);
+    expect(w.findAll('.member-terminal.full')).toHaveLength(1);
+    expect(paneOf(w, 'Manager').find('.member-activity').exists()).toBe(true);
+    expect(paneOf(w, 'Manager').get('[data-test=member-view-activity]').attributes('aria-selected')).toBe('true');
+    // The remembered (desktop) choice is not touched by the phone.
+    expect(getMemberView('payments', 'Manager')).toBe('activity');
+    expect(getMemberView('payments', 'DeveloperAda')).toBe('activity');
+  });
+
+  it('two members remembered on Terminal: the page opens with both on Activity, no full-screen terminal, the choice kept', async () => {
+    setMemberView('payments', 'Manager', 'terminal');
+    setMemberView('payments', 'DeveloperAda', 'terminal');
+    const w = await teamPage(375);
+    expect(terminals(w)).toHaveLength(0);
+    for (const n of ['Manager', 'DeveloperAda']) expect(paneOf(w, n).find('.member-activity').exists(), n).toBe(true);
+    expect(getMemberView('payments', 'Manager')).toBe('terminal');
+    expect(getMemberView('payments', 'DeveloperAda')).toBe('terminal');
+  });
+
+  it('a terminal left open on the phone is closed the next time the team page opens', async () => {
+    const w = await teamPage(375);
+    await paneOf(w, 'DeveloperAda').get('[data-test=member-view-terminal]').trigger('click');
+    await settle();
+    expect(terminals(w)).toHaveLength(1);
+    wrappers.pop()!.unmount();
+    const again = await teamPage(375);
+    expect(terminals(again)).toHaveLength(0);
+  });
+});
+
+describe('member terminals at 1280 px (B064: unchanged)', () => {
+  it('two members remembered on Terminal: both restored, both open in their panes', async () => {
+    setMemberView('payments', 'Manager', 'terminal');
+    setMemberView('payments', 'DeveloperAda', 'terminal');
+    const w = await teamPage(Desktop);
+    expect(openOn(w)).toEqual(['Manager', 'DeveloperAda']);
+    expect(w.findAll('.member-terminal.full')).toHaveLength(0);
+  });
+});
 
 describe("a member's pane at 1280 px (B061)", () => {
   it('one frame, the two areas side by side, the shared width and height, the full toolbar', async () => {

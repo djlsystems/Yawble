@@ -4,10 +4,8 @@
 // - the Logs sheet's list fills what the sheet leaves it (no fixed 200 px), the filters and Sort by scroll away at the
 //   top of the list instead of eating into the sheet, and Load more is the list's last row (reached by scrolling to the
 //   end), with Filters closed and open;
-// - a member's terminal has one header row (the Formatted / Raw tabs, and a ⋯ holding the bar's state line and Policy)
-//   over a transcript of at least 60% of the height. Since B061 (card 286 fix round, from verify 288) that terminal is
-//   the one inline in the member's pane on the team page (MemberPane, TerminalApp in-pane): Open interactive CLI and Stop
-//   are the pane's toolbar there, and the right-hand pane no longer shows a member's terminal.
+// - a member's terminal (in its pane on the team page since B061, card 307) is the whole screen with one header row (title, the Formatted / Raw tabs, a ⋯ holding the
+//   bar's state, Open interactive CLI, Policy and Stop, and ✕), the terminal taking the rest (at least 60% of the height).
 // At 1280 px nothing changes.
 //
 // The real styles are in the page: styles.css and every component's <style> blocks under that component's scope id, so
@@ -21,8 +19,10 @@ import { resolve } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import LogsDialog from '../../src/renderer/src/components/LogsDialog.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
-import { resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
+import TerminalPane from '../../src/renderer/src/components/TerminalPane.vue';
+import { getMemberView, resetMemberViews } from '../../src/renderer/src/memberPaneView';
 import { PHONE_BREAKPOINT, PHONE_QUERY } from '../../src/renderer/src/phone';
+import { showChannelTerminal, terminalPane } from '../../src/renderer/src/terminalPane';
 import type { AgentCard, LogSourceInfo, TerminalBanner, YawbleApi } from '../../src/shared/api';
 
 // ---- the page's styles: styles.css, then each SFC's style blocks under its scope id
@@ -62,6 +62,8 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 5000 });
   localStorage.clear();
   resetMemberViews();
+  terminalPane.open = false;
+  terminalPane.target = null;
 });
 
 let wrappers: VueWrapper[] = [];
@@ -254,7 +256,10 @@ describe('Logs on a phone: the list fills the sheet, Load more is always reachab
   });
 });
 
-// ================================================================ the member terminal, inline in the member's pane
+// ================================================================ the member terminal (in its pane on the team page)
+// B061 moved a member's terminal from the right-hand TerminalPane into its MemberPane on the team page; card 307: B057's
+// phone terminal (full screen, one header row, the ⋯ with the bar, the capped Policy strip) came with it. The member's
+// terminal is opened the way the team page does it: its pane switched to Terminal (memberPaneView).
 
 const banner = (): TerminalBanner => ({
   title: 'web / DeveloperAda · sandbox', details: ['timeout 15 min'], loosened: [], interactive: false,
@@ -267,129 +272,123 @@ const longBanner = (): TerminalBanner => ({
     'timeout 15 min', 'idle timeout 5 min', 'memory 4 GB'],
   loosened: ['writes outside the clone allowed', 'network host github.com added by the person'],
 } as unknown as TerminalBanner);
+/** The iPhone SE frames the card names for the terminal (375 x 501 portrait, 667 x 263 landscape). */
+const TermPortrait: Frame = { name: 'portrait 375 x 501', width: 375, height: 501 };
+const TermPhones = [TermPortrait, Landscape];
 /** A CSS length in px at the frame's height (happy-dom may hand back a vh value as declared). */
 const lengthPx = (v: string, frame: Frame) => (/^[\d.]+vh$/.test(v.trim()) ? (parseFloat(v) * frame.height) / 100 : px(v));
-const card = (): AgentCard => ({
+const ada = (): AgentCard => ({
   member: { id: 4, teamId: 1, team: 'web', name: 'DeveloperAda', role: 'member', cli: 'claude', instructions: '', model: '', credential: 'default' },
   state: 'idle', queuePosition: null, queueLength: 0, queuedInstructions: 0, statusLine: 'Done.', runId: null, runStartedAt: null,
   lastRunState: 'completed', lastRunReason: null, hasClone: true,
 } as unknown as AgentCard);
-/** DeveloperAda's pane on the team page, on Terminal (the real TerminalApp and TerminalScreen; xterm stubbed out). */
 async function openTerminal(make: () => TerminalBanner = banner) {
-  const { api, calls } = fakeApi({ 'terminal.banner': () => make(), 'terminal.stop': () => null });
-  setMemberView('web', 'DeveloperAda', 'terminal');
-  const w = keep(mount(MemberPane, { props: { card: card(), api, pollMs: 60_000 }, attachTo: document.body, global: { stubs: { TerminalView: true, TranscriptView: true } } }));
+  const { api } = fakeApi({ 'terminal.banner': () => make(), 'terminal.stop': () => null });
+  const w = keep(mount(MemberPane, { props: { card: ada(), api, pollMs: 60_000 }, attachTo: document.body, global: { stubs: { TerminalView: true, TranscriptView: true } } }));
+  // Tapped open (B064: a remembered Terminal applies at desktop widths only).
+  await w.get('[data-test=member-view-terminal]').trigger('click');
   await settle();
-  return { w, calls };
-}
-/** The transcript's declared height on a phone (TerminalApp's `.in-pane .screen`, a calc of dvh that happy-dom drops). */
-function transcriptRule(): { dvh: number; plus: number } {
-  const src = readFileSync(resolve(__dirname, '../../src/renderer/src/TerminalApp.vue'), 'utf8');
-  const m = /\.in-pane \.screen \{[^}]*\bheight: calc\(([\d.]+)dvh \+ ([\d.]+)px\)/.exec(src);
-  expect(m, 'TerminalApp gives the in-pane transcript a height of its own on a phone').not.toBeNull();
-  return { dvh: Number(m![1]), plus: Number(m![2]) };
+  return w;
 }
 
-describe("the member's terminal on a phone: one header row over the transcript, in the member's pane", () => {
-  for (const frame of Phones) {
+describe('the member terminal on a phone: full screen, one header row', () => {
+  for (const frame of TermPhones) {
     it(frame.name, async () => {
       setScreen(frame);
-      const { w } = await openTerminal();
-      const term = w.get('[data-test=member-terminal]').element as HTMLElement;
-      const head = w.get('[data-test=member-terminal-head]').element;
-      // Inline in the pane, not the right-hand pane over the page.
-      expect(document.querySelector('[data-test=terminal-pane]')).toBeNull();
-      expect(term.querySelector('.term-window')!.classList.contains('in-pane')).toBe(true);
+      const w = await openTerminal();
+      const pane = w.get('[data-test=member-terminal]').element as HTMLElement;
+      const head = w.get('[data-test=terminal-pane-head]').element;
+      expect(head.parentElement).toBe(pane);
 
-      // One header row, the terminal's first: the Formatted / Raw tabs and ⋯ are in it; the bar (state line, Policy) is
-      // in its ⋯ menu, closed; Open interactive CLI and Stop are the pane's toolbar, not the terminal's. Nothing else
-      // stands between the header and the transcript.
-      expect(term.firstElementChild).toBe(head);
+      // The whole screen over the page, not an area of the stacked pane: fixed to every edge, no width of its own, no
+      // resize handle.
+      const p = css(pane);
+      expect(p.position).toBe('fixed');
+      expect([p.top, p.right, p.bottom, p.left].every((v) => v === '0px' || v === '0') || /^0(px)?$/.test(p.inset)).toBe(true);
+      expect(pane.style.width).toBe('');
+      expect([px(p.minWidth.replace(/^0$/, '0px')), p.maxWidth]).toEqual([0, 'none']);
+      // (Its height: 100dvh too, which happy-dom drops as unknown; fixed to all four edges is the screen either way.)
+      expect(w.find('.tile-grip').exists()).toBe(false);
+      expect(pane.querySelector('.handle')).toBeNull();
+
+      // One header row: the title, the Formatted / Raw tabs, ⋯ and ✕ are all in it; the bar (state, Open interactive
+      // CLI, Policy, Stop) is in its ⋯ menu, closed; nothing else stands between it and the terminal.
       expect(css(head).height).toBe('44px');
-      for (const sel of ['[data-test=terminal-modes]', '[data-test=member-terminal-more]']) expect(head.querySelector(sel), sel).toBeTruthy();
-      const menu = w.get('[data-test=member-terminal-menu]').element;
-      for (const sel of ['[data-test=terminal-state]', '[data-test=terminal-details-toggle]']) expect(menu.querySelector(sel), sel).toBeTruthy();
-      expect(term.querySelector('[data-test=open-interactive]')).toBeNull();
-      expect(term.querySelector('[data-test=terminal-stop]')).toBeNull();
-      expect(w.find('[data-test=member-toolbar] [data-test=stop]').exists()).toBe(true);
+      expect(w.get('[data-test=terminal-pane-title]').text()).toBe('Developer Ada · web');
+      for (const sel of ['[data-test=terminal-pane-title]', '[data-test=terminal-modes]', '[data-test=terminal-pane-more]', '[data-test=terminal-pane-close]'])
+        expect(head.querySelector(sel), sel).toBeTruthy();
+      const menu = w.get('[data-test=terminal-pane-menu]').element;
+      for (const sel of ['[data-test=terminal-state]', '[data-test=open-interactive]', '[data-test=terminal-details-toggle]', '[data-test=terminal-stop]'])
+        expect(menu.querySelector(sel), sel).toBeTruthy();
       expect(shown(menu)).toBe(false);
       expect(css(menu).position).toBe('absolute');
-      const inFlowRows = [...term.querySelectorAll('.bar, .modes, header')].filter((e) => shown(e) && !head.contains(e));
+      const body = pane.querySelector(':scope > .term-window')!;
+      const inFlowRows = [...pane.querySelectorAll('.bar, .modes, header')].filter((e) => shown(e) && !head.contains(e));
       expect(inFlowRows, 'no second or third header row').toEqual([]);
 
-      // The transcript has a height of its own (no flex share the frame's borders could eat into): at least 60% of the
-      // screen, with no 160 px floor. The whole terminal (its 1 px borders, the 44 px row and its 1 px line, the
-      // transcript) fits the screen under the app's 52 px top bar, so scrolled to the transcript's end its header shows.
-      const screen = term.querySelector('.term-window > .screen')!;
-      expect(css(screen).flexGrow).toBe('0');
-      expect(px(css(term.querySelector('.screen-wrap')!).minHeight)).toBe(0);
-      const rule = transcriptRule();
-      const transcript = (rule.dvh * frame.height) / 100 + rule.plus;
-      expect(transcript / frame.height, `${transcript} of ${frame.height}`).toBeGreaterThanOrEqual(0.6);
-      expect(rule.plus).toBeGreaterThan(0); // a margin over 60% for rounding
-      expect(1 + 44 + px(css(head).borderBottomWidth) + transcript + 1).toBeLessThanOrEqual(frame.height - 52);
+      // The terminal takes the rest and never runs past the bottom: a flex child with no floor, all the way down.
+      expect([css(body).flexGrow, px(css(body).minHeight), css(body).overflow]).toEqual(['1', 0, 'hidden']);
+      expect(css(pane).overflow).toBe('hidden');
+      const screen = body.querySelector('.screen')!;
+      expect([css(screen).flexGrow, px(css(screen).minHeight)]).toEqual(['1', 0]);
+      expect(px(css(body.querySelector('.screen-wrap')!).minHeight)).toBe(0);
+      const transcript = frame.height - 44;
+      expect(transcript / frame.height).toBeGreaterThanOrEqual(0.6);
 
       // ⋯ opens the menu; Policy there shows the policy (and the menu closes).
-      await w.get('[data-test=member-terminal-more]').trigger('click');
+      await w.get('[data-test=terminal-pane-more]').trigger('click');
       expect(shown(menu)).toBe(true);
       await w.get('[data-test=terminal-details-toggle]').trigger('click');
       expect(shown(menu)).toBe(false);
       expect(shown(w.get('[data-test=banner]').element)).toBe(true);
       // Every control in the header is a 44 px target.
-      for (const b of head.querySelectorAll(':scope > button, [data-test=terminal-modes] button')) {
-        expect(px(css(b).minHeight) || px(css(b).height), b.textContent ?? '').toBeGreaterThanOrEqual(44);
-        if (b.matches('[data-test=member-terminal-more]')) expect(px(css(b).minWidth)).toBeGreaterThanOrEqual(44);
-      }
+      for (const b of head.querySelectorAll(':scope > button, [data-test=terminal-modes] button')) expect(px(css(b).minHeight) || px(css(b).height), b.textContent ?? '').toBeGreaterThanOrEqual(44);
+
+      // ✕ goes back to the member's Activity: the terminal (and its header) is gone.
+      await w.get('[data-test=terminal-pane-close]').trigger('click');
+      expect(getMemberView('web', 'DeveloperAda', true)).toBe('activity');
+      expect(w.find('[data-test=member-terminal]').exists()).toBe(false);
     });
   }
 
-  it('the menu goes when the pane switches to Activity, and comes back closed', async () => {
-    setScreen(Portrait);
-    const { w } = await openTerminal();
-    await w.get('[data-test=member-terminal-more]').trigger('click');
-    expect(shown(w.get('[data-test=member-terminal-menu]').element)).toBe(true);
-    await w.get('[data-test=member-view-activity]').trigger('click');
-    await settle();
-    expect(w.find('[data-test=member-terminal]').exists()).toBe(false);
-    await w.get('[data-test=member-view-terminal]').trigger('click');
-    await settle();
-    expect(shown(w.get('[data-test=member-terminal-menu]').element)).toBe(false);
-    expect(w.get('[data-test=member-terminal-menu] [data-test=terminal-state]').text()).toContain('Idle');
-  });
-
-  it('1280: unchanged - no header row; the bar (state, Policy) and the tabs over the terminal', async () => {
+  it('1280: unchanged - the terminal beside what was said, in the pane; its bar and the tabs over the terminal', async () => {
     setScreen(Desktop);
-    const { w } = await openTerminal();
-    expect(w.find('[data-test=member-terminal-head]').exists()).toBe(false);
-    expect(w.find('[data-test=member-terminal-menu]').exists()).toBe(false);
-    const bar = w.get('[data-test=member-terminal] .term-window > .bar').element;
-    expect(bar.querySelector('[data-test=terminal-state]')).toBeTruthy();
+    const w = await openTerminal();
+    const pane = w.get('[data-test=member-terminal]').element as HTMLElement;
+    expect(css(pane).position).not.toBe('fixed');
+    expect(pane.classList.contains('full')).toBe(false);
+    expect(w.get('[data-test=member-side]').element.contains(pane)).toBe(true);
+    expect(w.find('.tile-grip').exists()).toBe(true);
+    expect(w.find('[data-test=terminal-pane-head]').exists()).toBe(false);
+    expect(w.find('[data-test=terminal-pane-more]').exists()).toBe(false);
+    expect(w.find('[data-test=terminal-pane-menu]').exists()).toBe(false);
+    const bar = w.get('.term-window > .bar').element;
     expect(bar.querySelector('[data-test=terminal-details-toggle]')).toBeTruthy();
+    // Open interactive CLI and Stop are the pane's toolbar at this width, as B061 left them.
+    expect(bar.querySelector('[data-test=open-interactive]')).toBeNull();
+    expect(bar.querySelector('[data-test=terminal-stop]')).toBeNull();
+    expect(w.find('[data-test=member-toolbar] [data-test=open-interactive-cli]').exists()).toBe(true);
     expect(w.get('.screen-wrap > [data-test=terminal-modes]').exists()).toBe(true);
-    expect(css(w.get('.term-window > .screen').element).flexGrow).toBe('1');
+    expect(css(w.get('.screen-wrap').element).minHeight).toBe('160px');
   });
 });
 
 describe('the Policy strip from ⋯ on a phone (B057 verify O2): capped, scrolls on its own, closes with its own ✕', () => {
-  for (const frame of Phones) {
+  for (const frame of TermPhones) {
     it(frame.name, async () => {
       setScreen(frame);
-      const { w } = await openTerminal(longBanner);
-      await w.get('[data-test=member-terminal-more]').trigger('click');
+      const w = await openTerminal(longBanner);
+      await w.get('[data-test=terminal-pane-more]').trigger('click');
       await w.get('[data-test=terminal-details-toggle]').trigger('click');
       const strip = w.get('[data-test=banner]').element;
       expect(shown(strip)).toBe(true);
-      expect(strip.closest('[data-test=member-terminal]')).toBeTruthy();
       expect(w.get('[data-test=banner-loosened]').text()).toContain('github.com');
 
-      // A cap of at most a fifth of the screen; it adds to the terminal and takes nothing from the transcript, whose
-      // height is its own (at least 60%, above).
+      // A cap, so the transcript (the screen less the 44 px header and the strip) keeps at least 60%.
       const cap = lengthPx(css(strip).maxHeight, frame);
       expect(cap, 'the strip has a max-height').toBeGreaterThan(0);
-      expect(cap).toBeLessThanOrEqual(frame.height * 0.2);
       expect(css(strip).flexShrink === '0' || css(strip).flex.startsWith('0 0')).toBe(true);
-      const rule = transcriptRule();
-      expect(((rule.dvh * frame.height) / 100 + rule.plus) / frame.height).toBeGreaterThanOrEqual(0.6);
+      expect((frame.height - 44 - cap) / frame.height).toBeGreaterThanOrEqual(0.6);
       // The text scrolls inside the strip, under the same cap; the strip itself clips.
       const text = w.get('[data-test=banner-text]').element;
       expect(css(text).overflowY).toBe('auto');
@@ -403,15 +402,17 @@ describe('the Policy strip from ⋯ on a phone (B057 verify O2): capped, scrolls
       expect(cap).toBeGreaterThanOrEqual(44);
       await close.trigger('click');
       expect(shown(strip)).toBe(false);
-      expect(shown(w.get('[data-test=member-terminal-menu]').element)).toBe(false);
+      expect(shown(w.get('[data-test=terminal-pane-menu]').element)).toBe(false);
       expect(localStorage.getItem('yawble.terminal.details')).toBeNull();
+      // ... and the member's terminal is still open.
+      expect(w.find('[data-test=member-terminal]').exists()).toBe(true);
     });
   }
 
   it('1280: unchanged - no cap, no ✕ on the strip', async () => {
     setScreen(Desktop);
     localStorage.setItem('yawble.terminal.details', '1');
-    const { w } = await openTerminal(longBanner);
+    const w = await openTerminal(longBanner);
     const strip = w.get('[data-test=banner]').element;
     expect(shown(strip)).toBe(true);
     expect(['none', '']).toContain(css(strip).maxHeight);
@@ -423,11 +424,36 @@ describe('the Policy strip from ⋯ on a phone (B057 verify O2): capped, scrolls
 describe('the ⋯ state line (B057 verify O3): no separator for an empty field', () => {
   it('a headless run with no command known reads "Run 42 · input off during headless run"', async () => {
     setScreen(Landscape);
-    const { w } = await openTerminal(() => ({ ...banner(), state: 'running', runId: 42 } as unknown as TerminalBanner));
-    const state = w.get('[data-test=terminal-state]');
-    expect(state.element.closest('[data-test=member-terminal-menu]'), "in the terminal header's ⋯").toBeTruthy();
-    const line = state.text();
+    const w = await openTerminal(() => ({ ...banner(), state: 'running', runId: 42 } as unknown as TerminalBanner));
+    const line = w.get('[data-test=terminal-pane-menu] [data-test=terminal-state]').text();
     expect(line).toBe('Run 42 · input off during headless run');
     expect(line).not.toMatch(/·\s*·/);
+  });
+});
+
+// ================================================================ a channel terminal (still the right-hand TerminalPane)
+
+describe('a channel terminal on a phone keeps B057 in TerminalPane', () => {
+  it('full screen, one 44 px header row with the tabs; 1280: a side pane with its handle', async () => {
+    const { api } = fakeApi({});
+    showChannelTerminal('agent-test:claude', 'Claude · Test', () => {});
+    setScreen(Landscape);
+    const w = keep(mount(TerminalPane, { props: { api, pollMs: 60_000 }, attachTo: document.body, global: { stubs: { TerminalView: true, TranscriptView: true } } }));
+    await settle();
+    expect(css(w.get('[data-test=terminal-pane]').element).position).toBe('fixed');
+    const head = w.get('[data-test=terminal-pane-head]').element;
+    expect(css(head).height).toBe('44px');
+    expect(head.querySelector('[data-test=terminal-modes]')).toBeTruthy();
+    expect(head.querySelector('[data-test=terminal-pane-more]')).toBeTruthy();
+    w.unmount(); wrappers = wrappers.filter((x) => x !== w);
+
+    setScreen(Desktop);
+    const d = keep(mount(TerminalPane, { props: { api, pollMs: 60_000 }, attachTo: document.body, global: { stubs: { TerminalView: true, TranscriptView: true } } }));
+    await settle();
+    const pane = d.get('[data-test=terminal-pane]').element as HTMLElement;
+    expect(css(pane).position).toBe('relative');
+    expect(pane.style.width).toBe(`${terminalPane.width}px`);
+    expect(pane.querySelector('.handle')).toBeTruthy();
+    expect(d.find('[data-test=terminal-pane-more]').exists()).toBe(false);
   });
 });

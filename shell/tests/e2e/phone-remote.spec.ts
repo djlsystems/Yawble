@@ -183,7 +183,18 @@ for (const size of PHONES) {
       await expect(page.locator('[data-test=team-title]')).toBeVisible();
       await check(page, 'team', size);
       await page.screenshot({ path: path.join(SHOTS, `team-full-${tag(size)}.png`), fullPage: true });
-      await page.locator('[data-test=open-code]').first().click();
+      // B061: on a phone a member's Code is in its pane's ⋯ menu (member-more): open the first one that has a clone.
+      const code = page.locator('[data-test=open-code]:visible').first();
+      if (!(await code.isVisible().catch(() => false))) {
+        const mores = page.locator('[data-test=member-more]');
+        for (let i = 0, n = await mores.count(); i < n; i++) {
+          await mores.nth(i).click();
+          await expect(page.locator('[data-test=member-more-menu]')).toBeVisible();
+          if (await page.locator('[data-test=member-more-menu] [data-test=open-code]').count()) break;
+          await mores.nth(i).click(); // closes it again
+        }
+      }
+      await page.locator('[data-test=open-code]:visible').first().click();
       await expect(page.locator('.code-dialog, [data-test=code-dialog], [data-test=code-browser]').first()).toBeVisible();
       await page.waitForTimeout(500);
       await check(page, 'code-browser', size);
@@ -437,6 +448,13 @@ for (const size of PHONES) {
               await more.click();
               await expect(p.locator('[data-test=team-more-menu]')).toBeVisible();
             }
+            // B061: on a phone a member's Code, Settings and Logs are in its pane's ⋯ menu (member-more).
+            const memberMore = p.locator('[data-test=member-more]').first();
+            if (!(await b.isVisible().catch(() => false)) && (await memberMore.isVisible().catch(() => false))) {
+              if (await more.isVisible().catch(() => false) && (await p.locator('[data-test=team-more-menu]').count())) await more.click();
+              await memberMore.click();
+              await expect(p.locator('[data-test=member-more-menu]')).toBeVisible();
+            }
             if (!(await b.isVisible().catch(() => false))) return false;
             return b.click({ timeout: 3000 }).then(() => true, () => false);
           },
@@ -592,7 +610,9 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
     ['nav-teams', 'team-page'], ['nav-documents', 'documents-folder'], ['open-app-settings', 'settings-skill'], ['open-app-settings', 'settings-guardrails'], ['open-app-settings', 'settings-integrations'], ['open-app-settings', 'settings-system']] as const) {
     test(`${name}: every [data-test] element in the same place and size`, async ({ browser }) => {
       const size = { w: 1280, h: 800 };
-      const layouts: Record<string, Record<string, string>> = {};
+      type Layout = { out: Record<string, string>; below: string[]; members: { top: number; bottom: number } | null;
+        panes: { name: string; frames: number; saidRight: number; sideLeft: number }[] };
+      const layouts: Record<string, Layout> = {};
       for (const [which, dir] of [['base', baseBuiltDir], ['branch', builtDir]] as const) {
         const { page } = await open(browser, size, { dir, mobile: false });
         if (id) await page.locator(`[data-test=sidebar] [data-test=${id}]`).first().click();
@@ -600,26 +620,58 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
         await page.waitForTimeout(900);
         await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${name}-${which}.png`) });
         layouts[which] = await page.evaluate(() => {
+          // A team's page (B061, card 312): its members (.member-cell, an AgentCard + activity row on main, one framed
+          // MemberPane here) are measured apart; what comes after them is listed in `below`.
+          const cells = [...document.querySelectorAll('.member-cell')];
+          const last = cells[cells.length - 1];
+          const members = cells.length ? { top: Math.round(cells[0].getBoundingClientRect().top), bottom: Math.round(last.getBoundingClientRect().bottom) } : null;
           const out: Record<string, string> = {};
+          const below: string[] = [];
           const seen = new Map<string, number>();
           for (const el of document.querySelectorAll('[data-test]')) {
+            if (el.closest('.member-cell')) continue;
             const k0 = el.getAttribute('data-test')!;
             const n = (seen.get(k0) ?? 0) + 1; seen.set(k0, n);
             const r = el.getBoundingClientRect();
             if (!r.width && !r.height) continue;
-            out[`${k0}#${n}`] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+            const k = `${k0}#${n}`;
+            out[k] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+            if (last && (last.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) below.push(k);
           }
-          return out;
+          const panes = cells.map((c) => {
+            const said = c.querySelector('[data-test=member-said]'), side = c.querySelector('[data-test=member-side]');
+            return { name: c.querySelector('[data-test^=agent-]')?.getAttribute('data-test') ?? '?', frames: c.querySelectorAll('section.pane').length,
+              saidRight: said ? Math.round(said.getBoundingClientRect().right) : -1, sideLeft: side ? Math.round(side.getBoundingClientRect().left) : -1 };
+          });
+          return { out, below, members, panes };
         });
         await page.context().close();
       }
+      const base = layouts.base!, branch = layouts.branch!;
+      // What follows the members may move down or up by however much taller or shorter the members area is (B061).
+      const shift = base.members && branch.members ? (branch.members.bottom - branch.members.top) - (base.members.bottom - base.members.top) : 0;
+      const moved = (v: string | undefined, dy: number) => v?.replace(/^(-?\d+),(-?\d+)/, (_m, x, y) => `${x},${Number(y) - dy}`);
       // A data-test the branch adds (a hook main does not have) is not a layout change: listed, not compared.
       const diff: string[] = [];
-      const added = Object.keys(layouts.branch!).filter((k) => !(k.replace(/#\d+$/, '#1') in layouts.base!));
+      const added = Object.keys(branch.out).filter((k) => !(k.replace(/#\d+$/, '#1') in base.out));
       if (added.length) console.log(`${name} @1280: hooks new in B037 (not compared): ${added.join(', ')}`);
-      for (const k of new Set([...Object.keys(layouts.base!), ...Object.keys(layouts.branch!)]))
-        if (!added.includes(k) && layouts.base![k] !== layouts.branch![k]) diff.push(`${k}: main ${BASE_COMMIT} ${layouts.base![k] ?? '-'} / B037 ${layouts.branch![k] ?? '-'}`);
+      for (const k of new Set([...Object.keys(base.out), ...Object.keys(branch.out)])) {
+        if (added.includes(k)) continue;
+        const b = branch.below.includes(k) ? moved(branch.out[k], shift) : branch.out[k];
+        if (base.out[k] !== b) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / B037 ${branch.out[k] ?? '-'}${branch.below.includes(k) ? ` (below the members, shift ${shift})` : ''}`);
+      }
       expect.soft(diff, `${name} at 1280 px differs from main ${BASE_COMMIT}`).toEqual([]);
+      if (base.members || branch.members) {
+        // The members area starts where main's did, and is B061's layout: one frame per member, its two areas side by side.
+        // eslint-disable-next-line no-console
+        console.log(`${name} @1280: members main ${JSON.stringify(base.members)} / B061 ${JSON.stringify(branch.members)}; ${JSON.stringify(branch.panes)}`);
+        expect.soft(branch.members?.top, `${name}: the members start where main's do`).toBe(base.members?.top);
+        expect.soft(branch.panes.length, `${name}: one pane per member`).toBe(base.panes.length);
+        for (const p of branch.panes) {
+          expect.soft(p.frames, `${p.name}: one framed pane`).toBe(1);
+          expect.soft(p.saidRight, `${p.name}: what was said left of the side area`).toBeLessThanOrEqual(p.sideLeft);
+        }
+      }
     });
   }
 });
