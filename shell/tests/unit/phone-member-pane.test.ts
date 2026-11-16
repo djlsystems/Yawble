@@ -11,7 +11,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { OUTPUT_DEFAULT, setOutputHeight } from '../../src/renderer/src/agentOutputHeight';
-import { focusMemberTerminal, resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
+import { focusMemberTerminal, getMemberView, resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
 import type { AgentCard, YawbleApi } from '../../src/shared/api';
 
 function screen(width: number) {
@@ -126,8 +126,9 @@ for (const frame of [Portrait, Landscape]) {
     // Card 307: B057's phone terminal followed it here - the whole screen, one 44 px header row (the full checks are in
     // phone-sheets.test.ts, with the real cascade).
     it("the terminal is the whole screen with one header row: its transcript is at least 60% of the visible height", async () => {
-      setMemberView('payments', 'DeveloperAda', 'terminal');
       const w = await teamPage(frame.width);
+      await paneOf(w, 'DeveloperAda').get('[data-test=member-view-terminal]').trigger('click');
+      await settle();
       const side = paneOf(w, 'DeveloperAda').get('[data-test=member-side]');
       const term = side.get('[data-test=member-terminal]');
       expect(term.classes()).toContain('full');
@@ -155,6 +156,60 @@ for (const frame of [Portrait, Landscape]) {
     });
   });
 }
+
+// B064 (card 310): on a phone the terminal is the whole screen, so one member's at a time; the page opens on Activity.
+const terminals = (w: VueWrapper) => w.findAll('[data-test=member-terminal]');
+/** The members whose terminal is open, in page order. */
+const openOn = (w: VueWrapper) => w.findAll('section.pane').filter((p) => p.find('[data-test=member-terminal]').exists())
+  .map((p) => p.attributes('data-test')!.replace(/^agent-/, ''));
+describe('member terminals on a phone at 375x521 (B064)', () => {
+  it('opening Terminal on one member and then another: only the second is open, the first is back on Activity', async () => {
+    const w = await teamPage(375);
+    await paneOf(w, 'Manager').get('[data-test=member-view-terminal]').trigger('click');
+    await settle();
+    expect(openOn(w)).toEqual(['Manager']);
+    await paneOf(w, 'DeveloperAda').get('[data-test=member-view-terminal]').trigger('click');
+    await settle();
+    expect(terminals(w)).toHaveLength(1);
+    expect(openOn(w)).toEqual(['DeveloperAda']);
+    expect(w.findAll('.member-terminal.full')).toHaveLength(1);
+    expect(paneOf(w, 'Manager').find('.member-activity').exists()).toBe(true);
+    expect(paneOf(w, 'Manager').get('[data-test=member-view-activity]').attributes('aria-selected')).toBe('true');
+    // The remembered (desktop) choice is not touched by the phone.
+    expect(getMemberView('payments', 'Manager')).toBe('activity');
+    expect(getMemberView('payments', 'DeveloperAda')).toBe('activity');
+  });
+
+  it('two members remembered on Terminal: the page opens with both on Activity, no full-screen terminal, the choice kept', async () => {
+    setMemberView('payments', 'Manager', 'terminal');
+    setMemberView('payments', 'DeveloperAda', 'terminal');
+    const w = await teamPage(375);
+    expect(terminals(w)).toHaveLength(0);
+    for (const n of ['Manager', 'DeveloperAda']) expect(paneOf(w, n).find('.member-activity').exists(), n).toBe(true);
+    expect(getMemberView('payments', 'Manager')).toBe('terminal');
+    expect(getMemberView('payments', 'DeveloperAda')).toBe('terminal');
+  });
+
+  it('a terminal left open on the phone is closed the next time the team page opens', async () => {
+    const w = await teamPage(375);
+    await paneOf(w, 'DeveloperAda').get('[data-test=member-view-terminal]').trigger('click');
+    await settle();
+    expect(terminals(w)).toHaveLength(1);
+    wrappers.pop()!.unmount();
+    const again = await teamPage(375);
+    expect(terminals(again)).toHaveLength(0);
+  });
+});
+
+describe('member terminals at 1280 px (B064: unchanged)', () => {
+  it('two members remembered on Terminal: both restored, both open in their panes', async () => {
+    setMemberView('payments', 'Manager', 'terminal');
+    setMemberView('payments', 'DeveloperAda', 'terminal');
+    const w = await teamPage(Desktop);
+    expect(openOn(w)).toEqual(['Manager', 'DeveloperAda']);
+    expect(w.findAll('.member-terminal.full')).toHaveLength(0);
+  });
+});
 
 describe("a member's pane at 1280 px (B061)", () => {
   it('one frame, the two areas side by side, the shared width and height, the full toolbar', async () => {

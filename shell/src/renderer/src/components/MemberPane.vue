@@ -64,8 +64,9 @@ const emptyText = computed(() => (props.card.lastRunState ? 'No report since the
 const hasDetails = computed(() => !!(report.value.label || stateLine.value || lease.value || props.card.policyProblems?.length));
 
 // Activity or Terminal, per member (shared with the entry points: the Monitor, the palette, the remote view).
-const view = computed<MemberView>(() => getMemberView(m.value.team, m.value.name));
-const show = (v: MemberView) => setMemberView(m.value.team, m.value.name, v);
+// A phone (B064, card 310) has its own choice: one member's terminal at a time, none when the page opens (memberPaneView.ts).
+const view = computed<MemberView>(() => getMemberView(m.value.team, m.value.name, phone.value));
+const show = (v: MemberView) => setMemberView(m.value.team, m.value.name, v, phone.value);
 
 // The shown terminal: its session is live (an interactive CLI, or a run attached), which holds Open and allows Stop.
 const term = ref<InstanceType<typeof TerminalApp> | null>(null);

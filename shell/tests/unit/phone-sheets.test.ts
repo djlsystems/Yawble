@@ -20,7 +20,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import LogsDialog from '../../src/renderer/src/components/LogsDialog.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
 import TerminalPane from '../../src/renderer/src/components/TerminalPane.vue';
-import { getMemberView, resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
+import { getMemberView, resetMemberViews } from '../../src/renderer/src/memberPaneView';
 import { PHONE_BREAKPOINT, PHONE_QUERY } from '../../src/renderer/src/phone';
 import { showChannelTerminal, terminalPane } from '../../src/renderer/src/terminalPane';
 import type { AgentCard, LogSourceInfo, TerminalBanner, YawbleApi } from '../../src/shared/api';
@@ -284,8 +284,9 @@ const ada = (): AgentCard => ({
 } as unknown as AgentCard);
 async function openTerminal(make: () => TerminalBanner = banner) {
   const { api } = fakeApi({ 'terminal.banner': () => make(), 'terminal.stop': () => null });
-  setMemberView('web', 'DeveloperAda', 'terminal');
   const w = keep(mount(MemberPane, { props: { card: ada(), api, pollMs: 60_000 }, attachTo: document.body, global: { stubs: { TerminalView: true, TranscriptView: true } } }));
+  // Tapped open (B064: a remembered Terminal applies at desktop widths only).
+  await w.get('[data-test=member-view-terminal]').trigger('click');
   await settle();
   return w;
 }
@@ -345,7 +346,7 @@ describe('the member terminal on a phone: full screen, one header row', () => {
 
       // ✕ goes back to the member's Activity: the terminal (and its header) is gone.
       await w.get('[data-test=terminal-pane-close]').trigger('click');
-      expect(getMemberView('web', 'DeveloperAda')).toBe('activity');
+      expect(getMemberView('web', 'DeveloperAda', true)).toBe('activity');
       expect(w.find('[data-test=member-terminal]').exists()).toBe(false);
     });
   }
