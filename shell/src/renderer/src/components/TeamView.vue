@@ -12,7 +12,7 @@ import { useTeamActivity } from '../monitor/teamActivity';
 import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
 import { memberCardsStore } from '../gripStore';
-import { memberFocus, takeMemberFocus } from '../memberPaneView';
+import { closePhoneTerminals, memberFocus, takeMemberFocus } from '../memberPaneView';
 import Icon from './Icon.vue';
 import TriggersDialog from './TriggersDialog.vue';
 import LoadingNote from './LoadingNote.vue';
@@ -179,7 +179,9 @@ watch(() => props.team.id, () => {
   told.value = null; loaded.value = false; error.value = null; refreshError.value = null; cards.value = []; decisions.value = []; asks.value = [];
   void refresh();
 });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); closeCode(); });
+// A phone (B064): the page opens with every member on Activity, so leaving it (or its team) closes that team's terminal.
+watch(() => props.team.name, (_now, before) => closePhoneTerminals(before));
+onBeforeUnmount(() => { if (timer) clearInterval(timer); closeCode(); closePhoneTerminals(props.team.name); });
 
 /** Opens the Workflows dialog (the Monitor opens a team here when a workflow node is clicked). */
 const workflowFocus = ref<number | null>(null);
