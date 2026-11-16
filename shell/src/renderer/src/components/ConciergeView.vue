@@ -49,6 +49,7 @@ const work = useBusy();
 // bottom is padded by what it covers (visualViewport), so the box and its Send button stay above it. The chat list is
 // the drawer's (Sidebar.vue).
 const phone = usePhone();
+const hint = 'The Concierge sees every team and acts through the Managers. It can make mistakes; check what it did on the team.';
 const keyboard = useKeyboardInset();
 const phoneStyle = computed(() => (phone.value ? { '--keyboard': `${keyboard.value}px` } : undefined));
 // The keyboard coming up shrinks the thread: keep its last message in view.
@@ -243,8 +244,9 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
           </span>
         </div>
         <Composer v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :agents-loaded="agentsLoaded" :running="running" :stopping="work.is('stop')" placeholder="Reply to the Concierge…" autofocus
-          @update:team-id="changeTeam" @send="send" @stop="stop" />
-        <p class="hint">The Concierge sees every team and acts through the Managers. It can make mistakes; check what it did on the team.</p>
+          :note="phone ? hint : undefined" @update:team-id="changeTeam" @send="send" @stop="stop" />
+        <!-- On a phone the note folds away with the composer's pickers (B057): the thread keeps those lines. -->
+        <p v-if="!phone" class="hint" data-test="concierge-hint">{{ hint }}</p>
       </div>
     </template>
   </section>
@@ -284,6 +286,4 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
 .phone.keyboard .dock { padding-bottom: 6px; } /* the keyboard covers the home bar */
 .phone .w-what { max-width: 40vw; }
 .phone .w-btn { width: 44px; height: 44px; }
-.phone .hint { font-size: 11px; margin-top: 4px; }
-.phone.keyboard .hint { display: none; } /* typing: every line of the screen for the thread */
 </style>
