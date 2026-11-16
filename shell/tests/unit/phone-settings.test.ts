@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import SettingsView, { type SettingsTab } from '../../src/renderer/src/components/SettingsView.vue';
+import BoardView from '../../src/renderer/src/board/BoardView.vue';
 import SkillsDialog from '../../src/renderer/src/components/SkillsDialog.vue';
 import { PHONE_BREAKPOINT, PHONE_QUERY } from '../../src/renderer/src/phone';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
@@ -301,6 +302,120 @@ describe('the 16 px / 44 px phone rule beats the scoped field sizes of other scr
       }
       expect(src, key).not.toMatch(/<(input|select|textarea)\b[^>]*\bstyle="[^"]*(font|height)/);
     }
+  });
+});
+
+describe('card 283: a 16 px field is never wider than its container (the Kanban team filter at 360 x 740)', () => {
+  const longTeam = 'Yawble Code Browser Team with a much longer name than fits';
+  const boardApi = () => ({
+    call: async (method: string) => {
+      if (method === 'board.list') return { lanes: [{ id: 'todo', label: 'To Do' }], cards: [], teams: [{ id: 1, name: longTeam }] };
+      throw new Error(`not in this fake: ${method}`);
+    },
+    onEvent: () => () => {},
+  }) as unknown as YawbleApi;
+
+  it('the board team select is capped at its row (max-width 100%, min-width 0) and nothing sets it wider than 340 px', async () => {
+    setScreen(360, 740);
+    const w = keep(mount(BoardView, { props: { api: boardApi(), pollMs: 60_000 }, attachTo: document.body }));
+    await flushPromises();
+    const sel = w.get('[data-test=board-team]').element as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.text)).toContain(longTeam);
+    const s = getComputedStyle(sel);
+    expect(s.fontSize).toBe('16px'); // still no zoom on focus
+    expect(px(s.minHeight)).toBeGreaterThanOrEqual(44);
+    expect(s.maxWidth).toBe('100%'); // so its right edge stays inside the 340 px filter row
+    expect(px(s.minWidth)).toBe(0);
+    expect(s.boxSizing).toBe('border-box'); // padding and border inside that 100%
+    for (const v of [s.width, s.minWidth]) if (v.endsWith('px')) expect(px(v)).toBeLessThanOrEqual(340);
+    // Its row wraps, so the member select and the search go to their own lines rather than pushing it out.
+    expect(getComputedStyle(sel.parentElement!).flexWrap).toBe('wrap');
+    for (const f of fields(w.get('.filters').element)) expect(getComputedStyle(f).maxWidth, f.getAttribute('data-test')!).toBe('100%');
+  });
+
+  it('at 1280 px the board filters keep their desktop size (no cap from the phone rule)', async () => {
+    setScreen(1280, 800);
+    const w = keep(mount(BoardView, { props: { api: boardApi(), pollMs: 60_000 }, attachTo: document.body }));
+    await flushPromises();
+    const s = getComputedStyle(w.get('[data-test=board-team]').element);
+    expect(s.fontSize).toBe('13px');
+    expect(s.maxWidth === 'none' || s.maxWidth === '').toBe(true);
+  });
+});
+
+describe('card 300: a growing field keeps a floor and its row wraps (the decline notes beside their buttons)', () => {
+  /** `tree` built under `file`'s scope id: [tag, class, children]; returns the elements by data-test. */
+  type Node = [string, string, Node[]?, string?];
+  function build(file: string, node: Node, parent: Element = document.body, out: Record<string, HTMLElement> = {}) {
+    const id = scopeOf.get(file);
+    expect(id, file).toBeTruthy();
+    const [tag, cls, kids = [], test] = node;
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    e.setAttribute(id!, '');
+    if (test) { e.setAttribute('data-test', test); out[test] = e; }
+    parent.appendChild(e);
+    for (const k of kids) build(file, k, e, out);
+    return out;
+  }
+  const btn = (n: number): Node[] => Array.from({ length: n }, () => ['button', ''] as Node);
+  // TeamView.vue:258, the integration ask: the note, five buttons and the scope select in one .row.
+  const integrationAsk: Node = ['div', 'decision ask', [['div', 'row', [['input', 'grow', [], 'note'], ...btn(5), ['select', '']], 'row']]];
+  /** min(12rem, 100%) at a 16 px root, for a container `room` px wide. */
+  const floorOf = (minWidth: string, room: number) => {
+    const m = /^min\(\s*([\d.]+)(rem|px)\s*,\s*100%\s*\)$/.exec(minWidth); // happy-dom gives min(192px, 100%)
+    return m ? Math.min(parseFloat(m[1]) * (m[2] === 'rem' ? 16 : 1), room) : px(minWidth);
+  };
+
+  it.each([[360, 740], [375, 667], [390, 844], [667, 263]])('at %i x %i the Team page decline note is at least 120 px and its row wraps', (width, height) => {
+    setScreen(width, height);
+    const { note, row } = build('TeamView.vue', integrationAsk);
+    const s = getComputedStyle(note);
+    expect(s.minWidth).not.toBe('0px'); // was 0: 15 px at 390 x 844, 30 px at 667 x 263 (re-verify 284)
+    expect(floorOf(s.minWidth, width - 24 - 20), s.minWidth).toBeGreaterThanOrEqual(120); // page and card padding
+    expect(s.maxWidth).toBe('100%');
+    expect(s.fontSize).toBe('16px');
+    expect(getComputedStyle(row).flexWrap).toBe('wrap');
+  });
+
+  it('a .row anywhere holding a .grow field wraps on a phone; one without a .grow field keeps its own wrapping', () => {
+    setScreen(390, 844);
+    const id = scopeOf.get('NewTeamDialog.vue')!;
+    const row = document.createElement('span');
+    row.className = 'row';
+    row.setAttribute(id, '');
+    const f = document.createElement('input');
+    f.className = 'grow';
+    f.setAttribute(id, '');
+    row.appendChild(f);
+    const plain = document.createElement('div');
+    plain.className = 'row';
+    plain.appendChild(document.createElement('input'));
+    document.body.append(row, plain);
+    expect(getComputedStyle(row).flexWrap).toBe('wrap');
+    expect(floorOf(getComputedStyle(f).minWidth, 390 - 24)).toBeGreaterThanOrEqual(120);
+    expect(getComputedStyle(plain).flexWrap).not.toBe('wrap');
+    expect(px(getComputedStyle(plain.firstElementChild!).minWidth)).toBe(0); // a plain field still may shrink
+  });
+
+  it("a component's own .grow rule still wins: the Tell row stays one line, TaskAskCard's buttons stack under a full-width note", () => {
+    setScreen(375, 667);
+    const { tell, text } = build('TeamView.vue', ['div', 'row tell', [['input', 'grow', [], 'text'], ...btn(2)], 'tell']);
+    expect(getComputedStyle(tell).flexWrap).toBe('nowrap');
+    expect(px(getComputedStyle(text).minWidth)).toBe(0);
+    // TaskAskCard.vue:59 on a phone: .buttons is a column and each child, the note included, is 100% wide.
+    const { buttons, note } = build('TaskAskCard.vue', ['div', 'task-ask phone', [['div', 'row buttons', [['input', 'grow', [], 'note'], ...btn(3)], 'buttons']]]);
+    expect(getComputedStyle(buttons).flexDirection).toBe('column');
+    expect(getComputedStyle(note).width).toBe('100%');
+  });
+
+  it('at 1280 px no floor and no forced wrap (desktop unchanged)', () => {
+    setScreen(1280, 800);
+    const { note, row } = build('TeamView.vue', integrationAsk);
+    const s = getComputedStyle(note);
+    expect(s.minWidth === '' || s.minWidth === 'auto' || s.minWidth === '0px').toBe(true);
+    expect(s.maxWidth === 'none' || s.maxWidth === '').toBe(true);
+    expect(getComputedStyle(row).flexWrap).not.toBe('wrap');
   });
 });
 
