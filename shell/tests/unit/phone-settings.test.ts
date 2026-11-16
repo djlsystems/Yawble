@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import SettingsView, { type SettingsTab } from '../../src/renderer/src/components/SettingsView.vue';
+import BoardView from '../../src/renderer/src/board/BoardView.vue';
 import SkillsDialog from '../../src/renderer/src/components/SkillsDialog.vue';
 import { PHONE_BREAKPOINT, PHONE_QUERY } from '../../src/renderer/src/phone';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
@@ -301,6 +302,44 @@ describe('the 16 px / 44 px phone rule beats the scoped field sizes of other scr
       }
       expect(src, key).not.toMatch(/<(input|select|textarea)\b[^>]*\bstyle="[^"]*(font|height)/);
     }
+  });
+});
+
+describe('card 283: a 16 px field is never wider than its container (the Kanban team filter at 360 x 740)', () => {
+  const longTeam = 'Yawble Code Browser Team with a much longer name than fits';
+  const boardApi = () => ({
+    call: async (method: string) => {
+      if (method === 'board.list') return { lanes: [{ id: 'todo', label: 'To Do' }], cards: [], teams: [{ id: 1, name: longTeam }] };
+      throw new Error(`not in this fake: ${method}`);
+    },
+    onEvent: () => () => {},
+  }) as unknown as YawbleApi;
+
+  it('the board team select is capped at its row (max-width 100%, min-width 0) and nothing sets it wider than 340 px', async () => {
+    setScreen(360, 740);
+    const w = keep(mount(BoardView, { props: { api: boardApi(), pollMs: 60_000 }, attachTo: document.body }));
+    await flushPromises();
+    const sel = w.get('[data-test=board-team]').element as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.text)).toContain(longTeam);
+    const s = getComputedStyle(sel);
+    expect(s.fontSize).toBe('16px'); // still no zoom on focus
+    expect(px(s.minHeight)).toBeGreaterThanOrEqual(44);
+    expect(s.maxWidth).toBe('100%'); // so its right edge stays inside the 340 px filter row
+    expect(px(s.minWidth)).toBe(0);
+    expect(s.boxSizing).toBe('border-box'); // padding and border inside that 100%
+    for (const v of [s.width, s.minWidth]) if (v.endsWith('px')) expect(px(v)).toBeLessThanOrEqual(340);
+    // Its row wraps, so the member select and the search go to their own lines rather than pushing it out.
+    expect(getComputedStyle(sel.parentElement!).flexWrap).toBe('wrap');
+    for (const f of fields(w.get('.filters').element)) expect(getComputedStyle(f).maxWidth, f.getAttribute('data-test')!).toBe('100%');
+  });
+
+  it('at 1280 px the board filters keep their desktop size (no cap from the phone rule)', async () => {
+    setScreen(1280, 800);
+    const w = keep(mount(BoardView, { props: { api: boardApi(), pollMs: 60_000 }, attachTo: document.body }));
+    await flushPromises();
+    const s = getComputedStyle(w.get('[data-test=board-team]').element);
+    expect(s.fontSize).toBe('13px');
+    expect(s.maxWidth === 'none' || s.maxWidth === '').toBe(true);
   });
 });
 
