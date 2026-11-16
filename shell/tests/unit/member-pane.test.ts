@@ -164,9 +164,12 @@ describe("a member's pane: Activity | Terminal", () => {
     expect(w.find('[data-test=member-activity]').exists()).toBe(false);
     const side = w.get('[data-test=member-side]');
     expect(side.find('[data-test=member-terminal] .fake-screen').attributes('data-channel')).toBe('member:7');
-    // The terminal's own bar: what it shows and Policy; Open and Stop are the pane's toolbar.
-    expect(side.find('[data-test=terminal-state]').exists()).toBe(true);
-    expect(side.find('[data-test=terminal-details-toggle]').exists()).toBe(true);
+    // Just the screen, Formatted: no bar, no Policy, no Formatted / Raw choice; Open and Stop are the pane's toolbar.
+    expect(side.find('.term-window > .bar').exists()).toBe(false);
+    expect(side.find('[data-test=terminal-state]').exists()).toBe(false);
+    expect(side.find('[data-test=terminal-details-toggle]').exists()).toBe(false);
+    expect(side.find('[data-test=banner]').exists()).toBe(false);
+    expect(side.find('[data-test=terminal-modes]').exists()).toBe(false);
     expect(side.find('[data-test=open-interactive]').exists()).toBe(false);
     expect(side.find('[data-test=terminal-stop]').exists()).toBe(false);
     expect(getMemberView('payments', 'DeveloperMarlo')).toBe('terminal');

@@ -96,7 +96,7 @@ async function openInteractive() {
 const moreOpen = ref(false);
 
 // A phone (B057, card 307): the member's terminal is the whole screen over the page with one 44 px header row - the
-// title, the terminal's Formatted / Raw tabs, a ⋯ holding its bar (the state line, Open interactive CLI, Policy, Stop)
+// title, a ⋯ holding the terminal's bar (the state line, Open interactive CLI, Stop)
 // and ✕ (back to Activity) - and the terminal fills the rest. The terminal puts its tabs and bar there (PaneHeaderKey).
 const termFull = computed(() => phone.value && view.value === 'terminal');
 const uid = useId();
@@ -176,8 +176,7 @@ defineExpose({ el: () => root.value });
         <div v-else class="member-terminal" :class="{ full: termFull }" data-test="member-terminal">
           <header v-if="termFull" class="term-head" data-test="terminal-pane-head">
             <span class="term-title" data-test="terminal-pane-title">{{ displayName(m.name) }} · {{ m.team }}</span>
-            <!-- The terminal's Formatted / Raw tabs come here (TerminalScreen), its bar into the ⋯ menu (TerminalApp). -->
-            <span :id="headerSlots.tabs" class="tabs-slot" data-test="terminal-pane-tabs"></span>
+            <!-- The terminal's bar (state line, Open interactive CLI, Stop) goes into the ⋯ menu (TerminalApp). -->
             <button class="term-mini" :class="{ on: termMoreOpen }" aria-label="More" :aria-expanded="termMoreOpen" data-test="terminal-pane-more"
               @click="termMoreOpen = !termMoreOpen">⋯</button>
             <div v-show="termMoreOpen" :id="headerSlots.more" class="term-menu" data-test="terminal-pane-menu" @click="termMoreOpen = false"></div>

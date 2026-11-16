@@ -138,15 +138,16 @@ for (const frame of [Portrait, Landscape]) {
       expect(value(term.element, st, 'inset')).toBe('0');
       expect(value(term.element, st, 'height')).toBe('100dvh');
       expect(value(side.element, st, 'height')).toBe('auto');
-      // One 44 px header row: title, the tabs' slot, ⋯ and ✕; the terminal's bar (state, Open, Policy, Stop) in its ⋯.
+      // One 44 px header row: title, ⋯ and ✕; the terminal's bar (state, Open, Stop) in its ⋯, no Policy.
       const head = term.get('[data-test=terminal-pane-head]');
       expect(px(value(head.element, st, 'height'))).toBe(44);
       const own = [...head.element.querySelectorAll(':scope > button')];
       expect(own.map((b) => b.getAttribute('data-test'))).toEqual(['terminal-pane-more', 'terminal-pane-close']);
       for (const b of own) expect(px(value(b, st, 'height', 'min-height'))).toBeGreaterThanOrEqual(44);
       const menu = term.get('[data-test=terminal-pane-menu]');
-      for (const sel of ['terminal-state', 'open-interactive', 'terminal-details-toggle', 'terminal-stop'])
+      for (const sel of ['terminal-state', 'open-interactive', 'terminal-stop'])
         expect(menu.find(`[data-test=${sel}]`).exists(), sel).toBe(true);
+      expect(term.find('[data-test=terminal-details-toggle]').exists()).toBe(false);
       const transcript = frame.height - 44;
       expect(transcript / frame.height, `${transcript} of ${frame.height}`).toBeGreaterThanOrEqual(0.6);
       // ✕: back to Activity.
