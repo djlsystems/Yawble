@@ -259,8 +259,17 @@ const banner = (): TerminalBanner => ({
   title: 'web / DeveloperAda · sandbox', details: ['timeout 15 min'], loosened: [], interactive: false,
   state: 'idle', runId: null, queuePosition: null, queueLength: 0, lastRunState: 'completed', lastRunReason: null,
 } as unknown as TerminalBanner);
-async function openTerminal() {
-  const { api } = fakeApi({ 'terminal.banner': () => banner(), 'terminal.stop': () => null });
+/** A long policy (B057 verify O2): 8 entries and 2 loosened. */
+const longBanner = (): TerminalBanner => ({
+  ...banner(),
+  details: ['sandbox job object', 'CLI claude 2.1', 'network via proxy', 'allow api.anthropic.com', 'allow registry.npmjs.org',
+    'timeout 15 min', 'idle timeout 5 min', 'memory 4 GB'],
+  loosened: ['writes outside the clone allowed', 'network host github.com added by the person'],
+} as unknown as TerminalBanner);
+/** A CSS length in px at the frame's height (happy-dom may hand back a vh value as declared). */
+const lengthPx = (v: string, frame: Frame) => (/^[\d.]+vh$/.test(v.trim()) ? (parseFloat(v) * frame.height) / 100 : px(v));
+async function openTerminal(make: () => TerminalBanner = banner) {
+  const { api } = fakeApi({ 'terminal.banner': () => make(), 'terminal.stop': () => null });
   showMemberTerminal(4, 'DeveloperAda · web');
   const w = keep(mount(TerminalPane, { props: { api, pollMs: 60_000 }, attachTo: document.body, global: { stubs: { TerminalView: true, TranscriptView: true } } }));
   await settle();
@@ -332,5 +341,61 @@ describe('the member terminal on a phone: full screen, one header row', () => {
     expect(bar.querySelector('[data-test=open-interactive]')).toBeTruthy();
     expect(w.get('.screen-wrap > [data-test=terminal-modes]').exists()).toBe(true);
     expect(css(w.get('.screen-wrap').element).minHeight).toBe('160px');
+  });
+});
+
+describe('the Policy strip from ⋯ on a phone (B057 verify O2): capped, scrolls on its own, closes with its own ✕', () => {
+  for (const frame of Phones) {
+    it(frame.name, async () => {
+      setScreen(frame);
+      const w = await openTerminal(longBanner);
+      await w.get('[data-test=terminal-pane-more]').trigger('click');
+      await w.get('[data-test=terminal-details-toggle]').trigger('click');
+      const strip = w.get('[data-test=banner]').element;
+      expect(shown(strip)).toBe(true);
+      expect(w.get('[data-test=banner-loosened]').text()).toContain('github.com');
+
+      // A cap, so the transcript (the screen less the 44 px header and the strip) keeps at least 60%.
+      const cap = lengthPx(css(strip).maxHeight, frame);
+      expect(cap, 'the strip has a max-height').toBeGreaterThan(0);
+      expect(css(strip).flexShrink === '0' || css(strip).flex.startsWith('0 0')).toBe(true);
+      expect((frame.height - 44 - cap) / frame.height).toBeGreaterThanOrEqual(0.6);
+      // The text scrolls inside the strip, under the same cap; the strip itself clips.
+      const text = w.get('[data-test=banner-text]').element;
+      expect(css(text).overflowY).toBe('auto');
+      expect(lengthPx(css(text).maxHeight, frame)).toBeLessThanOrEqual(cap);
+      expect(css(strip).overflow).toBe('hidden');
+
+      // Its ✕ is a 44 px target that fits in the strip, and hides it without reopening ⋯.
+      const close = w.get('[data-test=banner-close]');
+      expect(px(css(close.element).minHeight)).toBeGreaterThanOrEqual(44);
+      expect(px(css(close.element).minWidth)).toBeGreaterThanOrEqual(44);
+      expect(cap).toBeGreaterThanOrEqual(44);
+      await close.trigger('click');
+      expect(shown(strip)).toBe(false);
+      expect(shown(w.get('[data-test=terminal-pane-menu]').element)).toBe(false);
+      expect(localStorage.getItem('yawble.terminal.details')).toBeNull();
+    });
+  }
+
+  it('1280: unchanged - no cap, no ✕ on the strip', async () => {
+    setScreen(Desktop);
+    localStorage.setItem('yawble.terminal.details', '1');
+    const w = await openTerminal(longBanner);
+    const strip = w.get('[data-test=banner]').element;
+    expect(shown(strip)).toBe(true);
+    expect(['none', '']).toContain(css(strip).maxHeight);
+    expect(w.find('[data-test=banner-close]').exists()).toBe(false);
+    expect(css(w.get('[data-test=banner-text]').element).overflowY).not.toBe('auto');
+  });
+});
+
+describe('the ⋯ state line (B057 verify O3): no separator for an empty field', () => {
+  it('a headless run with no command known reads "Run 42 · input off during headless run"', async () => {
+    setScreen(Landscape);
+    const w = await openTerminal(() => ({ ...banner(), state: 'running', runId: 42 } as unknown as TerminalBanner));
+    const line = w.get('[data-test=terminal-state]').text();
+    expect(line).toBe('Run 42 · input off during headless run');
+    expect(line).not.toMatch(/·\s*·/);
   });
 });
