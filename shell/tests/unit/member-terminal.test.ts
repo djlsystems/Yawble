@@ -46,10 +46,12 @@ function api(): YawbleApi {
         case 'teams.agents': return (cardsOf[p.teamId] ?? []) as any;
         case 'monitor.messages': return { end: 0, messages: [] } as any;
         case 'monitor.steps': return { end: 0, pending: false, steps: [] } as any;
-        // The real member pane on Terminal (the memberPaneView test) attaches its terminal and reads its banner.
-        case 'terminal.attach': return { replay: '', end: 0, session: null } as any;
+        // The real member pane on Terminal (the memberPaneView test) attaches its terminal and reads its banner:
+        // TerminalScreen atob()s the replay (empty is valid base64) and TerminalApp reads banner.loosened.length.
+        // Without these the default [] reply raises 2 unhandled rejections (B061 verify F4).
+        case 'terminal.attach': return { channel: p.channel, replay: '', end: 0, session: null } as any;
         case 'terminal.banner': return {
-          memberId: p.memberId, title: `m${p.memberId}`, state: 'idle', runId: null, queuePosition: null, queueLength: 0,
+          memberId: p.memberId, channel: `member:${p.memberId}`, title: `m${p.memberId}`, state: 'idle', runId: null, queuePosition: null, queueLength: 0,
           lastRunState: null, lastRunReason: null, details: [], loosened: [], interactive: false,
         } as any;
         default: return [] as any;
