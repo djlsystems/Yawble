@@ -213,8 +213,9 @@ The event carries the sections that changed, each in full:
 - `logs.tail {level: "default" | "all", team?: string, member?: string}` starts pushing this computer's new log
   entries, as they are written, to this viewer. `default` sends warning and error entries and workflow events;
   `all` sends every level. `team` and `member` narrow it to one team or one member.
-- Each entry that passes the filter is pushed as the event `logs.tailEntry`, carrying one entry, redacted the way
-  `logs.query` redacts it.
+- Each entry that passes the filter is pushed as the event `logs.tailEntry`, carrying one entry. `logs.query` rows
+  and `logs.tailEntry` entries are redacted the same way, by the same code as the window's Logs dialog: known secrets
+  and token-shaped text become `[redacted]`.
 - The filtering happens on the computer. Nothing is kept for the cloud beyond the logs the app already keeps, and with
   no viewer tailing nothing is done.
 - `logs.untail` stops it. A viewer who disconnects stops it too.
