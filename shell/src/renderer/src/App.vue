@@ -317,8 +317,8 @@ const menus = computed<Menu[]>(() => [
     { id: 'theme:dark', label: 'Theme: Dark', radio: true, checked: theme.state.mode === 'dark' },
     { id: 'toggleTheme', label: 'Toggle theme' },
     { separator: true },
-    { id: 'go:concierge', label: 'Concierge' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:backlog', label: 'Backlog' },
-    { id: 'go:teams', label: 'Teams' }, { id: 'go:board', label: 'Kanban board' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
+    { id: 'go:concierge', label: 'Concierge' }, { id: 'go:teams', label: 'Teams' }, { id: 'go:backlog', label: 'Backlog' },
+    { id: 'go:board', label: 'Kanban board' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
     ...(desktop ? [
       { separator: true } as const,
       { id: 'zoomIn', label: 'Zoom in', keys: `${mod}=` }, { id: 'zoomOut', label: 'Zoom out', keys: `${mod}-` }, { id: 'zoomReset', label: 'Actual size', keys: `${mod}0` },
