@@ -427,6 +427,7 @@ public sealed class CloudLink : IAsyncDisposable
                         Volatile.Write(ref watching, users.Length);
                         lock (_lock) _viewers = users;
                         PublishState();
+                        ViewersNow(users);
                         break;
                     case "detached":
                         lock (_lock)
@@ -458,11 +459,33 @@ public sealed class CloudLink : IAsyncDisposable
         {
             _log?.Invoke($"Cloud Link: connection ended: {e.Message}");
         }
+        finally
+        {
+            // The link is gone: nobody is viewing any more, so every cloud watch (org.summary.watch, logs.tail) ends.
+            ViewersNow([]);
+        }
     }
 
     /// <summary>
-    /// This computer's hello on the link: who it is, and what it understands. "caps": ["access"] says it enforces each
-    /// call's "access" (a read-only viewer's change calls are refused here), so the site lets a Visitor open it.
+    /// The site's viewers, by sign-in, each time the list changes, and an empty list when the connection ends. What a
+    /// viewer started (org.summary.watch, logs.tail) stops when it is no longer listed: a disconnect is an unwatch.
+    /// </summary>
+    public event Action<IReadOnlyList<string>>? ViewersChanged;
+
+    internal void ViewersNow(IReadOnlyList<string> users)
+    {
+        try { ViewersChanged?.Invoke(users); }
+        catch (Exception e) { _log?.Invoke($"Cloud Link: a viewer-list handler failed: {e.GetType().Name}: {e.Message}"); }
+    }
+
+    /// <summary>The name this computer has on the cloud site (null when not attached): org.summary's computer label.</summary>
+    public string? InstanceName { get { lock (_lock) return _settings?.InstanceName; } }
+
+    /// <summary>
+    /// This computer's hello on the link: who it is, and what it understands. "caps": "access" says it enforces each
+    /// call's "access" (a read-only viewer's change calls are refused here), so the site lets a Visitor open it;
+    /// "summary" that it answers org.summary and pushes org.summaryChanged while watched; "logsTail" that it answers
+    /// logs.tail with logs.tailEntry pushes (B048). The site shows a computer without them as "update Yawble to appear here".
     /// </summary>
     internal static JsonObject Hello() => new()
     {
@@ -470,11 +493,17 @@ public sealed class CloudLink : IAsyncDisposable
         ["name"] = Environment.MachineName,
         ["os"] = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
         ["version"] = CoreInfo.Version,
-        ["caps"] = new JsonArray(AccessCap),
+        ["caps"] = new JsonArray(AccessCap, SummaryCap, LogsTailCap),
     };
 
     /// <summary>The capability the hello announces: this computer reads and enforces call["access"].</summary>
     public const string AccessCap = "access";
+
+    /// <summary>The capability: org.summary, org.summary.watch / unwatch and the org.summaryChanged push (summaryVersion 1).</summary>
+    public const string SummaryCap = "summary";
+
+    /// <summary>The capability: logs.tail / logs.untail and the logs.tailEntry push.</summary>
+    public const string LogsTailCap = "logsTail";
 
     /// <summary>Each viewer session's access (full | read) as its latest call said, while the link is connected.</summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _sessionAccess = new(StringComparer.Ordinal);

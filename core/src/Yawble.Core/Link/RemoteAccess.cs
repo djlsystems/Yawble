@@ -29,6 +29,8 @@ public static class RemoteAccess
         "updates.status",
         // The read-only code browser (members' clones), unless the person turned it off (Settings > Cloud Link).
         "code.",
+        // The cloud org dashboard (B048): this computer's summary, and its live changes while a viewer watches.
+        "org.",
     ];
 
     /// <summary>A viewer who may change things: an Owner or a workgroup Member (the site's "full"; also a site that does not say).</summary>
@@ -89,6 +91,10 @@ public static class RemoteAccess
             "network.asks",
             "tools.catalog", "tools.asks",
             "logs.query", "logs.sources", "logs.values", "logs.who", "logs.prunePreview",
+            // Live logs (B048): watching new entries, and stopping, change nothing.
+            "logs.tail", "logs.untail",
+            // The org dashboard's summary (B048); watching and unwatching it only start and stop its pushes.
+            "org.summary", "org.summary.watch", "org.summary.unwatch",
             "updates.status",
             "code.list", "code.open", "code.read", "code.close", "code.download",
         ],

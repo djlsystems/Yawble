@@ -359,12 +359,20 @@ var agentInfoRpc = launch.Launcher is null ? null : new Yawble.Core.Agents.Agent
 // The read-only code browser of members' clones (watched while a member runs or a Code dialog is open on it).
 await using var codeBrowser = new Yawble.CodeBrowser.CodeBrowserService(new Yawble.Core.Code.CodeHost(bus, runs, events, policies));
 codeBrowser.Start();
+// The cloud org dashboard (B048): org.summary from what the app already tracks (never tokens, cost or usage), pushed as
+// org.summaryChanged while a viewer watches; a Cloud Link viewer who leaves is unwatched.
+await using var orgSummary = new Yawble.Core.Link.OrgSummaryService(
+    new Yawble.Core.Link.AppOrgSummarySource(bus, new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), integrations, networkAsks, toolAsks, logService,
+        () => link.InstanceName, new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime(), TimeSpan.Zero)),
+    events, log: line => Console.Error.WriteLine(line));
+link.ViewersChanged += orgSummary.ViewersPresent;
+orgSummary.Start();
 var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, runs, guardrail, ui, hostChecks,
     scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: clis, agentTests: agentTests, link: link, concierge: concierge, board: board,
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
     code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService),
-    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks);
+    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks, orgSummary: orgSummary);
 dispatcherForLink = dispatcher;
 link.Start();
 
