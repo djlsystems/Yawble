@@ -196,7 +196,9 @@ async function openFromHash() {
     const list = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: t, limit: 200 });
     return Array.isArray(list) ? list.map((w) => w.id) : [];
   }, target.team);
-  if (teamId !== null) openWorkflow(teamId, target.workflow);
+  // Straight to the team's page with its workflows open (not openWorkflow: that is the Monitor's dialog over the
+  // Monitor, shown only while the Monitor is the place, and a link may arrive on any place).
+  if (teamId !== null) openTeam(teamId, 'workflows', target.workflow);
 }
 
 // The team settings opened from a card in the Teams list (the same dialog as the team page's Settings).
