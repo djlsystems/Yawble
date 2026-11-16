@@ -26,10 +26,49 @@ public sealed partial class NameLeakTests
     [GeneratedRegex(@"openshrimp|(?:design|spec) §|\bphase ?\d|\bslice \d|\bspikes?\b|-design\.md|\bw29833\b", RegexOptions.IgnoreCase)]
     private static partial Regex History();
 
+    /// <summary>
+    /// Test-output files a run leaves in the repository root (b038-full.xml, results.xml, full-skips.txt, a .trx): their
+    /// test names and messages quote what this test looks for. Only an untracked file directly in the root is passed
+    /// over; a tracked one, or one in a subfolder, is checked like any other file.
+    /// </summary>
+    [GeneratedRegex(@"^(?:[^/]+\.trx|[^/]*(?:full|results?|skips?)[^/]*\.(?:xml|txt))$", RegexOptions.IgnoreCase)]
+    private static partial Regex StrayTestOutput();
+
     [Fact]
     public void NoFileCarriesTheVendorsNameOutsideItsOwnNamesOrAnyProjectHistory()
     {
-        var root = Binaries.RepoRoot;
+        var problems = Scan(Binaries.RepoRoot);
+        Assert.True(problems.Count == 0, $"{problems.Count} lines:\n" + string.Join("\n", problems.Take(200)));
+    }
+
+    /// <summary>Card 231: a stray test-output file left untracked in the root does not fail the check; the same name
+    /// tracked, the same name in a subfolder, and any other untracked file still do.</summary>
+    [Fact]
+    public void AStrayTestOutputFileInTheRepoRoot_IsPassedOver_ButNotWhenTrackedOrInASubfolder()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "yawble-nameleak-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "sub"));
+        try
+        {
+            Git(root, "init", "-q");
+            const string leak = "<test name=\"phase 2 of the mxc spike\" />\n";
+            File.WriteAllText(Path.Combine(root, "clean.txt"), "nothing here\n");
+            File.WriteAllText(Path.Combine(root, "tracked-results.xml"), leak);
+            Git(root, "add", "clean.txt", "tracked-results.xml");
+            foreach (var stray in new[] { "b038-full.xml", "results.xml", "full-skips.txt", "run.trx" })
+                File.WriteAllText(Path.Combine(root, stray), leak);
+            File.WriteAllText(Path.Combine(root, "sub", "results.xml"), leak);
+            File.WriteAllText(Path.Combine(root, "notes.md"), leak);
+
+            var flagged = Scan(root).Select(p => p[..p.IndexOf(':')]).Distinct().Order().ToList();
+
+            Assert.Equal(["notes.md", "sub/results.xml", "tracked-results.xml"], flagged);
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    private static List<string> Scan(string root)
+    {
         var problems = new List<string>();
         foreach (var file in RepositoryFiles(root))
         {
@@ -45,22 +84,30 @@ public sealed partial class NameLeakTests
                 else if (History().IsMatch(line)) problems.Add($"{file}:{i + 1}: {Trim(line)}");
             }
         }
-        Assert.True(problems.Count == 0, $"{problems.Count} lines:\n" + string.Join("\n", problems.Take(200)));
+        return problems;
     }
 
-    private static string Trim(string line) => line.Trim() is { Length: > 160 } t ? t[..160] + "…" : line.Trim();
-
-    private static IEnumerable<string> RepositoryFiles(string root)
+    private static string Git(string root, params string[] args)
     {
-        var psi = new ProcessStartInfo("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        var psi = new ProcessStartInfo("git", ["-C", root, .. args])
         {
             RedirectStandardOutput = true, UseShellExecute = false,
         };
         using var git = Process.Start(psi)!;
         var output = git.StandardOutput.ReadToEnd();
         git.WaitForExit();
-        Assert.Equal(0, git.ExitCode);
-        return output.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+        Assert.True(git.ExitCode == 0, $"git {string.Join(' ', args)} exited {git.ExitCode}");
+        return output;
+    }
+
+    private static string Trim(string line) => line.Trim() is { Length: > 160 } t ? t[..160] + "…" : line.Trim();
+
+    private static IEnumerable<string> RepositoryFiles(string root)
+    {
+        string[] List(params string[] which) =>
+            Git(root, ["ls-files", "-z", .. which]).Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        var untracked = List("--others", "--exclude-standard").Where(f => !StrayTestOutput().IsMatch(f));
+        return List("--cached").Concat(untracked).Distinct()
             .Where(f => File.Exists(Path.Combine(root, f)));
     }
 }

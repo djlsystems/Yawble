@@ -94,7 +94,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - **Allow everywhere** adds it to the global allowed hosts, and closes every team's requests it covers;
   - **Deny** closes it; the agent is told (with the note you type above the buttons, if any), and that host is not
     asked again for that member for 24 hours. The 24 hours belong to that member: a member hired later with the same
-    name is asked again.
+    name is asked again. Deny on a grouped item denies every listed host and tells the agent once, in one message
+    listing all of them.
   Only the host or the domain allow you chose is added, only after your click, through the same checks as a policy
   change; it applies from the member's next run. A later refusal of a host the domain allow covers is not asked about:
   the agent is told the host is allowed from its next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
