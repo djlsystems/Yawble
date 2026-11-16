@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, screen, session, shell } from 'electron';
 import { placeWindow, WindowStateFile, type Display, type Rect } from './window-state';
+import { wheelZoom, zoom } from './zoom';
 import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -315,6 +316,9 @@ function keepDevStartMenuShortcut(): void {
   }
 }
 
+// Ctrl/Cmd + mouse wheel zooms every window like View > Zoom in / Zoom out.
+app.on('web-contents-created', (_e, wc) => wheelZoom(wc));
+
 app.whenReady().then(async () => {
   keepDevStartMenuShortcut();
   // Everything is refused except writing text to the clipboard (the copy buttons on the Concierge's code blocks).
@@ -343,7 +347,6 @@ app.whenReady().then(async () => {
   // on the window that asked. Only the listed commands; anything else is ignored.
   ipcMain.on(Channels.windowCommand, (e, command: unknown) => {
     const wc = e.sender;
-    const zoom = (delta: number | null) => wc.setZoomLevel(delta === null ? 0 : Math.max(-3, Math.min(5, wc.getZoomLevel() + delta)));
     switch (command) {
       case 'undo': wc.undo(); break;
       case 'redo': wc.redo(); break;
@@ -352,9 +355,9 @@ app.whenReady().then(async () => {
       case 'paste': wc.paste(); break;
       case 'selectAll': wc.selectAll(); break;
       case 'reload': wc.reload(); break;
-      case 'zoomIn': zoom(0.5); break;
-      case 'zoomOut': zoom(-0.5); break;
-      case 'zoomReset': zoom(null); break;
+      case 'zoomIn': zoom(wc, 1); break;
+      case 'zoomOut': zoom(wc, -1); break;
+      case 'zoomReset': zoom(wc, null); break;
       case 'devtools': wc.toggleDevTools(); break;
       case 'quit': quitting = true; app.quit(); break;
       default: break;
