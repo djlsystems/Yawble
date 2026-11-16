@@ -202,15 +202,18 @@ async function openFromHash() {
 }
 
 // A member's terminal (memberTerminal.ts: the Monitor, View > Terminal, the remote view, an agent's >_) opens here: its
-// team's page, where that member's pane switches to Terminal. A member known only by id is looked up in the teams.
-async function findMemberTeam(memberId: number): Promise<number | null> {
-  for (const t of allTeams.value) {
-    const cards = await api.call<{ member: { id: number } }[]>('teams.agents', { teamId: t.id }).catch(() => []);
-    if (Array.isArray(cards) && cards.some((c) => c.member?.id === memberId)) return t.id;
+// team's page, where that member's pane switches to Terminal. The pane is keyed by team and member NAME: the member is
+// looked up in its team (or, known only by id, in each team in turn).
+async function findMember(memberId: number, teamId?: number): Promise<{ teamId: number; team: string; member: string } | null> {
+  const known = allTeams.value.find((t) => t.id === teamId);
+  for (const t of known ? [known] : allTeams.value) {
+    const cards = await api.call<{ member: { id: number; name: string } }[]>('teams.agents', { teamId: t.id }).catch(() => []);
+    const c = Array.isArray(cards) ? cards.find((x) => x.member?.id === memberId) : undefined;
+    if (c) return { teamId: t.id, team: t.name, member: c.member.name };
   }
   return null;
 }
-const unregisterTeamPage = registerTeamPage((teamId) => { monitorWorkflows.value = null; openTeam(teamId); }, findMemberTeam);
+const unregisterTeamPage = registerTeamPage((teamId) => { monitorWorkflows.value = null; openTeam(teamId); }, findMember);
 onBeforeUnmount(unregisterTeamPage);
 
 // The team settings opened from a card in the Teams list (the same dialog as the team page's Settings).

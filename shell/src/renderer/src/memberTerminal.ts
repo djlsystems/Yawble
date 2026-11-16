@@ -9,11 +9,17 @@ import { nextTick } from 'vue';
  */
 export interface MemberRef { teamId: number; memberId: number }
 
-type Focus = (team: number, member: number) => void;
+/** memberPaneView.ts's focusMemberTerminal: the team's NAME and the member's name (what the team page keys panes by). */
+type Focus = (team: string, member: string) => void;
 /** How App opens a team's page (registered by App while it is mounted). */
 type OpenTeam = (teamId: number) => void | Promise<void>;
-/** Which team a member is on, when only the member is known (remoteApi.openTerminal): App asks the core. */
-type FindTeam = (memberId: number) => Promise<number | null>;
+/** A member as the team page names it. */
+export interface MemberNames { teamId: number; team: string; member: string }
+/**
+ * Finds a member by id: in the given team when it is known (the Monitor, Ctrl+`), else in each team (remoteApi's
+ * openTerminal, showMemberTerminal). App asks the core. Null: no such member (there).
+ */
+type FindMember = (memberId: number, teamId?: number) => Promise<MemberNames | null>;
 
 // The team page's shared view state (memberPaneView.ts) is read through a glob, so this builds whether or not that
 // module is in the tree yet: absent, the team page still opens, on the pane's own default view.
@@ -23,14 +29,14 @@ declare global {
 const paneView = import.meta.glob<Focus>('./memberPaneView.ts', { eager: true, import: 'focusMemberTerminal' });
 let focus: Focus | null = Object.values(paneView)[0] ?? null;
 let openTeam: OpenTeam | null = null;
-let findTeam: FindTeam | null = null;
+let findMember: FindMember | null = null;
 /** The member terminal opened last: View > Terminal / Ctrl+` goes back to it when the right-hand pane has nothing. */
 let last: MemberRef | null = null;
 
-export function registerTeamPage(open: OpenTeam, find: FindTeam): () => void {
+export function registerTeamPage(open: OpenTeam, find: FindMember): () => void {
   openTeam = open;
-  findTeam = find;
-  return () => { if (openTeam === open) { openTeam = null; findTeam = null; } };
+  findMember = find;
+  return () => { if (openTeam === open) { openTeam = null; findMember = null; } };
 }
 
 /** Tests: a fake focusMemberTerminal (null puts back the real one, if present). */
@@ -38,21 +44,25 @@ export function setMemberTerminalFocus(f: Focus | null) { focus = f ?? Object.va
 
 export const lastMemberTerminal = (): MemberRef | null => last;
 
-/** Opens the team page with that member's pane on Terminal, scrolled into view. */
-export async function openMemberTerminal(teamId: number, memberId: number): Promise<void> {
-  last = { teamId, memberId };
-  // Set first: a pane mounting with the page reads it; again after the page is there, so the scroll finds its pane.
-  focus?.(teamId, memberId);
-  await openTeam?.(teamId);
-  await nextTick();
-  focus?.(teamId, memberId);
+/** Opens the team page with that member's pane on Terminal, scrolled into view. Not a member of that team: nothing. */
+export function openMemberTerminal(teamId: number, memberId: number): Promise<boolean> {
+  return open(memberId, teamId);
 }
 
 /** The same when only the member is known: its team is looked up first. Unknown member: nothing happens. */
-export async function openMemberTerminalById(memberId: number): Promise<boolean> {
-  const teamId = last?.memberId === memberId ? last.teamId : await findTeam?.(memberId).catch(() => null) ?? null;
-  if (teamId === null) return false;
-  await openMemberTerminal(teamId, memberId);
+export function openMemberTerminalById(memberId: number): Promise<boolean> {
+  return open(memberId);
+}
+
+async function open(memberId: number, teamId?: number): Promise<boolean> {
+  const m = await findMember?.(memberId, teamId).catch(() => null) ?? null;
+  if (!m) return false;
+  last = { teamId: m.teamId, memberId };
+  // Set first: a pane mounting with the page reads it; again after the page is there, so the scroll finds its pane.
+  focus?.(m.team, m.member);
+  await openTeam?.(m.teamId);
+  await nextTick();
+  focus?.(m.team, m.member);
   return true;
 }
 

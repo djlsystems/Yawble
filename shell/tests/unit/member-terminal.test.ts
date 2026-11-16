@@ -54,7 +54,7 @@ function api(): YawbleApi {
   } as unknown as YawbleApi;
 }
 
-const focused: [number, number][] = [];
+const focused: [string, string][] = [];
 const settle = async (n = 6) => { for (let i = 0; i < n; i++) await flushPromises(); };
 
 beforeEach(() => {
@@ -87,7 +87,7 @@ describe('member terminals open on the team page', () => {
     await settle();
     expect(w.find('[data-test=monitor-activity]').exists()).toBe(false); // left the Monitor
     expect(w.findComponent({ name: 'TeamView' }).props('team')).toMatchObject({ id: 2, name: 'alpha' });
-    expect(focused.at(-1)).toEqual([2, 4]);
+    expect(focused.at(-1)).toEqual(['alpha', 'Ines']);
     expect(tp.terminalPane.open).toBe(false);
     expect(w.find('[data-test=terminal-pane]').exists()).toBe(false);
     w.unmount();
@@ -116,7 +116,7 @@ describe('member terminals open on the team page', () => {
     focused.length = 0;
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true }));
     await settle();
-    expect(focused.at(-1)).toEqual([2, 5]);
+    expect(focused.at(-1)).toEqual(['alpha', 'Kofi']);
     expect(w.findComponent({ name: 'TeamView' }).props('team')).toMatchObject({ id: 2 });
     expect(tp.terminalPane.open).toBe(false);
     w.unmount();
@@ -126,7 +126,7 @@ describe('member terminals open on the team page', () => {
     const w = await app();
     tp.showMemberTerminal(3, 'Ben · payments');
     await settle();
-    expect(focused.at(-1)).toEqual([1, 3]);
+    expect(focused.at(-1)).toEqual(['payments', 'Ben']);
     expect(w.findComponent({ name: 'TeamView' }).props('team')).toMatchObject({ id: 1 });
     expect(tp.terminalPane.open).toBe(false);
     expect(tp.terminalPane.target).toBeNull();
@@ -136,6 +136,7 @@ describe('member terminals open on the team page', () => {
   it('a member on no team: nothing opens, no error', async () => {
     const w = await app();
     expect(await mt.openMemberTerminalById(99)).toBe(false);
+    expect(await mt.openMemberTerminal(2, 3)).toBe(false); // Ben is on payments, not alpha
     await settle();
     expect(focused).toEqual([]);
     expect(tp.terminalPane.open).toBe(false);
@@ -151,7 +152,7 @@ describe('member terminals open on the team page', () => {
     await remote.openTerminal(4);
     await settle();
     expect(open).not.toHaveBeenCalled();
-    expect(focused.at(-1)).toEqual([2, 4]);
+    expect(focused.at(-1)).toEqual(['alpha', 'Ines']);
     expect(w.findComponent({ name: 'TeamView' }).props('team')).toMatchObject({ id: 2 });
     open.mockRestore();
     vi.unstubAllGlobals();
@@ -171,7 +172,9 @@ describe('the right-hand pane is for channel terminals only', () => {
   });
 
   it('Ctrl+` toggles the pane while it holds a channel, even after a member terminal was opened', async () => {
-    await mt.openMemberTerminal(2, 4);
+    const off = mt.registerTeamPage(() => {}, async (memberId, teamId) => ({ teamId: teamId ?? 2, team: 'alpha', member: `m${memberId}` }));
+    expect(await mt.openMemberTerminal(2, 4)).toBe(true);
+    off();
     tp.showChannelTerminal('agent-test:grok', 'Terminal · Grok · global policy');
     focused.length = 0;
     expect(tp.toggleTerminalPane()).toBe(false);
