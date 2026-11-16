@@ -287,7 +287,12 @@ a member's card opens it at that member's activity.
   are built from them.
 - **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
+- Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs dialog, `logs.query` over the Cloud Link and the live tail all use the
+  same redaction, so a row reads the same everywhere.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
+- A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
+  this computer by level (warnings, errors and workflow events by default, or everything), team and member, and
+  redacted as above. It stops when the viewer stops it or disconnects.
 
 ## Repositories and git
 
@@ -434,6 +439,20 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 - It also runs as a command:
   `yawble-core guardrail-check --data-dir <app root>/data [--team T --member M | --cli claude|grok] [--json]`. The
   exit code is 0 for passed, 1 for failed and 2 for a usage error.
+
+## Cloud org dashboard
+
+- The cloud site's org dashboard shows each attached computer live: the site stores nothing and asks the computers
+  while someone is watching. See [Cloud Link](cloud-link.md#the-org-dashboard).
+- `org.summary` answers one snapshot of this computer (`summaryVersion` 1): the computer (name, label, version,
+  platform, uptime, run slots, queued runs), each team's agents (running, queued, idle, errored, and what each running
+  agent is doing), the open workflows and those ended in the last 24 hours (state, backlog item, cards done of total,
+  owner), what waits for the person per team (decisions, tool-call approvals, network and tool requests), and the
+  last 20 warnings and errors of the last hour.
+- While a viewer watches (`org.summary.watch`), the app pushes `org.summaryChanged` with the changed sections, at most
+  once every 2 seconds. Nothing is built or pushed while nobody watches; unwatching or disconnecting stops it.
+- The summary holds facts only: no token counts, cost, usage or price. Titles and log lines are redacted.
+- Visitors (read-only viewers) can use the dashboard too. The hello lists `summary` and `logsTail` in its caps.
 
 ## Settings
 
