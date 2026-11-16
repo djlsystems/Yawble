@@ -17,9 +17,12 @@ import TerminalScreen from './components/TerminalScreen.vue';
 const props = defineProps<{ memberId: number; api?: YawbleApi; pollMs?: number; embedded?: boolean; inPane?: boolean }>();
 const emit = defineEmits<{ banner: [TerminalBanner]; live: [boolean] }>();
 const api = resolveApi(props.api);
-/** The pane's header on a phone (TerminalPane): the bar goes into its ⋯ menu. */
+/** The pane's header on a phone (the member's full-screen terminal in MemberPane, B057): the bar goes into its ⋯ menu. */
 const pane = inject(PaneHeaderKey, null);
 const inMenu = computed(() => !!props.embedded && !!pane?.on);
+/** Open interactive CLI and Stop are the bar's own, except in a member's pane at desktop width (its toolbar has them);
+ *  on a phone that toolbar is under the full-screen terminal, so they are in the ⋯ menu. */
+const ownActions = computed(() => !props.inPane || inMenu.value);
 
 const banner = ref<TerminalBanner | null>(null);
 const session = ref<TerminalSessionInfo | null>(null);
@@ -109,11 +112,11 @@ defineExpose({ size: () => view.value?.size() ?? null });
       <LoadingNote v-if="!banner && !error" class="grow" text="Loading the terminal…" />
       <span v-else class="grow state" data-test="terminal-state">{{ stateLine }}</span>
       <span v-if="error && !inMenu" class="error" data-test="terminal-error">{{ error }}</span>
-      <button v-if="!inPane && banner && banner.state === 'idle' && !live" data-test="open-interactive" :disabled="!!doing" :aria-busy="doing === 'open'" @click="openInteractive"><BusyLabel :busy="doing === 'open'" text="Opening…">Open interactive CLI</BusyLabel></button>
+      <button v-if="ownActions && banner && banner.state === 'idle' && !live" data-test="open-interactive" :disabled="!!doing" :aria-busy="doing === 'open'" @click="openInteractive"><BusyLabel :busy="doing === 'open'" text="Opening…">Open interactive CLI</BusyLabel></button>
       <button v-if="banner" class="toggle" :class="{ on: showDetails, warn: banner.loosened.length }" data-test="terminal-details-toggle"
         :aria-expanded="showDetails" :title="showDetails ? 'Hide this agent\'s sandbox policy' : 'Show this agent\'s sandbox policy'"
         @click="toggleDetails">{{ banner.loosened.length ? '⚠ ' : '' }}Policy {{ showDetails ? '▴' : '▾' }}</button>
-      <button v-if="!inPane" data-test="terminal-stop" :disabled="!(banner?.state === 'running' || live) || !!doing" :aria-busy="doing === 'stop'" @click="stop"><BusyLabel :busy="doing === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
+      <button v-if="ownActions" data-test="terminal-stop" :disabled="!(banner?.state === 'running' || live) || !!doing" :aria-busy="doing === 'stop'" @click="stop"><BusyLabel :busy="doing === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
     </div>
     </Teleport>
     <p v-if="error && inMenu" class="error phone-error" data-test="terminal-error">{{ error }}</p>
