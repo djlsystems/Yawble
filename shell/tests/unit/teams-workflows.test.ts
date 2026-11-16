@@ -60,11 +60,16 @@ describe("each team's card lists its recent workflows", () => {
     w.unmount();
   });
 
-  it("opens the team's workflows with the clicked one selected", async () => {
+  it("opens the team's workflows over the Teams list with the clicked one selected, and closing stays on the list", async () => {
     const w = await teamsPage();
     await w.findAll('[data-test=team-workflow]').find((r) => r.attributes('data-id') === '4')!.trigger('click');
     for (let i = 0; i < 6; i++) await flushPromises();
     expect(w.get('[data-test=workflow-4]').classes()).toContain('sel');
+    expect(w.findAll('[data-test=team-card]')).toHaveLength(2); // still the Teams list, not the team's page
+    await w.get('[data-test=modal-close]').trigger('click');
+    for (let i = 0; i < 4; i++) await flushPromises();
+    expect(w.find('[data-test=workflow-4]').exists()).toBe(false);
+    expect(w.findAll('[data-test=team-card]')).toHaveLength(2);
     w.unmount();
   });
   it("has a Settings button that opens the team's settings, which show its repository path (the card does not)", async () => {
