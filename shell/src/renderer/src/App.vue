@@ -3,7 +3,7 @@ import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
 import WorkflowsDialog from './components/WorkflowsDialog.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary } from '../../shared/api';
+import type { ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary, WorkflowSummary } from '../../shared/api';
 import { errorText, resolveApi } from './api';
 import { cliLabel } from './agentClis';
 import HostChecksBanner from './components/HostChecksBanner.vue';
@@ -22,6 +22,7 @@ import DocumentsView from './components/DocumentsView.vue';
 import MenuBar, { type Menu, type MenuItem as MenuBarItem } from './components/MenuBar.vue';
 import TerminalPane from './components/TerminalPane.vue';
 import { terminalPane, toggleTerminalPane } from './terminalPane';
+import { openMemberTerminal, registerTeamPage } from './memberTerminal';
 import BacklogView from './board/BacklogView.vue';
 import Sidebar, { type View } from './components/Sidebar.vue';
 import SettingsView, { type SettingsTab } from './components/SettingsView.vue';
@@ -35,6 +36,7 @@ import { theme } from './theme';
 import type { AgentOption } from './components/Composer.vue';
 import { installTapTitles, usePhone } from './phone';
 import { pushEscape } from './escapeClose';
+import { findWorkflowTeam, parseRemoteHash } from './remoteHash';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
 // Concierge is home: a chat with an agent that knows every team. The same screens run in a browser through the
@@ -182,6 +184,44 @@ function openTeam(id: number, panel?: 'workflows', workflow?: number) {
   if (panel === 'workflows') void nextTick(() => teamView.value?.openWorkflows(workflow));
 }
 
+/**
+ * A link into the remote view (remoteHash.ts): #team={id} opens that team, #workflow={wf} that workflow's thread in its
+ * team (found by asking each team's newest 200 workflows, core's most). An unknown or malformed id leaves the view where it
+ * is, no error; a well-formed workflow no team lists is named in a short note (in its hinted team's Workflows, if any).
+ */
+const hashNote = ref<string | null>(null);
+async function openFromHash() {
+  hashNote.value = null;
+  const target = parseRemoteHash(window.location.hash);
+  if (!target) return;
+  const ids = allTeams.value.map((t) => t.id);
+  if (target.kind === 'team') { if (ids.includes(target.team)) openTeam(target.team); return; }
+  const teamId = await findWorkflowTeam(target.workflow, ids, async (t) => {
+    const list = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: t, limit: 200 });
+    return Array.isArray(list) ? list.map((w) => w.id) : [];
+  }, target.team);
+  // Straight to the team's page with its workflows open (not openWorkflow: that is the Monitor's dialog over the
+  // Monitor, shown only while the Monitor is the place, and a link may arrive on any place).
+  if (teamId !== null) openTeam(teamId, 'workflows', target.workflow);
+  else if (target.team !== null && ids.includes(target.team)) openTeam(target.team, 'workflows', target.workflow);
+  else hashNote.value = `Workflow #${target.workflow} was not found in any team's newest 200 workflows.`;
+}
+
+// A member's terminal (memberTerminal.ts: the Monitor, View > Terminal, the remote view, an agent's >_) opens here: its
+// team's page, where that member's pane switches to Terminal. The pane is keyed by team and member NAME: the member is
+// looked up in its team (or, known only by id, in each team in turn).
+async function findMember(memberId: number, teamId?: number): Promise<{ teamId: number; team: string; member: string } | null> {
+  const known = allTeams.value.find((t) => t.id === teamId);
+  for (const t of known ? [known] : allTeams.value) {
+    const cards = await api.call<{ member: { id: number; name: string } }[]>('teams.agents', { teamId: t.id }).catch(() => []);
+    const c = Array.isArray(cards) ? cards.find((x) => x.member?.id === memberId) : undefined;
+    if (c) return { teamId: t.id, team: t.name, member: c.member.name };
+  }
+  return null;
+}
+const unregisterTeamPage = registerTeamPage((teamId) => { monitorWorkflows.value = null; openTeam(teamId); }, findMember);
+onBeforeUnmount(unregisterTeamPage);
+
 // The team settings opened from a card in the Teams list (the same dialog as the team page's Settings).
 const manageTeam = ref<TeamSummary | null>(null);
 
@@ -273,7 +313,12 @@ onMounted(() => {
       if (t.state !== 'running' || !conversations.value.find((c) => c.id === t.conversationId)?.running) void loadConversations();
     }
   }));
-  void refresh();
+  // The remote view opened from the cloud site's org dashboard (#workflow= / #team=, remoteHash.ts) opens at that place
+  // once the teams are known; a later change of the hash (the dashboard reusing the tab) opens the new place.
+  if (api.remote) {
+    void refresh().then(openFromHash);
+    window.addEventListener('hashchange', openFromHash);
+  } else void refresh();
   void loadConversations();
   void loadAgents();
   timer = setInterval(refresh, props.pollMs ?? 1000);
@@ -284,7 +329,7 @@ function loadAgentsOnFocus() { void loadAgents(); }
 let offTapTitles: (() => void) | null = null;
 onMounted(() => { offTapTitles = installTapTitles(() => phone.value); });
 onBeforeUnmount(() => { offTapTitles?.(); releaseDrawerEscape?.(); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); });
+onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); window.removeEventListener('hashchange', openFromHash); });
 
 // The window's own title (taskbar, Alt+Tab) follows the place; the page shows its own heading.
 watch(title, (t) => { document.title = t ? `${t} · Yawble` : 'Yawble'; }, { immediate: true });
@@ -413,8 +458,9 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <!-- The banners above every view, in one scrolling box no taller than half the window (40% on a phone), so the view
            below keeps its share and the Concierge's composer stays on screen however many banners there are. -->
       <div class="banners" data-test="banners">
-      <p v-if="terminalPane.stopError" class="error banner" data-test="terminal-stop-error">{{ terminalPane.stopError }} <button class="mini" @click="terminalPane.stopError = null">Dismiss</button></p>
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
+      <p v-if="hashNote" class="muted banner" data-test="hash-note">{{ hashNote }}
+        <button data-test="hash-note-dismiss" @click="hashNote = null">Dismiss</button></p>
       <HostChecksBanner :api="api" />
       <GitBanner :api="api" />
       <UpdateBanner ref="updateBanner" :api="api" />
@@ -443,7 +489,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
         </section>
 
         <DocumentsView v-else-if="view === 'documents'" :teams="teams" :archived="archivedTeams" :api="api" :loading="!overview && !error" />
-        <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" />
+        <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" @open-terminal="openMemberTerminal" />
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />
         <BacklogView v-else-if="view === 'backlog'" :teams="teams" :teams-loading="!overview && !error" :api="api" :poll-ms="pollMs" @open-team="openTeam"
           @board="focusTeamId = $event; go('board')" />

@@ -49,6 +49,9 @@ const work = useBusy();
 // bottom is padded by what it covers (visualViewport), so the box and its Send button stay above it. The chat list is
 // the drawer's (Sidebar.vue).
 const phone = usePhone();
+// B057 F1: the composer's team / agent pickers are open (on a phone in landscape the watch row folds away meanwhile).
+const pickersOpen = ref(false);
+const hint = 'The Concierge sees every team and acts through the Managers. It can make mistakes; check what it did on the team.';
 const keyboard = useKeyboardInset();
 const phoneStyle = computed(() => (phone.value ? { '--keyboard': `${keyboard.value}px` } : undefined));
 // The keyboard coming up shrinks the thread: keep its last message in view.
@@ -230,7 +233,7 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
           <p v-if="error" class="error">{{ error }}</p>
         </div>
       </div>
-      <div class="dock">
+      <div class="dock" :class="{ 'pickers-open': phone && pickersOpen }">
         <div v-if="conversation?.watches?.length" class="watches" data-test="watches">
           <span class="w-label"><Icon name="eye" :size="13" />Keeping tabs on</span>
           <span v-for="w in conversation.watches" :key="w.id" class="watch" data-test="watch" :title="watchTitle(w)">
@@ -243,8 +246,9 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
           </span>
         </div>
         <Composer v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :agents-loaded="agentsLoaded" :running="running" :stopping="work.is('stop')" placeholder="Reply to the Concierge…" autofocus
-          @update:team-id="changeTeam" @send="send" @stop="stop" />
-        <p class="hint">The Concierge sees every team and acts through the Managers. It can make mistakes; check what it did on the team.</p>
+          :note="phone ? hint : undefined" @update:team-id="changeTeam" @send="send" @stop="stop" @pickers="pickersOpen = $event" />
+        <!-- On a phone the note folds away with the composer's pickers (B057): the thread keeps those lines. -->
+        <p v-if="!phone" class="hint" data-test="concierge-hint">{{ hint }}</p>
       </div>
     </template>
   </section>
@@ -284,6 +288,12 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
 .phone.keyboard .dock { padding-bottom: 6px; } /* the keyboard covers the home bar */
 .phone .w-what { max-width: 40vw; }
 .phone .w-btn { width: 44px; height: 44px; }
-.phone .hint { font-size: 11px; margin-top: 4px; }
-.phone.keyboard .hint { display: none; } /* typing: every line of the screen for the thread */
+/* B057, a phone in landscape (263 px tall): the "Keeping tabs on" row is one 44 px line (more watches scroll sideways)
+   with a 2 px gap, not 60 px; while the composer's pickers are open it folds away, so the text row stays on screen (F1). */
+@media (orientation: landscape) {
+  .phone .watches { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; margin-bottom: 2px; }
+  .phone .w-label, .phone .watch { flex: none; }
+  .phone .watch { padding: 0 0 0 10px; }
+  .phone .dock.pickers-open .watches { display: none; }
+}
 </style>

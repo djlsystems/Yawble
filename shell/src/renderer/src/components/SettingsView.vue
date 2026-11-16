@@ -54,8 +54,9 @@ const tabs = computed(() => [
   ...(api.remote ? [] : [{ id: 'companion' as const, label: 'Companion', test: 'open-companion' }]),
   { id: 'system' as const, label: 'System', test: 'open-system' },
 ]);
-/** Skills fills the page's height (its list and text scroll on their own); every other tab scrolls as a page. */
-const fill = computed(() => props.tab === 'skills');
+/** Skills fills the page's height (its list and text scroll on their own); every other tab scrolls as a page. On a
+ *  phone Skills scrolls as a page too (one scroll level, B054): the list, or the picked skill, in normal flow. */
+const fill = computed(() => props.tab === 'skills' && !phone.value);
 
 // General: the app's own settings, kept by the desktop app (not the core), so a cloud viewer has none to change.
 const shell = ref<ShellSettings | null>(null);
@@ -117,7 +118,7 @@ async function set(patch: Partial<ShellSettings>) {
       <HealthPanel v-else-if="tab === 'health' && !api.remote" :api="api" @open="emit('connections')" @changed="emit('changed')" />
       <CompanionPanel v-else-if="tab === 'companion' && !api.remote" :api="api" />
       <AgentsDialog v-else-if="tab === 'agents'" inline :api="api" />
-      <SkillsDialog v-else-if="tab === 'skills'" inline fill :api="api" :teams="teams" />
+      <SkillsDialog v-else-if="tab === 'skills'" inline :fill="fill" :api="api" :teams="teams" />
       <GlobalPolicyDialog v-else-if="tab === 'globalPolicy'" inline :api="api" :poll-ms="pollMs" @changed="emit('changed')" />
       <IntegrationsPanel v-else-if="tab === 'integrations'" :key="integrationsTab ?? 'cli'" :api="api" :teams="teams" :initial-tab="integrationsTab ?? null" />
       <LinkDialog v-else-if="tab === 'link'" inline :api="api" @changed="emit('link', $event)" />
@@ -159,7 +160,15 @@ async function set(patch: Partial<ShellSettings>) {
 .section-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 10px; }
 .back { display: inline-flex; align-items: center; gap: 2px; border: 0; background: transparent; color: var(--accent); padding: 0 8px 0 0; font-size: 15px; }
 .back-icon { font-size: 22px; line-height: 1; margin-right: 2px; }
+/* B054: on a phone the section's header is one slim row that sticks to the top of the page's scroller (the only one),
+   so "‹ Settings" stays in reach at the bottom of a long section (Guardrails). Its background hides what scrolls under. */
+.phone .section-head { position: sticky; top: 0; z-index: 2; flex-direction: row; align-items: center; gap: 6px; min-height: 44px;
+  margin: 0 0 8px; background: var(--surface); border-bottom: 1px solid var(--line-soft); }
+.phone .section-head .back { flex: none; }
+.phone .section-head .page-title { margin: 0; font-size: 17px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phone .pane { max-width: none; }
+/* One scroll level on a phone: no panel inside a section scrolls on its own (Health's targets). */
+.phone :deep(.targets) { max-height: none; overflow: visible; }
 .phone .check { padding: 12px 0; }
 .phone :deep(table) { display: block; max-width: 100%; overflow-x: auto; }
 .phone :deep(dl), .phone :deep(.facts) { grid-template-columns: minmax(0, 1fr); }

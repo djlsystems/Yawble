@@ -18,12 +18,11 @@ test('real terminal windows: the Claude and Grok TUIs draw for the window they a
     const main = await app.firstWindow();
     await expect(main.locator('[data-test=team-title]')).toContainText('greeter', { timeout: 60_000 });
     for (const agent of ['Ada', 'Ben']) {
-      // The agent's terminal opens in the main window's terminal pane (one at a time).
-      await main.locator(`[data-test=agent-${agent}] [data-test=open-terminal]`).click();
-      const term = main.locator('[data-test=terminal-pane]');
+      // The agent's terminal opens in its own pane on the team page (B061): Open interactive CLI shows it and starts the CLI.
+      const term = main.locator(`[data-test=agent-${agent}]`);
       await term.waitFor();
       await main.setViewportSize({ width: 1500, height: 800 });
-      await term.locator('[data-test=open-interactive]').click();
+      await term.locator('[data-test=open-interactive-cli]').click();
       await expect(term.locator('[data-test=terminal-state]')).toContainText('Interactive', { timeout: 60_000 });
       await main.waitForTimeout(8000);
       await main.screenshot({ path: path.join(shots, `${agent}-1-opened.png`) });
@@ -34,9 +33,9 @@ test('real terminal windows: the Claude and Grok TUIs draw for the window they a
       await main.setViewportSize({ width: 1700, height: 900 });
       await main.waitForTimeout(3000);
       await main.screenshot({ path: path.join(shots, `${agent}-3-resized.png`) });
-      await term.locator('[data-test=terminal-stop]').click();
-      await expect(term.locator('[data-test=open-interactive]')).toBeVisible({ timeout: 30_000 });
-      await term.locator('[data-test=terminal-pane-close]').click();
+      await term.locator('[data-test=stop]').click();
+      await expect(term.locator('[data-test=open-interactive-cli]')).toBeEnabled({ timeout: 30_000 });
+      await term.locator('[data-test=member-view-activity]').click();
     }
   } finally {
     await app.close();

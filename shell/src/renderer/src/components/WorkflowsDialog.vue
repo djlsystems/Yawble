@@ -7,11 +7,12 @@ import { displayName } from '../faces/faces';
 import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import { vChange } from '../remoteAccess';
 
 /**
  * A team's workflows, newest activity first: open ones (and who is working them, or that nobody is), completed and
  * closed ones. On an open one the person can nudge it (its Manager is told to pick it up), stop what runs in it, or
- * close it. Everything is also on the bus, so the Board and the Monitor follow.
+ * close it (v-change: disabled in a read-only Visitor view, card 305; the core refuses them anyway). Everything is also on the bus, so the Board and the Monitor follow.
  */
 // focus: a workflow to show selected when the list opens (a workflow clicked on the Monitor).
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number; focus?: number | null }>();
@@ -28,9 +29,16 @@ const doing = (id: number, method: string) => busy.value === id && busyMethod.va
 const acting = ref<{ id: number; kind: 'nudge' | 'close'; text: string } | null>(null);
 let timer: ReturnType<typeof setInterval> | null = null;
 
+// The newest 50 are listed; opened at a workflow that is older than those, the newest 200 (core's most) instead, so
+// it can be shown. Past that the focus workflow is named as not found, not silently left out.
+const ListLimit = 50;
+const FocusLimit = 200;
+const limit = ref(ListLimit);
+const missing = ref<number | null>(null);
+
 async function load() {
   try {
-    list.value = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: props.team.id, limit: 50 });
+    list.value = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: props.team.id, limit: limit.value });
     error.value = null;
   } catch (e) { error.value = errorText(e); }
 }
@@ -57,9 +65,16 @@ const stateLabel = (w: WorkflowSummary) => w.state === 'open' ? (w.undeclared ? 
 onMounted(async () => {
   timer = setInterval(load, props.pollMs ?? 2000);
   await load();
-  // Opened at a workflow (from the Monitor): scroll it into view and pulse it once.
-  if (props.focus != null && list.value?.some((w) => w.id === props.focus)) {
-    const id = props.focus;
+  // Opened at a workflow (the Monitor, a #workflow= link): scroll it into view and pulse it once. Not among the newest
+  // 50 (a full page came back): ask for the newest 200 and look again; still not there, say so.
+  const has = () => props.focus != null && !!list.value?.some((w) => w.id === props.focus);
+  if (props.focus != null && list.value && !has() && list.value.length >= limit.value) {
+    limit.value = FocusLimit;
+    await load();
+  }
+  if (props.focus != null && list.value && !has()) missing.value = props.focus;
+  if (has()) {
+    const id = props.focus!;
     flash.value = id;
     setTimeout(() => { if (flash.value === id) flash.value = null; }, 1800);
     await nextTick();
@@ -76,6 +91,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
       and nobody is working it, nudge it: its Manager is told to pick it up.
     </p>
     <p v-if="error" class="error" data-test="workflows-error">{{ error }}</p>
+    <p v-if="missing !== null" class="muted" data-test="workflow-not-found">
+      Workflow #{{ missing }} was not found{{ (list?.length ?? 0) >= limit ? ` among this team's newest ${limit} workflows` : ' in this team' }}.
+    </p>
     <LoadingNote v-if="!list && !error" text="Loading workflows…" />
     <p v-if="list && !list.length" class="muted" data-test="workflows-empty">No workflows yet. Tell the Manager something to start one.</p>
     <ol v-if="list?.length" class="wfs" data-test="workflows">
@@ -95,14 +113,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
           <template v-if="acting?.id === w.id">
             <input v-model="acting.text" class="grow" :placeholder="acting.kind === 'nudge' ? 'A note for the Manager (optional)' : 'Why (optional)'"
               data-test="workflow-text" @keydown.enter="confirmAct" />
-            <button class="primary" :disabled="busy === w.id" data-test="workflow-confirm" @click="confirmAct"><BusyLabel :busy="busy === w.id" :text="acting.kind === 'nudge' ? 'Nudging…' : 'Closing…'">{{ acting.kind === 'nudge' ? 'Nudge' : 'Close it' }}</BusyLabel></button>
+            <button v-change class="primary" :disabled="busy === w.id" data-test="workflow-confirm" @click="confirmAct"><BusyLabel :busy="busy === w.id" :text="acting.kind === 'nudge' ? 'Nudging…' : 'Closing…'">{{ acting.kind === 'nudge' ? 'Nudge' : 'Close it' }}</BusyLabel></button>
             <button :disabled="busy === w.id" @click="acting = null">Cancel</button>
           </template>
           <template v-else>
-            <button :disabled="busy === w.id" data-test="workflow-nudge" title="Tell the Manager to pick this up" @click="acting = { id: w.id, kind: 'nudge', text: '' }">Nudge</button>
-            <button v-if="w.busy.some((b) => b.endsWith('is running'))" :disabled="busy === w.id" data-test="workflow-stop" title="Stop the runs working on it now"
+            <button v-change :disabled="busy === w.id" data-test="workflow-nudge" title="Tell the Manager to pick this up" @click="acting = { id: w.id, kind: 'nudge', text: '' }">Nudge</button>
+            <button v-if="w.busy.some((b) => b.endsWith('is running'))" v-change :disabled="busy === w.id" data-test="workflow-stop" title="Stop the runs working on it now"
               @click="run(w.id, 'bus.stopWorkflow', {})"><BusyLabel :busy="doing(w.id, 'bus.stopWorkflow')" text="Stopping…">Stop runs</BusyLabel></button>
-            <button :disabled="busy === w.id" data-test="workflow-close" title="End it without declaring it complete" @click="acting = { id: w.id, kind: 'close', text: '' }">Close</button>
+            <button v-change :disabled="busy === w.id" data-test="workflow-close" title="End it without declaring it complete" @click="acting = { id: w.id, kind: 'close', text: '' }">Close</button>
           </template>
         </div>
       </li>

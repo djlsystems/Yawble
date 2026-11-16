@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AgentsDialog from '../../src/renderer/src/components/AgentsDialog.vue';
 import TerminalPane from '../../src/renderer/src/components/TerminalPane.vue';
 import type { AgentTestSession, DetectedCli, YawbleApi } from '../../src/shared/api';
-import { showChannelTerminal, showMemberTerminal, terminalPane, toggleTerminalPane } from '../../src/renderer/src/terminalPane';
+import { showChannelTerminal, terminalPane, toggleTerminalPane } from '../../src/renderer/src/terminalPane';
 
 // An agent's Terminal / Test session is released when the person is done:
 // ✕ on the pane stops it, its tile shows it while it runs (Open / Stop), driven by agents.testSessions and the
@@ -68,16 +68,11 @@ describe('terminal pane: ✕ releases an agent session', () => {
     expect(terminalPane.open).toBe(false);
   });
 
-  it('✕ on a member terminal, or another channel, does not stop anything: it only hides the pane', async () => {
-    showMemberTerminal(4, 'ines');
-    const w = mount(TerminalPane, stubs);
-    await w.get('[data-test=terminal-pane-close]').trigger('click');
-    await flushPromises();
-    expect(terminalPane.open).toBe(false);
-
+  it('✕ on another channel does not stop anything: it only hides the pane', async () => {
     const stop = vi.fn();
     showChannelTerminal('host:shell', 'Shell', stop);
-    await flushPromises();
+    const w = mount(TerminalPane, stubs);
+    expect(w.get('[data-test=terminal-pane-close]').attributes('title')).toBe('Close');
     await w.get('[data-test=terminal-pane-close]').trigger('click');
     await flushPromises();
     expect(stop).not.toHaveBeenCalled();
@@ -289,100 +284,5 @@ describe('review fixes: a stop names its run, ended sessions are left alone, rep
     push('agents.testChanged', { cli: 'claude', agent: 'claude', kind: 'test', runId: 'run-claude-1', live: false });
     await flushPromises();
     expect(w.find('[data-test=agents-test-note]').exists()).toBe(false);
-  });
-});
-
-describe('terminal pane: ✕ releases a member\'s interactive session', () => {
-  const banner = (over: Record<string, unknown> = {}) =>
-    ({ memberId: 4, channel: 'member:4', title: 't', details: [], loosened: [], state: 'running', queuePosition: null, queueLength: 0, runId: null,
-      interactive: true, lastRunState: null, lastRunReason: null, ...over });
-  function rig(initial: Record<string, unknown>, stopImpl: () => unknown = () => ({ stopped: true })) {
-    let current = initial;
-    const fake = fakeApi({ 'terminal.banner': () => current, 'terminal.stop': stopImpl });
-    const w = mount(TerminalPane, { props: { api: fake.api }, ...stubs });
-    const seen = (b: Record<string, unknown>) => { current = b; w.findComponent({ name: 'TerminalApp' }).vm.$emit('banner', b); };
-    return { ...fake, w, seen, set: (b: Record<string, unknown>) => { current = b; } };
-  }
-  const stops = (calls: { method: string }[]) => calls.filter((c) => c.method === 'terminal.stop');
-
-  it('✕ on a live interactive session stops that member, then closes; the tooltip says so', async () => {
-    showMemberTerminal(4, 'ines · alpha');
-    const { w, calls, seen } = rig(banner());
-    seen(banner());
-    await flushPromises();
-    expect(w.get('[data-test=terminal-pane-close]').attributes('title')).toBe('End the session and close — queued work for ines resumes');
-    await w.get('[data-test=terminal-pane-close]').trigger('click');
-    await flushPromises();
-    expect(stops(calls)).toEqual([{ method: 'terminal.stop', params: { memberId: 4 } }]);
-    expect(terminalPane.open).toBe(false);
-  });
-
-  it('✕ on a session still waiting for a slot withdraws it (same stop)', async () => {
-    showMemberTerminal(4, 'ines · alpha');
-    const waiting = banner({ state: 'queued', queuePosition: 2, queueLength: 3 });
-    const { w, calls, seen } = rig(waiting);
-    seen(waiting);
-    await flushPromises();
-    await w.get('[data-test=terminal-pane-close]').trigger('click');
-    await flushPromises();
-    expect(stops(calls)).toHaveLength(1);
-    expect(terminalPane.open).toBe(false);
-  });
-
-  it('✕ while watching a headless run does not stop it, and says Close', async () => {
-    showMemberTerminal(4, 'ines · alpha');
-    const headless = banner({ interactive: false, runId: 9 });
-    const { w, calls, seen } = rig(headless);
-    seen(headless);
-    await flushPromises();
-    expect(w.get('[data-test=terminal-pane-close]').attributes('title')).toBe('Close');
-    await w.get('[data-test=terminal-pane-close]').trigger('click');
-    await flushPromises();
-    expect(stops(calls)).toHaveLength(0);
-    expect(terminalPane.open).toBe(false);
-  });
-
-  it('a stale interactive banner never stops a headless run that began since (fresh check)', async () => {
-    showMemberTerminal(4, 'ines · alpha');
-    const { w, calls, seen, set } = rig(banner());
-    seen(banner());
-    set(banner({ interactive: false, runId: 9 }));
-    await w.get('[data-test=terminal-pane-close]').trigger('click');
-    await flushPromises();
-    expect(stops(calls)).toHaveLength(0);
-    expect(terminalPane.open).toBe(false);
-  });
-
-  it('is held while stopping (no double stop); a failed stop is reported and the pane still closes', async () => {
-    showMemberTerminal(4, 'ines · alpha');
-    let release!: () => void;
-    const gate = new Promise<void>((r) => { release = r; });
-    const { w, calls, seen } = rig(banner(), () => gate.then(() => { throw new Error('boom'); }));
-    seen(banner());
-    await flushPromises();
-    const close = w.get('[data-test=terminal-pane-close]');
-    await close.trigger('click');
-    await flushPromises();
-    expect(close.attributes('aria-busy')).toBe('true');
-    expect(close.attributes('disabled')).toBeDefined();
-    await close.trigger('click');
-    release();
-    await flushPromises();
-    expect(stops(calls)).toHaveLength(1);
-    expect(terminalPane.open).toBe(false);
-    expect(terminalPane.stopError).toBe('Could not end the session: boom');
-    terminalPane.stopError = null;
-  });
-
-  it('Ctrl+` / toggle never stops, and opening another terminal does not end the session', async () => {
-    showMemberTerminal(4, 'ines · alpha');
-    const { calls, seen } = rig(banner());
-    seen(banner());
-    toggleTerminalPane();
-    toggleTerminalPane();
-    showMemberTerminal(5, 'ben · alpha');
-    showChannelTerminal('host:shell', 'Shell');
-    await flushPromises();
-    expect(stops(calls)).toHaveLength(0);
   });
 });

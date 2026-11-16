@@ -2,22 +2,28 @@
 import type { ActivityRow } from '../monitor/model';
 import { Palette } from '../monitor/scene';
 import { ago } from '../monitor/teamActivity';
+import { computed } from 'vue';
 import LoadingNote from './LoadingNote.vue';
 
 // A member's activity beside its card on the team board: the lines the Monitor's activity list shows for that member,
 // newest first, in the board's light look and without the face (the card beside it has it). It is as tall as the card
 // and scrolls inside.
-defineProps<{ rows: readonly ActivityRow[]; loaded: boolean; now: number }>();
+// limit (a phone, B054): only the newest lines show, at their own height (no inner scroller); a last line says how many more
+// are in the member's Logs. Without it, every line, scrolling inside.
+const props = defineProps<{ rows: readonly ActivityRow[]; loaded: boolean; now: number; limit?: number }>();
+const shown = computed(() => (props.limit ? props.rows.slice(0, props.limit) : props.rows));
+const more = computed(() => (props.limit ? Math.max(0, props.rows.length - props.limit) : 0));
 </script>
 
 <template>
-  <aside class="activity" data-test="member-activity" aria-label="Activity">
+  <aside class="activity" :class="{ capped: !!limit }" data-test="member-activity" aria-label="Activity">
     <header>Activity</header>
     <ol>
-      <li v-for="r in rows" :key="r.key" :style="{ '--tone': Palette[r.tone] }" data-test="member-activity-row">
+      <li v-for="r in shown" :key="r.key" :style="{ '--tone': Palette[r.tone] }" data-test="member-activity-row">
         <div><b>{{ r.verb }}</b> <template v-if="r.verb.endsWith('told')">{{ r.who }}</template><template v-else>· {{ r.who }}</template> <span class="dim">· {{ ago(r.at, now) }}</span></div>
         <div v-if="r.text" class="text">{{ r.text }}</div>
       </li>
+      <li v-if="more" class="none dim more" data-test="member-activity-more">+{{ more }} older in Logs</li>
       <li v-if="!loaded" class="none"><LoadingNote text="Loading activity…" /></li>
       <li v-else-if="!rows.length" class="none dim" data-test="member-activity-empty">Nothing yet.</li>
     </ol>
@@ -36,6 +42,8 @@ li + li { border-top: 1px solid var(--line-soft); }
 /* A phone (B037): under its member's card, full width; a line's text may run to three lines. */
 @media (max-width: 759.98px) {
   .activity { min-height: 8rem; }
+  .activity.capped { min-height: 0; }
+  .activity.capped ol { position: static; overflow: visible; }
   .text { -webkit-line-clamp: 3; }
 }
 </style>
