@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
+import { PaneHeaderKey } from './terminalPane';
 import LoadingNote from './components/LoadingNote.vue';
 import BusyLabel from './components/BusyLabel.vue';
 import type { YawbleApi, TerminalBanner, TerminalSessionInfo } from '../../shared/api';
@@ -14,6 +15,9 @@ import TerminalScreen from './components/TerminalScreen.vue';
 const props = defineProps<{ memberId: number; api?: YawbleApi; pollMs?: number; embedded?: boolean }>();
 const emit = defineEmits<{ banner: [TerminalBanner] }>();
 const api = resolveApi(props.api);
+/** The pane's header on a phone (TerminalPane): the bar goes into its ⋯ menu. */
+const pane = inject(PaneHeaderKey, null);
+const inMenu = computed(() => !!props.embedded && !!pane?.on);
 
 const banner = ref<TerminalBanner | null>(null);
 const session = ref<TerminalSessionInfo | null>(null);
@@ -92,16 +96,20 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 
 <template>
   <div class="term-window" :class="{ embedded }">
-    <div class="bar row">
+    <!-- In the main window's pane on a phone (B057) the bar is the pane header's ⋯ menu; anywhere else it stays here. -->
+    <Teleport defer :key="inMenu ? 'menu' : 'here'" :to="inMenu ? `#${pane!.more}` : 'body'" :disabled="!inMenu">
+    <div class="bar row" :class="{ 'in-menu': inMenu }">
       <LoadingNote v-if="!banner && !error" class="grow" text="Loading the terminal…" />
       <span v-else class="grow state" data-test="terminal-state">{{ stateLine }}</span>
-      <span v-if="error" class="error" data-test="terminal-error">{{ error }}</span>
+      <span v-if="error && !inMenu" class="error" data-test="terminal-error">{{ error }}</span>
       <button v-if="banner && banner.state === 'idle' && !live" data-test="open-interactive" :disabled="!!doing" :aria-busy="doing === 'open'" @click="openInteractive"><BusyLabel :busy="doing === 'open'" text="Opening…">Open interactive CLI</BusyLabel></button>
       <button v-if="banner" class="toggle" :class="{ on: showDetails, warn: banner.loosened.length }" data-test="terminal-details-toggle"
         :aria-expanded="showDetails" :title="showDetails ? 'Hide this agent\'s sandbox policy' : 'Show this agent\'s sandbox policy'"
         @click="toggleDetails">{{ banner.loosened.length ? '⚠ ' : '' }}Policy {{ showDetails ? '▴' : '▾' }}</button>
       <button data-test="terminal-stop" :disabled="!(banner?.state === 'running' || live) || !!doing" :aria-busy="doing === 'stop'" @click="stop"><BusyLabel :busy="doing === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
     </div>
+    </Teleport>
+    <p v-if="error && inMenu" class="error phone-error" data-test="terminal-error">{{ error }}</p>
     <header v-show="showDetails" class="banner" data-test="banner">
       <div class="title mono" data-test="banner-title">{{ banner?.title ?? 'Sandbox terminal' }}</div>
       <div class="details mono" data-test="banner-details">{{ banner?.details.join(' · ') }}</div>
@@ -128,4 +136,11 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .bar button { background: var(--term-btn); color: var(--term-btn-ink); border-color: var(--term-btn-line); }
 .screen { flex: 1; min-height: 0; }
 .error { color: var(--term-bad); }
+/* A phone, in the pane's ⋯ menu (B057): the state line over the actions, each a 44 px row. */
+@media (max-width: 759.98px) {
+  .bar.in-menu { flex-direction: column; align-items: stretch; gap: 4px; padding: 0; background: transparent; font-size: 13px; }
+  .bar.in-menu .state { white-space: normal; padding: 4px 6px; }
+  .bar.in-menu button { min-height: 44px; }
+  .phone-error { margin: 0; padding: 4px 12px; font-size: 12px; background: var(--term-bar); }
+}
 </style>
