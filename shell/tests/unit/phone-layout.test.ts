@@ -269,6 +269,9 @@ describe('the Backlog on a phone', () => {
     // The opening of a row is not triggered by its menu.
     expect(w.find('[data-test=backlog-item]').exists()).toBe(false);
 
+    // The sort is in the header's fold (B054), closed at first.
+    expect(w.find('[data-test=backlog-sort-key]').exists()).toBe(false);
+    await w.get('[data-test=backlog-tools-toggle]').trigger('click');
     await w.get('[data-test=backlog-sort-key]').setValue('title');
     expect(w.findAll('[data-test=backlog-row]').map((r) => r.get('.ttl').text())).toEqual(['First', 'Second', 'Third']);
     await w.get('[data-test=backlog-sort-dir]').trigger('click');

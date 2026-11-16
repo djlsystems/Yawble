@@ -6,6 +6,7 @@ import { errorText, resolveApi } from '../api';
 import { renderMarkdown } from '../markdown';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import Icon from './Icon.vue';
 import { useBusy } from '../busy';
 import { useNarrow } from '../narrowScreen';
 
@@ -116,6 +117,15 @@ async function doUpload(files: FileList | null) {
 // A phone (B037): the list first; a file opened takes the browser's whole area, and Back returns to the list.
 const phone = useNarrow();
 const fileShown = computed(() => !!open.value || !!opening.value);
+/** On a phone (B054) the breadcrumb is one row: below the team's top folder it shows "…" (the folder above) and the
+ * folder you are in; the + menu holds New file, New folder, Upload and Open folder. */
+const shownCrumbs = computed<{ label: string; path: string; title?: string }[]>(() => {
+  const all = crumbs.value;
+  if (!phone.value || all.length <= 2) return all;
+  const parent = all[all.length - 2]!;
+  return [{ label: '…', path: parent.path, title: parent.label }, all[all.length - 1]!];
+});
+const addOpen = ref(false);
 function backToList() { open.value = null; editing.value = false; }
 
 const size = (n: number | null) => n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
@@ -128,17 +138,31 @@ onMounted(() => void load(''));
     <div class="bar">
       <nav class="crumbs" data-test="docs-crumbs">
         <template v-if="above"><a href="#" data-test="docs-up" @click.prevent="emit('up')">{{ above }}</a><span class="sep">/</span></template>
-        <template v-for="(c, i) in crumbs" :key="c.path">
+        <template v-for="(c, i) in shownCrumbs" :key="c.path">
           <span v-if="i" class="sep">/</span>
-          <a href="#" @click.prevent="open = null; load(c.path)">{{ c.label }}</a>
+          <a href="#" :title="c.title" @click.prevent="open = null; load(c.path)">{{ c.label }}</a>
         </template>
       </nav>
       <span class="grow" />
+      <!-- A phone (B054): the breadcrumb and one + menu (New file, New folder, Upload, Open folder) share one row. -->
+      <span v-if="phone" class="more-wrap">
+        <button class="hbtn" data-test="docs-add" title="New file, folder or upload" aria-label="New file, folder or upload" aria-haspopup="menu" :aria-expanded="addOpen"
+          :disabled="busy || acting" :aria-busy="doing('upload')" @click="addOpen = !addOpen"><BusyLabel :busy="doing('upload')"><Icon name="plus" :size="18" /></BusyLabel></button>
+        <span v-if="addOpen" class="menu" role="menu" data-test="docs-add-menu">
+          <button role="menuitem" data-test="docs-new-file" @click="addOpen = false; naming = { kind: 'file', text: '' }">New file</button>
+          <button role="menuitem" data-test="docs-new-folder" @click="addOpen = false; naming = { kind: 'folder', text: '' }">New folder</button>
+          <button role="menuitem" data-test="docs-upload" @click="addOpen = false; picker?.click()">Upload</button>
+          <button v-if="canReveal" role="menuitem" data-test="docs-reveal" @click="addOpen = false; api.openDocuments!(team.id)">Open folder</button>
+        </span>
+        <input ref="picker" type="file" multiple hidden data-test="docs-upload-input" @change="upload(($event.target as HTMLInputElement).files)" />
+      </span>
+      <template v-else>
       <button data-test="docs-new-file" :disabled="busy || acting" @click="naming = { kind: 'file', text: '' }">New file</button>
       <button data-test="docs-new-folder" :disabled="busy || acting" @click="naming = { kind: 'folder', text: '' }">New folder</button>
       <button data-test="docs-upload" :disabled="busy || acting" :aria-busy="doing('upload')" @click="picker?.click()"><BusyLabel :busy="doing('upload')" text="Uploading…">Upload</BusyLabel></button>
       <input ref="picker" type="file" multiple hidden data-test="docs-upload-input" @change="upload(($event.target as HTMLInputElement).files)" />
       <button v-if="canReveal" data-test="docs-reveal" title="Open the folder on this computer" @click="api.openDocuments!(team.id)">Open folder</button>
+      </template>
     </div>
     <div v-if="naming" class="naming">
       <input v-model="naming.text" class="grow" autofocus data-test="docs-name"
@@ -245,8 +269,24 @@ onMounted(() => void load(''));
   .viewer { border: 0; padding: 0; }
   .browser:not(.fill) .viewer { min-height: 60vh; }
   .bar button, .naming button, .naming input, .vh button { min-height: 44px; box-sizing: border-box; }
-  .crumbs { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; }
-  .crumbs a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; box-sizing: border-box; padding: 0 4px; }
+  /* One row (B054): the breadcrumb (the folder you are in cut with …) and the + menu; it scrolls away with the page. */
+  .bar { flex-wrap: nowrap; height: 44px; gap: 4px; }
+  .crumbs { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; overflow: hidden; }
+  .crumbs a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; box-sizing: border-box; padding: 0 4px; white-space: nowrap; flex: none; }
+  .crumbs a:last-child { display: block; flex: 0 1 auto; line-height: 44px; overflow: hidden; text-overflow: ellipsis; }
+  .sep { flex: none; }
+  .hbtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; box-sizing: border-box; }
+  .more-wrap { position: relative; display: inline-flex; flex: none; }
+  .menu { position: absolute; right: 0; top: 100%; z-index: 5; display: flex; flex-direction: column; min-width: 170px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px var(--shadow); }
+  .menu button { text-align: left; border: 0; background: transparent; padding: 0 10px; font-size: 13px; }
+  .menu button:hover { background: var(--hover); }
+  /* One scroller (B054): the list and an opened file at their own height; the page (or the sheet) scrolls. */
+  .browser.fill { height: auto; display: block; }
+  .files, .browser.fill .files { overflow: visible; }
+  .viewer, .browser.fill .viewer { overflow: visible; display: block; }
+  .browser.fill .viewer > .vbody:not(textarea) { overflow: visible; }
+  .browser.fill .viewer > .editor { min-height: 50vh; resize: vertical; }
   .files li { padding: 0 6px; }
   .files .name { min-height: 44px; }
   .mini { min-width: 44px; min-height: 44px; font-size: 15px; }
