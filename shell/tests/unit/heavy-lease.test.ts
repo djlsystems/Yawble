@@ -2,7 +2,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it } from 'vitest';
 import MonitorView from '../../src/renderer/src/monitor/MonitorView.vue';
-import AgentCardView from '../../src/renderer/src/components/AgentCard.vue';
+import AgentCardView from '../../src/renderer/src/components/MemberPane.vue';
 import GlobalPolicyDialog from '../../src/renderer/src/components/GlobalPolicyDialog.vue';
 import { clockTime, heavyLine, leaseText } from '../../src/renderer/src/heavyLease';
 import { setOutputHeight } from '../../src/renderer/src/agentOutputHeight';

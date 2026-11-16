@@ -175,9 +175,10 @@ const fits = (top: number, frame: { height: number }) => (frame === Portrait ? t
 /** The desktop rules outside each phone block, as they were at the base (8b39e07): a desktop change must be on purpose. */
 const DesktopCss: Record<string, string> = {
   'board/BacklogView.vue': '55673d4cef46ac87',
-  'components/TeamView.vue': '6cef2202a70e0d79',
+  // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
+  'components/TeamView.vue': 'ec127edc70b3a1a4',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
-  'components/AgentCard.vue': 'd11db7b8c12a9c15',
+  'components/MemberPane.vue': '0dcbae2a8c95e6e4',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   'components/DocumentsBrowser.vue': 'e2d8b12b24e93037',
@@ -237,7 +238,7 @@ describe('the first content row is near the top on a phone (B054)', () => {
 
     it(`the Team page at ${at}: the header row, then Tell the Manager, then the members`, async () => {
       const w = await teamPage(frame.width);
-      const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/AgentCard.vue', 'components/MemberActivity.vue');
+      const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/MemberPane.vue', 'components/MemberActivity.vue');
       const root = w.get('section.team').element;
       const tell = topOf(w.get('.tell').element, root, st, teamsPlacePad);
       expect(tell.above).toEqual(['teamhead']);
@@ -249,7 +250,7 @@ describe('the first content row is near the top on a phone (B054)', () => {
 
     it(`the Team page at ${at} with the "commits behind" bar: Tell is still the first row, the bar under it, the first member on screen`, async () => {
       const w = await teamPage(frame.width, true);
-      const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/AgentCard.vue', 'components/MemberActivity.vue');
+      const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/MemberPane.vue', 'components/MemberActivity.vue');
       expect(w.get('[data-test=team-behind]').text()).toContain('3 commits behind main');
       const root = w.get('section.team').element;
       // Card 282: the bar sat between the header and Tell (Tell at 156 px in portrait); now Tell is where it is without it.
@@ -294,7 +295,7 @@ describe('the first content row is near the top on a phone (B054)', () => {
 describe('one scroller per page on a phone (B054)', () => {
   const pages: Record<string, { files: string[]; root: string[] }> = {
     Backlog: { files: ['board/BacklogView.vue'], root: ['.backlog-place'] },
-    Team: { files: ['components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/AgentCard.vue', 'components/MemberActivity.vue'], root: [] },
+    Team: { files: ['components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/MemberPane.vue', 'components/MemberActivity.vue'], root: [] },
     Documents: { files: ['components/DocumentsView.vue', 'components/DocumentsBrowser.vue'], root: ['.docs-place'] },
   };
   // A code block in a report scrolls sideways at its own height (no fixed height): not a vertical scroller.
@@ -322,12 +323,13 @@ describe('one scroller per page on a phone (B054)', () => {
     expect(br.find((r) => r.sels.includes('.browser.fill'))?.decls).toMatchObject({ height: 'auto', display: 'block' });
   });
 
-  it("the Team page: each member's activity and output are at their own height (the inline desktop height is overridden)", async () => {
+  it("the Team page: each member's activity and output are at their own height (no inline desktop height on the phone)", async () => {
     const w = await teamPage(Portrait.width);
-    const card = rules(phoneCss(read('components/AgentCard.vue')));
-    expect(card.find((r) => r.sels.includes('.output') && r.decls.height)?.decls.height).toBe('auto !important');
-    const team = rules(phoneCss(read('components/TeamView.vue')));
-    expect(team.find((r) => r.sels.includes('.member-side') && r.decls.height)?.decls.height).toBe('auto');
+    for (const b of w.findAll('[data-test=member-pane-body]')) expect((b.element as HTMLElement).style.height).toBe('');
+    for (const s of w.findAll('[data-test=member-side]')) expect((s.element as HTMLElement).style.flexBasis).toBe('');
+    const pane = rules(phoneCss(read('components/MemberPane.vue')));
+    expect(pane.find((r) => r.sels.includes('.output') && r.decls.height)?.decls.height).toBe('auto');
+    expect(pane.find((r) => r.sels.includes('.side') && r.decls.height)?.decls.height).toBe('auto');
     // The activity is capped: it renders as a plain list, its ol not positioned to scroll.
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).toContain('capped');
     const act = rules(phoneCss(read('components/MemberActivity.vue')));

@@ -87,9 +87,10 @@ function installProbe(root: string): boolean {
 
 /** The agent's terminal, in the main window's terminal pane (one at a time; no window of its own). */
 async function terminalFor(_app: ElectronApplication, main: Page, agent: string) {
-  await main.locator(`[data-test=agent-${agent}] [data-test=open-terminal]`).click();
-  const term = main.locator('[data-test=terminal-pane]');
-  await term.waitFor();
+  // The member's terminal in its own pane on the team page (B061): the Terminal side of its Activity | Terminal toggle.
+  await main.locator(`[data-test=agent-${agent}] [data-test=member-view-terminal]`).click();
+  const term = main.locator(`[data-test=agent-${agent}]`);
+  await term.locator('[data-test=member-terminal]').waitFor();
   return term;
 }
 
@@ -286,7 +287,7 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await expect(term.locator('[data-test=banner]')).toBeHidden();
     await term.locator('[data-test=terminal-details-toggle]').click();
     await expect(term.locator('[data-test=banner-title]')).toHaveText(/^payments \/ Ben · sandbox · \w+ · grok · net: model \+ bus \+ registry\.npmjs\.org$/);
-    await expect(term.locator('[data-test=terminal-pane-title]')).toContainText('Ben · payments');
+    await expect(term.locator('[data-test=agent-name]')).toContainText('Ben');
     await expect(term.locator('[data-test=banner-details]')).toContainText('timeout 15 min');
     await expect(term.locator('[data-test=banner-loosened]')).toContainText('network.allowHosts + registry.npmjs.org');
     await expect(term.locator('[data-test=terminal-state]')).toContainText('input off during headless run');
@@ -296,7 +297,7 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await expect(mirror).toContainText('● step 4'); // still growing: live
     await shot(main, '09-terminal-live');
     const before = (await mirror.textContent()) ?? '';
-    await term.locator('[data-test=terminal-pane-close]').click();
+    await term.locator('[data-test=member-view-activity]').click();
 
     // ---- Reopen: the replay comes back (everything shown before, from the start of the run), then live again.
     await main.waitForTimeout(1500);
@@ -309,18 +310,18 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await shot(main, '10-terminal-reopened-replay');
 
     // ---- Stop, then an interactive session (the fake-pty runner's).
-    await term.locator('[data-test=terminal-stop]').click();
+    await term.locator('[data-test=stop]').click();
     await expect(mirror2).toContainText('stopped by the person');
     await expect(term.locator('[data-test=terminal-state]')).toContainText('last run failed: stopped: by the person');
-    await term.locator('[data-test=open-interactive]').click();
+    await term.locator('[data-test=open-interactive-cli]').click();
     await expect(term.locator('[data-test=terminal-state]')).toContainText('input on');
     await term.locator('[data-test=xterm]').click();
     await main.keyboard.type('hello');
     await main.keyboard.press('Enter');
     await expect(mirror2).toContainText('you said "hello"');
     await shot(main, '11-terminal-interactive');
-    await term.locator('[data-test=terminal-stop]').click();
-    await term.locator('[data-test=terminal-pane-close]').click();
+    await term.locator('[data-test=stop]').click();
+    await term.locator('[data-test=member-view-activity]').click();
 
     await expect(main.locator('[data-test=agent-Ben] [data-test=agent-state]')).toContainText('stopped: by the person');
     await shot(main, '12-team-after-stop');
