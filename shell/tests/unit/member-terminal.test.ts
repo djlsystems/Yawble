@@ -122,6 +122,20 @@ describe('member terminals open on the team page', () => {
     w.unmount();
   });
 
+  it("without a fake, memberPaneView's focusMemberTerminal gets the names: that member's pane is on Terminal", async () => {
+    const pv = await import('../../src/renderer/src/memberPaneView');
+    pv.resetMemberViews();
+    mt.setMemberTerminalFocus(null);
+    const w = await app();
+    expect(await mt.openMemberTerminal(2, 5)).toBe(true);
+    await settle();
+    expect(pv.getMemberView('alpha', 'Kofi')).toBe('terminal');
+    expect(pv.getMemberView('2', '5')).toBe('activity'); // not keyed by ids
+    expect(focused).toEqual([]);
+    w.unmount();
+    pv.resetMemberViews();
+  });
+
   it('an older showMemberTerminal call (an agent card\'s >_) looks the member\'s team up and opens it there', async () => {
     const w = await app();
     tp.showMemberTerminal(3, 'Ben · payments');

@@ -1,4 +1,5 @@
 import { nextTick } from 'vue';
+import { focusMemberTerminal } from './memberPaneView';
 
 /**
  * A member's terminal lives in that member's pane on its team page (memberPaneView.ts, the pane's Activity | Terminal
@@ -21,13 +22,7 @@ export interface MemberNames { teamId: number; team: string; member: string }
  */
 type FindMember = (memberId: number, teamId?: number) => Promise<MemberNames | null>;
 
-// The team page's shared view state (memberPaneView.ts) is read through a glob, so this builds whether or not that
-// module is in the tree yet: absent, the team page still opens, on the pane's own default view.
-declare global {
-  interface ImportMeta { glob<T>(pattern: string, options: { eager: true; import: string }): Record<string, T> }
-}
-const paneView = import.meta.glob<Focus>('./memberPaneView.ts', { eager: true, import: 'focusMemberTerminal' });
-let focus: Focus | null = Object.values(paneView)[0] ?? null;
+let focus: Focus = focusMemberTerminal;
 let openTeam: OpenTeam | null = null;
 let findMember: FindMember | null = null;
 /** The member terminal opened last: View > Terminal / Ctrl+` goes back to it when the right-hand pane has nothing. */
@@ -39,8 +34,8 @@ export function registerTeamPage(open: OpenTeam, find: FindMember): () => void {
   return () => { if (openTeam === open) { openTeam = null; findMember = null; } };
 }
 
-/** Tests: a fake focusMemberTerminal (null puts back the real one, if present). */
-export function setMemberTerminalFocus(f: Focus | null) { focus = f ?? Object.values(paneView)[0] ?? null; }
+/** Tests: a fake focusMemberTerminal (null puts back the real one). */
+export function setMemberTerminalFocus(f: Focus | null) { focus = f ?? focusMemberTerminal; }
 
 export const lastMemberTerminal = (): MemberRef | null => last;
 
@@ -59,10 +54,10 @@ async function open(memberId: number, teamId?: number): Promise<boolean> {
   if (!m) return false;
   last = { teamId: m.teamId, memberId };
   // Set first: a pane mounting with the page reads it; again after the page is there, so the scroll finds its pane.
-  focus?.(m.team, m.member);
+  focus(m.team, m.member);
   await openTeam?.(m.teamId);
   await nextTick();
-  focus?.(m.team, m.member);
+  focus(m.team, m.member);
   return true;
 }
 
