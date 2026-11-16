@@ -287,10 +287,12 @@ a member's card opens it at that member's activity.
   are built from them.
 - **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
+- Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs dialog, `logs.query` over the Cloud Link and the live tail all use the
+  same redaction, so a row reads the same everywhere.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
 - A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
   this computer by level (warnings, errors and workflow events by default, or everything), team and member, and
-  redacted the way the Logs dialog's reads are. It stops when the viewer stops it or disconnects.
+  redacted as above. It stops when the viewer stops it or disconnects.
 
 ## Repositories and git
 
