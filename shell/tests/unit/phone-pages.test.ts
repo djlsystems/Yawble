@@ -199,10 +199,10 @@ async function backlog(width: number) {
   await settle();
   return w;
 }
-async function teamPage(width: number, behind = false) {
+async function teamPage(width: number, behind = false, of = team) {
   screen(width);
   const dialogs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, WorkflowsDialog: true, DocumentsDialog: true, LogsDialog: true };
-  const w = keep(mount(TeamView, { props: { team, api: teamApi(behind), pollMs: 100_000 }, global: { stubs: dialogs } }));
+  const w = keep(mount(TeamView, { props: { team: of, api: teamApi(behind), pollMs: 100_000 }, global: { stubs: dialogs } }));
   await settle();
   return w;
 }
@@ -247,12 +247,21 @@ describe('the first content row is near the top on a phone (B054)', () => {
       expect(member.top + Row, `first member at ${member.top}`).toBeLessThanOrEqual(frame.height);
     });
 
-    it(`the Team page at ${at} with the "commits behind" bar: one compact row more, the first member still on screen`, async () => {
+    it(`the Team page at ${at} with the "commits behind" bar: Tell is still the first row, the bar under it, the first member on screen`, async () => {
       const w = await teamPage(frame.width, true);
       const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/AgentCard.vue', 'components/MemberActivity.vue');
       expect(w.get('[data-test=team-behind]').text()).toContain('3 commits behind main');
-      const member = topOf(w.get('.member-cell').element, w.get('section.team').element, st, teamsPlacePad);
-      expect(member.above).toEqual(['teamhead', 'team-sync', 'tell']);
+      const root = w.get('section.team').element;
+      // Card 282: the bar sat between the header and Tell (Tell at 156 px in portrait); now Tell is where it is without it.
+      const tell = topOf(w.get('.tell').element, root, st, teamsPlacePad);
+      expect(tell.above).toEqual(['teamhead']);
+      expect(fits(tell.top, frame), `Tell at ${tell.top}`).toBe(true);
+      if (frame === Portrait) expect(tell.top).toBeLessThanOrEqual(PortraitTarget);
+      const sync = topOf(w.get('[data-test=team-sync]').element, root, st, teamsPlacePad);
+      expect(sync.above).toEqual(['teamhead', 'tell']);
+      expect(sync.top + Row, `sync bar at ${sync.top}`).toBeLessThanOrEqual(frame.height);
+      const member = topOf(w.get('.member-cell').element, root, st, teamsPlacePad);
+      expect(member.above).toEqual(['teamhead', 'tell', 'team-sync']);
       expect(member.top + Row, `first member at ${member.top}`).toBeLessThanOrEqual(frame.height);
     });
 
@@ -378,6 +387,37 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect('Tell the Manager… (paste an image to attach it)'.length * Char).toBeGreaterThan(room); // why the phone has a short one
   });
 
+  it('the Team page of a running team at 375 px: the name is whole beside the state chip (card 282: it read "Tea…")', async () => {
+    const w = await teamPage(Portrait.width, false, { ...team, running: 1 });
+    const st = new Styles('components/TeamView.vue');
+    const line = w.get('.titleline').element;
+    const h2 = w.get('.titleline h2').element;
+    // The title still reads "Team payments" (what a screen reader and the tests read); "Team " is left out on screen.
+    expect(h2.textContent).toBe('Team payments');
+    const prefix = w.get('.titleline h2 .title-prefix').element;
+    expect(st.hidden(prefix)).toBe(true);
+    const shown = h2.textContent!.replace(prefix.textContent!, '');
+    expect(shown).toBe('payments');
+    // No count chip takes room (the live "1 running" one was what pushed the name out); only the state chip is left.
+    const kpis = [...line.querySelectorAll('.kpi')];
+    expect(kpis.length).toBe(3);
+    for (const k of kpis) expect(st.hidden(k), k.getAttribute('data-test')!).toBe(true);
+    const chip = w.get('[data-test=team-page-state]').element;
+    expect(chip.textContent).toBe('Running');
+    expect([...line.children].filter((k) => !st.hidden(k))).toEqual([h2, chip]);
+    // The room the title line has: the row less the three 44 px icons and the gaps.
+    const room = (Portrait.width - 2 * teamsPlacePad) - 3 * 44 - 2 * px(st.value(w.get('.phone-actions').element, 'gap'))
+      - px(st.value(w.get('.teamhead').element, 'gap'));
+    const chipWidth = chip.textContent!.length * 7 + 14 + 11; // 11 px bold label, its padding, the pulsing dot
+    expect(shown.length * Char + px(st.value(line, 'gap')) + chipWidth, `room ${room}`).toBeLessThanOrEqual(room);
+    // The old title would not fit (why "Team " and the counts go on a phone).
+    expect('Team payments'.length * Char + 6 + chipWidth + 6 + '1 running'.length * 7.5 + 20).toBeGreaterThan(room);
+    // A longer name: the state chip gives way first.
+    expect(st.value(chip, 'flex')).toBe('0 1000 auto');
+    expect(st.value(chip, 'min-width')).toBe('0');
+    expect(st.value(h2, 'flex')).toBe('0 1 auto');
+  });
+
   it('the Team page: Triggers, Git and Settings are in the ⋯ menu, and each opens what it did', async () => {
     const w = await teamPage(Portrait.width);
     expect(w.find('[data-test=open-triggers]').exists()).toBe(false);
@@ -453,6 +493,14 @@ describe('at 1280 px the desktop is as it was (B054)', () => {
     expect(w.get('[data-test=tell-send]').text()).toBe('Tell Manager ✉');
     expect(w.get('[data-test=tell-send]').attributes('aria-label')).toBeUndefined();
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).not.toContain('capped');
+  });
+
+  it('the Team page: the "commits behind" bar is still above Tell (card 282 moves it on a phone only)', async () => {
+    const w = await teamPage(Desktop, true);
+    const order = [...w.get('section.team').element.children].map((e) => e.getAttribute('data-test') ?? e.classList[0]);
+    expect(order.indexOf('team-sync')).toBeGreaterThan(order.indexOf('teamhead'));
+    expect(order.indexOf('team-sync')).toBeLessThan(order.indexOf('tell'));
+    expect(w.findAll('[data-test=team-sync]')).toHaveLength(1);
   });
 
   it('Documents: the root intro, and in a folder the breadcrumb then New file, New folder and Upload', async () => {
