@@ -77,7 +77,7 @@ describe('main window', () => {
     expect(hire.find('[data-test=decision-approve]').exists()).toBe(true);
     expect(hire.find('[data-test=decision-always]').exists()).toBe(true);
     expect(w.find('[data-test=decision-discuss]').exists()).toBe(true);
-    expect(w.findAll('[data-test=open-terminal]')).toHaveLength(2);
+    expect(w.findAll('[data-test=member-view-terminal]')).toHaveLength(2);
     expect(w.findAll('[data-test=open-settings]')).toHaveLength(2);
   });
 });

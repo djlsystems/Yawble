@@ -46,6 +46,12 @@ function api(): YawbleApi {
         case 'teams.agents': return (cardsOf[p.teamId] ?? []) as any;
         case 'monitor.messages': return { end: 0, messages: [] } as any;
         case 'monitor.steps': return { end: 0, pending: false, steps: [] } as any;
+        // The real member pane on Terminal (the memberPaneView test) attaches its terminal and reads its banner.
+        case 'terminal.attach': return { replay: '', end: 0, session: null } as any;
+        case 'terminal.banner': return {
+          memberId: p.memberId, title: `m${p.memberId}`, state: 'idle', runId: null, queuePosition: null, queueLength: 0,
+          lastRunState: null, lastRunReason: null, details: [], loosened: [], interactive: false,
+        } as any;
         default: return [] as any;
       }
     },

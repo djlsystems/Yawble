@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import LogsDialog from '../../src/renderer/src/components/LogsDialog.vue';
-import AgentCard from '../../src/renderer/src/components/AgentCard.vue';
+import AgentCard from '../../src/renderer/src/components/MemberPane.vue';
 import { diagnosticLog } from '../../src/main/diagnostic-log';
 import type { LogSourceInfo, YawbleApi } from '../../src/shared/api';
 

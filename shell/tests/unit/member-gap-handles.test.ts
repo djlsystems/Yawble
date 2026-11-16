@@ -27,7 +27,7 @@ async function board() {
   return w;
 }
 const handles = (w: Awaited<ReturnType<typeof board>>) => w.findAll('[data-test=member-handle-h]');
-const outs = (w: Awaited<ReturnType<typeof board>>) => w.findAll('[data-test=agent-output]').map((o) => (o.element as HTMLElement).style.height);
+const outs = (w: Awaited<ReturnType<typeof board>>) => w.findAll('[data-test=member-pane-body]').map((o) => (o.element as HTMLElement).style.height);
 const down = (h: any, y = 0) => h.trigger('pointerdown', { clientX: 0, clientY: y, pointerId: 1, button: 0 });
 const move = (y: number) => window.dispatchEvent(new PointerEvent('pointermove', { clientX: 0, clientY: y, pointerId: 1 }));
 

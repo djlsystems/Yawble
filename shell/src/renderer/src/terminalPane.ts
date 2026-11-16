@@ -1,4 +1,4 @@
-import { reactive } from 'vue';
+import { reactive, type InjectionKey } from 'vue';
 import { lastMemberTerminal, openMemberTerminal, openMemberTerminalById } from './memberTerminal';
 
 /**
@@ -44,6 +44,14 @@ export function toggleTerminalPane(): boolean {
 }
 /** Hides the pane. TerminalPane's ✕ also stops an agent session first; Ctrl+` / View → Terminal only hide it. */
 export function closeTerminalPane() { terminalPane.open = false; }
+
+/**
+ * The pane's one header row on a phone (B057): TerminalPane provides where the shown terminal puts its Formatted / Raw
+ * tabs (`tabs`, in the header) and its bar's actions (`more`, the header's ⋯ menu), as element ids; `on` is false at
+ * desktop width, and then each stays where it is. Outside the pane nothing is provided and nothing moves.
+ */
+export interface PaneHeaderSlots { readonly on: boolean; readonly tabs: string; readonly more: string }
+export const PaneHeaderKey: InjectionKey<PaneHeaderSlots> = Symbol('terminal-pane-header');
 
 export function setTerminalPaneWidth(px: number) {
   terminalPane.width = Math.max(320, Math.min(1400, Math.round(px)));

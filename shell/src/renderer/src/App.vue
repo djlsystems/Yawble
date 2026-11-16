@@ -200,7 +200,8 @@ async function openFromHash() {
     const list = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: t, limit: 200 });
     return Array.isArray(list) ? list.map((w) => w.id) : [];
   }, target.team);
-  // The team's own page, at that workflow (openWorkflow is the Monitor's dialog, shown only over the Monitor).
+  // Straight to the team's page with its workflows open (not openWorkflow: that is the Monitor's dialog over the
+  // Monitor, shown only while the Monitor is the place, and a link may arrive on any place).
   if (teamId !== null) openTeam(teamId, 'workflows', target.workflow);
   else if (target.team !== null && ids.includes(target.team)) openTeam(target.team, 'workflows', target.workflow);
   else hashNote.value = `Workflow #${target.workflow} was not found in any team's newest 200 workflows.`;
