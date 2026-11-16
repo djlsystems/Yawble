@@ -108,7 +108,9 @@ become `[redacted]`) and cut to one short line.
 
 A dashboard row links into the remote view: `/i/{id}/ui/remote.html#workflow={wf}` opens that workflow selected in
 its team's Workflows (the team is found from the workflow id; `&team={id}` is an optional hint), `#team={id}` opens that
-team, and an unknown or malformed id opens the usual start page. A Visitor can open both. `#terminal/{memberId}` is
+team, and an unknown or malformed id opens the usual start page. The workflow is looked for among each team's newest
+200 (the most `bus.workflows` returns); one older than that opens a short "Workflow #N was not found" note instead
+(in its `&team=` team's Workflows when that hint is given). A Visitor can open both. `#terminal/{memberId}` is
 still an agent's terminal window.
 
 ### `org.summary` (contract version 1)
