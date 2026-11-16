@@ -1,25 +1,22 @@
 import { reactive, type InjectionKey } from 'vue';
+import { lastMemberTerminal, openMemberTerminal, openMemberTerminalById } from './memberTerminal';
 
 /**
- * The main window's terminal pane (View → Terminal): one terminal at a time, on the right. Every terminal button
- * (an agent's card, Settings → Agents → Test) shows its terminal here, replacing what was shown, instead of opening a
- * window of its own.
+ * The main window's terminal pane (View → Terminal): one terminal at a time, on the right, for the terminals that are
+ * no member's: Settings → Agents Terminal / Test sessions and other channels. A member's terminal is in its own pane on
+ * the team page (memberTerminal.ts), never here.
  */
-export type PaneTarget =
-  | { kind: 'member'; memberId: number; title: string }
-  | { kind: 'channel'; channel: string; title: string; stop?: () => Promise<void> | void };
+export type PaneTarget = { kind: 'channel'; channel: string; title: string; stop?: () => Promise<void> | void };
 
 export const terminalPane = reactive({
   open: false,
   target: null as PaneTarget | null,
   width: readWidth(),
-  /** A member session's end failed when ✕ closed the pane: App shows it (the pane is gone by then). */
-  stopError: null as string | null,
 });
 
-export function showMemberTerminal(memberId: number, title: string) {
-  terminalPane.target = { kind: 'member', memberId, title };
-  terminalPane.open = true;
+/** An older entry for a member's terminal: it opens on the team page (that member's pane, on Terminal) instead. */
+export function showMemberTerminal(memberId: number, _title?: string) {
+  void openMemberTerminalById(memberId);
 }
 
 /** An agent's Terminal / Test session from Settings > Agents (core AgentTestSessions.ChannelPrefix). */
@@ -33,7 +30,18 @@ export function showChannelTerminal(channel: string, title: string, stop?: () =>
   terminalPane.open = true;
 }
 
-export function toggleTerminalPane() { terminalPane.open = !terminalPane.open; }
+/**
+ * View → Terminal / Ctrl+`: shows or hides the pane's channel terminal. With no channel terminal to show, it goes back to
+ * the member terminal opened last, on its team page (returns true then); with neither, the empty pane says where to look.
+ */
+export function toggleTerminalPane(): boolean {
+  if (!terminalPane.open && !terminalPane.target) {
+    const m = lastMemberTerminal();
+    if (m) { void openMemberTerminal(m.teamId, m.memberId); return true; }
+  }
+  terminalPane.open = !terminalPane.open;
+  return false;
+}
 /** Hides the pane. TerminalPane's ✕ also stops an agent session first; Ctrl+` / View → Terminal only hide it. */
 export function closeTerminalPane() { terminalPane.open = false; }
 

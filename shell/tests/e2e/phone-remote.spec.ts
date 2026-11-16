@@ -1,18 +1,18 @@
-﻿// B037 verify (card 169): remote.html on a phone, end to end in a real browser (headless Chrome), against a FAKE core
+// B037 verify (card 169): remote.html on a phone, end to end in a real browser (headless Chrome), against a FAKE core
 // (tests/e2e/phone/fake-core.ts: canned answers over the page's socket, nothing real behind it).
 //
 // Every screen at 390 x 844 and 360 x 740: the page must not scroll sideways (scrollWidth > innerWidth), no visible
 // control may sit off the screen's edge, and none may be smaller than 44 x 44 px. Plus the on-screen keyboard (a fake
 // visualViewport), the Visitor chip, the dark Monitor and its forces panel, the 759 / 760 px edges, rotation, and at
-// 1280 px the desktop layout compared with main b726212's.
+// 1280 px the desktop layout compared with main's at BASE_COMMIT (tests/e2e/phone/server.ts; one line to bump).
 //
-//   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, from `git archive b726212 shell code-browser`)
+//   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B037-screens (else test-results/B037-screens); the audit to test-results/b037-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { audit, type Audit } from './phone/audit';
-import { baseBuiltDir, baseShellDir, buildRenderer, builtDir, fakeRemote } from './phone/server';
+import { BASE_COMMIT, baseBuiltDir, baseShellDir, buildRenderer, builtDir, extractBaseTree, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
@@ -26,7 +26,7 @@ test.beforeAll(async () => {
   test.setTimeout(600_000);
   mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
-  if (process.env.B037_NO_BASE !== '1') await buildRenderer(baseShellDir, baseBuiltDir);
+  if (process.env.B037_NO_BASE !== '1') { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
 });
 
 type Size = { w: number; h: number };
@@ -328,11 +328,12 @@ for (const size of PHONES) {
 
     // F7 re-verify (card 177): the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
     test('Visitor (read-only) F7: the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
-      const composerBar = (page: Page) => page.locator('[data-test=composer] .bar').evaluate((bar) => {
-        const r = (sel: string) => { const e = bar.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
+      // B057: on a phone the team and agent pickers fold out above the bar (one button opens them).
+      const composerBar = async (page: Page) => { await page.locator('[data-test=composer-pickers-toggle]').click(); return page.locator('[data-test=composer] .bar').evaluate((bar) => {
+        const r = (sel: string) => { const e = bar.closest('[data-test=composer]')!.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
         const bb = bar.getBoundingClientRect();
         return { barRight: bb.right - parseFloat(getComputedStyle(bar).paddingRight), padR: getComputedStyle(bar).paddingRight, team: r('[data-test=composer-team]'), agent: r('[data-test=composer-agent]'), attach: r('[data-test=composer-attach]'), send: r('[data-test=composer-send]'), sw: document.documentElement.scrollWidth, iw: innerWidth };
-      });
+      }); };
       const full = await open(browser, size, { asks: false });
       const f = await composerBar(full.page);
       await full.ctx.close();
@@ -574,7 +575,7 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
   }
 });
 
-test.describe('1280 px: the desktop layout is unchanged from main b726212', () => {
+test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}`, () => {
   test.skip(process.env.B037_NO_BASE === '1', 'no base build');
   // B054 verify (card 270): also the pages B054 changes past their landing screen - a team's page, a team's documents
   // folder, and the Settings sections (Skills with a skill picked, Guardrails, Integrations, System).
@@ -617,8 +618,8 @@ test.describe('1280 px: the desktop layout is unchanged from main b726212', () =
       const added = Object.keys(layouts.branch!).filter((k) => !(k.replace(/#\d+$/, '#1') in layouts.base!));
       if (added.length) console.log(`${name} @1280: hooks new in B037 (not compared): ${added.join(', ')}`);
       for (const k of new Set([...Object.keys(layouts.base!), ...Object.keys(layouts.branch!)]))
-        if (!added.includes(k) && layouts.base![k] !== layouts.branch![k]) diff.push(`${k}: main ${layouts.base![k] ?? '-'} / B037 ${layouts.branch![k] ?? '-'}`);
-      expect.soft(diff, `${name} at 1280 px differs from main`).toEqual([]);
+        if (!added.includes(k) && layouts.base![k] !== layouts.branch![k]) diff.push(`${k}: main ${BASE_COMMIT} ${layouts.base![k] ?? '-'} / B037 ${layouts.branch![k] ?? '-'}`);
+      expect.soft(diff, `${name} at 1280 px differs from main ${BASE_COMMIT}`).toEqual([]);
     });
   }
 });

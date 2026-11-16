@@ -34,7 +34,7 @@ import { entryTime, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown, 
  * Clicking one opens the team at its Workflows dialog.
  */
 const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
-const emit = defineEmits<{ openTeam: [teamId: number, panel?: 'workflows']; openWorkflow: [teamId: number, workflow: number] }>();
+const emit = defineEmits<{ openTeam: [teamId: number, panel?: 'workflows']; openWorkflow: [teamId: number, workflow: number]; openTerminal: [teamId: number, memberId: number] }>();
 const api = resolveApi(props.api);
 
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -376,6 +376,11 @@ function openPicked() {
   const p = pickedTeam.value;
   if (p) emit('openTeam', p.team.id);
 }
+/** A picked member's terminal: on its team page, in that member's pane (App, memberTerminal.ts). */
+function openPickedTerminal() {
+  const p = pickedTeam.value;
+  if (p?.member) emit('openTerminal', p.team.id, p.member.id);
+}
 
 function ago(at: string): string {
   const s = Math.max(0, ((playhead.value ?? Date.now()) - new Date(at).getTime()) / 1000);
@@ -560,6 +565,7 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
         <template v-if="pickedTeam">
           <span class="pick">{{ pickedTeam.member ? spaced(pickedTeam.member.name) : pickedTeam.team.name }}</span>
           <button class="ctl" data-test="monitor-open-team" @click="openPicked">Open team</button>
+          <button v-if="pickedTeam.member" class="ctl" data-test="monitor-open-terminal" :title="`Open ${spaced(pickedTeam.member.name)}'s terminal on the team page`" @click="openPickedTerminal">Terminal</button>
           <button class="ctl" title="Show everything" data-test="monitor-unpick" @click="pick(null)">×</button>
         </template>
         <span v-else class="pick">Activity<template v-if="mode === 'replay'"> · replay</template></span>
