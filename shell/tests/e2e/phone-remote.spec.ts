@@ -326,11 +326,12 @@ for (const size of PHONES) {
 
     // F7 re-verify (card 177): the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
     test('Visitor (read-only) F7: the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
-      const composerBar = (page: Page) => page.locator('[data-test=composer] .bar').evaluate((bar) => {
-        const r = (sel: string) => { const e = bar.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
+      // B057: on a phone the team and agent pickers fold out above the bar (one button opens them).
+      const composerBar = async (page: Page) => { await page.locator('[data-test=composer-pickers-toggle]').click(); return page.locator('[data-test=composer] .bar').evaluate((bar) => {
+        const r = (sel: string) => { const e = bar.closest('[data-test=composer]')!.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
         const bb = bar.getBoundingClientRect();
         return { barRight: bb.right - parseFloat(getComputedStyle(bar).paddingRight), padR: getComputedStyle(bar).paddingRight, team: r('[data-test=composer-team]'), agent: r('[data-test=composer-agent]'), attach: r('[data-test=composer-attach]'), send: r('[data-test=composer-send]'), sw: document.documentElement.scrollWidth, iw: innerWidth };
-      });
+      }); };
       const full = await open(browser, size, { asks: false });
       const f = await composerBar(full.page);
       await full.ctx.close();
