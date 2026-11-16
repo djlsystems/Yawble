@@ -13,8 +13,8 @@ const shellDir = path.resolve(__dirname, '..', '..', '..');
 // Under out/ (ignored): Playwright empties test-results at the start of each run.
 export const builtDir = path.join(shellDir, 'out', 'b037', 'renderer');
 /** The base's shell (main b726212), extracted with `git archive b726212 shell code-browser` for the 1280 px comparison. */
-export const baseShellDir = path.join(shellDir, 'out', 'b037', 'main', 'shell');
-export const baseBuiltDir = path.join(shellDir, 'out', 'b037', 'renderer-base');
+export const baseShellDir = process.env.B037_BASE_DIR ? path.resolve(process.env.B037_BASE_DIR, 'shell') : path.join(shellDir, 'out', 'b037', 'main', 'shell');
+export const baseBuiltDir = process.env.B037_BASE_DIR ? path.resolve(process.env.B037_BASE_DIR, 'renderer') : path.join(shellDir, 'out', 'b037', 'renderer-base');
 
 /**
  * Builds a renderer (index.html and remote.html) once per run of the test runner (a worker restarted after a failure

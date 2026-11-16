@@ -32,11 +32,13 @@ test.beforeAll(async () => {
 type Size = { w: number; h: number };
 const PHONES: Size[] = [{ w: 390, h: 844 }, { w: 360, h: 740 }];
 
-interface OpenOpts { access?: 'full' | 'read'; theme?: 'light' | 'dark'; dir?: string; mobile?: boolean; asks?: boolean }
+interface OpenOpts { access?: 'full' | 'read'; theme?: 'light' | 'dark'; dir?: string; mobile?: boolean; asks?: boolean; sync?: boolean; needsYou?: boolean }
 async function open(browser: Browser, size: Size, o: OpenOpts = {}) {
   const s = fakeRemote(o.dir ?? builtDir);
   s.core.setAccess(o.access ?? 'full');
   s.core.setAsks(o.asks ?? true);
+  s.core.setSync(o.sync ?? false);
+  s.core.setNeedsYou(o.needsYou ?? true);
   const mobile = o.mobile ?? size.w < 760;
   const ctx = await browser.newContext({ viewport: { width: size.w, height: size.h }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 2, colorScheme: o.theme ?? 'light' });
   await ctx.addInitScript((theme) => {
@@ -428,6 +430,12 @@ for (const size of PHONES) {
             await p.locator('[data-test=team-open-payments]').click();
             await expect(p.locator('[data-test=team-title]')).toBeVisible();
             const b = p.locator(`[data-test=${id}]`).first();
+            // B054 (card 270): on a phone Triggers, Git and Settings are in the team page's ⋯ menu: open it first.
+            const more = p.locator('[data-test=team-more]');
+            if (!(await b.isVisible().catch(() => false)) && (await more.isVisible().catch(() => false))) {
+              await more.click();
+              await expect(p.locator('[data-test=team-more-menu]')).toBeVisible();
+            }
             if (!(await b.isVisible().catch(() => false))) return false;
             return b.click({ timeout: 3000 }).then(() => true, () => false);
           },
@@ -466,6 +474,10 @@ for (const size of PHONES) {
       }
       console.log(`F8 sheets @${tag(size)}: ${JSON.stringify(seen)}`);
       results.push({ screen: 'f8-sheets', size: tag(size), audit: seen as unknown as Audit });
+      // B054: the three sheets behind ⋯ are still checked on a phone (an opener that is gone is a fault, not a skip).
+      for (const name of ['team-triggers', 'team-git', 'team-manage'])
+        for (const access of ['read', 'full'] as const)
+          expect.soft(typeof seen[name]?.[access], `${name} (${access}) @${tag(size)}: opened as a sheet (${JSON.stringify(seen[name]?.[access])})`).toBe('object');
     });
 
     test('dark theme: the shell is dark, the Monitor is dark', async ({ browser }) => {
@@ -564,13 +576,26 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
 
 test.describe('1280 px: the desktop layout is unchanged from main b726212', () => {
   test.skip(process.env.B037_NO_BASE === '1', 'no base build');
-  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'], ['nav-logs', 'logs']] as const) {
+  // B054 verify (card 270): also the pages B054 changes past their landing screen - a team's page, a team's documents
+  // folder, and the Settings sections (Skills with a skill picked, Guardrails, Integrations, System).
+  const tap = (sel: string) => async (p: Page) => { await p.locator(sel).first().click(); await p.waitForTimeout(500); };
+  const deeper: Record<string, ((p: Page) => Promise<void>)[]> = {
+    'team-page': [tap('[data-test=team-open-payments]')],
+    'documents-folder': [tap('[data-test=documents-team-payments]')],
+    'settings-skill': [tap('[data-test=settings] [data-test=open-skills]'), tap('[data-test=skill-skill-10]')],
+    'settings-guardrails': [tap('[data-test=settings] [data-test=open-global-policy]')],
+    'settings-integrations': [tap('[data-test=settings] [data-test=open-integrations]')],
+    'settings-system': [tap('[data-test=settings] [data-test=open-system]')],
+  };
+  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'], ['nav-logs', 'logs'],
+    ['nav-teams', 'team-page'], ['nav-documents', 'documents-folder'], ['open-app-settings', 'settings-skill'], ['open-app-settings', 'settings-guardrails'], ['open-app-settings', 'settings-integrations'], ['open-app-settings', 'settings-system']] as const) {
     test(`${name}: every [data-test] element in the same place and size`, async ({ browser }) => {
       const size = { w: 1280, h: 800 };
       const layouts: Record<string, Record<string, string>> = {};
       for (const [which, dir] of [['base', baseBuiltDir], ['branch', builtDir]] as const) {
         const { page } = await open(browser, size, { dir, mobile: false });
         if (id) await page.locator(`[data-test=sidebar] [data-test=${id}]`).first().click();
+        for (const step of deeper[name] ?? []) await step(page);
         await page.waitForTimeout(900);
         await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${name}-${which}.png`) });
         layouts[which] = await page.evaluate(() => {
@@ -597,3 +622,207 @@ test.describe('1280 px: the desktop layout is unchanged from main b726212', () =
     });
   }
 });
+
+// B054 verify (card 270): iPhone SE sizes, portrait 375 x 501 and landscape 667 x 263 (both the phone layout). Per page:
+// where the first content row starts (px from the top of the frame, the browser window; ~120 px is the portrait target,
+// on screen in landscape), no nested vertical scrollers, no sideways scroll, every field 16 px / 44 px, the Settings
+// back control after scrolling Guardrails to its bottom, and a picked skill in view. "before" is the base team branch
+// (B037_BASE_DIR, e.g. 8b39e07), "after" this branch; only "after" is asserted, "before" is measured and recorded.
+const SE: Size[] = [{ w: 375, h: 501 }, { w: 667, h: 263 }];
+type B054 = { first: { sel: string; top: number; bottom: number } | null; rows: Record<string, { top: number; bottom: number } | null>; topBar: number;
+  scrollers: string[]; inputs: { what: string; font: number; h: number }[]; overflow: boolean; sw: number };
+const B054_RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'b054-measure.ndjson');
+
+/** Measures the screen: the first visible match of `first` (in order), the named rows, the inner vertical scrollers, the fields. */
+function measure(page: Page, first: string[], rows: Record<string, string> = {}): Promise<B054> {
+  return page.evaluate(([first, rows]) => {
+    const shown = (el: Element) => { if (el.closest('[inert], [aria-hidden=true]')) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (el as HTMLElement).checkVisibility?.({ checkVisibilityCSS: true } as any) !== false && r.right > 0 && r.left < innerWidth; };
+    const box = (sel: string) => { const el = [...document.querySelectorAll(sel)].find(shown); if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+    let f: B054['first'] = null;
+    for (const s of first as string[]) { const b = box(s); if (b) { f = { sel: s, ...b }; break; } }
+    const named: B054['rows'] = {};
+    for (const [k, s] of Object.entries(rows as Record<string, string>)) named[k] = box(s);
+    const bar = document.querySelector('.app.phone > .main > header.bar, .app > .main > header.bar');
+    const describe = (el: Element) => `${el.tagName.toLowerCase()}${el.getAttribute('data-test') ? `[data-test=${el.getAttribute('data-test')}]` : ''}${typeof (el as HTMLElement).className === 'string' && (el as HTMLElement).className ? '.' + (el as HTMLElement).className.trim().split(/\s+/).slice(0, 3).join('.') : ''}`;
+    const scrollers: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>('body *')) {
+      if (el.tagName === 'TEXTAREA' || el.closest('[data-test=sidebar]')) continue;
+      const s = getComputedStyle(el);
+      if (!/(auto|scroll)/.test(s.overflowY) || el.scrollHeight <= el.clientHeight + 1 || !shown(el)) continue;
+      scrollers.push(`${describe(el)} ${el.clientHeight}/${el.scrollHeight}`);
+    }
+    const inputs = [...document.querySelectorAll<HTMLElement>('input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=range]):not([type=color]):not([type=file]), select, textarea')]
+      .filter(shown).filter((el) => !el.closest('[data-test=sidebar]'))
+      .map((el) => ({ what: describe(el), font: parseFloat(getComputedStyle(el).fontSize), h: Math.round(el.getBoundingClientRect().height * 10) / 10 }));
+    const sw = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+    return { first: f, rows: named, topBar: bar ? Math.round(bar.getBoundingClientRect().bottom) : -1, scrollers, inputs, overflow: sw > innerWidth, sw };
+  }, [first, rows] as const);
+}
+
+for (const size of SE) {
+  const portrait = size.h > size.w;
+  test.describe(`B054 iPhone SE ${tag(size)} (${portrait ? 'portrait' : 'landscape'})`, () => {
+    const builds = [['after', builtDir], ...(process.env.B037_NO_BASE === '1' ? [] : [['before', baseBuiltDir]])] as const;
+    for (const [which, dir] of builds) {
+      test(`${which}: Backlog, Team, Documents and every Settings section`, async ({ browser }) => {
+        test.setTimeout(240_000);
+        const after = which === 'after';
+        const rec = (screen: string, m: B054, extra: Record<string, unknown> = {}) => {
+          mkdirSync(path.dirname(B054_RESULTS), { recursive: true });
+          appendFileSync(B054_RESULTS, JSON.stringify({ which, screen, size: tag(size), ...m, ...extra }) + '\n');
+        };
+        const where = (screen: string) => `${screen} @${tag(size)}`;
+        /** The checks for a page; the first content row against the target (portrait) or on screen (landscape). */
+        const judge = (screen: string, m: B054, o: { scrollersOk?: number; at?: boolean } = {}) => {
+          if (!after) return;
+          expect.soft(m.first, `${where(screen)}: a first content row`).not.toBeNull();
+          // at: false - a fold or field the user opened pushes the list down: not judged for where the row starts.
+          if (m.first && o.at !== false) {
+            if (portrait) expect.soft(m.first.top, `${where(screen)}: first content row (${m.first.sel}) within ~120 px of the top`).toBeLessThanOrEqual(120);
+            else expect.soft(m.first.top < size.h && m.first.bottom > 0, `${where(screen)}: first content row (${m.first.sel}) on screen in landscape (top ${m.first.top})`).toBe(true);
+          }
+          expect.soft(m.scrollers.length, `${where(screen)}: vertical scrollers (the page's one only): ${m.scrollers.join(' | ')}`).toBeLessThanOrEqual(o.scrollersOk ?? 1);
+          expect.soft(m.overflow, `${where(screen)}: sideways scroll (${m.sw} > ${size.w})`).toBe(false);
+          for (const i of m.inputs) {
+            expect.soft(i.font, `${where(screen)}: ${i.what} font-size`).toBeGreaterThanOrEqual(16);
+            expect.soft(i.h, `${where(screen)}: ${i.what} height`).toBeGreaterThanOrEqual(44);
+          }
+        };
+        const SHOTS54 = path.join(path.dirname(SHOTS), 'B054-screens');
+        mkdirSync(SHOTS54, { recursive: true });
+        const shot = (screen: string) => page.screenshot({ path: path.join(SHOTS54, `${which}-${screen}-${tag(size)}.png`) });
+        let { page, ctx, errors } = await open(browser, size, { dir, asks: false });
+
+        // Backlog: the list, then the search-and-sort fold open (its fields).
+        await nav(page, 'nav-backlog');
+        await expect(page.locator('[data-test=backlog-row]').first()).toBeVisible();
+        await page.waitForTimeout(300);
+        let m = await measure(page, ['[data-test=backlog-row]'], { head: '[data-test=backlog-phone-head], .backlog-place .head' });
+        rec('backlog', m); judge('backlog', m); await shot('backlog');
+        const tools = page.locator('[data-test=backlog-tools-toggle]');
+        if (await tools.count()) { await tools.click(); await page.waitForTimeout(200); }
+        m = await measure(page, ['[data-test=backlog-row]'], { search: '[data-test=backlog-search]' });
+        rec('backlog-tools', m); judge('backlog-tools', m, { at: false }); await shot('backlog-tools');
+        if (after) expect.soft(m.inputs.some((i) => /backlog-search/.test(i.what)), `${where('backlog-tools')}: the search field shown`).toBe(true);
+
+        // Team, without and with the sync bar: the Tell row is the first content row; the first member card measured too.
+        // Three states: an integration ask and a Manager decision pending (above the members), the same with the sync bar,
+        // and nothing pending (the members right under Tell).
+        for (const [screen, sync, needsYou] of [['team', false, true], ['team-sync', true, true], ['team-quiet', false, false], ['team-quiet-sync', true, false]] as const) {
+          if (screen !== 'team') { await ctx.close(); ({ page, ctx, errors } = await open(browser, size, { dir, asks: false, sync, needsYou })); }
+          await nav(page, 'nav-teams');
+          await page.locator('[data-test=team-open-payments]').click();
+          await expect(page.locator('[data-test=team-title]')).toBeVisible();
+          if (sync) await expect(page.locator('[data-test=team-sync]')).toBeVisible();
+          await page.waitForTimeout(500);
+          m = await measure(page, ['.tell.row'], { title: '[data-test=team-title]', sync: '[data-test=team-sync]', tell: '.tell.row', member: '[data-test=agent-Manager]' });
+          rec(screen, m); judge(screen, m); await shot(screen);
+          if (after) expect.soft(m.rows.tell && m.rows.tell.bottom - m.rows.tell.top, `${where(screen)}: the Tell row is one 44 px row`).toBeLessThanOrEqual(56);
+          // Asks and decisions pending go above the members on purpose (Needs you first): there the members are recorded only.
+          if (after && !portrait && !needsYou) expect.soft(m.rows.member && m.rows.member.top < size.h, `${where(screen)}: a member card on screen in landscape (top ${m.rows.member?.top})`).toBe(true);
+          // Scrolled until the first member card shows: is it reachable (the page scrolls)?
+          await page.locator('[data-test=agent-Manager]').scrollIntoViewIfNeeded();
+          const mb = await page.locator('[data-test=agent-Manager]').boundingBox();
+          rec(`${screen}-member-scrolled`, m, { memberAfterScroll: mb && { top: Math.round(mb.y), bottom: Math.round(mb.y + mb.height) } });
+        }
+        await ctx.close();
+        ({ page, ctx, errors } = await open(browser, size, { dir, asks: false }));
+
+        // Documents: the root (team folders), a team's folder, and its New file field.
+        await nav(page, 'nav-documents');
+        await expect(page.locator('[data-test=documents-view]')).toBeVisible();
+        await page.waitForTimeout(400);
+        m = await measure(page, ['[data-test^=documents-team-]'], { title: '[data-test=documents-view] h2' });
+        rec('documents-root', m); judge('documents-root', m); await shot('documents-root');
+        await page.locator('[data-test=documents-team-payments]').click();
+        await expect(page.locator('[data-test=docs-browser]')).toBeVisible();
+        await page.waitForTimeout(400);
+        const firstDoc = ['[data-test=docs-list] [data-test^="doc-"]:not([data-test^="doc-delete"])', '[data-test=docs-list] li'];
+        m = await measure(page, firstDoc, { bar: '[data-test=docs-browser] > .bar' });
+        rec('documents-folder', m); judge('documents-folder', m); await shot('documents-folder');
+        const add = page.locator('[data-test=docs-add]');
+        if (await add.isVisible().catch(() => false)) await add.click();
+        await page.locator('[data-test=docs-new-file]').first().click();
+        await expect(page.locator('[data-test=docs-name]')).toBeVisible();
+        m = await measure(page, firstDoc, { name: '[data-test=docs-name]' });
+        rec('documents-new-file', m); judge('documents-new-file', m, { at: false }); await shot('documents-new-file');
+        if (after) expect.soft(m.inputs.some((i) => /docs-name/.test(i.what)), `${where('documents-new-file')}: the name field shown`).toBe(true);
+
+        // Settings: the list, then each section; Guardrails scrolled to its bottom; Skills with a skill picked.
+        const openSettings = async () => {
+          await drawer(page);
+          const item = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
+          await item.scrollIntoViewIfNeeded().catch(() => {});
+          await item.click();
+          await expect(page.locator('[data-test=settings]')).toBeVisible();
+          await page.waitForTimeout(400);
+        };
+        await openSettings();
+        m = await measure(page, ['[data-test=settings] [role=tab]']);
+        rec('settings', m); judge('settings', m); await shot('settings');
+        for (const id of ['open-general', 'open-agents', 'open-skills', 'open-global-policy', 'open-integrations', 'open-system']) {
+          const tab = page.locator(`[data-test=settings] [data-test=${id}]`);
+          if (!(await tab.isVisible().catch(() => false))) {
+            const back = page.locator('[data-test=settings-back]');
+            if (await back.isVisible().catch(() => false)) await back.click(); else await openSettings();
+            await page.waitForTimeout(200);
+          }
+          await tab.click();
+          await page.waitForTimeout(700);
+          const screen = `settings-${id.replace('open-', '')}`;
+          // Where the section opened (the page scroller keeps the last section's scroll, e.g. Guardrails at its bottom),
+          // recorded; then measured from its top.
+          const openedAt = await page.locator('[data-test=settings]').evaluate((s) => { const t = Math.round(s.scrollTop); s.scrollTop = 0; return t; });
+          if (openedAt) rec(`${screen}-opened-scrolled`, await measure(page, []), { openedAt });
+          await page.waitForTimeout(150);
+          m = await measure(page, ['[data-test=settings-pane] > section > *:not(.section-head)', '[data-test=settings-pane] > * > *:not(.section-head)', '[data-test=settings-pane] > *'],
+            { head: '[data-test=settings] .section-head', back: '[data-test=settings-back]' });
+          rec(screen, m); judge(screen, m); await shot(screen);
+          if (id === 'open-global-policy') {
+            // Scroll the page's scroller to the bottom: "‹ Settings" still on screen and tappable.
+            const r = await page.locator('[data-test=settings-pane]').evaluate((pane) => {
+              let s: HTMLElement | null = pane;
+              while (s && !(/(auto|scroll)/.test(getComputedStyle(s).overflowY) && s.scrollHeight > s.clientHeight + 1)) s = s.parentElement;
+              const sc = s ?? document.scrollingElement as HTMLElement;
+              sc.scrollTop = sc.scrollHeight;
+              return { scroller: sc.tagName + '.' + sc.className, scrollTop: Math.round(sc.scrollTop), max: sc.scrollHeight - sc.clientHeight };
+            });
+            await page.waitForTimeout(300);
+            const back = await page.evaluate(() => {
+              const b = document.querySelector('[data-test=settings-back]');
+              if (!b) return null;
+              const r = b.getBoundingClientRect();
+              const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height), tappable: !!hit && (b === hit || b.contains(hit)) };
+            });
+            rec('settings-guardrails-bottom', await measure(page, []), { scroll: r, back });
+            await shot('settings-guardrails-bottom');
+            if (after) {
+              expect.soft(r.max, `${where('guardrails')}: Guardrails is longer than the screen (to test the scroll)`).toBeGreaterThan(0);
+              expect.soft(back && back.top >= 0 && back.bottom <= size.h && back.tappable, `${where('guardrails')}: ‹ Settings on screen and tappable at the bottom (${JSON.stringify(back)}, ${JSON.stringify(r)})`).toBe(true);
+            }
+          }
+          if (id === 'open-skills') {
+            const skill = page.locator('[data-test=skill-skill-10]');
+            await skill.scrollIntoViewIfNeeded();
+            await skill.click();
+            await page.waitForTimeout(500);
+            const pane = await page.locator('[data-test=skills-pane]').evaluate((p) => {
+              const r = p.getBoundingClientRect(); const body = p.querySelector('.body')?.getBoundingClientRect();
+              return { top: Math.round(r.top), bottom: Math.round(r.bottom), title: p.textContent!.includes('skill-10'), bodyTop: body ? Math.round(body.top) : null };
+            });
+            const sm = await measure(page, ['[data-test=skills-pane]']);
+            rec('settings-skill-picked', sm, { pane });
+            judge('settings-skill-picked', sm);
+            await shot('settings-skill-picked');
+            if (after) expect.soft(pane.top >= 0 && pane.top < size.h - 40 && pane.title, `${where('skill picked')}: the skill's detail in view (${JSON.stringify(pane)})`).toBe(true);
+            const sb = page.locator('[data-test=skills-back]');
+            if (await sb.isVisible().catch(() => false)) await sb.click();
+          }
+        }
+        expect(errors).toEqual([]);
+        await ctx.close();
+      });
+    }
+  });
+}
