@@ -51,7 +51,8 @@ const api = {
 async function teamPage(width: number) {
   screen(width);
   const stubs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, WorkflowsDialog: true, DocumentsDialog: true, LogsDialog: true, TerminalScreen: true };
-  const w = mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs } });
+  // In the document, as in the app: the phone terminal's bar teleports into its header's ⋯ menu by id.
+  const w = mount(TeamView, { props: { team, api, pollMs: 100_000 }, attachTo: document.body, global: { stubs } });
   wrappers.push(w);
   await settle();
   return w;
@@ -122,32 +123,35 @@ for (const frame of [Portrait, Landscape]) {
       expect(bar.find('[data-test=member-more-menu]').exists()).toBe(false);
     });
 
-    it("the terminal gets the right area full width: its transcript is at least 60% of the visible height and on screen", async () => {
+    // Card 307: B057's phone terminal followed it here - the whole screen, one 44 px header row (the full checks are in
+    // phone-sheets.test.ts, with the real cascade).
+    it("the terminal is the whole screen with one header row: its transcript is at least 60% of the visible height", async () => {
       setMemberView('payments', 'DeveloperAda', 'terminal');
       const w = await teamPage(frame.width);
       const side = paneOf(w, 'DeveloperAda').get('[data-test=member-side]');
       const term = side.get('[data-test=member-terminal]');
+      expect(term.classes()).toContain('full');
       expect(term.find('.term-window').classes()).toContain('in-pane');
-      // The area: 60dvh plus the terminal's two rows (its bar, its Formatted / Raw tabs), capped at the screen.
-      const h = value(side.element, st, 'height')!;
-      const m = /^calc\(60dvh \+ (\d+)px\)$/.exec(h);
-      expect(m, h).not.toBeNull();
-      expect(value(side.element, st, 'max-height')).toBe('100dvh');
-      const app = phoneRules('TerminalApp.vue');
-      const barH = px(app.find((r) => r.sels.includes('.in-pane .bar'))?.decls.height);
-      const modesH = px(app.find((r) => r.sels.includes('.in-pane :deep(.modes)'))?.decls.height);
-      expect(barH).toBe(44);
-      expect(modesH).toBe(44);
-      expect(app.find((r) => r.sels.includes('.in-pane :deep(.screen-wrap)'))?.decls['min-height']).toBe('0');
-      const area = Math.min(frame.height * 0.6 + Number(m![1]), frame.height);
-      const transcript = area - barH - modesH;
+      // Over the page: fixed to every edge at the screen's height; its place in the stack takes no height.
+      expect(value(term.element, st, 'position')).toBe('fixed');
+      expect(value(term.element, st, 'inset')).toBe('0');
+      expect(value(term.element, st, 'height')).toBe('100dvh');
+      expect(value(side.element, st, 'height')).toBe('auto');
+      // One 44 px header row: title, the tabs' slot, ⋯ and ✕; the terminal's bar (state, Open, Policy, Stop) in its ⋯.
+      const head = term.get('[data-test=terminal-pane-head]');
+      expect(px(value(head.element, st, 'height'))).toBe(44);
+      const own = [...head.element.querySelectorAll(':scope > button')];
+      expect(own.map((b) => b.getAttribute('data-test'))).toEqual(['terminal-pane-more', 'terminal-pane-close']);
+      for (const b of own) expect(px(value(b, st, 'height', 'min-height'))).toBeGreaterThanOrEqual(44);
+      const menu = term.get('[data-test=terminal-pane-menu]');
+      for (const sel of ['terminal-state', 'open-interactive', 'terminal-details-toggle', 'terminal-stop'])
+        expect(menu.find(`[data-test=${sel}]`).exists(), sel).toBe(true);
+      const transcript = frame.height - 44;
       expect(transcript / frame.height, `${transcript} of ${frame.height}`).toBeGreaterThanOrEqual(0.6);
-      expect(area).toBeLessThanOrEqual(frame.height);
-      // The terminal's own bar keeps what it shows and Policy, at 44 px; Open and Stop are the pane's.
-      expect(term.find('[data-test=terminal-state]').exists()).toBe(true);
-      expect(term.find('[data-test=open-interactive]').exists()).toBe(false);
-      expect(term.find('[data-test=terminal-stop]').exists()).toBe(false);
-      expect(app.find((r) => r.sels.includes('.in-pane .bar button'))?.decls['min-height']).toBe('44px');
+      // ✕: back to Activity.
+      await head.get('[data-test=terminal-pane-close]').trigger('click');
+      expect(paneOf(w, 'DeveloperAda').find('[data-test=member-terminal]').exists()).toBe(false);
+      expect(paneOf(w, 'DeveloperAda').find('.member-activity').exists()).toBe(true);
     });
   });
 }
