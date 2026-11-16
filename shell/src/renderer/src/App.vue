@@ -186,9 +186,12 @@ function openTeam(id: number, panel?: 'workflows', workflow?: number) {
 
 /**
  * A link into the remote view (remoteHash.ts): #team={id} opens that team, #workflow={wf} that workflow's thread in its
- * team (found by asking each team's workflows). An unknown or malformed id leaves the view where it is: no error.
+ * team (found by asking each team's newest 200 workflows, core's most). An unknown or malformed id leaves the view where it
+ * is, no error; a well-formed workflow no team lists is named in a short note (in its hinted team's Workflows, if any).
  */
+const hashNote = ref<string | null>(null);
 async function openFromHash() {
+  hashNote.value = null;
   const target = parseRemoteHash(window.location.hash);
   if (!target) return;
   const ids = allTeams.value.map((t) => t.id);
@@ -199,6 +202,8 @@ async function openFromHash() {
   }, target.team);
   // The team's own page, at that workflow (openWorkflow is the Monitor's dialog, shown only over the Monitor).
   if (teamId !== null) openTeam(teamId, 'workflows', target.workflow);
+  else if (target.team !== null && ids.includes(target.team)) openTeam(target.team, 'workflows', target.workflow);
+  else hashNote.value = `Workflow #${target.workflow} was not found in any team's newest 200 workflows.`;
 }
 
 // A member's terminal (memberTerminal.ts: the Monitor, View > Terminal, the remote view, an agent's >_) opens here: its
@@ -453,6 +458,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
            below keeps its share and the Concierge's composer stays on screen however many banners there are. -->
       <div class="banners" data-test="banners">
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
+      <p v-if="hashNote" class="muted banner" data-test="hash-note">{{ hashNote }}
+        <button data-test="hash-note-dismiss" @click="hashNote = null">Dismiss</button></p>
       <HostChecksBanner :api="api" />
       <GitBanner :api="api" />
       <UpdateBanner ref="updateBanner" :api="api" />
