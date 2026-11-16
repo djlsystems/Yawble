@@ -8,6 +8,7 @@ import { availableWidth, renderedWidth, tileSize } from '../teamTileSize';
 import BusyLabel from './BusyLabel.vue';
 import Icon from './Icon.vue';
 import TeamStateChip from './TeamStateChip.vue';
+import TeamMembers from './TeamMembers.vue';
 import TeamWorkflows from './TeamWorkflows.vue';
 import TileGrip from './TileGrip.vue';
 import WorkflowsDialog from './WorkflowsDialog.vue';
@@ -87,7 +88,7 @@ watch(phone, () => void fit());
       <div class="team-card" :class="`is-${teamState(t)}`" :data-state="teamState(t)" data-test="team-card">
         <button class="card-open" :data-test="`team-open-${t.name}`" @click="emit('open', t.id)">
           <span class="card-title"><strong class="card-name" :title="t.name">{{ t.name }}</strong><TeamStateChip :team="t" data-test="team-state" /></span>
-          <span class="muted small">{{ t.members }} agents · {{ t.running }} running · {{ t.queued }} queued<template v-if="t.paused"> · <b class="paused-tag">paused</b></template></span>
+          <TeamMembers :team-id="t.id" :api="api" :poll-ms="pollMs" :fallback="`${t.members} agents · ${t.running} running · ${t.queued} queued`" />
         </button>
         <div class="card-actions" :class="{ normal: confirmDelete !== t.id }" data-test="card-actions">
           <template v-if="confirmDelete !== t.id">
