@@ -143,8 +143,12 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
   button, select, input:not([type=checkbox], [type=radio], [type=hidden]) { min-height: 44px; }
   button { min-width: 44px; }
   input[type=checkbox], input[type=radio] { width: 22px; height: 22px; }
-  /* 16 px text in a field: a phone browser zooms the page into a smaller one when it gets the focus. */
-  input, select, textarea { font-size: 16px; }
+  /* 16 px text in a field: a phone browser zooms the page into a smaller one when it gets the focus. B054: every text
+     field, select and textarea in the renderer is at least 16 px and 44 px tall on a phone, whatever a component's own
+     (scoped) rule says: !important here outweighs any scoped selector (none of them is !important). A checkbox or
+     radio keeps its 22 px box above. */
+  input:not([type=checkbox], [type=radio], [type=hidden], [type=range], [type=color]), select, textarea {
+    font-size: 16px !important; min-height: 44px !important; box-sizing: border-box; }
   /* The read-only chip moves to the top bar's right end (the top bar keeps that room free), clear of the message box. */
   .remote-access-chip { left: auto; bottom: auto; right: calc(8px + env(safe-area-inset-right, 0px)); top: calc(15px + env(safe-area-inset-top, 0px)); }
   /* Only the shell's own top bar (App.vue's main > header.bar): a bare .bar also matched the Composer's, the Documents'
