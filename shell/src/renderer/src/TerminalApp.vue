@@ -38,12 +38,14 @@ function toggleDetails() {
 
 const live = computed(() => !!session.value && !session.value.ended);
 watch(live, (v) => emit('live', v));
+/** The state line's fields, ' · ' between them; an empty field (no command known yet) gets no separator of its own. */
+const joinFields = (...parts: (string | null | undefined)[]) => parts.map((p) => (p ?? '').trim()).filter(Boolean).join(' · ');
 const stateLine = computed(() => {
   const b = banner.value;
   const s = session.value;
   if (!b) return '';
-  if (s && !s.ended && s.kind === 'interactive') return `Interactive ${s.command ?? ''} session · input on`;
-  if (b.state === 'running') return `Run ${b.runId} · ${s?.command ?? ''} · input off during headless run`;
+  if (s && !s.ended && s.kind === 'interactive') return joinFields(['Interactive', s.command, 'session'].filter(Boolean).join(' '), 'input on');
+  if (b.state === 'running') return joinFields(`Run ${b.runId ?? ''}`, s?.command, 'input off during headless run');
   if (b.state === 'queued') return `Queued · position ${b.queuePosition} of ${b.queueLength} · waiting for a global run slot`;
   const last = b.lastRunState ? ` · last run ${b.lastRunState}${b.lastRunReason ? `: ${b.lastRunReason}` : ''}` : '';
   return `Idle${last} · showing the last transcript`;
@@ -115,10 +117,14 @@ defineExpose({ size: () => view.value?.size() ?? null });
     </div>
     </Teleport>
     <p v-if="error && inMenu" class="error phone-error" data-test="terminal-error">{{ error }}</p>
-    <header v-show="showDetails" class="banner" data-test="banner">
-      <div class="title mono" data-test="banner-title">{{ banner?.title ?? 'Sandbox terminal' }}</div>
-      <div class="details mono" data-test="banner-details">{{ banner?.details.join(' · ') }}</div>
-      <div v-if="banner?.loosened.length" class="loosened mono" data-test="banner-loosened">loosened: {{ banner.loosened.join('; ') }}</div>
+    <!-- On a phone (opened from the pane's ⋯) the strip is capped and scrolls on its own, with a ✕ to hide it (O2). -->
+    <header v-show="showDetails" class="banner" :class="{ 'in-menu': inMenu }" data-test="banner">
+      <div class="banner-text" data-test="banner-text">
+        <div class="title mono" data-test="banner-title">{{ banner?.title ?? 'Sandbox terminal' }}</div>
+        <div class="details mono" data-test="banner-details">{{ banner?.details.join(' · ') }}</div>
+        <div v-if="banner?.loosened.length" class="loosened mono" data-test="banner-loosened">loosened: {{ banner.loosened.join('; ') }}</div>
+      </div>
+      <button v-if="inMenu" class="banner-close" data-test="banner-close" title="Hide this agent's sandbox policy" aria-label="Hide the policy" @click="toggleDetails">✕</button>
     </header>
     <div class="screen">
       <TerminalScreen ref="view" :key="memberId" :channel="`member:${memberId}`" :api="api" @session="session = $event" />
@@ -146,6 +152,11 @@ defineExpose({ size: () => view.value?.size() ?? null });
   .bar.in-menu { flex-direction: column; align-items: stretch; gap: 4px; padding: 0; background: transparent; font-size: 13px; }
   .bar.in-menu .state { white-space: normal; padding: 4px 6px; }
   .bar.in-menu button { min-height: 44px; }
+  /* The Policy strip opened from ⋯ (O2): at most 20% of the screen, so with the 44 px header the transcript keeps at
+     least 60% (375x521: 104 px; 667x263: 53 px); its text scrolls inside it and the 44 px ✕ stays put. */
+  .banner.in-menu { display: flex; align-items: flex-start; gap: 4px; max-height: 20vh; padding: 0 0 0 12px; box-sizing: border-box; flex: none; overflow: hidden; }
+  .banner.in-menu .banner-text { flex: 1; min-width: 0; max-height: 20vh; overflow-y: auto; padding: 6px 0; box-sizing: border-box; overscroll-behavior: contain; }
+  .banner.in-menu .banner-close { flex: none; min-width: 44px; min-height: 44px; padding: 0; font-size: 16px; background: transparent; color: var(--term-fg); border: 0; }
   .phone-error { margin: 0; padding: 4px 12px; font-size: 12px; background: var(--term-bar); }
   /* In a member's pane (B061): the bar and the Formatted / Raw tabs are one 44 px row each; the screen takes the rest. */
   .in-pane .bar { height: 44px; box-sizing: border-box; padding: 0 4px 0 10px; }
