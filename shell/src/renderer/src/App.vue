@@ -2,7 +2,7 @@
 import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary } from '../../shared/api';
+import type { ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary, WorkflowSummary } from '../../shared/api';
 import { errorText, resolveApi } from './api';
 import { cliLabel } from './agentClis';
 import HostChecksBanner from './components/HostChecksBanner.vue';
@@ -34,6 +34,7 @@ import { theme } from './theme';
 import type { AgentOption } from './components/Composer.vue';
 import { installTapTitles, usePhone } from './phone';
 import { pushEscape } from './escapeClose';
+import { findWorkflowTeam, parseRemoteHash } from './remoteHash';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
 // Concierge is home: a chat with an agent that knows every team. The same screens run in a browser through the
@@ -171,6 +172,22 @@ function openTeam(id: number, panel?: 'workflows', workflow?: number) {
   if (panel === 'workflows') void nextTick(() => teamView.value?.openWorkflows(workflow));
 }
 
+/**
+ * A link into the remote view (remoteHash.ts): #team={id} opens that team, #workflow={wf} that workflow's thread in its
+ * team (found by asking each team's workflows). An unknown or malformed id leaves the view where it is: no error.
+ */
+async function openFromHash() {
+  const target = parseRemoteHash(window.location.hash);
+  if (!target) return;
+  const ids = allTeams.value.map((t) => t.id);
+  if (target.kind === 'team') { if (ids.includes(target.team)) openTeam(target.team); return; }
+  const teamId = await findWorkflowTeam(target.workflow, ids, async (t) => {
+    const list = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: t, limit: 200 });
+    return Array.isArray(list) ? list.map((w) => w.id) : [];
+  }, target.team);
+  if (teamId !== null) openWorkflow(teamId, target.workflow);
+}
+
 // The team settings opened from a card in the Teams list (the same dialog as the team page's Settings).
 const manageTeam = ref<TeamSummary | null>(null);
 
@@ -261,7 +278,12 @@ onMounted(() => {
       if (t.state !== 'running' || !conversations.value.find((c) => c.id === t.conversationId)?.running) void loadConversations();
     }
   }));
-  void refresh();
+  // The remote view opened from the cloud site's org dashboard (#workflow= / #team=, remoteHash.ts) opens at that place
+  // once the teams are known; a later change of the hash (the dashboard reusing the tab) opens the new place.
+  if (api.remote) {
+    void refresh().then(openFromHash);
+    window.addEventListener('hashchange', openFromHash);
+  } else void refresh();
   void loadConversations();
   void loadAgents();
   timer = setInterval(refresh, props.pollMs ?? 1000);
@@ -272,7 +294,7 @@ function loadAgentsOnFocus() { void loadAgents(); }
 let offTapTitles: (() => void) | null = null;
 onMounted(() => { offTapTitles = installTapTitles(() => phone.value); });
 onBeforeUnmount(() => { offTapTitles?.(); releaseDrawerEscape?.(); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); });
+onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); window.removeEventListener('hashchange', openFromHash); });
 
 // The window's own title (taskbar, Alt+Tab) follows the place; the page shows its own heading.
 watch(title, (t) => { document.title = t ? `${t} · Yawble` : 'Yawble'; }, { immediate: true });
