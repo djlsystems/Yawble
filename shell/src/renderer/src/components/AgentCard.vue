@@ -11,12 +11,12 @@ import { leaseText } from '../heavyLease';
 import { outputHeight } from '../agentOutputHeight';
 
 // One agent in the list. A title bar (face, name, chips, state,
-// and the actions: >_ terminal, ⚙ settings, 🛡 guardrail check, ■ Stop, 🗑 remove), a details line, and what the agent
+// and the actions: >_ terminal, ⚙ settings (its Guardrails tab has the guardrail check), ■ Stop, 🗑 remove), a details line, and what the agent
 // last said as formatted text in a box of fixed height that scrolls inside. The gaps between cards drag the height
 // of every member's box together (the gap handles under each card, see TeamView).
 /** pending: Stop or Remove was clicked and the core has not answered yet (that icon shows the spinner, both are held). */
 const props = defineProps<{ card: AgentCard; pending?: 'stop' | 'remove' | null }>();
-const emit = defineEmits<{ terminal: []; code: []; settings: []; guardrail: []; logs: []; stop: []; remove: [] }>();
+const emit = defineEmits<{ terminal: []; code: []; settings: []; policy: []; logs: []; stop: []; remove: [] }>();
 
 const m = computed(() => props.card.member);
 const face = computed(() => memberStateOf(props.card));
@@ -53,8 +53,9 @@ const height = outputHeight;
       <strong data-test="agent-name" :title="m.name">{{ displayName(m.name) }}</strong>
       <span class="chip">{{ m.role }}</span>
       <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli">{{ m.cli }}</span>
-      <span v-if="card.loosened?.length" class="chip loosened" data-test="loosened-chip" :title="card.loosened.join('\n')">
-        loosened: {{ card.loosened.map((l) => l.replace(/^.*\+ /, '')).join(', ') }}</span>
+      <!-- Only a marker: what is loosened is listed on the agent's settings, Policy tab (and its Guardrails tab), which it opens. -->
+      <button v-if="card.loosened?.length" class="chip loosened" data-test="loosened-chip" :title="`Loosened beyond the global policy:\n${card.loosened.join('\n')}`"
+        @click="emit('policy')">⚠ loosened</button>
       <span class="label" data-test="agent-face-state">{{ MemberStateLabel[face] }}</span>
       <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
       <span class="spacer" />
@@ -63,7 +64,6 @@ const height = outputHeight;
         <!-- The read-only Code browser of the member's clone: only when the member has one. -->
         <button v-if="card.hasClone" class="icon code" title="Code" data-test="open-code" @click="emit('code')">&lt;/&gt;</button>
         <button class="icon" title="Settings" data-test="open-settings" @click="emit('settings')">⚙</button>
-        <button class="icon" title="Guardrail check" data-test="open-guardrail" @click="emit('guardrail')">🛡</button>
         <button class="icon" title="Logs: all of this agent's activity" data-test="open-logs" @click="emit('logs')"><Icon name="logs" :size="14" /></button>
         <button class="icon" :title="pending === 'stop' ? 'Stopping…' : 'Stop'" data-test="stop" :disabled="card.state !== 'running' || !!pending" :aria-busy="pending === 'stop'" @click="emit('stop')"><BusyLabel :busy="pending === 'stop'">■</BusyLabel></button>
         <button v-if="m.role === 'member'" class="icon danger" :title="pending === 'remove' ? 'Removing…' : 'Remove agent'" data-test="remove-agent" :disabled="card.state === 'running' || !!pending" :aria-busy="pending === 'remove'" @click="emit('remove')"><BusyLabel :busy="pending === 'remove'">🗑</BusyLabel></button>

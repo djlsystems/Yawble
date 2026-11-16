@@ -220,11 +220,12 @@ h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4
 .drawer .brand .icon-btn { width: 44px; height: 44px; }
 .drawer .chat .actions { display: flex; }
 .drawer .chat .actions .icon-btn { width: 44px; height: 44px; }
-/* The drawer scrolls as a whole when it is taller than the screen (a short phone, the menu group open), so Settings and
-   the run-slots line are always reachable; the Teams and Chats lists keep room for their heading and two rows. */
+/* The drawer scrolls as ONE list (a phone's screen is short): the Teams and Chats lists are not a box of their own, so
+   every chat is reached by scrolling the drawer, and the footer (the folded menu, Settings, the run slots) follows them
+   instead of being pinned under a squeezed list. */
 .side.drawer { overflow-y: auto; overscroll-behavior: contain; }
-.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot { flex: none; }
-.drawer .lists { min-height: 150px; }
+.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot, .drawer .lists { flex: none; }
+.drawer .lists { overflow: visible; }
 .drawer-menu { border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; padding-bottom: 4px; }
 .drawer-menu .check { width: 14px; flex: none; color: var(--accent); font-size: 12px; }
 </style>

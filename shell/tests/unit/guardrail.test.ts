@@ -90,8 +90,12 @@ describe('guardrail check: wiring', () => {
     const w = mount(App, { props: { api, pollMs: 60_000 } });
     await until(w, 'the team in the sidebar', () => w.find('[data-test=team-item]').exists());
     await w.get('[data-test=team-item]').trigger('click');
-    await until(w, 'the card', () => w.find('[data-test=agent-Ben] [data-test=open-guardrail]').exists());
-    await w.get('[data-test=agent-Ben] [data-test=open-guardrail]').trigger('click');
+    // The check lives on the agent's settings (Guardrails tab); the card has no guardrail button of its own.
+    await until(w, 'the card', () => w.find('[data-test=agent-Ben] [data-test=open-settings]').exists());
+    expect(w.find('[data-test=agent-Ben] [data-test=open-guardrail]').exists()).toBe(false);
+    await w.get('[data-test=agent-Ben] [data-test=open-settings]').trigger('click');
+    await until(w, 'the tabs', () => w.find('[data-test=tab-guardrails]').exists());
+    await w.get('[data-test=tab-guardrails]').trigger('click');
     await until(w, 'the report', () => w.find('[data-test=guardrail-summary]').exists());
     expect(w.get('[data-test=tab-guardrails]').classes()).toContain('on');
     expect(calls.find((c) => c.method === 'guardrail.get')!.params).toEqual({ team: 'payments', member: 'Ben' });

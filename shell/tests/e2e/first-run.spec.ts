@@ -236,14 +236,15 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await shot(main, '06-agent-policy-saved');
     await main.locator('[data-test=modal-close]').click();
     await expect(main.locator('[data-test=agent-Ben] [data-test=agent-timeout]')).toHaveText('15 min');
-    await expect(main.locator('[data-test=agent-Ben] [data-test=loosened-chip]')).toContainText('registry.npmjs.org');
+    await expect(main.locator('[data-test=agent-Ben] [data-test=loosened-chip]')).toHaveAttribute('title', /registry\.npmjs\.org/);
     await expect(main.locator('[data-test=agent-Ada] [data-test=agent-timeout]')).toHaveText('2 h');
 
-    // ---- The card's guardrail button opens the agent's Guardrails tab, through Electron main's method
+    // ---- The agent's settings, Guardrails tab, through Electron main's method
     // allow-list to the core. By default this e2e installs no yawble-guardcheck probe (and runs no real sandbox), so the core
     // answers why the check is off and Run is disabled. With YAWBLE_E2E_GUARDCHECK_DIR (see installProbe) the window
     // runs the real check in the sandbox and it must pass. The check itself is covered by RealSandboxGuardrailTests.
-    await main.locator('[data-test=agent-Ben] [data-test=open-guardrail]').click();
+    await main.locator('[data-test=agent-Ben] [data-test=open-settings]').click();
+    await main.locator('[data-test=tab-guardrails]').click();
     await expect(main.locator('[data-test=tab-guardrails]')).toHaveClass(/on/);
     await expect(main.locator('[data-test=guardrail-panel]')).toContainText("Ben's effective policy");
     if (!realCheck) {
@@ -281,6 +282,9 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
 
     // ---- Ben's terminal during the run: banner and live output.
     let term = await terminalFor(app, main, 'Ben');
+    // The policy banner is folded behind the bar's Policy toggle (closed by default): open it to read it.
+    await expect(term.locator('[data-test=banner]')).toBeHidden();
+    await term.locator('[data-test=terminal-details-toggle]').click();
     await expect(term.locator('[data-test=banner-title]')).toHaveText(/^payments \/ Ben · sandbox · \w+ · grok · net: model \+ bus \+ registry\.npmjs\.org$/);
     await expect(term.locator('[data-test=terminal-pane-title]')).toContainText('Ben · payments');
     await expect(term.locator('[data-test=banner-details]')).toContainText('timeout 15 min');

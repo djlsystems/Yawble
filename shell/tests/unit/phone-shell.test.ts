@@ -566,12 +566,11 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(w.get('[data-test=slots]').text()).toContain('Run slots');
   });
 
-  it('F2: the drawer scrolls when taller than the screen; the lists keep room for a heading and two 44 px rows', () => {
+  it('the drawer scrolls as one list: the Teams and Chats lists are not a box of their own, and the footer follows them', () => {
     const css = src('components/Sidebar.vue');
     expect(css).toContain('.side.drawer { overflow-y: auto;');
-    expect(css).toContain('.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot { flex: none; }');
-    const min = Number(/\.drawer \.lists \{ min-height: (\d+)px; \}/.exec(css)?.[1]);
-    expect(min).toBeGreaterThanOrEqual(33 + 2 * 44); // the "Teams" heading (14 + 15 + 4 px) and two rows
+    expect(css).toContain('.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot, .drawer .lists { flex: none; }');
+    expect(css).toContain('.drawer .lists { overflow: visible; }');
     // The desktop sidebar keeps its rules: the lists flex, the sidebar itself does not scroll.
     expect(css).toContain('.lists { flex: 1; overflow: auto; min-height: 0; }');
     expect(css).toMatch(/\.side \{ [^}]*min-height: 0; padding: 8px 8px 6px; \}/);

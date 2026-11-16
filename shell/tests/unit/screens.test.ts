@@ -64,7 +64,9 @@ describe('main window', () => {
     const ben = w.get('[data-test=agent-Ben]');
     expect(ben.get('[data-test=agent-face-state]').text()).toBe('Waiting to start');
     expect(ben.get('[data-test=agent-state]').text()).toContain('position 1 of 2');
-    expect(ben.get('[data-test=loosened-chip]').text()).toContain('registry.npmjs.org');
+    // A short marker on the card; the hosts are in its tooltip and on the settings' Policy tab, which it opens.
+    expect(ben.get('[data-test=loosened-chip]').text()).toBe('⚠ loosened');
+    expect(ben.get('[data-test=loosened-chip]').attributes('title')).toContain('registry.npmjs.org');
     expect(ben.get('[data-test=agent-cli]').text()).toBe('grok');
     const [bensQuestion, hire] = w.findAll('[data-test=decision]');
     expect(bensQuestion.text()).toContain('Ben needs a decision');

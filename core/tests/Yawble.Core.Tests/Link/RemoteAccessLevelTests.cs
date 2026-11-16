@@ -31,10 +31,7 @@ public class RemoteAccessLevelTests
         var missing = allowed.Where(m => !RemoteAccess.Kinds.ContainsKey(m)).ToList();
         Assert.True(missing.Count == 0, "not classified as read or change: " + string.Join(", ", missing));
         // ...and the table names only real methods on the allow list (no typo silently left as a change).
-        // (logs.tail and logs.untail are DeveloperInes's, card 253, built in parallel with this table: until that branch is
-        // merged in they are listed here before their handler exists. Remove this exception once it is.)
-        string[] comingWithCard253 = ["logs.tail", "logs.untail"];
-        var stray = RemoteAccess.Kinds.Keys.Where(m => !dispatched.Contains(m) && !comingWithCard253.Contains(m) || !RemoteAccess.OnAllowList(m)).ToList();
+        var stray = RemoteAccess.Kinds.Keys.Where(m => !dispatched.Contains(m) || !RemoteAccess.OnAllowList(m)).ToList();
         Assert.True(stray.Count == 0, "in the table but not an allowed method: " + string.Join(", ", stray));
     }
 

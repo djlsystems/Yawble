@@ -136,12 +136,17 @@ for (const size of PHONES) {
       await check(page, 'concierge-new', size);
       await drawer(page);
       await check(page, 'drawer', size);
-      // The drawer's Teams and Chats lists get room (two rows at least), and Settings is on screen or reachable by scrolling.
+      // The drawer scrolls as one list: no inner box holds the Teams and Chats lists, the first chat comes on screen by
+      // scrolling the drawer, and Settings is on screen or reachable by scrolling.
       const room = await page.locator('[data-test=sidebar]').evaluate((side) => {
-        const lists = [...side.querySelectorAll<HTMLElement>('*')].find((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.querySelector('[data-test=chat-item]'));
-        return { lists: lists ? lists.clientHeight : -1, sideScrolls: /(auto|scroll)/.test(getComputedStyle(side).overflowY), sideOver: side.scrollHeight - side.clientHeight };
+        const inner = [...side.querySelectorAll<HTMLElement>('*')].find((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.querySelector('[data-test=chat-item]'));
+        return { inner: !!inner, sideScrolls: /(auto|scroll)/.test(getComputedStyle(side).overflowY), sideOver: side.scrollHeight - side.clientHeight };
       });
-      expect.soft(room.lists, `drawer @${tag(size)}: px the Teams and Chats lists get`).toBeGreaterThanOrEqual(88);
+      expect.soft(room.inner, `drawer @${tag(size)}: the lists are not a scrolling box of their own`).toBe(false);
+      const chat = page.locator('[data-test=sidebar] [data-test=chat-item]').first();
+      await chat.scrollIntoViewIfNeeded();
+      const cb = (await chat.boundingBox())!;
+      expect.soft(cb.y >= 0 && cb.y + cb.height <= size.h + 1, `drawer @${tag(size)}: the first chat on screen after scrolling`).toBe(true);
       const settings = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
       await settings.scrollIntoViewIfNeeded().catch(() => {});
       const sb = (await settings.boundingBox())!;
@@ -416,7 +421,7 @@ for (const size of PHONES) {
       // Openers: Logs from the drawer, then each sheet the team page and its first agent card offer (when shown).
       const openers: { name: string; go: (page: Page) => Promise<boolean> }[] = [
         { name: 'logs', go: async (p) => { await nav(p, 'nav-logs'); return true; } },
-        ...['open-code', 'open-settings', 'open-guardrail', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
+        ...['open-code', 'open-settings', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
           name: id.replace('open-', 'team-'),
           go: async (p: Page) => {
             await nav(p, 'nav-teams');
