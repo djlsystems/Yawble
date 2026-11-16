@@ -78,6 +78,14 @@ describe("each team's card lists its recent workflows", () => {
     w.unmount();
   });
 
+  it("the sidebar's Teams pill counts the teams, not the agents running", async () => {
+    const w = await teamsPage();
+    const pill = w.get('[data-test=nav-teams-count]');
+    expect(pill.text()).toBe('2'); // two teams; one agent is running
+    expect(pill.attributes('title')).toBe('2 teams');
+    w.unmount();
+  });
+
   it('says so when a team has no workflows yet', async () => {
     const w = await teamsPage();
     expect(w.findAll('[data-test=team-card]')[1].get('[data-test=team-workflows-empty]').text()).toContain('No workflows yet');
