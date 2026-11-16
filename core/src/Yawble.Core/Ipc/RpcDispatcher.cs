@@ -34,7 +34,8 @@ public sealed class RpcDispatcher(
     Logs.LogRpc? logs = null,
     Updates.UpdateRpc? updates = null,
     Integrations.NetworkAskService? networkAsks = null,
-    Integrations.ToolAskService? toolAsks = null)
+    Integrations.ToolAskService? toolAsks = null,
+    Yawble.Core.Link.OrgSummaryService? orgSummary = null)
 {
     /// <summary>
     /// A call as the person (or a cloud viewer) made it: run as <paramref name="actor"/>, so whatever it records carries
@@ -96,6 +97,8 @@ public sealed class RpcDispatcher(
             // Settings > Cloud Link, "Show members' code to cloud viewers" (the window only: link. is refused remotely).
             "link.setShowCode" => Task.FromResult<JsonNode?>(Then(() => Link().SetShowCode(parameters?["show"]?.GetValue<bool>() ?? true))),
             "runs.stop" => StopRunAsync(parameters, ct),
+            // The cloud org dashboard's summary of this computer, and its live changes (Link/OrgSummaryService.cs, B048).
+            _ when orgSummary is not null && Yawble.Core.Link.OrgSummaryService.Handles(method) => orgSummary.DispatchAsync(method, parameters, ct),
             // The git on this computer: the check, and installing or updating it (Teams/GitRpc.cs).
             _ when git is not null && Teams.GitRpc.Handles(method) => git.DispatchAsync(method, parameters, ct),
             // The Logs dialog: every log, its entries, pruning and retention (Logs/LogRpc.cs).
