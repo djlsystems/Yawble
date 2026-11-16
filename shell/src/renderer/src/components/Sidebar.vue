@@ -94,7 +94,7 @@ function finishRename(id: string) {
 
     <nav class="places">
       <button class="item" :class="{ on: view === 'concierge' }" data-test="nav-concierge" @click="emit('go', 'concierge')"><Icon name="spark" />Concierge</button>
-      <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="slots?.running" class="badge" title="agents running">{{ slots.running }}</span></button>
+      <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="teams.length" class="badge" data-test="nav-teams-count" :title="`${teams.length} team${teams.length === 1 ? '' : 's'}`">{{ teams.length }}</span></button>
       <button class="item" :class="{ on: view === 'backlog' }" data-test="nav-backlog" @click="emit('go', 'backlog')"><Icon name="backlog" />Backlog</button>
       <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Kanban board</button>
       <button class="item" :class="{ on: view === 'documents' }" data-test="nav-documents" @click="emit('go', 'documents')"><Icon name="docs" />Documents</button>
