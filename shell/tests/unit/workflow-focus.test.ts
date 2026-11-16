@@ -56,6 +56,28 @@ describe('a workflow clicked on the Monitor', () => {
     w.unmount();
   });
 
+  it('opens the dialog over the Monitor, and closing it stays on the Monitor', async () => {
+    const w = await clickMonitorWorkflow(413);
+    expect(w.find('[data-test=monitor-workflow]').exists()).toBe(true); // still the Monitor, not the team's page
+    await w.get('[data-test=modal-close]').trigger('click');
+    for (let i = 0; i < 4; i++) await flushPromises();
+    expect(w.find('[data-test=workflow-413]').exists()).toBe(false);
+    expect(w.find('[data-test=monitor-workflow]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("the team's workflows header opens the dialog over the Monitor too", async () => {
+    const w = mount(App, { props: { api: api(), pollMs: 60_000 }, attachTo: document.body });
+    await flushPromises();
+    await w.get('[data-test=nav-monitor]').trigger('click');
+    for (let i = 0; i < 4; i++) await flushPromises();
+    await w.get('[data-test=monitor-workflows-team]').trigger('click');
+    for (let i = 0; i < 6; i++) await flushPromises();
+    expect(w.find('[data-test=workflow-413]').exists()).toBe(true);
+    expect(w.find('[data-test=monitor-workflow]').exists()).toBe(true);
+    w.unmount();
+  });
+
   it('selects whichever workflow was clicked, whether or not it came from the backlog', async () => {
     const w = await clickMonitorWorkflow(77);
     expect(w.get('[data-test=workflow-77]').classes()).toContain('sel');

@@ -117,7 +117,7 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 .chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--chip); color: var(--muted); margin-left: 6px; }
 .chip.cli-claude { background: var(--chip-claude-bg); color: var(--chip-claude-ink); }
 .chip.cli-grok { background: var(--chip-grok-bg); color: var(--chip-grok-ink); }
-.chip.loosened { background: var(--warn-soft); color: var(--warn); border: 0; font: inherit; cursor: pointer; white-space: nowrap; }
+.chip.loosened { background: var(--warn-soft); color: var(--warn); border: 0; cursor: pointer; white-space: nowrap; } /* .chip size, like the role and CLI chips */
 .chip.fake { background: var(--pill-red-bg); color: var(--bad); }
 .row { display: flex; gap: 8px; align-items: center; }
 .grow { flex: 1; }

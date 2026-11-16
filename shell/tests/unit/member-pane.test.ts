@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
@@ -81,6 +83,13 @@ describe("a member's pane", () => {
     await chip.trigger('click');
     expect(w.emitted('policy')).toHaveLength(1);
     expect(pane({ card: card() }).find('[data-test=loosened-chip]').exists()).toBe(false);
+  });
+
+  it('the loosened marker is the same size as the role and CLI chips (no font of its own)', () => {
+    const css = readFileSync(path.resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
+    const rule = /^\.chip\.loosened \{([^}]*)\}/m.exec(css)![1];
+    expect(rule).not.toMatch(/\bfont(-size)?\s*:/);
+    expect(/^\.chip \{([^}]*)\}/m.exec(css)![1]).toContain('font-size: 11px');
   });
 
   it('the toolbar asks for Settings, Logs, Stop and Remove; Stop only while running, Remove never while running', async () => {

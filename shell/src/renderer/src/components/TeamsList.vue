@@ -8,8 +8,10 @@ import { availableWidth, renderedWidth, tileSize } from '../teamTileSize';
 import BusyLabel from './BusyLabel.vue';
 import Icon from './Icon.vue';
 import TeamStateChip from './TeamStateChip.vue';
+import TeamMembers from './TeamMembers.vue';
 import TeamWorkflows from './TeamWorkflows.vue';
 import TileGrip from './TileGrip.vue';
+import WorkflowsDialog from './WorkflowsDialog.vue';
 import { usePhone } from '../phone';
 
 // The Teams page: one grid of equally sized tiles (every team, then "New team"), resized together by the grip on any
@@ -24,6 +26,8 @@ const cardDoing = (method: string, teamId: number) => cards.is('card', `${method
 const confirmDelete = ref<number | null>(null);
 const showArchived = ref(false);
 const failure = ref<string | null>(null);
+// A workflow picked on a tile opens the team's workflows dialog here, over the list; closing it stays on the list.
+const workflowOf = ref<{ team: TeamSummary; id: number } | null>(null);
 
 function teamAction(method: string, teamId: number, params: Record<string, unknown> = {}) {
   return cards.run('card', async () => {
@@ -84,7 +88,7 @@ watch(phone, () => void fit());
       <div class="team-card" :class="`is-${teamState(t)}`" :data-state="teamState(t)" data-test="team-card">
         <button class="card-open" :data-test="`team-open-${t.name}`" @click="emit('open', t.id)">
           <span class="card-title"><strong class="card-name" :title="t.name">{{ t.name }}</strong><TeamStateChip :team="t" data-test="team-state" /></span>
-          <span class="muted small">{{ t.members }} agents · {{ t.running }} running · {{ t.queued }} queued<template v-if="t.paused"> · <b class="paused-tag">paused</b></template></span>
+          <TeamMembers :team-id="t.id" :api="api" :poll-ms="pollMs" :fallback="`${t.members} agents · ${t.running} running · ${t.queued} queued`" />
         </button>
         <div class="card-actions" :class="{ normal: confirmDelete !== t.id }" data-test="card-actions">
           <template v-if="confirmDelete !== t.id">
@@ -101,7 +105,7 @@ watch(phone, () => void fit());
             <button class="tile-btn" data-test="card-delete-no" :disabled="cardBusy" @click.stop="confirmDelete = null">Cancel</button>
           </template>
         </div>
-        <TeamWorkflows :team-id="t.id" :api="api" :poll-ms="pollMs" @open="emit('open', t.id, 'workflows', $event)" />
+        <TeamWorkflows :team-id="t.id" :api="api" :poll-ms="pollMs" @open="workflowOf = { team: t, id: $event }" />
         <TileGrip v-if="!phone" />
       </div>
       <template v-if="!phone"><TileGrip axis="w" /><TileGrip axis="h" /></template>
@@ -140,6 +144,7 @@ watch(phone, () => void fit());
         </div>
       </div>
     </template>
+    <WorkflowsDialog v-if="workflowOf" :key="`${workflowOf.team.id}:${workflowOf.id}`" :api="api" :team="workflowOf.team" :poll-ms="pollMs" :focus="workflowOf.id" @close="workflowOf = null" />
     <p v-if="!teams.length" class="muted" data-test="no-teams">No teams yet. Install and sign in to your agent CLIs in your own terminal (Settings → Agents), then create a team with a Manager.</p>
   </div>
 </template>
