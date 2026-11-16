@@ -105,7 +105,7 @@ public sealed partial class BusEngine
     /// <summary>Removes a folder whose git objects are read-only (Windows refuses to delete those as they are).</summary>
     private static void DeleteTree(string folder)
     {
-        foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+        foreach (var file in Ops.FolderWalk.Files(folder).Select(f => f.FullName))
         {
             var attributes = File.GetAttributes(file);
             if ((attributes & FileAttributes.ReadOnly) != 0) File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
