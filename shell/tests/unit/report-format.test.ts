@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import AgentCardView from '../../src/renderer/src/components/AgentCard.vue';
+import AgentCardView from '../../src/renderer/src/components/MemberPane.vue';
 import { splitReport } from '../../src/renderer/src/reportFormat';
 import type { AgentCard } from '../../src/shared/api';
 

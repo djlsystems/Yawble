@@ -329,7 +329,7 @@ function teamApi() {
 }
 
 describe('Teams on a phone', () => {
-  it("a team's members are stacked, each one's Activity under its card, with no resize handles", async () => {
+  it("a team's members are stacked, each one's pane with its Activity under what it said, with no resize handles", async () => {
     screen(Phone);
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
@@ -337,22 +337,23 @@ describe('Teams on a phone', () => {
     const cells = w.findAll('.member-cell');
     expect(cells).toHaveLength(2);
     for (const c of cells) {
-      const row = c.get('.member-row');
-      // The card, then the Activity, in that order inside the member's row (the phone CSS stacks it as a column).
-      expect(row.element.children[0]!.classList.contains('member-main')).toBe(true);
+      const row = c.get('[data-test=member-pane-body]');
+      // What was said, then the Activity, in that order inside the member's pane (the phone CSS stacks it as a column).
+      expect(row.element.children[0]!.getAttribute('data-test')).toBe('member-said');
       expect(row.element.children[1]!.querySelector('[data-test=member-activity]')).not.toBeNull();
       expect((row.element.children[1] as HTMLElement).style.flexBasis).toBe('');
+      expect((row.element as HTMLElement).style.height).toBe('');
     }
     expect(w.find('.tile-grip').exists()).toBe(false);
     expect(w.get('section.team').classes()).toContain('phone');
   });
 
-  it('at desktop width: the Activity beside its card at the shared width, with the width and height handles', async () => {
+  it('at desktop width: the Activity beside what was said at the shared width, with the width and height handles', async () => {
     screen(Desktop);
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
     await settle();
-    const side = w.findAll('.member-side')[0]!.element as HTMLElement;
+    const side = w.findAll('[data-test=member-side]')[0]!.element as HTMLElement;
     expect(side.style.flexBasis).toMatch(/px$/);
     expect(w.findAll('[data-test$=-handle-w]')).toHaveLength(2);
     expect(w.findAll('[data-test$=-handle-h]')).toHaveLength(2);
@@ -363,9 +364,9 @@ describe('Teams on a phone', () => {
     const src = (p: string) => readFileSync(resolve(__dirname, '../../src/renderer/src', p), 'utf8');
     const phoneRules = (p: string) => /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src(p))?.[1] ?? '';
     expect(phoneRules('components/TeamsList.vue')).toMatch(/\.team-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
-    expect(phoneRules('components/TeamView.vue')).toMatch(/\.member-row \{ flex-direction: column/);
+    expect(phoneRules('components/MemberPane.vue')).toMatch(/\.body \{ flex-direction: column/);
     expect(src('components/TileGrip.vue')).toMatch(/@media \(max-width: 759\.98px\) \{ \.tile-grip \{ display: none; \} \}/);
-    expect(phoneRules('components/AgentCard.vue')).toMatch(/min-height: 44px/);
+    expect(phoneRules('components/MemberPane.vue')).toMatch(/min-width: 44px/);
     for (const f of ['GitBanner', 'HostChecksBanner', 'TeamSyncBanner', 'UpdateBanner', 'TeamWorkflows', 'AgentTile', 'MemberActivity'])
       expect(src(`components/${f}.vue`), f).toContain('@media (max-width: 759.98px)');
   });

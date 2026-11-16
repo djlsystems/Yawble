@@ -64,14 +64,14 @@ const lines = (el: Element) => [...el.querySelectorAll('[data-test=member-activi
 describe('team board: each member\'s activity beside its card', () => {
   beforeEach(() => { localStorage.clear(); document.body.innerHTML = ''; });
 
-  it('puts an activity tile to the right of every member card, in the same row', async () => {
+  it('puts an activity tile to the right of what every member said, in its pane', async () => {
     const w = await board(fakeApi().api);
-    const rows = w.findAll('.member-row');
+    const rows = w.findAll('[data-test=member-pane-body]');
     expect(rows).toHaveLength(2);
     for (const r of rows) {
       const kids = [...r.element.children];
-      expect(kids[0]!.getAttribute('data-test')).toMatch(/^agent-/);
-      expect(kids[1]!.classList.contains('member-side')).toBe(true);
+      expect(kids[0]!.getAttribute('data-test')).toBe('member-said');
+      expect(kids[1]!.getAttribute('data-test')).toBe('member-side');
       expect(kids[1]!.querySelector('[data-test=member-activity]')).not.toBeNull();
       expect(kids[1]!.querySelector('[data-test=member-activity-handle-w]')).not.toBeNull();
     }
@@ -82,7 +82,7 @@ describe('team board: each member\'s activity beside its card', () => {
     setActivityWidth(ACTIVITY_DEFAULT);
     localStorage.clear();
     const w = await board(fakeApi().api);
-    const widths = () => w.findAll('.member-side').map((x) => (x.element as HTMLElement).style.flexBasis);
+    const widths = () => w.findAll('[data-test=member-side]').map((x) => (x.element as HTMLElement).style.flexBasis);
     expect(widths()).toEqual(['360px', '360px']);
     const bar = w.findAll('[data-test=member-activity-handle-w]')[1]!;
     await bar.trigger('pointerdown', { clientX: 500, clientY: 0, pointerId: 1, button: 0 });

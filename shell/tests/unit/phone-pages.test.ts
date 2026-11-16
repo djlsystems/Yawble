@@ -175,9 +175,10 @@ const fits = (top: number, frame: { height: number }) => (frame === Portrait ? t
 /** The desktop rules outside each phone block, as they were at the base (8b39e07): a desktop change must be on purpose. */
 const DesktopCss: Record<string, string> = {
   'board/BacklogView.vue': '55673d4cef46ac87',
-  'components/TeamView.vue': '6cef2202a70e0d79',
+  // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
+  'components/TeamView.vue': 'ec127edc70b3a1a4',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
-  'components/AgentCard.vue': 'd11db7b8c12a9c15',
+  'components/MemberPane.vue': '0dcbae2a8c95e6e4',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   'components/DocumentsBrowser.vue': 'e2d8b12b24e93037',
@@ -199,10 +200,10 @@ async function backlog(width: number) {
   await settle();
   return w;
 }
-async function teamPage(width: number, behind = false) {
+async function teamPage(width: number, behind = false, of = team) {
   screen(width);
   const dialogs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, WorkflowsDialog: true, DocumentsDialog: true, LogsDialog: true };
-  const w = keep(mount(TeamView, { props: { team, api: teamApi(behind), pollMs: 100_000 }, global: { stubs: dialogs } }));
+  const w = keep(mount(TeamView, { props: { team: of, api: teamApi(behind), pollMs: 100_000 }, global: { stubs: dialogs } }));
   await settle();
   return w;
 }
@@ -237,7 +238,7 @@ describe('the first content row is near the top on a phone (B054)', () => {
 
     it(`the Team page at ${at}: the header row, then Tell the Manager, then the members`, async () => {
       const w = await teamPage(frame.width);
-      const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/AgentCard.vue', 'components/MemberActivity.vue');
+      const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/MemberPane.vue', 'components/MemberActivity.vue');
       const root = w.get('section.team').element;
       const tell = topOf(w.get('.tell').element, root, st, teamsPlacePad);
       expect(tell.above).toEqual(['teamhead']);
@@ -247,12 +248,21 @@ describe('the first content row is near the top on a phone (B054)', () => {
       expect(member.top + Row, `first member at ${member.top}`).toBeLessThanOrEqual(frame.height);
     });
 
-    it(`the Team page at ${at} with the "commits behind" bar: one compact row more, the first member still on screen`, async () => {
+    it(`the Team page at ${at} with the "commits behind" bar: Tell is still the first row, the bar under it, the first member on screen`, async () => {
       const w = await teamPage(frame.width, true);
-      const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/AgentCard.vue', 'components/MemberActivity.vue');
+      const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/MemberPane.vue', 'components/MemberActivity.vue');
       expect(w.get('[data-test=team-behind]').text()).toContain('3 commits behind main');
-      const member = topOf(w.get('.member-cell').element, w.get('section.team').element, st, teamsPlacePad);
-      expect(member.above).toEqual(['teamhead', 'team-sync', 'tell']);
+      const root = w.get('section.team').element;
+      // Card 282: the bar sat between the header and Tell (Tell at 156 px in portrait); now Tell is where it is without it.
+      const tell = topOf(w.get('.tell').element, root, st, teamsPlacePad);
+      expect(tell.above).toEqual(['teamhead']);
+      expect(fits(tell.top, frame), `Tell at ${tell.top}`).toBe(true);
+      if (frame === Portrait) expect(tell.top).toBeLessThanOrEqual(PortraitTarget);
+      const sync = topOf(w.get('[data-test=team-sync]').element, root, st, teamsPlacePad);
+      expect(sync.above).toEqual(['teamhead', 'tell']);
+      expect(sync.top + Row, `sync bar at ${sync.top}`).toBeLessThanOrEqual(frame.height);
+      const member = topOf(w.get('.member-cell').element, root, st, teamsPlacePad);
+      expect(member.above).toEqual(['teamhead', 'tell', 'team-sync']);
       expect(member.top + Row, `first member at ${member.top}`).toBeLessThanOrEqual(frame.height);
     });
 
@@ -285,7 +295,7 @@ describe('the first content row is near the top on a phone (B054)', () => {
 describe('one scroller per page on a phone (B054)', () => {
   const pages: Record<string, { files: string[]; root: string[] }> = {
     Backlog: { files: ['board/BacklogView.vue'], root: ['.backlog-place'] },
-    Team: { files: ['components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/AgentCard.vue', 'components/MemberActivity.vue'], root: [] },
+    Team: { files: ['components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/MemberPane.vue', 'components/MemberActivity.vue'], root: [] },
     Documents: { files: ['components/DocumentsView.vue', 'components/DocumentsBrowser.vue'], root: ['.docs-place'] },
   };
   // A code block in a report scrolls sideways at its own height (no fixed height): not a vertical scroller.
@@ -313,12 +323,13 @@ describe('one scroller per page on a phone (B054)', () => {
     expect(br.find((r) => r.sels.includes('.browser.fill'))?.decls).toMatchObject({ height: 'auto', display: 'block' });
   });
 
-  it("the Team page: each member's activity and output are at their own height (the inline desktop height is overridden)", async () => {
+  it("the Team page: each member's activity and output are at their own height (no inline desktop height on the phone)", async () => {
     const w = await teamPage(Portrait.width);
-    const card = rules(phoneCss(read('components/AgentCard.vue')));
-    expect(card.find((r) => r.sels.includes('.output') && r.decls.height)?.decls.height).toBe('auto !important');
-    const team = rules(phoneCss(read('components/TeamView.vue')));
-    expect(team.find((r) => r.sels.includes('.member-side') && r.decls.height)?.decls.height).toBe('auto');
+    for (const b of w.findAll('[data-test=member-pane-body]')) expect((b.element as HTMLElement).style.height).toBe('');
+    for (const s of w.findAll('[data-test=member-side]')) expect((s.element as HTMLElement).style.flexBasis).toBe('');
+    const pane = rules(phoneCss(read('components/MemberPane.vue')));
+    expect(pane.find((r) => r.sels.includes('.output') && r.decls.height)?.decls.height).toBe('auto');
+    expect(pane.find((r) => r.sels.includes('.side') && r.decls.height)?.decls.height).toBe('auto');
     // The activity is capped: it renders as a plain list, its ol not positioned to scroll.
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).toContain('capped');
     const act = rules(phoneCss(read('components/MemberActivity.vue')));
@@ -376,6 +387,37 @@ describe('no sideways overflow on a phone (B054)', () => {
     const room = content(Portrait.width, 12) - 2 * 44 - 2 * 6 - 16;
     expect(placeholder.length * Char).toBeLessThanOrEqual(room);
     expect('Tell the Manager… (paste an image to attach it)'.length * Char).toBeGreaterThan(room); // why the phone has a short one
+  });
+
+  it('the Team page of a running team at 375 px: the name is whole beside the state chip (card 282: it read "Tea…")', async () => {
+    const w = await teamPage(Portrait.width, false, { ...team, running: 1 });
+    const st = new Styles('components/TeamView.vue');
+    const line = w.get('.titleline').element;
+    const h2 = w.get('.titleline h2').element;
+    // The title still reads "Team payments" (what a screen reader and the tests read); "Team " is left out on screen.
+    expect(h2.textContent).toBe('Team payments');
+    const prefix = w.get('.titleline h2 .title-prefix').element;
+    expect(st.hidden(prefix)).toBe(true);
+    const shown = h2.textContent!.replace(prefix.textContent!, '');
+    expect(shown).toBe('payments');
+    // No count chip takes room (the live "1 running" one was what pushed the name out); only the state chip is left.
+    const kpis = [...line.querySelectorAll('.kpi')];
+    expect(kpis.length).toBe(3);
+    for (const k of kpis) expect(st.hidden(k), k.getAttribute('data-test')!).toBe(true);
+    const chip = w.get('[data-test=team-page-state]').element;
+    expect(chip.textContent).toBe('Running');
+    expect([...line.children].filter((k) => !st.hidden(k))).toEqual([h2, chip]);
+    // The room the title line has: the row less the three 44 px icons and the gaps.
+    const room = (Portrait.width - 2 * teamsPlacePad) - 3 * 44 - 2 * px(st.value(w.get('.phone-actions').element, 'gap'))
+      - px(st.value(w.get('.teamhead').element, 'gap'));
+    const chipWidth = chip.textContent!.length * 7 + 14 + 11; // 11 px bold label, its padding, the pulsing dot
+    expect(shown.length * Char + px(st.value(line, 'gap')) + chipWidth, `room ${room}`).toBeLessThanOrEqual(room);
+    // The old title would not fit (why "Team " and the counts go on a phone).
+    expect('Team payments'.length * Char + 6 + chipWidth + 6 + '1 running'.length * 7.5 + 20).toBeGreaterThan(room);
+    // A longer name: the state chip gives way first.
+    expect(st.value(chip, 'flex')).toBe('0 1000 auto');
+    expect(st.value(chip, 'min-width')).toBe('0');
+    expect(st.value(h2, 'flex')).toBe('0 1 auto');
   });
 
   it('the Team page: Triggers, Git and Settings are in the ⋯ menu, and each opens what it did', async () => {
@@ -453,6 +495,14 @@ describe('at 1280 px the desktop is as it was (B054)', () => {
     expect(w.get('[data-test=tell-send]').text()).toBe('Tell Manager ✉');
     expect(w.get('[data-test=tell-send]').attributes('aria-label')).toBeUndefined();
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).not.toContain('capped');
+  });
+
+  it('the Team page: the "commits behind" bar is still above Tell (card 282 moves it on a phone only)', async () => {
+    const w = await teamPage(Desktop, true);
+    const order = [...w.get('section.team').element.children].map((e) => e.getAttribute('data-test') ?? e.classList[0]);
+    expect(order.indexOf('team-sync')).toBeGreaterThan(order.indexOf('teamhead'));
+    expect(order.indexOf('team-sync')).toBeLessThan(order.indexOf('tell'));
+    expect(w.findAll('[data-test=team-sync]')).toHaveLength(1);
   });
 
   it('Documents: the root intro, and in a folder the breadcrumb then New file, New folder and Upload', async () => {

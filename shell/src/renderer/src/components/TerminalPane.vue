@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, provide, reactive, ref, useId, watch } from 'vue';
 import type { YawbleApi, TerminalSessionInfo } from '../../../shared/api';
 import BusyLabel from './BusyLabel.vue';
-import { closeTerminalPane, isAgentSession, setTerminalPaneWidth, terminalPane } from '../terminalPane';
+import { usePhone } from '../phone';
+import { closeTerminalPane, isAgentSession, PaneHeaderKey, setTerminalPaneWidth, terminalPane } from '../terminalPane';
 import TerminalScreen from './TerminalScreen.vue';
 
 // The terminal pane on the right of the main window: the one channel terminal shown (an Agents Terminal / Test
@@ -26,6 +27,15 @@ const closeTitle = computed(() => {
   return t && isAgentSession(t.channel) ? 'Stop this session and close the terminal' : 'Close';
 });
 watch(() => terminalPane.target, () => { session.value = null; sawLive.value = false; finished.value = false; });
+// A phone (B057): the pane is the whole screen with one header row - the title, the shown terminal's Formatted / Raw
+// tabs, a ⋯ for the rest (the session's Stop) and ✕ - and the terminal fills the rest.
+const phone = usePhone();
+const uid = useId();
+const slots = reactive({ get on() { return phone.value; }, tabs: `terminal-pane-tabs-${uid}`, more: `terminal-pane-more-${uid}` });
+provide(PaneHeaderKey, slots);
+const moreOpen = ref(false);
+const hasMore = computed(() => !!terminalPane.target?.stop);
+watch(() => terminalPane.target, () => { moreOpen.value = false; });
 let dragging = false;
 function startDrag(e: PointerEvent) {
   dragging = true;
@@ -56,11 +66,21 @@ async function close() {
 </script>
 
 <template>
-  <aside class="pane" :style="{ width: terminalPane.width + 'px' }" data-test="terminal-pane">
-    <div class="handle" title="Drag to resize" @pointerdown="startDrag" @pointermove="drag" @pointerup="endDrag" @pointercancel="endDrag"></div>
-    <header class="head">
+  <aside class="pane" :class="{ phone }" :style="phone ? undefined : { width: terminalPane.width + 'px' }" data-test="terminal-pane">
+    <div v-if="!phone" class="handle" title="Drag to resize" @pointerdown="startDrag" @pointermove="drag" @pointerup="endDrag" @pointercancel="endDrag"></div>
+    <header class="head" data-test="terminal-pane-head">
       <span class="title" data-test="terminal-pane-title">{{ terminalPane.target?.title ?? 'Terminal' }}</span>
-      <button v-if="terminalPane.target?.stop" class="mini" data-test="terminal-pane-stop"
+      <template v-if="phone">
+        <!-- The shown terminal's Formatted / Raw tabs come here (TerminalScreen: PaneHeaderKey), its Stop into the ⋯ menu. -->
+        <span :id="slots.tabs" class="tabs-slot" data-test="terminal-pane-tabs"></span>
+        <button v-if="hasMore" class="mini more-toggle" :class="{ on: moreOpen }" aria-label="More" :aria-expanded="moreOpen" data-test="terminal-pane-more"
+          @click="moreOpen = !moreOpen">⋯</button>
+        <div v-show="moreOpen" :id="slots.more" class="more-menu" data-test="terminal-pane-menu" @click="moreOpen = false">
+          <button v-if="terminalPane.target?.stop" class="mini" data-test="terminal-pane-stop"
+            :disabled="finished || !!stopping" :aria-busy="stopping === 'stop'" @click="stop"><BusyLabel :busy="stopping === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
+        </div>
+      </template>
+      <button v-else-if="terminalPane.target?.stop" class="mini" data-test="terminal-pane-stop"
         :disabled="finished || !!stopping" :aria-busy="stopping === 'stop'" @click="stop"><BusyLabel :busy="stopping === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
       <button class="mini" :title="closeTitle" data-test="terminal-pane-close" :disabled="!!stopping" :aria-busy="stopping === 'close'" @click="close"><BusyLabel :busy="stopping === 'close'">✕</BusyLabel></button>
     </header>
@@ -84,4 +104,19 @@ async function close() {
 .body { flex: 1; min-height: 0; }
 .empty { color: var(--term-muted); padding: 16px; font-size: 13px; }
 .empty code { background: var(--term-btn-on); padding: 0 4px; border-radius: 3px; }
+/* A phone (B057): the whole screen over the page (no side pane crushing the team column), one 44 px header row, the
+   terminal filling the rest and never past the bottom (dvh: what the browser really shows). */
+@media (max-width: 759.98px) {
+  .pane.phone { position: fixed; inset: 0; z-index: 9; width: auto; min-width: 0; max-width: none; height: 100dvh; border-left: 0; overflow: hidden; }
+  .pane.phone .head { position: relative; flex: none; height: 44px; box-sizing: content-box; gap: 2px;
+    padding: env(safe-area-inset-top, 0px) calc(2px + env(safe-area-inset-right, 0px)) 0 calc(10px + env(safe-area-inset-left, 0px)); }
+  .pane.phone .title { min-width: 0; font-size: 14px; }
+  .pane.phone .head > .mini { min-width: 44px; height: 44px; flex: none; padding: 0 8px; border-color: transparent; background: transparent; font-size: 16px; }
+  .pane.phone .head > .mini.on { background: var(--term-btn-on); }
+  .tabs-slot { display: flex; flex: none; }
+  .more-menu { position: absolute; right: 4px; top: calc(100% + 2px); z-index: 3; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+    max-width: min(320px, calc(100vw - 8px)); padding: 6px; background: var(--term-head); border: 1px solid var(--term-line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow); }
+  .more-menu .mini { min-height: 44px; font-size: 14px; }
+  .pane.phone .body { flex: 1 1 0; min-height: 0; overflow: hidden; }
+}
 </style>

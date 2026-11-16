@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue';
 import type { LogColumn, LogPage, LogPrunePreview, LogSourceInfo, LogWho, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import Modal from './Modal.vue';
@@ -54,6 +54,10 @@ const membersOfTeam = computed(() => who.value.members.filter((m) => !team.value
 const local = computed(() => !props.api.remote);
 /** On a phone the filters fold behind a Filters button (closed at first), so the entries get the screen. */
 const filtersOpen = ref(false);
+/** On a phone Prune… and Retention… fold behind a ⋯ (the bar is then one row in landscape). */
+const actionsOpen = ref(false);
+/** Where the filters go on a phone: the top of the list's scroller (B057). */
+const phoneToolsId = `logs-phone-tools-${useId()}`;
 /** How many filters are set (the search box apart): shown on the phone's Filters button. */
 const activeFilters = computed(() => [team.value, member.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
 const filtered = computed(() => !!(team.value || member.value || fromDay.value || toDay.value || text.value.trim() || Object.values(filters).some((v) => v)));
@@ -256,12 +260,19 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
         <button v-if="phone" type="button" class="filters-toggle" :class="{ on: filtersOpen }" :aria-expanded="filtersOpen" data-test="logs-filters-toggle"
           @click="filtersOpen = !filtersOpen">Filters{{ activeFilters ? ` (${activeFilters})` : '' }} {{ filtersOpen ? '▴' : '▾' }}</button>
         <template v-if="local">
-          <button v-if="source?.prunable" type="button" :class="{ on: panel === 'prune' }" data-test="logs-prune-open" @click="panel = panel === 'prune' ? null : 'prune'; pruning = null">Prune…</button>
-          <button type="button" :class="{ on: panel === 'retention' }" data-test="logs-retention-open" @click="panel = panel === 'retention' ? null : 'retention'">Retention…</button>
+          <button v-if="phone" type="button" class="actions-toggle" :class="{ on: actionsOpen }" aria-label="More: Prune, Retention" :aria-expanded="actionsOpen"
+            data-test="logs-actions-toggle" @click="actionsOpen = !actionsOpen">⋯</button>
+          <div v-show="!phone || actionsOpen" class="actions" :class="{ menu: phone }" data-test="logs-actions" @click="actionsOpen = false">
+            <button v-if="source?.prunable" type="button" :class="{ on: panel === 'prune' }" data-test="logs-prune-open" @click="panel = panel === 'prune' ? null : 'prune'; pruning = null">Prune…</button>
+            <button type="button" :class="{ on: panel === 'retention' }" data-test="logs-retention-open" @click="panel = panel === 'retention' ? null : 'retention'">Retention…</button>
+          </div>
         </template>
       </div>
       <p v-if="source && !phone" class="about muted small" data-test="logs-about">{{ source.about }}</p>
 
+      <!-- On a phone the filters (and the Sort by row) sit at the top of the list's scroller and scroll away with it, so
+           the list keeps the sheet; at desktop width they stay here (the Teleport is off). -->
+      <Teleport defer :to="`#${phoneToolsId}`" :disabled="!phone">
       <div v-show="!phone || filtersOpen" class="filters" data-test="logs-filters">
         <label v-if="source?.team">Team
           <select v-model="team" data-test="logs-team">
@@ -286,6 +297,15 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
         <label>To <input v-model="toDay" type="date" data-test="logs-to" /></label>
         <button v-if="filtered" type="button" class="mini" data-test="logs-clear" @click="clearFilters">Clear filters</button>
       </div>
+      <div v-if="phone" v-show="filtersOpen" class="phone-sort" data-test="logs-sort">
+        <label>Sort by
+          <select :value="sort" data-test="logs-sort-key" @change="sortBy(($event.target as HTMLSelectElement).value)">
+            <option v-for="c in columns" :key="c.key" :value="c.key">{{ c.label }}</option>
+          </select>
+        </label>
+        <button type="button" class="mini" :aria-label="descending ? 'Descending' : 'Ascending'" data-test="logs-sort-dir" @click="sortBy(sort)">{{ descending ? '▼' : '▲' }}</button>
+      </div>
+      </Teleport>
 
       <section v-if="panel === 'prune' && source?.prunable" class="panel" data-test="logs-prune">
         <div class="row">
@@ -341,15 +361,8 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
       </p>
 
       <div ref="scroller" class="scroll" data-test="logs-scroll" @scroll.passive="onScroll">
+        <div :id="phoneToolsId" class="phone-tools" data-test="logs-phone-tools"></div>
         <template v-if="phone">
-          <div class="phone-sort" data-test="logs-sort">
-            <label>Sort by
-              <select :value="sort" data-test="logs-sort-key" @change="sortBy(($event.target as HTMLSelectElement).value)">
-                <option v-for="c in columns" :key="c.key" :value="c.key">{{ c.label }}</option>
-              </select>
-            </label>
-            <button type="button" class="mini" :aria-label="descending ? 'Descending' : 'Ascending'" data-test="logs-sort-dir" @click="sortBy(sort)">{{ descending ? '▼' : '▲' }}</button>
-          </div>
           <ol class="cards" data-test="logs-cards">
             <li v-for="r in rows" :key="String(r._id)" class="entry-card" :class="{ open: open === String(r._id) }" data-test="logs-row"
               role="button" tabindex="0" :aria-expanded="open === String(r._id)"
@@ -406,6 +419,8 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 .bar .source select { margin-left: 6px; min-width: 200px; }
 .bar .search { min-width: 200px; }
 .bar button.on { background: var(--hover); }
+/* Prune… and Retention… are the bar's own buttons at desktop width (the wrapper takes no box); on a phone, the ⋯ menu. */
+.actions { display: contents; }
 .filters label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
 .filters select { max-width: 220px; }
 .about { margin: 0; }
@@ -433,7 +448,7 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 .detail dd { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
 .empty { padding: 16px; margin: 0; }
 .more { margin: 8px; }
-.phone-sort { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg); border-bottom: 1px solid var(--line); font-size: 13px; }
+.phone-sort { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg); border-bottom: 1px solid var(--line); font-size: 13px; }
 .phone-sort label { flex: 1; display: flex; align-items: center; gap: 6px; }
 .phone-sort select { flex: 1; min-width: 0; }
 .cards { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
@@ -445,9 +460,14 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 .entry-card.open dd { white-space: pre-wrap; word-break: break-word; overflow: visible; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
 /* A phone (B037): the bars wrap into full-width rows, labels over their controls, tap targets 44 px. */
 @media (max-width: 759.98px) {
-  .bar .source { flex: 1 1 100%; min-width: 0; }
-  .bar .search { flex: 1 1 0; min-width: 0; }
-  .filters-toggle { flex: none; white-space: nowrap; }
+  /* B057: one row in landscape (Log, Filters, ⋯, search), two in portrait (the search on its own row under them). */
+  .bar { position: relative; }
+  .bar .source { order: 0; flex: 1 1 180px; min-width: 0; }
+  .filters-toggle { order: 1; flex: none; white-space: nowrap; }
+  .actions-toggle { order: 2; flex: none; min-width: 44px; }
+  .bar .search { order: 3; flex: 1 1 200px; min-width: 0; }
+  .actions.menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 3; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+    padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow); }
   .bar .source { display: flex; align-items: center; gap: 6px; }
   .bar .source select { flex: 1; min-width: 0; margin-left: 0; }
   .filters label { flex: 1 1 calc(50% - 8px); flex-direction: column; align-items: stretch; }
@@ -455,6 +475,10 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
   button, select, input { min-height: 44px; box-sizing: border-box; }
   .mini { min-width: 44px; }
   .keep td { display: block; padding: 2px 0; }
-  .scroll { min-height: 200px; }
+  /* B057: the list fills what the sheet has left (no fixed height); the filters and Sort by scroll away at its top,
+     Load more is at its end. */
+  .scroll { flex: 1 1 0; min-height: 0; }
+  .phone-tools .filters { padding: 8px; border-bottom: 1px solid var(--line); }
+  .phone-sort { border-bottom: 1px solid var(--line); }
 }
 </style>
