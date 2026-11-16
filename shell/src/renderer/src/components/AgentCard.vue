@@ -137,5 +137,7 @@ const height = outputHeight;
   .actions .icon { min-width: 44px; min-height: 44px; font-size: 16px; }
   .state { padding-left: 0; }
   .output { margin-left: 0; }
+  /* B054: what the agent said at its own height (the shared height is the desktop's): the page is the one scroller. */
+  .output { height: auto !important; overflow-y: visible; }
 }
 </style>

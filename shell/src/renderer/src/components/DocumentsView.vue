@@ -4,6 +4,7 @@ import type { YawbleApi, TeamSummary } from '../../../shared/api';
 import DocumentsBrowser from './DocumentsBrowser.vue';
 import Icon from './Icon.vue';
 import LoadingNote from './LoadingNote.vue';
+import { useNarrow } from '../narrowScreen';
 
 /**
  * The Documents page: the root of every team's documents. Each team has its own folder (what its agents write for
@@ -14,6 +15,8 @@ const props = defineProps<{ teams: TeamSummary[]; archived: TeamSummary[]; api?:
 
 const openId = ref<number | null>(null);
 const team = computed(() => [...props.teams, ...props.archived].find((t) => t.id === openId.value) ?? null);
+/** A phone (B054): the root's intro is left out, so the team folders start right under the title. */
+const phone = useNarrow();
 </script>
 
 <template>
@@ -23,7 +26,7 @@ const team = computed(() => [...props.teams, ...props.archived].find((t) => t.id
     </div>
     <div v-else class="wrap">
       <h2>Documents</h2>
-      <p class="muted">Each team keeps its documents here: what its agents write for you (reports, specs, plans) and anything you add.</p>
+      <p v-if="!phone" class="muted">Each team keeps its documents here: what its agents write for you (reports, specs, plans) and anything you add.</p>
       <LoadingNote v-if="loading" text="Loading the teams' documents…" />
       <div v-else class="grid" data-test="documents-root">
         <button v-for="t in teams" :key="t.id" class="folder" :data-test="`documents-team-${t.name}`" @click="openId = t.id">
@@ -59,7 +62,11 @@ h2 { margin: 0 0 4px; font-size: 22px; }
 /* A phone (B037): one column of team folders, each a roomy tap target; the open browser uses the full width. */
 @media (max-width: 759.98px) {
   .docs-place { padding: 4px 10px 16px; }
-  .grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  /* One scroller (B054): the page; an open team's browser is at its own height inside it (nothing pinned, no inner scroller). */
+  .docs-place.fill { display: block; overflow: auto; }
+  .wrap, .wrap.fill { display: block; margin: 4px auto 0; }
+  h2 { margin: 0; font-size: 18px; line-height: 28px; height: 28px; }
+  .grid { grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 8px 0 12px; }
   .folder { min-height: 52px; }
 }
 </style>

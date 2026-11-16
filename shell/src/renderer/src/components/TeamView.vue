@@ -43,6 +43,11 @@ const agentOptions = useAgentOptions(api);
 const activity = useTeamActivity(api, () => props.team.name, () => props.pollMs);
 /** A phone (B037): the members stacked, each one's Activity under its card, no resize handles (nothing to drag). */
 const phone = useNarrow();
+/** On a phone (B054): the actions behind ⋯ (open or not), the Tell box's short placeholder (it fits at 375 px), and how
+ * many of a member's latest activity lines show (the rest are in its Logs): the page is the one scroller. */
+const moreOpen = ref(false);
+const TellShort = 'Tell the Manager…';
+const PhoneActivityRows = 5;
 
 const cards = ref<Card[]>([]);
 const decisions = ref<Decision[]>([]);
@@ -187,7 +192,20 @@ defineExpose({ refresh, openWorkflows });
         <span class="kpi" :class="{ live: team.running > 0 }" data-test="kpi-running"><span class="sep"> · </span><b>{{ team.running }}</b> running</span>
         <span class="kpi" data-test="kpi-queued"><span class="sep"> · </span><b>{{ team.queued }}</b> queued</span>
       </div>
-      <div class="actions">
+      <!-- A phone (B054): the title and the actions are one row: Documents and Workflows as icons, the rest behind ⋯. -->
+      <div v-if="phone" class="actions phone-actions" data-test="team-phone-actions">
+        <button class="hbtn" data-test="open-documents" title="Documents" aria-label="Documents" @click="showDocs = true"><Icon name="docs" :size="18" /></button>
+        <button class="hbtn" data-test="open-workflows" title="Workflows" aria-label="Workflows" @click="showWorkflows = true"><Icon name="board" :size="18" /></button>
+        <span class="more-wrap">
+          <button class="hbtn" data-test="team-more" title="More" aria-label="More team actions" aria-haspopup="menu" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen"><Icon name="more" :size="18" /></button>
+          <span v-if="moreOpen" class="menu" role="menu" data-test="team-more-menu">
+            <button role="menuitem" data-test="open-triggers" @click="moreOpen = false; showTriggers = true">⏰ Triggers</button>
+            <button role="menuitem" data-test="open-git" @click="moreOpen = false; showGit = true">⎇ Git</button>
+            <button role="menuitem" data-test="open-manage" @click="moreOpen = false; showManage = true"><Icon name="settings" :size="14" /> Settings</button>
+          </span>
+        </span>
+      </div>
+      <div v-else class="actions">
         <button data-test="open-documents" title="What the team writes for you, and what you add" @click="showDocs = true">Documents</button>
         <button data-test="open-workflows" title="The team's pieces of work: nudge, stop or close one" @click="showWorkflows = true">Workflows</button>
         <button data-test="open-triggers" title="Work on a schedule" @click="showTriggers = true">⏰ Triggers</button>
@@ -212,12 +230,12 @@ defineExpose({ refresh, openWorkflows });
     <p v-if="error || refreshError" class="error" data-test="team-error">{{ error ?? refreshError }}</p>
 
     <div class="tell row">
-      <input v-model="tell" class="grow" placeholder="Tell the Manager… (paste an image to attach it)" data-test="tell-text"
+      <input v-model="tell" class="grow" :placeholder="phone ? TellShort : 'Tell the Manager… (paste an image to attach it)'" data-test="tell-text"
         @keydown.enter="(tell.trim() || tellImages.images.value.length) && sendTell()" @paste="tellImages.onPaste" />
       <button title="Attach an image" data-test="tell-attach" @click="tellPicker?.click()">🖼</button>
       <input ref="tellPicker" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden data-test="tell-attach-input"
         @change="tellImages.add(($event.target as HTMLInputElement).files ?? []); ($event.target as HTMLInputElement).value = ''" />
-      <button class="primary" v-change data-test="tell-send" :disabled="(!tell.trim() && !tellImages.images.value.length) || busy.is('tell')" :aria-busy="busy.is('tell')" @click="sendTell"><BusyLabel :busy="busy.is('tell')" text="Sending…">Tell Manager ✉</BusyLabel></button>
+      <button class="primary" v-change data-test="tell-send" :disabled="(!tell.trim() && !tellImages.images.value.length) || busy.is('tell')" :aria-busy="busy.is('tell')" :aria-label="phone ? 'Tell Manager' : undefined" @click="sendTell"><BusyLabel :busy="busy.is('tell')" text="Sending…">{{ phone ? '✉' : 'Tell Manager ✉' }}</BusyLabel></button>
     </div>
     <div v-if="tellImages.images.value.length" class="thumbs" data-test="tell-images">
       <span v-for="(im, i) in tellImages.images.value" :key="i" class="thumb">
@@ -286,7 +304,7 @@ defineExpose({ refresh, openWorkflows });
         <!-- The bar in the gap to the left of the activity sets the width of every member's activity together. -->
         <div class="member-side" :style="phone ? undefined : { flexBasis: `${activityWidth}px` }">
           <TileGrip v-if="!phone" class="activity-grip" axis="w" reverse :store="memberActivityStore" />
-          <MemberActivity class="member-activity" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" />
+          <MemberActivity class="member-activity" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" :limit="phone ? PhoneActivityRows : undefined" />
         </div>
       </div>
       <TileGrip v-if="!phone" axis="h" :store="memberCardsStore" />
@@ -351,13 +369,29 @@ h2 { font-size: 16px; margin: 0; }
 /* A phone (B037): one column; each member's Activity under its card; the actions, Tell and the asks wrap; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .member-row { flex-direction: column; gap: 8px; }
-  .member-side { flex-basis: auto; height: 12rem; }
+  /* The Activity under its card at its own height (B054: no nested scroller; the page scrolls). */
+  .member-side { flex-basis: auto; height: auto; }
   .member-side > .activity-grip { display: none; }
   .team > .member-cell { margin-bottom: 16px; }
-  .actions button { flex: 1 1 auto; justify-content: center; }
+  .team > * { margin-bottom: 6px; }
+  /* The header (B054): one 44 px row, the title (cut with …) and the icon actions; it scrolls away with the page. */
+  .teamhead { flex-direction: row; align-items: center; gap: 4px; height: 44px; }
+  .titleline { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow: hidden; gap: 6px; }
+  .titleline h2 { flex: 0 1 auto; min-width: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .titleline .kpi:not(.live) { display: none; }
+  .phone-actions { flex: none; flex-wrap: nowrap; gap: 2px; }
+  .hbtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; box-sizing: border-box; }
+  .more-wrap { position: relative; display: inline-flex; }
+  .menu { position: absolute; right: 0; top: 100%; z-index: 5; display: flex; flex-direction: column; min-width: 170px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px var(--shadow); }
+  .menu button { justify-content: flex-start; text-align: left; border: 0; background: transparent; padding: 0 10px; min-height: 44px; font-size: 13px; }
+  .menu button:hover { background: var(--hover); }
   .actions button, .row button, .row input, .row select, .paused button { min-height: 44px; box-sizing: border-box; }
   .row { flex-wrap: wrap; }
-  .tell input.grow { flex: 1 1 100%; }
+  /* Tell the Manager (B054): one row, the box beside the two 44 px icon buttons (its short placeholder fits at 375 px). */
+  .tell { flex-wrap: nowrap; gap: 6px; min-height: 44px; }
+  .tell input.grow { flex: 1 1 0; min-width: 0; }
+  .tell button { flex: none; min-width: 44px; padding: 0 10px; }
   .add input { flex: 1 1 100%; }
   .paused { flex-wrap: wrap; }
   .thumb .x { width: 32px; height: 32px; line-height: 32px; font-size: 13px; }
