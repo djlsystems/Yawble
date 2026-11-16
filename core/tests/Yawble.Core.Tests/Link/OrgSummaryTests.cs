@@ -129,6 +129,30 @@ public class OrgSummaryTests
     }
 
     [Fact]
+    public void AFailedWorkflow_IsOpen_AndStaysListedAfter24hIdle_ButACompletedOrClosedOneDoesNot()
+    {
+        // B051 F2 (card 258): docs/cloud-link.md calls failed open; only completed and closed are ended.
+        Assert.False(OrgSummary.Ended(OrgSummary.Failed));
+        Assert.True(OrgSummary.Ended(OrgSummary.Completed));
+        Assert.True(OrgSummary.Ended(OrgSummary.Closed));
+        Assert.All(new[] { OrgSummary.Running, OrgSummary.WaitingOnPerson, OrgSummary.Blocked, OrgSummary.NobodyWorking },
+            st => Assert.False(OrgSummary.Ended(st)));
+
+        var facts = Facts() with
+        {
+            Workflows =
+            [
+                new OrgWorkflow(20, "web", "Failed 25 h ago", null, null, OrgSummary.Failed, 0, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
+                new OrgWorkflow(21, "web", "Completed 25 h ago", null, null, OrgSummary.Completed, 1, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
+                new OrgWorkflow(22, "web", "Closed 25 h ago", null, null, OrgSummary.Closed, 0, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
+            ],
+        };
+        var listed = Assert.Single(OrgSummary.Build(facts, Now)["workflows"]!.AsArray())!;
+        Assert.Equal(20L, listed["id"]!.GetValue<long>());
+        Assert.Equal("failed", listed["state"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void SecretsInTitlesAndLogLines_AreRedacted_AndALogLineIsOneLine()
     {
         var s = OrgSummary.Build(Facts(), Now);

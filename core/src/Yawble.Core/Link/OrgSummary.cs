@@ -57,7 +57,7 @@ public static class OrgSummary
     public const string Running = "running", WaitingOnPerson = "waitingOnPerson", Blocked = "blocked", NobodyWorking = "nobodyWorking",
         Completed = "completed", Failed = "failed", Closed = "closed";
 
-    /// <summary>Every workflow state; the last three are ended ones.</summary>
+    /// <summary>Every workflow state. Only completed and closed are ended; the rest, failed included, are open.</summary>
     public static readonly IReadOnlyList<string> WorkflowStates = [Running, WaitingOnPerson, Blocked, NobodyWorking, Completed, Failed, Closed];
 
     public static readonly TimeSpan EndedWorkflowsFor = TimeSpan.FromHours(24);
@@ -67,7 +67,11 @@ public static class OrgSummary
     private const int MaxTitle = 100;
     private const int MaxMessage = 200;
 
-    public static bool Ended(string state) => state is Completed or Failed or Closed;
+    /// <summary>
+    /// Only completed (declared done) and closed (closed by a person) are ended; every other state, failed included, is
+    /// open and stays in the snapshot however old its last activity (docs/cloud-link.md).
+    /// </summary>
+    public static bool Ended(string state) => state is Completed or Closed;
 
     public static JsonObject Build(OrgSummaryFacts facts, DateTimeOffset now) => new()
     {
