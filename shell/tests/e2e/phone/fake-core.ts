@@ -97,11 +97,11 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'concierge.read': () => ({ ok: true }),
   'network.asks': () => [networkAsk],
   'tools.asks': () => [toolAsk],
-  'integrations.asks': () => [integrationAsk],
+  'integrations.asks': () => (needsYou ? [integrationAsk] : []),
   'integrations.connectionAttention': () => [{ id: 3, name: 'Stripe test key', reason: '401 from the API', where: 'Settings, Connections' }],
   'companion.list': () => ({ clients: [], pairings: [{ id: 'p1', name: 'claude-code', level: 'act', code: 'K7Q2ZD', expires: later(5) }], actions: [] }),
   'companion.status': () => ({ endpoint: null, controlFile: null, binaryPath: null, claudeCommand: null }),
-  'bus.decisions': (p) => (p?.teamId === 1 || p?.team === 'payments' || p?.teamId === undefined ? [decision] : []),
+  'bus.decisions': (p) => !needsYou ? [] : (p?.teamId === 1 || p?.team === 'payments' || p?.teamId === undefined ? [decision] : []),
   'bus.workflows': () => workflows,
   'teams.agents': (p) => agents[p?.teamId ?? p?.id ?? 1] ?? [],
   'teams.quiet': () => ({ quiet: false, working: ['DeveloperAda'], openWorkflows: [10] }),
@@ -132,16 +132,38 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   ] }),
   'code.read': (p) => ({ path: p?.path, type: 'text', size: 80, content: 'export function refund(amount: number, limitDays = 30): boolean {\n  return amount > 0 && limitDays <= 90; // a long comment that runs past the edge of a phone screen\n}\n', lines: [], removed: [], linesUnknown: false }),
   'code.close': () => ({}),
-  'git.status': () => ({ installed: true, version: '2.50', path: 'C:/fake/git.exe' }),
+  // A team's Git dialog asks with its teamId (a TeamGitStatus); without one, the computer's git (B054 verify: the Git
+  // sheet behind the team page's ⋯ rendered nothing with the computer's answer).
+  'git.status': (p) => (p?.teamId == null ? { installed: true, version: '2.50', path: 'C:/fake/git.exe' } : {
+    repoPath: 'C:/repos/payments', managed: true, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: null, baseSha: 'abc1234', originBaseSha: null,
+    baseAheadOfOrigin: null, baseBehindOrigin: null, teamBranch: 'team/payments', teamSha: 'def5678', teamAheadOfBase: 2, teamBehindBase: 0, merge: 'fast-forward',
+    conflictFiles: [], members: [], oldBranches: [], blockingBranches: [],
+  }),
   'updates.status': () => ({ state: 'idle', current: '0.0.0+dev.fake', available: null, auto: false }),
   'credentials.status': () => ({ mode: 'subscription', claude: { connected: true, addedAt: iso(1000), expiresAt: null, lastUsedAt: iso(5), renewSoon: false, problem: null } }),
   'triggers.list': () => [],
-  'skills.list': () => [],
+  // B054 verify (card 270): skills to pick on a phone, and a Guardrails page long enough to scroll to its bottom.
+  'skills.list': () => Array.from({ length: 12 }, (_, i) => ({
+    name: `skill-${i}`, description: `When to load skill ${i}: a one-line description that wraps on a phone.`, roles: ['member'],
+    body: `# Skill ${i}\n\n${'What to do, step by step. '.repeat(30)}`, kind: i < 6 ? 'builtin' : 'custom', teamId: null, team: null, id: i < 6 ? null : i, updatedAt: iso(i * 10),
+  })),
+  'policy.getGlobal': () => ({
+    filesystem: { grantableRoots: ['~/src', 'D:/work'], readonly: ['C:/tools', 'C:/sdk', 'C:/Program Files/Git'], readwrite: ['C:/scratch'], denied: ['~/.ssh', '~/.aws', '~/.azure'] },
+    network: { allowHosts: ['api.github.com', 'registry.npmjs.org', 'api.nuget.org', 'pypi.org', 'files.pythonhosted.org', 'objects.githubusercontent.com'] },
+    compute: { wallTimeoutSec: 7200, idleTimeoutSec: 1800, memoryMb: null, cpuPercent: null, maxProcesses: null },
+    ui: { clipboard: 'read' }, app: { maxConcurrentAgents: 4, backend: 'sandbox', heavyWorkAtOnce: 1 },
+  }),
+  'teams.syncToBase': () => (syncBehind ? { on: true, note: null, baseBranch: 'main', behind: { teamBranch: 'team/payments', count: 3, text: '3 commits behind main' } } : { on: true, note: null, baseBranch: 'main', behind: null }),
   'tasks.list': () => [],
   'members.get': (p) => (agents[1] as any[]).map((a) => a.member).find((m) => m.id === p?.id) ?? (agents[1] as any)[0].member,
 };
 
 /** Methods a viewer with "read" access may not call (the fake refuses them, like the Cloud Link). */
+/** B054: with true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */
+let syncBehind = false;
+/** B054: with false, no integration ask and no Manager decision is pending (the team page shows its members under Tell). */
+let needsYou = true;
+
 const isChange = (m: string) => /\.(send|answer|save|delete|remove|create|add|update|install|run|stop|move|rename|tellManager|approve|decline)/.test(m);
 
 export function createFakeCore() {
@@ -154,6 +176,10 @@ export function createFakeCore() {
     setAccess(a: Access) { access = a; },
     /** With false, no network or tool asks are pending (the global Needs-you banners stay away). */
     setAsks(on: boolean) { asks = on; },
+    /** B054: the team branch behind its base (the team page's sync bar shows). */
+    setSync(behind: boolean) { syncBehind = behind; },
+    /** B054: with false, no integration ask and no decision is pending. */
+    setNeedsYou(on: boolean) { needsYou = on; },
     answer(text: string): string | null {
       const msg = JSON.parse(text) as { id: number; method: string; params: any };
       calls.push(msg.method);
