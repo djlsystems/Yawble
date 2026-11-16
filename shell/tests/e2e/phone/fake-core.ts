@@ -158,13 +158,15 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'members.get': (p) => (agents[1] as any[]).map((a) => a.member).find((m) => m.id === p?.id) ?? (agents[1] as any)[0].member,
 };
 
-/** Methods a viewer with "read" access may not call (the fake refuses them, like the Cloud Link). */
 /** B054: with true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */
 let syncBehind = false;
 /** B054: with false, no integration ask and no Manager decision is pending (the team page shows its members under Tell). */
 let needsYou = true;
 
-const isChange = (m: string) => /\.(send|answer|save|delete|remove|create|add|update|install|run|stop|move|rename|tellManager|approve|decline)/.test(m);
+/** Methods a viewer with "read" access may not call (the fake refuses them, like the Cloud Link). Card 305: the workflows
+ *  dialog's bus.nudgeWorkflow and bus.closeWorkflow too (bus.stopWorkflow already matched "stop"), as core's
+ *  RemoteAccess lists them. */
+const isChange = (m: string) => /\.(send|answer|save|delete|remove|create|add|update|install|run|stop|move|rename|tellManager|approve|decline|nudgeWorkflow|closeWorkflow)/.test(m);
 
 export function createFakeCore() {
   const unknown = new Set<string>();
