@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
+import WorkflowsDialog from './components/WorkflowsDialog.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary } from '../../shared/api';
 import { errorText, resolveApi } from './api';
@@ -160,8 +161,18 @@ function openConversation(id: string) {
   conversationId.value = id;
 }
 
-// A workflow chosen on the Monitor: its team's workflows, with that workflow selected.
-function openWorkflow(teamId: number, workflow: number) { openTeam(teamId, 'workflows', workflow); }
+// A workflow chosen on the Monitor (or its team's workflows header): the team's workflows dialog opens over the
+// Monitor, with that workflow selected; closing it stays on the Monitor.
+const monitorWorkflows = ref<{ team: TeamSummary; id: number | null } | null>(null);
+function openWorkflow(teamId: number, workflow?: number) {
+  const t = allTeams.value.find((x) => x.id === teamId);
+  if (t) monitorWorkflows.value = { team: t, id: workflow ?? null };
+  else openTeam(teamId, 'workflows', workflow);
+}
+function openFromMonitor(teamId: number, panel?: 'workflows') {
+  if (panel === 'workflows') openWorkflow(teamId);
+  else openTeam(teamId);
+}
 
 function openTeam(id: number, panel?: 'workflows', workflow?: number) {
   view.value = 'teams';
@@ -215,6 +226,7 @@ async function remove(id: string) {
 
 /** A place in the sidebar. Teams always opens the list of teams, not the team last looked at. */
 function go(place: View) {
+  monitorWorkflows.value = null;
   if (place === 'settings') { settingsLanding.value = true; if (phone.value) settingsKey.value++; }
   view.value = place;
   if (place === 'teams') selected.value = null;
@@ -431,7 +443,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
         </section>
 
         <DocumentsView v-else-if="view === 'documents'" :teams="teams" :archived="archivedTeams" :api="api" :loading="!overview && !error" />
-        <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openTeam" @open-workflow="openWorkflow" />
+        <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" />
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />
         <BacklogView v-else-if="view === 'backlog'" :teams="teams" :teams-loading="!overview && !error" :api="api" :poll-ms="pollMs" @open-team="openTeam"
           @board="focusTeamId = $event; go('board')" />
@@ -443,6 +455,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
     </main>
 
     <NewTeamDialog v-if="dialog === 'newTeam'" :api="api" @close="dialog = null" @created="created" />
+    <WorkflowsDialog v-if="monitorWorkflows && view === 'monitor'" :key="`${monitorWorkflows.team.id}:${monitorWorkflows.id ?? 0}`" :api="api"
+      :team="monitorWorkflows.team" :poll-ms="pollMs" :focus="monitorWorkflows.id" @close="monitorWorkflows = null" />
     <TeamManageDialog v-if="manageTeam" :api="api" :team="manageTeam" @close="manageTeam = null" @changed="refresh"
       @deleted="manageTeam = null; refresh()" />
     <LinkDialog v-if="dialog === 'link'" :api="api" @close="dialog = null" @changed="link = $event" />
