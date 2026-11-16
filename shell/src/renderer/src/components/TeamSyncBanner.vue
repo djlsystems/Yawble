@@ -79,7 +79,12 @@ defineExpose({ load });
 .behind { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
 /* A phone (B037): the heading over its button, the text over Sync now; tap targets 44 px. */
 @media (max-width: 759.98px) {
-  .note .head, .behind { flex-wrap: wrap; }
+  .note .head { flex-wrap: wrap; }
   .sync button { min-height: 44px; }
+  /* B054: "N commits behind" is one compact row, the text beside Sync now (the off-for-this-team aside left out). */
+  .sync { margin: 4px 0; }
+  .behind { flex-wrap: nowrap; justify-content: space-between; margin: 0; min-height: 44px; }
+  .behind > .muted { display: none; }
+  .behind button { flex: none; }
 }
 </style>
