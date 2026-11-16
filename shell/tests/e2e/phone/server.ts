@@ -1,4 +1,4 @@
-﻿// B037 verify: remote.html, built once by Vite from the renderer's source into out/b037/renderer, and the fake
+// B037 verify: remote.html, built once by Vite from the renderer's source into out/b037/renderer, and the fake
 // core behind the page's "rpc" socket. Nothing listens on a port: this sandbox refuses loopback sockets (to the browser
 // and to node), so the page is loaded from a made-up origin, http://yawble-remote.test/, whose requests Playwright
 // fulfils from the built files, and its WebSocket is answered by Playwright's routeWebSocket from the fake core. No real
@@ -21,9 +21,12 @@ const shellDir = path.resolve(__dirname, '..', '..', '..');
 // Under out/ (ignored): Playwright empties test-results at the start of each run.
 export const builtDir = path.join(shellDir, 'out', 'b037', 'renderer');
 const baseTreeDir = path.join(shellDir, 'out', 'b037', 'main');
-/** The base's shell (main BASE_COMMIT), extracted with `git archive BASE_COMMIT shell code-browser` for the 1280 px comparison. */
-export const baseShellDir = path.join(baseTreeDir, 'shell');
-export const baseBuiltDir = path.join(shellDir, 'out', 'b037', 'renderer-base');
+/**
+ * The base's shell for the 1280 px comparison: main BASE_COMMIT, extracted with `git archive BASE_COMMIT shell code-browser`
+ * (extractBaseTree). B037_BASE_DIR picks another base tree instead (its shell/ and its built renderer/); then nothing is extracted.
+ */
+export const baseShellDir = process.env.B037_BASE_DIR ? path.resolve(process.env.B037_BASE_DIR, 'shell') : path.join(baseTreeDir, 'shell');
+export const baseBuiltDir = process.env.B037_BASE_DIR ? path.resolve(process.env.B037_BASE_DIR, 'renderer') : path.join(shellDir, 'out', 'b037', 'renderer-base');
 
 /**
  * Extracts BASE_COMMIT's shell/ and code-browser/ into out/b037/main (`git archive BASE_COMMIT shell code-browser`),
@@ -31,6 +34,7 @@ export const baseBuiltDir = path.join(shellDir, 'out', 'b037', 'renderer-base');
  * B037_SKIP_BUILD=1. The tree sits under shell/, so its imports (vue, highlight.js, ...) resolve from shell/node_modules.
  */
 export function extractBaseTree() {
+  if (process.env.B037_BASE_DIR) return;
   const stamp = path.join(baseTreeDir, '.commit');
   if (existsSync(path.join(baseShellDir, 'src', 'renderer', 'remote.html')) && existsSync(stamp) && readFileSync(stamp, 'utf8').trim() === BASE_COMMIT) return;
   const repo = path.resolve(shellDir, '..');
