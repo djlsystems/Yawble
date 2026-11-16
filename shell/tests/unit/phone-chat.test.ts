@@ -75,13 +75,13 @@ const chat: Conversation = {
   ],
   turn: null,
 } as unknown as Conversation;
-function fakeApi(): YawbleApi {
+function fakeApi(watches: unknown[] = []): YawbleApi {
   const answers: Record<string, (p: any) => unknown> = {
     'app.overview': () => ({ slots: { running: 0, limit: 4, queued: 0 }, teams: [{ id: 1, name: longTeam, repoPath: null, members: 2, running: 0, queued: 0 }] }),
     'link.status': () => ({ state: 'off', viewers: [] }),
     'agents.detect': () => [{ cliId: 'claude', found: true, signIn: { status: 'signed-in', detail: null } }],
     'concierge.list': () => [{ ...chat, messages: undefined }],
-    'concierge.get': () => JSON.parse(JSON.stringify(chat)),
+    'concierge.get': () => JSON.parse(JSON.stringify({ ...chat, watching: watches.length, watches })),
     'concierge.read': () => ({}),
     'concierge.setTeam': () => ({}),
     'network.asks': () => [],
@@ -102,8 +102,8 @@ function fakeApi(): YawbleApi {
 }
 
 /** The App with the chat open (the sidebar's, or on a phone the drawer's, chat entry). */
-async function openChat() {
-  const w = keep(mount(App, { props: { api: fakeApi(), pollMs: 60_000 }, attachTo: document.body }));
+async function openChat(watches: unknown[] = []) {
+  const w = keep(mount(App, { props: { api: fakeApi(watches), pollMs: 60_000 }, attachTo: document.body }));
   await flushPromises();
   await flushPromises();
   await w.get('.chat .open').trigger('click');
@@ -187,14 +187,16 @@ describe.each(Phones)('a chat on a phone, $name', ({ width, height, portrait }) 
     await composer.get('[data-test=composer-pickers-toggle]').trigger('click');
     expect(composer.get('[data-test=composer-pickers-toggle]').attributes('aria-expanded')).toBe('true');
     const panel = composer.get('[data-test=composer-pickers]');
-    expect(css(panel.element).flexDirection).toBe('column'); // one row each
+    // One row each in portrait; side by side in landscape (B057 F1: the 263 px frame has no room for two rows).
+    expect(css(panel.element).flexDirection).toBe(portrait ? 'column' : 'row');
     for (const sel of ['[data-test=composer-team]', '[data-test=composer-agent]']) {
       const select = panel.get(sel).element;
       const s = css(select);
       expect(len(s.fontSize), sel).toBeGreaterThanOrEqual(16);
       expect(len(s.minHeight), sel).toBeGreaterThanOrEqual(44);
       expect(s.flexGrow, sel).toBe('1'); // it takes the row, all but its label
-      expect(css(select.closest('.row-pick')!).width, sel).toBe('100%');
+      if (portrait) expect(css(select.closest('.row-pick')!).width, sel).toBe('100%');
+      else expect(css(select.closest('.row-pick')!).flexGrow, sel).toBe('1'); // half the row each
       expect(select.closest('.bar'), sel).toBeNull(); // not squeezed into the bar beside the text
     }
     // The long team name is the picked option, whole, in a select that is no longer capped at a third of the screen.
@@ -226,6 +228,62 @@ describe.each(Phones)('a chat on a phone, $name', ({ width, height, portrait }) 
     expect(w.emitted('send')).toBeUndefined();
     await w.get('[data-test=composer-send]').trigger('click');
     expect(w.emitted('send')![0][0]).toBe('Hello');
+  });
+});
+
+// B057 F1 (TesterKofi, card 276): at 667 x 263 a chat with a watch and the pickers open pushed the text row (pickers'
+// button, text, Attach, Send) below the screen. Now the watch row folds away while the pickers are open, the pickers sit
+// side by side and their panel is capped (it scrolls), so the text row's bottom stays within the frame.
+describe('a chat with a watch on a phone in landscape, 667 x 263', () => {
+  const height = 263;
+  beforeEach(() => setScreen(667, height));
+  const watches = [{ id: 7, team: 'payments', what: 'partial refunds', followUp: false, workflow: null, createdAt: '', expiresAt: '' }];
+  /** A max-height from computed CSS in px (a dvh value is a share of the frame). */
+  const capPx = (v: string) => (v.endsWith('dvh') || v.endsWith('vh') ? (Number.parseFloat(v) * height) / 100 : len(v));
+  /** The dock's rows down to the bottom of the text row, from the top of the dock. */
+  function textRowBottom(w: VueWrapper): number {
+    const dock = w.get('.dock').element;
+    const composer = w.get('[data-test=composer]').element;
+    const bar = composer.querySelector('.bar')!;
+    const watchRow = dock.querySelector('[data-test=watches]');
+    const watchH = watchRow && css(watchRow).display !== 'none'
+      ? Math.max(...[...watchRow.querySelectorAll('.w-btn')].map(tall)) + len(css(watchRow).marginBottom) : 0;
+    const panel = composer.querySelector('[data-test=composer-pickers]');
+    let pickersH = 0;
+    if (panel) {
+      const s = css(panel);
+      expect(s.boxSizing).toBe('border-box');
+      expect(s.overflowY).toBe('auto'); // past its cap the panel scrolls; it never pushes the row down
+      pickersH = capPx(s.maxHeight) + len(s.marginBottom);
+    }
+    const topBar = tall(w.get('.main > header.bar').element);
+    const s = css(composer);
+    return topBar + len(css(dock).paddingTop) + watchH + len(s.paddingTop) + len(s.borderTopWidth) + pickersH
+      + Math.max(...[...bar.children].filter((c) => css(c).display !== 'none' && !c.hasAttribute('hidden')).map(tall));
+  }
+
+  it('the idle "Keeping tabs on" row is one 44 px line with a small gap', async () => {
+    const w = await openChat(watches);
+    const row = w.get('[data-test=watches]').element;
+    expect(css(row).display).not.toBe('none');
+    expect(css(row).flexWrap).toBe('nowrap');
+    expect(len(css(row).marginBottom)).toBeLessThanOrEqual(2);
+    expect(len(css(w.get('[data-test=watch]').element).paddingTop)).toBe(0);
+    expect(textRowBottom(w)).toBeLessThanOrEqual(height);
+  });
+
+  it('with the pickers open the text row\'s bottom is within the frame: the watch row folds away, the pickers sit side by side', async () => {
+    const w = await openChat(watches);
+    await w.get('[data-test=composer-pickers-toggle]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=composer-pickers]').exists()).toBe(true);
+    expect(css(w.get('[data-test=watches]').element).display).toBe('none');
+    expect(css(w.get('[data-test=composer-pickers]').element).flexDirection).toBe('row');
+    expect(textRowBottom(w)).toBeLessThanOrEqual(height);
+    // Folding the pickers away brings the watch row back.
+    await w.get('[data-test=composer-pickers-toggle]').trigger('click');
+    await flushPromises();
+    expect(css(w.get('[data-test=watches]').element).display).not.toBe('none');
   });
 });
 

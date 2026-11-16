@@ -26,7 +26,7 @@ const props = defineProps<{
   /** A line about the chat (the page shows it under the box on the desktop); on a phone it folds out with the pickers. */
   note?: string;
 }>();
-const emit = defineEmits<{ send: [text: string, images: { name: string; base64: string }[], previews: AttachedImage[]]; stop: []; 'update:cli': [cli: string]; 'update:teamId': [teamId: number | null] }>();
+const emit = defineEmits<{ send: [text: string, images: { name: string; base64: string }[], previews: AttachedImage[]]; stop: []; 'update:cli': [cli: string]; 'update:teamId': [teamId: number | null]; pickers: [open: boolean] }>();
 
 const text = ref('');
 const box = ref<HTMLTextAreaElement | null>(null);
@@ -39,6 +39,8 @@ const phone = usePhone();
 const canSend = computed(() => (text.value.trim().length > 0 || attach.images.value.length > 0) && !props.running);
 // B057: on a phone the team and agent pickers (and the note) fold behind one button, so the idle box is one row.
 const pickersOpen = ref(false);
+// The page folds its other dock rows away while they are open in landscape (B057 F1: ConciergeView's watch row).
+watch(pickersOpen, (open) => emit('pickers', open));
 const noAgents = computed(() => (props.agentsLoaded ? 'No agent CLI found (Settings > Agents)' : 'Finding agents…'));
 const pickersTitle = computed(() => {
   const team = props.teams.find((t) => t.id === props.teamId)?.name ?? 'All teams';
@@ -187,6 +189,14 @@ textarea { width: 100%; border: 0; outline: 0; resize: none; background: transpa
 .row-label { display: inline-flex; align-items: center; gap: 4px; flex: none; width: 64px; }
 .row-pick select { flex: 1; min-width: 0; width: 100%; font-size: 16px; min-height: 44px; box-sizing: border-box; color: var(--ink); text-overflow: ellipsis; }
 .note { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 2px 2px 0; }
+/* B057 F1, a phone in landscape (263 px tall): the two pickers side by side on one row, the note under them, and the
+   panel never taller than 40 % of the screen (it scrolls past that), so the text row under it always stays on screen. */
+@media (orientation: landscape) {
+  .pickers { flex-direction: row; flex-wrap: wrap; gap: 4px 8px; box-sizing: border-box; max-height: 40dvh; overflow-y: auto; }
+  .row-pick { flex: 1 1 0; width: auto; min-width: 0; }
+  .row-label { width: auto; }
+  .note { flex: 1 0 100%; }
+}
 .phone .round { width: 44px; height: 44px; flex: none; }
 .phone .thumb { width: 88px; height: 88px; }
 .phone .thumb .x { top: 0; right: 0; width: 44px; height: 44px; border-radius: 0 0 0 12px; font-size: 13px; line-height: 44px; }
