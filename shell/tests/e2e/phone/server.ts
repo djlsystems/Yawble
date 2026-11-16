@@ -12,9 +12,10 @@ import { createFakeCore } from './fake-core';
 /**
  * The main commit the 1280 px desktop layout is compared with (phone-remote.spec.ts). To move the base, change this
  * one line: the next run extracts that commit's shell into out/b037/main and rebuilds out/b037/renderer-base.
- * Was b726212 (cards 169-276); f3a3c3d since card 294 (nav order be4a82a and the rest of main up to it).
+ * Was b726212 (cards 169-276), then f3a3c3d (cards 294-312, nav order be4a82a and the rest of main up to it); 43048e1 since
+ * card 313 (the Sidebar team counts as pills).
  */
-export const BASE_COMMIT = 'f3a3c3d';
+export const BASE_COMMIT = '43048e1';
 
 export const ORIGIN = 'http://yawble-remote.test';
 const shellDir = path.resolve(__dirname, '..', '..', '..');
@@ -67,7 +68,7 @@ export async function buildRenderer(from = shellDir, out = builtDir) {
   }
   // The base's tree: its vite.config.mts is not loadable from under test-results, so the same settings inline (the
   // shell's vite.config.mts at BASE_COMMIT: root, base, the Vue plugin, the Code browser alias, dedupe, the build-version
-  // define (as with no scripts/ folder: 0.0.0+dev.unknown), the two pages; unchanged from b726212 to f3a3c3d).
+  // define (as with no scripts/ folder: 0.0.0+dev.unknown), the two pages; unchanged from b726212 to f3a3c3d and to 43048e1).
   // Check them again when BASE_COMMIT moves: `git diff <old> <new> -- shell/vite.config.mts`.
   const vue = (await import('@vitejs/plugin-vue')).default;
   const renderer = path.join(from, 'src', 'renderer');
