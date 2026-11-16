@@ -95,7 +95,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
                 if (rows.Count == limit) { more = true; break; }
                 var row = new JsonObject { ["_id"] = Value(r, 0)?.ToString() };
                 for (var i = 0; i < s.Columns.Count; i++) row[s.Columns[i].Key] = Value(r, i + 1);
-                rows.Add(row);
+                rows.Add(LogRedaction.Row(row));
             }
         }
         long? total = null;
@@ -231,9 +231,39 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         {
             var row = new JsonObject { ["_id"] = $"{offset + i}" };
             for (var k = 0; k < f.Columns.Count; k++) row[f.Columns[k].Key] = e[k];
-            page.Add(row);
+            page.Add(LogRedaction.Row(row));
         }
         return Page(page, offset == 0 ? list.Count : null, asOf, offset + limit < list.Count ? offset + limit : null);
+    }
+
+    /// <summary>
+    /// logs.tail's read of the activity log: its entries at or after <paramref name="since"/> (ISO), oldest first, at
+    /// most <paramref name="limit"/>, model usage left out (no token counts leave this way). Each with its row id.
+    /// </summary>
+    public IReadOnlyList<(string Id, LogTailEntry Entry)> TailSince(string since, int limit = 500)
+    {
+        var s = LogSources.Find(LogSources.Activity)!;
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = $"SELECT t.rid, t.at, t.source, t.member, t.event, t.details FROM {s.From} WHERE t.at >= @since AND t.source <> 'Model usage' ORDER BY t.at, t.rid LIMIT @limit;";
+        cmd.Parameters.AddWithValue("@since", since);
+        cmd.Parameters.AddWithValue("@limit", limit);
+        var list = new List<(string, LogTailEntry)>();
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+        {
+            string? Str(int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture);
+            var source = Str(2) ?? "";
+            var key = Str(3);
+            var slash = key?.IndexOf('/') ?? -1;
+            var (team, member) = slash > 0 ? (key![..slash], key[(slash + 1)..]) : ((string?)null, (string?)null);
+            var ev = Str(4);
+            var text = Str(5);
+            var message = source == "Messages";
+            var level = message ? LogLevels.OfMessage(ev) : LogLevels.Of(ev, text);
+            list.Add((Str(0) ?? "", new LogTailEntry(Str(1) ?? "", source, level, team, member, ev, text, message && LogLevels.IsWorkflowEvent(ev))));
+        }
+        return list;
     }
 
     /// <summary>The teams and their members ("Team/Name"), archived ones too, for the team and member filters.</summary>

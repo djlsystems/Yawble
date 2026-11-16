@@ -5,11 +5,11 @@ using Yawble.Core.Provenance;
 namespace Yawble.Core.Logs;
 
 /// <summary>
-/// The Logs dialog's calls. Reading (logs.sources, logs.query, logs.values) is for the window and cloud viewers alike;
+/// The Logs dialog's calls. Reading (logs.sources, logs.query, logs.values, and the live logs.tail / logs.untail) is for the window and cloud viewers alike;
 /// what changes the logs (logs.prunePreview, logs.prune, logs.setRetention) is the person's, in the window on this
 /// computer only.
 /// </summary>
-public sealed class LogRpc(LogService logs)
+public sealed class LogRpc(LogService logs, LogTail? tail = null)
 {
     public static bool Handles(string method) => method.StartsWith("logs.", StringComparison.Ordinal);
 
@@ -31,6 +31,8 @@ public sealed class LogRpc(LogService logs)
                 "logs.prunePreview" => Preview(logs.PrunePreview(Required(p, "source"), Cutoff(p))),
                 "logs.prune" => Prune(p),
                 "logs.setRetention" => SetRetention(p),
+                "logs.tail" => StartTail(p),
+                "logs.untail" => StopTail(p),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
             return Task.FromResult<JsonNode?>(result);
@@ -39,6 +41,29 @@ public sealed class LogRpc(LogService logs)
         {
             throw new RpcException("bad_params", e.Message);
         }
+    }
+
+    /// <summary>
+    /// logs.tail {level: "default"|"all", team?, member?}: pushes each new entry that passes as "logs.tailEntry"
+    /// {tail, entry} until logs.untail or the viewer leaves (<see cref="LogTail"/>). Returns the tail's id and its filter.
+    /// </summary>
+    private JsonNode StartTail(JsonObject? p)
+    {
+        var t = tail ?? throw new RpcException("unavailable", "logs.tail is not wired in this core");
+        var level = Text(p, "level") ?? "default";
+        if (level is not ("default" or "all")) throw new ArgumentException("level is \"default\" (warnings, errors and workflow events) or \"all\"");
+        var member = Text(p, "member");
+        if (member is not null && (member.IndexOf('/') <= 0 || member.EndsWith('/'))) throw new ArgumentException("member is \"Team/Name\"");
+        var team = Text(p, "team");
+        var id = t.Start(new LogTailFilter(level == "all", team, member), Actor.Current);
+        return new JsonObject { ["tail"] = id, ["level"] = level, ["team"] = team, ["member"] = member };
+    }
+
+    /// <summary>logs.untail {tail?}: ends that tail, or every tail of the caller; never another viewer's.</summary>
+    private JsonNode StopTail(JsonObject? p)
+    {
+        var t = tail ?? throw new RpcException("unavailable", "logs.tail is not wired in this core");
+        return new JsonObject { ["stopped"] = t.Stop(Text(p, "tail"), Actor.Current) };
     }
 
     private JsonNode Prune(JsonObject? p)
