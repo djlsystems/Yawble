@@ -17,7 +17,7 @@ import TerminalScreen from './components/TerminalScreen.vue';
 const props = defineProps<{ memberId: number; api?: YawbleApi; pollMs?: number; embedded?: boolean; inPane?: boolean }>();
 const emit = defineEmits<{ banner: [TerminalBanner]; live: [boolean] }>();
 const api = resolveApi(props.api);
-/** The pane's header on a phone (TerminalPane): the bar goes into its ⋯ menu. */
+/** The pane's header on a phone (TerminalPane, or a member's pane on the team page): the bar goes into its ⋯ menu. */
 const pane = inject(PaneHeaderKey, null);
 const inMenu = computed(() => !!props.embedded && !!pane?.on);
 
@@ -158,11 +158,10 @@ defineExpose({ size: () => view.value?.size() ?? null });
   .banner.in-menu .banner-text { flex: 1; min-width: 0; max-height: 20vh; overflow-y: auto; padding: 6px 0; box-sizing: border-box; overscroll-behavior: contain; }
   .banner.in-menu .banner-close { flex: none; min-width: 44px; min-height: 44px; padding: 0; font-size: 16px; background: transparent; color: var(--term-fg); border: 0; }
   .phone-error { margin: 0; padding: 4px 12px; font-size: 12px; background: var(--term-bar); }
-  /* In a member's pane (B061): the bar and the Formatted / Raw tabs are one 44 px row each; the screen takes the rest. */
-  .in-pane .bar { height: 44px; box-sizing: border-box; padding: 0 4px 0 10px; }
-  .in-pane .bar button { min-height: 44px; font-size: 14px; }
-  .in-pane :deep(.modes) { height: 44px; box-sizing: border-box; padding: 0 4px; align-items: center; }
-  .in-pane :deep(.modes button) { min-height: 40px; padding: 0 12px; font-size: 14px; }
+  /* In a member's pane (B061): the bar and the tabs are in the pane's one header row (MemberPane, PaneHeaderKey), and
+     the transcript has a height of its own, a little over 60% of the screen, whatever its frame's borders and the
+     Policy strip take (the strip adds to the pane). */
+  .in-pane .screen { flex: none; height: calc(60dvh + 2px); }
   .in-pane :deep(.screen-wrap) { min-height: 0; }
 }
 </style>

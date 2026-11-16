@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, provide, reactive, ref, useId, watch } from 'vue';
 import type { AgentCard, YawbleApi } from '../../../shared/api';
 import type { ActivityRow } from '../monitor/model';
 import MemberAvatar from '../faces/MemberAvatar.vue';
@@ -18,6 +18,7 @@ import { memberActivityStore } from '../gripStore';
 import { errorText, resolveApi } from '../api';
 import { getMemberView, setMemberView, type MemberView } from '../memberPaneView';
 import { useNarrow } from '../narrowScreen';
+import { PaneHeaderKey } from '../terminalPane';
 
 // One member on the team page (B061), in one frame: a title bar (face, name, chips, state, "more waiting"), one toolbar
 // (Open interactive CLI, Code, Settings, Logs, Stop, Remove, and the Activity | Terminal toggle), and a body: on the left
@@ -89,6 +90,15 @@ async function openInteractive() {
     opening.value = false;
   }
 }
+
+// The terminal's one header row on a phone (B057, moved here from the right-hand pane by B061): the shown terminal's
+// Formatted / Raw tabs, and a ⋯ holding its bar (the state line and Policy); Open interactive CLI and Stop are this
+// pane's toolbar. At desktop width `on` is false and the terminal keeps its bar and tabs (TerminalApp, TerminalScreen).
+const uid = useId();
+const termSlots = reactive({ get on() { return phone.value; }, tabs: `member-terminal-tabs-${uid}`, more: `member-terminal-more-${uid}` });
+provide(PaneHeaderKey, termSlots);
+const termMoreOpen = ref(false);
+watch([view, phone], () => { termMoreOpen.value = false; });
 
 /** The phone's ⋯ menu (the toolbar's extras). */
 const moreOpen = ref(false);
@@ -162,6 +172,14 @@ defineExpose({ el: () => root.value });
         <MemberActivity v-if="view === 'activity'" class="member-activity" :rows="rows" :loaded="loaded" :now="now" :limit="activityLimit" />
         <!-- Mounted only while shown: a hidden terminal does not poll. -->
         <div v-else class="member-terminal" data-test="member-terminal">
+          <!-- A phone: one 44 px row over the transcript - the terminal's tabs, and ⋯ for its state line and Policy. -->
+          <div v-if="phone" class="term-head" data-test="member-terminal-head">
+            <span :id="termSlots.tabs" class="tabs-slot" data-test="member-terminal-tabs"></span>
+            <span class="spacer" />
+            <button class="term-more" :class="{ on: termMoreOpen }" title="The terminal's state and policy" aria-label="Terminal: state and policy"
+              :aria-expanded="termMoreOpen" data-test="member-terminal-more" @click="termMoreOpen = !termMoreOpen">⋯</button>
+            <div v-show="termMoreOpen" :id="termSlots.more" class="term-menu" data-test="member-terminal-menu" @click="termMoreOpen = false"></div>
+          </div>
           <TerminalApp ref="term" :key="m.id" embedded in-pane :member-id="m.id" :api="api" :poll-ms="pollMs" @live="termLive = $event" />
         </div>
       </div>
@@ -239,6 +257,10 @@ defineExpose({ el: () => root.value });
    height, then the Activity (its newest lines) or the terminal, full width. The terminal's transcript gets at least 60%
    of the visible height: the area is 60dvh plus its two 44 px rows (the terminal's bar and its Formatted / Raw tabs). */
 @media (max-width: 759.98px) {
+  /* (Verify 288, F3: the terminal is now one 44 px header row - its tabs and ⋯, B057 - over a transcript with a height
+     of its own, a little over 60% of the screen (TerminalApp: 60dvh + 2 px), so the frame's borders never take it under
+     60%; the Policy strip, when opened, adds to the terminal instead of taking from the transcript. With one row the
+     whole terminal fits under the app's top bar even at 667 x 263: 1 + 45 + 160 + 1 px of the 211 px under it.) */
   .pane { padding: 4px 8px 8px; }
   .title { height: 36px; }
   .toolbar { height: 48px; gap: 6px; }
@@ -250,7 +272,15 @@ defineExpose({ el: () => root.value });
   /* What the agent said at its own height: the page is the one scroller. */
   .output { flex: none; height: auto; overflow-y: visible; }
   .side { flex-basis: auto; height: auto; }
-  .side.side-terminal { height: calc(60dvh + 88px); max-height: 100dvh; }
+  .side.side-terminal { height: auto; }
+  .member-terminal > .term-window { flex: none; }
+  .term-head { position: relative; display: flex; align-items: center; gap: 2px; flex: none; height: 44px; padding: 0 2px 0 4px;
+    background: var(--term-head); color: var(--term-fg); border-bottom: 1px solid var(--term-line); }
+  .tabs-slot { display: flex; flex: none; }
+  .term-more { flex: none; min-width: 44px; height: 44px; padding: 0 8px; border: 0; background: transparent; color: inherit; font-size: 16px; }
+  .term-more.on { background: var(--term-btn-on); }
+  .term-menu { position: absolute; right: 4px; top: calc(100% + 2px); z-index: 3; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+    max-width: min(320px, calc(100vw - 8px)); padding: 6px; background: var(--term-head); border: 1px solid var(--term-line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow); }
   .side > .activity-grip { display: none; }
   .more-wrap { position: relative; display: inline-flex; }
   .menu { position: absolute; right: 0; top: 100%; z-index: 5; display: flex; flex-direction: column; min-width: 200px; padding: 4px;

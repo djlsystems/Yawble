@@ -51,7 +51,8 @@ const api = {
 async function teamPage(width: number) {
   screen(width);
   const stubs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, WorkflowsDialog: true, DocumentsDialog: true, LogsDialog: true, TerminalScreen: true };
-  const w = mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs } });
+  // In the document, as in the app: the terminal's bar and tabs teleport by id into its phone header row (PaneHeaderKey).
+  const w = mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs }, attachTo: document.body });
   wrappers.push(w);
   await settle();
   return w;
@@ -128,26 +129,35 @@ for (const frame of [Portrait, Landscape]) {
       const side = paneOf(w, 'DeveloperAda').get('[data-test=member-side]');
       const term = side.get('[data-test=member-terminal]');
       expect(term.find('.term-window').classes()).toContain('in-pane');
-      // The area: 60dvh plus the terminal's two rows (its bar, its Formatted / Raw tabs), capped at the screen.
-      const h = value(side.element, st, 'height')!;
-      const m = /^calc\(60dvh \+ (\d+)px\)$/.exec(h);
-      expect(m, h).not.toBeNull();
-      expect(value(side.element, st, 'max-height')).toBe('100dvh');
+      // The area is as tall as what it holds (no share of a fixed height the frame's borders could eat into, verify 288
+      // F3): the terminal's one 44 px header row (its tabs and ⋯) and the transcript at a height of its own, a little
+      // over 60% of the screen.
+      expect(value(side.element, st, 'height')).toBe('auto');
+      const head = term.get('[data-test=member-terminal-head]').element;
+      const headH = px(value(head, st, 'height')) + px(value(head, st, 'border-bottom')?.split(/\s+/)[0]);
+      expect(headH).toBe(45);
       const app = phoneRules('TerminalApp.vue');
-      const barH = px(app.find((r) => r.sels.includes('.in-pane .bar'))?.decls.height);
-      const modesH = px(app.find((r) => r.sels.includes('.in-pane :deep(.modes)'))?.decls.height);
-      expect(barH).toBe(44);
-      expect(modesH).toBe(44);
+      const screenRule = app.find((r) => r.sels.includes('.in-pane .screen'))!;
+      expect(screenRule.decls.flex).toBe('none');
+      const m = /^calc\(60dvh \+ (\d+)px\)$/.exec(screenRule.decls.height ?? '');
+      expect(m, screenRule.decls.height).not.toBeNull();
       expect(app.find((r) => r.sels.includes('.in-pane :deep(.screen-wrap)'))?.decls['min-height']).toBe('0');
-      const area = Math.min(frame.height * 0.6 + Number(m![1]), frame.height);
-      const transcript = area - barH - modesH;
+      const transcript = frame.height * 0.6 + Number(m![1]);
       expect(transcript / frame.height, `${transcript} of ${frame.height}`).toBeGreaterThanOrEqual(0.6);
-      expect(area).toBeLessThanOrEqual(frame.height);
-      // The terminal's own bar keeps what it shows and Policy, at 44 px; Open and Stop are the pane's.
-      expect(term.find('[data-test=terminal-state]').exists()).toBe(true);
+      // The whole terminal (1 px borders, the header, the transcript) fits under the app's top bar, so with the
+      // transcript scrolled into view its header row is not covered (verify 288, 667 x 263).
+      const appBar = px(rules(styleOf(read('App.vue'))).find((r) => r.sels.includes('.phone .bar'))?.decls['min-height']);
+      expect(appBar).toBeGreaterThan(0);
+      expect(2 + headH + transcript, `terminal under a ${appBar} px top bar`).toBeLessThanOrEqual(frame.height - appBar);
+      // The terminal's bar (what it shows, Policy) is in the header's ⋯ menu; Open and Stop are the pane's.
+      const menu = term.get('[data-test=member-terminal-menu]');
+      expect(menu.find('[data-test=terminal-state]').exists()).toBe(true);
+      expect(menu.find('[data-test=terminal-details-toggle]').exists()).toBe(true);
       expect(term.find('[data-test=open-interactive]').exists()).toBe(false);
       expect(term.find('[data-test=terminal-stop]').exists()).toBe(false);
-      expect(app.find((r) => r.sels.includes('.in-pane .bar button'))?.decls['min-height']).toBe('44px');
+      const more = term.get('[data-test=member-terminal-more]').element;
+      expect(px(value(more, st, 'height'))).toBeGreaterThanOrEqual(44);
+      expect(px(value(more, st, 'min-width'))).toBeGreaterThanOrEqual(44);
     });
   });
 }
