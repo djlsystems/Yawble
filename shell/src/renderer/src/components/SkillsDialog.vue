@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { usePhone } from '../phone';
 import type { YawbleApi, Skill, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
@@ -44,10 +45,30 @@ async function load() {
   }
 }
 
+// A phone (B054): the list and the skill are two views, list → skill → back, in one scroll level (the page's). A picked
+// skill (or the editor) replaces the list, scrolled into view under the sticky Settings bar.
+const phone = usePhone();
+const detailOpen = computed(() => editing.value || selected.value !== null);
+const showList = computed(() => !phone.value || !detailOpen.value);
+const showPane = computed(() => !phone.value || detailOpen.value);
+const paneEl = ref<HTMLElement | null>(null);
+async function revealPane() {
+  if (!phone.value) return;
+  await nextTick();
+  const el = paneEl.value;
+  if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' });
+}
+function backToList() {
+  selected.value = null;
+  editing.value = false;
+  saved.value = null;
+}
+
 function pick(s: Skill) {
   selected.value = s;
   editing.value = false;
   saved.value = null;
+  void revealPane();
 }
 
 function startNew(from?: Skill) {
@@ -57,6 +78,7 @@ function startNew(from?: Skill) {
   selected.value = null;
   editing.value = true;
   saved.value = null;
+  void revealPane();
 }
 
 // Save / Delete await the core: held with a spinner until it answers.
@@ -102,8 +124,8 @@ onMounted(load);
     <p class="muted small">Agents see the list of skills offered to their role and load one when it applies (skills_list, skills_get).
       Every agent CLI gets the same skills the same way.</p>
     <p v-if="error" class="error" data-test="skills-error">{{ error }}</p>
-    <div class="layout" :class="{ fill: inline && fill }" data-test="skills-layout">
-      <aside class="list" data-test="skills-list">
+    <div class="layout" :class="{ fill: inline && fill, phone }" data-test="skills-layout" :data-phone-view="phone ? (detailOpen ? 'detail' : 'list') : undefined">
+      <aside v-if="showList" class="list" data-test="skills-list">
         <LoadingNote v-if="!loaded" text="Loading skills…" />
         <button v-for="s in skills" :key="key(s)" class="item" :class="{ on: selected && key(selected) === key(s) }"
           :data-test="`skill-${s.name}`" @click="pick(s)">
@@ -115,7 +137,8 @@ onMounted(load);
         <button class="primary new" data-test="skill-new" @click="startNew()">+ New skill</button>
       </aside>
 
-      <section class="pane" data-test="skills-pane">
+      <section v-if="showPane" ref="paneEl" class="pane" data-test="skills-pane">
+        <button v-if="phone" class="back" data-test="skills-back" aria-label="Back to the skills" @click="backToList"><span class="back-icon" aria-hidden="true">‹</span>Skills</button>
         <template v-if="editing">
           <label>Name <input v-model="form.name" placeholder="release-notes" data-test="skill-name" /></label>
           <label>Description (one line: when an agent should load it)
@@ -191,4 +214,12 @@ textarea { width: 100%; font-size: 12px; }
   .layout.fill > .pane { display: block; overflow: visible; }
   .layout.fill > .pane > .body { max-height: 420px; }
 }
+/* A phone (B054): the list or the skill, one at a time, in the page's flow; nothing inside scrolls on its own. */
+.layout.phone { display: block; min-height: 0; }
+.layout.phone > .list { max-height: none; overflow: visible; }
+.layout.phone > .pane { overflow: visible; scroll-margin-top: 56px; }
+.layout.phone > .pane > .body { max-height: none; overflow: visible; overflow-wrap: anywhere; }
+.layout.phone .item { min-height: 44px; }
+.back { display: inline-flex; align-items: center; gap: 2px; border: 0; background: transparent; color: var(--accent); padding: 0 8px 0 0; margin-bottom: 6px; font-size: 15px; }
+.back-icon { font-size: 22px; line-height: 1; margin-right: 2px; }
 </style>
