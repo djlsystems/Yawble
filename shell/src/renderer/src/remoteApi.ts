@@ -1,4 +1,5 @@
 import type { AvailableBackend, CoreEvent, CoreInfo, YawbleApi } from '../../shared/api';
+import { openMemberTerminalById } from './memberTerminal';
 
 interface Pending {
   resolve(value: unknown): void;
@@ -70,12 +71,9 @@ export function createRemoteApi(socketUrl: string = defaultSocketUrl()): YawbleA
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    // An agent's terminal: the same page in its own browser window (the page reads #terminal/<id>).
-    openTerminal: async (memberId) => {
-      const url = new URL(window.location.href);
-      url.hash = `terminal/${memberId}`;
-      window.open(url.toString(), `terminal-${memberId}`, 'width=980,height=620');
-    },
+    // An agent's terminal: in this page, on its team's page in that member's pane (memberTerminal.ts), not in a
+    // browser window of its own. (A #terminal/<id> link still opens the bare terminal page, as before.)
+    openTerminal: async (memberId) => { await openMemberTerminalById(memberId); },
     // No OS folder picker in a browser: the person types the folder's path on the instance.
     pickFolder: async () => null,
   };
