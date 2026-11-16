@@ -108,7 +108,10 @@ function finishRename(id: string) {
       <button v-for="t in teams" :key="t.id" class="item small" :class="{ on: view === 'teams' && teamId === t.id }" data-test="team-item" @click="emit('openTeam', t.id)">
         <span class="dot" :class="{ busy: t.running > 0 }" :data-state="teamState(t)" :title="teamStateLabel[teamState(t)]" />
         <span class="label">{{ t.name }}</span>
-        <span v-if="t.running || t.queued" class="muted tiny" data-test="team-counts">{{ t.running }} running · {{ t.queued }} queued</span>
+        <span v-if="t.running || t.queued" class="team-pills" data-test="team-counts">
+          <span v-if="t.running" class="tpill running" data-test="team-running" :title="`${t.running} running`">{{ t.running }}</span>
+          <span v-if="t.queued" class="tpill queued" data-test="team-queued" :title="`${t.queued} queued`">{{ t.queued }}</span>
+        </span>
       </button>
       <button class="item small muted" v-change data-test="new-team" @click="emit('newTeam')"><Icon name="plus" :size="15" />New team</button>
 
@@ -184,6 +187,11 @@ function finishRename(id: string) {
 h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4px; }
 .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tiny { font-size: 11px; }
+/* A team's running and queued counts as pills in the state colours (running solid, queued dashed), each named on hover. */
+.team-pills { display: inline-flex; gap: 3px; flex: none; }
+.tpill { font-size: 11px; line-height: 16px; min-width: 18px; text-align: center; border-radius: 9px; padding: 0 6px; }
+.tpill.running { background: color-mix(in srgb, var(--state-running) 18%, transparent); color: var(--state-running); }
+.tpill.queued { border: 1px dashed var(--state-waiting); color: var(--state-waiting); line-height: 14px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dot-off); flex: none; }
 .dot.busy { background: var(--state-running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-running) 15%, transparent); animation: dot-pulse 1.6s ease-in-out infinite; }
 .dot[data-state=queued] { background: var(--state-waiting); }
