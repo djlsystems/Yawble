@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { vChange } from '../remoteAccess';
 import TeamStateChip from './TeamStateChip.vue';
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import TaskAskCard from './TaskAskCard.vue';
 import type { AgentCard as Card, Decision, IntegrationAsk, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { type AgentCliId } from '../agentClis';
 import { useAgentOptions } from '../agentOptions';
-import AgentCard from './AgentCard.vue';
-import MemberActivity from './MemberActivity.vue';
+import MemberPane from './MemberPane.vue';
 import { useTeamActivity } from '../monitor/teamActivity';
 import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
-import { memberActivityStore, memberCardsStore } from '../gripStore';
-import { activityWidth } from '../memberActivityWidth';
+import { memberCardsStore } from '../gripStore';
+import { memberFocus, takeMemberFocus } from '../memberPaneView';
 import Icon from './Icon.vue';
 import TriggersDialog from './TriggersDialog.vue';
 import LoadingNote from './LoadingNote.vue';
@@ -29,7 +28,6 @@ import TeamSyncBanner from './TeamSyncBanner.vue';
 import { renderMarkdown } from '../markdown';
 import { asksForApproval, questionMarkdown, questionOptions } from '../questionFormat';
 import { useImageAttachments } from '../imageAttachments';
-import { showMemberTerminal } from '../terminalPane';
 import { useNarrow } from '../narrowScreen';
 
 // A team's agent list: the Tell Manager box, open needs_decision questions, the cards, and Add agent.
@@ -159,8 +157,19 @@ const remove = (c: Card) => {
   if (!window.confirm(`Remove ${c.member.name} from ${c.member.team}? Its queued instructions are dropped.`)) return;
   return busyFor(`member-${c.member.id}`, () => api.call('members.remove', { memberId: c.member.id }), 'remove')();
 };
-// The agent's terminal in the window's terminal pane (one at a time, replacing what it showed).
-const openTerminal = (c: Card) => showMemberTerminal(c.member.id, `${c.member.name} · ${c.member.team}`);
+// The members' panes by name, so a focus request (focusMemberTerminal: the Monitor, the palette, the remote view) can
+// scroll one into view. The request waits until this team is shown and the member's pane is there.
+const panes = new Map<string, InstanceType<typeof MemberPane>>();
+function setPaneRef(name: string, p: unknown) {
+  if (p) panes.set(name, p as InstanceType<typeof MemberPane>);
+  else panes.delete(name);
+}
+watch([() => memberFocus(), () => props.team.name, () => cards.value.map((c) => c.member.name).join('\n')], async ([f]) => {
+  if (!f || f.team !== props.team.name || !cards.value.some((c) => c.member.name === f.member)) return;
+  takeMemberFocus(props.team.name);
+  await nextTick();
+  panes.get(f.member)?.el()?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+}, { immediate: true });
 
 onMounted(() => {
   void refresh();
@@ -296,19 +305,13 @@ defineExpose({ refresh, openWorkflows });
       </div>
     </div>
 
-    <!-- One column of members, each its card and its activity side by side: the 14px gap below each is a height handle for every member's output box (as on the Teams list). -->
+    <!-- One column of members, each one framed pane (B061): the 14px gap below each is a height handle for every member's body (as on the Teams list). -->
     <div v-for="c in cards" :key="c.member.id" class="member-cell">
-      <div class="member-row">
-        <AgentCard class="member-main" :card="c"
-          :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
-          @terminal="openTerminal(c)" @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)" @policy="emit('policy', c.member.id)"
-          @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
-        <!-- The bar in the gap to the left of the activity sets the width of every member's activity together. -->
-        <div class="member-side" :style="phone ? undefined : { flexBasis: `${activityWidth}px` }">
-          <TileGrip v-if="!phone" class="activity-grip" axis="w" reverse :store="memberActivityStore" />
-          <MemberActivity class="member-activity" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" :limit="phone ? PhoneActivityRows : undefined" />
-        </div>
-      </div>
+      <MemberPane :ref="(p) => setPaneRef(c.member.name, p)" :card="c" :api="api" :poll-ms="pollMs"
+        :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
+        :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" :activity-limit="phone ? PhoneActivityRows : undefined"
+        @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)" @policy="emit('policy', c.member.id)"
+        @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
       <TileGrip v-if="!phone" axis="h" :store="memberCardsStore" />
     </div>
 
@@ -336,17 +339,6 @@ h2 { font-size: 16px; margin: 0; }
 .actions button { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .team > * { margin-bottom: 10px; }
 .team > .member-cell { position: relative; margin-bottom: 14px; }
-.member-row { display: flex; gap: 14px; align-items: stretch; }
-.member-main { flex: 1 1 0; min-width: 0; }
-.member-side { position: relative; display: flex; flex-grow: 0; flex-shrink: 1; min-width: 0; }
-.member-activity { flex: 1; min-width: 0; }
-/* The width bar fills the 14px gap between the card and the activity (TileGrip's gap handles sit outside what they size). */
-.member-side > .activity-grip { left: -14px; right: auto; }
-@media (max-width: 900px) {
-  .member-row { flex-direction: column; }
-  .member-side { flex-basis: auto !important; height: 12rem; }
-  .member-side > .activity-grip { display: none; }
-}
 .decision { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; }
 .decision p { margin: 0 0 6px; }
 .decision > .row { margin-top: 6px; }
@@ -368,12 +360,8 @@ h2 { font-size: 16px; margin: 0; }
 .add { margin-top: 14px; }
 .paused { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
 .small { font-size: 12px; }
-/* A phone (B037): one column; each member's Activity under its card; the actions, Tell and the asks wrap; tap targets 44 px. */
+/* A phone (B037): one column of member panes (each stacked, MemberPane); the actions, Tell and the asks wrap; tap targets 44 px. */
 @media (max-width: 759.98px) {
-  .member-row { flex-direction: column; gap: 8px; }
-  /* The Activity under its card at its own height (B054: no nested scroller; the page scrolls). */
-  .member-side { flex-basis: auto; height: auto; }
-  .member-side > .activity-grip { display: none; }
   .team > .member-cell { margin-bottom: 16px; }
   .team > * { margin-bottom: 6px; }
   /* The header (B054): one 44 px row, the title (cut with …) and the icon actions; it scrolls away with the page. */

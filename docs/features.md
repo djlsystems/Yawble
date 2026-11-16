@@ -27,8 +27,23 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     team's documents, as you choose.
   - **Environment** holds team environment variables; the next runs get them.
 - **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**.
-- On the team page each member's card has an **Activity** tile beside it: the Monitor's activity lines for that
-  member (what it was told, its progress, runs and changed files), newest first.
+- On the team page each member is one framed pane:
+  - A title bar: face, name, role and CLI chips, **⚠ loosened** (opens its Policy tab), its state and how many
+    instructions wait behind its run.
+  - One toolbar: **>_** Open interactive CLI, **</>** Code (when the member has a clone), **⚙** Settings, Logs,
+    **■** Stop and **🗑** Remove, and an **Activity | Terminal** toggle.
+  - Left: what the member last said, formatted. Right: its **Activity** (the Monitor's lines for that member: what it
+    was told, its progress, runs and changed files, newest first) or its **Terminal**.
+  - The terminal is the same as the member terminal elsewhere: **Formatted** or **Raw**, the state line, and the
+    **Policy** banner. **Open interactive CLI** shows it and starts the CLI at its size.
+  - The toggle is remembered per member. Only a terminal that is shown polls; several members' terminals can show at
+    once. The Monitor, the palette and the remote view can open a member's terminal: the team page shows that pane's
+    Terminal and scrolls it into view.
+  - The bar between the two areas sets the right area's width for every member; the gaps between members set their
+    height. At the default height a pane is no taller than the card and Activity row it replaced.
+  - On a phone a pane is stacked: the title, a compact toolbar (Stop, the toggle and **⋯** with the rest), what was
+    said, then the Activity (its newest lines) or the terminal, full width. The terminal's transcript gets at least
+    60% of the screen's height. Every target is at least 44 px.
 - Members ask you through the team page. **Approve** answers once; **Always approve for this team…** remembers it.
 - One global run limit (default 4) covers every team. Runs and interactive sessions wait in one first-come,
   first-served queue.
@@ -262,7 +277,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 ## Logs
 
 **Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. The **log** icon on
-a member's card opens it at that member's activity.
+a member's pane opens it at that member's activity.
 
 - **Logs:**
   - **All activity**: everything a member did or was asked to do, gathered from every log below. Every member's
@@ -472,3 +487,5 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 - Every call that changes something is recorded in an audit log, with who made it and how. Keys, tokens and
   messages are never recorded.
 - Each run's output is kept in an owner-only transcript file. The terminal shows it as **Formatted** or **Raw**.
+- A member's terminal is in its pane on the team page (the **Terminal** side of its toggle). An agent's **Terminal**
+  and **Test** sessions from Settings > Agents open in the window's terminal pane.

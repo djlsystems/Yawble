@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import AgentCardView from '../../src/renderer/src/components/AgentCard.vue';
+import AgentCardView from '../../src/renderer/src/components/MemberPane.vue';
 import CodeDialog from '../../src/renderer/src/components/CodeDialog.vue';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import LinkDialog from '../../src/renderer/src/components/LinkDialog.vue';
@@ -56,13 +56,13 @@ describe('the Code browser in the shell', () => {
     for (const m of ['code.open', 'code.list', 'code.read', 'code.download', 'code.close']) expect(isUiMethod(m)).toBe(true);
   });
 
-  it("the member card's Code icon shows only when the member has a clone, and asks to open it", async () => {
+  it("the member pane's Code icon shows only when the member has a clone, and asks to open it", async () => {
     const without = mount(AgentCardView, { props: { card: card() } });
     expect(without.find('[data-test=open-code]').exists()).toBe(false);
     const noClone = mount(AgentCardView, { props: { card: card({ hasClone: false }) } });
     expect(noClone.find('[data-test=open-code]').exists()).toBe(false);
     const w = mount(AgentCardView, { props: { card: card({ hasClone: true }) } });
-    const icon = w.get('[data-test=agent-title] [data-test=open-code]');
+    const icon = w.get('[data-test=member-toolbar] [data-test=open-code]');
     expect(icon.attributes('title')).toBe('Code');
     await icon.trigger('click');
     expect(w.emitted('code')).toHaveLength(1);
