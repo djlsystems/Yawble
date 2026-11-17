@@ -827,7 +827,8 @@ public sealed partial class TeamRepos
 
     /// <summary>
     /// Pushes every branch of the member's team repository that origin does not have yet: members' branches and the
-    /// team branch, never the base branch or main/master. Called after each run's fetch-back (and so after the
+    /// team branch, never the base branch or main/master. A member branch origin has behind the team's copy (its commits
+    /// reached origin through another branch, a merge into main) is fast-forwarded too (B067). Called after each run's fetch-back (and so after the
     /// Manager's run in which it declared the workflow complete). Never forced; a refused branch does not stop the
     /// others; the first transport failure stops the push and names what did not go. Never throws for git: a failed
     /// push is reported, never the run's failure (a transport problem, not an agent fault).
@@ -873,8 +874,10 @@ public sealed partial class TeamRepos
                 {
                     var local = await Git.TryRunAsync(repo.Path, ["rev-parse", "refs/heads/" + branch], ct);
                     var remote = await Git.TryRunAsync(repo.Path, ["rev-parse", "--verify", "-q", "refs/remotes/origin/" + branch], ct);
-                    // A member branch only when origin lacks it: one origin has at another commit is not ours to move.
-                    isAhead = remote.ExitCode != 0 || (branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal) && remote.Stdout != local.Stdout);
+                    // A member branch when origin lacks it, or (B067) when origin's copy is behind the team's: a fast-forward,
+                    // never forced. One origin has at a commit the team's copy does not contain is not ours to move (Realign).
+                    isAhead = remote.ExitCode != 0 || (remote.Stdout != local.Stdout && (branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal)
+                        || (await Git.TryRunAsync(repo.Path, ["merge-base", "--is-ancestor", remote.Stdout, local.Stdout], ct)).ExitCode == 0));
                     // ...unless the branch is only a point of origin's base branch (no work of the team on it):
                     // a branch on origin that says nothing.
                     if (isAhead && remote.ExitCode != 0

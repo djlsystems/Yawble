@@ -77,7 +77,9 @@ public sealed class PersonGitPush(TimeSpan? timeout = null, string? globalConfig
 
     /// <summary>
     /// Any other git command that must reach origin as the person does (the Git dialog's Fetch). The person's config
-    /// applies; prompts are off; askpass is off. Callers pass only network commands against origin.
+    /// applies; prompts are off; askpass is off. Callers pass only network commands against origin. The only pushes here
+    /// that replace a commit are the person's own confirmed actions, each with --force-with-lease on the commit shown: a
+    /// branch delete, and (B067) a member branch's realign to its clone.
     /// </summary>
     public async Task<GitResult> RunAsync(string teamRepo, IReadOnlyList<string> args, CancellationToken ct)
     {

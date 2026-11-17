@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import { useEscapeClose } from '../escapeClose';
 import type { ApiRow, Connection, IntegrationInfo, McpServerInfo, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -366,7 +367,7 @@ async function discovered() {
 let kept = false;
 async function close() {
   const dirty = checklist.value?.dirtyCount ?? 0;
-  if (dirty > 0 && !window.confirm('You have unsaved changes. Close and lose them?')) return;
+  if (dirty > 0 && !(await confirmDialog({ message: 'You have unsaved changes. Close and lose them?', okLabel: 'Close', danger: true }))) return;
   // Cancel removes an API this session created (a new one, not Edit); its connection, if any, is never removed.
   if (isApi.value && !props.name && apiName.value && !kept && !remote.value) {
     try { await api.call('integrations.apiRemove', { name: apiName.value, removeConnection: false }); } catch (e) { error.value = errorText(e); return; }

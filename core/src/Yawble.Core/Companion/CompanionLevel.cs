@@ -28,7 +28,7 @@ public static class CompanionLevels
     {
         CompanionLevel.Read => "Can look at teams, boards, backlog, documents and status. Changes nothing.",
         CompanionLevel.Act => "Can also start work (tell and answer agents, dispatch backlog items, nudge workflows), pause and resume teams, and manage the backlog and board; these run right away.",
-        CompanionLevel.Destructive => "Can also ask for risky actions, for example git merges, pushes and branch deletes, pull requests, creating, archiving or deleting a team, backups and restores, the doctor's fixes or closing a workflow; each one still waits for your click in the app.",
+        CompanionLevel.Destructive => "Can also ask for risky actions, for example git merges, pushes and branch deletes, pull requests, creating, archiving or deleting a team, backups and restores, the doctor's fixes, closing a workflow or running a team's host task; each one still waits for your click in the app.",
         _ => throw new ArgumentOutOfRangeException(nameof(level)),
     };
 }

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import type { Connection, EnvFromConnection, HostTaskDef, HostTaskInfo, YawbleApi, TaskPreview, TaskRun, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
+import { requesterName } from '../requester';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 
@@ -26,14 +28,14 @@ const doing = ref<string | null>(null);
 
 /** One "Environment from a Connection" row in the form: the variable, the Connection and which of its secret fields. */
 interface BindingRow { name: string; connectionId: number | null; field: string; connectionName: string }
-interface Form { original: string | null; name: string; repo: string; program: string; args: string; workdir: string; timeoutSeconds: number; envNames: string; watch: string; pinMode: 'files' | 'commit'; commandLineOnly: boolean; bindings: BindingRow[] }
+interface Form { original: string | null; name: string; repo: string; program: string; args: string; workdir: string; timeoutSeconds: number; envNames: string; watch: string; pinMode: 'files' | 'commit'; commandLineOnly: boolean; bindings: BindingRow[]; description: string; checkAfter: string }
 const form = ref<Form | null>(null);
 const preview = ref<TaskPreview | null>(null);
 
 /** The first two tasks, offered as drafts: the person reviews them in the form and presses Save (nothing exists until then). */
 const DRAFTS: Record<string, Form> = {
-  e2e: { original: null, name: 'e2e', repo: 'main', program: 'npm', args: 'run\ntest:e2e', workdir: 'shell', timeoutSeconds: 900, envNames: '', watch: 'shell/playwright.config.ts', pinMode: 'files', commandLineOnly: false, bindings: [] },
-  'core-tests-host': { original: null, name: 'core-tests-host', repo: 'main', program: 'dotnet', args: 'test\n--project\ncore/tests/Yawble.Core.Tests', workdir: '.', timeoutSeconds: 1200, envNames: '', watch: '', pinMode: 'commit', commandLineOnly: false, bindings: [] },
+  e2e: { original: null, name: 'e2e', repo: 'main', program: 'npm', args: 'run\ntest:e2e', workdir: 'shell', timeoutSeconds: 900, envNames: '', watch: 'shell/playwright.config.ts', pinMode: 'files', commandLineOnly: false, bindings: [], description: '', checkAfter: '' },
+  'core-tests-host': { original: null, name: 'core-tests-host', repo: 'main', program: 'dotnet', args: 'test\n--project\ncore/tests/Yawble.Core.Tests', workdir: '.', timeoutSeconds: 1200, envNames: '', watch: '', pinMode: 'commit', commandLineOnly: false, bindings: [], description: '', checkAfter: '' },
 };
 
 const lines = (s: string) => s.split(/\r?\n/).map((x) => x.trim()).filter((x) => x.length > 0);
@@ -42,7 +44,14 @@ function defOf(f: Form): HostTaskDef {
   return { name: f.name.trim(), repo: f.repo, program: f.program.trim(), args: f.args.split(/\r?\n/).map((x) => x.trim()).filter((x) => x.length > 0), workdir: f.workdir.trim() || '.',
     timeoutSeconds: Number(f.timeoutSeconds), envNames: names(f.envNames), watch: lines(f.watch), pinMode: f.pinMode, commandLineOnly: f.commandLineOnly,
     envFromConnections: f.bindings.filter((b) => !blankRow(b))
-      .map((b) => ({ name: b.name.trim(), connectionId: b.connectionId as number, field: b.field, connectionName: b.connectionName })) };
+      .map((b) => ({ name: b.name.trim(), connectionId: b.connectionId as number, field: b.field, connectionName: b.connectionName })),
+    ...optionalText(f) };
+}
+/** Description and "What to check after" (B066): one line each, trimmed, and left out when empty so an empty field stays empty. */
+const oneLine = (s: string) => s.replace(/\s*\r?\n\s*/g, ' ').trim();
+function optionalText(f: Form): Pick<HostTaskDef, 'description' | 'checkAfter'> {
+  const description = oneLine(f.description), checkAfter = oneLine(f.checkAfter);
+  return { ...(description ? { description } : {}), ...(checkAfter ? { checkAfter } : {}) };
 }
 
 /** Over the Cloud Link a task's bindings are shown (names only) but never changed: that is done on the computer itself. */
@@ -104,7 +113,7 @@ async function act(work: () => Promise<unknown>, done?: string, label = '') {
 }
 
 function startNew(draft?: string) {
-  form.value = draft ? { ...DRAFTS[draft], bindings: [] } : { original: null, name: '', repo: 'main', program: '', args: '', workdir: '.', timeoutSeconds: 600, envNames: '', watch: '', pinMode: 'files', commandLineOnly: false, bindings: [] };
+  form.value = draft ? { ...DRAFTS[draft], bindings: [] } : { original: null, name: '', repo: 'main', program: '', args: '', workdir: '.', timeoutSeconds: 600, envNames: '', watch: '', pinMode: 'files', commandLineOnly: false, bindings: [], description: '', checkAfter: '' };
   void loadConnections();
   preview.value = null;
   void refreshPreview();
@@ -119,7 +128,8 @@ function startEdit(t: HostTaskInfo) {
   const d = t.def;
   form.value = { original: d.name, name: d.name, repo: d.repo, program: d.program, args: d.args.join('\n'), workdir: d.workdir, timeoutSeconds: d.timeoutSeconds, envNames: d.envNames.join(', '),
     watch: d.watch.join('\n'), pinMode: d.pinMode, commandLineOnly: d.commandLineOnly,
-    bindings: (d.envFromConnections ?? []).map((b) => ({ ...b, connectionId: connectionIdOf(b.connectionId) })) };
+    bindings: (d.envFromConnections ?? []).map((b) => ({ ...b, connectionId: connectionIdOf(b.connectionId) })),
+    description: d.description ?? '', checkAfter: d.checkAfter ?? '' };
   void loadConnections();
   preview.value = null;
   void refreshPreview();
@@ -138,7 +148,7 @@ async function save() {
     form.value = null;
   }, 'Saved. Any earlier Always approval was removed; the next request asks.', 'save');
 }
-const del = (t: HostTaskInfo) => { if (window.confirm(`Delete the task ${t.def.name}? Its run records stay.`)) void act(() => api.call('tasks.delete', { teamId: teamId.value, name: t.def.name }), undefined, `delete:${t.def.name}`); };
+const del = async (t: HostTaskInfo) => { if (await confirmDialog({ message: `Delete the task ${t.def.name}? Its run records stay.`, okLabel: 'Delete', danger: true })) void act(() => api.call('tasks.delete', { teamId: teamId.value, name: t.def.name }), undefined, `delete:${t.def.name}`); };
 const revoke = (t: HostTaskInfo) => act(() => api.call('tasks.revoke', { teamId: teamId.value, name: t.def.name }), 'Always revoked: it asks every time.', `revoke:${t.def.name}`);
 async function runNow(t: HostTaskInfo) {
   await act(async () => {
@@ -191,6 +201,8 @@ onMounted(load);
             <option value="commit">commit: ask after every new commit on the base branch</option>
           </select></label>
       </div>
+      <label class="block">Description (optional, one line: what the task does)<input v-model="form.description" data-test="task-description" placeholder="Builds, signs and publishes the desktop release" /></label>
+      <label class="block">What to check after (optional, e.g. a health URL)<input v-model="form.checkAfter" data-test="task-check-after" placeholder="https://example.org/health answers 200" /></label>
       <label class="block">Arguments (one per line, never a shell line)<textarea v-model="form.args" rows="3" class="mono" data-test="task-args" @input="refreshPreview"></textarea></label>
       <label class="block">Environment variable names to pass on (names only, never values)<input v-model="form.envNames" class="mono" data-test="task-env" /></label>
       <div class="block bindings" data-test="task-bindings">
@@ -248,12 +260,14 @@ onMounted(load);
       <header class="row">
         <div class="grow">
           <b class="mono">{{ t.def.name }}</b> <span class="muted small">{{ t.def.repo }} · in {{ t.def.workdir }} · limit {{ t.def.timeoutSeconds }} s · pin {{ t.def.pinMode }}</span>
+          <div v-if="t.def.description" class="small" data-test="task-description-text">{{ t.def.description }}</div>
           <div class="mono small">{{ t.commandLine }}</div>
+          <div v-if="t.def.checkAfter" class="small" data-test="task-check-after-text"><span class="muted">Check after:</span> {{ t.def.checkAfter }}</div>
           <div v-for="b in t.def.envFromConnections ?? []" :key="b.name" class="mono small" data-test="task-binding-text">{{ bindingText(b) }}</div>
           <div class="small">
             <span :class="t.approval === 'always' ? 'ok' : t.approval === 'always-but-changed' ? 'warn' : 'muted'" data-test="task-approval">{{ approvalText(t) }}</span>
             <template v-if="t.pendingAskId"> · <span class="warn">waiting for you (request {{ t.pendingAskId }}, on the team's page)</span></template>
-            <template v-if="t.lastRun"> · last: {{ runText(t.lastRun) }}<template v-if="t.lastRun.requestedBy"> asked by {{ t.lastRun.requestedBy }}</template></template>
+            <template v-if="t.lastRun"> · last: {{ runText(t.lastRun) }}<template v-if="t.lastRun.requestedBy"> asked by {{ requesterName(t.lastRun.requestedBy) }}</template></template>
           </div>
           <div v-if="t.problem" class="small warn">{{ t.problem }}</div>
         </div>
@@ -273,7 +287,7 @@ onMounted(load);
         <td>#{{ r.id }}</td><td class="mono">{{ r.task }}</td>
         <td :class="r.state === 'done' && r.exitCode === 0 ? 'ok' : r.state === 'running' ? 'muted' : 'warn'">{{ runText(r) }}</td>
         <td class="muted">{{ durationOf(r) }}</td><td class="muted mono">{{ (r.commit ?? '').slice(0, 8) }}</td>
-        <td class="muted">{{ r.requestedBy ?? 'you' }}</td>
+        <td class="muted">{{ r.requestedBy ? requesterName(r.requestedBy) : 'you' }}</td>
         <td><button v-if="r.state === 'running'" class="mini" data-test="run-stop" :disabled="busy" @click.stop="cancel(r.id)"><BusyLabel :busy="doing === `stop:${r.id}`" text="Stopping…">Stop</BusyLabel></button></td>
       </tr>
       <tr v-if="openRun === r.id"><td class="detail" colspan="7">

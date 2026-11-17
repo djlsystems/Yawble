@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import type { ChoiceState, DiscoverChecklistData, DiscoverJobData, DiscoverNode, YawbleApi, RowState, TeamSummary } from '../../../shared/api';
@@ -269,8 +270,12 @@ async function save(): Promise<boolean> {
   finally { saving.value = false; }
 }
 
-function changeScope(v: string) {
-  if (dirtyCount.value > 0 && !window.confirm('You have unsaved changes. Switch the scope and lose them?')) return;
+async function changeScope(el: HTMLSelectElement) {
+  const v = el.value;
+  if (dirtyCount.value > 0 && !(await confirmDialog({ message: 'You have unsaved changes. Switch the scope and lose them?', okLabel: 'Switch', danger: true }))) {
+    el.value = scope.value === null ? '' : String(scope.value); // the select shows the scope that stays
+    return;
+  }
   scope.value = v === '' ? null : Number(v);
   saved.value = null;
   void load();
@@ -313,7 +318,7 @@ defineExpose({ dirtyCount, start, save });
 
       <div class="row bar">
         <label class="small">Scope
-          <select :value="scope === null ? '' : String(scope)" data-test="discover-scope" @change="changeScope(($event.target as HTMLSelectElement).value)">
+          <select :value="scope === null ? '' : String(scope)" data-test="discover-scope" @change="changeScope($event.target as HTMLSelectElement)">
             <option value="">Every team (default)</option>
             <option v-for="t in offeredTeams" :key="t.id" :value="String(t.id)">Team: {{ t.name }}</option>
           </select>

@@ -7,6 +7,7 @@ import { errorCode, errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import TidyPanel from './TidyPanel.vue';
 
 // The Git dialog: for the team's main repository or one of its writable extra repositories (the tabs on
 // top), see the team's branches against the base branch, fetch origin,
@@ -25,9 +26,13 @@ const confirming = ref(false);
 // Which repository: the main one ('') or a writable extra by name. Read-only references have no team branch.
 const repo = ref('');
 const choices = ref<{ name: string; label: string }[]>([]);
+const mainName = ref<string | null>(null);
+// B067: Tidy… (every branch of the team's repositories in one plan; TidyPanel).
+const tidying = ref(false);
 async function loadChoices() {
   try {
     const r = await api.call<{ main: { name: string | null } | null; extras: { name: string; writable: boolean }[] }>('teams.repos', { teamId: props.team.id });
+    mainName.value = r.main?.name ?? null;
     choices.value = [{ name: '', label: r.main?.name ?? 'main' }, ...r.extras.filter((e) => e.writable).map((e) => ({ name: e.name, label: e.name }))];
   } catch { choices.value = []; }
 }
@@ -280,11 +285,15 @@ onMounted(() => { void loadChoices(); void load(); });
         </span>
         <button v-if="status.merge === 'conflict' || (status.teamBehindBase > 0 && status.merge !== 'none')" data-test="git-ask-team" :disabled="!!busy"
           title="Tell the Manager to merge the base into its branch and resolve the conflicts" @click="askTeam"><BusyLabel :busy="busy === 'ask'" text="Asking…">Ask the team to bring it current</BusyLabel></button>
+        <button data-test="git-tidy" :disabled="!!busy || tidying" title="Every branch here, on origin and in the members' clones in one list: delete the merged ones, realign moved ones"
+          @click="tidying = true; deleting = null; confirming = false">Tidy…</button>
         <button data-test="git-refresh" :disabled="!!busy" @click="refresh"><BusyLabel :busy="busy === 'refresh'" text="Refreshing…">Refresh</BusyLabel></button>
       </div>
 
       <p v-if="result" class="result" :class="{ ok: result.changed }" data-test="git-result">{{ result.message }}
         <template v-if="result.files?.length"> Files: <code>{{ result.files.join(', ') }}</code></template></p>
+
+      <TidyPanel v-if="tidying" :api="api" :team="team" :main-name="mainName" @close="tidying = false" @changed="load()" />
 
       <section v-for="b in blockingBranches" :key="`blocking:${b.repo}:${b.name}`" class="blocking" data-test="git-blocking-branch">
         <div><strong><code>{{ b.name }}</code> blocks this team's member branches</strong></div>
