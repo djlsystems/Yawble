@@ -5,7 +5,10 @@ import { groupAsks, hostsLabel } from '../networkAskGroups';
 import { resolveApi } from '../api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { MemberStateLabel, memberStateOf, type MemberState } from '../faces/faces';
-import { memberKey, MonitorModel, spaced, teamKey, type ActivityRow, type FeedRow, type TeamSnapshot } from './model';
+import {
+  memberKey, MonitorModel, needYouSummary, needYouWord, spaced, teamKey, type ActivityRow, type FeedRow, type NeedYouItem, type NeedYouKind, type TeamSnapshot,
+} from './model';
+import { youNodeAt } from './rhythm';
 import { MonitorScene, Palette, type SceneHover } from './scene';
 import {
   clampLayout, Densities, DefaultDensity, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, LayoutStep, readDensity, readLayout,
@@ -163,7 +166,13 @@ function onWallUp(e: PointerEvent): void {
   const [x, y] = canvasPoint(e);
   let you = false;
   try { you = extras()?.hitYouNode?.(x, y) === true; } catch { you = false; }
-  if (you) { emit('openNeedsYou'); return; }
+  // On a phone (no hover) a tap shows what is in it first; its button opens Needs you. A desktop click opens it.
+  if (you) {
+    if (phone.value) { publishCounts(); youOpen.value = !youOpen.value; }
+    else emit('openNeedsYou');
+    return;
+  }
+  youOpen.value = false;
   if (p.seq === pickSeq) leaveFocus();
 }
 function onWallCancel(): void { pointersDown = Math.max(0, pointersDown - 1); press = null; }
@@ -199,9 +208,33 @@ function toggleActivity(): void {
   try { localStorage.setItem('yawble.monitor.activity', activityOpen.value ? 'open' : 'collapsed'); } catch { /* not kept */ }
 }
 const counts = ref({ running: 0, waiting: 0, needYou: 0, members: 0, perMinute: 0 });
+/**
+ * What waits for the person (B088): the live model's need-you list, the same one the You node counts, so the header's
+ * "N need you" is always its length. Published with the counts.
+ */
+const needYou = shallowRef<NeedYouItem[]>([]);
+function publishCounts(): void {
+  needYou.value = live.needYouItems();
+  counts.value = { ...live.counts(), needYou: needYou.value.length, perMinute: live.perMinute(performance.now()) };
+}
 /** The heavy-work lease line under the counts (null: hidden, the lease is free and nobody waits). */
 const heavy = ref<string | null>(null);
 const hover = ref<SceneHover | null>(null);
+// The You node's breakdown: shown while it is hovered (a desktop) or after a tap on it (a phone, until the next tap).
+const YouTipLines = 10;
+const NeedYouLook: Record<NeedYouKind, 'decision' | 'blocked' | 'fail'> = { question: 'decision', network: 'decision', tool: 'decision', blocked: 'blocked', failed: 'fail' };
+const youOpen = ref(false);
+const youShown = computed(() => youOpen.value || hover.value?.kind === 'you');
+const youTipStyle = computed(() => {
+  const b = canvas.value?.getBoundingClientRect();
+  const w = b?.width ?? 0, h = b?.height ?? 0;
+  const n = youNodeAt(w, h);
+  return { right: `${Math.max(4, w - n.x + n.r + 10)}px`, top: `${n.y}px` };
+});
+function openNeedsYouFromTip(): void {
+  youOpen.value = false;
+  emit('openNeedsYou');
+}
 const picked = ref<string | null>(null);
 const clock = ref('');
 const error = ref<string | null>(null);
@@ -283,6 +316,18 @@ const shown = computed(() => {
   if (!p) return activity.value;
   return activity.value.filter((r) => r.team.toLowerCase() === p.team.name.toLowerCase() && (!p.member || r.member?.toLowerCase() === p.member.name.toLowerCase()));
 });
+/** Each member's state now, by its scene key, so an activity row's face wears the same ring as the member on the wall. */
+const memberStates = computed(() => {
+  const states = new Map<string, MemberState>();
+  for (const t of teams.value) for (const m of t.members) states.set(memberKey(t.name, m.name), m.state);
+  return states;
+});
+/** A row's member state: the replay's state at the playhead in a replay, else the live one (idle if unknown). */
+function rowState(team: string, member: string): MemberState {
+  const key = memberKey(team, member);
+  if (replayStates && playhead.value !== null) return replayStates.of(key, playhead.value);
+  return memberStates.value.get(key) ?? 'idle';
+}
 const windowFrom = computed(() => now.value - windowMinutes.value * 60_000);
 const replayClock = computed(() => (playhead.value === null ? '' : new Date(playhead.value).toLocaleTimeString()));
 
@@ -422,12 +467,12 @@ async function loadAsks(): Promise<void> {
         api.call<NetworkAsk[]>('network.asks', {}).then((r) => (Array.isArray(r) ? r : []), () => [] as NetworkAsk[]),
         api.call<ToolAsk[]>('tools.asks', {}).then((r) => (Array.isArray(r) ? r : []), () => [] as ToolAsk[]),
       ]);
-      const asks: { key: string; team: string; member: string | null; label: string | null }[] = [
+      const asks: { key: string; kind: 'network' | 'tool'; team: string; member: string | null; label: string | null }[] = [
         ...groupAsks(net.filter((a) => a && a.state === 'pending')).map((g) => ({
-          key: `n:${g.key}`, team: g.asks[0].team, member: g.asks[0].memberName || null, label: hostsLabel(g.hosts),
+          key: `n:${g.key}`, kind: 'network' as const, team: g.asks[0].team, member: g.asks[0].memberName || null, label: hostsLabel(g.hosts),
         })),
         ...tools.filter((a) => a && (a.state === 'pending' || a.state === 'installing')).map((a) => ({
-          key: `t:${a.id}`, team: a.team, member: a.memberName || null, label: a.displayName || a.tool,
+          key: `t:${a.id}`, kind: 'tool' as const, team: a.team, member: a.memberName || null, label: a.displayName || a.tool,
         })),
       ];
       const setAsks = (live as Partial<Pick<MonitorModel, 'setAsks'>>).setAsks;
@@ -437,7 +482,7 @@ async function loadAsks(): Promise<void> {
       // Those already waiting when the Monitor opens are counted, not flown in.
       if (asksFirst) live.effects.length = before;
       asksFirst = false;
-      if (!asksAgain && mode.value === 'live') counts.value = { ...live.counts(), perMinute: live.perMinute(performance.now()) };
+      if (!asksAgain && mode.value === 'live') publishCounts();
     } while (asksAgain);
   } finally { asksLoading = false; }
 }
@@ -462,6 +507,9 @@ async function tick(first = false) {
     const fe = await codeFeed(first);
     await workflowFeed(first, new Set(fr.map((r) => r.team.toLowerCase())));
     if (first) catchUp(live, [...fr].sort((a, b) => timeOf(a) - timeOf(b)), fs, fe);
+    // The need-you items new since the last look fly to the You node and sound, once each (B088); those there when the
+    // Monitor opens are counted, not flown.
+    live.syncNeedYou(performance.now(), !first);
     const from = Date.now() - MaxWindowMinutes * 60_000;
     rows.value = trimByTime(rows.value, from, 4000);
     steps.value = trimByTime(steps.value, from, 30_000);
@@ -480,7 +528,7 @@ async function tick(first = false) {
   } finally {
     busy = false;
     loaded.value = true;
-    counts.value = { ...live.counts(), perMinute: live.perMinute(performance.now()) };
+    publishCounts();
   }
 }
 
@@ -744,7 +792,19 @@ onBeforeUnmount(() => {
             </li>
           </template>
         </ul>
-        <div v-if="hover" class="tip" :style="{ left: `${hover.x}px`, top: `${hover.y}px` }" data-test="monitor-tip">
+        <!-- The You node's breakdown (B088): hovered on a desktop, tapped on a phone; the same list as the header's count. -->
+        <div v-if="youShown" class="you-tip" :class="{ open: youOpen }" :style="youTipStyle" data-test="monitor-you-tip"
+          :role="youOpen ? 'dialog' : undefined" :aria-label="youOpen ? 'What needs you' : undefined">
+          <strong data-test="monitor-you-summary">{{ needYouSummary(needYou) }}</strong>
+          <span v-for="i in needYou.slice(0, YouTipLines)" :key="i.id" class="you-line" data-test="monitor-you-item" :data-kind="i.kind">
+            <b :style="{ color: Palette[NeedYouLook[i.kind]] }">{{ needYouWord(i.kind) }}</b>
+            {{ i.team }} / {{ i.member ? spaced(i.member) : 'the team' }}<span v-if="i.label" class="dim"> · {{ i.label }}</span>
+          </span>
+          <span v-if="needYou.length > YouTipLines" class="dim">+{{ needYou.length - YouTipLines }} more</span>
+          <button v-if="youOpen" type="button" class="ctl" data-test="monitor-you-open" @click="openNeedsYouFromTip">Open Needs you</button>
+          <span v-else class="dim">click to open Needs you</span>
+        </div>
+        <div v-if="hover && hover.kind !== 'you'" class="tip" :style="{ left: `${hover.x}px`, top: `${hover.y}px` }" data-test="monitor-tip">
           <template v-if="hover.kind === 'file'">
             <strong class="path" data-test="monitor-tip-path">{{ hover.path }}</strong>
             <span :style="{ color: StepLook[hover.fileKind ?? 'edit'].color }">{{ hover.fileKind === 'create' ? 'new' : hover.fileKind === 'read' ? 'read' : 'changed' }}{{ (hover.touches ?? 1) > 1 ? ` · ${hover.touches} touches` : '' }}</span>
@@ -826,7 +886,7 @@ onBeforeUnmount(() => {
       </header>
       <ol v-if="activityOpen">
         <li v-for="r in shown" :key="r.key" :style="{ '--tone': Palette[r.tone] }" data-test="monitor-row">
-          <MemberAvatar v-if="r.member" :team="r.team" :member="r.member" :size="22" wall />
+          <MemberAvatar v-if="r.member" :team="r.team" :member="r.member" :state="rowState(r.team, r.member)" :size="22" wall />
           <span v-else class="noface" />
           <div class="line">
             <div><b>{{ r.verb }}</b> <template v-if="r.verb.endsWith('told')">{{ r.who }}</template><template v-else>· {{ r.who }}</template> <span class="dim">· {{ r.team }} · {{ ago(r.at) }}</span></div>
@@ -904,6 +964,11 @@ onBeforeUnmount(() => {
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .tip { position: absolute; transform: translate(-50%, calc(-100% - 12px)); max-width: 22rem; pointer-events: none; display: flex; flex-direction: column; gap: 2px;
   background: rgba(12, 19, 34, .95); border: 1px solid #334155; border-radius: 8px; padding: 6px 10px; font-size: 12px; }
+.you-tip { position: absolute; transform: translateY(-50%); max-width: min(22rem, calc(100% - 80px)); pointer-events: none; display: flex; flex-direction: column; gap: 3px;
+  background: rgba(12, 19, 34, .96); border: 1px solid #334155; border-radius: 8px; padding: 8px 10px; font-size: 12px; z-index: 3; }
+.you-tip.open { pointer-events: auto; }
+.you-tip .you-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.you-tip .ctl { align-self: flex-start; margin-top: 4px; }
 .path { font-family: ui-monospace, Consolas, monospace; font-size: 11px; word-break: break-all; }
 .dim { color: #94a3b8; }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: #94a3b8; padding: 24px; text-align: center; pointer-events: none; }

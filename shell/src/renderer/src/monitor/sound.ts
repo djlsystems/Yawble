@@ -33,8 +33,9 @@ export function soundOf(e: Effect): SoundKind | null {
     case 'merge': return e.big ? 'landed' : 'merge';
     case 'push': return 'push';
     case 'comet': return e.color === 'handback' ? 'handback' : null;
+    // Needs you sounds for each new need-you item (B088: question, network or tool ask, blocked, failed), once per id.
+    case 'you': return 'needsYou';
     case 'burst':
-      if (e.color === 'decision') return 'needsYou';
       if (e.color === 'fail' || e.color === 'blocked') return 'failed';
       if (e.color === 'done' && e.big) return 'done';
       return null;
@@ -58,7 +59,10 @@ export class MonitorSound {
   private ctx: AudioContext | null = null;
   constructor(private play: ((kind: SoundKind) => void) | null = null) {}
 
-  /** The kinds actually played for these effects at `now` (ms), after the gaps. */
+  /**
+   * The kinds actually played for these effects at `now` (ms), after the gaps. A need-you item makes one 'you' effect
+   * (MonitorModel.syncNeedYou fires each item once by id), so it sounds at most once.
+   */
   hear(effects: readonly Effect[], now = performance.now()): SoundKind[] {
     if (!this.on) return [];
     const played: SoundKind[] = [];

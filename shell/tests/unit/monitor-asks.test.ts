@@ -89,13 +89,13 @@ describe('the You node gets the network and tool asks (card 386)', () => {
     expect(calls).toContain('tools.asks');
     expect(spy).toHaveBeenCalledTimes(1);
     expect(lastAsks()).toEqual([
-      { key: expect.stringMatching(/^n:/), team: 'payments', member: 'Ana', label: 'crl3.digicert.com, ocsp.digicert.com (2 hosts)' },
-      { key: expect.stringMatching(/^n:/), team: 'payments', member: 'Ana', label: 'api.nuget.org' },
-      { key: 't:7', team: 'alpha', member: 'Bo', label: '.NET SDK' },
-      { key: 't:8', team: 'alpha', member: 'Bo', label: 'python' },
+      { key: expect.stringMatching(/^n:/), kind: 'network', team: 'payments', member: 'Ana', label: 'crl3.digicert.com, ocsp.digicert.com (2 hosts)' },
+      { key: expect.stringMatching(/^n:/), kind: 'network', team: 'payments', member: 'Ana', label: 'api.nuget.org' },
+      { key: 't:7', kind: 'tool', team: 'alpha', member: 'Bo', label: '.NET SDK' },
+      { key: 't:8', kind: 'tool', team: 'alpha', member: 'Bo', label: 'python' },
     ]);
     const m = theModel();
-    expect(m.youCount()).toBe(4);
+    expect(m.needYouItems().length).toBe(4);
     // Those waiting when the Monitor opens are counted, not flown in.
     expect(youFx(m)).toHaveLength(0);
   });
@@ -107,21 +107,21 @@ describe('the You node gets the network and tool asks (card 386)', () => {
     emit('network.asksChanged');
     await settle();
     expect(spy).toHaveBeenCalledTimes(2);
-    expect(lastAsks()).toEqual([{ key: expect.stringMatching(/^n:/), team: 'payments', member: 'Ana', label: 'registry.npmjs.org' }]);
+    expect(lastAsks()).toEqual([{ key: expect.stringMatching(/^n:/), kind: 'network', team: 'payments', member: 'Ana', label: 'registry.npmjs.org' }]);
     const m = theModel();
-    expect(m.youCount()).toBe(1);
+    expect(m.needYouItems().length).toBe(1);
     expect(youFx(m)).toHaveLength(1);
   });
 
   it('tools.asksChanged reads again: an answered tool ask leaves the count', async () => {
     toolAsks = [tool({ id: 7 }), tool({ id: 8, tool: 'git' })];
     await view();
-    expect(theModel().youCount()).toBe(2);
+    expect(theModel().needYouItems().length).toBe(2);
     toolAsks = [tool({ id: 8, tool: 'git' })];
     emit('tools.asksChanged');
     await settle();
     expect(lastAsks().map((a) => a.key)).toEqual(['t:8']);
-    expect(theModel().youCount()).toBe(1);
+    expect(theModel().needYouItems().length).toBe(1);
   });
 
   it('other events do not read the asks', async () => {

@@ -214,6 +214,7 @@ describe('density', () => {
 
 describe('sound', () => {
   const burst = (color: any, big = false): Effect => ({ kind: 'burst', node: 'n', color, big, at: 0 });
+  const you = (id: string): Effect => ({ kind: 'you', from: 'n', color: 'decision', label: null, at: 0, id });
 
   it('is off by default; the toggle turns it on and is kept', async () => {
     const { w } = await view();
@@ -230,12 +231,12 @@ describe('sound', () => {
   it('plays nothing while off, one tone per kind, with gaps', () => {
     const played: string[] = [];
     const s = new snd.MonitorSound((k) => played.push(k));
-    const fx: Effect[] = [burst('decision'), burst('fail', true), { kind: 'step', node: 'n', step: 'read', caption: null, at: 0 }, burst('decision')];
+    const fx: Effect[] = [you('q:a'), burst('fail', true), { kind: 'step', node: 'n', step: 'read', caption: null, at: 0 }, you('q:b')];
     expect(s.hear(fx, 0)).toEqual([]);
     s.on = true;
     expect(s.hear(fx, 0)).toEqual(['needsYou', 'failed']);
-    expect(s.hear([burst('decision')], 500)).toEqual([]); // inside the gap
-    expect(s.hear([burst('decision')], 500 + snd.SoundGapMs)).toEqual(['needsYou']);
+    expect(s.hear([you('q:c')], 500)).toEqual([]); // inside the gap
+    expect(s.hear([you('q:d')], 500 + snd.SoundGapMs)).toEqual(['needsYou']);
     expect(played).toEqual(['needsYou', 'failed', 'needsYou']);
   });
 
@@ -246,6 +247,10 @@ describe('sound', () => {
     expect(snd.soundOf({ kind: 'comet', from: 'a', to: 'b', color: 'handback', label: null, at: 0 })).toBe('handback');
     expect(snd.soundOf({ kind: 'comet', from: 'a', to: 'b', color: 'tell', label: null, at: 0 })).toBeNull();
     expect(snd.soundOf(burst('done', false))).toBeNull();
+    // B088: needs you sounds for a need-you item flying to the You node, not for the question's burst on its member.
+    expect(snd.soundOf(you('q:a'))).toBe('needsYou');
+    expect(snd.soundOf(burst('decision'))).toBeNull();
+    expect(snd.soundOf(burst('blocked', true))).toBe('failed');
     expect(snd.soundOf(burst('done', true))).toBe('done');
     expect(snd.soundOf({ kind: 'float', node: 'n', color: 'progress', text: 'x', at: 0 })).toBeNull();
   });
