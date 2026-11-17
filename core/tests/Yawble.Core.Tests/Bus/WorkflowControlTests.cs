@@ -333,4 +333,25 @@ public class WorkflowControlTests
             Assert.Equal(["Alpha/Manager"], after.AdmittedNames());
         }
     }
+
+    [Fact]
+    public async Task TheListIsTheNewestUpToTheLimit_AndEveryOpenWorkflowHoweverOld()
+    {
+        var (db, engine) = await Team(new ScriptedRunner());
+        using (db)
+        await using (engine)
+        {
+            await engine.StartAsync(Ct);
+            var old = await engine.PersonTellAsync("Alpha", "Ada", "an old open one", ct: Ct);
+            var middle = await engine.PersonTellAsync("Alpha", "Ada", "a closed one", ct: Ct);
+            var newest = await engine.PersonTellAsync("Alpha", "Ada", "the newest", ct: Ct);
+            await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet");
+            await engine.CloseWorkflowAsync("Alpha", middle.Seq, null, Ct);
+            await engine.CloseWorkflowAsync("Alpha", newest.Seq, null, Ct);
+
+            var list = await engine.WorkflowsAsync("Alpha", limit: 1, ct: Ct);
+            Assert.Equal([(newest.Seq, "closed"), (old.Seq, "open")], list.Select(w => (w.Id, w.State)).ToArray());
+            Assert.Equal(3, (await engine.WorkflowsAsync("Alpha", limit: 3, ct: Ct)).Count);
+        }
+    }
 }

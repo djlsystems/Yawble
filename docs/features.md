@@ -26,7 +26,11 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - **Reset** clears, per member, waiting instructions, the home folder (the CLI's own history), the clone, and the
     team's documents, as you choose.
   - **Environment** holds team environment variables; the next runs get them.
-- **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**.
+- **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**. Every open
+  workflow is listed however old, with the newest completed and closed ones; the cloud dashboard, the Concierge and the
+  companion list them the same way. Ask the Concierge to close the open ones whose work is done: it checks each one
+  and closes only those with nothing left, saying why (on this computer: the remote view's Concierge cannot close
+  workflows).
 - On the team page each member is one framed pane:
   - A title bar: face, name, role and CLI chips, its state and how many instructions wait behind its run, and at the
     right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,

@@ -492,7 +492,7 @@ public sealed class ConciergeTools(
             ("hours", "integer", "How long to watch (default 48, at most 168).", false)),
         Tool("watch_list", "What this conversation is watching."),
         Tool("unwatch", "Stop a watch, when the person no longer wants updates.", ("id", "integer", "The watch's number (from watch_list).", true)),
-        Tool("team_workflows", "One team's workflows, newest first: open (and who works them, or that nobody does), completed, closed.",
+        Tool("team_workflows", "One team's workflows, newest first: every open one however old (and who works them, or that nobody does), and the newest completed and closed.",
             ("team", "string", "The team's name.", true)),
         Tool("workflow_nudge", "Nudge an open workflow nobody is working: its Manager is told to pick it up. When the person asks, or after asking them.",
             ("team", "string", "The team's name.", true), ("workflow", "integer", "The workflow's number (team_workflows).", true),
