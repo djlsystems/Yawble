@@ -2,7 +2,7 @@ import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY
 import { LayoutDefaults, type LayoutSettings } from './layout';
 import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type MemberState } from '../faces/faces';
 import { DoingMs, memberKey, teamKey, spaced, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
-import type { WorkflowSummary } from '../../../shared/api';
+import { workflowTime, type WorkflowSummary } from '../../../shared/api';
 import { drawStepIcon, drawWorkflowIcon } from './icons';
 import { fileAlpha, FilePulseMs, StepLook, type FileMark } from './steps';
 import { entryTime, panelHit, panelLayout, panelRadius, panelScale, PanelFontPx, workflowLabel, workflowLook, type PanelLayout } from './workflows';
@@ -790,7 +790,7 @@ export class MonitorScene {
         c.fillStyle = 'rgba(56, 189, 248, 0.10)';
         roundRect(c, x0 + 3 * k, ry, l.w - 6 * k, l.rowH, 4 * k); c.fill();
       }
-      c.globalAlpha = alpha * (look.status === 'closed' ? 0.7 : 1);
+      c.globalAlpha = alpha * (look.status === 'closed' || look.status === 'expired' ? 0.7 : 1);
       const ix = x0 + l.pad + 6 * k, ir = 5.5 * k;
       if (look.status === 'working') {
         c.strokeStyle = color;
@@ -814,14 +814,14 @@ export class MonitorScene {
       // The time on the right, the label in the room left.
       c.textAlign = 'right';
       c.font = `500 ${9 * k}px ${family}`;
-      const when = entryTime(w.lastAt);
+      const when = entryTime(workflowTime(w));
       const tw = c.measureText(when).width;
       c.fillStyle = Palette.inkDim;
       c.fillText(when, x0 + l.w - l.pad, cy + 0.5 * k);
       c.textAlign = 'left';
       c.font = `500 ${PanelFontPx * k}px ${family}`;
       const lx = ix + ir + 6 * k;
-      c.fillStyle = look.status === 'closed' ? Palette.inkDim : hover === i ? Palette.ink : 'rgba(226, 232, 240, 0.88)';
+      c.fillStyle = look.status === 'closed' || look.status === 'expired' ? Palette.inkDim : hover === i ? Palette.ink : 'rgba(226, 232, 240, 0.88)';
       c.fillText(fitText(c, workflowLabel(w, 60), x0 + l.w - l.pad - tw - 8 * k - lx), lx, cy + 0.5 * k);
     });
     c.globalAlpha = 1;

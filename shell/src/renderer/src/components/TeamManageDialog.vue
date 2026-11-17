@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, IntegrationInfo, McpServerInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
+import { TEAM_WORKFLOW_EXPIRY, WorkflowExpiryDefaultDays } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
 import IntegrationDialog from './IntegrationDialog.vue';
@@ -53,7 +54,7 @@ const work = useBusy();
 const busy = computed(() => work.any());
 const doing = (method: string) => work.is('act', method);
 // Each tab's data has had its first answer (an error is shown above and ends the loading state too).
-const ready = reactive({ quiet: false, push: false, sync: false, repos: false, approvals: false, env: false, ints: false, members: false });
+const ready = reactive({ expiry: false, quiet: false, push: false, sync: false, repos: false, approvals: false, env: false, ints: false, members: false });
 
 function act(method: string, params: Record<string, unknown> = {}, done?: (r: any) => void) {
   return work.run('act', async () => {
@@ -84,6 +85,24 @@ const sync = ref<{ on: boolean; note: string | null } | null>(null);
 async function loadSync() { try { sync.value = await api.call('teams.syncToBase', { teamId: props.team.id }); } catch { sync.value = null; } finally { ready.sync = true; } }
 const setSync = (on: boolean) => act('teams.syncToBase', { on }, (r) => { sync.value = r; });
 const baseName = computed(() => repos.value?.main?.baseBranch ?? 'the base branch');
+
+// ---- B085: expire idle workflows after N days (workflowExpiryDays, default 3). An older core without it: the field is not shown.
+const expiry = ref<number | null>(null);
+const expiryDraft = ref<number>(WorkflowExpiryDefaultDays);
+const expirySaved = ref(false);
+async function loadExpiry() {
+  try {
+    const r = await api.call<{ days: number }>(TEAM_WORKFLOW_EXPIRY, { teamId: props.team.id });
+    expiry.value = r?.days ?? WorkflowExpiryDefaultDays;
+    expiryDraft.value = expiry.value;
+  } catch { expiry.value = null; } finally { ready.expiry = true; }
+}
+const expiryValid = computed(() => Number.isInteger(expiryDraft.value) && expiryDraft.value >= 1 && expiryDraft.value <= 365);
+const saveExpiry = () => act(TEAM_WORKFLOW_EXPIRY, { days: expiryDraft.value }, (r: { days?: number }) => {
+  expiry.value = r?.days ?? expiryDraft.value;
+  expiryDraft.value = expiry.value;
+  expirySaved.value = true;
+});
 
 // ---- repositories: the main one (every member's working directory) and the others, writable or read-only
 interface ExtraRepo { name: string; path: string; writable: boolean; baseBranch: string; source: string | null }
@@ -170,7 +189,7 @@ const doReset = () => act('teams.reset', { members: [...resetPick.value], ...res
   resetDone.value = `Done: ${r.done.join('; ') || 'nothing to clear'}.` + (r.left.length ? ` Not removed: ${r.left.join('; ')}.` : '');
 });
 
-onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
+onMounted(() => { void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
 </script>
 
 <template>
@@ -202,6 +221,20 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
         <p v-else-if="team.repoPath" class="mono small path" data-test="team-repo-path">{{ team.repoPath }}</p>
         <p v-else class="muted small">Made at the team's first run.</p>
         <p class="muted small">Other repositories, and adding more, are on the <a href="#" @click.prevent="tab = 'repos'">Repositories</a> tab.</p>
+      </div>
+      <div v-if="!ready.expiry || expiry !== null" class="block" data-test="team-workflow-expiry">
+        <h4>Idle workflows</h4>
+        <LoadingNote v-if="!ready.expiry" text="Loading…" />
+        <template v-else>
+          <label class="inline">Expire idle workflows after
+            <input v-model.number="expiryDraft" type="number" min="1" max="365" step="1" class="days" data-test="team-workflow-expiry-days" @input="expirySaved = false" />
+            days</label>
+          <p class="muted small">An open workflow with no message, run, hand-back or status change for this long is closed by the app as expired.
+            One that waits on your answer is shown in Needs you the day before, with Extend. Nothing expires while a run, a wake or a trigger is pending.</p>
+          <div class="buttons"><span v-if="!expiryValid" class="warn small">A whole number of days, 1 to 365.</span><span class="grow" />
+            <span v-if="expirySaved" class="ok" data-test="team-workflow-expiry-saved">Saved.</span>
+            <button class="primary" data-test="team-workflow-expiry-save" :disabled="busy || !expiryValid || expiryDraft === expiry" @click="saveExpiry"><BusyLabel :busy="doing(TEAM_WORKFLOW_EXPIRY)" text="Saving…">Save</BusyLabel></button></div>
+        </template>
       </div>
     </section>
 
@@ -401,6 +434,8 @@ label input.wide { max-width: none; }
 label { display: flex; flex-direction: column; gap: 4px; }
 label input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; max-width: 320px; }
 label.check { flex-direction: row; align-items: center; }
+label.inline { flex-direction: row; align-items: center; gap: 6px; }
+input.days { width: 72px; }
 label.check input { width: auto; padding: 0; }
 .primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .danger { background: var(--bad); color: var(--on-accent); border-color: var(--bad); }

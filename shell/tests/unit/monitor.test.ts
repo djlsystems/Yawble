@@ -164,7 +164,7 @@ describe('the workflows on the wall', () => {
     expect(workflowLook(wf(1, t, 'open', ['DeveloperPriya is running']))).toMatchObject({ status: 'working', tone: 'start', icon: 'play' });
     expect(workflowLook(wf(1, t, 'open'))).toMatchObject({ status: 'waiting', tone: 'handback', icon: 'pause' });
     expect(workflowLook(wf(1, t, 'closed'))).toMatchObject({ status: 'closed', tone: 'inkDim', icon: 'cross' });
-    expect(WorkflowLooks.map((l) => l.status)).toEqual(['completed', 'working', 'waiting', 'closed']);
+    expect(WorkflowLooks.map((l) => l.status)).toEqual(['completed', 'working', 'waiting', 'closed', 'expired']);
     for (const l of WorkflowLooks) expect(l.label.length).toBeGreaterThan(0);
   });
 

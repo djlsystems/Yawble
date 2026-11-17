@@ -3,7 +3,7 @@ import type { WorkflowSummary } from '../../../shared/api';
 /**
  * THE WORKFLOWS ON THE WALL: each team's last few pieces of work (bus.workflows) sit in one panel off its hub, a
  * row each, last updated first, coloured and marked by how they stand: done (a check), being worked (a play mark in a turning ring), waiting with
- * nobody on it (a pause), closed (a cross). Live only: a replay would have to fake their history, so it shows none.
+ * nobody on it (a pause), closed (a cross), expired (a clock). Live only: a replay would have to fake their history, so it shows none.
  */
 
 /** How many workflows each team shows. */
@@ -11,24 +11,26 @@ export const WorkflowsShown = 5;
 /** A team's tile in the Teams list: up to this many newest workflows (and every open one, however old), scrolling inside the tile. */
 export const TileWorkflowsShown = 50;
 
-export type WorkflowStatus = 'completed' | 'working' | 'waiting' | 'closed';
-export type WorkflowIcon = 'check' | 'play' | 'pause' | 'cross';
+export type WorkflowStatus = 'completed' | 'working' | 'waiting' | 'closed' | 'expired';
+export type WorkflowIcon = 'check' | 'play' | 'pause' | 'cross' | 'clock';
 /** A Palette key (scene.ts) for each state's colour. */
 export type WorkflowTone = 'done' | 'start' | 'handback' | 'inkDim';
 export interface WorkflowLook { status: WorkflowStatus; tone: WorkflowTone; icon: WorkflowIcon; label: string }
 
-/** The four states in the legend's order. */
+/** The five states in the legend's order (expired, B085: closed by the app after the team's idle days). */
 export const WorkflowLooks: readonly WorkflowLook[] = [
   { status: 'completed', tone: 'done', icon: 'check', label: 'Completed' },
   { status: 'working', tone: 'start', icon: 'play', label: 'Being worked' },
   { status: 'waiting', tone: 'handback', icon: 'pause', label: 'Waiting, nobody on it' },
   { status: 'closed', tone: 'inkDim', icon: 'cross', label: 'Closed' },
+  { status: 'expired', tone: 'inkDim', icon: 'clock', label: 'Expired' },
 ];
 const byStatus = Object.fromEntries(WorkflowLooks.map((l) => [l.status, l])) as Record<WorkflowStatus, WorkflowLook>;
 
 export function workflowStatus(w: Pick<WorkflowSummary, 'state' | 'busy'>): WorkflowStatus {
   if (w.state === 'completed') return 'completed';
   if (w.state === 'closed') return 'closed';
+  if (w.state === 'expired') return 'expired';
   return w.busy.length > 0 ? 'working' : 'waiting';
 }
 

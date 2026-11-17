@@ -350,8 +350,27 @@ export interface TeamSummary { id: number; name: string; repoPath: string | null
 export interface TeamQuiet { quiet: boolean; working: string[]; openWorkflows: number[] }
 /** A team's workflow (bus.workflows): one piece of work and everything it led to. */
 export interface WorkflowSummary {
-  id: number; title: string; owner: string | null; state: 'open' | 'completed' | 'closed'; undeclared: boolean;
+  id: number; title: string; owner: string | null; state: WorkflowState; undeclared: boolean;
   busy: string[]; ending: string | null; startedAt: string; lastAt: string; messages: number;
+  /** B085: an ended workflow's recorded end; for an expired one its last real activity, not the expiry time (older cores: absent). */
+  endedAt?: string | null;
+  /** B085: when the app closed it as expired; null otherwise. */
+  expiredAt?: string | null;
+  /** B085: when an open, idle workflow would expire; null when it is not idle (a run, a wake or a trigger is pending). */
+  expiresAt?: string | null;
+  /** B085: the question an open workflow waits on the person for (its number), when the core names one. */
+  question?: number | null;
+}
+/** A workflow's state (bus.workflows): "expired" is closed by the app after workflowExpiryDays without activity (B085). */
+export type WorkflowState = 'open' | 'completed' | 'closed' | 'expired';
+/** B085: the RPC that resets an open workflow's expiry clock ({ teamId, workflow }). */
+export const WORKFLOW_EXTEND = 'bus.workflowExtend';
+/** B085: a team's "expire idle workflows after N days" setting ({ teamId, days? } -> { days }); default 3. */
+export const TEAM_WORKFLOW_EXPIRY = 'teams.workflowExpiry';
+export const WorkflowExpiryDefaultDays = 3;
+/** The time a workflow's row shows: its recorded end once ended (an expired one: its last activity), else its last entry. */
+export function workflowTime(w: Pick<WorkflowSummary, 'state' | 'lastAt' | 'endedAt'>): string {
+  return w.state !== 'open' && w.endedAt ? w.endedAt : w.lastAt;
 }
 /** A team's documents (docs.list / docs.read): paths are relative to the team's documents folder. */
 export interface DocEntry { name: string; path: string; folder: boolean; size: number | null; modified: string }
@@ -853,7 +872,7 @@ export interface BacklogItem {
 /** One dispatch of a backlog item (0023): its team and workflow, read live from the bus, the board and usage records. */
 export interface BacklogDispatch {
   team: string; teamId: number | null; teamGone: boolean; workflow: number; dispatchedAt: string; dispatchedBy: string | null;
-  state: 'open' | 'completed' | 'closed' | null; ending: string | null; busy: string[] | null; lastAt: string | null;
+  state: WorkflowState | null; ending: string | null; busy: string[] | null; lastAt: string | null;
   cards: number; cardsDone: number; runs: number; members: string[]; inputTokens: number; outputTokens: number;
   firstStart: string | null; lastEnd: string | null;
 }

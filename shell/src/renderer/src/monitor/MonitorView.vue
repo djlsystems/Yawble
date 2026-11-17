@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
-import type { AgentCard, YawbleApi, Overview, WorkflowSummary } from '../../../shared/api';
+import { workflowTime, type AgentCard, type YawbleApi, type Overview, type WorkflowSummary } from '../../../shared/api';
 import { resolveApi } from '../api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { MemberStateLabel, memberStateOf, type MemberState } from '../faces/faces';
@@ -130,6 +130,7 @@ const workflowRows = shallowRef<{ teamId: number; team: string; list: WorkflowSu
 /** The legend's mark for each workflow state, as SVG paths on a 16-unit box. */
 const WorkflowIconPath: Record<WorkflowIcon, string> = {
   check: 'M4.5 8.5l2.5 2.5 4.5-5', play: 'M6.5 5l4.5 3-4.5 3z', pause: 'M6.5 5v6M9.5 5v6', cross: 'M5.5 5.5l5 5M10.5 5.5l-5 5',
+  clock: 'M8 3.5a4.5 4.5 0 1 0 0.01 0M8 5.5V8l2 1.2',
 };
 
 const states: MemberState[] = ['running', 'waiting', 'decision', 'blocked', 'failed', 'idle'];
@@ -499,7 +500,7 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
             </li>
             <li v-for="w in r.list" :key="w.id">
               <button type="button" data-test="monitor-workflow" :data-id="w.id" @click="openWorkflow(r.teamId, w.id)">
-                {{ r.team }}: {{ workflowLabel(w) }} · {{ workflowLook(w).label }} · last entry {{ entryTime(w.lastAt) }}
+                {{ r.team }}: {{ workflowLabel(w) }} · {{ workflowLook(w).label }} · {{ w.state === 'open' ? 'last entry' : 'ended' }} {{ entryTime(workflowTime(w)) }}
               </button>
             </li>
           </template>
