@@ -13,9 +13,9 @@ import { createFakeCore } from './fake-core';
  * The main commit the 1280 px desktop layout is compared with (phone-remote.spec.ts). To move the base, change this
  * one line: the next run extracts that commit's shell into out/b037/main and rebuilds out/b037/renderer-base.
  * Was b726212 (cards 169-276), then f3a3c3d (cards 294-312, nav order be4a82a and the rest of main up to it); 43048e1 since
- * card 313 (the Sidebar team counts as pills).
+ * card 313 (the Sidebar team counts as pills), 52485c5 since B065 (the Documents list's Modified column, 31f02d0).
  */
-export const BASE_COMMIT = '43048e1';
+export const BASE_COMMIT = '52485c5';
 
 export const ORIGIN = 'http://yawble-remote.test';
 const shellDir = path.resolve(__dirname, '..', '..', '..');
