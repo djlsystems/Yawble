@@ -6,10 +6,10 @@ import type { WorkflowSummary } from '../../../shared/api';
 import { drawHandbackMark, drawStepIcon, drawWorkflowIcon } from './icons';
 import { StepLook } from './steps';
 import {
-  commitPhase, CommitLifeMs, DefaultLimits, fileLight, layoutTeamMap, LightMs, MaxMapNodes, popScale, shortSha,
+  commitPhase, CommitLifeMs, DefaultLimits, fileLight, layoutTeamMap, LightMs, MapPastMembers, mapRoomOf, MaxMapNodes, popScale, shortSha,
   type MapFile, type TeamMapView,
 } from './codemap';
-import { busyMembers, entryTime, panelHit, panelLayout, panelRadius, panelScale, PanelFontPx, workflowLabel, workflowLook, workflowNodeLook, type PanelLayout } from './workflows';
+import { busyMembers, nodeLabelFont, workflowNodeLabel, workflowNodeLook } from './workflows';
 import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt, type Density } from './rhythm';
 
 /**
@@ -30,10 +30,6 @@ import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodM
  * member's spoke to the hub and rests there (hover: its message and short sha); a merge into the team branch bursts
  * along the hub's spokes, a landing on main bursts larger, a push pulses out past the wall's edge. Map nodes off the
  * screen are not drawn, and all the maps together show at most MaxMapNodes files (fewer at a lower density).
- * A team's newest workflows (live only) sit in one panel hung off its hub on a thin dashed line, past its members:
- * a header, then a row per workflow, last updated first: its mark in its state's colour (check, play in a turning
- * ring, pause, cross), "#id title" and the time of its last entry. The panel is one body in the layout, sized to its
- * rows, and drawn larger as the wall zooms out so its words stay readable; clicking it opens the team at its workflows.
  * The layout is a d3-force simulation
  * ticked once per frame while it is awake; it cools to rest once nothing changes, and so the camera, which fits
  * everything unless the person has moved it in the last 12 s, settles too (card 385).
@@ -42,7 +38,8 @@ import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodM
  * B080, livelier and easier to follow:
  *   workflow nodes - every open workflow is a small node tied by dashed lines to the members working it (to its hub
  *     while nobody is on it); completed, it flashes green and drifts away; closed, it fades with a cross; blocked, it
- *     wears the blocked colour and a "!". The panel stays as the list of the newest five and the legend of the marks.
+ *     wears the blocked colour and a "!". Under it, "#id title" (B090; the WORKFLOWS panel is gone); hover gives the
+ *     whole title, a click opens the workflow.
  *   work rhythm - a member's disc pulses faster the more steps it takes; a command shows a ring filling round it
  *     while it runs, then a green or red burst by its exit code when that is known; thinking shimmers softly.
  *   the You node - at the right edge: what waits for the person flies to it and it glows with the count.
@@ -53,10 +50,8 @@ import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodM
  */
 
 interface Node extends SimulationNodeDatum {
-  key: string; kind: 'team' | 'member' | 'workflows' | 'wf'; team: string; name: string; r: number; hue: number;
+  key: string; kind: 'team' | 'member' | 'wf'; team: string; name: string; r: number; hue: number;
   role?: 'manager' | 'member'; state?: MemberState; queued?: number; statusLine?: string | null; homeX: number; homeY: number;
-  /** A workflow panel's workflows, last updated first. */
-  wfs?: WorkflowSummary[];
   /** A workflow node's workflow. */
   wf?: WorkflowSummary;
 }
@@ -74,7 +69,7 @@ export interface SceneHover {
   path?: string; touches?: number; fileKind?: 'edit' | 'create' | 'read'; sha?: string | null; members?: string[]; more?: string[];
   /** A commit dot's message. */
   message?: string;
-  /** The workflow row hovered on a team's workflow panel (none on its header). */
+  /** The hovered workflow node's workflow. */
   workflow?: WorkflowSummary;
 }
 
@@ -99,8 +94,44 @@ const StillCometMs = 2200;
 const WfR = 10;
 const WfMemberDist = 58;
 const StepIconGap = 20;
-/** How much further apart the teams sit once any of them has a code map round it. */
-const MapRoom = 190;
+/** The wall's oval: its y radius is this much of its x radius. */
+const OvalY = 0.62;
+/**
+ * How far a team's cluster reaches from its hub toward the other teams before its code map: the members, their names
+ * and the workflow nodes with their labels; and the room left between two clusters at Team spacing 1.
+ */
+export const ClusterCore = 100;
+export const ClusterGap = 40;
+
+/** The distance between the two nearest of count places on an oval of x radius 1 (teamAngle; the y radius OvalY). */
+export function nearestPair(count: number): number {
+  let d = Infinity;
+  for (let a = 0; a < count; a++) for (let b = a + 1; b < count; b++) {
+    const p = teamAngle(a, count), q = teamAngle(b, count);
+    d = Math.min(d, Math.hypot(Math.cos(p) - Math.cos(q), OvalY * (Math.sin(p) - Math.sin(q))));
+  }
+  return d;
+}
+
+/**
+ * Where team i of count sits on the wall's oval (its "home", in world px). The oval is as large as puts the two nearest
+ * teams two clusters (ClusterCore and the room their code maps need, mapRoom, from the maps drawn) and a gap apart, times
+ * the person's Team spacing; its y radius is OvalY of its x radius. A team alone sits in the middle.
+ */
+export function teamHome(i: number, count: number, mapRoom: number, spacing: number): { x: number; y: number } {
+  if (count <= 1) return { x: 0, y: 0 };
+  const rx = Math.max(140, (2 * (ClusterCore + mapRoom) + ClusterGap) / nearestPair(count)) * spacing, ry = rx * OvalY;
+  const angle = teamAngle(i, count);
+  return { x: Math.cos(angle) * rx, y: Math.sin(angle) * ry };
+}
+
+/** The room the widest map drawn needs past its members (codemap mapRoomOf), in steps of this much, so it moves the teams seldom. */
+const MapRoomStep = 10;
+export function mapRoomFor(views: Iterable<TeamMapView>): number {
+  let room = 0;
+  for (const v of views) room = Math.max(room, mapRoomOf(v));
+  return Math.ceil(room / MapRoomStep) * MapRoomStep;
+}
 /** How often a team's map view is worked out again when nothing came or went (its order follows the activity). */
 const MapViewMs = 400;
 const RefitAfterMs = 12_000;
@@ -158,36 +189,6 @@ export function graphShape(nodes: Iterable<{ key: string; r: number; homeX: numb
   return s;
 }
 
-/** Which way the workflow panels last re-sized: 1 larger, -1 smaller, 0 not since the inputs last changed. */
-export type PanelDir = -1 | 0 | 1;
-
-/**
- * The workflow panels' next size step. The panels are drawn larger as the wall zooms out, and they are bodies in the
- * forces, so a step moves the graph, which moves the fit, which changes the zoom again. With two teams' maps this went
- * round for ever (card 385: zoom 0.30-0.51, the hub circling). So a step needs an 8% change, and after one the panels
- * only go on the same way until an input changes (the person zooms or pans, Fit, focus, the wall's size, nodes come or
- * go: `dir` back to 0). Steps one way are bounded (1 to PanelMaxScale), so the size settles and so does the camera.
- */
-export function panelStep(current: number, wanted: number, dir: PanelDir): { k: number; dir: PanelDir } {
-  if (Math.abs(wanted - current) / current < 0.08) return { k: current, dir };
-  const way: PanelDir = wanted > current ? 1 : -1;
-  if (dir !== 0 && way !== dir) return { k: current, dir };
-  return { k: wanted, dir: way };
-}
-
-/** How still the graph (alpha) and how near its aim the camera (zoom) must be before an auto fit re-sizes the panels. */
-export const PanelRestAlpha = 0.1;
-export const PanelArrivedZoom = 0.03;
-/** Whether the panels may re-size while the camera fits on its own: the forces are at rest and the camera is (nearly) there. */
-export function panelsMayStep(alpha: number, camK: number, targetK: number): boolean {
-  return alpha <= PanelRestAlpha && Math.abs(camK - targetK) <= PanelArrivedZoom * targetK;
-}
-
-/** graphShape with each workflow panel's radius left out (it follows the zoom; its row count stands for it). */
-function forceShape(nodes: Iterable<Node>): string {
-  return graphShape([...nodes].map((n) => (n.kind === 'workflows' ? { key: n.key, r: n.wfs?.length ?? 0, homeX: n.homeX, homeY: n.homeY } : n)));
-}
-
 export function teamAngle(i: number, count: number): number {
   return count <= 1 ? 0 : Math.PI + (i / count) * Math.PI * 2;
 }
@@ -195,8 +196,6 @@ export function teamAngle(i: number, count: number): number {
 export function aimsAtEverything(pinned: boolean, now: number, movedAt: number, fitUntil: number): boolean {
   return pinned ? now < fitUntil : now - movedAt > RefitAfterMs;
 }
-/** How much further from its hub than the members a workflow panel's edge sits. */
-const WorkflowPast = 50;
 
 /** The wall's state colours: the app's --state-* lifted toward white, read once. */
 function stateColors(): Record<MemberState, string> {
@@ -221,17 +220,9 @@ export class MonitorScene {
   private ctx: CanvasRenderingContext2D;
   private nodes = new Map<string, Node>();
   private links: Link[] = [];
-  /** The hub-to-workflow lines (a force of their own: longer and looser than the members' spokes). */
-  private wfLinks: Link[] = [];
   private teamList: TeamSnapshot[] = [];
   /** Which model's workflows, at which rev, the nodes were last built from. */
   private wfFrom: { model: MonitorModel | null; rev: number } = { model: null, rev: -1 };
-  /** How much larger than its world size the workflow panels are drawn (panelScale of the zoom, changed in steps). */
-  private panelK = 1;
-  /** Which way the panels last re-sized since the inputs last changed (0: either way may come next); see panelStep. */
-  private panelDir: PanelDir = 0;
-  /** What of a workflow panel is under the pointer. */
-  private hoverPanel: { key: string; hit: 'header' | 'panel' | number } | null = null;
   private sim: Simulation<Node, undefined>;
   private cam = { x: 0, y: 0, k: 1 };
   private target = { x: 0, y: 0, k: 1 };
@@ -248,7 +239,7 @@ export class MonitorScene {
   private h = 0;
   private hover: Node | null = null;
   private picked: string | null = null;
-  private drag: { node: Node | null; x: number; y: number; cx: number; cy: number; hit?: 'header' | 'panel' | number } | null = null;
+  private drag: { node: Node | null; x: number; y: number; cx: number; cy: number } | null = null;
   private colors = stateColors();
   private dt = 16;
   /** Where each map node is drawn (eased toward its place), and the ones drawn this frame, for the hover. */
@@ -258,8 +249,9 @@ export class MonitorScene {
   private hoverMap: MapNode | null = null;
   /** Each team's map layout as last worked out, with the map's rev and when (MapViewMs). */
   private mapLayouts: { rev: number; at: number; model: MonitorModel | null; list: { team: Node; view: TeamMapView }[] } = { rev: -1, at: -Infinity, model: null, list: [] };
-  /** Whether the teams sit apart for their maps (MapRoom). */
-  private mapRoom = false;
+  /** How much further apart the teams sit for their maps, as the homes were last placed (teamHome), and as the maps drawn now want it. */
+  private mapRoom = 0;
+  private wantedRoom = 0;
   /** The commit dot under the pointer. */
   private hoverCommit: Extract<Effect, { kind: 'commit' }> | null = null;
   /** Each step icon's place in its member's stack, eased so the stack slides up rather than jumps. */
@@ -281,20 +273,19 @@ export class MonitorScene {
   stateOf: ((key: string) => MemberState) | null = null;
   onHover: (h: SceneHover | null) => void = () => {};
   onPick: (key: string | null) => void = () => {};
-  /** A team's workflow panel was clicked (not dragged): its header, or a row (with that workflow's id). */
+  /** A workflow node was clicked (not dragged): its team and its workflow's id. */
   onOpenWorkflow: (team: string, id?: number) => void = () => {};
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
     this.reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.sim = forceSimulation<Node>([])
-      // The forces cool to rest (alpha target 0) once nothing changes: kept warm, two teams' hubs and their workflow
-      // panels kept circling one another and the camera's fit chased them (card 385).
+      // The forces cool to rest (alpha target 0) once nothing changes: kept warm, two teams' hubs kept circling one
+      // another and the camera's fit chased them (card 385).
       .alphaDecay(0.02).alphaTarget(0)
       .force('link', forceLink<Node, Link>([]))
-      .force('wflink', forceLink<Node, Link>([]))
       .force('wfmlink', forceLink<Node, Link>([]))
-      .force('collide', forceCollide<Node>().radius((n) => n.r + (n.kind === 'team' ? 30 : n.kind === 'workflows' ? 12 : n.kind === 'wf' ? 10 : 24)))
+      .force('collide', forceCollide<Node>().radius((n) => n.r + (n.kind === 'team' ? 30 : n.kind === 'wf' ? 10 : 24)))
       .stop();
     this.applyLayout();
     void loadAvatarSheet();
@@ -349,8 +340,10 @@ export class MonitorScene {
 
   /** The person's layout multipliers (the cog beside Pinned): from now on, and the graph is woken so it moves to them. */
   setLayout(layout: LayoutSettings): void {
+    const moved = layout.spacing !== this.layout.spacing;
     this.layout = { ...layout };
     this.applyLayout();
+    if (moved) this.rebuild(); // new homes: the teams move there, and a fit follows them
     this.sim.alpha(Math.max(this.sim.alpha(), 0.5));
   }
 
@@ -358,14 +351,12 @@ export class MonitorScene {
   private applyLayout(): void {
     const { distance, strength, repulsion, gravity, friction } = this.layout;
     const link = this.sim.force('link') as ReturnType<typeof forceLink<Node, Link>>;
-    const wflink = this.sim.force('wflink') as ReturnType<typeof forceLink<Node, Link>>;
     this.sim
       .velocityDecay(Math.min(0.9, Math.max(0.05, 0.32 * friction)))
-      .force('charge', forceManyBody<Node>().strength((n) => (n.kind === 'team' ? -600 : n.kind === 'workflows' ? -320 : n.kind === 'wf' ? -90 : -280) * repulsion))
+      .force('charge', forceManyBody<Node>().strength((n) => (n.kind === 'team' ? -600 : n.kind === 'wf' ? -90 : -280) * repulsion))
       .force('x', forceX<Node>((n) => n.homeX).strength((n) => (n.kind === 'team' ? 0.12 : 0.02) * gravity))
       .force('y', forceY<Node>((n) => n.homeY).strength((n) => (n.kind === 'team' ? 0.12 : 0.02) * gravity));
     link.distance((l) => this.spoke(l.source.team) * distance).strength(Math.min(1, 0.55 * strength));
-    wflink.distance((l) => (this.spoke(l.source.team) + WorkflowPast) * distance + l.target.r * 0.75).strength(Math.min(1, 0.35 * strength));
     const wfmlink = this.sim.force('wfmlink') as ReturnType<typeof forceLink<Node, Link>>;
     wfmlink.distance((l) => (l.target.kind === 'team' ? this.spoke(l.source.team) * 0.55 : WfMemberDist) * distance).strength(Math.min(1, 0.25 * strength));
   }
@@ -388,17 +379,12 @@ export class MonitorScene {
   /** The nodes from the teams and the model's workflows (none in a replay): new ones born near their hub. */
   private rebuild(): void {
     const teams = this.teamList;
-    const workflows = this.model?.workflows;
     this.wfFrom = { model: this.model, rev: this.model?.workflowsRev ?? -1 };
     const keep = new Set<string>();
     const count = teams.length;
-    this.mapRoom = (this.model?.map.size ?? 0) > 0;
-    const rx = Math.max(140, 150 + count * 34) + (this.mapRoom && count > 1 ? MapRoom : 0);
-    const ry = rx * 0.62;
+    this.mapRoom = this.wantedRoom;
     teams.forEach((t, i) => {
-      const angle = teamAngle(i, count);
-      const homeX = count === 1 ? 0 : Math.cos(angle) * rx;
-      const homeY = count === 1 ? 0 : Math.sin(angle) * ry;
+      const { x: homeX, y: homeY } = teamHome(i, count, this.mapRoom, this.layout.spacing);
       const hue = (i * 137.508 + 190) % 360;
       const tk = teamKey(t.name);
       keep.add(tk);
@@ -412,15 +398,6 @@ export class MonitorScene {
           role: m.role, state: m.state, queued: m.queued, statusLine: m.statusLine,
         }, (team.x ?? homeX) + Math.cos(a) * 60, (team.y ?? homeY) + Math.sin(a) * 60);
       });
-      const wfs = workflows?.get(tk) ?? [];
-      if (wfs.length) {
-        const wk = `w:${t.name.toLowerCase()}`;
-        keep.add(wk);
-        // Born outward from the middle of the wall, past the members.
-        const out = count === 1 ? -Math.PI / 4 : angle;
-        this.upsert(wk, { kind: 'workflows', team: t.name, name: t.name, r: panelRadius(panelLayout(wfs.length, this.panelK)), hue, homeX, homeY, wfs },
-          (team.x ?? homeX) + Math.cos(out) * 260, (team.y ?? homeY) + Math.sin(out) * 260);
-      }
       // The workflow nodes: each open workflow, born beside the first member working it (or its hub).
       for (const w of this.model?.openWfs.get(tk) ?? []) {
         const wk = workflowKey(t.name, w.id);
@@ -455,29 +432,46 @@ export class MonitorScene {
     }
     // A poll that changes no node, size or home (the usual case, every 1.2 s) only refreshes what the nodes say: waking
     // the forces each time made the graph jerk once a second.
-    // A panel's radius is left out: it follows the zoom (rescalePanels wakes the forces for that itself), and counting it
-    // here made every poll after a panel step wake the graph again (card 385).
-    const shape = forceShape(this.nodes.values()) + wfm.map((l) => `${l.source.key}>${l.target.key}`).join(',');
+    const shape = graphShape(this.nodes.values()) + wfm.map((l) => `${l.source.key}>${l.target.key}`).join(',');
     if (shape === this.shape) return;
     this.shape = shape;
-    this.panelDir = 0; // nodes came, went or moved home: the panels may re-size either way
-    const spokeTo = (kind: Node['kind']) => [...this.nodes.values()].filter((n) => n.kind === kind).map((n) => ({ source: this.nodes.get(teamKey(n.team))!, target: n }));
-    this.links = spokeTo('member');
-    this.wfLinks = spokeTo('workflows');
+    this.links = [...this.nodes.values()].filter((n) => n.kind === 'member').map((n) => ({ source: this.nodes.get(teamKey(n.team))!, target: n }));
     this.wfmLinks = wfm;
     this.sim.nodes([...this.nodes.values()]);
     (this.sim.force('link') as ReturnType<typeof forceLink<Node, Link>>).links(this.links);
-    (this.sim.force('wflink') as ReturnType<typeof forceLink<Node, Link>>).links(this.wfLinks);
     (this.sim.force('wfmlink') as ReturnType<typeof forceLink<Node, Link>>).links(this.wfmLinks);
     this.sim.alpha(Math.max(this.sim.alpha(), 0.3));
   }
 
-  /** The workflow nodes on the wall now (for the tests): key, its workflow's id, and the members it is tied to. */
-  workflowNodes(): { key: string; id: number; to: string[]; status: string }[] {
+  /** The workflow nodes on the wall now (for the tests): key, its workflow's id, the members it is tied to, and its label as drawn now. */
+  workflowNodes(): { key: string; id: number; to: string[]; status: string; label: string; x: number; y: number }[] {
     return [...this.nodes.values()].filter((n) => n.kind === 'wf').map((n) => ({
       key: n.key, id: n.wf!.id, to: this.wfmLinks.filter((l) => l.source === n).map((l) => l.target.key),
-      status: workflowNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key)).status,
+      status: workflowNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key)).status, label: this.wfLabelBox(n).text, x: n.x!, y: n.y!,
     }));
+  }
+
+  /**
+   * Each team's cluster as drawn now (for the tests and Team spacing): its hub and home, and the world box round its hub,
+   * members (with their name labels), workflow nodes (with their labels) and code map (with its labels), by team in lower case.
+   */
+  clusters(): { team: string; hub: { x: number; y: number }; home: { x: number; y: number }; box: { x0: number; y0: number; x1: number; y1: number } }[] {
+    const out = new Map<string, { team: string; hub: { x: number; y: number }; home: { x: number; y: number }; box: { x0: number; y0: number; x1: number; y1: number } }>();
+    for (const n of this.nodes.values()) {
+      if (n.kind === 'team') out.set(n.team.toLowerCase(), { team: n.team.toLowerCase(), hub: { x: n.x!, y: n.y! }, home: { x: n.homeX, y: n.homeY }, box: { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity } });
+    }
+    const add = (team: string, x: number, y: number, hw: number, hh: number) => {
+      const b = out.get(team.toLowerCase())?.box;
+      if (!b) return;
+      b.x0 = Math.min(b.x0, x - hw); b.x1 = Math.max(b.x1, x + hw); b.y0 = Math.min(b.y0, y - hh); b.y1 = Math.max(b.y1, y + hh);
+    };
+    for (const n of this.nodes.values()) {
+      if (n.kind === 'team') add(n.team, n.x!, n.y!, n.r + 30, n.r + 30); // its pill and ring
+      else if (n.kind === 'member') add(n.team, n.x!, n.y!, n.r + 30, n.r + 18); // its name below it
+      else { add(n.team, n.x!, n.y!, n.r + 4, n.r + 4); const l = this.wfLabelBox(n); add(n.team, n.x!, l.y, l.w / 2, l.h / 2); }
+    }
+    for (const m of this.mapNodes) add(m.team.team, m.x, m.y, 40, 10); // a node and its label
+    return [...out.values()];
   }
 
   /** The graph's shape at the last rebuild that woke the forces (graphShape). */
@@ -494,16 +488,16 @@ export class MonitorScene {
   setPicked(key: string | null): void { this.picked = key; }
 
   /** Fits everything on the next frames (double-click, the Fit button); pinned, only this once. */
-  fit(): void { this.movedAt = -Infinity; this.fitUntil = performance.now() + FitOnceMs; this.panelDir = 0; }
+  fit(): void { this.movedAt = -Infinity; this.fitUntil = performance.now() + FitOnceMs; }
 
   /** Auto fit (false: fits everything unless the person moved the wall in the last 12 s) or pinned (true: never on its own). */
-  setPinned(on: boolean): void { this.pinned = on; this.fitUntil = -Infinity; if (!on) this.movedAt = -Infinity; this.panelDir = 0; }
+  setPinned(on: boolean): void { this.pinned = on; this.fitUntil = -Infinity; if (!on) this.movedAt = -Infinity; }
 
   /** Whether the camera aims at everything this frame. */
   private fitting(now: number): boolean { return aimsAtEverything(this.pinned, now, this.movedAt, this.fitUntil); }
 
   /** The person moved the wall: auto fit waits 12 s; a one-off fit under way stops. */
-  private moved(): void { this.movedAt = performance.now(); this.fitUntil = -Infinity; this.panelDir = 0; }
+  private moved(): void { this.movedAt = performance.now(); this.fitUntil = -Infinity; }
 
   // ---------- the frame ----------
   private frame = (now: number) => {
@@ -512,10 +506,9 @@ export class MonitorScene {
     this.last = now;
     this.dt = dt;
     this.model?.tidy(now);
-    if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.workflowsRev ?? -1) || this.mapRoom !== (this.model?.map.size ?? 0) > 0) this.rebuild();
-    this.rescalePanels(now);
+    if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.workflowsRev ?? -1) || this.mapRoom !== this.wantedRoom) this.rebuild();
     this.resize();
-    if (this.sim.alpha() > 0.001) this.sim.tick(); // at rest the nodes stay put (a wake: new nodes, a drag, a panel step)
+    if (this.sim.alpha() > 0.001) this.sim.tick(); // at rest the nodes stay put (a wake: new nodes, a drag, new homes)
     if (this.fitting(now)) this.aimFit();
     const ease = 1 - Math.pow(0.0025, dt / 1000);
     this.cam.x += (this.target.x - this.cam.x) * ease;
@@ -531,33 +524,23 @@ export class MonitorScene {
     return this.reducedMotion && (e.kind === 'comet' || e.kind === 'you') ? StillCometMs : Life[e.kind];
   }
 
-  /** Follows the zoom with the workflow panels' size, in steps (each step re-sizes their bodies in the layout; panelStep). */
-  private rescalePanels(now: number): void {
-    // While the camera fits on its own, a step waits until the graph is at rest and the camera has got there: a step
-    // taken mid-swing chased a zoom that was only passing (card 385). Zoomed by hand, the panels follow at once.
-    if (this.fitting(now) && !panelsMayStep(this.sim.alpha(), this.cam.k, this.target.k)) return;
-    const step = panelStep(this.panelK, panelScale(this.cam.k), this.panelDir);
-    if (step.k === this.panelK) return;
-    const k = step.k;
-    this.panelK = k;
-    this.panelDir = step.dir;
-    let any = false;
-    for (const n of this.nodes.values()) if (n.kind === 'workflows') { n.r = panelRadius(panelLayout(n.wfs?.length ?? 0, k)); any = true; }
-    if (!any) return;
-    const collide = this.sim.force('collide') as ReturnType<typeof forceCollide<Node>>;
-    collide.radius(collide.radius()); // re-reads the radii
-    (this.sim.force('wflink') as ReturnType<typeof forceLink<Node, Link>>).links(this.wfLinks);
-    this.sim.alpha(Math.max(this.sim.alpha(), 0.15));
+  /**
+   * A workflow node's label as drawn now (workflowNodeLabel at the zoom and the wall's width), its font size, and the
+   * box it fills under the node (world px; its centre y). The label stays the camera's size, never under 8 px on screen.
+   */
+  private wfLabelBox(n: Node): { text: string; font: number; w: number; h: number; y: number } {
+    const text = n.wf ? workflowNodeLabel(n.wf, { zoom: this.cam.k, wallPx: this.w || this.canvas.clientWidth }) : n.name;
+    const font = nodeLabelFont(this.cam.k);
+    this.ctx.font = `600 ${font}px ${this.family()}`;
+    const w = this.ctx.measureText(text).width;
+    return { text, font, w, h: font * 1.2, y: n.y! + n.r + 3 + font * 0.6 };
   }
-
-  private panelOf(n: Node): PanelLayout { return panelLayout(n.wfs?.length ?? 0, this.panelK); }
 
   private resize(): void {
     const dpr = window.devicePixelRatio || 1;
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (w === this.w && h === this.h && dpr === this.dpr) return;
     this.w = w; this.h = h; this.dpr = dpr;
-    this.panelDir = 0;
     this.canvas.width = Math.max(1, Math.round(w * dpr));
     this.canvas.height = Math.max(1, Math.round(h * dpr));
   }
@@ -571,7 +554,7 @@ export class MonitorScene {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const n of ns) {
       // A member's pad leaves room for the files fanned beside it.
-      const pad = n.r + (n.kind === 'team' ? 70 : n.kind === 'workflows' ? 10 : 64);
+      const pad = n.r + (n.kind === 'team' ? 70 : 64);
       x0 = Math.min(x0, n.x! - pad); x1 = Math.max(x1, n.x! + pad);
       y0 = Math.min(y0, n.y! - pad); y1 = Math.max(y1, n.y! + pad);
     }
@@ -622,15 +605,6 @@ export class MonitorScene {
       c.lineWidth = 1.2;
       c.beginPath(); c.moveTo(l.source.x!, l.source.y!); c.lineTo(l.target.x!, l.target.y!); c.stroke();
     }
-    // The workflows' lines: thinner, dashed and fainter than the members' spokes.
-    c.setLineDash([3, 4]);
-    c.lineWidth = 0.8;
-    for (const l of this.wfLinks) {
-      c.globalAlpha = 0.3 * Math.min(dim(l.source.key), dim(l.target.key));
-      c.strokeStyle = `hsl(${l.source.hue} 50% 62%)`;
-      c.beginPath(); c.moveTo(l.source.x!, l.source.y!); c.lineTo(l.target.x!, l.target.y!); c.stroke();
-    }
-    c.setLineDash([]);
     c.globalAlpha = 1;
     this.placeMap(now);
     const view = this.viewBox();
@@ -640,7 +614,6 @@ export class MonitorScene {
     c.globalCompositeOperation = 'source-over';
     for (const n of this.nodes.values()) if (n.kind === 'wf') this.drawWorkflowNode(c, n, now, motion, dim(n.key));
     for (const n of this.nodes.values()) if (n.kind === 'member') this.drawMember(c, n, now, motion, dim(n.key));
-    for (const n of this.nodes.values()) if (n.kind === 'workflows') this.drawPanel(c, n, now, motion, dim(n.key));
     this.drawMapNodes(c, now, dim, view);
     this.drawCommits(c, now);
     for (const n of this.nodes.values()) if (n.kind === 'team') this.drawTeamPill(c, n, dim(n.key));
@@ -679,7 +652,7 @@ export class MonitorScene {
     c.globalAlpha = 1;
   }
 
-  /** A workflow node: a rounded square in its state's colour with its mark, and "#id" under it. */
+  /** A workflow node: a rounded square in its state's colour with its mark, and "#id title" under it (wfLabelBox). */
   private drawWorkflowNode(c: CanvasRenderingContext2D, n: Node, now: number, motion: number, alpha: number): void {
     const look = workflowNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key));
     const color = Palette[look.tone];
@@ -696,12 +669,11 @@ export class MonitorScene {
     }
     c.fillStyle = color; c.strokeStyle = color;
     drawWorkflowIcon(c, look.icon, x, y, r * 1.1);
-    if (this.cam.k > 0.5) {
-      c.font = `600 9px ${this.family()}`;
-      c.textAlign = 'center'; c.textBaseline = 'top';
-      c.fillStyle = look.status === 'blocked' ? color : Palette.inkDim;
-      c.fillText(n.name, x, y + r + 3);
-    }
+    const label = this.wfLabelBox(n);
+    c.font = `600 ${label.font}px ${this.family()}`;
+    c.textAlign = 'center'; c.textBaseline = 'top';
+    c.fillStyle = look.status === 'blocked' ? color : Palette.inkDim;
+    c.fillText(label.text, x, y + r + 3);
     c.globalAlpha = 1;
   }
 
@@ -858,6 +830,7 @@ export class MonitorScene {
     const map = this.model?.map;
     if (!map || !map.size) {
       if (this.mapNodes.length) { this.mapNodes = []; this.mapById.clear(); this.mapPos.clear(); }
+      this.wantedRoom = 0;
       return;
     }
     const L = this.mapLayouts;
@@ -872,6 +845,7 @@ export class MonitorScene {
         if (team) list.push({ team, view: map.view(name, { maxFiles: each }) });
       }
       this.mapLayouts = { rev: map.rev, at: now, model: this.model, list };
+      this.wantedRoom = mapRoomFor(list.map((l) => l.view)); // the next frame moves the homes if it changed
     }
     const ease = this.reduced ? 1 : 1 - Math.pow(0.0004, this.dt / 1000);
     const nodes: MapNode[] = [];
@@ -885,7 +859,7 @@ export class MonitorScene {
       byId.set(n.id, n);
     };
     for (const { team, view: v } of this.mapLayouts.list) {
-      const laid = layoutTeamMap(v, { x: team.x!, y: team.y! }, this.teamOut.get(team.key) ?? -Math.PI / 2, this.reach(team) + 70);
+      const laid = layoutTeamMap(v, { x: team.x!, y: team.y! }, this.teamOut.get(team.key) ?? -Math.PI / 2, this.reach(team) + MapPastMembers);
       for (const f of laid.folders) {
         put({ id: f.id, kind: 'folder', team, folder: f.view.path, label: f.view.label, heat: f.view.heat, files: [...f.view.files, ...f.view.more] }, f.x, f.y, team.x!, team.y!);
         if (f.view.more.length)
@@ -1340,82 +1314,6 @@ export class MonitorScene {
     c.globalAlpha = alpha;
   }
 
-  /**
-   * A team's workflow panel: a header, then a row per workflow (last updated first) with its mark in its state's
-   * colour (a turning ring round it while it is worked), "#id title" cut to fit, and the time of its last entry.
-   */
-  private drawPanel(c: CanvasRenderingContext2D, n: Node, now: number, motion: number, alpha: number): void {
-    const wfs = n.wfs ?? [];
-    const l = this.panelOf(n);
-    const k = this.panelK;
-    const x0 = n.x! - l.w / 2, y0 = n.y! - l.h / 2;
-    const hover = this.hoverPanel?.key === n.key ? this.hoverPanel.hit : null;
-    const family = this.family();
-    c.globalAlpha = alpha;
-    c.fillStyle = 'rgba(12, 19, 34, 0.92)';
-    c.strokeStyle = hover !== null ? 'rgba(226, 232, 240, 0.7)' : `hsla(${n.hue}, 70%, 60%, 0.45)`;
-    c.lineWidth = Math.max(1, k);
-    roundRect(c, x0, y0, l.w, l.h, 8 * k); c.fill(); c.stroke();
-    // The header.
-    c.textBaseline = 'middle';
-    c.textAlign = 'left';
-    c.font = `700 ${9 * k}px ${family}`;
-    c.fillStyle = hover === 'header' ? Palette.ink : Palette.inkDim;
-    const hy = y0 + l.pad + l.headerH / 2 - 1 * k;
-    c.fillText('WORKFLOWS', x0 + l.pad, hy);
-    c.textAlign = 'right';
-    c.font = `500 ${9 * k}px ${family}`;
-    c.fillText(hover === 'header' ? 'open ›' : 'last updated', x0 + l.w - l.pad, hy);
-    c.strokeStyle = 'rgba(148, 163, 184, 0.18)';
-    c.lineWidth = Math.max(0.6, 0.8 * k);
-    c.beginPath(); c.moveTo(x0 + l.pad, y0 + l.pad + l.headerH - 2 * k); c.lineTo(x0 + l.w - l.pad, y0 + l.pad + l.headerH - 2 * k); c.stroke();
-    // The rows.
-    wfs.forEach((w, i) => {
-      const look = workflowLook(w);
-      const color = Palette[look.tone];
-      const ry = y0 + l.pad + l.headerH + i * l.rowH, cy = ry + l.rowH / 2;
-      if (hover === i) {
-        c.globalAlpha = alpha;
-        c.fillStyle = 'rgba(56, 189, 248, 0.10)';
-        roundRect(c, x0 + 3 * k, ry, l.w - 6 * k, l.rowH, 4 * k); c.fill();
-      }
-      c.globalAlpha = alpha * (look.status === 'closed' ? 0.7 : 1);
-      const ix = x0 + l.pad + 6 * k, ir = 5.5 * k;
-      if (look.status === 'working') {
-        c.strokeStyle = color;
-        c.lineWidth = 1.2 * k;
-        c.lineCap = 'round';
-        if (motion) {
-          const turn = now / 700;
-          for (let j = 0; j < 2; j++) { const a = turn + j * Math.PI; c.beginPath(); c.arc(ix, cy, ir + 2.2 * k, a, a + Math.PI * 0.55); c.stroke(); }
-        } else {
-          c.globalAlpha = alpha * 0.5;
-          c.beginPath(); c.arc(ix, cy, ir + 2.2 * k, 0, Math.PI * 2); c.stroke();
-          c.globalAlpha = alpha;
-        }
-      }
-      c.fillStyle = 'rgba(7, 11, 20, 0.95)';
-      c.strokeStyle = color;
-      c.lineWidth = 1.2 * k;
-      c.beginPath(); c.arc(ix, cy, ir, 0, Math.PI * 2); c.fill(); c.stroke();
-      c.fillStyle = color;
-      drawWorkflowIcon(c, look.icon, ix, cy, 6.5 * k);
-      // The time on the right, the label in the room left.
-      c.textAlign = 'right';
-      c.font = `500 ${9 * k}px ${family}`;
-      const when = entryTime(w.lastAt);
-      const tw = c.measureText(when).width;
-      c.fillStyle = Palette.inkDim;
-      c.fillText(when, x0 + l.w - l.pad, cy + 0.5 * k);
-      c.textAlign = 'left';
-      c.font = `500 ${PanelFontPx * k}px ${family}`;
-      const lx = ix + ir + 6 * k;
-      c.fillStyle = look.status === 'closed' ? Palette.inkDim : hover === i ? Palette.ink : 'rgba(226, 232, 240, 0.88)';
-      c.fillText(fitText(c, workflowLabel(w, 60), x0 + l.w - l.pad - tw - 8 * k - lx), lx, cy + 0.5 * k);
-    });
-    c.globalAlpha = 1;
-  }
-
   private drawEffect(c: CanvasRenderingContext2D, e: Effect, now: number, motion: number): void {
     // Steps and floating lines are drawn above the members (drawSteps, drawFloat).
     // Commits are drawn by drawCommits, what waits for the person by drawToYou.
@@ -1563,7 +1461,7 @@ export class MonitorScene {
 
   private neighbours(key: string): Set<string> {
     const set = new Set([key]);
-    for (const l of [...this.links, ...this.wfLinks, ...this.wfmLinks]) {
+    for (const l of [...this.links, ...this.wfmLinks]) {
       if (l.source.key === key) set.add(l.target.key);
       if (l.target.key === key) set.add(l.source.key);
     }
@@ -1576,18 +1474,6 @@ export class MonitorScene {
   private nodeAt(sx: number, sy: number): Node | null {
     const [x, y] = this.toWorld(sx, sy);
     return nearestNodeAt(this.nodes.values(), x, y, this.cam.k);
-  }
-
-  /** The workflow panel under a screen point, and what of it (its header, a row, the rest). */
-  private panelAt(sx: number, sy: number): { node: Node; hit: 'header' | 'panel' | number } | null {
-    const [x, y] = this.toWorld(sx, sy);
-    for (const n of this.nodes.values()) {
-      if (n.kind !== 'workflows') continue;
-      const l = this.panelOf(n);
-      const hit = panelHit(l, x - (n.x! - l.w / 2), y - (n.y! - l.h / 2));
-      if (hit !== null) return { node: n, hit };
-    }
-    return null;
   }
 
   /** The map node under a screen point, if any (they are small, so the reach is a few pixels on screen). */
@@ -1658,7 +1544,7 @@ export class MonitorScene {
       // the view opens Needs you on its click.
       this.hoverYou = this.hitYouNode(sx, sy);
       if (this.hoverYou) {
-        this.hover = null; this.hoverMap = null; this.hoverCommit = null; this.hoverPanel = null;
+        this.hover = null; this.hoverMap = null; this.hoverCommit = null;
         cv.style.cursor = 'pointer';
         const you = youNodeAt(this.w, this.h);
         this.onHover({ key: 'you', kind: 'you', team: '', name: 'You', x: you.x, y: you.y });
@@ -1683,25 +1569,13 @@ export class MonitorScene {
         this.onHover(this.mapHover(mapNode, fx, fy));
         return;
       }
-      const panel = this.panelAt(sx, sy);
-      this.hoverPanel = panel ? { key: panel.node.key, hit: panel.hit } : null;
-      if (panel) {
-        const p = panel.node, l = this.panelOf(p);
-        this.hover = p;
-        cv.style.cursor = 'pointer';
-        const row = typeof panel.hit === 'number' ? panel.hit : null;
-        const top = p.y! - l.h / 2 + (row === null ? 0 : l.pad + l.headerH + row * l.rowH);
-        const [hx, hy] = this.toScreen(p.x!, top);
-        this.onHover({ key: p.key, kind: 'workflow', team: p.team, name: p.team, workflow: row === null ? undefined : p.wfs?.[row], x: hx, y: hy });
-        return;
-      }
       const n = this.nodeAt(sx, sy);
       this.hover = n;
       cv.style.cursor = n ? 'pointer' : 'grab';
       if (!n) { this.onHover(null); return; }
       const [hx, hy] = this.toScreen(n.x!, n.y!);
       if (n.kind === 'wf') { this.onHover({ key: n.key, kind: 'workflow', team: n.team, name: n.team, workflow: n.wf, x: hx, y: hy - n.r * this.cam.k }); return; }
-      this.onHover({ key: n.key, kind: n.kind === 'workflows' ? 'workflow' : n.kind, team: n.team, name: n.name, state: n.state, statusLine: n.statusLine, queued: n.queued, x: hx, y: hy - n.r * this.cam.k });
+      this.onHover({ key: n.key, kind: n.kind, team: n.team, name: n.name, state: n.state, statusLine: n.statusLine, queued: n.queued, x: hx, y: hy - n.r * this.cam.k });
     };
     const down = (e: PointerEvent) => {
       if (touchDown(e)) return;
@@ -1719,26 +1593,23 @@ export class MonitorScene {
         const key = last ? memberKey(file.team.team, last.member) : file.team.key;
         this.picked = key; this.onPick(key);
       }
-      const panel = file ? null : this.panelAt(sx, sy);
-      const n = file ? null : panel ? panel.node : this.nodeAt(sx, sy);
+      const n = file ? null : this.nodeAt(sx, sy);
       cv.setPointerCapture(e.pointerId);
-      this.drag = { node: n, x: sx, y: sy, cx: this.target.x, cy: this.target.y, hit: panel?.hit };
-      // A workflow panel opens on the click's release (a drag only moves it); it does not take the pick.
-      if (n && n.kind !== 'workflows' && n.kind !== 'wf') { this.picked = n.key; this.onPick(n.key); }
+      this.drag = { node: n, x: sx, y: sy, cx: this.target.x, cy: this.target.y };
+      // A workflow node opens on the click's release (a drag only moves it); it does not take the pick.
+      if (n && n.kind !== 'wf') { this.picked = n.key; this.onPick(n.key); }
     };
     const up = (e: PointerEvent) => {
       if (touchUp(e)) return;
       const node = this.drag?.node;
-      if (node?.kind === 'workflows' || node?.kind === 'wf') {
+      if (node?.kind === 'wf') {
         const [sx, sy] = local(e);
-        const hit = this.drag!.hit;
-        const id = node.kind === 'wf' ? node.wf?.id : typeof hit === 'number' ? node.wfs?.[hit]?.id : undefined;
-        if (Math.hypot(sx - this.drag!.x, sy - this.drag!.y) < 5) this.onOpenWorkflow(node.team, id);
+        if (Math.hypot(sx - this.drag!.x, sy - this.drag!.y) < 5) this.onOpenWorkflow(node.team, node.wf?.id);
       }
       if (this.drag?.node) { this.drag.node.fx = null; this.drag.node.fy = null; }
       this.drag = null;
     };
-    const leave = () => { this.hover = null; this.hoverMap = null; this.hoverCommit = null; this.hoverPanel = null; this.hoverYou = false; this.onHover(null); };
+    const leave = () => { this.hover = null; this.hoverMap = null; this.hoverCommit = null; this.hoverYou = false; this.onHover(null); };
     // Touch (an iPad, a touch screen): two fingers pinch to zoom and move together to pan, the point between them staying
     // under them; a double tap fits everything. One finger drags as the mouse does.
     const touches = new Map<number, readonly [number, number]>();
@@ -1818,18 +1689,6 @@ export class MonitorScene {
       cv.removeEventListener('dblclick', dbl);
     };
   }
-}
-
-/** A line cut with an ellipsis to fit `max` px in the current font. */
-function fitText(c: CanvasRenderingContext2D, text: string, max: number): string {
-  if (max <= 0) return '';
-  if (c.measureText(text).width <= max) return text;
-  let lo = 0, hi = text.length;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    if (c.measureText(text.slice(0, mid).trimEnd() + '…').width <= max) lo = mid; else hi = mid - 1;
-  }
-  return text.slice(0, lo).trimEnd() + '…';
 }
 
 function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
