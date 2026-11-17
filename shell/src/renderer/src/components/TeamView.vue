@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { vChange } from '../remoteAccess';
 import TeamStateChip from './TeamStateChip.vue';
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import TaskAskCard from './TaskAskCard.vue';
 import type { AgentCard as Card, Decision, IntegrationAsk, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -11,7 +11,7 @@ import MemberPane from './MemberPane.vue';
 import { useTeamActivity } from '../monitor/teamActivity';
 import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
-import { memberCardsStore } from '../gripStore';
+import { memberAvailableWidth, memberRenderedWidth, memberTileSize, memberTilesStore } from '../memberTileSize';
 import { closePhoneTerminals, memberFocus, takeMemberFocus } from '../memberPaneView';
 import Icon from './Icon.vue';
 import TriggersDialog from './TriggersDialog.vue';
@@ -148,9 +148,40 @@ const approve = (a: IntegrationAsk, remember: 'once' | 'always' | 'ask', scope: 
 const decline = (a: IntegrationAsk, remember?: 'never', scope?: Scope) => busyFor(`ask-${a.id}`, () => api.call('integrations.decline',
   { id: a.id, note: declineNote.value[a.id] || undefined, ...(remember ? { remember, scope: scope ?? 'team' } : {}) }), remember ?? 'decline')();
 const declineTask = (a: IntegrationAsk, note: string) => busyFor(`ask-${a.id}`, () => api.call('integrations.decline', { id: a.id, note: note || undefined }), 'decline')();
+// The "New member" tile (B076), last in the grid: its + opens the add form in the tile; Add closes it once the member is
+// there (a refused add keeps the form and what was typed, the error shows above), Cancel or Escape closes it.
+const adding = ref(false);
+const addName = ref<HTMLInputElement | null>(null);
+async function openAdd() {
+  adding.value = true;
+  await nextTick();
+  addName.value?.focus();
+}
+function cancelAdd() {
+  adding.value = false;
+  newAgent.value = { name: '', cli: 'claude' };
+}
 const addAgent = busyFor('add-agent', async () => {
   await api.call('members.add', { teamId: props.team.id, name: newAgent.value.name.trim(), cli: newAgent.value.cli });
   newAgent.value = { name: '', cli: 'claude' };
+  adding.value = false;
+});
+const canAdd = computed(() => !!newAgent.value.name.trim() && !busy.is('add-agent'));
+
+// The member grid (B076): equal tiles that wrap, the shared size (memberTileSize.ts) as --tile-w / --tile-h, never
+// wider than the grid (measured, so a drag starts from the width the tiles really have).
+const grid = ref<HTMLElement | null>(null);
+const gridStyle = computed(() => ({ '--tile-w': `${memberRenderedWidth.value}px`, '--tile-h': `${memberTileSize.value.h}px` }));
+function measureGrid() {
+  const w = grid.value?.clientWidth;
+  memberAvailableWidth.value = w && w > 0 ? w : Infinity;
+}
+let gridObserver: ResizeObserver | null = null;
+watch(grid, (el) => {
+  gridObserver?.disconnect();
+  gridObserver = null;
+  measureGrid();
+  if (el && typeof ResizeObserver !== 'undefined') { gridObserver = new ResizeObserver(measureGrid); gridObserver.observe(el); }
 });
 const stop = (c: Card) => busyFor(`member-${c.member.id}`, () => api.call('terminal.stop', { memberId: c.member.id }), 'stop')();
 const remove = (c: Card) => {
@@ -176,12 +207,19 @@ onMounted(() => {
   timer = setInterval(refresh, props.pollMs ?? 1000);
 });
 watch(() => props.team.id, () => {
+  cancelAdd();
   told.value = null; loaded.value = false; error.value = null; refreshError.value = null; cards.value = []; decisions.value = []; asks.value = [];
   void refresh();
 });
 // A phone (B064): the page opens with every member on Activity, so leaving it (or its team) closes that team's terminal.
 watch(() => props.team.name, (_now, before) => closePhoneTerminals(before));
-onBeforeUnmount(() => { if (timer) clearInterval(timer); closeCode(); closePhoneTerminals(props.team.name); });
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer);
+  closeCode();
+  closePhoneTerminals(props.team.name);
+  gridObserver?.disconnect();
+  memberAvailableWidth.value = Infinity;
+});
 
 /** Opens the Workflows dialog (the Monitor opens a team here when a workflow node is clicked). */
 const workflowFocus = ref<number | null>(null);
@@ -312,20 +350,37 @@ defineExpose({ refresh, openWorkflows, openDocuments });
       </div>
     </div>
 
-    <!-- One column of members, each one framed pane (B061): the 14px gap below each is a height handle for every member's body (as on the Teams list). -->
-    <div v-for="c in cards" :key="c.member.id" class="member-cell">
-      <MemberPane :ref="(p) => setPaneRef(c.member.name, p)" :card="c" :api="api" :poll-ms="pollMs"
-        :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
-        :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" :activity-limit="phone ? PhoneActivityRows : undefined"
-        @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
-        @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
-      <TileGrip v-if="!phone" axis="h" :store="memberCardsStore" />
-    </div>
-
-    <div class="add row">
-      <input v-model="newAgent.name" placeholder="Job and first name, e.g. Developer Priya" title="Named for the job, a space, then a first name. Its id is the name without the space (DeveloperPriya)." maxlength="60" data-test="add-agent-name" />
-      <select v-model="newAgent.cli" data-test="add-agent-cli"><option v-for="c in agentOptions" :key="c.id" :value="c.id">{{ c.label }}</option></select>
-      <button v-change data-test="add-agent" :disabled="!newAgent.name.trim() || busy.is('add-agent')" :aria-busy="busy.is('add-agent')" @click="addAgent"><BusyLabel :busy="busy.is('add-agent')" text="Adding…">+ Add agent</BusyLabel></button>
+    <!-- The members (B076): equal tiles in a wrapping grid, like the Teams list; the 14px gaps right of and below each
+         tile are the width and height handles for every tile (memberTileSize.ts). The last tile is New member. A phone:
+         one full-width tile per row, as tall as its content, no handles. -->
+    <div ref="grid" class="member-grid" :style="phone ? undefined : gridStyle" data-test="member-grid">
+      <div v-for="c in cards" :key="c.member.id" class="member-cell" data-test="member-cell">
+        <MemberPane :ref="(p) => setPaneRef(c.member.name, p)" :card="c" :api="api" :poll-ms="pollMs"
+          :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
+          :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" :activity-limit="phone ? PhoneActivityRows : undefined"
+          @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
+          @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
+        <template v-if="!phone"><TileGrip axis="w" :store="memberTilesStore" /><TileGrip axis="h" :store="memberTilesStore" /></template>
+      </div>
+      <div class="member-cell new-cell">
+        <div class="new-tile" :class="{ open: adding }" data-test="member-card-new-tile">
+          <button v-if="!adding" v-change class="new-open" data-test="member-card-new" title="Add a member to this team" @click="openAdd"><Icon name="plus" />New member</button>
+          <form v-else class="add" data-test="add-agent-form" @submit.prevent="canAdd && addAgent()" @keydown.esc.stop="cancelAdd">
+            <strong class="add-title">New member</strong>
+            <label>Job and first name
+              <input ref="addName" v-model="newAgent.name" placeholder="e.g. Developer Priya" title="Named for the job, a space, then a first name. Its id is the name without the space (DeveloperPriya)." maxlength="60" data-test="add-agent-name" />
+            </label>
+            <label>CLI
+              <select v-model="newAgent.cli" data-test="add-agent-cli"><option v-for="o in agentOptions" :key="o.id" :value="o.id">{{ o.label }}</option></select>
+            </label>
+            <div class="add-buttons">
+              <button type="submit" class="primary" v-change data-test="add-agent" :disabled="!canAdd" :aria-busy="busy.is('add-agent')"><BusyLabel :busy="busy.is('add-agent')" text="Adding…">Add</BusyLabel></button>
+              <button type="button" data-test="add-agent-cancel" :disabled="busy.is('add-agent')" @click="cancelAdd">Cancel</button>
+            </div>
+          </form>
+        </div>
+        <template v-if="!phone"><TileGrip axis="w" :store="memberTilesStore" /><TileGrip axis="h" :store="memberTilesStore" /></template>
+      </div>
     </div>
     <LogsDialog v-if="logsFor" :api="api" source="activity" :member="logsFor" @close="logsFor = null" />
   </section>
@@ -345,7 +400,25 @@ h2 { font-size: 16px; margin: 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .actions button { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .team > * { margin-bottom: 10px; }
-.team > .member-cell { position: relative; margin-bottom: 14px; }
+/* B076: the members are equal tiles that wrap, like the Teams list's .team-grid: columns the shared width (or the whole
+   row when narrower), rows the shared height; the handles live in the 14px gaps right of and below each cell. */
+.member-grid { display: grid; grid-template-columns: repeat(auto-fill, min(var(--tile-w), 100%)); grid-auto-rows: var(--tile-h); justify-content: start; gap: 14px; margin-bottom: 14px; }
+.member-cell { position: relative; min-width: 0; min-height: 0; }
+/* The pane fills its tile; its view takes what the title and tabs leave (MemberPane scrolls it inside, card 366), not the
+   old shared output height (the body's inline height, which only the removed gap handles set). The desktop only: on a
+   phone the pane keeps its own height. */
+@media (min-width: 760px) {
+  .member-cell > :deep(.pane) { height: 100%; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .member-cell > :deep(.pane > .body) { flex: 1 1 0; min-height: 0; height: auto !important; }
+}
+.new-tile { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; border: 1px dashed var(--line); border-radius: 6px; background: var(--surface); overflow: auto; }
+.new-tile:hover { border-color: var(--line-strong); }
+.new-open { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; background: transparent; color: var(--muted); }
+.new-open:hover:not(:disabled) { color: var(--accent); }
+.add { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.add label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-soft); }
+.add input, .add select { font: inherit; font-size: 13px; }
+.add-buttons { display: flex; gap: 6px; }
 .decision { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; }
 .decision p { margin: 0 0 6px; }
 .decision > .row { margin-top: 6px; }
@@ -364,7 +437,6 @@ h2 { font-size: 16px; margin: 0; }
 .remember input { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .decision.ask code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 .muted { color: var(--muted); }
-.add { margin-top: 14px; }
 .paused { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
 .small { font-size: 12px; }
 /* Card 342: the Tell buttons draw monochrome line icons (currentColor), not emoji iOS paints in colour. */
@@ -380,7 +452,11 @@ h2 { font-size: 16px; margin: 0; }
 }
 /* A phone (B037): one column of member panes (each stacked, MemberPane); the actions, Tell and the asks wrap; tap targets 44 px. */
 @media (max-width: 759.98px) {
-  .team > .member-cell { margin-bottom: 16px; }
+  /* B076: one full-width tile per row, as tall as its content, the New member tile last; no handles (the template). */
+  .member-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 16px; }
+  .new-tile { min-height: 64px; overflow: visible; }
+  .new-open { min-height: 64px; }
+  .add-buttons button { flex: 1 1 0; }
   .team > * { margin-bottom: 6px; }
   /* The header (B054): one 44 px row, the title (cut with …) and the icon actions; it scrolls away with the page. */
   .teamhead { flex-direction: row; align-items: center; gap: 4px; height: 44px; }
@@ -408,7 +484,7 @@ h2 { font-size: 16px; margin: 0; }
   .tell { flex-wrap: nowrap; gap: 6px; min-height: 44px; }
   .tell input.grow { flex: 1 1 0; min-width: 0; }
   .tell button { flex: none; min-width: 44px; padding: 0 10px; }
-  .add input { flex: 1 1 100%; }
+  .add input, .add select, .add button { min-height: 44px; box-sizing: border-box; }
   .paused { flex-wrap: wrap; }
   .thumb .x { width: 32px; height: 32px; line-height: 32px; font-size: 13px; }
 }

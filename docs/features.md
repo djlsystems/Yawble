@@ -47,9 +47,15 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - The tab is remembered per member; the Report is the default. Only a terminal that is shown polls; several members'
     terminals can show at once. The Monitor, the palette and the remote view can open a member's terminal: the team
     page shows that pane's Terminal and scrolls it into view.
-  - The gaps between members set the view's height for every member. At the default height a pane is no taller than
-    the card and Activity row it replaced.
-  - On a phone a pane is stacked the same way, the view at its own height. The Terminal tab opens the terminal full
+  - The members are equal tiles in a grid that wraps, like the Teams list: two per row at a 1280 px window by default.
+    The gaps right of and below the tiles are width and height handles (drag, or the arrow keys on a focused handle;
+    double-click for the default) that resize every tile at once. The size is the team page's own, kept by this
+    computer or browser (each remote viewer keeps theirs). The pane fills its tile and its view scrolls inside it.
+  - The last tile is **New member**: its **+** opens a small form in the tile: **Job and first name**, the **CLI**, and
+    **Add** (or **Cancel**, or Escape). Add is offered once a name is typed; a refused add keeps the form and shows why.
+    The remote view has the same grid; a read-only (Visitor) viewer cannot add.
+  - On a phone the tiles are one per row, full width, each as tall as its content, with no handles, New member last;
+    a pane is stacked the same way, the view at its own height. The Terminal tab opens the terminal full
     screen with one header row; its **⋯** holds the state line and Stop, and **✕** goes back to the Report. The
     transcript gets at least 60% of the screen's height. Every target is at least 44 px.
 - Members ask you through the team page. **Approve** answers once; **Always approve for this team…** remembers it.
