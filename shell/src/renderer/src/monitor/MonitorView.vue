@@ -6,7 +6,11 @@ import MemberAvatar from '../faces/MemberAvatar.vue';
 import { MemberStateLabel, memberStateOf, type MemberState } from '../faces/faces';
 import { memberKey, MonitorModel, spaced, teamKey, type ActivityRow, type FeedRow, type TeamSnapshot } from './model';
 import { MonitorScene, Palette, type SceneHover } from './scene';
-import { clampLayout, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, LayoutStep, readLayout, writeLayout, type LayoutKey, type LayoutSettings } from './layout';
+import {
+  clampLayout, Densities, DefaultDensity, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, LayoutStep, readDensity, readLayout,
+  writeDensity, writeLayout, type Density, type LayoutKey, type LayoutSettings,
+} from './layout';
+import { MonitorSound, readSound, writeSound } from './sound';
 import { readStep, StepLook, type StepKind, type StepRow } from './steps';
 import Timeline from './Timeline.vue';
 import LoadingNote from '../components/LoadingNote.vue';
@@ -37,9 +41,18 @@ import { entryTime, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown, 
  * Each team's newest workflows (bus.workflows) sit in one panel hung off its hub, live only: they are fetched when the bus brings that
  * team something and otherwise every WorkflowPollMs, and a replay shows none (it would be faking their history).
  * Clicking one opens the team at its Workflows dialog.
+ *
+ * A click on a team's hub focuses it (the scene zooms to it and dims the rest); Esc, a click on the empty wall or the
+ * chip's × shows every team again. A click on the You node opens Needs you (emit openNeedsYou). Beside the camera:
+ * the density (calm / normal / lively, kept) and the sound (off unless turned on, kept; sound.ts); on a phone both
+ * sit at the top of the cog's panel.
  */
 const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
-const emit = defineEmits<{ openTeam: [teamId: number, panel?: 'workflows']; openWorkflow: [teamId: number, workflow: number]; openTerminal: [teamId: number, memberId: number] }>();
+const emit = defineEmits<{
+  openTeam: [teamId: number, panel?: 'workflows']; openWorkflow: [teamId: number, workflow: number]; openTerminal: [teamId: number, memberId: number];
+  /** The You node was clicked: the app opens what needs the person (the Board's Needs You). */
+  openNeedsYou: [];
+}>();
 const api = resolveApi(props.api);
 
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -87,6 +100,92 @@ function fitOnce(): void {
   if (!pinned.value) setPinned(true);
   scene?.fit();
 }
+/**
+ * What the view asks of the scene beyond the camera (DeveloperTomas's scene.ts, card 373): each one optional, so a
+ * scene without it leaves the view's control doing nothing on the wall (the view's own state is kept all the same).
+ */
+interface SceneExtras {
+  setFocus?: (teamId: number | null) => void;
+  setDensity?: (level: Density) => void;
+  hitYouNode?: (x: number, y: number) => boolean;
+}
+const extras = (): SceneExtras | null => scene as unknown as SceneExtras | null;
+
+// Focus: a click on a team zooms the wall to it and dims the rest; Esc, a click on the empty wall or the chip's ×
+// leaves. Not kept: the Monitor opens on everything.
+const focus = ref<{ id: number; name: string } | null>(null);
+function setFocus(team: { id: number; name: string } | null): void {
+  if ((focus.value?.id ?? null) === (team?.id ?? null)) return;
+  focus.value = team ? { id: team.id, name: team.name } : null;
+  try { extras()?.setFocus?.(team ? team.id : null); } catch { /* the scene could not; the view stays as it was */ }
+}
+function leaveFocus(): void { setFocus(null); }
+/** A pick from the wall: a team's hub focuses that team (a member or a file leaves the focus as it is). */
+function onScenePick(key: string | null): void {
+  pickSeq++;
+  if (key === null || key.startsWith('you')) return;
+  picked.value = key;
+  if (!key.startsWith('t:')) return;
+  const t = teams.value.find((x) => `t:${x.name.toLowerCase()}` === key);
+  if (t) setFocus(t);
+}
+function onKey(e: KeyboardEvent): void {
+  if (e.key !== 'Escape' || e.defaultPrevented || !focus.value) return;
+  const el = e.target as HTMLElement | null;
+  if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+  leaveFocus();
+}
+
+// A plain click on the wall (pressed and let go within ClickSlopPx, one pointer, and the scene took no pick in
+// between): on the You node it opens Needs you; anywhere else empty it leaves the focus.
+const ClickSlopPx = 5;
+let pickSeq = 0;
+let press: { x: number; y: number; seq: number; id: number } | null = null;
+let pointersDown = 0;
+function canvasPoint(e: PointerEvent): [number, number] {
+  const b = canvas.value!.getBoundingClientRect();
+  return [e.clientX - b.left, e.clientY - b.top];
+}
+/** Runs in the capture phase, so before the scene's own pointerdown (which may pick). */
+function onWallDown(e: PointerEvent): void {
+  if (e.target !== canvas.value) return;
+  pointersDown++;
+  press = pointersDown === 1 ? { x: e.clientX, y: e.clientY, seq: pickSeq, id: e.pointerId } : null;
+}
+/** Runs after the scene's pointerup. */
+function onWallUp(e: PointerEvent): void {
+  if (e.target !== canvas.value) return;
+  pointersDown = Math.max(0, pointersDown - 1);
+  const p = press;
+  press = null;
+  if (!p || p.id !== e.pointerId || Math.hypot(e.clientX - p.x, e.clientY - p.y) >= ClickSlopPx) return;
+  const [x, y] = canvasPoint(e);
+  let you = false;
+  try { you = extras()?.hitYouNode?.(x, y) === true; } catch { you = false; }
+  if (you) { emit('openNeedsYou'); return; }
+  if (p.seq === pickSeq) leaveFocus();
+}
+function onWallCancel(): void { pointersDown = Math.max(0, pointersDown - 1); press = null; }
+
+// Density: how much of what happens moves on the wall (calm / normal / lively), kept. Reduced motion stands at any.
+const density = ref<Density>(readDensity());
+function setDensity(level: Density): void {
+  density.value = level;
+  try { extras()?.setDensity?.(level); } catch { /* the scene could not */ }
+  writeDensity(level);
+}
+
+// Sound: a quiet tone per kind of event (sound.ts), off unless turned on; kept. Live only, never in a replay.
+const sound = new MonitorSound();
+const soundOn = ref(readSound());
+sound.on = soundOn.value;
+function toggleSound(): void {
+  soundOn.value = !soundOn.value;
+  sound.on = soundOn.value;
+  if (soundOn.value) sound.unlock();
+  writeSound(soundOn.value);
+}
+
 /**
  * A phone (B037): the wall fills the screen, the activity starts collapsed (a bar under the timeline; how it is left
  * there is not kept, so the desktop's choice stands), and the camera and legend controls sit in one compact row.
@@ -202,6 +301,8 @@ async function snapshot() {
   live.reconcile(next, performance.now());
   teams.value = next;
   scene?.setTeams(next);
+  // A focused team that is gone (deleted, archived) leaves the focus.
+  if (focus.value && !next.some((t) => t.id === focus.value!.id)) leaveFocus();
 }
 
 /**
@@ -322,8 +423,11 @@ async function tick(first = false) {
     events.value = trimByTime(events.value, from, 5000);
     if (eventKeys.size > 20_000) { eventKeys.clear(); for (const e of events.value) eventKeys.add(codeEventKey(e)); }
     replay?.extend(rows.value, steps.value, events.value);
-    if (mode.value === 'live' && scene) scene.effects.push(...live.effects.splice(0));
-    else live.effects.length = 0;
+    if (mode.value === 'live') {
+      const fx = live.effects.splice(0);
+      sound.hear(fx);
+      scene?.effects.push(...fx);
+    } else live.effects.length = 0;
     if (model === live) activity.value = [...live.activity];
     error.value = null;
   } catch (e) {
@@ -441,12 +545,15 @@ onMounted(async () => {
     scene.setPinned(pinned.value);
     if (layoutChanged.value) scene.setLayout(layout.value);
     scene.onHover = (h) => { hover.value = h; };
-    scene.onPick = (k) => { picked.value = k; };
+    scene.onPick = onScenePick;
     scene.onOpenWorkflow = (team, id) => {
+      pickSeq++;
       const t = teams.value.find((x) => x.name.toLowerCase() === team.toLowerCase());
       if (t) openWorkflow(t.id, id);
     };
+    if (density.value !== DefaultDensity) setDensity(density.value);
   }
+  window.addEventListener('keydown', onKey);
   await tick(true);
   timers = [
     setInterval(() => void tick(), props.pollMs ?? 1200),
@@ -455,14 +562,20 @@ onMounted(async () => {
   clock.value = new Date().toLocaleTimeString();
   if (typeof requestAnimationFrame === 'function') raf = requestAnimationFrame(frame);
 });
-onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimationFrame(raf); scene?.destroy(); });
+onBeforeUnmount(() => {
+  for (const t of timers) clearInterval(t);
+  cancelAnimationFrame(raf);
+  window.removeEventListener('keydown', onKey);
+  sound.destroy();
+  scene?.destroy();
+});
 </script>
 
 <template>
   <div class="monitor" :class="{ phone }" data-test="monitor">
     <div class="main">
-      <div class="stage">
-        <canvas ref="canvas" class="wall" data-test="monitor-canvas"></canvas>
+      <div class="stage" @pointerdown.capture="onWallDown" @pointerup="onWallUp" @pointercancel="onWallCancel">
+        <canvas ref="canvas" class="wall" :class="{ focused: !!focus }" data-test="monitor-canvas"></canvas>
         <div class="hud">
           <div v-if="mode === 'live'" class="title"><span class="live" />LIVE <span class="clock">{{ clock }}</span></div>
           <div v-else class="title replay" data-test="monitor-replaying"><span class="rec" />REPLAY {{ speed }}× <span class="clock">{{ replayClock }}</span></div>
@@ -474,6 +587,11 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
           </div>
           <div class="sub">{{ teams.length }} team{{ teams.length === 1 ? '' : 's' }} · {{ counts.members }} member{{ counts.members === 1 ? '' : 's' }}<template v-if="mode === 'replay'"> · the counts are now; the wall is the replay</template></div>
           <div v-if="heavy" class="heavy" data-test="monitor-heavy" title="The heavy-work lease: a full test suite, build or image build runs a few at a time">{{ heavy }}</div>
+          <div v-if="focus" class="focus-chip" data-test="monitor-focus">
+            <span class="focus-name">Focused on <b>{{ focus.name }}</b></span>
+            <button class="ctl" type="button" data-test="monitor-focus-leave" :title="phone ? 'Show every team' : 'Show every team (Esc, or click the empty wall)'"
+              aria-label="Show every team" @click="leaveFocus">×</button>
+          </div>
         </div>
         <div class="controls">
           <div class="seg" role="group" aria-label="Camera" data-test="monitor-camera">
@@ -492,6 +610,21 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
                 fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
             </svg>
           </button>
+          <template v-if="!phone">
+            <div class="seg" role="group" aria-label="Density" data-test="monitor-density">
+              <button v-for="d in Densities" :key="d.level" class="ctl" :class="{ on: density === d.level }" type="button" :aria-pressed="density === d.level"
+                :data-test="`monitor-density-${d.level}`" :title="d.help" @click="setDensity(d.level)">{{ d.label }}</button>
+            </div>
+            <button class="ctl sound" :class="{ on: soundOn }" type="button" data-test="monitor-sound" :aria-pressed="soundOn"
+              :aria-label="soundOn ? 'Sound on' : 'Sound off'" :title="soundOn ? 'Sound on: a quiet tone for needs you, failures, handbacks, commits and merges' : 'Sound off'"
+              @click="toggleSound">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" fill="currentColor" />
+                <path v-if="soundOn" d="M10.6 5.4a3.6 3.6 0 0 1 0 5.2M12.4 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                <path v-else d="M10.5 6l4 4M14.5 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </svg>
+            </button>
+          </template>
           <button v-if="phone" class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
             :aria-expanded="legendOpen" :title="legendOpen ? 'Hide the legend' : 'Show the legend'" @click="toggleLegend">{{ legendOpen ? 'Legend ▾' : 'Legend ▸' }}</button>
         </div>
@@ -500,6 +633,14 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
             <strong>Network forces</strong>
             <button class="ctl close" type="button" aria-label="Close" data-test="monitor-layout-close" @click="layoutOpen = false">×</button>
           </header>
+          <!-- A phone has no room beside the cog: the density and the sound sit at the top of its panel. -->
+          <div v-if="phone" class="wallprefs">
+            <div class="seg" role="group" aria-label="Density" data-test="monitor-density">
+              <button v-for="d in Densities" :key="d.level" class="ctl" :class="{ on: density === d.level }" type="button" :aria-pressed="density === d.level"
+                :data-test="`monitor-density-${d.level}`" :title="d.help" @click="setDensity(d.level)">{{ d.label }}</button>
+            </div>
+            <button class="ctl sound" :class="{ on: soundOn }" type="button" data-test="monitor-sound" :aria-pressed="soundOn" @click="toggleSound">{{ soundOn ? 'Sound on' : 'Sound off' }}</button>
+          </div>
           <label v-for="f in LayoutFields" :key="f.key" class="force" :title="f.help">
             <span class="name">{{ f.label }}</span>
             <input type="range" :min="LayoutMin" :max="LayoutMax" :step="LayoutStep" :value="layout[f.key]" :data-test="`monitor-layout-${f.key}`"
@@ -665,7 +806,17 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 .figures b { font-size: 20px; color: #e2e8f0; margin-right: 4px; font-variant-numeric: tabular-nums; }
 .sub { font-size: 11px; color: #64748b; margin-top: 2px; }
 .heavy { font-size: 11px; color: #cbd5e1; margin-top: 2px; max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.controls { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; }
+.controls { position: absolute; top: 12px; right: 12px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: calc(100% - 24px); }
+/* The speaker beside the density: lit when on. */
+.sound { display: inline-flex; align-items: center; padding: 3px 6px; color: #94a3b8; }
+.sound svg { width: 15px; height: 15px; }
+.sound.on { color: #e0f2fe; border-color: #38bdf8; background: rgba(56, 189, 248, .18); }
+/* The focused team's chip under the counts: its × shows every team again. */
+.focus-chip { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; max-width: 100%;
+  background: rgba(56, 189, 248, .12); border: 1px solid #38bdf8; border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; color: #e0f2fe; }
+.focus-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.focus-chip .ctl { border-radius: 999px; padding: 0 8px; }
+.wallprefs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ctl { background: rgba(12, 19, 34, .85); color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px; padding: 3px 10px; font-size: 12px; }
 .ctl:hover:not(:disabled) { border-color: #38bdf8; }
 /* Auto fit | Fit | Pinned: one joined control; the camera's mode is lit. */
@@ -753,6 +904,8 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
   /* The forces panel sits above the compact row, the screen's width less the margins, scrolling when it is taller. */
   .forces { top: auto; bottom: 60px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 76px); overflow-y: auto; }
   .forces .ctl { min-height: 44px; min-width: 44px; }
+  .wallprefs .seg .ctl { padding: 0 10px; }
+  .focus-chip .ctl { min-height: 44px; min-width: 44px; }
   .force input { min-height: 44px; }
   .legend { bottom: 60px; padding: 8px 10px; max-height: 40%; overflow-y: auto; pointer-events: auto; }
   .tip { max-width: calc(100vw - 24px); }

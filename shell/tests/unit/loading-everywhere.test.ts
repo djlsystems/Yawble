@@ -288,7 +288,7 @@ describe('Documents', () => {
 });
 
 describe('Monitor: first load', () => {
-  const rest: Auto = { 'monitor.messages': { end: 0, messages: [] }, 'monitor.steps': { end: 0, pending: false, steps: [] }, 'teams.agents': [], 'bus.workflows': [] };
+  const rest: Auto = { 'monitor.messages': { end: 0, messages: [] }, 'monitor.steps': { end: 0, pending: false, steps: [] }, 'monitor.codeEvents': [], 'teams.agents': [], 'bus.workflows': [] };
   it('shows the note on the wall and in the activity until the first tick ends', async () => {
     const f = fakeCore(rest);
     const w = keep(mount(MonitorView, { props: { api: f.api, pollMs: 60_000 } }));

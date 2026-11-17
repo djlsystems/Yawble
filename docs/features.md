@@ -279,9 +279,24 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 ## Monitor
 
-- A live wall of every team. Members orbit their team as discs with a state ring: running, waiting, needs you,
-  idle.
-- Each member shows its recent tool steps and what it is doing now.
+- A live wall of every team. **Nodes**: each team is a hub in its own colour; its members orbit it as discs with
+  their face and a state ring (running turns, waiting creeps round, blocked, needs you and failed throb, idle is a
+  thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots. Open
+  workflows hang off the team as nodes tied to the members working them.
+- **Rhythm**: each member shows its recent tool steps rising off it and what it is doing now; a busier member pulses
+  faster, and a command or test run shows a ring filling while it runs, then a green or red burst.
+- **You node**: at the edge of the wall. Questions, approvals and network or tool asks that wait for you fly to it,
+  and it glows with their count until they are answered. Click it to open the Kanban board (every team), whose **Needs You** lane lists them.
+- **Focus a team**: click a team's hub and the wall zooms to it and dims the rest; a chip under the counts names it.
+  Press **Esc**, click the empty wall or the chip's **×** to see every team again. Not remembered.
+- **Density** beside the camera controls: **Calm** moves only the big moments (handbacks, failures, needs you,
+  commits, merges), **Normal** (the default) what the teams do without the smallest steps, **Lively** every step and
+  message. Remembered. Reduced motion is respected at every density.
+- **Sound** (the speaker beside the density): off unless you turn it on, and remembered. Then a short, quiet tone
+  plays for needs you, a failure or block, a finished workflow, a hand-back, a commit, a merge, a landing on main and
+  a push, each kind at most once every 1.5 s. Steps and messages make no sound, nor does a replay.
+- On a phone or in the remote view the camera, the cog and the legend share one row; the density and the sound sit
+  at the top of the cog's panel, so nothing scrolls sideways at 375 px.
 - **Code map**: each team has one tree round its hub, past its members: the repository, then its folders, then their
   files. It builds up over the life of a workflow.
   - A new file pops in. An edit lights a file bright, a read lights it faint. A folder glows warmer the busier its
