@@ -1,4 +1,4 @@
-// Card 367 (verify B076, cards 365 + 366): the team page's members as a grid of equal tiles, in headless Chrome against
+﻿// Card 367 (verify B076, cards 365 + 366): the team page's members as a grid of equal tiles, in headless Chrome against
 // the phone-remote fake core (remote.html, tests/e2e/phone). At 1280 px: two tiles per row by default with New member
 // last; the w / h handles resize every tile together and the size is kept in yawble.memberTiles across a reload (apart
 // from the Teams list's size); each MemberPane fills its tile, its view scrolling inside; at the narrowest tile the title
@@ -341,5 +341,112 @@ for (const theme of ['light', 'dark'] as const) {
     await page.locator('[data-test=member-card-new-tile]').screenshot({ path: path.join(SHOTS, `phone-375-new-form-${theme}.png`) });
     expect(errors).toEqual([]);
     await ctx.close();
+  });
+}
+
+// Card 369 (re-verify the card 368 fix): at the smallest tile (280x200) the open ☰ menu is on top of every grip / tile it
+// overlaps (elementFromPoint: its own tile's h grip in the gap), and - moved straight down into the tile below by a
+// test-only transform, since the real menu only reaches the 14 px gap - above the next row's tile; with the menu closed nothing of a pane shows outside its tile (the
+// gap just below / right of each tile is only its own grips). 1280 (three per row) and 900 (two per row, so a member tile
+// with its grips sits right under the first tile).
+for (const theme of ['light', 'dark'] as const) {
+  test(`card 369 ${theme}: 280x200 menu on top of the gap grips and (pushed) the next row; panes stay inside their tiles`, async ({ browser }) => {
+    for (const vw of [1280, 900]) {
+      const { page, ctx, errors } = await open(browser, { w: vw, theme, tiles: { w: 280, h: 200 } });
+      const where = `${theme} ${vw}`;
+      // Closed: nothing of a pane below or right of its tile (sample the 14 px gap); body within the cell.
+      const spill = await page.evaluate(() => [...document.querySelectorAll('[data-test=member-cell]')].flatMap((c, i) => {
+        const r = c.getBoundingClientRect();
+        const body = c.querySelector('[data-test=member-pane-body]')!.getBoundingClientRect();
+        const bad: string[] = [];
+        if (body.bottom > r.bottom + 1 || body.right > r.right + 1) bad.push(`tile ${i}: body ${Math.round(body.bottom)} > cell ${Math.round(r.bottom)}`);
+        for (let x = r.left + 4; x < r.right - 4; x += 20) {
+          const e = document.elementFromPoint(x, r.bottom + 6);
+          if (e && c.contains(e) && !e.closest('[data-test^=member-tile-handle]') && r.bottom + 6 < innerHeight) bad.push(`tile ${i}: ${(e as HTMLElement).className || e.tagName} below at x ${Math.round(x)}`);
+        }
+        for (let y = r.top + 4; y < Math.min(r.bottom - 4, innerHeight); y += 20) {
+          const e = document.elementFromPoint(r.right + 6, y);
+          if (e && c.contains(e) && !e.closest('[data-test^=member-tile-handle]')) bad.push(`tile ${i}: ${(e as HTMLElement).className || e.tagName} right at y ${Math.round(y)}`);
+        }
+        return bad;
+      }));
+      expect.soft(spill, `${where}: no pane content outside its tile`).toEqual([]);
+      const cellsNow = await cells(page);
+      for (const i of [0, 1]) {
+        const cell = page.locator('[data-test=member-cell]').nth(i);
+        await cell.locator('[data-test=member-more]').click();
+        const menu = cell.locator('[data-test=member-more-menu]');
+        await expect(menu).toBeVisible();
+        await page.waitForTimeout(150);
+        await page.screenshot({ path: path.join(SHOTS, `card369-${vw}-280x200-menu${i}-${theme}.png`) });
+        const o = await menu.evaluate((el, idx) => {
+          const m = el.getBoundingClientRect();
+          const own = el.closest('.member-cell')!;
+          const cellR = own.getBoundingClientRect();
+          // Every element of another cell (the cell itself, its pane, its handles) the menu overlaps.
+          const others = [...document.querySelectorAll('[data-test=member-grid] > .member-cell')].filter((c) => c !== own);
+          // ... and every resize grip, the menu's own tile's grips included (they sit in the gap the menu reaches into).
+          const targets = [...others, ...document.querySelectorAll('[data-test=member-grid] [data-test^=member-tile-handle]')];
+          const hits: { what: string; ok: boolean }[] = [];
+          for (const t of targets) {
+            const r = t.getBoundingClientRect();
+            const l = Math.max(r.left, m.left), rt = Math.min(r.right, m.right), tp = Math.max(r.top, m.top), b = Math.min(r.bottom, m.bottom);
+            if (rt - l < 2 || b - tp < 2) continue;
+            const x = (l + rt) / 2, y = (tp + b) / 2;
+            const e = document.elementFromPoint(x, y);
+            hits.push({ what: (t.getAttribute('data-test') || (t as HTMLElement).className) + ` @${Math.round(x)},${Math.round(y)}`, ok: !!e && el.contains(e) });
+          }
+          return { idx, menuB: Math.round(m.bottom), cellB: Math.round(cellR.bottom), hits, handles: hits.filter((h) => h.what.startsWith('member-tile-handle')).length };
+        }, i);
+        console.log(`card369 ${where} tile ${i}: ${JSON.stringify(o)}`);
+        // As it is, the menu reaches only into the 14 px gap (TesterBen's: bottom 372 vs tile 366, next row at 380);
+        // where it passes its tile it must cover the grips there.
+        if (o.menuB > o.cellB) expect.soft(o.hits.length, `${where} tile ${i}: the menu overlaps a grip past its tile (${JSON.stringify(o)})`).toBeGreaterThan(0);
+        expect.soft(o.hits.filter((h) => !h.ok), `${where} tile ${i}: the menu is on top of every tile / grip it overlaps (${JSON.stringify(o)})`).toEqual([]);
+        // Stacking probe: the real menu never reaches the next row, so move it straight down (test-only transform) into
+        // the tile right below its own; it must still be on top there (the focused
+        // cell's z-index 6). No probe when nothing is below (1280, tile 1).
+        const probe = await menu.evaluate((el) => {
+          const own = el.closest('.member-cell')!;
+          const ownR = own.getBoundingClientRect();
+          const below = [...document.querySelectorAll('[data-test=member-grid] > .member-cell')]
+            .find((c) => { const r = c.getBoundingClientRect(); return r.top >= ownR.bottom && r.left < ownR.right && r.right > ownR.left; });
+          if (!below) return null;
+          const br = below.getBoundingClientRect();
+          const m0 = el.getBoundingClientRect();
+          // Straight down, its top 30 px into the tile below (not sideways: the pane clips sideways, overflow-x clip, so a
+          // menu moved past its pane's right edge - where the w grips are - is cut there; the real menu is right-aligned
+          // inside its pane and never gets there).
+          (el as HTMLElement).style.transform = `translateY(${br.top + 30 - m0.top}px)`;
+          const m = el.getBoundingClientRect();
+          const targets = [below, ...below.querySelectorAll('[data-test^=member-tile-handle]')];
+          const hits: { what: string; ok: boolean }[] = [];
+          for (const t of targets) {
+            const r = t.getBoundingClientRect();
+            const l = Math.max(r.left, m.left), rt = Math.min(r.right, m.right), tp = Math.max(r.top, m.top), b = Math.min(r.bottom, m.bottom);
+            if (rt - l < 2 || b - tp < 2) continue;
+            const e = document.elementFromPoint((l + rt) / 2, (tp + b) / 2);
+            hits.push({ what: t.getAttribute('data-test') || (t as HTMLElement).className, ok: !!e && el.contains(e), top: e ? `${e.tagName}.${(e as HTMLElement).className}[${e.getAttribute('data-test') ?? ''}]` : '' } as any);
+          }
+          (el as HTMLElement).style.transform = '';
+          return { below: below.getAttribute('data-test') + (below.classList.contains('new-cell') ? ' (New member)' : ''), hits };
+        });
+        console.log(`card369 ${where} tile ${i} probe: ${JSON.stringify(probe)}`);
+        if (probe) {
+          expect.soft(probe.hits.length, `${where} tile ${i}: the moved menu overlaps the tile below`).toBeGreaterThan(0);
+          expect.soft(probe.hits.filter((h) => !h.ok), `${where} tile ${i}: the moved menu is on top of the tile below and its grips (${JSON.stringify(probe)})`).toEqual([]);
+        } else expect.soft(vw === 1280 && i === 1, `${where} tile ${i}: a tile below`).toBe(true);
+        // Every item is clickable (on top).
+        const items = await menu.evaluate((el) => [...el.querySelectorAll('button')].map((b) => { const q = b.getBoundingClientRect(); const e = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!e && b.contains(e); }));
+        expect.soft(items.every(Boolean), `${where} tile ${i}: every menu item is on top`).toBe(true);
+        await page.keyboard.press('Escape');
+        if (await menu.isVisible()) await cell.locator('[data-test=member-more]').click();
+        await expect(menu).toBeHidden();
+      }
+      // Tiles unchanged by opening / closing menus.
+      expect(await cells(page)).toEqual(cellsNow);
+      expect(errors).toEqual([]);
+      await ctx.close();
+    }
   });
 }
