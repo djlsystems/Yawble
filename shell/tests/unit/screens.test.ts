@@ -53,7 +53,10 @@ describe('main window', () => {
     await flushPromises();
     await flushPromises();
     expect(w.get('[data-test=slots]').text()).toBe('Run slots: 3 / 3 in use · 1 queued');
-    expect(w.get('[data-test=team-counts]').text()).toBe('1 running · 1 queued');
+    expect(w.get('[data-test=team-running]').text()).toBe('1');
+    expect(w.get('[data-test=team-running]').attributes('title')).toBe('1 running');
+    expect(w.get('[data-test=team-queued]').text()).toBe('1');
+    expect(w.get('[data-test=team-queued]').attributes('title')).toBe('1 queued');
     // The window opens on the Concierge; the team is one click away in the sidebar.
     expect(w.find('[data-test=concierge-hero]').exists()).toBe(true);
     await w.get('[data-test=team-item]').trigger('click');
@@ -77,7 +80,7 @@ describe('main window', () => {
     expect(hire.find('[data-test=decision-approve]').exists()).toBe(true);
     expect(hire.find('[data-test=decision-always]').exists()).toBe(true);
     expect(w.find('[data-test=decision-discuss]').exists()).toBe(true);
-    expect(w.findAll('[data-test=open-terminal]')).toHaveLength(2);
+    expect(w.findAll('[data-test=member-view-terminal]')).toHaveLength(2);
     expect(w.findAll('[data-test=open-settings]')).toHaveLength(2);
   });
 });

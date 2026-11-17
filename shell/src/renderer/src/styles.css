@@ -143,8 +143,22 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
   button, select, input:not([type=checkbox], [type=radio], [type=hidden]) { min-height: 44px; }
   button { min-width: 44px; }
   input[type=checkbox], input[type=radio] { width: 22px; height: 22px; }
-  /* 16 px text in a field: a phone browser zooms the page into a smaller one when it gets the focus. */
-  input, select, textarea { font-size: 16px; }
+  /* 16 px text in a field: a phone browser zooms the page into a smaller one when it gets the focus. B054: every text
+     field, select and textarea in the renderer is at least 16 px and 44 px tall on a phone, whatever a component's own
+     (scoped) rule says: !important here outweighs any scoped selector (none of them is !important). A checkbox or
+     radio keeps its 22 px box above. The bigger text makes a select as wide as its longest option at 16 px (card 283:
+     the Kanban team filter went 303 -> 364 px in a 340 px row at 360 px wide), so a field is never wider than its
+     container: max-width 100% (also caps a flex item's automatic minimum size) and min-width 0. Not !important: a
+     component's own narrower max-width still wins. */
+  input:not([type=checkbox], [type=radio], [type=hidden], [type=range], [type=color]), select, textarea {
+    font-size: 16px !important; min-height: 44px !important; box-sizing: border-box; max-width: 100%; min-width: 0; }
+  /* Card 300: min-width 0 let a growing field (flex: 1, .grow) next to buttons shrink to nothing instead of the row
+     wrapping (the Team page's "A note if you decline" was 15 px at 390 px wide). A .grow field keeps a 12rem floor (or
+     its container's width when that is less), and a row holding one wraps, so the buttons go to the next line. Same
+     specificity as the rule above (it comes later); a component's own scoped .grow rule still wins (the Tell row keeps
+     its one-line min-width 0). The row rule is :where(.row), so a component's own nowrap row still wins too. */
+  :is(input, select, textarea).grow { min-width: min(12rem, 100%); }
+  :where(.row):has(> :is(input, select, textarea).grow) { flex-wrap: wrap; }
   /* The read-only chip moves to the top bar's right end (the top bar keeps that room free), clear of the message box. */
   .remote-access-chip { left: auto; bottom: auto; right: calc(8px + env(safe-area-inset-right, 0px)); top: calc(15px + env(safe-area-inset-top, 0px)); }
   /* Only the shell's own top bar (App.vue's main > header.bar): a bare .bar also matched the Composer's, the Documents'

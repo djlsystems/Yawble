@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, inject, ref, watch } from 'vue';
 import type { YawbleApi, TerminalSessionInfo } from '../../../shared/api';
+import { PaneHeaderKey } from '../terminalPane';
 import TerminalView from './TerminalView.vue';
 import TranscriptView from './TranscriptView.vue';
 
@@ -19,6 +20,9 @@ const session = ref<TerminalSessionInfo | null>(null);
 const interactive = computed(() => !!session.value && !session.value.ended && session.value.kind !== 'headless');
 const shown = computed<Mode>(() => (interactive.value ? 'raw' : mode.value));
 const view = ref<InstanceType<typeof TerminalView> | null>(null);
+/** The pane's header on a phone (TerminalPane): the tabs go into it. */
+const pane = inject(PaneHeaderKey, null);
+const inHeader = computed(() => !!pane?.on);
 
 function onSession(s: TerminalSessionInfo | null) {
   session.value = s;
@@ -29,12 +33,15 @@ defineExpose({ size: () => view.value?.size() ?? null, focus: () => view.value?.
 </script>
 
 <template>
-  <div class="screen-wrap">
-    <div class="modes" role="tablist" data-test="terminal-modes">
+  <div class="screen-wrap" :class="{ 'in-pane': inHeader }">
+    <!-- In the main window's pane on a phone (B057) the tabs sit in the pane's one header row; anywhere else, here. -->
+    <Teleport defer :key="inHeader ? 'header' : 'here'" :to="inHeader ? `#${pane!.tabs}` : 'body'" :disabled="!inHeader">
+    <div class="modes" :class="{ 'in-header': inHeader }" role="tablist" data-test="terminal-modes">
       <button role="tab" :class="{ on: shown === 'formatted' }" :disabled="interactive" data-test="terminal-mode-formatted"
         :title="interactive ? 'An interactive session is shown as the terminal' : 'The run as a person reads it'" @click="mode = 'formatted'">Formatted</button>
       <button role="tab" :class="{ on: shown === 'raw' }" data-test="terminal-mode-raw" title="The terminal, exactly as the CLI printed it (JSON for headless runs)" @click="mode = 'raw'">Raw</button>
     </div>
+    </Teleport>
     <div class="layer" :class="{ hidden: shown !== 'raw' }">
       <TerminalView ref="view" :channel="channel" :api="api" :rows="rows" @session="onSession" @text="text = $event" />
     </div>
@@ -51,4 +58,11 @@ defineExpose({ size: () => view.value?.size() ?? null, focus: () => view.value?.
 .layer { flex: 1; min-height: 0; position: relative; }
 /* Hidden but laid out, so xterm keeps its size and keeps receiving output. */
 .layer.hidden { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+/* A phone (B057): the screen takes what the pane leaves it (no 160 px floor pushing xterm past the bottom); in the
+   pane's header the tabs are part of its one row. */
+@media (max-width: 759.98px) {
+  .screen-wrap.in-pane { min-height: 0; }
+  .modes.in-header { padding: 0; gap: 0; background: transparent; border-bottom: 0; }
+  .modes.in-header button { min-height: 44px; padding: 0 8px; font-size: 13px; border-radius: 8px; }
+}
 </style>

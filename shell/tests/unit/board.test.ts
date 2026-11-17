@@ -329,3 +329,41 @@ describe('the Board: Clear done', () => {
     for (const r of rules) expect(r).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(/i);
   });
 });
+
+describe("In Progress's count and the global run limit", () => {
+  it('shows "n of limit", and the limit opens a small dialog that changes it', async () => {
+    const { api: base, calls } = fakeApi();
+    let limit = 8;
+    const saved: any[] = [];
+    const doc = () => ({ filesystem: { grantableRoots: [], readonly: [], readwrite: [], denied: [] }, network: { allowHosts: ['x.test'] },
+      compute: { idleTimeoutSec: 600, wallTimeoutSec: 7200 }, ui: { clipboard: 'ask' }, app: { maxConcurrentAgents: limit, backend: 'default', heavyWorkAtOnce: 1 } });
+    const api = { ...base, call: async (method: string, params?: any) => {
+      if (method === 'app.overview') return { slots: { running: 1, limit, queued: 0 }, teams: [] };
+      if (method === 'policy.getGlobal') return doc();
+      if (method === 'policy.saveGlobal') { saved.push(params.policy); limit = params.policy.app.maxConcurrentAgents; return doc(); }
+      return base.call(method, params);
+    } } as unknown as YawbleApi;
+    const w = mount(BoardView, { props: { api, pollMs: 60_000 }, attachTo: document.body });
+    await flushPromises();
+    expect(w.get('[data-test=lane-in-progress-count]').text()).toBe('1 of 8');
+    await w.get('[data-test=run-limit-link]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=run-limit-hint]').text()).toContain('across all teams');
+    expect((w.get('[data-test=run-limit-value]').element as HTMLInputElement).value).toBe('8');
+
+    await w.get('[data-test=run-limit-value]').setValue('0');
+    await w.get('[data-test=run-limit-dialog]').trigger('submit');
+    expect(w.get('[data-test=run-limit-error]').text()).toContain('1 to 64');
+    expect(saved).toHaveLength(0);
+
+    await w.get('[data-test=run-limit-value]').setValue('3');
+    await w.get('[data-test=run-limit-dialog]').trigger('submit');
+    await flushPromises();
+    expect(saved[0].app.maxConcurrentAgents).toBe(3);
+    expect(saved[0].network.allowHosts).toEqual(['x.test']); // the rest of the policy goes back unchanged
+    expect(w.find('[data-test=run-limit-dialog]').exists()).toBe(false);
+    expect(w.get('[data-test=lane-in-progress-count]').text()).toBe('1 of 3');
+    expect(calls.some((c) => c.method === 'board.list')).toBe(true);
+    w.unmount();
+  });
+});

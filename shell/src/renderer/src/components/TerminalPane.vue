@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import type { YawbleApi, TerminalBanner, TerminalSessionInfo } from '../../../shared/api';
-import TerminalApp from '../TerminalApp.vue';
+import { computed, provide, reactive, ref, useId, watch } from 'vue';
+import type { YawbleApi, TerminalSessionInfo } from '../../../shared/api';
 import BusyLabel from './BusyLabel.vue';
-import { errorText, resolveApi } from '../api';
-import { closeTerminalPane, isAgentSession, setTerminalPaneWidth, terminalPane } from '../terminalPane';
+import { usePhone } from '../phone';
+import { closeTerminalPane, isAgentSession, PaneHeaderKey, setTerminalPaneWidth, terminalPane } from '../terminalPane';
 import TerminalScreen from './TerminalScreen.vue';
 
-// The terminal pane on the right of the main window: the one terminal shown (an agent's, or an Agents test session),
-// a drag handle on its left edge to resize it, and a close button. Empty until a terminal button picks one.
-const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
+// The terminal pane on the right of the main window: the one channel terminal shown (an Agents Terminal / Test
+// session), a drag handle on its left edge to resize it, and a close button. A member's terminal is never shown here:
+// it is in that member's pane on the team page (memberTerminal.ts). pollMs is accepted for App's binding.
+defineProps<{ api?: YawbleApi; pollMs?: number }>();
 
 const session = ref<TerminalSessionInfo | null>(null);
 // The shown session ended after this pane saw it live: there is nothing left to stop. (A channel's previous run stays
@@ -22,16 +22,20 @@ function onSession(s: TerminalSessionInfo | null) {
   if (s && !s.ended) sawLive.value = true;
   finished.value = sawLive.value && !!s?.ended;
 }
-// The member terminal's last banner (TerminalApp polls it): says whether the member holds an INTERACTIVE session.
-const banner = ref<TerminalBanner | null>(null);
-const endsSession = computed(() => terminalPane.target?.kind === 'member' && !!banner.value?.interactive);
 const closeTitle = computed(() => {
   const t = terminalPane.target;
-  if (t?.kind === 'channel' && isAgentSession(t.channel)) return 'Stop this session and close the terminal';
-  if (t?.kind === 'member' && endsSession.value) return `End the session and close — queued work for ${t.title.split(' · ')[0]} resumes`;
-  return 'Close';
+  return t && isAgentSession(t.channel) ? 'Stop this session and close the terminal' : 'Close';
 });
-watch(() => terminalPane.target, () => { banner.value = null; session.value = null; sawLive.value = false; finished.value = false; });
+watch(() => terminalPane.target, () => { session.value = null; sawLive.value = false; finished.value = false; });
+// A phone (B057): the pane is the whole screen with one header row - the title, the shown terminal's Formatted / Raw
+// tabs, a ⋯ for the rest (the session's Stop) and ✕ - and the terminal fills the rest.
+const phone = usePhone();
+const uid = useId();
+const slots = reactive({ get on() { return phone.value; }, tabs: `terminal-pane-tabs-${uid}`, more: `terminal-pane-more-${uid}` });
+provide(PaneHeaderKey, slots);
+const moreOpen = ref(false);
+const hasMore = computed(() => !!terminalPane.target?.stop);
+watch(() => terminalPane.target, () => { moreOpen.value = false; });
 let dragging = false;
 function startDrag(e: PointerEvent) {
   dragging = true;
@@ -45,47 +49,46 @@ function endDrag() { dragging = false; }
 const stopping = ref<'stop' | 'close' | null>(null);
 async function stop() {
   const t = terminalPane.target;
-  if (t?.kind !== 'channel' || stopping.value) return;
+  if (!t || stopping.value) return;
   stopping.value = 'stop';
   try { await t.stop?.(); } finally { stopping.value = null; }
 }
-/** ✕: an agent's Terminal / Test session (agent-test:<cli>) is stopped, then the pane closes; a member's terminal is
- *  only hidden. (Ctrl+` / View → Terminal only hides the pane, so a session can be hidden on purpose and shown again.) */
+/** ✕: an agent's Terminal / Test session (agent-test:<cli>) is stopped, then the pane closes; another channel is only
+ *  hidden. (Ctrl+` / View → Terminal only hides the pane, so a session can be hidden on purpose and shown again.) */
 async function close() {
   const t = terminalPane.target;
   if (stopping.value) return;
-  terminalPane.stopError = null;
   try {
-    if (t?.kind === 'channel' && isAgentSession(t.channel) && !finished.value) { stopping.value = 'close'; await t.stop?.(); }
-    else if (t?.kind === 'member' && endsSession.value) {
-      // Ask the core again just before: a stale banner must never end a headless run that began since.
-      stopping.value = 'close';
-      const fresh = await resolveApi(props.api).call<TerminalBanner>('terminal.banner', { memberId: t.memberId });
-      if (fresh.interactive) await resolveApi(props.api).call('terminal.stop', { memberId: t.memberId });
-    }
-  } catch (e) {
-    // An agent session reports its own failure (Settings > Agents); a member's is shown here. The pane closes either way.
-    if (t?.kind === 'member') terminalPane.stopError = `Could not end the session: ${errorText(e)}`;
-  } finally { stopping.value = null; }
+    if (t && isAgentSession(t.channel) && !finished.value) { stopping.value = 'close'; await t.stop?.(); }
+  } catch { /* an agent session reports its own failure (Settings > Agents); the pane closes either way */ } finally { stopping.value = null; }
   closeTerminalPane();
 }
 </script>
 
 <template>
-  <aside class="pane" :style="{ width: terminalPane.width + 'px' }" data-test="terminal-pane">
-    <div class="handle" title="Drag to resize" @pointerdown="startDrag" @pointermove="drag" @pointerup="endDrag" @pointercancel="endDrag"></div>
-    <header class="head">
+  <aside class="pane" :class="{ phone }" :style="phone ? undefined : { width: terminalPane.width + 'px' }" data-test="terminal-pane">
+    <div v-if="!phone" class="handle" title="Drag to resize" @pointerdown="startDrag" @pointermove="drag" @pointerup="endDrag" @pointercancel="endDrag"></div>
+    <header class="head" data-test="terminal-pane-head">
       <span class="title" data-test="terminal-pane-title">{{ terminalPane.target?.title ?? 'Terminal' }}</span>
-      <button v-if="terminalPane.target?.kind === 'channel' && terminalPane.target.stop" class="mini" data-test="terminal-pane-stop"
+      <template v-if="phone">
+        <!-- The shown terminal's Formatted / Raw tabs come here (TerminalScreen: PaneHeaderKey), its Stop into the ⋯ menu. -->
+        <span :id="slots.tabs" class="tabs-slot" data-test="terminal-pane-tabs"></span>
+        <button v-if="hasMore" class="mini more-toggle" :class="{ on: moreOpen }" aria-label="More" :aria-expanded="moreOpen" data-test="terminal-pane-more"
+          @click="moreOpen = !moreOpen">⋯</button>
+        <div v-show="moreOpen" :id="slots.more" class="more-menu" data-test="terminal-pane-menu" @click="moreOpen = false">
+          <button v-if="terminalPane.target?.stop" class="mini" data-test="terminal-pane-stop"
+            :disabled="finished || !!stopping" :aria-busy="stopping === 'stop'" @click="stop"><BusyLabel :busy="stopping === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
+        </div>
+      </template>
+      <button v-else-if="terminalPane.target?.stop" class="mini" data-test="terminal-pane-stop"
         :disabled="finished || !!stopping" :aria-busy="stopping === 'stop'" @click="stop"><BusyLabel :busy="stopping === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
       <button class="mini" :title="closeTitle" data-test="terminal-pane-close" :disabled="!!stopping" :aria-busy="stopping === 'close'" @click="close"><BusyLabel :busy="stopping === 'close'">✕</BusyLabel></button>
     </header>
     <div class="body">
-      <TerminalApp v-if="terminalPane.target?.kind === 'member'" :key="`m${terminalPane.target.memberId}`" embedded
-        :member-id="terminalPane.target.memberId" :api="api" :poll-ms="pollMs" @banner="banner = $event" />
-      <TerminalScreen v-else-if="terminalPane.target?.kind === 'channel'" :key="terminalPane.target.channel"
+      <TerminalScreen v-if="terminalPane.target" :key="terminalPane.target.channel"
         :channel="terminalPane.target.channel" :api="api" @session="onSession" />
-      <p v-else class="empty">No terminal open. Click a terminal button (an agent's <code>&gt;_</code>, or Settings → Agents → Test) to show one here.</p>
+      <p v-else class="empty" data-test="terminal-pane-empty">No terminal open. Settings → Agents → Terminal or Test shows one here; an agent's
+        terminal (<code>&gt;_</code>) opens in its pane on the team page.</p>
     </div>
   </aside>
 </template>
@@ -101,4 +104,19 @@ async function close() {
 .body { flex: 1; min-height: 0; }
 .empty { color: var(--term-muted); padding: 16px; font-size: 13px; }
 .empty code { background: var(--term-btn-on); padding: 0 4px; border-radius: 3px; }
+/* A phone (B057): the whole screen over the page (no side pane crushing the team column), one 44 px header row, the
+   terminal filling the rest and never past the bottom (dvh: what the browser really shows). */
+@media (max-width: 759.98px) {
+  .pane.phone { position: fixed; inset: 0; z-index: 9; width: auto; min-width: 0; max-width: none; height: 100dvh; border-left: 0; overflow: hidden; }
+  .pane.phone .head { position: relative; flex: none; height: 44px; box-sizing: content-box; gap: 2px;
+    padding: env(safe-area-inset-top, 0px) calc(2px + env(safe-area-inset-right, 0px)) 0 calc(10px + env(safe-area-inset-left, 0px)); }
+  .pane.phone .title { min-width: 0; font-size: 14px; }
+  .pane.phone .head > .mini { min-width: 44px; height: 44px; flex: none; padding: 0 8px; border-color: transparent; background: transparent; font-size: 16px; }
+  .pane.phone .head > .mini.on { background: var(--term-btn-on); }
+  .tabs-slot { display: flex; flex: none; }
+  .more-menu { position: absolute; right: 4px; top: calc(100% + 2px); z-index: 3; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+    max-width: min(320px, calc(100vw - 8px)); padding: 6px; background: var(--term-head); border: 1px solid var(--term-line); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow); }
+  .more-menu .mini { min-height: 44px; font-size: 14px; }
+  .pane.phone .body { flex: 1 1 0; min-height: 0; overflow: hidden; }
+}
 </style>

@@ -342,7 +342,7 @@ public sealed partial class TeamRepos
         if (!Directory.Exists(folder)) return;
         try
         {
-            foreach (var f in new DirectoryInfo(folder).EnumerateFiles("*", SearchOption.AllDirectories))
+            foreach (var f in Ops.FolderWalk.Files(folder))
                 if (f.Attributes.HasFlag(FileAttributes.ReadOnly)) f.Attributes &= ~FileAttributes.ReadOnly;
             Directory.Delete(folder, recursive: true);
         }

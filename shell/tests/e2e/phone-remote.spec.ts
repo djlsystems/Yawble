@@ -1,18 +1,18 @@
-﻿// B037 verify (card 169): remote.html on a phone, end to end in a real browser (headless Chrome), against a FAKE core
+// B037 verify (card 169): remote.html on a phone, end to end in a real browser (headless Chrome), against a FAKE core
 // (tests/e2e/phone/fake-core.ts: canned answers over the page's socket, nothing real behind it).
 //
 // Every screen at 390 x 844 and 360 x 740: the page must not scroll sideways (scrollWidth > innerWidth), no visible
 // control may sit off the screen's edge, and none may be smaller than 44 x 44 px. Plus the on-screen keyboard (a fake
 // visualViewport), the Visitor chip, the dark Monitor and its forces panel, the 759 / 760 px edges, rotation, and at
-// 1280 px the desktop layout compared with main b726212's.
+// 1280 px the desktop layout compared with main's at BASE_COMMIT (tests/e2e/phone/server.ts; one line to bump).
 //
-//   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, from `git archive b726212 shell code-browser`)
+//   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B037-screens (else test-results/B037-screens); the audit to test-results/b037-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { audit, type Audit } from './phone/audit';
-import { baseBuiltDir, baseShellDir, buildRenderer, builtDir, fakeRemote } from './phone/server';
+import { BASE_COMMIT, baseBuiltDir, baseShellDir, buildRenderer, builtDir, extractBaseTree, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
@@ -26,7 +26,7 @@ test.beforeAll(async () => {
   test.setTimeout(600_000);
   mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
-  if (process.env.B037_NO_BASE !== '1') await buildRenderer(baseShellDir, baseBuiltDir);
+  if (process.env.B037_NO_BASE !== '1') { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
 });
 
 type Size = { w: number; h: number };
@@ -183,7 +183,18 @@ for (const size of PHONES) {
       await expect(page.locator('[data-test=team-title]')).toBeVisible();
       await check(page, 'team', size);
       await page.screenshot({ path: path.join(SHOTS, `team-full-${tag(size)}.png`), fullPage: true });
-      await page.locator('[data-test=open-code]').first().click();
+      // B061: on a phone a member's Code is in its pane's ⋯ menu (member-more): open the first one that has a clone.
+      const code = page.locator('[data-test=open-code]:visible').first();
+      if (!(await code.isVisible().catch(() => false))) {
+        const mores = page.locator('[data-test=member-more]');
+        for (let i = 0, n = await mores.count(); i < n; i++) {
+          await mores.nth(i).click();
+          await expect(page.locator('[data-test=member-more-menu]')).toBeVisible();
+          if (await page.locator('[data-test=member-more-menu] [data-test=open-code]').count()) break;
+          await mores.nth(i).click(); // closes it again
+        }
+      }
+      await page.locator('[data-test=open-code]:visible').first().click();
       await expect(page.locator('.code-dialog, [data-test=code-dialog], [data-test=code-browser]').first()).toBeVisible();
       await page.waitForTimeout(500);
       await check(page, 'code-browser', size);
@@ -328,11 +339,12 @@ for (const size of PHONES) {
 
     // F7 re-verify (card 177): the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
     test('Visitor (read-only) F7: the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
-      const composerBar = (page: Page) => page.locator('[data-test=composer] .bar').evaluate((bar) => {
-        const r = (sel: string) => { const e = bar.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
+      // B057: on a phone the team and agent pickers fold out above the bar (one button opens them).
+      const composerBar = async (page: Page) => { await page.locator('[data-test=composer-pickers-toggle]').click(); return page.locator('[data-test=composer] .bar').evaluate((bar) => {
+        const r = (sel: string) => { const e = bar.closest('[data-test=composer]')!.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
         const bb = bar.getBoundingClientRect();
         return { barRight: bb.right - parseFloat(getComputedStyle(bar).paddingRight), padR: getComputedStyle(bar).paddingRight, team: r('[data-test=composer-team]'), agent: r('[data-test=composer-agent]'), attach: r('[data-test=composer-attach]'), send: r('[data-test=composer-send]'), sw: document.documentElement.scrollWidth, iw: innerWidth };
-      });
+      }); };
       const full = await open(browser, size, { asks: false });
       const f = await composerBar(full.page);
       await full.ctx.close();
@@ -435,6 +447,13 @@ for (const size of PHONES) {
             if (!(await b.isVisible().catch(() => false)) && (await more.isVisible().catch(() => false))) {
               await more.click();
               await expect(p.locator('[data-test=team-more-menu]')).toBeVisible();
+            }
+            // B061: on a phone a member's Code, Settings and Logs are in its pane's ⋯ menu (member-more).
+            const memberMore = p.locator('[data-test=member-more]').first();
+            if (!(await b.isVisible().catch(() => false)) && (await memberMore.isVisible().catch(() => false))) {
+              if (await more.isVisible().catch(() => false) && (await p.locator('[data-test=team-more-menu]').count())) await more.click();
+              await memberMore.click();
+              await expect(p.locator('[data-test=member-more-menu]')).toBeVisible();
             }
             if (!(await b.isVisible().catch(() => false))) return false;
             return b.click({ timeout: 3000 }).then(() => true, () => false);
@@ -574,7 +593,7 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
   }
 });
 
-test.describe('1280 px: the desktop layout is unchanged from main b726212', () => {
+test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}`, () => {
   test.skip(process.env.B037_NO_BASE === '1', 'no base build');
   // B054 verify (card 270): also the pages B054 changes past their landing screen - a team's page, a team's documents
   // folder, and the Settings sections (Skills with a skill picked, Guardrails, Integrations, System).
@@ -591,7 +610,9 @@ test.describe('1280 px: the desktop layout is unchanged from main b726212', () =
     ['nav-teams', 'team-page'], ['nav-documents', 'documents-folder'], ['open-app-settings', 'settings-skill'], ['open-app-settings', 'settings-guardrails'], ['open-app-settings', 'settings-integrations'], ['open-app-settings', 'settings-system']] as const) {
     test(`${name}: every [data-test] element in the same place and size`, async ({ browser }) => {
       const size = { w: 1280, h: 800 };
-      const layouts: Record<string, Record<string, string>> = {};
+      type Layout = { out: Record<string, string>; below: string[]; members: { top: number; bottom: number } | null;
+        panes: { name: string; frames: number; saidRight: number; sideLeft: number }[] };
+      const layouts: Record<string, Layout> = {};
       for (const [which, dir] of [['base', baseBuiltDir], ['branch', builtDir]] as const) {
         const { page } = await open(browser, size, { dir, mobile: false });
         if (id) await page.locator(`[data-test=sidebar] [data-test=${id}]`).first().click();
@@ -599,26 +620,58 @@ test.describe('1280 px: the desktop layout is unchanged from main b726212', () =
         await page.waitForTimeout(900);
         await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${name}-${which}.png`) });
         layouts[which] = await page.evaluate(() => {
+          // A team's page (B061, card 312): its members (.member-cell, an AgentCard + activity row on main, one framed
+          // MemberPane here) are measured apart; what comes after them is listed in `below`.
+          const cells = [...document.querySelectorAll('.member-cell')];
+          const last = cells[cells.length - 1];
+          const members = cells.length ? { top: Math.round(cells[0].getBoundingClientRect().top), bottom: Math.round(last.getBoundingClientRect().bottom) } : null;
           const out: Record<string, string> = {};
+          const below: string[] = [];
           const seen = new Map<string, number>();
           for (const el of document.querySelectorAll('[data-test]')) {
+            if (el.closest('.member-cell')) continue;
             const k0 = el.getAttribute('data-test')!;
             const n = (seen.get(k0) ?? 0) + 1; seen.set(k0, n);
             const r = el.getBoundingClientRect();
             if (!r.width && !r.height) continue;
-            out[`${k0}#${n}`] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+            const k = `${k0}#${n}`;
+            out[k] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+            if (last && (last.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) below.push(k);
           }
-          return out;
+          const panes = cells.map((c) => {
+            const said = c.querySelector('[data-test=member-said]'), side = c.querySelector('[data-test=member-side]');
+            return { name: c.querySelector('[data-test^=agent-]')?.getAttribute('data-test') ?? '?', frames: c.querySelectorAll('section.pane').length,
+              saidRight: said ? Math.round(said.getBoundingClientRect().right) : -1, sideLeft: side ? Math.round(side.getBoundingClientRect().left) : -1 };
+          });
+          return { out, below, members, panes };
         });
         await page.context().close();
       }
+      const base = layouts.base!, branch = layouts.branch!;
+      // What follows the members may move down or up by however much taller or shorter the members area is (B061).
+      const shift = base.members && branch.members ? (branch.members.bottom - branch.members.top) - (base.members.bottom - base.members.top) : 0;
+      const moved = (v: string | undefined, dy: number) => v?.replace(/^(-?\d+),(-?\d+)/, (_m, x, y) => `${x},${Number(y) - dy}`);
       // A data-test the branch adds (a hook main does not have) is not a layout change: listed, not compared.
       const diff: string[] = [];
-      const added = Object.keys(layouts.branch!).filter((k) => !(k.replace(/#\d+$/, '#1') in layouts.base!));
+      const added = Object.keys(branch.out).filter((k) => !(k.replace(/#\d+$/, '#1') in base.out));
       if (added.length) console.log(`${name} @1280: hooks new in B037 (not compared): ${added.join(', ')}`);
-      for (const k of new Set([...Object.keys(layouts.base!), ...Object.keys(layouts.branch!)]))
-        if (!added.includes(k) && layouts.base![k] !== layouts.branch![k]) diff.push(`${k}: main ${layouts.base![k] ?? '-'} / B037 ${layouts.branch![k] ?? '-'}`);
-      expect.soft(diff, `${name} at 1280 px differs from main`).toEqual([]);
+      for (const k of new Set([...Object.keys(base.out), ...Object.keys(branch.out)])) {
+        if (added.includes(k)) continue;
+        const b = branch.below.includes(k) ? moved(branch.out[k], shift) : branch.out[k];
+        if (base.out[k] !== b) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / B037 ${branch.out[k] ?? '-'}${branch.below.includes(k) ? ` (below the members, shift ${shift})` : ''}`);
+      }
+      expect.soft(diff, `${name} at 1280 px differs from main ${BASE_COMMIT}`).toEqual([]);
+      if (base.members || branch.members) {
+        // The members area starts where main's did, and is B061's layout: one frame per member, its two areas side by side.
+        // eslint-disable-next-line no-console
+        console.log(`${name} @1280: members main ${JSON.stringify(base.members)} / B061 ${JSON.stringify(branch.members)}; ${JSON.stringify(branch.panes)}`);
+        expect.soft(branch.members?.top, `${name}: the members start where main's do`).toBe(base.members?.top);
+        expect.soft(branch.panes.length, `${name}: one pane per member`).toBe(base.panes.length);
+        for (const p of branch.panes) {
+          expect.soft(p.frames, `${p.name}: one framed pane`).toBe(1);
+          expect.soft(p.saidRight, `${p.name}: what was said left of the side area`).toBeLessThanOrEqual(p.sideLeft);
+        }
+      }
     });
   }
 });

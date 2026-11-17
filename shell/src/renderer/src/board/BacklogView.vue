@@ -117,6 +117,9 @@ const sortKeys = computed<{ key: SortKey; label: string }[]>(() => [
   tab.value === 'archived' ? { key: 'archived', label: 'Archived' } : { key: 'updated', label: 'Modified' },
 ]);
 function pickSort(key: SortKey) { sort.value = { key, desc: false }; }
+// The phone's fold (B054): closed at first; its button counts what is set in it (search, team, a sort other than priority).
+const toolsOpen = ref(false);
+const toolsSet = computed(() => (search.value.trim() ? 1 : 0) + (teamFilter.value ? 1 : 0) + (sort.value.key !== 'pos' || sort.value.desc ? 1 : 0));
 
 // ---- reorder
 async function step(item: BacklogItem, direction: 'up' | 'down') {
@@ -245,7 +248,43 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 <template>
   <section class="backlog-place fill" :class="{ phone }" data-test="backlog-view">
     <div class="wrap fill">
-      <header class="head">
+      <!-- A phone (B054): one compact row (the tabs, the search-and-sort fold and + Add item), scrolling away with the
+           list; the search, team filter, sort and Upload document are in the fold, closed at first. -->
+      <template v-if="phone">
+        <header class="phead" data-test="backlog-phone-head">
+          <nav class="tabs">
+            <button :class="{ on: tab === 'live' }" data-test="backlog-tab-live" @click="switchTab('live')">Backlog</button>
+            <button :class="{ on: tab === 'archived' }" data-test="backlog-tab-archived" @click="switchTab('archived')">Archived</button>
+          </nav>
+          <span class="grow" />
+          <button type="button" class="hbtn" :class="{ on: toolsOpen || !!toolsSet }" title="Search, filter and sort" aria-label="Search, filter and sort"
+            :aria-expanded="toolsOpen" data-test="backlog-tools-toggle" @click="toolsOpen = !toolsOpen">
+            <Icon name="search" :size="18" /><span v-if="toolsSet" class="badge" data-test="backlog-tools-count">{{ toolsSet }}</span>
+          </button>
+          <template v-if="tab === 'live'">
+            <button type="button" class="hbtn primary" v-change title="Add an item" aria-label="Add item" data-test="backlog-add" @click="adding = !adding"><Icon name="plus" :size="18" /></button>
+            <input ref="picker" type="file" accept=".md,.markdown,.txt,text/*" hidden data-test="backlog-upload-input" @change="upload(($event.target as HTMLInputElement).files)" />
+          </template>
+        </header>
+        <div v-if="toolsOpen" class="phone-tools" data-test="backlog-tools">
+          <input v-model="search" class="search" placeholder="Search" data-test="backlog-search" />
+          <select v-model="teamFilter" data-test="backlog-team-filter" title="Dispatched to">
+            <option value="">All teams</option>
+            <option v-for="t in teamOptions" :key="t" :value="t">{{ t }}</option>
+          </select>
+          <div class="phone-sort" data-test="backlog-sort">
+            <label>Sort by
+              <select :value="sort.key" data-test="backlog-sort-key" @change="pickSort(($event.target as HTMLSelectElement).value as SortKey)">
+                <option v-for="s in sortKeys" :key="s.key" :value="s.key">{{ s.label }}</option>
+              </select>
+            </label>
+            <button type="button" class="mini" :aria-label="sort.desc ? 'Descending' : 'Ascending'" data-test="backlog-sort-dir" @click="sort.desc = !sort.desc">{{ sort.desc ? '▾' : '▴' }}</button>
+          </div>
+          <button v-if="tab === 'live'" v-change data-test="backlog-upload" title="A Markdown or text file: its first # heading is the title" @click="picker?.click()">Upload document</button>
+          <p class="muted small intro" data-test="backlog-intro">Most important first. Mark an item ready once you have read it, then dispatch it to a team.</p>
+        </div>
+      </template>
+      <header v-else class="head">
         <h2>Backlog</h2>
         <nav class="tabs">
           <button :class="{ on: tab === 'live' }" data-test="backlog-tab-live" @click="switchTab('live')">Backlog</button>
@@ -263,7 +302,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
           <button class="primary" v-change data-test="backlog-add" @click="adding = !adding">+ Add item</button>
         </template>
       </header>
-      <p class="muted intro">Work you want done, most important first. Mark an item ready once you have read it, then dispatch it to a team: its Manager cuts it into cards on the Board.</p>
+      <p v-if="!phone" class="muted intro">Work you want done, most important first. Mark an item ready once you have read it, then dispatch it to a team: its Manager cuts it into cards on the Board.</p>
       <p v-if="error" class="error" data-test="backlog-error">{{ error }}</p>
 
       <div v-if="adding" class="itemform" data-test="backlog-new">
@@ -274,14 +313,6 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 
       <div class="split" :class="{ withItem: !!open }" data-test="backlog-split">
         <div v-show="!(phone && open)" class="listwrap" data-test="backlog-listwrap">
-        <div v-if="phone" class="phone-sort" data-test="backlog-sort">
-          <label>Sort by
-            <select :value="sort.key" data-test="backlog-sort-key" @change="pickSort(($event.target as HTMLSelectElement).value as SortKey)">
-              <option v-for="s in sortKeys" :key="s.key" :value="s.key">{{ s.label }}</option>
-            </select>
-          </label>
-          <button type="button" class="mini" :aria-label="sort.desc ? 'Descending' : 'Ascending'" data-test="backlog-sort-dir" @click="sort.desc = !sort.desc">{{ sort.desc ? '▾' : '▴' }}</button>
-        </div>
         <table class="list">
           <thead>
             <tr>
@@ -537,9 +568,24 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
    the team and when); an opened item takes the page; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .backlog-place { padding: 4px 10px 16px; }
-  .head h2 { flex: 1 1 100%; }
-  .search { flex: 1 1 auto; width: auto; min-width: 0; }
-  .head button, .head select, .head input, .phone-sort select, .phone-sort button, .tabs button { min-height: 44px; box-sizing: border-box; }
+  /* One scroller (B054): the page; the header row, the fold, the list and an opened item scroll with it, nothing pinned. */
+  .backlog-place.fill { display: block; }
+  .wrap.fill { display: block; min-height: 0; margin: 4px auto 0; }
+  .wrap.fill > .split { grid-template-rows: auto; }
+  .listwrap, .item { overflow: visible; }
+  .item > .ibody { flex: none; }
+  .md { overflow-y: visible; }
+  .phead { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; height: 44px; margin: 0 0 6px; }
+  .phead .tabs { flex: 0 1 auto; min-width: 0; }
+  .hbtn { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; box-sizing: border-box; }
+  .hbtn.on:not(.primary) { border-color: var(--accent); color: var(--accent); }
+  .badge { position: absolute; top: 3px; right: 3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-size: 10.5px; line-height: 16px; }
+  .phone-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; }
+  .phone-tools .search, .phone-tools .phone-sort { flex: 1 1 100%; margin: 0; }
+  .phone-tools > select { flex: 1 1 0; min-width: 0; font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; }
+  .phone-tools .intro { flex: 1 1 100%; margin: 0; }
+  .search { width: auto; min-width: 0; }
+  .phone-tools button, .phone-tools select, .phone-tools input, .phone-sort select, .phone-sort button, .tabs button { min-height: 44px; box-sizing: border-box; }
   .split.withItem { grid-template-columns: minmax(0, 1fr); }
   .list thead { display: none; }
   .list, .list tbody { display: block; }
