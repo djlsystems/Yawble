@@ -70,6 +70,37 @@ export function isDefaultLayout(layout: LayoutSettings): boolean {
   return LayoutFields.every(({ key }) => layout[key] === LayoutDefaults[key]);
 }
 
+/**
+ * How much the wall shows happening (the control beside the cog): calm keeps to the big moments, lively shows every
+ * step; the scene reads it (scene.setDensity). Reduced motion stands whatever the density. Kept like the forces.
+ */
+export type Density = 'calm' | 'normal' | 'lively';
+export const Densities: readonly { level: Density; label: string; help: string }[] = [
+  { level: 'calm', label: 'Calm', help: 'Calm: only the big moments move (handbacks, failures, needs you, commits and merges)' },
+  { level: 'normal', label: 'Normal', help: 'Normal: what the team does, without the smallest steps' },
+  { level: 'lively', label: 'Lively', help: 'Lively: every step and message moves' },
+];
+export const DefaultDensity: Density = 'normal';
+export const DensityStorageKey = 'yawble.monitor.density';
+
+export function readDensity(storage: Pick<Storage, 'getItem'> | null = safeStorage()): Density {
+  try {
+    const saved = storage?.getItem(DensityStorageKey);
+    return Densities.some((d) => d.level === saved) ? (saved as Density) : DefaultDensity;
+  } catch {
+    return DefaultDensity;
+  }
+}
+
+export function writeDensity(level: Density, storage: Pick<Storage, 'setItem' | 'removeItem'> | null = safeStorage()): void {
+  try {
+    if (level === DefaultDensity) storage?.removeItem(DensityStorageKey);
+    else storage?.setItem(DensityStorageKey, level);
+  } catch {
+    // Remembered only while the Monitor is open.
+  }
+}
+
 function safeStorage(): Storage | null {
   try {
     return typeof localStorage === 'undefined' ? null : localStorage;
