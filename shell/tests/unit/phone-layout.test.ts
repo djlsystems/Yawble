@@ -431,11 +431,9 @@ describe('the Monitor on a phone', () => {
     expect(w.get('[data-test=monitor-activity]').classes()).not.toContain('collapsed');
     expect(w.get('.controls').find('[data-test=monitor-legend-toggle]').exists()).toBe(false);
     expect(w.findAll('[data-test=monitor-legend-toggle]')).toHaveLength(1);
-    // The forces cog stays beside Pinned, as main has it.
-    const order = w.get('.controls').element.children;
-    expect((order[0] as HTMLElement).dataset.test).toBe('monitor-camera');
-    expect((order[1] as HTMLElement).dataset.test).toBe('monitor-layout-toggle');
-    expect(order).toHaveLength(2);
+    // The forces cog stays beside Pinned, as main has it; the density and the sound follow it (card 374).
+    const order = [...w.get('.controls').element.children].map((e) => (e as HTMLElement).dataset.test);
+    expect(order).toEqual(['monitor-camera', 'monitor-layout-toggle', 'monitor-density', 'monitor-sound']);
   });
 
   it('puts the forces cog in the compact row with the camera and the legend, and opens the forces panel from it', async () => {

@@ -497,7 +497,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
         </section>
 
         <DocumentsView v-else-if="view === 'documents'" :teams="teams" :archived="archivedTeams" :api="api" :loading="!overview && !error" />
-        <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" @open-terminal="openMemberTerminal" />
+        <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" @open-terminal="openMemberTerminal"
+          @open-needs-you="focusTeamId = null; go('board')" />
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />
         <BacklogView v-else-if="view === 'backlog'" :teams="teams" :teams-loading="!overview && !error" :api="api" :poll-ms="pollMs" @open-team="openTeam"
           @board="focusTeamId = $event; go('board')" />
