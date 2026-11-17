@@ -1,4 +1,5 @@
-import type { WorkflowSummary } from '../../shared/api';
+import type { Decision, WorkflowSummary } from '../../shared/api';
+import { errorCode, errorText } from './api';
 
 /**
  * WORKFLOW EXPIRY (B085): an open workflow nobody touches for the team's workflowExpiryDays (default 3) is closed by
@@ -24,7 +25,15 @@ export function until(iso: string, now = Date.now()): string {
   return `in ${Math.floor(s / 3600)} h`;
 }
 
-/** The Needs-you item's words: "#12 will expire tomorrow; it waits on your answer to question 3". */
-export function expiryWarningText(w: Pick<WorkflowSummary, 'id' | 'question'>): string {
-  return `#${w.id} will expire tomorrow; it waits on your answer to ${w.question != null ? `question ${w.question}` : 'a question'}`;
+/** The Needs-you item's words: the core's expiryWarning on the decision, else built from its workflow and seq (the question
+ *  number): "#12 will expire tomorrow; it waits on your answer to question 3". */
+export function expiryWarningText(d: Pick<Decision, 'workflow' | 'seq' | 'expiryWarning'>): string {
+  return d.expiryWarning || `#${d.workflow} will expire tomorrow; it waits on your answer to question ${d.seq}`;
+}
+
+/** An Extend's error: the core refuses an ended workflow with already_ended. */
+export function extendErrorText(e: unknown, workflow: number): string {
+  return errorCode(e) === 'already_ended'
+    ? `#${workflow} has already ended, so there is nothing to extend. Telling its team something in it reopens it.`
+    : errorText(e);
 }

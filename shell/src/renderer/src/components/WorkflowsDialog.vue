@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { YawbleApi, TeamSummary, WorkflowSummary } from '../../../shared/api';
 import { WORKFLOW_EXTEND } from '../../../shared/api';
-import { expiresSoon, until } from '../workflowExpiry';
+import { expiresSoon, extendErrorText, until } from '../workflowExpiry';
 import { errorText, resolveApi } from '../api';
 import { ago } from '../board/cards';
 import { displayName } from '../faces/faces';
@@ -54,7 +54,10 @@ async function run(id: number, method: string, params: Record<string, unknown>) 
     await api.call(method, { teamId: props.team.id, workflow: id, ...params });
     acting.value = null;
     await load();
-  } catch (e) { error.value = errorText(e); } finally { busy.value = null; busyMethod.value = null; }
+  } catch (e) {
+    // already_ended: it ended meanwhile; said as such (the next poll shows how it ended).
+    error.value = method === WORKFLOW_EXTEND ? extendErrorText(e, id) : errorText(e);
+  } finally { busy.value = null; busyMethod.value = null; }
 }
 
 const confirmAct = () => {
