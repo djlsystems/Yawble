@@ -1,6 +1,7 @@
 import type { MemberState } from '../faces/faces';
 import { memberKey, type FeedRow, type Tone } from './model';
 import type { StepRow } from './steps';
+import type { CodeEvent } from './codemap';
 
 /**
  * THE TIMELINE AND THE REPLAY. The timeline across the bottom of the Monitor is the last stretch of time (a choice of
@@ -53,7 +54,29 @@ export function trimByTime<T extends { at: string }>(list: T[], from: number, ma
   return list;
 }
 
-export interface ReplayDue { rows: FeedRow[]; steps: StepRow[] }
+export interface ReplayDue { rows: FeedRow[]; steps: StepRow[]; events: CodeEvent[] }
+
+/** One thing to play: a bus message, a step or a code event. */
+export type Played = { row: FeedRow } | { step: StepRow } | { event: CodeEvent };
+
+/**
+ * The rows, steps and code events (each sorted by time) as one list in the order they happened. At the same moment a
+ * message comes first, then a step, then a code event (a commit lands after the edits it holds); each list keeps its
+ * own order, so a commit is played before the merge that brings it in.
+ */
+export function inTimeOrder(rows: readonly FeedRow[], steps: readonly StepRow[], events: readonly CodeEvent[] = []): Played[] {
+  const out: Played[] = [];
+  let i = 0, j = 0, k = 0;
+  while (i < rows.length || j < steps.length || k < events.length) {
+    const tr = i < rows.length ? timeOf(rows[i]!) : Infinity;
+    const ts = j < steps.length ? timeOf(steps[j]!) : Infinity;
+    const te = k < events.length ? timeOf(events[k]!) : Infinity;
+    if (tr <= ts && tr <= te) out.push({ row: rows[i++]! });
+    else if (ts <= te) out.push({ step: steps[j++]! });
+    else out.push({ event: events[k++]! });
+  }
+  return out;
+}
 
 /**
  * THE REPLAY'S CLOCK: log time that runs `speed` times faster than the wall's, from `start`. Each step returns the
@@ -62,37 +85,45 @@ export interface ReplayDue { rows: FeedRow[]; steps: StepRow[] }
 export class ReplayClock {
   private ri = 0;
   private si = 0;
+  private ei = 0;
   private virtual: number;
 
-  constructor(private rows: readonly FeedRow[], private steps: readonly StepRow[], start: number, public speed: number, private maxGap = MaxGapMs) {
+  constructor(
+    private rows: readonly FeedRow[], private steps: readonly StepRow[], start: number, public speed: number, private maxGap = MaxGapMs,
+    private events: readonly CodeEvent[] = [],
+  ) {
     this.virtual = start;
     this.ri = firstAtOrAfter(rows, start);
     this.si = firstAtOrAfter(steps, start);
+    this.ei = firstAtOrAfter(events, start);
   }
 
   /** The log time reached, ms. */
   get at(): number { return this.virtual; }
 
   /** Nothing more to play from what it was given. */
-  get drained(): boolean { return this.ri >= this.rows.length && this.si >= this.steps.length; }
+  get drained(): boolean { return this.ri >= this.rows.length && this.si >= this.steps.length && this.ei >= this.events.length; }
 
-  /** Takes rows and steps that arrived after it started (live polling goes on during a replay). */
-  extend(rows: readonly FeedRow[], steps: readonly StepRow[]): void {
+  /** Takes rows, steps and code events that arrived after it started (live polling goes on during a replay). */
+  extend(rows: readonly FeedRow[], steps: readonly StepRow[], events?: readonly CodeEvent[]): void {
     this.rows = rows;
     this.steps = steps;
+    if (events) this.events = events;
   }
 
   step(wallMs: number, until = Number.POSITIVE_INFINITY): ReplayDue {
-    const due: ReplayDue = { rows: [], steps: [] };
+    const due: ReplayDue = { rows: [], steps: [], events: [] };
     const next = Math.min(
       this.ri < this.rows.length ? timeOf(this.rows[this.ri]!) : Number.POSITIVE_INFINITY,
       this.si < this.steps.length ? timeOf(this.steps[this.si]!) : Number.POSITIVE_INFINITY,
+      this.ei < this.events.length ? timeOf(this.events[this.ei]!) : Number.POSITIVE_INFINITY,
     );
     // Skip the quiet: never wait longer than maxGap of log time for the next row or step.
     if (Number.isFinite(next) && next - this.virtual > this.maxGap) this.virtual = next - this.maxGap;
     this.virtual = Math.min(until, this.virtual + wallMs * this.speed);
     while (this.ri < this.rows.length && timeOf(this.rows[this.ri]!) <= this.virtual) due.rows.push(this.rows[this.ri++]!);
     while (this.si < this.steps.length && timeOf(this.steps[this.si]!) <= this.virtual) due.steps.push(this.steps[this.si++]!);
+    while (this.ei < this.events.length && timeOf(this.events[this.ei]!) <= this.virtual) due.events.push(this.events[this.ei++]!);
     return due;
   }
 }

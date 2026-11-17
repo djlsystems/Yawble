@@ -54,7 +54,7 @@ public sealed class TeamRepoRunner(IAgentRunner inner, TeamRepos repos, Action<s
         try
         {
             await repos.CheckAndScrubAsync(run.Member, CancellationToken.None);
-            var fetched = await repos.FetchBackAsync(run.Member, CancellationToken.None);
+            var fetched = await repos.FetchBackAsync(run.Member, CancellationToken.None, run.Correlation);
             problem = fetched.Error;
         }
         catch (Exception ex) when (ex is GitException or IOException or UnauthorizedAccessException)
@@ -65,7 +65,7 @@ public sealed class TeamRepoRunner(IAgentRunner inner, TeamRepos repos, Action<s
         {
             // The app publishes, so work cannot be lost to a run that ended early. A failed
             // push never fails the run; it is reported with it (the Manager and the person see it).
-            var push = await repos.PublishAsync(run.Member, CancellationToken.None);
+            var push = await repos.PublishAsync(run.Member, CancellationToken.None, run.Correlation);
             if (push.Result is TeamPublishResult.NoRepository or TeamPublishResult.NothingToPublish) return result;
             var details = new Dictionary<string, object?>(result.Details ?? new Dictionary<string, object?>())
             {

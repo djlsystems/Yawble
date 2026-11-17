@@ -64,7 +64,7 @@ public static class RemoteAccess
     internal static readonly IReadOnlyDictionary<string, Kind> Kinds = Table(
         reads:
         [
-            "app.overview", "app.version", "monitor.messages", "monitor.steps",
+            "app.overview", "app.version", "monitor.messages", "monitor.steps", "monitor.codeEvents",
             "teams.list", "teams.agents", "teams.quiet", "teams.env", "teams.approvals", "teams.repos",
             "docs.list", "docs.read", "docs.folder",
             "members.get",

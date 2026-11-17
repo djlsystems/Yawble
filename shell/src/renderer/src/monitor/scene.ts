@@ -4,7 +4,11 @@ import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type 
 import { DoingMs, memberKey, teamKey, spaced, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
 import type { WorkflowSummary } from '../../../shared/api';
 import { drawStepIcon, drawWorkflowIcon } from './icons';
-import { fileAlpha, FilePulseMs, StepLook, type FileMark } from './steps';
+import { StepLook } from './steps';
+import {
+  commitPhase, CommitLifeMs, DefaultLimits, fileLight, layoutTeamMap, LightMs, MaxMapNodes, popScale, shortSha,
+  type MapFile, type TeamMapView,
+} from './codemap';
 import { entryTime, panelHit, panelLayout, panelRadius, panelScale, PanelFontPx, workflowLabel, workflowLook, type PanelLayout } from './workflows';
 
 /**
@@ -16,9 +20,15 @@ import { entryTime, panelHit, panelLayout, panelRadius, panelScale, PanelFontPx,
  *   idle     - a thin line.
  * The Manager wears an outer ring with three ticks; queued instructions orbit a member as small dots.
  * Effects (comets, bursts, ripples, floating lines) come from the model. So do the members' steps: each step's icon
- * rises off its member and fades (newest lowest, at most StepIconsEach at once), the files a member changes sit
- * beside it as small labelled nodes on lines, fanned away from its team and pulsing when touched again, until half a
- * minute after their last touch, and a line under the member's name says what it is doing now.
+ * rises off its member and fades (newest lowest, at most StepIconsEach at once), and a line under the member's name
+ * says what it is doing now.
+ * Each team's code map (codemap.ts) hangs round its hub past its members: the repository's folders on an arc, each
+ * with its files fanned beyond it (a "+N" for the rest when the map is large), a folder glowing warmer the busier it
+ * is. A new file pops in, an edit lights it bright, a read faint; a line runs from each member to every file it
+ * touched, and a file two members touched wears a double ring. A commit's files gather into a dot that travels the
+ * member's spoke to the hub and rests there (hover: its message and short sha); a merge into the team branch bursts
+ * along the hub's spokes, a landing on main bursts larger, a push pulses out past the wall's edge. Map nodes off the
+ * screen are not drawn, and all the maps together show at most MaxMapNodes files.
  * A team's newest workflows (live only) sit in one panel hung off its hub on a thin dashed line, past its members:
  * a header, then a row per workflow, last updated first: its mark in its state's colour (check, play in a turning
  * ring, pause, cross), "#id title" and the time of its last entry. The panel is one body in the layout, sized to its
@@ -37,29 +47,38 @@ interface Node extends SimulationNodeDatum {
 interface Link { source: Node; target: Node }
 
 export interface SceneHover {
-  key: string; kind: 'team' | 'member' | 'file' | 'workflow'; team: string; name: string; state?: MemberState; statusLine?: string | null; queued?: number; x: number; y: number;
-  /** A file node's: its path, how often it was touched, how it was last touched, and the files a "+N" node counts. */
-  path?: string; touches?: number; fileKind?: 'edit' | 'create'; more?: string[];
+  key: string; kind: 'team' | 'member' | 'file' | 'folder' | 'commit' | 'workflow'; team: string; name: string; state?: MemberState; statusLine?: string | null; queued?: number; x: number; y: number;
+  /**
+   * A map node's: a file's path, how often it was touched, whether it is new, changed or only read, whether a commit
+   * confirmed it (its short sha) and who touched it; a folder's or a "+N" node's files.
+   */
+  path?: string; touches?: number; fileKind?: 'edit' | 'create' | 'read'; sha?: string | null; members?: string[]; more?: string[];
+  /** A commit dot's message. */
+  message?: string;
   /** The workflow row hovered on a team's workflow panel (none on its header). */
   workflow?: WorkflowSummary;
 }
 
-/** A file node as drawn this frame: where it is and how strongly it shows. `mark` is null for a "+N" node. */
-interface ShownFile { id: string; member: Node; mark: FileMark | null; counted: FileMark[]; x: number; y: number; alpha: number; color: string; pulse: number }
+/** A map node as drawn this frame: a file, a folder, a folder's "+N" or a team's "+N folders". */
+interface MapNode {
+  id: string; kind: 'file' | 'folder' | 'more' | 'rest'; team: Node; x: number; y: number;
+  file?: MapFile; folder?: string; label: string; heat: number; files: MapFile[];
+}
 
 const Palette = {
   ground: '#070b14', ink: '#e2e8f0', inkDim: '#94a3b8',
   tell: '#38bdf8', start: '#22d3ee', progress: '#a5b4fc', done: '#34d399', handback: '#fbbf24', fail: '#f43f5e',
-  blocked: '#fb923c', decision: '#c4b5fd', person: '#f9a8d4', edit: '#a3e635',
+  blocked: '#fb923c', decision: '#c4b5fd', person: '#f9a8d4', edit: '#a3e635', commit: '#fde047',
 } satisfies Record<Tone | 'ground' | 'ink' | 'inkDim', string>;
 
-const Life = { comet: 1100, burst: 1400, ripple: 1100, float: 2600, step: 2600 } as const;
+const Life = { comet: 1100, burst: 1400, ripple: 1100, float: 2600, step: 2600, commit: CommitLifeMs, merge: 1800, push: 1600 } as const;
 /** At most this many step icons on one member at once: a burst of steps keeps the newest. */
 const StepIconsEach = 3;
 const StepIconGap = 20;
-/** Where a member's file nodes sit: the angle off its outward direction and the distance past its disc, by place. */
-const FileFan = [{ a: 0, d: 60 }, { a: -0.62, d: 48 }, { a: 0.62, d: 48 }, { a: -1.2, d: 64 }, { a: 1.2, d: 64 }, { a: -1.75, d: 50 }];
-const MoreFan = { a: 1.75, d: 50 };
+/** How much further apart the teams sit once any of them has a code map round it. */
+const MapRoom = 190;
+/** How often a team's map view is worked out again when nothing came or went (its order follows the activity). */
+const MapViewMs = 400;
 const RefitAfterMs = 12_000;
 /** How long a one-off Fit (pinned) keeps aiming at everything while the camera eases there. */
 export const FitOnceMs = 1_500;
@@ -154,10 +173,17 @@ export class MonitorScene {
   private drag: { node: Node | null; x: number; y: number; cx: number; cy: number; hit?: 'header' | 'panel' | number } | null = null;
   private colors = stateColors();
   private dt = 16;
-  /** Where each file node is drawn (eased toward its place), and the ones drawn this frame, for the hover. */
-  private filePos = new Map<string, { x: number; y: number }>();
-  private shownFiles: ShownFile[] = [];
-  private hoverFile: ShownFile | null = null;
+  /** Where each map node is drawn (eased toward its place), and the ones drawn this frame, for the hover. */
+  private mapPos = new Map<string, { x: number; y: number }>();
+  private mapNodes: MapNode[] = [];
+  private mapById = new Map<string, MapNode>();
+  private hoverMap: MapNode | null = null;
+  /** Each team's map layout as last worked out, with the map's rev and when (MapViewMs). */
+  private mapLayouts: { rev: number; at: number; model: MonitorModel | null; list: { team: Node; view: TeamMapView }[] } = { rev: -1, at: -Infinity, model: null, list: [] };
+  /** Whether the teams sit apart for their maps (MapRoom). */
+  private mapRoom = false;
+  /** The commit dot under the pointer. */
+  private hoverCommit: Extract<Effect, { kind: 'commit' }> | null = null;
   /** Each step icon's place in its member's stack, eased so the stack slides up rather than jumps. */
   private stepSlots = new WeakMap<Effect, number>();
   readonly reduced: boolean;
@@ -235,7 +261,8 @@ export class MonitorScene {
     this.wfFrom = { model: this.model, rev: this.model?.workflowsRev ?? -1 };
     const keep = new Set<string>();
     const count = teams.length;
-    const rx = Math.max(140, 150 + count * 34);
+    this.mapRoom = (this.model?.map.size ?? 0) > 0;
+    const rx = Math.max(140, 150 + count * 34) + (this.mapRoom && count > 1 ? MapRoom : 0);
     const ry = rx * 0.62;
     teams.forEach((t, i) => {
       const angle = teamAngle(i, count);
@@ -311,7 +338,7 @@ export class MonitorScene {
     this.last = now;
     this.dt = dt;
     this.model?.tidy(now);
-    if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.workflowsRev ?? -1)) this.rebuild();
+    if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.workflowsRev ?? -1) || this.mapRoom !== (this.model?.map.size ?? 0) > 0) this.rebuild();
     this.rescalePanels();
     this.resize();
     if (this.sim.alpha() > 0.001 || !this.reduced) this.sim.tick();
@@ -358,6 +385,11 @@ export class MonitorScene {
       const pad = n.r + (n.kind === 'team' ? 70 : n.kind === 'workflows' ? 10 : 64);
       x0 = Math.min(x0, n.x! - pad); x1 = Math.max(x1, n.x! + pad);
       y0 = Math.min(y0, n.y! - pad); y1 = Math.max(y1, n.y! + pad);
+    }
+    // The maps, with room for their labels.
+    for (const m of this.mapNodes) {
+      x0 = Math.min(x0, m.x - 60); x1 = Math.max(x1, m.x + 60);
+      y0 = Math.min(y0, m.y - 16); y1 = Math.max(y1, m.y + 16);
     }
     const top = 96, bottom = 40; // room for the counts at the top and the legend at the bottom
     const k = Math.min(1.6, Math.max(0.2, Math.min(this.w / (x1 - x0), (this.h - top - bottom) / (y1 - y0))));
@@ -407,14 +439,16 @@ export class MonitorScene {
     }
     c.setLineDash([]);
     c.globalAlpha = 1;
-    this.placeFiles(now);
-    this.drawFileLines(c, motion, dim);
+    this.placeMap(now);
+    const view = this.viewBox();
+    this.drawMapLines(c, now, dim, view);
     c.globalCompositeOperation = 'lighter';
     for (const e of this.effects) this.drawEffect(c, e, now, motion);
     c.globalCompositeOperation = 'source-over';
     for (const n of this.nodes.values()) if (n.kind === 'member') this.drawMember(c, n, now, motion, dim(n.key));
     for (const n of this.nodes.values()) if (n.kind === 'workflows') this.drawPanel(c, n, now, motion, dim(n.key));
-    this.drawFileNodes(c, motion, dim);
+    this.drawMapNodes(c, now, dim, view);
+    this.drawCommits(c, now);
     for (const n of this.nodes.values()) if (n.kind === 'team') this.drawTeamPill(c, n, dim(n.key));
     const icons = this.drawSteps(c, now, motion, dim);
     // Floating lines on the same member stack, newest lowest, so two never overlap, above its step icons.
@@ -428,127 +462,279 @@ export class MonitorScene {
     }
   }
 
-  // ---------- the members' files ----------
+  // ---------- the code maps ----------
 
-  /** The direction from a member's team out through the member, kept off straight up (its step icons) and down (its name). */
-  private outward(member: Node): number {
-    const team = this.nodes.get(teamKey(member.team));
-    const dx = team ? member.x! - team.x! : 0, dy = team ? member.y! - team.y! : -1;
-    let a = Math.hypot(dx, dy) < 1 ? 0 : Math.atan2(dy, dx);
-    const up = -Math.PI / 2, down = Math.PI / 2, keep = 0.95;
-    const off = (from: number) => Math.atan2(Math.sin(a - from), Math.cos(a - from));
-    if (Math.abs(off(up)) < keep) a = up + Math.sign(off(up) || 1) * keep;
-    if (Math.abs(off(down)) < keep) a = down + Math.sign(off(down) || 1) * keep;
-    return a;
+  /** The world rectangle on screen, a margin wider: map nodes and lines outside it are not drawn. */
+  private viewBox(): { x0: number; y0: number; x1: number; y1: number } {
+    const [x0, y0] = this.toWorld(-40, -40);
+    const [x1, y1] = this.toWorld(this.w + 40, this.h + 40);
+    return { x0, y0, x1, y1 };
   }
 
-  /** Where each member's files are this frame: a place on the fan for each placed file, one "+N" node for the rest. */
-  private placeFiles(now: number): void {
-    const shown: ShownFile[] = [];
+  /** Each team's direction away from the others (straight up for a team alone), by team key. */
+  private teamOut = new Map<string, number>();
+
+  private outwards(): void {
+    let cx = 0, cy = 0, n = 0;
+    for (const t of this.nodes.values()) if (t.kind === 'team') { cx += t.x!; cy += t.y!; n++; }
+    if (n) { cx /= n; cy /= n; }
+    this.teamOut.clear();
+    for (const t of this.nodes.values()) {
+      if (t.kind !== 'team') continue;
+      const dx = t.x! - cx, dy = t.y! - cy;
+      this.teamOut.set(t.key, n < 2 || Math.hypot(dx, dy) < 1 ? -Math.PI / 2 : Math.atan2(dy, dx));
+    }
+  }
+
+  /** How far a team's members reach from its hub (its map's folders sit past them). */
+  private reach(team: Node): number {
+    let r = 60;
+    for (const n of this.nodes.values()) if (n.kind === 'member' && n.team === team.team) r = Math.max(r, Math.hypot(n.x! - team.x!, n.y! - team.y!) + n.r);
+    return r;
+  }
+
+  /**
+   * Where every map node is this frame. Each team's collapsed view is worked out again when a file comes or goes, or
+   * every MapViewMs; the layout follows the hub every frame, and each node eases to its place (snaps, under reduced motion).
+   */
+  private placeMap(now: number): void {
+    this.outwards();
+    const map = this.model?.map;
+    if (!map || !map.size) {
+      if (this.mapNodes.length) { this.mapNodes = []; this.mapById.clear(); this.mapPos.clear(); }
+      return;
+    }
+    const L = this.mapLayouts;
+    if (L.model !== this.model || L.rev !== map.rev || now - L.at > MapViewMs || now < L.at) {
+      const names = map.teamNames();
+      const each = Math.max(6, Math.min(DefaultLimits.maxFiles, Math.floor(MaxMapNodes / Math.max(1, names.length))));
+      const list: { team: Node; view: TeamMapView }[] = [];
+      for (const name of names) {
+        const team = this.nodes.get(teamKey(name));
+        if (team) list.push({ team, view: map.view(name, { maxFiles: each }) });
+      }
+      this.mapLayouts = { rev: map.rev, at: now, model: this.model, list };
+    }
     const ease = this.reduced ? 1 : 1 - Math.pow(0.0004, this.dt / 1000);
-    const alive = new Set<string>();
-    const place = (id: string, member: Node, spot: { a: number; d: number }, base: number) => {
-      const a = base + spot.a, d = member.r + spot.d;
-      const tx = member.x! + Math.cos(a) * d, ty = member.y! + Math.sin(a) * d;
-      let p = this.filePos.get(id);
-      if (!p) this.filePos.set(id, (p = { x: member.x!, y: member.y! }));
+    const nodes: MapNode[] = [];
+    const byId = new Map<string, MapNode>();
+    const put = (node: Omit<MapNode, 'x' | 'y'>, tx: number, ty: number, bornX: number, bornY: number) => {
+      let p = this.mapPos.get(node.id);
+      if (!p) this.mapPos.set(node.id, (p = { x: this.reduced ? tx : bornX, y: this.reduced ? ty : bornY }));
       p.x += (tx - p.x) * ease; p.y += (ty - p.y) * ease;
-      alive.add(id);
-      return p;
+      const n: MapNode = { ...node, x: p.x, y: p.y };
+      nodes.push(n);
+      byId.set(n.id, n);
     };
-    const files = this.model?.files;
-    if (files) {
-      for (const key of files.members()) {
-        const member = this.nodes.get(key);
-        if (!member) continue;
-        const base = this.outward(member);
-        const { placed, counted } = files.of(key);
-        for (const f of placed) {
-          const id = `${key}|${f.path}`;
-          const p = place(id, member, FileFan[f.slot] ?? FileFan[0]!, base);
-          shown.push({ id, member, mark: f, counted: [], x: p.x, y: p.y, alpha: fileAlpha(f, now, this.reduced), color: f.kind === 'create' ? StepLook.create.color : StepLook.edit.color, pulse: (now - f.last) / FilePulseMs });
-        }
-        if (counted.length) {
-          const id = `${key}|+`;
-          const p = place(id, member, MoreFan, base);
-          const last = Math.max(...counted.map((f) => f.last));
-          const first = Math.min(...counted.map((f) => f.first));
-          shown.push({ id, member, mark: null, counted, x: p.x, y: p.y, alpha: fileAlpha({ first, last }, now, this.reduced), color: Palette.inkDim, pulse: (now - last) / FilePulseMs });
-        }
+    for (const { team, view: v } of this.mapLayouts.list) {
+      const laid = layoutTeamMap(v, { x: team.x!, y: team.y! }, this.teamOut.get(team.key) ?? -Math.PI / 2, this.reach(team) + 70);
+      for (const f of laid.folders) {
+        put({ id: f.id, kind: 'folder', team, folder: f.view.path, label: f.view.label, heat: f.view.heat, files: [...f.view.files, ...f.view.more] }, f.x, f.y, team.x!, team.y!);
+        if (f.view.more.length)
+          put({ id: `${f.id}+`, kind: 'more', team, folder: f.view.path, label: `+${f.view.more.length}`, heat: 0, files: f.view.more }, f.moreX, f.moreY, f.x, f.y);
       }
+      for (const p of laid.files) {
+        const folder = byId.get(`${team.key.slice(2)}|${p.folder}/`);
+        put({ id: p.id, kind: 'file', team, file: p.file, folder: p.folder, label: p.file.name, heat: 0, files: [p.file] }, p.x, p.y, folder?.x ?? team.x!, folder?.y ?? team.y!);
+      }
+      if (laid.rest && v.moreFolders)
+        put({ id: `${team.key}|+folders`, kind: 'rest', team, label: `+${v.moreFolders} folder${v.moreFolders === 1 ? '' : 's'}`, heat: 0, files: [] }, laid.rest.x, laid.rest.y, team.x!, team.y!);
     }
-    for (const id of [...this.filePos.keys()]) if (!alive.has(id)) this.filePos.delete(id);
-    this.shownFiles = shown;
+    for (const id of [...this.mapPos.keys()]) if (!byId.has(id)) this.mapPos.delete(id);
+    this.mapNodes = nodes;
+    this.mapById = byId;
   }
 
-  /** The lines from each member to its files, and on a fresh touch a dot that runs out along the line. */
-  private drawFileLines(c: CanvasRenderingContext2D, motion: number, dim: (k: string) => number): void {
-    for (const f of this.shownFiles) {
-      const m = f.member;
-      const a = f.alpha * dim(m.key);
-      if (a <= 0.01) continue;
-      const ang = Math.atan2(f.y - m.y!, f.x - m.x!);
-      const sx = m.x! + Math.cos(ang) * (m.r + 6), sy = m.y! + Math.sin(ang) * (m.r + 6);
-      c.strokeStyle = f.color;
-      c.globalAlpha = a * (f.pulse < 1 ? 0.75 : 0.4);
-      c.lineWidth = f.pulse < 1 ? 1.6 : 1;
-      if (!f.mark) c.setLineDash([2, 3]);
-      c.beginPath(); c.moveTo(sx, sy); c.lineTo(f.x, f.y); c.stroke();
-      c.setLineDash([]);
-      if (motion && f.pulse < 0.5) {
-        const u = f.pulse / 0.5;
-        c.fillStyle = f.color;
-        c.globalAlpha = a * (1 - u * 0.5);
-        c.beginPath(); c.arc(sx + (f.x - sx) * u, sy + (f.y - sy) * u, 2.4, 0, Math.PI * 2); c.fill();
+  /** The tree's branches (hub to folder, folder to file) and a line from each member to every file it touched. */
+  private drawMapLines(c: CanvasRenderingContext2D, now: number, dim: (k: string) => number, v: { x0: number; y0: number; x1: number; y1: number }): void {
+    const off = (ax: number, ay: number, bx: number, by: number) =>
+      (ax < v.x0 && bx < v.x0) || (ax > v.x1 && bx > v.x1) || (ay < v.y0 && by < v.y0) || (ay > v.y1 && by > v.y1);
+    c.lineWidth = 1;
+    for (const m of this.mapNodes) {
+      const t = m.team;
+      const a = dim(t.key);
+      if (m.kind === 'folder' || m.kind === 'rest') {
+        if (off(t.x!, t.y!, m.x, m.y)) continue;
+        c.strokeStyle = `hsl(${t.hue} 55% 60%)`;
+        c.globalAlpha = (0.14 + m.heat * 0.22) * a;
+        c.beginPath(); c.moveTo(t.x!, t.y!); c.lineTo(m.x, m.y); c.stroke();
+        continue;
       }
-    }
-    c.globalAlpha = 1;
-  }
-
-  /** The file nodes: a dot in the touch's colour (a ring round it for a new file), its name beside it, a ring on a touch. */
-  private drawFileNodes(c: CanvasRenderingContext2D, motion: number, dim: (k: string) => number): void {
-    const labels = this.cam.k > 0.45;
-    c.font = `500 10px ${this.family()}`;
-    c.textBaseline = 'middle';
-    for (const f of this.shownFiles) {
-      const a = f.alpha * dim(f.member.key);
-      if (a <= 0.01) continue;
-      const hovered = this.hoverFile?.id === f.id;
-      if (f.pulse < 1) {
-        const t = f.pulse;
-        c.strokeStyle = f.color;
-        c.globalAlpha = a * (1 - t) * 0.9;
-        c.lineWidth = 1.5;
-        c.beginPath(); c.arc(f.x, f.y, 5 + (motion ? t * 12 : 4), 0, Math.PI * 2); c.stroke();
+      const folder = this.mapById.get(`${t.key.slice(2)}|${m.folder}/`);
+      if (folder && !off(folder.x, folder.y, m.x, m.y)) {
+        c.strokeStyle = `hsl(${t.hue} 45% 62%)`;
+        c.globalAlpha = 0.22 * a;
+        c.beginPath(); c.moveTo(folder.x, folder.y); c.lineTo(m.x, m.y); c.stroke();
       }
-      c.globalAlpha = a;
-      const r = f.mark ? 4.2 : 7;
-      c.fillStyle = Palette.ground;
-      c.beginPath(); c.arc(f.x, f.y, r + 1.5, 0, Math.PI * 2); c.fill();
-      if (f.mark) {
-        c.fillStyle = f.color;
-        c.beginPath(); c.arc(f.x, f.y, f.mark.kind === 'create' ? 2.6 : r, 0, Math.PI * 2); c.fill();
-        if (f.mark.kind === 'create') { c.strokeStyle = f.color; c.lineWidth = 1.3; c.beginPath(); c.arc(f.x, f.y, r, 0, Math.PI * 2); c.stroke(); }
-      } else {
-        c.strokeStyle = f.color; c.lineWidth = 1.2; c.setLineDash([2, 2]);
-        c.beginPath(); c.arc(f.x, f.y, r, 0, Math.PI * 2); c.stroke();
+      // The members' lines: one per member that touched it (to a "+N", one per member of the files it counts).
+      const touched = new Map<string, { kind: string; light: number }>();
+      for (const f of m.files) {
+        const light = m.kind === 'file' ? fileLight(f, now) : 0.4;
+        for (const [k, touch] of f.members) {
+          const was = touched.get(k);
+          if (!was || light > was.light) touched.set(k, { kind: touch.kind, light });
+        }
+      }
+      for (const [k, t2] of touched) {
+        const member = this.nodes.get(`m:${t.team.toLowerCase()}/${k}`);
+        if (!member || off(member.x!, member.y!, m.x, m.y)) continue;
+        const fresh = m.file ? Math.max(0, 1 - (now - Math.max(m.file.editShown, m.file.readShown)) / LightMs) : 0;
+        c.strokeStyle = StepLook[t2.kind === 'read' ? 'read' : t2.kind === 'create' ? 'create' : 'edit'].color;
+        c.globalAlpha = (t2.kind === 'read' ? 0.1 : 0.16) * (1 + fresh * 3) * Math.min(dim(member.key), a);
+        c.lineWidth = fresh > 0 ? 1.4 : 0.8;
+        if (m.kind === 'more') c.setLineDash([2, 3]);
+        c.beginPath(); c.moveTo(member.x!, member.y!); c.lineTo(m.x, m.y); c.stroke();
         c.setLineDash([]);
+        c.lineWidth = 1;
       }
-      if (hovered) { c.strokeStyle = Palette.ink; c.lineWidth = 1; c.beginPath(); c.arc(f.x, f.y, r + 3.5, 0, Math.PI * 2); c.stroke(); }
-      if (!labels && !hovered) continue;
-      const right = f.x >= f.member.x!;
-      // Two files of one name beside a member (two README.md) say their folder too.
-      const name = f.mark && this.shownFiles.some((o) => o !== f && o.member === f.member && o.mark?.name === f.mark!.name) ? f.mark.path.split('/').slice(-2).join('/') : f.mark?.name;
-      const text = f.mark ? name + (f.mark.touches > 1 ? ` ×${f.mark.touches}` : '') : `+${f.counted.length} file${f.counted.length === 1 ? '' : 's'}`;
-      const label = text.length > 28 ? text.slice(0, 27) + '…' : text;
-      c.textAlign = right ? 'left' : 'right';
-      const lx = f.x + (right ? r + 5 : -r - 5);
-      c.lineWidth = 3; c.strokeStyle = 'rgba(7, 11, 20, 0.85)'; c.lineJoin = 'round';
-      c.strokeText(label, lx, f.y + 0.5);
-      c.fillStyle = f.pulse < 1 ? Palette.ink : f.mark ? 'rgba(226, 232, 240, 0.82)' : Palette.inkDim;
-      c.fillText(label, lx, f.y + 0.5);
     }
     c.globalAlpha = 1;
+  }
+
+  /**
+   * The map's nodes. A folder: a rounded square that glows warmer (blue to amber) the busier it is, its name beside it.
+   * A file: a dot in its touch's colour (teal new, green changed, blue only read), bright when changed and faint when
+   * only read, lit up for a moment by a fresh touch and popping in when new; a ring once a commit confirmed it, a
+   * double ring when two members touched it. "+N": a dashed ring with the count.
+   */
+  private drawMapNodes(c: CanvasRenderingContext2D, now: number, dim: (k: string) => number, v: { x0: number; y0: number; x1: number; y1: number }): void {
+    const family = this.family();
+    const labels = this.cam.k > 0.55;
+    c.textBaseline = 'middle';
+    for (const m of this.mapNodes) {
+      if (m.x < v.x0 || m.x > v.x1 || m.y < v.y0 || m.y > v.y1) continue;
+      const a = dim(m.team.key);
+      const hovered = this.hoverMap?.id === m.id;
+      if (m.kind === 'folder') {
+        const hue = 205 - m.heat * 175; // cool blue to warm amber
+        const g = c.createRadialGradient(m.x, m.y, 0, m.x, m.y, 16 + m.heat * 18);
+        g.addColorStop(0, `hsla(${hue}, 90%, 58%, ${(0.16 + m.heat * 0.3) * a})`);
+        g.addColorStop(1, `hsla(${hue}, 90%, 58%, 0)`);
+        c.fillStyle = g;
+        c.beginPath(); c.arc(m.x, m.y, 16 + m.heat * 18, 0, Math.PI * 2); c.fill();
+        c.globalAlpha = a;
+        c.fillStyle = 'rgba(12, 19, 34, 0.92)';
+        c.strokeStyle = `hsl(${hue} 85% ${60 + m.heat * 8}%)`;
+        c.lineWidth = hovered ? 2 : 1.3;
+        roundRect(c, m.x - 6, m.y - 5, 12, 10, 2.5); c.fill(); c.stroke();
+        if (labels || hovered) {
+          c.font = `600 10px ${family}`;
+          c.textAlign = 'center';
+          const label = m.label.length > 24 ? m.label.slice(0, 23) + '…' : m.label;
+          c.lineWidth = 3; c.strokeStyle = 'rgba(7, 11, 20, 0.85)'; c.lineJoin = 'round';
+          c.strokeText(label, m.x, m.y - 13);
+          c.fillStyle = `hsl(${hue} 80% 78%)`;
+          c.fillText(label, m.x, m.y - 13);
+        }
+      } else if (m.kind === 'file' && m.file) {
+        const f = m.file;
+        const light = fileLight(f, now);
+        const pop = popScale(f.bornShown, now, this.reduced);
+        const color = f.editAt === -Infinity ? StepLook.read.color : f.created ? StepLook.create.color : StepLook.edit.color;
+        const r = 3.6 * pop;
+        const flash = Math.max(0, 1 - (now - Math.max(f.editShown, f.readShown)) / LightMs);
+        if (flash > 0) {
+          c.globalAlpha = flash * 0.5 * a * (f.editShown >= f.readShown ? 1 : 0.5);
+          c.fillStyle = color;
+          c.beginPath(); c.arc(m.x, m.y, r + 4 + flash * 4, 0, Math.PI * 2); c.fill();
+        }
+        c.globalAlpha = light * a;
+        c.fillStyle = color;
+        c.beginPath(); c.arc(m.x, m.y, r, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = color;
+        c.lineWidth = 1;
+        if (f.confirmed) { c.beginPath(); c.arc(m.x, m.y, r + 2.2, 0, Math.PI * 2); c.stroke(); }
+        if (f.members.size > 1) { c.strokeStyle = Palette.ink; c.globalAlpha = 0.7 * a; c.beginPath(); c.arc(m.x, m.y, r + 4.2, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.arc(m.x, m.y, r + 6.2, 0, Math.PI * 2); c.stroke(); }
+        if (hovered) { c.strokeStyle = Palette.ink; c.globalAlpha = a; c.beginPath(); c.arc(m.x, m.y, r + 8, 0, Math.PI * 2); c.stroke(); }
+        if (hovered || (labels && (this.cam.k > 0.9 || flash > 0))) {
+          c.font = `500 9.5px ${family}`;
+          const right = Math.cos(Math.atan2(m.y - m.team.y!, m.x - m.team.x!)) >= 0;
+          c.textAlign = right ? 'left' : 'right';
+          const label = m.label.length > 26 ? m.label.slice(0, 25) + '…' : m.label;
+          const lx = m.x + (right ? r + 5 : -r - 5);
+          c.globalAlpha = a * Math.max(light, 0.6);
+          c.lineWidth = 3; c.strokeStyle = 'rgba(7, 11, 20, 0.85)'; c.lineJoin = 'round';
+          c.strokeText(label, lx, m.y + 0.5);
+          c.fillStyle = flash > 0 || hovered ? Palette.ink : 'rgba(226, 232, 240, 0.78)';
+          c.fillText(label, lx, m.y + 0.5);
+        }
+      } else {
+        c.globalAlpha = a * 0.9;
+        c.strokeStyle = Palette.inkDim;
+        c.lineWidth = hovered ? 1.6 : 1.1;
+        c.setLineDash([2, 2]);
+        const r = m.kind === 'rest' ? 9 : 7;
+        c.fillStyle = Palette.ground;
+        c.beginPath(); c.arc(m.x, m.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
+        c.setLineDash([]);
+        if (labels || hovered || m.kind === 'rest') {
+          c.font = `600 9.5px ${family}`;
+          c.textAlign = 'left';
+          c.fillStyle = Palette.inkDim;
+          c.fillText(m.label, m.x + r + 4, m.y + 0.5);
+        }
+      }
+    }
+    c.globalAlpha = 1;
+  }
+
+  /** Where each commit dot is this frame, for the hover. */
+  private commitSpots: { e: Extract<Effect, { kind: 'commit' }>; x: number; y: number }[] = [];
+
+  /**
+   * The commits: the files gather into the member, the dot travels its spoke to the hub, then rests there with the
+   * team's other recent commits in a small arc above it until it fades. Under reduced motion it is simply at the hub.
+   */
+  private drawCommits(c: CanvasRenderingContext2D, now: number): void {
+    const spots: typeof this.commitSpots = [];
+    const resting = new Map<string, number>();
+    for (let i = this.effects.length - 1; i >= 0; i--) {
+      const e = this.effects[i]!;
+      if (e.kind !== 'commit') continue;
+      const hub = this.nodes.get(teamKey(e.team));
+      if (!hub) continue;
+      const member = e.node ? this.nodes.get(e.node) : undefined;
+      const age = now - e.at;
+      const phase = commitPhase(age, this.reduced);
+      const fade = Math.min(1, (Life.commit - age) / 2000);
+      if (fade <= 0) continue;
+      let x: number, y: number;
+      if (phase.resting || !member) {
+        const slot = resting.get(hub.key) ?? 0;
+        resting.set(hub.key, slot + 1);
+        if (slot >= 8) continue;
+        const a = -Math.PI / 2 + (slot - 3.5) * 0.36;
+        x = hub.x! + Math.cos(a) * 46; y = hub.y! + Math.sin(a) * 46;
+      } else {
+        x = member.x! + (hub.x! - member.x!) * phase.travel;
+        y = member.y! + (hub.y! - member.y!) * phase.travel;
+      }
+      if (phase.gather !== null && member) {
+        // The files, drawn in toward the member.
+        c.fillStyle = Palette.commit;
+        for (const id of e.files.slice(0, 24)) {
+          const f = this.mapById.get(id);
+          if (!f) continue;
+          const u = 1 - Math.pow(1 - phase.gather, 2);
+          c.globalAlpha = 0.85;
+          c.beginPath(); c.arc(f.x + (member.x! - f.x) * u, f.y + (member.y! - f.y) * u, 2.2, 0, Math.PI * 2); c.fill();
+        }
+      }
+      if (phase.gather === null || !member) {
+        const hovered = this.hoverCommit === e;
+        const r = 4.2 + Math.min(3, Math.log2(1 + e.files.length));
+        c.globalAlpha = fade;
+        c.save();
+        if (!this.reduced) { c.shadowColor = Palette.commit; c.shadowBlur = phase.resting ? 6 : 14; }
+        c.fillStyle = Palette.commit;
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+        c.restore();
+        if (hovered) { c.strokeStyle = Palette.ink; c.lineWidth = 1.2; c.beginPath(); c.arc(x, y, r + 3, 0, Math.PI * 2); c.stroke(); }
+        spots.push({ e, x, y });
+      }
+    }
+    c.globalAlpha = 1;
+    this.commitSpots = spots;
   }
 
   // ---------- the members' steps ----------
@@ -829,8 +1015,9 @@ export class MonitorScene {
 
   private drawEffect(c: CanvasRenderingContext2D, e: Effect, now: number, motion: number): void {
     // Steps and floating lines are drawn above the members (drawSteps, drawFloat).
-    if (e.kind === 'step' || e.kind === 'float') return;
+    if (e.kind === 'step' || e.kind === 'float' || e.kind === 'commit') return;
     const t = (now - e.at) / Life[e.kind];
+    if (e.kind === 'merge' || e.kind === 'push') { if (motion) this.drawCodeBurst(c, e, t); return; }
     const color = Palette[e.color];
     if (e.kind === 'comet') {
       const a = this.nodes.get(e.from), b = this.nodes.get(e.to);
@@ -875,6 +1062,52 @@ export class MonitorScene {
         }
       c.globalAlpha = 1;
     }
+  }
+
+  /**
+   * A merge: a ring off the hub and sparks running out along every spoke (a landing on main: two rings, wider, more
+   * sparks, in the finished colour). A push: a pulse that runs from the hub out past the wall's edge, away from the
+   * other teams. Not drawn under reduced motion: the map just updates.
+   */
+  private drawCodeBurst(c: CanvasRenderingContext2D, e: Extract<Effect, { kind: 'merge' | 'push' }>, t: number): void {
+    const hub = this.nodes.get(teamKey(e.team));
+    if (!hub) return;
+    const x = hub.x!, y = hub.y!;
+    if (e.kind === 'push') {
+      const out = this.teamOut.get(hub.key) ?? -Math.PI / 2;
+      const far = (Math.hypot(this.w, this.h) / Math.max(0.05, this.cam.k)) * 0.9;
+      const d = 20 + t * far;
+      const px = x + Math.cos(out) * d, py = y + Math.sin(out) * d;
+      c.strokeStyle = Palette.tell;
+      c.globalAlpha = (1 - t) * 0.8;
+      c.lineWidth = 2;
+      c.beginPath(); c.moveTo(x + Math.cos(out) * Math.max(20, d - 120), y + Math.sin(out) * Math.max(20, d - 120)); c.lineTo(px, py); c.stroke();
+      c.beginPath(); c.arc(px, py, 6 + t * 10, out - 0.7, out + 0.7); c.stroke();
+      c.globalAlpha = 1;
+      return;
+    }
+    const color = e.big ? Palette.done : Palette.handback;
+    const rings = e.big ? 2 : 1;
+    c.strokeStyle = color;
+    for (let i = 0; i < rings; i++) {
+      const u = Math.max(0, t - i * 0.18);
+      if (u <= 0 || u >= 1) continue;
+      c.globalAlpha = (1 - u) * 0.9;
+      c.lineWidth = e.big ? 3 : 2.2;
+      c.beginPath(); c.arc(x, y, 10 + u * (e.big ? 140 : 90), 0, Math.PI * 2); c.stroke();
+    }
+    c.fillStyle = color;
+    for (const l of this.links) {
+      if (l.source !== hub) continue;
+      const m = l.target;
+      for (let k = 0; k < (e.big ? 3 : 2); k++) {
+        const u = Math.min(1, t * 1.6 - k * 0.15);
+        if (u <= 0) continue;
+        c.globalAlpha = (1 - u) * 0.95;
+        c.beginPath(); c.arc(x + (m.x! - x) * u, y + (m.y! - y) * u, e.big ? 3 : 2.4, 0, Math.PI * 2); c.fill();
+      }
+    }
+    c.globalAlpha = 1;
   }
 
   private drawFloat(c: CanvasRenderingContext2D, e: Extract<Effect, { kind: 'float' }>, now: number, motion: number, lane: number, lift = 0): void {
@@ -938,21 +1171,47 @@ export class MonitorScene {
     return null;
   }
 
-  /** The file node under a screen point, if any (they are small, so the reach is a few pixels on screen). */
-  private fileAt(sx: number, sy: number): ShownFile | null {
+  /** The map node under a screen point, if any (they are small, so the reach is a few pixels on screen). */
+  private mapAt(sx: number, sy: number): MapNode | null {
     const [x, y] = this.toWorld(sx, sy);
     const reach = 9 / this.cam.k;
-    let best: ShownFile | null = null, bestD = Infinity;
-    for (const f of this.shownFiles) {
-      if (f.alpha < 0.05) continue;
-      const d = Math.hypot(f.x - x, f.y - y);
-      if (d < reach && d < bestD) { best = f; bestD = d; }
+    let best: MapNode | null = null, bestD = Infinity;
+    for (const m of this.mapNodes) {
+      const d = Math.hypot(m.x - x, m.y - y);
+      if (d < reach && d < bestD) { best = m; bestD = d; }
     }
     return best;
   }
 
-  /** Forgets every file node's place (a replay starts, or live comes back). */
-  clearFiles(): void { this.filePos.clear(); this.shownFiles = []; this.hoverFile = null; }
+  /** The commit dot under a screen point, if any. */
+  private commitAt(sx: number, sy: number): (typeof this.commitSpots)[number] | null {
+    const [x, y] = this.toWorld(sx, sy);
+    const reach = 10 / this.cam.k;
+    let best: (typeof this.commitSpots)[number] | null = null, bestD = Infinity;
+    for (const s of this.commitSpots) {
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d < reach && d < bestD) { best = s; bestD = d; }
+    }
+    return best;
+  }
+
+  /** What the tip says about a map node. */
+  private mapHover(m: MapNode, sx: number, sy: number): SceneHover {
+    const base = { key: m.team.key, team: m.team.team, x: sx, y: sy - 8 };
+    if (m.kind === 'file' && m.file) {
+      const f = m.file;
+      const members = [...f.members.values()].sort((a, b) => b.at - a.at).map((t) => t.member);
+      return {
+        ...base, kind: 'file', name: members[0] ?? m.team.team, path: f.path, touches: f.touches,
+        fileKind: f.editAt === -Infinity ? 'read' : f.created ? 'create' : 'edit', sha: f.sha ? shortSha(f.sha) : null, members,
+      };
+    }
+    if (m.kind === 'rest') return { ...base, kind: 'folder', name: m.label, more: [] };
+    return { ...base, kind: 'folder', name: m.kind === 'folder' ? m.folder || '/' : `${m.label} in ${m.folder || '/'}`, more: m.files.map((f) => f.path) };
+  }
+
+  /** Forgets every map node's place (a replay starts, or live comes back). */
+  clearFiles(): void { this.mapPos.clear(); this.mapNodes = []; this.mapById.clear(); this.hoverMap = null; this.hoverCommit = null; this.commitSpots = []; this.mapLayouts = { rev: -1, at: -Infinity, model: null, list: [] }; }
 
   private listen(): void {
     const cv = this.canvas;
@@ -976,18 +1235,23 @@ export class MonitorScene {
         }
         return;
       }
-      const file = this.fileAt(sx, sy);
-      this.hoverFile = file;
-      if (file) {
-        this.hover = file.member;
-        cv.style.cursor = 'pointer';
-        const [fx, fy] = this.toScreen(file.x, file.y);
-        const m = file.member;
-        this.onHover({
-          key: m.key, kind: 'file', team: m.team, name: m.name, x: fx, y: fy - 8,
-          path: file.mark?.path, touches: file.mark?.touches, fileKind: file.mark?.kind,
-          more: file.mark ? undefined : file.counted.map((f) => f.path),
-        });
+      const commit = this.commitAt(sx, sy);
+      this.hoverCommit = commit?.e ?? null;
+      if (commit) {
+        const e = commit.e;
+        this.hover = null;
+        cv.style.cursor = 'default';
+        const [cx, cy] = this.toScreen(commit.x, commit.y);
+        this.onHover({ key: teamKey(e.team), kind: 'commit', team: e.team, name: e.member ?? e.team, x: cx, y: cy - 8, message: e.message, sha: shortSha(e.sha), touches: e.files.length });
+        return;
+      }
+      const mapNode = this.mapAt(sx, sy);
+      this.hoverMap = mapNode;
+      if (mapNode) {
+        this.hover = mapNode.team;
+        cv.style.cursor = 'default';
+        const [fx, fy] = this.toScreen(mapNode.x, mapNode.y);
+        this.onHover(this.mapHover(mapNode, fx, fy));
         return;
       }
       const panel = this.panelAt(sx, sy);
@@ -1012,8 +1276,13 @@ export class MonitorScene {
     const down = (e: PointerEvent) => {
       if (touchDown(e)) return;
       const [sx, sy] = local(e);
-      const file = this.fileAt(sx, sy);
-      if (file) { this.picked = file.member.key; this.onPick(file.member.key); }
+      // A map node picks the member that touched it last (the team when nobody is known).
+      const file = this.mapAt(sx, sy);
+      if (file) {
+        const last = [...(file.file?.members.values() ?? [])].sort((a, b) => b.at - a.at)[0];
+        const key = last ? memberKey(file.team.team, last.member) : file.team.key;
+        this.picked = key; this.onPick(key);
+      }
       const panel = file ? null : this.panelAt(sx, sy);
       const n = file ? null : panel ? panel.node : this.nodeAt(sx, sy);
       cv.setPointerCapture(e.pointerId);
@@ -1032,7 +1301,7 @@ export class MonitorScene {
       if (this.drag?.node) { this.drag.node.fx = null; this.drag.node.fy = null; }
       this.drag = null;
     };
-    const leave = () => { this.hover = null; this.hoverFile = null; this.hoverPanel = null; this.onHover(null); };
+    const leave = () => { this.hover = null; this.hoverMap = null; this.hoverCommit = null; this.hoverPanel = null; this.onHover(null); };
     // Touch (an iPad, a touch screen): two fingers pinch to zoom and move together to pan, the point between them staying
     // under them; a double tap fits everything. One finger drags as the mouse does.
     const touches = new Map<number, readonly [number, number]>();
