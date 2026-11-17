@@ -286,7 +286,10 @@ async function focusTeam(page: Page, team = TEAM, tap = false): Promise<number> 
           console.log('TRY', i, 'k', h.op.m[0].toFixed(3), 'at', s.x.toFixed(1), s.y.toFixed(1), 'hub after', s2.x.toFixed(1), s2.y.toFixed(1), 'picked', await page.locator('[data-test=monitor-unpick]').count(), 'tip', (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ').slice(0, 60) : 'none');
         }
         if (await page.locator('[data-test=monitor-focus]').count()) return i;
-      }
+      } else if (process.env.DBG_CLICK) console.log('SKIP', i, 'hub off the wall: k', h.op.m[0].toFixed(3), 'at', s.x.toFixed(1), s.y.toFixed(1), 'wall', box.width.toFixed(0), box.height.toFixed(0));
+    } else if (process.env.DBG_CLICK) {
+      const inks = f.ops.filter((o) => o.op === 'text' && o.text === team).map((o) => `${o.style}${isScreen(o) ? ' screen' : ''}`);
+      console.log('SKIP', i, 'no hub label', f.ops.length, 'ops; texts', team, ':', JSON.stringify(inks));
     }
     await page.waitForTimeout(400);
   }
@@ -1126,6 +1129,59 @@ for (const theme of ['light', 'dark'] as const)
       await ctx.close();
     });
   }
+
+// Card 399 (B087, card 398's 22 px reach floor): at 1280 each hub and member still answers for itself, and of two close
+// nodes a point nearer one never names the other. The hover tip is read: hover and a click both go through nodeAt.
+for (const theme of ['light', 'dark'] as const)
+  test(`9d node picks ${theme} 1280: hubs and members hit their own node; a close neighbour does not steal`, async ({ browser }) => {
+    test.setTimeout(120_000);
+    const feed = busyFeed();
+    const { page, ctx, errors } = await open(browser, { feed, theme, w: 1280 });
+    await page.waitForTimeout(4500);
+    await unhover(page);
+    const box = await canvasBox(page);
+    const tip = async () => (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : '';
+    type Nd = { name: string; label: string; at: (f: Frame) => Pt | null };
+    const nodes: Nd[] = [
+      { name: `hub ${TEAM}`, label: TEAM, at: (f) => { const h = hubAt(f, TEAM); return h && screen(h.op, h.x, h.y); } },
+      { name: `hub ${TEAM2}`, label: TEAM2, at: (f) => { const h = hubAt(f, TEAM2); return h && screen(h.op, h.x, h.y); } },
+      ...[ADA, BEN, 'DeveloperCleo'].map((m) => ({ name: m, label: m.replace(/([a-z])([A-Z])/g, '$1 $2'), at: (f: Frame) => { const p = memberAt(f, m); return p && screen(p.op, p.x, p.y); } })),
+    ];
+    const hoverAt = async (p: Pt) => { await page.mouse.move(box.x + p.x, box.y + p.y); await page.waitForTimeout(60); return tip(); };
+    const names = (t: string) => nodes.filter((n) => n.label !== TEAM && n.label !== TEAM2 && t.includes(n.label)).map((n) => n.name);
+    const r: Record<string, unknown> = {};
+    // Each node at its centre.
+    for (const n of nodes) {
+      const p = n.at(await lastFrame(page));
+      expect(p, `${n.name} is drawn`).not.toBeNull();
+      const t = await hoverAt(p!);
+      r[n.name] = t;
+      expect(t, `${n.name}: the tip names it`).toContain(n.label);
+      if (n.name.startsWith('hub')) expect(names(t), `${n.name}: no member named`).toEqual([]);
+      else expect(names(t), `${n.name}: only it is named`).toEqual([n.name]);
+      await unhover(page);
+    }
+    // The closest pair on screen: a point 35% of the way (at most 15 px) from each toward the other.
+    const f = await lastFrame(page);
+    const at = nodes.map((n) => ({ n, p: n.at(f)! }));
+    let pair: [typeof at[0], typeof at[0]] = [at[0], at[1]], best = Infinity;
+    for (let i = 0; i < at.length; i++) for (let j = i + 1; j < at.length; j++) { const d = Math.hypot(at[i].p.x - at[j].p.x, at[i].p.y - at[j].p.y); if (d < best) { best = d; pair = [at[i], at[j]]; } }
+    const picks: Record<string, string> = {};
+    for (const [a, b] of [pair, [pair[1], pair[0]]] as const) {
+      const g = await lastFrame(page);
+      const pa = a.n.at(g)!, pb = b.n.at(g)!;
+      const d = Math.hypot(pb.x - pa.x, pb.y - pa.y), s = Math.min(0.35 * d, 15) / d;
+      const t = await hoverAt({ x: pa.x + (pb.x - pa.x) * s, y: pa.y + (pb.y - pa.y) * s });
+      picks[`near ${a.n.name}`] = t;
+      expect(t, `near ${a.n.name}, not ${b.n.name}`).toContain(a.n.label);
+      if (!b.n.name.startsWith('hub')) expect(names(t), `near ${a.n.name}: ${b.n.name} does not steal it`).not.toContain(b.n.name);
+      await unhover(page);
+    }
+    r.closestPair = { a: pair[0].n.name, b: pair[1].n.name, px: +best.toFixed(1), picks };
+    result[`node-picks-${theme}-1280-${Date.now()}`] = r;
+    expect(errors).toEqual([]);
+    await ctx.close();
+  });
 
 for (const w of [1280, 375])
   test(`9b reduced motion screens ${w}`, async ({ browser }) => {
