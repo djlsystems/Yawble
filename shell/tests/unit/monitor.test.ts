@@ -108,9 +108,10 @@ describe('the Monitor model', () => {
     m.apply(row(1, 'instruction', 'DeveloperPriya', 'Manager', 'Add a README'), 0);
     m.apply(row(2, 'decision', 'DeveloperPriya', 'payments/DeveloperPriya', 'MIT or Apache?'), 10);
     m.apply(row(3, 'done', 'Manager', 'Manager', 'README'), 20);
-    expect(m.effects.map((e) => e.kind)).toEqual(['comet', 'burst', 'float', 'burst']);
+    // (B080: a question also flies to the You node.)
+    expect(m.effects.map((e) => e.kind)).toEqual(['comet', 'burst', 'float', 'you', 'burst']);
     expect(m.effects[0]).toMatchObject({ from: memberKey('payments', 'Manager'), to: memberKey('payments', 'DeveloperPriya'), label: 'Add a README' });
-    expect(m.effects[3]).toMatchObject({ node: teamKey('payments'), big: true });
+    expect(m.effects[4]).toMatchObject({ node: teamKey('payments'), big: true });
     expect(m.activity[0]!.verb).toBe('finished the work');
     expect(m.activity[2]).toMatchObject({ verb: 'Manager told', who: 'Developer Priya' });
     expect(m.perMinute(30)).toBe(3);
