@@ -45,6 +45,8 @@ public sealed class HostTaskService
     private readonly object _gate = new();
     private readonly Dictionary<string, long> _busy = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private readonly ConcurrentDictionary<long, (CancellationTokenSource Cts, Task Done)> _active = new();
+    /// <summary>The log file of each run under way (its record names the log only once it is over).</summary>
+    private readonly ConcurrentDictionary<long, string> _liveLogs = new();
 
     /// <param name="repoOf">The team's repository by name ("main" is the primary), or null when the team has none by that name.</param>
     /// <param name="docsRootOf">The team's documents folder, where full logs go (under task-runs/).</param>
@@ -294,6 +296,31 @@ public sealed class HostTaskService
     /// <summary>Completes when the run is over and its record and wake-up are written (for tests and for a caller that must wait).</summary>
     public Task WaitForRunAsync(long runId) => _active.TryGetValue(runId, out var a) ? a.Done : Task.CompletedTask;
 
+    /// <summary>The log of a run: the file being written while it runs, else the one its record names (null: none, or kept no longer).</summary>
+    public string? LogPathOf(long runId) => _liveLogs.TryGetValue(runId, out var live) ? live : _store.Run(runId)?.LogPath;
+
+    /// <summary>
+    /// The last <paramref name="lines"/> lines of a log (at most <paramref name="maxBytes"/> from its end), read while it may still be
+    /// written. The log is masked as it is written. Empty when there is no such file.
+    /// </summary>
+    public static string ReadTail(string? path, int lines = 40, int maxBytes = 16 * 1024)
+    {
+        if (path is null || !File.Exists(path)) return "";
+        try
+        {
+            using var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var start = Math.Max(0, s.Length - maxBytes);
+            s.Seek(start, SeekOrigin.Begin);
+            var buffer = new byte[s.Length - start];
+            var read = 0;
+            while (read < buffer.Length && s.Read(buffer, read, buffer.Length - read) is var got and > 0) read += got;
+            var all = Encoding.UTF8.GetString(buffer, 0, read).Replace("\r\n", "\n").Split('\n');
+            if (start > 0 && all.Length > 1) all = all[1..]; // the first line was cut by the byte limit
+            return string.Join('\n', all.Reverse().SkipWhile(l => l.Length == 0).Take(lines).Reverse());
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return ""; }
+    }
+
     // ------------------------------------------------------------------ evaluation: the preconditions, then the hashes
 
     private async Task<(TaskEvaluation? Eval, TaskRefusal? Refusal)> EvaluateAsync(HostTask task, bool strict, CancellationToken ct)
@@ -498,6 +525,7 @@ public sealed class HostTaskService
                 Timeout = TimeSpan.FromSeconds(task.Def.TimeoutSeconds), LogPath = logPath, SecretValues = secrets, LogCapBytes = LogCapBytes,
             };
             var cts = new CancellationTokenSource();
+            _liveLogs[runId] = logPath; // before the run starts: a quick one removes it when it is over
             var done = Task.Run(() => ExecuteAsync(reservation, eval, runId, options, missing, member, workflow, causation, decision, who, cts));
             _active[runId] = (cts, done);
         }
@@ -532,7 +560,10 @@ public sealed class HostTaskService
             var run = _store.Run(runId)!;
             _store.Call(task, member, workflow, decision, null, run, who);
             if (member is not null)
-                await WakeAsync(new TaskWake(task.TeamId, member, workflow, causation, WakeText(task, run, result, error, options, headAfter, dirtyAfter, missing)));
+                await WakeAsync(new TaskWake(task.TeamId, member, workflow, causation, WakeText(task, run, result, error, options, headAfter, dirtyAfter, missing))
+                {
+                    Run = run, Tail = result?.Tail, Def = task.Def,
+                });
             Retain(task);
         }
         catch (Exception e)
@@ -543,6 +574,7 @@ public sealed class HostTaskService
         {
             reservation.Dispose();
             _active.TryRemove(runId, out _);
+            _liveLogs.TryRemove(runId, out _);
             cts.Dispose();
         }
     }
@@ -572,6 +604,7 @@ public sealed class HostTaskService
             sb.AppendLine(r.Tail);
         }
         if (r is not null) sb.AppendLine($"Full log: {o.LogPath}");
+        if (r is not null && task.Def.CheckAfter is { } check) sb.AppendLine($"Check after (the person's note on how to check the result): {check}");
         return sb.ToString().TrimEnd();
     }
 

@@ -7,6 +7,7 @@ import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
+import { confirmDialog } from '../confirm';
 
 // Skills: what agents load with skills_list / skills_get. Built-in skills come with the app and
 // are read-only; a custom skill of the same name replaces one (in every team, or in one team only).
@@ -97,8 +98,8 @@ async function doSave() {
   }
 }
 
-function remove(s: Skill) {
-  if (s.id === null || !window.confirm(`Delete the skill ${s.name} (${scope(s)})?`)) return;
+async function remove(s: Skill) {
+  if (s.id === null || !(await confirmDialog({ message: `Delete the skill ${s.name} (${scope(s)})?`, okLabel: 'Delete', danger: true }))) return;
   return work.run('delete', () => doRemove(s));
 }
 async function doRemove(s: Skill) {

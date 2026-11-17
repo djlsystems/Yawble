@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import type { AgentCard, YawbleApi, TeamSummary, Trigger, TriggerFire, WakeManager } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
@@ -117,8 +118,8 @@ async function doSave() {
   }
 }
 
-function remove(t: Trigger) {
-  if (!window.confirm(`Delete the trigger ${t.name}?`)) return;
+async function remove(t: Trigger) {
+  if (!(await confirmDialog({ message: `Delete the trigger ${t.name}?`, okLabel: 'Delete', danger: true }))) return;
   return work.run(`trigger-${t.id}`, () => doRemove(t), 'delete');
 }
 async function doRemove(t: Trigger) {

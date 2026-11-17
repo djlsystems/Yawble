@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TeamsList from '../../src/renderer/src/components/TeamsList.vue';
-import { reloadTileSize, resetTileSize, setTileSize, tileSize } from '../../src/renderer/src/teamTileSize';
+import { availableWidth, reloadTileSize, resetTileSize, setTileSize, tileSize } from '../../src/renderer/src/teamTileSize';
 import type { YawbleApi, TeamSummary } from '../../src/shared/api';
 
 const mk = (id: number, name: string, over: Partial<TeamSummary> = {}) =>
@@ -60,7 +60,7 @@ describe('Teams list tiles: one shared size', () => {
     const grip = w.get('[data-test=tile-grip]');
     await grip.trigger('pointerdown', { clientX: 0, clientY: 0, pointerId: 1, button: 0 });
     move(5000, 5000); up();
-    expect(tileSize.value).toEqual({ w: 640, h: 640 });
+    expect(tileSize.value).toEqual({ w: 4096, h: 640 }); // no content area measured here: only the sanity cap
     await grip.trigger('pointerdown', { clientX: 0, clientY: 0, pointerId: 1, button: 0 });
     move(-5000, -5000); up();
     expect(tileSize.value).toEqual({ w: 280, h: 200 });
@@ -155,14 +155,25 @@ describe('Teams list tiles: the gaps are resize handles', () => {
     w.unmount();
   });
 
+  it('widens up to the whole content area, no further', () => {
+    const before = availableWidth.value;
+    try {
+      availableWidth.value = 1500;
+      setTileSize({ w: 9999, h: 300 });
+      expect(tileSize.value).toEqual({ w: 1500, h: 300 });
+      setTileSize({ w: 1200, h: 300 });
+      expect(tileSize.value.w).toBe(1200); // wider than the old 640 px cap
+    } finally { availableWidth.value = before; resetTileSize(); }
+  });
+
   it('the handles clamp', async () => {
     const w = mountList([mk(1, 'a')]);
     await down(w.get('[data-test=tile-handle-w]'));
     move(9999, 0); up();
-    expect(tileSize.value.w).toBe(640);
+    expect(tileSize.value.w).toBe(4096);
     await down(w.get('[data-test=tile-handle-h]'));
     move(0, -9999); up();
-    expect(tileSize.value).toEqual({ w: 640, h: 200 });
+    expect(tileSize.value).toEqual({ w: 4096, h: 200 });
     w.unmount();
   });
 

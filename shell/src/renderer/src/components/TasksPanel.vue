@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import type { Connection, EnvFromConnection, HostTaskDef, HostTaskInfo, YawbleApi, TaskPreview, TaskRun, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import LoadingNote from './LoadingNote.vue';
@@ -146,7 +147,7 @@ async function save() {
     form.value = null;
   }, 'Saved. Any earlier Always approval was removed; the next request asks.', 'save');
 }
-const del = (t: HostTaskInfo) => { if (window.confirm(`Delete the task ${t.def.name}? Its run records stay.`)) void act(() => api.call('tasks.delete', { teamId: teamId.value, name: t.def.name }), undefined, `delete:${t.def.name}`); };
+const del = async (t: HostTaskInfo) => { if (await confirmDialog({ message: `Delete the task ${t.def.name}? Its run records stay.`, okLabel: 'Delete', danger: true })) void act(() => api.call('tasks.delete', { teamId: teamId.value, name: t.def.name }), undefined, `delete:${t.def.name}`); };
 const revoke = (t: HostTaskInfo) => act(() => api.call('tasks.revoke', { teamId: teamId.value, name: t.def.name }), 'Always revoked: it asks every time.', `revoke:${t.def.name}`);
 async function runNow(t: HostTaskInfo) {
   await act(async () => {

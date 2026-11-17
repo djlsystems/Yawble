@@ -316,6 +316,27 @@ public sealed class ConciergeService
         }
     }
 
+    /// <summary>
+    /// A host task's result, for a run the Concierge or a companion client asked for: posted as an Update in the chat it was
+    /// asked from (the same path as a watched workflow's), or, for a companion client, nowhere (it checks host_task_status).
+    /// False when the run was an agent's: the caller wakes the agent instead. One Update at the end, none while it runs.
+    /// </summary>
+    public bool TryPostTaskUpdate(Tasks.TaskWake wake, string team)
+    {
+        if (ConciergeHostTasks.IsCompanion(wake.Member)) return true;
+        if (ConciergeHostTasks.ConversationOf(wake.Member) is not { } conversationId) return false;
+        if (_store.Get(conversationId) is null) return true; // the chat was deleted meanwhile: nobody to tell
+        var (kind, text) = ConciergeHostTasks.UpdateFor(wake, team);
+        var id = _store.AddUpdate(conversationId, text, team, kind, null);
+        _events.Publish(UpdateEvent, new JsonObject
+        {
+            ["conversationId"] = conversationId,
+            ["message"] = MessageJson(_store.Message(id)!),
+            ["unread"] = _store.Get(conversationId)?.Unread ?? 0,
+        });
+        return true;
+    }
+
     private JsonNode Read(string id)
     {
         _store.MarkRead(id);

@@ -8,6 +8,8 @@ import type { WorkflowSummary } from '../../../shared/api';
 
 /** How many workflows each team shows. */
 export const WorkflowsShown = 5;
+/** A team's tile in the Teams list: up to this many newest workflows (and every open one, however old), scrolling inside the tile. */
+export const TileWorkflowsShown = 50;
 
 export type WorkflowStatus = 'completed' | 'working' | 'waiting' | 'closed';
 export type WorkflowIcon = 'check' | 'play' | 'pause' | 'cross';
