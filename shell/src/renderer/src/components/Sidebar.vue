@@ -182,7 +182,9 @@ function finishRename(id: string) {
 .logo-btn { height: 44px; margin-bottom: 4px; }
 .logo-btn img { width: 28px; height: 28px; object-fit: contain; }
 .rail-badge { position: absolute; top: 2px; right: 1px; font-size: 10px; background: var(--brand); color: var(--on-accent); border-radius: 8px; padding: 0 5px; line-height: 15px; }
-.side { background: var(--side); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; padding: 8px 8px 6px; }
+/* overflow-y (card 334): a window shorter than the sidebar's fixed rows (a phone in landscape at a desktop width) scrolls
+   the sidebar, its Settings and run slots reachable; a taller one shows no scrollbar (the Teams and Chats lists scroll). */
+.side { background: var(--side); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 8px 8px 6px; }
 .brand { display: flex; align-items: center; gap: 8px; padding: 6px 6px 10px; }
 .logo { height: 26px; width: auto; flex: none; margin-left: 2px; }
 .grow { flex: 1; }
@@ -194,7 +196,7 @@ function finishRename(id: string) {
 .places { margin: 4px 0 6px; }
 .soon { margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: var(--chip); padding: 1px 6px; border-radius: 6px; }
 .badge { margin-left: auto; font-size: 11px; background: var(--brand); color: var(--on-accent); border-radius: 9px; padding: 0 7px; }
-.lists { flex: 1; overflow: auto; min-height: 0; }
+.lists { flex: 1; overflow: auto; min-height: min(96px, 100%); }
 h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4px; }
 .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tiny { font-size: 11px; }
