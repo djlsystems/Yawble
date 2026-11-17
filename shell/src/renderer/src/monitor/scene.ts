@@ -125,6 +125,28 @@ export function pinchCamera(start: { dist: number; k: number; wx: number; wy: nu
   return { k, x: start.wx - (mid[0] - w / 2) / k, y: start.wy - (mid[1] - h / 2) / k };
 }
 
+/** The least reach a map node has for a tap or a click, in screen px, at any zoom (a fingertip at 375 px, card 398). */
+export const MinHitPx = 22;
+
+/**
+ * The map node a world point (wx, wy) is on at zoom k, or null: each node reaches its own world reach (a team hub 14, others
+ * their radius + 8) or MinHitPx on screen, whichever is more, and of the nodes in reach the nearest wins, so close nodes do
+ * not steal each other's taps. Workflow panels are left out (they are hit as rectangles, panelAt).
+ */
+export function nearestNodeAt<N extends { kind: string; r: number; x?: number; y?: number }>(
+  nodes: Iterable<N>, wx: number, wy: number, k: number,
+): N | null {
+  const floor = MinHitPx / Math.max(k, 1e-6);
+  let best: N | null = null, bestD = Infinity;
+  for (const n of nodes) {
+    if (n.kind === 'workflows') continue;
+    const d = Math.hypot(n.x! - wx, n.y! - wy);
+    const reach = Math.max(n.kind === 'team' ? 14 : n.r + 8, floor);
+    if (d < reach && d < bestD) { best = n; bestD = d; }
+  }
+  return best;
+}
+
 /**
  * Where team i of count sits on the wall's oval (radians, 0 = right, clockwise on screen): the first on the left, the
  * rest evenly round from there, so two teams sit side by side across the wide axis rather than one above the other.
@@ -1553,14 +1575,7 @@ export class MonitorScene {
 
   private nodeAt(sx: number, sy: number): Node | null {
     const [x, y] = this.toWorld(sx, sy);
-    let best: Node | null = null, bestD = Infinity;
-    for (const n of this.nodes.values()) {
-      const d = Math.hypot(n.x! - x, n.y! - y);
-      if (n.kind === 'workflows') continue; // panels are hit as rectangles (panelAt)
-      const reach = n.kind === 'team' ? 14 : n.r + 8;
-      if (d < reach && d < bestD) { best = n; bestD = d; }
-    }
-    return best;
+    return nearestNodeAt(this.nodes.values(), x, y, this.cam.k);
   }
 
   /** The workflow panel under a screen point, and what of it (its header, a row, the rest). */
