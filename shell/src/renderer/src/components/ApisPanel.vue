@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import type { ApiRow, Connection, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import IntegrationDialog from './IntegrationDialog.vue';
@@ -57,14 +58,14 @@ const reasons = ref(new Map<number, string | null>());
 
 async function remove(a: ApiRow) {
   if (busy.value) return;
-  if (!window.confirm(`Remove ${a.name}? Agents can no longer use it.`)) return;
+  if (!(await confirmDialog({ message: `Remove ${a.name}? Agents can no longer use it.`, okLabel: 'Remove', danger: true })) || busy.value) return;
   let removeConnection = false;
   if (a.connection && !remote.value) {
     try {
       const all = await api.call<Connection[]>('integrations.connections', {});
       const c = all.find((x) => x.id === a.connection!.id);
       const others = (c?.usedBy ?? []).filter((n) => n !== a.name);
-      if (c && others.length === 0) removeConnection = window.confirm(`Also delete the connection '${c.name}'?`);
+      if (c && others.length === 0) removeConnection = await confirmDialog({ message: `Also delete the connection '${c.name}'?`, okLabel: 'Delete', danger: true });
     } catch { /* the connection stays; the removal itself still asks nothing more */ }
   }
   busy.value = a.name;

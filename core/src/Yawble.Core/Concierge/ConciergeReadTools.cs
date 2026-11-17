@@ -39,7 +39,7 @@ public sealed class ConciergeReadTools(
     public static readonly IReadOnlyList<string> LocalOnly = ["backup_now"];
 
     public static readonly IReadOnlyList<string> Names =
-        ["backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "integrations_status", "usage", "doctor", "backup_now"];
+        ["backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "integrations_status", "usage", "doctor", "backup_now"];
 
     public static bool Handles(string name) => Names.Contains(name);
 
@@ -57,6 +57,7 @@ public sealed class ConciergeReadTools(
             "board_card" => await BoardCardAsync(Required(args, "card"), ct),
             "system_status" => await SystemStatusAsync(ct),
             "team_git" => await TeamGitAsync(Optional(args, "team"), ct),
+            "git_tidy_plan" => await TidyPlanAsync(Optional(args, "team"), ct),
             "integrations_status" => await IntegrationsAsync(ct),
             "usage" => await UsageAsync(Optional(args, "team"), Int(args, "days") ?? 7, ct),
             "doctor" => await DoctorAsync(ct),
@@ -459,6 +460,65 @@ public sealed class ConciergeReadTools(
         return sb.ToString().TrimEnd();
     }
 
+    /// <summary>The classes in the order the tidy plan lists them: what can go, what needs the person, what is kept.</summary>
+    private static readonly (string Class, string Heading)[] TidyOrder =
+    [
+        (TidyClasses.Merged, "merged (deletable)"),
+        (TidyClasses.Contained, "contained in the base (deletable, no unmerged_ok needed; the proof follows each)"),
+        (TidyClasses.Moved, "moved: the member's clone was reset or rebased (git_branch_realign sets the team's and origin's copy to the clone's)"),
+        (TidyClasses.OwnWork, "own work: commits not in the base (needs a look; kept unless the person names it)"),
+        (TidyClasses.OriginOnly, "only on origin, not in the base (needs a look)"),
+        (TidyClasses.Working, "members' working branches (in use: kept)"),
+        (TidyClasses.Scratch, "scratch: only in a member's clone (the member's to delete; the app never changes a clone)"),
+    ];
+
+    /// <summary>git_tidy_plan (B067): <see cref="TeamRepos.GitTidyPlanAsync"/> for the team (or every team), as text.</summary>
+    private async Task<string> TidyPlanAsync(string? team, CancellationToken ct)
+    {
+        var repos = bus.Repos ?? throw new ArgumentException("this app has no team repositories, so there is nothing to tidy");
+        var teams = (await bus.TeamsAsync(ct)).Where(t => team is null || string.Equals(t.Name, team.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+        if (team is not null && teams.Count == 0) await TeamNamedAsync(team, ct); // the refusal naming the teams
+        var sb = new StringBuilder("Tidy plan (nothing was changed; origin as of the last fetch, never contacted; member clones are read from their branches only):\n");
+        foreach (var t in teams)
+        {
+            TeamGitTidyPlan plan;
+            try { plan = await repos.GitTidyPlanAsync(t.Id, t.Name, ct); }
+            catch (Exception e) when (e is GitException or IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                sb.AppendLine().AppendLine($"== {t.Name}: check not run: {e.Message}");
+                continue;
+            }
+            if (plan.Repos.Count == 0) { if (team is not null) sb.AppendLine().AppendLine($"== {t.Name}: no repository yet."); continue; }
+            foreach (var r in plan.Repos)
+            {
+                sb.AppendLine().AppendLine($"== {t.Name}: {r.Repo} ({r.Path}); base branch {r.BaseBranch}");
+                foreach (var note in r.Notes) sb.AppendLine("  check not run: " + note);
+                if (r.Branches.Count == 0) sb.AppendLine("  no branches besides the base.");
+                foreach (var (cls, heading) in TidyOrder)
+                {
+                    var rows = r.Branches.Where(b => b.Class == cls).ToList();
+                    if (rows.Count == 0) continue;
+                    sb.AppendLine($"  {heading} ({rows.Count}):");
+                    foreach (var b in rows)
+                    {
+                        var line = new StringBuilder($"    - {b.Name} [{string.Join(", ", b.Where)}]");
+                        if (b.Class == TidyClasses.Moved) line.Append($": team {Short(b.TeamSha ?? "?")}, {b.Member}'s clone {Short(b.CloneSha ?? "?")}");
+                        if (b.Proof is not null) line.Append($"{(b.Class == TidyClasses.Moved ? "; " : ": ")}{b.Proof}");
+                        sb.AppendLine(line.ToString());
+                        if (b.Class is TidyClasses.OwnWork or TidyClasses.OriginOnly or TidyClasses.Moved && b.Commits is { Count: > 0 } commits)
+                        {
+                            foreach (var c in commits.Take(5)) sb.AppendLine($"        {Short(c.Sha)} {Clip(c.Subject, 80)}");
+                            if (commits.Count > 5) sb.AppendLine($"        ... and {commits.Count - 5} more");
+                        }
+                    }
+                }
+            }
+        }
+        sb.AppendLine().AppendLine("To delete: git_branches_delete with the merged and contained branches by name (remote=true for those on origin). " +
+                                   "To fix a moved one: git_branch_realign with team, repo and member. Both show their exact plan and need the person's yes.");
+        return sb.ToString().TrimEnd();
+    }
+
     private async Task<int> RepoAsync(StringBuilder sb, GitRepoTarget t, CancellationToken ct)
     {
         var failed = 0;
@@ -759,6 +819,11 @@ public sealed class ConciergeReadTools(
                                       "open PRs (through gh, when it is signed in on this computer); each member clone's commits not yet in the team repository and its local-only branches; " +
                                       "whether origin's base matches the team's. Uncommitted changes in member clones are NOT checked (that would run git inside an agent's clone); " +
                                       "say so when asked. Complete, and says every check it could not run. Use it to answer 'is everything pushed?'.",
+            ("team", "string", "Only this team (optional).", false));
+        yield return Tool("git_tidy_plan", "The tidy plan of a team's branches (or every team's): every branch of each writable repository, here, on origin (as of the last fetch) and in member clones, in exactly one class: " +
+                                           "merged; contained (not merged, but every commit already has an equivalent in the base, e.g. cherry-picked: the proof is git cherry's answer; deletes like a merged one, no unmerged_ok); " +
+                                           "working (a member's working branch, in use: kept); moved (the team's copy has commits the member's clone no longer has: the clone was reset or rebased; git_branch_realign fixes it); " +
+                                           "own-work (commits of its own: needs a look); origin-only (only on origin, not in the base); scratch (a member clone's local-only branch). Reads only; use it for 'tidy branches'.",
             ("team", "string", "Only this team (optional).", false));
         yield return Tool("integrations_status", "What is connected: Connections (name, kind, status, what uses each; never a secret or a masked value), APIs, websites, " +
                                                 "MCP servers, the person's tools (gh, az, ...), which teams have each turned on, and the agents' model sign-ins. " +

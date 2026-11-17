@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import type { Connection, TeamSummary, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import ConnectionDialog from './ConnectionDialog.vue';
@@ -78,7 +79,7 @@ async function remove(c: Connection) {
   if (c.usedBy.length) parts.push(`${c.name} is used by ${c.usedBy.join(', ')}: those APIs will need a new connection.`);
   if (tasks.length) parts.push(`${tasks.length === 1 ? 'The host task' : 'The host tasks'} ${tasks.join(', ')} take a variable from it and will not start without it.`);
   const msg = parts.length ? `${parts.join(' ')} Remove it anyway?` : `Remove the connection ${c.name}?`;
-  if (busy.value !== null || !window.confirm(msg)) return;
+  if (busy.value !== null || !(await confirmDialog({ message: msg, okLabel: 'Remove', danger: true })) || busy.value !== null) return;
   if (!begin(c.id, 'remove')) return;
   error.value = null;
   try { await api.call('integrations.connectionRemove', { id: c.id, confirm: true }); await load(); }

@@ -292,7 +292,7 @@ public class CompanionServiceTests : IDisposable
         Assert.Equal(CompanionLevel.Read, CompanionTools.LevelOf("team_list", []));
         Assert.Equal(CompanionLevel.Act, CompanionTools.LevelOf("tell", []));
         Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf("git_merge_team", []));
-        Assert.Equal(["git_branches_delete", "git_prune", "git_pr_merge", "team_archive", "team_delete"], CompanionTools.SelfConfirming);
+        Assert.Equal(["git_branches_delete", "git_branch_realign", "git_prune", "git_pr_merge", "team_archive", "team_delete"], CompanionTools.SelfConfirming);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
-import type { AgentCard, YawbleApi, Overview, WorkflowSummary } from '../../../shared/api';
+import type { AgentCard, NetworkAsk, ToolAsk, YawbleApi, Overview, WorkflowSummary } from '../../../shared/api';
+import { groupAsks, hostsLabel } from '../networkAskGroups';
 import { resolveApi } from '../api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { MemberStateLabel, memberStateOf, type MemberState } from '../faces/faces';
@@ -398,6 +399,50 @@ async function codeFeed(first: boolean): Promise<CodeEvent[]> {
   return fresh;
 }
 
+/**
+ * The network and tool asks waiting for the person (network.asks, pending; tools.asks, pending or installing), read the
+ * way Needs you reads them (NetworkAsks.vue, ToolAsks.vue): at the start, on network.asksChanged / tools.asksChanged and
+ * on a slow poll. One You item per Needs-you item (a member's network asks on one domain are one, groupAsks), handed to
+ * the live model's setAsks, which counts them on the You node and flies a new one to it. Those waiting at the start
+ * do not fly. A read that fails (an older core, a remote view that may not read it) counts as none of that kind.
+ */
+const AsksPollMs = 5000;
+let asksLoading = false;
+let asksAgain = false;
+let asksFirst = true;
+let asksAt = 0;
+async function loadAsks(): Promise<void> {
+  if (asksLoading) { asksAgain = true; return; }
+  asksLoading = true;
+  try {
+    do {
+      asksAgain = false;
+      asksAt = Date.now();
+      const [net, tools] = await Promise.all([
+        api.call<NetworkAsk[]>('network.asks', {}).then((r) => (Array.isArray(r) ? r : []), () => [] as NetworkAsk[]),
+        api.call<ToolAsk[]>('tools.asks', {}).then((r) => (Array.isArray(r) ? r : []), () => [] as ToolAsk[]),
+      ]);
+      const asks: { key: string; team: string; member: string | null; label: string | null }[] = [
+        ...groupAsks(net.filter((a) => a && a.state === 'pending')).map((g) => ({
+          key: `n:${g.key}`, team: g.asks[0].team, member: g.asks[0].memberName || null, label: hostsLabel(g.hosts),
+        })),
+        ...tools.filter((a) => a && (a.state === 'pending' || a.state === 'installing')).map((a) => ({
+          key: `t:${a.id}`, team: a.team, member: a.memberName || null, label: a.displayName || a.tool,
+        })),
+      ];
+      const setAsks = (live as Partial<Pick<MonitorModel, 'setAsks'>>).setAsks;
+      if (typeof setAsks !== 'function') return;
+      const before = live.effects.length;
+      setAsks.call(live, asks, performance.now());
+      // Those already waiting when the Monitor opens are counted, not flown in.
+      if (asksFirst) live.effects.length = before;
+      asksFirst = false;
+      if (!asksAgain && mode.value === 'live') counts.value = { ...live.counts(), perMinute: live.perMinute(performance.now()) };
+    } while (asksAgain);
+  } finally { asksLoading = false; }
+}
+let offAsks: (() => void) | null = null;
+
 /** Applies rows, steps and code events to a model in the order they happened, without playing them (the start, a replay's past). */
 function catchUp(m: MonitorModel, rs: readonly FeedRow[], ss: readonly StepRow[], es: readonly CodeEvent[] = [], into?: ReplayStates) {
   for (const p of inTimeOrder(rs, ss, es)) {
@@ -555,8 +600,12 @@ onMounted(async () => {
   }
   window.addEventListener('keydown', onKey);
   await tick(true);
+  offAsks = api.onEvent?.((e) => { if (e.event === 'network.asksChanged' || e.event === 'tools.asksChanged') void loadAsks(); }) ?? null;
+  await loadAsks();
   timers = [
     setInterval(() => void tick(), props.pollMs ?? 1200),
+    // The asks' slow poll (a repeated refusal's count changes without an event), as Needs you polls them.
+    setInterval(() => { if (Date.now() - asksAt >= AsksPollMs) void loadAsks(); }, 1000),
     setInterval(() => { clock.value = new Date().toLocaleTimeString(); now.value = Date.now(); }, 1000),
   ];
   clock.value = new Date().toLocaleTimeString();
@@ -564,6 +613,7 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   for (const t of timers) clearInterval(t);
+  offAsks?.();
   cancelAnimationFrame(raf);
   window.removeEventListener('keydown', onKey);
   sound.destroy();
