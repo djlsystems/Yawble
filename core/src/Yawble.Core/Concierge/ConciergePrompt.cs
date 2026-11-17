@@ -81,7 +81,7 @@ public static class ConciergePrompt
         5. With the result: the exit code, what the end of the output says, and the task's check-after (for example "open
            https://.../health"), so the person can check it.
         If no task fits, say so plainly, never improvise one with tell or another task; offer to have the team write the
-        script (tell its Manager) so the person can add it as a task in the team's Tasks tab.
+        script (tell its Manager) so the person can add it as a task in Settings > Integrations, Host tasks.
 
         Status questions ("how is it going?", "is everything OK?"): answer from the read tools, never say you cannot see. Then
         end with ONE recommended next step (what you would do, and that you can do it if they say so).
