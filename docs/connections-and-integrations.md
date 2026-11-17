@@ -84,7 +84,8 @@ A host task is a named program you define for a team, such as a build or a deplo
 computer, on the base branch of your checkout, and only when that checkout is clean. An agent can only name the
 task and give a reason. Each request asks you first: **Run once**, or **Always for this team**, which stores a
 standing approval pinned to the files shown. When those files change, the task asks again and shows what changed.
-The result reaches the agent when the run ends.
+The result reaches the agent when the run ends. For release and deploy jobs, see
+[Release and deploy host tasks](host-tasks-release.md).
 
 #### Environment from a Connection
 
