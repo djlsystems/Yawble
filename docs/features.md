@@ -33,6 +33,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   companion list them the same way. Ask the Concierge to close the open ones whose work is done: it checks each one
   and closes only those with nothing left, saying why (on this computer: the remote view's Concierge cannot close
   workflows).
+- Each team's tile on **Teams** lists its 50 newest workflows and every open one, last updated first, scrolling inside
+  the tile; a row opens that workflow.
 - On the team page each member is one framed pane:
   - A title bar: face, name, role and CLI chips, its state and how many instructions wait behind its run, and at the
     right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
