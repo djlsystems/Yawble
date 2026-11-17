@@ -11,6 +11,8 @@ export type StepKind = 'read' | 'edit' | 'create' | 'run' | 'search' | 'web' | '
 /** One step as monitor.steps returns it. */
 export interface StepRow {
   id: number; at: string; team: string; member: string; run: number; kind: StepKind; tool: string; target: string | null;
+  /** A command's exit code, when the feed knows it (a finished command); absent or null when not. */
+  exit?: number | null;
 }
 
 export const StepKinds: readonly StepKind[] = ['read', 'edit', 'create', 'run', 'search', 'web', 'bus', 'think', 'say', 'agent', 'plan', 'skill', 'tool'];
@@ -42,6 +44,7 @@ export function readStep(raw: unknown): StepRow | null {
   return {
     id: s.id, at: text(s.at), team: text(s.team), member: text(s.member), run: typeof s.run === 'number' ? s.run : 0,
     kind, tool: text(s.tool), target: typeof s.target === 'string' && s.target ? s.target : null,
+    ...(typeof s.exit === 'number' && Number.isInteger(s.exit) ? { exit: s.exit } : {}),
   };
 }
 

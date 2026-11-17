@@ -283,17 +283,23 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 - A live wall of every team. **Nodes**: each team is a hub in its own colour; its members orbit it as discs with
   their face and a state ring (running turns, waiting creeps round, blocked, needs you and failed throb, idle is a
-  thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots. Open
-  workflows hang off the team as nodes tied to the members working them.
+  thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots.
+- **Workflow nodes**: each open workflow is a small node tied by dashed lines to the members working it (to its team
+  while nobody is on it). It flashes green and drifts away when it completes, fades with a cross when it is closed,
+  and shows a "!" while it is blocked. The team's **Workflows** panel stays as the list of its newest five.
 - **Rhythm**: each member shows its recent tool steps rising off it and what it is doing now; a busier member pulses
-  faster, and a command or test run shows a ring filling while it runs, then a green or red burst.
+  faster, a command or test run shows a ring filling while it runs, then a green or red burst by its exit code when
+  that is known, and thinking shimmers softly.
+- **Cards**: a Manager's instruction flies to the member with its card number (#373). The hand-back returns along the
+  same line with a ✓, or a ✗ when the run failed or was blocked.
 - **You node**: at the edge of the wall. Questions, approvals and network or tool asks that wait for you fly to it,
   and it glows with their count until they are answered. Click it to open the Kanban board (every team), whose **Needs You** lane lists them.
 - **Focus a team**: click a team's hub and the wall zooms to it and dims the rest; a chip under the counts names it.
   Press **Esc**, click the empty wall or the chip's **×** to see every team again. Not remembered.
 - **Density** beside the camera controls: **Calm** moves only the big moments (handbacks, failures, needs you,
   commits, merges), **Normal** (the default) what the teams do without the smallest steps, **Lively** every step and
-  message. Remembered. Reduced motion is respected at every density.
+  message. Remembered. Calm also shows fewer code-map files (72 in all) and at most 3 resting commits per team.
+  Reduced motion is respected at every density.
 - **Sound** (the speaker beside the density): off unless you turn it on, and remembered. Then a short, quiet tone
   plays for needs you, a failure or block, a finished workflow, a hand-back, a commit, a merge, a landing on main and
   a push, each kind at most once every 1.5 s. Steps and messages make no sound, nor does a replay.
@@ -315,7 +321,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - **merge into the team branch**: a burst along the hub's spokes.
   - **landed on main**: a larger burst.
   - **push**: a pulse that runs off the edge of the wall.
-- With reduced motion there is no travel and no pop: the map just updates, and a commit's dot is simply at the hub.
+- A focused team's code map, commits and merges stay bright; the other teams' maps dim with them.
+- With reduced motion nothing travels, pops or pulses: the map just updates, a commit's dot is simply at the hub, a
+  comet is a still line with its label, and states are steady marks.
 - Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
 - A timeline replays any moment: the map, the commits and the merges play at their times. **● Back to live** returns.
 - The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
