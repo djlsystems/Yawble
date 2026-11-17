@@ -371,7 +371,7 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(tabs + icons.length * 44 + 3 * px(st.value(head, 'gap'))).toBeLessThanOrEqual(content(Portrait.width, 10));
   });
 
-  it('the Team page: the title gives way to Documents, Workflows and ⋯; the Tell placeholder is whole at 375 px', async () => {
+  it('the Team page: the title gives way to ⋯ (Documents and Workflows are in the drawer, card 316); the Tell placeholder is whole at 375 px', async () => {
     const w = await teamPage(Portrait.width);
     const st = new Styles('components/TeamView.vue');
     const head = w.get('.teamhead').element;
@@ -379,7 +379,7 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(st.value(w.get('.titleline').element, 'min-width')).toBe('0');
     expect(st.value(w.get('.titleline h2').element, 'text-overflow')).toBe('ellipsis');
     expect(w.findAll('[data-test=team-phone-actions] > .hbtn, [data-test=team-phone-actions] .more-wrap > .hbtn').map((b) => b.attributes('aria-label')))
-      .toEqual(['Documents', 'Workflows', 'More team actions']);
+      .toEqual(['More team actions']);
     // Tell: the box beside two 44 px buttons; its placeholder fits the room left (16 px font).
     const tell = w.get('[data-test=tell-text]');
     const placeholder = tell.attributes('placeholder')!;

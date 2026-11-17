@@ -188,7 +188,10 @@ const workflowFocus = ref<number | null>(null);
 /** Opens the team's workflows, with one of them selected when given (a workflow clicked on the Monitor). */
 function openWorkflows(workflow?: number) { workflowFocus.value = workflow ?? null; showWorkflows.value = true; }
 
-defineExpose({ refresh, openWorkflows });
+/** Opens the team's documents (on a phone the drawer's Documents item does, card 316: the header has no button for it). */
+function openDocuments() { showDocs.value = true; }
+
+defineExpose({ refresh, openWorkflows, openDocuments });
 </script>
 
 <template>
@@ -203,10 +206,9 @@ defineExpose({ refresh, openWorkflows });
         <span class="kpi" :class="{ live: team.running > 0 }" data-test="kpi-running"><span class="sep"> · </span><b>{{ team.running }}</b> running</span>
         <span class="kpi" data-test="kpi-queued"><span class="sep"> · </span><b>{{ team.queued }}</b> queued</span>
       </div>
-      <!-- A phone (B054): the title and the actions are one row: Documents and Workflows as icons, the rest behind ⋯. -->
+      <!-- A phone (B054): the title and the actions are one row, the actions behind ⋯. Documents and Workflows are in the
+           drawer, under the team's name (App.vue, Sidebar.vue; card 316). -->
       <div v-if="phone" class="actions phone-actions" data-test="team-phone-actions">
-        <button class="hbtn" data-test="open-documents" title="Documents" aria-label="Documents" @click="showDocs = true"><Icon name="docs" :size="18" /></button>
-        <button class="hbtn" data-test="open-workflows" title="Workflows" aria-label="Workflows" @click="showWorkflows = true"><Icon name="board" :size="18" /></button>
         <span class="more-wrap">
           <button class="hbtn" data-test="team-more" title="More" aria-label="More team actions" aria-haspopup="menu" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen"><Icon name="more" :size="18" /></button>
           <span v-if="moreOpen" class="menu" role="menu" data-test="team-more-menu">
@@ -217,8 +219,8 @@ defineExpose({ refresh, openWorkflows });
         </span>
       </div>
       <div v-else class="actions">
-        <button data-test="open-documents" title="What the team writes for you, and what you add" @click="showDocs = true">Documents</button>
-        <button data-test="open-workflows" title="The team's pieces of work: nudge, stop or close one" @click="showWorkflows = true">Workflows</button>
+        <button data-test="open-documents" title="What the team writes for you, and what you add" @click="openDocuments">Documents</button>
+        <button data-test="open-workflows" title="The team's pieces of work: nudge, stop or close one" @click="openWorkflows()">Workflows</button>
         <button data-test="open-triggers" title="Work on a schedule" @click="showTriggers = true">⏰ Triggers</button>
         <button data-test="open-git" title="The team's branches, merge to main" @click="showGit = true">⎇ Git</button>
         <button data-test="open-manage" title="The team's repositories, pause and archive, environment, reset, delete" @click="showManage = true">

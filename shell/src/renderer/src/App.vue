@@ -120,6 +120,14 @@ const allTeams = computed(() => overview.value?.teams ?? []);
 const teams = computed(() => allTeams.value.filter((t) => !t.archived));
 const archivedTeams = computed(() => allTeams.value.filter((t) => t.archived));
 const team = computed(() => allTeams.value.find((t) => t.id === selected.value) ?? null);
+/** The team whose page is open: on a phone the drawer offers its Documents and Workflows (card 316). */
+const openTeamName = computed(() => (view.value === 'teams' && team.value ? team.value.name : null));
+/** The drawer's Documents / Workflows of the open team: the drawer closes and the team page opens that dialog. */
+function openTeamDialog(which: 'documents' | 'workflows') {
+  drawerOpen.value = false;
+  if (which === 'documents') teamView.value?.openDocuments();
+  else teamView.value?.openWorkflows();
+}
 const defaultCli = computed(() => agents.value.find((a) => a.ready)?.id ?? 'claude');
 const title = computed(() => {
   if (view.value === 'concierge') return conversations.value.find((c) => c.id === conversationId.value)?.title ?? 'New chat';
@@ -435,7 +443,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
       @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
-      @logs="drawerOpen = false; logsOpen = true" />
+      @logs="drawerOpen = false; logsOpen = true" :open-team-name="openTeamName" @team-documents="openTeamDialog('documents')" @team-workflows="openTeamDialog('workflows')" />
 
     <main class="main">
       <header class="bar">
