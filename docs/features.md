@@ -285,6 +285,12 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   as you drag and are remembered; **Reset** goes back to the defaults: distance 0.3×, strength 2.75×, repulsion 0.35×,
   gravity 2.4×, friction 0.45×.
 
+**Code map sources.** The app records what really reaches the team repository: each new commit a member's run brings
+back (its files and whether each was added, modified, deleted or renamed), each merge into the team branch, each Merge
+to main and each push to origin, with the workflow it came from. It reads them in the team repository, never in a
+member's clone. Commit diffs are the truth for a file's existence and status. Transcript steps are only the immediate,
+provisional signal, and the only source for reads.
+
 ## Logs
 
 **Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. **Logs** in the ☰ menu of

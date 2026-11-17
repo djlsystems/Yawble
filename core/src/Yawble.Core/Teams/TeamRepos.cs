@@ -502,15 +502,19 @@ public sealed partial class TeamRepos
         return findings;
     }
 
-    /// <summary>Fetches the member's branch into the team repository (merging is the person's). Never pushes.</summary>
-    public async Task<FetchResult> FetchBackAsync(MemberRef member, CancellationToken ct = default)
+    /// <summary>
+    /// Fetches the member's branch into the team repository (merging is the person's). Never pushes. What lands is
+    /// recorded as the Monitor's code events, with <paramref name="workflowId"/> (the run's workflow) when known.
+    /// </summary>
+    public async Task<FetchResult> FetchBackAsync(MemberRef member, CancellationToken ct = default, long? workflowId = null)
     {
         var repo = RepoOf(member.TeamId);
         if (repo is null || Row(member.Id) is null) return FetchResult.Nothing;
         var checkout = CheckoutOf(member, repo);
         var result = await FetchBranchAsync(member, repo.Path, repo.BaseBranch, checkout.ClonePath, checkout.Branch, SharedRepoPath(member.Team),
             error => UpdateClone(member.Id, "last_error = $e", ("$e", error)),
-            sha => UpdateClone(member.Id, "fetched_at = $t, fetched_sha = $s, last_error = NULL", ("$t", Now()), ("$s", sha)), ct);
+            sha => UpdateClone(member.Id, "fetched_at = $t, fetched_sha = $s, last_error = NULL", ("$t", Now()), ("$s", sha)), ct,
+            recordEvents: true, workflowId);
         if (result.Error is not null) return result;
         // The team's other writable repositories: their branches come back the same way. A failure is reported with
         // the repository's name; it never hides the primary's result.
@@ -575,7 +579,7 @@ public sealed partial class TeamRepos
     /// that repository's shared view up to date. Never pushes; never runs git inside the clone.
     /// </summary>
     private async Task<FetchResult> FetchBranchAsync(MemberRef member, string repoPath, string baseBranch, string clonePath, string branch,
-        string sharedPath, Action<string> recordError, Action<string> recordFetched, CancellationToken ct)
+        string sharedPath, Action<string> recordError, Action<string> recordFetched, CancellationToken ct, bool recordEvents = false, long? workflowId = null)
     {
         var gitDir = Path.Combine(clonePath, ".git");
         var error = CloneGitDirProblem(clonePath);
@@ -616,12 +620,16 @@ public sealed partial class TeamRepos
                 ["fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", StrictUploadPack, "--", gitDir, $"+{refName}:{staging}"], ct);
             if (fetched.ExitCode != 0) return Fail("could not fetch the member's branch: " + fetched.Stderr);
             recordFetched(sha);
+            var before = await RevAsync(repoPath, refName, ct);
             var landed = await LandFetchedAsync(member, repoPath, branch, sha, ct);
             if (landed is not null)
             {
                 AddSyncNote(member.TeamId, landed);
                 return Fail(landed);
             }
+            // B079: what the branch gained is the Monitor's truth about the member's files.
+            if (recordEvents && await RevAsync(repoPath, refName, ct) is { } after && after != before)
+                await RecordFetchedAsync(member, repoPath, baseBranch, branch, before, after, workflowId, ct);
             _log?.Invoke($"{member.Qualified}: fetched {branch} at {sha[..Math.Min(12, sha.Length)]} into {repoPath}");
             try
             {
@@ -824,12 +832,15 @@ public sealed partial class TeamRepos
     /// others; the first transport failure stops the push and names what did not go. Never throws for git: a failed
     /// push is reported, never the run's failure (a transport problem, not an agent fault).
     /// </summary>
-    public async Task<TeamPublishReport> PublishAsync(MemberRef member, CancellationToken ct = default)
+    public async Task<TeamPublishReport> PublishAsync(MemberRef member, CancellationToken ct = default, long? workflowId = null)
     {
         var repo = RepoOf(member.TeamId);
         if (repo is null || !Directory.Exists(repo.Path)) return TeamPublishReport.None;
         if (!PushesToOrigin(member.TeamId)) return TeamPublishReport.None; // the person turned pushing off for this team
         var report = await PublishRepoAsync(member, repo.Path, repo.BaseBranch, ct);
+        // B079: what reached origin is a Monitor code event (the primary repository's branches).
+        if (report.Result is TeamPublishResult.Published or TeamPublishResult.Rejected or TeamPublishResult.PushFailed)
+            await RecordPushedAsync(member, repo.Path, report.Result == TeamPublishResult.Published ? report.Branches : report.Published ?? [], workflowId, ct);
         // The team's other writable repositories are pushed the same way; their outcome is folded into the report.
         foreach (var extra in ExtrasOf(member.TeamId).Where(e => e.Writable && Directory.Exists(e.Path)))
             report = TeamPublishReport.Combine(report, extra.Name, await PublishRepoAsync(member, extra.Path, extra.BaseBranch, ct));
