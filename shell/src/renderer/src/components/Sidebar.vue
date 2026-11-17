@@ -35,9 +35,13 @@ defineProps<{
   open?: boolean;
   /** A remote view on a phone has no menu bar: these of its items (theme, terminal, Help) sit at the drawer's bottom. */
   menu?: MenuBarItem[];
+  /** The team whose page is open (card 316): on a phone its Documents and Workflows sit near the drawer's top, not in
+   *  the team page's header. Null with no team page open; ignored on the desktop. */
+  openTeamName?: string | null;
 }>();
 const emit = defineEmits<{
   newChat: []; openConversation: [id: string]; openTeam: [id: number]; go: [view: View]; logs: [];
+  teamDocuments: []; teamWorkflows: [];
   rename: [id: string, title: string]; remove: [id: string]; newTeam: []; collapse: []; expand: []; command: [id: string];
 }>();
 
@@ -91,6 +95,13 @@ function finishRename(id: string) {
     </div>
 
     <button class="item new" data-test="new-chat" @click="emit('newChat')"><Icon name="newChat" />New chat</button>
+
+    <!-- A phone with a team page open: that team's Documents and Workflows (its header has no room for them). -->
+    <div v-if="drawer && openTeamName" class="team-group" data-test="drawer-team">
+      <h3 class="team-name" :title="`Team ${openTeamName}`">Team {{ openTeamName }}</h3>
+      <button class="item" data-test="drawer-team-documents" @click="emit('teamDocuments')"><Icon name="docs" />Documents</button>
+      <button class="item" data-test="drawer-team-workflows" @click="emit('teamWorkflows')"><Icon name="dispatch" />Workflows</button>
+    </div>
 
     <nav class="places">
       <button class="item" :class="{ on: view === 'concierge' }" data-test="nav-concierge" @click="emit('go', 'concierge')"><Icon name="spark" />Concierge</button>
@@ -224,6 +235,9 @@ h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4
    the run-slots line are always reachable; the Teams and Chats lists keep room for their heading and two rows. */
 .side.drawer { overflow-y: auto; overscroll-behavior: contain; }
 .drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot { flex: none; }
+.drawer .team-group { flex: none; }
+.team-group { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); margin: 4px 0 2px; padding-bottom: 4px; }
+.team-group .team-name { margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer .lists { min-height: 150px; }
 .drawer-menu { border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; padding-bottom: 4px; }
 .drawer-menu .check { width: 14px; flex: none; color: var(--accent); font-size: 12px; }

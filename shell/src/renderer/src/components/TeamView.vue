@@ -172,7 +172,10 @@ const workflowFocus = ref<number | null>(null);
 /** Opens the team's workflows, with one of them selected when given (a workflow clicked on the Monitor). */
 function openWorkflows(workflow?: number) { workflowFocus.value = workflow ?? null; showWorkflows.value = true; }
 
-defineExpose({ refresh, openWorkflows });
+/** Opens the team's documents (on a phone the drawer's Documents item does, card 316: the header has no button for it). */
+function openDocuments() { showDocs.value = true; }
+
+defineExpose({ refresh, openWorkflows, openDocuments });
 </script>
 
 <template>
@@ -188,8 +191,11 @@ defineExpose({ refresh, openWorkflows });
         <span class="kpi" data-test="kpi-queued"><span class="sep"> · </span><b>{{ team.queued }}</b> queued</span>
       </div>
       <div class="actions">
-        <button data-test="open-documents" title="What the team writes for you, and what you add" @click="showDocs = true">Documents</button>
-        <button data-test="open-workflows" title="The team's pieces of work: nudge, stop or close one" @click="showWorkflows = true">Workflows</button>
+        <!-- On a phone these two are in the drawer, under the team's name (App.vue, Sidebar.vue; card 316). -->
+        <template v-if="!phone">
+          <button data-test="open-documents" title="What the team writes for you, and what you add" @click="openDocuments">Documents</button>
+          <button data-test="open-workflows" title="The team's pieces of work: nudge, stop or close one" @click="openWorkflows()">Workflows</button>
+        </template>
         <button data-test="open-triggers" title="Work on a schedule" @click="showTriggers = true">⏰ Triggers</button>
         <button data-test="open-git" title="The team's branches, merge to main" @click="showGit = true">⎇ Git</button>
         <button data-test="open-manage" title="The team's repositories, pause and archive, environment, reset, delete" @click="showManage = true">

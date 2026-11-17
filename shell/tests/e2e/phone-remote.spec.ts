@@ -422,6 +422,8 @@ for (const size of PHONES) {
             await nav(p, 'nav-teams');
             await p.locator('[data-test=team-open-payments]').click();
             await expect(p.locator('[data-test=team-title]')).toBeVisible();
+            // On a phone the team's Documents and Workflows are in the drawer, not the header (card 316).
+            if (id === 'open-documents' || id === 'open-workflows') { await nav(p, id.replace('open-', 'drawer-team-')); return true; }
             const b = p.locator(`[data-test=${id}]`).first();
             if (!(await b.isVisible().catch(() => false))) return false;
             return b.click({ timeout: 3000 }).then(() => true, () => false);

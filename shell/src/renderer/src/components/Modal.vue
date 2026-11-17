@@ -37,7 +37,9 @@ const phone = usePhone();
 .modal.wide { width: min(980px, calc(100vw - 32px)); }
 .modal.full { width: min(1320px, calc(100vw - 32px)); height: calc(100vh - var(--dialog-top) - 24px); }
 .modal.full .body { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-header { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+/* flex: none: the header never shrinks in the modal's column. Shrunk (iOS Safari did, on a phone sheet with a tall body,
+   card 316), its title and Close spilled over the body and the body's first lines sat under the title. */
+header { flex: none; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
 h2 { margin: 0; font-size: 16px; }
 .body { padding: 12px 16px 16px; overflow: auto; }
 .inline-panel { min-width: 0; }
@@ -47,7 +49,8 @@ h2 { margin: 0; font-size: 16px; }
 /* The phone sheet: the whole screen (dvh: what the browser really shows), clear of a notch and the home bar. */
 .backdrop.sheet { padding: 0; align-items: stretch; }
 .modal.sheet, .modal.sheet.wide, .modal.sheet.full { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; box-shadow: none; }
-.modal.sheet header { position: sticky; top: 0; padding: calc(4px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) 4px calc(14px + env(safe-area-inset-left, 0px)); }
+.modal.sheet { overflow: hidden; }
+.modal.sheet header { position: relative; z-index: 1; padding: calc(4px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) 4px calc(14px + env(safe-area-inset-left, 0px)); }
 .modal.sheet h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal.sheet header .icon { width: 44px; height: 44px; flex: none; }
 .modal.sheet:not(.full) .body { flex: 1 1 0; min-height: 0; overflow: auto; }
