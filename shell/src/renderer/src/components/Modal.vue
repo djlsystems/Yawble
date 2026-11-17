@@ -52,7 +52,9 @@ h2 { margin: 0; font-size: 16px; }
 .modal.sheet { overflow: hidden; }
 .modal.sheet header { position: relative; z-index: 1; padding: calc(4px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) 4px calc(14px + env(safe-area-inset-left, 0px)); }
 .modal.sheet h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.modal.sheet header .icon { width: 44px; height: 44px; flex: none; }
+/* Close keeps its 44 px tap target, but without the button box: a bordered 44 px square around a small ✕ looked oversized
+   next to the title (card 328). */
+.modal.sheet header .icon { width: 44px; height: 44px; flex: none; border-color: transparent; background: transparent; font-size: 18px; }
 .modal.sheet:not(.full) .body { flex: 1 1 0; min-height: 0; overflow: auto; }
 .modal.sheet .body { padding: 12px calc(12px + env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
 </style>
