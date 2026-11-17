@@ -19,7 +19,7 @@
 //   npx playwright test card375-monitor --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots and the results go to $YAWBLE_TEAM_DOCS/b080-monitor (else test-results/b080-monitor).
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
@@ -56,6 +56,14 @@ class Feed {
   attn = new Map<string, string>();
   private seq = 100; private sid = 1000; private eid = 1;
   calls: { method: string; params: any }[] = [];
+  netAsks: any[] | null = null;
+  toolAsks: any[] | null = null;
+  netAsk(id: number, member: string, host: string, state = 'pending', team = TEAM) {
+    return { id, at: this.iso(60_000), teamId: 1, team, member: `${team}/${member}`, memberName: member, host, reason: 'restore', method: 'CONNECT', pathSample: null, count: 1, lastSeen: this.iso(30_000), hint: null, workflow: 10, state, scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'] };
+  }
+  toolAsk(id: number, member: string, tool: string, displayName: string, state = 'pending', team = TEAM) {
+    return { id, at: this.iso(60_000), teamId: 1, team, member: `${team}/${member}`, memberName: member, tool, displayName, publisher: 'Microsoft', wingetId: null, scope: 'machine', reason: 'build', count: 1, lastSeen: this.iso(30_000), workflow: 10, state, attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null };
+  }
   iso(msAgo = 0) { return new Date(Date.now() - msAgo).toISOString(); }
   row(kind: string, member: string | null, from: string, workflow = 10, msAgo = 0, text: string | null = null, team = TEAM) {
     this.rows.push({ seq: ++this.seq, kind, team, member, from, text, workflow, at: this.iso(msAgo) });
@@ -92,6 +100,9 @@ class Feed {
       return this.events.filter((e) => Date.parse(e.at) >= since && (!p?.team || e.team.toLowerCase() === String(p.team).toLowerCase()));
     }
     if (method === 'bus.workflows') return JSON.parse(JSON.stringify(this.wfs.get(p?.teamId) ?? []));
+    // Card 387 (F2): the waiting network and tool asks, when the test sets them (else the fake core answers).
+    if (method === 'network.asks' && this.netAsks) return JSON.parse(JSON.stringify(this.netAsks));
+    if (method === 'tools.asks' && this.toolAsks) return JSON.parse(JSON.stringify(this.toolAsks));
     return undefined;
   }
 }
@@ -348,7 +359,9 @@ async function open(browser: Browser, o: OpenOpts = {}) {
     if (!file.startsWith(builtDir) || !existsSync(file)) return route.fulfill({ status: 404, body: 'not found' });
     return route.fulfill({ path: file });
   });
+  const sockets: { send: (s: string) => void }[] = [];
   await ctx.routeWebSocket(/\/rpc$/, (ws) => {
+    sockets.push(ws);
     ws.onMessage((m) => {
       const msg = JSON.parse(String(m));
       try {
@@ -386,13 +399,21 @@ async function open(browser: Browser, o: OpenOpts = {}) {
   await page.locator('[data-test=sidebar] [data-test=nav-monitor]').first().click();
   await expect(page.locator('[data-test=monitor-canvas]')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-test=monitor-loading]')).toHaveCount(0, { timeout: 30_000 });
-  return { page, ctx, feed, core, errors };
+  /** A core event to the page (as the phone server pushes them: { event, data }). */
+  const push = (event: string, data: unknown = {}) => { for (const ws of sockets) ws.send(JSON.stringify({ event, data })); };
+  return { page, ctx, feed, core, errors, push };
 }
 
 async function shot(page: Page, name: string) { await page.screenshot({ path: path.join(SHOTS, 'screens', `${name}.png`) }); }
 
 const result: Record<string, unknown> = {};
-test.afterAll(() => { writeFileSync(path.join(SHOTS, 'card375-results.json'), JSON.stringify(result, null, 2)); });
+// Merged into what is there (card 387): a --grep group run keeps the other groups' results instead of leaving only its own.
+test.afterAll(() => {
+  const file = path.join(SHOTS, 'card375-results.json');
+  let old: Record<string, unknown> = {};
+  try { old = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
+  writeFileSync(file, JSON.stringify({ ...old, ...result }, null, 2));
+});
 
 /** The usual scene: payments with three workflows (10 worked by Ada, 11 nobody on, 12 worked by Ben). */
 function seed(feed: Feed) {
@@ -594,10 +615,11 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
 // ---------------------------------------------------------------------------------------------------------------------
 // 3. The You node, and 4. cards on comets
 
-test('3 You node: a question flies in, it glows with the count; a click opens Needs you and picks nothing; network and tool asks do not reach it', async ({ browser }) => {
+test('3 You node: a question flies in, it glows with the count; a click opens Needs you and picks nothing', async ({ browser }) => {
   const feed = new Feed();
   seed(feed);
-  const { page, ctx, errors } = await open(browser, { feed, asks: true });
+  // No network or tool asks here (card 387: since F2's fix they count too; test 3b checks them).
+  const { page, ctx, errors } = await open(browser, { feed, asks: false });
   await until(page, (x) => !!youNode(x), Boolean);
   await page.waitForTimeout(1500);
   const r: Record<string, unknown> = {};
@@ -607,10 +629,9 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   r.place = { x: y.x, y: y.y, canvas: { w: box.width, h: box.height }, expected: { x: box.width - 46, y: Math.max(120, box.height / 2) } };
   expect(y.x).toBeCloseTo(box.width - 46, 0);
   expect(y.y).toBeCloseTo(Math.max(120, box.height / 2), 0);
-  // The core has a network ask and a tool ask pending; the view never gives them to live.setAsks.
-  const asked = feed.calls.filter((c) => c.method === 'network.asks' || c.method === 'tools.asks').length;
-  r.asksPending = { networkAndToolAsksInCore: 2, youCount: y.count, fill: y.fill, asksCallsSeen: asked };
-  await shot(page, 'you-01-asks-pending-no-count');
+  r.nothingWaiting = { youCount: y.count, fill: y.fill };
+  expect(y.count, 'nothing waits: no count').toBeNull();
+  await shot(page, 'you-01-nothing-waiting');
 
   // A question: the decision row flies to the You node; with the member's attention it counts 1 and glows.
   await page.evaluate(() => { (window as any).__frames = []; });
@@ -643,6 +664,83 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   expect(tip).toBe(0);
   await shot(page, 'you-03-click-opened-board');
   result.you = r;
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+// Card 387 (F2's fix, card 386): the view reads network.asks / tools.asks and hands them to live.setAsks.
+test('3b You node: pending network and tool asks are counted (waiting at open: no flight); one added later flies in; a decided one leaves', async ({ browser }) => {
+  const feed = new Feed();
+  seed(feed);
+  // Waiting at open: Ada's two asks on one domain (one Needs-you item), a decided one (not counted), Ben's tool ask
+  // (pending) and an installed tool (not counted). Two items.
+  feed.netAsks = [feed.netAsk(7, ADA, 'api.nuget.org'), feed.netAsk(8, ADA, 'api.nuget.org'), feed.netAsk(9, BEN, 'pypi.org', 'allowed')];
+  feed.toolAsks = [feed.toolAsk(4, BEN, 'dotnet-sdk-10', '.NET SDK 10'), feed.toolAsk(5, ADA, 'python-3', 'Python 3', 'installed')];
+  const { page, ctx, errors, push } = await open(browser, { feed });
+  const r: Record<string, unknown> = {};
+  let f = await untilFrame(page, (x) => youNode(x)?.count === '2', 12_000);
+  r.atOpen = { count: youNode(f)?.count ?? null, fill: youNode(f)?.fill ?? null, asksReads: feed.calls.filter((c) => c.method === 'network.asks' || c.method === 'tools.asks').length };
+  expect(youNode(f)?.count, 'a network ask and a tool ask: 2').toBe('2');
+  expect(youNode(f)?.fill, 'glowing').toBe('rgba(46, 26, 84, 0.95)');
+  expect(youNode(f)?.needsYou).toBe(true);
+  // Those waiting at open are counted, not flown in.
+  await page.evaluate(() => { (window as any).__frames = []; });
+  await page.waitForTimeout(2000);
+  r.atOpen = { ...(r.atOpen as object), flyingFramesAfter: (await frames(page)).filter((x) => youFlyers(x).length >= 4).length };
+  expect((r.atOpen as any).flyingFramesAfter, 'nothing flies for those waiting at open').toBe(0);
+  await shot(page, 'you-04-asks-at-open');
+
+  // A network ask added later, with its change event: it flies in and the count goes to 3.
+  await page.evaluate(() => { (window as any).__frames = []; });
+  const t0 = Date.now();
+  feed.netAsks.push(feed.netAsk(10, BEN, 'registry.npmjs.org'));
+  push('network.asksChanged');
+  f = await untilFrame(page, (x) => youNode(x)?.count === '3', 6000);
+  const countedMs = Date.now() - t0;
+  await page.waitForTimeout(1800); // the flight (1.5 s)
+  let fs = await frames(page);
+  const netFlying = fs.filter((x) => youFlyers(x).length >= 4).length;
+  const netRing = fs.some((x) => x.ops.some((o) => o.op === 'stroke' && isScreen(o) && o.style === C.decision && o.lw === 2 && o.items?.some((i) => i.t === 'arc' && i.r > 26)));
+  const netLabel = fs.some((x) => texts(x).includes('registry.npmjs.org'));
+  r.networkAdded = { count: youNode(f)?.count ?? null, countedMs, flyingFrames: netFlying, arrivalRing: netRing, labelSeen: netLabel };
+  expect(youNode(f)?.count, 'a new network ask: 3').toBe('3');
+  expect(countedMs, 'on the event, not the 5 s poll').toBeLessThan(3000);
+  expect(netFlying, 'the new network ask flies in').toBeGreaterThan(5);
+  expect(netRing, 'a ring opens on arrival').toBe(true);
+  await shot(page, 'you-05-network-ask-added');
+
+  // A tool ask added later (installing counts too), with its change event: it flies in, 4.
+  await page.evaluate(() => { (window as any).__frames = []; });
+  feed.toolAsks.push(feed.toolAsk(6, ADA, 'node-22', 'Node.js 22', 'installing'));
+  push('tools.asksChanged');
+  f = await untilFrame(page, (x) => youNode(x)?.count === '4', 6000);
+  await page.waitForTimeout(1800);
+  fs = await frames(page);
+  r.toolAdded = { count: youNode(f)?.count ?? null, flyingFrames: fs.filter((x) => youFlyers(x).length >= 4).length };
+  expect(youNode(f)?.count, 'a new tool ask: 4').toBe('4');
+  expect((r.toolAdded as any).flyingFrames, 'the new tool ask flies in').toBeGreaterThan(5);
+
+  // Decided: Ben's network ask allowed, his tool installed: they leave the count (2), nothing flies.
+  await page.evaluate(() => { (window as any).__frames = []; });
+  feed.netAsks = feed.netAsks.map((a) => (a.id === 10 ? { ...a, state: 'allowed' } : a));
+  feed.toolAsks = feed.toolAsks.map((a) => (a.id === 4 ? { ...a, state: 'installed' } : a));
+  push('network.asksChanged');
+  push('tools.asksChanged');
+  f = await untilFrame(page, (x) => youNode(x)?.count === '2', 6000);
+  await page.waitForTimeout(1200);
+  r.decided = { count: youNode(f)?.count ?? null, flyingFrames: (await frames(page)).filter((x) => youFlyers(x).length >= 4).length };
+  expect(youNode(f)?.count, 'the decided ones leave: 2').toBe('2');
+  expect((r.decided as any).flyingFrames).toBe(0);
+
+  // Without an event, the slow poll (5 s) picks one up.
+  const t1 = Date.now();
+  feed.netAsks.push(feed.netAsk(11, ADA, 'github.com'));
+  f = await untilFrame(page, (x) => youNode(x)?.count === '3', 9000);
+  r.slowPoll = { count: youNode(f)?.count ?? null, ms: Date.now() - t1 };
+  expect(youNode(f)?.count, 'the slow poll: 3').toBe('3');
+  await shot(page, 'you-06-asks-after-poll');
+  result.youAsks = r;
+  console.log('YOU-ASKS', JSON.stringify(r));
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -745,7 +843,8 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: 'a'.repeat(40), message: 'Refund commit', files: [{ path: 'src/refund/f0.ts', status: 'M' }] });
   feed.event({ kind: 'commit', team: TEAM2, member: 'DeveloperCleo', sha: 'b'.repeat(40), message: 'Cart commit', files: [{ path: 'web/cart/c0.ts', status: 'M' }] });
   feed.event({ kind: 'merge-team', team: TEAM2, member: null, sha: 'c'.repeat(40), message: 'Merge', files: [] });
-  feed.row('instruction', 'DeveloperCleo', 'Manager', 20, 0, 'Card 10: other team comet', TEAM2);
+  // Card 77 (card 387): focused, the zoom passes 0.5 and payments' own workflow #10 is labelled "#10", so "#10" matched it.
+  feed.row('instruction', 'DeveloperCleo', 'Manager', 20, 0, 'Card 77: other team comet', TEAM2);
   await page.waitForTimeout(3500);
   const fs = await frames(page);
   const dotsByTeam = (x: Frame) => {
@@ -755,7 +854,7 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   };
   const mine = Math.max(...fs.map((x) => dotsByTeam(x).mine)), oth = Math.max(...fs.map((x) => dotsByTeam(x).other));
   const otherRings = Math.max(0, ...fs.map((x) => { const b = hubAt(x, TEAM2); return b ? x.ops.filter((o) => o.op === 'stroke' && o.style === C.handback && o.items?.some((i) => i.t === 'arc' && near(i, b, 0.5) && i.r >= 10 && full(i))).length : 0; }));
-  const otherComet = Math.max(0, ...fs.map((x) => texts(x).filter((t) => t === '#10').length));
+  const otherComet = Math.max(0, ...fs.map((x) => texts(x).filter((t) => t === '#77').length));
   r.codeEvents = { payCommitDots: mine, otherCommitDots: oth, otherMergeRings: otherRings, otherCometLabel: otherComet };
   expect(mine, "payments' commit drawn").toBeGreaterThan(0);
   expect(oth, "the other team's commit not drawn").toBe(0);
@@ -826,9 +925,22 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
     const comets = await most(page, (x) => cometHeads(x).length, 3000); // the next poll (1.2 s), then a comet's 1.1 s
     // Ten commits for payments at once: its commit dots.
     await page.waitForTimeout(800);
+    const callsBefore = feed.calls.length;
+    const pushedAt = Date.now();
     for (let i = 0; i < 10; i++) feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: (++shaN).toString(16).padStart(40, '0'), message: `c${shaN}`, files: [{ path: `src/area1/file${i}.ts`, status: 'M' }] });
-    const commits = await most(page, (x) => commitDots(x).length, 3000);
-    r[level] = { mapFileNodes: map, stepIconsOnAda: steps, cometHeads: comets, paymentsCommitDots: commits, stored: await page.evaluate(() => localStorage.getItem('yawble.monitor.density')) };
+    // Card 387 (test 6's flake): sampled for 8 s, keeping when the dots first show and what the old 3 s window saw.
+    const trace: { ms: number; dots: number }[] = [];
+    while (Date.now() - pushedAt < 8000) {
+      let best = 0;
+      for (const x of await recent(page)) best = Math.max(best, commitDots(x).length);
+      trace.push({ ms: Date.now() - pushedAt, dots: best });
+      await page.waitForTimeout(120);
+    }
+    const commits = Math.max(0, ...trace.map((t) => t.dots));
+    const in3s = Math.max(0, ...trace.filter((t) => t.ms <= 3000).map((t) => t.dots));
+    const firstDotMs = trace.find((t) => t.dots > 0)?.ms ?? null;
+    const codeReads = feed.calls.slice(callsBefore).filter((c) => c.method === 'monitor.codeEvents').length;
+    r[level] = { mapFileNodes: map, stepIconsOnAda: steps, cometHeads: comets, paymentsCommitDots: commits, commitDotsIn3s: in3s, firstCommitDotMs: firstDotMs, codeReadsIn8s: codeReads, stored: await page.evaluate(() => localStorage.getItem('yawble.monitor.density')) };
     await shot(page, `density-${level}`);
     await page.waitForTimeout(12_500); // the commits fade (12 s) before the next level
   }
@@ -847,6 +959,9 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   expect(r.normal.paymentsCommitDots).toBe(8);
   expect(r.lively.paymentsCommitDots).toBe(8);
   expect(r.lively.stored).toBe('lively');
+  // Card 387: the dots show 2.4-3.0 s after the commits (a 1.2 s poll, then their entry); the old 3 s window missed one
+  // at 3033 ms. Sampled for 8 s now; they must still show within 6 s.
+  for (const level of ['calm', 'normal', 'lively'] as const) expect(r[level].firstCommitDotMs, `${level}: commit dots within 6 s`).toBeLessThanOrEqual(6000);
   expect(errors).toEqual([]);
   await ctx.close();
 });
