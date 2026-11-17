@@ -2,6 +2,8 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
 import { setOutputHeight } from '../../src/renderer/src/agentOutputHeight';
 import { getMemberView, resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
@@ -273,6 +275,93 @@ describe("a member's pane: Report | Activity | Terminal", () => {
     const m = await menu(pane({ card: card(), api: fake.api, pollMs: 60_000 }));
     expect(m.find('[data-test=open-interactive-cli]').exists()).toBe(false);
     expect(m.find('[data-test=open-settings]').exists()).toBe(true);
+  });
+});
+
+// B076 (card 366): the panes are tiles in a grid, two a row at 1280 px and narrower when resized; the grid sets the
+// tile's height. happy-dom lays nothing out, so the pane's own desktop rules (outside the phone block) are matched
+// against the mounted elements: the last rule that matches an element and sets a property wins, as in the page.
+const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/MemberPane.vue'), 'utf8').replace(/\r\n/g, '\n');
+const desktopRules = (() => {
+  const css = (/<style scoped>([\s\S]*?)<\/style>/.exec(src)?.[1] ?? '').replace(/@media \(max-width: 759\.98px\) \{[\s\S]*?\n\}/, '')
+    .replace(/@media[^{]*\{[^{}]*\{[^{}]*\}\s*\}/g, '').replace(/@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*\s*\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    sels: m[1]!.split(',').map((s) => s.trim().replace(/:deep\(([^)]*)\)/g, '$1')).filter(Boolean),
+    decls: Object.fromEntries(m[2]!.split(';').map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]).filter(([k]) => k)),
+  }));
+})();
+const css = (el: Element, prop: string) => {
+  let v: string | undefined;
+  for (const r of desktopRules) if (r.decls[prop] !== undefined && r.sels.some((s) => { try { return el.matches(s); } catch { return false; } })) v = r.decls[prop];
+  return v;
+};
+
+describe("a member's pane as a narrow tile (320 x 300)", () => {
+  const tile = (over: Partial<AgentCard> = {}) => {
+    const cell = document.createElement('div');
+    cell.style.cssText = 'width: 320px; height: 300px; display: grid;';
+    document.body.appendChild(cell);
+    const w = mount(MemberPane, { props: { card: card({ state: 'running', queuedInstructions: 3, statusLine: report, lastRunState: 'completed', ...over }, { role: 'a-rather-long-role-name' }) } as any, attachTo: cell, ...stubs });
+    mounted.push(w);
+    return w;
+  };
+
+  it('fills its cell as a column: the title and tabs at their height, the view taking the rest', () => {
+    const p = tile().get('[data-test=agent-DeveloperMarlo]').element;
+    expect(css(p, 'display')).toBe('flex');
+    expect(css(p, 'flex-direction')).toBe('column');
+    expect(css(p, 'height')).toBe('100%');
+    expect(css(p, 'min-width')).toBe('0');
+    expect(css(p, 'min-height')).toBe('0');
+    for (const row of ['agent-title', 'member-tabs']) expect(css(p.querySelector(`[data-test=${row}]`)!, 'flex'), row).toBe('none');
+  });
+
+  it("the title bar's chips shrink and ellipsize, on one line, and the ☰ never shrinks", () => {
+    const title = tile().get('[data-test=agent-title]').element;
+    expect(css(title, 'white-space')).toBe('nowrap');
+    expect(css(title, 'min-width')).toBe('0');
+    const items = ['[data-test=agent-name]', '.chip', '[data-test=agent-cli]', '[data-test=agent-face-state]', '[data-test=agent-more-waiting]'];
+    for (const sel of items) {
+      const el = title.querySelector(sel)!;
+      expect(el, sel).not.toBeNull();
+      expect(css(el, 'text-overflow'), sel).toBe('ellipsis');
+      expect(css(el, 'overflow'), sel).toBe('hidden');
+      expect(css(el, 'white-space'), sel).toBe('nowrap');
+      expect(css(el, 'min-width'), sel).toBe('0');
+      expect(css(el, 'flex'), sel).toBe('0 1 auto');
+    }
+    expect(css(title.querySelector('.menu-wrap')!, 'flex')).toBe('none');
+    expect(css(title.querySelector('.avatar')!, 'flex')).toBe('none');
+    // The ☰ menu drops out of the title bar: nothing there clips it.
+    expect(css(title, 'overflow')).toBeUndefined();
+  });
+
+  it('the tab row stays one line: the tabs keep their size, the details ellipsize', () => {
+    const tabs = tile().get('[data-test=member-tabs]').element;
+    expect(css(tabs, 'flex-wrap')).toBe('nowrap');
+    expect(css(tabs, 'white-space')).toBe('nowrap');
+    expect(css(tabs.querySelector('[data-test=member-view-toggle]')!, 'flex')).toBe('none');
+    const state = tabs.querySelector('[data-test=agent-state]')!;
+    expect(css(state, 'min-width')).toBe('0');
+    expect(css(state, 'text-overflow')).toBe('ellipsis');
+  });
+
+  it('the view scrolls inside the tile instead of growing the pane', async () => {
+    const w = tile();
+    const body = w.get('[data-test=member-pane-body]').element;
+    expect(css(body, 'flex')).toBe('1 1 auto');
+    expect(css(body, 'min-height')).toBe('0');
+    expect(css(body, 'overflow')).toBe('auto');
+    expect(css(w.get('[data-test=agent-output]').element, 'overflow-y')).toBe('auto');
+    await w.get('[data-test=member-view-activity]').trigger('click');
+    expect(css(w.get('.member-activity').element, 'min-height')).toBe('0');
+  });
+
+  it('on a phone it is not a tile: a block as tall as its rows, the view unscrolled (the page scrolls)', () => {
+    const phone = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
+    expect(phone).toMatch(/\n {2}\.pane \{ [^}]*display: block; height: auto; \}/);
+    expect(phone).toMatch(/\n {2}\.pane > \.body \{ overflow: visible; \}/);
+    expect(phone).toMatch(/\n {2}\.tabs \{ flex-wrap: wrap;/);
   });
 });
 
