@@ -79,4 +79,24 @@ describe('card 390: the fake core serves the real UiRpc B085 shapes', () => {
     call(TEAM_WORKFLOW_EXPIRY, { teamId: 1, days: 9 });
     expect((call('teams.list').result as any[]).find((t) => t.id === 1).workflowExpiryDays).toBe(9);
   });
+
+  // Card 390 re-verify: the values behind F1 and F3, not only the keys.
+  it('F1: expiryWarning is the core\'s WarningText on the warned #12, null on #10 and #9, and null again after Extend', () => {
+    const { call } = core();
+    const list = () => call('bus.workflows', { teamId: 1 }).result as any[];
+    const by = (id: number) => list().find((w) => w.id === id);
+    expect(by(12).expiryWarning).toBe('#12 will expire tomorrow; it waits on your answer to question 3');
+    expect(by(10).expiryWarning).toBeNull();
+    expect(by(9).expiryWarning).toBeNull();
+    expect(call(WORKFLOW_EXTEND, { teamId: 1, workflow: 12 }).result.expiryWarning).toBeNull();
+    expect(by(12).expiryWarning).toBeNull();
+  });
+
+  it('F3: with workflowExpiryDays 9, Extend sets expiresAt = now + 9 days, and the list item shows the same expiresAt', () => {
+    const { call } = core();
+    call(TEAM_WORKFLOW_EXPIRY, { teamId: 1, days: 9 });
+    const r = call(WORKFLOW_EXTEND, { teamId: 1, workflow: 12 }).result;
+    expect(Math.abs(Date.parse(r.expiresAt) - (Date.now() + 9 * 86400_000))).toBeLessThan(60_000);
+    expect((call('bus.workflows', { teamId: 1 }).result as any[]).find((w) => w.id === 12).expiresAt).toBe(r.expiresAt);
+  });
 });

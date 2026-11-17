@@ -77,6 +77,8 @@ test('the workflows dialog: #9 Expired with ended/expired times, #12 Expires in 
   const w9 = page.locator('[data-test=workflow-9]');
   await expect(w9.locator('[data-test=workflow-state]')).toHaveText('Expired');
   await expect(w9).toContainText(/ended .* · expired /);
+  // F2 (card 390 re-verify): the core's ending is the detail only, so the line reads once "Expired: ...".
+  await expect(w9.locator('.ending').first()).toHaveText('Expired: no activity for 3 days');
   await expect(w9.locator('[data-test=workflow-extend]')).toHaveCount(0); // an ended one has no Extend
   const w12 = page.locator('[data-test=workflow-12]');
   await expect(w12.locator('[data-test=workflow-expires]')).toContainText(/Expires in (19|20) h/);
