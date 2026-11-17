@@ -21,6 +21,7 @@ const agents = [
   agent(3, 'TesterWren', 'member', 'queued', { queuePosition: 2 }),
 ];
 
+let asked: any[] = [];
 function api(): YawbleApi {
   return {
     getInfo: async () => { throw new Error('no'); },
@@ -31,7 +32,7 @@ function api(): YawbleApi {
           { id: 1, name: 'payments', repoPath: 'C:/repos/payments', members: 3, running: 1, queued: 0 },
           { id: 2, name: 'quiet', repoPath: null, members: 1, running: 0, queued: 0 }] } as any;
         case 'link.status': return { state: 'off', viewers: [] } as any;
-        case 'bus.workflows': return (p?.teamId === 1 ? list : []) as any;
+        case 'bus.workflows': asked.push(p); return (p?.teamId === 1 ? list : []) as any;
         case 'teams.agents': return (p?.teamId === 1 ? agents : []) as any;
         default: return [] as any;
       }
@@ -50,14 +51,15 @@ async function teamsPage() {
 }
 
 describe("each team's card lists its recent workflows", () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = ''; });
+  beforeEach(() => { asked = []; localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = ''; });
 
-  it('shows the five newest, last updated first, with their state and last-entry time', async () => {
+  it('shows up to the 50 newest (every one the core lists), last updated first, with their state and last-entry time', async () => {
     const w = await teamsPage();
+    expect(asked.filter((p) => p?.teamId === 1).every((p) => p.limit === 50)).toBe(true);
     const card = w.findAll('[data-test=team-card]')[0];
     const rows = card.findAll('[data-test=team-workflow]');
-    expect(rows.map((r) => r.attributes('data-id'))).toEqual(['3', '4', '5', '2', '1']);
-    expect(rows.map((r) => r.attributes('data-status'))).toEqual(['working', 'waiting', 'completed', 'completed', 'closed']);
+    expect(rows.map((r) => r.attributes('data-id'))).toEqual(['3', '4', '5', '2', '1', '6']);
+    expect(rows.map((r) => r.attributes('data-status'))).toEqual(['working', 'waiting', 'completed', 'completed', 'closed', 'completed']);
     expect(rows[0].text()).toContain('#3');
     expect(rows[0].text()).toContain('Workflow number 3');
     expect(rows[0].get('[data-test=team-workflow-time]').text()).not.toBe('');

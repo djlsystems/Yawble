@@ -6,15 +6,20 @@ import MemberAvatar from '../faces/MemberAvatar.vue';
 import { MemberStateLabel, memberStateOf, type MemberState } from '../faces/faces';
 import { memberKey, MonitorModel, spaced, teamKey, type ActivityRow, type FeedRow, type TeamSnapshot } from './model';
 import { MonitorScene, Palette, type SceneHover } from './scene';
-import { clampLayout, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, LayoutStep, readLayout, writeLayout, type LayoutKey, type LayoutSettings } from './layout';
+import {
+  clampLayout, Densities, DefaultDensity, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, LayoutStep, readDensity, readLayout,
+  writeDensity, writeLayout, type Density, type LayoutKey, type LayoutSettings,
+} from './layout';
+import { MonitorSound, readSound, writeSound } from './sound';
 import { readStep, StepLook, type StepKind, type StepRow } from './steps';
 import Timeline from './Timeline.vue';
 import LoadingNote from '../components/LoadingNote.vue';
 import { heavyLine } from '../heavyLease';
 import { useNarrow } from '../narrowScreen';
 import {
-  DefaultSpeed, DefaultWindowMinutes, MaxWindowMinutes, mergeByTime, ReplayClock, ReplayStates, Speeds, timeOf, trimByTime, Windows,
+  DefaultSpeed, DefaultWindowMinutes, inTimeOrder, MaxWindowMinutes, mergeByTime, ReplayClock, ReplayStates, Speeds, timeOf, trimByTime, Windows,
 } from './timeline';
+import { codeEventKey, MapIdleChoices, readCodeEvents, readMapIdle, writeMapIdle, type CodeEvent } from './codemap';
 import { entryTime, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown, type WorkflowIcon } from './workflows';
 
 /**
@@ -29,12 +34,25 @@ import { entryTime, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown, 
  * the states the replay works out (ReplayStates), and when it catches up with now, or the person presses Live, the
  * wall is live again.
  *
+ * The code events (monitor.codeEvents: commits, merges into the team branch, landings on main, pushes) are polled
+ * the same way and build each team's code map with the steps (codemap.ts); a core without the read leaves the map to
+ * the steps alone. The replay plays them at their times with the rest.
+ *
  * Each team's newest workflows (bus.workflows) sit in one panel hung off its hub, live only: they are fetched when the bus brings that
  * team something and otherwise every WorkflowPollMs, and a replay shows none (it would be faking their history).
  * Clicking one opens the team at its Workflows dialog.
+ *
+ * A click on a team's hub focuses it (the scene zooms to it and dims the rest); Esc, a click on the empty wall or the
+ * chip's × shows every team again. A click on the You node opens Needs you (emit openNeedsYou). Beside the camera:
+ * the density (calm / normal / lively, kept) and the sound (off unless turned on, kept; sound.ts); on a phone both
+ * sit at the top of the cog's panel.
  */
 const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
-const emit = defineEmits<{ openTeam: [teamId: number, panel?: 'workflows']; openWorkflow: [teamId: number, workflow: number]; openTerminal: [teamId: number, memberId: number] }>();
+const emit = defineEmits<{
+  openTeam: [teamId: number, panel?: 'workflows']; openWorkflow: [teamId: number, workflow: number]; openTerminal: [teamId: number, memberId: number];
+  /** The You node was clicked: the app opens what needs the person (the Board's Needs You). */
+  openNeedsYou: [];
+}>();
 const api = resolveApi(props.api);
 
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -83,6 +101,92 @@ function fitOnce(): void {
   scene?.fit();
 }
 /**
+ * What the view asks of the scene beyond the camera (DeveloperTomas's scene.ts, card 373): each one optional, so a
+ * scene without it leaves the view's control doing nothing on the wall (the view's own state is kept all the same).
+ */
+interface SceneExtras {
+  setFocus?: (teamId: number | null) => void;
+  setDensity?: (level: Density) => void;
+  hitYouNode?: (x: number, y: number) => boolean;
+}
+const extras = (): SceneExtras | null => scene as unknown as SceneExtras | null;
+
+// Focus: a click on a team zooms the wall to it and dims the rest; Esc, a click on the empty wall or the chip's ×
+// leaves. Not kept: the Monitor opens on everything.
+const focus = ref<{ id: number; name: string } | null>(null);
+function setFocus(team: { id: number; name: string } | null): void {
+  if ((focus.value?.id ?? null) === (team?.id ?? null)) return;
+  focus.value = team ? { id: team.id, name: team.name } : null;
+  try { extras()?.setFocus?.(team ? team.id : null); } catch { /* the scene could not; the view stays as it was */ }
+}
+function leaveFocus(): void { setFocus(null); }
+/** A pick from the wall: a team's hub focuses that team (a member or a file leaves the focus as it is). */
+function onScenePick(key: string | null): void {
+  pickSeq++;
+  if (key === null || key.startsWith('you')) return;
+  picked.value = key;
+  if (!key.startsWith('t:')) return;
+  const t = teams.value.find((x) => `t:${x.name.toLowerCase()}` === key);
+  if (t) setFocus(t);
+}
+function onKey(e: KeyboardEvent): void {
+  if (e.key !== 'Escape' || e.defaultPrevented || !focus.value) return;
+  const el = e.target as HTMLElement | null;
+  if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+  leaveFocus();
+}
+
+// A plain click on the wall (pressed and let go within ClickSlopPx, one pointer, and the scene took no pick in
+// between): on the You node it opens Needs you; anywhere else empty it leaves the focus.
+const ClickSlopPx = 5;
+let pickSeq = 0;
+let press: { x: number; y: number; seq: number; id: number } | null = null;
+let pointersDown = 0;
+function canvasPoint(e: PointerEvent): [number, number] {
+  const b = canvas.value!.getBoundingClientRect();
+  return [e.clientX - b.left, e.clientY - b.top];
+}
+/** Runs in the capture phase, so before the scene's own pointerdown (which may pick). */
+function onWallDown(e: PointerEvent): void {
+  if (e.target !== canvas.value) return;
+  pointersDown++;
+  press = pointersDown === 1 ? { x: e.clientX, y: e.clientY, seq: pickSeq, id: e.pointerId } : null;
+}
+/** Runs after the scene's pointerup. */
+function onWallUp(e: PointerEvent): void {
+  if (e.target !== canvas.value) return;
+  pointersDown = Math.max(0, pointersDown - 1);
+  const p = press;
+  press = null;
+  if (!p || p.id !== e.pointerId || Math.hypot(e.clientX - p.x, e.clientY - p.y) >= ClickSlopPx) return;
+  const [x, y] = canvasPoint(e);
+  let you = false;
+  try { you = extras()?.hitYouNode?.(x, y) === true; } catch { you = false; }
+  if (you) { emit('openNeedsYou'); return; }
+  if (p.seq === pickSeq) leaveFocus();
+}
+function onWallCancel(): void { pointersDown = Math.max(0, pointersDown - 1); press = null; }
+
+// Density: how much of what happens moves on the wall (calm / normal / lively), kept. Reduced motion stands at any.
+const density = ref<Density>(readDensity());
+function setDensity(level: Density): void {
+  density.value = level;
+  try { extras()?.setDensity?.(level); } catch { /* the scene could not */ }
+  writeDensity(level);
+}
+
+// Sound: a quiet tone per kind of event (sound.ts), off unless turned on; kept. Live only, never in a replay.
+const sound = new MonitorSound();
+const soundOn = ref(readSound());
+sound.on = soundOn.value;
+function toggleSound(): void {
+  soundOn.value = !soundOn.value;
+  sound.on = soundOn.value;
+  if (soundOn.value) sound.unlock();
+  writeSound(soundOn.value);
+}
+
+/**
  * A phone (B037): the wall fills the screen, the activity starts collapsed (a bar under the timeline; how it is left
  * there is not kept, so the desktop's choice stands), and the camera and legend controls sit in one compact row.
  */
@@ -111,6 +215,21 @@ let raf = 0;
 // The timeline: what it holds, how far back it shows, and the replay.
 const rows = shallowRef<FeedRow[]>([]);
 const steps = shallowRef<StepRow[]>([]);
+const events = shallowRef<CodeEvent[]>([]);
+/** The code events already taken (the read is asked again from the newest one's time, so it overlaps). */
+const eventKeys = new Set<string>();
+let eventsSince = 0;
+/** How the code read is asked: for every team at once, per team, or not at all (a core without it). */
+let codeMode: 'all' | 'team' | 'off' = 'all';
+/** How long a file stays on the map after its last touch, minutes (the person's choice, kept). */
+const mapIdle = ref(readMapIdle());
+live.map.idleMs = mapIdle.value * 60_000;
+function setMapIdle(minutes: number): void {
+  mapIdle.value = minutes;
+  live.map.idleMs = minutes * 60_000;
+  if (model !== live) model.map.idleMs = minutes * 60_000;
+  writeMapIdle(minutes);
+}
 const WindowKey = 'yawble.monitor.windowMinutes';
 const windowMinutes = ref(readWindow());
 const now = ref(Date.now());
@@ -182,6 +301,8 @@ async function snapshot() {
   live.reconcile(next, performance.now());
   teams.value = next;
   scene?.setTeams(next);
+  // A focused team that is gone (deleted, archived) leaves the focus.
+  if (focus.value && !next.some((t) => t.id === focus.value!.id)) leaveFocus();
 }
 
 /**
@@ -246,20 +367,43 @@ async function stepFeed(first: boolean): Promise<StepRow[]> {
   return got;
 }
 
-/** Applies rows and steps to a model in the order they happened, without playing them (the start, a replay's past). */
-function catchUp(m: MonitorModel, rs: readonly FeedRow[], ss: readonly StepRow[], into?: ReplayStates) {
-  let i = 0, j = 0;
-  while (i < rs.length || j < ss.length) {
-    // (The index moves outside the optional call: `into?.row(rs[i++])` would skip the ++ without `into`.)
-    if (j >= ss.length || (i < rs.length && timeOf(rs[i]!) <= timeOf(ss[j]!))) {
-      const r = rs[i++]!;
-      m.apply(r, 0, false);
-      into?.row(r);
-    } else {
-      const s = ss[j++]!;
-      m.applyStep(s, 0, false);
-      into?.step(s);
+/**
+ * The code feed: the commits, merges, landings and pushes since the newest one taken (from the start of the timeline
+ * at first). A fresh one plays live; any joins the timeline and the map. The read is asked for all teams at once; if
+ * that is refused it is asked per team, and if that is refused too (a core without it) the map keeps to the steps.
+ */
+async function codeFeed(first: boolean): Promise<CodeEvent[]> {
+  if (codeMode === 'off') return [];
+  const since = new Date(first ? Date.now() - MaxWindowMinutes * 60_000 : eventsSince).toISOString();
+  let got: CodeEvent[] = [];
+  try {
+    if (codeMode === 'all') {
+      try { got = readCodeEvents(await api.call<unknown>('monitor.codeEvents', { since })); }
+      catch { codeMode = 'team'; }
     }
+    if (codeMode === 'team')
+      for (const t of teams.value) got.push(...readCodeEvents(await api.call<unknown>('monitor.codeEvents', { team: t.name, since })));
+  } catch {
+    codeMode = 'off';
+    return [];
+  }
+  const fresh = got.filter((e) => { const k = codeEventKey(e); if (eventKeys.has(k)) return false; eventKeys.add(k); return true; });
+  fresh.sort((a, b) => timeOf(a) - timeOf(b));
+  for (const e of fresh) eventsSince = Math.max(eventsSince, timeOf(e));
+  if (!first) {
+    const wall = Date.now();
+    for (const e of fresh) live.applyCode(e, performance.now(), mode.value === 'live' && wall - timeOf(e) < FreshStepMs);
+  }
+  if (fresh.length) events.value = mergeByTime([...events.value], fresh);
+  return fresh;
+}
+
+/** Applies rows, steps and code events to a model in the order they happened, without playing them (the start, a replay's past). */
+function catchUp(m: MonitorModel, rs: readonly FeedRow[], ss: readonly StepRow[], es: readonly CodeEvent[] = [], into?: ReplayStates) {
+  for (const p of inTimeOrder(rs, ss, es)) {
+    if ('row' in p) { m.apply(p.row, 0, false); into?.row(p.row); }
+    else if ('step' in p) { m.applyStep(p.step, 0, false); into?.step(p.step); }
+    else m.applyCode(p.event, 0, false);
   }
 }
 
@@ -270,14 +414,20 @@ async function tick(first = false) {
     await snapshot();
     const fr = await feed(first);
     const fs = await stepFeed(first);
+    const fe = await codeFeed(first);
     await workflowFeed(first, new Set(fr.map((r) => r.team.toLowerCase())));
-    if (first) catchUp(live, [...fr].sort((a, b) => timeOf(a) - timeOf(b)), fs);
+    if (first) catchUp(live, [...fr].sort((a, b) => timeOf(a) - timeOf(b)), fs, fe);
     const from = Date.now() - MaxWindowMinutes * 60_000;
     rows.value = trimByTime(rows.value, from, 4000);
     steps.value = trimByTime(steps.value, from, 30_000);
-    replay?.extend(rows.value, steps.value);
-    if (mode.value === 'live' && scene) scene.effects.push(...live.effects.splice(0));
-    else live.effects.length = 0;
+    events.value = trimByTime(events.value, from, 5000);
+    if (eventKeys.size > 20_000) { eventKeys.clear(); for (const e of events.value) eventKeys.add(codeEventKey(e)); }
+    replay?.extend(rows.value, steps.value, events.value);
+    if (mode.value === 'live') {
+      const fx = live.effects.splice(0);
+      sound.hear(fx);
+      scene?.effects.push(...fx);
+    } else live.effects.length = 0;
     if (model === live) activity.value = [...live.activity];
     error.value = null;
   } catch (e) {
@@ -298,12 +448,15 @@ function startReplay(at: number) {
   const from = Math.max(at, wall - MaxWindowMinutes * 60_000);
   const m = new MonitorModel();
   m.reconcile(teams.value, performance.now());
+  m.map.idleMs = mapIdle.value * 60_000;
+  m.logNow = () => replay?.at ?? from;
   const st = new ReplayStates();
-  // The half hour before the moment sets the states and the activity list; older rows would only fill the list.
-  const lead = from - 30 * 60_000;
-  catchUp(m, rows.value.filter((r) => timeOf(r) >= lead && timeOf(r) < from), steps.value.filter((s) => timeOf(s) >= lead && timeOf(s) < from), st);
+  // The stretch before the moment (the map's idle time, at least half an hour) sets the states, the map and the activity list.
+  const lead = from - Math.max(30, mapIdle.value) * 60_000;
+  const before = (x: { at: string }) => timeOf(x) >= lead && timeOf(x) < from;
+  catchUp(m, rows.value.filter(before), steps.value.filter(before), events.value.filter(before), st);
   m.effects.length = 0;
-  replay = new ReplayClock(rows.value, steps.value, from, speed.value);
+  replay = new ReplayClock(rows.value, steps.value, from, speed.value, undefined, events.value);
   replayStates = st;
   model = m;
   mode.value = 'replay';
@@ -347,15 +500,10 @@ function frame(t: number) {
   if (!replay || !replayStates) return;
   const wall = Date.now();
   const due = replay.step(dt, wall);
-  let i = 0, j = 0;
-  while (i < due.rows.length || j < due.steps.length) {
-    if (j >= due.steps.length || (i < due.rows.length && timeOf(due.rows[i]!) <= timeOf(due.steps[j]!))) {
-      model.apply(due.rows[i]!, t, true);
-      replayStates.row(due.rows[i++]!);
-    } else {
-      model.applyStep(due.steps[j]!, t, true);
-      replayStates.step(due.steps[j++]!);
-    }
+  for (const p of inTimeOrder(due.rows, due.steps, due.events)) {
+    if ('row' in p) { model.apply(p.row, t, true); replayStates.row(p.row); }
+    else if ('step' in p) { model.applyStep(p.step, t, true); replayStates.step(p.step); }
+    else model.applyCode(p.event, t, true);
   }
   if (scene) scene.effects.push(...model.effects.splice(0));
   else model.effects.length = 0;
@@ -397,12 +545,15 @@ onMounted(async () => {
     scene.setPinned(pinned.value);
     if (layoutChanged.value) scene.setLayout(layout.value);
     scene.onHover = (h) => { hover.value = h; };
-    scene.onPick = (k) => { picked.value = k; };
+    scene.onPick = onScenePick;
     scene.onOpenWorkflow = (team, id) => {
+      pickSeq++;
       const t = teams.value.find((x) => x.name.toLowerCase() === team.toLowerCase());
       if (t) openWorkflow(t.id, id);
     };
+    if (density.value !== DefaultDensity) setDensity(density.value);
   }
+  window.addEventListener('keydown', onKey);
   await tick(true);
   timers = [
     setInterval(() => void tick(), props.pollMs ?? 1200),
@@ -411,14 +562,20 @@ onMounted(async () => {
   clock.value = new Date().toLocaleTimeString();
   if (typeof requestAnimationFrame === 'function') raf = requestAnimationFrame(frame);
 });
-onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimationFrame(raf); scene?.destroy(); });
+onBeforeUnmount(() => {
+  for (const t of timers) clearInterval(t);
+  cancelAnimationFrame(raf);
+  window.removeEventListener('keydown', onKey);
+  sound.destroy();
+  scene?.destroy();
+});
 </script>
 
 <template>
   <div class="monitor" :class="{ phone }" data-test="monitor">
     <div class="main">
-      <div class="stage">
-        <canvas ref="canvas" class="wall" data-test="monitor-canvas"></canvas>
+      <div class="stage" @pointerdown.capture="onWallDown" @pointerup="onWallUp" @pointercancel="onWallCancel">
+        <canvas ref="canvas" class="wall" :class="{ focused: !!focus }" data-test="monitor-canvas"></canvas>
         <div class="hud">
           <div v-if="mode === 'live'" class="title"><span class="live" />LIVE <span class="clock">{{ clock }}</span></div>
           <div v-else class="title replay" data-test="monitor-replaying"><span class="rec" />REPLAY {{ speed }}× <span class="clock">{{ replayClock }}</span></div>
@@ -430,6 +587,11 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
           </div>
           <div class="sub">{{ teams.length }} team{{ teams.length === 1 ? '' : 's' }} · {{ counts.members }} member{{ counts.members === 1 ? '' : 's' }}<template v-if="mode === 'replay'"> · the counts are now; the wall is the replay</template></div>
           <div v-if="heavy" class="heavy" data-test="monitor-heavy" title="The heavy-work lease: a full test suite, build or image build runs a few at a time">{{ heavy }}</div>
+          <div v-if="focus" class="focus-chip" data-test="monitor-focus">
+            <span class="focus-name">Focused on <b>{{ focus.name }}</b></span>
+            <button class="ctl" type="button" data-test="monitor-focus-leave" :title="phone ? 'Show every team' : 'Show every team (Esc, or click the empty wall)'"
+              aria-label="Show every team" @click="leaveFocus">×</button>
+          </div>
         </div>
         <div class="controls">
           <div class="seg" role="group" aria-label="Camera" data-test="monitor-camera">
@@ -448,6 +610,21 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
                 fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
             </svg>
           </button>
+          <template v-if="!phone">
+            <div class="seg" role="group" aria-label="Density" data-test="monitor-density">
+              <button v-for="d in Densities" :key="d.level" class="ctl" :class="{ on: density === d.level }" type="button" :aria-pressed="density === d.level"
+                :data-test="`monitor-density-${d.level}`" :title="d.help" @click="setDensity(d.level)">{{ d.label }}</button>
+            </div>
+            <button class="ctl sound" :class="{ on: soundOn }" type="button" data-test="monitor-sound" :aria-pressed="soundOn"
+              :aria-label="soundOn ? 'Sound on' : 'Sound off'" :title="soundOn ? 'Sound on: a quiet tone for needs you, failures, handbacks, commits and merges' : 'Sound off'"
+              @click="toggleSound">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" fill="currentColor" />
+                <path v-if="soundOn" d="M10.6 5.4a3.6 3.6 0 0 1 0 5.2M12.4 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                <path v-else d="M10.5 6l4 4M14.5 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+              </svg>
+            </button>
+          </template>
           <button v-if="phone" class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
             :aria-expanded="legendOpen" :title="legendOpen ? 'Hide the legend' : 'Show the legend'" @click="toggleLegend">{{ legendOpen ? 'Legend ▾' : 'Legend ▸' }}</button>
         </div>
@@ -456,6 +633,14 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
             <strong>Network forces</strong>
             <button class="ctl close" type="button" aria-label="Close" data-test="monitor-layout-close" @click="layoutOpen = false">×</button>
           </header>
+          <!-- A phone has no room beside the cog: the density and the sound sit at the top of its panel. -->
+          <div v-if="phone" class="wallprefs">
+            <div class="seg" role="group" aria-label="Density" data-test="monitor-density">
+              <button v-for="d in Densities" :key="d.level" class="ctl" :class="{ on: density === d.level }" type="button" :aria-pressed="density === d.level"
+                :data-test="`monitor-density-${d.level}`" :title="d.help" @click="setDensity(d.level)">{{ d.label }}</button>
+            </div>
+            <button class="ctl sound" :class="{ on: soundOn }" type="button" data-test="monitor-sound" :aria-pressed="soundOn" @click="toggleSound">{{ soundOn ? 'Sound on' : 'Sound off' }}</button>
+          </div>
           <label v-for="f in LayoutFields" :key="f.key" class="force" :title="f.help">
             <span class="name">{{ f.label }}</span>
             <input type="range" :min="LayoutMin" :max="LayoutMax" :step="LayoutStep" :value="layout[f.key]" :data-test="`monitor-layout-${f.key}`"
@@ -479,6 +664,11 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
           <span><i class="tone" :style="{ background: Palette.fail }" />failed</span>
           <span class="sep" />
           <span v-for="k in legendSteps" :key="k"><i class="dot" :style="{ background: StepLook[k].color }" />{{ StepLook[k].done }}</span>
+          <span class="sep" />
+          <span data-test="monitor-legend-code"><i class="dot" :style="{ background: Palette.commit }" />commit</span>
+          <span><i class="tone" :style="{ background: Palette.handback }" />merged</span>
+          <span><i class="tone" :style="{ background: Palette.done }" />landed</span>
+          <span><i class="tone" :style="{ background: Palette.tell }" />pushed</span>
           <template v-if="mode === 'live'">
             <span class="sep" />
             <span class="wfl" data-test="monitor-legend-workflows">
@@ -506,14 +696,21 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
         </ul>
         <div v-if="hover" class="tip" :style="{ left: `${hover.x}px`, top: `${hover.y}px` }" data-test="monitor-tip">
           <template v-if="hover.kind === 'file'">
-            <template v-if="hover.path">
-              <strong class="path">{{ hover.path }}</strong>
-              <span :style="{ color: StepLook[hover.fileKind ?? 'edit'].color }">{{ hover.fileKind === 'create' ? 'written' : 'edited' }}{{ (hover.touches ?? 1) > 1 ? ` ${hover.touches}×` : '' }} by {{ spaced(hover.name) }}</span>
-            </template>
-            <template v-else>
-              <strong>{{ hover.more?.length }} more files by {{ spaced(hover.name) }}</strong>
-              <span v-for="p in (hover.more ?? []).slice(0, 8)" :key="p" class="dim path">{{ p }}</span>
-            </template>
+            <strong class="path" data-test="monitor-tip-path">{{ hover.path }}</strong>
+            <span :style="{ color: StepLook[hover.fileKind ?? 'edit'].color }">{{ hover.fileKind === 'create' ? 'new' : hover.fileKind === 'read' ? 'read' : 'changed' }}{{ (hover.touches ?? 1) > 1 ? ` · ${hover.touches} touches` : '' }}</span>
+            <span v-if="hover.members?.length" class="dim">by {{ hover.members.map(spaced).join(', ') }}</span>
+            <span class="dim">{{ hover.sha ? `in commit ${hover.sha}` : 'not committed yet (from the steps)' }} · {{ hover.team }}</span>
+          </template>
+          <template v-else-if="hover.kind === 'folder'">
+            <strong class="path">{{ hover.name }}</strong>
+            <span v-if="hover.more?.length" class="dim">{{ hover.more.length }} file{{ hover.more.length === 1 ? '' : 's' }} touched</span>
+            <span v-for="p in (hover.more ?? []).slice(0, 8)" :key="p" class="dim path">{{ p }}</span>
+            <span v-if="(hover.more?.length ?? 0) > 8" class="dim">+{{ hover.more!.length - 8 }} more</span>
+          </template>
+          <template v-else-if="hover.kind === 'commit'">
+            <strong data-test="monitor-tip-commit">{{ hover.message || '(no message)' }}</strong>
+            <span :style="{ color: Palette.commit }">{{ hover.sha }} · {{ hover.touches }} file{{ hover.touches === 1 ? '' : 's' }}</span>
+            <span class="dim">{{ spaced(hover.name) }} · {{ hover.team }}</span>
           </template>
           <template v-else-if="hover.kind === 'workflow' && hover.workflow">
             <strong>#{{ hover.workflow.id }} {{ hover.workflow.title }}</strong>
@@ -551,8 +748,14 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
             <button class="ctl live-btn" data-test="monitor-live" @click="goLive">● Back to live</button>
           </template>
           <span v-else class="hint">click or drag the timeline to replay from a moment</span>
+          <label class="idle" title="How long a file stays on the code map after its last touch (it also leaves when its workflow ends)">
+            files stay
+            <select :value="mapIdle" data-test="monitor-map-idle" @change="setMapIdle(Number(($event.target as HTMLSelectElement).value))">
+              <option v-for="m in MapIdleChoices" :key="m" :value="m">{{ m < 60 ? `${m}m` : `${m / 60}h` }}</option>
+            </select>
+          </label>
         </div>
-        <Timeline :from="windowFrom" :to="now" :rows="rows" :steps="steps" :playhead="playhead" :live="mode === 'live'" @seek="startReplay" />
+        <Timeline :from="windowFrom" :to="now" :rows="rows" :steps="steps" :events="events" :playhead="playhead" :live="mode === 'live'" @seek="startReplay" />
       </div>
     </div>
 
@@ -603,7 +806,17 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 .figures b { font-size: 20px; color: #e2e8f0; margin-right: 4px; font-variant-numeric: tabular-nums; }
 .sub { font-size: 11px; color: #64748b; margin-top: 2px; }
 .heavy { font-size: 11px; color: #cbd5e1; margin-top: 2px; max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.controls { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; }
+.controls { position: absolute; top: 12px; right: 12px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: calc(100% - 24px); }
+/* The speaker beside the density: lit when on. */
+.sound { display: inline-flex; align-items: center; padding: 3px 6px; color: #94a3b8; }
+.sound svg { width: 15px; height: 15px; }
+.sound.on { color: #e0f2fe; border-color: #38bdf8; background: rgba(56, 189, 248, .18); }
+/* The focused team's chip under the counts: its × shows every team again. */
+.focus-chip { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; max-width: 100%;
+  background: rgba(56, 189, 248, .12); border: 1px solid #38bdf8; border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px; color: #e0f2fe; }
+.focus-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.focus-chip .ctl { border-radius: 999px; padding: 0 8px; }
+.wallprefs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ctl { background: rgba(12, 19, 34, .85); color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px; padding: 3px 10px; font-size: 12px; }
 .ctl:hover:not(:disabled) { border-color: #38bdf8; }
 /* Auto fit | Fit | Pinned: one joined control; the camera's mode is lit. */
@@ -654,6 +867,8 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 .seg:hover:not(.on) { color: #e2e8f0; }
 .live-btn { color: #fda4af; padding: 2px 10px; font-size: 11px; }
 .hint { opacity: .8; }
+.idle { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.idle select { background: #0c1322; color: #cbd5e1; border: 1px solid #1e293b; border-radius: 6px; font-size: 11px; padding: 1px 4px; }
 .activity { width: 22rem; flex: none; display: flex; flex-direction: column; border-left: 1px solid #1e293b; background: #0c1322; min-height: 0; }
 .activity.collapsed { width: 2.25rem; }
 .rail { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 0; border: 0; background: transparent; color: #94a3b8; cursor: pointer; }
@@ -689,6 +904,8 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
   /* The forces panel sits above the compact row, the screen's width less the margins, scrolling when it is taller. */
   .forces { top: auto; bottom: 60px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 76px); overflow-y: auto; }
   .forces .ctl { min-height: 44px; min-width: 44px; }
+  .wallprefs .seg .ctl { padding: 0 10px; }
+  .focus-chip .ctl { min-height: 44px; min-width: 44px; }
   .force input { min-height: 44px; }
   .legend { bottom: 60px; padding: 8px 10px; max-height: 40%; overflow-y: auto; pointer-events: auto; }
   .tip { max-width: calc(100vw - 24px); }
@@ -696,6 +913,7 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
   .bar-controls { flex-wrap: wrap; }
   .bar-controls .hint { display: none; }
   .bar-controls .seg { min-height: 44px; min-width: 44px; }
+  .idle select { min-height: 44px; font-size: 16px; }
   .live-btn { min-height: 44px; }
   .activity { height: 50%; }
   .activity.collapsed { height: 44px; }

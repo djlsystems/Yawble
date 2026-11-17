@@ -38,7 +38,9 @@ const paths: Record<string, string> = {
   undo: 'M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
   checkAll: 'M2 12l5 5L18 6 M12 16l1.5 1.5L22 9',
   dispatch: 'M22 2 11 13 M22 2l-7 20-4-9-9-4Z',
-  close: 'M18 6 6 18 M6 6l12 12',
+  clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 6v6l4 2',
+  branch: 'M6 3v12 M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M18 9a9 9 0 0 1-9 9',
+  close:'M18 6 6 18 M6 6l12 12',
   alert:'M12 9v4 M12 17h.01 M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
 };
 </script>

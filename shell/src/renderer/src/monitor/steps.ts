@@ -1,8 +1,8 @@
 /**
  * THE MEMBERS' STEPS: what a member does between its bus messages - each file it reads or changes, each command it
  * runs, each search, each web fetch, each bus call - as the core reads them from its runs' transcripts
- * (monitor.steps). A step is drawn as a small icon that rises off the member and fades; the file it changes stays
- * as a labelled node beside the member, tied to it by a line, for FileTtlMs after its last touch (FileTrail).
+ * (monitor.steps). A step is drawn as a small icon that rises off the member and fades; the file it reads or
+ * changes takes its node on the team's code map (codemap.ts), tied to the member by a line.
  * The icons are drawn on the canvas (icons.ts), so nothing is downloaded.
  */
 
@@ -80,92 +80,4 @@ export function stepDoing(s: Pick<StepRow, 'kind' | 'tool' | 'target'>): string 
   const look = StepLook[s.kind];
   const what = changesFile(s) || s.kind === 'read' ? fileName(s.target ?? '') : stepCaption(s, 26);
   return what ? `${look.doing} ${what}` : look.doing;
-}
-
-// --- the files a member changes, in display time ---------------------------------------------------------------
-
-/** How long a changed file stays beside its member after its last touch, how it fades in and out, and its pulse. */
-export const FileTtlMs = 30_000;
-export const FileInMs = 300;
-export const FileFadeMs = 8_000;
-export const FilePulseMs = 1_200;
-/** At most this many files are nodes beside one member; the rest are counted on a "+N" node. */
-export const MaxFileNodes = 6;
-
-export interface FileMark {
-  member: string; path: string; name: string; kind: 'edit' | 'create';
-  /** Display times (performance.now()) of its first and latest touch. */
-  first: number; last: number; touches: number;
-  /** Its place beside the member (0..MaxFileNodes-1), or -1 while it is only counted on the "+N" node. */
-  slot: number;
-}
-
-/** How strongly a file shows at `now`: in quickly, out over its last seconds; under reduced motion simply there. */
-export function fileAlpha(f: Pick<FileMark, 'first' | 'last'>, now: number, reduced = false): number {
-  const left = f.last + FileTtlMs - now;
-  if (left <= 0) return 0;
-  if (reduced) return 1;
-  return Math.max(0, Math.min(1, (now - f.first) / FileInMs, left / FileFadeMs));
-}
-
-/**
- * THE FILES BESIDE EACH MEMBER. A file keeps its place while it lives, so a file touched again pulses where it is
- * rather than moving; a member that changes many files at once (a rename, an install) shows the first few and
- * counts the rest on one node, and a counted file takes a place as soon as one is free.
- */
-export class FileTrail {
-  private byMember = new Map<string, Map<string, FileMark>>();
-
-  touch(member: string, path: string, kind: 'edit' | 'create', now: number): FileMark {
-    let files = this.byMember.get(member);
-    if (!files) this.byMember.set(member, (files = new Map()));
-    const known = files.get(path);
-    if (known) {
-      known.last = now;
-      known.touches++;
-      if (kind === 'create') known.kind = 'create';
-      if (known.slot < 0) known.slot = this.freeSlot(files);
-      return known;
-    }
-    const mark: FileMark = { member, path, name: fileName(path), kind, first: now, last: now, touches: 1, slot: this.freeSlot(files) };
-    files.set(path, mark);
-    return mark;
-  }
-
-  /** Forgets what has run out by `now`, and gives the freed places to the counted files touched most lately. */
-  tidy(now: number): void {
-    for (const [member, files] of this.byMember) {
-      for (const [path, f] of files) if (f.last + FileTtlMs <= now) files.delete(path);
-      if (!files.size) { this.byMember.delete(member); continue; }
-      const waiting = [...files.values()].filter((f) => f.slot < 0).sort((a, b) => b.last - a.last);
-      for (const f of waiting) {
-        const slot = this.freeSlot(files);
-        if (slot < 0) break;
-        f.slot = slot;
-      }
-    }
-  }
-
-  /** A member's files at `now`: those with a place, and those only counted. */
-  of(member: string): { placed: FileMark[]; counted: FileMark[] } {
-    const files = [...(this.byMember.get(member)?.values() ?? [])];
-    return { placed: files.filter((f) => f.slot >= 0), counted: files.filter((f) => f.slot < 0) };
-  }
-
-  members(): string[] { return [...this.byMember.keys()]; }
-
-  get size(): number {
-    let n = 0;
-    for (const files of this.byMember.values()) n += files.size;
-    return n;
-  }
-
-  clear(): void { this.byMember.clear(); }
-
-  private freeSlot(files: Map<string, FileMark>): number {
-    const used = new Set<number>();
-    for (const f of files.values()) if (f.slot >= 0) used.add(f.slot);
-    for (let i = 0; i < MaxFileNodes; i++) if (!used.has(i)) return i;
-    return -1;
-  }
 }

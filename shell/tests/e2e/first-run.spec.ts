@@ -209,6 +209,8 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await expect(main.locator('[data-test=team-item]')).toHaveCount(2);
 
     // Add and remove an agent.
+    // B076: the New member tile, last in the member grid, opens the add form.
+    await main.locator('[data-test=member-card-new]').click();
     await main.locator('[data-test=add-agent-name]').fill('Temp');
     await main.locator('[data-test=add-agent]').click();
     await expect(main.locator('[data-test=agent-Temp]')).toBeVisible();

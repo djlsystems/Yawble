@@ -334,8 +334,10 @@ describe('Teams on a phone', () => {
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
     await settle();
-    const cells = w.findAll('.member-cell');
+    // B076: the member tiles, one per row, then the New member tile last.
+    const cells = w.findAll('.member-cell:not(.new-cell)');
     expect(cells).toHaveLength(2);
+    expect(w.findAll('.member-cell').at(-1)!.find('[data-test=member-card-new-tile]').exists()).toBe(true);
     for (const c of cells) {
       const row = c.get('[data-test=member-pane-body]');
       // One view: the chosen tab's (the Report by default); the tabs above it.
@@ -352,7 +354,7 @@ describe('Teams on a phone', () => {
     expect(w.get('section.team').classes()).toContain('phone');
   });
 
-  it('at desktop width: one view per member at the shared height, with the height handles (no width bar)', async () => {
+  it('at desktop width: one view per member, the member tiles with their width and height handles (B076)', async () => {
     screen(Desktop);
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
@@ -360,8 +362,9 @@ describe('Teams on a phone', () => {
     const body = w.findAll('[data-test=member-pane-body]')[0]!.element as HTMLElement;
     expect(body.style.height).toMatch(/px$/);
     expect(w.find('[data-test=member-side]').exists()).toBe(false);
-    expect(w.findAll('[data-test$=-handle-w]')).toHaveLength(0);
-    expect(w.findAll('[data-test$=-handle-h]')).toHaveLength(2);
+    // Two members and the New member tile, each with a width and a height handle in its gaps.
+    expect(w.findAll('[data-test=member-tile-handle-w]')).toHaveLength(3);
+    expect(w.findAll('[data-test=member-tile-handle-h]')).toHaveLength(3);
     expect(w.get('section.team').classes()).not.toContain('phone');
   });
 
@@ -428,11 +431,9 @@ describe('the Monitor on a phone', () => {
     expect(w.get('[data-test=monitor-activity]').classes()).not.toContain('collapsed');
     expect(w.get('.controls').find('[data-test=monitor-legend-toggle]').exists()).toBe(false);
     expect(w.findAll('[data-test=monitor-legend-toggle]')).toHaveLength(1);
-    // The forces cog stays beside Pinned, as main has it.
-    const order = w.get('.controls').element.children;
-    expect((order[0] as HTMLElement).dataset.test).toBe('monitor-camera');
-    expect((order[1] as HTMLElement).dataset.test).toBe('monitor-layout-toggle');
-    expect(order).toHaveLength(2);
+    // The forces cog stays beside Pinned, as main has it; the density and the sound follow it (card 374).
+    const order = [...w.get('.controls').element.children].map((e) => (e as HTMLElement).dataset.test);
+    expect(order).toEqual(['monitor-camera', 'monitor-layout-toggle', 'monitor-density', 'monitor-sound']);
   });
 
   it('puts the forces cog in the compact row with the camera and the legend, and opens the forces panel from it', async () => {
