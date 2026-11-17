@@ -102,6 +102,7 @@ describe('team board: gap handles between member cards', () => {
     const w = await board();
     await handles(w)[0]!.trigger('click');
     expect(w.emitted('settings')).toBeUndefined();
+    await w.get('[data-test=agent-TesterWren] [data-test=member-more]').trigger('click');
     await w.get('[data-test=agent-TesterWren] [data-test=open-settings]').trigger('click');
     expect(w.emitted('settings')![0]).toEqual([8]);
     w.unmount();

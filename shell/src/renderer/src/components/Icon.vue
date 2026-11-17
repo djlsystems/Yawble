@@ -17,6 +17,7 @@ const paths: Record<string, string> = {
   stop: 'M7 7h10v10H7Z',
   sidebar: 'M3 3h18v18H3Z M9 3v18',
   more: 'M5 12h.01 M12 12h.01 M19 12h.01',
+  menu: 'M4 6h16 M4 12h16 M4 18h16',
   trash: 'M3 6h18 M8 6V4h8v2 M19 6l-1 14H6L5 6',
   edit: 'M12 20h9 M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z',
   spark: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9Z M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8Z',

@@ -329,7 +329,7 @@ function teamApi() {
 }
 
 describe('Teams on a phone', () => {
-  it("a team's members are stacked, each one's pane with its Activity under what it said, with no resize handles", async () => {
+  it("a team's members are stacked, each one's pane showing one view (its Report first) at its own height, with no resize handles", async () => {
     screen(Phone);
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
@@ -338,24 +338,29 @@ describe('Teams on a phone', () => {
     expect(cells).toHaveLength(2);
     for (const c of cells) {
       const row = c.get('[data-test=member-pane-body]');
-      // What was said, then the Activity, in that order inside the member's pane (the phone CSS stacks it as a column).
-      expect(row.element.children[0]!.getAttribute('data-test')).toBe('member-said');
-      expect(row.element.children[1]!.querySelector('[data-test=member-activity]')).not.toBeNull();
-      expect((row.element.children[1] as HTMLElement).style.flexBasis).toBe('');
+      // One view: the chosen tab's (the Report by default); the tabs above it.
+      expect([...row.element.children].map((k) => k.getAttribute('data-test'))).toEqual(['agent-output']);
+      expect(c.findAll('[data-test=member-tabs] button').map((b) => b.attributes('data-test')))
+        .toEqual(['member-view-report', 'member-view-activity', 'member-view-terminal']);
       expect((row.element as HTMLElement).style.height).toBe('');
+      // The Activity tab shows the Activity in the same place.
+      await c.get('[data-test=member-view-activity]').trigger('click');
+      expect(c.get('[data-test=member-pane-body]').find('[data-test=member-activity]').exists()).toBe(true);
+      expect(c.get('[data-test=member-pane-body]').find('[data-test=agent-output]').exists()).toBe(false);
     }
     expect(w.find('.tile-grip').exists()).toBe(false);
     expect(w.get('section.team').classes()).toContain('phone');
   });
 
-  it('at desktop width: the Activity beside what was said at the shared width, with the width and height handles', async () => {
+  it('at desktop width: one view per member at the shared height, with the height handles (no width bar)', async () => {
     screen(Desktop);
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
     await settle();
-    const side = w.findAll('[data-test=member-side]')[0]!.element as HTMLElement;
-    expect(side.style.flexBasis).toMatch(/px$/);
-    expect(w.findAll('[data-test$=-handle-w]')).toHaveLength(2);
+    const body = w.findAll('[data-test=member-pane-body]')[0]!.element as HTMLElement;
+    expect(body.style.height).toMatch(/px$/);
+    expect(w.find('[data-test=member-side]').exists()).toBe(false);
+    expect(w.findAll('[data-test$=-handle-w]')).toHaveLength(0);
     expect(w.findAll('[data-test$=-handle-h]')).toHaveLength(2);
     expect(w.get('section.team').classes()).not.toContain('phone');
   });
@@ -364,7 +369,9 @@ describe('Teams on a phone', () => {
     const src = (p: string) => readFileSync(resolve(__dirname, '../../src/renderer/src', p), 'utf8');
     const phoneRules = (p: string) => /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src(p))?.[1] ?? '';
     expect(phoneRules('components/TeamsList.vue')).toMatch(/\.team-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
-    expect(phoneRules('components/MemberPane.vue')).toMatch(/\.body \{ flex-direction: column/);
+    // The member's pane is one column everywhere (one view under its tabs); on a phone the view is at its own height.
+    expect(src('components/MemberPane.vue')).toMatch(/\n\.body \{ display: flex; flex-direction: column/);
+    expect(phoneRules('components/MemberPane.vue')).toMatch(/\.body \{ height: auto; \}/);
     expect(src('components/TileGrip.vue')).toMatch(/@media \(max-width: 759\.98px\) \{ \.tile-grip \{ display: none; \} \}/);
     expect(phoneRules('components/MemberPane.vue')).toMatch(/min-width: 44px/);
     for (const f of ['GitBanner', 'HostChecksBanner', 'TeamSyncBanner', 'UpdateBanner', 'TeamWorkflows', 'AgentTile', 'MemberActivity'])

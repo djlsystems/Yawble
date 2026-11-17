@@ -32,7 +32,7 @@ import { useNarrow } from '../narrowScreen';
 
 // A team's agent list: the Tell Manager box, open needs_decision questions, the cards, and Add agent.
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number }>();
-const emit = defineEmits<{ settings: [memberId: number]; policy: [memberId: number]; changed: []; deleted: []; discuss: [decision: Decision] }>();
+const emit = defineEmits<{ settings: [memberId: number]; changed: []; deleted: []; discuss: [decision: Decision] }>();
 const api = resolveApi(props.api);
 /** The member whose activity the Logs dialog shows ("Team/Name"), opened from its card. */
 const logsFor = ref<string | null>(null);
@@ -312,7 +312,7 @@ defineExpose({ refresh, openWorkflows });
       <MemberPane :ref="(p) => setPaneRef(c.member.name, p)" :card="c" :api="api" :poll-ms="pollMs"
         :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
         :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" :activity-limit="phone ? PhoneActivityRows : undefined"
-        @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)" @policy="emit('policy', c.member.id)"
+        @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
         @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
       <TileGrip v-if="!phone" axis="h" :store="memberCardsStore" />
     </div>

@@ -178,7 +178,9 @@ const DesktopCss: Record<string, string> = {
   // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
   'components/TeamView.vue': 'ec127edc70b3a1a4',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
-  'components/MemberPane.vue': '0dcbae2a8c95e6e4',
+  // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
+  // toolbar, no two areas side by side, no width bar, no loosened marker).
+  'components/MemberPane.vue': 'ee6baa53cc7ccb8f',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   // The documents list's Modified column: a wider list and the size / modified cells.
@@ -327,10 +329,11 @@ describe('one scroller per page on a phone (B054)', () => {
   it("the Team page: each member's activity and output are at their own height (no inline desktop height on the phone)", async () => {
     const w = await teamPage(Portrait.width);
     for (const b of w.findAll('[data-test=member-pane-body]')) expect((b.element as HTMLElement).style.height).toBe('');
-    for (const s of w.findAll('[data-test=member-side]')) expect((s.element as HTMLElement).style.flexBasis).toBe('');
     const pane = rules(phoneCss(read('components/MemberPane.vue')));
     expect(pane.find((r) => r.sels.includes('.output') && r.decls.height)?.decls.height).toBe('auto');
-    expect(pane.find((r) => r.sels.includes('.side') && r.decls.height)?.decls.height).toBe('auto');
+    expect(pane.find((r) => r.sels.includes('.body') && r.decls.height)?.decls.height).toBe('auto');
+    // The activity is the Activity tab's view.
+    for (const t of w.findAll('[data-test=member-view-activity]')) await t.trigger('click');
     // The activity is capped: it renders as a plain list, its ol not positioned to scroll.
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).toContain('capped');
     const act = rules(phoneCss(read('components/MemberActivity.vue')));

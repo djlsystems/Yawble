@@ -12,18 +12,18 @@ import TerminalScreen from './components/TerminalScreen.vue';
 // timeouts, anything loosened) is folded behind the bar's "Policy" toggle, closed by default and remembered. Closing
 // only detaches.
 // Embedded: the same, in the main window's terminal pane (the window's title is left alone).
-// inPane: inside the member's pane on the team page (B061): just the screen, always Formatted (the terminal itself while
-// an interactive session is open), no bar and no Policy; Open interactive CLI and Stop are the pane's toolbar, and whether
-// a session is live is told to the pane (live). On a phone the full-screen terminal's ⋯ menu holds the state line,
-// Open interactive CLI and Stop (the pane's toolbar is under it).
+// inPane: inside the member's pane on the team page (B061): just the screen, always Formatted (the terminal itself, with
+// no input, while an interactive session is open), no bar and no Policy; never interactive - its Open interactive CLI
+// opens this window instead, and Stop is in the pane's menu. Whether a session is live is told to the pane (live). On a
+// phone the full-screen terminal's ⋯ menu holds the state line and Stop.
 const props = defineProps<{ memberId: number; api?: YawbleApi; pollMs?: number; embedded?: boolean; inPane?: boolean }>();
 const emit = defineEmits<{ banner: [TerminalBanner]; live: [boolean] }>();
 const api = resolveApi(props.api);
 /** The pane's header on a phone (the member's full-screen terminal in MemberPane, B057): the bar goes into its ⋯ menu. */
 const pane = inject(PaneHeaderKey, null);
 const inMenu = computed(() => !!props.embedded && !!pane?.on);
-/** Open interactive CLI and Stop are the bar's own, except in a member's pane at desktop width (its toolbar has them);
- *  on a phone that toolbar is under the full-screen terminal, so they are in the ⋯ menu. */
+/** Stop is the bar's own, except in a member's pane at desktop width (its menu has it); on a phone that menu is under
+ *  the full-screen terminal, so Stop is in the ⋯ menu. Open interactive CLI is never in a member's pane. */
 const ownActions = computed(() => !props.inPane || inMenu.value);
 /** The bar: anywhere but a member's pane, where only the phone's ⋯ menu has it. */
 const hasBar = computed(() => !props.inPane || inMenu.value);
@@ -116,7 +116,7 @@ defineExpose({ size: () => view.value?.size() ?? null });
       <LoadingNote v-if="!banner && !error" class="grow" text="Loading the terminal…" />
       <span v-else class="grow state" data-test="terminal-state">{{ stateLine }}</span>
       <span v-if="error && !inMenu" class="error" data-test="terminal-error">{{ error }}</span>
-      <button v-if="ownActions && banner && banner.state === 'idle' && !live" data-test="open-interactive" :disabled="!!doing" :aria-busy="doing === 'open'" @click="openInteractive"><BusyLabel :busy="doing === 'open'" text="Opening…">Open interactive CLI</BusyLabel></button>
+      <button v-if="!inPane && banner && banner.state === 'idle' && !live" data-test="open-interactive" :disabled="!!doing" :aria-busy="doing === 'open'" @click="openInteractive"><BusyLabel :busy="doing === 'open'" text="Opening…">Open interactive CLI</BusyLabel></button>
       <button v-if="banner && !inPane" class="toggle" :class="{ on: showDetails, warn: banner.loosened.length }" data-test="terminal-details-toggle"
         :aria-expanded="showDetails" :title="showDetails ? 'Hide this agent\'s sandbox policy' : 'Show this agent\'s sandbox policy'"
         @click="toggleDetails">{{ banner.loosened.length ? '⚠ ' : '' }}Policy {{ showDetails ? '▴' : '▾' }}</button>

@@ -311,16 +311,18 @@ describe('the member terminal on a phone: full screen, one header row', () => {
       expect(w.find('.tile-grip').exists()).toBe(false);
       expect(pane.querySelector('.handle')).toBeNull();
 
-      // One header row: the title, ⋯ and ✕ are all in it; the bar (state, Open interactive CLI, Stop) is in its ⋯
-      // menu, closed; no Formatted / Raw tabs and no Policy; nothing else stands between it and the terminal.
+      // One header row: the title, ⋯ and ✕ are all in it; the bar (state, Stop) is in its ⋯ menu, closed - never Open
+      // interactive CLI (the pane's terminal is never interactive); no Formatted / Raw tabs and no Policy; nothing else
+      // stands between it and the terminal.
       expect(css(head).height).toBe('44px');
       expect(w.get('[data-test=terminal-pane-title]').text()).toBe('Developer Ada · web');
       for (const sel of ['[data-test=terminal-pane-title]', '[data-test=terminal-pane-more]', '[data-test=terminal-pane-close]'])
         expect(head.querySelector(sel), sel).toBeTruthy();
       expect(pane.querySelector('[data-test=terminal-modes]')).toBeNull();
       const menu = w.get('[data-test=terminal-pane-menu]').element;
-      for (const sel of ['[data-test=terminal-state]', '[data-test=open-interactive]', '[data-test=terminal-stop]'])
+      for (const sel of ['[data-test=terminal-state]', '[data-test=terminal-stop]'])
         expect(menu.querySelector(sel), sel).toBeTruthy();
+      expect(pane.querySelector('[data-test=open-interactive]')).toBeNull();
       expect(menu.querySelector('[data-test=terminal-details-toggle]')).toBeNull();
       expect(pane.querySelector('[data-test=banner]')).toBeNull();
       expect(shown(menu)).toBe(false);
@@ -344,21 +346,22 @@ describe('the member terminal on a phone: full screen, one header row', () => {
       // Every control in the header is a 44 px target.
       for (const b of head.querySelectorAll(':scope > button')) expect(px(css(b).minHeight) || px(css(b).height), b.textContent ?? '').toBeGreaterThanOrEqual(44);
 
-      // ✕ goes back to the member's Activity: the terminal (and its header) is gone.
+      // ✕ goes back to the member's Report: the terminal (and its header) is gone.
       await w.get('[data-test=terminal-pane-close]').trigger('click');
-      expect(getMemberView('web', 'DeveloperAda', true)).toBe('activity');
+      expect(getMemberView('web', 'DeveloperAda', true)).toBe('report');
       expect(w.find('[data-test=member-terminal]').exists()).toBe(false);
     });
   }
 
-  it('1280: the terminal beside what was said, in the pane: just the screen, Formatted, no bar, tabs or Policy', async () => {
+  it('1280: the terminal is the pane\'s one view: just the screen, Formatted, no bar, tabs or Policy, never interactive', async () => {
     setScreen(Desktop);
     const w = await openTerminal();
     const pane = w.get('[data-test=member-terminal]').element as HTMLElement;
     expect(css(pane).position).not.toBe('fixed');
     expect(pane.classList.contains('full')).toBe(false);
-    expect(w.get('[data-test=member-side]').element.contains(pane)).toBe(true);
-    expect(w.find('.tile-grip').exists()).toBe(true);
+    expect(w.get('[data-test=member-pane-body]').element.contains(pane)).toBe(true);
+    // The pane has no width bar of its own any more (one view, full width); the height handles are the team page's gaps.
+    expect(w.find('.tile-grip').exists()).toBe(false);
     expect(w.find('[data-test=terminal-pane-head]').exists()).toBe(false);
     expect(w.find('[data-test=terminal-pane-more]').exists()).toBe(false);
     expect(w.find('[data-test=terminal-pane-menu]').exists()).toBe(false);
@@ -366,10 +369,12 @@ describe('the member terminal on a phone: full screen, one header row', () => {
     expect(w.find('[data-test=terminal-details-toggle]').exists()).toBe(false);
     expect(w.find('[data-test=banner]').exists()).toBe(false);
     expect(w.find('[data-test=terminal-modes]').exists()).toBe(false);
-    // Open interactive CLI and Stop are the pane's toolbar at this width.
+    // Open interactive CLI (it opens the agent's terminal window) and Stop are in the pane's ☰ menu at this width.
     expect(w.find('[data-test=member-terminal] [data-test=open-interactive]').exists()).toBe(false);
     expect(w.find('[data-test=member-terminal] [data-test=terminal-stop]').exists()).toBe(false);
-    expect(w.find('[data-test=member-toolbar] [data-test=open-interactive-cli]').exists()).toBe(true);
+    await w.get('[data-test=member-more]').trigger('click');
+    expect(w.find('[data-test=member-more-menu] [data-test=open-interactive-cli]').exists()).toBe(true);
+    expect(w.find('[data-test=member-more-menu] [data-test=stop]').exists()).toBe(true);
     expect(css(w.get('.screen-wrap').element).minHeight).toBe('160px');
   });
 });

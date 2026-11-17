@@ -8,7 +8,7 @@ import TranscriptView from './TranscriptView.vue';
 // One terminal channel, shown Formatted (a headless run's JSON events as a person reads them) or Raw (the terminal
 // itself, as the CLI printed it). The terminal stays attached either way. An interactive session is a TUI: Raw.
 // formattedOnly (a member's pane on the team page): no Formatted / Raw choice; Formatted, or the terminal while an
-// interactive session is open.
+// interactive session is open, which it shows without input (the session runs in the agent's terminal window).
 const props = defineProps<{ channel: string; api?: YawbleApi; rows?: number; formattedOnly?: boolean }>();
 const emit = defineEmits<{ session: [TerminalSessionInfo | null] }>();
 
@@ -45,7 +45,7 @@ defineExpose({ size: () => view.value?.size() ?? null, focus: () => view.value?.
     </div>
     </Teleport>
     <div class="layer" :class="{ hidden: shown !== 'raw' }">
-      <TerminalView ref="view" :channel="channel" :api="api" :rows="rows" @session="onSession" @text="text = $event" />
+      <TerminalView ref="view" :channel="channel" :api="api" :rows="rows" :no-input="formattedOnly" @session="onSession" @text="text = $event" />
     </div>
     <div v-if="shown === 'formatted'" class="layer"><TranscriptView :text="text" /></div>
   </div>

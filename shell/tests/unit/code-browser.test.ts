@@ -56,14 +56,17 @@ describe('the Code browser in the shell', () => {
     for (const m of ['code.open', 'code.list', 'code.read', 'code.download', 'code.close']) expect(isUiMethod(m)).toBe(true);
   });
 
-  it("the member pane's Code icon shows only when the member has a clone, and asks to open it", async () => {
-    const without = mount(AgentCardView, { props: { card: card() } });
-    expect(without.find('[data-test=open-code]').exists()).toBe(false);
-    const noClone = mount(AgentCardView, { props: { card: card({ hasClone: false }) } });
-    expect(noClone.find('[data-test=open-code]').exists()).toBe(false);
-    const w = mount(AgentCardView, { props: { card: card({ hasClone: true }) } });
-    const icon = w.get('[data-test=member-toolbar] [data-test=open-code]');
-    expect(icon.attributes('title')).toBe('Code');
+  it("the member pane's Code action (its ☰ menu) shows only when the member has a clone, and asks to open it", async () => {
+    const opened = async (c: ReturnType<typeof card>) => {
+      const m = mount(AgentCardView, { props: { card: c } });
+      await m.get('[data-test=member-more]').trigger('click');
+      return m;
+    };
+    expect((await opened(card())).find('[data-test=open-code]').exists()).toBe(false);
+    expect((await opened(card({ hasClone: false }))).find('[data-test=open-code]').exists()).toBe(false);
+    const w = await opened(card({ hasClone: true }));
+    const icon = w.get('[data-test=member-more-menu] [data-test=open-code]');
+    expect(icon.text()).toContain('Code');
     await icon.trigger('click');
     expect(w.emitted('code')).toHaveLength(1);
   });
@@ -75,6 +78,7 @@ describe('the Code browser in the shell', () => {
     const w = keep(mount(TeamView, { props: { team: { id: 1, name: 'payments', repoPath: null, members: 1, running: 0, queued: 0 }, api: core.api, pollMs: 100000 },
       global: { stubs: { TeamSyncBanner: true } }, attachTo: document.body }));
     await flushPromises();
+    await w.get('[data-test=member-more]').trigger('click');
     await w.get('[data-test=open-code]').trigger('click');
     await flushPromises();
     expect(w.get('[data-test=code-dialog]').attributes('data-member')).toBe('DeveloperAda');
