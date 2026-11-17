@@ -15,7 +15,10 @@
     <script vite-ignore src="./theme-boot.js" data-key="yawble.remoteTheme"></script>
     <title>Yawble</title>
   </head>
-  <body>
+  <!-- -webkit-text-size-adjust (card 334): iOS Safari enlarges the text in landscape unless told not to (inherited, so the
+       whole page). Here, not in styles.css: the build's CSS minifier targets desktop Safari, which has no text-size-adjust,
+       and drops the prefix; and not on <html>, whose style theme.ts rewrites (color-scheme). -->
+  <body style="-webkit-text-size-adjust: 100%; text-size-adjust: 100%">
     <div id="app"></div>
     <!-- A read-only viewer (a workgroup Visitor) gets a "Read-only (Visitor)" chip added here by remoteAccess.ts. -->
     <script type="module" src="./src/remote.ts"></script>
