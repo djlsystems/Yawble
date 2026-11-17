@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, IntegrationInfo, McpServerInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
-import { TEAM_SET_WORKFLOW_EXPIRY, WorkflowExpiryDefaultDays, WorkflowExpiryMaxDays, WorkflowExpiryMinDays } from '../../../shared/api';
+import { TEAM_WORKFLOW_EXPIRY, WorkflowExpiryDefaultDays } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
 import IntegrationDialog from './IntegrationDialog.vue';
@@ -90,21 +90,16 @@ const baseName = computed(() => repos.value?.main?.baseBranch ?? 'the base branc
 const expiry = ref<number | null>(null);
 const expiryDraft = ref<number>(WorkflowExpiryDefaultDays);
 const expirySaved = ref(false);
-/** The value is on the teams.list item (workflowExpiryDays); read fresh, falling back to the team passed in. */
 async function loadExpiry() {
-  let days = props.team.workflowExpiryDays;
   try {
-    const list = await api.call<TeamSummary[]>('teams.list');
-    const mine = Array.isArray(list) ? list.find((t) => t.id === props.team.id) : undefined;
-    if (mine) days = mine.workflowExpiryDays;
-  } catch { /* keep the prop's value */ }
-  expiry.value = typeof days === 'number' ? days : null;
-  if (expiry.value !== null) expiryDraft.value = expiry.value;
-  ready.expiry = true;
+    const r = await api.call<{ days: number }>(TEAM_WORKFLOW_EXPIRY, { teamId: props.team.id });
+    expiry.value = r?.days ?? WorkflowExpiryDefaultDays;
+    expiryDraft.value = expiry.value;
+  } catch { expiry.value = null; } finally { ready.expiry = true; }
 }
-const expiryValid = computed(() => Number.isInteger(expiryDraft.value) && expiryDraft.value >= WorkflowExpiryMinDays && expiryDraft.value <= WorkflowExpiryMaxDays);
-const saveExpiry = () => act(TEAM_SET_WORKFLOW_EXPIRY, { workflowExpiryDays: expiryDraft.value }, (r: { workflowExpiryDays?: number }) => {
-  expiry.value = r?.workflowExpiryDays ?? expiryDraft.value;
+const expiryValid = computed(() => Number.isInteger(expiryDraft.value) && expiryDraft.value >= 1 && expiryDraft.value <= 365);
+const saveExpiry = () => act(TEAM_WORKFLOW_EXPIRY, { days: expiryDraft.value }, (r: { days?: number }) => {
+  expiry.value = r?.days ?? expiryDraft.value;
   expiryDraft.value = expiry.value;
   expirySaved.value = true;
 });
@@ -232,13 +227,13 @@ onMounted(() => { void loadExpiry(); void checkQuiet(); void loadEnv(); void loa
         <LoadingNote v-if="!ready.expiry" text="Loading…" />
         <template v-else>
           <label class="inline">Expire idle workflows after
-            <input v-model.number="expiryDraft" type="number" :min="WorkflowExpiryMinDays" :max="WorkflowExpiryMaxDays" step="1" class="days" data-test="team-workflow-expiry-days" @input="expirySaved = false" />
+            <input v-model.number="expiryDraft" type="number" min="1" max="365" step="1" class="days" data-test="team-workflow-expiry-days" @input="expirySaved = false" />
             days</label>
           <p class="muted small">An open workflow with no message, run, hand-back or status change for this long is closed by the app as expired.
             One that waits on your answer is shown in Needs you the day before, with Extend. Nothing expires while a run, a wake or a trigger is pending.</p>
-          <div class="buttons"><span v-if="!expiryValid" class="warn small">A whole number of days, {{ WorkflowExpiryMinDays }} to {{ WorkflowExpiryMaxDays }}.</span><span class="grow" />
+          <div class="buttons"><span v-if="!expiryValid" class="warn small">A whole number of days, 1 to 365.</span><span class="grow" />
             <span v-if="expirySaved" class="ok" data-test="team-workflow-expiry-saved">Saved.</span>
-            <button class="primary" data-test="team-workflow-expiry-save" :disabled="busy || !expiryValid || expiryDraft === expiry" @click="saveExpiry"><BusyLabel :busy="doing(TEAM_SET_WORKFLOW_EXPIRY)" text="Saving…">Save</BusyLabel></button></div>
+            <button class="primary" data-test="team-workflow-expiry-save" :disabled="busy || !expiryValid || expiryDraft === expiry" @click="saveExpiry"><BusyLabel :busy="doing(TEAM_WORKFLOW_EXPIRY)" text="Saving…">Save</BusyLabel></button></div>
         </template>
       </div>
     </section>

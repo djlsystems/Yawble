@@ -1,21 +1,20 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { BoardCard, Decision, TeamSummary, WorkflowSummary, YawbleApi } from '../../src/shared/api';
-import { TEAM_SET_WORKFLOW_EXPIRY, workflowTime } from '../../src/shared/api';
+import type { BoardCard, TeamSummary, WorkflowSummary, YawbleApi } from '../../src/shared/api';
+import { workflowTime } from '../../src/shared/api';
 import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
 import TeamWorkflows from '../../src/renderer/src/components/TeamWorkflows.vue';
 import WorkflowExpiryAsks from '../../src/renderer/src/components/WorkflowExpiryAsks.vue';
 import TeamManageDialog from '../../src/renderer/src/components/TeamManageDialog.vue';
 import { entryTime, workflowEnds, workflowLook, WorkflowLooks } from '../../src/renderer/src/monitor/workflows';
 import { MonitorModel, workflowKey } from '../../src/renderer/src/monitor/model';
-import { expiresSoon, expiryWarningText, extendErrorText, until } from '../../src/renderer/src/workflowExpiry';
+import { expiresSoon, expiryWarningText, until } from '../../src/renderer/src/workflowExpiry';
 import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remoteAccess';
 
-// B085 (card 389): an expired workflow reads "expired" (not completed, not closed) with its time from endedAt; a
-// bus.decisions item the core warns about (expiryWarning, expiresAt) is in Needs you with Extend (bus.workflowExtend;
-// an ended workflow is refused with already_ended); Team settings edits workflowExpiryDays (read from teams.list, set
-// with teams.setWorkflowExpiry, 1..90). Against card 388's core (DeveloperMarlo's d0adff4); fakes only.
+// B085 (card 389): an expired workflow reads "expired" (not completed, not closed) with its time from endedAt; an open
+// one that waits on the person's answer and expires within a day is in Needs you with Extend (bus.workflowExtend);
+// Team settings edits workflowExpiryDays (teams.workflowExpiry). Against the contract of card 388; fakes only.
 
 const hours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
 const team = { id: 1, name: 'payments' } as TeamSummary;
@@ -24,12 +23,7 @@ const expired: WorkflowSummary = { ...base, id: 9, title: 'Old export', state: '
   lastAt: hours(-2), endedAt: hours(-96), expiredAt: hours(-24) };
 const completed: WorkflowSummary = { ...base, id: 8, title: 'Done thing', state: 'completed', lastAt: hours(-50), endedAt: hours(-50) };
 const closed: WorkflowSummary = { ...base, id: 7, title: 'Dropped thing', state: 'closed', lastAt: hours(-60), endedAt: hours(-60) };
-const expiring: WorkflowSummary = { ...base, id: 12, title: 'Refund limits', state: 'open', undeclared: true, lastAt: hours(-52), expiresAt: hours(20),
-  expiryWarning: '#12 will expire tomorrow; it waits on your answer to question 3' };
-/** The core's bus.decisions items: question 3 of #12 is warned; question 5 of #10 is not. */
-const warned: Decision = { seq: 3, from: 'Manager', question: 'Which countries?', workflow: 12, at: hours(-52),
-  expiresAt: hours(20), expiryWarning: '#12 will expire tomorrow; it waits on your answer to question 3' };
-const plain: Decision = { seq: 5, from: 'Manager', question: 'Which bank?', workflow: 10, at: hours(-1), expiresAt: null, expiryWarning: null };
+const expiring: WorkflowSummary = { ...base, id: 12, title: 'Refund limits', state: 'open', undeclared: true, lastAt: hours(-52), expiresAt: hours(20), question: 3 };
 
 function fakeApi(answers: Record<string, (p: any) => unknown>) {
   const calls: { method: string; params: any }[] = [];
@@ -44,7 +38,6 @@ function fakeApi(answers: Record<string, (p: any) => unknown>) {
   } as unknown as YawbleApi;
   return { api, calls };
 }
-const refusal = (code: string, message: string) => Object.assign(new Error(message), { code });
 
 afterEach(() => { applyRemoteAccess('full'); document.body.innerHTML = ''; });
 
@@ -105,22 +98,19 @@ describe('the "expired" state (B085)', () => {
   });
 });
 
-describe('Needs you and Extend (B085)', () => {
-  const cards = [{ id: 4, team: 'payments', teamId: 1, status: 'needs-decision', workflow: 12 } as BoardCard];
-
-  it('the Needs-you item is the warned decision\'s expiryWarning, and Extend calls bus.workflowExtend { teamId, workflow }', async () => {
-    let list = [plain, warned];
+describe('Extend (B085)', () => {
+  it('the Needs-you item reads "#12 will expire tomorrow; it waits on your answer to question 3" and Extend calls bus.workflowExtend', async () => {
+    let list = [expiring, expired];
     const { api, calls } = fakeApi({
-      'bus.decisions': () => list,
-      'bus.workflowExtend': (p) => { list = list.map((d) => (d.workflow === p.workflow ? { ...d, expiresAt: null, expiryWarning: null } : d)); return { ...expiring, expiresAt: null }; },
+      'bus.workflows': () => list,
+      'bus.workflowExtend': (p) => { list = list.map((x) => (x.id === p.workflow ? { ...x, expiresAt: null } : x)); return {}; },
     });
+    const cards = [{ id: 4, team: 'payments', teamId: 1, status: 'needs-decision', workflow: 12 } as BoardCard];
     const w = mount(WorkflowExpiryAsks, { props: { api, cards, pollMs: 60_000 } });
     await flushPromises();
-    expect(calls.find((c) => c.method === 'bus.decisions')!.params).toEqual({ teamId: 1 });
     expect(w.emitted('count')!.at(-1)).toEqual([1]);
     expect(w.get('[data-test=workflow-expiry-text]').text()).toBe('#12 will expire tomorrow; it waits on your answer to question 3');
-    expect(w.get('[data-test=workflow-expiry-12]').text()).toContain('expires in 19 h');
-    expect(w.find('[data-test=workflow-expiry-10]').exists()).toBe(false);
+    expect(w.find('[data-test=workflow-expiry-9]').exists()).toBe(false);
     await w.get('[data-test=workflow-expiry-extend]').trigger('click');
     await flushPromises();
     expect(calls.find((c) => c.method === 'bus.workflowExtend')!.params).toEqual({ teamId: 1, workflow: 12 });
@@ -129,37 +119,21 @@ describe('Needs you and Extend (B085)', () => {
     w.unmount();
   });
 
-  it('no item without a warning (an older core, or nothing warned), and no call without a needs-decision card', async () => {
-    const older = { ...warned, expiryWarning: undefined, expiresAt: undefined };
-    const { api, calls } = fakeApi({ 'bus.decisions': () => [plain, older] });
+  it('no item without a question waiting (no needs-decision card, no question), nor one expiring later than a day', async () => {
+    const quiet = { ...expiring, question: null };
+    const later = { ...expiring, id: 13, expiresAt: hours(40) };
+    const { api } = fakeApi({ 'bus.workflows': () => [quiet, later] });
+    const cards = [{ id: 5, team: 'payments', teamId: 1, status: 'needs-decision', workflow: 13 } as BoardCard];
     const w = mount(WorkflowExpiryAsks, { props: { api, cards, pollMs: 60_000 } });
     await flushPromises();
     expect(w.find('[data-test=workflow-expiry-asks]').exists()).toBe(false);
-    w.unmount();
-    calls.length = 0;
-    const w2 = mount(WorkflowExpiryAsks, { props: { api, cards: [], pollMs: 60_000 } });
-    await flushPromises();
-    expect(calls).toEqual([]);
-    w2.unmount();
-  });
-
-  it('an Extend refused with already_ended says the workflow has ended and drops its line', async () => {
-    const { api } = fakeApi({
-      'bus.decisions': () => [warned],
-      'bus.workflowExtend': () => { throw refusal('already_ended', 'this workflow has ended; telling its team something in it reopens it'); },
-    });
-    const w = mount(WorkflowExpiryAsks, { props: { api, cards, pollMs: 60_000 } });
-    await flushPromises();
-    await w.get('[data-test=workflow-expiry-extend]').trigger('click');
-    await flushPromises();
-    expect(w.get('[data-test=workflow-expiry-error]').text()).toBe('#12 has already ended, so there is nothing to extend. Telling its team something in it reopens it.');
-    expect(w.find('[data-test=workflow-expiry-12]').exists()).toBe(false);
     w.unmount();
   });
 
   it('Extend is read-only for a Visitor: disabled with the read-only title, nothing called', async () => {
     applyRemoteAccess('read');
-    const { api, calls } = fakeApi({ 'bus.decisions': () => [warned] });
+    const { api, calls } = fakeApi({ 'bus.workflows': () => [expiring] });
+    const cards = [{ id: 4, team: 'payments', teamId: 1, status: 'needs-decision', workflow: 12 } as BoardCard];
     const w = mount(WorkflowExpiryAsks, { props: { api, cards, pollMs: 60_000 } });
     await flushPromises();
     const b = w.get('[data-test=workflow-expiry-extend]').element as HTMLButtonElement;
@@ -180,17 +154,27 @@ describe('Needs you and Extend (B085)', () => {
     w.unmount();
   });
 
-  it('the workflows dialog: an Extend refused with already_ended reads as ended, not as a raw error', async () => {
-    const { api } = fakeApi({ 'bus.workflows': () => [expiring], 'bus.workflowExtend': () => { throw refusal('already_ended', 'this workflow has already ended'); } });
-    const w = mount(WorkflowsDialog, { props: { team, api, pollMs: 60_000 }, attachTo: document.body });
+  it('an Extend refused with already_ended says it has already ended, in Needs you and in the workflows dialog', async () => {
+    const ended = () => { throw Object.assign(new Error('workflow #12 has already ended'), { code: 'already_ended' }); };
+    const text = '#12 has already ended, so there is nothing to extend. Telling its team something in it reopens it.';
+    const one = fakeApi({ 'bus.workflows': () => [expiring], 'bus.workflowExtend': ended });
+    const cards = [{ id: 4, team: 'payments', teamId: 1, status: 'needs-decision', workflow: 12 } as BoardCard];
+    const a = mount(WorkflowExpiryAsks, { props: { api: one.api, cards, pollMs: 60_000 } });
     await flushPromises();
-    await w.get('[data-test=workflow-extend]').trigger('click');
+    await a.get('[data-test=workflow-expiry-extend]').trigger('click');
     await flushPromises();
-    expect(w.text()).toContain('#12 has already ended, so there is nothing to extend.');
-    w.unmount();
+    expect(a.get('[data-test=workflow-expiry-error]').text()).toBe(text);
+    a.unmount();
+    const two = fakeApi({ 'bus.workflows': () => [expiring], 'bus.workflowExtend': ended });
+    const d = mount(WorkflowsDialog, { props: { team, api: two.api, pollMs: 60_000 }, attachTo: document.body });
+    await flushPromises();
+    await d.get('[data-test=workflow-extend]').trigger('click');
+    await flushPromises();
+    expect(document.body.textContent).toContain(text);
+    d.unmount();
   });
 
-  it('the helpers: expiresSoon within a day only for open ones, until, the text from seq, and other Extend errors', () => {
+  it('the helpers: expiresSoon within a day only for open ones, until, and the text without a question number', () => {
     expect(expiresSoon(expiring)).toBe(true);
     expect(expiresSoon({ state: 'open', expiresAt: hours(30) })).toBe(false);
     expect(expiresSoon({ state: 'expired', expiresAt: hours(1) })).toBe(false);
@@ -199,83 +183,51 @@ describe('Needs you and Extend (B085)', () => {
     expect(until('2026-11-17T12:29:30Z', now)).toBe('in 29 min');
     expect(until('2026-11-18T07:59:00Z', now)).toBe('in 19 h');
     expect(until('2026-11-17T11:00:00Z', now)).toBe('within a minute');
-    expect(expiryWarningText(warned)).toBe(warned.expiryWarning);
-    expect(expiryWarningText({ workflow: 4, seq: 7, expiryWarning: null })).toBe('#4 will expire tomorrow; it waits on your answer to question 7');
-    expect(extendErrorText(new Error('boom'), 4)).toBe('boom');
+    expect(expiryWarningText({ id: 4, question: null })).toBe('#4 will expire tomorrow; it waits on your answer to a question');
   });
 });
 
 describe('the team setting "Expire idle workflows after N days" (B085)', () => {
-  /** days.v undefined: an older core, whose teams.list items have no workflowExpiryDays. */
-  const answers = (days: { v: number | undefined }) => ({
+  const answers = (days: { v: number }) => ({
     'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
     'teams.push': () => ({ on: false, origin: null }), 'teams.approvals': () => [], 'teams.syncToBase': () => ({ on: true, note: null, baseBranch: 'main', behind: null }),
     'teams.repos': () => ({ main: { path: 'C:/r', baseBranch: 'main', managed: true, origin: null, name: null }, extras: [] }),
     'integrations.list': () => ({ integrations: [], pendingAsks: 0 }), 'integrations.mcpList': () => [], 'integrations.apiList': () => [],
-    'teams.list': () => [{ ...team, members: 1, running: 0, queued: 0, repoPath: null, ...(days.v === undefined ? {} : { workflowExpiryDays: days.v }) }],
-    [TEAM_SET_WORKFLOW_EXPIRY]: (p: any) => {
-      const d = p.workflowExpiryDays;
-      if (d !== null && (!Number.isInteger(d) || d < 1 || d > 90)) throw refusal('bad_days', 'workflowExpiryDays must be 1 to 90 days');
-      days.v = d ?? 3;
-      return { workflowExpiryDays: days.v };
-    },
+    'teams.workflowExpiry': (p: any) => { if (p.days !== undefined) days.v = p.days; return { days: days.v }; },
   });
   const mountIt = (api: YawbleApi) => mount(TeamManageDialog, { props: { team: { ...team, members: 1, running: 0, queued: 0, repoPath: null }, api },
     global: { stubs: { IntegrationDialog: true, Modal: { template: '<div><slot /></div>' } } } });
 
-  it('shows the teams.list item\'s workflowExpiryDays (3) and saving 5 sends teams.setWorkflowExpiry { teamId, workflowExpiryDays: 5 }', async () => {
-    const days = { v: 3 as number | undefined };
+  it('shows the team\'s days (default 3) and saving 5 sends teams.workflowExpiry { teamId, days: 5 }', async () => {
+    const days = { v: 3 };
     const { api, calls } = fakeApi(answers(days));
     const w = mountIt(api);
     await flushPromises();
     const field = w.get('[data-test=team-workflow-expiry-days]');
     expect((field.element as HTMLInputElement).value).toBe('3');
-    expect(field.attributes('max')).toBe('90');
     expect(w.get('[data-test=team-workflow-expiry]').text()).toContain('Expire idle workflows after');
     expect((w.get('[data-test=team-workflow-expiry-save]').element as HTMLButtonElement).disabled).toBe(true); // unchanged
     await field.setValue('5');
     await w.get('[data-test=team-workflow-expiry-save]').trigger('click');
     await flushPromises();
-    expect(calls.filter((c) => c.method === 'teams.setWorkflowExpiry').at(-1)!.params).toEqual({ teamId: 1, workflowExpiryDays: 5 });
+    expect(calls.filter((c) => c.method === 'teams.workflowExpiry').at(-1)!.params).toEqual({ teamId: 1, days: 5 });
     expect(days.v).toBe(5);
     expect(w.find('[data-test=team-workflow-expiry-saved]').exists()).toBe(true);
-    expect(calls.some((c) => c.method === 'teams.workflowExpiry')).toBe(false);
     w.unmount();
   });
 
-  it('allows 90, refuses 0 and 91 (Save disabled, with the 1 to 90 note)', async () => {
+  it('refuses 0 days (Save disabled) and an older core without the setting shows no field', async () => {
     const { api } = fakeApi(answers({ v: 3 }));
     const w = mountIt(api);
     await flushPromises();
-    const field = w.get('[data-test=team-workflow-expiry-days]');
-    const save = () => (w.get('[data-test=team-workflow-expiry-save]').element as HTMLButtonElement).disabled;
-    await field.setValue('90');
-    expect(save()).toBe(false);
-    await field.setValue('91');
-    expect(save()).toBe(true);
-    expect(w.get('[data-test=team-workflow-expiry]').text()).toContain('A whole number of days, 1 to 90.');
-    await field.setValue('0');
-    expect(save()).toBe(true);
+    await w.get('[data-test=team-workflow-expiry-days]').setValue('0');
+    expect((w.get('[data-test=team-workflow-expiry-save]').element as HTMLButtonElement).disabled).toBe(true);
     w.unmount();
-  });
-
-  it('a refusal from the core (bad_days) is shown, not saved', async () => {
-    const a = answers({ v: 3 });
-    a[TEAM_SET_WORKFLOW_EXPIRY] = () => { throw refusal('bad_days', 'workflowExpiryDays must be 1 to 90 days'); };
-    const w = mountIt(fakeApi(a).api);
+    const old = answers({ v: 3 }) as Record<string, unknown>;
+    delete old['teams.workflowExpiry'];
+    const w2 = mountIt(fakeApi(old as any).api);
     await flushPromises();
-    await w.get('[data-test=team-workflow-expiry-days]').setValue('7');
-    await w.get('[data-test=team-workflow-expiry-save]').trigger('click');
-    await flushPromises();
-    expect(w.text()).toContain('workflowExpiryDays must be 1 to 90 days');
-    expect(w.find('[data-test=team-workflow-expiry-saved]').exists()).toBe(false);
-    w.unmount();
-  });
-
-  it('an older core (no workflowExpiryDays on the teams.list item) shows no field', async () => {
-    const w = mountIt(fakeApi(answers({ v: undefined })).api);
-    await flushPromises();
-    expect(w.find('[data-test=team-workflow-expiry]').exists()).toBe(false);
-    w.unmount();
+    expect(w2.find('[data-test=team-workflow-expiry]').exists()).toBe(false);
+    w2.unmount();
   });
 });

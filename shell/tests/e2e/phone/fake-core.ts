@@ -9,8 +9,8 @@ const iso = (minsAgo: number) => new Date(now - minsAgo * 60_000).toISOString();
 const later = (mins: number) => new Date(now + mins * 60_000).toISOString();
 
 const teams = [
-  { id: 1, name: 'payments', repoPath: 'C:/repos/payments', members: 3, running: 1, queued: 1, workflowExpiryDays: 3 },
-  { id: 2, name: 'checkout-web-with-a-rather-long-team-name', repoPath: 'C:/repos/checkout', members: 2, running: 0, queued: 0, workflowExpiryDays: 3 },
+  { id: 1, name: 'payments', repoPath: 'C:/repos/payments', members: 3, running: 1, queued: 1 },
+  { id: 2, name: 'checkout-web-with-a-rather-long-team-name', repoPath: 'C:/repos/checkout', members: 2, running: 0, queued: 0 },
 ];
 
 const member = (id: number, teamId: number, team: string, name: string, role: 'manager' | 'member') =>
@@ -59,11 +59,7 @@ const integrationAsk = {
   id: 9, at: iso(8), integration: 'gh', teamId: 1, member: 'DeveloperAda', command: 'gh pr create --title "Partial refunds" --body-file pr.md',
   reason: 'open the pull request for card 1', workflow: 10, repo: 'payments', action: 'pr create', canAlways: true,
 };
-const decision = { seq: 77, from: 'Manager', question: 'What should the refund limit be: 30 days or 90 days?', workflow: 10, at: iso(4), expiresAt: null, expiryWarning: null };
-/** B085, with setExpiry(true): question 3 of workflow #12, which is warned (the core puts expiryWarning and expiresAt on it). */
-const expiryDecision = () => ({ seq: 3, from: 'Manager', question: 'Which countries get the lower refund limit?', workflow: 12, at: iso(2 * 1440 + 240),
-  expiresAt: expiry.extended.has(12) ? null : later(20 * 60),
-  expiryWarning: expiry.extended.has(12) ? null : '#12 will expire tomorrow; it waits on your answer to question 3' });
+const decision = { seq: 77, from: 'Manager', question: 'What should the refund limit be: 30 days or 90 days?', workflow: 10, at: iso(4) };
 
 const conversations = [
   { id: 'c1', title: 'Payments today', cli: 'claude', teamId: 1, team: 'payments', createdAt: iso(300), updatedAt: iso(2), running: false, unread: 1, watching: 1 },
@@ -92,12 +88,12 @@ const workflows = [{ id: 10, title: 'Partial refunds', owner: 'Manager', state: 
  *  Extend), and one the app closed as expired (endedAt: its last activity, 3 days before expiredAt). */
 const expiryWorkflows = () => [
   { id: 12, title: 'Refund limits per country', owner: 'Manager', state: 'open', undeclared: true, busy: [], ending: null, startedAt: iso(4000), lastAt: iso(2 * 1440 + 240), messages: 6,
-    endedAt: null, expiredAt: null, expiresAt: expiry.extended.has(12) ? null : later(20 * 60), expiryWarning: expiryDecision().expiryWarning },
+    endedAt: null, expiredAt: null, expiresAt: expiry.extended.has(12) ? null : later(20 * 60), question: 3 },
   { id: 9, title: 'Old refund export', owner: 'Manager', state: 'expired', undeclared: false, busy: [], ending: 'expired: no activity for 3 days', startedAt: iso(9000), lastAt: iso(4 * 1440), messages: 4,
-    endedAt: iso(4 * 1440), expiredAt: iso(1440), expiresAt: null, expiryWarning: null },
+    endedAt: iso(4 * 1440), expiredAt: iso(1440), expiresAt: null, question: null },
 ];
-/** B085: the expiry fixtures on or off and the workflows extended (the team's workflowExpiryDays is on its teams.list item). */
-const expiry = { on: false, extended: new Set<number>() };
+/** B085: the expiry fixtures on or off, the workflows extended, and the team's workflowExpiryDays. */
+const expiry = { on: false, extended: new Set<number>(), days: 3 };
 
 export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'core.getInfo': (_p, access) => ({ product: 'Yawble', version: '0.0.0+dev.fake', platform: 'win32', os: 'Windows (fake)', dotnet: '10', pid: 1, sandbox: { backend: 'fake' }, schema: [], hostChecks: [], remoteAccess: access }),
@@ -115,27 +111,24 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'integrations.connectionAttention': () => [{ id: 3, name: 'Stripe test key', reason: '401 from the API', where: 'Settings, Connections' }],
   'companion.list': () => ({ clients: [], pairings: [{ id: 'p1', name: 'claude-code', level: 'act', code: 'K7Q2ZD', expires: later(5) }], actions: [] }),
   'companion.status': () => ({ endpoint: null, controlFile: null, binaryPath: null, claudeCommand: null }),
-  'bus.decisions': (p) => !needsYou ? [] : (p?.teamId === 1 || p?.team === 'payments' || p?.teamId === undefined ? [decision, ...(expiry.on ? [expiryDecision()] : [])] : []),
+  'bus.decisions': (p) => !needsYou ? [] : (p?.teamId === 1 || p?.team === 'payments' || p?.teamId === undefined ? [decision] : []),
   'bus.workflows': () => (expiry.on ? [...workflows, ...expiryWorkflows()] : workflows),
-  'teams.list': () => teams,
-  // B085: Extend resets the workflow's clock (the fake: it no longer expires; an ended one is refused with already_ended).
+  // B085: Extend resets the workflow's clock (the fake: it no longer expires); teams.workflowExpiry reads, or sets with days.
+  // Like the core: returns the updated list item; an ended workflow is refused with already_ended.
   'bus.workflowExtend': (p) => {
-    const w = Number(p?.workflow);
-    if (expiry.on && expiryWorkflows().some((x) => x.id === w && x.state !== 'open'))
-      throw Object.assign(new Error('this workflow has ended; telling its team something in it reopens it'), { code: 'already_ended' });
-    expiry.extended.add(w);
-    return { ...(expiry.on ? expiryWorkflows().find((x) => x.id === w) : workflows.find((x) => x.id === w)), expiresAt: null, expiryWarning: null };
+    const id = Number(p?.workflow);
+    const w = [...workflows, ...(expiry.on ? expiryWorkflows() : [])].find((x) => x.id === id);
+    if (w && w.state !== 'open') throw Object.assign(new Error(`workflow #${id} has already ended`), { code: 'already_ended' });
+    expiry.extended.add(id);
+    return { ...(w ?? { id }), expiresAt: null };
   },
-  // B085: { teamId, workflowExpiryDays: 1..90 | null (the default 3) } -> { workflowExpiryDays }; bad_days otherwise.
-  'teams.setWorkflowExpiry': (p, access) => {
-    if (access === 'read') throw Object.assign(new Error('Read-only (Visitor): refused by the fake'), { code: 'remote_refused' });
-    const team = teams.find((t) => t.id === p?.teamId);
-    if (!team) throw Object.assign(new Error(`there is no team ${p?.teamId}`), { code: 'no_such_team' });
-    const days = p?.workflowExpiryDays ?? null;
-    if (days !== null && (!Number.isInteger(days) || days < 1 || days > 90))
-      throw Object.assign(new Error('workflowExpiryDays must be 1 to 90 days'), { code: 'bad_days' });
-    team.workflowExpiryDays = days ?? 3;
-    return { workflowExpiryDays: team.workflowExpiryDays };
+  'teams.workflowExpiry': (p, access) => {
+    if (p?.days != null) {
+      if (access === 'read') throw Object.assign(new Error('Read-only (Visitor): refused by the fake'), { code: 'remote_refused' });
+      if (!Number.isInteger(p.days) || p.days < 1 || p.days > 365) throw Object.assign(new Error('days: a whole number from 1 to 365'), { code: 'bad_request' });
+      expiry.days = p.days;
+    }
+    return { days: expiry.days };
   },
   'teams.agents': (p) => agents[p?.teamId ?? p?.id ?? 1] ?? [],
   'teams.quiet': () => ({ quiet: false, working: ['DeveloperAda'], openWorkflows: [10] }),
@@ -248,7 +241,7 @@ let needsYou = true;
 /** Methods a viewer with "read" access may not call (the fake refuses them, like the Cloud Link). Card 305: the workflows
  *  dialog's bus.nudgeWorkflow and bus.closeWorkflow too (bus.stopWorkflow already matched "stop"), as core's
  *  RemoteAccess lists them. */
-const isChange = (m: string) => /\.(send|answer|save|delete|remove|create|add|update|install|run|stop|move|rename|tellManager|approve|decline|nudgeWorkflow|closeWorkflow|workflowExtend|setWorkflowExpiry)/.test(m);
+const isChange = (m: string) => /\.(send|answer|save|delete|remove|create|add|update|install|run|stop|move|rename|tellManager|approve|decline|nudgeWorkflow|closeWorkflow|workflowExtend)/.test(m);
 
 export function createFakeCore() {
   const unknown = new Set<string>();
@@ -265,7 +258,7 @@ export function createFakeCore() {
     /** B054: with false, no integration ask and no decision is pending. */
     setNeedsYou(on: boolean) { needsYou = on; },
     /** B085: the expiring and expired workflows listed (off: only #10), Extend forgotten, workflowExpiryDays back to 3. */
-    setExpiry(on: boolean) { expiry.on = on; expiry.extended.clear(); for (const t of teams) t.workflowExpiryDays = 3; },
+    setExpiry(on: boolean) { expiry.on = on; expiry.extended.clear(); expiry.days = 3; },
     /** B067: put the Tidy… plan back (nothing deleted or realigned). */
     resetTidy() { tidy.deleted.clear(); tidy.realigned.clear(); },
     answer(text: string): string | null {

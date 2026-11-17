@@ -345,11 +345,7 @@ export interface AgentTestSession { cli: string; agent: string; kind: 'terminal'
 /** The push when one starts or ends (agents.testChanged; never over the Cloud Link). */
 export const AGENT_TEST_CHANGED = 'agents.testChanged';
 
-export interface TeamSummary {
-  id: number; name: string; repoPath: string | null; members: number; running: number; queued: number; paused?: boolean; archived?: boolean;
-  /** B085: expire an open workflow after this many idle days (1 to 90, default 3); absent on an older core. */
-  workflowExpiryDays?: number;
-}
+export interface TeamSummary { id: number; name: string; repoPath: string | null; members: number; running: number; queued: number; paused?: boolean; archived?: boolean }
 /** Whether a team may be archived or deleted (teams.quiet): what is still working, and its open workflows. */
 export interface TeamQuiet { quiet: boolean; working: string[]; openWorkflows: number[] }
 /** A team's workflow (bus.workflows): one piece of work and everything it led to. */
@@ -362,22 +358,16 @@ export interface WorkflowSummary {
   expiredAt?: string | null;
   /** B085: when an open, idle workflow would expire; null when it is not idle (a run, a wake or a trigger is pending). */
   expiresAt?: string | null;
-  /** B085: while an open workflow that waits on the person's answer is warned it will expire, the warning
-   *  ("#12 will expire tomorrow; it waits on your answer to question 3"); null otherwise. */
-  expiryWarning?: string | null;
-  /** Unused: the core does not send it (the question is the warned decision's seq, in bus.decisions). */
+  /** B085: the question an open workflow waits on the person for (its number), when the core names one. */
   question?: number | null;
 }
 /** A workflow's state (bus.workflows): "expired" is closed by the app after workflowExpiryDays without activity (B085). */
 export type WorkflowState = 'open' | 'completed' | 'closed' | 'expired';
 /** B085: the RPC that resets an open workflow's expiry clock ({ teamId, workflow }). */
 export const WORKFLOW_EXTEND = 'bus.workflowExtend';
-/** B085: sets a team's "expire idle workflows after N days" ({ teamId, workflowExpiryDays: 1..90, or null for the default }
- *  -> { workflowExpiryDays }); a bad value is refused with bad_days. teams.list items carry the value. */
-export const TEAM_SET_WORKFLOW_EXPIRY = 'teams.setWorkflowExpiry';
+/** B085: a team's "expire idle workflows after N days" setting ({ teamId, days? } -> { days }); default 3. */
+export const TEAM_WORKFLOW_EXPIRY = 'teams.workflowExpiry';
 export const WorkflowExpiryDefaultDays = 3;
-export const WorkflowExpiryMinDays = 1;
-export const WorkflowExpiryMaxDays = 90;
 /** The time a workflow's row shows: its recorded end once ended (an expired one: its last activity), else its last entry. */
 export function workflowTime(w: Pick<WorkflowSummary, 'state' | 'lastAt' | 'endedAt'>): string {
   return w.state !== 'open' && w.endedAt ? w.endedAt : w.lastAt;
@@ -720,12 +710,7 @@ export interface AgentCard {
   hasClone?: boolean;
 }
 
-export interface Decision {
-  seq: number; from: string; question: string; workflow: number; at: string;
-  /** B085: while the decision's workflow is warned it will expire: the Needs-you text and when it expires (else null or absent). */
-  expiryWarning?: string | null;
-  expiresAt?: string | null;
-}
+export interface Decision { seq: number; from: string; question: string; workflow: number; at: string }
 
 export interface SecretStatus { connected: boolean; addedAt: string | null; expiresAt: string | null; lastUsedAt: string | null; renewSoon: boolean; problem: string | null }
 export interface GrokLoginStatus { signedIn: boolean; expiresAt: string | null; lastRefreshAt: string | null; problem: string | null }
@@ -868,9 +853,6 @@ export interface BoardCard {
   createdAt: string; updatedAt: string; trailCount: number;
   /** When the person cleared this Done card from the board view (0037); null or absent when it shows. */
   clearedAt?: string | null;
-  /** B085: when and how the card's workflow ended it (closing a workflow ends its open cards); null while open. */
-  endedAt?: string | null;
-  endedHow?: 'completed' | 'closed' | 'expired' | null;
   memberState?: { state: AgentCard['state']; attention: AgentCard['attention'] };
   /** The heavy-work lease of the card's member, on the card it is working on only: held, or waited for (queue position). */
   lease?: { state: 'holding' | 'waiting'; what: string | null; position: number | null };
