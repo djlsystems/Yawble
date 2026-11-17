@@ -33,12 +33,17 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "checkHosts",
     };
 
-    /// <summary>Calls that read a setting, or set it when they carry <c>on</c>.</summary>
-    private static readonly HashSet<string> GetOrSet = new(StringComparer.Ordinal) { "teams.push", "teams.syncToBase" };
+    /// <summary>Calls that read a setting, or set it when they carry its value: by method, the field that sets it.</summary>
+    private static readonly Dictionary<string, string> GetOrSet = new(StringComparer.Ordinal)
+    {
+        ["teams.push"] = "on", ["teams.syncToBase"] = "on",
+        // B085: { teamId } reads the team's workflowExpiryDays, { teamId, days } sets it.
+        ["teams.workflowExpiry"] = "days",
+    };
 
-    /// <summary>A call that only reads: not audited. A get-or-set call reads when it carries no <c>on</c>.</summary>
+    /// <summary>A call that only reads: not audited. A get-or-set call reads when it carries no value to set.</summary>
     public static bool IsReadOnly(string method, JsonObject? parameters) =>
-        GetOrSet.Contains(method) ? parameters?["on"] is null : IsReadOnly(method);
+        GetOrSet.TryGetValue(method, out var key) ? parameters?[key] is null : IsReadOnly(method);
 
     /// <summary>A call that only reads, by its name alone.</summary>
     public static bool IsReadOnly(string method)

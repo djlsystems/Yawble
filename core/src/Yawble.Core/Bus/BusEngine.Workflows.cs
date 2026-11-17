@@ -12,10 +12,11 @@ namespace Yawble.Core.Bus;
 /// <param name="ExpiredAt">When the app expired it (state expired only).</param>
 /// <param name="ExpiresAt">When it will expire if nothing happens (open and idle only; null while something works it or is due to).</param>
 /// <param name="ExpiryWarning">The warning given for a workflow that waits on the person's answer ("#12 will expire tomorrow; ...").</param>
+/// <param name="Question">The question an open workflow waits on the person's answer to (its needs-decision message, as bus.decisions' id); null when none.</param>
 public sealed record WorkflowSummary(
     long Id, string Title, string? Owner, string State, bool Undeclared, IReadOnlyList<string> Busy, string? Ending,
     DateTimeOffset StartedAt, DateTimeOffset LastAt, int Messages,
-    DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null, DateTimeOffset? ExpiresAt = null, string? ExpiryWarning = null);
+    DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null, DateTimeOffset? ExpiresAt = null, string? ExpiryWarning = null, long? Question = null);
 
 /// <summary>
 /// The person's hold on a workflow: see each one's state, close one, stop what

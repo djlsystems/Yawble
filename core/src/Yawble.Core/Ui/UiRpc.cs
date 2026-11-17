@@ -68,8 +68,8 @@ public sealed class UiRpc(
                     new TeamResetOptions(Flag(p, "dropWaiting"), Flag(p, "clearHome"), Flag(p, "removeClone"), Flag(p, "clearDocuments")), ct)),
                 "teams.syncToBase" => await SyncSettingAsync(Long(p, "teamId"), p?["on"] is JsonValue sv && sv.TryGetValue<bool>(out var son) ? son : null, ct),
                 "teams.push" => PushSetting(Long(p, "teamId"), p?["on"] is JsonValue pv && pv.TryGetValue<bool>(out var pon) ? pon : null),
-                // B085: { teamId, workflowExpiryDays: 1-90, or null for the default 3 }; teams.list carries the value.
-                "teams.setWorkflowExpiry" => new JsonObject { ["workflowExpiryDays"] = await bus.SetWorkflowExpiryDaysAsync(await TeamNameOf(Long(p, "teamId"), ct), ExpiryDays(p), ct) },
+                // B085: { teamId } reads the team's workflowExpiryDays (default 3), { teamId, days: 1-365 } sets it; both return { days }.
+                "teams.workflowExpiry" => await WorkflowExpiryAsync(p, ct),
                 "teams.env" => S(await bus.TeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
                 "teams.setEnv" => S(await bus.SetTeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), EnvEntries(p), ct)),
                 "teams.approvals" => S(await bus.TeamApprovalsAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
@@ -719,14 +719,24 @@ public sealed class UiRpc(
         return await bus.ExtendWorkflowAsync(team, workflow, ct);
     }
 
-    /// <summary>workflowExpiryDays: a whole number of days, or null (or absent) for the default.</summary>
-    private static int? ExpiryDays(JsonObject? p) => p?["workflowExpiryDays"] switch
+    /// <summary>teams.workflowExpiry: a get-or-set like teams.push; "days" (a whole number 1-365) sets it.</summary>
+    private async Task<JsonObject> WorkflowExpiryAsync(JsonObject? p, CancellationToken ct)
     {
-        null => null,
-        JsonValue v when v.TryGetValue<int>(out var d) => d,
-        JsonValue v when v.TryGetValue<double>(out var x) && x == Math.Floor(x) && x is >= int.MinValue and <= int.MaxValue => (int)x,
-        _ => throw new RpcException("bad_request", "workflowExpiryDays must be a whole number of days, or null for the default"),
-    };
+        var team = await TeamNameOf(Long(p, "teamId"), ct);
+        var days = p?["days"] switch
+        {
+            null => (int?)null,
+            JsonValue v when v.TryGetValue<int>(out var d) => d,
+            JsonValue v when v.TryGetValue<double>(out var x) && x == Math.Floor(x) && x is >= int.MinValue and <= int.MaxValue => (int)x,
+            _ => throw new RpcException("bad_request", "days must be a whole number of days from 1 to 365"),
+        };
+        if (days is < BusEngine.MinWorkflowExpiryDays or > BusEngine.MaxWorkflowExpiryDays)
+            throw new RpcException("bad_request", $"days must be {BusEngine.MinWorkflowExpiryDays} to {BusEngine.MaxWorkflowExpiryDays}");
+        return new JsonObject
+        {
+            ["days"] = days is { } set ? await bus.SetWorkflowExpiryDaysAsync(team, set, ct) : await bus.WorkflowExpiryDaysAsync(team, ct),
+        };
+    }
 
     private async Task<JsonNode?> DecisionsAsync(long teamId, CancellationToken ct)
     {

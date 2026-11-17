@@ -66,7 +66,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - After a model usage limit, the Manager is told to pick the work up again once the limit resets, up to 3 times per
   workflow.
 - When a run ends with its workflow still open and nothing else working on it, the Manager gets one reminder.
-- **Workflow expiry.** An open workflow with no activity for the team's **workflowExpiryDays** (Team settings, 1 to 90,
+- **Workflow expiry.** An open workflow with no activity for the team's **workflowExpiryDays** (Team settings, 1 to 365,
   default 3; settable from the cloud like the other team settings) is closed by the app as **expired**, distinct from
   closed by a person and from completed. Activity is any message in it (an instruction, a run's report, a hand-back, a
   status change, an answer) and the person's **Extend**.
@@ -77,7 +77,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     that question. It expires at N days, and never sooner than a day after its warning (an app that was closed at
     warning time warns first).
   - **Extend** (the workflow list, or the Concierge's workflow_extend) starts an open workflow's idle clock again.
-  - An open workflow's list row shows when it will expire (expiresAt; none while something works it). An expired one
+  - An open workflow's list row shows when it will expire (expiresAt; none while something works it) and the question it
+    waits on the person's answer to (question; null when none). An expired one
     reads **expired** in the Workflows dialog, on the Teams tiles, in the Concierge's team_workflows and on the cloud
     dashboard. Its recorded end (endedAt) is its last real activity, not the expiry; expiredAt is when the app expired it.
   - New activity reopens an expired workflow, as it reopens a completed or closed one.

@@ -18,7 +18,7 @@ public sealed record WorkflowExpiryWarning(long TeamId, string Team, long Workfl
 /// </summary>
 public sealed partial class BusEngine
 {
-    public const int DefaultWorkflowExpiryDays = 3, MinWorkflowExpiryDays = 1, MaxWorkflowExpiryDays = 90;
+    public const int DefaultWorkflowExpiryDays = 3, MinWorkflowExpiryDays = 1, MaxWorkflowExpiryDays = 365;
 
     /// <summary>How often the pump looks for workflows to warn about or expire.</summary>
     public static readonly TimeSpan ExpirySweepInterval = TimeSpan.FromMinutes(1);
@@ -44,11 +44,15 @@ public sealed partial class BusEngine
     private sealed record IdleWorkflow(DateTimeOffset LastActivity, DateTimeOffset IdleSince, int Days, DateTimeOffset ExpiresAt,
         Message? Question, DateTimeOffset? WarnAt, bool Warned);
 
-    /// <summary>The team's workflowExpiryDays, within 1-90.</summary>
+    /// <summary>The team's workflowExpiryDays, within 1-365.</summary>
     private int ExpiryDaysOf(long teamId) =>
         Math.Clamp(_store.WorkflowExpiryDays(teamId) ?? DefaultWorkflowExpiryDays, MinWorkflowExpiryDays, MaxWorkflowExpiryDays);
 
-    /// <summary>Sets the team's workflowExpiryDays (1-90); null goes back to the default. Returns the value now in force.</summary>
+    /// <summary>The team's workflowExpiryDays now in force (the default 3 when never set).</summary>
+    public Task<int> WorkflowExpiryDaysAsync(string team, CancellationToken ct = default) =>
+        WithGate(() => ExpiryDaysOf(TeamId(team)), ct);
+
+    /// <summary>Sets the team's workflowExpiryDays (1-365); null goes back to the default. Returns the value now in force.</summary>
     public Task<int> SetWorkflowExpiryDaysAsync(string team, int? days, CancellationToken ct = default) =>
         WithGate(() =>
         {
@@ -261,7 +265,8 @@ public sealed partial class BusEngine
         };
         return new WorkflowSummary(w.Id, TitleOf(root), owner.Name, state, undeclared, busy, endingText, w.First, w.Last, w.Count,
             endedAt, expiredAt, idle?.ExpiresAt,
-            idle is { Warned: true, Question: { } q } ? WarningText(w.Id, q.Seq) : null);
+            idle is { Warned: true, Question: { } q } ? WarningText(w.Id, q.Seq) : null,
+            ended ? null : (idle?.Question ?? OpenQuestion(thread))?.Seq);
     }
 
     private static DateTimeOffset? Time(Message m, string field) =>
