@@ -283,6 +283,18 @@ const shown = computed(() => {
   if (!p) return activity.value;
   return activity.value.filter((r) => r.team.toLowerCase() === p.team.name.toLowerCase() && (!p.member || r.member?.toLowerCase() === p.member.name.toLowerCase()));
 });
+/** Each member's state now, by its scene key, so an activity row's face wears the same ring as the member on the wall. */
+const memberStates = computed(() => {
+  const states = new Map<string, MemberState>();
+  for (const t of teams.value) for (const m of t.members) states.set(memberKey(t.name, m.name), m.state);
+  return states;
+});
+/** A row's member state: the replay's state at the playhead in a replay, else the live one (idle if unknown). */
+function rowState(team: string, member: string): MemberState {
+  const key = memberKey(team, member);
+  if (replayStates && playhead.value !== null) return replayStates.of(key, playhead.value);
+  return memberStates.value.get(key) ?? 'idle';
+}
 const windowFrom = computed(() => now.value - windowMinutes.value * 60_000);
 const replayClock = computed(() => (playhead.value === null ? '' : new Date(playhead.value).toLocaleTimeString()));
 
@@ -822,7 +834,7 @@ onBeforeUnmount(() => {
       </header>
       <ol v-if="activityOpen">
         <li v-for="r in shown" :key="r.key" :style="{ '--tone': Palette[r.tone] }" data-test="monitor-row">
-          <MemberAvatar v-if="r.member" :team="r.team" :member="r.member" :size="22" wall />
+          <MemberAvatar v-if="r.member" :team="r.team" :member="r.member" :state="rowState(r.team, r.member)" :size="22" wall />
           <span v-else class="noface" />
           <div class="line">
             <div><b>{{ r.verb }}</b> <template v-if="r.verb.endsWith('told')">{{ r.who }}</template><template v-else>· {{ r.who }}</template> <span class="dim">· {{ r.team }} · {{ ago(r.at) }}</span></div>
