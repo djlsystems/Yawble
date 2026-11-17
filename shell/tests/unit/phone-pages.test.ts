@@ -424,12 +424,12 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(st.value(h2, 'flex')).toBe('0 1 auto');
   });
 
-  it('the Team page: Triggers, Git and Settings are in the ⋯ menu, and each opens what it did', async () => {
+  it('the Team page: Documents, Workflows, Triggers, Git and Settings are in the ⋯ menu (card 331), and each opens what it did', async () => {
     const w = await teamPage(Portrait.width);
     expect(w.find('[data-test=open-triggers]').exists()).toBe(false);
     await w.get('[data-test=team-more]').trigger('click');
     expect(w.get('[data-test=team-more]').attributes('aria-expanded')).toBe('true');
-    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-triggers', 'open-git', 'open-manage']);
+    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-documents-menu', 'open-workflows-menu', 'open-triggers', 'open-git', 'open-manage']);
     await w.get('[data-test=open-git]').trigger('click');
     expect(w.find('[data-test=team-more-menu]').exists()).toBe(false); // the menu closes as the dialog opens
     expect(w.find('git-dialog-stub').exists()).toBe(true);
