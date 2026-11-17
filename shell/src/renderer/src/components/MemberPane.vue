@@ -99,7 +99,10 @@ watch(menuOpen, (open) => {
   else { document.removeEventListener('pointerdown', onDocDown, true); document.removeEventListener('keydown', onKey); }
 });
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', onDocDown, true); document.removeEventListener('keydown', onKey); });
-function pick(f: () => void) { menuOpen.value = false; f(); }
+const menuBtn = ref<HTMLButtonElement | null>(null);
+// A pick hands the focus back to the ⋯ button before the menu (v-if) goes: the item clicked is removed from the page,
+// and a confirm it opens (Remove agent, card 355) returns the focus to where it was, the ⋯ button, not <body>.
+function pick(f: () => void) { menuBtn.value?.focus(); menuOpen.value = false; f(); }
 
 // A phone (B057, card 307): the member's terminal is the whole screen over the page with one 44 px header row - the
 // title, a ⋯ holding the terminal's state line and Stop, and ✕ (back to the Report) - and the terminal fills the rest.
@@ -127,7 +130,7 @@ defineExpose({ el: () => root.value });
       <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
       <span class="spacer" />
       <span ref="menuWrap" class="menu-wrap">
-        <button class="icon menu-button" :class="{ on: menuOpen }" title="Actions" :aria-label="`${displayName(m.name)}: actions`" aria-haspopup="menu" :aria-expanded="menuOpen"
+        <button ref="menuBtn" class="icon menu-button" :class="{ on: menuOpen }" title="Actions" :aria-label="`${displayName(m.name)}: actions`" aria-haspopup="menu" :aria-expanded="menuOpen"
           data-test="member-more" @click="menuOpen = !menuOpen"><Icon name="menu" :size="16" /></button>
         <span v-if="menuOpen" class="menu" role="menu" data-test="member-more-menu">
           <button v-if="!remote" role="menuitem" data-test="open-interactive-cli" :disabled="!canOpen || opening" :aria-busy="opening"

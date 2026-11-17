@@ -146,6 +146,12 @@ for (const [label, w, h] of [['phone 390x844', 390, 844], ['iPad 820x1180', 820,
       await page.screenshot({ path: test.info().outputPath(`confirm-member-${w}.png`) });
       await page.locator('[data-test=confirm-cancel]').click();
       await expect(confirmBox(page)).toHaveCount(0);
+      // The ⋯ menu (v-if) went before the confirm opened: the focus is back on the ⋯ button, not <body> (card 356).
+      await expect(pane.locator('[data-test=member-more]')).toBeFocused();
+      await ask();
+      await page.keyboard.press('Escape');
+      await expect(confirmBox(page)).toHaveCount(0);
+      await expect(pane.locator('[data-test=member-more]')).toBeFocused();
       await page.waitForTimeout(1500); // a refresh or two: still there
       expect(calls).not.toContain('members.remove');
       await expect(pane).toBeVisible();
