@@ -27,6 +27,28 @@ const requests = computed(() => deleteRequests(plan.value, selected.value, props
 const selectedCount = computed(() => requests.value.reduce((n, q) => n + q.branches.length, 0));
 const multiRepo = computed(() => (plan.value?.repos.length ?? 0) > 1);
 const short = (sha: string | null | undefined) => (sha ? sha.slice(0, 10) : '—');
+const baseOf = (repo: string) => plan.value?.repos.find((x) => x.repo === repo)?.baseBranch || null;
+
+/** The plan's notes (what the core could not read, e.g. a member's clone), each with its repository. */
+const notes = computed(() => (plan.value?.repos ?? []).flatMap((r) => (r.notes ?? []).map((text) => ({ repo: r.repo, text }))));
+/** What merged and contained are measured against: one base for all, or each repository's. */
+const baseText = computed(() => {
+  const repos = (plan.value?.repos ?? []).filter((r) => r.baseBranch);
+  if (!repos.length) return null;
+  const bases = [...new Set(repos.map((r) => r.baseBranch))];
+  return bases.length === 1
+    ? `Merged and contained are measured against ${bases[0]}.`
+    : `Merged and contained are measured against each repository's base: ${repos.map((r) => `${r.repo} → ${r.baseBranch}`).join(', ')}.`;
+});
+/** The heading over a row's commits: what they are for its class (none for classes that do not list commits). */
+function commitsLabel(r: TidyRow): string | null {
+  const base = baseOf(r.repo) ?? 'the base branch';
+  switch (r.branch.class) {
+    case 'moved': return `A realign drops these from the team's copy (not in ${r.branch.member ? `${r.branch.member}'s` : 'the'} clone):`;
+    case 'own-work': case 'origin-only': return `Commits not in ${base}:`;
+    default: return null;
+  }
+}
 
 async function load(): Promise<TidyPlan | null> {
   error.value = null;
@@ -114,17 +136,37 @@ async function confirmRealign() {
   if (!r || busy.value) return;
   busy.value = 'realign';
   r.error = null;
+  const b = r.row.branch;
   try {
-    const res = await api.call<BranchRealignResult>('git.branchRealign', { ...teamParams(), repo: r.row.repo, member: r.row.branch.member });
+    // The yes is for the two commits the confirm shows: the core refuses ("stale") if either moved since.
+    const res = await api.call<BranchRealignResult>('git.branchRealign', {
+      ...teamParams(), repo: r.row.repo, member: b.member,
+      ...(b.teamSha ? { expectOld: b.teamSha } : {}), ...(b.cloneSha ? { expectNew: b.cloneSha } : {}),
+    });
     realigning.value = null;
     emit('changed');
-    await afterAction([`Realigned ${r.row.branch.name}: ${short(res.oldSha)} → ${short(res.newSha)} (the old commit is recorded for recovery).`], new Set());
+    await afterAction([`Realigned ${b.name}: ${short(res.oldSha)} → ${short(res.newSha)} (the old commit is recorded for recovery).`], new Set());
   } catch (e) {
+    const code = errorCode(e);
     r.error = errorText(e);
-    r.refused = errorCode(e) === 'running' || /running|runs/i.test(r.error);
+    r.refused = (!!code && !NOT_REFUSALS.has(code)) || /running|runs/i.test(r.error);
+    if (code === 'stale') await reshowRealign(r);
   } finally {
     busy.value = null;
   }
+}
+
+/** Error codes that are a failure, not the core saying no (those show as "Refused: <reason>"). */
+const NOT_REFUSALS = new Set(['internal', 'method_not_found', 'bad_request', 'invalid_params', 'timeout', 'disconnected']);
+
+/** After a "stale" refusal: read the plan again; if the branch is still moved, show the confirm with its new commits (a
+ * new yes is bound to those), else close it and say what happened. The refusal stays shown either way. */
+async function reshowRealign(r: { row: TidyRow; error: string | null }) {
+  const p = await load();
+  const again = groupTidy(p).flatMap((g) => g.rows).find((x) => x.key === r.row.key && x.branch.class === 'moved');
+  if (again) { realigning.value = { row: again, error: r.error, refused: true }; return; }
+  realigning.value = null;
+  report.value = { done: [`Refused: ${r.error}`], kept: p ? keptReport(p, new Set()) : [] };
 }
 
 async function afterAction(done: string[], asked: Set<string>) {
@@ -162,6 +204,10 @@ defineExpose({ load });
     </section>
 
     <template v-if="plan">
+      <ul v-if="notes.length" class="notes small" data-test="tidy-notes">
+        <li v-for="(n, i) in notes" :key="`n${i}`" class="note" data-test="tidy-note"><template v-if="multiRepo">{{ n.repo }}: </template>{{ n.text }}</li>
+      </ul>
+      <p v-if="baseText" class="small muted base" data-test="tidy-base">{{ baseText }}</p>
       <p v-if="!groups.length" class="muted small" data-test="tidy-empty">No branches to tidy.</p>
       <section v-for="g in groups" :key="g.cls" class="group" :class="`cls-${g.cls}`" :data-test="`tidy-group-${g.cls}`">
         <div class="ghead"><strong>{{ g.label }}</strong> <span class="count">{{ g.rows.length }}</span></div>
@@ -174,15 +220,18 @@ defineExpose({ load });
             <span v-if="multiRepo" class="chip" data-test="tidy-repo">{{ r.repo }}</span>
             <span class="muted small">{{ whereText(r.branch.where) }}</span>
           </div>
-          <div v-if="r.branch.class === 'contained' && r.branch.proof" class="small proof" data-test="tidy-proof">{{ r.branch.proof }}</div>
           <div v-if="r.branch.class === 'working'" class="small muted">{{ r.branch.member ? `${r.branch.member}'s` : "The member's" }} working branch, not a leftover.</div>
           <div v-if="r.branch.class === 'moved'" class="small moved">
             <span data-test="tidy-moved-shas">team {{ short(r.branch.teamSha) }} · {{ r.branch.member ? `${r.branch.member}'s ` : '' }}clone {{ short(r.branch.cloneSha) }}</span>
             <button class="small-btn" data-test="tidy-realign" :disabled="!!busy" @click="startRealign(r)">Realign…</button>
           </div>
-          <ul v-if="r.branch.class === 'own-work' && r.branch.commits?.length" class="commits small" data-test="tidy-commits">
-            <li v-for="c in r.branch.commits" :key="c.sha"><code>{{ short(c.sha) }}</code> {{ c.subject }}</li>
-          </ul>
+          <template v-if="r.branch.commits?.length && commitsLabel(r)">
+            <div class="small muted">{{ commitsLabel(r) }}</div>
+            <ul class="commits small" data-test="tidy-commits">
+              <li v-for="c in r.branch.commits" :key="c.sha"><code>{{ short(c.sha) }}</code> {{ c.subject }}</li>
+            </ul>
+          </template>
+          <div v-if="r.branch.proof && r.branch.class !== 'working'" class="small proof" :data-test="r.branch.class === 'contained' ? 'tidy-proof' : 'tidy-why'">{{ r.branch.proof }}</div>
         </div>
       </section>
 
@@ -191,6 +240,13 @@ defineExpose({ load });
         <div class="small">Set the team repository's<template v-if="realigning.row.branch.where.includes('origin')"> and origin's</template> copy to what
           {{ realigning.row.branch.member ?? 'the member' }}'s clone has (a forced update):</div>
         <div class="shas" data-test="tidy-realign-shas"><code>{{ short(realigning.row.branch.teamSha) }}</code> → <code>{{ short(realigning.row.branch.cloneSha) }}</code></div>
+        <template v-if="realigning.row.branch.commits?.length">
+          <div class="small">The team's copy drops these commits:</div>
+          <ul class="commits small" data-test="tidy-realign-commits">
+            <li v-for="c in realigning.row.branch.commits" :key="c.sha"><code>{{ short(c.sha) }}</code> {{ c.subject }}</li>
+          </ul>
+        </template>
+        <div v-if="realigning.row.branch.proof" class="small proof" data-test="tidy-realign-proof">{{ realigning.row.branch.proof }}</div>
         <div class="muted small">The old commit is recorded so it can be recovered.</div>
         <p v-if="realigning.error" class="error" data-test="tidy-realign-error">
           <template v-if="realigning.refused">Refused: </template>{{ realigning.error }}</p>
@@ -240,7 +296,9 @@ defineExpose({ load });
 .chip { font-size: 11px; padding: 0 5px; border-radius: 8px; background: var(--bg); }
 .confirm-box { padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--state-failed); background: var(--bg); min-width: 0; }
 .confirm-box .plan { white-space: pre-wrap; word-break: break-word; background: var(--chip); border-radius: 4px; padding: 6px 8px; margin: 6px 0; font-size: 12.5px; max-height: 240px; overflow: auto; }
-.note { color: var(--warn-ink); }
+.note { color: var(--warn-ink); overflow-wrap: anywhere; }
+.notes { margin: 0; padding-left: 18px; min-width: 0; }
+.base { margin: 0; }
 .report { padding: 6px 8px; border-left: 3px solid var(--ok-rule); background: var(--bg); min-width: 0; }
 .ok-line { margin: 0 0 4px 0; overflow-wrap: anywhere; }
 .kept { margin: 2px 0 0 0; padding-left: 18px; }

@@ -79,7 +79,14 @@ test('1280 x 800: Tidy… plan, Delete selected with one yes, report kept and wh
   for (const cls of ['merged', 'contained', 'moved', 'own-work', 'working', 'origin-only', 'scratch']) await expect(tidy.locator(`[data-test=tidy-group-${cls}]`)).toBeVisible();
   await expect(tidy.locator('[data-test=tidy-proof]')).toContainText('git cherry main members/payments/kofi');
   await expect(tidy.locator('[data-test=tidy-group-working]')).toContainText("DeveloperAda's working branch, not a leftover");
-  await expect(tidy.locator('[data-test=tidy-commits]')).toContainText('Refund limits per merchant');
+  await expect(tidy.locator('[data-test="tidy-row-feature/refund-limits"] [data-test=tidy-commits]')).toContainText('Refund limits per merchant');
+  // Card 362 fix (F3, F4): the moved row's dropped commits and proof, origin-only's commits, the notes and the base.
+  const benRow = tidy.locator('[data-test="tidy-row-members/payments/testerben"]');
+  await expect(benRow.locator('[data-test=tidy-commits]')).toContainText('Retry the upload three times');
+  await expect(benRow.locator('[data-test=tidy-why]')).toContainText('nothing is lost by realigning it');
+  await expect(tidy.locator('[data-test="tidy-row-feature/old-idea"] [data-test=tidy-commits]')).toContainText('Try a new cache');
+  await expect(tidy.locator('[data-test=tidy-note]')).toHaveText("payments-cloud: TesterBen's clone was not read: its .git is a file (a gitdir pointer)");
+  await expect(tidy.locator('[data-test=tidy-base]')).toHaveText('Merged and contained are measured against main.');
   await expect(tidy.locator('[data-test=tidy-delete-selected]')).toContainText('Delete selected (3)');
   const ticked = await tidy.locator('[data-test=tidy-select]').evaluateAll((cs) => cs.map((c) => (c as HTMLInputElement).checked));
   expect(ticked).toEqual([true, true, true]);
@@ -101,7 +108,7 @@ test('1280 x 800: Tidy… plan, Delete selected with one yes, report kept and wh
   save('kept-after-delete', kept);
   expect(kept.some((k) => k.includes('old-cleo') || k.includes('kofi') || k.includes('old-wren'))).toBe(false);
   expect(kept).toContain("feature/refund-limits (payments): has work of its own (1 commit), needs a look");
-  expect(kept).toContain('spike/old-idea (payments-cloud): only on origin, nobody has it here');
+  expect(kept).toContain('feature/old-idea (payments-cloud): only on origin, nobody has it here');
   await expect(tidy.locator('[data-test=tidy-group-merged]')).toHaveCount(0);
   await expect(tidy.locator('[data-test=tidy-group-contained]')).toHaveCount(0);
   await shot(page, 'after-delete-1280');
