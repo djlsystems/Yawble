@@ -66,7 +66,7 @@ interface WfGhost { x: number; y: number; hue: number; id: number; outX: number;
 interface Link { source: Node; target: Node }
 
 export interface SceneHover {
-  key: string; kind: 'team' | 'member' | 'file' | 'folder' | 'commit' | 'workflow'; team: string; name: string; state?: MemberState; statusLine?: string | null; queued?: number; x: number; y: number;
+  key: string; kind: 'team' | 'member' | 'file' | 'folder' | 'commit' | 'workflow' | 'you'; team: string; name: string; state?: MemberState; statusLine?: string | null; queued?: number; x: number; y: number;
   /**
    * A map node's: a file's path, how often it was touched, whether it is new, changed or only read, whether a commit
    * confirmed it (its short sha) and who touched it; a folder's or a "+N" node's files.
@@ -773,7 +773,7 @@ export class MonitorScene {
   private drawYouNode(c: CanvasRenderingContext2D, now: number, motion: number): void {
     if (!this.w || !this.h) return;
     const { x, y, r } = youNodeAt(this.w, this.h);
-    const count = this.model?.youCount() ?? 0;
+    const count = this.model?.needYouItems().length ?? 0; // the header's "N need you" too (B088)
     const color = Palette.decision;
     // Something just arrived: a ring opens out from it.
     const arrived = this.drawn.filter((e) => e.kind === 'you' && (now - e.at) / this.life(e) > 0.75);
@@ -1654,12 +1654,14 @@ export class MonitorScene {
         }
         return;
       }
-      // The You node sits over the wall: the view opens Needs you on its click.
+      // The You node sits over the wall: hovering it shows what waits for the person (the view's need-you list, B088);
+      // the view opens Needs you on its click.
       this.hoverYou = this.hitYouNode(sx, sy);
       if (this.hoverYou) {
         this.hover = null; this.hoverMap = null; this.hoverCommit = null; this.hoverPanel = null;
         cv.style.cursor = 'pointer';
-        this.onHover(null);
+        const you = youNodeAt(this.w, this.h);
+        this.onHover({ key: 'you', kind: 'you', team: '', name: 'You', x: you.x, y: you.y });
         return;
       }
       const commit = this.commitAt(sx, sy);
