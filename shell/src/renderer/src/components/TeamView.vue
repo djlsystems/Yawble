@@ -207,14 +207,17 @@ defineExpose({ refresh, openWorkflows, openDocuments });
         <span class="kpi" data-test="kpi-queued"><span class="sep"> · </span><b>{{ team.queued }}</b> queued</span>
       </div>
       <!-- A phone (B054): the title and the actions are one row, the actions behind ⋯. Documents and Workflows are in the
-           drawer, under the team's name (App.vue, Sidebar.vue; card 316). -->
+           ⋯ menu first (card 331) and in the drawer, under the team's name (App.vue, Sidebar.vue; card 316). Every item
+           has an icon of the same size, as the drawer has. -->
       <div v-if="phone" class="actions phone-actions" data-test="team-phone-actions">
         <span class="more-wrap">
           <button class="hbtn" data-test="team-more" title="More" aria-label="More team actions" aria-haspopup="menu" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen"><Icon name="more" :size="18" /></button>
           <span v-if="moreOpen" class="menu" role="menu" data-test="team-more-menu">
-            <button role="menuitem" data-test="open-triggers" @click="moreOpen = false; showTriggers = true">⏰ Triggers</button>
-            <button role="menuitem" data-test="open-git" @click="moreOpen = false; showGit = true">⎇ Git</button>
-            <button role="menuitem" data-test="open-manage" @click="moreOpen = false; showManage = true"><Icon name="settings" :size="14" /> Settings</button>
+            <button role="menuitem" data-test="open-documents-menu" @click="moreOpen = false; openDocuments()"><Icon name="docs" :size="18" />Documents</button>
+            <button role="menuitem" data-test="open-workflows-menu" @click="moreOpen = false; openWorkflows()"><Icon name="dispatch" :size="18" />Workflows</button>
+            <button role="menuitem" data-test="open-triggers" @click="moreOpen = false; showTriggers = true"><Icon name="clock" :size="18" />Triggers</button>
+            <button role="menuitem" data-test="open-git" @click="moreOpen = false; showGit = true"><Icon name="branch" :size="18" />Git</button>
+            <button role="menuitem" data-test="open-manage" @click="moreOpen = false; showManage = true"><Icon name="settings" :size="18" />Settings</button>
           </span>
         </span>
       </div>
@@ -391,9 +394,13 @@ h2 { font-size: 16px; margin: 0; }
   .phone-actions { flex: none; flex-wrap: nowrap; gap: 2px; }
   .hbtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; box-sizing: border-box; }
   .more-wrap { position: relative; display: inline-flex; }
-  .menu { position: absolute; right: 0; top: 100%; z-index: 5; display: flex; flex-direction: column; min-width: 170px; padding: 4px;
+  /* Card 331: the menu opens from the ⋯ at the right edge, leftward, and stays on screen (never wider than the screen,
+     scrolls if taller than it); it sits above the member panes (their grips and menus are z-index 1-5). */
+  .menu { position: absolute; right: 0; top: 100%; z-index: 20; display: flex; flex-direction: column; min-width: 190px; padding: 4px;
+    max-width: calc(100vw - 16px); max-height: calc(100dvh - 120px); overflow-y: auto; box-sizing: border-box;
     background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px var(--shadow); }
-  .menu button { justify-content: flex-start; text-align: left; border: 0; background: transparent; padding: 0 10px; min-height: 44px; font-size: 13px; }
+  .menu button { display: flex; align-items: center; gap: 10px; justify-content: flex-start; text-align: left; border: 0; background: transparent;
+    padding: 0 12px; height: 44px; min-height: 44px; flex: none; font-size: 14px; white-space: nowrap; }
   .menu button:hover { background: var(--hover); }
   .actions button, .row button, .row input, .row select, .paused button { min-height: 44px; box-sizing: border-box; }
   .row { flex-wrap: wrap; }

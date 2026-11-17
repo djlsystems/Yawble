@@ -161,13 +161,13 @@ describe('the team page header (card 316)', () => {
     return w;
   };
 
-  it('on a phone: no Documents or Workflows in the header; the rest stay behind ⋯ (B054); the exposed openers still open the dialogs', async () => {
+  it('on a phone: no Documents or Workflows buttons in the header; all five are behind ⋯ (B054, card 331); the exposed openers still open the dialogs', async () => {
     setWidth(390);
     const w = await mountTeam();
     expect(w.find('[data-test=open-documents]').exists()).toBe(false);
     expect(w.find('[data-test=open-workflows]').exists()).toBe(false);
     await w.get('[data-test=team-more]').trigger('click');
-    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-triggers', 'open-git', 'open-manage']);
+    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-documents-menu', 'open-workflows-menu', 'open-triggers', 'open-git', 'open-manage']);
     await w.get('[data-test=team-more]').trigger('click');
     (w.vm as unknown as { openDocuments: () => void }).openDocuments();
     await flushPromises();
