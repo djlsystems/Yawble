@@ -45,7 +45,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
     {
         var dot = method.LastIndexOf('.');
         var verb = dot < 0 ? method : method[(dot + 1)..];
-        return ReadVerbs.Contains(verb) || method.StartsWith("git.status", StringComparison.Ordinal)
+        return ReadVerbs.Contains(verb) || method.StartsWith("git.status", StringComparison.Ordinal) || method == "git.tidyPlan"
             // Opening and closing the read-only Code view change nothing (a download is recorded).
             || method is "code.open" or "code.close";
     }
