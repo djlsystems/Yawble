@@ -176,12 +176,16 @@ const fits = (top: number, frame: { height: number }) => (frame === Portrait ? t
 const DesktopCss: Record<string, string> = {
   'board/BacklogView.vue': '55673d4cef46ac87',
   // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
-  'components/TeamView.vue': 'ec127edc70b3a1a4',
+  // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon); card 344: a desktop rule keeps the 29 px buttons' size.
+  'components/TeamView.vue': 'e9484eb0ecb95837',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
-  'components/MemberPane.vue': '0dcbae2a8c95e6e4',
+  // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
+  // toolbar, no two areas side by side, no width bar, no loosened marker).
+  'components/MemberPane.vue': 'ee6baa53cc7ccb8f',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
-  'components/DocumentsBrowser.vue': 'e2d8b12b24e93037',
+  // The documents list's Modified column: a wider list and the size / modified cells.
+  'components/DocumentsBrowser.vue': '5adcd20e83bad36c',
 };
 
 /** Selectors that scroll vertically on the desktop (overflow / overflow-y auto or scroll). */
@@ -206,6 +210,18 @@ async function teamPage(width: number, behind = false, of = team) {
   const w = keep(mount(TeamView, { props: { team: of, api: teamApi(behind), pollMs: 100_000 }, global: { stubs: dialogs } }));
   await settle();
   return w;
+}
+/** Card 342: Attach and Send draw a monochrome line icon (an aria-hidden svg in currentColor), never an emoji. */
+function expectSvgIcons(w: VueWrapper) {
+  for (const sel of ['[data-test=tell-attach]', '[data-test=tell-send]']) {
+    const b = w.get(sel);
+    const svg = b.find('svg');
+    expect(svg.exists(), sel).toBe(true);
+    expect(svg.attributes('aria-hidden'), sel).toBe('true');
+    expect(svg.attributes('stroke'), sel).toBe('currentColor');
+    expect(svg.attributes('fill'), sel).toBe('none');
+    expect(b.text(), sel).not.toMatch(/\p{Extended_Pictographic}|✉/u);
+  }
 }
 async function documentsRoot(width: number) {
   screen(width);
@@ -326,10 +342,11 @@ describe('one scroller per page on a phone (B054)', () => {
   it("the Team page: each member's activity and output are at their own height (no inline desktop height on the phone)", async () => {
     const w = await teamPage(Portrait.width);
     for (const b of w.findAll('[data-test=member-pane-body]')) expect((b.element as HTMLElement).style.height).toBe('');
-    for (const s of w.findAll('[data-test=member-side]')) expect((s.element as HTMLElement).style.flexBasis).toBe('');
     const pane = rules(phoneCss(read('components/MemberPane.vue')));
     expect(pane.find((r) => r.sels.includes('.output') && r.decls.height)?.decls.height).toBe('auto');
-    expect(pane.find((r) => r.sels.includes('.side') && r.decls.height)?.decls.height).toBe('auto');
+    expect(pane.find((r) => r.sels.includes('.body') && r.decls.height)?.decls.height).toBe('auto');
+    // The activity is the Activity tab's view.
+    for (const t of w.findAll('[data-test=member-view-activity]')) await t.trigger('click');
     // The activity is capped: it renders as a plain list, its ol not positioned to scroll.
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).toContain('capped');
     const act = rules(phoneCss(read('components/MemberActivity.vue')));
@@ -367,7 +384,7 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(tabs + icons.length * 44 + 3 * px(st.value(head, 'gap'))).toBeLessThanOrEqual(content(Portrait.width, 10));
   });
 
-  it('the Team page: the title gives way to Documents, Workflows and ⋯; the Tell placeholder is whole at 375 px', async () => {
+  it('the Team page: the title gives way to ⋯ (Documents and Workflows are in the drawer, card 316); the Tell placeholder is whole at 375 px', async () => {
     const w = await teamPage(Portrait.width);
     const st = new Styles('components/TeamView.vue');
     const head = w.get('.teamhead').element;
@@ -375,14 +392,16 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(st.value(w.get('.titleline').element, 'min-width')).toBe('0');
     expect(st.value(w.get('.titleline h2').element, 'text-overflow')).toBe('ellipsis');
     expect(w.findAll('[data-test=team-phone-actions] > .hbtn, [data-test=team-phone-actions] .more-wrap > .hbtn').map((b) => b.attributes('aria-label')))
-      .toEqual(['Documents', 'Workflows', 'More team actions']);
+      .toEqual(['More team actions']);
     // Tell: the box beside two 44 px buttons; its placeholder fits the room left (16 px font).
     const tell = w.get('[data-test=tell-text]');
     const placeholder = tell.attributes('placeholder')!;
     expect(placeholder).toBe('Tell the Manager…');
     expect(st.value(w.get('.tell').element, 'flex-wrap')).toBe('nowrap');
     expect(st.value(tell.element, 'min-width')).toBe('0');
-    expect(w.get('[data-test=tell-send]').text()).toBe('✉');
+    expect(w.get('[data-test=tell-send]').text()).toBe(''); // card 342: the paper plane only
+    expect(w.get('[data-test=tell-attach]').attributes('title')).toBe('Attach an image');
+    expectSvgIcons(w);
     expect(w.get('[data-test=tell-send]').attributes('aria-label')).toBe('Tell Manager');
     const room = content(Portrait.width, 12) - 2 * 44 - 2 * 6 - 16;
     expect(placeholder.length * Char).toBeLessThanOrEqual(room);
@@ -420,12 +439,12 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(st.value(h2, 'flex')).toBe('0 1 auto');
   });
 
-  it('the Team page: Triggers, Git and Settings are in the ⋯ menu, and each opens what it did', async () => {
+  it('the Team page: Documents, Workflows, Triggers, Git and Settings are in the ⋯ menu (card 331), and each opens what it did', async () => {
     const w = await teamPage(Portrait.width);
     expect(w.find('[data-test=open-triggers]').exists()).toBe(false);
     await w.get('[data-test=team-more]').trigger('click');
     expect(w.get('[data-test=team-more]').attributes('aria-expanded')).toBe('true');
-    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-triggers', 'open-git', 'open-manage']);
+    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-documents-menu', 'open-workflows-menu', 'open-triggers', 'open-git', 'open-manage']);
     await w.get('[data-test=open-git]').trigger('click');
     expect(w.find('[data-test=team-more-menu]').exists()).toBe(false); // the menu closes as the dialog opens
     expect(w.find('git-dialog-stub').exists()).toBe(true);
@@ -487,12 +506,13 @@ describe('at 1280 px the desktop is as it was (B054)', () => {
     expect(w.get('[data-test=backlog-view]').classes()).toEqual(['backlog-place', 'fill']);
   });
 
-  it('the Team page: the five labelled actions, the long Tell placeholder and "Tell Manager ✉", the activity uncapped', async () => {
+  it('the Team page: the five labelled actions, the long Tell placeholder and "Tell Manager" with the plane, the activity uncapped', async () => {
     const w = await teamPage(Desktop);
     expect(w.findAll('.teamhead .actions > button').map((b) => b.text())).toEqual(['Documents', 'Workflows', '⏰ Triggers', '⎇ Git', 'Settings']);
     expect(w.find('[data-test=team-more]').exists()).toBe(false);
     expect(w.get('[data-test=tell-text]').attributes('placeholder')).toBe('Tell the Manager… (paste an image to attach it)');
-    expect(w.get('[data-test=tell-send]').text()).toBe('Tell Manager ✉');
+    expect(w.get('[data-test=tell-send]').text()).toBe('Tell Manager');
+    expectSvgIcons(w);
     expect(w.get('[data-test=tell-send]').attributes('aria-label')).toBeUndefined();
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).not.toContain('capped');
   });

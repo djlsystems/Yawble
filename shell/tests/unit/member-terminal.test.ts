@@ -138,7 +138,7 @@ describe('member terminals open on the team page', () => {
     expect(await mt.openMemberTerminal(2, 5)).toBe(true);
     await settle();
     expect(pv.getMemberView('alpha', 'Kofi')).toBe('terminal');
-    expect(pv.getMemberView('2', '5')).toBe('activity'); // not keyed by ids
+    expect(pv.getMemberView('2', '5')).toBe('report'); // not keyed by ids
     expect(focused).toEqual([]);
     w.unmount();
     pv.resetMemberViews();

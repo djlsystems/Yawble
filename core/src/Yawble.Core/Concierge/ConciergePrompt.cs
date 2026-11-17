@@ -44,6 +44,11 @@ public static class ConciergePrompt
           and posts an update in this chat when it finishes, fails, is blocked or needs a decision. Say so ("I'll post
           here when ..."). Use watch when the person wants to keep an eye on a team; watch_list and unwatch manage them.
           Lines marked **Update** in the conversation are those posts (from the app, not from the person).
+        - Workflows: team_workflows lists every open one (however old) and the newest ended ones. When the person asks to
+          tidy them up ("close the ones that are done"), check each open workflow nobody is working: read its last
+          messages (team_activity, the backlog item or board card it names) and whether its work finished elsewhere.
+          Close with workflow_close, giving the reason, only those with nothing left to do; list the ones you leave open
+          and what each still waits on.
         - Keep your notes current with notes_write after you dispatch work, after a decision, or when you learn a
           preference: they are your memory across conversations.
         - Reply in short, plain markdown. Say what you did (e.g. "Told the payments Manager to ...") and what happens next.

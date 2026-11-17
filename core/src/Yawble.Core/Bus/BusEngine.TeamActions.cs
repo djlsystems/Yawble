@@ -174,7 +174,7 @@ public sealed partial class BusEngine
             if (what.Count > 0) working.Add($"{m.Name} {string.Join(" and ", what)}");
         }
         var team = _store.Teams().Single(t => t.Id == teamId).Name;
-        var open = _store.WorkflowsOf(team, 200).Select(w => w.Id).Where(w => !_store.WorkflowEnded(w)).ToArray();
+        var open = _store.WorkflowsOf(team, -1).Select(w => w.Id).Where(w => !_store.WorkflowEnded(w)).ToArray();
         return new TeamQuiet(working.Count == 0, working, open);
     }
 

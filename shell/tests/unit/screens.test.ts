@@ -67,9 +67,8 @@ describe('main window', () => {
     const ben = w.get('[data-test=agent-Ben]');
     expect(ben.get('[data-test=agent-face-state]').text()).toBe('Waiting to start');
     expect(ben.get('[data-test=agent-state]').text()).toContain('position 1 of 2');
-    // A short marker on the card; the hosts are in its tooltip and on the settings' Policy tab, which it opens.
-    expect(ben.get('[data-test=loosened-chip]').text()).toBe('⚠ loosened');
-    expect(ben.get('[data-test=loosened-chip]').attributes('title')).toContain('registry.npmjs.org');
+    // No loosened marker on the card: what is loosened is on the agent's settings (Policy tab).
+    expect(ben.find('[data-test=loosened-chip]').exists()).toBe(false);
     expect(ben.get('[data-test=agent-cli]').text()).toBe('grok');
     const [bensQuestion, hire] = w.findAll('[data-test=decision]');
     expect(bensQuestion.text()).toContain('Ben needs a decision');
@@ -81,6 +80,9 @@ describe('main window', () => {
     expect(hire.find('[data-test=decision-always]').exists()).toBe(true);
     expect(w.find('[data-test=decision-discuss]').exists()).toBe(true);
     expect(w.findAll('[data-test=member-view-terminal]')).toHaveLength(2);
+    // Every action is in each member's ☰ menu.
+    expect(w.findAll('[data-test=member-more]')).toHaveLength(2);
+    for (const more of w.findAll('[data-test=member-more]')) await more.trigger('click');
     expect(w.findAll('[data-test=open-settings]')).toHaveLength(2);
   });
 });

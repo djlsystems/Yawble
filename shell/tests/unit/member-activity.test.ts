@@ -3,11 +3,11 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it } from 'vitest';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { MonitorModel } from '../../src/renderer/src/monitor/model';
-import { ACTIVITY_DEFAULT, ACTIVITY_MIN, activityWidth, setActivityWidth } from '../../src/renderer/src/memberActivityWidth';
+import { resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
 import type { AgentCard, YawbleApi, TeamSummary } from '../../src/shared/api';
 
-// The team board: beside each member's card, that member's activity, the same lines the Monitor's activity list shows
-// for it (what it did and what it was told), without the face, other teams' and other members' lines left out.
+// The team board: each member's Activity tab, the same lines the Monitor's activity list shows for it (what it did and
+// what it was told), without the face, other teams' and other members' lines left out.
 // A fake api only: no core, program, network or port.
 const team = { id: 1, name: 'payments', repoPath: null, members: 2, running: 0, queued: 0 } as TeamSummary;
 const mk = (id: number, name: string): AgentCard => ({
@@ -58,49 +58,34 @@ async function board(api: YawbleApi) {
   return w;
 }
 const tile = (w: Awaited<ReturnType<typeof board>>, member: string) =>
-  w.find(`[data-test=agent-${member}]`).element.parentElement!.querySelector('[data-test=member-activity]')!;
+  w.find(`[data-test=agent-${member}]`).element.querySelector('[data-test=member-activity]')!;
 const lines = (el: Element) => [...el.querySelectorAll('[data-test=member-activity-row]')].map((r) => r.textContent!.replace(/\s+/g, ' ').trim());
 
-describe('team board: each member\'s activity beside its card', () => {
-  beforeEach(() => { localStorage.clear(); document.body.innerHTML = ''; });
+describe("team board: each member's Activity tab", () => {
+  beforeEach(() => {
+    localStorage.clear(); document.body.innerHTML = ''; resetMemberViews();
+    setMemberView('payments', 'DeveloperMarlo', 'activity');
+    setMemberView('payments', 'TesterWren', 'activity');
+  });
 
-  it('puts an activity tile to the right of what every member said, in its pane', async () => {
+  it('on the Activity tab, the activity is the whole view of the pane (no width bar)', async () => {
     const w = await board(fakeApi().api);
     const rows = w.findAll('[data-test=member-pane-body]');
     expect(rows).toHaveLength(2);
     for (const r of rows) {
       const kids = [...r.element.children];
-      expect(kids[0]!.getAttribute('data-test')).toBe('member-said');
-      expect(kids[1]!.getAttribute('data-test')).toBe('member-side');
-      expect(kids[1]!.querySelector('[data-test=member-activity]')).not.toBeNull();
-      expect(kids[1]!.querySelector('[data-test=member-activity-handle-w]')).not.toBeNull();
+      expect(kids).toHaveLength(1);
+      expect(kids[0]!.getAttribute('data-test')).toBe('member-activity');
+      expect(r.element.querySelector('[data-test=member-activity-handle-w]')).toBeNull();
     }
     w.unmount();
   });
 
-  it('a bar between card and activity resizes every member\'s activity together: right is narrower, kept on release, double-click resets', async () => {
-    setActivityWidth(ACTIVITY_DEFAULT);
-    localStorage.clear();
+  it('is not shown on the Report tab', async () => {
+    resetMemberViews();
     const w = await board(fakeApi().api);
-    const widths = () => w.findAll('[data-test=member-side]').map((x) => (x.element as HTMLElement).style.flexBasis);
-    expect(widths()).toEqual(['360px', '360px']);
-    const bar = w.findAll('[data-test=member-activity-handle-w]')[1]!;
-    await bar.trigger('pointerdown', { clientX: 500, clientY: 0, pointerId: 1, button: 0 });
-    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 440, clientY: 0, pointerId: 1 }));
-    await w.vm.$nextTick();
-    expect(widths()).toEqual(['420px', '420px']); // dragged left: wider, every member at once
-    expect(localStorage.getItem('yawble.memberActivityWidth')).toBeNull();
-    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
-    expect(activityWidth.value).toBe(420);
-    expect(localStorage.getItem('yawble.memberActivityWidth')).toBe('420');
-    await bar.trigger('keydown', { key: 'ArrowRight' });
-    expect(activityWidth.value).toBe(404); // the bar moves right: narrower
-    await bar.trigger('pointerdown', { clientX: 0, clientY: 0, pointerId: 2, button: 0 });
-    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 5000, clientY: 0, pointerId: 2 }));
-    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }));
-    expect(activityWidth.value).toBe(ACTIVITY_MIN); // clamped
-    await bar.trigger('dblclick');
-    expect(activityWidth.value).toBe(ACTIVITY_DEFAULT);
+    expect(w.findAll('[data-test=member-activity]')).toHaveLength(0);
+    expect(w.findAll('[data-test=agent-output]')).toHaveLength(2);
     w.unmount();
   });
 

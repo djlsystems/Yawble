@@ -1,12 +1,12 @@
 // B061 verify (card 288): a member's pane on the team page in a real browser (headless Chrome), against the FAKE core
-// of phone-remote.spec.ts (remote.html, canned answers). DeveloperAda's pane is on Terminal (the pane's own toggle).
-// On a phone (375x501, 375x667, 667x263, 667x375): no sideways scroll, the terminal full width, its transcript (the
-// screen under the terminal's bar and tabs) at least 60% of the visible height and on screen once scrolled to it, the
-// toolbar's controls 44 px. At 1280 x 800: one frame, the two areas side by side, the pane no taller than the old
-// card + activity row (193 px at the default output height, see phone-member-pane.test.ts).
-// Card 312 (after card 307 / B064): on a phone the page opens on Activity, the pane's Terminal toggle opens the
-// member's terminal full screen over the page with one header row (title, tabs, ⋯, ✕) that is on top of the app's top
-// bar, its transcript >= 60% of the height; the ⋯ opens the state line and Policy, ✕ goes back to Activity.
+// of phone-remote.spec.ts (remote.html, canned answers). DeveloperAda's pane is on its Terminal tab.
+// On a phone (375x501, 375x667, 667x263, 667x375): no sideways scroll, the terminal full width, its transcript at least
+// 60% of the visible height, the header's controls 44 px. At 1280 x 800: one frame, one view (the chosen tab's), the
+// pane no taller than the old card + activity row (193 px at the default output height, see phone-member-pane.test.ts).
+// On a phone the page opens on the Report; the pane's Terminal tab opens the member's terminal full screen over the
+// page with one header row (title, ⋯, ✕) that is on top of the app's top bar, its transcript >= 60% of the height; the
+// ⋯ opens the state line and Stop (never Open interactive CLI: the terminal in a pane is never interactive), ✕ goes
+// back to the Report.
 //
 //   npx playwright test member-pane-phone      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 import { expect, test, type Browser } from '@playwright/test';
@@ -43,8 +43,8 @@ async function open(browser: Browser, w: number, h: number) {
   await page.goto(`${s.url}#team=1`);
   const pane = page.locator('[data-test=agent-DeveloperAda]');
   if (mobile) {
-    // A phone (B064) opens the team page with every member on Activity: the pane's own toggle opens the terminal.
-    await expect(pane.locator('[data-test=member-view-activity]')).toBeVisible({ timeout: 30_000 });
+    // A phone (B064) opens the team page with every member on the Report: the pane's Terminal tab opens the terminal.
+    await expect(pane.locator('[data-test=member-view-report]')).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });
     await pane.locator('[data-test=member-view-terminal]').click();
   }
   await expect(pane.locator('[data-test=member-terminal]')).toBeVisible({ timeout: 30_000 });
@@ -85,35 +85,39 @@ for (const [w, h] of [[375, 501], [375, 667], [667, 263], [667, 375]] as const) 
     expect(m.screen!.bottom, 'the transcript reaches no further than the screen').toBeLessThanOrEqual(m.vh + 1);
     expect(m.headShown, "the terminal's header row is on top (not under the app's top bar)").toBe(true);
     for (const t of m.controls) expect.soft(Math.min(t.w, t.h), `${t.t} ${t.w}x${t.h}`).toBeGreaterThanOrEqual(44);
-    // Its ⋯ opens the terminal's state line and Policy (the B057 header in the member's pane, card 307).
+    // Its ⋯ opens the terminal's state line and Stop, never Open interactive CLI.
     await pane.locator('[data-test=terminal-pane-more]').click();
     await expect(pane.locator('[data-test=terminal-pane-menu] [data-test=terminal-state]')).toBeVisible();
-    await expect(pane.locator('[data-test=terminal-pane-menu] [data-test=terminal-details-toggle]')).toBeVisible();
-    // ✕ goes back to Activity.
+    await expect(pane.locator('[data-test=terminal-pane-menu] [data-test=terminal-stop]')).toBeVisible();
+    await expect(pane.locator('[data-test=terminal-pane-menu] [data-test=open-interactive]')).toHaveCount(0);
+    // ✕ goes back to the Report.
     await pane.locator('[data-test=terminal-pane-close]').click();
     await expect(pane.locator('[data-test=member-terminal]')).toHaveCount(0);
-    await expect(pane.locator('[data-test=member-activity]')).toBeVisible();
+    await expect(pane.locator('[data-test=agent-output]')).toBeVisible();
     expect(errors).toEqual([]);
     await ctx.close();
   });
 }
 
-test('desktop 1280x800: one frame, side by side, no taller than the old card + activity row', async ({ browser }) => {
+test('desktop 1280x800: one frame, one view, no taller than the old card + activity row', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, 1280, 800);
   await page.screenshot({ path: path.join(SHOTS, 'member-pane-1280x800.png') });
   const m = await page.evaluate(() => {
-    const out: Record<string, { h: number; saidRight: number; sideLeft: number }> = {};
+    const out: Record<string, { h: number; views: number; tabs: string[]; menu: boolean }> = {};
     for (const n of ['Manager', 'DeveloperAda', 'TesterBen']) {
       const p = document.querySelector(`[data-test=agent-${n}]`)!;
-      out[n] = { h: p.getBoundingClientRect().height, saidRight: p.querySelector('[data-test=member-said]')!.getBoundingClientRect().right,
-        sideLeft: p.querySelector('[data-test=member-side]')!.getBoundingClientRect().left };
+      out[n] = { h: p.getBoundingClientRect().height, views: p.querySelector('[data-test=member-pane-body]')!.children.length,
+        tabs: [...p.querySelectorAll('[data-test=member-tabs] [role=tab]')].map((t) => t.textContent!.trim()),
+        menu: !!p.querySelector('[data-test=agent-title] [data-test=member-more]') };
     }
     return out;
   });
   // eslint-disable-next-line no-console
   console.log(JSON.stringify(m));
   for (const [n, v] of Object.entries(m)) {
-    expect(v.saidRight, `${n}: side by side`).toBeLessThanOrEqual(v.sideLeft);
+    expect(v.views, `${n}: one view`).toBe(1);
+    expect(v.tabs, `${n}: tabs`).toEqual(['Report', 'Activity', 'Terminal']);
+    expect(v.menu, `${n}: the ☰ in the title bar`).toBe(true);
     expect(v.h, `${n}: pane height`).toBeLessThanOrEqual(193);
   }
   expect(errors).toEqual([]);

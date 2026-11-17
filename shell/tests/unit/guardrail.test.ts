@@ -91,7 +91,8 @@ describe('guardrail check: wiring', () => {
     await until(w, 'the team in the sidebar', () => w.find('[data-test=team-item]').exists());
     await w.get('[data-test=team-item]').trigger('click');
     // The check lives on the agent's settings (Guardrails tab); the card has no guardrail button of its own.
-    await until(w, 'the card', () => w.find('[data-test=agent-Ben] [data-test=open-settings]').exists());
+    await until(w, 'the card', () => w.find('[data-test=agent-Ben] [data-test=member-more]').exists());
+    await w.get('[data-test=agent-Ben] [data-test=member-more]').trigger('click');
     expect(w.find('[data-test=agent-Ben] [data-test=open-guardrail]').exists()).toBe(false);
     await w.get('[data-test=agent-Ben] [data-test=open-settings]').trigger('click');
     await until(w, 'the tabs', () => w.find('[data-test=tab-guardrails]').exists());

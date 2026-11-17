@@ -95,6 +95,9 @@
   --state-failed: #f2736d; --state-idle: #a8a299;
 }
 
+/* Card 334: a phone browser enlarges text in landscape unless told not to; the page keeps its own sizes in every
+   orientation. The build keeps only the unprefixed one here, so remote.html also sets the -webkit- one (iOS Safari). */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 * { box-sizing: border-box; }
 /* selection and focus ring follow the theme; the Monitor keeps the browser's own */
 /* (zero specificity, so a component's own outline rule still wins) */

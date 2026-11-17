@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TeamsList from '../../src/renderer/src/components/TeamsList.vue';
@@ -266,6 +268,38 @@ describe('Teams list tiles: the button row', () => {
     setTileSize({ w: 340, h: 260 });
     await flushPromises();
     expect(w.get('[data-test=team-grid]').classes()).not.toContain('icons-only'); // and back
+    w.unmount();
+    sw.mockRestore(); cw.mockRestore();
+  });
+
+  it('keeps the actions on one row on a phone, so an overflowing row switches to 44 px icons; the Delete confirm keeps its words (card 319)', async () => {
+    // A wrapping row never overflows (its scrollWidth stays its clientWidth), so fit() never went icons-only on an iPhone
+    // and Delete wrapped onto a second row. The phone @media rule must not wrap the row.
+    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/TeamsList.vue'), 'utf8');
+    const phoneRules = /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
+    expect(phoneRules).toMatch(/\.card-actions \{ flex-wrap: nowrap; \}/);
+    expect(src).not.toMatch(/flex-wrap: wrap/);
+    expect(phoneRules).toMatch(/\.tile-btn \{ height: 44px;/);
+    expect(phoneRules).toMatch(/\.icons-only \.card-actions\.normal \.tile-btn \{ width: 44px; \}/);
+    // Icon width applies to the normal row only: the confirm row's Cancel keeps its word; its question ellipsizes.
+    expect(src).not.toMatch(/\.icons-only \.tile-btn:not\(\.danger\)/);
+    expect(src).toMatch(/\.confirm-q \{[^}]*text-overflow: ellipsis; white-space: nowrap; min-width: 0;/);
+
+    // A 375 px phone: the labelled row needs more than the card's ~325 px, so it overflows and goes icons-only.
+    const sw = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('card-actions') ? 360 : 0; });
+    const cw = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('card-actions') ? 325 : 0; });
+    const w = mountList([mk(1, 'a')]);
+    await flushPromises();
+    expect(w.get('[data-test=team-grid]').classes()).toContain('icons-only');
+    for (const [t, label] of [['card-settings', 'Settings'], ['card-pause', 'Pause'], ['card-archive', 'Archive'], ['card-delete', 'Delete']]) {
+      expect(w.get(`[data-test=${t}]`).attributes('aria-label')).toBe(label);
+      expect(w.get(`[data-test=${t}]`).attributes('title')).toMatch(new RegExp(`^${label}`));
+    }
+    await w.get('[data-test=card-delete]').trigger('click');
+    const row = w.get('[data-test=card-actions]');
+    expect(row.classes()).not.toContain('normal');
+    expect(row.get('.confirm-q').text()).toBe('Delete a?');
+    expect(row.get('[data-test=card-delete-no]').text()).toBe('Cancel');
     w.unmount();
     sw.mockRestore(); cw.mockRestore();
   });

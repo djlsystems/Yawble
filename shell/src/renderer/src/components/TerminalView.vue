@@ -10,7 +10,8 @@ import { xtermTheme } from '../terminalPane';
 
 // One terminal channel rendered with xterm.js: attach = replay the buffer, then stream pushes.
 // Pushes carry "end" (bytes ever written), so bytes already in the replay are never written twice.
-const props = defineProps<{ channel: string; api?: YawbleApi; rows?: number }>();
+/** noInput: a member's pane on the team page - it shows a session but never types into it. */
+const props = defineProps<{ channel: string; api?: YawbleApi; rows?: number; noInput?: boolean }>();
 const emit = defineEmits<{ session: [TerminalSessionInfo | null]; text: [string] }>();
 const api = resolveApi(props.api);
 
@@ -55,11 +56,12 @@ let sizedFor: string | null = null; // the live session the core last heard this
 
 function session(s: TerminalSessionInfo | null) {
   // A read-only remote viewer (a Visitor) never types into a terminal: the core refuses terminal.input for it anyway.
-  inputEnabled = !!s && s.inputEnabled && !s.ended && !readOnly.value;
+  inputEnabled = !!s && s.inputEnabled && !s.ended && !readOnly.value && !props.noInput;
   if (term) term.options.cursorBlink = inputEnabled;
   // A session's PTY starts at a default size, and this terminal is already fitted (xterm raises no resize of its
-  // own), so tell the core the real size once per live session; otherwise the CLI draws for the wrong size.
-  if (s && !s.ended && term && s.startedAt !== sizedFor) {
+  // own), so tell the core the real size once per live session; otherwise the CLI draws for the wrong size. A pane that
+  // only shows the session (noInput) leaves the size to the terminal window that runs it.
+  if (s && !s.ended && term && !props.noInput && s.startedAt !== sizedFor) {
     sizedFor = s.startedAt;
     void api.call('terminal.resize', { channel: props.channel, cols: term.cols, rows: term.rows }).catch(() => {});
   }
@@ -116,7 +118,7 @@ onMounted(async () => {
   term.onData((data) => {
     if (inputEnabled && !readOnly.value) void api.call('terminal.input', { channel: props.channel, data });
   });
-  term.onResize(({ cols, rows }) => void api.call('terminal.resize', { channel: props.channel, cols, rows }).catch(() => {}));
+  term.onResize(({ cols, rows }) => { if (!props.noInput) void api.call('terminal.resize', { channel: props.channel, cols, rows }).catch(() => {}); });
   resizeObserver = new ResizeObserver(() => { try { fit?.fit(); } catch { /* ignore */ } });
   resizeObserver.observe(host.value!);
   off = api.onEvent(onEvent);

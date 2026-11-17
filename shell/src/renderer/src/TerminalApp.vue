@@ -12,17 +12,21 @@ import TerminalScreen from './components/TerminalScreen.vue';
 // timeouts, anything loosened) is folded behind the bar's "Policy" toggle, closed by default and remembered. Closing
 // only detaches.
 // Embedded: the same, in the main window's terminal pane (the window's title is left alone).
-// inPane: inside the member's pane on the team page (B061): Open interactive CLI and Stop are the pane's toolbar, so the
-// bar keeps what the terminal shows and the Policy toggle; whether a session is live is told to the pane (live).
+// inPane: inside the member's pane on the team page (B061): just the screen, always Formatted (the terminal itself, with
+// no input, while an interactive session is open), no bar and no Policy; never interactive - its Open interactive CLI
+// opens this window instead, and Stop is in the pane's menu. Whether a session is live is told to the pane (live). On a
+// phone the full-screen terminal's ⋯ menu holds the state line and Stop.
 const props = defineProps<{ memberId: number; api?: YawbleApi; pollMs?: number; embedded?: boolean; inPane?: boolean }>();
 const emit = defineEmits<{ banner: [TerminalBanner]; live: [boolean] }>();
 const api = resolveApi(props.api);
 /** The pane's header on a phone (the member's full-screen terminal in MemberPane, B057): the bar goes into its ⋯ menu. */
 const pane = inject(PaneHeaderKey, null);
 const inMenu = computed(() => !!props.embedded && !!pane?.on);
-/** Open interactive CLI and Stop are the bar's own, except in a member's pane at desktop width (its toolbar has them);
- *  on a phone that toolbar is under the full-screen terminal, so they are in the ⋯ menu. */
+/** Stop is the bar's own, except in a member's pane at desktop width (its menu has it); on a phone that menu is under
+ *  the full-screen terminal, so Stop is in the ⋯ menu. Open interactive CLI is never in a member's pane. */
 const ownActions = computed(() => !props.inPane || inMenu.value);
+/** The bar: anywhere but a member's pane, where only the phone's ⋯ menu has it. */
+const hasBar = computed(() => !props.inPane || inMenu.value);
 
 const banner = ref<TerminalBanner | null>(null);
 const session = ref<TerminalSessionInfo | null>(null);
@@ -107,21 +111,21 @@ defineExpose({ size: () => view.value?.size() ?? null });
 <template>
   <div class="term-window" :class="{ embedded, 'in-pane': inPane }">
     <!-- In the main window's pane on a phone (B057) the bar is the pane header's ⋯ menu; anywhere else it stays here. -->
-    <Teleport defer :key="inMenu ? 'menu' : 'here'" :to="inMenu ? `#${pane!.more}` : 'body'" :disabled="!inMenu">
+    <Teleport v-if="hasBar" defer :key="inMenu ? 'menu' : 'here'" :to="inMenu ? `#${pane!.more}` : 'body'" :disabled="!inMenu">
     <div class="bar row" :class="{ 'in-menu': inMenu }">
       <LoadingNote v-if="!banner && !error" class="grow" text="Loading the terminal…" />
       <span v-else class="grow state" data-test="terminal-state">{{ stateLine }}</span>
       <span v-if="error && !inMenu" class="error" data-test="terminal-error">{{ error }}</span>
-      <button v-if="ownActions && banner && banner.state === 'idle' && !live" data-test="open-interactive" :disabled="!!doing" :aria-busy="doing === 'open'" @click="openInteractive"><BusyLabel :busy="doing === 'open'" text="Opening…">Open interactive CLI</BusyLabel></button>
-      <button v-if="banner" class="toggle" :class="{ on: showDetails, warn: banner.loosened.length }" data-test="terminal-details-toggle"
+      <button v-if="!inPane && banner && banner.state === 'idle' && !live" data-test="open-interactive" :disabled="!!doing" :aria-busy="doing === 'open'" @click="openInteractive"><BusyLabel :busy="doing === 'open'" text="Opening…">Open interactive CLI</BusyLabel></button>
+      <button v-if="banner && !inPane" class="toggle" :class="{ on: showDetails, warn: banner.loosened.length }" data-test="terminal-details-toggle"
         :aria-expanded="showDetails" :title="showDetails ? 'Hide this agent\'s sandbox policy' : 'Show this agent\'s sandbox policy'"
         @click="toggleDetails">{{ banner.loosened.length ? '⚠ ' : '' }}Policy {{ showDetails ? '▴' : '▾' }}</button>
       <button v-if="ownActions" data-test="terminal-stop" :disabled="!(banner?.state === 'running' || live) || !!doing" :aria-busy="doing === 'stop'" @click="stop"><BusyLabel :busy="doing === 'stop'" text="Stopping…">Stop ■</BusyLabel></button>
     </div>
     </Teleport>
-    <p v-if="error && inMenu" class="error phone-error" data-test="terminal-error">{{ error }}</p>
+    <p v-if="error && (inMenu || !hasBar)" class="error phone-error" data-test="terminal-error">{{ error }}</p>
     <!-- On a phone (opened from the pane's ⋯) the strip is capped and scrolls on its own, with a ✕ to hide it (O2). -->
-    <header v-show="showDetails" class="banner" :class="{ 'in-menu': inMenu }" data-test="banner">
+    <header v-if="!inPane" v-show="showDetails" class="banner" :class="{ 'in-menu': inMenu }" data-test="banner">
       <div class="banner-text" data-test="banner-text">
         <div class="title mono" data-test="banner-title">{{ banner?.title ?? 'Sandbox terminal' }}</div>
         <div class="details mono" data-test="banner-details">{{ banner?.details.join(' · ') }}</div>
@@ -130,13 +134,13 @@ defineExpose({ size: () => view.value?.size() ?? null });
       <button v-if="inMenu" class="banner-close" data-test="banner-close" title="Hide this agent's sandbox policy" aria-label="Hide the policy" @click="toggleDetails">✕</button>
     </header>
     <div class="screen">
-      <TerminalScreen ref="view" :key="memberId" :channel="`member:${memberId}`" :api="api" @session="session = $event" />
+      <TerminalScreen ref="view" :key="memberId" :channel="`member:${memberId}`" :api="api" :formatted-only="inPane" @session="session = $event" />
     </div>
   </div>
 </template>
 
 <style scoped>
-.term-window { display: flex; flex-direction: column; height: 100vh; background: var(--term-bg); color: var(--term-fg); }
+.term-window { display: flex; flex-direction: column; height: 100vh; height: 100dvh; background: var(--term-bg); color: var(--term-fg); }
 .term-window.embedded { height: 100%; }
 .banner { padding: 6px 12px; background: var(--term-head); border-bottom: 1px solid var(--term-line); }
 .title { font-size: 13px; color: var(--term-title); }
@@ -150,6 +154,7 @@ defineExpose({ size: () => view.value?.size() ?? null });
 .bar button { background: var(--term-btn); color: var(--term-btn-ink); border-color: var(--term-btn-line); }
 .screen { flex: 1; min-height: 0; }
 .error { color: var(--term-bad); }
+.phone-error { margin: 0; padding: 4px 12px; font-size: 12px; background: var(--term-bar); }
 /* A phone, in the pane's ⋯ menu (B057): the state line over the actions, each a 44 px row. */
 @media (max-width: 759.98px) {
   .bar.in-menu { flex-direction: column; align-items: stretch; gap: 4px; padding: 0; background: transparent; font-size: 13px; }
@@ -160,7 +165,6 @@ defineExpose({ size: () => view.value?.size() ?? null });
   .banner.in-menu { display: flex; align-items: flex-start; gap: 4px; max-height: 20vh; padding: 0 0 0 12px; box-sizing: border-box; flex: none; overflow: hidden; }
   .banner.in-menu .banner-text { flex: 1; min-width: 0; max-height: 20vh; overflow-y: auto; padding: 6px 0; box-sizing: border-box; overscroll-behavior: contain; }
   .banner.in-menu .banner-close { flex: none; min-width: 44px; min-height: 44px; padding: 0; font-size: 16px; background: transparent; color: var(--term-fg); border: 0; }
-  .phone-error { margin: 0; padding: 4px 12px; font-size: 12px; background: var(--term-bar); }
   /* In a member's pane (B061): the bar and the Formatted / Raw tabs are one 44 px row each; the screen takes the rest. */
   .in-pane .bar { height: 44px; box-sizing: border-box; padding: 0 4px 0 10px; }
   .in-pane .bar button { min-height: 44px; font-size: 14px; }

@@ -311,15 +311,20 @@ describe('the member terminal on a phone: full screen, one header row', () => {
       expect(w.find('.tile-grip').exists()).toBe(false);
       expect(pane.querySelector('.handle')).toBeNull();
 
-      // One header row: the title, the Formatted / Raw tabs, ⋯ and ✕ are all in it; the bar (state, Open interactive
-      // CLI, Policy, Stop) is in its ⋯ menu, closed; nothing else stands between it and the terminal.
+      // One header row: the title, ⋯ and ✕ are all in it; the bar (state, Stop) is in its ⋯ menu, closed - never Open
+      // interactive CLI (the pane's terminal is never interactive); no Formatted / Raw tabs and no Policy; nothing else
+      // stands between it and the terminal.
       expect(css(head).height).toBe('44px');
       expect(w.get('[data-test=terminal-pane-title]').text()).toBe('Developer Ada · web');
-      for (const sel of ['[data-test=terminal-pane-title]', '[data-test=terminal-modes]', '[data-test=terminal-pane-more]', '[data-test=terminal-pane-close]'])
+      for (const sel of ['[data-test=terminal-pane-title]', '[data-test=terminal-pane-more]', '[data-test=terminal-pane-close]'])
         expect(head.querySelector(sel), sel).toBeTruthy();
+      expect(pane.querySelector('[data-test=terminal-modes]')).toBeNull();
       const menu = w.get('[data-test=terminal-pane-menu]').element;
-      for (const sel of ['[data-test=terminal-state]', '[data-test=open-interactive]', '[data-test=terminal-details-toggle]', '[data-test=terminal-stop]'])
+      for (const sel of ['[data-test=terminal-state]', '[data-test=terminal-stop]'])
         expect(menu.querySelector(sel), sel).toBeTruthy();
+      expect(pane.querySelector('[data-test=open-interactive]')).toBeNull();
+      expect(menu.querySelector('[data-test=terminal-details-toggle]')).toBeNull();
+      expect(pane.querySelector('[data-test=banner]')).toBeNull();
       expect(shown(menu)).toBe(false);
       expect(css(menu).position).toBe('absolute');
       const body = pane.querySelector(':scope > .term-window')!;
@@ -335,89 +340,42 @@ describe('the member terminal on a phone: full screen, one header row', () => {
       const transcript = frame.height - 44;
       expect(transcript / frame.height).toBeGreaterThanOrEqual(0.6);
 
-      // ⋯ opens the menu; Policy there shows the policy (and the menu closes).
+      // ⋯ opens the menu.
       await w.get('[data-test=terminal-pane-more]').trigger('click');
       expect(shown(menu)).toBe(true);
-      await w.get('[data-test=terminal-details-toggle]').trigger('click');
-      expect(shown(menu)).toBe(false);
-      expect(shown(w.get('[data-test=banner]').element)).toBe(true);
       // Every control in the header is a 44 px target.
-      for (const b of head.querySelectorAll(':scope > button, [data-test=terminal-modes] button')) expect(px(css(b).minHeight) || px(css(b).height), b.textContent ?? '').toBeGreaterThanOrEqual(44);
+      for (const b of head.querySelectorAll(':scope > button')) expect(px(css(b).minHeight) || px(css(b).height), b.textContent ?? '').toBeGreaterThanOrEqual(44);
 
-      // ✕ goes back to the member's Activity: the terminal (and its header) is gone.
+      // ✕ goes back to the member's Report: the terminal (and its header) is gone.
       await w.get('[data-test=terminal-pane-close]').trigger('click');
-      expect(getMemberView('web', 'DeveloperAda', true)).toBe('activity');
+      expect(getMemberView('web', 'DeveloperAda', true)).toBe('report');
       expect(w.find('[data-test=member-terminal]').exists()).toBe(false);
     });
   }
 
-  it('1280: unchanged - the terminal beside what was said, in the pane; its bar and the tabs over the terminal', async () => {
+  it('1280: the terminal is the pane\'s one view: just the screen, Formatted, no bar, tabs or Policy, never interactive', async () => {
     setScreen(Desktop);
     const w = await openTerminal();
     const pane = w.get('[data-test=member-terminal]').element as HTMLElement;
     expect(css(pane).position).not.toBe('fixed');
     expect(pane.classList.contains('full')).toBe(false);
-    expect(w.get('[data-test=member-side]').element.contains(pane)).toBe(true);
-    expect(w.find('.tile-grip').exists()).toBe(true);
+    expect(w.get('[data-test=member-pane-body]').element.contains(pane)).toBe(true);
+    // The pane has no width bar of its own any more (one view, full width); the height handles are the team page's gaps.
+    expect(w.find('.tile-grip').exists()).toBe(false);
     expect(w.find('[data-test=terminal-pane-head]').exists()).toBe(false);
     expect(w.find('[data-test=terminal-pane-more]').exists()).toBe(false);
     expect(w.find('[data-test=terminal-pane-menu]').exists()).toBe(false);
-    const bar = w.get('.term-window > .bar').element;
-    expect(bar.querySelector('[data-test=terminal-details-toggle]')).toBeTruthy();
-    // Open interactive CLI and Stop are the pane's toolbar at this width, as B061 left them.
-    expect(bar.querySelector('[data-test=open-interactive]')).toBeNull();
-    expect(bar.querySelector('[data-test=terminal-stop]')).toBeNull();
-    expect(w.find('[data-test=member-toolbar] [data-test=open-interactive-cli]').exists()).toBe(true);
-    expect(w.get('.screen-wrap > [data-test=terminal-modes]').exists()).toBe(true);
+    expect(w.find('.term-window > .bar').exists()).toBe(false);
+    expect(w.find('[data-test=terminal-details-toggle]').exists()).toBe(false);
+    expect(w.find('[data-test=banner]').exists()).toBe(false);
+    expect(w.find('[data-test=terminal-modes]').exists()).toBe(false);
+    // Open interactive CLI (it opens the agent's terminal window) and Stop are in the pane's ☰ menu at this width.
+    expect(w.find('[data-test=member-terminal] [data-test=open-interactive]').exists()).toBe(false);
+    expect(w.find('[data-test=member-terminal] [data-test=terminal-stop]').exists()).toBe(false);
+    await w.get('[data-test=member-more]').trigger('click');
+    expect(w.find('[data-test=member-more-menu] [data-test=open-interactive-cli]').exists()).toBe(true);
+    expect(w.find('[data-test=member-more-menu] [data-test=stop]').exists()).toBe(true);
     expect(css(w.get('.screen-wrap').element).minHeight).toBe('160px');
-  });
-});
-
-describe('the Policy strip from ⋯ on a phone (B057 verify O2): capped, scrolls on its own, closes with its own ✕', () => {
-  for (const frame of TermPhones) {
-    it(frame.name, async () => {
-      setScreen(frame);
-      const w = await openTerminal(longBanner);
-      await w.get('[data-test=terminal-pane-more]').trigger('click');
-      await w.get('[data-test=terminal-details-toggle]').trigger('click');
-      const strip = w.get('[data-test=banner]').element;
-      expect(shown(strip)).toBe(true);
-      expect(w.get('[data-test=banner-loosened]').text()).toContain('github.com');
-
-      // A cap, so the transcript (the screen less the 44 px header and the strip) keeps at least 60%.
-      const cap = lengthPx(css(strip).maxHeight, frame);
-      expect(cap, 'the strip has a max-height').toBeGreaterThan(0);
-      expect(css(strip).flexShrink === '0' || css(strip).flex.startsWith('0 0')).toBe(true);
-      expect((frame.height - 44 - cap) / frame.height).toBeGreaterThanOrEqual(0.6);
-      // The text scrolls inside the strip, under the same cap; the strip itself clips.
-      const text = w.get('[data-test=banner-text]').element;
-      expect(css(text).overflowY).toBe('auto');
-      expect(lengthPx(css(text).maxHeight, frame)).toBeLessThanOrEqual(cap);
-      expect(css(strip).overflow).toBe('hidden');
-
-      // Its ✕ is a 44 px target that fits in the strip, and hides it without reopening ⋯.
-      const close = w.get('[data-test=banner-close]');
-      expect(px(css(close.element).minHeight)).toBeGreaterThanOrEqual(44);
-      expect(px(css(close.element).minWidth)).toBeGreaterThanOrEqual(44);
-      expect(cap).toBeGreaterThanOrEqual(44);
-      await close.trigger('click');
-      expect(shown(strip)).toBe(false);
-      expect(shown(w.get('[data-test=terminal-pane-menu]').element)).toBe(false);
-      expect(localStorage.getItem('yawble.terminal.details')).toBeNull();
-      // ... and the member's terminal is still open.
-      expect(w.find('[data-test=member-terminal]').exists()).toBe(true);
-    });
-  }
-
-  it('1280: unchanged - no cap, no ✕ on the strip', async () => {
-    setScreen(Desktop);
-    localStorage.setItem('yawble.terminal.details', '1');
-    const w = await openTerminal(longBanner);
-    const strip = w.get('[data-test=banner]').element;
-    expect(shown(strip)).toBe(true);
-    expect(['none', '']).toContain(css(strip).maxHeight);
-    expect(w.find('[data-test=banner-close]').exists()).toBe(false);
-    expect(css(w.get('[data-test=banner-text]').element).overflowY).not.toBe('auto');
   });
 });
 
