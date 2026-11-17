@@ -26,12 +26,20 @@ public sealed record HostTaskDef(
     /// <summary>Variables taken from Connections (JSON envFromConnections); empty by default.</summary>
     public IReadOnlyList<EnvBinding> EnvFromConnections { get; init; } = [];
 
+    /// <summary>What the task is for, in the person's words (JSON description); null when not given. Not pinned: it runs nothing.</summary>
+    public string? Description { get; init; }
+
+    /// <summary>How to check the result after a run (JSON checkAfter: a health URL, a page); null when not given. Not pinned.</summary>
+    public string? CheckAfter { get; init; }
+
     public static HostTaskDef Make(string name, string program, IEnumerable<string>? args = null, string repo = "main", string workdir = ".",
         int timeoutSeconds = 600, IEnumerable<string>? envNames = null, IEnumerable<string>? watch = null, string pinMode = PinModes.Files,
-        bool commandLineOnly = false, IEnumerable<EnvBinding>? envFromConnections = null) =>
+        bool commandLineOnly = false, IEnumerable<EnvBinding>? envFromConnections = null, string? description = null, string? checkAfter = null) =>
         new(name, repo, program, (args ?? []).ToArray(), workdir, timeoutSeconds, (envNames ?? []).ToArray(), (watch ?? []).ToArray(), pinMode, commandLineOnly)
         {
             EnvFromConnections = (envFromConnections ?? []).ToArray(),
+            Description = description,
+            CheckAfter = checkAfter,
         };
 }
 
@@ -52,12 +60,25 @@ public enum RequestKind { Refused, Asked, AlreadyWaiting, Started }
 public sealed record TaskRequestResult(RequestKind Kind, string Text, long? AskId = null, long? RunId = null, int? Precondition = null);
 
 /// <summary>The message that wakes the requesting agent once a task run, or an ask about it, is over.</summary>
-public sealed record TaskWake(long TeamId, string Member, long Workflow, long CausationSeq, string Text);
+public sealed record TaskWake(long TeamId, string Member, long Workflow, long CausationSeq, string Text)
+{
+    /// <summary>The run that ended, when one ran to its end (null: nothing ran, or the ask was declined or went stale).</summary>
+    public TaskRunRow? Run { get; init; }
+
+    /// <summary>The last lines of its output (already masked), when it ran.</summary>
+    public string? Tail { get; init; }
+
+    /// <summary>The task as it ran (its description and check-after), when it ran.</summary>
+    public HostTaskDef? Def { get; init; }
+}
 
 /// <summary>Validation of a definition. Throws <see cref="ArgumentException"/> with the reason.</summary>
 public static partial class HostTaskRules
 {
-    public const int MinTimeoutSeconds = 10, MaxTimeoutSeconds = 7200;
+    public const int MinTimeoutSeconds = 10, MaxTimeoutSeconds = 7200, MaxTextLength = 1000;
+
+    /// <summary>A free-text field as stored: trimmed, and null when blank.</summary>
+    public static string? Text(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
     [GeneratedRegex("^[a-z0-9][a-z0-9._-]{0,39}$")]
     private static partial Regex NameShape();
@@ -100,6 +121,9 @@ public static partial class HostTaskRules
             if (!long.TryParse(b.ConnectionId, out _)) throw new ArgumentException($"{b.Name}: which Connection?");
             if (string.IsNullOrWhiteSpace(b.Field)) throw new ArgumentException($"{b.Name}: which field of the Connection?");
         }
+        if (d.Description is { Length: > MaxTextLength }) throw new ArgumentException($"the description is at most {MaxTextLength} characters");
+        if (d.CheckAfter is { Length: > MaxTextLength }) throw new ArgumentException($"'check after' is at most {MaxTextLength} characters");
+        if ((d.Description ?? "").Contains('\0') || (d.CheckAfter ?? "").Contains('\0')) throw new ArgumentException("the description or 'check after' holds a NUL");
         if (!IsInsideRelative(d.Workdir)) throw new ArgumentException("the working folder must be a relative path inside the repository");
         foreach (var w in d.Watch)
             if (!IsInsideRelative(w.Replace('*', 'x').Replace('?', 'x'))) throw new ArgumentException($"watch path '{w}' must be relative and inside the repository");

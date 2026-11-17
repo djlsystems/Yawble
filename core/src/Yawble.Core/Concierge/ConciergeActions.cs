@@ -127,7 +127,10 @@ public sealed class ConciergeActions(
 
     /// <summary>The same actions for a new turn (the person's yes is a later turn than the list); with <paramref name="book"/>,
     /// bound to that book instead of these actions' own (the companion keeps its own, so neither accepts the other's tokens).</summary>
-    public ConciergeActions ForTurn(ConciergeTurn turn, ConfirmationBook? book = null) => new(bus, ui, board, git, repos, book ?? _book, gh, audit, turn);
+    public ConciergeActions ForTurn(ConciergeTurn turn, ConfirmationBook? book = null) => new(bus, ui, board, git, repos, book ?? _book, gh, audit, turn) { HostTasks = HostTasks };
+
+    /// <summary>The teams' host tasks (host_task_list / run / status), set by the app when this computer has them; null: none.</summary>
+    public ConciergeHostTasks? HostTasks { get; set; }
 
     /// <summary>
     /// What a turn started through the Cloud Link may not do (git deletes and anything hard to undo stay on
