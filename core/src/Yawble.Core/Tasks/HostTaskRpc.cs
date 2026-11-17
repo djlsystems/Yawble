@@ -146,6 +146,7 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
     {
         ["name"] = d.Name, ["repo"] = d.Repo, ["program"] = d.Program, ["args"] = Arr(d.Args), ["workdir"] = d.Workdir, ["timeoutSeconds"] = d.TimeoutSeconds,
         ["envNames"] = Arr(d.EnvNames), ["watch"] = Arr(d.Watch), ["pinMode"] = d.PinMode, ["commandLineOnly"] = d.CommandLineOnly,
+        ["description"] = d.Description, ["checkAfter"] = d.CheckAfter,
         ["envFromConnections"] = new JsonArray(d.EnvFromConnections.Select(b => (JsonNode?)new JsonObject
         {
             ["name"] = b.Name, ["connectionId"] = b.ConnectionId, ["field"] = b.Field, ["connectionName"] = b.ConnectionName,
@@ -196,8 +197,17 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
             d["pinMode"]?.GetValue<string>() ?? PinModes.Files, d["commandLineOnly"]?.GetValue<bool>() ?? false)
         {
             EnvFromConnections = Bindings(d["envFromConnections"]),
+            Description = OptText(d, "description"), CheckAfter = OptText(d, "checkAfter"),
         };
     }
+
+    /// <summary>An optional free-text field: trimmed, null when absent, null or blank; anything but a string is refused.</summary>
+    private static string? OptText(JsonObject d, string name) => d[name] switch
+    {
+        null => null,
+        JsonValue v when v.TryGetValue<string>(out var s) => HostTaskRules.Text(s),
+        _ => throw new ArgumentException($"{name} is text"),
+    };
 
     /// <summary>envFromConnections: [{name, connectionId, field, connectionName}]; connectionId may come as a number or a string. A value is never accepted.</summary>
     private static EnvBinding[] Bindings(JsonNode? n)
@@ -280,7 +290,8 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
             var last = store.Runs(t.Id, 1).FirstOrDefault();
             rows.Add(new JsonObject
             {
-                ["name"] = t.Def.Name, ["repo"] = t.Def.Repo, ["command"] = CommandLine(t.Def), ["workdir"] = t.Def.Workdir, ["timeout_s"] = t.Def.TimeoutSeconds,
+                ["name"] = t.Def.Name, ["description"] = t.Def.Description, ["check_after"] = t.Def.CheckAfter,
+                ["repo"] = t.Def.Repo, ["command"] = CommandLine(t.Def), ["workdir"] = t.Def.Workdir, ["timeout_s"] = t.Def.TimeoutSeconds,
                 ["env_names"] = Arr(t.Def.EnvNames), ["env_from_connections"] = Arr(t.Def.EnvFromConnections.Select(b => b.Name)), ["approval"] = await tasks.ApprovalStateAsync(t, ct),
                 ["state"] = store.RunningRun(t.Id) is not null ? "running" : store.PendingAsk(t.Id) is not null ? "waiting-for-person" : "idle",
                 ["last_run"] = last is null ? null : new JsonObject { ["run"] = last.Id, ["exit"] = last.ExitCode, ["ended"] = last.EndedAt, ["commit"] = last.CommitSha, ["log"] = last.LogPath },
