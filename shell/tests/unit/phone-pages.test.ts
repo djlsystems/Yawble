@@ -177,11 +177,14 @@ const DesktopCss: Record<string, string> = {
   'board/BacklogView.vue': '55673d4cef46ac87',
   // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
   // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon); card 344: a desktop rule keeps the 29 px buttons' size.
-  'components/TeamView.vue': 'e9484eb0ecb95837',
+  // B076 (card 365): the members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)
+  // ending with the New member tile (.new-tile, its form .add); the old add row's rule went.
+  'components/TeamView.vue': 'e82b8eb7b739fbb3',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
-  // toolbar, no two areas side by side, no width bar, no loosened marker).
-  'components/MemberPane.vue': 'ee6baa53cc7ccb8f',
+  // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the
+  // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
+  'components/MemberPane.vue': '0c45fdece399ca73',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   // The documents list's Modified column: a wider list and the size / modified cells.

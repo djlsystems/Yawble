@@ -99,14 +99,14 @@ for (const [w, h] of [[375, 501], [375, 667], [667, 263], [667, 375]] as const) 
   });
 }
 
-test('desktop 1280x800: one frame, one view, no taller than the old card + activity row', async ({ browser }) => {
+test('desktop 1280x800: one frame, one view, the pane fills its grid tile (B076)', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, 1280, 800);
   await page.screenshot({ path: path.join(SHOTS, 'member-pane-1280x800.png') });
   const m = await page.evaluate(() => {
-    const out: Record<string, { h: number; views: number; tabs: string[]; menu: boolean }> = {};
+    const out: Record<string, { h: number; cell: number; views: number; tabs: string[]; menu: boolean }> = {};
     for (const n of ['Manager', 'DeveloperAda', 'TesterBen']) {
       const p = document.querySelector(`[data-test=agent-${n}]`)!;
-      out[n] = { h: p.getBoundingClientRect().height, views: p.querySelector('[data-test=member-pane-body]')!.children.length,
+      out[n] = { h: Math.round(p.getBoundingClientRect().height), cell: Math.round(p.closest('.member-cell')!.getBoundingClientRect().height), views: p.querySelector('[data-test=member-pane-body]')!.children.length,
         tabs: [...p.querySelectorAll('[data-test=member-tabs] [role=tab]')].map((t) => t.textContent!.trim()),
         menu: !!p.querySelector('[data-test=agent-title] [data-test=member-more]') };
     }
@@ -118,7 +118,9 @@ test('desktop 1280x800: one frame, one view, no taller than the old card + activ
     expect(v.views, `${n}: one view`).toBe(1);
     expect(v.tabs, `${n}: tabs`).toEqual(['Report', 'Activity', 'Terminal']);
     expect(v.menu, `${n}: the ☰ in the title bar`).toBe(true);
-    expect(v.h, `${n}: pane height`).toBeLessThanOrEqual(193);
+    // B076 (card 367): the members are tiles of one shared height (340 by default); the pane fills its tile (was <= 193, B061).
+    expect(v.h, `${n}: pane height = its tile's`).toBe(v.cell);
+    expect(v.cell, `${n}: the default tile height`).toBe(340);
   }
   expect(errors).toEqual([]);
   await ctx.close();
