@@ -33,8 +33,11 @@ export interface TeamSnapshot { id: number; name: string; members: MemberSnapsho
 export type Effect =
   /** card: the card an instruction is about (its label says it); mark: a hand-back's check or cross, carried home. */
   | { kind: 'comet'; from: string; to: string; color: Tone; label: string | null; at: number; card?: number | null; mark?: 'check' | 'cross' }
-  /** Something waiting for the person flies from its member (or team) to the You node at the wall's edge. */
-  | { kind: 'you'; from: string; color: Tone; label: string | null; at: number }
+  /**
+   * Something waiting for the person flies from its member (or team) to the You node at the wall's edge, and the node
+   * pulses as it lands. id: its need-you item's id (B088): one item flies (and sounds) once.
+   */
+  | { kind: 'you'; from: string; color: Tone; label: string | null; at: number; id?: string }
   /** A workflow node leaves: completed (a green flash, drifting away) or closed (a cross, fading). key: its node. */
   | { kind: 'wfdone'; key: string; team: string; status: 'completed' | 'closed'; at: number }
   | { kind: 'burst'; node: string; color: Tone; big: boolean; at: number }
@@ -96,6 +99,36 @@ const CodeVerbs: Record<CodeEvent['kind'], { verb: string; tone: Tone }> = {
 
 export const ActivityKeep = 80;
 
+/**
+ * One thing waiting for the person (B088): a member's open question, a network ask, a tool ask, a blocked member or a
+ * failed one. The header's "N need you" and the You node both count needYouItems(), so they always agree; each thing
+ * is one item (a member asking a question and also asking for a host is two).
+ */
+export type NeedYouKind = 'question' | 'network' | 'tool' | 'blocked' | 'failed';
+export interface NeedYouItem { id: string; kind: NeedYouKind; team: string; member: string | null; label: string | null }
+/** The order the kinds are listed in (the You node's breakdown, the item list). */
+export const NeedYouKinds: readonly NeedYouKind[] = ['question', 'network', 'tool', 'blocked', 'failed'];
+const NeedYouWords: Record<NeedYouKind, [string, string]> = {
+  question: ['question', 'questions'], network: ['network ask', 'network asks'], tool: ['tool ask', 'tool asks'],
+  blocked: ['blocked', 'blocked'], failed: ['failed', 'failed'],
+};
+const NeedYouTone: Record<NeedYouKind, Tone> = { question: 'decision', network: 'decision', tool: 'decision', blocked: 'blocked', failed: 'fail' };
+/** One item's kind in words ("question", "network ask", "blocked"). */
+export const needYouWord = (kind: NeedYouKind): string => NeedYouWords[kind][0];
+/** What is in the list by kind: "2 questions, 1 network ask, 1 failed"; "Nothing needs you" when empty. */
+export function needYouSummary(items: readonly Pick<NeedYouItem, 'kind'>[]): string {
+  const parts: string[] = [];
+  for (const k of NeedYouKinds) {
+    const n = items.filter((i) => i.kind === k).length;
+    if (n) parts.push(`${n} ${NeedYouWords[k][n === 1 ? 0 : 1]}`);
+  }
+  return parts.length ? parts.join(', ') : 'Nothing needs you';
+}
+/** A member's need-you item id: one per member and kind. */
+const memberNeedId = (prefix: string, team: string, member: string) => `${prefix}:${team.toLowerCase()}/${member.toLowerCase()}`;
+/** A fired item that never showed up in the list (a question the snapshot never saw) is forgotten after this long. */
+export const NeedYouForgetMs = 30_000;
+
 export class MonitorModel {
   /** keep: how many activity lines it holds (the Monitor's ActivityKeep; the team board keeps more of one team). */
   constructor(private readonly keep = ActivityKeep) {}
@@ -129,7 +162,11 @@ export class MonitorModel {
   /** Each member's step times (display time) over the last minute, for its pulse. */
   private stepTimes = new Map<string, number[]>();
   /** What waits for the person besides questions (network and tool asks), by the view's key for each. */
-  private asks = new Map<string, { team: string; member: string | null }>();
+  private asks = new Map<string, { team: string; member: string | null; kind: 'network' | 'tool'; label: string | null }>();
+  /** The words of each member's last question (by member key), for its flyer to the You node. */
+  private questions = new Map<string, string | null>();
+  /** The need-you items that have flown (and sounded), by id; seen: the list has shown it since. */
+  private fired = new Map<string, { at: number; seen: boolean }>();
 
   /** Takes a snapshot: who exists and their states. A member that starts running ripples. */
   reconcile(teams: TeamSnapshot[], now: number): void {
@@ -183,24 +220,60 @@ export class MonitorModel {
 
   /**
    * What waits for the person besides questions: network and tool asks (the view's list, keyed as it likes). A new one
-   * flies from its member to the You node; the You node counts them until they are gone from the list.
+   * flies from its member to the You node once (syncNeedYou); the You node counts them until they are gone from the list.
+   * kind: network or tool (without it, read from the key: "n:" / "net" is a network ask, anything else a tool ask).
    */
-  setAsks(asks: readonly { key: string; team: string; member: string | null; label?: string | null }[], now = performance.now()): void {
-    const next = new Map<string, { team: string; member: string | null }>();
-    for (const a of asks) {
-      next.set(a.key, { team: a.team, member: a.member });
-      if (!this.asks.has(a.key))
-        this.effects.push({ kind: 'you', from: a.member ? memberKey(a.team, a.member) : teamKey(a.team), color: 'decision', label: clip(a.label ?? null, 30), at: now });
-    }
+  setAsks(asks: readonly { key: string; team: string; member: string | null; label?: string | null; kind?: 'network' | 'tool' }[], now = performance.now()): void {
+    const next = new Map<string, { team: string; member: string | null; kind: 'network' | 'tool'; label: string | null }>();
+    for (const a of asks)
+      next.set(a.key, { team: a.team, member: a.member, kind: a.kind ?? (/^n(et)?[:/-]/i.test(a.key) ? 'network' : 'tool'), label: a.label ?? null });
     this.asks = next;
-    this.capEffects();
+    this.syncNeedYou(now);
   }
 
-  /** How many things wait for the person (the You node's count): members whose question is open, and the asks. */
-  youCount(): number {
-    let n = this.asks.size;
-    for (const t of this.teams) for (const m of t.members) if (m.state === 'decision') n++;
-    return n;
+  /**
+   * Everything waiting for the person, each thing once (B088): members whose question is open, the network and tool
+   * asks, blocked and failed members. Its length is the header's "N need you" and the You node's count.
+   */
+  needYouItems(): NeedYouItem[] {
+    const items: NeedYouItem[] = [];
+    const states: Partial<Record<MemberState, { kind: NeedYouKind; prefix: string }>> = {
+      decision: { kind: 'question', prefix: 'q' }, blocked: { kind: 'blocked', prefix: 'b' }, failed: { kind: 'failed', prefix: 'f' },
+    };
+    for (const t of this.teams)
+      for (const m of t.members) {
+        const s = states[m.state];
+        if (!s) continue;
+        const label = s.kind === 'question' ? this.questions.get(memberKey(t.name, m.name)) ?? m.statusLine : m.statusLine;
+        items.push({ id: memberNeedId(s.prefix, t.name, m.name), kind: s.kind, team: t.name, member: m.name, label: label ?? null });
+      }
+    for (const [key, a] of this.asks) items.push({ id: `a:${key}`, kind: a.kind, team: a.team, member: a.member, label: a.label });
+    const rank = (k: NeedYouKind) => NeedYouKinds.indexOf(k);
+    return items.sort((a, b) => rank(a.kind) - rank(b.kind));
+  }
+
+  /**
+   * Fires the need-you items that are new (B088): each one flies to the You node, which pulses as it lands, and sounds
+   * (sound.ts), once per id - a later poll, a change event or a feed row for the same item fires nothing. An item that
+   * leaves the list is forgotten, so the same thing waiting again later is new. play false: the items are taken as
+   * already there (the Monitor's start), counted but not flown. Returns the list.
+   */
+  syncNeedYou(now = performance.now(), play = true): NeedYouItem[] {
+    const items = this.needYouItems();
+    const present = new Set(items.map((i) => i.id));
+    for (const [id, f] of this.fired) if (!present.has(id) && (f.seen || Math.abs(now - f.at) > NeedYouForgetMs)) this.fired.delete(id);
+    for (const it of items) {
+      const f = this.fired.get(it.id);
+      if (f) { f.seen = true; continue; }
+      this.fired.set(it.id, { at: now, seen: true });
+      if (play)
+        this.effects.push({
+          kind: 'you', from: it.member ? memberKey(it.team, it.member) : teamKey(it.team), color: NeedYouTone[it.kind],
+          label: clip(it.label ?? (it.kind === 'blocked' || it.kind === 'failed' ? it.kind : null), 30), at: now, id: it.id,
+        });
+    }
+    this.capEffects();
+    return items;
   }
 
   /** Applies a feed row: an effect for the scene and a line for the activity list. */
@@ -224,6 +297,7 @@ export class MonitorModel {
     // Which workflow a member works in, so the files its steps touch light that workflow's part of the code map.
     if (row.kind === 'instruction' && row.member) this.memberWorkflow.set(target, row.workflow);
     if (row.kind === 'done') this.map.endWorkflow(row.team, row.workflow);
+    if (row.kind === 'decision' && row.member) this.questions.set(target, row.text);
     if (!live) return;
     this.recent.push(now);
     // The member's run is over: so is any command it was running.
@@ -262,8 +336,15 @@ export class MonitorModel {
       case 'decision':
         this.effects.push({ kind: 'burst', node: target, color: 'decision', big: false, at: now });
         this.effects.push({ kind: 'float', node: target, color: 'decision', text: 'needs you', at: now });
-        this.effects.push({ kind: 'you', from: target, color: 'decision', label: clip(row.text, 30), at: now });
+      {
+        // The question flies at once, before the next snapshot shows it; it is its member's question item, so the
+        // snapshot's list does not fly it again (syncNeedYou).
+        const id = row.member ? memberNeedId('q', row.team, row.member) : null;
+        if (id && this.fired.has(id)) break;
+        if (id) this.fired.set(id, { at: now, seen: false });
+        this.effects.push({ kind: 'you', from: target, color: 'decision', label: clip(row.text, 30), at: now, ...(id ? { id } : {}) });
         break;
+      }
       case 'done':
         this.effects.push({ kind: 'burst', node: teamKey(row.team), color: 'done', big: true, at: now });
         break;
@@ -375,16 +456,16 @@ export class MonitorModel {
     return this.recent.length;
   }
 
+  /** The header's counts; needYou is needYouItems()'s length, the You node's count. */
   counts(): { running: number; waiting: number; needYou: number; members: number } {
-    let running = 0, waiting = 0, needYou = 0, members = 0;
+    let running = 0, waiting = 0, members = 0;
     for (const t of this.teams)
       for (const m of t.members) {
         members++;
         if (m.state === 'running') running++;
         else if (m.state === 'waiting') waiting++;
-        else if (m.state === 'decision' || m.state === 'blocked' || m.state === 'failed') needYou++;
       }
-    return { running, waiting, needYou, members };
+    return { running, waiting, needYou: this.needYouItems().length, members };
   }
 }
 
