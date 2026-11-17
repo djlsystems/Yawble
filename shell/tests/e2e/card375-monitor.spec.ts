@@ -228,7 +228,8 @@ function wfBoxes(f: Frame) {
 }
 /** A workflow node by its "#id" label (drawn 13 under its centre). */
 function wfNode(f: Frame, id: number) {
-  const t = f.ops.find((o) => o.op === 'text' && o.text === `#${id}` && (o.style === C.inkDim || o.style === C.blocked));
+  // B090: the label is "#id title" (or "#id" on a phone's wall zoomed out).
+  const t = f.ops.find((o) => o.op === 'text' && (o.text === `#${id}` || o.text!.startsWith(`#${id} `)) && (o.style === C.inkDim || o.style === C.blocked));
   if (!t) return null;
   const c = { x: t.x!, y: t.y! - 13 };
   const box = wfBoxes(f).find((b) => near(b, c, 0.05));

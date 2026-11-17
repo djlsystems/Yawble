@@ -149,7 +149,9 @@ async function confirmRealign() {
   } catch (e) {
     const code = errorCode(e);
     r.error = errorText(e);
-    r.refused = (!!code && !NOT_REFUSALS.has(code)) || /running|runs/i.test(r.error);
+    // A coded answer decides by its code alone, so a git_failed whose git text says "runs" stays a plain error; only an
+    // uncoded error falls back to the text.
+    r.refused = code ? !NOT_REFUSALS.has(code) : /running|runs/i.test(r.error);
     if (code === 'stale') await reshowRealign(r);
   } finally {
     busy.value = null;
@@ -157,7 +159,8 @@ async function confirmRealign() {
 }
 
 /** Error codes that are a failure, not the core saying no (those show as "Refused: <reason>"). */
-const NOT_REFUSALS = new Set(['internal', 'method_not_found', 'bad_request', 'invalid_params', 'timeout', 'disconnected']);
+const NOT_REFUSALS = new Set(['internal', 'method_not_found', 'bad_request', 'invalid_params', 'timeout', 'disconnected',
+  'git_failed', 'bad_params', 'no_such_member']);
 
 /** After a "stale" refusal: read the plan again; if the branch is still moved, show the confirm with its new commits (a
  * new yes is bound to those), else close it and say what happened. The refusal stays shown either way. */
