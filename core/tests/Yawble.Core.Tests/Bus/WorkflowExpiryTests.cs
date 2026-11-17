@@ -59,6 +59,7 @@ public class WorkflowExpiryTests
             var open = await Listed(engine, root.Seq);
             Assert.Equal(("open", (DateTimeOffset?)last.AddDays(3)), (open.State, open.ExpiresAt));
             Assert.Null(open.EndedAt);
+            Assert.Null(open.Question); // no question asked
 
             clock.Now = last.AddDays(3).AddMinutes(-1);
             Assert.Equal(0, await engine.SweepExpiryAsync(clock.Now, Ct));
@@ -83,7 +84,7 @@ public class WorkflowExpiryTests
     }
 
     [Fact]
-    public async Task TheTeamSetting_SetsTheDays_WithinOneToNinety()
+    public async Task TheTeamSetting_SetsTheDays_WithinOneTo365()
     {
         var (db, clock, engine) = await Team(new ScriptedRunner());
         using (db)
@@ -93,7 +94,8 @@ public class WorkflowExpiryTests
             Assert.Equal(5, await engine.SetWorkflowExpiryDaysAsync("Alpha", 5, Ct));
             Assert.Equal(5, Assert.Single(await engine.TeamsAsync(Ct)).WorkflowExpiryDays);
             Assert.Equal("bad_days", (await Assert.ThrowsAsync<BusRefusal>(() => engine.SetWorkflowExpiryDaysAsync("Alpha", 0, Ct))).Code);
-            Assert.Equal("bad_days", (await Assert.ThrowsAsync<BusRefusal>(() => engine.SetWorkflowExpiryDaysAsync("Alpha", 91, Ct))).Code);
+            Assert.Equal("bad_days", (await Assert.ThrowsAsync<BusRefusal>(() => engine.SetWorkflowExpiryDaysAsync("Alpha", 366, Ct))).Code);
+            Assert.Equal(5, await engine.WorkflowExpiryDaysAsync("Alpha", Ct));
 
             var root = await engine.PersonTellAsync("Alpha", "Ada", "a slow one", ct: Ct);
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet");
@@ -199,6 +201,7 @@ public class WorkflowExpiryTests
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet");
             var question = Assert.Single(await engine.OpenDecisionsAsync("Alpha", Ct));
             var last = LastActivity(db, root.Seq);
+            Assert.Equal(question.Seq, (await Listed(engine, root.Seq)).Question); // the list item names the question it waits on
 
             Assert.Equal(0, await engine.SweepExpiryAsync(last.AddDays(2).AddMinutes(-1), Ct));
             Assert.Empty(warned);
@@ -221,6 +224,7 @@ public class WorkflowExpiryTests
             Assert.Equal(1, await engine.SweepExpiryAsync(clock.Now.AddDays(1), Ct)); // ...and at N days it expires
             var expired = await Listed(engine, root.Seq);
             Assert.Equal(("expired", (DateTimeOffset?)last), (expired.State, expired.EndedAt));
+            Assert.Null(expired.Question); // an ended workflow waits on nothing
             Assert.Empty(await engine.ExpiryWarningsAsync("Alpha", Ct));
         }
     }

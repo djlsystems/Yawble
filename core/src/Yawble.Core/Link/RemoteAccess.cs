@@ -52,7 +52,7 @@ public static class RemoteAccess
         Reads,
         /// <summary>Changes something: refused for a read-only viewer.</summary>
         Changes,
-        /// <summary>Reads a setting, or sets it when the call carries "on" (teams.push, teams.syncToBase).</summary>
+        /// <summary>Reads a setting, or sets it when the call carries its value: "on" (teams.push, teams.syncToBase), "days" (teams.workflowExpiry).</summary>
         ReadsUnlessOn,
     }
 
@@ -98,7 +98,7 @@ public static class RemoteAccess
             "updates.status",
             "code.list", "code.open", "code.read", "code.close", "code.download",
         ],
-        readsUnlessOn: ["teams.push", "teams.syncToBase"],
+        readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry"],
         changes:
         [
             "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",
@@ -106,7 +106,7 @@ public static class RemoteAccess
             "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
             "members.add", "members.remove", "members.update",
             "bus.tellManager", "bus.answer", "bus.closeWorkflow", "bus.stopWorkflow", "bus.nudgeWorkflow",
-            "bus.workflowExtend", "teams.setWorkflowExpiry",
+            "bus.workflowExtend",
             "policy.saveGlobal", "policy.saveOverride", "policy.saveLoosen", "policy.removeTeamHost",
             "credentials.setClaudeSetupToken", "credentials.setAnthropicApiKey", "credentials.setXaiApiKey", "credentials.remove", "credentials.setMode",
             "hostTerminal.start",
@@ -151,7 +151,10 @@ public static class RemoteAccess
 
     /// <summary>Whether a call only reads, by the table: a method missing from it changes something.</summary>
     public static bool Reads(string method, JsonObject? parameters) =>
-        Kinds.TryGetValue(method, out var kind) && (kind == Kind.Reads || kind == Kind.ReadsUnlessOn && parameters?["on"] is null);
+        Kinds.TryGetValue(method, out var kind) && (kind == Kind.Reads || kind == Kind.ReadsUnlessOn && parameters?[SetKey(method)] is null);
+
+    /// <summary>The field a get-or-set call carries when it sets its setting (B085 teams.workflowExpiry: "days"; the rest "on").</summary>
+    public static string SetKey(string method) => method == "teams.workflowExpiry" ? "days" : "on";
 
     /// <summary>Null when the call is allowed for a viewer with this access; otherwise the reason, as the remote person reads it.</summary>
     /// <param name="access"><see cref="Full"/> or <see cref="Read"/> (<see cref="AccessOf"/>): a read-only viewer's change call gets
