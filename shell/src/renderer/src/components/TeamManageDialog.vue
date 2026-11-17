@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, IntegrationInfo, McpServerInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
@@ -8,6 +8,7 @@ import TeamNetworkAllows from './TeamNetworkAllows.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
+import { usePhone } from '../phone';
 
 /**
  * A team's housekeeping: pause or resume it, its repositories, its environment variables, archive it, delete it. Archive and delete need
@@ -19,6 +20,32 @@ const api = resolveApi(props.api);
 
 type Tab = 'general' | 'state' | 'repos' | 'env' | 'network' | 'integrations' | 'reset' | 'delete';
 const tab = ref<Tab>('general');
+const tabs: { id: Tab; label: string }[] = [
+  { id: 'general', label: 'General' },
+  { id: 'state', label: 'Pause and archive' },
+  { id: 'repos', label: 'Repositories' },
+  { id: 'env', label: 'Environment' },
+  { id: 'network', label: 'Network' },
+  { id: 'integrations', label: 'Integrations' },
+  { id: 'reset', label: 'Reset' },
+  { id: 'delete', label: 'Delete' },
+];
+// A phone (card 346), laid out like the app's Settings on a phone (SettingsView): the dialog opens at the list of its
+// sections; a tap opens that section alone under a sticky Back + title; Back returns to the list. Desktop: the tab row.
+const phone = usePhone();
+const sectionOpen = ref(false);
+function choose(id: Tab) { tab.value = id; sectionOpen.value = true; }
+const showList = computed(() => !phone.value || !sectionOpen.value);
+const showPane = computed(() => !phone.value || sectionOpen.value);
+const tabLabel = computed(() => tabs.find((t) => t.id === tab.value)?.label ?? 'Settings');
+// A section opened on a phone starts at its top (the sheet's body is the one scroller).
+const root = ref<HTMLElement | null>(null);
+watch([tab, sectionOpen], async () => {
+  if (!phone.value) return;
+  await nextTick();
+  const body = root.value?.closest<HTMLElement>('.body');
+  if (body) body.scrollTop = 0;
+});
 const error = ref<string | null>(null);
 const note = ref<string | null>(null);
 // One action at a time (every action button is held while one runs); the clicked one shows the spinner: work.is('act', method).
@@ -148,18 +175,18 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
 
 <template>
   <Modal :title="`Settings · ${team.name}`" wide @close="emit('close')">
-    <nav class="tabs">
-      <button :class="{ on: tab === 'general' }" data-test="manage-tab-general" @click="tab = 'general'">General</button>
-      <button :class="{ on: tab === 'state' }" data-test="manage-tab-state" @click="tab = 'state'">Pause and archive</button>
-      <button :class="{ on: tab === 'repos' }" data-test="manage-tab-repos" @click="tab = 'repos'">Repositories</button>
-      <button :class="{ on: tab === 'env' }" data-test="manage-tab-env" @click="tab = 'env'">Environment</button>
-      <button :class="{ on: tab === 'network' }" data-test="manage-tab-network" @click="tab = 'network'">Network</button>
-      <button :class="{ on: tab === 'integrations' }" data-test="manage-tab-integrations" @click="tab = 'integrations'">Integrations</button>
-      <button :class="{ on: tab === 'reset' }" data-test="manage-tab-reset" @click="tab = 'reset'">Reset</button>
-      <button :class="{ on: tab === 'delete' }" data-test="manage-tab-delete" @click="tab = 'delete'">Delete</button>
+    <div ref="root" class="manage" :class="{ phone }" :data-phone-screen="phone ? (sectionOpen ? 'section' : 'list') : undefined">
+    <div v-if="phone && sectionOpen" class="section-head">
+      <button class="back" data-test="manage-back" aria-label="Back to the team's Settings" @click="sectionOpen = false"><span class="back-icon" aria-hidden="true">‹</span>Settings</button>
+      <h3 class="section-title" data-test="manage-section-title">{{ tabLabel }}</h3>
+    </div>
+    <nav v-if="showList" class="tabs" :class="{ list: phone }" data-test="manage-tabs" role="tablist" :aria-orientation="phone ? 'vertical' : undefined">
+      <button v-for="t in tabs" :key="t.id" role="tab" :aria-selected="tab === t.id" :class="{ on: tab === t.id && !phone }" :data-test="`manage-tab-${t.id}`"
+        @click="choose(t.id)">{{ t.label }}<span v-if="phone" class="go-icon" aria-hidden="true">›</span></button>
     </nav>
     <p v-if="error" class="error" data-test="manage-error">{{ error }}</p>
 
+    <template v-if="showPane">
     <section v-if="tab === 'general'" class="pane" data-test="team-general">
       <div class="block">
         <h4>Team</h4>
@@ -326,7 +353,7 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
       <p v-if="resetDone" class="ok" data-test="reset-done">{{ resetDone }}</p>
     </section>
 
-    <section v-else class="pane">
+    <section v-else class="pane" data-test="team-delete-pane">
       <p>
         Deleting <b>{{ team.name }}</b> removes its members, their settings, schedules and Board cards, and its folder in the app's
         data: the members' working copies and, if the app made it, the team's repository with any work not pushed anywhere.
@@ -342,6 +369,8 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
       </div>
       <p v-if="note" class="warn">{{ note }}</p>
     </section>
+    </template>
+    </div>
   </Modal>
 </template>
 
@@ -383,4 +412,30 @@ label.check input { width: auto; padding: 0; }
 .warn { color: var(--warn); margin: 0; }
 .ok { color: var(--ok); font-size: 12.5px; }
 .error { color: var(--bad); }
+/* ---- a phone (card 346), like the app's Settings on a phone (SettingsView): the list of sections as full-width 52 px
+   rows with a chevron, or one section under a slim sticky Back + title. Nothing is wider than the sheet. */
+.phone .tabs.list { flex-direction: column; flex-wrap: nowrap; gap: 0; border-bottom: 0; border-top: 1px solid var(--line-soft); margin-bottom: 12px; }
+.phone .tabs.list button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 52px; padding: 0 6px 0 4px;
+  border-bottom: 1px solid var(--line-soft); text-align: left; font-weight: 500; color: var(--ink); font-size: 15px; white-space: nowrap; }
+.go-icon { color: var(--muted); font-size: 20px; line-height: 1; }
+/* Sticks to the top of the sheet's body (its only scroller); the negative margin covers the body's top padding, so
+   nothing shows above the head as the section scrolls under it. */
+.section-head { position: sticky; top: -12px; z-index: 2; display: flex; align-items: center; gap: 6px; min-height: 44px;
+  margin: -12px 0 10px; padding-top: 12px; background: var(--surface); border-bottom: 1px solid var(--line-soft); }
+.back { flex: none; display: inline-flex; align-items: center; gap: 2px; border: 0; background: transparent; color: var(--accent); padding: 0 8px 0 0; min-height: 44px; font-size: 15px; }
+.back-icon { font-size: 22px; line-height: 1; margin-right: 2px; }
+.section-title { margin: 0; font-size: 17px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone .pane { min-width: 0; }
+.phone .block { min-width: 0; }
+.phone .repo .grow { min-width: 0; }
+.phone .mono, .phone code { overflow-wrap: anywhere; }
+.phone .env { table-layout: fixed; }
+.phone .env td:first-child { width: 38%; min-width: 0; }
+.phone .env td:last-child { width: 36px; }
+.phone .env td.grow { width: auto; }
+.phone .env input { min-width: 0; box-sizing: border-box; }
+.phone label input:not([type=checkbox]) { max-width: none; width: 100%; min-width: 0; box-sizing: border-box; }
+.phone .buttons { flex-wrap: wrap; }
+.phone .check { align-items: flex-start; padding: 6px 0; }
+.phone .check input { margin-top: 3px; }
 </style>
