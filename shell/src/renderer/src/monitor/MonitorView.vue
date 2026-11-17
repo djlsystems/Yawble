@@ -13,8 +13,9 @@ import LoadingNote from '../components/LoadingNote.vue';
 import { heavyLine } from '../heavyLease';
 import { useNarrow } from '../narrowScreen';
 import {
-  DefaultSpeed, DefaultWindowMinutes, MaxWindowMinutes, mergeByTime, ReplayClock, ReplayStates, Speeds, timeOf, trimByTime, Windows,
+  DefaultSpeed, DefaultWindowMinutes, inTimeOrder, MaxWindowMinutes, mergeByTime, ReplayClock, ReplayStates, Speeds, timeOf, trimByTime, Windows,
 } from './timeline';
+import { codeEventKey, MapIdleChoices, readCodeEvents, readMapIdle, writeMapIdle, type CodeEvent } from './codemap';
 import { entryTime, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown, type WorkflowIcon } from './workflows';
 
 /**
@@ -28,6 +29,10 @@ import { entryTime, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown, 
  * own (the live one keeps listening underneath) plays the messages and steps from there, the members' rings show
  * the states the replay works out (ReplayStates), and when it catches up with now, or the person presses Live, the
  * wall is live again.
+ *
+ * The code events (monitor.codeEvents: commits, merges into the team branch, landings on main, pushes) are polled
+ * the same way and build each team's code map with the steps (codemap.ts); a core without the read leaves the map to
+ * the steps alone. The replay plays them at their times with the rest.
  *
  * Each team's newest workflows (bus.workflows) sit in one panel hung off its hub, live only: they are fetched when the bus brings that
  * team something and otherwise every WorkflowPollMs, and a replay shows none (it would be faking their history).
@@ -111,6 +116,21 @@ let raf = 0;
 // The timeline: what it holds, how far back it shows, and the replay.
 const rows = shallowRef<FeedRow[]>([]);
 const steps = shallowRef<StepRow[]>([]);
+const events = shallowRef<CodeEvent[]>([]);
+/** The code events already taken (the read is asked again from the newest one's time, so it overlaps). */
+const eventKeys = new Set<string>();
+let eventsSince = 0;
+/** How the code read is asked: for every team at once, per team, or not at all (a core without it). */
+let codeMode: 'all' | 'team' | 'off' = 'all';
+/** How long a file stays on the map after its last touch, minutes (the person's choice, kept). */
+const mapIdle = ref(readMapIdle());
+live.map.idleMs = mapIdle.value * 60_000;
+function setMapIdle(minutes: number): void {
+  mapIdle.value = minutes;
+  live.map.idleMs = minutes * 60_000;
+  if (model !== live) model.map.idleMs = minutes * 60_000;
+  writeMapIdle(minutes);
+}
 const WindowKey = 'yawble.monitor.windowMinutes';
 const windowMinutes = ref(readWindow());
 const now = ref(Date.now());
@@ -246,20 +266,43 @@ async function stepFeed(first: boolean): Promise<StepRow[]> {
   return got;
 }
 
-/** Applies rows and steps to a model in the order they happened, without playing them (the start, a replay's past). */
-function catchUp(m: MonitorModel, rs: readonly FeedRow[], ss: readonly StepRow[], into?: ReplayStates) {
-  let i = 0, j = 0;
-  while (i < rs.length || j < ss.length) {
-    // (The index moves outside the optional call: `into?.row(rs[i++])` would skip the ++ without `into`.)
-    if (j >= ss.length || (i < rs.length && timeOf(rs[i]!) <= timeOf(ss[j]!))) {
-      const r = rs[i++]!;
-      m.apply(r, 0, false);
-      into?.row(r);
-    } else {
-      const s = ss[j++]!;
-      m.applyStep(s, 0, false);
-      into?.step(s);
+/**
+ * The code feed: the commits, merges, landings and pushes since the newest one taken (from the start of the timeline
+ * at first). A fresh one plays live; any joins the timeline and the map. The read is asked for all teams at once; if
+ * that is refused it is asked per team, and if that is refused too (a core without it) the map keeps to the steps.
+ */
+async function codeFeed(first: boolean): Promise<CodeEvent[]> {
+  if (codeMode === 'off') return [];
+  const since = new Date(first ? Date.now() - MaxWindowMinutes * 60_000 : eventsSince).toISOString();
+  let got: CodeEvent[] = [];
+  try {
+    if (codeMode === 'all') {
+      try { got = readCodeEvents(await api.call<unknown>('monitor.codeEvents', { since })); }
+      catch { codeMode = 'team'; }
     }
+    if (codeMode === 'team')
+      for (const t of teams.value) got.push(...readCodeEvents(await api.call<unknown>('monitor.codeEvents', { team: t.name, since })));
+  } catch {
+    codeMode = 'off';
+    return [];
+  }
+  const fresh = got.filter((e) => { const k = codeEventKey(e); if (eventKeys.has(k)) return false; eventKeys.add(k); return true; });
+  fresh.sort((a, b) => timeOf(a) - timeOf(b));
+  for (const e of fresh) eventsSince = Math.max(eventsSince, timeOf(e));
+  if (!first) {
+    const wall = Date.now();
+    for (const e of fresh) live.applyCode(e, performance.now(), mode.value === 'live' && wall - timeOf(e) < FreshStepMs);
+  }
+  if (fresh.length) events.value = mergeByTime([...events.value], fresh);
+  return fresh;
+}
+
+/** Applies rows, steps and code events to a model in the order they happened, without playing them (the start, a replay's past). */
+function catchUp(m: MonitorModel, rs: readonly FeedRow[], ss: readonly StepRow[], es: readonly CodeEvent[] = [], into?: ReplayStates) {
+  for (const p of inTimeOrder(rs, ss, es)) {
+    if ('row' in p) { m.apply(p.row, 0, false); into?.row(p.row); }
+    else if ('step' in p) { m.applyStep(p.step, 0, false); into?.step(p.step); }
+    else m.applyCode(p.event, 0, false);
   }
 }
 
@@ -270,12 +313,15 @@ async function tick(first = false) {
     await snapshot();
     const fr = await feed(first);
     const fs = await stepFeed(first);
+    const fe = await codeFeed(first);
     await workflowFeed(first, new Set(fr.map((r) => r.team.toLowerCase())));
-    if (first) catchUp(live, [...fr].sort((a, b) => timeOf(a) - timeOf(b)), fs);
+    if (first) catchUp(live, [...fr].sort((a, b) => timeOf(a) - timeOf(b)), fs, fe);
     const from = Date.now() - MaxWindowMinutes * 60_000;
     rows.value = trimByTime(rows.value, from, 4000);
     steps.value = trimByTime(steps.value, from, 30_000);
-    replay?.extend(rows.value, steps.value);
+    events.value = trimByTime(events.value, from, 5000);
+    if (eventKeys.size > 20_000) { eventKeys.clear(); for (const e of events.value) eventKeys.add(codeEventKey(e)); }
+    replay?.extend(rows.value, steps.value, events.value);
     if (mode.value === 'live' && scene) scene.effects.push(...live.effects.splice(0));
     else live.effects.length = 0;
     if (model === live) activity.value = [...live.activity];
@@ -298,12 +344,15 @@ function startReplay(at: number) {
   const from = Math.max(at, wall - MaxWindowMinutes * 60_000);
   const m = new MonitorModel();
   m.reconcile(teams.value, performance.now());
+  m.map.idleMs = mapIdle.value * 60_000;
+  m.logNow = () => replay?.at ?? from;
   const st = new ReplayStates();
-  // The half hour before the moment sets the states and the activity list; older rows would only fill the list.
-  const lead = from - 30 * 60_000;
-  catchUp(m, rows.value.filter((r) => timeOf(r) >= lead && timeOf(r) < from), steps.value.filter((s) => timeOf(s) >= lead && timeOf(s) < from), st);
+  // The stretch before the moment (the map's idle time, at least half an hour) sets the states, the map and the activity list.
+  const lead = from - Math.max(30, mapIdle.value) * 60_000;
+  const before = (x: { at: string }) => timeOf(x) >= lead && timeOf(x) < from;
+  catchUp(m, rows.value.filter(before), steps.value.filter(before), events.value.filter(before), st);
   m.effects.length = 0;
-  replay = new ReplayClock(rows.value, steps.value, from, speed.value);
+  replay = new ReplayClock(rows.value, steps.value, from, speed.value, undefined, events.value);
   replayStates = st;
   model = m;
   mode.value = 'replay';
@@ -347,15 +396,10 @@ function frame(t: number) {
   if (!replay || !replayStates) return;
   const wall = Date.now();
   const due = replay.step(dt, wall);
-  let i = 0, j = 0;
-  while (i < due.rows.length || j < due.steps.length) {
-    if (j >= due.steps.length || (i < due.rows.length && timeOf(due.rows[i]!) <= timeOf(due.steps[j]!))) {
-      model.apply(due.rows[i]!, t, true);
-      replayStates.row(due.rows[i++]!);
-    } else {
-      model.applyStep(due.steps[j]!, t, true);
-      replayStates.step(due.steps[j++]!);
-    }
+  for (const p of inTimeOrder(due.rows, due.steps, due.events)) {
+    if ('row' in p) { model.apply(p.row, t, true); replayStates.row(p.row); }
+    else if ('step' in p) { model.applyStep(p.step, t, true); replayStates.step(p.step); }
+    else model.applyCode(p.event, t, true);
   }
   if (scene) scene.effects.push(...model.effects.splice(0));
   else model.effects.length = 0;
@@ -479,6 +523,11 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
           <span><i class="tone" :style="{ background: Palette.fail }" />failed</span>
           <span class="sep" />
           <span v-for="k in legendSteps" :key="k"><i class="dot" :style="{ background: StepLook[k].color }" />{{ StepLook[k].done }}</span>
+          <span class="sep" />
+          <span data-test="monitor-legend-code"><i class="dot" :style="{ background: Palette.commit }" />commit</span>
+          <span><i class="tone" :style="{ background: Palette.handback }" />merged</span>
+          <span><i class="tone" :style="{ background: Palette.done }" />landed</span>
+          <span><i class="tone" :style="{ background: Palette.tell }" />pushed</span>
           <template v-if="mode === 'live'">
             <span class="sep" />
             <span class="wfl" data-test="monitor-legend-workflows">
@@ -506,14 +555,21 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
         </ul>
         <div v-if="hover" class="tip" :style="{ left: `${hover.x}px`, top: `${hover.y}px` }" data-test="monitor-tip">
           <template v-if="hover.kind === 'file'">
-            <template v-if="hover.path">
-              <strong class="path">{{ hover.path }}</strong>
-              <span :style="{ color: StepLook[hover.fileKind ?? 'edit'].color }">{{ hover.fileKind === 'create' ? 'written' : 'edited' }}{{ (hover.touches ?? 1) > 1 ? ` ${hover.touches}×` : '' }} by {{ spaced(hover.name) }}</span>
-            </template>
-            <template v-else>
-              <strong>{{ hover.more?.length }} more files by {{ spaced(hover.name) }}</strong>
-              <span v-for="p in (hover.more ?? []).slice(0, 8)" :key="p" class="dim path">{{ p }}</span>
-            </template>
+            <strong class="path" data-test="monitor-tip-path">{{ hover.path }}</strong>
+            <span :style="{ color: StepLook[hover.fileKind ?? 'edit'].color }">{{ hover.fileKind === 'create' ? 'new' : hover.fileKind === 'read' ? 'read' : 'changed' }}{{ (hover.touches ?? 1) > 1 ? ` · ${hover.touches} touches` : '' }}</span>
+            <span v-if="hover.members?.length" class="dim">by {{ hover.members.map(spaced).join(', ') }}</span>
+            <span class="dim">{{ hover.sha ? `in commit ${hover.sha}` : 'not committed yet (from the steps)' }} · {{ hover.team }}</span>
+          </template>
+          <template v-else-if="hover.kind === 'folder'">
+            <strong class="path">{{ hover.name }}</strong>
+            <span v-if="hover.more?.length" class="dim">{{ hover.more.length }} file{{ hover.more.length === 1 ? '' : 's' }} touched</span>
+            <span v-for="p in (hover.more ?? []).slice(0, 8)" :key="p" class="dim path">{{ p }}</span>
+            <span v-if="(hover.more?.length ?? 0) > 8" class="dim">+{{ hover.more!.length - 8 }} more</span>
+          </template>
+          <template v-else-if="hover.kind === 'commit'">
+            <strong data-test="monitor-tip-commit">{{ hover.message || '(no message)' }}</strong>
+            <span :style="{ color: Palette.commit }">{{ hover.sha }} · {{ hover.touches }} file{{ hover.touches === 1 ? '' : 's' }}</span>
+            <span class="dim">{{ spaced(hover.name) }} · {{ hover.team }}</span>
           </template>
           <template v-else-if="hover.kind === 'workflow' && hover.workflow">
             <strong>#{{ hover.workflow.id }} {{ hover.workflow.title }}</strong>
@@ -551,8 +607,14 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
             <button class="ctl live-btn" data-test="monitor-live" @click="goLive">● Back to live</button>
           </template>
           <span v-else class="hint">click or drag the timeline to replay from a moment</span>
+          <label class="idle" title="How long a file stays on the code map after its last touch (it also leaves when its workflow ends)">
+            files stay
+            <select :value="mapIdle" data-test="monitor-map-idle" @change="setMapIdle(Number(($event.target as HTMLSelectElement).value))">
+              <option v-for="m in MapIdleChoices" :key="m" :value="m">{{ m < 60 ? `${m}m` : `${m / 60}h` }}</option>
+            </select>
+          </label>
         </div>
-        <Timeline :from="windowFrom" :to="now" :rows="rows" :steps="steps" :playhead="playhead" :live="mode === 'live'" @seek="startReplay" />
+        <Timeline :from="windowFrom" :to="now" :rows="rows" :steps="steps" :events="events" :playhead="playhead" :live="mode === 'live'" @seek="startReplay" />
       </div>
     </div>
 
@@ -654,6 +716,8 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 .seg:hover:not(.on) { color: #e2e8f0; }
 .live-btn { color: #fda4af; padding: 2px 10px; font-size: 11px; }
 .hint { opacity: .8; }
+.idle { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.idle select { background: #0c1322; color: #cbd5e1; border: 1px solid #1e293b; border-radius: 6px; font-size: 11px; padding: 1px 4px; }
 .activity { width: 22rem; flex: none; display: flex; flex-direction: column; border-left: 1px solid #1e293b; background: #0c1322; min-height: 0; }
 .activity.collapsed { width: 2.25rem; }
 .rail { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 0; border: 0; background: transparent; color: #94a3b8; cursor: pointer; }
@@ -696,6 +760,7 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
   .bar-controls { flex-wrap: wrap; }
   .bar-controls .hint { display: none; }
   .bar-controls .seg { min-height: 44px; min-width: 44px; }
+  .idle select { min-height: 44px; font-size: 16px; }
   .live-btn { min-height: 44px; }
   .activity { height: 50%; }
   .activity.collapsed { height: 44px; }

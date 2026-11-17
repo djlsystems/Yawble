@@ -1,7 +1,8 @@
 import type { WorkflowSummary } from '../../../shared/api';
 import type { MemberState } from '../faces/faces';
-import { changesFile, fileName, FileTrail, stepCaption, stepDoing, type StepKind, type StepRow } from './steps';
+import { changesFile, fileName, stepCaption, stepDoing, type StepKind, type StepRow } from './steps';
 import { latestWorkflows } from './workflows';
+import { CodeMap, codeEventKey, shortSha, type CodeEvent } from './codemap';
 
 /**
  * THE MONITOR'S MODEL: every team and member as the Monitor draws them, kept current from two sources. Snapshots
@@ -9,7 +10,10 @@ import { latestWorkflows } from './workflows';
  * (bus messages, monitor.messages) only adds what happens between snapshots: an instruction flies to its member as
  * a comet, a finished run bursts, a progress line floats up, a question raises "needs you". The step feed
  * (monitor.steps, steps.ts) adds what each member does inside its run: an icon rising off it for each step, the
- * files it changes beside it for half a minute, and a line under its name saying what it is doing now.
+ * files it touches on its team's code map (codemap.ts), and a line under its name saying what it is doing now. The
+ * code events (monitor.codeEvents) are the map's truth: a commit's files confirm or correct the steps, and the
+ * commit travels as a dot to the team's hub; a merge into the team branch bursts along the hub, a landing on main
+ * bursts larger, a push pulses off the edge of the wall.
  */
 
 export type FeedKind = 'instruction' | 'completed' | 'failed' | 'handback' | 'progress' | 'blocked' | 'decision' | 'done';
@@ -30,10 +34,16 @@ export type Effect =
   | { kind: 'burst'; node: string; color: Tone; big: boolean; at: number }
   | { kind: 'ripple'; node: string; color: Tone; at: number }
   | { kind: 'float'; node: string; color: Tone; text: string; at: number }
-  | { kind: 'step'; node: string; step: StepKind; caption: string | null; at: number };
+  | { kind: 'step'; node: string; step: StepKind; caption: string | null; at: number }
+  /** A commit: its files (by map id) gather to the member, a dot travels the member's spoke to the hub and rests there. */
+  | { kind: 'commit'; team: string; node: string | null; files: string[]; sha: string; message: string; member: string | null; at: number }
+  /** A merge into the team branch (big: false) or a landing on main (big: true): a burst along the hub. */
+  | { kind: 'merge'; team: string; big: boolean; at: number }
+  /** A push to origin: a pulse off the wall's edge. */
+  | { kind: 'push'; team: string; at: number };
 
 /** The wall's colours for what happens (the scene reads the hex values from CSS). */
-export type Tone = 'tell' | 'start' | 'progress' | 'done' | 'handback' | 'fail' | 'blocked' | 'decision' | 'person' | 'edit';
+export type Tone = 'tell' | 'start' | 'progress' | 'done' | 'handback' | 'fail' | 'blocked' | 'decision' | 'person' | 'edit' | 'commit';
 
 /** A line of the activity list: a bus message (key "m<seq>"), or a member's file changes gathered ("f<step id>"). */
 export interface ActivityRow { key: string; seq: number; tone: Tone; team: string; member: string | null; verb: string; who: string; text: string | null; at: string }
@@ -60,6 +70,13 @@ const verbs: Record<FeedKind, { verb: string; tone: Tone }> = {
   done: { verb: 'finished the work', tone: 'done' },
 };
 
+const CodeVerbs: Record<CodeEvent['kind'], { verb: string; tone: Tone }> = {
+  commit: { verb: 'committed', tone: 'commit' },
+  'merge-team': { verb: 'merged into the team', tone: 'handback' },
+  landed: { verb: 'landed on main', tone: 'done' },
+  push: { verb: 'pushed', tone: 'tell' },
+};
+
 export const ActivityKeep = 80;
 
 export class MonitorModel {
@@ -69,8 +86,13 @@ export class MonitorModel {
   teams: TeamSnapshot[] = [];
   activity: ActivityRow[] = [];
   effects: Effect[] = [];
-  /** The files each member changed lately, beside it on the wall. */
-  readonly files = new FileTrail();
+  /** Each team's code map: the files its members touch and its commits confirm. */
+  readonly map = new CodeMap();
+  /** Log time now, for the map's idle time: the wall clock live, the replay's clock in a replay. */
+  logNow: () => number = () => Date.now();
+  /** The workflow each member was last told in, by member key (its touches belong to it). */
+  private memberWorkflow = new Map<string, number>();
+  private prunedAt = -Infinity;
   /** What each member is doing now, by member key. */
   readonly doing = new Map<string, Doing>();
   /** Events per minute, counted over the last minute of rows. */
@@ -114,6 +136,8 @@ export class MonitorModel {
       who: spaced(whoName), text: row.text, at: row.at,
     });
     if (this.activity.length > this.keep) for (const gone of this.activity.splice(this.keep)) this.gathered.delete(gone.key);
+    if (row.kind === 'instruction' && row.member) this.memberWorkflow.set(target, row.workflow);
+    if (row.kind === 'done') this.map.endWorkflow(row.team, row.workflow);
     if (!live) return;
     this.recent.push(now);
     const source = row.from === 'person' || row.from === 'host' ? teamKey(row.team) : memberKey(row.team, row.from);
@@ -156,12 +180,41 @@ export class MonitorModel {
   applyStep(step: StepRow, now: number, live = true): void {
     const node = memberKey(step.team, step.member);
     if (changesFile(step)) this.gatherFile(step);
+    // The map is built from every step, played or not; only a played one pops and lights.
+    this.map.touchStep(step, this.memberWorkflow.get(node) ?? null, live ? now : null);
     if (!live) return;
     this.recent.push(now);
     // A reply is how nearly every run ends: the line keeps the last real thing the member did.
     if (step.kind !== 'say') this.doing.set(node, { text: stepDoing(step), kind: step.kind, at: now });
-    if (changesFile(step)) this.files.touch(node, step.target!, step.kind === 'create' ? 'create' : 'edit', now);
     this.effects.push({ kind: 'step', node, step: step.kind, caption: step.kind === 'edit' || step.kind === 'create' ? null : stepCaption(step), at: now });
+    if (this.effects.length > 260) this.effects.splice(0, this.effects.length - 260);
+  }
+
+  /**
+   * Applies a code event: always, its files correct the team's map and it joins the activity list; live, a commit's
+   * dot travels from its member to the hub, a merge bursts along the hub (a landing larger), a push pulses off the edge.
+   */
+  applyCode(ev: CodeEvent, now: number, live = true): void {
+    const lit = this.map.applyCode(ev, live ? now : null);
+    const look = CodeVerbs[ev.kind];
+    const first = ev.message.split('\n')[0]!.trim();
+    this.activity.unshift({
+      key: `c${codeEventKey(ev)}`, seq: 0, tone: look.tone, team: ev.team, member: ev.member,
+      verb: look.verb, who: spaced(ev.member ?? ev.team),
+      text: ev.kind === 'push' ? ev.branch || null : [ev.sha ? shortSha(ev.sha) : '', clip(first, 60) ?? '', ev.files.length ? `(${ev.files.length} file${ev.files.length === 1 ? '' : 's'})` : ''].filter(Boolean).join(' ') || null,
+      at: ev.at,
+    });
+    if (this.activity.length > this.keep) for (const gone of this.activity.splice(this.keep)) this.gathered.delete(gone.key);
+    if (!live) return;
+    this.recent.push(now);
+    const tk = ev.team.toLowerCase();
+    if (ev.kind === 'commit')
+      this.effects.push({
+        kind: 'commit', team: ev.team, node: ev.member ? memberKey(ev.team, ev.member) : null, files: lit.map((f) => `${tk}|${f.path}`),
+        sha: ev.sha, message: first, member: ev.member, at: now,
+      });
+    else if (ev.kind === 'push') this.effects.push({ kind: 'push', team: ev.team, at: now });
+    else this.effects.push({ kind: 'merge', team: ev.team, big: ev.kind === 'landed', at: now });
     if (this.effects.length > 260) this.effects.splice(0, this.effects.length - 260);
   }
 
@@ -193,9 +246,9 @@ export class MonitorModel {
     }
   }
 
-  /** Forgets the files and "now" lines that have run out (the scene calls this each frame through the view). */
+  /** Forgets the map's idle files (twice a second) and the "now" lines that have run out (the scene calls this each frame). */
   tidy(now: number): void {
-    this.files.tidy(now);
+    if (now - this.prunedAt >= 500 || now < this.prunedAt) { this.prunedAt = now; this.map.prune(this.logNow()); }
     for (const [k, d] of this.doing) if (now - d.at > DoingMs) this.doing.delete(k);
   }
 
