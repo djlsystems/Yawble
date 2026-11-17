@@ -46,19 +46,21 @@ public sealed class ConciergeTools(
     /// can steer through what they post) runs none of them: it may read, keep its notes and watches, and recommend.
     /// </summary>
     public static readonly IReadOnlyList<string> Acting =
-        ["tell", "answer", "team_create", "team_pause", "team_resume", "workflow_nudge", "workflow_close", "backlog_add", "team_repo_add", "team_repo_remove", "backup_now"];
+        ["tell", "answer", "team_create", "team_pause", "team_resume", "workflow_nudge", "workflow_close", "backlog_add", "team_repo_add", "team_repo_remove", "backup_now",
+         ConciergeHostTasks.RunTool];
 
     /// <summary>
     /// The tools here only for the person at this computer (as <see cref="ConciergeActions.LocalOnly"/>): a new team or
-    /// repository makes the host clone a folder or address for a sandboxed agent, and closing a workflow ends work.
+    /// repository makes the host clone a folder or address for a sandboxed agent, closing a workflow ends work, and a host
+    /// task runs a program on this computer.
     /// </summary>
-    public static readonly IReadOnlyList<string> LocalOnly = ["team_create", "team_repo_add", "team_repo_remove", "workflow_close"];
+    public static readonly IReadOnlyList<string> LocalOnly = ["team_create", "team_repo_add", "team_repo_remove", "workflow_close", ConciergeHostTasks.RunTool];
 
     public static readonly IReadOnlyList<string> ToolNames =
         ["team_list", "team_current", "team_status", "team_activity", "tell", "answer", "team_create", "notes_read", "notes_write",
          "watch", "watch_list", "unwatch", "team_workflows", "workflow_nudge", "workflow_close", "team_pause", "team_resume",
          "documents_list", "documents_read", "backlog_add", "team_repos", "team_repo_add", "team_repo_remove",
-         .. ConciergeReadTools.Names];
+         .. ConciergeHostTasks.Names, .. ConciergeReadTools.Names];
 
     private readonly ConciergeReadTools _read = new(bus, ui, store.ConnectionString,
         openPrs: actions is null ? null : actions.OpenPullRequestsAsync, remote: Remote(remote));
@@ -128,7 +130,7 @@ public sealed class ConciergeTools(
     /// caller (the companion offers a subset of them by name).
     /// </summary>
     public static JsonArray Definitions(bool withActions) => withActions
-        ? [.. ConciergeReadTools.Append(Tools()).Select(t => t!.DeepClone()), .. ConciergeActions.Tools().Select(t => t!.DeepClone())]
+        ? [.. ConciergeReadTools.Append(Tools()).Select(t => t!.DeepClone()), .. ConciergeActions.Tools().Select(t => t!.DeepClone()), .. ConciergeHostTasks.Tools()]
         : ConciergeReadTools.Append(Tools());
 
     /// <summary>
@@ -173,6 +175,9 @@ public sealed class ConciergeTools(
                 "team_repo_add" => await RepoAddAsync(await TeamAsync(Required(args, "team"), ct), args, ct),
                 "team_repo_remove" => await UiText("teams.removeRepo", await TeamAsync(Required(args, "team"), ct),
                     new JsonObject { ["name"] = Required(args, "name") }, "removed: members no longer get it (its folder on this computer is kept)", ct),
+                ConciergeHostTasks.ListTool => await HostTaskListAsync(args, ct),
+                ConciergeHostTasks.RunTool => await HostTaskRunAsync(args, ct),
+                ConciergeHostTasks.StatusTool => await HostTaskStatusAsync(args, ct),
                 _ when ConciergeReadTools.Handles(name) => await _read.CallAsync(name, args, ct),
                 _ => (actions is null ? null : await actions.TryCallAsync(name, args, ct)) ?? throw new ArgumentException($"unknown tool: {name}"),
             };
@@ -182,6 +187,30 @@ public sealed class ConciergeTools(
         {
             return (e is RpcException r ? $"refused ({r.Code}): {r.Message}" : e is BusRefusal b ? $"refused ({b.Code}): {b.Message}" : e.Message, true);
         }
+    }
+
+    private ConciergeHostTasks HostTasks() =>
+        actions?.HostTasks ?? throw new ArgumentException("host tasks are not available on this computer (no team repositories yet)");
+
+    private async Task<string> HostTaskListAsync(JsonObject args, CancellationToken ct)
+    {
+        var tasks = HostTasks();
+        var team = await TeamAsync(Required(args, "team"), ct);
+        return await tasks.ListAsync(team.Id, team.Name, ct);
+    }
+
+    private async Task<string> HostTaskRunAsync(JsonObject args, CancellationToken ct)
+    {
+        var tasks = HostTasks();
+        var team = await TeamAsync(Required(args, "team"), ct);
+        return await tasks.RunAsync(team.Id, team.Name, args, _turn, ct);
+    }
+
+    private async Task<string> HostTaskStatusAsync(JsonObject args, CancellationToken ct)
+    {
+        var tasks = HostTasks();
+        var teams = await bus.TeamsAsync(ct);
+        return tasks.Status(args, name => teams.FirstOrDefault(t => string.Equals(t.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))?.Id);
     }
 
     private async Task<string> UiText(string method, TeamSummary team, JsonObject p, string done, CancellationToken ct)
