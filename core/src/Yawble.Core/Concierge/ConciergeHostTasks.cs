@@ -56,7 +56,7 @@ public sealed class ConciergeHostTasks(HostTaskRpc rpc)
         var store = Service.Store;
         var tasks = store.Tasks(teamId);
         if (tasks.Count == 0)
-            return $"{team} has no host tasks. The person defines them in the team's Tasks tab; offer to have the team write a script for it and the person add it as a task.";
+            return $"{team} has no host tasks. The person defines them in Settings > Integrations, Host tasks; offer to have the team write a script for it and the person add it as a task.";
         var sb = new StringBuilder($"Host tasks of {team} (the person's programs, run on this computer on the base branch of their checkout; each run asks the person unless they chose Always):\n");
         foreach (var t in tasks)
         {
@@ -88,7 +88,7 @@ public sealed class ConciergeHostTasks(HostTaskRpc rpc)
     {
         if (args.Select(kv => kv.Key).FirstOrDefault(k => k is not ("team" or "task" or "reason")) is { } extra)
             throw new ArgumentException(extra == "args"
-                ? $"{RunTool} takes no arguments for the program: no host task declares any (the person defined its command line in the Tasks tab)"
+                ? $"{RunTool} takes no arguments for the program: no host task declares any (the person defined its command line in Settings > Integrations, Host tasks)"
                 : $"{RunTool} takes only 'team', 'task' and 'reason', not '{extra}': the person defined the program, its arguments and its environment");
         var name = Str(args, "task") ?? throw new ArgumentException($"'task' is required (see {ListTool})");
         var reason = Str(args, "reason") ?? throw new ArgumentException("'reason' is required: one line, shown to the person");
