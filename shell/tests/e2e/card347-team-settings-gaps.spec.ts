@@ -277,17 +277,19 @@ test(`desktop 1280x800: Settings tab row and Modal Close as on main ${BASE_COMMI
     for (const id of ['open-manage', 'open-triggers']) {
       await openFromTeam(page, id);
       await shot(page, `desktop-1280-${id}-${which}.png`);
-      out[id] = await page.evaluate(() => {
-        const box = (e: Element | null) => { if (!e) return null; const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map((n) => Math.round(n * 10) / 10).join(','); };
+      // The Team settings dialog's height follows its General tab's content (B085 added the "Idle workflows" card:
+      // 316 -> 469 px), so for open-manage the dialog box is left, top and width only. Everything else is unchanged.
+      out[id] = await page.evaluate((anyHeight) => {
+        const box = (e: Element | null, withHeight = true) => { if (!e) return null; const r = e.getBoundingClientRect(); return (withHeight ? [r.left, r.top, r.width, r.height] : [r.left, r.top, r.width]).map((n) => Math.round(n * 10) / 10).join(','); };
         const st = (e: Element | null, keys: string[]) => { if (!e) return null; const s = getComputedStyle(e); return keys.map((k) => `${k}=${s.getPropertyValue(k)}`).join(';'); };
         const m = [...document.querySelectorAll('[role=dialog]')].pop()!, c = m.querySelector('[data-test=modal-close]');
         const row = m.querySelector('[data-test=manage-tabs], nav.tabs');
-        return { sheet: m.classList.contains('sheet'), dialog: box(m), title: box(m.querySelector('h2')), close: box(c),
+        return { sheet: m.classList.contains('sheet'), dialog: box(m, !anyHeight), title: box(m.querySelector('h2')), close: box(c),
           closeStyle: st(c, ['width', 'height', 'font-size', 'border-top-color', 'border-top-width', 'background-color', 'color', 'padding-top', 'padding-left']),
           row: box(row), rowStyle: st(row, ['overflow-x', 'flex-wrap', 'flex-direction', 'border-bottom-width']),
           tabs: row ? [...row.querySelectorAll('button')].map((b) => `${b.textContent!.trim()}@${box(b)} ${st(b, ['white-space', 'flex-shrink', 'font-weight', 'color', 'border-bottom-color'])}`) : null,
           back: !!m.querySelector('[data-test=manage-back]'), chevrons: m.querySelectorAll('.go-icon').length };
-      });
+      }, id === 'open-manage');
       await page.locator('[data-test=modal-close]').last().click();
       await expect(page.locator('[role=dialog]')).toHaveCount(0);
     }
