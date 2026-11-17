@@ -64,7 +64,7 @@ public class CodeEventsTests
         });
         Assert.Equal([first, second], events.Select(e => e.Sha));
         Assert.Equal(["add a, touch readme", "rename a, drop readme"], events.Select(e => e.Message));
-        Assert.Equal("M README.md, A a.txt", Files(events[0]));
+        Assert.Equal("A README.md, A a.txt", Files(events[0])); // the team repository starts empty: the first commit adds README.md
         Assert.Equal("D README.md, R a.txt->b.txt", Files(events[1]));
 
         // A fetch-back with nothing new records nothing; the next commit is one more event, never a repeat.
