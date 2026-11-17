@@ -1,8 +1,8 @@
-// Card 328: the team Settings dialog's tab row on a phone, in a real browser (headless Chrome) against the FAKE core of
-// phone-remote.spec.ts (remote.html, canned answers). At 390x844 (an iPhone) the eight tabs stay on one line and the row
-// scrolls sideways: every manage-tab-* button is one line tall, no two tabs overlap, the last one (Delete) is reached by
-// scrolling and its pane shows when tapped. The sheet's Close keeps its 44 px tap target, without a button box.
-// At 1280x800 the row does not scroll and every tab is one line, as before.
+// Card 346 (was card 328): the team Settings dialog on a phone, in a real browser (headless Chrome) against the FAKE core
+// of phone-remote.spec.ts (remote.html, canned answers). At 390x844 (an iPhone) it is laid out like the app's Settings on
+// a phone: it opens at the list of its eight sections (full-width rows, one line each, at least 44 px tall, a › chevron);
+// a tap opens that section alone under a Back + title head; Back returns to the list. Nothing is wider than the screen.
+// The sheet's Close keeps its 44 px tap target (card 328). At 1280x800 the tab row is as before.
 //
 //   npx playwright test team-settings-phone      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 import { expect, test, type Browser, type Page } from '@playwright/test';
@@ -11,18 +11,26 @@ import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 
-// The Settings dialog's own calls (not in the shared fake): no environment variables, integrations, MCP servers or APIs.
-answers['teams.env'] = () => ({});
+// The Settings dialog's own calls (not in the shared fake): two environment variables (one long), no integrations.
+answers['teams.env'] = () => ({ API_BASE_URL: 'http://localhost:5173/api/v1/some/long/path/that/would/overflow', TEST_USER: 'tester@example.com' });
 answers['integrations.list'] = () => ({ integrations: [] });
 answers['integrations.mcpList'] = () => [];
 answers['integrations.apiList'] = () => [];
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
-test.setTimeout(60_000);
+test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), process.env.C328_SHOTS || 'C328-screens');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), process.env.C346_SHOTS || 'C346-screens');
 
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
+
+const IDS = ['general', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
+const LABELS = ['General', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
+// Each section's own pane (a data-test inside it that only it has).
+const PANES: Record<string, string> = {
+  general: '[data-test=team-general]', state: '[data-test=team-approvals]', repos: '[data-test=repo-main]', env: '[data-test=env-add]',
+  network: '[data-test=team-network]', integrations: '[data-test=team-integrations]', reset: '[data-test=team-reset]', delete: '[data-test=team-delete-pane]',
+};
 
 async function openSettings(browser: Browser, w: number, h: number) {
   const s = fakeRemote(builtDir);
@@ -48,82 +56,112 @@ async function openSettings(browser: Browser, w: number, h: number) {
   return { page, ctx, errors };
 }
 
-/** Each tab's box, its text's line height, and the row's scroll extent. */
-const tabInfo = (page: Page) => page.evaluate(() => {
-  const row = document.querySelector<HTMLElement>('[data-test=manage-tabs]')!;
-  const tabs = [...row.querySelectorAll<HTMLElement>('button[data-test^=manage-tab-]')].map((b) => {
-    const r = b.getBoundingClientRect(), cs = getComputedStyle(b);
-    const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
-    // The text's own rectangles: one per line it is laid out on.
+/** Each row's box and how many lines its text takes. */
+const rowInfo = (page: Page) => page.evaluate(() => {
+  const nav = document.querySelector<HTMLElement>('[data-test=manage-tabs]')!;
+  return [...nav.querySelectorAll<HTMLElement>('button[data-test^=manage-tab-]')].map((b) => {
+    const r = b.getBoundingClientRect();
     const range = document.createRange();
-    range.selectNodeContents(b);
+    range.selectNodeContents(b.firstChild!);
     const lines = new Set([...range.getClientRects()].map((q) => Math.round(q.top))).size;
-    // The label's own height (the button is 44 px tall on a phone, a tap target, whatever its text).
-    const text = range.getBoundingClientRect().height;
-    return { id: b.dataset.test!, left: r.left, right: r.right, top: r.top, bottom: r.bottom, h: r.height, w: r.width, text, line, lines, fits: b.scrollWidth <= b.clientWidth + 1 };
+    return { id: b.dataset.test!, text: (b.firstChild?.textContent ?? '').trim(), left: r.left, right: r.right, top: r.top, h: r.height, lines, chevron: !!b.querySelector('.go-icon') };
   });
-  const rr = row.getBoundingClientRect();
-  return { tabs, row: { left: rr.left, right: rr.right, scrollW: row.scrollWidth, clientW: row.clientWidth, scrollLeft: row.scrollLeft }, docW: document.documentElement.scrollWidth, vw: innerWidth };
 });
 
-function checkTabs(m: Awaited<ReturnType<typeof tabInfo>>) {
-  expect(m.tabs.map((t) => t.id)).toEqual(['general', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'].map((t) => `manage-tab-${t}`));
-  for (const t of m.tabs) {
-    expect.soft(t.lines, `${t.id}: one line of text`).toBe(1);
-    expect.soft(t.text, `${t.id}: its label is one line tall (${t.text} px, line ${t.line} px)`).toBeLessThan(t.line * 1.5);
-    expect.soft(t.h, `${t.id}: the button is no taller than a 44 px tap target`).toBeLessThanOrEqual(44.5);
-    expect.soft(t.fits, `${t.id}: its label fits its box`).toBe(true);
+/** Elements wider than the screen, or reaching past its right edge (scrollers' own content excluded: none expected). */
+const overflow = (page: Page) => page.evaluate(() => {
+  const vw = innerWidth, bad: string[] = [];
+  const sheet = document.querySelector('[role=dialog]')!;
+  for (const e of sheet.querySelectorAll<HTMLElement>('*')) {
+    const r = e.getBoundingClientRect();
+    if (r.width === 0) continue;
+    if (r.width > vw + 0.5 || r.right > vw + 0.5 || r.left < -0.5) bad.push(`${e.tagName.toLowerCase()}.${e.className}[${e.dataset.test ?? ''}] ${Math.round(r.left)}..${Math.round(r.right)}`);
   }
-  for (let i = 0; i < m.tabs.length; i++)
-    for (let j = i + 1; j < m.tabs.length; j++) {
-      const a = m.tabs[i]!, b = m.tabs[j]!;
-      const ow = Math.min(a.right, b.right) - Math.max(a.left, b.left), oh = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-      expect.soft(ow > 0.5 && oh > 0.5, `${a.id} and ${b.id} overlap`).toBe(false);
-    }
-  expect.soft(m.docW, 'the page does not scroll sideways').toBeLessThanOrEqual(m.vw);
-}
+  return { bad, docW: document.documentElement.scrollWidth, vw };
+});
 
-test('phone 390x844: one line of tabs that scrolls sideways; Delete is reached and opens its pane', async ({ browser }) => {
+test('phone 390x844: a list of sections; a tap opens one under Back; Back returns to the list', async ({ browser }) => {
   const { page, ctx, errors } = await openSettings(browser, 390, 844);
-  await page.screenshot({ path: path.join(SHOTS, 'team-settings-390x844.png') });
-  const m = await tabInfo(page);
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify(m));
-  checkTabs(m);
-  expect(m.row.scrollW, 'the eight tabs are wider than the screen: the row scrolls').toBeGreaterThan(m.row.clientW);
+  const root = page.locator('.manage');
+  await expect(root).toHaveAttribute('data-phone-screen', 'list');
 
-  // The sheet's Close: still a 44 px tap target.
-  const close = await page.locator('[data-test=modal-close]').boundingBox();
-  expect(close && `${Math.round(close.width)}x${Math.round(close.height)}`).toBe('44x44');
+  // The sheet's Close: a 44 px tap target (card 328).
+  const close = await page.locator('[role=dialog] header button').last().boundingBox();
+  expect(close && Math.round(close.width)).toBe(44);
+  expect(close && Math.round(close.height)).toBe(44);
 
-  // Scroll to Delete, tap it: its pane shows, and it is fully inside the row.
-  const del = page.locator('[data-test=manage-tab-delete]');
-  await del.scrollIntoViewIfNeeded();
-  await del.tap();
-  await expect(page.locator('[data-test=team-delete-pane]')).toBeVisible();
-  await expect(del).toHaveClass(/\bon\b/);
-  const after = await tabInfo(page);
-  const d = after.tabs.find((t) => t.id === 'manage-tab-delete')!;
-  expect(d.left, 'Delete inside the row (left)').toBeGreaterThanOrEqual(after.row.left - 1);
-  expect(d.right, 'Delete inside the row (right)').toBeLessThanOrEqual(after.row.right + 1);
-  await page.screenshot({ path: path.join(SHOTS, 'team-settings-390x844-delete.png') });
+  // The list: eight full-width rows in order, one line each, >= 44 px, a chevron; no pane under it.
+  const rows = await rowInfo(page);
+  expect(rows.map((r) => r.id)).toEqual(IDS.map((t) => `manage-tab-${t}`));
+  expect(rows.map((r) => r.text)).toEqual(LABELS);
+  for (const r of rows) {
+    expect.soft(r.lines, `${r.id}: one line`).toBe(1);
+    expect.soft(r.h, `${r.id}: at least 44 px tall`).toBeGreaterThanOrEqual(44);
+    expect.soft(r.right - r.left, `${r.id}: full width`).toBeGreaterThan(330);
+    expect.soft(r.chevron, `${r.id}: a chevron`).toBe(true);
+  }
+  for (let i = 1; i < rows.length; i++) expect.soft(rows[i]!.top, `${rows[i]!.id} under ${rows[i - 1]!.id}`).toBeGreaterThanOrEqual(rows[i - 1]!.top + rows[i - 1]!.h - 0.5);
+  await expect(page.locator('[data-test=team-general]')).toHaveCount(0);
+  expect((await overflow(page)).bad, 'list: nothing wider than the screen').toEqual([]);
+  await page.screenshot({ path: path.join(SHOTS, 'team-settings-390x844-list.png') });
 
-  // Choosing General (off screen to the left now) scrolls it back into the row.
-  await page.evaluate(() => { const g = document.querySelector<HTMLElement>('[data-test=manage-tab-general]')!; g.click(); });
-  await expect(page.locator('[data-test=team-general]')).toBeVisible();
-  await expect.poll(async () => (await tabInfo(page)).row.scrollLeft, 'the row scrolled back to General').toBe(0);
+  // Each section: tap, its pane alone under Back + title, nothing too wide, Back to the list.
+  for (let i = 0; i < IDS.length; i++) {
+    const id = IDS[i]!;
+    await page.locator(`[data-test=manage-tab-${id}]`).tap();
+    await expect(root).toHaveAttribute('data-phone-screen', 'section');
+    await expect(page.locator('[data-test=manage-tabs]')).toHaveCount(0);
+    await expect(page.locator('[data-test=manage-section-title]')).toHaveText(LABELS[i]!);
+    await expect(page.locator(PANES[id]!).first()).toBeVisible();
+    const back = await page.locator('[data-test=manage-back]').boundingBox();
+    expect.soft(back && back.height, `${id}: Back is a 44 px tap target`).toBeGreaterThanOrEqual(44);
+    await page.waitForTimeout(150);
+    const o = await overflow(page);
+    expect.soft(o.bad, `${id}: nothing wider than the screen`).toEqual([]);
+    if (['general', 'env', 'delete'].includes(id)) await page.screenshot({ path: path.join(SHOTS, `team-settings-390x844-${id}.png`) });
+    await page.locator('[data-test=manage-back]').tap();
+    await expect(root).toHaveAttribute('data-phone-screen', 'list');
+    await expect(page.locator('[data-test=manage-tabs]')).toBeVisible();
+  }
+
+  // General's "Repositories tab" link opens that section.
+  await page.locator('[data-test=manage-tab-general]').tap();
+  await page.locator('[data-test=team-general] a').tap();
+  await expect(page.locator('[data-test=manage-section-title]')).toHaveText('Repositories');
+  await expect(page.locator('[data-test=repo-main]')).toBeVisible();
+
+  // A long section: the head stays at the top of the sheet as it scrolls.
+  const body = page.locator('[role=dialog] .body');
+  const headTop = async () => (await page.locator('.section-head').boundingBox())!.y;
+  const before = await headTop();
+  await body.evaluate((b) => { b.scrollTop = b.scrollHeight; });
+  await page.waitForTimeout(100);
+  const scrolled = await body.evaluate((b) => b.scrollTop);
+  if (scrolled > 20) expect(Math.abs((await headTop()) - before), 'the head stays put as the section scrolls').toBeLessThanOrEqual(13);
+
   expect(errors).toEqual([]);
   await ctx.close();
 });
 
-test('desktop 1280x800: the tab row is as before (no sideways scroll, one line each)', async ({ browser }) => {
+test('desktop 1280x800: the tab row is as before (one row, one line each, no list)', async ({ browser }) => {
   const { page, ctx, errors } = await openSettings(browser, 1280, 800);
   await page.screenshot({ path: path.join(SHOTS, 'team-settings-1280x800.png') });
-  const m = await tabInfo(page);
-  checkTabs(m);
-  expect(m.row.scrollW, 'the row does not scroll').toBeLessThanOrEqual(m.row.clientW);
-  const ov = await page.locator('[data-test=manage-tabs]').evaluate((e) => getComputedStyle(e).overflowX);
-  expect(ov, 'desktop row overflow unchanged').toBe('visible');
+  await expect(page.locator('.manage')).not.toHaveAttribute('data-phone-screen', /.*/);
+  await expect(page.locator('[data-test=manage-back]')).toHaveCount(0);
+  await expect(page.locator('[data-test=team-general]')).toBeVisible();
+  const rows = await rowInfo(page);
+  expect(rows.map((r) => r.id)).toEqual(IDS.map((t) => `manage-tab-${t}`));
+  for (const r of rows) {
+    expect.soft(r.lines, `${r.id}: one line`).toBe(1);
+    expect.soft(r.chevron, `${r.id}: no chevron`).toBe(false);
+    expect.soft(Math.round(r.top), `${r.id}: on the one row`).toBe(Math.round(rows[0]!.top));
+  }
+  const nav = await page.locator('[data-test=manage-tabs]').evaluate((e) => { const cs = getComputedStyle(e); return { dir: cs.flexDirection, ov: cs.overflowX }; });
+  expect(nav).toEqual({ dir: 'row', ov: 'visible' });
+  await expect(page.locator('[data-test=manage-tab-general]')).toHaveClass(/\bon\b/);
+  await page.locator('[data-test=manage-tab-delete]').click();
+  await expect(page.locator('[data-test=team-delete-pane]')).toBeVisible();
+  await expect(page.locator('[data-test=manage-tabs]')).toBeVisible();
   expect(errors).toEqual([]);
   await ctx.close();
 });
