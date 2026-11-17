@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, IntegrationInfo, McpServerInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
@@ -19,6 +19,19 @@ const api = resolveApi(props.api);
 
 type Tab = 'general' | 'state' | 'repos' | 'env' | 'network' | 'integrations' | 'reset' | 'delete';
 const tab = ref<Tab>('general');
+// On a phone the tab row is one line that scrolls sideways (card 328): the chosen tab is scrolled fully into the row.
+// Only the row scrolls (not the sheet's body, as scrollIntoView would); on a desktop the row never overflows, so nothing moves.
+const tabsEl = ref<HTMLElement | null>(null);
+watch(tab, async () => {
+  await nextTick();
+  const row = tabsEl.value;
+  const on = row?.querySelector<HTMLElement>('button.on');
+  if (!row || !on || row.scrollWidth <= row.clientWidth) return;
+  const r = row.getBoundingClientRect(), b = on.getBoundingClientRect();
+  const left = b.left - r.left + row.scrollLeft, right = left + b.width;
+  if (left < row.scrollLeft) row.scrollLeft = left;
+  else if (right > row.scrollLeft + row.clientWidth) row.scrollLeft = right - row.clientWidth;
+});
 const error = ref<string | null>(null);
 const note = ref<string | null>(null);
 // One action at a time (every action button is held while one runs); the clicked one shows the spinner: work.is('act', method).
@@ -148,7 +161,7 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
 
 <template>
   <Modal :title="`Settings · ${team.name}`" wide @close="emit('close')">
-    <nav class="tabs">
+    <nav ref="tabsEl" class="tabs" data-test="manage-tabs">
       <button :class="{ on: tab === 'general' }" data-test="manage-tab-general" @click="tab = 'general'">General</button>
       <button :class="{ on: tab === 'state' }" data-test="manage-tab-state" @click="tab = 'state'">Pause and archive</button>
       <button :class="{ on: tab === 'repos' }" data-test="manage-tab-repos" @click="tab = 'repos'">Repositories</button>
@@ -326,7 +339,7 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
       <p v-if="resetDone" class="ok" data-test="reset-done">{{ resetDone }}</p>
     </section>
 
-    <section v-else class="pane">
+    <section v-else class="pane" data-test="team-delete-pane">
       <p>
         Deleting <b>{{ team.name }}</b> removes its members, their settings, schedules and Board cards, and its folder in the app's
         data: the members' working copies and, if the app made it, the team's repository with any work not pushed anywhere.
@@ -383,4 +396,11 @@ label.check input { width: auto; padding: 0; }
 .warn { color: var(--warn); margin: 0; }
 .ok { color: var(--ok); font-size: 12.5px; }
 .error { color: var(--bad); }
+/* A phone (card 328): the eight tabs stay on one line and the row scrolls sideways; no label wraps or shrinks into the
+   next one. Desktop is unchanged. */
+@media (max-width: 759.98px) {
+  .tabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: none; white-space: nowrap; }
+}
 </style>

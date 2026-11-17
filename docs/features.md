@@ -26,6 +26,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - **Reset** clears, per member, waiting instructions, the home folder (the CLI's own history), the clone, and the
     team's documents, as you choose.
   - **Environment** holds team environment variables; the next runs get them.
+  - On a phone the tabs stay on one line and the row scrolls sideways; the chosen tab is scrolled into view.
 - **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**. Every open
   workflow is listed however old, with the newest completed and closed ones; the cloud dashboard, the Concierge and the
   companion list them the same way. Ask the Concierge to close the open ones whose work is done: it checks each one
