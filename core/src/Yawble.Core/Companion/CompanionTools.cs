@@ -14,7 +14,7 @@ public static class CompanionTools
     public static readonly IReadOnlyList<string> Read =
     [
         "team_list", "team_status", "team_activity", "team_workflows", "documents_list", "documents_read", "team_repos",
-        "backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "integrations_status", "usage", "doctor",
+        "backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "integrations_status", "usage", "doctor",
         "backups_list", "request_status", "host_task_list", "host_task_status",
     ];
 
@@ -26,13 +26,13 @@ public static class CompanionTools
 
     public static readonly IReadOnlyList<string> Destructive =
     [
-        "git_branches_delete", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
+        "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
         "team_archive", "team_delete", "team_env_set", "doctor_fix", "team_create", "team_repo_add", "team_repo_remove", "workflow_close",
         "backup_now", "git_merge_team", "backup_restore", "host_task_run",
     ];
 
     /// <summary>The destructive tools whose own first call shows the exact list and issues a token (ConciergeActions' confirm flow).</summary>
-    public static readonly IReadOnlyList<string> SelfConfirming = ["git_branches_delete", "git_prune", "git_pr_merge", "team_archive", "team_delete"];
+    public static readonly IReadOnlyList<string> SelfConfirming = ["git_branches_delete", "git_branch_realign", "git_prune", "git_pr_merge", "team_archive", "team_delete"];
 
     /// <summary>The tools the companion serves itself (not the Concierge's).</summary>
     public static readonly IReadOnlyList<string> Own = ["backups_list", "request_status", "git_merge_team", "backup_restore"];
