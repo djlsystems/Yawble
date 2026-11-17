@@ -302,7 +302,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
           <button class="primary" v-change data-test="backlog-add" @click="adding = !adding">+ Add item</button>
         </template>
       </header>
-      <p v-if="!phone" class="muted intro">Work you want done, most important first. Mark an item ready once you have read it, then dispatch it to a team: its Manager cuts it into cards on the Board.</p>
+      <p v-if="!phone && tab === 'live'" class="muted intro">Mark an item ready once you have read it, then dispatch it to a team.</p>
       <p v-if="error" class="error" data-test="backlog-error">{{ error }}</p>
 
       <div v-if="adding" class="itemform" data-test="backlog-new">
