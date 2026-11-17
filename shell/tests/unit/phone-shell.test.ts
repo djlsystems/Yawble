@@ -525,7 +525,8 @@ describe('B037 e2e faults F1 to F4', () => {
 
   it('F1: the box holds them all in at most 40% of a phone\'s height and scrolls; no banner has its own half-screen cap', () => {
     const app = src('App.vue');
-    expect(app).toContain('.banners { display: block; flex: none; max-height: 50vh; overflow-y: auto;');
+    // 50dvh after its 50vh fallback (card 334): half of what the browser really shows.
+    expect(app).toContain('.banners { display: block; flex: none; max-height: 50vh; max-height: 50dvh; overflow-y: auto;');
     expect(app).toContain('.phone .banners { max-height: 40dvh; }');
     expect(app).toMatch(/\.content \{ flex: 1; min-height: 0;/); // the view takes the rest
     for (const file of ['components/NetworkAsks.vue', 'components/ToolAsks.vue']) {
@@ -571,9 +572,10 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(css).toContain('.side.drawer { overflow-y: auto;');
     expect(css).toContain('.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot, .drawer .lists { flex: none; }');
     expect(css).toContain('.drawer .lists { overflow: visible; }');
-    // The desktop sidebar keeps its rules: the lists flex, the sidebar itself does not scroll.
-    expect(css).toContain('.lists { flex: 1; overflow: auto; min-height: 0; }');
-    expect(css).toMatch(/\.side \{ [^}]*min-height: 0; padding: 8px 8px 6px; \}/);
+    // The desktop sidebar keeps its rules: the lists flex and scroll. Card 334: only a window shorter than its fixed rows
+    // (a phone in landscape at a desktop width) scrolls the sidebar itself, the lists then kept at least 96 px.
+    expect(css).toContain('.lists { flex: 1; overflow: auto; min-height: min(96px, 100%); }');
+    expect(css).toMatch(/\.side \{ [^}]*min-height: 0; overflow-y: auto; padding: 8px 8px 6px; \}/);
   });
 
   it('F3 and F4: on a phone Attach is a 44 x 44 square and the text box is at least 44 px tall; the desktop rules are unchanged', () => {

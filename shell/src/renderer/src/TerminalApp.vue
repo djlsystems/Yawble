@@ -140,7 +140,7 @@ defineExpose({ size: () => view.value?.size() ?? null });
 </template>
 
 <style scoped>
-.term-window { display: flex; flex-direction: column; height: 100vh; background: var(--term-bg); color: var(--term-fg); }
+.term-window { display: flex; flex-direction: column; height: 100vh; height: 100dvh; background: var(--term-bg); color: var(--term-fg); }
 .term-window.embedded { height: 100%; }
 .banner { padding: 6px 12px; background: var(--term-head); border-bottom: 1px solid var(--term-line); }
 .title { font-size: 13px; color: var(--term-title); }
