@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { stopConfirmStubs, stubConfirm } from './confirm-stub';
 import McpAddDialog from '../../src/renderer/src/components/McpAddDialog.vue';
 import McpServersPanel from '../../src/renderer/src/components/McpServersPanel.vue';
 import type { McpServerInfo, YawbleApi } from '../../src/shared/api';
@@ -23,8 +24,7 @@ function fakeApi(answers: Record<string, (params: any) => unknown>, remote = fal
   };
   return { api, calls };
 }
-const realConfirm = window.confirm;
-afterEach(() => { window.confirm = realConfirm; });
+afterEach(() => { stopConfirmStubs(); });
 
 const cand = (o: Record<string, unknown> = {}) => ({
   key: 'k1', name: 'files', transport: 'stdio', command: 'npx', args: ['-y', 'files-mcp'], url: null, env: [{ name: 'TOKEN', secret: true, shown: 'ab••••yz' }],
@@ -243,8 +243,7 @@ describe('McpServersPanel remote cards', () => {
   });
 
   it('removeAsksAboutAnUnusedConnection', async () => {
-    const ask = vi.fn(() => true);
-    window.confirm = ask as unknown as typeof window.confirm;
+    const ask = stubConfirm(() => true);
     const { api, calls } = fakeApi({
       'integrations.mcpList': () => [remoteServer()],
       'integrations.connections': () => [{ id: 5, name: 'linear sign-in', kind: 'oauth', fields: [], status: 'works', statusReason: null, testedAt: null, usedBy: ['MCP: linear'] }],
@@ -259,7 +258,7 @@ describe('McpServersPanel remote cards', () => {
   });
 
   it('removeSendsNoRemoveConnectionKeyUnlessTrueAndNeverRemotely', async () => {
-    window.confirm = vi.fn((m: string) => m.startsWith('Remove ')) as unknown as typeof window.confirm;
+    stubConfirm((m: string) => m.startsWith('Remove '));
     const mk = (remote: boolean) => fakeApi({
       'integrations.mcpList': () => [remoteServer()],
       'integrations.connections': () => [{ id: 5, name: 'linear sign-in', kind: 'oauth', fields: [], status: 'works', statusReason: null, testedAt: null, usedBy: ['MCP: linear'] }],

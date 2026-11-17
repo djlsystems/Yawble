@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 // B023 (card 113): "Environment from a Connection" in the host task editor, and the in-use note in Connections.
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { stopConfirmStubs, stubConfirm } from './confirm-stub';
+afterEach(() => { stopConfirmStubs(); });
 import ConnectionsPanel from '../../src/renderer/src/components/ConnectionsPanel.vue';
 import TasksPanel from '../../src/renderer/src/components/TasksPanel.vue';
 import type { Connection, HostTaskInfo, YawbleApi } from '../../src/shared/api';
@@ -148,8 +150,7 @@ describe('host task editor: Environment from a Connection', () => {
 
 describe('Connections: in use by a host task', () => {
   it('says which host tasks use a Connection, and removing it warns they will not start', async () => {
-    const confirm = vi.fn((_: string) => false);
-    window.confirm = confirm as unknown as typeof window.confirm;
+    const confirm = stubConfirm(() => false);
     const { api, calls } = fakeApi({ 'integrations.connections': () => [release, twoSecrets] });
     const w = mount(ConnectionsPanel, { props: { api, teams } });
     await flushPromises();

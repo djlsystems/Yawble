@@ -139,6 +139,24 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
     baseAheadOfOrigin: null, baseBehindOrigin: null, teamBranch: 'team/payments', teamSha: 'def5678', teamAheadOfBase: 2, teamBehindBase: 0, merge: 'fast-forward',
     conflictFiles: [], members: [], oldBranches: [], blockingBranches: [],
   }),
+  // B067 (card 362): the Git dialog's Tidy… against the contract DeveloperMarlo builds in core (git.tidyPlan,
+  // git.branchRealign; delete through git.deleteBranches, plan then token). DeveloperAda runs, so realigning her
+  // branch is refused; TesterBen's goes through.
+  'git.tidyPlan': () => tidyPlan(),
+  'git.deleteBranches': (p) => {
+    const names: string[] = p?.branches ?? [];
+    if (!p?.confirm) return { plan: names.map((n) => `Delete ${n}${p?.remote ? ' here and on origin' : ' here'} (merged into main).`).join('\n'), token: `tok:${names.join(',')}`, empty: names.length === 0 };
+    for (const n of names) tidy.deleted.add(n);
+    return { result: `Deleted ${names.join(', ')}.` };
+  },
+  'git.branchRealign': (p) => {
+    if (p?.member === 'DeveloperAda') throw Object.assign(new Error('DeveloperAda is running: realign it when the run ends.'), { code: 'running' });
+    // As the core (TeamRepos.Tidy.cs): the yes is bound to the commits shown; a branch that moved since is refused.
+    if ((p?.expectOld != null && p.expectOld !== TIDY_TEAM_SHA) || (p?.expectNew != null && p.expectNew !== TIDY_CLONE_SHA))
+      throw Object.assign(new Error(`${p?.member}'s branch changed since it was shown (now: team 5bbb6ba450, clone e0f2a18c0f). Nothing changed; look at the new plan.`), { code: 'stale' });
+    tidy.realigned.add(p?.member);
+    return { oldSha: TIDY_TEAM_SHA, newSha: TIDY_CLONE_SHA };
+  },
   'updates.status': () => ({ state: 'idle', current: '0.0.0+dev.fake', available: null, auto: false }),
   'credentials.status': () => ({ mode: 'subscription', claude: { connected: true, addedAt: iso(1000), expiresAt: null, lastUsedAt: iso(5), renewSoon: false, problem: null } }),
   'triggers.list': () => [],
@@ -157,6 +175,36 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'tasks.list': () => [],
   'members.get': (p) => (agents[1] as any[]).map((a) => a.member).find((m) => m.id === p?.id) ?? (agents[1] as any)[0].member,
 };
+
+/** B067: what Tidy… deleted and realigned (resetTidy puts the plan back). */
+const tidy = { deleted: new Set<string>(), realigned: new Set<string>() };
+const TIDY_TEAM_SHA = '5bbb6ba450df8fe26f82';
+const TIDY_CLONE_SHA = 'e0f2a18c0ffee1234567';
+/** Shaped as the core's UiRpc.TidyPlanJson: repo, baseBranch, branches (commits on moved, own-work and origin-only rows;
+ * proof where the core gives one), and notes when the core could not read something. */
+function tidyPlan() {
+  const moved = (name: string, member: string) => (tidy.realigned.has(member)
+    ? { name, where: ['local', 'origin', `clone:${member}`], class: 'working', member, teamSha: TIDY_CLONE_SHA, cloneSha: TIDY_CLONE_SHA }
+    : { name, where: ['local', 'origin', `clone:${member}`], class: 'moved', member, teamSha: TIDY_TEAM_SHA, cloneSha: TIDY_CLONE_SHA,
+        commits: [{ sha: 'aa11bb22cc33dd44ee55', subject: 'Retry the upload three times' }],
+        proof: `the team's copy (5bbb6ba450) has 1 commit(s) ${member}'s clone (e0f2a18c0f) does not have and that are not merged into main: the clone was reset or rebased; nothing is lost by realigning it (git cherry main: - aa11bb22cc)` });
+  const main = [
+    { name: 'members/payments/developerada-and-a-very-long-suffix-that-must-wrap-on-a-phone', where: ['local', 'clone:DeveloperAda'], class: 'working', member: 'DeveloperAda' },
+    { name: 'members/payments/old-cleo', where: ['local', 'origin'], class: 'merged' },
+    { name: 'members/payments/kofi', where: ['local', 'origin'], class: 'contained', proof: 'git cherry main members/payments/kofi: - 1a2b3c4d Fix the refund rounding (an equivalent commit is in main: 9f8e7d6c)' },
+    moved('members/payments/testerben', 'TesterBen'),
+    moved('members/payments/developerada-moved', 'DeveloperAda'),
+    { name: 'feature/refund-limits', where: ['local'], class: 'own-work', commits: [{ sha: '77aa88bb99cc', subject: 'Refund limits per merchant (half done)' }] },
+  ];
+  const cloud = [
+    { name: 'members/payments/old-wren', where: ['origin'], class: 'merged' },
+    { name: 'feature/old-idea', where: ['origin'], class: 'origin-only', commits: [{ sha: '4444444444dddddddddd', subject: 'Try a new cache' }], proof: 'only on origin, nobody has it here; 1 commit(s) not in main: needs a look' },
+    { name: 'scratch/try-a-thing', where: ['clone:DeveloperAda'], class: 'scratch', member: 'DeveloperAda' },
+  ];
+  const keep = (b: { name: string }) => !tidy.deleted.has(b.name);
+  return { repos: [{ repo: 'payments', baseBranch: 'main', branches: main.filter(keep) },
+    { repo: 'payments-cloud', baseBranch: 'main', branches: cloud.filter(keep), notes: ["TesterBen's clone was not read: its .git is a file (a gitdir pointer)"] }] };
+}
 
 /** B054: with true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */
 let syncBehind = false;
@@ -182,6 +230,8 @@ export function createFakeCore() {
     setSync(behind: boolean) { syncBehind = behind; },
     /** B054: with false, no integration ask and no decision is pending. */
     setNeedsYou(on: boolean) { needsYou = on; },
+    /** B067: put the Tidy… plan back (nothing deleted or realigned). */
+    resetTidy() { tidy.deleted.clear(); tidy.realigned.clear(); },
     answer(text: string): string | null {
       const msg = JSON.parse(text) as { id: number; method: string; params: any };
       calls.push(msg.method);
@@ -190,7 +240,10 @@ export function createFakeCore() {
       const a = answers[msg.method];
       if (!a) { unknown.add(msg.method); return JSON.stringify({ id: msg.id, error: { code: 'method_not_found', message: `fake core: ${msg.method} is not faked` } }); }
       try { return JSON.stringify({ id: msg.id, result: a(msg.params, access) ?? null }); }
-      catch (e) { return JSON.stringify({ id: msg.id, error: { code: 'fake_error', message: String(e) } }); }
+      catch (e) {
+        const code = (e as { code?: string })?.code;
+        return JSON.stringify({ id: msg.id, error: code ? { code, message: (e as Error).message } : { code: 'fake_error', message: String(e) } });
+      }
     },
   };
 }

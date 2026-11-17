@@ -2,6 +2,7 @@
 import { vChange } from '../remoteAccess';
 import TeamStateChip from './TeamStateChip.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import TaskAskCard from './TaskAskCard.vue';
 import type { AgentCard as Card, Decision, IntegrationAsk, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -184,8 +185,8 @@ watch(grid, (el) => {
   if (el && typeof ResizeObserver !== 'undefined') { gridObserver = new ResizeObserver(measureGrid); gridObserver.observe(el); }
 });
 const stop = (c: Card) => busyFor(`member-${c.member.id}`, () => api.call('terminal.stop', { memberId: c.member.id }), 'stop')();
-const remove = (c: Card) => {
-  if (!window.confirm(`Remove ${c.member.name} from ${c.member.team}? Its queued instructions are dropped.`)) return;
+const remove = async (c: Card) => {
+  if (!(await confirmDialog({ message: `Remove ${c.member.name} from ${c.member.team}? Its queued instructions are dropped.`, okLabel: 'Remove', danger: true }))) return;
   return busyFor(`member-${c.member.id}`, () => api.call('members.remove', { memberId: c.member.id }), 'remove')();
 };
 // The members' panes by name, so a focus request (focusMemberTerminal: the Monitor, the palette, the remote view) can

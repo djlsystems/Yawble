@@ -128,7 +128,8 @@ public static class TaskProcess
 
         Directory.CreateDirectory(Path.GetDirectoryName(o.LogPath)!);
         var watch = Stopwatch.StartNew();
-        using var log = new FileStream(o.LogPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+        // Unbuffered: each line is in the file as it arrives, so the live tail (host_task_status) shows it while the run goes on.
+        using var log = new FileStream(o.LogPath, FileMode.Create, FileAccess.Write, FileShare.Read, bufferSize: 0);
         var gate = new object();
         long written = 0, bytes = 0;
         var truncated = false;
