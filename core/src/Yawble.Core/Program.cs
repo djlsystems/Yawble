@@ -263,6 +263,8 @@ bus.ToolAsks = toolAsks;
 link.IsIntegration = integrations.HasIntegration; // a remote viewer may detect or discover a CLI that is already added, not a new unknown one
 link.IsRemoteMcp = integrations.IsRemoteMcp;
 // Host tasks: the person's named programs, run on this computer on the base branch of their own checkout, under a hash-pinned approval.
+// The Concierge and the companion ask for them as an agent does (host_task_run), through conciergeHostTasks.
+Yawble.Core.Concierge.ConciergeHostTasks? conciergeHostTasks = null;
 if (bus.Repos is { } taskRepos)
 {
     HostTaskService? hostTasks = null;
@@ -273,6 +275,8 @@ if (bus.Repos is { } taskRepos)
         teamId => new Yawble.Core.Teams.TeamDocuments(taskRepos).Root(hostTasks!.Store.TeamName(teamId) ?? throw new InvalidOperationException("no such team")),
         async wake =>
         {
+            // A run the Concierge asked for ends as an Update in its chat (a companion client's: nowhere, it checks the status).
+            if (concierge.TryPostTaskUpdate(wake, hostTasks!.Store.TeamName(wake.TeamId) ?? $"team {wake.TeamId}")) return;
             var slash = wake.Member.IndexOf('/');
             await bus.PersonTellAsync(wake.Member[..slash], wake.Member[(slash + 1)..], wake.Text, wake.CausationSeq);
         },
@@ -281,6 +285,7 @@ if (bus.Repos is { } taskRepos)
     if (interrupted > 0) Console.Error.WriteLine($"tasks: {interrupted} run(s) were cut off when the app last closed; marked interrupted");
     integrations.HostTasks = new HostTaskRpc(hostTasks,
         teamId => new[] { "main" }.Concat(taskRepos.ExtrasOf(teamId).Select(e => e.Name)).ToList());
+    conciergeHostTasks = new Yawble.Core.Concierge.ConciergeHostTasks(integrations.HostTasks);
 }
 var board = new Yawble.Core.Board.BoardService(new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), bus,
     line => Console.Error.WriteLine($"board: {line}"));
@@ -299,6 +304,7 @@ boardForConcierge = board.DispatchAsync;
 if (bus.Repos is { } actionRepos)
     concierge.Actions = Yawble.Core.Concierge.ConciergeActions.ForApp(bus, actionRepos, conciergeRoute, conciergeRoute,
         new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"));
+if (concierge.Actions is { } conciergeActions) conciergeActions.HostTasks = conciergeHostTasks;
 // The doctor and log retention. Backups come from the BackupService lister.
 // Connections: read through ConnectionService.Index (no secret). Orphan secrets are offered only for keys this data folder's
 // issued-keys ledger recorded (the OS store is shared by every data folder), and only from a store that is a credential index.
