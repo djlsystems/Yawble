@@ -344,9 +344,11 @@ describe('the Monitor view', () => {
     } as unknown as YawbleApi;
     const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
     await flushPromises();
-    // The cog sits in the camera controls, right after the Auto fit | Fit | Pinned group; the panel is closed.
+    // The cog sits in the camera controls, right after the Auto fit | Fit | Pinned group, then density and
+    // sound (card 374); the panel is closed.
     const controls = w.get('.controls');
-    expect(controls.element.lastElementChild?.getAttribute('data-test')).toBe('monitor-layout-toggle');
+    const order = Array.from(controls.element.children).map((el) => el.getAttribute('data-test')).filter(Boolean);
+    expect(order.slice(-3)).toEqual(['monitor-layout-toggle', 'monitor-density', 'monitor-sound']);
     expect(w.find('[data-test=monitor-layout]').exists()).toBe(false);
     await w.get('[data-test=monitor-layout-toggle]').trigger('click');
     const panel = w.get('[data-test=monitor-layout]');
