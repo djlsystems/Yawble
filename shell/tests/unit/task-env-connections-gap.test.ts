@@ -3,7 +3,9 @@
 // (HostTaskRpc.DefJson: connectionId is a STRING; HostTaskService ask detail: env_from_connections is a list of shown lines;
 // a refused run puts the binding problem in missingEnv with state 'refused').
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { stopConfirmStubs, stubConfirm } from './confirm-stub';
+afterEach(() => { stopConfirmStubs(); });
 import ConnectionsPanel from '../../src/renderer/src/components/ConnectionsPanel.vue';
 import TaskAskCard from '../../src/renderer/src/components/TaskAskCard.vue';
 import TasksPanel from '../../src/renderer/src/components/TasksPanel.vue';
@@ -181,8 +183,7 @@ describe('B023 re-test F2: the stored binding in the editor', () => {
 
 describe('B023 gap: removing a Connection only host tasks use (spec point 5)', () => {
   it('usedBy empty + usedByTasks non-empty: warns about the task, removes on OK with confirm, reloads', async () => {
-    const confirm = vi.fn((_: string) => true);
-    window.confirm = confirm as unknown as typeof window.confirm;
+    const confirm = stubConfirm(() => true);
     let list: Connection[] = [release];
     const { api, calls } = fakeApi({
       'integrations.connections': () => list,

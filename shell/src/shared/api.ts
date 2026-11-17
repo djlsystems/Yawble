@@ -478,6 +478,10 @@ export interface HostTaskDef {
   pinMode: 'files' | 'commit'; commandLineOnly: boolean;
   /** Environment variables whose value is read from a Connection's secret field at start (B023). The binding is pinned, never the value. */
   envFromConnections?: EnvFromConnection[];
+  /** One line on what the task does, shown on the task row and to the Concierge (B066). Omitted when empty. */
+  description?: string;
+  /** What to check once it has run, e.g. a health URL (B066). Omitted when empty. */
+  checkAfter?: string;
 }
 /** One binding: variable `name` takes the secret `field` of Connection `connectionId`; `connectionName` is for display only. */
 /** The core sends connectionId as a string ("7") and accepts a number or a string back; the editor normalises it to a number on load. */
@@ -635,6 +639,25 @@ export interface TeamGitBlockingBranch { name: string; repo: string; location: '
  * means the branches changed since the plan. */
 export interface GitDeletePlan { plan: string; token: string; empty: boolean }
 export interface GitDeleteResult { result: string }
+/** B067 git.tidyPlan {team}: every branch of the team's repositories (here, on origin, in the members' clones) in one class.
+ * merged: in the base; contained: every commit has an equivalent in the base (proof: git cherry's answer, as text);
+ * working: a member's working branch (in use, kept); moved: the team's copy differs from the member's clone (teamSha vs
+ * cloneSha; Realign sets the team's and origin's copy to the clone's); own-work: commits of its own (commits), needs a look;
+ * origin-only: on origin, nobody has it here; scratch: a clone's local-only scratch/* or tmp/* branch. where: local,
+ * origin, clone:<member>. */
+export type TidyClass = 'merged' | 'contained' | 'working' | 'moved' | 'own-work' | 'origin-only' | 'scratch';
+export interface TidyBranch {
+  name: string; where: string[]; class: TidyClass; proof?: string | null; commits?: { sha: string; subject: string }[] | null;
+  teamSha?: string | null; cloneSha?: string | null; member?: string | null;
+}
+/** baseBranch: what merged and contained are measured against; notes: what the core could not read (a member's clone
+ * that was skipped, for example), so a branch missing from the list is not silently missing. */
+export interface TidyRepo { repo: string; baseBranch?: string | null; branches: TidyBranch[]; notes?: string[] | null }
+export interface TidyPlan { repos: TidyRepo[] }
+/** B067 git.branchRealign {team, repo, member, expectOld?, expectNew?}: the old and new commit of the member branch in
+ * the team repository (and origin). expectOld / expectNew bind the yes to the team and clone commits the person was
+ * shown: the core refuses with code "stale" if either moved. Also refused (an error) while the member runs. */
+export interface BranchRealignResult { oldSha: string; newSha: string }
 /** teams.syncToBase: the team's "Bring branches up to <base> before new work" setting, the note of a sync or fetch-back
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {

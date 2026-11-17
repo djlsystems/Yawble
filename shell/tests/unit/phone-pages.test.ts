@@ -504,10 +504,20 @@ describe('at 1280 px the desktop is as it was (B054)', () => {
     expect([...head.element.children].map((e) => e.getAttribute('data-test') ?? (e.className || e.tagName.toLowerCase())))
       .toEqual(['h2', 'tabs', 'grow', 'backlog-search', 'backlog-team-filter', 'backlog-upload', 'backlog-upload-input', 'backlog-add']);
     expect(head.get('[data-test=backlog-add]').text()).toBe('+ Add item');
-    expect(w.get('.wrap > p.intro').text()).toMatch(/^Work you want done, most important first\./);
+    expect(w.get('.wrap > p.intro').text()).toBe('Mark an item ready once you have read it, then dispatch it to a team.');
     expect(w.find('[data-test=backlog-phone-head]').exists()).toBe(false);
     expect(w.find('[data-test=backlog-tools-toggle]').exists()).toBe(false);
     expect(w.get('[data-test=backlog-view]').classes()).toEqual(['backlog-place', 'fill']);
+  });
+
+  it('Backlog: the Archived tab shows no intro; back on Backlog it shows again', async () => {
+    const w = await backlog(Desktop);
+    await w.get('header.head [data-test=backlog-tab-archived]').trigger('click');
+    await settle();
+    expect(w.find('.wrap > p.intro').exists()).toBe(false);
+    await w.get('header.head [data-test=backlog-tab-live]').trigger('click');
+    await settle();
+    expect(w.find('.wrap > p.intro').exists()).toBe(true);
   });
 
   it('the Team page: the five labelled actions, the long Tell placeholder and "Tell Manager" with the plane, the activity uncapped', async () => {

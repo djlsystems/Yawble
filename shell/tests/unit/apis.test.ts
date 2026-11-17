@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { stopConfirmStubs, stubConfirm } from './confirm-stub';
 import ConnectionDialog from '../../src/renderer/src/components/ConnectionDialog.vue';
 import ConnectionsPanel from '../../src/renderer/src/components/ConnectionsPanel.vue';
 import IntegrationDialog from '../../src/renderer/src/components/IntegrationDialog.vue';
@@ -27,13 +28,10 @@ function fakeApi(answers: Record<string, (params: any) => unknown>, remote = fal
   return { api, calls };
 }
 
-const realConfirm = window.confirm;
-afterEach(() => { window.confirm = realConfirm; });
-/** happy-dom has no confirm to spy on: install one that answers the same every time and records what it was asked. */
+afterEach(() => { stopConfirmStubs(); });
+/** Answers the in-page confirm (card 355) the same every time and records what it was asked. */
 function answerConfirm(answer: boolean) {
-  const fn = vi.fn(() => answer);
-  window.confirm = fn as unknown as typeof window.confirm;
-  return fn;
+  return stubConfirm(() => answer);
 }
 
 const teams = [{ id: 3, name: 'ops', repoPath: null, members: 2, running: 0, queued: 0 }];

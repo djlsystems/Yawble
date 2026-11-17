@@ -3,6 +3,7 @@ import { vChange } from '../remoteAccess';
 import { ref } from 'vue';
 import BusyLabel from './BusyLabel.vue';
 import { usePhone } from '../phone';
+import { requesterName } from '../requester';
 import type { IntegrationAsk } from '../../../shared/api';
 
 /**
@@ -22,7 +23,7 @@ const short = (s: string | null | undefined) => (s ?? '').slice(0, 8);
 <template>
   <div class="decision ask task-ask" :class="{ phone }" data-test="task-ask">
     <p>
-      <strong>{{ ask.member.split('/')[1] }} asks to run the host task</strong> <code data-test="task-ask-name">{{ ask.taskName }}</code>
+      <strong>{{ requesterName(ask.member, { memberOnly: true }) }} asks to run the host task</strong> <code data-test="task-ask-name">{{ ask.taskName }}</code>
       <span class="muted small"> on {{ short(ask.detail?.commit ?? ask.commit) }}</span>
     </p>
     <p class="small"><span class="muted">The agent's words:</span> <span data-test="task-ask-reason">{{ ask.reason }}</span></p>
