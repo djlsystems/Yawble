@@ -159,6 +159,13 @@ function recorder() {
     AC.prototype.createOscillator = function (this: any, ...a: any[]) { w.__osc++; return orig.apply(this, a); };
     (window as any).AudioContext = class extends AC { constructor(...a: any[]) { super(...a); w.__audio++; } };
   }
+  // Card 401 (B088): each oscillator started, with its frequency (a needs-you tone starts at 660 Hz, then 880).
+  w.__tones = [];
+  const ON = (window as any).OscillatorNode;
+  if (ON) {
+    const start = ON.prototype.start;
+    ON.prototype.start = function (this: any, ...a: any[]) { w.__tones.push({ f: this.frequency.value, at: performance.now() }); return start.apply(this, a); };
+  }
 }
 
 type Op = { op: 'fill' | 'stroke' | 'text'; style: string; alpha: number; lw?: number; dash?: boolean; items?: any[]; text?: string; x?: number; y?: number; m: number[] };
@@ -747,6 +754,272 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 3c. Card 401 (verify B088, card 400): one need-you list. The header's "N need you" and the You node count the same
+// items (questions, network and tool asks, blocked and failed members; a member with a question and a network ask is 2);
+// the You node's hover (tap on a phone) lists them; each new item flies in once (its head: a screen-space disc of r 3.4
+// in its tone), the node's arrival ring opens once, and the needs-you tone (an oscillator at 660 Hz) sounds once.
+
+const SHOTS88 = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'b088-monitor');
+const result88: Record<string, unknown> = {};
+test.afterAll(() => {
+  mkdirSync(SHOTS88, { recursive: true });
+  const file = path.join(SHOTS88, 'b088-results.json');
+  let old: Record<string, unknown> = {};
+  try { old = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
+  if (Object.keys(result88).length) writeFileSync(file, JSON.stringify({ ...old, ...result88 }, null, 2));
+});
+async function shot88(page: Page, name: string) { mkdirSync(path.join(SHOTS88, 'screens'), { recursive: true }); await page.screenshot({ path: path.join(SHOTS88, 'screens', `${name}.png`) }); }
+
+const FLY = [C.decision, C.blocked, C.fail];
+/** The heads of the flights to the You node this frame, by colour. */
+const youHeads = (f: Frame) => discs(f, (o, a) => isScreen(o) && FLY.includes(o.style) && Math.abs(a.r - 3.4) < 0.01).map((d) => d.style);
+/** The You node's arrival rings this frame that have just opened (r 26 to 29). */
+const youRingsNew = (f: Frame, y: Pt) => arcsAt(f, y, 27.5, C.decision, 1.5).filter((a) => a.lw === 2).length;
+/** How many flights (and arrival rings) started over these frames: each rise in the number drawn. */
+function starts(fs: Frame[], count: (f: Frame) => number): number {
+  let n = 0, prev = 0;
+  for (const f of fs) { const c = count(f); if (c > prev) n += c - prev; prev = c; }
+  return n;
+}
+async function headerNeed(page: Page): Promise<number | null> {
+  const t = await page.locator('[data-test=monitor-counts]').innerText();
+  const m = /(\d+)\s*need you/.exec(t);
+  return m ? Number(m[1]) : null;
+}
+const tonesNeedYou = (page: Page): Promise<number> => page.evaluate(() => (window as any).__tones.filter((t: any) => t.f === 660).length);
+
+for (const W of [1280, 375]) {
+  test(`3c need you at ${W}: header = You node for questions, asks, blocked / failed, a mix; the tip lists them; each new item flies and sounds once`, async ({ browser }) => {
+    test.setTimeout(240_000);
+    const phone = W < 700;
+    const tag = `w${W}`;
+    const feed = new Feed();
+    seed(feed);
+    feed.netAsks = []; feed.toolAsks = [];
+    // Waiting at open: DeveloperCleo (the second team) blocked, and TesterBen's question (its row is history).
+    feed.attn.set('2/DeveloperCleo', 'blocked');
+    feed.attn.set(`1/${BEN}`, 'decision');
+    feed.row('decision', BEN, BEN, 12, 90_000, 'Which refund limit?');
+    const { page, ctx, errors, push } = await open(browser, { feed, w: W, sound: true });
+    const r: Record<string, any> = { steps: [] as any[] };
+    const box = await canvasBox(page);
+    let you: Pt = { x: box.width - 46, y: Math.max(120, box.height / 2) };
+    const mismatches: string[] = [];
+
+    /** Waits until the header and the You node both say n; returns what each said. */
+    async function both(n: number, timeout = 9000) {
+      const end = Date.now() + timeout;
+      let node: string | null = null, head: number | null = null;
+      do {
+        const f = await lastFrame(page);
+        const y = youNode(f);
+        if (y) you = { x: y.x, y: y.y };
+        node = y?.count ?? null; head = await headerNeed(page);
+        if ((n === 0 ? node === null : node === String(n)) && head === n) break;
+        await page.waitForTimeout(100);
+      } while (Date.now() < end);
+      return { node, header: head };
+    }
+    /** One change: clears the frames and tones' mark, applies it, waits for the count, then for the flights to end. */
+    async function step(name: string, change: () => void, n: number, want: { flights: number; tones: number }, settle = 2600) {
+      await page.evaluate(() => { (window as any).__frames = []; });
+      const tones0 = await tonesNeedYou(page);
+      change();
+      const said = await both(n);
+      await page.waitForTimeout(settle);
+      const fs = await frames(page);
+      const s = {
+        name, want: n, ...said, flights: starts(fs, (f) => youHeads(f).length), flightColors: [...new Set(fs.flatMap(youHeads))],
+        rings: starts(fs, (f) => youRingsNew(f, you)), tones: (await tonesNeedYou(page)) - tones0, frames: fs.length,
+      };
+      r.steps.push(s);
+      if (s.node !== (n === 0 ? null : String(n)) || s.header !== n) mismatches.push(`${name}: header ${s.header}, node ${s.node}, want ${n}`);
+      expect.soft(s.header, `${name}: header`).toBe(n);
+      expect.soft(s.node, `${name}: You node`).toBe(n === 0 ? null : String(n));
+      expect.soft(s.flights, `${name}: flights`).toBe(want.flights);
+      expect.soft(s.rings, `${name}: arrival rings`).toBe(want.flights);
+      expect.soft(s.tones, `${name}: needs-you tones`).toBe(want.tones);
+      return s;
+    }
+    /** The You node's tip: hovered (desktop) or tapped (phone). */
+    async function tip() {
+      const b = await canvasBox(page);
+      if (phone) {
+        if (!(await page.locator('[data-test=monitor-you-tip]').count())) {
+          await page.touchscreen.tap(b.x + you.x, b.y + you.y);
+          if (process.env.DBG_YOU) {
+            await page.waitForTimeout(200);
+            const y = youNode(await lastFrame(page));
+            console.log('TAP you at', you.x.toFixed(1), you.y.toFixed(1), 'node now', y?.x.toFixed(1), y?.y.toFixed(1), 'tip', await page.locator('[data-test=monitor-you-tip]').count(), 'board', await page.locator('[data-test=board]').count(), 'hit', await page.evaluate((q) => (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.dataset?.test ?? (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.className, { x: b.x + you.x, y: b.y + you.y }));
+            await shot88(page, `${tag}-dbg-tap-${Date.now() % 100000}`);
+          }
+        }
+      } else { await page.mouse.move(b.x + you.x, b.y + you.y); }
+      await expect(page.locator('[data-test=monitor-you-tip]')).toBeVisible({ timeout: 4000 });
+      await page.waitForTimeout(300);
+      // The panel sits beside the You node, centred on it (translateY(-50%) at the node's y).
+      const tb = (await page.locator('[data-test=monitor-you-tip]').boundingBox())!;
+      const cb = await canvasBox(page);
+      const offsetY = Math.round(tb.y + tb.height / 2 - (cb.y + you.y));
+      expect.soft(Math.abs(offsetY), `the panel is centred on the You node (canvas ${Math.round(cb.height)} px high, node at ${you.y})`).toBeLessThan(30);
+      return {
+        offsetY, canvasH: Math.round(cb.height), nodeY: you.y,
+        summary: await page.locator('[data-test=monitor-you-summary]').innerText(),
+        items: (await page.locator('[data-test=monitor-you-item]').allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim()),
+        kinds: await page.locator('[data-test=monitor-you-item]').evaluateAll((els) => els.map((e) => e.getAttribute('data-kind'))),
+        more: (await page.locator('[data-test=monitor-you-tip] .dim').allInnerTexts()).find((s) => /^\+\d+ more$/.test(s.trim())) ?? null,
+        button: await page.locator('[data-test=monitor-you-open]').count(),
+      };
+    }
+    async function untip() {
+      if (phone) {
+        const b = await canvasBox(page);
+        // The bare wall at its right edge, above or below the You node (the graph keeps to the middle), on the canvas
+        // itself and away from the open panel (a tap beside its button is snapped onto it by Chrome's touch adjustment).
+        const t = (await page.locator('[data-test=monitor-you-tip]').boundingBox())!;
+        const tries = [-80, 80, -120, 120, -50, 50].map((d) => ({ x: b.x + b.width - 14, y: b.y + you.y + d }));
+        let at = tries[0], onCanvas: string | null = null;
+        for (const p of tries) {
+          if (p.y < b.y + 4 || p.y > b.y + b.height - 4 || (p.y > t.y - 30 && p.y < t.y + t.height + 30 && p.x > t.x - 30 && p.x < t.x + t.width + 30)) continue;
+          const hit = await page.evaluate((q) => (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.dataset?.test ?? null, p);
+          if (hit === 'monitor-canvas') { at = p; onCanvas = hit; break; }
+        }
+        await page.touchscreen.tap(at.x, at.y);
+        await page.waitForTimeout(300);
+        return { tappedOn: onCanvas, tipAfter: await page.locator('[data-test=monitor-you-tip]').count() };
+      }
+      await unhover(page);
+      await page.waitForTimeout(150);
+      return { tappedOn: null, tipAfter: await page.locator('[data-test=monitor-you-tip]').count() };
+    }
+
+    // Open: what waits is counted (2), nothing flies in, nothing sounds.
+    await until(page, (x) => !!youNode(x), Boolean);
+    const atOpen = await both(2, 12_000);
+    await page.evaluate(() => { (window as any).__frames = []; });
+    await page.waitForTimeout(2500);
+    let fs = await frames(page);
+    r.atOpen = { ...atOpen, flights: starts(fs, (f) => youHeads(f).length), tones: await tonesNeedYou(page), soundOn: await page.evaluate(() => localStorage.getItem('yawble.monitor.sound')) };
+    expect(r.atOpen.header).toBe(2);
+    expect(r.atOpen.node).toBe('2');
+    expect(r.atOpen.flights, 'nothing flies for those waiting at open').toBe(0);
+    expect(r.atOpen.tones, 'nothing sounds for those waiting at open').toBe(0);
+    expect(r.atOpen.soundOn).toBe('on');
+    r.atOpen.tip = await tip();
+    expect(r.atOpen.tip.summary).toBe('1 question, 1 blocked');
+    if (process.env.DBG_YOU) { console.log('AFTER TIP board', await page.locator('[data-test=board]').count(), 'tip', await page.locator('[data-test=monitor-you-tip]').count()); await shot88(page, `${tag}-dbg-after-tip`); }
+    r.atOpen.untip = await untip();
+    if (process.env.DBG_YOU) { console.log('AFTER UNTIP', JSON.stringify(r.atOpen.untip), 'board', await page.locator('[data-test=board]').count()); await shot88(page, `${tag}-dbg-after-untip`); }
+    expect(r.atOpen.untip.tipAfter, 'a tap elsewhere / leaving hides the tip').toBe(0);
+    // Both resolve: 0, nothing flies.
+    await step('open items resolve', () => { feed.attn.delete('2/DeveloperCleo'); feed.attn.delete(`1/${BEN}`); }, 0, { flights: 0, tones: 0 }, 1500);
+    await shot88(page, `${tag}-01-nothing`);
+
+    // Only blocked / failed (attention only, no feed rows): each flies in once in its tone, one tone each.
+    let s = await step('Ada failed', () => feed.attn.set(`1/${ADA}`, 'failed'), 1, { flights: 1, tones: 1 });
+    expect(s.flightColors).toEqual([C.fail]);
+    s = await step('Cleo blocked', () => feed.attn.set('2/DeveloperCleo', 'blocked'), 2, { flights: 1, tones: 1 });
+    expect(s.flightColors).toEqual([C.blocked]);
+    r.onlyBlockedFailed = await tip();
+    expect(r.onlyBlockedFailed.summary).toBe('1 blocked, 1 failed');
+    expect(r.onlyBlockedFailed.kinds).toEqual(['blocked', 'failed']);
+    expect(r.onlyBlockedFailed.items[0]).toContain(`${TEAM2} / Developer Cleo`);
+    expect(r.onlyBlockedFailed.items[1]).toContain(`${TEAM} / Developer Ada`);
+    await shot88(page, `${tag}-02-blocked-failed-tip`);
+    await untip();
+    // Repeated polls fire nothing new.
+    await step('polls only (blocked / failed)', () => {}, 2, { flights: 0, tones: 0 }, 3000);
+    await step('blocked / failed resolve', () => { feed.attn.delete(`1/${ADA}`); feed.attn.delete('2/DeveloperCleo'); }, 0, { flights: 0, tones: 0 }, 1500);
+
+    // Only questions: Ben's with its row and his attention (one item), the other team's Manager by attention alone.
+    await step('Ben asks (row + attention)', () => { feed.row('decision', BEN, BEN, 12, 0, 'Which refund limit, 50 or 100?'); feed.attn.set(`1/${BEN}`, 'decision'); }, 1, { flights: 1, tones: 1 });
+    await step('Manager (team 2) asks', () => feed.attn.set('2/Manager', 'decision'), 2, { flights: 1, tones: 1 });
+    await step('Ben asks again while open (the same item)', () => feed.row('decision', BEN, BEN, 12, 0, 'And the currency?'), 2, { flights: 0, tones: 0 });
+    r.onlyQuestions = await tip();
+    expect(r.onlyQuestions.summary).toBe('2 questions');
+    expect(r.onlyQuestions.kinds).toEqual(['question', 'question']);
+    await shot88(page, `${tag}-03-questions-tip`);
+    await untip();
+    await step('questions resolve', () => { feed.attn.delete(`1/${BEN}`); feed.attn.delete('2/Manager'); }, 0, { flights: 0, tones: 0 }, 1500);
+
+    // Only asks: Ada's two asks on one host (one item), Ben's tool ask; repeated asksChanged events fire nothing new.
+    await step('Ada network ask (2 asks, 1 host)', () => { feed.netAsks!.push(feed.netAsk(7, ADA, 'api.nuget.org'), feed.netAsk(8, ADA, 'api.nuget.org')); push('network.asksChanged'); }, 1, { flights: 1, tones: 1 });
+    await step('Ben tool ask', () => { feed.toolAsks!.push(feed.toolAsk(4, BEN, 'dotnet-sdk-10', '.NET SDK 10')); push('tools.asksChanged'); }, 2, { flights: 1, tones: 1 });
+    await step('asksChanged x3, nothing new', () => { push('network.asksChanged'); push('tools.asksChanged'); push('network.asksChanged'); }, 2, { flights: 0, tones: 0 });
+    r.onlyAsks = await tip();
+    expect(r.onlyAsks.summary).toBe('1 network ask, 1 tool ask');
+    expect(r.onlyAsks.items[0]).toContain(`${TEAM} / Developer Ada`);
+    expect(r.onlyAsks.items[0]).toContain('api.nuget.org');
+    expect(r.onlyAsks.items[1]).toContain('.NET SDK 10');
+    await shot88(page, `${tag}-04-asks-tip`);
+    await untip();
+
+    // A mix: Ada now has a question too (her network ask stays: 2 for her), Ben blocked, Cleo failed. 1 + 1 + 1 + 1 + 1 = 5.
+    await step('Ada asks a question (she has a network ask too)', () => feed.attn.set(`1/${ADA}`, 'decision'), 3, { flights: 1, tones: 1 });
+    await step('Ben blocked', () => feed.attn.set(`1/${BEN}`, 'blocked'), 4, { flights: 1, tones: 1 });
+    await step('Cleo failed', () => feed.attn.set('2/DeveloperCleo', 'failed'), 5, { flights: 1, tones: 1 });
+    r.mix = await tip();
+    expect(r.mix.summary).toBe('1 question, 1 network ask, 1 tool ask, 1 blocked, 1 failed');
+    expect(r.mix.kinds).toEqual(['question', 'network', 'tool', 'blocked', 'failed']);
+    expect(r.mix.items.filter((t: string) => t.includes(`${TEAM} / Developer Ada`)).length, 'Ada: a question and a network ask, 2 lines').toBe(2);
+    expect(r.mix.more).toBeNull();
+    await shot88(page, `${tag}-05-mix-tip`);
+    await untip();
+    await step('polls only (mix)', () => {}, 5, { flights: 0, tones: 0 }, 3000);
+
+    // Resolving, one at a time: the count goes down, nothing flies.
+    await step('Ada answered (network ask stays)', () => feed.attn.delete(`1/${ADA}`), 4, { flights: 0, tones: 0 }, 1200);
+    await step('Ada network ask allowed', () => { feed.netAsks = feed.netAsks!.map((a) => ({ ...a, state: 'allowed' })); push('network.asksChanged'); }, 3, { flights: 0, tones: 0 }, 1200);
+    await step('tool installed', () => { feed.toolAsks = feed.toolAsks!.map((a) => ({ ...a, state: 'installed' })); push('tools.asksChanged'); }, 2, { flights: 0, tones: 0 }, 1200);
+    await step('Ben unblocked', () => feed.attn.delete(`1/${BEN}`), 1, { flights: 0, tones: 0 }, 1200);
+    // A resolved item that returns is new again.
+    await step('Ben blocked again (returns)', () => feed.attn.set(`1/${BEN}`, 'blocked'), 2, { flights: 1, tones: 1 });
+    await shot88(page, `${tag}-06-resolved-and-returned`);
+
+    // More than ten: 11 network asks on distinct hosts (13 in all): ten lines, then "+3 more".
+    await step('11 network asks at once', () => {
+      for (let i = 0; i < 11; i++) feed.netAsks!.push(feed.netAsk(100 + i, i % 2 ? ADA : BEN, `h${i}.example${i}.com`));
+      push('network.asksChanged');
+    }, 13, { flights: 11, tones: 1 });
+    r.many = await tip();
+    expect(r.many.items.length).toBe(10);
+    expect(r.many.more?.trim()).toBe('+3 more');
+    expect(r.many.summary).toBe('11 network asks, 1 blocked, 1 failed');
+    await shot88(page, `${tag}-07-more-than-ten`);
+
+    // The wall changes size (a desktop window made shorter): the hover panel follows the You node.
+    if (!phone) {
+      await unhover(page);
+      await page.setViewportSize({ width: W, height: 600 });
+      await page.waitForTimeout(1200);
+      const y = youNode(await lastFrame(page));
+      if (y) you = { x: y.x, y: y.y };
+      r.resized = await tip();
+      await shot88(page, `${tag}-08-after-resize-tip`);
+    }
+
+    // Opening Needs you: a desktop click on the You node; a phone tap shows the panel with its button, which opens it.
+    if (phone) {
+      expect(r.many.button, 'the phone panel has its button').toBe(1);
+      await page.locator('[data-test=monitor-you-open]').click();
+    } else {
+      expect(r.many.button).toBe(0);
+      const b = await canvasBox(page);
+      await page.mouse.move(b.x + you.x, b.y + you.y);
+      await page.mouse.down(); await page.mouse.up();
+    }
+    await expect(page.locator('[data-test=board]')).toBeVisible({ timeout: 5000 });
+    r.opened = 'board';
+    r.mismatches = mismatches;
+    result88[tag] = r;
+    console.log(`B088-${tag}`, JSON.stringify(r));
+    expect(mismatches).toEqual([]);
+    expect(errors).toEqual([]);
+    await ctx.close();
+  });
+}
 
 test('4 cards: an instruction carries "#card", the hand-back comes home with a check, a failed run with a cross', async ({ browser }) => {
   const feed = new Feed();
