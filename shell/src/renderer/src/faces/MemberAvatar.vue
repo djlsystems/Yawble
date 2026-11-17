@@ -48,7 +48,7 @@ const style = computed(() => ({
   position: absolute; inset: 0; border-radius: 50%; background-repeat: no-repeat;
   box-shadow: 0 0 8px color-mix(in srgb, var(--avatar-ring) 70%, transparent);
 }
-.is-idle .face { box-shadow: none; }
+.member-avatar.is-idle .face { box-shadow: none; }
 .initials {
   display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--avatar-ring) 22%, var(--surface)); color: var(--ink, inherit);
@@ -57,7 +57,7 @@ const style = computed(() => ({
 .ring { position: absolute; inset: calc(-1 * var(--ring-gap)); border-radius: 50%; pointer-events: none; }
 
 /* RUNNING: three arcs of 75 degrees turning, a turn in 3.3 s. */
-.is-running .ring {
+.member-avatar.is-running .ring {
   background: conic-gradient(
     var(--avatar-ring) 0deg 75deg, transparent 75deg 120deg,
     var(--avatar-ring) 120deg 195deg, transparent 195deg 240deg,
@@ -67,14 +67,14 @@ const style = computed(() => ({
   animation: avatar-turn 3.27s linear infinite;
 }
 /* WAITING: a dashed ring creeping round. */
-.is-waiting .ring { border: 2px dashed var(--avatar-ring); animation: avatar-turn 9s linear infinite; }
+.member-avatar.is-waiting .ring { border: 2px dashed var(--avatar-ring); animation: avatar-turn 9s linear infinite; }
 /* BLOCKED, NEEDS YOU, FAILED: a ring that throbs, swelling and brightening, once every 1.4 s. */
-.is-blocked .ring, .is-decision .ring, .is-failed .ring {
+.member-avatar.is-blocked .ring, .member-avatar.is-decision .ring, .member-avatar.is-failed .ring {
   border: var(--ring-width) solid var(--avatar-ring);
   animation: avatar-throb 0.69s ease-in-out infinite alternate;
 }
 /* IDLE: a thin line. */
-.is-idle .ring { border: 1.2px solid color-mix(in srgb, var(--avatar-ring) 70%, transparent); }
+.member-avatar.is-idle .ring { border: 1.2px solid color-mix(in srgb, var(--avatar-ring) 70%, transparent); }
 
 @keyframes avatar-turn { to { transform: rotate(360deg); } }
 @keyframes avatar-throb { from { opacity: .5; transform: scale(1); } to { opacity: 1; transform: scale(1.1); } }

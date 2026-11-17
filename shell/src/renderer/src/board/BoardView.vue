@@ -10,6 +10,7 @@ import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
 import NetworkAsks from '../components/NetworkAsks.vue';
 import ToolAsks from '../components/ToolAsks.vue';
+import RunLimitDialog from '../components/RunLimitDialog.vue';
 import { useBusy } from '../busy';
 import { useNarrow, useSwipe } from '../narrowScreen';
 
@@ -117,6 +118,14 @@ const toolAsks = ref(0);
 
 function clear() { team.value = ''; member.value = ''; search.value = ''; }
 
+/** The global run limit, shown with In Progress's count ("3 of 8"); its number opens a small dialog to change it. */
+const runLimit = ref<number | null>(null);
+const editLimit = ref(false);
+async function loadLimit() {
+  try { runLimit.value = (await api.call<{ slots?: { limit?: number } }>('app.overview'))?.slots?.limit ?? runLimit.value; }
+  catch { /* keeps what it showed */ }
+}
+
 /** A lane's count: its cards shown, and in Needs You what else needs the person. */
 const laneCount = (id: string) => inLane(shown.value, id).length + (id === 'blocked' ? reconnect.value.length + networkAsks.value + toolAsks.value : 0);
 
@@ -137,11 +146,12 @@ const swipe = useSwipe(stepLane);
 onMounted(() => {
   void load();
   void loadReconnect();
+  void loadLimit();
   off = api.onEvent?.((e) => {
     if (e.event === 'connections.changed') void loadReconnect();
     else if (e.event === 'board.changed') void load(); // cleared or restored (here or in another view)
   }) ?? null;
-  timer = setInterval(() => { void load(); void loadReconnect(); }, props.pollMs ?? 2000);
+  timer = setInterval(() => { void load(); void loadReconnect(); void loadLimit(); }, props.pollMs ?? 2000);
 });
 onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
 </script>
@@ -169,7 +179,11 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
       </nav>
       <div v-if="board" class="lanes" data-test="board-lanes" @pointerdown="phone && swipe.down($event)" @pointerup="phone && swipe.up($event)" @pointercancel="swipe.cancel()">
         <section v-for="l in board.lanes" v-show="!phone || activeLane === l.id" :key="l.id" class="lane" :class="`lane-${l.id}`" :data-test="`lane-${l.id}`">
-          <header><span class="lname">{{ l.label }}</span><span class="count">{{ laneCount(l.id) }}</span>
+          <header><span class="lname">{{ l.label }}</span>
+            <span v-if="l.id === 'in-progress' && runLimit !== null" class="count" data-test="lane-in-progress-count"
+              :title="`${laneCount(l.id)} in progress; the global run limit is ${runLimit}`">{{ laneCount(l.id) }} of <button type="button" class="link limit-link"
+                data-test="run-limit-link" title="Change the global run limit" @click="editLimit = true">{{ runLimit }}</button></span>
+            <span v-else class="count">{{ laneCount(l.id) }}</span>
             <button v-if="l.id === 'done' && shownDone.length" class="link small clear-done" data-test="board-clear-done"
               :title="clearTitle" :disabled="work.is('clear')" :aria-busy="work.is('clear')" @click="clearDone"><BusyLabel :busy="work.is('clear')" text="Clearing…">Clear</BusyLabel></button></header>
           <div v-if="l.id === 'blocked' && reconnect.length" class="cards reconnect">
@@ -203,6 +217,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
         team, or tell a team's Manager what you want, and its Manager plans the cards.
       </p>
     </div>
+    <RunLimitDialog v-if="editLimit" :api="api" @close="editLimit = false" @changed="runLimit = $event" />
     <CardPanel v-if="openCard !== null && board" ref="panel" :id="openCard" :lanes="board.lanes" :api="api"
       @close="openCard = null" @changed="load" @open-team="emit('openTeam', $event)" />
   </div>
@@ -220,6 +235,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
 .lane { display: flex; flex-direction: column; min-height: 0; background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; }
 .lane header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
 .lname { font-weight: 700; font-size: 13px; }
+.limit-link { font-size: inherit; padding: 0; min-height: 0; text-decoration: underline; }
 .count { font-size: 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; }
 .lane-blocked .lname { color: var(--warn-edge); }
 .cards { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 10px; overflow-y: auto; }

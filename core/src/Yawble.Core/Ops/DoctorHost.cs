@@ -32,11 +32,11 @@ public sealed class DoctorHostSystem(
         var teams = Path.Combine(root, "teams");
         if (!Directory.Exists(teams)) return new Dictionary<string, long>();
         return Directory.GetDirectories(teams).ToDictionary(d => Path.GetFileName(d),
-            d => new DirectoryInfo(d).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length));
+            d => FolderWalk.Size(d));
     }
 
     public long LogBytes() => logFolders.Where(Directory.Exists)
-        .Sum(f => new DirectoryInfo(f).EnumerateFiles("*.log", SearchOption.AllDirectories).Sum(x => x.Length));
+        .Sum(f => FolderWalk.Size(f, "*.log"));
 
     public SandboxState Sandbox()
     {

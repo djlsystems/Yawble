@@ -85,11 +85,17 @@ function installProbe(root: string): boolean {
   return true;
 }
 
-/** The agent's terminal, in the main window's terminal pane (one at a time; no window of its own). */
+/** A member's action from its pane's ☰ menu. */
+async function memberAction(main: Page, agent: string, action: string) {
+  await main.locator(`[data-test=agent-${agent}] [data-test=member-more]`).click();
+  await main.locator(`[data-test=agent-${agent}] [data-test=member-more-menu] [data-test=${action}]`).click();
+}
+
+/** The agent's terminal in its pane on the team page: its Terminal tab (read only, never interactive). */
 async function terminalFor(_app: ElectronApplication, main: Page, agent: string) {
-  await main.locator(`[data-test=agent-${agent}] [data-test=open-terminal]`).click();
-  const term = main.locator('[data-test=terminal-pane]');
-  await term.waitFor();
+  await main.locator(`[data-test=agent-${agent}] [data-test=member-view-terminal]`).click();
+  const term = main.locator(`[data-test=agent-${agent}]`);
+  await term.locator('[data-test=member-terminal]').waitFor();
   return term;
 }
 
@@ -206,11 +212,11 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await main.locator('[data-test=add-agent-name]').fill('Temp');
     await main.locator('[data-test=add-agent]').click();
     await expect(main.locator('[data-test=agent-Temp]')).toBeVisible();
-    await main.locator('[data-test=agent-Temp] [data-test=remove-agent]').click();
+    await memberAction(main, 'Temp', 'remove-agent');
     await expect(main.locator('[data-test=agent-Temp]')).toHaveCount(0);
 
     // ---- Change one agent's policy: Ben (Grok) gets a 15-minute timeout, and a confirmed loosening.
-    await main.locator('[data-test=agent-Ben] [data-test=open-settings]').click();
+    await memberAction(main, 'Ben', 'open-settings');
     await main.locator('[data-test=tab-policy]').click();
     await main.locator('[data-test=inherit-compute-wallTimeoutSec]').uncheck();
     await main.locator('[data-test=override-compute-wallTimeoutSec]').fill('900');
@@ -236,14 +242,15 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await shot(main, '06-agent-policy-saved');
     await main.locator('[data-test=modal-close]').click();
     await expect(main.locator('[data-test=agent-Ben] [data-test=agent-timeout]')).toHaveText('15 min');
-    await expect(main.locator('[data-test=agent-Ben] [data-test=loosened-chip]')).toContainText('registry.npmjs.org');
+    await expect(main.locator('[data-test=agent-Ben] [data-test=loosened-chip]')).toHaveCount(0); // no marker on the pane
     await expect(main.locator('[data-test=agent-Ada] [data-test=agent-timeout]')).toHaveText('2 h');
 
-    // ---- The card's guardrail button opens the agent's Guardrails tab, through Electron main's method
+    // ---- The agent's settings, Guardrails tab, through Electron main's method
     // allow-list to the core. By default this e2e installs no yawble-guardcheck probe (and runs no real sandbox), so the core
     // answers why the check is off and Run is disabled. With YAWBLE_E2E_GUARDCHECK_DIR (see installProbe) the window
     // runs the real check in the sandbox and it must pass. The check itself is covered by RealSandboxGuardrailTests.
-    await main.locator('[data-test=agent-Ben] [data-test=open-guardrail]').click();
+    await memberAction(main, 'Ben', 'open-settings');
+    await main.locator('[data-test=tab-guardrails]').click();
     await expect(main.locator('[data-test=tab-guardrails]')).toHaveClass(/on/);
     await expect(main.locator('[data-test=guardrail-panel]')).toContainText("Ben's effective policy");
     if (!realCheck) {
@@ -279,20 +286,17 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await expect(main.locator('[data-test=slots]')).toContainText('in use');
     await shot(main, '08-team-running');
 
-    // ---- Ben's terminal during the run: banner and live output.
+    // ---- Ben's terminal during the run, in its pane: just the live output (no bar, no Policy).
     let term = await terminalFor(app, main, 'Ben');
-    await expect(term.locator('[data-test=banner-title]')).toHaveText(/^payments \/ Ben · sandbox · \w+ · grok · net: model \+ bus \+ registry\.npmjs\.org$/);
-    await expect(term.locator('[data-test=terminal-pane-title]')).toContainText('Ben · payments');
-    await expect(term.locator('[data-test=banner-details]')).toContainText('timeout 15 min');
-    await expect(term.locator('[data-test=banner-loosened]')).toContainText('network.allowHosts + registry.npmjs.org');
-    await expect(term.locator('[data-test=terminal-state]')).toContainText('input off during headless run');
+    await expect(term.locator('[data-test=agent-name]')).toContainText('Ben');
+    await expect(term.locator('[data-test=banner]')).toHaveCount(0);
     const mirror = term.locator('[data-test=terminal-mirror]');
     await expect(mirror).toContainText('$ grok -p (batch of 1');
     await expect(mirror).toContainText('● step 2');
     await expect(mirror).toContainText('● step 4'); // still growing: live
     await shot(main, '09-terminal-live');
     const before = (await mirror.textContent()) ?? '';
-    await term.locator('[data-test=terminal-pane-close]').click();
+    await term.locator('[data-test=member-view-activity]').click();
 
     // ---- Reopen: the replay comes back (everything shown before, from the start of the run), then live again.
     await main.waitForTimeout(1500);
@@ -304,19 +308,25 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await expect.poll(async () => (((await mirror2.textContent()) ?? '').match(/● step \d+/g) ?? []).length).toBeGreaterThan(stepsBefore + 1);
     await shot(main, '10-terminal-reopened-replay');
 
-    // ---- Stop, then an interactive session (the fake-pty runner's).
-    await term.locator('[data-test=terminal-stop]').click();
+    // ---- Stop, then an interactive session (the fake-pty runner's) in Ben's terminal window: the pane never takes input.
+    await memberAction(main, 'Ben', 'stop');
     await expect(mirror2).toContainText('stopped by the person');
-    await expect(term.locator('[data-test=terminal-state]')).toContainText('last run failed: stopped: by the person');
-    await term.locator('[data-test=open-interactive]').click();
-    await expect(term.locator('[data-test=terminal-state]')).toContainText('input on');
-    await term.locator('[data-test=xterm]').click();
-    await main.keyboard.type('hello');
-    await main.keyboard.press('Enter');
+    await expect(term.locator('[data-test=agent-state]')).toContainText('stopped: by the person');
+    const opened = app.waitForEvent('window');
+    await memberAction(main, 'Ben', 'open-interactive-cli');
+    const win = await opened;
+    await win.locator('[data-test=open-interactive]').click();
+    await expect(win.locator('[data-test=terminal-state]')).toContainText('input on');
+    await win.locator('[data-test=xterm]').click();
+    await win.keyboard.type('hello');
+    await win.keyboard.press('Enter');
+    await expect(win.locator('[data-test=terminal-mirror]')).toContainText('you said "hello"');
+    // The pane mirrors the session, read only.
     await expect(mirror2).toContainText('you said "hello"');
-    await shot(main, '11-terminal-interactive');
-    await term.locator('[data-test=terminal-stop]').click();
-    await term.locator('[data-test=terminal-pane-close]').click();
+    await shot(win, '11-terminal-interactive');
+    await win.locator('[data-test=terminal-stop]').click();
+    await win.close();
+    await term.locator('[data-test=member-view-report]').click();
 
     await expect(main.locator('[data-test=agent-Ben] [data-test=agent-state]')).toContainText('stopped: by the person');
     await shot(main, '12-team-after-stop');

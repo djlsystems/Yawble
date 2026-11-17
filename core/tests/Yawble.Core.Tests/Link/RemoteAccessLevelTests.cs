@@ -131,7 +131,7 @@ public class RemoteAccessLevelTests
     {
         var hello = CloudLink.Hello();
         Assert.Equal("hello", hello["type"]!.GetValue<string>());
-        Assert.Equal(["access"], hello["caps"]!.AsArray().Select(c => c!.GetValue<string>()));
+        Assert.Equal(["access", "summary", "logsTail"], hello["caps"]!.AsArray().Select(c => c!.GetValue<string>()));
         Assert.NotNull(hello["name"]);
         Assert.NotNull(hello["os"]);
         Assert.NotNull(hello["version"]);
@@ -246,7 +246,7 @@ public class RemoteAccessLevelTests
     private static HashSet<string> DispatchedMethods()
     {
         var src = Path.Combine(RepoRoot(), "core", "src");
-        var pattern = new Regex("""(?:case |^\s*|\bor |\bis )"([a-z][A-Za-z]*\.[A-Za-z]+)"(?=(?:\s+or\s+"[^"]+")*\s*(?:=>|:|when\b|or\b|;|\)))""", RegexOptions.Multiline);
+        var pattern = new Regex("""(?:case |^\s*|\bor |\bis )"([a-z][A-Za-z]*(?:\.[A-Za-z]+)+)"(?=(?:\s+or\s+"[^"]+")*\s*(?:=>|:|when\b|or\b|;|\)))""", RegexOptions.Multiline);
         var methods = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in Directory.EnumerateFiles(src, "*.cs", SearchOption.AllDirectories))
         {

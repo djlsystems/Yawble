@@ -53,7 +53,8 @@ using var dataLock = heldLock;
 // The shell opens its window on this line (before it, a refused core may still exit with the dialog's message).
 Console.WriteLine("YAWBLE-STARTING");
 // Everything the core reports on standard error is also kept in <data>/logs/core-<day>.log (the Diagnostics log).
-Console.SetError(new Yawble.Core.Logs.DiagnosticLog(options.DataDir!, "core").Tee(Console.Error));
+var diagnostics = new Yawble.Core.Logs.DiagnosticLog(options.DataDir!, "core");
+Console.SetError(diagnostics.Tee(Console.Error));
 Console.Error.WriteLine(CoreInfo.StartupLine());
 Yawble.Core.Storage.DataFolderAccess.Secure(options.DataDir!, Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!), line => Console.Error.WriteLine(line));
 // The IPC folders crashed launches left behind (no socket in them answers); never ours, never one that is still in use.
@@ -314,6 +315,9 @@ var updateService = new Yawble.Core.Updates.UpdateService(options.DataDir!, $"Da
     log: line => Console.Error.WriteLine(line), managed: Yawble.Core.Updates.UpdatePolicy.Managed, os: OperatingSystem.IsLinux() ? "linux" : "win");
 // Every log, for the Logs dialog, its pruning and the daily retention sweep.
 var logService = new Yawble.Core.Logs.LogService(options.DataDir!, $"Data Source={dbPath}", log: line => Console.Error.WriteLine(line));
+// logs.tail: new entries pushed to who tails them (the Diagnostics log as written, the activity log while a tail is open).
+var logTail = new Yawble.Core.Logs.LogTail(events, since => logService.TailSince(since));
+diagnostics.Tail = logTail;
 var logFolders = new[] { Path.Combine(options.DataDir!, "logs"), Path.Combine(options.DataDir!, "transcripts") };
 var doctorService = new Yawble.Core.Ops.DoctorService(
     new Yawble.Core.Ops.DoctorHostSystem(options.DataDir!, () => applied, launch.Problem, guardrail, link.Status, logFolders, launch.GatewayProbe),
@@ -359,12 +363,20 @@ var agentInfoRpc = launch.Launcher is null ? null : new Yawble.Core.Agents.Agent
 // The read-only code browser of members' clones (watched while a member runs or a Code dialog is open on it).
 await using var codeBrowser = new Yawble.CodeBrowser.CodeBrowserService(new Yawble.Core.Code.CodeHost(bus, runs, events, policies));
 codeBrowser.Start();
+// The cloud org dashboard (B048): org.summary from what the app already tracks (never tokens, cost or usage), pushed as
+// org.summaryChanged while a viewer watches; a Cloud Link viewer who leaves is unwatched.
+await using var orgSummary = new Yawble.Core.Link.OrgSummaryService(
+    new Yawble.Core.Link.AppOrgSummarySource(bus, new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), integrations, networkAsks, toolAsks, logService,
+        () => link.InstanceName, new DateTimeOffset(System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime(), TimeSpan.Zero)),
+    events, log: line => Console.Error.WriteLine(line));
+link.ViewersChanged += orgSummary.ViewersPresent;
+orgSummary.Start();
 var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, runs, guardrail, ui, hostChecks,
     scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: clis, agentTests: agentTests, link: link, concierge: concierge, board: board,
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
-    code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService),
-    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks);
+    code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService, logTail),
+    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks, orgSummary: orgSummary);
 dispatcherForLink = dispatcher;
 link.Start();
 

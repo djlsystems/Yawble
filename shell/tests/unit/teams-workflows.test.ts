@@ -11,6 +11,16 @@ const list = [
   wf(4, 'open', [], '2026-11-11T11:00:00Z'), wf(5, 'completed', [], '2026-11-11T10:00:00Z'), wf(6, 'completed', [], '2026-11-09T10:00:00Z'),
 ];
 
+const agent = (id: number, name: string, role: string, state: string, over: Record<string, unknown> = {}) => ({
+  member: { id, teamId: 1, team: 'payments', name, role, cli: 'claude' }, state, attention: null, queuePosition: null, queueLength: 0,
+  queuedInstructions: 0, statusLine: null, runId: null, runStartedAt: null, lastRunState: null, lastRunReason: null, loosened: [], policyProblems: [], ...over,
+});
+const agents = [
+  agent(1, 'Manager', 'manager', 'idle'),
+  agent(2, 'DeveloperInes', 'member', 'running', { statusLine: 'Card 12: wiring the overview\nmore detail' }),
+  agent(3, 'TesterWren', 'member', 'queued', { queuePosition: 2 }),
+];
+
 function api(): YawbleApi {
   return {
     getInfo: async () => { throw new Error('no'); },
@@ -22,6 +32,7 @@ function api(): YawbleApi {
           { id: 2, name: 'quiet', repoPath: null, members: 1, running: 0, queued: 0 }] } as any;
         case 'link.status': return { state: 'off', viewers: [] } as any;
         case 'bus.workflows': return (p?.teamId === 1 ? list : []) as any;
+        case 'teams.agents': return (p?.teamId === 1 ? agents : []) as any;
         default: return [] as any;
       }
     },
@@ -54,17 +65,43 @@ describe("each team's card lists its recent workflows", () => {
     w.unmount();
   });
 
+  it("shows each member's avatar with its state, and a tooltip with name, state and what it is doing", async () => {
+    const w = await teamsPage();
+    const card = w.findAll('[data-test=team-card]')[0];
+    const faces = card.findAll('[data-test=team-member]');
+    expect(faces.map((f) => f.attributes('data-state'))).toEqual(['idle', 'running', 'waiting']);
+    expect(faces[1].attributes('title')).toBe('Developer Ines · member\nRunning\nCard 12: wiring the overview');
+    expect(faces[2].attributes('title')).toBe('Tester Wren · member\nWaiting to start (#2 in the queue)');
+    expect(card.text()).not.toContain('agents ·');
+    // A team whose members are not known (yet) keeps the counts as text.
+    expect(w.findAll('[data-test=team-card]')[1].get('[data-test=team-members-text]').text()).toBe('1 agents · 0 running · 0 queued');
+    w.unmount();
+  });
+
+  it("the sidebar's Teams pill counts the teams, not the agents running", async () => {
+    const w = await teamsPage();
+    const pill = w.get('[data-test=nav-teams-count]');
+    expect(pill.text()).toBe('2'); // two teams; one agent is running
+    expect(pill.attributes('title')).toBe('2 teams');
+    w.unmount();
+  });
+
   it('says so when a team has no workflows yet', async () => {
     const w = await teamsPage();
     expect(w.findAll('[data-test=team-card]')[1].get('[data-test=team-workflows-empty]').text()).toContain('No workflows yet');
     w.unmount();
   });
 
-  it("opens the team's workflows with the clicked one selected", async () => {
+  it("opens the team's workflows over the Teams list with the clicked one selected, and closing stays on the list", async () => {
     const w = await teamsPage();
     await w.findAll('[data-test=team-workflow]').find((r) => r.attributes('data-id') === '4')!.trigger('click');
     for (let i = 0; i < 6; i++) await flushPromises();
     expect(w.get('[data-test=workflow-4]').classes()).toContain('sel');
+    expect(w.findAll('[data-test=team-card]')).toHaveLength(2); // still the Teams list, not the team's page
+    await w.get('[data-test=modal-close]').trigger('click');
+    for (let i = 0; i < 4; i++) await flushPromises();
+    expect(w.find('[data-test=workflow-4]').exists()).toBe(false);
+    expect(w.findAll('[data-test=team-card]')).toHaveLength(2);
     w.unmount();
   });
   it("has a Settings button that opens the team's settings, which show its repository path (the card does not)", async () => {

@@ -26,12 +26,19 @@ public sealed partial class BusEngine
     /// <summary>Marks the wake a Manager gets after its run in the workflow was cut off by the app stopping.</summary>
     public const string RestartWakeMarker = "restartWake";
 
+    /// <summary>
+    /// A team's workflows, newest activity first: the newest <paramref name="limit"/>, and every open one however old,
+    /// so an open workflow nobody is working is never cut off a list (the team's Workflows, the Concierge, the
+    /// companion's tools and the cloud dashboard all read this).
+    /// </summary>
     public Task<IReadOnlyList<WorkflowSummary>> WorkflowsAsync(string team, int limit = 30, CancellationToken ct = default) =>
         WithGate<IReadOnlyList<WorkflowSummary>>(() =>
         {
             var teamId = TeamId(team);
             var manager = _store.TeamMembers(teamId).Single(m => m.Role == MemberRole.Manager);
-            return _store.WorkflowsOf(team, Math.Clamp(limit, 1, 200)).Select(w =>
+            var newest = Math.Clamp(limit, 1, 200);
+            var all = _store.WorkflowsOf(team, -1);
+            return all.Where((w, i) => i < newest || !_store.WorkflowEnded(w.Id)).Select(w =>
             {
                 var root = _store.Find(w.Id);
                 var owner = OwnerOf(w.Id);

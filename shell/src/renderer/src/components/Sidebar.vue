@@ -105,10 +105,10 @@ function finishRename(id: string) {
 
     <nav class="places">
       <button class="item" :class="{ on: view === 'concierge' }" data-test="nav-concierge" @click="emit('go', 'concierge')"><Icon name="spark" />Concierge</button>
-      <button class="item" :class="{ on: view === 'documents' }" data-test="nav-documents" @click="emit('go', 'documents')"><Icon name="docs" />Documents</button>
+      <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="teams.length" class="badge" data-test="nav-teams-count" :title="`${teams.length} team${teams.length === 1 ? '' : 's'}`">{{ teams.length }}</span></button>
       <button class="item" :class="{ on: view === 'backlog' }" data-test="nav-backlog" @click="emit('go', 'backlog')"><Icon name="backlog" />Backlog</button>
-      <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="slots?.running" class="badge" title="agents running">{{ slots.running }}</span></button>
       <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Kanban board</button>
+      <button class="item" :class="{ on: view === 'documents' }" data-test="nav-documents" @click="emit('go', 'documents')"><Icon name="docs" />Documents</button>
       <button class="item" :class="{ on: view === 'monitor' }" data-test="nav-monitor" @click="emit('go', 'monitor')"><Icon name="monitor" />Monitor</button>
       <button class="item" data-test="nav-logs" @click="emit('logs')"><Icon name="logs" />Logs</button>
     </nav>
@@ -119,7 +119,10 @@ function finishRename(id: string) {
       <button v-for="t in teams" :key="t.id" class="item small" :class="{ on: view === 'teams' && teamId === t.id }" data-test="team-item" @click="emit('openTeam', t.id)">
         <span class="dot" :class="{ busy: t.running > 0 }" :data-state="teamState(t)" :title="teamStateLabel[teamState(t)]" />
         <span class="label">{{ t.name }}</span>
-        <span v-if="t.running || t.queued" class="muted tiny" data-test="team-counts">{{ t.running }} running · {{ t.queued }} queued</span>
+        <span v-if="t.running || t.queued" class="team-pills" data-test="team-counts">
+          <span v-if="t.running" class="tpill running" data-test="team-running" :title="`${t.running} running`">{{ t.running }}</span>
+          <span v-if="t.queued" class="tpill queued" data-test="team-queued" :title="`${t.queued} queued`">{{ t.queued }}</span>
+        </span>
       </button>
       <button class="item small muted" v-change data-test="new-team" @click="emit('newTeam')"><Icon name="plus" :size="15" />New team</button>
 
@@ -195,6 +198,11 @@ function finishRename(id: string) {
 h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4px; }
 .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tiny { font-size: 11px; }
+/* A team's running and queued counts as pills in the state colours (running solid, queued dashed), each named on hover. */
+.team-pills { display: inline-flex; gap: 3px; flex: none; }
+.tpill { font-size: 11px; line-height: 16px; min-width: 18px; text-align: center; border-radius: 9px; padding: 0 6px; }
+.tpill.running { background: color-mix(in srgb, var(--state-running) 18%, transparent); color: var(--state-running); }
+.tpill.queued { border: 1px dashed var(--state-waiting); color: var(--state-waiting); line-height: 14px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dot-off); flex: none; }
 .dot.busy { background: var(--state-running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-running) 15%, transparent); animation: dot-pulse 1.6s ease-in-out infinite; }
 .dot[data-state=queued] { background: var(--state-waiting); }
@@ -231,14 +239,15 @@ h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4
 .drawer .brand .icon-btn { width: 44px; height: 44px; }
 .drawer .chat .actions { display: flex; }
 .drawer .chat .actions .icon-btn { width: 44px; height: 44px; }
-/* The drawer scrolls as a whole when it is taller than the screen (a short phone, the menu group open), so Settings and
-   the run-slots line are always reachable; the Teams and Chats lists keep room for their heading and two rows. */
+/* The drawer scrolls as ONE list (a phone's screen is short): the Teams and Chats lists are not a box of their own, so
+   every chat is reached by scrolling the drawer, and the footer (the folded menu, Settings, the run slots) follows them
+   instead of being pinned under a squeezed list. */
 .side.drawer { overflow-y: auto; overscroll-behavior: contain; }
-.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot { flex: none; }
+.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot, .drawer .lists { flex: none; }
+.drawer .lists { overflow: visible; }
 .drawer .team-group { flex: none; }
 .team-group { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); margin: 4px 0 2px; padding-bottom: 4px; }
 .team-group .team-name { margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.drawer .lists { min-height: 150px; }
 .drawer-menu { border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; padding-bottom: 4px; }
 .drawer-menu .check { width: 14px; flex: none; color: var(--accent); font-size: 12px; }
 </style>

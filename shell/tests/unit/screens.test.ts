@@ -53,7 +53,10 @@ describe('main window', () => {
     await flushPromises();
     await flushPromises();
     expect(w.get('[data-test=slots]').text()).toBe('Run slots: 3 / 3 in use · 1 queued');
-    expect(w.get('[data-test=team-counts]').text()).toBe('1 running · 1 queued');
+    expect(w.get('[data-test=team-running]').text()).toBe('1');
+    expect(w.get('[data-test=team-running]').attributes('title')).toBe('1 running');
+    expect(w.get('[data-test=team-queued]').text()).toBe('1');
+    expect(w.get('[data-test=team-queued]').attributes('title')).toBe('1 queued');
     // The window opens on the Concierge; the team is one click away in the sidebar.
     expect(w.find('[data-test=concierge-hero]').exists()).toBe(true);
     await w.get('[data-test=team-item]').trigger('click');
@@ -64,7 +67,8 @@ describe('main window', () => {
     const ben = w.get('[data-test=agent-Ben]');
     expect(ben.get('[data-test=agent-face-state]').text()).toBe('Waiting to start');
     expect(ben.get('[data-test=agent-state]').text()).toContain('position 1 of 2');
-    expect(ben.get('[data-test=loosened-chip]').text()).toContain('registry.npmjs.org');
+    // No loosened marker on the card: what is loosened is on the agent's settings (Policy tab).
+    expect(ben.find('[data-test=loosened-chip]').exists()).toBe(false);
     expect(ben.get('[data-test=agent-cli]').text()).toBe('grok');
     const [bensQuestion, hire] = w.findAll('[data-test=decision]');
     expect(bensQuestion.text()).toContain('Ben needs a decision');
@@ -75,7 +79,10 @@ describe('main window', () => {
     expect(hire.find('[data-test=decision-approve]').exists()).toBe(true);
     expect(hire.find('[data-test=decision-always]').exists()).toBe(true);
     expect(w.find('[data-test=decision-discuss]').exists()).toBe(true);
-    expect(w.findAll('[data-test=open-terminal]')).toHaveLength(2);
+    expect(w.findAll('[data-test=member-view-terminal]')).toHaveLength(2);
+    // Every action is in each member's ☰ menu.
+    expect(w.findAll('[data-test=member-more]')).toHaveLength(2);
+    for (const more of w.findAll('[data-test=member-more]')) await more.trigger('click');
     expect(w.findAll('[data-test=open-settings]')).toHaveLength(2);
   });
 });

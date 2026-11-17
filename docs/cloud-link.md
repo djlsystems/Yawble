@@ -54,8 +54,8 @@ written to `cloud-link-audit.log` in the app's data folder, with the time, the v
 
 The site marks each call with the viewer's access: `full` for an Owner or a workgroup Member, `read` for a workgroup
 Visitor. The app checks it on every call. A call with no access, or any value other than `read`, is full, so an
-older site works as before. The app's hello on the connection says `"caps": ["access"]`; the site lets a Visitor open
-only a computer that says it.
+older site works as before. The app's hello on the connection lists `"access"` in its `caps`; the site lets a Visitor
+open only a computer that says it.
 
 A read-only viewer sees the same screens and gets the same live updates. The remote view shows a
 **Read-only (Visitor)** chip and turns off the buttons that would change something. They can:
@@ -64,6 +64,7 @@ A read-only viewer sees the same screens and gets the same live updates. The rem
 - read the board, the backlog, cards and the team's documents;
 - see integrations, their requests and calls, host tasks and their runs, network and tool requests;
 - read the logs, the backup list, the agents and their versions, settings and policies as shown;
+- watch the org dashboard: the computer's summary and its live logs (below);
 - browse members' code (when **Show members' code to cloud viewers** is on).
 
 They cannot change anything. Telling a manager, answering a question, approving or declining a request, answering a
@@ -80,6 +81,154 @@ read-only viewers until it is listed as a read.
 
 The remote view learns its access from `core.getInfo`: over the Cloud Link the answer carries
 `"remoteAccess": "full"` or `"remoteAccess": "read"`. In the window on the computer the field is absent.
+
+## Capabilities in the hello
+
+When it connects, the app sends a hello: `{"type": "hello", "name", "os", "version", "caps": [...]}`. `caps` says
+what this computer understands:
+
+| Cap | Meaning |
+|---|---|
+| `access` | The app checks each call's `access` and refuses a read-only viewer's changes (above). |
+| `summary` | The app answers `org.summary`, `org.summary.watch` and `org.summary.unwatch`, and pushes `org.summaryChanged` while watched (below). |
+| `logsTail` | The app answers `logs.tail` and `logs.untail`, and pushes `logs.tailEntry` while tailed (below). |
+
+The site shows a computer whose hello lacks `summary` as "update Yawble to appear here" on the org dashboard.
+
+## The org dashboard
+
+The site's org dashboard shows what every attached computer is running, live. The site stores none of it: it asks each
+computer while someone is watching. The app sends only facts it already has. It never sends token counts, cost,
+usage, price or "value" figures, though its run records hold token counts. The summary's field names never contain
+token, cost, usage or price, and the model usage log is never read for it.
+
+All five methods below are reads: a Visitor may call them, and anything a viewer cannot read today stays hidden. Free
+text (titles, questions, log lines) is redacted the way the other reads redact it (known secrets and token-shaped text
+become `[redacted]`) and cut to one short line.
+
+A dashboard row links into the remote view: `/i/{id}/ui/remote.html#workflow={wf}` opens that workflow selected in
+its team's Workflows (the team is found from the workflow id; `&team={id}` is an optional hint), `#team={id}` opens that
+team, and an unknown or malformed id opens the usual start page. The workflow is looked for among each team's newest
+200 (the most `bus.workflows` returns); one older than that opens a short "Workflow #N was not found" note instead
+(in its `&team=` team's Workflows when that hint is given). A Visitor can open both. `#terminal/{memberId}` is
+still an agent's terminal window.
+
+### `org.summary` (contract version 1)
+
+`org.summary` (no parameters) answers one snapshot of this computer:
+
+```json
+{
+  "summaryVersion": 1,
+  "at": "2026-11-16T12:00:00Z",
+  "computer": {
+    "name": "DESK-1", "label": "Ada's desk", "yawbleVersion": "2026.11.15.1", "platform": "Microsoft Windows 10.0.26200",
+    "startedAt": "2026-11-16T09:00:00Z", "uptimeSeconds": 10800,
+    "runSlots": { "used": 2, "total": 4 }, "queuedRuns": 1
+  },
+  "teams": [
+    {
+      "name": "web", "paused": false, "archived": false,
+      "agents": { "total": 4, "running": 1, "queued": 1, "idle": 1, "errored": 1 },
+      "running": [ { "member": "Manager", "role": "Manager", "doing": "card 7: plan the login page", "since": "2026-11-16T11:55:00Z" } ]
+    }
+  ],
+  "workflows": [
+    {
+      "id": 10, "team": "web", "title": "Build the login page",
+      "item": { "id": "B048", "title": "Live org summary" },
+      "state": "running", "cards": { "done": 2, "total": 5 },
+      "startedAt": "2026-11-16T10:00:00Z", "lastActivityAt": "2026-11-16T11:59:00Z", "owner": "Manager"
+    }
+  ],
+  "needsYou": {
+    "total": 4, "decisions": 1, "toolCalls": 1, "networkRequests": 1, "toolRequests": 1,
+    "teams": [
+      {
+        "team": "web", "total": 2,
+        "decisions": { "count": 1, "titles": ["Which login provider?"] },
+        "toolCalls": { "count": 1, "titles": ["Ines: gh pr create"] },
+        "networkRequests": { "count": 0, "titles": [] },
+        "toolRequests": { "count": 0, "titles": [] }
+      }
+    ]
+  },
+  "problems": [
+    { "source": "Runs", "team": "web", "member": "Ines", "at": "2026-11-16T11:59:00Z", "level": "error", "message": "run failed: claude exit 1" }
+  ]
+}
+```
+
+- **computer**: the computer's name, `label` (its name on the cloud site; null when not attached), the Yawble version,
+  the OS, when the core started and its uptime, the run slots in use and in total, and the runs waiting for a slot.
+- **teams**: every team, by name, paused or archived. `agents` counts its agents: `running`, `queued`, `idle`, and
+  `errored` (idle, and its last run failed; not also counted as idle). `running` lists each running agent: member
+  name, role (`Manager` or `Member`), what it is doing (its open card on the board, else its last status line) and
+  since when.
+- **workflows**: every open workflow, and those that ended in the last 24 hours, newest activity first. `item` is the
+  backlog item it came from (null when none). `cards` counts its cards on the board, done and in total. `owner` is
+  the agent that owns it (its Manager). `state` is one of:
+
+  | State | Meaning |
+  |---|---|
+  | `running` | An agent is working it (running, queued, or about to be woken). |
+  | `waitingOnPerson` | A question in it waits for the person. |
+  | `blocked` | An agent reported it is blocked, and nothing is working it. |
+  | `nobodyWorking` | Open, and nothing is running, queued or waiting to be woken. |
+  | `failed` | Open with nobody working it, and its owner's last run failed. |
+  | `completed` | Declared done. |
+  | `closed` | Closed by a person. |
+
+  `completed` and `closed` are the ended states. Every other state, `failed` included, is open, so the workflow is
+  listed however long ago its last activity was.
+
+- **needsYou**: what waits for the person: decisions (questions), tool-call approvals, network requests and tool
+  requests. The totals across every team, then per team the count and the first five short titles of each kind.
+- **problems**: the last 20 warning and error entries of the last hour, newest first: failed or cut-short runs,
+  refused network calls, and the app's own diagnostics lines that report an error or a warning. Each has its source,
+  team and member (null when the entry names none), time, `level` (`warning` or `error`) and a one-line message.
+
+Times are UTC, ISO 8601. A later version adds fields; it changes `summaryVersion` only when a field changes meaning
+or goes away.
+
+### `org.summary.watch`, `org.summary.unwatch` and `org.summaryChanged`
+
+- `org.summary.watch` (no parameters) starts the live updates for this viewer and answers the full snapshot, as
+  `org.summary` does.
+- While at least one viewer watches, the app rebuilds the snapshot every 2 seconds. When a section changed, it pushes
+  the event `org.summaryChanged` once, however much changed in those 2 seconds. The uptime ticking alone is not a
+  change.
+- `org.summary.unwatch` stops it for this viewer and answers `{"watching": false}`.
+- A viewer is a sign-in: each viewer's watch is its own. A viewer who leaves (the site's viewer list no longer names
+  them) or a dropped connection counts as an unwatch.
+- When nobody watches, the app builds nothing and pushes nothing.
+
+The event carries the sections that changed, each in full:
+
+```json
+{
+  "event": "org.summaryChanged",
+  "data": {
+    "summaryVersion": 1, "at": "2026-11-16T12:00:02Z", "full": false,
+    "changed": ["computer", "needsYou"],
+    "sections": { "computer": { ... }, "needsYou": { ... } }
+  }
+}
+```
+
+`full` is true when every section is in it. The site replaces each named section of its copy with the one sent.
+
+### `logs.tail`, `logs.untail` and `logs.tailEntry`
+
+- `logs.tail {level: "default" | "all", team?: string, member?: string}` starts pushing this computer's new log
+  entries, as they are written, to this viewer. `default` sends warning and error entries and workflow events;
+  `all` sends every level. `team` and `member` narrow it to one team or one member.
+- Each entry that passes the filter is pushed as the event `logs.tailEntry`, carrying one entry. `logs.query` rows
+  and `logs.tailEntry` entries are redacted the same way, by the same code as the window's Logs dialog: known secrets
+  and token-shaped text become `[redacted]`.
+- The filtering happens on the computer. Nothing is kept for the cloud beyond the logs the app already keeps, and with
+  no viewer tailing nothing is done.
+- `logs.untail` stops it. A viewer who disconnects stops it too.
 
 ## What only the person at the computer can do
 

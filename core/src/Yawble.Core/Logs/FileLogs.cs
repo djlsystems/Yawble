@@ -126,15 +126,20 @@ public sealed class DiagnosticLog(string dataDir, string origin, TimeProvider? c
 
     public string Folder => Path.Combine(dataDir, FileLogs.DiagnosticsFolder);
 
+    /// <summary>logs.tail: each line written is also offered to the open tails (none open: nothing more is done).</summary>
+    public LogTail? Tail { get; set; }
+
     public void Write(string text)
     {
         var now = _clock.GetUtcNow();
         var at = now.ToString("O", CultureInfo.InvariantCulture);
         var sb = new StringBuilder();
+        var tail = Tail is { Count: > 0 } open ? open : null;
         foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
         {
             if (line.Trim().Length == 0) continue;
             sb.Append(at).Append('\t').Append(origin).Append('\t').Append(line.Replace('\t', ' ')).Append('\n');
+            tail?.Write(new LogTailEntry(at, FileLogs.Diagnostics.Id, LogLevels.Of(null, line), null, null, origin, line.Replace('\t', ' '), MemberInText: true));
         }
         if (sb.Length == 0) return;
         lock (_lock)

@@ -269,6 +269,9 @@ describe('the Backlog on a phone', () => {
     // The opening of a row is not triggered by its menu.
     expect(w.find('[data-test=backlog-item]').exists()).toBe(false);
 
+    // The sort is in the header's fold (B054), closed at first.
+    expect(w.find('[data-test=backlog-sort-key]').exists()).toBe(false);
+    await w.get('[data-test=backlog-tools-toggle]').trigger('click');
     await w.get('[data-test=backlog-sort-key]').setValue('title');
     expect(w.findAll('[data-test=backlog-row]').map((r) => r.get('.ttl').text())).toEqual(['First', 'Second', 'Third']);
     await w.get('[data-test=backlog-sort-dir]').trigger('click');
@@ -326,7 +329,7 @@ function teamApi() {
 }
 
 describe('Teams on a phone', () => {
-  it("a team's members are stacked, each one's Activity under its card, with no resize handles", async () => {
+  it("a team's members are stacked, each one's pane showing one view (its Report first) at its own height, with no resize handles", async () => {
     screen(Phone);
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
@@ -334,24 +337,30 @@ describe('Teams on a phone', () => {
     const cells = w.findAll('.member-cell');
     expect(cells).toHaveLength(2);
     for (const c of cells) {
-      const row = c.get('.member-row');
-      // The card, then the Activity, in that order inside the member's row (the phone CSS stacks it as a column).
-      expect(row.element.children[0]!.classList.contains('member-main')).toBe(true);
-      expect(row.element.children[1]!.querySelector('[data-test=member-activity]')).not.toBeNull();
-      expect((row.element.children[1] as HTMLElement).style.flexBasis).toBe('');
+      const row = c.get('[data-test=member-pane-body]');
+      // One view: the chosen tab's (the Report by default); the tabs above it.
+      expect([...row.element.children].map((k) => k.getAttribute('data-test'))).toEqual(['agent-output']);
+      expect(c.findAll('[data-test=member-tabs] button').map((b) => b.attributes('data-test')))
+        .toEqual(['member-view-report', 'member-view-activity', 'member-view-terminal']);
+      expect((row.element as HTMLElement).style.height).toBe('');
+      // The Activity tab shows the Activity in the same place.
+      await c.get('[data-test=member-view-activity]').trigger('click');
+      expect(c.get('[data-test=member-pane-body]').find('[data-test=member-activity]').exists()).toBe(true);
+      expect(c.get('[data-test=member-pane-body]').find('[data-test=agent-output]').exists()).toBe(false);
     }
     expect(w.find('.tile-grip').exists()).toBe(false);
     expect(w.get('section.team').classes()).toContain('phone');
   });
 
-  it('at desktop width: the Activity beside its card at the shared width, with the width and height handles', async () => {
+  it('at desktop width: one view per member at the shared height, with the height handles (no width bar)', async () => {
     screen(Desktop);
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
     await settle();
-    const side = w.findAll('.member-side')[0]!.element as HTMLElement;
-    expect(side.style.flexBasis).toMatch(/px$/);
-    expect(w.findAll('[data-test$=-handle-w]')).toHaveLength(2);
+    const body = w.findAll('[data-test=member-pane-body]')[0]!.element as HTMLElement;
+    expect(body.style.height).toMatch(/px$/);
+    expect(w.find('[data-test=member-side]').exists()).toBe(false);
+    expect(w.findAll('[data-test$=-handle-w]')).toHaveLength(0);
     expect(w.findAll('[data-test$=-handle-h]')).toHaveLength(2);
     expect(w.get('section.team').classes()).not.toContain('phone');
   });
@@ -360,9 +369,11 @@ describe('Teams on a phone', () => {
     const src = (p: string) => readFileSync(resolve(__dirname, '../../src/renderer/src', p), 'utf8');
     const phoneRules = (p: string) => /@media \(max-width: 759\.98px\) \{([\s\S]*?)\n\}/.exec(src(p))?.[1] ?? '';
     expect(phoneRules('components/TeamsList.vue')).toMatch(/\.team-grid \{ grid-template-columns: minmax\(0, 1fr\)/);
-    expect(phoneRules('components/TeamView.vue')).toMatch(/\.member-row \{ flex-direction: column/);
+    // The member's pane is one column everywhere (one view under its tabs); on a phone the view is at its own height.
+    expect(src('components/MemberPane.vue')).toMatch(/\n\.body \{ display: flex; flex-direction: column/);
+    expect(phoneRules('components/MemberPane.vue')).toMatch(/\.body \{ height: auto; \}/);
     expect(src('components/TileGrip.vue')).toMatch(/@media \(max-width: 759\.98px\) \{ \.tile-grip \{ display: none; \} \}/);
-    expect(phoneRules('components/AgentCard.vue')).toMatch(/min-height: 44px/);
+    expect(phoneRules('components/MemberPane.vue')).toMatch(/min-width: 44px/);
     for (const f of ['GitBanner', 'HostChecksBanner', 'TeamSyncBanner', 'UpdateBanner', 'TeamWorkflows', 'AgentTile', 'MemberActivity'])
       expect(src(`components/${f}.vue`), f).toContain('@media (max-width: 759.98px)');
   });
@@ -500,6 +511,30 @@ describe('Logs on a phone', () => {
     await w.get('[data-test=logs-sort-dir]').trigger('click');
     await settle();
     expect(called('logs.query').at(-1)!.params.descending).toBe(true);
+  });
+
+  it('the filters fold behind a Filters button (closed at first, counting what is set), so the entries get the screen', async () => {
+    screen(Phone);
+    const { api } = logsApi();
+    const w = keep(mount(LogsDialog, { props: { api, team: 'web' }, attachTo: document.body }));
+    await settle();
+    const filters = w.get('[data-test=logs-filters]').element as HTMLElement;
+    expect(filters.style.display).toBe('none');
+    expect(w.find('[data-test=logs-about]').exists()).toBe(false);
+    const toggle = w.get('[data-test=logs-filters-toggle]');
+    expect(toggle.text()).toBe('Filters (1) ▾'); // the team it was opened for
+    await toggle.trigger('click');
+    expect(filters.style.display).toBe('');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+  });
+
+  it('at desktop width the filters are always shown, with no Filters button', async () => {
+    screen(Desktop);
+    const { api } = logsApi();
+    const w = keep(mount(LogsDialog, { props: { api }, attachTo: document.body }));
+    await settle();
+    expect((w.get('[data-test=logs-filters]').element as HTMLElement).style.display).toBe('');
+    expect(w.find('[data-test=logs-filters-toggle]').exists()).toBe(false);
   });
 
   it('at desktop width: the table with its sortable column headers, no cards', async () => {

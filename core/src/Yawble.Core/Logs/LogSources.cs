@@ -285,10 +285,13 @@ public static class LogSources
     /// <summary>
     /// The combined view: one row per thing that happened to or by a member, with its member as "Team/Name". Audit
     /// entries are about a member when their target names it (memberId=…, or team=… member=…).
+    /// A run's row is dated by its end once it has ended (what it says, "run failed", happened then), by its start while it
+    /// runs: so a run that started hours ago and failed just now is in the last hour (org.summary problems) and is new to an
+    /// open logs.tail (B051).
     /// </summary>
     private const string ActivityFrom = """
         (
-          SELECT r.started_at AS at, 'Runs' AS source, r.team || '/' || r.member AS member, 'run ' || COALESCE(r.end_class, 'running') AS event,
+          SELECT COALESCE(r.ended_at, r.started_at) AS at, 'Runs' AS source, r.team || '/' || r.member AS member, 'run ' || COALESCE(r.end_class, 'running') AS event,
                  trim(COALESCE(r.cli, '') || ' ' || COALESCE(r.model, '') || ' ' || COALESCE(r.kind, '') || COALESCE(' exit ' || r.exit_code, '') || COALESCE(' ' || r.reason, '')) AS details,
                  'r' || r.id AS rid
             FROM run_records r

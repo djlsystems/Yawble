@@ -1,18 +1,18 @@
-﻿// B037 verify (card 169): remote.html on a phone, end to end in a real browser (headless Chrome), against a FAKE core
+// B037 verify (card 169): remote.html on a phone, end to end in a real browser (headless Chrome), against a FAKE core
 // (tests/e2e/phone/fake-core.ts: canned answers over the page's socket, nothing real behind it).
 //
 // Every screen at 390 x 844 and 360 x 740: the page must not scroll sideways (scrollWidth > innerWidth), no visible
 // control may sit off the screen's edge, and none may be smaller than 44 x 44 px. Plus the on-screen keyboard (a fake
 // visualViewport), the Visitor chip, the dark Monitor and its forces panel, the 759 / 760 px edges, rotation, and at
-// 1280 px the desktop layout compared with main b726212's.
+// 1280 px the desktop layout compared with main's at BASE_COMMIT (tests/e2e/phone/server.ts; one line to bump).
 //
-//   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, from `git archive b726212 shell code-browser`)
+//   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B037-screens (else test-results/B037-screens); the audit to test-results/b037-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { audit, type Audit } from './phone/audit';
-import { baseBuiltDir, baseShellDir, buildRenderer, builtDir, fakeRemote } from './phone/server';
+import { BASE_COMMIT, baseBuiltDir, baseShellDir, buildRenderer, builtDir, extractBaseTree, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
@@ -26,17 +26,19 @@ test.beforeAll(async () => {
   test.setTimeout(600_000);
   mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
-  if (process.env.B037_NO_BASE !== '1') await buildRenderer(baseShellDir, baseBuiltDir);
+  if (process.env.B037_NO_BASE !== '1') { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
 });
 
 type Size = { w: number; h: number };
 const PHONES: Size[] = [{ w: 390, h: 844 }, { w: 360, h: 740 }];
 
-interface OpenOpts { access?: 'full' | 'read'; theme?: 'light' | 'dark'; dir?: string; mobile?: boolean; asks?: boolean }
+interface OpenOpts { access?: 'full' | 'read'; theme?: 'light' | 'dark'; dir?: string; mobile?: boolean; asks?: boolean; sync?: boolean; needsYou?: boolean }
 async function open(browser: Browser, size: Size, o: OpenOpts = {}) {
   const s = fakeRemote(o.dir ?? builtDir);
   s.core.setAccess(o.access ?? 'full');
   s.core.setAsks(o.asks ?? true);
+  s.core.setSync(o.sync ?? false);
+  s.core.setNeedsYou(o.needsYou ?? true);
   const mobile = o.mobile ?? size.w < 760;
   const ctx = await browser.newContext({ viewport: { width: size.w, height: size.h }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 2, colorScheme: o.theme ?? 'light' });
   await ctx.addInitScript((theme) => {
@@ -136,12 +138,17 @@ for (const size of PHONES) {
       await check(page, 'concierge-new', size);
       await drawer(page);
       await check(page, 'drawer', size);
-      // The drawer's Teams and Chats lists get room (two rows at least), and Settings is on screen or reachable by scrolling.
+      // The drawer scrolls as one list: no inner box holds the Teams and Chats lists, the first chat comes on screen by
+      // scrolling the drawer, and Settings is on screen or reachable by scrolling.
       const room = await page.locator('[data-test=sidebar]').evaluate((side) => {
-        const lists = [...side.querySelectorAll<HTMLElement>('*')].find((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.querySelector('[data-test=chat-item]'));
-        return { lists: lists ? lists.clientHeight : -1, sideScrolls: /(auto|scroll)/.test(getComputedStyle(side).overflowY), sideOver: side.scrollHeight - side.clientHeight };
+        const inner = [...side.querySelectorAll<HTMLElement>('*')].find((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.querySelector('[data-test=chat-item]'));
+        return { inner: !!inner, sideScrolls: /(auto|scroll)/.test(getComputedStyle(side).overflowY), sideOver: side.scrollHeight - side.clientHeight };
       });
-      expect.soft(room.lists, `drawer @${tag(size)}: px the Teams and Chats lists get`).toBeGreaterThanOrEqual(88);
+      expect.soft(room.inner, `drawer @${tag(size)}: the lists are not a scrolling box of their own`).toBe(false);
+      const chat = page.locator('[data-test=sidebar] [data-test=chat-item]').first();
+      await chat.scrollIntoViewIfNeeded();
+      const cb = (await chat.boundingBox())!;
+      expect.soft(cb.y >= 0 && cb.y + cb.height <= size.h + 1, `drawer @${tag(size)}: the first chat on screen after scrolling`).toBe(true);
       const settings = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
       await settings.scrollIntoViewIfNeeded().catch(() => {});
       const sb = (await settings.boundingBox())!;
@@ -176,7 +183,18 @@ for (const size of PHONES) {
       await expect(page.locator('[data-test=team-title]')).toBeVisible();
       await check(page, 'team', size);
       await page.screenshot({ path: path.join(SHOTS, `team-full-${tag(size)}.png`), fullPage: true });
-      await page.locator('[data-test=open-code]').first().click();
+      // B061: on a phone a member's Code is in its pane's ⋯ menu (member-more): open the first one that has a clone.
+      const code = page.locator('[data-test=open-code]:visible').first();
+      if (!(await code.isVisible().catch(() => false))) {
+        const mores = page.locator('[data-test=member-more]');
+        for (let i = 0, n = await mores.count(); i < n; i++) {
+          await mores.nth(i).click();
+          await expect(page.locator('[data-test=member-more-menu]')).toBeVisible();
+          if (await page.locator('[data-test=member-more-menu] [data-test=open-code]').count()) break;
+          await mores.nth(i).click(); // closes it again
+        }
+      }
+      await page.locator('[data-test=open-code]:visible').first().click();
       await expect(page.locator('.code-dialog, [data-test=code-dialog], [data-test=code-browser]').first()).toBeVisible();
       await page.waitForTimeout(500);
       await check(page, 'code-browser', size);
@@ -321,11 +339,12 @@ for (const size of PHONES) {
 
     // F7 re-verify (card 177): the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
     test('Visitor (read-only) F7: the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
-      const composerBar = (page: Page) => page.locator('[data-test=composer] .bar').evaluate((bar) => {
-        const r = (sel: string) => { const e = bar.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
+      // B057: on a phone the team and agent pickers fold out above the bar (one button opens them).
+      const composerBar = async (page: Page) => { await page.locator('[data-test=composer-pickers-toggle]').click(); return page.locator('[data-test=composer] .bar').evaluate((bar) => {
+        const r = (sel: string) => { const e = bar.closest('[data-test=composer]')!.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
         const bb = bar.getBoundingClientRect();
         return { barRight: bb.right - parseFloat(getComputedStyle(bar).paddingRight), padR: getComputedStyle(bar).paddingRight, team: r('[data-test=composer-team]'), agent: r('[data-test=composer-agent]'), attach: r('[data-test=composer-attach]'), send: r('[data-test=composer-send]'), sw: document.documentElement.scrollWidth, iw: innerWidth };
-      });
+      }); };
       const full = await open(browser, size, { asks: false });
       const f = await composerBar(full.page);
       await full.ctx.close();
@@ -416,7 +435,7 @@ for (const size of PHONES) {
       // Openers: Logs from the drawer, then each sheet the team page and its first agent card offer (when shown).
       const openers: { name: string; go: (page: Page) => Promise<boolean> }[] = [
         { name: 'logs', go: async (p) => { await nav(p, 'nav-logs'); return true; } },
-        ...['open-code', 'open-settings', 'open-guardrail', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
+        ...['open-code', 'open-settings', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
           name: id.replace('open-', 'team-'),
           go: async (p: Page) => {
             await nav(p, 'nav-teams');
@@ -425,6 +444,19 @@ for (const size of PHONES) {
             // On a phone the team's Documents and Workflows are in the drawer, not the header (card 316).
             if (id === 'open-documents' || id === 'open-workflows') { await nav(p, id.replace('open-', 'drawer-team-')); return true; }
             const b = p.locator(`[data-test=${id}]`).first();
+            // B054 (card 270): on a phone Triggers, Git and Settings are in the team page's ⋯ menu: open it first.
+            const more = p.locator('[data-test=team-more]');
+            if (!(await b.isVisible().catch(() => false)) && (await more.isVisible().catch(() => false))) {
+              await more.click();
+              await expect(p.locator('[data-test=team-more-menu]')).toBeVisible();
+            }
+            // B061: on a phone a member's Code, Settings and Logs are in its pane's ⋯ menu (member-more).
+            const memberMore = p.locator('[data-test=member-more]').first();
+            if (!(await b.isVisible().catch(() => false)) && (await memberMore.isVisible().catch(() => false))) {
+              if (await more.isVisible().catch(() => false) && (await p.locator('[data-test=team-more-menu]').count())) await more.click();
+              await memberMore.click();
+              await expect(p.locator('[data-test=member-more-menu]')).toBeVisible();
+            }
             if (!(await b.isVisible().catch(() => false))) return false;
             return b.click({ timeout: 3000 }).then(() => true, () => false);
           },
@@ -463,6 +495,10 @@ for (const size of PHONES) {
       }
       console.log(`F8 sheets @${tag(size)}: ${JSON.stringify(seen)}`);
       results.push({ screen: 'f8-sheets', size: tag(size), audit: seen as unknown as Audit });
+      // B054: the three sheets behind ⋯ are still checked on a phone (an opener that is gone is a fault, not a skip).
+      for (const name of ['team-triggers', 'team-git', 'team-manage'])
+        for (const access of ['read', 'full'] as const)
+          expect.soft(typeof seen[name]?.[access], `${name} (${access}) @${tag(size)}: opened as a sheet (${JSON.stringify(seen[name]?.[access])})`).toBe('object');
     });
 
     test('dark theme: the shell is dark, the Monitor is dark', async ({ browser }) => {
@@ -559,38 +595,289 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
   }
 });
 
-test.describe('1280 px: the desktop layout is unchanged from main b726212', () => {
+test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}`, () => {
   test.skip(process.env.B037_NO_BASE === '1', 'no base build');
-  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'], ['nav-logs', 'logs']] as const) {
+  // B054 verify (card 270): also the pages B054 changes past their landing screen - a team's page, a team's documents
+  // folder, and the Settings sections (Skills with a skill picked, Guardrails, Integrations, System).
+  const tap = (sel: string) => async (p: Page) => { await p.locator(sel).first().click(); await p.waitForTimeout(500); };
+  const deeper: Record<string, ((p: Page) => Promise<void>)[]> = {
+    'team-page': [tap('[data-test=team-open-payments]')],
+    'documents-folder': [tap('[data-test=documents-team-payments]')],
+    'settings-skill': [tap('[data-test=settings] [data-test=open-skills]'), tap('[data-test=skill-skill-10]')],
+    'settings-guardrails': [tap('[data-test=settings] [data-test=open-global-policy]')],
+    'settings-integrations': [tap('[data-test=settings] [data-test=open-integrations]')],
+    'settings-system': [tap('[data-test=settings] [data-test=open-system]')],
+  };
+  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'], ['nav-logs', 'logs'],
+    ['nav-teams', 'team-page'], ['nav-documents', 'documents-folder'], ['open-app-settings', 'settings-skill'], ['open-app-settings', 'settings-guardrails'], ['open-app-settings', 'settings-integrations'], ['open-app-settings', 'settings-system']] as const) {
     test(`${name}: every [data-test] element in the same place and size`, async ({ browser }) => {
       const size = { w: 1280, h: 800 };
-      const layouts: Record<string, Record<string, string>> = {};
+      type Layout = { out: Record<string, string>; below: string[]; members: { top: number; bottom: number } | null;
+        panes: { name: string; frames: number; saidRight: number; sideLeft: number }[] };
+      const layouts: Record<string, Layout> = {};
       for (const [which, dir] of [['base', baseBuiltDir], ['branch', builtDir]] as const) {
         const { page } = await open(browser, size, { dir, mobile: false });
         if (id) await page.locator(`[data-test=sidebar] [data-test=${id}]`).first().click();
+        for (const step of deeper[name] ?? []) await step(page);
         await page.waitForTimeout(900);
         await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${name}-${which}.png`) });
         layouts[which] = await page.evaluate(() => {
+          // A team's page (B061, card 312): its members (.member-cell, an AgentCard + activity row on main, one framed
+          // MemberPane here) are measured apart; what comes after them is listed in `below`.
+          const cells = [...document.querySelectorAll('.member-cell')];
+          const last = cells[cells.length - 1];
+          const members = cells.length ? { top: Math.round(cells[0].getBoundingClientRect().top), bottom: Math.round(last.getBoundingClientRect().bottom) } : null;
           const out: Record<string, string> = {};
+          const below: string[] = [];
           const seen = new Map<string, number>();
           for (const el of document.querySelectorAll('[data-test]')) {
+            if (el.closest('.member-cell')) continue;
             const k0 = el.getAttribute('data-test')!;
             const n = (seen.get(k0) ?? 0) + 1; seen.set(k0, n);
             const r = el.getBoundingClientRect();
             if (!r.width && !r.height) continue;
-            out[`${k0}#${n}`] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+            const k = `${k0}#${n}`;
+            out[k] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+            if (last && (last.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) below.push(k);
           }
-          return out;
+          const panes = cells.map((c) => {
+            const body = c.querySelector('[data-test=member-pane-body]');
+            return { name: c.querySelector('[data-test^=agent-]')?.getAttribute('data-test') ?? '?', frames: c.querySelectorAll('section.pane').length,
+              views: body ? body.children.length : -1 };
+          });
+          return { out, below, members, panes };
         });
         await page.context().close();
       }
+      const base = layouts.base!, branch = layouts.branch!;
+      // What follows the members may move down or up by however much taller or shorter the members area is (B061).
+      const shift = base.members && branch.members ? (branch.members.bottom - branch.members.top) - (base.members.bottom - base.members.top) : 0;
+      const moved = (v: string | undefined, dy: number) => v?.replace(/^(-?\d+),(-?\d+)/, (_m, x, y) => `${x},${Number(y) - dy}`);
       // A data-test the branch adds (a hook main does not have) is not a layout change: listed, not compared.
       const diff: string[] = [];
-      const added = Object.keys(layouts.branch!).filter((k) => !(k.replace(/#\d+$/, '#1') in layouts.base!));
+      const added = Object.keys(branch.out).filter((k) => !(k.replace(/#\d+$/, '#1') in base.out));
       if (added.length) console.log(`${name} @1280: hooks new in B037 (not compared): ${added.join(', ')}`);
-      for (const k of new Set([...Object.keys(layouts.base!), ...Object.keys(layouts.branch!)]))
-        if (!added.includes(k) && layouts.base![k] !== layouts.branch![k]) diff.push(`${k}: main ${layouts.base![k] ?? '-'} / B037 ${layouts.branch![k] ?? '-'}`);
-      expect.soft(diff, `${name} at 1280 px differs from main`).toEqual([]);
+      for (const k of new Set([...Object.keys(base.out), ...Object.keys(branch.out)])) {
+        if (added.includes(k)) continue;
+        const b = branch.below.includes(k) ? moved(branch.out[k], shift) : branch.out[k];
+        if (base.out[k] !== b) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / B037 ${branch.out[k] ?? '-'}${branch.below.includes(k) ? ` (below the members, shift ${shift})` : ''}`);
+      }
+      expect.soft(diff, `${name} at 1280 px differs from main ${BASE_COMMIT}`).toEqual([]);
+      if (base.members || branch.members) {
+        // The members area starts where main's did: one frame per member, showing one view (its chosen tab's).
+        // eslint-disable-next-line no-console
+        console.log(`${name} @1280: members main ${JSON.stringify(base.members)} / B061 ${JSON.stringify(branch.members)}; ${JSON.stringify(branch.panes)}`);
+        expect.soft(branch.members?.top, `${name}: the members start where main's do`).toBe(base.members?.top);
+        expect.soft(branch.panes.length, `${name}: one pane per member`).toBe(base.panes.length);
+        for (const p of branch.panes) {
+          expect.soft(p.frames, `${p.name}: one framed pane`).toBe(1);
+          expect.soft(p.views, `${p.name}: one view`).toBe(1);
+        }
+      }
     });
   }
 });
+
+// B054 verify (card 270): iPhone SE sizes, portrait 375 x 501 and landscape 667 x 263 (both the phone layout). Per page:
+// where the first content row starts (px from the top of the frame, the browser window; ~120 px is the portrait target,
+// on screen in landscape), no nested vertical scrollers, no sideways scroll, every field 16 px / 44 px, the Settings
+// back control after scrolling Guardrails to its bottom, and a picked skill in view. "before" is the base team branch
+// (B037_BASE_DIR, e.g. 8b39e07), "after" this branch; only "after" is asserted, "before" is measured and recorded.
+const SE: Size[] = [{ w: 375, h: 501 }, { w: 667, h: 263 }];
+type B054 = { first: { sel: string; top: number; bottom: number } | null; rows: Record<string, { top: number; bottom: number } | null>; topBar: number;
+  scrollers: string[]; inputs: { what: string; font: number; h: number }[]; overflow: boolean; sw: number };
+const B054_RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'b054-measure.ndjson');
+
+/** Measures the screen: the first visible match of `first` (in order), the named rows, the inner vertical scrollers, the fields. */
+function measure(page: Page, first: string[], rows: Record<string, string> = {}): Promise<B054> {
+  return page.evaluate(([first, rows]) => {
+    const shown = (el: Element) => { if (el.closest('[inert], [aria-hidden=true]')) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (el as HTMLElement).checkVisibility?.({ checkVisibilityCSS: true } as any) !== false && r.right > 0 && r.left < innerWidth; };
+    const box = (sel: string) => { const el = [...document.querySelectorAll(sel)].find(shown); if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+    let f: B054['first'] = null;
+    for (const s of first as string[]) { const b = box(s); if (b) { f = { sel: s, ...b }; break; } }
+    const named: B054['rows'] = {};
+    for (const [k, s] of Object.entries(rows as Record<string, string>)) named[k] = box(s);
+    const bar = document.querySelector('.app.phone > .main > header.bar, .app > .main > header.bar');
+    const describe = (el: Element) => `${el.tagName.toLowerCase()}${el.getAttribute('data-test') ? `[data-test=${el.getAttribute('data-test')}]` : ''}${typeof (el as HTMLElement).className === 'string' && (el as HTMLElement).className ? '.' + (el as HTMLElement).className.trim().split(/\s+/).slice(0, 3).join('.') : ''}`;
+    const scrollers: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>('body *')) {
+      if (el.tagName === 'TEXTAREA' || el.closest('[data-test=sidebar]')) continue;
+      const s = getComputedStyle(el);
+      if (!/(auto|scroll)/.test(s.overflowY) || el.scrollHeight <= el.clientHeight + 1 || !shown(el)) continue;
+      scrollers.push(`${describe(el)} ${el.clientHeight}/${el.scrollHeight}`);
+    }
+    const inputs = [...document.querySelectorAll<HTMLElement>('input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=range]):not([type=color]):not([type=file]), select, textarea')]
+      .filter(shown).filter((el) => !el.closest('[data-test=sidebar]'))
+      .map((el) => ({ what: describe(el), font: parseFloat(getComputedStyle(el).fontSize), h: Math.round(el.getBoundingClientRect().height * 10) / 10 }));
+    const sw = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+    return { first: f, rows: named, topBar: bar ? Math.round(bar.getBoundingClientRect().bottom) : -1, scrollers, inputs, overflow: sw > innerWidth, sw };
+  }, [first, rows] as const);
+}
+
+for (const size of SE) {
+  const portrait = size.h > size.w;
+  test.describe(`B054 iPhone SE ${tag(size)} (${portrait ? 'portrait' : 'landscape'})`, () => {
+    const builds = [['after', builtDir], ...(process.env.B037_NO_BASE === '1' ? [] : [['before', baseBuiltDir]])] as const;
+    for (const [which, dir] of builds) {
+      test(`${which}: Backlog, Team, Documents and every Settings section`, async ({ browser }) => {
+        test.setTimeout(240_000);
+        const after = which === 'after';
+        const rec = (screen: string, m: B054, extra: Record<string, unknown> = {}) => {
+          mkdirSync(path.dirname(B054_RESULTS), { recursive: true });
+          appendFileSync(B054_RESULTS, JSON.stringify({ which, screen, size: tag(size), ...m, ...extra }) + '\n');
+        };
+        const where = (screen: string) => `${screen} @${tag(size)}`;
+        /** The checks for a page; the first content row against the target (portrait) or on screen (landscape). */
+        const judge = (screen: string, m: B054, o: { scrollersOk?: number; at?: boolean } = {}) => {
+          if (!after) return;
+          expect.soft(m.first, `${where(screen)}: a first content row`).not.toBeNull();
+          // at: false - a fold or field the user opened pushes the list down: not judged for where the row starts.
+          if (m.first && o.at !== false) {
+            if (portrait) expect.soft(m.first.top, `${where(screen)}: first content row (${m.first.sel}) within ~120 px of the top`).toBeLessThanOrEqual(120);
+            else expect.soft(m.first.top < size.h && m.first.bottom > 0, `${where(screen)}: first content row (${m.first.sel}) on screen in landscape (top ${m.first.top})`).toBe(true);
+          }
+          expect.soft(m.scrollers.length, `${where(screen)}: vertical scrollers (the page's one only): ${m.scrollers.join(' | ')}`).toBeLessThanOrEqual(o.scrollersOk ?? 1);
+          expect.soft(m.overflow, `${where(screen)}: sideways scroll (${m.sw} > ${size.w})`).toBe(false);
+          for (const i of m.inputs) {
+            expect.soft(i.font, `${where(screen)}: ${i.what} font-size`).toBeGreaterThanOrEqual(16);
+            expect.soft(i.h, `${where(screen)}: ${i.what} height`).toBeGreaterThanOrEqual(44);
+          }
+        };
+        const SHOTS54 = path.join(path.dirname(SHOTS), 'B054-screens');
+        mkdirSync(SHOTS54, { recursive: true });
+        const shot = (screen: string) => page.screenshot({ path: path.join(SHOTS54, `${which}-${screen}-${tag(size)}.png`) });
+        let { page, ctx, errors } = await open(browser, size, { dir, asks: false });
+
+        // Backlog: the list, then the search-and-sort fold open (its fields).
+        await nav(page, 'nav-backlog');
+        await expect(page.locator('[data-test=backlog-row]').first()).toBeVisible();
+        await page.waitForTimeout(300);
+        let m = await measure(page, ['[data-test=backlog-row]'], { head: '[data-test=backlog-phone-head], .backlog-place .head' });
+        rec('backlog', m); judge('backlog', m); await shot('backlog');
+        const tools = page.locator('[data-test=backlog-tools-toggle]');
+        if (await tools.count()) { await tools.click(); await page.waitForTimeout(200); }
+        m = await measure(page, ['[data-test=backlog-row]'], { search: '[data-test=backlog-search]' });
+        rec('backlog-tools', m); judge('backlog-tools', m, { at: false }); await shot('backlog-tools');
+        if (after) expect.soft(m.inputs.some((i) => /backlog-search/.test(i.what)), `${where('backlog-tools')}: the search field shown`).toBe(true);
+
+        // Team, without and with the sync bar: the Tell row is the first content row; the first member card measured too.
+        // Three states: an integration ask and a Manager decision pending (above the members), the same with the sync bar,
+        // and nothing pending (the members right under Tell).
+        for (const [screen, sync, needsYou] of [['team', false, true], ['team-sync', true, true], ['team-quiet', false, false], ['team-quiet-sync', true, false]] as const) {
+          if (screen !== 'team') { await ctx.close(); ({ page, ctx, errors } = await open(browser, size, { dir, asks: false, sync, needsYou })); }
+          await nav(page, 'nav-teams');
+          await page.locator('[data-test=team-open-payments]').click();
+          await expect(page.locator('[data-test=team-title]')).toBeVisible();
+          if (sync) await expect(page.locator('[data-test=team-sync]')).toBeVisible();
+          await page.waitForTimeout(500);
+          m = await measure(page, ['.tell.row'], { title: '[data-test=team-title]', sync: '[data-test=team-sync]', tell: '.tell.row', member: '[data-test=agent-Manager]' });
+          rec(screen, m); judge(screen, m); await shot(screen);
+          if (after) expect.soft(m.rows.tell && m.rows.tell.bottom - m.rows.tell.top, `${where(screen)}: the Tell row is one 44 px row`).toBeLessThanOrEqual(56);
+          // Asks and decisions pending go above the members on purpose (Needs you first): there the members are recorded only.
+          if (after && !portrait && !needsYou) expect.soft(m.rows.member && m.rows.member.top < size.h, `${where(screen)}: a member card on screen in landscape (top ${m.rows.member?.top})`).toBe(true);
+          // Scrolled until the first member card shows: is it reachable (the page scrolls)?
+          await page.locator('[data-test=agent-Manager]').scrollIntoViewIfNeeded();
+          const mb = await page.locator('[data-test=agent-Manager]').boundingBox();
+          rec(`${screen}-member-scrolled`, m, { memberAfterScroll: mb && { top: Math.round(mb.y), bottom: Math.round(mb.y + mb.height) } });
+        }
+        await ctx.close();
+        ({ page, ctx, errors } = await open(browser, size, { dir, asks: false }));
+
+        // Documents: the root (team folders), a team's folder, and its New file field.
+        await nav(page, 'nav-documents');
+        await expect(page.locator('[data-test=documents-view]')).toBeVisible();
+        await page.waitForTimeout(400);
+        m = await measure(page, ['[data-test^=documents-team-]'], { title: '[data-test=documents-view] h2' });
+        rec('documents-root', m); judge('documents-root', m); await shot('documents-root');
+        await page.locator('[data-test=documents-team-payments]').click();
+        await expect(page.locator('[data-test=docs-browser]')).toBeVisible();
+        await page.waitForTimeout(400);
+        const firstDoc = ['[data-test=docs-list] [data-test^="doc-"]:not([data-test^="doc-delete"])', '[data-test=docs-list] li'];
+        m = await measure(page, firstDoc, { bar: '[data-test=docs-browser] > .bar' });
+        rec('documents-folder', m); judge('documents-folder', m); await shot('documents-folder');
+        const add = page.locator('[data-test=docs-add]');
+        if (await add.isVisible().catch(() => false)) await add.click();
+        await page.locator('[data-test=docs-new-file]').first().click();
+        await expect(page.locator('[data-test=docs-name]')).toBeVisible();
+        m = await measure(page, firstDoc, { name: '[data-test=docs-name]' });
+        rec('documents-new-file', m); judge('documents-new-file', m, { at: false }); await shot('documents-new-file');
+        if (after) expect.soft(m.inputs.some((i) => /docs-name/.test(i.what)), `${where('documents-new-file')}: the name field shown`).toBe(true);
+
+        // Settings: the list, then each section; Guardrails scrolled to its bottom; Skills with a skill picked.
+        const openSettings = async () => {
+          await drawer(page);
+          const item = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
+          await item.scrollIntoViewIfNeeded().catch(() => {});
+          await item.click();
+          await expect(page.locator('[data-test=settings]')).toBeVisible();
+          await page.waitForTimeout(400);
+        };
+        await openSettings();
+        m = await measure(page, ['[data-test=settings] [role=tab]']);
+        rec('settings', m); judge('settings', m); await shot('settings');
+        for (const id of ['open-general', 'open-agents', 'open-skills', 'open-global-policy', 'open-integrations', 'open-system']) {
+          const tab = page.locator(`[data-test=settings] [data-test=${id}]`);
+          if (!(await tab.isVisible().catch(() => false))) {
+            const back = page.locator('[data-test=settings-back]');
+            if (await back.isVisible().catch(() => false)) await back.click(); else await openSettings();
+            await page.waitForTimeout(200);
+          }
+          await tab.click();
+          await page.waitForTimeout(700);
+          const screen = `settings-${id.replace('open-', '')}`;
+          // Where the section opened (the page scroller keeps the last section's scroll, e.g. Guardrails at its bottom),
+          // recorded; then measured from its top.
+          const openedAt = await page.locator('[data-test=settings]').evaluate((s) => { const t = Math.round(s.scrollTop); s.scrollTop = 0; return t; });
+          if (openedAt) rec(`${screen}-opened-scrolled`, await measure(page, []), { openedAt });
+          await page.waitForTimeout(150);
+          m = await measure(page, ['[data-test=settings-pane] > section > *:not(.section-head)', '[data-test=settings-pane] > * > *:not(.section-head)', '[data-test=settings-pane] > *'],
+            { head: '[data-test=settings] .section-head', back: '[data-test=settings-back]' });
+          rec(screen, m); judge(screen, m); await shot(screen);
+          if (id === 'open-global-policy') {
+            // Scroll the page's scroller to the bottom: "‹ Settings" still on screen and tappable.
+            const r = await page.locator('[data-test=settings-pane]').evaluate((pane) => {
+              let s: HTMLElement | null = pane;
+              while (s && !(/(auto|scroll)/.test(getComputedStyle(s).overflowY) && s.scrollHeight > s.clientHeight + 1)) s = s.parentElement;
+              const sc = s ?? document.scrollingElement as HTMLElement;
+              sc.scrollTop = sc.scrollHeight;
+              return { scroller: sc.tagName + '.' + sc.className, scrollTop: Math.round(sc.scrollTop), max: sc.scrollHeight - sc.clientHeight };
+            });
+            await page.waitForTimeout(300);
+            const back = await page.evaluate(() => {
+              const b = document.querySelector('[data-test=settings-back]');
+              if (!b) return null;
+              const r = b.getBoundingClientRect();
+              const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height), tappable: !!hit && (b === hit || b.contains(hit)) };
+            });
+            rec('settings-guardrails-bottom', await measure(page, []), { scroll: r, back });
+            await shot('settings-guardrails-bottom');
+            if (after) {
+              expect.soft(r.max, `${where('guardrails')}: Guardrails is longer than the screen (to test the scroll)`).toBeGreaterThan(0);
+              expect.soft(back && back.top >= 0 && back.bottom <= size.h && back.tappable, `${where('guardrails')}: ‹ Settings on screen and tappable at the bottom (${JSON.stringify(back)}, ${JSON.stringify(r)})`).toBe(true);
+            }
+          }
+          if (id === 'open-skills') {
+            const skill = page.locator('[data-test=skill-skill-10]');
+            await skill.scrollIntoViewIfNeeded();
+            await skill.click();
+            await page.waitForTimeout(500);
+            const pane = await page.locator('[data-test=skills-pane]').evaluate((p) => {
+              const r = p.getBoundingClientRect(); const body = p.querySelector('.body')?.getBoundingClientRect();
+              return { top: Math.round(r.top), bottom: Math.round(r.bottom), title: p.textContent!.includes('skill-10'), bodyTop: body ? Math.round(body.top) : null };
+            });
+            const sm = await measure(page, ['[data-test=skills-pane]']);
+            rec('settings-skill-picked', sm, { pane });
+            judge('settings-skill-picked', sm);
+            await shot('settings-skill-picked');
+            if (after) expect.soft(pane.top >= 0 && pane.top < size.h - 40 && pane.title, `${where('skill picked')}: the skill's detail in view (${JSON.stringify(pane)})`).toBe(true);
+            const sb = page.locator('[data-test=skills-back]');
+            if (await sb.isVisible().catch(() => false)) await sb.click();
+          }
+        }
+        expect(errors).toEqual([]);
+        await ctx.close();
+      });
+    }
+  });
+}

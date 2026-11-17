@@ -26,9 +26,30 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - **Reset** clears, per member, waiting instructions, the home folder (the CLI's own history), the clone, and the
     team's documents, as you choose.
   - **Environment** holds team environment variables; the next runs get them.
-- **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**.
-- On the team page each member's card has an **Activity** tile beside it: the Monitor's activity lines for that
-  member (what it was told, its progress, runs and changed files), newest first.
+- **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**. Every open
+  workflow is listed however old, with the newest completed and closed ones; the cloud dashboard, the Concierge and the
+  companion list them the same way. Ask the Concierge to close the open ones whose work is done: it checks each one
+  and closes only those with nothing left, saying why (on this computer: the remote view's Concierge cannot close
+  workflows).
+- On the team page each member is one framed pane:
+  - A title bar: face, name, role and CLI chips, its state and how many instructions wait behind its run, and at the
+    right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
+    Stop and Remove.
+  - A row of tabs, **Report | Activity | Terminal**, with the run's details beside them (how its last run ended, its
+    queue position, policy problems).
+  - One view, the chosen tab's. **Report**: what the member last said, formatted. **Activity**: the Monitor's lines
+    for that member (what it was told, its progress, runs and changed files, newest first). **Terminal**: its runs.
+  - The terminal in a pane is never interactive: it is just the screen, always formatted, with no bar of its own and
+    no input; an interactive session shows there read-only. **Open interactive CLI** opens the agent's own terminal
+    window, where the session starts and takes input. The remote view has no Open interactive CLI.
+  - The tab is remembered per member; the Report is the default. Only a terminal that is shown polls; several members'
+    terminals can show at once. The Monitor, the palette and the remote view can open a member's terminal: the team
+    page shows that pane's Terminal and scrolls it into view.
+  - The gaps between members set the view's height for every member. At the default height a pane is no taller than
+    the card and Activity row it replaced.
+  - On a phone a pane is stacked the same way, the view at its own height. The Terminal tab opens the terminal full
+    screen with one header row; its **⋯** holds the state line and Stop, and **✕** goes back to the Report. The
+    transcript gets at least 60% of the screen's height. Every target is at least 44 px.
 - Members ask you through the team page. **Approve** answers once; **Always approve for this team…** remembers it.
 - One global run limit (default 4) covers every team. Runs and interactive sessions wait in one first-come,
   first-served queue.
@@ -94,7 +115,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - **Allow everywhere** adds it to the global allowed hosts, and closes every team's requests it covers;
   - **Deny** closes it; the agent is told (with the note you type above the buttons, if any), and that host is not
     asked again for that member for 24 hours. The 24 hours belong to that member: a member hired later with the same
-    name is asked again.
+    name is asked again. Deny on a grouped item denies every listed host and tells the agent once, in one message
+    listing all of them.
   Only the host or the domain allow you chose is added, only after your click, through the same checks as a policy
   change; it applies from the member's next run. A later refusal of a host the domain allow covers is not asked about:
   the agent is told the host is allowed from its next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
@@ -242,7 +264,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
   - Items can be archived and restored. **Dispatches** shows each dispatch with its token counts.
-- **Documents**: each team has a shared documents folder for reports, specs and plans.
+- **Documents**: each team has a shared documents folder for reports, specs and plans. The list shows each entry's
+  size and when it was last modified.
   - Every member reads and writes it as plain files.
   - You can browse, read, edit, upload (up to 25 MB), rename and delete there.
 
@@ -260,8 +283,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 ## Logs
 
-**Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. The **log** icon on
-a member's card opens it at that member's activity.
+**Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. **Logs** in the ☰ menu of
+a member's pane opens it at that member's activity.
 
 - **Logs:**
   - **All activity**: everything a member did or was asked to do, gathered from every log below. Every member's
@@ -286,7 +309,12 @@ a member's card opens it at that member's activity.
   are built from them.
 - **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
+- Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs dialog, `logs.query` over the Cloud Link and the live tail all use the
+  same redaction, so a row reads the same everywhere.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
+- A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
+  this computer by level (warnings, errors and workflow events by default, or everything), team and member, and
+  redacted as above. It stops when the viewer stops it or disconnects.
 
 ## Repositories and git
 
@@ -434,6 +462,20 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
   `yawble-core guardrail-check --data-dir <app root>/data [--team T --member M | --cli claude|grok] [--json]`. The
   exit code is 0 for passed, 1 for failed and 2 for a usage error.
 
+## Cloud org dashboard
+
+- The cloud site's org dashboard shows each attached computer live: the site stores nothing and asks the computers
+  while someone is watching. See [Cloud Link](cloud-link.md#the-org-dashboard).
+- `org.summary` answers one snapshot of this computer (`summaryVersion` 1): the computer (name, label, version,
+  platform, uptime, run slots, queued runs), each team's agents (running, queued, idle, errored, and what each running
+  agent is doing), the open workflows and those ended in the last 24 hours (state, backlog item, cards done of total,
+  owner), what waits for the person per team (decisions, tool-call approvals, network and tool requests), and the
+  last 20 warnings and errors of the last hour.
+- While a viewer watches (`org.summary.watch`), the app pushes `org.summaryChanged` with the changed sections, at most
+  once every 2 seconds. Nothing is built or pushed while nobody watches; unwatching or disconnecting stops it.
+- The summary holds facts only: no token counts, cost, usage or price. Titles and log lines are redacted.
+- Visitors (read-only viewers) can use the dashboard too. The hello lists `summary` and `logsTail` in its caps.
+
 ## Settings
 
 | Tab | What it has |
@@ -452,3 +494,5 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 - Every call that changes something is recorded in an audit log, with who made it and how. Keys, tokens and
   messages are never recorded.
 - Each run's output is kept in an owner-only transcript file. The terminal shows it as **Formatted** or **Raw**.
+- A member's terminal is in its pane on the team page (the **Terminal** side of its toggle). An agent's **Terminal**
+  and **Test** sessions from Settings > Agents open in the window's terminal pane.

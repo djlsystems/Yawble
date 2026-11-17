@@ -163,7 +163,7 @@ public sealed class TeamDocuments(TeamRepos repos)
         if (PathsEqual(target, root)) throw new DocumentsException("not_allowed", "the documents folder itself cannot be deleted");
         if (Directory.Exists(target))
         {
-            foreach (var f in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories))
+            foreach (var f in Ops.FolderWalk.Files(target).Select(x => x.FullName))
                 File.SetAttributes(f, File.GetAttributes(f) & ~FileAttributes.ReadOnly);
             Directory.Delete(target, recursive: true);
         }

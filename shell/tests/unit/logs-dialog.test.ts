@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import LogsDialog from '../../src/renderer/src/components/LogsDialog.vue';
-import AgentCard from '../../src/renderer/src/components/AgentCard.vue';
+import AgentCard from '../../src/renderer/src/components/MemberPane.vue';
 import { diagnosticLog } from '../../src/main/diagnostic-log';
 import type { LogSourceInfo, YawbleApi } from '../../src/shared/api';
 
@@ -224,7 +224,8 @@ describe('the member card', () => {
   it('HasALogsButton', async () => {
     const card = { member: { id: 1, team: 'web', name: 'DeveloperAda', role: 'member', cli: 'claude' }, state: 'idle', hasClone: false } as any;
     const w = mount(AgentCard, { props: { card } });
-    await w.find('[data-test=open-logs]').trigger('click');
+    await w.get('[data-test=member-more]').trigger('click');
+    await w.get('[data-test=open-logs]').trigger('click');
     expect(w.emitted('logs')).toHaveLength(1);
   });
 });
