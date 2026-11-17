@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import type { Connection, EnvFromConnection, HostTaskDef, HostTaskInfo, YawbleApi, TaskPreview, TaskRun, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
+import { requesterName } from '../requester';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 
@@ -146,7 +148,7 @@ async function save() {
     form.value = null;
   }, 'Saved. Any earlier Always approval was removed; the next request asks.', 'save');
 }
-const del = (t: HostTaskInfo) => { if (window.confirm(`Delete the task ${t.def.name}? Its run records stay.`)) void act(() => api.call('tasks.delete', { teamId: teamId.value, name: t.def.name }), undefined, `delete:${t.def.name}`); };
+const del = async (t: HostTaskInfo) => { if (await confirmDialog({ message: `Delete the task ${t.def.name}? Its run records stay.`, okLabel: 'Delete', danger: true })) void act(() => api.call('tasks.delete', { teamId: teamId.value, name: t.def.name }), undefined, `delete:${t.def.name}`); };
 const revoke = (t: HostTaskInfo) => act(() => api.call('tasks.revoke', { teamId: teamId.value, name: t.def.name }), 'Always revoked: it asks every time.', `revoke:${t.def.name}`);
 async function runNow(t: HostTaskInfo) {
   await act(async () => {
@@ -265,7 +267,7 @@ onMounted(load);
           <div class="small">
             <span :class="t.approval === 'always' ? 'ok' : t.approval === 'always-but-changed' ? 'warn' : 'muted'" data-test="task-approval">{{ approvalText(t) }}</span>
             <template v-if="t.pendingAskId"> · <span class="warn">waiting for you (request {{ t.pendingAskId }}, on the team's page)</span></template>
-            <template v-if="t.lastRun"> · last: {{ runText(t.lastRun) }}<template v-if="t.lastRun.requestedBy"> asked by {{ t.lastRun.requestedBy }}</template></template>
+            <template v-if="t.lastRun"> · last: {{ runText(t.lastRun) }}<template v-if="t.lastRun.requestedBy"> asked by {{ requesterName(t.lastRun.requestedBy) }}</template></template>
           </div>
           <div v-if="t.problem" class="small warn">{{ t.problem }}</div>
         </div>
@@ -285,7 +287,7 @@ onMounted(load);
         <td>#{{ r.id }}</td><td class="mono">{{ r.task }}</td>
         <td :class="r.state === 'done' && r.exitCode === 0 ? 'ok' : r.state === 'running' ? 'muted' : 'warn'">{{ runText(r) }}</td>
         <td class="muted">{{ durationOf(r) }}</td><td class="muted mono">{{ (r.commit ?? '').slice(0, 8) }}</td>
-        <td class="muted">{{ r.requestedBy ?? 'you' }}</td>
+        <td class="muted">{{ r.requestedBy ? requesterName(r.requestedBy) : 'you' }}</td>
         <td><button v-if="r.state === 'running'" class="mini" data-test="run-stop" :disabled="busy" @click.stop="cancel(r.id)"><BusyLabel :busy="doing === `stop:${r.id}`" text="Stopping…">Stop</BusyLabel></button></td>
       </tr>
       <tr v-if="openRun === r.id"><td class="detail" colspan="7">

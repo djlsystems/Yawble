@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { stopConfirmStubs, stubConfirm } from './confirm-stub';
+afterEach(() => { stopConfirmStubs(); });
 import IntegrationsPanel from '../../src/renderer/src/components/IntegrationsPanel.vue';
 import IntegrationDialog from '../../src/renderer/src/components/IntegrationDialog.vue';
 import type { IntegrationInfo, YawbleApi } from '../../src/shared/api';
@@ -123,7 +125,7 @@ describe('integrations page and dialog', () => {
       'integrations.list': () => ({ integrations: items, pendingAsks: 0 }),
       'integrations.remove': (p) => { items = items.filter((i) => i.name !== p.name); return { ok: true }; },
     }));
-    window.confirm = () => true;
+    stubConfirm(() => true);
     const w = mount(IntegrationsPanel, { props: { api, teams }, global: { stubs } });
     await flushPromises();
     expect(w.find('[data-test=tab-cli]').text()).toBe('CLIs (2)');
