@@ -237,6 +237,26 @@ describe('the Monitor view', () => {
     expect(w.findAll('[data-test=monitor-row]').map((r) => r.text()).join('|')).toContain('Ship it?');
     expect(w.findAll('[data-test=monitor-row]').map((r) => r.text()).join('|')).toContain('a.ts');
     expect(w.find('[data-test=monitor-timeline]').exists()).toBe(true);
+    // Each row's face wears its member's ring as on the wall: the Manager needs you; the step's DeveloperPriya is not on the team, so idle.
+    expect(w.findAll('[data-test=monitor-row] [data-test=member-avatar]').map((a) => a.attributes('data-state'))).toEqual(['decision', 'idle']);
+    w.unmount();
+  });
+  it('an activity row\'s face follows its member\'s state: running turns, idle when the member is unknown', async () => {
+    let state = 'running';
+    const api = {
+      call: async (method: string) => {
+        if (method === 'app.overview') return { slots: { running: 1, limit: 4, queued: 0 }, teams: [{ id: 1, name: 'payments', repoPath: null, members: 1, running: 1, queued: 0 }] };
+        if (method === 'teams.agents') return [{ member: { id: 3, teamId: 1, team: 'payments', name: 'DeveloperPriya', role: 'member', cli: 'claude' }, state, attention: null, queuedInstructions: 0, statusLine: null }];
+        if (method === 'monitor.messages') return { end: 6, messages: [row(5, 'instruction', 'DeveloperPriya', 'Manager', 'go'), row(6, 'progress', 'Gone', 'Gone', 'hi')] };
+        if (method === 'monitor.steps') return { end: 0, pending: false, steps: [] };
+        throw new Error(method);
+      },
+      onEvent: () => () => {},
+    } as unknown as YawbleApi;
+    const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
+    for (let i = 0; i < 5; i++) await flushPromises();
+    const faces = () => Object.fromEntries(w.findAll('[data-test=monitor-row]').map((r) => [r.text().includes('Gone') ? 'gone' : 'priya', r.find('[data-test=member-avatar]').attributes('data-state')]));
+    expect(faces()).toEqual({ priya: 'running', gone: 'idle' });
     w.unmount();
   });
   it('shows each team\'s five newest workflows live, opens the team\'s workflows from one, and hides them in a replay', async () => {
