@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { AgentCard, NetworkAsk, ToolAsk, YawbleApi, Overview, WorkflowSummary } from '../../../shared/api';
 import { groupAsks, hostsLabel } from '../networkAskGroups';
 import { resolveApi } from '../api';
@@ -225,9 +225,21 @@ const YouTipLines = 10;
 const NeedYouLook: Record<NeedYouKind, 'decision' | 'blocked' | 'fail'> = { question: 'decision', network: 'decision', tool: 'decision', blocked: 'blocked', failed: 'fail' };
 const youOpen = ref(false);
 const youShown = computed(() => youOpen.value || hover.value?.kind === 'you');
-const youTipStyle = computed(() => {
+/**
+ * The wall's size as the panel is placed by (B088): measured each time the panel shows and whenever the canvas
+ * resizes (Needs you banners, a shorter window), so the panel follows the You node; a computed over
+ * getBoundingClientRect() alone would keep its first answer.
+ */
+const wallSize = ref({ w: 0, h: 0 });
+function measureWall(): void {
   const b = canvas.value?.getBoundingClientRect();
   const w = b?.width ?? 0, h = b?.height ?? 0;
+  if (w !== wallSize.value.w || h !== wallSize.value.h) wallSize.value = { w, h };
+}
+watch(youShown, (shown) => { if (shown) measureWall(); }, { flush: 'sync' });
+let wallObserver: ResizeObserver | null = null;
+const youTipStyle = computed(() => {
+  const { w, h } = wallSize.value;
   const n = youNodeAt(w, h);
   return { right: `${Math.max(4, w - n.x + n.r + 10)}px`, top: `${n.y}px` };
 });
@@ -647,6 +659,11 @@ onMounted(async () => {
     if (density.value !== DefaultDensity) setDensity(density.value);
   }
   window.addEventListener('keydown', onKey);
+  measureWall();
+  if (canvas.value && typeof ResizeObserver === 'function') {
+    wallObserver = new ResizeObserver(() => measureWall());
+    wallObserver.observe(canvas.value);
+  }
   await tick(true);
   offAsks = api.onEvent?.((e) => { if (e.event === 'network.asksChanged' || e.event === 'tools.asksChanged') void loadAsks(); }) ?? null;
   await loadAsks();
@@ -664,6 +681,7 @@ onBeforeUnmount(() => {
   offAsks?.();
   cancelAnimationFrame(raf);
   window.removeEventListener('keydown', onKey);
+  wallObserver?.disconnect();
   sound.destroy();
   scene?.destroy();
 });
