@@ -86,7 +86,7 @@ export function drawStepIcon(c: CanvasRenderingContext2D, kind: StepKind, x: num
 }
 
 /** A workflow's mark, in a box of `s` px centred on (x, y): a check, a play triangle, a pause, a cross. */
-export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon, x: number, y: number, s: number): void {
+export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon | 'bang', x: number, y: number, s: number): void {
   const u = s / 16;
   const P = (px: number, py: number): [number, number] => [x + (px - 8) * u, y + (py - 8) * u];
   const path = (close: boolean, ...pts: [number, number][]) => {
@@ -102,5 +102,20 @@ export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon
     case 'play': path(true, [5, 3], [13, 8], [5, 13]); break;
     case 'pause': path(false, [5.5, 3.5], [5.5, 12.5]); path(false, [10.5, 3.5], [10.5, 12.5]); break;
     case 'cross': path(false, [4, 4], [12, 12]); path(false, [12, 4], [4, 12]); break;
+    case 'bang': {
+      // An exclamation mark: a bar and a dot (blocked).
+      path(false, [8, 2.5], [8, 9.5]);
+      const [a, b] = P(8, 13);
+      c.beginPath(); c.arc(a, b, 1.3 * u, 0, Math.PI * 2); c.fill();
+      break;
+    }
   }
+}
+
+/**
+ * The mark a hand-back carries home along its line: a check (handed back) or a cross (failed, blocked), in a box of
+ * `s` px centred on (x, y).
+ */
+export function drawHandbackMark(c: CanvasRenderingContext2D, mark: 'check' | 'cross', x: number, y: number, s: number): void {
+  drawWorkflowIcon(c, mark, x, y, s);
 }

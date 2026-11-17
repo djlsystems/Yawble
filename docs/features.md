@@ -275,6 +275,18 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   idle.
 - Each member shows its recent tool steps, changed files and what it is doing now.
 - Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
+- Each open workflow is also a small node tied by dashed lines to the members working it (to its team while nobody is
+  on it). It flashes green and drifts away when it completes, fades with a cross when it is closed, and shows a "!"
+  while it is blocked. The team's panel stays as the list of its newest five.
+- Work rhythm: a member's disc pulses faster the more steps it takes. A command shows a ring filling while it runs,
+  then a green or red burst by its exit code when that is known. Thinking shimmers softly.
+- A **You** node at the right edge: questions and network or tool asks fly to it, and it glows with a count until they
+  are answered.
+- A Manager's instruction carries its card number (#373). The hand-back returns along the same line with a ✓, or a ✗
+  when the run failed or was blocked.
+- The scene can focus one team (zoom to it, dim the rest) and has three densities, calm, normal and lively, that cap
+  how many effects show at once. Under reduced motion nothing travels or pulses: comets are still lines with their
+  label, and states are steady marks.
 - A timeline replays any moment. **● Back to live** returns.
 - The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
   link strength, repulsion, gravity and friction, each a multiplier (0.25× to 3×) on the wall's own layout. They apply
