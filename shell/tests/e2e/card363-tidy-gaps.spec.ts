@@ -190,3 +190,104 @@ test('390 x 844, core-shaped plan: plan, realign and report do not scroll sidewa
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+// ---- Re-check after DeveloperInes's fix d0347c4 (F2 stale flow, F3 confirm + origin-only/own-work, F4 notes above the list).
+const NEW_TEAM = '6666666666ffffffffff0000000000000000aaaa';
+const NEW_CLONE = '7777777777000000000011111111111111112222';
+/** The core's stale refusal text (TeamRepos.Tidy.cs GitBranchRealignAsync), as the window gets it. */
+const STALE = 'members/fixture/developermarlo changed since it was shown (now: team 6666666666, clone 7777777777). Nothing changed; look at the new plan.';
+function movedTo(team: string, clone: string, cls = 'moved') {
+  const p = corePlan();
+  const b = p.repos[0].branches[0] as any;
+  b.teamSha = team; b.cloneSha = clone; b.class = cls;
+  if (cls !== 'moved') { delete b.commits; b.proof = "DeveloperMarlo's working branch, checked out in its clone: in use, kept"; }
+  return p;
+}
+
+test('F2: a stale refusal shows "Refused: <reason>", re-reads the plan and binds a new yes to the new commits', async ({ browser }) => {
+  let plans = 0;
+  let moved = false;
+  answers['git.tidyPlan'] = () => { plans++; return moved ? movedTo(NEW_TEAM, NEW_CLONE) : corePlan(); };
+  answers['git.branchRealign'] = (p) => {
+    seen.push({ method: 'git.branchRealign', p });
+    if (p.expectOld !== NEW_TEAM || p.expectNew !== NEW_CLONE) { moved = true; throw Object.assign(new Error(STALE), { code: 'stale' }); }
+    return { oldSha: NEW_TEAM, newSha: NEW_CLONE, branch: 'members/fixture/developermarlo', repo: 'main', member: p.member, changed: true };
+  };
+  const { page, ctx, tidy, errors } = await tidyAt(browser, 1280, 800);
+  const before = plans;
+  await tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"] [data-test=tidy-realign]').click();
+  await tidy.locator('[data-test=tidy-realign-yes]').click();
+  await expect(tidy.locator('[data-test=tidy-realign-error]')).toHaveText(`Refused: ${STALE}`);
+  expect(plans, 'the plan is read again after "stale"').toBeGreaterThan(before);
+  await expect(tidy.locator('[data-test=tidy-realign-shas]'), 'the confirm reshows the new commits').toHaveText('6666666666 → 7777777777');
+  await tidy.locator('[data-test=tidy-realign-confirm]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(SHOTS, 'card363-realign-stale-1280.png') });
+  await tidy.locator('[data-test=tidy-realign-yes]').click();
+  await expect(tidy.locator('[data-test=tidy-done]')).toContainText('Realigned members/fixture/developermarlo');
+  const calls = seen.filter((s) => s.method === 'git.branchRealign');
+  expect(calls.length).toBe(2);
+  expect([calls[0].p.expectOld, calls[0].p.expectNew], 'first yes: the commits first shown').toEqual([TEAM_SHA, CLONE_SHA]);
+  expect([calls[1].p.expectOld, calls[1].p.expectNew], 'second yes: bound to the new commits').toEqual([NEW_TEAM, NEW_CLONE]);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test('F2: a stale refusal where the branch is no longer moved closes the confirm and reports the refusal', async ({ browser }) => {
+  let moved = false;
+  answers['git.tidyPlan'] = () => (moved ? movedTo(CLONE_SHA, CLONE_SHA, 'working') : corePlan());
+  answers['git.branchRealign'] = (p) => { seen.push({ method: 'git.branchRealign', p }); moved = true; throw Object.assign(new Error(STALE), { code: 'stale' }); };
+  const { ctx, tidy } = await tidyAt(browser, 1280, 800);
+  await tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"] [data-test=tidy-realign]').click();
+  await tidy.locator('[data-test=tidy-realign-yes]').click();
+  await expect(tidy.locator('[data-test=tidy-realign-confirm]')).toHaveCount(0);
+  await expect(tidy.locator('[data-test=tidy-done]')).toContainText(`Refused: ${STALE}`);
+  await ctx.close();
+});
+
+test('F3: the Realign confirm lists the commits it drops and the core proof', async ({ browser }) => {
+  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+  const row = tidy.locator('[data-test="tidy-row-members/fixture/developermarlo"]');
+  await expect(row.locator('[data-test=tidy-commits]')).toContainText('aa11bb22cc Retry the upload three times');
+  await expect(row).toContainText("A realign drops these from the team's copy (not in DeveloperMarlo's clone):");
+  await expect(row.locator('[data-test=tidy-why]')).toContainText('nothing is lost by realigning it');
+  await row.locator('[data-test=tidy-realign]').click();
+  const box = tidy.locator('[data-test=tidy-realign-confirm]');
+  await expect(box.locator('[data-test=tidy-realign-commits]')).toContainText('aa11bb22cc Retry the upload three times');
+  await expect(box.locator('[data-test=tidy-realign-proof]')).toContainText('nothing is lost by realigning it (git cherry main: - aa11bb22cc)');
+  await box.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(SHOTS, 'card363-realign-confirm-box-1280.png') });
+  await ctx.close();
+});
+
+test('F3: origin-only and own-work rows list their commits under "Commits not in <base>:"', async ({ browser }) => {
+  answers['git.tidyPlan'] = () => {
+    const p = corePlan();
+    p.repos[0].branches.push({ name: 'members/fixture/old-own', where: ['local', 'origin'], class: 'own-work', teamSha: '8888888888aaaaaaaaaa',
+      commits: [{ sha: '8888888888aaaaaaaaaa0000000000000000000', subject: 'Half-done export' }], proof: '1 commit(s) not in main: needs a look' } as any);
+    return p;
+  };
+  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+  const oo = tidy.locator('[data-test="tidy-row-feature/origin-only-thing"]');
+  await expect(oo).toContainText('Commits not in main:');
+  await expect(oo.locator('[data-test=tidy-commits]')).toContainText('4444444444 Try a new cache');
+  const own = tidy.locator('[data-test="tidy-row-members/fixture/old-own"]');
+  await expect(own).toContainText('Commits not in main:');
+  await expect(own.locator('[data-test=tidy-commits]')).toContainText('8888888888 Half-done export');
+  await own.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(SHOTS, 'card363-own-work-origin-only-1280.png') });
+  await ctx.close();
+});
+
+test('F4: the notes and "Merged and contained are measured against <base>" are shown above the list', async ({ browser }) => {
+  const { page, ctx, tidy } = await tidyAt(browser, 1280, 800);
+  await expect(tidy.locator('[data-test=tidy-note]')).toHaveText(NOTE);
+  await expect(tidy.locator('[data-test=tidy-base]')).toHaveText('Merged and contained are measured against main.');
+  const order = await tidy.evaluate((el) => {
+    const at = (s: string) => el.querySelector(s)!.getBoundingClientRect().top;
+    return { note: at('[data-test=tidy-notes]'), base: at('[data-test=tidy-base]'), first: at('section.group') };
+  });
+  expect(order.note).toBeLessThan(order.first);
+  expect(order.base).toBeLessThan(order.first);
+  await shot(page, 'notes-base-1280');
+  await ctx.close();
+});
