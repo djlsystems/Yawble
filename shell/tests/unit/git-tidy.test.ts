@@ -30,19 +30,20 @@ const coreError = (code: string, message: string) => Object.assign(new Error(mes
 
 const team = { id: 3, name: 'payments', repoPath: null, members: 2, running: 0, queued: 0 };
 const plan = (): TidyPlan => ({ repos: [
-  { repo: 'payments', branches: [
+  { repo: 'payments', baseBranch: 'main', branches: [
     { name: 'members/payments/ada', where: ['local', 'clone:Ada'], class: 'working', member: 'Ada' },
     { name: 'members/payments/old-ben', where: ['local', 'origin'], class: 'merged' },
     { name: 'members/payments/kofi', where: ['local'], class: 'contained', proof: 'git cherry main: - 1a2b3c4 Fix refunds (equivalent in main)' },
-    { name: 'members/payments/marlo', where: ['local', 'origin', 'clone:Marlo'], class: 'moved', member: 'Marlo', teamSha: '5bbb6ba450df', cloneSha: 'e0f2a18aaaaa' },
+    { name: 'members/payments/marlo', where: ['local', 'origin', 'clone:Marlo'], class: 'moved', member: 'Marlo', teamSha: '5bbb6ba450df', cloneSha: 'e0f2a18aaaaa',
+      commits: [{ sha: '7777777777ef', subject: 'Retry the upload' }], proof: 'the clone was reset or rebased; nothing is lost by realigning it (git cherry main: - 7777777777)' },
     { name: 'feature/x', where: ['local'], class: 'own-work', commits: [{ sha: '9999999999ab', subject: 'Half a feature' }, { sha: '8888888888cd', subject: 'More of it' }] },
   ] },
   { repo: 'payments-cloud', branches: [
-    { name: 'old-spike', where: ['origin'], class: 'origin-only' },
+    { name: 'old-idea', where: ['origin'], class: 'origin-only', commits: [{ sha: '6666666666aa', subject: 'Try a cache' }] },
     { name: 'scratch/try', where: ['clone:Ada'], class: 'scratch', member: 'Ada' },
     { name: 'members/payments/wren', where: ['origin'], class: 'merged' },
     { name: 'members/payments/only-in-clone', where: ['clone:Wren'], class: 'merged' },
-  ] },
+  ], baseBranch: 'main', notes: ["Kofi's clone was not read: its .git is a file"] },
 ] });
 
 describe('tidyPlan helpers', () => {
@@ -86,7 +87,7 @@ describe('tidyPlan helpers', () => {
     expect(kept).toContain('members/payments/old-ben (payments): not selected');
     expect(kept).toContain("members/payments/marlo (payments): moved: team 5bbb6ba450, Marlo's clone e0f2a18aaa (Realign to fix)");
     expect(kept).toContain('feature/x (payments): has work of its own (2 commits), needs a look');
-    expect(kept).toContain('old-spike (payments-cloud): only on origin, nobody has it here');
+    expect(kept).toContain('old-idea (payments-cloud): only on origin, nobody has it here');
     expect(kept).toContain("scratch/try (payments-cloud): scratch branch in Ada's clone");
     expect(kept).toContain("members/payments/only-in-clone (payments-cloud): only in a member's clone");
   });
@@ -101,7 +102,7 @@ describe('TidyPanel', () => {
     expect(w.find('[data-test=tidy-group-merged]').text()).toContain('members/payments/old-ben');
     expect(w.find('[data-test=tidy-group-working]').text()).toContain("Ada's working branch, not a leftover");
     expect(w.find('[data-test=tidy-proof]').text()).toContain('git cherry main: - 1a2b3c4');
-    expect(w.find('[data-test=tidy-commits]').text()).toContain('Half a feature');
+    expect(w.find('[data-test="tidy-row-feature/x"] [data-test=tidy-commits]').text()).toContain('Half a feature');
     expect(w.find('[data-test=tidy-moved-shas]').text()).toBe("team 5bbb6ba450 · Marlo's clone e0f2a18aaa");
     const ticked = w.findAll('[data-test=tidy-select]').map((c) => (c.element as HTMLInputElement).checked);
     expect(ticked).toEqual([true, true, true]); // old-ben, wren, kofi; only-in-clone has no box
@@ -188,7 +189,7 @@ describe('TidyPanel', () => {
     expect(calls.some((c) => c.method === 'git.branchRealign')).toBe(false);
     await w.find('[data-test=tidy-realign-yes]').trigger('click');
     await flushPromises();
-    expect(calls.find((c) => c.method === 'git.branchRealign')!.params).toEqual({ teamId: 3, team: 'payments', repo: 'payments', member: 'Marlo' });
+    expect(calls.find((c) => c.method === 'git.branchRealign')!.params).toEqual({ teamId: 3, team: 'payments', repo: 'payments', member: 'Marlo', expectOld: '5bbb6ba450df', expectNew: 'e0f2a18aaaaa' });
     expect(w.find('[data-test=tidy-done]').text()).toBe('Realigned members/payments/marlo: 5bbb6ba450 → e0f2a18aaa (the old commit is recorded for recovery).');
     expect(w.findAll('[data-test=tidy-kept]').map((k) => k.text())).toContain("members/payments/marlo (payments): Marlo's working branch, not a leftover");
     expect(w.find('[data-test=tidy-group-moved]').exists()).toBe(false);
@@ -208,6 +209,44 @@ describe('TidyPanel', () => {
     expect(w.find('[data-test=tidy-realign-confirm]').exists()).toBe(true);
     expect(w.find('[data-test=tidy-report]').exists()).toBe(false);
     expect(calls.filter((c) => c.method === 'git.tidyPlan')).toHaveLength(1);
+  });
+
+  it('Realign refused as stale: "Refused: <reason>", the plan is read again and the confirm shows the new commits', async () => {
+    let reads = 0;
+    const { api, calls } = fakeApi({
+      'git.tidyPlan': () => { const p = plan(); if (reads++) p.repos[0].branches[3] = { ...p.repos[0].branches[3], cloneSha: 'f00dbeef0001' }; return p; },
+      'git.branchRealign': () => { throw coreError('stale', 'members/payments/marlo changed since it was shown. Nothing changed; look at the new plan.'); },
+    });
+    const w = mount(TidyPanel, { props: { api, team, mainName: 'payments' } });
+    await flushPromises();
+    await w.find('[data-test=tidy-realign]').trigger('click');
+    await w.find('[data-test=tidy-realign-yes]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=tidy-realign-error]').text()).toBe('Refused: members/payments/marlo changed since it was shown. Nothing changed; look at the new plan.');
+    expect(calls.filter((c) => c.method === 'git.tidyPlan')).toHaveLength(2);
+    expect(w.find('[data-test=tidy-realign-shas]').text()).toBe('5bbb6ba450 → f00dbeef00');
+  });
+
+  it('a moved row shows the commits a realign drops and the proof; origin-only shows its commits', async () => {
+    const { api } = fakeApi({ 'git.tidyPlan': () => plan() });
+    const w = mount(TidyPanel, { props: { api, team, mainName: 'payments' } });
+    await flushPromises();
+    const moved = w.find('[data-test="tidy-row-members/payments/marlo"]');
+    expect(moved.find('[data-test=tidy-commits]').text()).toContain('Retry the upload');
+    expect(moved.find('[data-test=tidy-why]').text()).toContain('nothing is lost by realigning it');
+    expect(w.find('[data-test="tidy-row-old-idea"] [data-test=tidy-commits]').text()).toContain('Try a cache');
+    await moved.find('[data-test=tidy-realign]').trigger('click');
+    expect(w.find('[data-test=tidy-realign-commits]').text()).toContain('Retry the upload');
+    expect(w.find('[data-test=tidy-realign-proof]').text()).toContain('nothing is lost');
+  });
+
+  it("shows the plan's notes above the list and what merged/contained are measured against", async () => {
+    const { api } = fakeApi({ 'git.tidyPlan': () => plan() });
+    const w = mount(TidyPanel, { props: { api, team, mainName: 'payments' } });
+    await flushPromises();
+    expect(w.find('[data-test=tidy-note]').text()).toBe("payments-cloud: Kofi's clone was not read: its .git is a file");
+    expect(w.find('[data-test=tidy-base]').text()).toBe('Merged and contained are measured against main.');
+    expect(w.html().indexOf('tidy-notes')).toBeLessThan(w.html().indexOf('tidy-group-'));
   });
 
   it('a core without git.tidyPlan shows its error', async () => {
