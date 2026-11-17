@@ -15,7 +15,8 @@ public sealed record GitPlan(string Text, string Key, bool Empty, Func<Cancellat
 /// <list type="bullet">
 /// <item>Nothing is forced. Deleting a ref is compare-and-delete on the SHA that was shown.</item>
 /// <item>A branch some clone has checked out, the base branch, and a branch the base does not contain (unmerged) are never
-///   deleted, unless the person NAMED the unmerged one (<c>unmergedOk</c>); a checked-out one never.</item>
+///   deleted, unless the person NAMED the unmerged one (<c>unmergedOk</c>); a checked-out one never. A branch whose every
+///   commit already has an equivalent in the base (B067: contained, see <see cref="ContainedProofAsync"/>) counts as merged.</item>
 /// <item>Every deleted branch's SHA is recorded (in the result and in <c>.git/yawble-concierge-deleted-branches.txt</c>)
 ///   so it can be restored with <c>git branch &lt;name&gt; &lt;sha&gt;</c>.</item>
 /// </list>
@@ -81,27 +82,36 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
                 sb.AppendLine($"- {branch} ({Short(sha ?? rsha!)}): REFUSED, checked out in {where}");
                 continue;
             }
+            // B067: a branch whose every commit already has an equivalent in the base (cherry-picked there) counts as merged:
+            // nothing is lost by deleting it, and the plan line carries the proof.
+            async Task<(bool Merged, string? Proof)> State(string tip) =>
+                await IsAncestorAsync(path, tip, baseSha, ct) || (originBase is not null && await IsAncestorAsync(path, tip, originBase, ct))
+                    ? (true, null)
+                    : (false, await ContainedProofAsync(path, repo.BaseBranch, baseSha, tip, ct)
+                              ?? (originBase is not null && originBase != baseSha ? await ContainedProofAsync(path, "origin/" + repo.BaseBranch, originBase, tip, ct) : null));
+            static string How((bool Merged, string? Proof) s) =>
+                s.Merged ? " (merged)" : s.Proof is { } proof ? $" (contained in base: {proof})" : " (UNMERGED, you named it)";
             if (sha is not null)
             {
-                var merged = await IsAncestorAsync(path, sha, baseSha, ct) || (originBase is not null && await IsAncestorAsync(path, sha, originBase, ct));
-                if (!merged && !UnmergedOk(branch))
+                var state = await State(sha);
+                if (!state.Merged && state.Proof is null && !UnmergedOk(branch))
                 {
                     sb.AppendLine($"- {branch} ({Short(sha)}): KEPT, not merged into {repo.BaseBranch} (name it in unmerged_ok to delete it anyway)");
                     continue;
                 }
-                sb.AppendLine($"- delete {branch} at {sha}{(merged ? " (merged)" : " (UNMERGED, you named it)")}");
+                sb.AppendLine($"- delete {branch} at {sha}{How(state)}");
                 key.Append("L ").Append(branch).Append(' ').AppendLine(sha);
                 deletable.Add((branch, sha));
             }
             if (rsha is not null)
             {
-                var merged = await IsAncestorAsync(path, rsha, baseSha, ct) || (originBase is not null && await IsAncestorAsync(path, rsha, originBase, ct));
-                if (!merged && !UnmergedOk(branch))
+                var state = await State(rsha);
+                if (!state.Merged && state.Proof is null && !UnmergedOk(branch))
                 {
                     sb.AppendLine($"- origin/{branch} ({Short(rsha)}): KEPT, not merged into {repo.BaseBranch}");
                     continue;
                 }
-                sb.AppendLine($"- delete origin/{branch} at {rsha}{(merged ? " (merged)" : " (UNMERGED, you named it)")}");
+                sb.AppendLine($"- delete origin/{branch} at {rsha}{How(state)}");
                 key.Append("R ").Append(branch).Append(' ').AppendLine(rsha);
                 remoteDeletable.Add((branch, rsha));
             }
@@ -131,6 +141,92 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
             if (log.Length > 0) await AppendLogAsync(path, log.ToString(), token);
             return done.ToString().TrimEnd();
         });
+    }
+
+    // ------------------------------------------------------------------ contained in base (B067)
+
+    /// <summary>At most this many base commits are fingerprinted when git cherry cannot tell (a branch that merged the base after a cherry-pick).</summary>
+    public const int MaxFingerprintedBaseCommits = 5000;
+
+    /// <summary>
+    /// Whether every commit on <paramref name="tip"/> that <paramref name="baseSha"/> lacks already has an equivalent in the base
+    /// (the same change, cherry-picked there), and if so the proof as text; null when not (or the branch is merged, or
+    /// git could not tell). Merge commits are skipped, as git cherry does. First <c>git cherry -v base tip</c>: every line
+    /// "-" is the proof. When the branch merged the base after its commits were picked, git cherry has nothing to compare
+    /// with (the base's copies are on the branch too), so each own commit's change is compared with the base's commits since
+    /// the branch forked, by a patch fingerprint (git patch-id's idea: the diff without line numbers and whitespace).
+    /// Read-only, in the host's own repository.
+    /// </summary>
+    public async Task<string?> ContainedProofAsync(string path, string baseName, string baseSha, string tip, CancellationToken ct)
+    {
+        var own = await git.TryRunAsync(path, ["rev-list", "--no-merges", "--reverse", tip, "^" + baseSha], ct);
+        if (own.ExitCode != 0) return null;
+        var commits = own.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (commits.Length == 0)
+        {
+            // Only merge commits ahead (the base merged in): contained when merging the branch into the base changes nothing.
+            if (await IsAncestorAsync(path, tip, baseSha, ct)) return null;
+            var merge = await git.TryRunAsync(path, ["merge-tree", "--write-tree", "--no-messages", baseSha, tip], ct);
+            var baseTree = await git.TryRunAsync(path, ["rev-parse", baseSha + "^{tree}"], ct);
+            return merge.ExitCode == 0 && baseTree.ExitCode == 0 && merge.Stdout.Split('\n')[0].Trim() == baseTree.Stdout.Trim()
+                ? $"its only commits ahead of {baseName} are merges, and merging it into {baseName} changes nothing"
+                : null;
+        }
+        var cherry = await git.TryRunAsync(path, ["cherry", "-v", baseSha, tip], ct);
+        var lines = cherry.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (cherry.ExitCode == 0 && lines.Length > 0 && lines.All(l => l.StartsWith("- ", StringComparison.Ordinal)))
+            return $"git cherry {baseName} {Short(tip)}: every commit has an equivalent in {baseName}: " + Listed(lines.Select(l => l[2..]).Select(ShortLine));
+
+        // The base's commits since the branch forked from it (before its first own commit), fingerprinted.
+        var parent = await git.TryRunAsync(path, ["rev-parse", "--verify", "-q", commits[0] + "^"], ct);
+        var fork = parent.ExitCode == 0 ? await git.TryRunAsync(path, ["merge-base", baseSha, parent.Stdout.Trim()], ct) : null;
+        var range = fork is { ExitCode: 0, Stdout.Length: > 0 } ? new[] { baseSha, "^" + fork.Stdout.Trim() } : [baseSha];
+        var upstream = await FingerprintsAsync(path, [.. range, "--max-count=" + MaxFingerprintedBaseCommits], ct);
+        var mine = await FingerprintsAsync(path, [tip, "^" + baseSha], ct);
+        if (upstream is null || mine is null) return null;
+        var byPrint = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (sha, print, _) in upstream) byPrint.TryAdd(print, sha);
+        var pairs = new List<string>();
+        foreach (var (sha, print, subject) in mine)
+        {
+            if (!byPrint.TryGetValue(print, out var same)) return null;
+            pairs.Add($"{Short(sha)} {subject} = {baseName} {Short(same)}");
+        }
+        return pairs.Count == 0 ? null
+            : $"every commit of {Short(tip)} not in {baseName} has the same change in {baseName} (git cherry cannot see it: the branch merged {baseName} since): " + Listed(pairs);
+
+        static string ShortLine(string l) => l.IndexOf(' ') is var sp && sp > 12 ? Short(l[..sp]) + l[sp..] : l;
+        static string Listed(IEnumerable<string> items)
+        {
+            var all = items.ToList();
+            return string.Join("; ", all.Take(20)) + (all.Count > 20 ? $"; and {all.Count - 20} more" : "");
+        }
+    }
+
+    /// <summary>Each non-merge commit of the range: its SHA, its change's fingerprint and its subject. Null when git failed.</summary>
+    private async Task<List<(string Sha, string Print, string Subject)>?> FingerprintsAsync(string path, IReadOnlyList<string> range, CancellationToken ct)
+    {
+        var r = await git.TryRunAsync(path, ["-c", "core.quotePath=false", "log", "--no-merges", "--no-color", "--no-ext-diff", "--no-textconv", "-p",
+            "--format=%x00%H %s", .. range, "--"], ct);
+        if (r.ExitCode != 0) return null;
+        var list = new List<(string, string, string)>();
+        foreach (var chunk in r.Stdout.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var nl = chunk.IndexOf('\n');
+            var head = nl < 0 ? chunk : chunk[..nl];
+            var sp = head.IndexOf(' ');
+            if (sp < 40) continue;
+            var print = new StringBuilder();
+            foreach (var line in (nl < 0 ? "" : chunk[(nl + 1)..]).Split('\n'))
+            {
+                if (line.StartsWith("index ", StringComparison.Ordinal)) continue;
+                var kept = line.StartsWith("@@", StringComparison.Ordinal) ? "@@" : line;
+                foreach (var c in kept) if (!char.IsWhiteSpace(c)) print.Append(c);
+                print.Append('\n');
+            }
+            list.Add((head[..sp], Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(print.ToString().Trim('\n')))), head[(sp + 1)..]));
+        }
+        return list;
     }
 
     // ------------------------------------------------------------------ prune
@@ -231,7 +327,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
     private async Task<List<string>> LocalBranchesAsync(string path, CancellationToken ct) =>
         (await git.RunAsync(path, ct, "for-each-ref", "--format=%(refname:short)", "refs/heads/")).Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
 
-    private async Task AppendLogAsync(string path, string text, CancellationToken ct)
+    internal async Task AppendLogAsync(string path, string text, CancellationToken ct)
     {
         var gitDir = await git.TryRunAsync(path, ["rev-parse", "--absolute-git-dir"], ct);
         if (gitDir.ExitCode == 0) await File.AppendAllTextAsync(System.IO.Path.Combine(gitDir.Stdout, DeletedLog), text, ct);
