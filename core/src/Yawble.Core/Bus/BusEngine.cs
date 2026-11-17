@@ -467,6 +467,7 @@ public sealed partial class BusEngine : IAsyncDisposable
                 {
                     if (_stopping) return;
                     SweepTriggersIfDue();
+                    SweepExpiryIfDue(); // B085: warn about, and expire, open workflows nobody works
                     Pump();
                     if (OfferIdleReminders()) Pump();
                     Schedule();

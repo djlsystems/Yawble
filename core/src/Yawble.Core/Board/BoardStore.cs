@@ -3,10 +3,14 @@ using Microsoft.Data.Sqlite;
 
 namespace Yawble.Core.Board;
 
-/// <summary>One card on a team's board (0014_board.sql). ClearedAt (0037): the person hid this Done card from the board view.</summary>
+/// <summary>
+/// One card on a team's board (0014_board.sql). ClearedAt (0037): the person hid this Done card from the board view.
+/// EndedAt / EndedHow (0045): when its workflow's end ended it, and how (completed, closed or expired); null while it is live.
+/// </summary>
 public sealed record CardRow(
     long Id, string Team, string? Member, string? Item, string Title, string Body, string Status, string Lane,
-    bool Placed, bool AwaitingManager, long? Workflow, string CreatedAt, string UpdatedAt, string? ClearedAt = null);
+    bool Placed, bool AwaitingManager, long? Workflow, string CreatedAt, string UpdatedAt, string? ClearedAt = null,
+    string? EndedAt = null, string? EndedHow = null);
 
 /// <summary>A line of a card's history: who did what, oldest first.</summary>
 public sealed record TrailRow(long Id, string At, string Source, string Kind, string Text);
@@ -38,12 +42,13 @@ public sealed class BoardStore(string connectionString, TimeProvider? clock = nu
 
     // ---------------------------------------------------------------- cards
 
-    private const string CardColumns = "id, team, member, item, title, body, status, lane, placed, awaiting_manager, workflow, created_at, updated_at, cleared_at";
+    private const string CardColumns = "id, team, member, item, title, body, status, lane, placed, awaiting_manager, workflow, created_at, updated_at, cleared_at, ended_at, ended_how";
 
     private static CardRow ReadCard(SqliteDataReader r) => new(
         r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3),
         r.GetString(4), r.GetString(5), r.GetString(6), r.GetString(7), r.GetInt64(8) != 0, r.GetInt64(9) != 0,
-        r.IsDBNull(10) ? null : r.GetInt64(10), r.GetString(11), r.GetString(12), r.IsDBNull(13) ? null : r.GetString(13));
+        r.IsDBNull(10) ? null : r.GetInt64(10), r.GetString(11), r.GetString(12), r.IsDBNull(13) ? null : r.GetString(13),
+        r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : r.GetString(15));
 
     public IReadOnlyList<CardRow> Cards(string? team = null) =>
         Query($"SELECT {CardColumns} FROM board_cards {(team is null ? "" : "WHERE team = $t COLLATE NOCASE")} ORDER BY updated_at DESC, id DESC;",
@@ -99,6 +104,18 @@ public sealed class BoardStore(string connectionString, TimeProvider? clock = nu
             ("$w", (object?)c.Workflow ?? DBNull.Value), ("$now", at ?? Now()), ("$id", c.Id));
         if (uncleared) Uncleared?.Invoke();
     }
+
+    // ---------------------------------------------------------------- a card's end (0045)
+
+    /// <summary>
+    /// Its workflow ended (B085): every card of it not ended yet records the end's time and how it ended (completed, closed
+    /// or expired). Returns how many were ended.
+    /// </summary>
+    public int EndCardsOf(long workflow, string how, string at) =>
+        Exec("UPDATE board_cards SET ended_at = $at, ended_how = $how WHERE workflow = $w AND ended_at IS NULL;", ("$at", at), ("$how", how), ("$w", workflow));
+
+    /// <summary>New work on the card (it is told again in its workflow): it is live again.</summary>
+    public void Unend(long cardId) => Exec("UPDATE board_cards SET ended_at = NULL, ended_how = NULL WHERE id = $id AND ended_at IS NOT NULL;", ("$id", cardId));
 
     // ---------------------------------------------------------------- clear done (0037)
 

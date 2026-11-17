@@ -337,6 +337,24 @@ public sealed class ConciergeService
         return true;
     }
 
+    /// <summary>
+    /// An Update the app itself has for the person about a team (B085's expiry warning): posted once, in the newest chat
+    /// about that team, else the newest chat. False when there is no chat at all (Needs you still shows it).
+    /// </summary>
+    public bool PostAppUpdate(long teamId, string team, string text, string kind)
+    {
+        var chats = _store.List();
+        if ((chats.FirstOrDefault(c => c.TeamId == teamId) ?? chats.FirstOrDefault()) is not { } chat) return false;
+        var id = _store.AddUpdate(chat.Id, text, team, kind, null);
+        _events.Publish(UpdateEvent, new JsonObject
+        {
+            ["conversationId"] = chat.Id,
+            ["message"] = MessageJson(_store.Message(id)!),
+            ["unread"] = _store.Get(chat.Id)?.Unread ?? 0,
+        });
+        return true;
+    }
+
     private JsonNode Read(string id)
     {
         _store.MarkRead(id);

@@ -10,13 +10,13 @@ public sealed record WatchHit(string ConversationId, ConciergeMessageRow Message
 /// Keeps the Concierge's promises between turns, with no agent running: it reads the bus for what a person waits on
 /// (a workflow finished, a decision asked, a run failed, an agent blocked), matches each event against the active
 /// watches (<see cref="WatchRow"/>), and posts each match into its conversation as an update. A workflow watch ends
-/// when its workflow is declared complete; any watch ends when it expires. Restart-safe: each watch remembers how far
+/// when its workflow is declared complete or expires; any watch ends when it expires. Restart-safe: each watch remembers how far
 /// it has read (since_seq), so events that arrived while the app was closed are posted at the next start.
 /// </summary>
 public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimeProvider? clock = null)
 {
     public static readonly IReadOnlyCollection<string> Types =
-        [MessageTypes.WorkflowCompleted, MessageTypes.NeedsDecision, MessageTypes.Failed, MessageTypes.Blocked];
+        [MessageTypes.WorkflowCompleted, MessageTypes.WorkflowExpired, MessageTypes.NeedsDecision, MessageTypes.Failed, MessageTypes.Blocked];
 
     public static readonly TimeSpan DefaultLife = TimeSpan.FromHours(48);
     public static readonly TimeSpan MaxLife = TimeSpan.FromDays(7);
@@ -61,7 +61,7 @@ public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimePr
                     if (Describe(m, team) is not { } update) continue;
                     var id = store.AddUpdate(group.Key, update.Text, team, update.Kind, m.Seq);
                     hits.Add(new WatchHit(group.Key, store.Message(id)!, group.Any(w => w.FollowUp)));
-                    if (m.Type == MessageTypes.WorkflowCompleted)
+                    if (m.Type is MessageTypes.WorkflowCompleted or MessageTypes.WorkflowExpired)
                         foreach (var w in group.Where(w => w.Workflow == m.CorrelationId))
                             if (store.EndWatch(w.Id, "done")) ended.Add(w.Id);
                 }
@@ -106,6 +106,8 @@ public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimePr
         {
             MessageTypes.WorkflowCompleted =>
                 ("done", $"**{team}** finished: {Clip(Str(p, "delivered") ?? "the work is declared complete")}"),
+            MessageTypes.WorkflowExpired =>
+                ("expired", $"**{team}**'s workflow #{m.CorrelationId} expired: {Clip(Str(p, "detail") ?? "nothing happened in it for too long")}. Telling the team something in it reopens it."),
             MessageTypes.NeedsDecision =>
                 ("decision", $"**{team}**{by} needs your decision (question {m.Seq}): {Clip(Str(p, "question") ?? "")}"),
             MessageTypes.Blocked =>

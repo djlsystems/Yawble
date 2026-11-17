@@ -507,6 +507,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         ["member"] = c.Member, ["item"] = c.Item, ["title"] = c.Title, ["body"] = c.Body, ["status"] = c.Status, ["lane"] = c.Lane,
         ["placed"] = c.Placed, ["awaitingManager"] = c.AwaitingManager, ["workflow"] = c.Workflow,
         ["createdAt"] = c.CreatedAt, ["updatedAt"] = c.UpdatedAt, ["trailCount"] = store.TrailCount(c.Id), ["clearedAt"] = c.ClearedAt,
+        ["endedAt"] = c.EndedAt, ["endedHow"] = c.EndedHow,
     };
 
     private JsonNode Items(IEnumerable<ItemRow> items) => new JsonArray(items.Select(i => (JsonNode)ItemJson(i)).ToArray());
