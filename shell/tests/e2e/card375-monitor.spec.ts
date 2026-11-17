@@ -959,6 +959,9 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   expect(r.normal.paymentsCommitDots).toBe(8);
   expect(r.lively.paymentsCommitDots).toBe(8);
   expect(r.lively.stored).toBe('lively');
+  // Card 387: the dots show 2.4-3.0 s after the commits (a 1.2 s poll, then their entry); the old 3 s window missed one
+  // at 3033 ms. Sampled for 8 s now; they must still show within 6 s.
+  for (const level of ['calm', 'normal', 'lively'] as const) expect(r[level].firstCommitDotMs, `${level}: commit dots within 6 s`).toBeLessThanOrEqual(6000);
   expect(errors).toEqual([]);
   await ctx.close();
 });
