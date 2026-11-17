@@ -180,8 +180,9 @@ const DesktopCss: Record<string, string> = {
   'components/TeamView.vue': 'e9484eb0ecb95837',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
-  // toolbar, no two areas side by side, no width bar, no loosened marker).
-  'components/MemberPane.vue': 'ee6baa53cc7ccb8f',
+  // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the
+  // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
+  'components/MemberPane.vue': '0c45fdece399ca73',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   // The documents list's Modified column: a wider list and the size / modified cells.
