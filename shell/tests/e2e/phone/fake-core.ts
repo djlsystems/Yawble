@@ -8,10 +8,12 @@ const now = Date.now();
 const iso = (minsAgo: number) => new Date(now - minsAgo * 60_000).toISOString();
 const later = (mins: number) => new Date(now + mins * 60_000).toISOString();
 
-const teams = [
+const teamRows = [
   { id: 1, name: 'payments', repoPath: 'C:/repos/payments', members: 3, running: 1, queued: 1 },
   { id: 2, name: 'checkout-web-with-a-rather-long-team-name', repoPath: 'C:/repos/checkout', members: 2, running: 0, queued: 0 },
 ];
+/** Like the core's TeamsAsync (teams.list and app.overview): each team with its workflowExpiryDays (B085, default 3). */
+const teamList = () => teamRows.map((t) => ({ ...t, workflowExpiryDays: expiryDays(t.id) }));
 
 const member = (id: number, teamId: number, team: string, name: string, role: 'manager' | 'member') =>
   ({ id, teamId, team, name, role, cli: 'claude', instructions: 'Builds things.', model: '', credential: 'default' });
@@ -23,7 +25,7 @@ const agent = (id: number, teamId: number, team: string, name: string, role: 'ma
 });
 const agents: Record<number, unknown[]> = {
   1: [agent(1, 1, 'payments', 'Manager', 'manager', 'idle'), agent(2, 1, 'payments', 'DeveloperAda', 'member', 'running'), agent(3, 1, 'payments', 'TesterBen', 'member', 'queued')],
-  2: [agent(4, 2, teams[1].name, 'Manager', 'manager', 'idle'), agent(5, 2, teams[1].name, 'DeveloperCleo', 'member', 'idle')],
+  2: [agent(4, 2, teamRows[1].name, 'Manager', 'manager', 'idle'), agent(5, 2, teamRows[1].name, 'DeveloperCleo', 'member', 'idle')],
 };
 
 const lanes = [{ id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' }, { id: 'blocked', label: 'Needs You' }, { id: 'done', label: 'Done' }];
@@ -83,22 +85,29 @@ const logSources = [{
 }];
 const logRows = Array.from({ length: 12 }, (_, i) => ({ _id: String(i + 1), at: iso(i * 7), member: i % 2 ? 'payments/DeveloperAda' : 'payments/Manager', event: `run ${40 - i}`, details: i === 0 ? 'a-very-long-unbroken-detail-string-'.repeat(4) : 'completed in 2m' }));
 
-const workflows = [{ id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', undeclared: false, busy: ['DeveloperAda'], ending: null, startedAt: iso(120), lastAt: iso(2), messages: 14, endedAt: null, expiredAt: null, expiresAt: null, question: null }];
+const workflows = [{ id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', undeclared: false, busy: ['DeveloperAda'], ending: null, startedAt: iso(120), lastAt: iso(2), messages: 14, endedAt: null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null }];
 /** B085 (card 389), shown with setExpiry(true): an open workflow waiting on question 3 that expires in 20 h (Needs you,
  *  Extend), and one the app closed as expired (endedAt: its last activity, 3 days before expiredAt). */
 const expiryWorkflows = () => [
   { id: 12, title: 'Refund limits per country', owner: 'Manager', state: 'open', undeclared: true, busy: [], ending: null, startedAt: iso(4000), lastAt: iso(2 * 1440 + 240), messages: 6,
-    endedAt: null, expiredAt: null, expiresAt: expiry.extended.has(12) ? null : later(20 * 60), question: 3 },
-  { id: 9, title: 'Old refund export', owner: 'Manager', state: 'expired', undeclared: false, busy: [], ending: 'expired: no activity for 3 days', startedAt: iso(9000), lastAt: iso(4 * 1440), messages: 4,
-    endedAt: iso(4 * 1440), expiredAt: iso(1440), expiresAt: null, question: null },
+    endedAt: null, expiredAt: null, expiresAt: expiry.extended.get(12) ?? later(20 * 60),
+    // Like the core: the warning text while the workflow is warned (it waits on a question and expires within a day), else null.
+    expiryWarning: expiry.extended.has(12) ? null : warningText(12, 3), question: 3 },
+  // The core's ending for an expired workflow is the detail only; the dialog adds "Expired: " itself.
+  { id: 9, title: 'Old refund export', owner: 'Manager', state: 'expired', undeclared: false, busy: [], ending: 'no activity for 3 days', startedAt: iso(9000), lastAt: iso(4 * 1440), messages: 4,
+    endedAt: iso(4 * 1440), expiredAt: iso(1440), expiresAt: null, expiryWarning: null, question: null },
 ];
-/** B085: the expiry fixtures on or off, the workflows extended, and the team's workflowExpiryDays. */
-const expiry = { on: false, extended: new Set<number>(), days: 3 };
+/** The core's BusEngine.WarningText. */
+const warningText = (workflow: number, question: number) => `#${workflow} will expire tomorrow; it waits on your answer to question ${question}`;
+/** B085: the expiry fixtures on or off, the workflows extended (id -> their new expiresAt), and each team's workflowExpiryDays. */
+const expiry = { on: false, extended: new Map<number, string>(), days: new Map<number, number>() };
+const expiryDays = (teamId: number) => expiry.days.get(teamId) ?? 3;
 
 export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'core.getInfo': (_p, access) => ({ product: 'Yawble', version: '0.0.0+dev.fake', platform: 'win32', os: 'Windows (fake)', dotnet: '10', pid: 1, sandbox: { backend: 'fake' }, schema: [], hostChecks: [], remoteAccess: access }),
   'sandbox.getAvailableBackends': () => [],
-  'app.overview': () => ({ slots: { running: 1, limit: 4, queued: 1 }, teams, needsYou: 4, networkAsks: 1, toolAsks: 1, heavy: { limit: 1, holders: [{ team: 'payments', member: 'DeveloperAda', what: 'full test suite', since: iso(2) }], queue: [] } }),
+  'teams.list': () => teamList(),
+  'app.overview': () => ({ slots: { running: 1, limit: 4, queued: 1 }, teams: teamList(), needsYou: 4, networkAsks: 1, toolAsks: 1, heavy: { limit: 1, holders: [{ team: 'payments', member: 'DeveloperAda', what: 'full test suite', since: iso(2) }], queue: [] } }),
   'app.version': () => ({ version: '0.0.0+dev.fake', commit: 'fake', dirty: false, released: false, cloudVersion: null }),
   'link.status': () => ({ state: 'connected', url: 'https://cloud.example.invalid/', viewers: ['kofi@example.invalid'], code: null, codeExpiresAt: null, instanceId: 'i1', instanceName: 'fake' }),
   'agents.detect': () => [{ cliId: 'claude', found: true, version: '2.0.0', path: 'C:/fake/claude.exe', signIn: { status: 'signed-in', detail: null } }],
@@ -113,29 +122,30 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'companion.status': () => ({ endpoint: null, controlFile: null, binaryPath: null, claudeCommand: null }),
   'bus.decisions': (p) => !needsYou ? [] : (p?.teamId === 1 || p?.team === 'payments' || p?.teamId === undefined ? [decision] : []),
   'bus.workflows': () => (expiry.on ? [...workflows, ...expiryWorkflows()] : workflows),
-  // B085: Extend resets the workflow's clock (the fake: it no longer expires); teams.workflowExpiry reads, or sets with days.
-  // Like the core: returns the updated list item; an ended workflow is refused with already_ended.
+  // B085: Extend resets the workflow's clock to now + the team's workflowExpiryDays (its warning goes); teams.workflowExpiry
+  // reads, or sets with days. Like the core: returns the updated list item; an ended workflow is refused with already_ended.
   'bus.workflowExtend': (p) => {
     const id = Number(p?.workflow);
     const w = [...workflows, ...(expiry.on ? expiryWorkflows() : [])].find((x) => x.id === id);
     if (w && w.state !== 'open') throw Object.assign(new Error(`workflow #${id} has already ended`), { code: 'already_ended' });
-    expiry.extended.add(id);
-    return { ...(w ?? { id }), expiresAt: null };
+    const expiresAt = new Date(Date.now() + expiryDays(Number(p?.teamId ?? 1)) * 86400_000).toISOString();
+    expiry.extended.set(id, expiresAt);
+    return { ...(w ?? { id }), expiresAt, expiryWarning: null };
   },
   'teams.workflowExpiry': (p, access) => {
     if (p?.days != null) {
       if (access === 'read') throw Object.assign(new Error('Read-only (Visitor): refused by the fake'), { code: 'remote_refused' });
       if (!Number.isInteger(p.days) || p.days < 1 || p.days > 365) throw Object.assign(new Error('days: a whole number from 1 to 365'), { code: 'bad_request' });
-      expiry.days = p.days;
+      expiry.days.set(Number(p.teamId), p.days);
     }
-    return { days: expiry.days };
+    return { days: expiryDays(Number(p?.teamId)) };
   },
   'teams.agents': (p) => agents[p?.teamId ?? p?.id ?? 1] ?? [],
   'teams.quiet': () => ({ quiet: false, working: ['DeveloperAda'], openWorkflows: [10] }),
   'teams.approvals': () => [],
   'teams.repos': () => [],
   'agentProfiles.list': () => [],
-  'board.list': () => ({ lanes, cards, teams: teams.map((t) => ({ id: t.id, name: t.name })), clearedCount: 0 }),
+  'board.list': () => ({ lanes, cards, teams: teamRows.map((t) => ({ id: t.id, name: t.name })), clearedCount: 0 }),
   'board.card': (p) => ({ ...cards.find((c) => c.id === p?.id)!, trail: [{ id: 1, at: iso(30), source: 'Manager', kind: 'planned', text: 'Planned the card.' }, { id: 2, at: iso(20), source: 'Manager', kind: 'assigned', text: 'Assigned to DeveloperAda.' }], itemTitle: 'Partial refunds' }),
   'backlog.list': () => backlog,
   'backlog.item': (p) => ({ ...backlog.find((b) => b.id === p?.id)!, dispatches: [] }),
@@ -258,7 +268,7 @@ export function createFakeCore() {
     /** B054: with false, no integration ask and no decision is pending. */
     setNeedsYou(on: boolean) { needsYou = on; },
     /** B085: the expiring and expired workflows listed (off: only #10), Extend forgotten, workflowExpiryDays back to 3. */
-    setExpiry(on: boolean) { expiry.on = on; expiry.extended.clear(); expiry.days = 3; },
+    setExpiry(on: boolean) { expiry.on = on; expiry.extended.clear(); expiry.days.clear(); },
     /** B067: put the Tidy… plan back (nothing deleted or realigned). */
     resetTidy() { tidy.deleted.clear(); tidy.realigned.clear(); },
     answer(text: string): string | null {

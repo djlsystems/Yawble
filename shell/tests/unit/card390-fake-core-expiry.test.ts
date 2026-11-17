@@ -1,6 +1,6 @@
 // Card 390 (B085 verify), gap tests: the phone-remote fake core (tests/e2e/phone/fake-core.ts) against the real UiRpc's
-// B085 shapes, as core's Card390ExpiryContractTests reads them over the wire (same key list). What matches is a plain
-// `it`; a known mismatch is `it.fails` (it turns red once the fake is fixed: then make it a plain `it`). Test-only.
+// B085 shapes, as core's Card390ExpiryContractTests reads them over the wire (same key list). All plain `it`: the
+// four `it.fails` that pinned F1-F4 became plain `it` once card 389 fixed the fake. Test-only.
 import { describe, expect, it } from 'vitest';
 import { createFakeCore } from '../e2e/phone/fake-core';
 import { WORKFLOW_EXTEND, TEAM_WORKFLOW_EXPIRY } from '../../src/shared/api';
@@ -33,17 +33,17 @@ describe('card 390: the fake core serves the real UiRpc B085 shapes', () => {
     expect(w9.question).toBeNull();
   });
 
-  it.fails('every bus.workflows item carries the real keys, expiryWarning included (fake: no expiryWarning)', () => {
+  it('every bus.workflows item carries the real keys, expiryWarning included', () => {
     const { call } = core();
     for (const w of call('bus.workflows', { teamId: 1 }).result as any[]) expect(Object.keys(w).sort()).toEqual(ItemKeys);
   });
 
-  it.fails('an expired item\'s ending is the core\'s detail "no activity for 3 days" (fake: "expired: no activity…", shown "Expired: expired: …")', () => {
+  it('an expired item\'s ending is the core\'s detail "no activity for 3 days"', () => {
     const { call } = core();
     expect((call('bus.workflows', { teamId: 1 }).result as any[]).find((w) => w.id === 9).ending).toBe('no activity for 3 days');
   });
 
-  it.fails('bus.workflowExtend returns the list item with the clock reset to now + workflowExpiryDays (fake: expiresAt null)', () => {
+  it('bus.workflowExtend returns the list item with the clock reset to now + workflowExpiryDays', () => {
     const { call } = core();
     const r = call(WORKFLOW_EXTEND, { teamId: 1, workflow: 12 }).result;
     expect(Object.keys(r).sort()).toEqual(ItemKeys);
@@ -73,7 +73,7 @@ describe('card 390: the fake core serves the real UiRpc B085 shapes', () => {
     expect(c.unknown.has('teams.setWorkflowExpiry')).toBe(true);
   });
 
-  it.fails('teams.list items carry workflowExpiryDays, and it follows teams.workflowExpiry (fake: absent)', () => {
+  it('teams.list items carry workflowExpiryDays, and it follows teams.workflowExpiry', () => {
     const { call } = core();
     expect((call('teams.list').result as any[]).every((t) => t.workflowExpiryDays === 3)).toBe(true);
     call(TEAM_WORKFLOW_EXPIRY, { teamId: 1, days: 9 });
