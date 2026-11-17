@@ -35,8 +35,9 @@ import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodM
  * ring, pause, cross), "#id title" and the time of its last entry. The panel is one body in the layout, sized to its
  * rows, and drawn larger as the wall zooms out so its words stay readable; clicking it opens the team at its workflows.
  * The layout is a d3-force simulation
- * ticked once per frame; the camera fits everything unless the person has moved it in the last 12 s.
- * Under reduced motion nothing turns or throbs and the graph settles.
+ * ticked once per frame while it is awake; it cools to rest once nothing changes, and so the camera, which fits
+ * everything unless the person has moved it in the last 12 s, settles too (card 385).
+ * Under reduced motion nothing turns or throbs.
  *
  * B080, livelier and easier to follow:
  *   workflow nodes - every open workflow is a small node tied by dashed lines to the members working it (to its hub
@@ -60,7 +61,8 @@ interface Node extends SimulationNodeDatum {
   wf?: WorkflowSummary;
 }
 /** A workflow node that has left (completed or closed): where it was, drawn by its wfdone effect. */
-interface WfGhost { x: number; y: number; hue: number; id: number; outX: number; outY: number; gone: number }
+/** A workflow node that left: where it was, its way out from its hub, and (to follow the hub) its hub and offset from it. */
+interface WfGhost { x: number; y: number; hue: number; id: number; outX: number; outY: number; gone: number; hub: string | null; dx: number; dy: number }
 interface Link { source: Node; target: Node }
 
 export interface SceneHover {
@@ -134,6 +136,36 @@ export function graphShape(nodes: Iterable<{ key: string; r: number; homeX: numb
   return s;
 }
 
+/** Which way the workflow panels last re-sized: 1 larger, -1 smaller, 0 not since the inputs last changed. */
+export type PanelDir = -1 | 0 | 1;
+
+/**
+ * The workflow panels' next size step. The panels are drawn larger as the wall zooms out, and they are bodies in the
+ * forces, so a step moves the graph, which moves the fit, which changes the zoom again. With two teams' maps this went
+ * round for ever (card 385: zoom 0.30-0.51, the hub circling). So a step needs an 8% change, and after one the panels
+ * only go on the same way until an input changes (the person zooms or pans, Fit, focus, the wall's size, nodes come or
+ * go: `dir` back to 0). Steps one way are bounded (1 to PanelMaxScale), so the size settles and so does the camera.
+ */
+export function panelStep(current: number, wanted: number, dir: PanelDir): { k: number; dir: PanelDir } {
+  if (Math.abs(wanted - current) / current < 0.08) return { k: current, dir };
+  const way: PanelDir = wanted > current ? 1 : -1;
+  if (dir !== 0 && way !== dir) return { k: current, dir };
+  return { k: wanted, dir: way };
+}
+
+/** How still the graph (alpha) and how near its aim the camera (zoom) must be before an auto fit re-sizes the panels. */
+export const PanelRestAlpha = 0.1;
+export const PanelArrivedZoom = 0.03;
+/** Whether the panels may re-size while the camera fits on its own: the forces are at rest and the camera is (nearly) there. */
+export function panelsMayStep(alpha: number, camK: number, targetK: number): boolean {
+  return alpha <= PanelRestAlpha && Math.abs(camK - targetK) <= PanelArrivedZoom * targetK;
+}
+
+/** graphShape with each workflow panel's radius left out (it follows the zoom; its row count stands for it). */
+function forceShape(nodes: Iterable<Node>): string {
+  return graphShape([...nodes].map((n) => (n.kind === 'workflows' ? { key: n.key, r: n.wfs?.length ?? 0, homeX: n.homeX, homeY: n.homeY } : n)));
+}
+
 export function teamAngle(i: number, count: number): number {
   return count <= 1 ? 0 : Math.PI + (i / count) * Math.PI * 2;
 }
@@ -174,6 +206,8 @@ export class MonitorScene {
   private wfFrom: { model: MonitorModel | null; rev: number } = { model: null, rev: -1 };
   /** How much larger than its world size the workflow panels are drawn (panelScale of the zoom, changed in steps). */
   private panelK = 1;
+  /** Which way the panels last re-sized since the inputs last changed (0: either way may come next); see panelStep. */
+  private panelDir: PanelDir = 0;
   /** What of a workflow panel is under the pointer. */
   private hoverPanel: { key: string; hit: 'header' | 'panel' | number } | null = null;
   private sim: Simulation<Node, undefined>;
@@ -232,7 +266,9 @@ export class MonitorScene {
     this.ctx = canvas.getContext('2d')!;
     this.reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.sim = forceSimulation<Node>([])
-      .alphaDecay(0.02).alphaTarget(this.reducedMotion ? 0 : 0.012)
+      // The forces cool to rest (alpha target 0) once nothing changes: kept warm, two teams' hubs and their workflow
+      // panels kept circling one another and the camera's fit chased them (card 385).
+      .alphaDecay(0.02).alphaTarget(0)
       .force('link', forceLink<Node, Link>([]))
       .force('wflink', forceLink<Node, Link>([]))
       .force('wfmlink', forceLink<Node, Link>([]))
@@ -254,7 +290,6 @@ export class MonitorScene {
   get reduced(): boolean { return this.reducedMotion; }
   setReducedMotion(on: boolean): void {
     this.reducedMotion = on;
-    this.sim.alphaTarget(on ? 0 : 0.012);
   }
 
   /** How many effects the wall draws per frame, and how many code-map files and commit dots: calm, normal (the default) or lively. */
@@ -377,11 +412,12 @@ export class MonitorScene {
     const now = typeof performance === 'object' ? performance.now() : 0;
     for (const [k, n] of [...this.nodes]) {
       if (keep.has(k)) continue;
-      // A workflow node that leaves keeps where it was a while, for its flash or fade (its wfdone effect).
+      // A workflow node that leaves keeps where it was beside its hub a while, for its flash or fade (its wfdone
+      // effect): it goes with the hub while the graph settles without it, so it drifts away from its own team.
       if (n.kind === 'wf') {
         const hub = this.nodes.get(teamKey(n.team));
         const dx = hub ? n.x! - hub.x! : 1, dy = hub ? n.y! - hub.y! : 0, d = Math.hypot(dx, dy) || 1;
-        this.wfGhosts.set(k, { x: n.x!, y: n.y!, hue: n.hue, id: n.wf?.id ?? 0, outX: dx / d, outY: dy / d, gone: now });
+        this.wfGhosts.set(k, { x: n.x!, y: n.y!, hue: n.hue, id: n.wf?.id ?? 0, outX: dx / d, outY: dy / d, gone: now, hub: hub ? hub.key : null, dx, dy });
       }
       this.nodes.delete(k);
     }
@@ -397,9 +433,12 @@ export class MonitorScene {
     }
     // A poll that changes no node, size or home (the usual case, every 1.2 s) only refreshes what the nodes say: waking
     // the forces each time made the graph jerk once a second.
-    const shape = graphShape(this.nodes.values()) + wfm.map((l) => `${l.source.key}>${l.target.key}`).join(',');
+    // A panel's radius is left out: it follows the zoom (rescalePanels wakes the forces for that itself), and counting it
+    // here made every poll after a panel step wake the graph again (card 385).
+    const shape = forceShape(this.nodes.values()) + wfm.map((l) => `${l.source.key}>${l.target.key}`).join(',');
     if (shape === this.shape) return;
     this.shape = shape;
+    this.panelDir = 0; // nodes came, went or moved home: the panels may re-size either way
     const spokeTo = (kind: Node['kind']) => [...this.nodes.values()].filter((n) => n.kind === kind).map((n) => ({ source: this.nodes.get(teamKey(n.team))!, target: n }));
     this.links = spokeTo('member');
     this.wfLinks = spokeTo('workflows');
@@ -433,16 +472,16 @@ export class MonitorScene {
   setPicked(key: string | null): void { this.picked = key; }
 
   /** Fits everything on the next frames (double-click, the Fit button); pinned, only this once. */
-  fit(): void { this.movedAt = -Infinity; this.fitUntil = performance.now() + FitOnceMs; }
+  fit(): void { this.movedAt = -Infinity; this.fitUntil = performance.now() + FitOnceMs; this.panelDir = 0; }
 
   /** Auto fit (false: fits everything unless the person moved the wall in the last 12 s) or pinned (true: never on its own). */
-  setPinned(on: boolean): void { this.pinned = on; this.fitUntil = -Infinity; if (!on) this.movedAt = -Infinity; }
+  setPinned(on: boolean): void { this.pinned = on; this.fitUntil = -Infinity; if (!on) this.movedAt = -Infinity; this.panelDir = 0; }
 
   /** Whether the camera aims at everything this frame. */
   private fitting(now: number): boolean { return aimsAtEverything(this.pinned, now, this.movedAt, this.fitUntil); }
 
   /** The person moved the wall: auto fit waits 12 s; a one-off fit under way stops. */
-  private moved(): void { this.movedAt = performance.now(); this.fitUntil = -Infinity; }
+  private moved(): void { this.movedAt = performance.now(); this.fitUntil = -Infinity; this.panelDir = 0; }
 
   // ---------- the frame ----------
   private frame = (now: number) => {
@@ -452,9 +491,9 @@ export class MonitorScene {
     this.dt = dt;
     this.model?.tidy(now);
     if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.workflowsRev ?? -1) || this.mapRoom !== (this.model?.map.size ?? 0) > 0) this.rebuild();
-    this.rescalePanels();
+    this.rescalePanels(now);
     this.resize();
-    if (this.sim.alpha() > 0.001 || !this.reduced) this.sim.tick();
+    if (this.sim.alpha() > 0.001) this.sim.tick(); // at rest the nodes stay put (a wake: new nodes, a drag, a panel step)
     if (this.fitting(now)) this.aimFit();
     const ease = 1 - Math.pow(0.0025, dt / 1000);
     this.cam.x += (this.target.x - this.cam.x) * ease;
@@ -470,11 +509,16 @@ export class MonitorScene {
     return this.reducedMotion && (e.kind === 'comet' || e.kind === 'you') ? StillCometMs : Life[e.kind];
   }
 
-  /** Follows the zoom with the workflow panels' size, in steps (each step re-sizes their bodies in the layout). */
-  private rescalePanels(): void {
-    const k = panelScale(this.cam.k);
-    if (Math.abs(k - this.panelK) / this.panelK < 0.08) return;
+  /** Follows the zoom with the workflow panels' size, in steps (each step re-sizes their bodies in the layout; panelStep). */
+  private rescalePanels(now: number): void {
+    // While the camera fits on its own, a step waits until the graph is at rest and the camera has got there: a step
+    // taken mid-swing chased a zoom that was only passing (card 385). Zoomed by hand, the panels follow at once.
+    if (this.fitting(now) && !panelsMayStep(this.sim.alpha(), this.cam.k, this.target.k)) return;
+    const step = panelStep(this.panelK, panelScale(this.cam.k), this.panelDir);
+    if (step.k === this.panelK) return;
+    const k = step.k;
     this.panelK = k;
+    this.panelDir = step.dir;
     let any = false;
     for (const n of this.nodes.values()) if (n.kind === 'workflows') { n.r = panelRadius(panelLayout(n.wfs?.length ?? 0, k)); any = true; }
     if (!any) return;
@@ -491,6 +535,7 @@ export class MonitorScene {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (w === this.w && h === this.h && dpr === this.dpr) return;
     this.w = w; this.h = h; this.dpr = dpr;
+    this.panelDir = 0;
     this.canvas.width = Math.max(1, Math.round(w * dpr));
     this.canvas.height = Math.max(1, Math.round(h * dpr));
   }
@@ -508,8 +553,9 @@ export class MonitorScene {
       x0 = Math.min(x0, n.x! - pad); x1 = Math.max(x1, n.x! + pad);
       y0 = Math.min(y0, n.y! - pad); y1 = Math.max(y1, n.y! + pad);
     }
-    // The maps, with room for their labels.
+    // The maps, with room for their labels: focused, that team's map only (all of them kept the focus from zooming in).
     for (const m of this.mapNodes) {
+      if (mine.length && focus !== null && m.team.team.toLowerCase() !== focus) continue;
       x0 = Math.min(x0, m.x - 60); x1 = Math.max(x1, m.x + 60);
       y0 = Math.min(y0, m.y - 16); y1 = Math.max(y1, m.y + 16);
     }
@@ -647,7 +693,9 @@ export class MonitorScene {
     let ox = ghost?.outX ?? 1, oy = ghost?.outY ?? 0;
     if (node && hub) { const d = Math.hypot(node.x! - hub.x!, node.y! - hub.y!) || 1; ox = (node.x! - hub.x!) / d; oy = (node.y! - hub.y!) / d; }
     const drift = motion && e.status === 'completed' ? (1 - Math.pow(1 - t, 2)) * 90 : 0;
-    const x = (node?.x ?? ghost!.x) + ox * drift, y = (node?.y ?? ghost!.y) + oy * drift;
+    const ghostHub = !node && ghost?.hub ? this.nodes.get(ghost.hub) : undefined;
+    const bx = node?.x ?? (ghostHub ? ghostHub.x! + ghost!.dx : ghost!.x), by = node?.y ?? (ghostHub ? ghostHub.y! + ghost!.dy : ghost!.y);
+    const x = bx + ox * drift, y = by + oy * drift;
     const done = e.status === 'completed';
     const color = done ? Palette.done : Palette.inkDim;
     c.globalCompositeOperation = 'source-over';

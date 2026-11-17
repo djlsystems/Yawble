@@ -127,7 +127,10 @@ public sealed class ConciergeActions(
 
     /// <summary>The same actions for a new turn (the person's yes is a later turn than the list); with <paramref name="book"/>,
     /// bound to that book instead of these actions' own (the companion keeps its own, so neither accepts the other's tokens).</summary>
-    public ConciergeActions ForTurn(ConciergeTurn turn, ConfirmationBook? book = null) => new(bus, ui, board, git, repos, book ?? _book, gh, audit, turn);
+    public ConciergeActions ForTurn(ConciergeTurn turn, ConfirmationBook? book = null) => new(bus, ui, board, git, repos, book ?? _book, gh, audit, turn) { HostTasks = HostTasks };
+
+    /// <summary>The teams' host tasks (host_task_list / run / status), set by the app when this computer has them; null: none.</summary>
+    public ConciergeHostTasks? HostTasks { get; set; }
 
     /// <summary>
     /// What a turn started through the Cloud Link may not do (git deletes and anything hard to undo stay on
@@ -135,7 +138,7 @@ public sealed class ConciergeActions(
     /// </summary>
     public static readonly IReadOnlyList<string> LocalOnly =
     [
-        "git_branches_delete", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
+        "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
         "team_archive", "team_delete", "team_env_set", "doctor_fix",
     ];
 
@@ -153,7 +156,7 @@ public sealed class ConciergeActions(
     public static readonly IReadOnlyList<string> ToolNames =
     [
         "backlog_edit", "backlog_ready", "backlog_dispatch", "backlog_archive", "backlog_restore", "board_move", "board_comment",
-        "git_branches_delete", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
+        "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
         "team_archive", "team_unarchive", "team_delete", "team_env_set", "team_agent_change", "doctor_fix",
     ];
 
@@ -237,6 +240,8 @@ public sealed class ConciergeActions(
                 var plan = await git.PlanDeleteAsync(repo, List(args, "branches"), List(args, "unmerged_ok"), Bool(args, "remote"), ct);
                 return await ConfirmedAsync(name, args, $"Delete these branches in {team.Name}:\n{plan.Text}", plan.Key, plan.Empty, plan.Run, ct);
             }
+            case "git_branch_realign":
+                return await RealignAsync(args, ct);
             case "git_prune":
             {
                 var (team, repo) = await RepoAsync(args, ct);
@@ -392,6 +397,42 @@ public sealed class ConciergeActions(
         }
     }
 
+    /// <summary>
+    /// git_branch_realign (B067): sets the team repository's and origin's copy of a member's branch to its clone's commit (a
+    /// forced update). The first call shows old and new commit and a token; the run, after the person's yes, checks they are
+    /// still the ones shown. Refused while the member runs, at either call.
+    /// </summary>
+    private async Task<string> RealignAsync(JsonObject args, CancellationToken ct)
+    {
+        var team = await TeamAsync(Required(args, "team"), ct);
+        var teamRepos = bus.Repos ?? throw new ArgumentException("this app has no team repositories");
+        var memberName = Required(args, "member");
+        var member = (await bus.AgentCardsAsync(team.Id, ct)).Select(c => c.Member).FirstOrDefault(m => string.Equals(m.Name, memberName.Trim(), StringComparison.OrdinalIgnoreCase))
+                     ?? throw new ArgumentException($"{team.Name} has no member '{memberName}'");
+        var repoName = Optional(args, "repo");
+        async Task<string?> Running(CancellationToken token) => await bus.ActiveRunOfAsync(member.Id, token) is { } run ? $"run {run}" : null;
+        try
+        {
+            var plan = await teamRepos.GitBranchRealignAsync(team.Id, team.Name, repoName, member.Name, Running, planOnly: true, ct: ct);
+            if (!plan.Planned) return "nothing to do: " + plan.Message;
+            var text = $"Realign in {team.Name} (a forced update; the old commit is recorded so it can be restored):\n- {plan.Message}";
+            var key = $"{team.Id}:{plan.Repo}:{plan.Branch}:{plan.OldSha}:{plan.NewSha}:{plan.OriginOldSha}";
+            return await ConfirmedAsync("git_branch_realign", args, text, key, false, async token =>
+            {
+                try
+                {
+                    return (await teamRepos.GitBranchRealignAsync(team.Id, team.Name, repoName, member.Name, Running,
+                        expectOld: plan.OldSha ?? "", expectNew: plan.NewSha, ct: token)).Message;
+                }
+                catch (TeamGitRefusal e) { throw new ArgumentException("refused: " + e.Message); }
+            }, ct);
+        }
+        catch (TeamGitRefusal e)
+        {
+            throw new ArgumentException("refused: " + e.Message);
+        }
+    }
+
     private static List<string>? Targets(JsonObject r) =>
         r["targets"] is JsonArray a ? a.Select(n => n?.GetValue<string>() ?? "").Order(StringComparer.Ordinal).ToList() : null;
 
@@ -535,10 +576,16 @@ public sealed class ConciergeActions(
             ("card", "integer", "The card's number.", true), ("lane", "string", "todo, in-progress, blocked or done.", true), ("note", "string", "Why (optional).", false)),
         Tool("board_comment", "Comment on a board card; the team's Manager is told.", ("card", "integer", "The card's number.", true), ("text", "string", "The comment.", true)),
         Tool("git_branches_delete", "Delete branches of a team's repository (local, and on origin with remote). DESTRUCTIVE: the first call only returns the exact list and a token; show the list to the person, and call again with the token only after they say yes in their next message. " +
-                                    "Each deleted branch's SHA is recorded. Never deletes the base branch, a branch checked out anywhere, or an unmerged branch unless it is named in unmerged_ok.",
+                                    "Each deleted branch's SHA is recorded. Never deletes the base branch, a branch checked out anywhere, or an unmerged branch unless it is named in unmerged_ok. " +
+                                    "A branch contained in the base (every commit already has an equivalent there, git_tidy_plan's contained) counts as merged and needs no unmerged_ok; its plan line shows the proof.",
             ("team", "string", "The team.", true), ("repo", "string", "Repository name (default main).", false),
             ("branches", "string", "Branch names, comma separated; omit for every merged branch.", false), ("unmerged_ok", "string", "Unmerged branches the person explicitly named for deletion.", false),
             ("remote", "boolean", "Also delete the same branches on origin.", false), ("confirm", "string", "The token, after the person's yes.", false)),
+        Tool("git_branch_realign", "Set the team repository's and origin's copy of a member's branch to what the member's clone has (a forced update, for a branch git_tidy_plan lists as moved: the clone was reset or rebased). " +
+                                   "DESTRUCTIVE: the first call only returns the old and new commit and a token; show it to the person, and call again with the token only after they say yes in their next message. " +
+                                   "The old commit is recorded so it can be restored. Refused while the member runs.",
+            ("team", "string", "The team.", true), ("member", "string", "The member whose clone's branch is the new commit.", true),
+            ("repo", "string", "Repository name (default main).", false), ("confirm", "string", "The token, after the person's yes.", false)),
         Tool("git_prune", "Forget remote-tracking branches origin no longer has. Lists them first and needs the person's yes like git_branches_delete.",
             ("team", "string", "The team.", true), ("repo", "string", "Repository name (default main).", false), ("confirm", "string", "The token, after the person's yes.", false)),
         Tool("git_push_branch", "Push one branch to origin (never forced), when the person asks.",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { confirmDialog } from '../confirm';
 import type { IntegrationInfo, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import IntegrationDialog from './IntegrationDialog.vue';
@@ -66,7 +67,7 @@ async function login(i: IntegrationInfo) {
   } catch (e) { error.value = errorText(e); } finally { busy.value = null; busyMethod.value = null; }
 }
 async function remove(i: IntegrationInfo) {
-  if (!window.confirm(`Remove ${i.label}? Agents can no longer use it.`)) return;
+  if (!(await confirmDialog({ message: `Remove ${i.label}? Agents can no longer use it.`, okLabel: 'Remove', danger: true }))) return;
   await call(i.name, 'integrations.remove', {});
 }
 async function addCli() {

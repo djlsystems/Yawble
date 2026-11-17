@@ -149,8 +149,10 @@ public sealed partial class TeamRepos
     private async Task<TeamRepo> GitRepoAsync(long teamId, string team, string? repoName, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(repoName)) return await EnsureTeamRepoAsync(teamId, team, ct);
-        var extra = ExtrasOf(teamId).FirstOrDefault(e => string.Equals(e.Name, repoName.Trim(), StringComparison.OrdinalIgnoreCase))
-            ?? throw new ArgumentException($"team {team} has no repository named {repoName}");
+        var extra = ExtrasOf(teamId).FirstOrDefault(e => string.Equals(e.Name, repoName.Trim(), StringComparison.OrdinalIgnoreCase));
+        // B067: "main" (the tidy plan's and the Concierge's name for it) is the main repository, unless an extra has that name.
+        if (extra is null && string.Equals(repoName.Trim(), MainRepoName, StringComparison.OrdinalIgnoreCase)) return await EnsureTeamRepoAsync(teamId, team, ct);
+        if (extra is null) throw new ArgumentException($"team {team} has no repository named {repoName}");
         if (!extra.Writable) throw new ArgumentException($"{extra.Name} is a read-only reference: the team has no branch in it to merge");
         return new TeamRepo(teamId, extra.Path, false, extra.BaseBranch);
     }
@@ -276,7 +278,7 @@ public sealed partial class TeamRepos
     {
         var repo = await GitRepoAsync(teamId, team, repoName, ct);
         var extra = string.IsNullOrWhiteSpace(repoName) ? null
-            : ExtrasOf(teamId).First(e => string.Equals(e.Name, repoName.Trim(), StringComparison.OrdinalIgnoreCase));
+            : ExtrasOf(teamId).FirstOrDefault(e => string.Equals(e.Name, repoName.Trim(), StringComparison.OrdinalIgnoreCase)); // none: "main"
         var name = extra?.Name ?? "main";
         // Card 104: every team on this repository, not only this one. Their clones count for what is checked out, and a
         // branch another team's member is recorded on (its live branch, an old-style members/<name> one before its move

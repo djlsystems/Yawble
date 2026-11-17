@@ -14,8 +14,8 @@ public static class CompanionTools
     public static readonly IReadOnlyList<string> Read =
     [
         "team_list", "team_status", "team_activity", "team_workflows", "documents_list", "documents_read", "team_repos",
-        "backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "integrations_status", "usage", "doctor",
-        "backups_list", "request_status",
+        "backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "integrations_status", "usage", "doctor",
+        "backups_list", "request_status", "host_task_list", "host_task_status",
     ];
 
     public static readonly IReadOnlyList<string> Act =
@@ -26,13 +26,13 @@ public static class CompanionTools
 
     public static readonly IReadOnlyList<string> Destructive =
     [
-        "git_branches_delete", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
+        "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
         "team_archive", "team_delete", "team_env_set", "doctor_fix", "team_create", "team_repo_add", "team_repo_remove", "workflow_close",
-        "backup_now", "git_merge_team", "backup_restore",
+        "backup_now", "git_merge_team", "backup_restore", "host_task_run",
     ];
 
     /// <summary>The destructive tools whose own first call shows the exact list and issues a token (ConciergeActions' confirm flow).</summary>
-    public static readonly IReadOnlyList<string> SelfConfirming = ["git_branches_delete", "git_prune", "git_pr_merge", "team_archive", "team_delete"];
+    public static readonly IReadOnlyList<string> SelfConfirming = ["git_branches_delete", "git_branch_realign", "git_prune", "git_pr_merge", "team_archive", "team_delete"];
 
     /// <summary>The tools the companion serves itself (not the Concierge's).</summary>
     public static readonly IReadOnlyList<string> Own = ["backups_list", "request_status", "git_merge_team", "backup_restore"];
@@ -100,6 +100,10 @@ public static class CompanionTools
                 // The Concierge's wording about tokens and a yes in chat does not apply here (the window approves): those sentences go.
                 var description = string.Join(' ', System.Text.RegularExpressions.Regex.Split(copy["description"]!.GetValue<string>(), @"(?<=\.)\s+")
                     .Where(sentence => !System.Text.RegularExpressions.Regex.IsMatch(sentence, @"(?i)token|confirm|\byes\b"))).Trim();
+                // An external client has no chat for the Update at a host task run's end: it checks host_task_status instead.
+                if (name == ConciergeHostTasks.RunTool)
+                    description = string.Join(' ', System.Text.RegularExpressions.Regex.Split(description, @"(?<=\.)\s+")
+                        .Where(sentence => !sentence.Contains("this chat", StringComparison.Ordinal))).Trim() + " Check its result with host_task_status.";
                 copy["description"] = description + " This " + ApprovalNote;
             }
             list.Add(copy);
@@ -151,6 +155,7 @@ public static class CompanionTools
             "team_repo_remove" => $"Take repository {Text(args, "name")} away from team {team} (its folder on this computer is kept).",
             "workflow_close" => $"Close workflow #{Text(args, "workflow")} of team {team} without declaring it complete" + (Text(args, "reason") is { } r ? $": {r}" : "") + ".",
             "backup_now" => "Make a backup of the app's data now.",
+            "host_task_run" => $"Ask to run host task {Text(args, "task")} of team {team} on this computer: {Text(args, "reason")}. It then waits for your Run once / Always in Needs you like an agent's request, unless it has a standing approval.",
             "git_merge_team" => $"Merge team {team}'s branch into the base branch of its {repo} repository.",
             "backup_restore" => $"Restore the backup {Text(args, "backup")}: it is staged and replaces the app's data when the app restarts.",
             "backlog_dispatch" => $"Make a new team {Text(args, "new_team")} with a {Text(args, "manager_cli") ?? "claude"} Manager" +

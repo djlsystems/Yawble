@@ -139,6 +139,8 @@ public sealed class UiRpc(
                 "git.sync" => await GitAsync(p, (r, id, name) => r.SyncNowAsync(id, name, ct), ct),
                 "git.askTeam" => await AskTeamAsync(Long(p, "teamId"), ct, OptStr(p, "repo")),
                 "git.deleteBranches" => await DeleteBranchesAsync(p, ct),
+                "git.tidyPlan" => await TidyPlanAsync(p, ct),
+                "git.branchRealign" => await BranchRealignAsync(p, ct),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -473,6 +475,93 @@ public sealed class UiRpc(
         return done.Result is { } result
             ? new JsonObject { ["result"] = result }
             : new JsonObject { ["plan"] = done.Plan, ["token"] = done.Token, ["empty"] = done.Empty };
+    }
+
+    /// <summary>B067: the team of a tidy call, by teamId (as every git RPC) or by its name (team).</summary>
+    private async Task<(Teams.TeamRepos Repos, TeamSummary Team)> TidyTeamAsync(JsonObject? p, CancellationToken ct)
+    {
+        if (OptLong(p, "teamId") is { } id) return await GitTeamAsync(id, ct);
+        var name = OptStr(p, "team") ?? throw new RpcException("bad_params", "teamId (or team) is required");
+        var team = (await bus.TeamsAsync(ct)).FirstOrDefault(t => string.Equals(t.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))
+                   ?? throw new RpcException("no_such_team", $"there is no team '{name}'");
+        return await GitTeamAsync(team.Id, ct);
+    }
+
+    /// <summary>
+    /// git.tidyPlan {teamId | team} -> {repos:[{repo, branches:[{name, where:[local|origin|clone:&lt;member&gt;], class, proof?,
+    /// commits?[{sha,subject}], teamSha?, cloneSha?, member?}], notes?}]} (B067). Reads only.
+    /// </summary>
+    private async Task<JsonNode?> TidyPlanAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        Teams.TeamGitTidyPlan plan;
+        try
+        {
+            plan = await repos.GitTidyPlanAsync(team.Id, team.Name, ct);
+        }
+        catch (Exception e) when (e is Teams.GitException or ArgumentException or InvalidOperationException or IOException)
+        {
+            throw new RpcException("git_failed", e.Message);
+        }
+        return TidyPlanJson(plan);
+    }
+
+    /// <summary>The tidy plan in the window's contract (git.tidyPlan): absent optional fields are left out.</summary>
+    public static JsonObject TidyPlanJson(Teams.TeamGitTidyPlan plan)
+    {
+        var list = new JsonArray();
+        foreach (var r in plan.Repos)
+        {
+            var branches = new JsonArray();
+            foreach (var b in r.Branches)
+            {
+                var o = new JsonObject { ["name"] = b.Name, ["where"] = new JsonArray(b.Where.Select(w => (JsonNode?)w).ToArray()), ["class"] = b.Class };
+                if (b.Proof is not null) o["proof"] = b.Proof;
+                if (b.Commits is not null) o["commits"] = new JsonArray(b.Commits.Select(c => (JsonNode?)new JsonObject { ["sha"] = c.Sha, ["subject"] = c.Subject }).ToArray());
+                if (b.TeamSha is not null) o["teamSha"] = b.TeamSha;
+                if (b.CloneSha is not null) o["cloneSha"] = b.CloneSha;
+                if (b.Member is not null) o["member"] = b.Member;
+                branches.Add(o);
+            }
+            var repo = new JsonObject { ["repo"] = r.Repo, ["baseBranch"] = r.BaseBranch, ["branches"] = branches };
+            if (r.Notes.Count > 0) repo["notes"] = new JsonArray(r.Notes.Select(n => (JsonNode?)n).ToArray());
+            list.Add(repo);
+        }
+        return new JsonObject { ["repos"] = list };
+    }
+
+    /// <summary>
+    /// git.branchRealign {teamId | team, repo, member, expectOld?, expectNew?} -> {oldSha, newSha, ...} (B067): the window asked
+    /// the person's yes. Refused with code <c>running</c> while the member runs (or has its interactive session open),
+    /// <c>stale</c> when the commits are not the ones shown, and the other refusals' own codes.
+    /// </summary>
+    private async Task<JsonNode?> BranchRealignAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var memberName = OptStr(p, "member") is { Length: > 0 } m ? m : throw new RpcException("bad_params", "member is required");
+        var member = (await bus.AgentCardsAsync(team.Id, ct)).Select(c => c.Member).FirstOrDefault(x => string.Equals(x.Name, memberName.Trim(), StringComparison.OrdinalIgnoreCase))
+                     ?? throw new RpcException("no_such_member", $"{team.Name} has no member '{memberName}'");
+        Teams.TeamGitRealign done;
+        try
+        {
+            done = await repos.GitBranchRealignAsync(team.Id, team.Name, OptStr(p, "repo"), member.Name, async token =>
+                await bus.ActiveRunOfAsync(member.Id, token) is { } run ? $"run {run}"
+                : terminals.IsLive(TerminalHub.MemberChannel(member.Id)) ? "its interactive session is open" : null,
+                expectOld: OptStr(p, "expectOld"), expectNew: OptStr(p, "expectNew"), ct: ct);
+        }
+        catch (Teams.TeamGitRefusal e)
+        {
+            throw new RpcException(e.Code, e.Message);
+        }
+        catch (Exception e) when (e is Teams.GitException or ArgumentException or InvalidOperationException or IOException)
+        {
+            throw new RpcException("git_failed", e.Message);
+        }
+        return new JsonObject
+        {
+            ["oldSha"] = done.OldSha, ["newSha"] = done.NewSha, ["branch"] = done.Branch, ["repo"] = done.Repo, ["member"] = done.Member,
+            ["originOldSha"] = done.OriginOldSha, ["originUpdated"] = done.OriginUpdated, ["changed"] = done.Changed, ["message"] = done.Message,
+        };
     }
 
     /// <summary>Tells the Manager to bring the team branch current with the base (Yawble ask-team), as a new workflow.</summary>
