@@ -164,7 +164,8 @@ watch(phone, () => void fit());
   font-size: 12px; line-height: 1; white-space: nowrap; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); }
 .tile-btn:hover:not(:disabled) { background: var(--hover); }
 .tile-btn:disabled { opacity: .5; }
-.icons-only .tile-btn:not(.danger) { width: 32px; padding: 0; flex: none; }
+/* Only the normal row's buttons shrink to their icon: the Delete confirm row keeps its worded Delete and Cancel (its question ellipsizes). */
+.icons-only .card-actions.normal .tile-btn { width: 32px; padding: 0; flex: none; }
 .icons-only .tile-btn .lbl { display: none; }
 .confirm-q { flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .danger-text { color: var(--bad); }
@@ -191,7 +192,7 @@ watch(phone, () => void fit());
 /* A phone, set by usePhone()'s class: no size grips (in the template), tap-sized buttons; the column and the card height are the @media rules below. */
 .phone .team-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 12px 0; }
 .phone .tile-btn { height: 44px; min-width: 44px; padding: 0 10px; }
-.phone .icons-only .tile-btn:not(.danger) { width: 44px; }
+.phone .icons-only .card-actions.normal .tile-btn { width: 44px; }
 .phone .link { min-height: 44px; min-width: 0; }
 /* A phone (B037): one column of team cards as tall as their content (the shared tile size and its grips do not
    apply), the buttons 44 px. */
@@ -200,9 +201,10 @@ watch(phone, () => void fit());
   .tile-cell > .team-card { height: auto; }
   .team-card { max-height: 22rem; }
   .team-card.add-wrap { min-height: 64px; }
-  .card-actions { flex-wrap: wrap; }
+  /* One row, never wrapped: a wrapped row never overflows, so fit() would never switch a phone to icons-only (card 319). */
+  .card-actions { flex-wrap: nowrap; }
   .tile-btn { height: 44px; padding: 0 12px; }
-  .icons-only .tile-btn:not(.danger) { width: 44px; }
+  .icons-only .card-actions.normal .tile-btn { width: 44px; }
   .link { min-height: 44px; }
 }
 </style>
