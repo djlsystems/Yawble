@@ -6,7 +6,8 @@ import { computed, ref } from 'vue';
  * saved on release (a blocked storage just means the default next time).
  */
 export const TILE_MIN_W = 280;
-export const TILE_MAX_W = 640;
+/** A sanity cap for a stored width; in practice a tile is as wide as the content area allows (availableWidth). */
+export const TILE_MAX_W = 4096;
 export const TILE_MIN_H = 200;
 export const TILE_MAX_H = 640;
 export const TILE_DEFAULT = { w: 320, h: 260 } as const;
@@ -24,14 +25,23 @@ function load(): TileSize {
   return { ...TILE_DEFAULT };
 }
 
+/** The width the tiles can really have: the content area's (Infinity until it is measured). Set by the Teams list. */
+export const availableWidth = ref(Infinity);
+
 export const tileSize = ref<TileSize>(load());
 
+/** Clamped, and never wider than the content area once it is measured: a tile can be widened up to the whole width. */
+const fit = (s: TileSize): TileSize => {
+  const c = clampTile(s);
+  return Number.isFinite(availableWidth.value) && availableWidth.value >= TILE_MIN_W ? { ...c, w: Math.min(c.w, Math.round(availableWidth.value)) } : c;
+};
+
 /** Sets the shared size (clamped) without saving: used while dragging. */
-export function previewTileSize(s: TileSize): void { tileSize.value = clampTile(s); }
+export function previewTileSize(s: TileSize): void { tileSize.value = fit(s); }
 
 /** Sets the shared size (clamped) and keeps it. */
 export function setTileSize(s: TileSize): void {
-  tileSize.value = clampTile(s);
+  tileSize.value = fit(s);
   try { localStorage.setItem(KEY, JSON.stringify(tileSize.value)); } catch { /* not kept */ }
 }
 
@@ -44,7 +54,5 @@ export function resetTileSize(): void {
 /** Re-reads the saved size (a fresh start of the page; tests use it to show the size survives a remount). */
 export function reloadTileSize(): void { tileSize.value = load(); }
 
-/** The width the tiles can really have: the content area's (Infinity until it is measured). Set by the Teams list. */
-export const availableWidth = ref(Infinity);
 /** The shared width as rendered: never wider than the content area. Dragging and arrow keys start from this. */
 export const renderedWidth = computed(() => Math.round(Math.min(tileSize.value.w, availableWidth.value)));
