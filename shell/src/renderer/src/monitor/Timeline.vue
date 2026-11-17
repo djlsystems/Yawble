@@ -4,15 +4,17 @@ import { spaced, type FeedRow } from './model';
 import { Palette } from './scene';
 import { StepLook, type StepKind, type StepRow } from './steps';
 import { axisTicks, timeOf, toneOfRow } from './timeline';
+import { shortSha, type CodeEvent } from './codemap';
 
 /**
  * THE TIMELINE across the bottom of the Monitor: from `from` to now, a tick for each bus message in its tone (the
  * ones that need the person or end something stand taller), and under them the members' steps, a column of each
- * moment's count (file changes in their own colour). The right edge is now. Hovering says what happened there;
+ * moment's count (file changes in their own colour), and a diamond at the top for each code event (a commit, a merge
+ * into the team branch, a landing on main, a push). The right edge is now. Hovering says what happened there;
  * clicking, or dragging and letting go, asks to replay from that moment (`seek`). In a replay the playhead shows
  * how far it has got.
  */
-const props = defineProps<{ from: number; to: number; rows: readonly FeedRow[]; steps: readonly StepRow[]; playhead: number | null; live: boolean }>();
+const props = withDefaults(defineProps<{ from: number; to: number; rows: readonly FeedRow[]; steps: readonly StepRow[]; events?: readonly CodeEvent[]; playhead: number | null; live: boolean }>(), { events: () => [] });
 const emit = defineEmits<{ seek: [at: number] }>();
 
 const box = ref<HTMLDivElement | null>(null);
@@ -88,6 +90,15 @@ function draw(): void {
     c.globalAlpha = r.kind === 'progress' ? 0.6 : 0.95;
     c.fillRect(Math.round(x) - 1, Lane.rows[1] - th, 2, th);
   }
+  // The code events: a diamond each at the top of the lane (a commit in its colour, a merge, a landing, a push).
+  for (const e of props.events) {
+    const x = xOf(timeOf(e));
+    if (x < -4 || x > width + 4) continue;
+    c.globalAlpha = 0.95;
+    c.fillStyle = Palette[codeTone(e)];
+    const s = e.kind === 'landed' ? 4 : 3;
+    c.beginPath(); c.moveTo(x, Lane.rows[0] - 2); c.lineTo(x + s, Lane.rows[0] + s - 2); c.lineTo(x, Lane.rows[0] + 2 * s - 2); c.lineTo(x - s, Lane.rows[0] + s - 2); c.closePath(); c.fill();
+  }
   c.globalAlpha = 1;
 
   // The axis: round times along the bottom.
@@ -144,8 +155,19 @@ const near = computed(() => {
     who, what: [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${n} ${StepLook[k].done}`).join(', '),
   }));
   const left = Math.min(Math.max(cursor.value, 172), width - 172);
-  return { at, rows, steps, left };
+  const code = props.events.filter((e) => Math.abs(timeOf(e) - at) <= reach).slice(-4)
+    .map((e, i) => ({ key: `${i}|${e.sha}|${e.kind}`, tone: codeTone(e), text: codeWords(e) }));
+  return { at, rows, steps, code, left };
 });
+
+const codeVerb: Record<CodeEvent['kind'], string> = { commit: 'committed', 'merge-team': 'merged into the team', landed: 'landed on main', push: 'pushed' };
+function codeTone(e: CodeEvent): 'commit' | 'handback' | 'done' | 'tell' {
+  return e.kind === 'commit' ? 'commit' : e.kind === 'merge-team' ? 'handback' : e.kind === 'landed' ? 'done' : 'tell';
+}
+function codeWords(e: CodeEvent): string {
+  const what = e.kind === 'push' ? e.branch : `${e.sha ? shortSha(e.sha) + ' ' : ''}${e.message.split('\n')[0]}`;
+  return `${spaced(e.member ?? e.team)} ${codeVerb[e.kind]}${what ? `: ${what}` : ''}`;
+}
 
 const words: Record<FeedRow['kind'], string> = {
   instruction: 'told', completed: 'finished a run', failed: 'run failed', handback: 'handed back', progress: 'progress',
@@ -181,7 +203,7 @@ function key(e: KeyboardEvent) {
   e.preventDefault();
 }
 
-watch(() => [props.from, props.to, props.rows, props.steps, props.playhead, props.live, cursor.value, dragging.value], draw);
+watch(() => [props.from, props.to, props.rows, props.steps, props.events, props.playhead, props.live, cursor.value, dragging.value], draw);
 onMounted(() => {
   observer = new ResizeObserver(() => { width = box.value?.clientWidth ?? 0; draw(); });
   if (box.value) { observer.observe(box.value); width = box.value.clientWidth; }
@@ -202,8 +224,9 @@ onBeforeUnmount(() => observer?.disconnect());
       <div v-for="r in near.rows" :key="r.seq" class="row">
         <i :style="{ background: Palette[toneOfRow(r)] }" /><span class="what">{{ rowWords(r) }}<span v-if="r.text" class="dim">: {{ r.text }}</span></span>
       </div>
+      <div v-for="e in near.code" :key="e.key" class="row" data-test="monitor-timeline-code"><i :style="{ background: Palette[e.tone] }" /><span class="what">{{ e.text }}</span></div>
       <div v-for="s in near.steps" :key="s.who" class="row"><i class="steps" /><span class="what">{{ s.who }} <span class="dim">{{ s.what }}</span></span></div>
-      <div v-if="!near.rows.length && !near.steps.length" class="dim">Nothing here.</div>
+      <div v-if="!near.rows.length && !near.steps.length && !near.code.length" class="dim">Nothing here.</div>
     </div>
   </div>
 </template>

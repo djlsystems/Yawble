@@ -283,9 +283,26 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 - A live wall of every team. Members orbit their team as discs with a state ring: running, waiting, needs you,
   idle.
-- Each member shows its recent tool steps, changed files and what it is doing now.
+- Each member shows its recent tool steps and what it is doing now.
+- **Code map**: each team has one tree round its hub, past its members: the repository, then its folders, then their
+  files. It builds up over the life of a workflow.
+  - A new file pops in. An edit lights a file bright, a read lights it faint. A folder glows warmer the busier its
+    files are.
+  - A line runs from each member to every file it touched. A file two members touched wears a double ring. A file a
+    commit confirmed wears a ring; hover a file for its path, who touched it and its commit.
+  - A file leaves when every workflow that touched it has ended, or after it has been idle for **files stay** (under
+    the timeline: 10 minutes, 30 minutes (the default), 1 hour or 4 hours; remembered).
+  - A large map collapses to its busiest folders, each with **+N** for the rest, and a **+N folders** node. All the
+    maps together show at most 240 files, and nodes off the screen are not drawn.
+- **Code events** on the wall, also listed in **Activity** and marked on the timeline:
+  - **commit**: the member's changed files gather into a dot that travels along the member's spoke to the team's hub
+    and rests there for a while. Hover it for the message and the short sha.
+  - **merge into the team branch**: a burst along the hub's spokes.
+  - **landed on main**: a larger burst.
+  - **push**: a pulse that runs off the edge of the wall.
+- With reduced motion there is no travel and no pop: the map just updates, and a commit's dot is simply at the hub.
 - Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
-- A timeline replays any moment. **● Back to live** returns.
+- A timeline replays any moment: the map, the commits and the merges play at their times. **● Back to live** returns.
 - The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
   link strength, repulsion, gravity and friction, each a multiplier (0.25× to 3×) on the wall's own layout. They apply
   as you drag and are remembered; **Reset** goes back to the defaults: distance 0.3×, strength 2.75×, repulsion 0.35×,
