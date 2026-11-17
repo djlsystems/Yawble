@@ -519,8 +519,12 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 </template>
 
 <style scoped>
-.app { display: grid; grid-template-columns: 268px 1fr; height: 100vh; background: var(--surface); }
-.app.collapsed { grid-template-columns: 56px 1fr; }
+/* dvh after vh (card 334): the height the browser really shows. iOS Safari's 100vh is the height with its toolbars hidden,
+   so a desktop-width remote view (an iPad, a phone in landscape) ran past the bottom of the screen, worst after a rotation.
+   In Electron dvh and vh are the same. minmax(0, 1fr): wide content never makes the page column wider than the window,
+   nor the sidebar's content the row taller than it (a phone turned to landscape: 380 px; the sidebar then scrolls). */
+.app { display: grid; grid-template-columns: 268px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100vh; height: 100dvh; background: var(--surface); }
+.app.collapsed { grid-template-columns: 56px minmax(0, 1fr); }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .bar { display: flex; align-items: center; gap: 6px; padding: 10px 16px; min-height: 52px; }
 .title { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -567,7 +571,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .phone .pill .pill-text { display: none; }
 .phone .banner { padding: 6px 12px; }
 /* All the banners together: at most half the window (40% of a phone's height), scrolling; the view (.content) gets the rest. */
-.banners { display: block; flex: none; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain; }
+.banners { display: block; flex: none; max-height: 50vh; max-height: 50dvh; overflow-y: auto; overscroll-behavior: contain; }
 .phone .banners { max-height: 40dvh; }
 .phone .teams-place { padding: 4px 12px 16px; }
 .phone .pad { padding: 16px; }
