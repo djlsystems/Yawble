@@ -639,6 +639,21 @@ export interface TeamGitBlockingBranch { name: string; repo: string; location: '
  * means the branches changed since the plan. */
 export interface GitDeletePlan { plan: string; token: string; empty: boolean }
 export interface GitDeleteResult { result: string }
+/** B067 git.tidyPlan {team}: every branch of the team's repositories (here, on origin, in the members' clones) in one class.
+ * merged: in the base; contained: every commit has an equivalent in the base (proof: git cherry's answer, as text);
+ * working: a member's working branch (in use, kept); moved: the team's copy differs from the member's clone (teamSha vs
+ * cloneSha; Realign sets the team's and origin's copy to the clone's); own-work: commits of its own (commits), needs a look;
+ * origin-only: on origin, nobody has it here; scratch: a clone's local-only scratch/* or tmp/* branch. where: local,
+ * origin, clone:<member>. */
+export type TidyClass = 'merged' | 'contained' | 'working' | 'moved' | 'own-work' | 'origin-only' | 'scratch';
+export interface TidyBranch {
+  name: string; where: string[]; class: TidyClass; proof?: string | null; commits?: { sha: string; subject: string }[] | null;
+  teamSha?: string | null; cloneSha?: string | null; member?: string | null;
+}
+export interface TidyPlan { repos: { repo: string; branches: TidyBranch[] }[] }
+/** B067 git.branchRealign {team, repo, member}: the old and new commit of the member branch in the team repository (and
+ * origin). Refused (an error) while the member runs. */
+export interface BranchRealignResult { oldSha: string; newSha: string }
 /** teams.syncToBase: the team's "Bring branches up to <base> before new work" setting, the note of a sync or fetch-back
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {
