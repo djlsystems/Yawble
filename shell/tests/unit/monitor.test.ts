@@ -1,12 +1,15 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memberKey, MonitorModel, teamKey, type FeedRow } from '../../src/renderer/src/monitor/model';
 import MonitorView from '../../src/renderer/src/monitor/MonitorView.vue';
 import Timeline from '../../src/renderer/src/monitor/Timeline.vue';
-import { aimsAtEverything, FitOnceMs } from '../../src/renderer/src/monitor/scene';
+import { aimsAtEverything, ClusterCore, ClusterGap, FitOnceMs, mapRoomFor, MonitorScene, nearestPair, teamHome } from '../../src/renderer/src/monitor/scene';
+import { clampLayout, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, readLayout, writeLayout } from '../../src/renderer/src/monitor/layout';
+import { collapse, DefaultLimits, mapRoomOf } from '../../src/renderer/src/monitor/codemap';
+import type { TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import type { YawbleApi, WorkflowSummary } from '../../src/shared/api';
-import { entryTime, latestWorkflows, panelHit, panelLayout, panelRadius, panelScale, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown } from '../../src/renderer/src/monitor/workflows';
+import { entryTime, latestWorkflows, nodeLabelFont, NodeLabelMax, workflowLabel, workflowLook, WorkflowLooks, workflowNodeLabel, WorkflowsShown } from '../../src/renderer/src/monitor/workflows';
 import { readStep, stepCaption, stepDoing, type StepKind, type StepRow } from '../../src/renderer/src/monitor/steps';
 import { MaxGapMs, mergeByTime, ReplayClock, ReplayRunningMs, ReplayStates, toneOfRow, trimByTime } from '../../src/renderer/src/monitor/timeline';
 
@@ -165,42 +168,28 @@ describe('the workflows on the wall', () => {
     expect(entryTime('not a time', now)).toBe('');
   });
 
-  it('lays a team\'s panel out as a header and one row per workflow, newest first', () => {
-    const list = [3, 1, 2].map((i) => wf(i, at(1_000_000 + i * 1000)));
-    expect(latestWorkflows(list).map((w) => w.id)).toEqual([3, 2, 1]);
-    const one = panelLayout(5);
-    expect(one.rows).toBe(5);
-    expect(one.h).toBe(one.pad * 2 + one.headerH + 5 * one.rowH);
-    expect(panelLayout(2).h).toBeLessThan(one.h);
-    expect(panelLayout(0).h).toBe(one.pad * 2 + one.headerH);
-    // Twice the scale, twice every size.
-    const big = panelLayout(5, 2);
-    expect(big.w).toBe(one.w * 2);
-    expect(big.h).toBe(one.h * 2);
-    expect(panelRadius(one)).toBeCloseTo(Math.hypot(one.w, one.h) / 2);
+  it('labels a workflow node "#id title", cut, with "Backlog item " dropped (B090)', () => {
+    expect(workflowNodeLabel(wf(12, at(0), 'open', [], 'Add a README'))).toBe('#12 Add a README');
+    const backlog = workflowNodeLabel(wf(3848, at(0), 'open', [], "Backlog item B081 Remote UI: xterm's link handler asks first"));
+    expect(backlog.startsWith("#3848 B081 Remote UI: xterm")).toBe(true);
+    expect(backlog).not.toContain('Backlog item');
+    expect(backlog.endsWith('…')).toBe(true);
+    expect(backlog.length).toBe(NodeLabelMax);
+    expect(NodeLabelMax).toBeGreaterThanOrEqual(28);
+    expect(NodeLabelMax).toBeLessThanOrEqual(32);
+    expect(workflowNodeLabel(wf(5, at(0), 'open', [], '  '))).toBe('#5');
+    // A phone's wall zoomed out: only "#id"; zoomed in, or a wide wall at any zoom, the title too.
+    const t = wf(3848, at(0), 'open', [], 'Backlog item B081 Remote UI');
+    expect(workflowNodeLabel(t, { wallPx: 375, zoom: 0.4 })).toBe('#3848');
+    expect(workflowNodeLabel(t, { wallPx: 375, zoom: 1 })).toBe('#3848 B081 Remote UI');
+    expect(workflowNodeLabel(t, { wallPx: 1400, zoom: 0.25 })).toBe('#3848 B081 Remote UI');
   });
 
-  it('finds the header or the row under a point of the panel', () => {
-    const l = panelLayout(3);
-    expect(panelHit(l, -1, 5)).toBeNull();
-    expect(panelHit(l, 5, l.h + 1)).toBeNull();
-    expect(panelHit(l, l.w + 1, 5)).toBeNull();
-    expect(panelHit(l, 10, l.pad + 2)).toBe('header');
-    const rowY = (i: number) => l.pad + l.headerH + i * l.rowH + l.rowH / 2;
-    expect(panelHit(l, 10, rowY(0))).toBe(0);
-    expect(panelHit(l, 10, rowY(2))).toBe(2);
-    // The padding under the last row is the panel, not a row.
-    expect(panelHit(l, 10, l.h - 1)).toBe('panel');
+  it('draws a node\'s label never below 8 px on screen', () => {
+    for (const k of [2, 1, 0.6, 0.3, 0.2]) expect(nodeLabelFont(k) * k).toBeGreaterThanOrEqual(8 - 1e-9);
+    expect(nodeLabelFont(1)).toBe(9);
+    expect(nodeLabelFont(0)).toBe(9);
   });
-
-  it('grows the panel as the wall zooms out, so its words stay readable', () => {
-    expect(panelScale(1)).toBe(1);
-    expect(panelScale(2)).toBe(1); // zoomed in: the words just grow with the camera
-    expect(panelScale(0.4)).toBeGreaterThan(1);
-    expect(panelScale(0.4) * 10 * 0.4).toBeCloseTo(8); // 10 px words never shown below 8 px
-    expect(panelScale(0.05)).toBe(2.4); // capped
-  });
-
   it('the model keeps each team\'s newest five and says when they change', () => {
     const m = new MonitorModel();
     const list = [1, 2, 3, 4, 5, 6].map((i) => wf(i, at(1_000_000 + i * 1000)));
@@ -373,7 +362,9 @@ describe('the Monitor view', () => {
     expect(w.find('[data-test=monitor-layout]').exists()).toBe(false);
     await w.get('[data-test=monitor-layout-toggle]').trigger('click');
     const panel = w.get('[data-test=monitor-layout]');
-    for (const key of ['distance', 'strength', 'repulsion', 'gravity', 'friction']) expect(panel.find(`[data-test=monitor-layout-${key}]`).exists()).toBe(true);
+    for (const key of ['distance', 'strength', 'repulsion', 'gravity', 'friction', 'spacing']) expect(panel.find(`[data-test=monitor-layout-${key}]`).exists()).toBe(true);
+    expect(panel.text()).toContain('Team spacing');
+    expect(panel.text()).toContain('How far apart the teams sit.');
     expect(w.get('[data-test=monitor-layout-reset]').attributes('disabled')).toBeDefined();
 
     const repulsion = w.get('[data-test=monitor-layout-repulsion]');
@@ -387,8 +378,14 @@ describe('the Monitor view', () => {
     await flushPromises();
     await again.get('[data-test=monitor-layout-toggle]').trigger('click');
     expect((again.get('[data-test=monitor-layout-repulsion]').element as HTMLInputElement).value).toBe('1.8'); // kept for next time
+    // Team spacing is kept beside the other five, clamped the same way.
+    const spacing = again.get('[data-test=monitor-layout-spacing]');
+    (spacing.element as HTMLInputElement).value = '9';
+    await spacing.trigger('input');
+    expect(JSON.parse(localStorage.getItem('yawble.monitor.layout')!)).toMatchObject({ repulsion: 1.8, spacing: 3 });
     await again.get('[data-test=monitor-layout-reset]').trigger('click');
     expect(localStorage.getItem('yawble.monitor.layout')).toBeNull();
+    expect((again.get('[data-test=monitor-layout-spacing]').element as HTMLInputElement).value).toBe(String(LayoutDefaults.spacing));
     await again.get('[data-test=monitor-layout]').trigger('keydown', { key: 'Escape' });
     expect(again.find('[data-test=monitor-layout]').exists()).toBe(false);
     again.unmount();
@@ -420,5 +417,127 @@ describe('the Monitor view', () => {
     await again.get('[data-test=monitor-activity-toggle]').trigger('click');
     expect(again.get('[data-test=monitor-activity]').classes()).not.toContain('collapsed');
     again.unmount();
+  });
+});
+
+describe('Team spacing (B089)', () => {
+  it('is a sixth layout setting, clamped, stored and reset like the other five', () => {
+    expect(LayoutFields.map((f) => f.key)).toEqual(['distance', 'strength', 'repulsion', 'gravity', 'friction', 'spacing']);
+    expect(LayoutFields.at(-1)).toEqual({ key: 'spacing', label: 'Team spacing', help: 'How far apart the teams sit.' });
+    expect(LayoutDefaults.spacing).toBe(1);
+    expect([clampLayout(0.1), clampLayout(9), clampLayout('1.234'), clampLayout('x', LayoutDefaults.spacing)]).toEqual([LayoutMin, LayoutMax, 1.25, 1]);
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+    writeLayout({ ...LayoutDefaults, spacing: 0.75 }, storage);
+    expect(JSON.parse(store.get('yawble.monitor.layout')!)).toMatchObject({ spacing: 0.75, distance: LayoutDefaults.distance });
+    expect(readLayout(storage)).toEqual({ ...LayoutDefaults, spacing: 0.75 });
+    store.set('yawble.monitor.layout', JSON.stringify({ spacing: 7 }));
+    expect(readLayout(storage).spacing).toBe(LayoutMax);
+    store.set('yawble.monitor.layout', JSON.stringify({ spacing: 'far', gravity: 1 }));
+    expect(readLayout(storage)).toEqual({ ...LayoutDefaults, gravity: 1 }); // a bad one is the default; an old store without it too
+    expect(isDefaultLayout({ ...LayoutDefaults, spacing: 1.05 })).toBe(false);
+    writeLayout({ ...LayoutDefaults }, storage); // Reset: nothing stored
+    expect(store.has('yawble.monitor.layout')).toBe(false);
+  });
+
+  it('scales the team homes; the oval puts the two nearest clusters apart by the room their maps need', () => {
+    for (const count of [2, 3, 4]) for (let i = 0; i < count; i++) {
+      const one = teamHome(i, count, 170, 1), two = teamHome(i, count, 170, 2);
+      expect(two.x).toBeCloseTo(one.x * 2);
+      expect(two.y).toBeCloseTo(one.y * 2);
+    }
+    expect(teamHome(0, 1, 170, 3)).toEqual({ x: 0, y: 0 }); // a team alone sits in the middle
+    const hubs = (count: number, room: number) => Array.from({ length: count }, (_, i) => teamHome(i, count, room, 1));
+    const nearest = (ps: { x: number; y: number }[]) => Math.min(...ps.flatMap((p, a) => ps.slice(a + 1).map((q) => Math.hypot(p.x - q.x, p.y - q.y))));
+    for (const count of [2, 3, 4]) for (const room of [0, 60, 170])
+      expect(nearest(hubs(count, room))).toBeCloseTo(Math.max(2 * (ClusterCore + room) + ClusterGap, 140 * nearestPair(count))); // the oval's x radius is never under 140
+    expect(nearestPair(2)).toBeCloseTo(2);
+    expect(nearestPair(3)).toBeLessThan(nearestPair(2)); // three on the flat oval: the two on the right sit nearest
+    // No map, no room; a wide map needs its full depth; a narrow one (two folders) only part of it.
+    const m = new MonitorModel();
+    m.logNow = () => Date.now();
+    const files = (n: number, folders: number) => { for (let i = 0; i < n; i++) m.applyStep({ id: 1000 + i, at: new Date().toISOString(), team: `t${folders}`, member: 'Dev', run: 1, kind: 'edit', tool: 'Edit', target: `src/d${i % folders}/f${i}.ts` }, 0, true); };
+    files(40, 2); files(120, 11);
+    const narrow = mapRoomOf(m.map.view('t2', DefaultLimits)), wide = mapRoomOf(m.map.view('t11', DefaultLimits));
+    expect(mapRoomOf(collapse('none', [], DefaultLimits))).toBe(0);
+    expect(narrow).toBeGreaterThan(0);
+    expect(wide).toBeGreaterThan(narrow * 2);
+    expect(mapRoomFor([m.map.view('t2', DefaultLimits), m.map.view('t11', DefaultLimits)])).toBe(Math.ceil(wide / 10) * 10);
+    expect(mapRoomFor([])).toBe(0);
+  });
+
+  /** A scene on a stub canvas with count teams of four, each with a wide code map and five open workflow nodes, settled. */
+  const scenes: MonitorScene[] = [];
+  afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  function settledWall(count: number, spacing = LayoutDefaults.spacing, frames = 700) {
+    // The test runs the frames itself: the scene's own requestAnimationFrame loop must not run too.
+    vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {});
+    let seed = 7;
+    vi.spyOn(Math, 'random').mockImplementation(() => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (t, k: string) => (k in t ? t[k] : k === 'measureText' ? (s: string) => ({ width: String(s).length * 6 }) : () => ({ addColorStop() {} })),
+      set: (t, k: string, v) => { t[k] = v; return true; },
+    });
+    const canvas = document.createElement('canvas');
+    Object.defineProperty(canvas, 'getContext', { value: () => ctx });
+    Object.defineProperty(canvas, 'clientWidth', { value: 1400 });
+    Object.defineProperty(canvas, 'clientHeight', { value: 860 });
+    const scene = new MonitorScene(canvas);
+    scenes.push(scene);
+    const names = ['Alpha', 'Beta', 'Gamma'].slice(0, count);
+    const teams: TeamSnapshot[] = names.map((name, i) => ({ id: i + 1, name, members: ['Manager', 'DeveloperTomas', 'TesterKofi', 'DesignerAmy'].map((n, j) =>
+      ({ id: j + 1, name: n, role: j ? 'member' as const : 'manager' as const, state: 'idle' as const, queued: 0, statusLine: null, cli: 'claude' })) }));
+    const m = new MonitorModel();
+    m.reconcile(teams, 0);
+    const t0 = Date.parse('2026-11-17T10:00:00Z');
+    m.logNow = () => t0 + 60_000;
+    const wfs: WorkflowSummary[] = [1, 2, 3, 4, 5].map((id) => ({ id, title: `Workflow ${id}`, owner: null, state: 'open', undeclared: false, busy: [], ending: null, startedAt: at(t0), lastAt: at(t0 + id), messages: 2 }));
+    let id = 0;
+    for (const name of names) {
+      for (let i = 0; i < 120; i++) m.applyStep({ id: ++id, at: at(t0 + i), team: name, member: i % 2 ? 'DeveloperTomas' : 'TesterKofi', run: 1, kind: i % 2 ? 'edit' : 'read', tool: 'Edit', target: `src/d${i % 11}/f${i}.ts` }, 1000, true);
+      m.setWorkflows(name, wfs, 0);
+    }
+    scene.model = m;
+    scene.setTeams(teams);
+    if (spacing !== LayoutDefaults.spacing) scene.setLayout({ ...LayoutDefaults, spacing });
+    const frame = (scene as unknown as { frame: (t: number) => void }).frame;
+    for (let i = 1; i <= frames; i++) frame(1000 + i * 16);
+    return scene;
+  }
+  const gaps = (scene: MonitorScene) => {
+    const cl = scene.clusters();
+    return cl.flatMap((a, i) => cl.slice(i + 1).map((b) => Math.max(b.box.x0 - a.box.x1, a.box.x0 - b.box.x1, b.box.y0 - a.box.y1, a.box.y0 - b.box.y1)));
+  };
+  const homeDistances = (scene: MonitorScene) => {
+    const hs = scene.clusters().map((c) => c.home);
+    return hs.flatMap((p, i) => hs.slice(i + 1).map((q) => Math.round(Math.hypot(p.x - q.x, p.y - q.y))));
+  };
+
+  it('at the default, two teams\' clusters (members, workflow nodes, code map) sit close but do not overlap', () => {
+    const scene = settledWall(2);
+    const cl = scene.clusters();
+    expect(cl).toHaveLength(2);
+    for (const c of cl) expect(c.box.x1 - c.box.x0).toBeGreaterThan(300); // the map is in the boxes
+    expect(homeDistances(scene)).toEqual([580]); // was 816 with a flat MapRoom of 190
+    for (const g of gaps(scene)) { expect(g).toBeGreaterThan(0); expect(g).toBeLessThan(300); }
+    for (const c of cl) expect(Math.hypot(c.hub.x - c.home.x, c.hub.y - c.home.y)).toBeLessThan(80); // the hubs sit near their homes
+  });
+
+  it('at the default, three teams\' clusters do not overlap either', () => {
+    const scene = settledWall(3);
+    expect(homeDistances(scene)).toEqual([860, 860, 580]);
+    for (const g of gaps(scene)) expect(g).toBeGreaterThan(0);
+  });
+
+  it('changing it moves the team homes live, and the hubs follow', () => {
+    const scene = settledWall(2, LayoutDefaults.spacing, 400);
+    const before = scene.clusters();
+    scene.setLayout({ ...LayoutDefaults, spacing: 2 });
+    const after = scene.clusters();
+    for (let i = 0; i < 2; i++) expect(after[i]!.home.x).toBeCloseTo(before[i]!.home.x * 2);
+    const frame = (scene as unknown as { frame: (t: number) => void }).frame;
+    for (let i = 1; i <= 500; i++) frame(20_000 + i * 16);
+    const moved = scene.clusters();
+    expect(Math.abs(moved[0]!.hub.x - moved[1]!.hub.x)).toBeGreaterThan(Math.abs(before[0]!.hub.x - before[1]!.hub.x) * 1.6);
   });
 });

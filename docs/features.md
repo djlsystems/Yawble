@@ -286,7 +286,10 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots.
 - **Workflow nodes**: each open workflow is a small node tied by dashed lines to the members working it (to its team
   while nobody is on it). It flashes green and drifts away when it completes, fades with a cross when it is closed,
-  and shows a "!" while it is blocked. The team's **Workflows** panel stays as the list of its newest five.
+  and shows a "!" while it is blocked. Under it, its number and title ("#3848 B081 Remote UI: xterm's link…"), cut to
+  30 characters, with a backlog workflow's "Backlog item " left out; hover it for the whole title, click it to open the
+  workflow. The label is never smaller than 8 px on screen and dims with its team; on a phone zoomed out it shows
+  only "#3848". There is no Workflows panel on the wall.
 - **Rhythm**: each member shows its recent tool steps rising off it and what it is doing now; a busier member pulses
   faster, a command or test run shows a ring filling while it runs, then a green or red burst by its exit code when
   that is known, and thinking shimmers softly.
@@ -324,12 +327,14 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - A focused team's code map, commits and merges stay bright; the other teams' maps dim with them.
 - With reduced motion nothing travels, pops or pulses: the map just updates, a commit's dot is simply at the hub, a
   comet is a still line with its label, and states are steady marks.
-- Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
+- Counts across the top and an **Activity** panel of messages.
 - A timeline replays any moment: the map, the commits and the merges play at their times. **● Back to live** returns.
 - The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
-  link strength, repulsion, gravity and friction, each a multiplier (0.25× to 3×) on the wall's own layout. They apply
-  as you drag and are remembered; **Reset** goes back to the defaults: distance 0.3×, strength 2.75×, repulsion 0.35×,
-  gravity 2.4×, friction 0.45×.
+  link strength, repulsion, gravity, friction and **Team spacing** (how far apart the teams sit), each a multiplier
+  (0.25× to 3×) on the wall's own layout. They apply as you drag and are remembered; **Reset** goes back to the
+  defaults: distance 0.3×, strength 2.75×, repulsion 0.35×, gravity 2.4×, friction 0.45×, team spacing 1×.
+- The teams sit on an oval sized so that, at team spacing 1×, the two nearest teams' clusters (members, workflow
+  nodes and the code maps actually drawn) are close but do not overlap.
 
 **Code map sources.** The app records what really reaches the team repository: each new commit a member's run brings
 back (its files and whether each was added, modified, deleted or renamed), each merge into the team branch, each Merge

@@ -347,7 +347,9 @@ export interface TeamMapLayout { team: string; folders: PlacedFolder[]; files: P
 
 /** How far past a team's member spokes its folders sit, and how far a folder's files sit from it. */
 export const FolderPast = 120;
-const FileReach = 34;
+export const FileReach = 34;
+/** How much further than FileReach every other file of a fan sits. */
+export const FileStagger = 16;
 
 /**
  * Where a team's map goes: its folders on an arc round the team's hub at `radius`, centred on the angle `out`
@@ -355,7 +357,7 @@ const FileReach = 34;
  */
 export function layoutTeamMap(view: TeamMapView, hub: { x: number; y: number }, out: number, radius: number): TeamMapLayout {
   const n = view.folders.length + (view.moreFolders ? 1 : 0);
-  const step = n <= 1 ? 0 : Math.min(0.62, (Math.PI * 1.7) / n);
+  const step = arcStep(n);
   const tk = lower(view.team);
   const folders: PlacedFolder[] = [];
   const files: PlacedFile[] = [];
@@ -367,7 +369,7 @@ export function layoutTeamMap(view: TeamMapView, hub: { x: number; y: number }, 
     let mx = x, my = y;
     for (let j = 0; j < k; j++) {
       const fa = a + (j - (k - 1) / 2) * fan;
-      const d = FileReach + (j % 2) * 16;
+      const d = FileReach + (j % 2) * FileStagger;
       const px = x + Math.cos(fa) * d, py = y + Math.sin(fa) * d;
       const f = fv.files[j];
       if (f) files.push({ id: `${tk}|${f.path}`, file: f, folder: fv.path, x: px, y: py });
@@ -379,6 +381,30 @@ export function layoutTeamMap(view: TeamMapView, hub: { x: number; y: number }, 
     ? { x: hub.x + Math.cos(out + (n - 1 - (n - 1) / 2) * step) * radius, y: hub.y + Math.sin(out + (n - 1 - (n - 1) / 2) * step) * radius }
     : null;
   return { team: view.team, folders, files, rest };
+}
+
+/** The angle between two folders on a map's arc, for n places on it (the folders and a "+N folders"). */
+function arcStep(n: number): number {
+  return n <= 1 ? 0 : Math.min(0.62, (Math.PI * 1.7) / n);
+}
+
+/** How far past its members a map's folders sit (the scene lays the arc at the members' reach plus this). */
+export const MapPastMembers = 70;
+/** Room for a map node's label past the node. */
+const MapLabelRoom = 44;
+
+/**
+ * How much room a team's map needs past its members toward the other teams, in world px (0 for no map). The map lies
+ * on an arc pointing away from the others: its full depth (the folders, their files' fans, the labels) counts as far as
+ * the arc wraps round toward them (a half-span of 90 degrees or more counts fully; a narrow arc, a share of it).
+ */
+export function mapRoomOf(view: TeamMapView): number {
+  const n = view.folders.length + (view.moreFolders ? 1 : 0);
+  if (n === 0) return 0;
+  const fans = view.folders.some((f) => f.files.length || f.more.length);
+  const depth = MapPastMembers + (fans ? FileReach + FileStagger : 0) + MapLabelRoom;
+  const half = ((n - 1) / 2) * arcStep(n);
+  return depth * (half >= Math.PI / 2 ? 1 : Math.max(0.3, Math.sin(half)));
 }
 
 // --- how the nodes look over time -----------------------------------------------------------------------------------

@@ -92,7 +92,7 @@ describe('a two-finger pinch on the wall (scene.ts pinchCamera)', () => {
 
 describe('the default layout', () => {
   it('is the tuned set', () => {
-    expect(LayoutDefaults).toEqual({ distance: 0.3, strength: 2.75, repulsion: 0.35, gravity: 2.4, friction: 0.45 });
+    expect(LayoutDefaults).toEqual({ distance: 0.3, strength: 2.75, repulsion: 0.35, gravity: 2.4, friction: 0.45, spacing: 1 });
     for (const v of Object.values(LayoutDefaults)) expect(clampLayout(v)).toBe(v); // each on the sliders' range and step
   });
 });

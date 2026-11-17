@@ -1,33 +1,15 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MonitorModel, teamKey, type TeamSnapshot } from '../../src/renderer/src/monitor/model';
-import { MonitorScene, PanelArrivedZoom, PanelRestAlpha, panelsMayStep, panelStep } from '../../src/renderer/src/monitor/scene';
+import { MonitorScene } from '../../src/renderer/src/monitor/scene';
 import type { StepRow } from '../../src/renderer/src/monitor/steps';
 import type { WorkflowSummary } from '../../src/shared/api';
 
 /**
  * Card 385 (B080 F1): with two teams' code maps the camera never settled (zoom 0.30-0.51, the hub moving 50-100 px in
- * 100 ms), so a hub click missed. The workflow panels grow as the wall zooms out and are bodies in the forces: each
+ * 100 ms), so a hub click missed. The workflow panels (gone since B090) grew as the wall zoomed out and were bodies in the forces: each
  * size step moved the graph, the fit followed, the zoom changed, the panels stepped again; and the forces never cooled.
  */
-
-describe('the workflow panels\' size steps (panelStep, panelsMayStep)', () => {
-  it('steps only by 8% or more, and after a step only the same way until the inputs change', () => {
-    expect(panelStep(1, 1.05, 0)).toEqual({ k: 1, dir: 0 });
-    expect(panelStep(1, 1.6, 0)).toEqual({ k: 1.6, dir: 1 });
-    expect(panelStep(1.6, 2.2, 1)).toEqual({ k: 2.2, dir: 1 });
-    expect(panelStep(2.2, 1.5, 1)).toEqual({ k: 2.2, dir: 1 }); // back the other way: held
-    expect(panelStep(2.2, 1.5, 0)).toEqual({ k: 1.5, dir: -1 }); // an input changed: free again
-    expect(panelStep(1.5, 2.4, -1)).toEqual({ k: 1.5, dir: -1 });
-  });
-
-  it('while the camera fits on its own, waits for the forces to rest and the camera to arrive', () => {
-    expect(panelsMayStep(0.3, 0.5, 0.5)).toBe(false);
-    expect(panelsMayStep(PanelRestAlpha, 0.5, 0.5)).toBe(true);
-    expect(panelsMayStep(0, 0.4, 0.5)).toBe(false);
-    expect(panelsMayStep(0, 0.5 * (1 + PanelArrivedZoom * 0.9), 0.5)).toBe(true);
-  });
-});
 
 // ---------- the scene, frame by frame on a stub canvas ----------
 
@@ -49,7 +31,7 @@ const scenes: MonitorScene[] = [];
 afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
 type Inner = {
-  frame: (t: number) => void; cam: { x: number; y: number; k: number }; panelK: number;
+  frame: (t: number) => void; cam: { x: number; y: number; k: number };
   sim: { alpha: () => number }; nodes: Map<string, { x?: number; y?: number }>; mapNodes: unknown[];
 };
 
@@ -146,16 +128,5 @@ describe('the camera settles with two teams\' code maps (card 385, F1)', () => {
     d = drift(o, 3_000);
     expect(d.dk).toBeLessThan(0.002);
     expect(d.dh).toBeLessThan(1);
-  });
-
-  it('zoomed by hand the panels follow the zoom at once (no wait for the forces)', () => {
-    const o = wall(1280, 800);
-    o.run(8_000);
-    const before = o.S.panelK;
-    const canvas = document.querySelector('canvas')!;
-    for (let i = 0; i < 12; i++) canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, clientX: 640, clientY: 400, bubbles: true, cancelable: true }));
-    o.run(50);
-    expect(o.S.cam.k).toBeLessThan(0.3);
-    expect(o.S.panelK).toBeGreaterThan(before * 1.5);
   });
 });
