@@ -151,8 +151,11 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   },
   'git.branchRealign': (p) => {
     if (p?.member === 'DeveloperAda') throw Object.assign(new Error('DeveloperAda is running: realign it when the run ends.'), { code: 'running' });
+    // As the core (TeamRepos.Tidy.cs): the yes is bound to the commits shown; a branch that moved since is refused.
+    if ((p?.expectOld != null && p.expectOld !== TIDY_TEAM_SHA) || (p?.expectNew != null && p.expectNew !== TIDY_CLONE_SHA))
+      throw Object.assign(new Error(`${p?.member}'s branch changed since it was shown (now: team 5bbb6ba450, clone e0f2a18c0f). Nothing changed; look at the new plan.`), { code: 'stale' });
     tidy.realigned.add(p?.member);
-    return { oldSha: '5bbb6ba450df8fe26f82', newSha: 'e0f2a18c0ffee1234567' };
+    return { oldSha: TIDY_TEAM_SHA, newSha: TIDY_CLONE_SHA };
   },
   'updates.status': () => ({ state: 'idle', current: '0.0.0+dev.fake', available: null, auto: false }),
   'credentials.status': () => ({ mode: 'subscription', claude: { connected: true, addedAt: iso(1000), expiresAt: null, lastUsedAt: iso(5), renewSoon: false, problem: null } }),
@@ -175,10 +178,16 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
 
 /** B067: what Tidy… deleted and realigned (resetTidy puts the plan back). */
 const tidy = { deleted: new Set<string>(), realigned: new Set<string>() };
+const TIDY_TEAM_SHA = '5bbb6ba450df8fe26f82';
+const TIDY_CLONE_SHA = 'e0f2a18c0ffee1234567';
+/** Shaped as the core's UiRpc.TidyPlanJson: repo, baseBranch, branches (commits on moved, own-work and origin-only rows;
+ * proof where the core gives one), and notes when the core could not read something. */
 function tidyPlan() {
   const moved = (name: string, member: string) => (tidy.realigned.has(member)
-    ? { name, where: ['local', 'origin', `clone:${member}`], class: 'working', member }
-    : { name, where: ['local', 'origin', `clone:${member}`], class: 'moved', member, teamSha: '5bbb6ba450df8fe26f82', cloneSha: 'e0f2a18c0ffee1234567' });
+    ? { name, where: ['local', 'origin', `clone:${member}`], class: 'working', member, teamSha: TIDY_CLONE_SHA, cloneSha: TIDY_CLONE_SHA }
+    : { name, where: ['local', 'origin', `clone:${member}`], class: 'moved', member, teamSha: TIDY_TEAM_SHA, cloneSha: TIDY_CLONE_SHA,
+        commits: [{ sha: 'aa11bb22cc33dd44ee55', subject: 'Retry the upload three times' }],
+        proof: `the team's copy (5bbb6ba450) has 1 commit(s) ${member}'s clone (e0f2a18c0f) does not have and that are not merged into main: the clone was reset or rebased; nothing is lost by realigning it (git cherry main: - aa11bb22cc)` });
   const main = [
     { name: 'members/payments/developerada-and-a-very-long-suffix-that-must-wrap-on-a-phone', where: ['local', 'clone:DeveloperAda'], class: 'working', member: 'DeveloperAda' },
     { name: 'members/payments/old-cleo', where: ['local', 'origin'], class: 'merged' },
@@ -189,11 +198,12 @@ function tidyPlan() {
   ];
   const cloud = [
     { name: 'members/payments/old-wren', where: ['origin'], class: 'merged' },
-    { name: 'spike/old-idea', where: ['origin'], class: 'origin-only' },
+    { name: 'feature/old-idea', where: ['origin'], class: 'origin-only', commits: [{ sha: '4444444444dddddddddd', subject: 'Try a new cache' }], proof: 'only on origin, nobody has it here; 1 commit(s) not in main: needs a look' },
     { name: 'scratch/try-a-thing', where: ['clone:DeveloperAda'], class: 'scratch', member: 'DeveloperAda' },
   ];
   const keep = (b: { name: string }) => !tidy.deleted.has(b.name);
-  return { repos: [{ repo: 'payments', branches: main.filter(keep) }, { repo: 'payments-cloud', branches: cloud.filter(keep) }] };
+  return { repos: [{ repo: 'payments', baseBranch: 'main', branches: main.filter(keep) },
+    { repo: 'payments-cloud', baseBranch: 'main', branches: cloud.filter(keep), notes: ["TesterBen's clone was not read: its .git is a file (a gitdir pointer)"] }] };
 }
 
 /** B054: with true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */

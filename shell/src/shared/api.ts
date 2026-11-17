@@ -650,9 +650,13 @@ export interface TidyBranch {
   name: string; where: string[]; class: TidyClass; proof?: string | null; commits?: { sha: string; subject: string }[] | null;
   teamSha?: string | null; cloneSha?: string | null; member?: string | null;
 }
-export interface TidyPlan { repos: { repo: string; branches: TidyBranch[] }[] }
-/** B067 git.branchRealign {team, repo, member}: the old and new commit of the member branch in the team repository (and
- * origin). Refused (an error) while the member runs. */
+/** baseBranch: what merged and contained are measured against; notes: what the core could not read (a member's clone
+ * that was skipped, for example), so a branch missing from the list is not silently missing. */
+export interface TidyRepo { repo: string; baseBranch?: string | null; branches: TidyBranch[]; notes?: string[] | null }
+export interface TidyPlan { repos: TidyRepo[] }
+/** B067 git.branchRealign {team, repo, member, expectOld?, expectNew?}: the old and new commit of the member branch in
+ * the team repository (and origin). expectOld / expectNew bind the yes to the team and clone commits the person was
+ * shown: the core refuses with code "stale" if either moved. Also refused (an error) while the member runs. */
 export interface BranchRealignResult { oldSha: string; newSha: string }
 /** teams.syncToBase: the team's "Bring branches up to <base> before new work" setting, the note of a sync or fetch-back
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
