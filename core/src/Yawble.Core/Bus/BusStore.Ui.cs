@@ -4,7 +4,7 @@ namespace Yawble.Core.Bus;
 public sealed record MemberRow(
     long Id, long TeamId, string Team, string Name, string Role, string Cli, string Instructions, string Model, string Credential);
 
-public sealed record TeamRow(long Id, string Name, string? RepoPath, string CreatedAt, string? PausedAt = null, string? ArchivedAt = null)
+public sealed record TeamRow(long Id, string Name, string? RepoPath, string CreatedAt, string? PausedAt = null, string? ArchivedAt = null, int? WorkflowExpiryDays = null)
 {
     public bool Paused => PausedAt is not null;
     public bool Archived => ArchivedAt is not null;
@@ -15,12 +15,12 @@ public sealed partial class BusStore
 {
     public IReadOnlyList<TeamRow> Teams()
     {
-        using var cmd = Command("SELECT t.id, t.name, s.repo_path, t.created_at, t.paused_at, t.archived_at FROM teams t LEFT JOIN team_settings s ON s.team_id = t.id ORDER BY t.id;");
+        using var cmd = Command("SELECT t.id, t.name, s.repo_path, t.created_at, t.paused_at, t.archived_at, s.workflow_expiry_days FROM teams t LEFT JOIN team_settings s ON s.team_id = t.id ORDER BY t.id;");
         using var r = cmd.ExecuteReader();
         var list = new List<TeamRow>();
         while (r.Read())
             list.Add(new TeamRow(r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.GetString(3),
-                r.IsDBNull(4) ? null : r.GetString(4), r.IsDBNull(5) ? null : r.GetString(5)));
+                r.IsDBNull(4) ? null : r.GetString(4), r.IsDBNull(5) ? null : r.GetString(5), r.IsDBNull(6) ? null : r.GetInt32(6)));
         return list;
     }
 

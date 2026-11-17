@@ -29,7 +29,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - On a phone it is laid out like the app's Settings on a phone: a list of its sections (one full-width row each, with a
     chevron); a tap opens that section alone under a Back and its title, and Back returns to the list.
 - **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**. Every open
-  workflow is listed however old, with the newest completed and closed ones; the cloud dashboard, the Concierge and the
+  workflow is listed however old, with the newest completed, closed and expired ones; the cloud dashboard, the Concierge and the
   companion list them the same way. Ask the Concierge to close the open ones whose work is done: it checks each one
   and closes only those with nothing left, saying why (on this computer: the remote view's Concierge cannot close
   workflows).
@@ -66,6 +66,25 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - After a model usage limit, the Manager is told to pick the work up again once the limit resets, up to 3 times per
   workflow.
 - When a run ends with its workflow still open and nothing else working on it, the Manager gets one reminder.
+- **Workflow expiry.** An open workflow with no activity for the team's **workflowExpiryDays** (Team settings, 1 to 90,
+  default 3; settable from the cloud like the other team settings) is closed by the app as **expired**, distinct from
+  closed by a person and from completed. Activity is any message in it (an instruction, a run's report, a hand-back, a
+  status change, an answer) and the person's **Extend**.
+  - A workflow never expires while a run works it or waits in the queue for it, while a wake (wake_me) or an automatic
+    resume after a usage limit is due in it.
+  - A workflow waiting on the person's answer to a question is warned first: after N-1 days of quiet the Concierge
+    posts one **Update** and Needs you shows "#<id> will expire tomorrow; it waits on your answer to question <n>" on
+    that question. It expires at N days, and never sooner than a day after its warning (an app that was closed at
+    warning time warns first).
+  - **Extend** (the workflow list, or the Concierge's workflow_extend) starts an open workflow's idle clock again.
+  - An open workflow's list row shows when it will expire (expiresAt; none while something works it). An expired one
+    reads **expired** in the Workflows dialog, on the Teams tiles, in the Concierge's team_workflows and on the cloud
+    dashboard. Its recorded end (endedAt) is its last real activity, not the expiry; expiredAt is when the app expired it.
+  - New activity reopens an expired workflow, as it reopens a completed or closed one.
+  - Closing a workflow in any way (completed, closed by a person, expired) ends every card of it not ended yet, with
+    the time and how it ended (completed, closed or expired); an expired workflow's cards end at its last activity.
+    Closed and expired move every card to Done, a waiting one too; completed leaves a card waiting on a person where
+    it is. Telling the card's member something in the workflow makes the card live again.
 - **Skills** (Settings > Skills) are instructions agents load through the app, offered to chosen roles and teams.
 
 ## Agent CLIs
@@ -228,7 +247,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - Conversations are kept. Each reply is one sandboxed run of the conversation's agent CLI.
 - It can read teams, status, activity, workflows, documents, the backlog, the board, git state, integrations,
   usage and the doctor.
-- It can tell a Manager, answer a team's question, create a team, pause or resume a team, nudge or close a
+- It can tell a Manager, answer a team's question, create a team, pause or resume a team, nudge, close or extend a
   workflow, and add, dispatch, move or comment on backlog items and cards.
 - Git and team actions: delete, prune, push or sync branches, open or merge a pull request (GitHub repositories, with
   your `gh`),
@@ -524,8 +543,8 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
   while someone is watching. See [Cloud Link](cloud-link.md#the-org-dashboard).
 - `org.summary` answers one snapshot of this computer (`summaryVersion` 1): the computer (name, label, version,
   platform, uptime, run slots, queued runs), each team's agents (running, queued, idle, errored, and what each running
-  agent is doing), the open workflows and those ended in the last 24 hours (state, backlog item, cards done of total,
-  owner), what waits for the person per team (decisions, tool-call approvals, network and tool requests), and the
+  agent is doing), the open workflows and those ended in the last 24 hours (state, including expired; backlog item,
+  cards done of total, owner, endedAt and expiredAt), what waits for the person per team (decisions, tool-call approvals, network and tool requests), and the
   last 20 warnings and errors of the last hour.
 - While a viewer watches (`org.summary.watch`), the app pushes `org.summaryChanged` with the changed sections, at most
   once every 2 seconds. Nothing is built or pushed while nobody watches; unwatching or disconnecting stops it.

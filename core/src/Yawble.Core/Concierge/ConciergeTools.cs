@@ -46,7 +46,7 @@ public sealed class ConciergeTools(
     /// can steer through what they post) runs none of them: it may read, keep its notes and watches, and recommend.
     /// </summary>
     public static readonly IReadOnlyList<string> Acting =
-        ["tell", "answer", "team_create", "team_pause", "team_resume", "workflow_nudge", "workflow_close", "backlog_add", "team_repo_add", "team_repo_remove", "backup_now",
+        ["tell", "answer", "team_create", "team_pause", "team_resume", "workflow_nudge", "workflow_close", "workflow_extend", "backlog_add", "team_repo_add", "team_repo_remove", "backup_now",
          ConciergeHostTasks.RunTool];
 
     /// <summary>
@@ -58,7 +58,7 @@ public sealed class ConciergeTools(
 
     public static readonly IReadOnlyList<string> ToolNames =
         ["team_list", "team_current", "team_status", "team_activity", "tell", "answer", "team_create", "notes_read", "notes_write",
-         "watch", "watch_list", "unwatch", "team_workflows", "workflow_nudge", "workflow_close", "team_pause", "team_resume",
+         "watch", "watch_list", "unwatch", "team_workflows", "workflow_nudge", "workflow_close", "workflow_extend", "team_pause", "team_resume",
          "documents_list", "documents_read", "backlog_add", "team_repos", "team_repo_add", "team_repo_remove",
          .. ConciergeHostTasks.Names, .. ConciergeReadTools.Names];
 
@@ -166,6 +166,9 @@ public sealed class ConciergeTools(
                 "workflow_close" => await UiText("bus.closeWorkflow", await TeamAsync(Required(args, "team"), ct),
                     new JsonObject { ["workflow"] = Long(args, "workflow") ?? throw new ArgumentException("'workflow' is required"), ["reason"] = Optional(args, "reason") },
                     "closed", ct),
+                "workflow_extend" => await UiText("bus.workflowExtend", await TeamAsync(Required(args, "team"), ct),
+                    new JsonObject { ["workflow"] = Long(args, "workflow") ?? throw new ArgumentException("'workflow' is required") },
+                    "extended: its idle clock starts again now", ct),
                 "team_pause" => await UiText("teams.pause", await TeamAsync(Required(args, "team"), ct), [], "paused: its work waits until it is resumed", ct),
                 "team_resume" => await UiText("teams.resume", await TeamAsync(Required(args, "team"), ct), [], "resumed", ct),
                 "documents_list" => await DocumentsListAsync(await TeamAsync(Required(args, "team"), ct), Optional(args, "path"), ct),
@@ -226,7 +229,11 @@ public sealed class ConciergeTools(
         if (list.Count == 0) return $"{team.Name} has no workflows yet.";
         return string.Join(Environment.NewLine, list.Select(w =>
             $"#{w.Id} [{(w.Undeclared ? "open, nobody working it" : w.State)}] {w.Title} (owner {w.Owner}; last {w.LastAt:yyyy-MM-dd HH:mm} UTC)" +
-            (w.Busy.Count > 0 ? $" - {string.Join("; ", w.Busy)}" : "") + (w.Ending is { } e ? $" - {(w.State == "closed" ? "closed" : "delivered")}: {e}" : "")));
+            (w.Busy.Count > 0 ? $" - {string.Join("; ", w.Busy)}" : "") +
+            (w.Ending is { } e ? $" - {w.State switch { "closed" => "closed", "expired" => "expired", _ => "delivered" }}: {e}" : "") +
+            (w.State == "expired" && w.EndedAt is { } end ? $" (last activity {end:yyyy-MM-dd HH:mm} UTC; telling its team something reopens it)" : "") +
+            (w.ExpiresAt is { } at ? $" - expires {at:yyyy-MM-dd HH:mm} UTC unless something happens in it (workflow_extend resets the clock)" : "") +
+            (w.ExpiryWarning is { } warn ? $" - {warn}" : "")));
     }
 
     private async Task<string> DocumentsListAsync(TeamSummary team, string? path, CancellationToken ct)
@@ -521,7 +528,9 @@ public sealed class ConciergeTools(
             ("hours", "integer", "How long to watch (default 48, at most 168).", false)),
         Tool("watch_list", "What this conversation is watching."),
         Tool("unwatch", "Stop a watch, when the person no longer wants updates.", ("id", "integer", "The watch's number (from watch_list).", true)),
-        Tool("team_workflows", "One team's workflows, newest first: every open one however old (and who works them, or that nobody does), and the newest completed and closed.",
+        Tool("workflow_extend", "Extend an open workflow that is about to expire (nothing happened in it for the team's expiry days): its idle clock starts again now. When the person asks.",
+            ("team", "string", "The team's name.", true), ("workflow", "integer", "The workflow's number (team_workflows).", true)),
+        Tool("team_workflows", "One team's workflows, newest first: every open one however old (and who works them, or that nobody does, and when it expires), and the newest completed, closed and expired.",
             ("team", "string", "The team's name.", true)),
         Tool("workflow_nudge", "Nudge an open workflow nobody is working: its Manager is told to pick it up. When the person asks, or after asking them.",
             ("team", "string", "The team's name.", true), ("workflow", "integer", "The workflow's number (team_workflows).", true),

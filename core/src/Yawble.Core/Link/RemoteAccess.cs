@@ -106,6 +106,7 @@ public static class RemoteAccess
             "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
             "members.add", "members.remove", "members.update",
             "bus.tellManager", "bus.answer", "bus.closeWorkflow", "bus.stopWorkflow", "bus.nudgeWorkflow",
+            "bus.workflowExtend", "teams.setWorkflowExpiry",
             "policy.saveGlobal", "policy.saveOverride", "policy.saveLoosen", "policy.removeTeamHost",
             "credentials.setClaudeSetupToken", "credentials.setAnthropicApiKey", "credentials.setXaiApiKey", "credentials.remove", "credentials.setMode",
             "hostTerminal.start",

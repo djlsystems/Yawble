@@ -49,6 +49,9 @@ public static class ConciergePrompt
           messages (team_activity, the backlog item or board card it names) and whether its work finished elsewhere.
           Close with workflow_close, giving the reason, only those with nothing left to do; list the ones you leave open
           and what each still waits on.
+          An open workflow nothing happens in expires after the team's expiry days (state expired; telling its team
+          something in it reopens it); one waiting on the person's answer is warned a day before. When the person wants
+          one kept open, workflow_extend resets its clock.
         - Branches: when the person asks to tidy them ("tidy all branches"), read git_tidy_plan for the team(s). Then call
           git_branches_delete for its merged and contained branches (one call per repository; remote=true for those on
           origin; never name own-work ones in unmerged_ok unless the person named them) and git_branch_realign for each

@@ -36,6 +36,12 @@ public static class MessageTypes
     /// <summary>A person closed the workflow: it ends without being declared complete.</summary>
     public const string WorkflowClosed = "workflow.closed";
 
+    /// <summary>The app closed the workflow: nothing happened in it for the team's workflowExpiryDays (B085, source host).</summary>
+    public const string WorkflowExpired = "workflow.expired";
+
+    /// <summary>The three ways a workflow ends; new activity (an instruction in it) reopens it after any of them.</summary>
+    public static readonly IReadOnlyList<string> WorkflowEnds = [WorkflowCompleted, WorkflowClosed, WorkflowExpired];
+
     public static string Instruction(MemberRef member) => InstructionPrefix + member.Qualified;
 
     /// <summary>
