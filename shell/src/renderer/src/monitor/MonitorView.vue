@@ -770,10 +770,6 @@ onBeforeUnmount(() => {
             <span class="dim">started {{ entryTime(hover.workflow.startedAt) }} · last entry {{ entryTime(hover.workflow.lastAt) }}</span>
             <span class="dim">{{ hover.workflow.messages }} message{{ hover.workflow.messages === 1 ? '' : 's' }} · {{ hover.team }} · click to open</span>
           </template>
-          <template v-else-if="hover.kind === 'workflow'">
-            <strong>{{ hover.team }} · workflows</strong>
-            <span class="dim">the last {{ WorkflowsShown }}, last updated first · click to open them all</span>
-          </template>
           <template v-else>
             <strong>{{ hover.kind === 'team' ? hover.name : spaced(hover.name) }}</strong>
             <span v-if="hover.kind === 'member' && hover.state" :style="{ color: stateColor(hover.state) }">{{ MemberStateLabel[hover.state] }}</span>

@@ -1,12 +1,13 @@
 import type { WorkflowSummary } from '../../../shared/api';
 
 /**
- * THE WORKFLOWS ON THE WALL: each team's last few pieces of work (bus.workflows) sit in one panel off its hub, a
- * row each, last updated first, coloured and marked by how they stand: done (a check), being worked (a play mark in a turning ring), waiting with
- * nobody on it (a pause), closed (a cross). Live only: a replay would have to fake their history, so it shows none.
+ * THE WORKFLOWS ON THE WALL: each team's last few pieces of work (bus.workflows), coloured and marked by how they
+ * stand: done (a check), being worked (a play mark), waiting with nobody on it (a pause), closed (a cross). The open
+ * ones are nodes on the wall (below); the legend and the screen reader's list name them all. Live only: a replay
+ * would have to fake their history, so it shows none.
  */
 
-/** How many workflows each team shows. */
+/** How many workflows each team's poll asks for (bus.workflows limit). */
 export const WorkflowsShown = 5;
 /** A team's tile in the Teams list: up to this many newest workflows (and every open one, however old), scrolling inside the tile. */
 export const TileWorkflowsShown = 50;
@@ -51,10 +52,38 @@ export function workflowLabel(w: Pick<WorkflowSummary, 'id' | 'title'>, max = 28
 
 /**
  * Every open workflow is also a node on the wall, tied by lines to the members working it (its busy list), or to its
- * team's hub while nobody is on it. The panel stays as the list of the newest few (and their legend); the nodes say
- * who works what. A node whose workflow completes flashes green and drifts away; one that is closed fades out with a
- * cross; one whose last word was "blocked" wears the blocked look until work on it goes on.
+ * team's hub while nobody is on it, with "#id title" under it (workflowNodeLabel). A node whose workflow completes
+ * flashes green and drifts away; one that is closed fades out with a cross; one whose last word was "blocked" wears
+ * the blocked look until work on it goes on.
  */
+
+/** A workflow node's label is cut to this many characters ("#id " and the title, with its "…"). */
+export const NodeLabelMax = 30;
+/** Its words are drawn this size in world px, and never smaller than NodeLabelMinPx on screen. */
+export const NodeLabelPx = 9;
+export const NodeLabelMinPx = 8;
+/** On a phone's wall (narrower than this, as narrowScreen.ts) zoomed out below NodeIdOnlyZoom, a node says only "#id". */
+export const PhoneWallPx = 760;
+export const NodeIdOnlyZoom = 0.6;
+
+/**
+ * A workflow node's label: "#3848 B081 Remote UI: xterm's link…", the title's "Backlog item " dropped (a backlog
+ * workflow is titled "Backlog item B081 ..."), cut to `max` characters in all. Only "#id" on a phone's wall zoomed out.
+ */
+export function workflowNodeLabel(w: Pick<WorkflowSummary, 'id' | 'title'>, opts: { zoom?: number; wallPx?: number; max?: number } = {}): string {
+  const { zoom = 1, wallPx = Infinity, max = NodeLabelMax } = opts;
+  const id = `#${w.id}`;
+  if (wallPx < PhoneWallPx && zoom < NodeIdOnlyZoom) return id;
+  const title = w.title.replace(/\s+/g, ' ').trim().replace(/^Backlog item\s+/i, '');
+  if (!title) return id;
+  const room = Math.max(1, max - id.length - 1);
+  return `${id} ${title.length <= room ? title : title.slice(0, room - 1).trimEnd() + '…'}`;
+}
+
+/** The size (world px) a workflow node's label is drawn at a zoom: NodeLabelPx, larger when zoomed out so it stays NodeLabelMinPx on screen. */
+export function nodeLabelFont(zoom: number): number {
+  return zoom > 0 ? Math.max(NodeLabelPx, NodeLabelMinPx / zoom) : NodeLabelPx;
+}
 
 /** At most this many workflow nodes per team (the newest open ones). */
 export const WorkflowNodesEach = 12;
@@ -94,40 +123,4 @@ export function entryTime(iso: string, now = Date.now()): string {
   const clock = `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
   const sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
   return sameDay ? clock : `${Months[d.getMonth()]} ${d.getDate()} ${clock}`;
-}
-
-// ---------- the team's workflow panel ----------
-
-/** A team's workflow panel at a scale (world units): its size, padding, header and row heights, and row count. */
-export interface PanelLayout { w: number; h: number; pad: number; headerH: number; rowH: number; rows: number }
-
-const PanelW = 236, PanelPad = 7, PanelHeader = 17, PanelRow = 17;
-/** The panel's words are drawn this size (world px at scale 1); they are never shown smaller than PanelMinPx on screen. */
-export const PanelFontPx = 10;
-const PanelMinPx = 8;
-const PanelMaxScale = 2.4;
-
-export function panelLayout(rows: number, scale = 1): PanelLayout {
-  const n = Math.max(0, rows);
-  const pad = PanelPad * scale, headerH = PanelHeader * scale, rowH = PanelRow * scale;
-  return { w: PanelW * scale, h: pad * 2 + headerH + n * rowH, pad, headerH, rowH, rows: n };
-}
-
-/** The radius of the one body the panel is in the layout: the circle round it. */
-export function panelRadius(l: PanelLayout): number {
-  return Math.hypot(l.w, l.h) / 2;
-}
-
-/** What is under a point of the panel (from its top-left): its header, a row (by index), the rest of it, or null. */
-export function panelHit(l: PanelLayout, x: number, y: number): 'header' | 'panel' | number | null {
-  if (x < 0 || y < 0 || x > l.w || y > l.h) return null;
-  if (y < l.pad + l.headerH) return 'header';
-  const i = Math.floor((y - l.pad - l.headerH) / l.rowH);
-  return i >= 0 && i < l.rows ? i : 'panel';
-}
-
-/** How much larger than its world size the panel is drawn at a zoom, so its words stay readable zoomed out. */
-export function panelScale(camK: number): number {
-  if (!(camK > 0)) return PanelMaxScale;
-  return Math.min(PanelMaxScale, Math.max(1, PanelMinPx / (PanelFontPx * camK)));
 }
