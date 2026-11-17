@@ -246,10 +246,10 @@ defineExpose({ refresh, openWorkflows, openDocuments });
     <div class="tell row">
       <input v-model="tell" class="grow" :placeholder="phone ? TellShort : 'Tell the Manager… (paste an image to attach it)'" data-test="tell-text"
         @keydown.enter="(tell.trim() || tellImages.images.value.length) && sendTell()" @paste="tellImages.onPaste" />
-      <button title="Attach an image" data-test="tell-attach" @click="tellPicker?.click()">🖼</button>
+      <button title="Attach an image" data-test="tell-attach" @click="tellPicker?.click()"><svg class="ticon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><circle cx="8.5" cy="9.5" r="1.6" /><path d="M21 16l-5-5-9 9" /></svg></button>
       <input ref="tellPicker" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden data-test="tell-attach-input"
         @change="tellImages.add(($event.target as HTMLInputElement).files ?? []); ($event.target as HTMLInputElement).value = ''" />
-      <button class="primary" v-change data-test="tell-send" :disabled="(!tell.trim() && !tellImages.images.value.length) || busy.is('tell')" :aria-busy="busy.is('tell')" :aria-label="phone ? 'Tell Manager' : undefined" @click="sendTell"><BusyLabel :busy="busy.is('tell')" text="Sending…">{{ phone ? '✉' : 'Tell Manager ✉' }}</BusyLabel></button>
+      <button class="primary" v-change data-test="tell-send" :disabled="(!tell.trim() && !tellImages.images.value.length) || busy.is('tell')" :aria-busy="busy.is('tell')" :aria-label="phone ? 'Tell Manager' : undefined" @click="sendTell"><BusyLabel :busy="busy.is('tell')" text="Sending…"><template v-if="!phone">Tell Manager </template><svg class="ticon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13" /><path d="M22 2l-7 20-4-9-9-4Z" /></svg></BusyLabel></button>
     </div>
     <div v-if="tellImages.images.value.length" class="thumbs" data-test="tell-images">
       <span v-for="(im, i) in tellImages.images.value" :key="i" class="thumb">
@@ -364,6 +364,8 @@ h2 { font-size: 16px; margin: 0; }
 .add { margin-top: 14px; }
 .paused { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
 .small { font-size: 12px; }
+/* Card 342: the Tell buttons draw monochrome line icons (currentColor), not emoji iOS paints in colour. */
+.tell .ticon { display: inline-block; vertical-align: middle; flex: none; }
 /* A phone (B037): one column of member panes (each stacked, MemberPane); the actions, Tell and the asks wrap; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .team > .member-cell { margin-bottom: 16px; }

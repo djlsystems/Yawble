@@ -176,7 +176,8 @@ const fits = (top: number, frame: { height: number }) => (frame === Portrait ? t
 const DesktopCss: Record<string, string> = {
   'board/BacklogView.vue': '55673d4cef46ac87',
   // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
-  'components/TeamView.vue': 'ec127edc70b3a1a4',
+  // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon).
+  'components/TeamView.vue': '68088f4197a62699',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
   // toolbar, no two areas side by side, no width bar, no loosened marker).
@@ -209,6 +210,18 @@ async function teamPage(width: number, behind = false, of = team) {
   const w = keep(mount(TeamView, { props: { team: of, api: teamApi(behind), pollMs: 100_000 }, global: { stubs: dialogs } }));
   await settle();
   return w;
+}
+/** Card 342: Attach and Send draw a monochrome line icon (an aria-hidden svg in currentColor), never an emoji. */
+function expectSvgIcons(w: VueWrapper) {
+  for (const sel of ['[data-test=tell-attach]', '[data-test=tell-send]']) {
+    const b = w.get(sel);
+    const svg = b.find('svg');
+    expect(svg.exists(), sel).toBe(true);
+    expect(svg.attributes('aria-hidden'), sel).toBe('true');
+    expect(svg.attributes('stroke'), sel).toBe('currentColor');
+    expect(svg.attributes('fill'), sel).toBe('none');
+    expect(b.text(), sel).not.toMatch(/\p{Extended_Pictographic}|✉/u);
+  }
 }
 async function documentsRoot(width: number) {
   screen(width);
@@ -386,7 +399,9 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(placeholder).toBe('Tell the Manager…');
     expect(st.value(w.get('.tell').element, 'flex-wrap')).toBe('nowrap');
     expect(st.value(tell.element, 'min-width')).toBe('0');
-    expect(w.get('[data-test=tell-send]').text()).toBe('✉');
+    expect(w.get('[data-test=tell-send]').text()).toBe(''); // card 342: the paper plane only
+    expect(w.get('[data-test=tell-attach]').attributes('title')).toBe('Attach an image');
+    expectSvgIcons(w);
     expect(w.get('[data-test=tell-send]').attributes('aria-label')).toBe('Tell Manager');
     const room = content(Portrait.width, 12) - 2 * 44 - 2 * 6 - 16;
     expect(placeholder.length * Char).toBeLessThanOrEqual(room);
@@ -491,12 +506,13 @@ describe('at 1280 px the desktop is as it was (B054)', () => {
     expect(w.get('[data-test=backlog-view]').classes()).toEqual(['backlog-place', 'fill']);
   });
 
-  it('the Team page: the five labelled actions, the long Tell placeholder and "Tell Manager ✉", the activity uncapped', async () => {
+  it('the Team page: the five labelled actions, the long Tell placeholder and "Tell Manager" with the plane, the activity uncapped', async () => {
     const w = await teamPage(Desktop);
     expect(w.findAll('.teamhead .actions > button').map((b) => b.text())).toEqual(['Documents', 'Workflows', '⏰ Triggers', '⎇ Git', 'Settings']);
     expect(w.find('[data-test=team-more]').exists()).toBe(false);
     expect(w.get('[data-test=tell-text]').attributes('placeholder')).toBe('Tell the Manager… (paste an image to attach it)');
-    expect(w.get('[data-test=tell-send]').text()).toBe('Tell Manager ✉');
+    expect(w.get('[data-test=tell-send]').text()).toBe('Tell Manager');
+    expectSvgIcons(w);
     expect(w.get('[data-test=tell-send]').attributes('aria-label')).toBeUndefined();
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).not.toContain('capped');
   });

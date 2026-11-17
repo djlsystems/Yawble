@@ -253,7 +253,7 @@ describe('a team page', () => {
     await w.get('[data-test=tell-send]').trigger('click');
     expect(busyOf(w, '[data-test=tell-send]')).toEqual({ disabled: true, spinner: true, text: 'Sending…' });
     await f.fail('bus.tellManager', 'the Manager is gone');
-    expect(busyOf(w, '[data-test=tell-send]')).toEqual({ disabled: false, spinner: false, text: 'Tell Manager ✉' });
+    expect(busyOf(w, '[data-test=tell-send]')).toEqual({ disabled: false, spinner: false, text: 'Tell Manager' });
     expect(w.get('[data-test=team-error]').text()).toContain('the Manager is gone');
   });
 
@@ -462,7 +462,7 @@ describe('review fixes: per-subject results', () => {
     await w.findAll('[data-test=team-item]')[1]!.trigger('click');
     await flushPromises();
     expect(w.get('[data-test=team-title]').text()).toContain('search');
-    expect(busyOf(w, '[data-test=tell-send]')).toEqual({ disabled: true, spinner: false, text: 'Tell Manager ✉' }); // disabled: empty box
+    expect(busyOf(w, '[data-test=tell-send]')).toEqual({ disabled: true, spinner: false, text: 'Tell Manager' }); // disabled: empty box
     await w.get('[data-test=tell-text]').setValue('For search');
     expect(w.get('[data-test=tell-send]').attributes('disabled')).toBeUndefined();
 
