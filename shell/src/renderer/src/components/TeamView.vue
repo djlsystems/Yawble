@@ -406,10 +406,14 @@ h2 { font-size: 16px; margin: 0; }
 .member-cell { position: relative; min-width: 0; min-height: 0; }
 /* The pane fills its tile; its view takes what the title and tabs leave (MemberPane scrolls it inside, card 366), not the
    old shared output height (the body's inline height, which only the removed gap handles set). The desktop only: on a
-   phone the pane keeps its own height. */
+   phone the pane keeps its own height.
+   Card 368: the pane clips sideways only, so its ☰ menu (absolute, under the title) draws in full over the tile's
+   bottom edge at a short tile; the view never spills down because it scrolls inside (flex 1 1 0, min-height 0). The
+   cell being used (its ☰ button was clicked, so it holds focus) sits above the tiles after it (next row, handles). */
 @media (min-width: 760px) {
-  .member-cell > :deep(.pane) { height: 100%; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .member-cell > :deep(.pane) { height: 100%; min-width: 0; display: flex; flex-direction: column; overflow-x: clip; overflow-y: visible; }
   .member-cell > :deep(.pane > .body) { flex: 1 1 0; min-height: 0; height: auto !important; }
+  .member-cell:focus-within { z-index: 6; }
 }
 .new-tile { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; border: 1px dashed var(--line); border-radius: 6px; background: var(--surface); overflow: auto; }
 .new-tile:hover { border-color: var(--line-strong); }
