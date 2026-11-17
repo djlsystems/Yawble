@@ -176,8 +176,8 @@ const fits = (top: number, frame: { height: number }) => (frame === Portrait ? t
 const DesktopCss: Record<string, string> = {
   'board/BacklogView.vue': '55673d4cef46ac87',
   // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
-  // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon).
-  'components/TeamView.vue': '68088f4197a62699',
+  // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon); card 344: a desktop rule keeps the 29 px buttons' size.
+  'components/TeamView.vue': 'e9484eb0ecb95837',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
   // toolbar, no two areas side by side, no width bar, no loosened marker).

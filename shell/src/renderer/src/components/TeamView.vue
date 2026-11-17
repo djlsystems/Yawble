@@ -366,6 +366,15 @@ h2 { font-size: 16px; margin: 0; }
 .small { font-size: 12px; }
 /* Card 342: the Tell buttons draw monochrome line icons (currentColor), not emoji iOS paints in colour. */
 .tell .ticon { display: inline-block; vertical-align: middle; flex: none; }
+/* Card 342 (card 344): on the desktop the 20 px icons take the room the 14 px emoji took, so the 29 px buttons, their widths,
+   the box and everything below stay put (phone-remote's 1280 px guard). -6 px top / -2 px bottom keeps them out of the line
+   height and lifts them the 2 px vertical-align: middle leaves them below the button's centre; 6 px of width overlaps the
+   10 px padding (both sides on Attach, the right on Send, so the plane stays after "Tell Manager "). The phone's 44 px
+   buttons are unchanged. */
+@media (min-width: 760px) {
+  .tell .ticon { margin: -6px -3px -2px; }
+  .tell [data-test=tell-send] .ticon { margin: -6px -6px -2px 0; }
+}
 /* A phone (B037): one column of member panes (each stacked, MemberPane); the actions, Tell and the asks wrap; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .team > .member-cell { margin-bottom: 16px; }
