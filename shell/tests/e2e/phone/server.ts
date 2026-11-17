@@ -4,7 +4,7 @@
 // fulfils from the built files, and its WebSocket is answered by Playwright's routeWebSocket from the fake core. No real
 // core, no real programs, no network.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { BrowserContext, WebSocketRoute } from '@playwright/test';
 import { createFakeCore } from './fake-core';
@@ -36,6 +36,13 @@ export const baseBuiltDir = process.env.B037_BASE_DIR ? path.resolve(process.env
  */
 export function extractBaseTree() {
   if (process.env.B037_BASE_DIR) return;
+  // Under the base build's lock: a worker never empties out/b037/main or renderer-base while another extracts or builds it.
+  const lock = lockPath(baseBuiltDir);
+  while (!tryLock(lock)) sleepSync(LOCK_POLL_MS);
+  try { extractBaseTreeLocked(); } finally { unlock(lock); }
+}
+
+function extractBaseTreeLocked() {
   const stamp = path.join(baseTreeDir, '.commit');
   if (existsSync(path.join(baseShellDir, 'src', 'renderer', 'remote.html')) && existsSync(stamp) && readFileSync(stamp, 'utf8').trim() === BASE_COMMIT) return;
   const repo = path.resolve(shellDir, '..');
@@ -51,19 +58,67 @@ export function extractBaseTree() {
 }
 
 /**
- * Builds a renderer (index.html and remote.html) once per run of the test runner (a worker restarted after a failure
- * finds the runner's mark and reuses it), or never with B037_SKIP_BUILD=1 when a build is there.
+ * The run this build belongs to: B037_RUN_ID, set once per run by tests/e2e/global-setup.ts (it reaches every worker),
+ * or the runner's pid (the workers' parent) when the specs run without that setup.
+ */
+const runId = () => process.env.B037_RUN_ID || String(process.ppid);
+
+// A cross-process lock per output folder (card 391): a directory beside it (out/b037/renderer.lock), made with mkdir
+// (atomic; EEXIST when taken) and holding the owner's pid. A lock whose owner has gone (a worker killed mid-build) is broken.
+const LOCK_POLL_MS = 500;
+const LOCK_STALE_MS = 20 * 60_000;
+const lockPath = (out: string) => `${out}.lock`;
+
+function alive(pid: number) {
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+function tryLock(lock: string) {
+  mkdirSync(path.dirname(lock), { recursive: true });
+  try {
+    mkdirSync(lock);
+    writeFileSync(path.join(lock, 'owner'), String(process.pid));
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+  }
+  let age: number;
+  try { age = Date.now() - statSync(lock).mtimeMs; } catch { return false; } // released meanwhile: try again
+  let owner = NaN;
+  try { owner = Number(readFileSync(path.join(lock, 'owner'), 'utf8')); } catch { /* not written yet */ }
+  const gone = owner ? owner !== process.pid && !alive(owner) : age > 60_000;
+  if (gone || age > LOCK_STALE_MS) rmSync(lock, { recursive: true, force: true });
+  return false;
+}
+
+function unlock(lock: string) { rmSync(lock, { recursive: true, force: true }); }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function sleepSync(ms: number) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+
+/**
+ * Builds a renderer (index.html and remote.html) once per run of the test runner, or never with B037_SKIP_BUILD=1 when
+ * a build is there. Safe from any number of workers (card 391): the first takes the folder's lock and builds; the others
+ * wait for it, then find the run's mark (.built-by = runId()) and reuse the build, so no worker empties a folder another
+ * is serving from. A worker restarted after a failure finds the mark too.
  */
 export async function buildRenderer(from = shellDir, out = builtDir) {
+  const lock = lockPath(out);
+  while (!tryLock(lock)) await sleep(LOCK_POLL_MS);
+  try { await buildRendererLocked(from, out); } finally { unlock(lock); }
+}
+
+async function buildRendererLocked(from: string, out: string) {
   const mark = path.join(out, '.built-by');
   if (existsSync(path.join(out, 'remote.html'))) {
     if (process.env.B037_SKIP_BUILD === '1') return;
-    if (existsSync(mark) && readFileSync(mark, 'utf8') === String(process.ppid)) return;
+    if (existsSync(mark) && readFileSync(mark, 'utf8') === runId()) return;
   }
+  console.log(`[b037] building ${path.relative(shellDir, out) || out} (worker pid ${process.pid})`);
   const { build } = await import('vite');
   if (from === shellDir) {
     await build({ configFile: path.join(from, 'vite.config.mts'), logLevel: 'error', build: { outDir: out, emptyOutDir: true } });
-    writeFileSync(mark, String(process.ppid));
+    writeFileSync(mark, runId());
     return;
   }
   // The base's tree: its vite.config.mts is not loadable from under test-results, so the same settings inline (the
@@ -78,7 +133,7 @@ export async function buildRenderer(from = shellDir, out = builtDir) {
     define: { __YAWBLE_BUILD__: JSON.stringify({ version: '0.0.0+dev.unknown', commit: 'unknown', dirty: false, released: false }) },
     build: { outDir: out, emptyOutDir: true, rollupOptions: { input: { index: path.join(renderer, 'index.html'), remote: path.join(renderer, 'remote.html') } } },
   });
-  writeFileSync(mark, String(process.ppid));
+  writeFileSync(mark, runId());
 }
 
 export function fakeRemote(dir = builtDir) {
