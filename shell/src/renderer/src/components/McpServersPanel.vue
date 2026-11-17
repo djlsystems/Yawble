@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { confirmDialog } from '../confirm';
 import type { Connection, McpServerInfo, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import IntegrationDialog from './IntegrationDialog.vue';
@@ -60,14 +61,14 @@ function signInState(s: McpServerInfo): { text: string; cls: string; again: bool
 }
 async function remove(s: McpServerInfo) {
   if (busy.value !== null) return;
-  if (!window.confirm(`Remove ${s.name}? Agents can no longer use it.`)) return;
+  if (!(await confirmDialog({ message: `Remove ${s.name}? Agents can no longer use it.`, okLabel: 'Remove', danger: true })) || busy.value !== null) return;
   let removeConnection = false;
   if (s.connection && !remote.value) {
     try {
       const all = await api.call<Connection[]>('integrations.connections', {});
       const c = all.find((x) => x.id === s.connection!.id);
       const others = (c?.usedBy ?? []).filter((n) => n.toLowerCase() !== `mcp: ${s.name}`.toLowerCase());
-      if (c && others.length === 0) removeConnection = window.confirm(`Also delete the connection '${c.name}'?`);
+      if (c && others.length === 0) removeConnection = await confirmDialog({ message: `Also delete the connection '${c.name}'?`, okLabel: 'Delete', danger: true });
     } catch { /* the connection stays */ }
   }
   await call(s.name, 'integrations.mcpRemove', removeConnection && !remote.value ? { removeConnection: true } : {});
