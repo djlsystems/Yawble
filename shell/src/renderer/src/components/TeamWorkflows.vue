@@ -2,11 +2,11 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import type { YawbleApi, WorkflowSummary } from '../../../shared/api';
 import LoadingNote from './LoadingNote.vue';
-import { entryTime, latestWorkflows, workflowLook, WorkflowsShown } from '../monitor/workflows';
+import { entryTime, latestWorkflows, TileWorkflowsShown, workflowLook } from '../monitor/workflows';
 
-// A team's recent workflows on its card in the Teams list: the five newest, last updated first, each with its state
-// (the Monitor's colours and icons), "#id title" and the time of its last entry. A row opens the team's workflows
-// with that one selected.
+// A team's workflows on its card in the Teams list: the 50 newest (TileWorkflowsShown) and every open one however old
+// (bus.workflows lists those), last updated first, scrolling inside the tile, each with its state (the Monitor's colours
+// and icons), "#id title" and the time of its last entry. A row opens the team's workflows with that one selected.
 const props = defineProps<{ teamId: number; api: YawbleApi; pollMs?: number }>();
 const emit = defineEmits<{ open: [workflow: number] }>();
 
@@ -17,8 +17,8 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 async function load() {
   try {
-    const got = await props.api.call<WorkflowSummary[]>('bus.workflows', { teamId: props.teamId, limit: WorkflowsShown });
-    list.value = latestWorkflows(Array.isArray(got) ? got : []);
+    const got = await props.api.call<WorkflowSummary[]>('bus.workflows', { teamId: props.teamId, limit: TileWorkflowsShown });
+    list.value = latestWorkflows(Array.isArray(got) ? got : [], Infinity);
     failed.value = false;
   } catch { failed.value = true; /* keeps what it showed */ }
 }
@@ -31,7 +31,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 
 <template>
   <div class="twf" data-test="team-workflows">
-    <div class="twf-head">Recent workflows</div>
+    <div class="twf-head">Workflows</div>
     <LoadingNote v-if="!list && !failed" class="tiny" text="Loading workflows…" />
     <p v-else-if="!list" class="muted tiny" data-test="team-workflows-error">The workflows could not be loaded.</p>
     <p v-if="list && !list.length" class="muted tiny" data-test="team-workflows-empty">No workflows yet.</p>
