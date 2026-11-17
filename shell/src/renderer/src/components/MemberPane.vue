@@ -189,9 +189,15 @@ defineExpose({ el: () => root.value });
 </template>
 
 <style scoped>
-.pane { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 4px 10px 4px; }
-.title { display: flex; align-items: center; gap: 8px; height: 30px; white-space: nowrap; }
+/* A tile in the team page's grid (B076, card 366): the pane fills its cell (the grid sets the height) as a column - the
+   title bar and the tabs at their own height, the view taking the rest and scrolling inside it - and never wider than
+   the cell: what the title bar holds shrinks and ellipsizes. Outside a grid (no set height) it is as tall as its rows. */
+.pane { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 4px 10px 4px;
+  display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
+.title { display: flex; align-items: center; gap: 8px; height: 30px; white-space: nowrap; flex: none; min-width: 0; }
+.title > .avatar { flex: none; }
 .title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.title strong, .title .chip, .title .label, .title .more { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spacer { flex: 1; }
 .label { font-weight: 600; font-size: 12px; color: var(--card-state); }
 .more { font-size: 12px; color: var(--muted); }
@@ -206,14 +212,16 @@ defineExpose({ el: () => root.value });
 .menu button.danger { color: var(--bad); }
 .mi { display: inline-flex; justify-content: center; width: 18px; flex: none; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; letter-spacing: -.04em; }
-.tabs { display: flex; align-items: center; gap: 10px; min-height: 26px; margin-bottom: 2px; border-top: 1px solid var(--line-soft); padding-top: 2px; }
+.tabs { display: flex; align-items: center; gap: 10px; min-height: 26px; margin-bottom: 2px; border-top: 1px solid var(--line-soft); padding-top: 2px;
+  flex: none; flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
+.tabs > .error { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tablist { display: inline-flex; flex: none; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
 .tablist button { border: 0; border-radius: 0; background: transparent; padding: 2px 12px; height: 24px; font-size: 12px; color: var(--ink-soft); }
 .tablist button.on { background: var(--chip); color: var(--ink); font-weight: 600; }
 .state { flex: 1 1 auto; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lease { font-weight: 600; color: var(--state-running, inherit); }
 .lease.waiting { color: var(--state-waiting, inherit); }
-.body { display: flex; flex-direction: column; min-height: 0; }
+.body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; min-width: 0; overflow: auto; }
 .output { flex: 1 1 0; min-height: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); overflow-y: auto; overflow-x: hidden;
   font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
 .output :deep(p) { margin: 0 0 6px; }
@@ -254,7 +262,9 @@ defineExpose({ el: () => root.value });
 /* A phone (B061): stacked - the title (☰ a 44 px target), the tabs (44 px) with the details under them, then the
    chosen view at its own height (the page is the one scroller); the terminal is the whole screen over the page. */
 @media (max-width: 759.98px) {
-  .pane { padding: 4px 8px 8px; }
+  /* Not a tile: a block as tall as its rows, the view at its own height (the page scrolls). */
+  .pane { padding: 4px 8px 8px; display: block; height: auto; }
+  .pane > .body { overflow: visible; }
   .title { height: 44px; }
   .menu-button { height: 44px; min-width: 44px; }
   .menu button { min-height: 44px; font-size: 14px; }

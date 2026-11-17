@@ -1,7 +1,9 @@
 import type { WorkflowSummary } from '../../../shared/api';
 import type { MemberState } from '../faces/faces';
-import { changesFile, fileName, FileTrail, stepCaption, stepDoing, type StepKind, type StepRow } from './steps';
-import { latestWorkflows } from './workflows';
+import { changesFile, fileName, stepCaption, stepDoing, type StepKind, type StepRow } from './steps';
+import { latestWorkflows, openWorkflows, workflowEnds } from './workflows';
+import { cardOf } from './rhythm';
+import { CodeMap, codeEventKey, shortSha, type CodeEvent } from './codemap';
 
 /**
  * THE MONITOR'S MODEL: every team and member as the Monitor draws them, kept current from two sources. Snapshots
@@ -9,7 +11,10 @@ import { latestWorkflows } from './workflows';
  * (bus messages, monitor.messages) only adds what happens between snapshots: an instruction flies to its member as
  * a comet, a finished run bursts, a progress line floats up, a question raises "needs you". The step feed
  * (monitor.steps, steps.ts) adds what each member does inside its run: an icon rising off it for each step, the
- * files it changes beside it for half a minute, and a line under its name saying what it is doing now.
+ * files it touches on its team's code map (codemap.ts), and a line under its name saying what it is doing now. The
+ * code events (monitor.codeEvents) are the map's truth: a commit's files confirm or correct the steps, and the
+ * commit travels as a dot to the team's hub; a merge into the team branch bursts along the hub, a landing on main
+ * bursts larger, a push pulses off the edge of the wall.
  */
 
 export type FeedKind = 'instruction' | 'completed' | 'failed' | 'handback' | 'progress' | 'blocked' | 'decision' | 'done';
@@ -26,14 +31,25 @@ export interface TeamSnapshot { id: number; name: string; members: MemberSnapsho
 
 /** An effect for the scene to draw; `at` is when it started (performance.now()). */
 export type Effect =
-  | { kind: 'comet'; from: string; to: string; color: Tone; label: string | null; at: number }
+  /** card: the card an instruction is about (its label says it); mark: a hand-back's check or cross, carried home. */
+  | { kind: 'comet'; from: string; to: string; color: Tone; label: string | null; at: number; card?: number | null; mark?: 'check' | 'cross' }
+  /** Something waiting for the person flies from its member (or team) to the You node at the wall's edge. */
+  | { kind: 'you'; from: string; color: Tone; label: string | null; at: number }
+  /** A workflow node leaves: completed (a green flash, drifting away) or closed (a cross, fading). key: its node. */
+  | { kind: 'wfdone'; key: string; team: string; status: 'completed' | 'closed' | 'expired'; at: number }
   | { kind: 'burst'; node: string; color: Tone; big: boolean; at: number }
   | { kind: 'ripple'; node: string; color: Tone; at: number }
   | { kind: 'float'; node: string; color: Tone; text: string; at: number }
-  | { kind: 'step'; node: string; step: StepKind; caption: string | null; at: number };
+  | { kind: 'step'; node: string; step: StepKind; caption: string | null; at: number }
+  /** A commit: its files (by map id) gather to the member, a dot travels the member's spoke to the hub and rests there. */
+  | { kind: 'commit'; team: string; node: string | null; files: string[]; sha: string; message: string; member: string | null; at: number }
+  /** A merge into the team branch (big: false) or a landing on main (big: true): a burst along the hub. */
+  | { kind: 'merge'; team: string; big: boolean; at: number }
+  /** A push to origin: a pulse off the wall's edge. */
+  | { kind: 'push'; team: string; at: number };
 
 /** The wall's colours for what happens (the scene reads the hex values from CSS). */
-export type Tone = 'tell' | 'start' | 'progress' | 'done' | 'handback' | 'fail' | 'blocked' | 'decision' | 'person' | 'edit';
+export type Tone = 'tell' | 'start' | 'progress' | 'done' | 'handback' | 'fail' | 'blocked' | 'decision' | 'person' | 'edit' | 'commit';
 
 /** A line of the activity list: a bus message (key "m<seq>"), or a member's file changes gathered ("f<step id>"). */
 export interface ActivityRow { key: string; seq: number; tone: Tone; team: string; member: string | null; verb: string; who: string; text: string | null; at: string }
@@ -48,6 +64,17 @@ const GatherFilesMs = 90_000;
 
 export const memberKey = (team: string, member: string) => `m:${team.toLowerCase()}/${member.toLowerCase()}`;
 export const teamKey = (team: string) => `t:${team.toLowerCase()}`;
+/** A workflow node's key (B080): one per open workflow. */
+export const workflowKey = (team: string, id: number) => `wf:${team.toLowerCase()}/${id}`;
+
+/** A command a member is running (a 'run' step), until its next step; exit when the feed knew it. */
+export interface RunMark { at: number; target: string | null; ended: number | null; exit: number | null }
+/** A run with no next step after this long is taken as over. */
+export const RunStaleMs = 10 * 60_000;
+/** How long an ended run's ring stays full before it goes. */
+export const RunEndShowMs = 900;
+/** Steps per member counted over this window for its pulse. */
+const RateWindowMs = 60_000;
 
 const verbs: Record<FeedKind, { verb: string; tone: Tone }> = {
   instruction: { verb: 'told', tone: 'tell' },
@@ -60,6 +87,13 @@ const verbs: Record<FeedKind, { verb: string; tone: Tone }> = {
   done: { verb: 'finished the work', tone: 'done' },
 };
 
+const CodeVerbs: Record<CodeEvent['kind'], { verb: string; tone: Tone }> = {
+  commit: { verb: 'committed', tone: 'commit' },
+  'merge-team': { verb: 'merged into the team', tone: 'handback' },
+  landed: { verb: 'landed on main', tone: 'done' },
+  push: { verb: 'pushed', tone: 'tell' },
+};
+
 export const ActivityKeep = 80;
 
 export class MonitorModel {
@@ -69,8 +103,13 @@ export class MonitorModel {
   teams: TeamSnapshot[] = [];
   activity: ActivityRow[] = [];
   effects: Effect[] = [];
-  /** The files each member changed lately, beside it on the wall. */
-  readonly files = new FileTrail();
+  /** Each team's code map: the files its members touch and its commits confirm. */
+  readonly map = new CodeMap();
+  /** Log time now, for the map's idle time: the wall clock live, the replay's clock in a replay. */
+  logNow: () => number = () => Date.now();
+  /** The workflow each member was last told in, by member key (its touches belong to it). */
+  private memberWorkflow = new Map<string, number>();
+  private prunedAt = -Infinity;
   /** What each member is doing now, by member key. */
   readonly doing = new Map<string, Doing>();
   /** Events per minute, counted over the last minute of rows. */
@@ -79,12 +118,25 @@ export class MonitorModel {
   /** Each team's newest workflows (live only; a replay's model has none), by team key; the rev moves when they change. */
   readonly workflows = new Map<string, WorkflowSummary[]>();
   workflowsRev = 0;
+  /** Each team's open workflows (the wall's workflow nodes), newest first, by team key; they move workflowsRev too. */
+  readonly openWfs = new Map<string, WorkflowSummary[]>();
+  /** The workflow nodes whose last word was "blocked" (workflowKey), until work on them goes on. */
+  readonly blockedWfs = new Set<string>();
+  /** The card each member was last told about, and who told it, so its hand-back returns along the same line. */
+  private told = new Map<string, { from: string; card: number | null }>();
+  /** The command each member runs now (or just ended), by member key. */
+  readonly runs = new Map<string, RunMark>();
+  /** Each member's step times (display time) over the last minute, for its pulse. */
+  private stepTimes = new Map<string, number[]>();
+  /** What waits for the person besides questions (network and tool asks), by the view's key for each. */
+  private asks = new Map<string, { team: string; member: string | null }>();
 
   /** Takes a snapshot: who exists and their states. A member that starts running ripples. */
   reconcile(teams: TeamSnapshot[], now: number): void {
     this.teams = teams;
     const present = new Set(teams.map((t) => teamKey(t.name)));
     for (const k of [...this.workflows.keys()]) if (!present.has(k)) { this.workflows.delete(k); this.workflowsRev++; }
+    for (const k of [...this.openWfs.keys()]) if (!present.has(k)) { this.openWfs.delete(k); this.workflowsRev++; }
     for (const t of teams)
       for (const m of t.members) {
         const key = memberKey(t.name, m.name);
@@ -95,12 +147,60 @@ export class MonitorModel {
   }
 
   /** Takes a team's workflows (bus.workflows): it keeps the newest few, and moves the rev only if they changed. */
-  setWorkflows(team: string, list: readonly WorkflowSummary[]): void {
+  setWorkflows(team: string, list: readonly WorkflowSummary[], now = performance.now()): void {
     const key = teamKey(team);
+    // The open ones are the workflow nodes; one open before and ended now leaves the wall (a flash or a fade).
+    const before = this.openWfs.get(key);
+    const open = openWorkflows(list);
+    if (before) {
+      for (const end of workflowEnds(before, list)) {
+        const wk = workflowKey(team, end.id);
+        this.blockedWfs.delete(wk);
+        this.effects.push({ kind: 'wfdone', key: wk, team: team.toLowerCase(), status: end.status, at: now });
+      }
+    }
+    let changed = false;
+    if (JSON.stringify(open) !== JSON.stringify(before ?? null)) { this.openWfs.set(key, open); changed = true; }
     const next = latestWorkflows(list);
-    if (JSON.stringify(next) === JSON.stringify(this.workflows.get(key) ?? null)) return;
-    this.workflows.set(key, next);
-    this.workflowsRev++;
+    if (JSON.stringify(next) !== JSON.stringify(this.workflows.get(key) ?? null)) { this.workflows.set(key, next); changed = true; }
+    if (changed) this.workflowsRev++;
+    this.capEffects();
+  }
+
+  /** Keeps the effects waiting for the scene to the newest 260 (a model nobody drains, as the team board's, stays small). */
+  private capEffects(): void {
+    if (this.effects.length > 260) this.effects.splice(0, this.effects.length - 260);
+  }
+
+  /** Steps per minute a member took lately (display time), for how fast its disc pulses. */
+  stepRate(node: string, now: number): number {
+    const times = this.stepTimes.get(node);
+    if (!times) return 0;
+    while (times.length && now - times[0]! > RateWindowMs) times.shift();
+    if (!times.length) { this.stepTimes.delete(node); return 0; }
+    return times.length * (60_000 / RateWindowMs);
+  }
+
+  /**
+   * What waits for the person besides questions: network and tool asks (the view's list, keyed as it likes). A new one
+   * flies from its member to the You node; the You node counts them until they are gone from the list.
+   */
+  setAsks(asks: readonly { key: string; team: string; member: string | null; label?: string | null }[], now = performance.now()): void {
+    const next = new Map<string, { team: string; member: string | null }>();
+    for (const a of asks) {
+      next.set(a.key, { team: a.team, member: a.member });
+      if (!this.asks.has(a.key))
+        this.effects.push({ kind: 'you', from: a.member ? memberKey(a.team, a.member) : teamKey(a.team), color: 'decision', label: clip(a.label ?? null, 30), at: now });
+    }
+    this.asks = next;
+    this.capEffects();
+  }
+
+  /** How many things wait for the person (the You node's count): members whose question is open, and the asks. */
+  youCount(): number {
+    let n = this.asks.size;
+    for (const t of this.teams) for (const m of t.members) if (m.state === 'decision') n++;
+    return n;
   }
 
   /** Applies a feed row: an effect for the scene and a line for the activity list. */
@@ -114,15 +214,35 @@ export class MonitorModel {
       who: spaced(whoName), text: row.text, at: row.at,
     });
     if (this.activity.length > this.keep) for (const gone of this.activity.splice(this.keep)) this.gathered.delete(gone.key);
+    const source = row.from === 'person' || row.from === 'host' ? teamKey(row.team) : memberKey(row.team, row.from);
+    // A workflow's blocked look lasts until work on it goes on (read at the start too, so the look is right at once).
+    const wk = workflowKey(row.team, row.workflow);
+    if (row.kind === 'blocked') this.blockedWfs.add(wk);
+    else if (row.kind !== 'decision') this.blockedWfs.delete(wk);
+    // Who told a member what, so its hand-back returns along the same line with the card's number.
+    if (row.kind === 'instruction' && row.member) this.told.set(target, { from: source, card: cardOf(row.text) });
+    // Which workflow a member works in, so the files its steps touch light that workflow's part of the code map.
+    if (row.kind === 'instruction' && row.member) this.memberWorkflow.set(target, row.workflow);
+    if (row.kind === 'done') this.map.endWorkflow(row.team, row.workflow);
     if (!live) return;
     this.recent.push(now);
-    const source = row.from === 'person' || row.from === 'host' ? teamKey(row.team) : memberKey(row.team, row.from);
+    // The member's run is over: so is any command it was running.
+    const run = this.runs.get(target);
+    if (run && run.ended === null && (row.kind === 'completed' || row.kind === 'failed' || row.kind === 'handback' || row.kind === 'blocked')) run.ended = now;
+    const told = this.told.get(target);
+    const back = (mark: 'check' | 'cross', color: Tone, words: string) => {
+      if (!row.member) return;
+      const card = told?.card ?? null;
+      this.effects.push({ kind: 'comet', from: target, to: told?.from ?? memberKey(row.team, 'Manager'), color, label: card !== null ? `#${card} ${mark === 'check' ? '✓' : '✗'}` : words, at: now, card, mark });
+    };
     switch (row.kind) {
-      case 'instruction':
-        this.effects.push({ kind: 'comet', from: source, to: target, color: row.from === 'person' ? 'person' : 'tell', label: clip(row.text, 36), at: now });
+      case 'instruction': {
+        const card = cardOf(row.text);
+        this.effects.push({ kind: 'comet', from: source, to: target, color: row.from === 'person' ? 'person' : 'tell', label: card !== null ? `#${card}` : clip(row.text, 36), at: now, card });
         break;
+      }
       case 'handback':
-        this.effects.push({ kind: 'comet', from: target, to: memberKey(row.team, 'Manager'), color: 'handback', label: 'handed back', at: now });
+        back('check', 'handback', 'handed back');
         break;
       case 'progress':
         if (row.text) this.effects.push({ kind: 'float', node: target, color: 'progress', text: clip(row.text, 40)!, at: now });
@@ -132,20 +252,23 @@ export class MonitorModel {
         break;
       case 'failed':
         this.effects.push({ kind: 'burst', node: target, color: 'fail', big: true, at: now });
+        back('cross', 'fail', 'failed');
         break;
       case 'blocked':
         this.effects.push({ kind: 'burst', node: target, color: 'blocked', big: true, at: now });
         this.effects.push({ kind: 'float', node: target, color: 'blocked', text: 'blocked', at: now });
+        back('cross', 'blocked', 'blocked');
         break;
       case 'decision':
         this.effects.push({ kind: 'burst', node: target, color: 'decision', big: false, at: now });
         this.effects.push({ kind: 'float', node: target, color: 'decision', text: 'needs you', at: now });
+        this.effects.push({ kind: 'you', from: target, color: 'decision', label: clip(row.text, 30), at: now });
         break;
       case 'done':
         this.effects.push({ kind: 'burst', node: teamKey(row.team), color: 'done', big: true, at: now });
         break;
     }
-    if (this.effects.length > 260) this.effects.splice(0, this.effects.length - 260);
+    this.capEffects();
   }
 
   /**
@@ -156,12 +279,52 @@ export class MonitorModel {
   applyStep(step: StepRow, now: number, live = true): void {
     const node = memberKey(step.team, step.member);
     if (changesFile(step)) this.gatherFile(step);
+    // The map is built from every step, played or not; only a played one pops and lights.
+    this.map.touchStep(step, this.memberWorkflow.get(node) ?? null, live ? now : null);
     if (!live) return;
     this.recent.push(now);
+    const times = this.stepTimes.get(node);
+    if (times) times.push(now); else this.stepTimes.set(node, [now]);
+    // A command's ring: it fills from its 'run' step until the member's next step (or at once when the exit code came
+    // with it), then bursts green or red by its exit code when that is known.
+    const running = this.runs.get(node);
+    if (running && running.ended === null) running.ended = now;
+    if (step.kind === 'run') {
+      const exit = typeof step.exit === 'number' ? step.exit : null;
+      this.runs.set(node, { at: now, target: step.target, ended: exit === null ? null : now, exit });
+      if (exit !== null) this.effects.push({ kind: 'burst', node, color: exit === 0 ? 'done' : 'fail', big: exit !== 0, at: now });
+    }
     // A reply is how nearly every run ends: the line keeps the last real thing the member did.
     if (step.kind !== 'say') this.doing.set(node, { text: stepDoing(step), kind: step.kind, at: now });
-    if (changesFile(step)) this.files.touch(node, step.target!, step.kind === 'create' ? 'create' : 'edit', now);
     this.effects.push({ kind: 'step', node, step: step.kind, caption: step.kind === 'edit' || step.kind === 'create' ? null : stepCaption(step), at: now });
+    this.capEffects();
+  }
+
+  /**
+   * Applies a code event: always, its files correct the team's map and it joins the activity list; live, a commit's
+   * dot travels from its member to the hub, a merge bursts along the hub (a landing larger), a push pulses off the edge.
+   */
+  applyCode(ev: CodeEvent, now: number, live = true): void {
+    const lit = this.map.applyCode(ev, live ? now : null);
+    const look = CodeVerbs[ev.kind];
+    const first = ev.message.split('\n')[0]!.trim();
+    this.activity.unshift({
+      key: `c${codeEventKey(ev)}`, seq: 0, tone: look.tone, team: ev.team, member: ev.member,
+      verb: look.verb, who: spaced(ev.member ?? ev.team),
+      text: ev.kind === 'push' ? ev.branch || null : [ev.sha ? shortSha(ev.sha) : '', clip(first, 60) ?? '', ev.files.length ? `(${ev.files.length} file${ev.files.length === 1 ? '' : 's'})` : ''].filter(Boolean).join(' ') || null,
+      at: ev.at,
+    });
+    if (this.activity.length > this.keep) for (const gone of this.activity.splice(this.keep)) this.gathered.delete(gone.key);
+    if (!live) return;
+    this.recent.push(now);
+    const tk = ev.team.toLowerCase();
+    if (ev.kind === 'commit')
+      this.effects.push({
+        kind: 'commit', team: ev.team, node: ev.member ? memberKey(ev.team, ev.member) : null, files: lit.map((f) => `${tk}|${f.path}`),
+        sha: ev.sha, message: first, member: ev.member, at: now,
+      });
+    else if (ev.kind === 'push') this.effects.push({ kind: 'push', team: ev.team, at: now });
+    else this.effects.push({ kind: 'merge', team: ev.team, big: ev.kind === 'landed', at: now });
     if (this.effects.length > 260) this.effects.splice(0, this.effects.length - 260);
   }
 
@@ -193,10 +356,17 @@ export class MonitorModel {
     }
   }
 
-  /** Forgets the files and "now" lines that have run out (the scene calls this each frame through the view). */
+  /** Forgets the map's idle files (twice a second) and the "now" lines that have run out (the scene calls this each frame). */
   tidy(now: number): void {
-    this.files.tidy(now);
+    if (now - this.prunedAt >= 500 || now < this.prunedAt) { this.prunedAt = now; this.map.prune(this.logNow()); }
     for (const [k, d] of this.doing) if (now - d.at > DoingMs) this.doing.delete(k);
+    for (const [k, r] of this.runs) if (r.ended !== null ? now - r.ended > RunEndShowMs : now - r.at > RunStaleMs) this.runs.delete(k);
+  }
+
+  /** Whether a member is thinking now (its last step was a thought, within the "now" line's half minute). */
+  thinking(node: string, now: number): boolean {
+    const d = this.doing.get(node);
+    return !!d && d.kind === 'think' && now - d.at < DoingMs;
   }
 
   /** Effects older than their life are dropped by the scene; this keeps the per-minute count honest. */

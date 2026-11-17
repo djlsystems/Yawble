@@ -49,9 +49,15 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - The tab is remembered per member; the Report is the default. Only a terminal that is shown polls; several members'
     terminals can show at once. The Monitor, the palette and the remote view can open a member's terminal: the team
     page shows that pane's Terminal and scrolls it into view.
-  - The gaps between members set the view's height for every member. At the default height a pane is no taller than
-    the card and Activity row it replaced.
-  - On a phone a pane is stacked the same way, the view at its own height. The Terminal tab opens the terminal full
+  - The members are equal tiles in a grid that wraps, like the Teams list: two per row at a 1280 px window by default.
+    The gaps right of and below the tiles are width and height handles (drag, or the arrow keys on a focused handle;
+    double-click for the default) that resize every tile at once. The size is the team page's own, kept by this
+    computer or browser (each remote viewer keeps theirs). The pane fills its tile and its view scrolls inside it.
+  - The last tile is **New member**: its **+** opens a small form in the tile: **Job and first name**, the **CLI**, and
+    **Add** (or **Cancel**, or Escape). Add is offered once a name is typed; a refused add keeps the form and shows why.
+    The remote view has the same grid; a read-only (Visitor) viewer cannot add.
+  - On a phone the tiles are one per row, full width, each as tall as its content, with no handles, New member last;
+    a pane is stacked the same way, the view at its own height. The Terminal tab opens the terminal full
     screen with one header row; its **⋯** holds the state line and Stop, and **✕** goes back to the Report. The
     transcript gets at least 60% of the screen's height. Every target is at least 44 px.
 - Members ask you through the team page. **Approve** answers once; **Always approve for this team…** remembers it.
@@ -275,15 +281,61 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 ## Monitor
 
-- A live wall of every team. Members orbit their team as discs with a state ring: running, waiting, needs you,
-  idle.
-- Each member shows its recent tool steps, changed files and what it is doing now.
+- A live wall of every team. **Nodes**: each team is a hub in its own colour; its members orbit it as discs with
+  their face and a state ring (running turns, waiting creeps round, blocked, needs you and failed throb, idle is a
+  thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots.
+- **Workflow nodes**: each open workflow is a small node tied by dashed lines to the members working it (to its team
+  while nobody is on it). It flashes green and drifts away when it completes, fades with a cross when it is closed,
+  and shows a "!" while it is blocked. The team's **Workflows** panel stays as the list of its newest five.
+- **Rhythm**: each member shows its recent tool steps rising off it and what it is doing now; a busier member pulses
+  faster, a command or test run shows a ring filling while it runs, then a green or red burst by its exit code when
+  that is known, and thinking shimmers softly.
+- **Cards**: a Manager's instruction flies to the member with its card number (#373). The hand-back returns along the
+  same line with a ✓, or a ✗ when the run failed or was blocked.
+- **You node**: at the edge of the wall. Questions, approvals and network or tool asks that wait for you fly to it,
+  and it glows with their count until they are answered. Click it to open the Kanban board (every team), whose **Needs You** lane lists them.
+- **Focus a team**: click a team's hub and the wall zooms to it and dims the rest; a chip under the counts names it.
+  Press **Esc**, click the empty wall or the chip's **×** to see every team again. Not remembered.
+- **Density** beside the camera controls: **Calm** moves only the big moments (handbacks, failures, needs you,
+  commits, merges), **Normal** (the default) what the teams do without the smallest steps, **Lively** every step and
+  message. Remembered. Calm also shows fewer code-map files (72 in all) and at most 3 resting commits per team.
+  Reduced motion is respected at every density.
+- **Sound** (the speaker beside the density): off unless you turn it on, and remembered. Then a short, quiet tone
+  plays for needs you, a failure or block, a finished workflow, a hand-back, a commit, a merge, a landing on main and
+  a push, each kind at most once every 1.5 s. Steps and messages make no sound, nor does a replay.
+- On a phone or in the remote view the camera, the cog and the legend share one row; the density and the sound sit
+  at the top of the cog's panel, so nothing scrolls sideways at 375 px.
+- **Code map**: each team has one tree round its hub, past its members: the repository, then its folders, then their
+  files. It builds up over the life of a workflow.
+  - A new file pops in. An edit lights a file bright, a read lights it faint. A folder glows warmer the busier its
+    files are.
+  - A line runs from each member to every file it touched. A file two members touched wears a double ring. A file a
+    commit confirmed wears a ring; hover a file for its path, who touched it and its commit.
+  - A file leaves when every workflow that touched it has ended, or after it has been idle for **files stay** (under
+    the timeline: 10 minutes, 30 minutes (the default), 1 hour or 4 hours; remembered).
+  - A large map collapses to its busiest folders, each with **+N** for the rest, and a **+N folders** node. All the
+    maps together show at most 240 files, and nodes off the screen are not drawn.
+- **Code events** on the wall, also listed in **Activity** and marked on the timeline:
+  - **commit**: the member's changed files gather into a dot that travels along the member's spoke to the team's hub
+    and rests there for a while. Hover it for the message and the short sha.
+  - **merge into the team branch**: a burst along the hub's spokes.
+  - **landed on main**: a larger burst.
+  - **push**: a pulse that runs off the edge of the wall.
+- A focused team's code map, commits and merges stay bright; the other teams' maps dim with them.
+- With reduced motion nothing travels, pops or pulses: the map just updates, a commit's dot is simply at the hub, a
+  comet is a still line with its label, and states are steady marks.
 - Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
-- A timeline replays any moment. **● Back to live** returns.
+- A timeline replays any moment: the map, the commits and the merges play at their times. **● Back to live** returns.
 - The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
   link strength, repulsion, gravity and friction, each a multiplier (0.25× to 3×) on the wall's own layout. They apply
   as you drag and are remembered; **Reset** goes back to the defaults: distance 0.3×, strength 2.75×, repulsion 0.35×,
   gravity 2.4×, friction 0.45×.
+
+**Code map sources.** The app records what really reaches the team repository: each new commit a member's run brings
+back (its files and whether each was added, modified, deleted or renamed), each merge into the team branch, each Merge
+to main and each push to origin, with the workflow it came from. It reads them in the team repository, never in a
+member's clone. Commit diffs are the truth for a file's existence and status. Transcript steps are only the immediate,
+provisional signal, and the only source for reads.
 
 ## Logs
 

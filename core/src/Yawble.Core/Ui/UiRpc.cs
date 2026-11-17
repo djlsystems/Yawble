@@ -23,7 +23,8 @@ public sealed class UiRpc(
     long? machineMemoryMb = null,
     Func<string, string, bool>? stopSandbox = null,
     Skills.SkillCatalog? skills = null,
-    Monitor.StepFeed? steps = null)
+    Monitor.StepFeed? steps = null,
+    Monitor.CodeEvents? codeEvents = null)
 {
     public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs."];
 
@@ -42,6 +43,7 @@ public sealed class UiRpc(
 
                 "monitor.messages" => await MonitorMessagesAsync(OptLong(p, "after") ?? 0, (int)(OptLong(p, "limit") ?? 200), ct),
                 "monitor.steps" => MonitorSteps(OptLong(p, "after") ?? 0, (int)(OptLong(p, "sinceMinutes") ?? 30), (int)(OptLong(p, "limit") ?? 2000)),
+                "monitor.codeEvents" => MonitorCodeEvents(p),
 
                 "teams.list" => S(await bus.TeamsAsync(ct)),
                 "teams.create" => await CreateTeamAsync(p, ct),
@@ -329,6 +331,27 @@ public sealed class UiRpc(
         var array = new JsonArray();
         foreach (var s in list) array.Add(s.ToJson());
         return new JsonObject { ["end"] = end, ["pending"] = pending, ["steps"] = array };
+    }
+
+    /// <summary>
+    /// monitor.codeEvents {team?, since?, until?, after?, limit?}: what really reached the team repository (B079,
+    /// Monitor/CodeEvents), oldest first: [{id, kind: commit|merge-team|landed|push, team, member?, branch, sha, message,
+    /// files: [{path, status, oldPath?}], at, recordedAt, workflowId?, into?, branches?}]. since/until are ISO times
+    /// filtering <c>at</c>; after is an id cursor. Without a store there are none.
+    /// </summary>
+    private JsonArray MonitorCodeEvents(JsonObject? p)
+    {
+        var array = new JsonArray();
+        if (codeEvents is null) return array;
+        static DateTimeOffset? Time(JsonObject? p, string key)
+        {
+            if (OptStr(p, key) is not { } text) return null;
+            return DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var t)
+                ? t : throw new RpcException("bad_params", $"{key} must be an ISO time");
+        }
+        foreach (var e in codeEvents.Read(OptStr(p, "team"), Time(p, "since"), Time(p, "until"), OptLong(p, "after") ?? 0, (int)(OptLong(p, "limit") ?? 2000)))
+            array.Add(e.ToJson());
+        return array;
     }
 
     internal static JsonObject? MonitorRow(Message m)

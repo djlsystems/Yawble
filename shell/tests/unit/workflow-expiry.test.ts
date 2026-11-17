@@ -7,7 +7,8 @@ import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.v
 import TeamWorkflows from '../../src/renderer/src/components/TeamWorkflows.vue';
 import WorkflowExpiryAsks from '../../src/renderer/src/components/WorkflowExpiryAsks.vue';
 import TeamManageDialog from '../../src/renderer/src/components/TeamManageDialog.vue';
-import { entryTime, workflowLook, WorkflowLooks } from '../../src/renderer/src/monitor/workflows';
+import { entryTime, workflowEnds, workflowLook, WorkflowLooks } from '../../src/renderer/src/monitor/workflows';
+import { MonitorModel, workflowKey } from '../../src/renderer/src/monitor/model';
 import { expiresSoon, expiryWarningText, until } from '../../src/renderer/src/workflowExpiry';
 import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remoteAccess';
 
@@ -84,6 +85,16 @@ describe('the "expired" state (B085)', () => {
     expect(row.get('[data-test=team-workflow-time]').text()).toBe(entryTime(expired.endedAt!));
     expect(w.get('[data-test=team-workflow][data-id="8"]').attributes('data-status')).toBe('completed');
     w.unmount();
+  });
+
+  it('a workflow node (B080) that expires leaves with an "expired" wfdone effect, not "closed"', () => {
+    const open = { ...expired, state: 'open' as const, endedAt: null, expiredAt: null };
+    expect(workflowEnds([open, { ...closed, state: 'open' }], [expired, closed])).toEqual([{ id: 9, status: 'expired' }, { id: 7, status: 'closed' }]);
+    const m = new MonitorModel();
+    m.setWorkflows('payments', [open], 0);
+    m.effects.length = 0;
+    m.setWorkflows('payments', [expired], 10);
+    expect(m.effects).toEqual([{ kind: 'wfdone', key: workflowKey('payments', 9), team: 'payments', status: 'expired', at: 10 }]);
   });
 });
 

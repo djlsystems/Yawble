@@ -177,11 +177,15 @@ const DesktopCss: Record<string, string> = {
   'board/BacklogView.vue': '55673d4cef46ac87',
   // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
   // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon); card 344: a desktop rule keeps the 29 px buttons' size.
-  'components/TeamView.vue': 'e9484eb0ecb95837',
+  // B076 (card 365): the members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)
+  // ending with the New member tile (.new-tile, its form .add); the old add row's rule went. Card 368: the pane clips
+  // sideways only (overflow-x clip, y visible) so its ☰ menu draws past a short tile; the focused cell is raised.
+  'components/TeamView.vue': '5f8d83d315b69e96',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
-  // toolbar, no two areas side by side, no width bar, no loosened marker).
-  'components/MemberPane.vue': 'ee6baa53cc7ccb8f',
+  // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the
+  // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
+  'components/MemberPane.vue': '0c45fdece399ca73',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   // The documents list's Modified column: a wider list and the size / modified cells.
@@ -500,10 +504,20 @@ describe('at 1280 px the desktop is as it was (B054)', () => {
     expect([...head.element.children].map((e) => e.getAttribute('data-test') ?? (e.className || e.tagName.toLowerCase())))
       .toEqual(['h2', 'tabs', 'grow', 'backlog-search', 'backlog-team-filter', 'backlog-upload', 'backlog-upload-input', 'backlog-add']);
     expect(head.get('[data-test=backlog-add]').text()).toBe('+ Add item');
-    expect(w.get('.wrap > p.intro').text()).toMatch(/^Work you want done, most important first\./);
+    expect(w.get('.wrap > p.intro').text()).toBe('Mark an item ready once you have read it, then dispatch it to a team.');
     expect(w.find('[data-test=backlog-phone-head]').exists()).toBe(false);
     expect(w.find('[data-test=backlog-tools-toggle]').exists()).toBe(false);
     expect(w.get('[data-test=backlog-view]').classes()).toEqual(['backlog-place', 'fill']);
+  });
+
+  it('Backlog: the Archived tab shows no intro; back on Backlog it shows again', async () => {
+    const w = await backlog(Desktop);
+    await w.get('header.head [data-test=backlog-tab-archived]').trigger('click');
+    await settle();
+    expect(w.find('.wrap > p.intro').exists()).toBe(false);
+    await w.get('header.head [data-test=backlog-tab-live]').trigger('click');
+    await settle();
+    expect(w.find('.wrap > p.intro').exists()).toBe(true);
   });
 
   it('the Team page: the five labelled actions, the long Tell placeholder and "Tell Manager" with the plane, the activity uncapped', async () => {

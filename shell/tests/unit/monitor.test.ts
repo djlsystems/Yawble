@@ -7,7 +7,7 @@ import Timeline from '../../src/renderer/src/monitor/Timeline.vue';
 import { aimsAtEverything, FitOnceMs } from '../../src/renderer/src/monitor/scene';
 import type { YawbleApi, WorkflowSummary } from '../../src/shared/api';
 import { entryTime, latestWorkflows, panelHit, panelLayout, panelRadius, panelScale, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown } from '../../src/renderer/src/monitor/workflows';
-import { fileAlpha, FileTrail, FileTtlMs, MaxFileNodes, readStep, stepCaption, stepDoing, type StepKind, type StepRow } from '../../src/renderer/src/monitor/steps';
+import { readStep, stepCaption, stepDoing, type StepKind, type StepRow } from '../../src/renderer/src/monitor/steps';
 import { MaxGapMs, mergeByTime, ReplayClock, ReplayRunningMs, ReplayStates, toneOfRow, trimByTime } from '../../src/renderer/src/monitor/timeline';
 
 const row = (seq: number, kind: FeedRow['kind'], member: string | null, from: string, text: string | null = null, at = new Date().toISOString()): FeedRow =>
@@ -37,41 +37,23 @@ describe('the steps', () => {
     expect(stepDoing({ kind: 'edit', tool: 'Edit', target: 'web/src/parser.ts' })).toBe('editing parser.ts');
   });
 
-  it('keeps a member\'s files in their places, counts the overflow, and forgets them 30 s after their last touch', () => {
-    const trail = new FileTrail();
-    for (let i = 0; i < MaxFileNodes + 2; i++) trail.touch('m', `f${i}.ts`, 'edit', i);
-    let { placed, counted } = trail.of('m');
-    expect(placed.map((f) => f.slot).sort()).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(counted).toHaveLength(2);
-    // Touched again: same place, a touch more, alive longer.
-    const again = trail.touch('m', 'f0.ts', 'edit', 20_000);
-    expect(again).toMatchObject({ slot: 0, touches: 2 });
-    trail.tidy(FileTtlMs + 10);
-    ({ placed, counted } = trail.of('m'));
-    expect(placed.map((f) => f.path)).toEqual(['f0.ts']);
-    expect(counted).toHaveLength(0);
-    expect(fileAlpha(again, 20_000 + FileTtlMs - 1)).toBeGreaterThan(0);
-    expect(fileAlpha(again, 20_000 + FileTtlMs)).toBe(0);
-    trail.tidy(20_000 + FileTtlMs);
-    expect(trail.size).toBe(0);
-  });
-
-  it('plays a step as an icon, a file and a "now" line, and gathers file changes on one activity line', () => {
+  it('plays a step as an icon, a file on the map and a "now" line, and gathers file changes on one activity line', () => {
     const m = new MonitorModel();
     m.applyStep(step(1, 'edit', 'src/a.ts'), 100);
     m.applyStep(step(2, 'run', 'npm test'), 200);
     m.applyStep(step(3, 'create', 'src/b.ts'), 300);
     expect(m.effects.map((e) => e.kind)).toEqual(['step', 'step', 'step']);
     expect(m.effects[1]).toMatchObject({ step: 'run', caption: 'npm test' });
-    expect(m.files.of(memberKey('payments', 'DeveloperPriya')).placed.map((f) => f.name)).toEqual(['a.ts', 'b.ts']);
+    expect(m.map.files('payments').map((f) => f.name).sort()).toEqual(['a.ts', 'b.ts']);
+    expect(m.map.get('payments', 'src/b.ts')).toMatchObject({ created: true, bornShown: 300 });
     expect(m.doing.get(memberKey('payments', 'DeveloperPriya'))).toMatchObject({ text: 'writing b.ts', kind: 'create' });
     expect(m.activity).toHaveLength(1);
     expect(m.activity[0]).toMatchObject({ verb: 'wrote files', text: 'a.ts, b.ts', tone: 'edit' });
-    // Read at the start: listed, not played.
+    // Read at the start: listed and on the map, not played (no pop, no light).
     const quiet = new MonitorModel();
     quiet.applyStep(step(4, 'edit', 'x.ts'), 0, false);
     expect(quiet.effects).toHaveLength(0);
-    expect(quiet.files.size).toBe(0);
+    expect(quiet.map.get('payments', 'x.ts')).toMatchObject({ bornShown: -Infinity, editShown: -Infinity });
     expect(quiet.activity[0]!.text).toBe('x.ts');
   });
 });
@@ -126,9 +108,10 @@ describe('the Monitor model', () => {
     m.apply(row(1, 'instruction', 'DeveloperPriya', 'Manager', 'Add a README'), 0);
     m.apply(row(2, 'decision', 'DeveloperPriya', 'payments/DeveloperPriya', 'MIT or Apache?'), 10);
     m.apply(row(3, 'done', 'Manager', 'Manager', 'README'), 20);
-    expect(m.effects.map((e) => e.kind)).toEqual(['comet', 'burst', 'float', 'burst']);
+    // (B080: a question also flies to the You node.)
+    expect(m.effects.map((e) => e.kind)).toEqual(['comet', 'burst', 'float', 'you', 'burst']);
     expect(m.effects[0]).toMatchObject({ from: memberKey('payments', 'Manager'), to: memberKey('payments', 'DeveloperPriya'), label: 'Add a README' });
-    expect(m.effects[3]).toMatchObject({ node: teamKey('payments'), big: true });
+    expect(m.effects[4]).toMatchObject({ node: teamKey('payments'), big: true });
     expect(m.activity[0]!.verb).toBe('finished the work');
     expect(m.activity[2]).toMatchObject({ verb: 'Manager told', who: 'Developer Priya' });
     expect(m.perMinute(30)).toBe(3);
@@ -362,9 +345,11 @@ describe('the Monitor view', () => {
     } as unknown as YawbleApi;
     const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
     await flushPromises();
-    // The cog sits in the camera controls, right after the Auto fit | Fit | Pinned group; the panel is closed.
+    // The cog sits in the camera controls, right after the Auto fit | Fit | Pinned group, then density and
+    // sound (card 374); the panel is closed.
     const controls = w.get('.controls');
-    expect(controls.element.lastElementChild?.getAttribute('data-test')).toBe('monitor-layout-toggle');
+    const order = Array.from(controls.element.children).map((el) => el.getAttribute('data-test')).filter(Boolean);
+    expect(order.slice(-3)).toEqual(['monitor-layout-toggle', 'monitor-density', 'monitor-sound']);
     expect(w.find('[data-test=monitor-layout]').exists()).toBe(false);
     await w.get('[data-test=monitor-layout-toggle]').trigger('click');
     const panel = w.get('[data-test=monitor-layout]');

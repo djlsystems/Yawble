@@ -49,7 +49,43 @@ export function workflowLabel(w: Pick<WorkflowSummary, 'id' | 'title'>, max = 28
   return `#${w.id} ${t.length <= max ? t : t.slice(0, max - 1) + '…'}`;
 }
 
-const Months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// ---------- the workflow nodes (B080) ----------
+
+/**
+ * Every open workflow is also a node on the wall, tied by lines to the members working it (its busy list), or to its
+ * team's hub while nobody is on it. The panel stays as the list of the newest few (and their legend); the nodes say
+ * who works what. A node whose workflow completes flashes green and drifts away; one that is closed fades out with a
+ * cross; one whose last word was "blocked" wears the blocked look until work on it goes on.
+ */
+
+/** At most this many workflow nodes per team (the newest open ones). */
+export const WorkflowNodesEach = 12;
+
+export type WorkflowNodeStatus = 'working' | 'waiting' | 'blocked';
+export interface WorkflowNodeLook { status: WorkflowNodeStatus; tone: WorkflowTone | 'blocked'; icon: WorkflowIcon | 'bang' }
+
+export function workflowNodeLook(w: Pick<WorkflowSummary, 'state' | 'busy'>, blocked: boolean): WorkflowNodeLook {
+  if (blocked) return { status: 'blocked', tone: 'blocked', icon: 'bang' };
+  return workflowStatus(w) === 'working' ? { status: 'working', tone: 'start', icon: 'play' } : { status: 'waiting', tone: 'handback', icon: 'pause' };
+}
+
+/** A team's open workflows, newest first, at most WorkflowNodesEach. */
+export function openWorkflows(list: readonly WorkflowSummary[], n = WorkflowNodesEach): WorkflowSummary[] {
+  return latestWorkflows(list.filter((w) => w.state === 'open'), n);
+}
+
+/** The member names in a workflow's busy list ("DeveloperPriya is running" -> "DeveloperPriya"). */
+export function busyMembers(w: Pick<WorkflowSummary, 'busy'>): string[] {
+  return w.busy.map((b) => b.trim().split(/\s+/)[0] ?? '').filter((s) => s !== '');
+}
+
+/** The workflows that were open before and are completed, closed or expired now (ids absent now are left alone). */
+export function workflowEnds(before: readonly WorkflowSummary[], now: readonly WorkflowSummary[]): { id: number; status: 'completed' | 'closed' | 'expired' }[] {
+  const was = new Set(before.filter((w) => w.state === 'open').map((w) => w.id));
+  return now.filter((w) => was.has(w.id) && w.state !== 'open').map((w) => ({ id: w.id, status: w.state as 'completed' | 'closed' | 'expired' }));
+}
+
+const Months =['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** A time compactly: "12:41 PM" today, "Nov 10 12:41 PM" another day (local time). */
 export function entryTime(iso: string, now = Date.now()): string {

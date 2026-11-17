@@ -420,6 +420,7 @@ public sealed partial class TeamRepos
                 ? notMoved with { Outcome = outcome, Changed = true, Sha = merged, Message = $"origin's {repo.BaseBranch} is now {Short(merged)}, but your local {repo.BaseBranch} did not move: {notMoved.Message}" }
                 : notMoved;
         }
+        await RecordLandedAsync(repo, team, teamBranch, start, merged, hasOrigin, ct);
         var how = outcome == "fast-forward" ? "fast-forwarded" : "merged with a merge commit";
         var where = hasOrigin ? $"{repo.BaseBranch} and origin's {repo.BaseBranch}" : repo.BaseBranch;
         _log?.Invoke($"team {team}: {teamBranch} {how} into {repo.BaseBranch} at {Short(merged)}");

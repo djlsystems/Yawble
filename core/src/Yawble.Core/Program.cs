@@ -180,7 +180,9 @@ var ui = new Yawble.Core.Ui.UiRpc(bus, policies, layouts,
     runs.Stop,
     skillCatalog,
     // The Monitor's step feed: what the members do, read from their runs' transcripts.
-    new Yawble.Core.Monitor.StepFeed($"Data Source={dbPath}"));
+    new Yawble.Core.Monitor.StepFeed($"Data Source={dbPath}"),
+    // The Monitor's code events (B079): commits, merges and pushes the host recorded in the team repositories.
+    new Yawble.Core.Monitor.CodeEvents($"Data Source={dbPath}"));
 // The guardrail check (runs a battery of escape attempts in a sandbox under a member's effective policy).
 // It rides on the launcher: the same layout, policy, per-run gateway and backend as the members' runs.
 // A member's check takes a global run slot through the bus, like a terminal session.
