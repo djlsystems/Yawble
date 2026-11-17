@@ -214,6 +214,21 @@ describe('density and focus (B080 item 5)', () => {
     expect(capEffects(floats, 'calm')).toHaveLength(DensityCaps.calm.floats);
   });
 
+  it('the code map follows the density and the focus too: commits per team, merges and pushes by team, map files in all', () => {
+    const commit = (team: string, i: number, member: string | null = 'dev'): Effect =>
+      ({ kind: 'commit', team, node: member ? memberKey(team, member) : null, files: [], sha: `s${i}`, message: 'm', member, at: i });
+    const commits = Array.from({ length: 12 }, (_, i) => commit(i % 2 ? 'a' : 'b', i));
+    const kept = (d: 'calm' | 'normal' | 'lively', team: string) => capEffects(commits, d, null).filter((e) => e.kind === 'commit' && e.team === team);
+    expect(kept('calm', 'a')).toHaveLength(DensityCaps.calm.commitsEach);
+    expect(kept('normal', 'a')).toHaveLength(6); // under the cap of 8: all of them
+    expect(kept('calm', 'a').map((e) => e.at)).toEqual([7, 9, 11]); // the newest kept
+    const code: Effect[] = [commit('a', 1, null), { kind: 'merge', team: 'B', big: false, at: 2 }, { kind: 'push', team: 'a', at: 3 }];
+    expect(capEffects(code, 'normal', 'a').map((e) => e.at)).toEqual([1, 3]);
+    expect(capEffects(code, 'normal', 'b').map((e) => e.at)).toEqual([2]);
+    expect(DensityCaps.calm.mapNodes).toBeLessThan(DensityCaps.normal.mapNodes);
+    expect(DensityCaps.normal.mapNodes).toBeLessThanOrEqual(240);
+  });
+
   it('a focused team shows only its own effects (and comets that reach it); the rest is dimmed', () => {
     const mixed: Effect[] = [comet(1), comet(2, memberKey('b', 'manager'), memberKey('b', 'dev')), comet(3, teamKey('b'), memberKey('a', 'dev')),
       { kind: 'wfdone', key: workflowKey('b', 4), team: 'b', status: 'completed', at: 4 }, { kind: 'you', from: memberKey('b', 'dev'), color: 'decision', label: null, at: 5 }];

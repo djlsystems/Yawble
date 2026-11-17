@@ -177,7 +177,10 @@ const DesktopCss: Record<string, string> = {
   'board/BacklogView.vue': '55673d4cef46ac87',
   // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
   // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon); card 344: a desktop rule keeps the 29 px buttons' size.
-  'components/TeamView.vue': 'e9484eb0ecb95837',
+  // B076 (card 365): the members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)
+  // ending with the New member tile (.new-tile, its form .add); the old add row's rule went. Card 368: the pane clips
+  // sideways only (overflow-x clip, y visible) so its ☰ menu draws past a short tile; the focused cell is raised.
+  'components/TeamView.vue': '5f8d83d315b69e96',
   'components/TeamSyncBanner.vue': '8305253f8317a684',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
   // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the

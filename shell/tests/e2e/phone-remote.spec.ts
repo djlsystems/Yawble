@@ -640,7 +640,8 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
             out[k] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
             if (last && (last.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) below.push(k);
           }
-          const panes = cells.map((c) => {
+          // B076 (card 367): the members are a grid now and its last cell is the New member tile (not a member pane).
+          const panes = cells.filter((c) => !c.classList.contains('new-cell')).map((c) => {
             const body = c.querySelector('[data-test=member-pane-body]');
             return { name: c.querySelector('[data-test^=agent-]')?.getAttribute('data-test') ?? '?', frames: c.querySelectorAll('section.pane').length,
               views: body ? body.children.length : -1 };
@@ -657,8 +658,25 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
       const diff: string[] = [];
       const added = Object.keys(branch.out).filter((k) => !(k.replace(/#\d+$/, '#1') in base.out));
       if (added.length) console.log(`${name} @1280: hooks new in B037 (not compared): ${added.join(', ')}`);
+      // B076 (card 367): the add row under the members went on purpose; its fields are in the New member tile (a
+      // .member-cell, measured with the members, card367-team-grid.spec.ts checks it).
+      const goneInB076 = new Set(['add-agent-name#1', 'add-agent-cli#1', 'add-agent#1']);
+      // B080 (card 374): the Monitor's density and sound controls sit right of the cog in the camera row, so the row's
+      // right-aligned controls move left together - one shared x shift, same y and size, nothing else.
+      const shiftedIn374 = new Set(['monitor-camera#1', 'monitor-autofit#1', 'monitor-fit#1', 'monitor-pin#1', 'monitor-layout-toggle#1']);
+      const xOf = (v: string | undefined) => Number(v?.split(',')[0]);
+      const dx374 = name === 'monitor' && base.out['monitor-camera#1'] && branch.out['monitor-camera#1']
+        ? xOf(branch.out['monitor-camera#1']) - xOf(base.out['monitor-camera#1']) : 0;
+      const movedX = (v: string | undefined, dx: number) => v?.replace(/^(-?\d+),/, (_m, x) => `${Number(x) - dx},`);
       for (const k of new Set([...Object.keys(base.out), ...Object.keys(branch.out)])) {
         if (added.includes(k)) continue;
+        if (name === 'team-page' && goneInB076.has(k) && !(k in branch.out)) continue;
+        if (name === 'monitor' && shiftedIn374.has(k)) {
+          // 1 px of rounding either way (sub-pixel widths round independently).
+          const same = [-1, 0, 1].some((e) => base.out[k] === movedX(branch.out[k], dx374 + e));
+          if (!same) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / B037 ${branch.out[k] ?? '-'} (card 374 row shift ${dx374})`);
+          continue;
+        }
         const b = branch.below.includes(k) ? moved(branch.out[k], shift) : branch.out[k];
         if (base.out[k] !== b) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / B037 ${branch.out[k] ?? '-'}${branch.below.includes(k) ? ` (below the members, shift ${shift})` : ''}`);
       }
