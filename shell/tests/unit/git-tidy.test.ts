@@ -227,6 +227,54 @@ describe('TidyPanel', () => {
     expect(w.find('[data-test=tidy-realign-shas]').text()).toBe('5bbb6ba450 → f00dbeef00');
   });
 
+  // B084 (card 396): a coded failure is a plain error, even when its text says "runs" or "running".
+  async function realignError(code: string, message: string) {
+    const { api } = fakeApi({ 'git.tidyPlan': () => plan(), 'git.branchRealign': () => { throw coreError(code, message); } });
+    const w = mount(TidyPanel, { props: { api, team, mainName: 'payments' } });
+    await flushPromises();
+    await w.find('[data-test=tidy-realign]').trigger('click');
+    await w.find('[data-test=tidy-realign-yes]').trigger('click');
+    await flushPromises();
+    return w.find('[data-test=tidy-realign-error]').text();
+  }
+
+  it.each([
+    ['git_failed', 'git update-ref failed: hook runs refused the update (exit 1)'],
+    ['bad_params', 'member is required; the realign runs on one member branch'],
+    ['no_such_member', 'No member Marlo in payments; was the member running elsewhere?'],
+  ])('Realign answered %s: the error is shown plain, not as "Refused:"', async (code, message) => {
+    expect(await realignError(code, message)).toBe(message);
+  });
+
+  it('Realign refused with a real refusal code still shows "Refused:"', async () => {
+    expect(await realignError('member_running', 'Marlo has a run open.')).toBe('Refused: Marlo has a run open.');
+  });
+
+  it('Realign with an uncoded error that says the member runs still shows "Refused:"', async () => {
+    const { api } = fakeApi({ 'git.tidyPlan': () => plan(), 'git.branchRealign': () => { throw new Error('Marlo runs now.'); } });
+    const w = mount(TidyPanel, { props: { api, team, mainName: 'payments' } });
+    await flushPromises();
+    await w.find('[data-test=tidy-realign]').trigger('click');
+    await w.find('[data-test=tidy-realign-yes]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=tidy-realign-error]').text()).toBe('Refused: Marlo runs now.');
+  });
+
+  it.each(['git_failed', 'bad_params', 'no_such_member'])('Delete answered %s: the error is shown plain, not as "Refused:"', async (code) => {
+    const message = `push --delete failed while a hook runs (${code})`;
+    const { api } = fakeApi({
+      'git.tidyPlan': () => plan(),
+      'git.deleteBranches': (p) => { if (p.confirm) throw coreError(code, message); return { plan: 'Delete it', token: 't', empty: false }; },
+    });
+    const w = mount(TidyPanel, { props: { api, team, mainName: 'payments' } });
+    await flushPromises();
+    await w.find('[data-test=tidy-delete-selected]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test=tidy-delete-yes]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=tidy-delete-error]').text()).toBe(message);
+  });
+
   it('a moved row shows the commits a realign drops and the proof; origin-only shows its commits', async () => {
     const { api } = fakeApi({ 'git.tidyPlan': () => plan() });
     const w = mount(TidyPanel, { props: { api, team, mainName: 'payments' } });
