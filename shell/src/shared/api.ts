@@ -478,6 +478,10 @@ export interface HostTaskDef {
   pinMode: 'files' | 'commit'; commandLineOnly: boolean;
   /** Environment variables whose value is read from a Connection's secret field at start (B023). The binding is pinned, never the value. */
   envFromConnections?: EnvFromConnection[];
+  /** One line on what the task does, shown on the task row and to the Concierge (B066). Omitted when empty. */
+  description?: string;
+  /** What to check once it has run, e.g. a health URL (B066). Omitted when empty. */
+  checkAfter?: string;
 }
 /** One binding: variable `name` takes the secret `field` of Connection `connectionId`; `connectionName` is for display only. */
 /** The core sends connectionId as a string ("7") and accepts a number or a string back; the editor normalises it to a number on load. */
