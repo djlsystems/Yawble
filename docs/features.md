@@ -26,24 +26,32 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - **Reset** clears, per member, waiting instructions, the home folder (the CLI's own history), the clone, and the
     team's documents, as you choose.
   - **Environment** holds team environment variables; the next runs get them.
-- **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**.
+  - On a phone it is laid out like the app's Settings on a phone: a list of its sections (one full-width row each, with a
+    chevron); a tap opens that section alone under a Back and its title, and Back returns to the list.
+- **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**. Every open
+  workflow is listed however old, with the newest completed and closed ones; the cloud dashboard, the Concierge and the
+  companion list them the same way. Ask the Concierge to close the open ones whose work is done: it checks each one
+  and closes only those with nothing left, saying why (on this computer: the remote view's Concierge cannot close
+  workflows).
 - On the team page each member is one framed pane:
-  - A title bar: face, name, role and CLI chips, **⚠ loosened** (opens its Policy tab), its state and how many
-    instructions wait behind its run.
-  - One toolbar: **>_** Open interactive CLI, **</>** Code (when the member has a clone), **⚙** Settings, Logs,
-    **■** Stop and **🗑** Remove, and an **Activity | Terminal** toggle.
-  - Left: what the member last said, formatted. Right: its **Activity** (the Monitor's lines for that member: what it
-    was told, its progress, runs and changed files, newest first) or its **Terminal**.
-  - The terminal is the same as the member terminal elsewhere: **Formatted** or **Raw**, the state line, and the
-    **Policy** banner. **Open interactive CLI** shows it and starts the CLI at its size.
-  - The toggle is remembered per member. Only a terminal that is shown polls; several members' terminals can show at
-    once. The Monitor, the palette and the remote view can open a member's terminal: the team page shows that pane's
-    Terminal and scrolls it into view.
-  - The bar between the two areas sets the right area's width for every member; the gaps between members set their
-    height. At the default height a pane is no taller than the card and Activity row it replaced.
-  - On a phone a pane is stacked: the title, a compact toolbar (Stop, the toggle and **⋯** with the rest), what was
-    said, then the Activity (its newest lines) or the terminal, full width. The terminal's transcript gets at least
-    60% of the screen's height. Every target is at least 44 px.
+  - A title bar: face, name, role and CLI chips, its state and how many instructions wait behind its run, and at the
+    right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
+    Stop and Remove.
+  - A row of tabs, **Report | Activity | Terminal**, with the run's details beside them (how its last run ended, its
+    queue position, policy problems).
+  - One view, the chosen tab's. **Report**: what the member last said, formatted. **Activity**: the Monitor's lines
+    for that member (what it was told, its progress, runs and changed files, newest first). **Terminal**: its runs.
+  - The terminal in a pane is never interactive: it is just the screen, always formatted, with no bar of its own and
+    no input; an interactive session shows there read-only. **Open interactive CLI** opens the agent's own terminal
+    window, where the session starts and takes input. The remote view has no Open interactive CLI.
+  - The tab is remembered per member; the Report is the default. Only a terminal that is shown polls; several members'
+    terminals can show at once. The Monitor, the palette and the remote view can open a member's terminal: the team
+    page shows that pane's Terminal and scrolls it into view.
+  - The gaps between members set the view's height for every member. At the default height a pane is no taller than
+    the card and Activity row it replaced.
+  - On a phone a pane is stacked the same way, the view at its own height. The Terminal tab opens the terminal full
+    screen with one header row; its **⋯** holds the state line and Stop, and **✕** goes back to the Report. The
+    transcript gets at least 60% of the screen's height. Every target is at least 44 px.
 - Members ask you through the team page. **Approve** answers once; **Always approve for this team…** remembers it.
 - One global run limit (default 4) covers every team. Runs and interactive sessions wait in one first-come,
   first-served queue.
@@ -258,7 +266,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
   - Items can be archived and restored. **Dispatches** shows each dispatch with its token counts.
-- **Documents**: each team has a shared documents folder for reports, specs and plans.
+- **Documents**: each team has a shared documents folder for reports, specs and plans. The list shows each entry's
+  size and when it was last modified.
   - Every member reads and writes it as plain files.
   - You can browse, read, edit, upload (up to 25 MB), rename and delete there.
 
@@ -276,7 +285,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 ## Logs
 
-**Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. The **log** icon on
+**Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. **Logs** in the ☰ menu of
 a member's pane opens it at that member's activity.
 
 - **Logs:**

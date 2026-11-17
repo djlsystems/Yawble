@@ -7,7 +7,9 @@ import TranscriptView from './TranscriptView.vue';
 
 // One terminal channel, shown Formatted (a headless run's JSON events as a person reads them) or Raw (the terminal
 // itself, as the CLI printed it). The terminal stays attached either way. An interactive session is a TUI: Raw.
-const props = defineProps<{ channel: string; api?: YawbleApi; rows?: number }>();
+// formattedOnly (a member's pane on the team page): no Formatted / Raw choice; Formatted, or the terminal while an
+// interactive session is open, which it shows without input (the session runs in the agent's terminal window).
+const props = defineProps<{ channel: string; api?: YawbleApi; rows?: number; formattedOnly?: boolean }>();
 const emit = defineEmits<{ session: [TerminalSessionInfo | null] }>();
 
 type Mode = 'formatted' | 'raw';
@@ -18,7 +20,7 @@ watch(mode, (m) => { try { localStorage.setItem('yawble.terminalMode', m); } cat
 const text = ref('');
 const session = ref<TerminalSessionInfo | null>(null);
 const interactive = computed(() => !!session.value && !session.value.ended && session.value.kind !== 'headless');
-const shown = computed<Mode>(() => (interactive.value ? 'raw' : mode.value));
+const shown = computed<Mode>(() => (interactive.value ? 'raw' : props.formattedOnly ? 'formatted' : mode.value));
 const view = ref<InstanceType<typeof TerminalView> | null>(null);
 /** The pane's header on a phone (TerminalPane): the tabs go into it. */
 const pane = inject(PaneHeaderKey, null);
@@ -35,7 +37,7 @@ defineExpose({ size: () => view.value?.size() ?? null, focus: () => view.value?.
 <template>
   <div class="screen-wrap" :class="{ 'in-pane': inHeader }">
     <!-- In the main window's pane on a phone (B057) the tabs sit in the pane's one header row; anywhere else, here. -->
-    <Teleport defer :key="inHeader ? 'header' : 'here'" :to="inHeader ? `#${pane!.tabs}` : 'body'" :disabled="!inHeader">
+    <Teleport v-if="!formattedOnly" defer :key="inHeader ? 'header' : 'here'" :to="inHeader ? `#${pane!.tabs}` : 'body'" :disabled="!inHeader">
     <div class="modes" :class="{ 'in-header': inHeader }" role="tablist" data-test="terminal-modes">
       <button role="tab" :class="{ on: shown === 'formatted' }" :disabled="interactive" data-test="terminal-mode-formatted"
         :title="interactive ? 'An interactive session is shown as the terminal' : 'The run as a person reads it'" @click="mode = 'formatted'">Formatted</button>
@@ -43,7 +45,7 @@ defineExpose({ size: () => view.value?.size() ?? null, focus: () => view.value?.
     </div>
     </Teleport>
     <div class="layer" :class="{ hidden: shown !== 'raw' }">
-      <TerminalView ref="view" :channel="channel" :api="api" :rows="rows" @session="onSession" @text="text = $event" />
+      <TerminalView ref="view" :channel="channel" :api="api" :rows="rows" :no-input="formattedOnly" @session="onSession" @text="text = $event" />
     </div>
     <div v-if="shown === 'formatted'" class="layer"><TranscriptView :text="text" /></div>
   </div>

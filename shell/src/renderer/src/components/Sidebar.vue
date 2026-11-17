@@ -35,9 +35,13 @@ defineProps<{
   open?: boolean;
   /** A remote view on a phone has no menu bar: these of its items (theme, terminal, Help) sit at the drawer's bottom. */
   menu?: MenuBarItem[];
+  /** The team whose page is open (card 316): on a phone its Documents and Workflows sit near the drawer's top, not in
+   *  the team page's header. Null with no team page open; ignored on the desktop. */
+  openTeamName?: string | null;
 }>();
 const emit = defineEmits<{
   newChat: []; openConversation: [id: string]; openTeam: [id: number]; go: [view: View]; logs: [];
+  teamDocuments: []; teamWorkflows: [];
   rename: [id: string, title: string]; remove: [id: string]; newTeam: []; collapse: []; expand: []; command: [id: string];
 }>();
 
@@ -91,6 +95,13 @@ function finishRename(id: string) {
     </div>
 
     <button class="item new" data-test="new-chat" @click="emit('newChat')"><Icon name="newChat" />New chat</button>
+
+    <!-- A phone with a team page open: that team's Documents and Workflows (its header has no room for them). -->
+    <div v-if="drawer && openTeamName" class="team-group" data-test="drawer-team">
+      <h3 class="team-name" :title="`Team ${openTeamName}`">Team {{ openTeamName }}</h3>
+      <button class="item" data-test="drawer-team-documents" @click="emit('teamDocuments')"><Icon name="docs" />Documents</button>
+      <button class="item" data-test="drawer-team-workflows" @click="emit('teamWorkflows')"><Icon name="dispatch" />Workflows</button>
+    </div>
 
     <nav class="places">
       <button class="item" :class="{ on: view === 'concierge' }" data-test="nav-concierge" @click="emit('go', 'concierge')"><Icon name="spark" />Concierge</button>
@@ -171,7 +182,9 @@ function finishRename(id: string) {
 .logo-btn { height: 44px; margin-bottom: 4px; }
 .logo-btn img { width: 28px; height: 28px; object-fit: contain; }
 .rail-badge { position: absolute; top: 2px; right: 1px; font-size: 10px; background: var(--brand); color: var(--on-accent); border-radius: 8px; padding: 0 5px; line-height: 15px; }
-.side { background: var(--side); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; padding: 8px 8px 6px; }
+/* overflow-y (card 334): a window shorter than the sidebar's fixed rows (a phone in landscape at a desktop width) scrolls
+   the sidebar, its Settings and run slots reachable; a taller one shows no scrollbar (the Teams and Chats lists scroll). */
+.side { background: var(--side); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 8px 8px 6px; }
 .brand { display: flex; align-items: center; gap: 8px; padding: 6px 6px 10px; }
 .logo { height: 26px; width: auto; flex: none; margin-left: 2px; }
 .grow { flex: 1; }
@@ -183,7 +196,7 @@ function finishRename(id: string) {
 .places { margin: 4px 0 6px; }
 .soon { margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: var(--chip); padding: 1px 6px; border-radius: 6px; }
 .badge { margin-left: auto; font-size: 11px; background: var(--brand); color: var(--on-accent); border-radius: 9px; padding: 0 7px; }
-.lists { flex: 1; overflow: auto; min-height: 0; }
+.lists { flex: 1; overflow: auto; min-height: min(96px, 100%); }
 h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4px; }
 .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tiny { font-size: 11px; }
@@ -234,6 +247,9 @@ h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4
 .side.drawer { overflow-y: auto; overscroll-behavior: contain; }
 .drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot, .drawer .lists { flex: none; }
 .drawer .lists { overflow: visible; }
+.drawer .team-group { flex: none; }
+.team-group { border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); margin: 4px 0 2px; padding-bottom: 4px; }
+.team-group .team-name { margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-menu { border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; padding-bottom: 4px; }
 .drawer-menu .check { width: 14px; flex: none; color: var(--accent); font-size: 12px; }
 </style>

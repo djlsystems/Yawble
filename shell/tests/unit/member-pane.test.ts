@@ -1,7 +1,5 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
@@ -9,8 +7,8 @@ import { setOutputHeight } from '../../src/renderer/src/agentOutputHeight';
 import { getMemberView, resetMemberViews, setMemberView } from '../../src/renderer/src/memberPaneView';
 import type { AgentCard, TerminalBanner, YawbleApi } from '../../src/shared/api';
 
-// One member's pane on the team page (B061): one frame with a title bar, one toolbar (the actions and the
-// Activity | Terminal toggle) and a body (what was said on the left, the Activity or the terminal on the right).
+// One member's pane on the team page: one frame with a title bar (its ☰ menu holds every action), a row of tabs
+// (Report, Activity, Terminal) and one view, the chosen tab's.
 // Fakes only: the core is a scripted fake, the terminal screen a stand-in (no xterm, no PTY).
 const member = { id: 7, teamId: 1, team: 'payments', name: 'DeveloperMarlo', role: 'member', cli: 'claude', instructions: '', model: '', credential: 'default' } as const;
 const card = (over: Partial<AgentCard> = {}, m: Partial<AgentCard['member']> = {}): AgentCard => ({
@@ -56,66 +54,84 @@ const pane = (props: Record<string, unknown>) => { const w = mount(MemberPane, {
 beforeEach(() => { localStorage.clear(); resetMemberViews(); setOutputHeight(120); screens.clear(); });
 afterEach(() => { vi.useRealTimers(); while (mounted.length) { try { mounted.pop()!.unmount(); } catch { /* already */ } } });
 
+/** Opens the pane's ☰ menu (every action is in it). */
+async function menu(w: ReturnType<typeof pane>) {
+  if (!w.find('[data-test=member-more-menu]').exists()) await w.get('[data-test=member-more]').trigger('click');
+  return w.get('[data-test=member-more-menu]');
+}
+
 describe("a member's pane", () => {
-  it('is one frame: the title bar, one toolbar, then the two areas side by side', () => {
+  it('is one frame: the title bar (with its ☰), the tabs, then one view', async () => {
     const w = pane({ card: card({ state: 'running', statusLine: 'Split work' }) });
     const root = w.get('[data-test=agent-DeveloperMarlo]');
     expect(root.element.tagName).toBe('SECTION');
-    expect([...root.element.children].map((c) => c.getAttribute('data-test'))).toEqual(['agent-title', 'member-toolbar', 'member-pane-body']);
+    expect([...root.element.children].map((c) => c.getAttribute('data-test'))).toEqual(['agent-title', 'member-tabs', 'member-pane-body']);
     const title = w.get('[data-test=agent-title]');
     expect(title.find('[data-test=agent-name]').exists()).toBe(true);
     expect(title.get('[data-test=agent-face-state]').text()).toBe('Running');
-    const bar = w.get('[data-test=member-toolbar]');
-    for (const b of ['open-interactive-cli', 'open-settings', 'open-logs', 'stop', 'remove-agent', 'member-view-activity', 'member-view-terminal'])
-      expect(bar.find(`[data-test=${b}]`).exists(), b).toBe(true);
+    expect(title.get('[data-test=agent-cli]').text()).toBe('claude');
+    // The ☰ is always there, at the right; its menu holds every action.
+    expect(title.element.lastElementChild!.querySelector('[data-test=member-more]')).not.toBeNull();
+    expect(w.find('[data-test=member-toolbar]').exists()).toBe(false);
+    const m = await menu(w);
+    for (const b of ['open-interactive-cli', 'open-settings', 'open-logs', 'stop', 'remove-agent']) expect(m.find(`[data-test=${b}]`).exists(), b).toBe(true);
+    expect(w.get('[data-test=member-tabs]').findAll('[role=tab]').map((t) => t.text())).toEqual(['Report', 'Activity', 'Terminal']);
+    // One view: the Report, what the member said, and nothing beside it.
     const body = w.get('[data-test=member-pane-body]');
-    expect([...body.element.children].map((c) => c.getAttribute('data-test'))).toEqual(['member-said', 'member-side']);
-    expect(body.get('[data-test=member-said]').find('[data-test=agent-output]').exists()).toBe(true);
-    expect(body.get('[data-test=member-side]').find('[data-test=member-activity]').exists()).toBe(true);
+    expect([...body.element.children].map((c) => c.getAttribute('data-test'))).toEqual(['agent-output']);
+    expect(body.find('[data-test=member-activity]').exists()).toBe(false);
   });
 
-  it('a loosened agent shows only a short marker, which opens its settings at the Policy tab; no guardrail button', async () => {
-    const w = pane({ card: card({ loosened: ['network.allowHosts + registry.npmjs.org', 'compute.wallTimeoutSec + 4 h'] }) });
-    const chip = w.get('[data-test=loosened-chip]');
-    expect(chip.text()).toBe('⚠ loosened');
-    expect(chip.attributes('title')).toContain('registry.npmjs.org');
+  it('shows no loosened marker (what is loosened is in the agent settings)', () => {
+    const w = pane({ card: card({ loosened: ['network.allowHosts + registry.npmjs.org'] }) });
+    expect(w.find('[data-test=loosened-chip]').exists()).toBe(false);
+    expect(w.text()).not.toContain('loosened');
     expect(w.find('[data-test=open-guardrail]').exists()).toBe(false);
-    await chip.trigger('click');
-    expect(w.emitted('policy')).toHaveLength(1);
-    expect(pane({ card: card() }).find('[data-test=loosened-chip]').exists()).toBe(false);
   });
 
-  it('the loosened marker is the same size as the role and CLI chips (no font of its own)', () => {
-    const css = readFileSync(path.resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
-    const rule = /^\.chip\.loosened \{([^}]*)\}/m.exec(css)![1];
-    expect(rule).not.toMatch(/\bfont(-size)?\s*:/);
-    expect(/^\.chip \{([^}]*)\}/m.exec(css)![1]).toContain('font-size: 11px');
-  });
-
-  it('the toolbar asks for Settings, Logs, Stop and Remove; Stop only while running, Remove never while running', async () => {
+  it('the menu asks for Settings, Logs, Stop and Remove and closes; Stop only while running, Remove never while running', async () => {
     const idle = pane({ card: card() });
-    await idle.get('[data-test=open-settings]').trigger('click');
-    await idle.get('[data-test=open-logs]').trigger('click');
-    await idle.get('[data-test=remove-agent]').trigger('click');
+    for (const b of ['open-settings', 'open-logs', 'remove-agent']) {
+      await (await menu(idle)).get(`[data-test=${b}]`).trigger('click');
+      expect(idle.find('[data-test=member-more-menu]').exists(), b).toBe(false);
+    }
     expect(Object.keys(idle.emitted())).toEqual(expect.arrayContaining(['settings', 'logs', 'remove']));
-    expect(idle.get('[data-test=stop]').attributes('disabled')).toBeDefined();
+    expect((await menu(idle)).get('[data-test=stop]').attributes('disabled')).toBeDefined();
     const running = pane({ card: card({ state: 'running' }) });
-    expect(running.get('[data-test=stop]').attributes('disabled')).toBeUndefined();
-    expect(running.get('[data-test=remove-agent]').attributes('disabled')).toBeDefined();
-    await running.get('[data-test=stop]').trigger('click');
+    const m = await menu(running);
+    expect(m.get('[data-test=stop]').attributes('disabled')).toBeUndefined();
+    expect(m.get('[data-test=remove-agent]').attributes('disabled')).toBeDefined();
+    await m.get('[data-test=stop]').trigger('click');
     expect(running.emitted('stop')).toHaveLength(1);
+    // Held while the core answers.
+    expect((await menu(pane({ card: card({ state: 'running' }), pending: 'stop' }))).get('[data-test=stop]').text()).toContain('Stopping…');
     // The Manager cannot be removed.
-    expect(pane({ card: card({}, { role: 'manager', name: 'Manager' }) }).find('[data-test=remove-agent]').exists()).toBe(false);
+    expect((await menu(pane({ card: card({}, { role: 'manager', name: 'Manager' }) }))).find('[data-test=remove-agent]').exists()).toBe(false);
   });
 
-  it("shows what the agent said as formatted text in its own box, not squeezed into the state line", () => {
+  it('the menu closes on Esc and on a click outside it', async () => {
+    const w = mount(MemberPane, { props: { card: card() } as any, attachTo: document.body, ...stubs });
+    mounted.push(w);
+    await w.get('[data-test=member-more]').trigger('click');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await flushPromises();
+    expect(w.find('[data-test=member-more-menu]').exists()).toBe(false);
+    await w.get('[data-test=member-more]').trigger('click');
+    expect(w.find('[data-test=member-more-menu]').exists()).toBe(true);
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await flushPromises();
+    expect(w.find('[data-test=member-more-menu]').exists()).toBe(false);
+  });
+
+  it("the Report shows what the agent said as formatted text; the run's details are beside the tabs", () => {
     const w = pane({ card: card({ lastRunState: 'completed', statusLine: report }) });
     const out = w.get('[data-test=agent-output]');
     expect(out.find('strong').text()).toBe('Delivered');
     expect(out.findAll('ol li').map((li) => li.text())).toEqual(['Settings > Health tab (new HealthPanel.vue)', 'Backups section']);
     expect(out.find('code').text()).toBe('HealthPanel.vue');
-    expect(w.get('[data-test=agent-state]').text()).not.toContain('Delivered');
-    expect(w.get('[data-test=agent-state]').text()).toContain('last run completed');
+    const state = w.get('[data-test=member-tabs] [data-test=agent-state]');
+    expect(state.text()).not.toContain('Delivered');
+    expect(state.text()).toContain('last run completed');
   });
 
   it('never renders HTML an agent wrote', () => {
@@ -123,7 +139,7 @@ describe("a member's pane", () => {
     expect(w.get('[data-test=agent-output]').find('img').exists()).toBe(false);
   });
 
-  it('the body is the shared height (what was said scrolls inside), and keeps the box when there is nothing said', () => {
+  it('the view is the shared height (the Report scrolls inside), and keeps the box when there is nothing said', () => {
     const w = pane({ card: card({ state: 'running', statusLine: report }) });
     expect((w.get('[data-test=member-pane-body]').element as HTMLElement).style.height).toBe('120px');
     const out = w.get('[data-test=agent-output]');
@@ -144,39 +160,43 @@ describe("a member's pane", () => {
     expect(localStorage.getItem('yawble.agentOutput')).toBe('240');
   });
 
-  it('its one resize bar sits between the two areas and sets their width (the height is the gaps on the team board)', () => {
-    const w = pane({ card: card() });
-    const grips = w.findAll('[role=slider]');
-    expect(grips.map((g) => g.attributes('data-test'))).toEqual(['member-activity-handle-w']);
-    expect(grips[0]!.element.parentElement!.getAttribute('data-test')).toBe('member-side');
+  it('has no resize bar of its own (the height is the gaps on the team board)', () => {
+    expect(pane({ card: card() }).findAll('[role=slider]')).toHaveLength(0);
   });
 });
 
-describe("a member's pane: Activity | Terminal", () => {
-  it('starts on Activity; the toggle shows the terminal in the right area and back, remembered per member', async () => {
+describe("a member's pane: Report | Activity | Terminal", () => {
+  it('starts on the Report; each tab shows only its view, remembered per member', async () => {
     const fake = fakeApi();
     const w = pane({ card: card(), api: fake.api, pollMs: 60_000 });
-    expect(w.get('[data-test=member-view-activity]').attributes('aria-selected')).toBe('true');
-    expect(w.find('[data-test=member-terminal]').exists()).toBe(false);
+    expect(w.get('[data-test=member-view-report]').attributes('aria-selected')).toBe('true');
+    await w.get('[data-test=member-view-activity]').trigger('click');
+    expect(w.find('[data-test=member-activity]').exists()).toBe(true);
+    expect(w.find('[data-test=agent-output]').exists()).toBe(false);
+    expect(getMemberView('payments', 'DeveloperMarlo')).toBe('activity');
     await w.get('[data-test=member-view-terminal]').trigger('click');
     await flushPromises();
     expect(w.get('[data-test=member-view-terminal]').attributes('aria-selected')).toBe('true');
     expect(w.find('[data-test=member-activity]').exists()).toBe(false);
-    const side = w.get('[data-test=member-side]');
-    expect(side.find('[data-test=member-terminal] .fake-screen').attributes('data-channel')).toBe('member:7');
-    // The terminal's own bar: what it shows and Policy; Open and Stop are the pane's toolbar.
-    expect(side.find('[data-test=terminal-state]').exists()).toBe(true);
-    expect(side.find('[data-test=terminal-details-toggle]').exists()).toBe(true);
-    expect(side.find('[data-test=open-interactive]').exists()).toBe(false);
-    expect(side.find('[data-test=terminal-stop]').exists()).toBe(false);
+    expect(w.find('[data-test=agent-output]').exists()).toBe(false);
+    const body = w.get('[data-test=member-pane-body]');
+    expect(body.find('[data-test=member-terminal] .fake-screen').attributes('data-channel')).toBe('member:7');
+    // Just the screen, Formatted: no bar, no Policy, no Formatted / Raw choice, no Open interactive CLI, no Stop of its own.
+    expect(body.find('.term-window > .bar').exists()).toBe(false);
+    expect(body.find('[data-test=terminal-state]').exists()).toBe(false);
+    expect(body.find('[data-test=terminal-details-toggle]').exists()).toBe(false);
+    expect(body.find('[data-test=banner]').exists()).toBe(false);
+    expect(body.find('[data-test=terminal-modes]').exists()).toBe(false);
+    expect(body.find('[data-test=open-interactive]').exists()).toBe(false);
+    expect(body.find('[data-test=terminal-stop]').exists()).toBe(false);
     expect(getMemberView('payments', 'DeveloperMarlo')).toBe('terminal');
     w.unmount();
     // Shown again (the page re-opened): still the terminal.
     const again = pane({ card: card(), api: fake.api, pollMs: 60_000 });
     expect(again.find('[data-test=member-terminal]').exists()).toBe(true);
-    await again.get('[data-test=member-view-activity]').trigger('click');
+    await again.get('[data-test=member-view-report]').trigger('click');
     expect(again.find('[data-test=member-terminal]').exists()).toBe(false);
-    expect(getMemberView('payments', 'DeveloperMarlo')).toBe('activity');
+    expect(getMemberView('payments', 'DeveloperMarlo')).toBe('report');
   });
 
   it('follows the shared view: an entry point setting Terminal shows it', async () => {
@@ -204,7 +224,7 @@ describe("a member's pane: Activity | Terminal", () => {
     expect(fake.count('terminal.banner', 8)).toBe(1);
   });
 
-  it('only a shown terminal polls: switching to Activity stops it', async () => {
+  it('only a shown terminal polls: switching to another tab stops it', async () => {
     vi.useFakeTimers();
     const fake = fakeApi();
     const w = pane({ card: card(), api: fake.api, pollMs: 1000 });
@@ -221,14 +241,38 @@ describe("a member's pane: Activity | Terminal", () => {
     expect(screens.size).toBe(0);
   });
 
-  it('Open interactive CLI shows the terminal and starts the CLI at its fitted size; held while the member runs', async () => {
-    const fake = fakeApi();
-    const w = pane({ card: card(), api: fake.api, pollMs: 60_000 });
-    await w.get('[data-test=open-interactive-cli]').trigger('click');
+  it('the terminal here takes no input: its screen is told noInput', async () => {
+    setMemberView('payments', 'DeveloperMarlo', 'terminal');
+    const seen: unknown[] = [];
+    const Probe = defineComponent({
+      props: { channel: String, noInput: Boolean },
+      setup(props, { expose }) { expose({ size: () => null }); seen.push(props.noInput); return () => h('div'); },
+    });
+    const w = mount(MemberPane, { props: { card: card(), api: fakeApi().api, pollMs: 60_000 } as any, global: { stubs: { TerminalView: Probe } } });
+    mounted.push(w);
     await flushPromises();
-    expect(w.find('[data-test=member-terminal]').exists()).toBe(true);
-    expect(fake.calls.find((c) => c.method === 'terminal.openInteractive')?.params).toEqual({ memberId: 7, cols: 100, rows: 30 });
-    expect(pane({ card: card({ state: 'running' }), api: fake.api }).get('[data-test=open-interactive-cli]').attributes('disabled')).toBeDefined();
+    expect(seen).toEqual([true]);
+  });
+
+  it("Open interactive CLI opens the agent's terminal window and starts nothing here; held while the member runs", async () => {
+    const fake = fakeApi();
+    const opened: number[] = [];
+    (fake.api as any).openTerminal = async (id: number) => { opened.push(id); };
+    const w = pane({ card: card(), api: fake.api, pollMs: 60_000 });
+    await (await menu(w)).get('[data-test=open-interactive-cli]').trigger('click');
+    await flushPromises();
+    expect(opened).toEqual([7]);
+    expect(fake.calls.some((c) => c.method === 'terminal.openInteractive')).toBe(false);
+    expect(w.find('[data-test=member-terminal]').exists()).toBe(false);
+    expect((await menu(pane({ card: card({ state: 'running' }), api: fake.api }))).get('[data-test=open-interactive-cli]').attributes('disabled')).toBeDefined();
+  });
+
+  it('the remote view has no Open interactive CLI (no terminal window there)', async () => {
+    const fake = fakeApi();
+    (fake.api as any).remote = true;
+    const m = await menu(pane({ card: card(), api: fake.api, pollMs: 60_000 }));
+    expect(m.find('[data-test=open-interactive-cli]').exists()).toBe(false);
+    expect(m.find('[data-test=open-settings]').exists()).toBe(true);
   });
 });
 

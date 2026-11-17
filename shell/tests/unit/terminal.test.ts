@@ -15,8 +15,8 @@ vi.mock('@xterm/xterm', () => ({
     focus() {}
     dispose() {}
     loadAddon() {}
-    onData() { return { dispose() {} }; }
-    onResize() { return { dispose() {} }; }
+    onData(h: (d: string) => void) { (globalThis as any).xtermOnData = h; return { dispose() {} }; }
+    onResize(h: (s: { cols: number; rows: number }) => void) { (globalThis as any).xtermOnResize = h; return { dispose() {} }; }
   },
 }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
@@ -73,6 +73,27 @@ describe('terminal view', () => {
     mount(TerminalView, { props: { channel: 'member:2', api } });
     await flushPromises();
     expect(resizes(calls)).toEqual([{ channel: 'member:2', cols: 132, rows: 41 }]);
+  });
+
+  it("noInput (a member's pane): shows a live session but never types into it or resizes it", async () => {
+    const { api, calls, push } = fakeApi(live('t1'));
+    mount(TerminalView, { props: { channel: 'member:2', api, noInput: true } });
+    await flushPromises();
+    push({ event: 'terminal.state', data: { channel: 'member:2', session: live('t2') } } as any);
+    await flushPromises();
+    (globalThis as any).xtermOnData('hello');
+    (globalThis as any).xtermOnResize({ cols: 80, rows: 20 });
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'terminal.input')).toEqual([]);
+    expect(resizes(calls)).toEqual([]);
+    // The same view without noInput types and resizes (the agent's terminal window).
+    const other = fakeApi(live('t1'));
+    mount(TerminalView, { props: { channel: 'member:2', api: other.api } });
+    await flushPromises();
+    (globalThis as any).xtermOnData('hello');
+    await flushPromises();
+    expect(other.calls.filter((c) => c.method === 'terminal.input').map((c) => c.params)).toEqual([{ channel: 'member:2', data: 'hello' }]);
+    expect(resizes(other.calls)).toHaveLength(1);
   });
 
   it('exposes its size for the session start', async () => {

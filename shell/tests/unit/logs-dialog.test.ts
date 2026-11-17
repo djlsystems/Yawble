@@ -224,7 +224,8 @@ describe('the member card', () => {
   it('HasALogsButton', async () => {
     const card = { member: { id: 1, team: 'web', name: 'DeveloperAda', role: 'member', cli: 'claude' }, state: 'idle', hasClone: false } as any;
     const w = mount(AgentCard, { props: { card } });
-    await w.find('[data-test=open-logs]').trigger('click');
+    await w.get('[data-test=member-more]').trigger('click');
+    await w.get('[data-test=open-logs]').trigger('click');
     expect(w.emitted('logs')).toHaveLength(1);
   });
 });

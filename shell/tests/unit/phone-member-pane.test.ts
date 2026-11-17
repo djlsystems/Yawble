@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-// B061 (card 286): a member's pane on a phone (375x501 portrait, 667x263 landscape): stacked - the title, a compact toolbar
-// (Stop, Activity | Terminal and ⋯ with the rest), what was said, then the Activity or the terminal full width; 44 px tap
-// targets; the terminal's transcript at least 60% of the visible height and on screen. At 1280 px: one frame, the two
-// areas side by side, no taller than the card + activity row it replaces.
+// B061 (card 286): a member's pane on a phone (375x501 portrait, 667x263 landscape): stacked - the title (with its ☰ menu
+// holding every action), the tabs (Report | Activity | Terminal), then the chosen view full width; 44 px tap targets; the
+// terminal's transcript at least 60% of the visible height and on screen. At 1280 px: one frame, one view at the shared
+// height, no taller than the card + activity row it replaces.
 // happy-dom does no layout: the sizes are worked out from the components' own (phone / desktop) styles.
 // Fakes only: matchMedia answers from a set width, the core is a scripted fake, the terminal screen a stand-in.
 import { readFileSync } from 'node:fs';
@@ -94,33 +94,36 @@ for (const frame of [Portrait, Landscape]) {
   describe(`a member's pane on a phone at ${at} (B061)`, () => {
     const st = [phoneRules('components/MemberPane.vue'), desktopRules('components/MemberPane.vue')];
 
-    it('is stacked: title, toolbar, what was said, then the Activity, full width, with no resize handles', async () => {
+    it('is stacked: title, tabs, then the chosen view (the Report first), full width, with no resize handles', async () => {
       const w = await teamPage(frame.width);
       const p = paneOf(w, 'DeveloperAda');
-      expect([...p.element.children].map((c) => c.getAttribute('data-test'))).toEqual(['agent-title', 'member-toolbar', 'member-pane-body']);
+      expect([...p.element.children].map((c) => c.getAttribute('data-test'))).toEqual(['agent-title', 'member-tabs', 'member-pane-body']);
       const body = p.get('[data-test=member-pane-body]').element as HTMLElement;
       expect(value(body, st, 'flex-direction')).toBe('column');
       expect(body.style.height).toBe('');
-      expect([...body.children].map((c) => c.getAttribute('data-test'))).toEqual(['member-said', 'member-side']);
-      expect((body.children[1] as HTMLElement).style.flexBasis).toBe('');
+      expect([...body.children].map((c) => c.getAttribute('data-test'))).toEqual(['agent-output']);
+      // What was said at its own height: the page is the one scroller.
+      expect(value(body.children[0]!, st, 'height')).toBe('auto');
       expect(p.find('.tile-grip').exists()).toBe(false);
     });
 
-    it('the toolbar is compact: Stop, Activity | Terminal and ⋯ (the rest in its menu), each a 44 px target', async () => {
+    it('the title has only the ☰ (every action in its menu) and the tabs are Report | Activity | Terminal, each a 44 px target', async () => {
       const w = await teamPage(frame.width);
-      const bar = paneOf(w, 'DeveloperAda').get('[data-test=member-toolbar]');
-      const shown = bar.findAll('button').map((b) => b.attributes('data-test'));
-      expect(shown).toEqual(['stop', 'member-view-activity', 'member-view-terminal', 'member-more']);
-      for (const b of bar.findAll('button')) {
+      const p = paneOf(w, 'DeveloperAda');
+      const title = p.get('[data-test=agent-title]');
+      expect(title.findAll('button').map((b) => b.attributes('data-test'))).toEqual(['member-more']);
+      const tabs = p.get('[data-test=member-tabs]').findAll('button');
+      expect(tabs.map((b) => b.attributes('data-test'))).toEqual(['member-view-report', 'member-view-activity', 'member-view-terminal']);
+      for (const b of [title.get('[data-test=member-more]'), ...tabs]) {
         expect(px(value(b.element, st, 'height', 'min-height')), b.attributes('data-test')).toBeGreaterThanOrEqual(44);
         expect(px(value(b.element, st, 'min-width')) || 44, b.attributes('data-test')).toBeGreaterThanOrEqual(44);
       }
-      await bar.get('[data-test=member-more]').trigger('click');
-      const menu = bar.get('[data-test=member-more-menu]');
-      expect(menu.findAll('button').map((b) => b.attributes('data-test'))).toEqual(['open-interactive-cli', 'open-code', 'open-settings', 'open-logs', 'remove-agent']);
+      await title.get('[data-test=member-more]').trigger('click');
+      const menu = title.get('[data-test=member-more-menu]');
+      expect(menu.findAll('button').map((b) => b.attributes('data-test'))).toEqual(['open-interactive-cli', 'open-code', 'open-settings', 'open-logs', 'stop', 'remove-agent']);
       for (const b of menu.findAll('button')) expect(px(value(b.element, st, 'min-height'))).toBeGreaterThanOrEqual(44);
       await menu.get('[data-test=open-settings]').trigger('click');
-      expect(bar.find('[data-test=member-more-menu]').exists()).toBe(false);
+      expect(title.find('[data-test=member-more-menu]').exists()).toBe(false);
     });
 
     // Card 307: B057's phone terminal followed it here - the whole screen, one 44 px header row (the full checks are in
@@ -129,7 +132,7 @@ for (const frame of [Portrait, Landscape]) {
       const w = await teamPage(frame.width);
       await paneOf(w, 'DeveloperAda').get('[data-test=member-view-terminal]').trigger('click');
       await settle();
-      const side = paneOf(w, 'DeveloperAda').get('[data-test=member-side]');
+      const side = paneOf(w, 'DeveloperAda').get('[data-test=member-pane-body]');
       const term = side.get('[data-test=member-terminal]');
       expect(term.classes()).toContain('full');
       expect(term.find('.term-window').classes()).toContain('in-pane');
@@ -138,32 +141,36 @@ for (const frame of [Portrait, Landscape]) {
       expect(value(term.element, st, 'inset')).toBe('0');
       expect(value(term.element, st, 'height')).toBe('100dvh');
       expect(value(side.element, st, 'height')).toBe('auto');
-      // One 44 px header row: title, the tabs' slot, ⋯ and ✕; the terminal's bar (state, Open, Policy, Stop) in its ⋯.
+      // One 44 px header row: title, ⋯ and ✕; the terminal's bar (state, Stop) in its ⋯, no Policy and never Open
+      // interactive CLI (the pane's terminal is never interactive).
       const head = term.get('[data-test=terminal-pane-head]');
       expect(px(value(head.element, st, 'height'))).toBe(44);
       const own = [...head.element.querySelectorAll(':scope > button')];
       expect(own.map((b) => b.getAttribute('data-test'))).toEqual(['terminal-pane-more', 'terminal-pane-close']);
       for (const b of own) expect(px(value(b, st, 'height', 'min-height'))).toBeGreaterThanOrEqual(44);
       const menu = term.get('[data-test=terminal-pane-menu]');
-      for (const sel of ['terminal-state', 'open-interactive', 'terminal-details-toggle', 'terminal-stop'])
+      for (const sel of ['terminal-state', 'terminal-stop'])
         expect(menu.find(`[data-test=${sel}]`).exists(), sel).toBe(true);
+      expect(term.find('[data-test=open-interactive]').exists()).toBe(false);
+      expect(term.find('[data-test=terminal-details-toggle]').exists()).toBe(false);
       const transcript = frame.height - 44;
       expect(transcript / frame.height, `${transcript} of ${frame.height}`).toBeGreaterThanOrEqual(0.6);
-      // ✕: back to Activity.
+      // ✕: back to the Report.
       await head.get('[data-test=terminal-pane-close]').trigger('click');
       expect(paneOf(w, 'DeveloperAda').find('[data-test=member-terminal]').exists()).toBe(false);
-      expect(paneOf(w, 'DeveloperAda').find('.member-activity').exists()).toBe(true);
+      expect(paneOf(w, 'DeveloperAda').find('[data-test=agent-output]').exists()).toBe(true);
     });
   });
 }
 
-// B064 (card 310): on a phone the terminal is the whole screen, so one member's at a time; the page opens on Activity.
+// B064 (card 310): on a phone the terminal is the whole screen, so one member's at a time; the page opens with none open
+// (each member on its Report).
 const terminals = (w: VueWrapper) => w.findAll('[data-test=member-terminal]');
 /** The members whose terminal is open, in page order. */
 const openOn = (w: VueWrapper) => w.findAll('section.pane').filter((p) => p.find('[data-test=member-terminal]').exists())
   .map((p) => p.attributes('data-test')!.replace(/^agent-/, ''));
 describe('member terminals on a phone at 375x521 (B064)', () => {
-  it('opening Terminal on one member and then another: only the second is open, the first is back on Activity', async () => {
+  it('opening Terminal on one member and then another: only the second is open, the first is back on the Report', async () => {
     const w = await teamPage(375);
     await paneOf(w, 'Manager').get('[data-test=member-view-terminal]').trigger('click');
     await settle();
@@ -173,19 +180,19 @@ describe('member terminals on a phone at 375x521 (B064)', () => {
     expect(terminals(w)).toHaveLength(1);
     expect(openOn(w)).toEqual(['DeveloperAda']);
     expect(w.findAll('.member-terminal.full')).toHaveLength(1);
-    expect(paneOf(w, 'Manager').find('.member-activity').exists()).toBe(true);
-    expect(paneOf(w, 'Manager').get('[data-test=member-view-activity]').attributes('aria-selected')).toBe('true');
+    expect(paneOf(w, 'Manager').find('[data-test=agent-output]').exists()).toBe(true);
+    expect(paneOf(w, 'Manager').get('[data-test=member-view-report]').attributes('aria-selected')).toBe('true');
     // The remembered (desktop) choice is not touched by the phone.
-    expect(getMemberView('payments', 'Manager')).toBe('activity');
-    expect(getMemberView('payments', 'DeveloperAda')).toBe('activity');
+    expect(getMemberView('payments', 'Manager')).toBe('report');
+    expect(getMemberView('payments', 'DeveloperAda')).toBe('report');
   });
 
-  it('two members remembered on Terminal: the page opens with both on Activity, no full-screen terminal, the choice kept', async () => {
+  it('two members remembered on Terminal: the page opens with both on the Report, no full-screen terminal, the choice kept', async () => {
     setMemberView('payments', 'Manager', 'terminal');
     setMemberView('payments', 'DeveloperAda', 'terminal');
     const w = await teamPage(375);
     expect(terminals(w)).toHaveLength(0);
-    for (const n of ['Manager', 'DeveloperAda']) expect(paneOf(w, n).find('.member-activity').exists(), n).toBe(true);
+    for (const n of ['Manager', 'DeveloperAda']) expect(paneOf(w, n).find('[data-test=agent-output]').exists(), n).toBe(true);
     expect(getMemberView('payments', 'Manager')).toBe('terminal');
     expect(getMemberView('payments', 'DeveloperAda')).toBe('terminal');
   });
@@ -212,15 +219,20 @@ describe('member terminals at 1280 px (B064: unchanged)', () => {
 });
 
 describe("a member's pane at 1280 px (B061)", () => {
-  it('one frame, the two areas side by side, the shared width and height, the full toolbar', async () => {
+  it('one frame, one view at the shared height, the tabs, and every action in the ☰ menu', async () => {
     const w = await teamPage(Desktop);
     const p = paneOf(w, 'DeveloperAda');
     const body = p.get('[data-test=member-pane-body]').element as HTMLElement;
     expect(body.style.height).toBe(`${OUTPUT_DEFAULT}px`);
-    expect((body.children[1] as HTMLElement).style.flexBasis).toMatch(/px$/);
-    expect(p.get('[data-test=member-toolbar]').findAll('button').map((b) => b.attributes('data-test')))
-      .toEqual(['open-interactive-cli', 'open-code', 'open-settings', 'open-logs', 'stop', 'remove-agent', 'member-view-activity', 'member-view-terminal']);
-    expect(p.find('[data-test=member-more]').exists()).toBe(false);
+    expect([...body.children].map((c) => c.getAttribute('data-test'))).toEqual(['agent-output']);
+    expect(p.find('[data-test=member-toolbar]').exists()).toBe(false);
+    expect(p.find('.tile-grip').exists()).toBe(false);
+    expect(p.get('[data-test=member-tabs]').findAll('button').map((b) => b.attributes('data-test')))
+      .toEqual(['member-view-report', 'member-view-activity', 'member-view-terminal']);
+    expect(p.get('[data-test=agent-title]').findAll('button').map((b) => b.attributes('data-test'))).toEqual(['member-more']);
+    await p.get('[data-test=member-more]').trigger('click');
+    expect(p.get('[data-test=member-more-menu]').findAll('button').map((b) => b.attributes('data-test')))
+      .toEqual(['open-interactive-cli', 'open-code', 'open-settings', 'open-logs', 'stop', 'remove-agent']);
   });
 
   it('focusMemberTerminal: the pane shows the terminal and is scrolled into view, on mount or while the page is open', async () => {
@@ -253,10 +265,12 @@ describe("a member's pane at 1280 px (B061)", () => {
     const [padTop, , padBottom] = decl('.pane', 'padding')!.split(/\s+/).map(px);
     const border = 2; // 1 px top and bottom (the 3 px is the left edge)
     const title = px(decl('.title', 'height'));
-    const toolbar = px(decl('.toolbar', 'height')) + px(decl('.toolbar', 'margin-bottom'));
-    const after = padTop! + padBottom! + border + title + toolbar + OUTPUT_DEFAULT;
+    // The tabs row: its height (min-height), its padding above, its 1 px top line and the gap below it.
+    const tabs = px(decl('.tabs', 'min-height')) + (px(decl('.tabs', 'padding-top')) || 0) + (decl('.tabs', 'border-top') ? 1 : 0)
+      + (px(decl('.tabs', 'margin-bottom')) || 0);
+    const after = padTop! + padBottom! + border + title + tabs + OUTPUT_DEFAULT;
     expect(after, `pane ${after} px, row ${before} px`).toBeLessThanOrEqual(before);
-    // The body holds what was said and the right area at the shared height (the activity's own 9rem floor is lifted in it).
-    expect(decl('.side > .member-activity', 'min-height')).toBe('0');
+    // The body holds the chosen view at the shared height (the activity's own 9rem floor is lifted in it).
+    expect(decl('.body > .member-activity', 'min-height')).toBe('0');
   });
 });

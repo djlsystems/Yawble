@@ -120,6 +120,14 @@ const allTeams = computed(() => overview.value?.teams ?? []);
 const teams = computed(() => allTeams.value.filter((t) => !t.archived));
 const archivedTeams = computed(() => allTeams.value.filter((t) => t.archived));
 const team = computed(() => allTeams.value.find((t) => t.id === selected.value) ?? null);
+/** The team whose page is open: on a phone the drawer offers its Documents and Workflows (card 316). */
+const openTeamName = computed(() => (view.value === 'teams' && team.value ? team.value.name : null));
+/** The drawer's Documents / Workflows of the open team: the drawer closes and the team page opens that dialog. */
+function openTeamDialog(which: 'documents' | 'workflows') {
+  drawerOpen.value = false;
+  if (which === 'documents') teamView.value?.openDocuments();
+  else teamView.value?.openWorkflows();
+}
 const defaultCli = computed(() => agents.value.find((a) => a.ready)?.id ?? 'claude');
 const title = computed(() => {
   if (view.value === 'concierge') return conversations.value.find((c) => c.id === conversationId.value)?.title ?? 'New chat';
@@ -435,7 +443,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
       @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
-      @logs="drawerOpen = false; logsOpen = true" />
+      @logs="drawerOpen = false; logsOpen = true" :open-team-name="openTeamName" @team-documents="openTeamDialog('documents')" @team-workflows="openTeamDialog('workflows')" />
 
     <main class="main">
       <header class="bar">
@@ -479,7 +487,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           @opened="conversationId = $event; loadConversations()" @changed="loadConversations" />
 
         <section v-else-if="view === 'teams'" class="teams-place">
-          <TeamView v-if="team" :key="team.id" ref="teamView" :team="team" :api="api" :poll-ms="pollMs" @settings="settingsTab = 'general'; settingsFor = $event" @policy="settingsTab = 'policy'; settingsFor = $event"
+          <TeamView v-if="team" :key="team.id" ref="teamView" :team="team" :api="api" :poll-ms="pollMs" @settings="settingsTab = 'general'; settingsFor = $event"
 @changed="refresh" @deleted="selected = null; refresh()"
             @discuss="discuss(team.id, $event)" />
           <TeamsList v-else-if="overview" class="team-grid-wrap" :teams="teams" :archived="archivedTeams" :api="api" :poll-ms="pollMs" :refresh="refresh"
@@ -511,8 +519,12 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 </template>
 
 <style scoped>
-.app { display: grid; grid-template-columns: 268px 1fr; height: 100vh; background: var(--surface); }
-.app.collapsed { grid-template-columns: 56px 1fr; }
+/* dvh after vh (card 334): the height the browser really shows. iOS Safari's 100vh is the height with its toolbars hidden,
+   so a desktop-width remote view (an iPad, a phone in landscape) ran past the bottom of the screen, worst after a rotation.
+   In Electron dvh and vh are the same. minmax(0, 1fr): wide content never makes the page column wider than the window,
+   nor the sidebar's content the row taller than it (a phone turned to landscape: 380 px; the sidebar then scrolls). */
+.app { display: grid; grid-template-columns: 268px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100vh; height: 100dvh; background: var(--surface); }
+.app.collapsed { grid-template-columns: 56px minmax(0, 1fr); }
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .bar { display: flex; align-items: center; gap: 6px; padding: 10px 16px; min-height: 52px; }
 .title { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -559,7 +571,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .phone .pill .pill-text { display: none; }
 .phone .banner { padding: 6px 12px; }
 /* All the banners together: at most half the window (40% of a phone's height), scrolling; the view (.content) gets the rest. */
-.banners { display: block; flex: none; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain; }
+.banners { display: block; flex: none; max-height: 50vh; max-height: 50dvh; overflow-y: auto; overscroll-behavior: contain; }
 .phone .banners { max-height: 40dvh; }
 .phone .teams-place { padding: 4px 12px 16px; }
 .phone .pad { padding: 16px; }

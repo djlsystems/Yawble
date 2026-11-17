@@ -441,6 +441,8 @@ for (const size of PHONES) {
             await nav(p, 'nav-teams');
             await p.locator('[data-test=team-open-payments]').click();
             await expect(p.locator('[data-test=team-title]')).toBeVisible();
+            // On a phone the team's Documents and Workflows are in the drawer, not the header (card 316).
+            if (id === 'open-documents' || id === 'open-workflows') { await nav(p, id.replace('open-', 'drawer-team-')); return true; }
             const b = p.locator(`[data-test=${id}]`).first();
             // B054 (card 270): on a phone Triggers, Git and Settings are in the team page's ⋯ menu: open it first.
             const more = p.locator('[data-test=team-more]');
@@ -639,9 +641,9 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
             if (last && (last.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) below.push(k);
           }
           const panes = cells.map((c) => {
-            const said = c.querySelector('[data-test=member-said]'), side = c.querySelector('[data-test=member-side]');
+            const body = c.querySelector('[data-test=member-pane-body]');
             return { name: c.querySelector('[data-test^=agent-]')?.getAttribute('data-test') ?? '?', frames: c.querySelectorAll('section.pane').length,
-              saidRight: said ? Math.round(said.getBoundingClientRect().right) : -1, sideLeft: side ? Math.round(side.getBoundingClientRect().left) : -1 };
+              views: body ? body.children.length : -1 };
           });
           return { out, below, members, panes };
         });
@@ -662,14 +664,14 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
       }
       expect.soft(diff, `${name} at 1280 px differs from main ${BASE_COMMIT}`).toEqual([]);
       if (base.members || branch.members) {
-        // The members area starts where main's did, and is B061's layout: one frame per member, its two areas side by side.
+        // The members area starts where main's did: one frame per member, showing one view (its chosen tab's).
         // eslint-disable-next-line no-console
         console.log(`${name} @1280: members main ${JSON.stringify(base.members)} / B061 ${JSON.stringify(branch.members)}; ${JSON.stringify(branch.panes)}`);
         expect.soft(branch.members?.top, `${name}: the members start where main's do`).toBe(base.members?.top);
         expect.soft(branch.panes.length, `${name}: one pane per member`).toBe(base.panes.length);
         for (const p of branch.panes) {
           expect.soft(p.frames, `${p.name}: one framed pane`).toBe(1);
-          expect.soft(p.saidRight, `${p.name}: what was said left of the side area`).toBeLessThanOrEqual(p.sideLeft);
+          expect.soft(p.views, `${p.name}: one view`).toBe(1);
         }
       }
     });

@@ -128,6 +128,14 @@ const shownCrumbs = computed<{ label: string; path: string; title?: string }[]>(
 const addOpen = ref(false);
 function backToList() { open.value = null; editing.value = false; }
 
+/** When an entry was last changed, short (the year only when it is not this year); the full time is its tooltip. */
+function when(iso: string | null | undefined): string {
+  const d = iso ? new Date(iso) : null;
+  if (!d || Number.isNaN(d.getTime())) return '';
+  const thisYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', ...(thisYear ? {} : { year: 'numeric' }), hour: 'numeric', minute: '2-digit' });
+}
+const whenFull = (iso: string | null | undefined) => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? `Modified ${d.toLocaleString()}` : ''; };
 const size = (n: number | null) => n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 
 onMounted(() => void load(''));
@@ -176,7 +184,8 @@ onMounted(() => void load(''));
         <li v-if="!list && !error" class="loading"><LoadingNote text="Loading documents…" /></li>
         <li v-for="e in list?.entries ?? []" :key="e.path" :class="{ on: open?.path === e.path }">
           <button class="name" :data-test="`doc-${e.path}`" @click="view(e)"><span class="ico">{{ e.folder ? '📁' : '📄' }}</span>{{ e.name }}</button>
-          <span class="muted small">{{ size(e.size) }}</span>
+          <span class="muted small size">{{ size(e.size) }}</span>
+          <span class="muted small modified" :title="whenFull(e.modified)" data-test="doc-modified">{{ when(e.modified) }}</span>
           <span class="acts">
             <button class="mini" title="Rename" @click="naming = { kind: 'rename', entry: e, text: e.name }">✎</button>
             <template v-if="confirmDelete === e.path">
@@ -228,11 +237,13 @@ onMounted(() => void load(''));
 .grow { flex: 1; }
 .naming { display: flex; gap: 6px; margin-bottom: 8px; }
 .naming input { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
-.split { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 12px; min-height: 380px; }
+.split { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 12px; min-height: 380px; }
 .files { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line-soft); border-radius: 8px; overflow: auto; max-height: 60vh; }
 .files li { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-bottom: 1px solid var(--line-soft); }
 .files li.on { background: var(--hover); }
 .files .name { flex: 1; text-align: left; border: 0; background: transparent; padding: 3px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files .size { flex: none; min-width: 4.5em; text-align: right; }
+.files .modified { flex: none; min-width: 8.5em; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ico { margin-right: 6px; }
 .acts { display: flex; gap: 2px; }
 .mini { border: 0; background: transparent; padding: 2px 4px; font-size: 12px; }
