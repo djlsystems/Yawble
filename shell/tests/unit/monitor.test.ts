@@ -4,12 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memberKey, MonitorModel, teamKey, type FeedRow } from '../../src/renderer/src/monitor/model';
 import MonitorView from '../../src/renderer/src/monitor/MonitorView.vue';
 import Timeline from '../../src/renderer/src/monitor/Timeline.vue';
-import { aimsAtEverything, ClusterCore, ClusterGap, FitOnceMs, mapRoomFor, MonitorScene, nearestPair, teamHome } from '../../src/renderer/src/monitor/scene';
+import { aimsAtEverything, ClusterCore, ClusterGap, FitOnceMs, mapRoomFor, MonitorScene, nearestPair, neighbourSpread, teamHome } from '../../src/renderer/src/monitor/scene';
 import { clampLayout, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, readLayout, writeLayout } from '../../src/renderer/src/monitor/layout';
-import { collapse, DefaultLimits, mapRoomOf } from '../../src/renderer/src/monitor/codemap';
+import { collapse, DefaultLimits, layoutTeamMap, MapMembersReach, MapPastMembers, mapRoomOf } from '../../src/renderer/src/monitor/codemap';
 import type { TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import type { YawbleApi, WorkflowSummary } from '../../src/shared/api';
-import { entryTime, latestWorkflows, nodeLabelFont, NodeLabelMax, workflowLabel, workflowLook, WorkflowLooks, workflowNodeLabel, WorkflowsShown } from '../../src/renderer/src/monitor/workflows';
+import { entryTime, latestWorkflows, nodeLabelFont, NodeLabelMax, placeWorkflowLabels, workflowLabel, workflowLook, WorkflowLooks, workflowNodeLabel, WorkflowsShown } from '../../src/renderer/src/monitor/workflows';
 import { readStep, stepCaption, stepDoing, type StepKind, type StepRow } from '../../src/renderer/src/monitor/steps';
 import { MaxGapMs, mergeByTime, ReplayClock, ReplayRunningMs, ReplayStates, toneOfRow, trimByTime } from '../../src/renderer/src/monitor/timeline';
 
@@ -171,18 +171,46 @@ describe('the workflows on the wall', () => {
   it('labels a workflow node "#id title", cut, with "Backlog item " dropped (B090)', () => {
     expect(workflowNodeLabel(wf(12, at(0), 'open', [], 'Add a README'))).toBe('#12 Add a README');
     const backlog = workflowNodeLabel(wf(3848, at(0), 'open', [], "Backlog item B081 Remote UI: xterm's link handler asks first"));
-    expect(backlog.startsWith("#3848 B081 Remote UI: xterm")).toBe(true);
+    expect(backlog).toBe("#3848 B081 Remote UI: xterm's…"); // the docs' example (card 409)
     expect(backlog).not.toContain('Backlog item');
     expect(backlog.endsWith('…')).toBe(true);
     expect(backlog.length).toBe(NodeLabelMax);
     expect(NodeLabelMax).toBeGreaterThanOrEqual(28);
     expect(NodeLabelMax).toBeLessThanOrEqual(32);
     expect(workflowNodeLabel(wf(5, at(0), 'open', [], '  '))).toBe('#5');
-    // A phone's wall zoomed out: only "#id"; zoomed in, or a wide wall at any zoom, the title too.
+    // A phone zoomed out: only "#id"; zoomed in, or a desktop window at any zoom (whatever its canvas), the title too.
     const t = wf(3848, at(0), 'open', [], 'Backlog item B081 Remote UI');
-    expect(workflowNodeLabel(t, { wallPx: 375, zoom: 0.4 })).toBe('#3848');
-    expect(workflowNodeLabel(t, { wallPx: 375, zoom: 1 })).toBe('#3848 B081 Remote UI');
-    expect(workflowNodeLabel(t, { wallPx: 1400, zoom: 0.25 })).toBe('#3848 B081 Remote UI');
+    expect(workflowNodeLabel(t, { phone: true, zoom: 0.4 })).toBe('#3848');
+    expect(workflowNodeLabel(t, { phone: true, zoom: 1 })).toBe('#3848 B081 Remote UI');
+    expect(workflowNodeLabel(t, { phone: false, zoom: 0.25 })).toBe('#3848 B081 Remote UI');
+    expect(workflowNodeLabel(t, { zoom: 0.39 })).toBe('#3848 B081 Remote UI');
+  });
+
+  it('places workflow labels so that none covers another or a member (card 409)', () => {
+    const measure = (s: string) => s.length * 5;
+    const h = 11;
+    const ask = (key: string, x: number, y: number, rank: number, full = `${key} a long title here`) => ({ key, x, y, r: 10, full, short: key, rank });
+    // Two nodes side by side, close: the first (by rank) keeps its place under the node; the second goes above.
+    const two = placeWorkflowLabels([ask('#2', 30, 0, 2), ask('#1', 0, 0, 1)], measure, h);
+    expect(two.get('#1')).toMatchObject({ text: '#1 a long title here', above: false });
+    expect(two.get('#2')).toMatchObject({ text: '#2 a long title here', above: true });
+    // A third, between them: no room above or below for the full label, so the short one, or nothing.
+    const three = placeWorkflowLabels([ask('#1', 0, 0, 1), ask('#2', 30, 0, 2), ask('#3', 15, 0, 3)], measure, h);
+    expect(three.get('#3')?.text ?? null).not.toBe('#3 a long title here');
+    // Far apart: every label under its node, in full.
+    const apart = placeWorkflowLabels([ask('#1', 0, 0, 1), ask('#2', 500, 0, 2)], measure, h);
+    for (const l of apart.values()) expect(l).toMatchObject({ above: false });
+    // A member's name below the node: the label goes above it.
+    const name = placeWorkflowLabels([ask('#1', 0, 0, 1)], measure, h, [{ x: -50, y: 12, w: 100, h: 13 }]);
+    expect(name.get('#1')).toMatchObject({ above: true });
+    // Whatever the layout, no two labels placed overlap.
+    let seed = 3;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const many = Array.from({ length: 30 }, (_, i) => ask(`#${i}`, rnd() * 300, rnd() * 200, i));
+    const placed = [...placeWorkflowLabels(many, measure, h).values()].filter((l) => l !== null);
+    expect(placed.length).toBeGreaterThan(10);
+    for (const [i, a] of placed.entries()) for (const b of placed.slice(i + 1))
+      expect(a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1).toBe(false);
   });
 
   it('draws a node\'s label never below 8 px on screen', () => {
@@ -453,17 +481,42 @@ describe('Team spacing (B089)', () => {
       expect(nearest(hubs(count, room))).toBeCloseTo(Math.max(2 * (ClusterCore + room) + ClusterGap, 140 * nearestPair(count))); // the oval's x radius is never under 140
     expect(nearestPair(2)).toBeCloseTo(2);
     expect(nearestPair(3)).toBeLessThan(nearestPair(2)); // three on the flat oval: the two on the right sit nearest
-    // No map, no room; a wide map needs its full depth; a narrow one (two folders) only part of it.
+    // No map, no room. A map's arc points away from the others: only what wraps back toward them counts (card 409). A
+    // narrow map (two folders) and a half-round one (six) stay behind the members; a wide one (eleven) wraps round past them.
     const m = new MonitorModel();
     m.logNow = () => Date.now();
     const files = (n: number, folders: number) => { for (let i = 0; i < n; i++) m.applyStep({ id: 1000 + i, at: new Date().toISOString(), team: `t${folders}`, member: 'Dev', run: 1, kind: 'edit', tool: 'Edit', target: `src/d${i % folders}/f${i}.ts` }, 0, true); };
-    files(40, 2); files(120, 11);
-    const narrow = mapRoomOf(m.map.view('t2', DefaultLimits)), wide = mapRoomOf(m.map.view('t11', DefaultLimits));
+    files(40, 2); files(24, 6); files(120, 11);
+    const room = (t: string, spread = 0) => mapRoomOf(m.map.view(t, DefaultLimits), ClusterCore, spread);
     expect(mapRoomOf(collapse('none', [], DefaultLimits))).toBe(0);
-    expect(narrow).toBeGreaterThan(0);
-    expect(wide).toBeGreaterThan(narrow * 2);
-    expect(mapRoomFor([m.map.view('t2', DefaultLimits), m.map.view('t11', DefaultLimits)])).toBe(Math.ceil(wide / 10) * 10);
+    expect(room('t2')).toBe(0);
+    expect(room('t6')).toBe(0); // was about 170: depth × sin(89°), the arc's sideways spread
+    expect(room('t11')).toBeGreaterThan(0);
+    expect(room('t11')).toBeLessThan(170);
+    // Neighbours off to the side (three teams) see more of a map than one straight across.
+    expect(room('t6', neighbourSpread(3))).toBeGreaterThanOrEqual(room('t6'));
+    expect(neighbourSpread(2)).toBe(0);
+    expect(neighbourSpread(3)).toBeGreaterThan(0);
+    expect(neighbourSpread(3)).toBeLessThan(Math.PI / 2);
+    const views = ['t2', 't6', 't11'].map((t) => m.map.view(t, DefaultLimits));
+    expect(mapRoomFor(views)).toBe(Math.ceil(room('t11') / 10) * 10);
     expect(mapRoomFor([])).toBe(0);
+  });
+
+  it('a map is measured toward the neighbours, not across: its nodes past the core reach no further than the room (card 409)', () => {
+    const m = new MonitorModel();
+    m.logNow = () => Date.now();
+    for (const folders of [1, 3, 6, 9, 11]) for (let i = 0; i < folders * 6; i++)
+      m.applyStep({ id: 5000 + folders * 100 + i, at: new Date().toISOString(), team: `f${folders}`, member: 'Dev', run: 1, kind: 'edit', tool: 'Edit', target: `src/d${i % folders}/f${i}.ts` }, 0, true);
+    for (const folders of [1, 3, 6, 9, 11]) {
+      const v = m.map.view(`f${folders}`, DefaultLimits);
+      const laid = layoutTeamMap(v, { x: 0, y: 0 }, 0, MapMembersReach + MapPastMembers);
+      // The neighbour is straight back (x < 0): the furthest a node with its label reaches that way is core + room.
+      const nodes = [...laid.folders, ...laid.files, ...laid.folders.map((f) => ({ x: f.moreX })), ...(laid.rest ? [laid.rest] : [])];
+      const back = Math.max(0, ...nodes.map((p) => -p.x + 40));
+      expect(back).toBeLessThanOrEqual(ClusterCore + mapRoomOf(v, ClusterCore, 0) + 1e-6);
+      expect(mapRoomOf(v, ClusterCore, 0)).toBeCloseTo(Math.max(0, back - ClusterCore), 6);
+    }
   });
 
   /** A scene on a stub canvas with count teams of four, each with a wide code map and five open workflow nodes, settled. */
@@ -513,20 +566,48 @@ describe('Team spacing (B089)', () => {
     return hs.flatMap((p, i) => hs.slice(i + 1).map((q) => Math.round(Math.hypot(p.x - q.x, p.y - q.y))));
   };
 
+  /** The least distance between two teams' drawn things (each part's box), for every pair of teams: as card 403 measured it. */
+  const partGaps = (scene: MonitorScene) => {
+    const cl = scene.clusters();
+    const apart = (a: { x0: number; y0: number; x1: number; y1: number }, b: typeof a) => {
+      const dx = Math.max(0, b.x0 - a.x1, a.x0 - b.x1), dy = Math.max(0, b.y0 - a.y1, a.y0 - b.y1);
+      return dx || dy ? Math.hypot(dx, dy) : -1; // -1: they overlap
+    };
+    return cl.flatMap((a, i) => cl.slice(i + 1).map((b) => Math.min(...a.parts.flatMap((p) => b.parts.map((q) => apart(p, q))))));
+  };
+
   it('at the default, two teams\' clusters (members, workflow nodes, code map) sit close but do not overlap', () => {
     const scene = settledWall(2);
     const cl = scene.clusters();
     expect(cl).toHaveLength(2);
     for (const c of cl) expect(c.box.x1 - c.box.x0).toBeGreaterThan(300); // the map is in the boxes
-    expect(homeDistances(scene)).toEqual([580]); // was 816 with a flat MapRoom of 190
-    for (const g of gaps(scene)) { expect(g).toBeGreaterThan(0); expect(g).toBeLessThan(300); }
+    expect(homeDistances(scene)).toEqual([440]); // 580 when the map's sideways spread was counted (card 409), 816 before
+    for (const g of gaps(scene)) expect(g).toBeLessThan(300);
+    // Card 409: the clusters sit about ClusterGap apart (more by the forces' push), not 210-394 px, and never overlap.
+    for (const g of partGaps(scene)) { expect(g).toBeGreaterThan(0); expect(g).toBeLessThan(ClusterGap * 3); }
     for (const c of cl) expect(Math.hypot(c.hub.x - c.home.x, c.hub.y - c.home.y)).toBeLessThan(80); // the hubs sit near their homes
   });
 
-  it('at the default, three teams\' clusters do not overlap either', () => {
+  it('at the default, three teams\' clusters sit close and do not overlap either', () => {
     const scene = settledWall(3);
-    expect(homeDistances(scene)).toEqual([860, 860, 580]);
-    for (const g of gaps(scene)) expect(g).toBeGreaterThan(0);
+    expect(homeDistances(scene)).toEqual([771, 771, 520]); // were 860, 860, 580
+    const g = partGaps(scene);
+    for (const d of g) expect(d).toBeGreaterThan(0);
+    // The nearest two sit close (about 154 here: ClusterGap, the forces' push of the hubs 12% past their homes, and
+    // the wide map's wrap toward a neighbour off to the side); card 403's spec wants under 160. Were 210-394.
+    expect(Math.min(...g)).toBeLessThan(ClusterGap * 4);
+  });
+
+  it('the workflow labels on a settled wall do not overlap, and most show their title (card 409)', () => {
+    for (const count of [2, 3]) {
+      const scene = settledWall(count);
+      const nodes = scene.workflowNodes();
+      expect(nodes).toHaveLength(count * 5);
+      const boxes = nodes.flatMap((n) => (n.box ? [n.box] : []));
+      for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1))
+        expect(a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1).toBe(false);
+      expect(nodes.filter((n) => n.label.startsWith(`#${n.id} Workflow`)).length).toBeGreaterThanOrEqual(nodes.length / 2);
+    }
   });
 
   it('changing it moves the team homes live, and the hubs follow', () => {

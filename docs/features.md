@@ -286,10 +286,14 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots.
 - **Workflow nodes**: each open workflow is a small node tied by dashed lines to the members working it (to its team
   while nobody is on it). It flashes green and drifts away when it completes, fades with a cross when it is closed,
-  and shows a "!" while it is blocked. Under it, its number and title ("#3848 B081 Remote UI: xterm's link…"), cut to
+  and shows a "!" while it is blocked. Under it, its number and title ("#3848 B081 Remote UI: xterm's…"), cut to
   30 characters, with a backlog workflow's "Backlog item " left out; hover it for the whole title, click it to open the
-  workflow. The label is never smaller than 8 px on screen and dims with its team; on a phone zoomed out it shows
-  only "#3848". There is no Workflows panel on the wall.
+  workflow. The label is never smaller than 8 px on screen and dims with its team. When the window is phone-wide
+  (under 760 px) and the wall is zoomed out, it shows only "#3848". A desktop window always shows the title, even
+  when the sidebar and Activity leave the wall narrow. Labels never cover each other or a member's disc or name.
+  Where a label has no room, it moves above its node or off to one side. With no room there either, it shrinks to
+  "#3848", or it is left out and the hover still gives the title. Blocked and working workflows go first, then the
+  newest. There is no Workflows panel on the wall.
 - **Rhythm**: each member shows its recent tool steps rising off it and what it is doing now; a busier member pulses
   faster, a command or test run shows a ring filling while it runs, then a green or red burst by its exit code when
   that is known, and thinking shimmers softly.
@@ -334,7 +338,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   (0.25× to 3×) on the wall's own layout. They apply as you drag and are remembered; **Reset** goes back to the
   defaults: distance 0.3×, strength 2.75×, repulsion 0.35×, gravity 2.4×, friction 0.45×, team spacing 1×.
 - The teams sit on an oval sized so that, at team spacing 1×, the two nearest teams' clusters (members, workflow
-  nodes and the code maps actually drawn) are close but do not overlap.
+  nodes and the code maps actually drawn) are close but do not overlap. A code map fans out away from the other teams,
+  so only the part of it that wraps back toward a neighbour adds to the room between them.
 
 **Code map sources.** The app records what really reaches the team repository: each new commit a member's run brings
 back (its files and whether each was added, modified, deleted or renamed), each merge into the team branch, each Merge

@@ -62,22 +62,77 @@ export const NodeLabelMax = 30;
 /** Its words are drawn this size in world px, and never smaller than NodeLabelMinPx on screen. */
 export const NodeLabelPx = 9;
 export const NodeLabelMinPx = 8;
-/** On a phone's wall (narrower than this, as narrowScreen.ts) zoomed out below NodeIdOnlyZoom, a node says only "#id". */
-export const PhoneWallPx = 760;
+/** On a phone zoomed out below this, a node says only "#id". */
 export const NodeIdOnlyZoom = 0.6;
 
 /**
- * A workflow node's label: "#3848 B081 Remote UI: xterm's link…", the title's "Backlog item " dropped (a backlog
- * workflow is titled "Backlog item B081 ..."), cut to `max` characters in all. Only "#id" on a phone's wall zoomed out.
+ * A workflow node's label: "#3848 B081 Remote UI: xterm's…", the title's "Backlog item " dropped (a backlog
+ * workflow is titled "Backlog item B081 ..."), cut to `max` characters in all. Only "#id" on a phone zoomed out:
+ * `phone` is the window being phone-wide (narrowScreen.ts), not the wall's canvas, which is as narrow on a 1280 px
+ * desktop with the sidebar and Activity open (card 409).
  */
-export function workflowNodeLabel(w: Pick<WorkflowSummary, 'id' | 'title'>, opts: { zoom?: number; wallPx?: number; max?: number } = {}): string {
-  const { zoom = 1, wallPx = Infinity, max = NodeLabelMax } = opts;
+export function workflowNodeLabel(w: Pick<WorkflowSummary, 'id' | 'title'>, opts: { zoom?: number; phone?: boolean; max?: number } = {}): string {
+  const { zoom = 1, phone = false, max = NodeLabelMax } = opts;
   const id = `#${w.id}`;
-  if (wallPx < PhoneWallPx && zoom < NodeIdOnlyZoom) return id;
+  if (phone && zoom < NodeIdOnlyZoom) return id;
   const title = w.title.replace(/\s+/g, ' ').trim().replace(/^Backlog item\s+/i, '');
   if (!title) return id;
   const room = Math.max(1, max - id.length - 1);
   return `${id} ${title.length <= room ? title : title.slice(0, room - 1).trimEnd() + '…'}`;
+}
+
+/** A label box (world px): its left, top, width and height. */
+export interface LabelBox { x: number; y: number; w: number; h: number }
+/** Something a label must not cover; one with an owner (a team) only keeps out the other teams' labels. */
+export interface LabelObstacle extends LabelBox { owner?: string }
+
+/**
+ * A workflow node whose label is to be placed: where it is, its full label and its short one ("#id"), its rank, and its
+ * team (owner).
+ */
+export interface LabelAsk { key: string; x: number; y: number; r: number; full: string; short: string; rank: number; owner?: string }
+export interface PlacedLabel extends LabelBox { text: string; above: boolean }
+
+/** How much two labels (or a label and an obstacle) may touch, in world px, before they count as overlapping. */
+const LabelSlack = 1;
+
+function overlaps(a: LabelBox, b: LabelBox): boolean {
+  return a.x < b.x + b.w - LabelSlack && b.x < a.x + a.w - LabelSlack && a.y < b.y + b.h - LabelSlack && b.y < a.y + a.h - LabelSlack;
+}
+
+/**
+ * Where each workflow node's label goes so that none covers another (card 409). The nodes go in rank order (the lower
+ * the rank the first: the brighter and newer ones); each takes the first of these that is clear of the labels placed
+ * before it, of every workflow node's square and of the obstacles (the members' discs and names, and the other teams'
+ * code maps, so a label does not run into the next cluster): its full label centred
+ * under the node, above it, then running off to one side under or above it; then its short label the same ways. A node
+ * with no clear place shows no label (its hover
+ * still gives the whole title). `measure` gives a text's width in world px; `h` is a label's height.
+ */
+export function placeWorkflowLabels(asks: readonly LabelAsk[], measure: (text: string) => number, h: number, obstacles: readonly LabelObstacle[] = []): Map<string, PlacedLabel | null> {
+  const squares = asks.map((a) => ({ key: a.key, box: { x: a.x - a.r, y: a.y - a.r, w: a.r * 2, h: a.r * 2 } }));
+  const placed: LabelBox[] = [];
+  const out = new Map<string, PlacedLabel | null>();
+  for (const a of [...asks].sort((p, q) => p.rank - q.rank || (p.key < q.key ? -1 : p.key > q.key ? 1 : 0))) {
+    const texts = a.short && a.short !== a.full ? [a.full, a.short] : [a.full];
+    let got: PlacedLabel | null = null;
+    for (const text of texts) {
+      const w = measure(text);
+      // Centred under the node, then above it; then from the node's left edge on (or to its right edge), under, then above.
+      const spots: [number, boolean][] = [[a.x - w / 2, false], [a.x - w / 2, true], [a.x - a.r, false], [a.x + a.r - w, false], [a.x - a.r, true], [a.x + a.r - w, true]];
+      for (const [x, above] of spots) {
+        const box = { x, y: above ? a.y - a.r - 3 - h : a.y + a.r + 3, w, h };
+        const clear = !placed.some((p) => overlaps(p, box))
+          && !squares.some((s) => s.key !== a.key && overlaps(s.box, box))
+          && !obstacles.some((o) => (o.owner === undefined || o.owner !== a.owner) && overlaps(o, box));
+        if (clear) { got = { ...box, text, above }; break; }
+      }
+      if (got) break;
+    }
+    if (got) placed.push(got);
+    out.set(a.key, got);
+  }
+  return out;
 }
 
 /** The size (world px) a workflow node's label is drawn at a zoom: NodeLabelPx, larger when zoomed out so it stays NodeLabelMinPx on screen. */
