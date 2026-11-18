@@ -55,9 +55,13 @@ function wfsOf(ti: number): { id: number; title: string }[] {
 const ALL_WFS = TEAMS.flatMap((_, i) => wfsOf(i));
 const titleOf = (id: number) => ALL_WFS.find((w) => w.id === id)!.title;
 
-/** The rule card 405 states, written out here to check what is drawn: "#id title", "Backlog item " dropped, 30 chars with "…". */
-function expectLabel(id: number, zoom: number, wallPx: number): string {
-  if (wallPx < 760 && zoom < 0.6) return `#${id}`;
+/**
+ * The rule cards 405 / 409 state, written out here to check what is drawn: "#id title", "Backlog item " dropped, 30 chars
+ * with "…"; only "#id" when the WINDOW is phone-wide (under 760, card 409: not the canvas) and zoomed out under 0.6.
+ * A crowded label may also fall back to "#id" or be left out (card 409, placeWorkflowLabels): see labelCheck.
+ */
+function expectLabel(id: number, zoom: number, windowPx: number): string {
+  if (windowPx < 760 && zoom < 0.6) return `#${id}`;
   const t = titleOf(id).replace(/^Backlog item\s+/i, '');
   const room = 30 - `#${id}`.length - 1;
   return `#${id} ${t.length <= room ? t : t.slice(0, room - 1).trimEnd() + '…'}`;
@@ -201,6 +205,179 @@ function mapThings(f: Frame): Pt[] {
 }
 const wfBoxCount = (f: Frame, color?: string) => f.ops.filter((o, i) => o.op === 'fill' && o.style === 'rgba(7, 11, 20, 0.95)' && o.items?.[0]?.t === 'm' && (!color || f.ops[i + 1]?.style === color)).length;
 
+/**
+ * The workflow nodes' squares (scene drawWorkflowNode: roundRect(x - 10, y - 10, 20, 20, 4), first moveTo at x - 6, y - 10),
+ * each with the label drawn right after it, if any (card 409: a label may be left out, so nodes are found by their squares).
+ */
+const WF_R = 10;
+type Label = ReturnType<typeof wfLabels>[number];
+type Sq = { x: number; y: number; alpha: number; label: Label | null; id: number | null; op: Op };
+function squaresOf(f: Frame): Sq[] {
+  const labels = wfLabels(f);
+  const out: Sq[] = [];
+  let cur: Sq | null = null;
+  for (const o of f.ops) {
+    if (o.op === 'fill' && o.style === 'rgba(7, 11, 20, 0.95)' && o.items?.[0]?.t === 'm') {
+      cur = { x: o.items[0].x - 4 + WF_R, y: o.items[0].y + WF_R, alpha: o.alpha, label: null, id: null, op: o };
+      out.push(cur);
+      continue;
+    }
+    if (cur && !cur.label && o.op === 'text') { const l = labels.find((x) => x.op === o); if (l) { cur.label = l; cur.id = l.id; } }
+  }
+  return out;
+}
+
+const tipText = async (page: Page) => ((await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : '');
+
+/** Hovers every square on the wall and reads its tip: which workflow it is, and whether the tip gives "#id <whole title>". */
+async function hoverAll(page: Page): Promise<{ ids: number[]; full: number[]; bySquare: (number | null)[]; misses: string[] }> {
+  const box = await canvasBox(page);
+  const f = await lastFrame(page);
+  const bySquare: (number | null)[] = [];
+  const misses: string[] = [];
+  const full = new Set<number>();
+  for (const s of squaresOf(f)) {
+    const p = toScreen(s.op, s.x, s.y);
+    if (p.x < 2 || p.y < 2 || p.x > box.width - 2 || p.y > box.height - 2) { bySquare.push(null); misses.push(`${s.id ? '#' + s.id : '?'} off the wall at ${Math.round(p.x)},${Math.round(p.y)}`); continue; }
+    let t = '';
+    for (let tries = 0; tries < 3 && !/^#\d+/.test(t); tries++) {
+      const g = squaresOf(await lastFrame(page)).find((q) => (s.id !== null ? q.id === s.id : Math.hypot(q.x - s.x, q.y - s.y) < 6)) ?? s;
+      const q = toScreen(g.op, g.x, g.y);
+      await page.mouse.move(box.x + q.x, box.y + q.y);
+      await page.waitForTimeout(200);
+      t = await tipText(page);
+    }
+    const id = Number(/^#(\d+)/.exec(t)?.[1] ?? NaN);
+    bySquare.push(Number.isFinite(id) ? id : null);
+    if (!Number.isFinite(id)) misses.push(`${s.id ? '#' + s.id : '?'} at ${Math.round(p.x)},${Math.round(p.y)} tip "${t.slice(0, 60)}"`);
+    if (Number.isFinite(id) && ALL_WFS.some((w) => w.id === id) && t.includes(`#${id} ${titleOf(id)}`)) full.add(id);
+  }
+  await page.mouse.move(2, 2);
+  return { ids: bySquare.filter((x): x is number => x !== null), full: [...full], bySquare, misses };
+}
+
+/** The screen point of workflow id's square: by its label if drawn, else by hovering the unlabelled squares. */
+async function squareOnScreen(page: Page, id: number): Promise<Pt | null> {
+  const f = await lastFrame(page);
+  const sqs = squaresOf(f);
+  const s = sqs.find((q) => q.id === id);
+  if (s) return toScreen(s.op, s.x, s.y);
+  const box = await canvasBox(page);
+  for (const q of sqs.filter((x) => !x.label)) {
+    const p = toScreen(q.op, q.x, q.y);
+    await page.mouse.move(box.x + p.x, box.y + p.y);
+    await page.waitForTimeout(200);
+    if ((await tipText(page)).includes(`#${id} `)) return p;
+  }
+  return null;
+}
+
+/** Text widths as the page's canvas measures them, for (font, text) pairs. */
+async function widths(page: Page, pairs: [string, string][]): Promise<number[]> {
+  return page.evaluate((ps) => {
+    const c = document.createElement('canvas').getContext('2d')!;
+    return ps.map(([font, text]) => { c.font = font; return c.measureText(text).width; });
+  }, pairs);
+}
+
+type WBox = { x: number; y: number; w: number; h: number; what: string; team?: number };
+const hit = (a: WBox, b: WBox, slack = 1) => a.x < b.x + b.w - slack && b.x < a.x + a.w - slack && a.y < b.y + b.h - slack && b.y < a.y + a.h - slack;
+
+/**
+ * Card 409's label rules on one frame, in world px with the page's own text widths:
+ *   overlaps   - a label over another label, any workflow square, a member's disc (r + 5) or name, or a map folder / file dot
+ *                (map things of the label's own team listed apart: the scene keeps labels off the OTHER teams' maps).
+ *   roomMissed - a label left out (or cut to "#id") although one of the scene's own spots (under, above, to a side; full,
+ *                then "#id") is clear of everything drawn in the final frame; checking against the final frame is lenient
+ *                (later labels only take room after), so a hit here is a real fault.
+ */
+async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
+  const k = zoomOf(f);
+  const names = TEAMS.slice(0, n);
+  const hubs = names.map((t) => hubAt(f, t)!);
+  const near = (p: Pt) => { let bi = 0, bd = Infinity; hubs.forEach((h, i) => { const d = Math.hypot(h.x - p.x, h.y - p.y); if (d < bd) { bd = d; bi = i; } }); return bi; };
+  const teamOfWf = (id: number) => names.findIndex((_, ti) => wfsOf(ti).some((w) => w.id === id));
+  const labels = wfLabels(f);
+  const sqs = squaresOf(f);
+  const members = f.ops.filter((o) => o.op === 'text' && !isScreen(o) && new Set(Object.values(MEMBERS).flat()).has(o.text!.replace(/ /g, '')));
+  const fontOf = labels[0]?.op.font ?? `600 ${11}px sans-serif`;
+  const lw = await widths(page, [...labels.map((l) => [l.op.font!, l.text] as [string, string]), ...members.map((o) => [o.font!, o.text!] as [string, string])]);
+  const lab: WBox[] = labels.map((l, i) => ({ x: l.x - lw[i]! / 2, y: l.y, w: lw[i]!, h: l.font * 1.2, what: `label #${l.id}`, team: teamOfWf(l.id) }));
+  const sqBox: WBox[] = sqs.map((s) => ({ x: s.x - WF_R, y: s.y - WF_R, w: WF_R * 2, h: WF_R * 2, what: `square ${s.id ? '#' + s.id : '?'}` }));
+  const memBox: WBox[] = [];
+  members.forEach((o, i) => {
+    const raw = o.text!.replace(/ /g, ''), r = raw === 'Manager' ? 17 : 14, ring = r + 5;
+    const cx = o.x!, cy = o.y! - r - 11;
+    memBox.push({ x: cx - ring, y: cy - ring, w: ring * 2, h: ring * 2, what: `disc ${raw}` });
+    memBox.push({ x: o.x! - lw[labels.length + i]! / 2, y: o.y!, w: lw[labels.length + i]!, h: 13, what: `name ${raw}` });
+  });
+  const mapBox: WBox[] = [];
+  for (const o of f.ops) {
+    if (o.op === 'fill' && o.style === 'rgba(12, 19, 34, 0.92)' && o.items?.[0]?.t === 'm') { const x = o.items[0].x - 2.5, y = o.items[0].y; mapBox.push({ x, y, w: 12, h: 10, what: 'folder', team: near({ x: x + 6, y: y + 5 }) }); }
+    if (o.op === 'fill' && FILE_COLORS.includes(o.style) && o.items?.length === 1 && o.items[0].t === 'arc' && Math.abs(o.items[0].r - 3.6) < 0.05) { const { x, y } = o.items[0]; mapBox.push({ x: x - 3.6, y: y - 3.6, w: 7.2, h: 7.2, what: 'file', team: near({ x, y }) }); }
+  }
+  // The team hubs' name pills (scene drawTeamPill: 700 13px, text width + 18 wide, 22 high, its text centred 11.5 down).
+  const pillOps = f.ops.filter((o) => o.op === 'text' && !isScreen(o) && names.includes(o.text!) && o.style === INK);
+  const pw = await widths(page, pillOps.map((o) => [o.font!, o.text!] as [string, string]));
+  const pillBox: WBox[] = pillOps.map((o, i) => ({ x: o.x! - (pw[i]! + 18) / 2, y: o.y! - 11.5, w: pw[i]! + 18, h: 22, what: `pill ${o.text}` }));
+  const overlaps: string[] = [], ownMap: string[] = [];
+  lab.forEach((a, i) => {
+    const mineSq = sqs.findIndex((s) => s.label === labels[i]);
+    lab.forEach((b, j) => { if (j > i && hit(a, b)) overlaps.push(`${a.what} / ${b.what}`); });
+    sqBox.forEach((b, j) => { if (j !== mineSq && hit(a, b)) overlaps.push(`${a.what} / ${b.what}`); });
+    memBox.forEach((b) => { if (hit(a, b)) overlaps.push(`${a.what} / ${b.what}`); });
+    pillBox.forEach((b) => { if (hit(a, b)) overlaps.push(`${a.what} / ${b.what}`); });
+    mapBox.forEach((b) => { if (hit(a, b)) (b.team === a.team ? ownMap : overlaps).push(`${a.what} / ${b.team === a.team ? 'own' : names[b.team!]} ${b.what}`); });
+  });
+  // Room for what was left out or cut short. The other teams' maps as the scene keeps clear of them (80 x 20 round each node).
+  const otherMap = (team: number) => mapBox.filter((b) => b.team !== team).map((b) => ({ x: b.x + b.w / 2 - 40, y: b.y + b.h / 2 - 10, w: 80, h: 20, what: 'map zone' }));
+  const font = labels[0]?.font ?? nodeFontGuess(k);
+  const roomMissed: string[] = [];
+  const short: number[] = [], dropped: number[] = [];
+  const pending: { s: Sq; id: number; texts: string[] }[] = [];
+  for (const s of sqs) {
+    if (s.label && s.label.text !== `#${s.label.id}`) continue;
+    if (s.label) { short.push(s.label.id); if (expectLabel(s.label.id, k, windowPx) !== `#${s.label.id}`) pending.push({ s, id: s.label.id, texts: [expectLabel(s.label.id, k, windowPx)] }); }
+    else pending.push({ s, id: NaN, texts: [] });
+  }
+  for (const p of pending) {
+    if (!Number.isFinite(p.id)) {
+      // Which workflow it is: hover it.
+      const box = await canvasBox(page);
+      const q = toScreen(p.s.op, p.s.x, p.s.y);
+      await page.mouse.move(box.x + q.x, box.y + q.y);
+      await page.waitForTimeout(200);
+      p.id = Number(/#(\d+)/.exec(await tipText(page))?.[1] ?? NaN);
+      dropped.push(p.id);
+      if (Number.isFinite(p.id)) p.texts = [...new Set([expectLabel(p.id, k, windowPx), `#${p.id}`])];
+    }
+  }
+  if (pending.length) await page.mouse.move(2, 2);
+  const tw = await widths(page, pending.flatMap((p) => p.texts.map((t) => [fontOf, t] as [string, string])));
+  let ti = 0;
+  for (const p of pending) {
+    const team = teamOfWf(p.id);
+    const mineSq = sqs.indexOf(p.s);
+    const block = [...lab, ...sqBox.filter((_, j) => j !== mineSq), ...memBox, ...pillBox, ...otherMap(team)];
+    for (const text of p.texts) {
+      const w = tw[ti++]!, h = font * 1.2, { x, y } = p.s, r = WF_R;
+      const spots: [number, boolean][] = [[x - w / 2, false], [x - w / 2, true], [x - r, false], [x + r - w, false], [x - r, true], [x + r - w, true]];
+      // A 2 px margin on top of the scene's 1 px slack, so a near miss of my estimates is not called a fault.
+      const free = spots.find(([sx, above]) => { const b = { x: sx, y: above ? y - r - 3 - h : y + r + 3, w, h, what: '' }; return !block.some((o) => hit(b, o, -2)); });
+      if (free) { roomMissed.push(`#${p.id} "${text}" fits ${free[1] ? 'above' : 'under'} at x ${Math.round(free[0] - x)}`); break; }
+    }
+  }
+  return { drawn: labels.length, squares: sqs.length, short, dropped, overlaps, ownMapOverlaps: ownMap, roomMissed };
+}
+const nodeFontGuess = (k: number) => Math.max(9, 8 / k);
+
+/** Each drawn workflow label's width as the page measures it (for measure's gap). */
+async function labelWidthMap(page: Page, f: Frame): Promise<Map<string, number>> {
+  const ls = wfLabels(f);
+  const ws = await widths(page, ls.map((l) => [l.op.font!, l.text] as [string, string]));
+  return new Map(ls.map((l, i) => [l.text, ws[i]!]));
+}
+
 async function canvasBox(page: Page) { return (await page.locator('[data-test=monitor-canvas]').boundingBox())!; }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -277,7 +454,7 @@ async function gotoMonitor(page: Page, phone: boolean) {
   await expect(page.locator('[data-test=monitor-loading]')).toHaveCount(0, { timeout: 30_000 });
 }
 
-/** Waits until every team's hub, its 5 workflow labels and its map are drawn and the hubs stop moving (under 1 px in 600 ms). */
+/** Waits until every team's hub, its 5 workflow squares and its map are drawn and the hubs stop moving (under 1 px in 600 ms). */
 async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
   const end = Date.now() + timeout;
   let prev: Pt[] | null = null;
@@ -285,7 +462,7 @@ async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
   while (Date.now() < end) {
     f = await lastFrame(page);
     const hubs = TEAMS.slice(0, n).map((t) => hubAt(f, t));
-    const ready = hubs.every(Boolean) && wfLabels(f).length >= n * 5 && mapThings(f).length >= n * (FOLDERS + FOLDERS * FILES);
+    const ready = hubs.every(Boolean) && squaresOf(f).length >= n * 5 && mapThings(f).length >= n * (FOLDERS + FOLDERS * FILES);
     if (ready && prev && hubs.every((h, i) => Math.hypot(h!.x - prev![i]!.x, h!.y - prev![i]!.y) < 1)) return f;
     prev = ready ? (hubs as Pt[]) : null;
     await page.waitForTimeout(600);
@@ -294,7 +471,7 @@ async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
 }
 
 /** The hub distances, the cluster gap and the empty middle (see the header). */
-function measure(f: Frame, n: number) {
+function measure(f: Frame, n: number, lw?: Map<string, number>) {
   const names = TEAMS.slice(0, n);
   const hubs = names.map((t) => hubAt(f, t)!);
   const dist: Record<string, number> = {};
@@ -310,11 +487,15 @@ function measure(f: Frame, n: number) {
     things[i]!.push({ x: m.x, y: m.y, r: m.r });
     things[i]!.push({ x: m.tx, y: m.ty + 5, r: m.w / 2 });
   }
+  // Squares by nearest hub (a node sits by its members, well inside its own cluster); labels by their workflow.
+  for (const s of squaresOf(f)) {
+    const i = s.id !== null ? names.findIndex((_, ti) => wfsOf(ti).some((w) => w.id === s.id)) : near(s);
+    if (i >= 0) things[i]!.push({ x: s.x, y: s.y, r: WF_R });
+  }
   for (const l of wfLabels(f)) {
     const i = names.findIndex((_, ti) => wfsOf(ti).some((w) => w.id === l.id));
     if (i < 0) continue;
-    things[i]!.push({ x: l.cx, y: l.cy, r: 10 });
-    const w = l.text.length * l.font * 0.55;
+    const w = lw?.get(l.text) ?? l.text.length * l.font * 0.55; // card 410: the page's own width when given
     for (let k = -0.5; k <= 0.5001; k += 0.25) things[i]!.push({ x: l.x + k * w, y: l.y + l.font * 0.6, r: l.font * 0.6 });
   }
   const mapCount = names.map(() => 0);
@@ -360,7 +541,7 @@ for (const theme of ['dark', 'light'] as const) for (const w of [1280, 375]) for
   test(`403 spacing ${theme} ${w} ${n} teams: close, no overlap, no empty middle; hub distances`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, { w, theme, teams: n });
     const f = await settle(page, n);
-    const m = measure(f, n);
+    const m = measure(f, n, await labelWidthMap(page, f));
     const screen = await hubsOnScreen(page, f, n);
     results.b089[`${theme}-${w}-${n}`] = { ...m, hubsOnScreen: screen };
     console.log(`B089 ${theme} ${w} ${n} teams:`, JSON.stringify({ ...m }));
@@ -368,7 +549,13 @@ for (const theme of ['dark', 'light'] as const) for (const w of [1280, 375]) for
     expect(m.mapCount, 'each team gets exactly its own map (6 folders + 24 files) by nearest hub').toEqual(Array(n).fill(FOLDERS * (FILES + 1)));
     expect(m.gap, 'clusters do not overlap').toBeGreaterThan(0);
     expect(m.gap, 'clusters sit close').toBeLessThan(160);
-    expect(m.middle, 'no empty middle').toBeLessThan(160);
+    // Card 410: the middle is judged in world px (< 160), except 3 teams on a phone wall: there the wall sits near the zoom
+    // floor (about 0.24) and the labels are "#id" only, so the measure sees the bare triangle between the clusters; it is
+    // judged on screen there (< 60 screen px). See b089-team-spacing/REPORT.md (card 410) for why.
+    const middleScreen = Math.round(m.middle * m.zoom);
+    results.b089[`${theme}-${w}-${n}`].middleScreen = middleScreen;
+    if (w < 760 && n === 3) expect(middleScreen, `no empty middle on screen (${m.middle} world px at zoom ${m.zoom})`).toBeLessThan(60);
+    else expect(m.middle, 'no empty middle').toBeLessThan(160);
     expect(screen.every((s) => s.inside), 'every hub on the wall').toBe(true);
     expect(await page.getByText(/^workflows$/i).count(), 'no WORKFLOWS words in the page').toBe(0);
     expect(errors).toEqual([]);
@@ -512,32 +699,26 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     const labels = wfLabels(f);
     r.zoom = +k.toFixed(3); r.wall = Math.round(box.width);
     r.labels = labels.map((l) => l.text);
-    r.mismatch = labels.filter((l) => l.text !== expectLabel(l.id, k, box.width)).map((l) => ({ got: l.text, want: expectLabel(l.id, k, box.width) }));
+    // Card 409: a drawn label is the rule's text, or "#id" when crowded.
+    r.mismatch = labels.filter((l) => l.text !== expectLabel(l.id, k, w) && l.text !== `#${l.id}`).map((l) => ({ got: l.text, want: expectLabel(l.id, k, w) }));
+    r.withTitle = labels.filter((l) => l.text.includes(' ')).length;
     r.screenPx = labels.map((l) => +(l.font * k).toFixed(2));
     r.maxLen = Math.max(...labels.map((l) => l.text.length));
     r.panelWords = f.ops.filter((o) => o.op === 'text' && /workflows/i.test(o.text!)).map((o) => o.text);
-    // Overlap: label boxes (est. 0.55 em a character) that intersect.
-    const boxes = labels.map((l) => { const wd = l.text.length * l.font * 0.55 * k; const s = toScreen(l.op, l.x, l.y); return { id: l.id, x0: s.x - wd / 2, x1: s.x + wd / 2, y0: s.y, y1: s.y + l.font * k * 1.2 }; });
-    const over: string[] = [];
-    let overArea = 0;
-    for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++) {
-      const p = boxes[a]!, q = boxes[b]!;
-      const ox = Math.min(p.x1, q.x1) - Math.max(p.x0, q.x0), oy = Math.min(p.y1, q.y1) - Math.max(p.y0, q.y0);
-      if (ox > 2 && oy > 2) {
-        const bad = ox > 0.3 * Math.min(p.x1 - p.x0, q.x1 - q.x0) && oy > 0.5 * (p.y1 - p.y0);
-        over.push(`#${p.id}/#${q.id} ${ox.toFixed(0)}x${oy.toFixed(0)}${bad ? ' BAD' : ''}`); overArea += ox * oy;
-      }
-    }
-    r.overlaps = over;
-    r.badOverlaps = over.filter((o) => o.endsWith('BAD')).length;
-    r.labelAreaShare = +(boxes.reduce((s, b) => s + (b.x1 - b.x0) * (b.y1 - b.y0), 0) / (box.width * box.height)).toFixed(4);
+    r.check = await labelCheck(page, f, 3, w);
     await page.screenshot({ path: path.join(S90, 'screens', `labels-${tag}.png`) });
-    expect.soft(labels.length, '15 labels').toBe(15);
-    expect.soft(r.mismatch, 'labels follow the rule').toEqual([]);
+    // Every workflow keeps at least its hover title.
+    const hv = await hoverAll(page);
+    r.hover = { squares: hv.bySquare.length, ids: hv.ids.length, fullTitles: hv.full.length, missing: ALL_WFS.map((x) => x.id).filter((id) => !hv.full.includes(id)), misses: hv.misses };
+    expect.soft(r.check.squares, '15 workflow squares').toBe(15);
+    expect.soft(r.hover.missing, 'every workflow gives its whole title on hover').toEqual([]);
+    expect.soft(r.mismatch, 'labels follow the rule (or "#id" when crowded)').toEqual([]);
+    if (w >= 760 && k >= 0.6) expect.soft(r.withTitle, 'a desktop wall at zoom >= 0.6 shows titles').toBeGreaterThan(0);
     expect.soft(Math.min(...r.screenPx), 'never under 8 px on screen').toBeGreaterThanOrEqual(7.99);
     expect.soft(r.maxLen).toBeLessThanOrEqual(30);
     expect.soft(r.panelWords, 'no WORKFLOWS panel on the wall').toEqual([]);
-    expect.soft(r.badOverlaps, 'labels do not overlap badly (over 30% of the narrower one and half the height)').toBe(0);
+    expect.soft(r.check.overlaps, 'no label over a label, square, member disc or name, or another team\'s map').toEqual([]);
+    expect.soft(r.check.roomMissed, 'no label left out or cut short when it had room').toEqual([]);
 
     // Where the panel was (260 out from the hub, away from the middle): hover and click do nothing workflow-ish.
     const hubs = TEAMS.map((t) => hubAt(f, t)!);
@@ -562,7 +743,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
 
     // Hover a backlog node: the full title. Then a drag on it opens nothing; a click opens it.
     const target = wfsOf(1)[0]!.id; // bravo's backlog workflow
-    const node = async () => { const g = await lastFrame(page); const l = wfLabels(g).find((x) => x.id === target)!; return toScreen(l.op, l.cx, l.cy); };
+    const node = async () => (await squareOnScreen(page, target)) ?? { x: -100, y: -100 };
     let tip = '';
     for (let i = 0; i < 5 && !tip.includes(titleOf(target)); i++) {
       const s = await node();
@@ -614,6 +795,10 @@ test('405 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels stay 
   f = await lastFrame(page);
   r.out = { zoom: +zoomOf(f).toFixed(3), labels: wfLabels(f).map((l) => l.text), px: wfLabels(f).map((l) => +(l.font * zoomOf(f)).toFixed(2)) };
   await page.screenshot({ path: path.join(S90, 'screens', 'phone-zoomed-out.png') });
+  r.outCheck = await labelCheck(page, f, 3, 375);
+  expect.soft(r.outCheck.overlaps, 'phone zoomed out: no overlaps').toEqual([]);
+  expect.soft(r.outCheck.roomMissed, 'phone zoomed out: nothing left out that had room').toEqual([]);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); // labelCheck's hovers moved the mouse off the wall
   expect(r.out.zoom).toBeLessThan(0.6);
   expect(r.out.labels.every((t: string) => /^#\d+$/.test(t)), 'only "#id" zoomed out on a phone').toBe(true);
   expect(Math.min(...r.out.px)).toBeGreaterThanOrEqual(7.99);
@@ -635,16 +820,33 @@ test('405 1280 wide zoomed out (Activity hidden, wall over 760): titles stay (on
   await settle(page, 3);
   const box = await canvasBox(page);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 300); await page.waitForTimeout(80); }
-  await page.waitForTimeout(600);
-  const f = await lastFrame(page);
-  const r = { wall: Math.round(box.width), zoom: +zoomOf(f).toFixed(3), labels: wfLabels(f).map((l) => l.text), px: wfLabels(f).map((l) => +(l.font * zoomOf(f)).toFixed(2)) };
+  // Card 410: step out one wheel notch at a time; the titles are judged at the first zoom under 0.6 (where the phone
+  // rule would cut them), and the far end (about 0.15) only reports how many are left out, with the room check.
+  const steps: any[] = [];
+  for (let i = 0; i < 6; i++) {
+    await page.mouse.wheel(0, 300);
+    await page.waitForTimeout(700);
+    const f = await lastFrame(page);
+    const labels = wfLabels(f);
+    const check = await labelCheck(page, f, 3, 1280);
+    steps.push({ zoom: +zoomOf(f).toFixed(3), drawn: labels.length, withTitle: labels.filter((l) => l.text.includes(' ')).length, idOnly: labels.filter((l) => !l.text.includes(' ')).map((l) => l.id), dropped: check.dropped, overlaps: check.overlaps, roomMissed: check.roomMissed, px: Math.min(...labels.map((l) => +(l.font * zoomOf(f)).toFixed(2))) });
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    if (i === 5) await page.screenshot({ path: path.join(S90, 'screens', 'wide-zoomed-out.png') });
+  }
+  const fit = steps.find((s) => s.zoom < 0.6)!;
+  const far = steps.at(-1)!;
+  const r = { wall: Math.round(box.width), steps, judgedAt: fit.zoom, farZoom: far.zoom, farDropped: far.dropped.length };
   results.b090.wideZoomOut = r;
   console.log('B090 wide zoom out:', JSON.stringify(r));
-  await page.screenshot({ path: path.join(S90, 'screens', 'wide-zoomed-out.png') });
-  expect(r.zoom).toBeLessThan(0.6);
-  expect(r.labels.filter((t) => t.includes(' ')).length, 'titles kept on a wide wall').toBe(r.labels.length);
-  expect(Math.min(...r.px)).toBeGreaterThanOrEqual(7.99);
+  expect(fit, 'a zoom under 0.6 reached').toBeTruthy();
+  // Titles kept: no label is cut to "#id" by the phone rule on a wide wall. A label that is "#id" or left out must have had
+  // no room (roomMissed below); the rest carry their title.
+  expect.soft(fit.withTitle, `most labels keep a title at zoom ${fit.zoom}`).toBeGreaterThanOrEqual(10);
+  for (const s of steps) {
+    expect.soft(s.overlaps, `zoom ${s.zoom}: no overlaps`).toEqual([]);
+    expect.soft(s.roomMissed, `zoom ${s.zoom}: nothing left out that had room`).toEqual([]);
+    expect.soft(s.px).toBeGreaterThanOrEqual(7.99);
+  }
   expect(errors).toEqual([]);
   await ctx.close();
 });
