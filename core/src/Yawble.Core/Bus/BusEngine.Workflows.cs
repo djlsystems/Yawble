@@ -5,12 +5,18 @@ using Yawble.Core.Triggers;
 namespace Yawble.Core.Bus;
 
 /// <summary>A workflow as the person sees it in a team's list (bus.workflows).</summary>
-/// <param name="State">open, completed (declared done) or closed (by a person). New work after either reopens it.</param>
+/// <param name="State">open, completed (declared done), closed (by a person) or expired (by the app, B085). New work after any of them reopens it.</param>
 /// <param name="Undeclared">Open, with nothing running, queued or waiting to be woken: nobody is working it.</param>
 /// <param name="Busy">What is still working it, in words ("Ada is running").</param>
+/// <param name="EndedAt">When it ended (null while open): an expired one's last real activity, not the expiry time.</param>
+/// <param name="ExpiredAt">When the app expired it (state expired only).</param>
+/// <param name="ExpiresAt">When it will expire if nothing happens (open and idle only; null while something works it or is due to).</param>
+/// <param name="ExpiryWarning">The warning given for a workflow that waits on the person's answer ("#12 will expire tomorrow; ...").</param>
+/// <param name="Question">The question an open workflow waits on the person's answer to (its needs-decision message, as bus.decisions' id); null when none.</param>
 public sealed record WorkflowSummary(
     long Id, string Title, string? Owner, string State, bool Undeclared, IReadOnlyList<string> Busy, string? Ending,
-    DateTimeOffset StartedAt, DateTimeOffset LastAt, int Messages);
+    DateTimeOffset StartedAt, DateTimeOffset LastAt, int Messages,
+    DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null, DateTimeOffset? ExpiresAt = null, string? ExpiryWarning = null, long? Question = null);
 
 /// <summary>
 /// The person's hold on a workflow: see each one's state, close one, stop what
@@ -35,24 +41,11 @@ public sealed partial class BusEngine
         WithGate<IReadOnlyList<WorkflowSummary>>(() =>
         {
             var teamId = TeamId(team);
-            var manager = _store.TeamMembers(teamId).Single(m => m.Role == MemberRole.Manager);
             var newest = Math.Clamp(limit, 1, 200);
             var all = _store.WorkflowsOf(team, -1);
-            return all.Where((w, i) => i < newest || !_store.WorkflowEnded(w.Id)).Select(w =>
-            {
-                var root = _store.Find(w.Id);
-                var owner = OwnerOf(w.Id);
-                var ending = _store.Workflow(w.Id).LastOrDefault(m => m.Type is MessageTypes.WorkflowCompleted or MessageTypes.WorkflowClosed);
-                var ended = _store.WorkflowEnded(w.Id);
-                var state = !ended ? "open" : ending?.Type == MessageTypes.WorkflowClosed ? "closed" : "completed";
-                var busy = Busy(owner ?? manager, w.Id, watcher: null);
-                if (_active.Values.Any(a => a.Context.Correlation == w.Id && a.Context.Member.Id == (owner ?? manager).Id))
-                    busy.Insert(0, $"{(owner ?? manager).Name} is running");
-                var undeclared = !ended && busy.Count == 0 && _store.OpenWakes(w.Id) == 0;
-                return new WorkflowSummary(w.Id, TitleOf(root), (owner ?? manager).Name, state, undeclared, busy,
-                    ending is null ? null : Text(ending, ending.Type == MessageTypes.WorkflowClosed ? "reason" : "delivered"),
-                    w.First, w.Last, w.Count);
-            }).ToArray();
+            var pending = _store.Pending();
+            var now = _store.Clock.GetUtcNow();
+            return all.Where((w, i) => i < newest || !_store.WorkflowEnded(w.Id)).Select(w => Summary(teamId, team, w, pending, now)).ToArray();
         }, ct);
 
     /// <summary>

@@ -105,6 +105,23 @@ public class RemoteAccessLevelTests
         Assert.Equal(Visitor, RemoteAccess.Refusal(method, new JsonObject { ["teamId"] = 1, ["on"] = true }, allowHostTerminals: false, RemoteAccess.Read));
     }
 
+    [Fact]
+    public void TheWorkflowExpirySetting_ReadsWithoutDays_ChangesWithThem_AndExtendIsAChange()
+    {
+        // B085 (card 388/389): teams.workflowExpiry is a get-or-set on "days"; bus.workflowExtend changes the workflow.
+        Assert.True(RemoteAccess.OnAllowList("teams.workflowExpiry"));
+        Assert.Null(RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1 }, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Null(RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["on"] = true }, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Equal(Visitor, RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Null(RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }, allowHostTerminals: false, RemoteAccess.Full));
+
+        Assert.True(RemoteAccess.OnAllowList("bus.workflowExtend"));
+        Assert.Equal(RemoteAccess.Kind.Changes, RemoteAccess.Kinds["bus.workflowExtend"]);
+        Assert.Equal(Visitor, RemoteAccess.Refusal("bus.workflowExtend", new JsonObject { ["teamId"] = 1, ["workflow"] = 4 }, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Null(RemoteAccess.Refusal("bus.workflowExtend", new JsonObject { ["teamId"] = 1, ["workflow"] = 4 }, allowHostTerminals: false, RemoteAccess.Full));
+        Assert.False(RemoteAccess.Kinds.ContainsKey("teams.setWorkflowExpiry")); // the earlier name is gone
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("full")]

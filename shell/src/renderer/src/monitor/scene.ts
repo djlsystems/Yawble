@@ -2,7 +2,7 @@ import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY
 import { LayoutDefaults, type LayoutSettings } from './layout';
 import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type MemberState } from '../faces/faces';
 import { DoingMs, memberKey, RunEndShowMs, teamKey, spaced, workflowKey, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
-import type { WorkflowSummary } from '../../../shared/api';
+import { workflowTime, type WorkflowSummary } from '../../../shared/api';
 import { drawHandbackMark, drawStepIcon, drawWorkflowIcon } from './icons';
 import { StepLook } from './steps';
 import {
@@ -683,7 +683,7 @@ export class MonitorScene {
     c.globalAlpha = 1;
   }
 
-  /** A workflow node leaving: completed, a green flash and it drifts away fading; closed, a grey cross that fades. */
+  /** A workflow node leaving: completed, a green flash and it drifts away fading; closed, a grey cross that fades; expired, a grey clock. */
   private drawWorkflowEnd(c: CanvasRenderingContext2D, e: Extract<Effect, { kind: 'wfdone' }>, now: number, motion: number): void {
     const node = this.nodes.get(e.key);
     const ghost = this.wfGhosts.get(e.key);
@@ -711,7 +711,7 @@ export class MonitorScene {
     c.strokeStyle = color; c.lineWidth = 1.5;
     roundRect(c, x - WfR, y - WfR, WfR * 2, WfR * 2, 4); c.fill(); c.stroke();
     c.fillStyle = color;
-    drawWorkflowIcon(c, done ? 'check' : 'cross', x, y, WfR * 1.1);
+    drawWorkflowIcon(c, done ? 'check' : e.status === 'expired' ? 'clock' : 'cross', x, y, WfR * 1.1);
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'lighter';
   }
@@ -1357,7 +1357,7 @@ export class MonitorScene {
         c.fillStyle = 'rgba(56, 189, 248, 0.10)';
         roundRect(c, x0 + 3 * k, ry, l.w - 6 * k, l.rowH, 4 * k); c.fill();
       }
-      c.globalAlpha = alpha * (look.status === 'closed' ? 0.7 : 1);
+      c.globalAlpha = alpha * (look.status === 'closed' || look.status === 'expired' ? 0.7 : 1);
       const ix = x0 + l.pad + 6 * k, ir = 5.5 * k;
       if (look.status === 'working') {
         c.strokeStyle = color;
@@ -1381,14 +1381,14 @@ export class MonitorScene {
       // The time on the right, the label in the room left.
       c.textAlign = 'right';
       c.font = `500 ${9 * k}px ${family}`;
-      const when = entryTime(w.lastAt);
+      const when = entryTime(workflowTime(w));
       const tw = c.measureText(when).width;
       c.fillStyle = Palette.inkDim;
       c.fillText(when, x0 + l.w - l.pad, cy + 0.5 * k);
       c.textAlign = 'left';
       c.font = `500 ${PanelFontPx * k}px ${family}`;
       const lx = ix + ir + 6 * k;
-      c.fillStyle = look.status === 'closed' ? Palette.inkDim : hover === i ? Palette.ink : 'rgba(226, 232, 240, 0.88)';
+      c.fillStyle = look.status === 'closed' || look.status === 'expired' ? Palette.inkDim : hover === i ? Palette.ink : 'rgba(226, 232, 240, 0.88)';
       c.fillText(fitText(c, workflowLabel(w, 60), x0 + l.w - l.pad - tw - 8 * k - lx), lx, cy + 0.5 * k);
     });
     c.globalAlpha = 1;

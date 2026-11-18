@@ -421,6 +421,10 @@ public sealed class LogServiceTests : IDisposable
             Assert.True(AuditLog.IsReadOnly(read, null), read);
         Assert.True(AuditLog.IsReadOnly("teams.push", new JsonObject { ["teamId"] = 1 }));
         Assert.False(AuditLog.IsReadOnly("teams.push", new JsonObject { ["teamId"] = 1, ["on"] = false }));
+        // B085: teams.workflowExpiry is audited when it sets the days, not when it reads them; an Extend is audited.
+        Assert.True(AuditLog.IsReadOnly("teams.workflowExpiry", new JsonObject { ["teamId"] = 1 }));
+        Assert.False(AuditLog.IsReadOnly("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }));
+        Assert.False(AuditLog.IsReadOnly("bus.workflowExtend", new JsonObject { ["teamId"] = 1, ["workflow"] = 4 }));
         Assert.False(AuditLog.IsReadOnly("teams.pause", null));
         Assert.False(AuditLog.IsReadOnly("logs.prune", null));
     }

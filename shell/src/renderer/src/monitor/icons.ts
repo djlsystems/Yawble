@@ -102,6 +102,12 @@ export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon
     case 'play': path(true, [5, 3], [13, 8], [5, 13]); break;
     case 'pause': path(false, [5.5, 3.5], [5.5, 12.5]); path(false, [10.5, 3.5], [10.5, 12.5]); break;
     case 'cross': path(false, [4, 4], [12, 12]); path(false, [12, 4], [4, 12]); break;
+    case 'clock': { // expired (B085): a clock face with its hands
+      const [cx, cy] = P(8, 8);
+      c.beginPath(); c.arc(cx, cy, 5 * u, 0, Math.PI * 2); c.stroke();
+      path(false, [8, 5.5], [8, 8], [10, 9.2]);
+      break;
+    }
     case 'bang': {
       // An exclamation mark: a bar and a dot (blocked).
       path(false, [8, 2.5], [8, 9.5]);

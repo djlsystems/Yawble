@@ -31,7 +31,8 @@ public sealed class UiRpc(
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
 
-    public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal));
+    /// <summary>The methods here, by prefix, and B085's workflowExtend under its contract name (also bus.workflowExtend).</summary>
+    public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method == "workflowExtend";
 
     public async Task<JsonNode?> DispatchAsync(string method, JsonObject? p, CancellationToken ct)
     {
@@ -67,6 +68,8 @@ public sealed class UiRpc(
                     new TeamResetOptions(Flag(p, "dropWaiting"), Flag(p, "clearHome"), Flag(p, "removeClone"), Flag(p, "clearDocuments")), ct)),
                 "teams.syncToBase" => await SyncSettingAsync(Long(p, "teamId"), p?["on"] is JsonValue sv && sv.TryGetValue<bool>(out var son) ? son : null, ct),
                 "teams.push" => PushSetting(Long(p, "teamId"), p?["on"] is JsonValue pv && pv.TryGetValue<bool>(out var pon) ? pon : null),
+                // B085: { teamId } reads the team's workflowExpiryDays (default 3), { teamId, days: 1-365 } sets it; both return { days }.
+                "teams.workflowExpiry" => await WorkflowExpiryAsync(p, ct),
                 "teams.env" => S(await bus.TeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
                 "teams.setEnv" => S(await bus.SetTeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), EnvEntries(p), ct)),
                 "teams.approvals" => S(await bus.TeamApprovalsAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
@@ -90,6 +93,8 @@ public sealed class UiRpc(
                 "bus.closeWorkflow" => S(await bus.CloseWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), OptStr(p, "reason"), ct)),
                 "bus.stopWorkflow" => new JsonObject { ["stopped"] = await bus.StopWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), ct) },
                 "bus.nudgeWorkflow" => S(await bus.NudgeWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), OptStr(p, "note"), ct)),
+                // B085 Extend: resets an open workflow's idle clock. teamId is optional (the workflow names its team).
+                "workflowExtend" or "bus.workflowExtend" => S(await ExtendAsync(p, ct)),
 
                 "policy.getGlobal" => policies.GetGlobal().ToJson(),
                 "policy.saveGlobal" => await SaveGlobalAsync(p, ct),
@@ -705,9 +710,39 @@ public sealed class UiRpc(
     private async Task<string> TeamNameOf(long teamId, CancellationToken ct) =>
         (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId)?.Name ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
 
+    /// <summary>workflowExtend({ workflow, teamId? }): the workflow as the list shows it after the Extend.</summary>
+    private async Task<WorkflowSummary> ExtendAsync(JsonObject? p, CancellationToken ct)
+    {
+        var workflow = Long(p, "workflow");
+        var team = OptLong(p, "teamId") is { } teamId ? await TeamNameOf(teamId, ct)
+            : await bus.WorkflowTeamAsync(workflow, ct) ?? throw new RpcException("no_such_workflow", $"there is no workflow {workflow}");
+        return await bus.ExtendWorkflowAsync(team, workflow, ct);
+    }
+
+    /// <summary>teams.workflowExpiry: a get-or-set like teams.push; "days" (a whole number 1-365) sets it.</summary>
+    private async Task<JsonObject> WorkflowExpiryAsync(JsonObject? p, CancellationToken ct)
+    {
+        var team = await TeamNameOf(Long(p, "teamId"), ct);
+        var days = p?["days"] switch
+        {
+            null => (int?)null,
+            JsonValue v when v.TryGetValue<int>(out var d) => d,
+            JsonValue v when v.TryGetValue<double>(out var x) && x == Math.Floor(x) && x is >= int.MinValue and <= int.MaxValue => (int)x,
+            _ => throw new RpcException("bad_request", "days must be a whole number of days from 1 to 365"),
+        };
+        if (days is < BusEngine.MinWorkflowExpiryDays or > BusEngine.MaxWorkflowExpiryDays)
+            throw new RpcException("bad_request", $"days must be {BusEngine.MinWorkflowExpiryDays} to {BusEngine.MaxWorkflowExpiryDays}");
+        return new JsonObject
+        {
+            ["days"] = days is { } set ? await bus.SetWorkflowExpiryDaysAsync(team, set, ct) : await bus.WorkflowExpiryDaysAsync(team, ct),
+        };
+    }
+
     private async Task<JsonNode?> DecisionsAsync(long teamId, CancellationToken ct)
     {
         var team = (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId) ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
+        // B085: the question a workflow about to expire waits on carries the warning (its Needs-you line) and when it expires.
+        var warnings = await bus.ExpiryWarningsAsync(team.Name, ct);
         var list = new JsonArray();
         foreach (var m in await bus.OpenDecisionsAsync(team.Name, ct))
         {
@@ -720,6 +755,8 @@ public sealed class UiRpc(
                 ["question"] = question ?? m.Payload,
                 ["workflow"] = m.CorrelationId,
                 ["at"] = m.OccurredAt.ToString("O"),
+                ["expiresAt"] = warnings.TryGetValue(m.CorrelationId, out var warning) && warning.Question == m.Seq ? warning.ExpiresAt.ToString("O") : null,
+                ["expiryWarning"] = warning is not null && warning.Question == m.Seq ? warning.Text : null,
             });
         }
         return list;

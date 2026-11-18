@@ -5,7 +5,9 @@ using Yawble.Core.Scheduling;
 namespace Yawble.Core.Bus;
 
 /// <summary>One team in the team list: its running and queued counts.</summary>
-public sealed record TeamSummary(long Id, string Name, string? RepoPath, int Members, int Running, int Queued, bool Paused = false, bool Archived = false);
+/// <param name="WorkflowExpiryDays">The team's workflowExpiryDays (B085): an open workflow nobody works expires after this many days.</param>
+public sealed record TeamSummary(long Id, string Name, string? RepoPath, int Members, int Running, int Queued, bool Paused = false, bool Archived = false,
+    int WorkflowExpiryDays = BusEngine.DefaultWorkflowExpiryDays);
 
 /// <summary>The header: global running / limit, and how many wait for a slot across all teams.</summary>
 public sealed record RunSlots(int Running, int Limit, int Queued);
@@ -145,7 +147,7 @@ public sealed partial class BusEngine
                 return new TeamSummary(t.Id, t.Name, t.RepoPath, ids.Count,
                     // An interactive session holds a run slot, so it counts as running.
                     _active.Values.Count(a => ids.Contains(a.Context.Member.Id)) + _sessions.Keys.Count(ids.Contains),
-                    queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived);
+                    queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived, t.WorkflowExpiryDays ?? DefaultWorkflowExpiryDays);
             }).ToArray();
         }, ct);
 

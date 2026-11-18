@@ -10,6 +10,7 @@ import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
 import NetworkAsks from '../components/NetworkAsks.vue';
 import ToolAsks from '../components/ToolAsks.vue';
+import WorkflowExpiryAsks from '../components/WorkflowExpiryAsks.vue';
 import RunLimitDialog from '../components/RunLimitDialog.vue';
 import { useBusy } from '../busy';
 import { useNarrow, useSwipe } from '../narrowScreen';
@@ -115,6 +116,8 @@ let off: (() => void) | null = null;
 const networkAsks = ref(0);
 /** Tool asks shown in Needs You (ToolAsks loads and answers them; the lane's count adds them). */
 const toolAsks = ref(0);
+/** Workflows that wait on the person and will expire within a day (B085), shown in Needs You with Extend. */
+const expiryAsks = ref(0);
 
 function clear() { team.value = ''; member.value = ''; search.value = ''; }
 
@@ -127,7 +130,7 @@ async function loadLimit() {
 }
 
 /** A lane's count: its cards shown, and in Needs You what else needs the person. */
-const laneCount = (id: string) => inLane(shown.value, id).length + (id === 'blocked' ? reconnect.value.length + networkAsks.value + toolAsks.value : 0);
+const laneCount = (id: string) => inLane(shown.value, id).length + (id === 'blocked' ? reconnect.value.length + networkAsks.value + toolAsks.value + expiryAsks.value : 0);
 
 // A phone (B037): one lane at a time, chosen with the lane tabs (each with its count) or by swiping left or right.
 // The other lanes stay mounted (hidden), so Needs You's asks keep counting.
@@ -195,10 +198,11 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
           </div>
           <NetworkAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :poll-ms="pollMs" :team="team" :member="member" @count="networkAsks = $event" />
           <ToolAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :poll-ms="pollMs" :team="team" :member="member" @count="toolAsks = $event" />
+          <WorkflowExpiryAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :cards="board.cards" :team="team" @count="expiryAsks = $event" />
           <TransitionGroup tag="div" name="card" class="cards">
             <BoardCardItem v-for="c in inLane(shown, l.id)" :key="c.id" :card="c" :selected="openCard === c.id" @open="openCard = c.id" />
           </TransitionGroup>
-          <p v-if="!inLane(shown, l.id).length && !(l.id === 'blocked' && (reconnect.length || networkAsks || toolAsks))" class="none">{{ l.id === 'blocked' ? 'Nothing needs you.' : 'No cards.' }}</p>
+          <p v-if="!inLane(shown, l.id).length && !(l.id === 'blocked' && (reconnect.length || networkAsks || toolAsks || expiryAsks))" class="none">{{ l.id === 'blocked' ? 'Nothing needs you.' : 'No cards.' }}</p>
           <template v-if="l.id === 'done' && shownCleared.length > 0">
             <button class="link small show-cleared" data-test="board-show-cleared" @click="toggleCleared">
               {{ showCleared ? `Hide cleared (${shownCleared.length})` : `Show cleared (${shownCleared.length})` }}</button>

@@ -37,7 +37,7 @@ public sealed class AppOrgSummarySource(
             var cards = await bus.AgentCardsAsync(t.Id, ct).ConfigureAwait(false);
             teams.Add(new OrgTeam(t.Name, t.Paused, t.Archived, cards.Select(c => new OrgAgent(c.Member.Name, Role(c.Member), c.State,
                 c.LastRunState == "failed", c.State == "running" ? Doing(t.Name, c) : null,
-                c.State == "running" ? ParseTime(c.RunStartedAt) : null)).ToList()));
+                c.State == "running" ? ParseTime(c.RunStartedAt) : null)).ToList(), t.WorkflowExpiryDays));
 
             var decisions = await bus.OpenDecisionsAsync(t.Name, ct).ConfigureAwait(false);
             asks.AddRange(decisions.Select(d => new OrgAsk("decision", t.Name, Field(d, "question") ?? Field(d, "text") ?? "a decision")));
@@ -51,7 +51,7 @@ public sealed class AppOrgSummarySource(
                 var item = board?.ItemDispatchedAs(w.Id)
                     ?? (onBoard.Select(c => Board.BoardStore.ItemId(c.Item)).FirstOrDefault(i => i is not null) is { } id ? board?.Item(id) : null);
                 workflows.Add(new OrgWorkflow(w.Id, t.Name, w.Title, item?.Label, item?.Title, state,
-                    onBoard.Count(c => c.Lane == "done"), onBoard.Count, w.StartedAt, w.LastAt, w.Owner));
+                    onBoard.Count(c => c.Lane == "done"), onBoard.Count, w.StartedAt, w.LastAt, w.Owner, w.EndedAt, w.ExpiredAt, w.ExpiresAt));
             }
             if (integrations is not null)
                 asks.AddRange(integrations.Asks(t.Id, pendingOnly: true).Select(a => new OrgAsk("toolCall", t.Name, $"{a.Member}: {a.Integration} {string.Join(' ', a.Args)}".Trim())));
@@ -76,6 +76,7 @@ public sealed class AppOrgSummarySource(
     {
         "completed" => OrgSummary.Completed,
         "closed" => OrgSummary.Closed,
+        "expired" => OrgSummary.Expired,
         _ when askingThePerson => OrgSummary.WaitingOnPerson,
         _ when w.Busy.Count > 0 => OrgSummary.Running,
         _ when blocked => OrgSummary.Blocked,
