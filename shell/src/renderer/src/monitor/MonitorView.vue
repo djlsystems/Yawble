@@ -239,13 +239,15 @@ const wallSize = ref({ w: 0, h: 0 });
  * the node it draws and hits is where the panel is placed.
  */
 const youKeepOut = shallowRef<KeepOut[]>([]);
-const KeepOutSelectors = ['.controls', '.legend-toggle', '.legend'];
+// Most telling first (youNodeAt keeps clear of the first above all): the Legend button (a phone's sits in the
+// controls row), the controls, the open legend.
+const KeepOutSelectors = [':scope > .legend-toggle, :scope > .controls > .legend-toggle', ':scope > .controls', ':scope > .legend'];
 function measureKeepOut(b: DOMRect): KeepOut[] {
   const stage = canvas.value?.parentElement;
   if (!stage) return [];
   const out: KeepOut[] = [];
   for (const sel of KeepOutSelectors) {
-    stage.querySelectorAll<HTMLElement>(`:scope > ${sel}`).forEach((el) => {
+    stage.querySelectorAll<HTMLElement>(sel).forEach((el) => {
       const r = el.getBoundingClientRect();
       if (r.width > 0 && r.height > 0) out.push({ left: r.left - b.left, top: r.top - b.top, right: r.right - b.left, bottom: r.bottom - b.top });
     });

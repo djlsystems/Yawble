@@ -4,8 +4,13 @@ import { onYouNode, youNodeAt, YouR, type KeepOut } from '../../src/renderer/src
 // Card 416 (B093 part 2): the You node stays inside the wall and clear of the Legend button (a phone's controls row
 // along the bottom, the desktop's button at the bottom left) whatever the wall's height.
 
-/** A phone's controls row (MonitorView: bottom 8px, left/right 8px, 44 px buttons, Legend at its right end). */
-const phoneRow = (w: number, h: number): KeepOut => ({ left: 8, top: h - 52, right: w - 8, bottom: h - 8 });
+/** A phone's controls row as the real page measures it (card 417): bottom 8px, left/right 8px, 48 px tall. */
+const phoneRow = (w: number, h: number): KeepOut => ({ left: 8, top: h - 56, right: w - 8, bottom: h - 8 });
+/** The phone's Legend button, 78 x 48 at the row's right end. */
+const phoneLegend = (w: number, h: number): KeepOut => ({ left: w - 8 - 78, top: h - 56, right: w - 8, bottom: h - 8 });
+/** What MonitorView gives the scene on a phone, most telling first: Legend, then the row. */
+const phoneKeep = (w: number, h: number): KeepOut[] => [phoneLegend(w, h), phoneRow(w, h)];
+const onRect = (x: number, y: number, k: KeepOut) => x >= k.left && x <= k.right && y >= k.top && y <= k.bottom;
 /** The desktop's Legend button (left 12px, bottom 8px). */
 const desktopLegend = (h: number): KeepOut => ({ left: 12, top: h - 28, right: 82, bottom: h - 8 });
 
@@ -82,6 +87,50 @@ describe('the You node on a short wall (card 416)', () => {
     const n = youNodeAt(375, 110, [row, openLegend]);
     expect(overlaps(n, row)).toBe(false);
     expect(inside(n, 375, 110)).toBe(true);
+  });
+
+  // Card 416 round 2 (card 417's fault): under ~114.5 px no spot clears the row with the margins; the node used to go
+  // back to its old place, on Legend. 375x546 gives 113 px, 375x530 103 px.
+  for (const h of [113, 110, 103, 100]) {
+    it(`a ${h} px phone wall with the real row and Legend: inside, clear of Legend, its centre on the wall`, () => {
+      const keep = phoneKeep(375, h);
+      const [legend, row] = keep as [KeepOut, KeepOut];
+      const n = youNodeAt(375, h, keep);
+      expect(inside(n, 375, h), JSON.stringify(n)).toBe(true);
+      expect(overlaps(n, legend), JSON.stringify(n)).toBe(false);
+      expect(onRect(n.x, n.y, row), 'the centre is off the controls row').toBe(false);
+      expect(n.y).toBeLessThan(row.top);
+      // where there is room (113, 110) it clears the whole row too, at the right edge
+      if (h >= 110) {
+        expect(overlaps(n, row), JSON.stringify(n)).toBe(false);
+        expect(n.x).toBe(375 - YouR - 22);
+      } else {
+        expect(n.y).toBe(YouR); // as high as it can go: it overlaps the row the least
+      }
+      expect(onYouNode(n.x, n.y, 375, h, keep)).toBe(true);
+      expect(onYouNode(legend.left + 39, legend.top + 24, 375, h, keep), 'a tap on Legend is not on the node').toBe(false);
+    });
+  }
+
+  it('every phone wall from 100 to 300 px with the real row: inside, never on Legend, centre never on the row', () => {
+    for (let h = 100; h <= 300; h += 1) {
+      const keep = phoneKeep(375, h);
+      const n = youNodeAt(375, h, keep);
+      expect(inside(n, 375, h), `h=${h}`).toBe(true);
+      expect(overlaps(n, keep[0]!), `h=${h}`).toBe(false);
+      expect(onRect(n.x, n.y, keep[1]!), `h=${h}`).toBe(false);
+      if (h >= 105) expect(overlaps(n, keep[1]!), `h=${h}`).toBe(false);
+    }
+  });
+
+  it('with the legend open over the top as well: the open legend is given up before Legend or the row', () => {
+    const h = 103;
+    const openLegend: KeepOut = { left: 8, top: 0, right: 300, bottom: h - 60 };
+    const keep = [...phoneKeep(375, h), openLegend];
+    const n = youNodeAt(375, h, keep);
+    expect(inside(n, 375, h)).toBe(true);
+    expect(overlaps(n, keep[0]!)).toBe(false);
+    expect(onRect(n.x, n.y, keep[1]!)).toBe(false);
   });
 
   it('a wall shorter than the node: centred, never off it', () => {
