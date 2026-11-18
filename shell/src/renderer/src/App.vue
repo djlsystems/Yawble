@@ -34,6 +34,8 @@ import UpdateBanner from './components/UpdateBanner.vue';
 import ThemeToggle from './components/ThemeToggle.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import TimelineDialog from './timeline/TimelineDialog.vue';
+import CommitDialog from './components/CommitDialog.vue';
+import { commitTeams, gitRequest, installCommitLinks } from './commitView';
 import { theme } from './theme';
 import type { AgentOption } from './components/Composer.vue';
 import { installTapTitles, usePhone } from './phone';
@@ -349,6 +351,17 @@ function loadAgentsOnFocus() { void loadAgents(); }
 let offTapTitles: (() => void) | null = null;
 onMounted(() => { offTapTitles = installTapTitles(() => phone.value); });
 onBeforeUnmount(() => { offTapTitles?.(); releaseDrawerEscape?.(); });
+
+// B072: a commit ID in rendered text opens the Commit view, looked for in the team on screen first, then every team.
+// Its Compare with main / Show its branch open that team's page, whose Git dialog takes the request (TeamView).
+let offCommitLinks: (() => void) | null = null;
+onMounted(() => { offCommitLinks = installCommitLinks(); });
+onBeforeUnmount(() => offCommitLinks?.());
+watch([team, allTeams], () => { commitTeams.value = { current: team.value?.name ?? null, all: allTeams.value.map((t) => t.name) }; }, { immediate: true });
+watch(gitRequest, (r) => {
+  const t = r ? allTeams.value.find((x) => x.name === r.team) : null;
+  if (t && (view.value !== 'teams' || selected.value !== t.id)) openTeam(t.id);
+});
 onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); window.removeEventListener('hashchange', openFromHash); });
 
 // The window's own title (taskbar, Alt+Tab) follows the place; the page shows its own heading.
@@ -529,6 +542,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
     <LinkDialog v-if="dialog === 'link'" :api="api" @close="dialog = null" @changed="link = $event" />
     <MemberSettingsDialog v-if="settingsFor !== null" :key="`${settingsFor}-${settingsTab}`" :member-id="settingsFor" :initial-tab="settingsTab" :api="api" :poll-ms="pollMs" @close="settingsFor = null" @changed="changed" />
     <TimelineDialog :api="api" />
+    <!-- B072: any commit ID clicked anywhere opens here, over whatever dialog showed it. -->
+    <CommitDialog :api="api" />
     <ConfirmDialog />
   </div>
 </template>

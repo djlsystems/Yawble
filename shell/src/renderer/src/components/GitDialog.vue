@@ -8,12 +8,14 @@ import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import TidyPanel from './TidyPanel.vue';
+import CommitLink from './CommitLink.vue';
 
 // The Git dialog: for the team's main repository or one of its writable extra repositories (the tabs on
 // top), see the team's branches against the base branch, fetch origin,
 // bring the base current, merge the team branch to it, or ask the team to bring its branch current. The person's
 // buttons only. Nothing is ever forced, rebased or stashed; a merge that would conflict changes nothing.
-const props = defineProps<{ api?: YawbleApi; team: TeamSummary }>();
+/** focusBranch (B072, the Commit view's Show its branch): that branch's row is marked. */
+const props = defineProps<{ api?: YawbleApi; team: TeamSummary; focusBranch?: string | null }>();
 const emit = defineEmits<{ close: [] }>();
 const api = resolveApi(props.api);
 
@@ -247,13 +249,13 @@ onMounted(() => { void loadChoices(); void load(); });
       <section class="repo">
         <div><strong>{{ status.repoPath }}</strong><span v-if="status.managed" class="chip">made by the app</span></div>
         <div class="muted small">
-          Base branch <code>{{ status.baseBranch }}</code> at {{ short(status.baseSha) }}
+          Base branch <code>{{ status.baseBranch }}</code> at <CommitLink :team="team.name" :sha="status.baseSha" />
           <template v-if="status.checkedOut"> · checked out: <code>{{ status.checkedOut }}</code></template>
           <span v-if="status.dirty" class="chip warn">uncommitted changes</span>
         </div>
         <div class="muted small" data-test="git-origin">
           <template v-if="status.origin">Origin {{ status.origin }}:
-            <template v-if="status.originBaseSha">its {{ status.baseBranch }} at {{ short(status.originBaseSha) }}
+            <template v-if="status.originBaseSha">its {{ status.baseBranch }} at <CommitLink :team="team.name" :sha="status.originBaseSha" />
               <span v-if="status.baseBehindOrigin" class="chip">yours is {{ status.baseBehindOrigin }} behind</span>
               <span v-if="status.baseAheadOfOrigin" class="chip warn">yours has {{ status.baseAheadOfOrigin }} not on origin</span>
             </template>
@@ -264,7 +266,7 @@ onMounted(() => { void loadChoices(); void load(); });
       </section>
 
       <section class="merge" :class="`state-${status.merge}`" data-test="git-merge-state">
-        <div><strong>{{ status.teamBranch }}</strong> {{ short(status.teamSha) }}</div>
+        <div :class="{ focus: focusBranch === status.teamBranch }" :data-focus="focusBranch === status.teamBranch ? 'true' : undefined"><strong>{{ status.teamBranch }}</strong> <CommitLink :team="team.name" :sha="status.teamSha" /></div>
         <div>{{ mergeText }}</div>
         <div v-if="status.conflictFiles.length" class="small">Conflicting files: <code>{{ status.conflictFiles.join(', ') }}</code></div>
         <div v-if="behindText" class="small behind" data-test="git-behind">{{ behindText }}
@@ -327,8 +329,8 @@ onMounted(() => { void loadChoices(); void load(); });
 
       <table class="list" data-test="git-members">
         <tr><th>Member branch</th><th>Commit</th><th>Ahead of {{ status.baseBranch }}</th><th>In {{ status.teamBranch }}</th><th></th></tr>
-        <tr v-for="b in status.members" :key="b.branch">
-          <td><code>{{ b.branch }}</code></td><td>{{ short(b.sha) }}</td><td>{{ b.aheadOfBase }}</td><td>{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
+        <tr v-for="b in status.members" :key="b.branch" :class="{ focus: focusBranch === b.branch }" :data-focus="focusBranch === b.branch ? 'true' : undefined" data-test="git-member-row">
+          <td><code>{{ b.branch }}</code></td><td><CommitLink :team="team.name" :sha="b.sha" /></td><td>{{ b.aheadOfBase }}</td><td>{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
           <td><button class="small-btn" :data-test="`git-delete-${b.branch}`" :disabled="!!busy" @click="startDelete(memberTarget(b))">Delete…</button></td>
         </tr>
         <tr v-if="status.members.length === 0 && oldBranches.length === 0"><td colspan="5" class="muted">No member has committed yet.</td></tr>
@@ -365,4 +367,5 @@ onMounted(() => { void loadChoices(); void load(); });
 .repos { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
 .repos button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 10px; font-weight: 600; color: var(--ink-soft); }
 .repos button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.focus { box-shadow: inset 4px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
 </style>

@@ -6,6 +6,8 @@ import { errorText, resolveApi } from '../api';
 import { renderMarkdown } from '../markdown';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName } from '../faces/faces';
+import { commitParts } from '../commitView';
+import CommitLink from '../components/CommitLink.vue';
 import { ago, cardFace, cardStatusLook, StatusLabel, trailKind } from './cards';
 import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
@@ -113,7 +115,7 @@ defineExpose({ load });
         <span v-if="card.item" class="chip item" :title="card.itemTitle">{{ card.item }}<template v-if="card.itemTitle">: {{ card.itemTitle }}</template></span>
         <span v-if="card.awaitingManager" class="chip waiting">awaiting Manager</span>
       </div>
-      <div v-if="body" class="md body" v-html="body"></div>
+      <div v-if="body" class="md body" :data-commit-team="card.team" v-html="body"></div>
 
       <section class="edit">
         <h4>Change it <span class="muted">(the Manager is told and acts on it)</span></h4>
@@ -142,7 +144,7 @@ defineExpose({ load });
             <span class="who">{{ t.source === 'you' ? 'You' : displayName(t.source) }}</span>
             <span class="kind" :class="{ stopped: trailKind(t) === 'stopped' }">{{ trailKind(t) }}</span>
             <span class="muted when">{{ ago(t.at) }}</span>
-            <div class="txt">{{ t.text }}</div>
+            <div class="txt"><template v-for="(p, pi) in commitParts(t.text)" :key="pi"><CommitLink v-if="p.sha" :team="card.team" :sha="p.sha" :length="40" /><template v-else>{{ p.text }}</template></template></div>
           </li>
           <li v-if="!card.trail.length" class="muted">Nothing yet.</li>
         </ol>

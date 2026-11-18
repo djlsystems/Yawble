@@ -9,6 +9,7 @@ import {
   memberKey, MonitorModel, needYouSummary, needYouWord, spaced, teamKey, type ActivityRow, type FeedRow, type NeedYouItem, type NeedYouKind, type TeamSnapshot,
 } from './model';
 import { youNodeAt, type KeepOut } from './rhythm';
+import { openCommit } from '../commitView';
 import { MonitorScene, Palette, type SceneHover } from './scene';
 import {
   clampLayout, Densities, DefaultDensity, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, LayoutStep, readDensity, readLayout,
@@ -173,6 +174,9 @@ function onWallUp(e: PointerEvent): void {
     return;
   }
   youOpen.value = false;
+  // B072: a click on a commit dot opens its Commit view.
+  const h = hover.value;
+  if (h?.kind === 'commit' && h.sha && h.team) { openCommit(h.team, h.sha); return; }
   if (p.seq === pickSeq) leaveFocus();
 }
 function onWallCancel(): void { pointersDown = Math.max(0, pointersDown - 1); press = null; }
