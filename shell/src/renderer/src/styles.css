@@ -54,6 +54,8 @@
   /* Member states, as the faces' rings and the Monitor show them. */
   --state-running: #2e7d4f; --state-waiting: #5f7385; --state-decision: #7a4fc4; --state-blocked: #b26a00;
   --state-failed: #c62828; --state-idle: #8a847c;
+  /* B097: a run the person stopped - neutral slate, never the failure red. */
+  --state-stopped: #6b7280;
 }
 
 :root[data-theme="dark"] {
@@ -92,7 +94,7 @@
    from <html>, so it keeps the light values in both themes; the .monitor block above resets them for its DOM. */
 :root[data-theme="dark"] body {
   --state-running: #4cc47f; --state-waiting: #93a6b8; --state-decision: #b493f0; --state-blocked: #e09a3e;
-  --state-failed: #f2736d; --state-idle: #a8a299;
+  --state-failed: #f2736d; --state-idle: #a8a299; --state-stopped: #a3aab6;
 }
 
 /* Card 334: a phone browser enlarges text in landscape unless told not to; the page keeps its own sizes in every

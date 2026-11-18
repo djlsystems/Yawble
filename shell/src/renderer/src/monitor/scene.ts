@@ -83,7 +83,7 @@ interface MapNode {
 
 const Palette = {
   ground: '#070b14', ink: '#e2e8f0', inkDim: '#94a3b8',
-  tell: '#38bdf8', start: '#22d3ee', progress: '#a5b4fc', done: '#34d399', handback: '#fbbf24', fail: '#f43f5e',
+  tell: '#38bdf8', start: '#22d3ee', progress: '#a5b4fc', done: '#34d399', handback: '#fbbf24', fail: '#f43f5e', stopped: '#94a3b8',
   blocked: '#fb923c', decision: '#c4b5fd', person: '#f9a8d4', edit: '#a3e635', commit: '#fde047',
 } satisfies Record<Tone | 'ground' | 'ink' | 'inkDim', string>;
 
@@ -298,7 +298,7 @@ function stateColors(): Record<MemberState, string> {
   const pick = (s: MemberState, fallback: string) => lift(css.getPropertyValue(`--state-${s}`).trim() || fallback);
   return {
     running: pick('running', '#2e7d4f'), waiting: pick('waiting', '#5f7385'), decision: pick('decision', '#7a4fc4'),
-    blocked: pick('blocked', '#b26a00'), failed: pick('failed', '#c62828'), idle: pick('idle', '#8a847c'),
+    blocked: pick('blocked', '#b26a00'), failed: pick('failed', '#c62828'), stopped: pick('stopped', '#6b7280'), idle: pick('idle', '#8a847c'),
   };
 }
 

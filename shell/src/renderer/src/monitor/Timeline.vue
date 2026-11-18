@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { spaced, type FeedRow } from './model';
+import { feedKindOf, spaced, type FeedRow } from './model';
 import { Palette } from './scene';
 import { StepLook, type StepKind, type StepRow } from './steps';
 import { axisTicks, timeOf, toneOfRow } from './timeline';
@@ -33,9 +33,10 @@ const clock = (t: number, seconds = false) => new Date(t).toLocaleTimeString([],
 
 /** How tall a message's tick stands: what needs the person or ends something stands tallest. */
 function tickHeight(row: FeedRow): number {
-  switch (row.kind) {
+  // A run the person stopped (B097) is a plain end, as tall as a finished run, not a failure.
+  switch (feedKindOf(row)) {
     case 'decision': case 'failed': case 'blocked': case 'done': return 20;
-    case 'completed': case 'handback': case 'instruction': return 14;
+    case 'completed': case 'stopped': case 'handback': case 'instruction': return 14;
     default: return 8;
   }
 }
@@ -170,12 +171,12 @@ function codeWords(e: CodeEvent): string {
 }
 
 const words: Record<FeedRow['kind'], string> = {
-  instruction: 'told', completed: 'finished a run', failed: 'run failed', handback: 'handed back', progress: 'progress',
+  instruction: 'told', completed: 'finished a run', failed: 'run failed', stopped: 'run stopped by you', handback: 'handed back', progress: 'progress',
   blocked: 'is blocked', decision: 'needs you', done: 'finished the work',
 };
 const rowWords = (r: FeedRow) => r.kind === 'instruction'
   ? `${r.from === 'person' ? 'You' : r.from === 'host' ? 'Schedule' : spaced(r.from)} told ${spaced(r.member ?? r.team)}`
-  : `${spaced(r.member ?? r.from)} ${words[r.kind]}`;
+  : `${spaced(r.member ?? r.from)} ${words[feedKindOf(r)]}`;
 
 function local(e: PointerEvent): number {
   return e.clientX - (box.value?.getBoundingClientRect().left ?? 0);

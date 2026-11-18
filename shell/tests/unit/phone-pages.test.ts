@@ -185,7 +185,8 @@ const DesktopCss: Record<string, string> = {
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
   // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the
   // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
-  'components/MemberPane.vue': '0c45fdece399ca73',
+  // Card 439 (B097): .is-stopped, a stopped run's neutral left edge and label colour.
+  'components/MemberPane.vue': 'a6f21a2cbead0e25',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   // The documents list's Modified column: a wider list and the size / modified cells.

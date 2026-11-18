@@ -3,13 +3,15 @@ import { computed } from 'vue';
 import type { BoardCard } from '../../../shared/api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName } from '../faces/faces';
-import { cardFace, StatusColor, StatusLabel } from './cards';
+import { cardFace, cardStatusLook } from './cards';
 
 // One card: the member's face in its state ring (none when unassigned), the item it comes from, the title, who and
 // which team, the status in its colour, and what is waiting (the Manager, the person).
 const props = defineProps<{ card: BoardCard; selected?: boolean }>();
 const emit = defineEmits<{ open: [] }>();
-const color = computed(() => StatusColor[props.card.status]);
+// A run the person stopped reads "Stopped" in the neutral colour, not "Failed" in red (B097).
+const look = computed(() => cardStatusLook(props.card));
+const color = computed(() => look.value.color);
 // The heavy-work lease (one full test suite, build or image build at a time on this computer), when this card's member
 // holds it or waits for it in the run working this card.
 const leaseLabel = computed(() => {
@@ -42,7 +44,7 @@ const leaseTitle = computed(() => {
       <span class="muted"> · card {{ card.id }}<template v-if="card.workflow"> · #{{ card.workflow }}</template></span>
     </div>
     <div class="foot">
-      <span class="status" data-test="card-status">{{ StatusLabel[card.status] }}</span>
+      <span class="status" data-test="card-status" :data-stopped="look.stopped || undefined">{{ look.label }}</span>
       <span v-if="card.lease" class="badge lease" :class="card.lease.state === 'waiting' ? 'queued' : 'held'" :title="leaseTitle" data-test="card-lease">{{ leaseLabel }}</span>
       <span v-if="card.awaitingManager" class="badge waiting" title="You changed this card; the Manager has not acted on it yet">awaiting Manager</span>
       <span v-if="card.trailCount" class="muted small">{{ card.trailCount }} update{{ card.trailCount === 1 ? '' : 's' }}</span>

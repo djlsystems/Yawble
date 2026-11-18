@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, provide, reactive, ref, useId, watch } from 'vue';
 import { PaneHeaderKey } from '../terminalPane';
-import type { AgentCard, YawbleApi } from '../../../shared/api';
+import { isStoppedRun, type AgentCard, type YawbleApi } from '../../../shared/api';
 import type { ActivityRow } from '../monitor/model';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import Icon from './Icon.vue';
@@ -44,6 +44,8 @@ const stateLine = computed(() => {
   if (c.attention === 'decision') return 'a question is waiting for your answer';
   if (c.state === 'queued') return `position ${c.queuePosition} of ${c.queueLength} for a global run slot · ${c.queuedInstructions} instruction${c.queuedInstructions === 1 ? '' : 's'}`;
   if (c.state === 'running') return '';
+  // B097: a run the person stopped (class "stopped", recorded failed) is no failure: it says who stopped it.
+  if (c.lastRunState !== 'completed' && c.lastRunState !== 'interrupted' && isStoppedRun({ state: c.lastRunState, failureClass: c.lastRunFailureClass, attention: c.attention })) return 'last run stopped by you';
   if (c.lastRunState === 'failed' || c.lastRunState === 'interrupted') return `last run ${c.lastRunState}: ${c.lastRunReason ?? ''}`;
   if (c.lastRunState === 'completed') return 'last run completed';
   return '';
@@ -259,6 +261,7 @@ defineExpose({ el: () => root.value });
 .is-decision { --card-state: var(--state-decision); border-left-color: var(--state-decision); }
 .is-blocked { --card-state: var(--state-blocked); border-left-color: var(--state-blocked); }
 .is-failed { --card-state: var(--state-failed); border-left-color: var(--state-failed); }
+.is-stopped { --card-state: var(--state-stopped); border-left-color: var(--state-stopped); }
 /* A phone (B061): stacked - the title (☰ a 44 px target), the tabs (44 px) with the details under them, then the
    chosen view at its own height (the page is the one scroller); the terminal is the whole screen over the page. */
 @media (max-width: 759.98px) {

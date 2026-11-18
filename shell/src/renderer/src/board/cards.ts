@@ -14,6 +14,33 @@ export const StatusColor: Record<CardStatus, string> = {
   completed: 'var(--status-completed)', handback: 'var(--status-completed)', done: 'var(--status-done)',
 };
 
+/** The core's reason for a run the person stopped (Bus BusEngine.StoppedReason), as a card's "failed" trail line says it. */
+export const StoppedReason = 'stopped by the person';
+
+/**
+ * B097: the card's run was stopped by the person, not failed. The core marks such a card "failed" (its member's run
+ * was recorded failed, class "stopped"); the member's state says stopped (attention "stopped", or class "stopped").
+ */
+export function cardStopped(card: Pick<BoardCard, 'status' | 'memberState'>): boolean {
+  if (card.status !== 'failed' || !card.memberState) return false;
+  const m = card.memberState;
+  return m.attention === 'stopped' || (m.attention === 'failed' && m.lastRunFailureClass === 'stopped');
+}
+
+/** The neutral look of a stopped run (B097): the member state's own colour, never the failure red. */
+export const StoppedLook = { label: 'Stopped', color: 'var(--state-stopped)' } as const;
+
+/** How a card's status reads and its colour: a stopped run reads "Stopped" in the neutral colour (B097). */
+export function cardStatusLook(card: Pick<BoardCard, 'status' | 'memberState'>): { label: string; color: string; stopped: boolean } {
+  if (cardStopped(card)) return { ...StoppedLook, stopped: true };
+  return { label: StatusLabel[card.status], color: StatusColor[card.status], stopped: false };
+}
+
+/** A trail line's kind as shown: the core's "failed" line for a run the person stopped reads "stopped" (B097). */
+export function trailKind(t: { kind: string; text: string }): string {
+  return t.kind === 'failed' && t.text.trim().toLowerCase() === StoppedReason ? 'stopped' : t.kind;
+}
+
 /** The ring a card's member wears: the member's own state when it is known, otherwise the card's. */
 export function cardFace(card: BoardCard): MemberState {
   if (card.memberState) return memberStateOf(card.memberState);
