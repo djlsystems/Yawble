@@ -56,6 +56,11 @@
   --state-failed: #c62828; --state-idle: #8a847c;
   /* B097: a run the person stopped - neutral slate, never the failure red. */
   --state-stopped: #6b7280;
+  /* B086: the timeline's categories (timeline/time.ts TimeCategories), one token each. Stalled is Agent working's hue,
+     drawn hatched (timeline.css), so it reads apart from it without a colour of its own. */
+  --tl-agent-working: #2e7d4f; --tl-stalled: #2e7d4f; --tl-waiting-on-you: #7a4fc4; --tl-waiting-for-slot: #0891b2;
+  --tl-waiting-on-teammate: #2563eb; --tl-blocked: #b26a00; --tl-scheduled: #64748b; --tl-not-started: #c3c8d2;
+  --tl-idle: #a8a299; --tl-was-done: #9fd3ae; --tl-marker: #1d2330; --tl-break: #6b7384;
 }
 
 :root[data-theme="dark"] {
@@ -89,6 +94,9 @@
   --console-dim: #8a95a7; --console-faint: #7d8898; --console-code: #222b36; --console-pre: #1b222c; --console-line: #36404e;
   --console-rule: #2c3542; --console-link: #8ab4ff; --console-tool: #f2b84b; --console-bad: #c9473d; --console-bad-ink: #ffb4b4;
   --console-bad-strong: #ff8a8a;
+  --tl-agent-working: #4cc47f; --tl-stalled: #4cc47f; --tl-waiting-on-you: #b493f0; --tl-waiting-for-slot: #3cc4e0;
+  --tl-waiting-on-teammate: #7ca3f5; --tl-blocked: #e09a3e; --tl-scheduled: #93a6b8; --tl-not-started: #4d5564;
+  --tl-idle: #6e6a64; --tl-was-done: #2f5d3d; --tl-marker: #e4e7ec; --tl-break: #9aa2b1;
 }
 /* The member states' dark values sit on <body>, not <html>: the Monitor's canvas (monitor/scene.ts) reads --state-*
    from <html>, so it keeps the light values in both themes; the .monitor block above resets them for its DOM. */

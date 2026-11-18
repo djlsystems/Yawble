@@ -174,7 +174,8 @@ const fits = (top: number, frame: { height: number }) => (frame === Portrait ? t
 
 /** The desktop rules outside each phone block, as they were at the base (8b39e07): a desktop change must be on purpose. */
 const DesktopCss: Record<string, string> = {
-  'board/BacklogView.vue': '55673d4cef46ac87',
+  // Backlog item pane: the Dispatches list went (only each team's Open team / Its board links stay), so the spec gets the height.
+  'board/BacklogView.vue': '6d5636200392cf67',
   // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
   // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon); card 344: a desktop rule keeps the 29 px buttons' size.
   // B076 (card 365): the members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)

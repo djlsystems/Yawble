@@ -143,7 +143,29 @@ public interface IRunIdleClock
 
     /// <summary>Count again, from a full window now.</summary>
     void Resume();
+
+    /// <summary>
+    /// The run's quiet stretches so far, as of <paramref name="now"/> (B086): each gap of no activity of at least
+    /// <see cref="RunActivitySpans.StallAfter"/> (from the last sign of activity to the next one, or to now), and each wait
+    /// in the lease's queue. None for a clock that does not keep them.
+    /// </summary>
+    RunActivitySpans Spans(DateTimeOffset now) => RunActivitySpans.None;
 }
+
+/// <summary>A stretch of a run's time, start to end.</summary>
+public sealed record ActivitySpan(DateTimeOffset Start, DateTimeOffset End);
+
+/// <summary>A run's stalls (no activity for at least <see cref="StallAfter"/>) and its waits for the heavy-work lease.</summary>
+public sealed record RunActivitySpans(IReadOnlyList<ActivitySpan> Stalls, IReadOnlyList<ActivitySpan> Holds)
+{
+    /// <summary>How long a run may show no sign of activity before that time counts as Stalled (B086).</summary>
+    public static readonly TimeSpan StallAfter = TimeSpan.FromMinutes(10);
+
+    public static RunActivitySpans None { get; } = new([], []);
+}
+
+/// <summary>A run working now, and its quiet stretches so far (the board's live Stalled and Waiting-for-a-slot bands).</summary>
+public sealed record LiveRunActivity(string Team, string Member, long Workflow, RunActivitySpans Spans);
 
 /// <summary>An item of a batch the member gave up on with blocked (item is null when it gave up the whole run).</summary>
 public sealed record BlockedItem(int? Item, string? Instruction, string Reason);

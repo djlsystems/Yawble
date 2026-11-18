@@ -77,7 +77,7 @@ public sealed partial class BusEngine
             catch (ArgumentException e) { throw new BusRefusal("bad_name", e.Message); }
             if (_store.MemberRows(teamId).Any(m => string.Equals(m.Name, id, StringComparison.OrdinalIgnoreCase)))
                 throw new BusRefusal("exists", $"the team already has a member '{id}'");
-            var m = AddMember(teamId, id, MemberRole.Member, CheckCli(cli));
+            var m = AddMember(teamId, id, MemberRole.Member, CheckCli(cli), Teams.MemberNameList.GivenNameOf(name));
             return _store.MemberRows(memberId: m.Id).Single();
         }), ct);
 
@@ -218,6 +218,19 @@ public sealed partial class BusEngine
     public Task<IReadOnlyList<Message>> RecentTeamMessagesAsync(string team, int limit, CancellationToken ct = default) =>
         WithGate(() => _store.RecentTeamMessages(team, limit), ct);
 
+    /// <summary>One workflow's messages, oldest first (the board's timeline of a workflow, B086).</summary>
+    public Task<IReadOnlyList<Message>> WorkflowThreadAsync(long correlation, CancellationToken ct = default) =>
+        WithGate(() => _store.Workflow(correlation), ct);
+
+    /// <summary>The runs working now and their quiet stretches so far (B086: live Stalled and Waiting-for-a-slot time).</summary>
+    public Task<IReadOnlyList<LiveRunActivity>> LiveActivityAsync(CancellationToken ct = default) =>
+        WithGate(() => LiveActivity(_store.Clock.GetUtcNow()), ct);
+
+    /// <summary>Under the gate.</summary>
+    private IReadOnlyList<LiveRunActivity> LiveActivity(DateTimeOffset now) =>
+        [.. _active.Values.Where(a => a.Context.IdleClock is not null)
+            .Select(a => new LiveRunActivity(a.Context.Member.Team, a.Context.Member.Name, a.Context.Correlation, a.Context.IdleClock!.Spans(now)))];
+
     /// <summary>The active run of a member, if any (the terminal window attaches to it).</summary>
     public Task<long?> ActiveRunOfAsync(long memberId, CancellationToken ct = default) =>
         WithGate(() => _active.Values.FirstOrDefault(a => a.Context.Member.Id == memberId)?.Context.RunId, ct);
@@ -252,20 +265,22 @@ public sealed partial class BusEngine
         WithGate(() => _store.InTransaction(() =>
         {
             if (run.Member.Role != MemberRole.Manager) throw new BusRefusal("not_allowed", "only the Manager hires members");
+            // The job word alone gets a first name from the person's list; a full name must have an unused first name.
+            var (label, given) = HireName(name);
             string trimmed;
             try
             {
-                trimmed = Teams.MemberNames.IdFor(name);
+                trimmed = Teams.MemberNames.IdFor(label);
             }
             catch (ArgumentException e)
             {
-                throw new BusRefusal("bad_name", e.Message + "; name them for the job, a space, then a first name, e.g. 'Developer Priya'");
+                throw new BusRefusal("bad_name", e.Message + "; name them for the job alone, e.g. 'Developer': the app adds the first name");
             }
             if (_store.MemberRows(run.Member.TeamId).Any(m => string.Equals(m.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
                 throw new BusRefusal("exists", $"the team already has a member named '{trimmed}'; pick another name, or tell that member");
             var own = _store.MemberRows(memberId: run.Member.Id).Single().Cli;
             var chosen = CheckCli(string.IsNullOrWhiteSpace(cli) ? own : cli.Trim());
-            var m = AddMember(run.Member.TeamId, trimmed, MemberRole.Member, chosen);
+            var m = AddMember(run.Member.TeamId, trimmed, MemberRole.Member, chosen, given);
             if (!string.IsNullOrWhiteSpace(instructions)) _store.UpdateMember(m.Id, chosen, instructions.Trim(), "", "default");
             Log($"{run.Member.Qualified} hired {m.Qualified} ({chosen})");
             return _store.MemberRows(memberId: m.Id).Single();

@@ -13,14 +13,17 @@ import HealthPanel from './HealthPanel.vue';
 import UpdatesSection from './UpdatesSection.vue';
 import BackupsSection from './BackupsSection.vue';
 import CompanionPanel from './CompanionPanel.vue';
+import ConciergeSettings from './ConciergeSettings.vue';
+import TeamsSettings from './TeamsSettings.vue';
 import type { MenuItem } from './Sidebar.vue';
 import LoadingNote from './LoadingNote.vue';
 
 /**
- * Settings, one page with tabs: General (how the app runs on this computer), Agents, Skills, Guardrails (the global
+ * Settings, one page with tabs: General (how the app runs on this computer), Agents, Concierge (its default agent), Teams
+ * (New Team defaults and the member-name list), Skills, Guardrails (the global
  * policy), Cloud Link, Health, Companion (yawble-companion; this computer only), System. Each tab shows its screen in place.
  */
-export type SettingsTab = 'general' | 'health' | 'companion' | MenuItem;
+export type SettingsTab = 'general' | 'health' | 'companion' | 'concierge' | 'teams' | MenuItem;
 
 const props = defineProps<{
   api?: YawbleApi; tab: SettingsTab; teams: TeamSummary[]; pollMs?: number; integrationsTab?: 'cli' | 'api' | 'mcp' | 'connections' | null;
@@ -46,6 +49,8 @@ const tabLabel = computed(() => tabs.value.find((t) => t.id === props.tab)?.labe
 const tabs = computed(() => [
   { id: 'general' as const, label: 'General', test: 'open-general' },
   { id: 'agents' as const, label: 'Agents', test: 'open-agents' },
+  { id: 'concierge' as const, label: 'Concierge', test: 'open-concierge' },
+  { id: 'teams' as const, label: 'Teams', test: 'open-teams' },
   { id: 'skills' as const, label: 'Skills', test: 'open-skills' },
   { id: 'globalPolicy' as const, label: 'Guardrails', test: 'open-global-policy' },
   { id: 'integrations' as const, label: 'Integrations', test: 'open-integrations' },
@@ -118,6 +123,8 @@ async function set(patch: Partial<ShellSettings>) {
       <HealthPanel v-else-if="tab === 'health' && !api.remote" :api="api" @open="emit('connections')" @changed="emit('changed')" />
       <CompanionPanel v-else-if="tab === 'companion' && !api.remote" :api="api" />
       <AgentsDialog v-else-if="tab === 'agents'" inline :api="api" />
+      <ConciergeSettings v-else-if="tab === 'concierge'" :api="api" />
+      <TeamsSettings v-else-if="tab === 'teams'" :api="api" />
       <SkillsDialog v-else-if="tab === 'skills'" inline :fill="fill" :api="api" :teams="teams" />
       <GlobalPolicyDialog v-else-if="tab === 'globalPolicy'" inline :api="api" :poll-ms="pollMs" @changed="emit('changed')" />
       <IntegrationsPanel v-else-if="tab === 'integrations'" :key="integrationsTab ?? 'cli'" :api="api" :teams="teams" :initial-tab="integrationsTab ?? null" />

@@ -13,8 +13,26 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - A team has one **Manager** and any number of **members**. You tell the Manager what you want. It splits the work,
   tells members, and declares the workflow complete.
 - **New team** asks for a team name, a repository (a folder on this computer, a new one the app makes, or
-  **Clone from an address**) and its agents, each with a role and a CLI.
+  **Clone from an address**) and its agents, each with a role and a CLI. It starts from the defaults in
+  **Settings > Teams**: the default Manager and the default members ticked **On new teams**; the others are offered as
+  one-click **+ name** buttons. The same defaults make the team when the Concierge or the companion creates one, or a
+  backlog item is dispatched to a new team, unless the caller names its own Manager, agent or members.
 - A member's name is a job and a first name, for example "Developer Priya". Its id names its folder and branch.
+- How members get their first names:
+  - A Manager hires with the job word alone ("Developer"). The app picks a random first name from the member-name
+    list (Settings > Teams) that no member of any team has, archived teams included; Managers do not count.
+  - When no free name is found (the list is empty, or 10 random tries all hit used names), the hire is refused and
+    the Manager hires again with a full name: a first name common in the list's country, unused on any team. A full
+    name whose first name a member already has is refused the same way.
+  - A default member or New Team row whose name is a job word alone gets a first name the same way when the team is
+    made; when none is free, the team is not made and the window says so. A full name is used as typed.
+  - Names typed in New Team or Add member are used as typed and checked only against their own team.
+- The member-name list (Settings > Teams) holds one first name per line. Save drops blank lines, surrounding spaces and
+  repeats (ignoring case); a line must be one word of the letters A-Z, 2 to 20 characters, a hyphen inside allowed, and
+  other lines are listed and not saved. Under it, how many names a member already uses. **Generate** asks the
+  Concierge's default agent once, with no Yawble tools and in a folder deleted afterwards, for 100 popular first names
+  of the chosen **Country** (default United States). Its names replace the text, unsaved until **Save**. The country is
+  saved with the list.
 - **Member settings** has General (CLI, model, credential, instructions) and Policy (see
   [Sandbox and policy](#sandbox-and-policy)).
 - Team **Settings** has the tabs General, Members, Repositories, Environment and Integrations:
@@ -246,6 +264,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 - The Concierge is a chat with an agent that knows every team on this computer and acts for you.
 - Conversations are kept. Each reply is one sandboxed run of the conversation's agent CLI.
+- A new conversation starts on the default agent from Settings > Concierge while that agent still exists; otherwise
+  on the first CLI that is installed and signed in. Existing conversations keep their own agent.
 - It can read teams, status, activity, workflows, documents, the backlog, the board, git state, integrations,
   usage and the doctor.
 - It can tell a Manager, answer a team's question, create a team, pause or resume a team, nudge, close or extend a
@@ -290,6 +310,55 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     count, so "latest" or "contest" do not make a tester. "tests" and "tested" do not count either, so
     "Developer: writes the code and its unit tests" is not a tester.
   - Teams with no tester are not asked for a reason.
+- **Time accounting**: every card and every workflow has one overall time, from when it was created to when it was
+  last done, and a breakdown of where that time went. The core computes both; the board, the Workflows list, the
+  Concierge (team_workflows, board_card), the phone and the cloud show the same numbers.
+  - A card's overall time runs from when it was planned (created) to the last time it entered Done. A workflow's runs
+    from its first message to when it was completed, closed or expired; an expired workflow ends at its last activity.
+    While open, the time runs to now. A reopened card or workflow moves its end later, and the time it spent done
+    before the reopen counts as **Was done**.
+  - A card records its planned time and its started time: the first time it has a member and is queued or told.
+    Every change of a card's state is recorded with its time and category.
+  - Every moment is in exactly one category, so the categories add up to the overall time: **Agent working** (a run
+    is active on it), **Stalled** (a run is active but shows no tool call or progress for 10 minutes or more; from its
+    last sign of activity to its next one, or to the run's end), **Waiting on you** (an open question to you),
+    **Waiting for a slot** (queued for a run slot, or waiting for the heavy-work lease), **Waiting on a teammate**
+    (handed back, or its run ended, and it waits for the Manager or a tester), **Blocked** (blocked, or its run failed),
+    **Scheduled** (parked until the wake it asked for), **Not started** (planned, no member yet), **Idle** (open,
+    nobody working it, nothing scheduled) and **Was done**.
+  - A workflow's cards overlap, so they are not added up: each moment takes the highest category among its cards
+    not in Done (and the Manager's own runs), in the order Agent working, Waiting on you, Stalled, Waiting for a slot,
+    Waiting on a teammate, Blocked, Scheduled, Not started, Idle, Was done. Its categories add up to its wall-clock
+    time.
+  - A card's or a workflow's timeline (timeline.get) gives one row of category bands per card, the workflow's summary
+    row, and markers for planned, started, reopen, hand-back, question asked and answered, a run ended by the idle
+    watchdog, and expired. A Visitor can read it.
+  - Cards from before time accounting have their timeline rebuilt from their history (planned, assigned, told,
+    progress, handed back, done, moved, run ended, failed), marked "rebuilt from history"; a run the idle watchdog
+    ended is Stalled from the line before it to its end.
+  - The overall time shows as one quiet line (like 1h 12m 05s) on a card's bottom row, under each workflow in the
+    Workflows dialog and on the workflow rows of the Teams-list tiles. An open card or workflow counts on each second.
+  - Clicking or tapping the overall time (or Enter on it) opens the **Timeline** dialog; it does not open the card.
+    The dialog shows:
+    - the overall time, created → ended (or open, still counting) and how it ended;
+    - the planned and started line (for a workflow: first message and first card started), with how long it waited
+      before it started;
+    - the breakdown table: each category with time, its share (the shares add up to 100%) and the total;
+    - "rebuilt from history" when the timeline was rebuilt from an older card's history;
+    - the timeline: for a workflow an **All cards** summary row on top, then one row per card; for a card one row.
+      Each row is drawn as category bands on one time axis, with the start time on the left and the end time (or
+      now) on the right.
+  - Pointing at, tapping or tabbing to a band or a marker says it in the readout under the timeline (its category,
+    from and to, and its length; a marker's kind and time). **Events** lists the markers as text.
+  - Markers sit on a row under the bands: planned, started, reopen, hand-back, question asked and answered, a run
+    ended by the idle watchdog, and expired. The legend lists the categories that appear.
+  - **Stalled** is drawn in Agent working's colour, hatched, in the bands, the legend and the table.
+  - A long quiet stretch (2 hours or more and over a quarter of the whole, with nothing changing) is drawn shorter
+    behind a break mark, labelled with its real length (≈ 2d 17h). The label never covers the start and end times.
+  - On a phone the axis scrolls sideways inside the dialog; the page does not. Bands and markers keep their size.
+  - An open item's timeline is asked again every 30 seconds while the dialog is open.
+  - A Visitor sees the overall times and the same Timeline dialog.
+  - Time only: no tokens or cost.
 - **Backlog**: work you want done, most important first.
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
@@ -573,6 +642,8 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 |---|---|
 | General | **Keep running when the window is closed** (Yawble stays in the tray), **Start Yawble when I sign in to this computer**, Backups |
 | Agents | Detected CLIs and custom agents |
+| Concierge | **Default agent** for new Concierge conversations: an agent, or **First available on this computer** (the first CLI that is installed and signed in) |
+| Teams | **Default agents** for new teams (the Manager's name and agent, and optional members, each ticked **On new teams** or offered as a one-click add), and **Member names**: the list new members' first names come from, with **Generate** for a country |
 | Skills | Skills and which roles and teams they are offered to |
 | Guardrails | The global policy and the global run limit |
 | Integrations | CLIs, APIs, MCP servers, Connections, host tasks |

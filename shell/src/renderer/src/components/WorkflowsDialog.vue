@@ -10,6 +10,8 @@ import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { vChange } from '../remoteAccess';
+import OverallTime from '../timeline/OverallTime.vue';
+import { hasTime } from '../timeline/time';
 
 /**
  * A team's workflows, newest activity first: open ones (and who is working them, or that nobody is), completed,
@@ -111,7 +113,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
           <span class="title" :title="w.title">{{ w.title }}</span>
         </div>
         <div class="meta muted">
-          #{{ w.id }} · {{ w.owner ? displayName(w.owner) : 'the Manager' }} · {{ w.messages }} message{{ w.messages === 1 ? '' : 's' }} · started {{ ago(w.startedAt) }} ·
+          #{{ w.id }} · {{ w.owner ? displayName(w.owner) : 'the Manager' }} · {{ w.messages }} message{{ w.messages === 1 ? '' : 's' }} · started {{ ago(w.startedAt) }}<template v-if="hasTime(w.time)"> (<OverallTime :time="w.time" :target="{ kind: 'workflow', id: w.id, title: w.title, team: team.name }" />)</template> ·
           <template v-if="w.state !== 'open' && w.endedAt">ended {{ ago(w.endedAt) }}</template><template v-else>last {{ ago(w.lastAt) }}</template>
           <template v-if="w.state === 'expired' && w.expiredAt"> · expired {{ ago(w.expiredAt) }}</template>
         </div>

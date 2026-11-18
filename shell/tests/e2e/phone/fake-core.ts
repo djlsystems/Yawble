@@ -28,6 +28,69 @@ const agents: Record<number, unknown[]> = {
   2: [agent(4, 2, teamRows[1].name, 'Manager', 'manager', 'idle'), agent(5, 2, teamRows[1].name, 'DeveloperCleo', 'member', 'idle')],
 };
 
+/** B086 (core card 429's wire contract): each card's stretches, back to back from its creation, as minutes; the last one
+ *  of an open card runs on to now. From them the fake builds BoardCard.time, timeline.get's rows and bands, workflow #10's
+ *  summary row (the core's priority merge) and its time, so every figure adds up like the core's. */
+type Cat = 'agent-working' | 'stalled' | 'waiting-on-you' | 'waiting-for-slot' | 'waiting-on-teammate' | 'blocked' | 'scheduled' | 'not-started' | 'idle' | 'was-done';
+const Merge: Cat[] = ['agent-working', 'waiting-on-you', 'stalled', 'waiting-for-slot', 'waiting-on-teammate', 'blocked', 'scheduled', 'not-started', 'idle', 'was-done'];
+const stretches: Record<number, { member: string; title: string; open: boolean; rebuilt?: boolean; segs: [Cat, number][] }> = {
+  1: { member: 'DeveloperAda', title: 'Add partial refunds', open: true, segs: [['not-started', 120]] },
+  2: { member: 'DeveloperAda', title: 'A very long card title', open: true, segs: [['not-started', 120]] },
+  3: { member: 'DeveloperAda', title: 'Refund webhook', open: true, segs: [['not-started', 20], ['waiting-for-slot', 8], ['agent-working', 34], ['stalled', 38], ['agent-working', 20]] },
+  4: { member: 'Manager', title: 'Pick the refund limit', open: true, segs: [['not-started', 5], ['agent-working', 10], ['waiting-on-you', 105]] },
+  5: { member: 'TesterBen', title: 'Refund model', open: false, segs: [['not-started', 10], ['agent-working', 25], ['waiting-on-teammate', 10], ['agent-working', 15]] },
+  6: { member: 'DeveloperAda', title: 'Docs for refunds', open: false, rebuilt: true, segs: [['not-started', 30], ['agent-working', 12], ['was-done', 6], ['agent-working', 8]] },
+};
+const timeline = (() => {
+  const t0 = now - 120 * 60_000;
+  const at = (ms: number) => new Date(ms).toISOString();
+  const cards: Record<number, { time: unknown; row: unknown; markers: unknown[]; bands: { category: Cat; s: number; e: number | null }[] }> = {};
+  for (const [id, c] of Object.entries(stretches)) {
+    let x = t0;
+    const bands = c.segs.map(([category, mins], i) => {
+      const s = x; x += mins * 60_000;
+      return { category, s, e: c.open && i === c.segs.length - 1 ? null : x };
+    });
+    const sum = new Map<Cat, number>();
+    for (const b of bands) sum.set(b.category, (sum.get(b.category) ?? 0) + ((b.e ?? now) - b.s));
+    const started = bands.find((b) => b.category !== 'not-started')?.s;
+    const time = {
+      createdAt: at(t0), startedAt: started ? at(started) : null, endedAt: c.open ? null : at(x), endedHow: c.open ? null : 'done',
+      open: c.open, overallMs: (c.open ? now : x) - t0, rebuilt: !!c.rebuilt, breakdown: [...sum].map(([category, ms]) => ({ category, ms })),
+    };
+    const markers: unknown[] = [{ kind: 'planned', at: at(t0), card: Number(id) }];
+    if (started) markers.push({ kind: 'started', at: at(started), card: Number(id) });
+    bands.forEach((b, i) => {
+      if (b.category === 'stalled' && b.e) markers.push({ kind: 'watchdog-end', at: at(b.e), card: Number(id) });
+      if (b.category === 'was-done') markers.push({ kind: 'reopen', at: at(b.e!), card: Number(id) });
+      if (b.category === 'waiting-on-you') markers.push({ kind: 'decision-asked', at: at(b.s), card: Number(id) });
+      if (!c.open && i === bands.length - 1) markers.push({ kind: 'handback', at: at(b.e!), card: Number(id) });
+    });
+    const row = { card: Number(id), member: c.member, title: c.title, bands: bands.map((b) => ({ category: b.category, start: at(b.s), end: b.e == null ? null : at(b.e) })) };
+    cards[Number(id)] = { time, row, markers, bands };
+  }
+  // Workflow #10: every card's stretches merged per moment, the higher category winning (the core's merge).
+  const edges = [...new Set(Object.values(cards).flatMap((c) => c.bands.flatMap((b) => [b.s, b.e ?? now])))].sort((a, b) => a - b);
+  const summary: { category: Cat; s: number; e: number }[] = [];
+  for (let i = 1; i < edges.length; i++) {
+    const mid = (edges[i - 1] + edges[i]) / 2;
+    const here = Object.values(cards).flatMap((c) => c.bands.filter((b) => b.s <= mid && (b.e ?? now) > mid).map((b) => b.category));
+    const cat = Merge.find((m) => here.includes(m)) ?? 'idle';
+    const last = summary[summary.length - 1];
+    if (last && last.category === cat && last.e === edges[i - 1]) last.e = edges[i]; else summary.push({ category: cat, s: edges[i - 1], e: edges[i] });
+  }
+  const wsum = new Map<Cat, number>();
+  for (const b of summary) wsum.set(b.category, (wsum.get(b.category) ?? 0) + (b.e - b.s));
+  const workflow = {
+    time: { createdAt: at(t0), startedAt: at(t0 + 10 * 60_000), endedAt: null, endedHow: null, open: true, overallMs: now - t0, rebuilt: false,
+      breakdown: [...wsum].map(([category, ms]) => ({ category, ms })) },
+    rows: Object.values(cards).map((c) => c.row),
+    summary: summary.map((b) => ({ category: b.category, start: at(b.s), end: b.e >= now ? null : at(b.e) })),
+    markers: Object.values(cards).flatMap((c) => c.markers),
+  };
+  return { cards, workflow };
+})();
+
 const lanes = [{ id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' }, { id: 'blocked', label: 'Needs You' }, { id: 'done', label: 'Done' }];
 const card = (id: number, lane: string, title: string, status: string, memberName = 'DeveloperAda') => ({
   id, team: 'payments', teamId: 1, member: memberName, item: 'B012', title, body: `${title}\n\nThe details of the card, with a long line that has to wrap on a phone screen without making it scroll sideways.`,
@@ -37,7 +100,7 @@ const cards = [
   card(1, 'todo', 'Add partial refunds', 'queued'), card(2, 'todo', 'A very long card title that goes on and on to check the wrapping of card titles on a phone', 'queued'),
   card(3, 'in-progress', 'Refund webhook', 'running'), card(4, 'blocked', 'Pick the refund limit', 'needs-decision', 'Manager'),
   card(5, 'done', 'Refund model', 'done', 'TesterBen'), card(6, 'done', 'Docs for refunds', 'done'),
-];
+].map((c) => ({ ...c, time: timeline.cards[c.id]?.time }));
 
 const backlogItem = (id: number, title: string, state: string) => ({
   id, label: `B0${10 + id}`, team: null, title, body: `# ${title}\n\nWhat it is and how it is checked.`, state, archivedAt: null,
@@ -85,18 +148,30 @@ const logSources = [{
 }];
 const logRows = Array.from({ length: 12 }, (_, i) => ({ _id: String(i + 1), at: iso(i * 7), member: i % 2 ? 'payments/DeveloperAda' : 'payments/Manager', event: `run ${40 - i}`, details: i === 0 ? 'a-very-long-unbroken-detail-string-'.repeat(4) : 'completed in 2m' }));
 
-const workflows = [{ id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', undeclared: false, busy: ['DeveloperAda'], ending: null, startedAt: iso(120), lastAt: iso(2), messages: 14, endedAt: null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null }];
+const workflows = [{ id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', undeclared: false, busy: ['DeveloperAda'], ending: null, startedAt: iso(120), lastAt: iso(2), messages: 14, endedAt: null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null, time: timeline.workflow.time }];
 /** B085 (card 389), shown with setExpiry(true): an open workflow waiting on question 3 that expires in 20 h (Needs you,
  *  Extend), and one the app closed as expired (endedAt: its last activity, 3 days before expiredAt). */
 const expiryWorkflows = () => [
   { id: 12, title: 'Refund limits per country', owner: 'Manager', state: 'open', undeclared: true, busy: [], ending: null, startedAt: iso(4000), lastAt: iso(2 * 1440 + 240), messages: 6,
     endedAt: null, expiredAt: null, expiresAt: expiry.extended.get(12) ?? later(20 * 60),
     // Like the core: the warning text while the workflow is warned (it waits on a question and expires within a day), else null.
-    expiryWarning: expiry.extended.has(12) ? null : warningText(12, 3), question: 3 },
+    expiryWarning: expiry.extended.has(12) ? null : warningText(12, 3), question: 3, time: idleTime(4000, null, null) },
   // The core's ending for an expired workflow is the detail only; the dialog adds "Expired: " itself.
   { id: 9, title: 'Old refund export', owner: 'Manager', state: 'expired', undeclared: false, busy: [], ending: 'no activity for 3 days', startedAt: iso(9000), lastAt: iso(4 * 1440), messages: 4,
-    endedAt: iso(4 * 1440), expiredAt: iso(1440), expiresAt: null, expiryWarning: null, question: null },
+    endedAt: iso(4 * 1440), expiredAt: iso(1440), expiresAt: null, expiryWarning: null, question: null, time: idleTime(9000, 4 * 1440, 'expired') },
 ];
+/** B086: a quiet workflow's time: 40 minutes worked after its first message, then idle to its end (or now, open). */
+function idleTime(createdAgo: number, endedAgo: number | null, how: string | null) {
+  const overallMs = (createdAgo - (endedAgo ?? 0)) * 60_000;
+  return { createdAt: iso(createdAgo), startedAt: iso(createdAgo - 5), endedAt: endedAgo == null ? null : iso(endedAgo), endedHow: how, open: endedAgo == null,
+    overallMs, rebuilt: false, breakdown: [{ category: 'not-started', ms: 5 * 60_000 }, { category: 'agent-working', ms: 40 * 60_000 }, { category: 'idle', ms: overallMs - 45 * 60_000 }] };
+}
+/** timeline.get for a quiet workflow: its summary row from its breakdown, back to back (the long idle stretch is compressed on screen). */
+function quietTimeline(time: ReturnType<typeof idleTime>) {
+  let x = Date.parse(time.createdAt);
+  const summary = time.breakdown.map((b, i) => { const s = x; x += b.ms; return { category: b.category, start: new Date(s).toISOString(), end: time.open && i === time.breakdown.length - 1 ? null : new Date(x).toISOString() }; });
+  return { time, rows: [], summary, markers: [{ kind: 'planned', at: time.createdAt }, ...(time.endedHow === 'expired' ? [{ kind: 'expired', at: time.endedAt! }] : [])] };
+}
 /** The core's BusEngine.WarningText. */
 const warningText = (workflow: number, question: number) => `#${workflow} will expire tomorrow; it waits on your answer to question ${question}`;
 /** B085: the expiry fixtures on or off, the workflows extended (id -> their new expiresAt), and each team's workflowExpiryDays. */
@@ -147,6 +222,15 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'agentProfiles.list': () => [],
   'board.list': () => ({ lanes, cards, teams: teamRows.map((t) => ({ id: t.id, name: t.name })), clearedCount: 0 }),
   'board.card': (p) => ({ ...cards.find((c) => c.id === p?.id)!, trail: [{ id: 1, at: iso(30), source: 'Manager', kind: 'planned', text: 'Planned the card.' }, { id: 2, at: iso(20), source: 'Manager', kind: 'assigned', text: 'Assigned to DeveloperAda.' }], itemTitle: 'Partial refunds' }),
+  // B086: a card's own row, or workflow #10's rows and summary; an unknown one is refused like the core (not_found).
+  'timeline.get': (p) => {
+    if (p?.workflow != null) { const quiet = (expiry.on ? expiryWorkflows() : []).find((w) => w.id === Number(p.workflow));
+      if (quiet) return quietTimeline(quiet.time);
+      if (Number(p.workflow) !== 10) throw Object.assign(new Error('no such workflow'), { code: 'not_found' }); return timeline.workflow; }
+    const c = timeline.cards[Number(p?.card)];
+    if (!c) throw Object.assign(new Error('no such card'), { code: 'not_found' });
+    return { time: c.time, rows: [c.row], summary: null, markers: c.markers };
+  },
   'backlog.list': () => backlog,
   'backlog.item': (p) => ({ ...backlog.find((b) => b.id === p?.id)!, dispatches: [] }),
   'monitor.messages': () => ({ end: 0, messages: [] }),

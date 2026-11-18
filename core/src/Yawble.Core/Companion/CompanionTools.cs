@@ -148,7 +148,7 @@ public static class CompanionTools
                 ? $"Remove environment variable {Text(args, "name")} from team {team}."
                 : $"Set environment variable {Text(args, "name")} for team {team} (the value is not shown here).",
             "doctor_fix" => $"Run the health fix {Text(args, "fix")}. If it removes or archives something, its exact list is shown for another approval first.",
-            "team_create" => $"Create team {Text(args, "name")} with a {Text(args, "manager_cli") ?? "claude"} Manager" +
+            "team_create" => $"Create team {Text(args, "name")} with " + (Text(args, "manager_cli") is { } managerCli ? $"a {managerCli} Manager" : "the default Manager and members (Settings > Teams)") +
                              (Text(args, "repo_url") is { } url ? $", cloning {ConciergeReadTools.OriginForDisplay(url)}" : Text(args, "repo_path") is { } path ? $", working on the folder {path}" : "") + ".",
             "team_repo_add" => $"Give team {team} the repository {(Text(args, "repo_url") is { } u ? ConciergeReadTools.OriginForDisplay(u) : Text(args, "repo_path"))}" +
                                (Text(args, "name") is { } n ? $" as {n}" : "") + (Flag(args, "read_only") ? " (a read-only reference)." : " (writable: every member gets a clone)."),
@@ -158,7 +158,7 @@ public static class CompanionTools
             "host_task_run" => $"Ask to run host task {Text(args, "task")} of team {team} on this computer: {Text(args, "reason")}. It then waits for your Run once / Always in Needs you like an agent's request, unless it has a standing approval.",
             "git_merge_team" => $"Merge team {team}'s branch into the base branch of its {repo} repository.",
             "backup_restore" => $"Restore the backup {Text(args, "backup")}: it is staged and replaces the app's data when the app restarts.",
-            "backlog_dispatch" => $"Make a new team {Text(args, "new_team")} with a {Text(args, "manager_cli") ?? "claude"} Manager" +
+            "backlog_dispatch" => $"Make a new team {Text(args, "new_team")} with " + (Text(args, "manager_cli") is { } dispatchCli ? $"a {dispatchCli} Manager" : "the default Manager and members (Settings > Teams)") +
                                   (Text(args, "repo_url") is { } du ? $" (cloning {ConciergeReadTools.OriginForDisplay(du)})" : Text(args, "repo_path") is { } dp ? $" (on the folder {dp})" : "") +
                                   $" and dispatch {Text(args, "item")} to it. It starts paid agent work.",
             _ => $"Run {tool}.",

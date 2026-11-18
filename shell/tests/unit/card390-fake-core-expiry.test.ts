@@ -7,7 +7,9 @@ import { WORKFLOW_EXTEND, TEAM_WORKFLOW_EXPIRY } from '../../src/shared/api';
 
 /** bus.workflows item keys from core (Card390ExpiryContractTests.WorkflowItemKeys). */
 const ItemKeys = ['id', 'title', 'owner', 'state', 'undeclared', 'busy', 'ending', 'startedAt', 'lastAt', 'messages',
-  'endedAt', 'expiredAt', 'expiresAt', 'expiryWarning', 'question'].sort();
+  'endedAt', 'expiredAt', 'expiresAt', 'expiryWarning', 'question',
+  // B086 (card 429's wire contract): the workflow item's time.
+  'time'].sort();
 
 function core(access: 'full' | 'read' = 'full') {
   const c = createFakeCore();
