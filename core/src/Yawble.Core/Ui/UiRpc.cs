@@ -150,6 +150,9 @@ public sealed class UiRpc(
                 "git.deleteBranches" => await DeleteBranchesAsync(p, ct),
                 "git.tidyPlan" => await TidyPlanAsync(p, ct),
                 "git.branchRealign" => await BranchRealignAsync(p, ct),
+                // B072, the commit view: reads only.
+                "git.commitShow" => await CommitShowAsync(p, ct),
+                "git.commitDiff" => await CommitDiffAsync(p, ct),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -605,6 +608,51 @@ public sealed class UiRpc(
             ["oldSha"] = done.OldSha, ["newSha"] = done.NewSha, ["branch"] = done.Branch, ["repo"] = done.Repo, ["member"] = done.Member,
             ["originOldSha"] = done.OriginOldSha, ["originUpdated"] = done.OriginUpdated, ["changed"] = done.Changed, ["message"] = done.Message,
         };
+    }
+
+    /// <summary>
+    /// git.commitShow {team | teamId, sha, repo?} (B072): a commit of the team's repository, read with plain git: what it
+    /// is, where it is, its files. {found: false, goneReason, sha} when git does not have it. codeShown is true here; the
+    /// Cloud Link sets it false when members' code is not shown to cloud viewers (and refuses git.commitDiff).
+    /// </summary>
+    private async Task<JsonNode?> CommitShowAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var sha = OptStr(p, "sha") ?? throw new RpcException("bad_params", "sha is required");
+        return await CommitCallAsync(async () => (await repos.GitCommitShowAsync(team.Id, team.Name, sha, ct, OptStr(p, "repo"))).ToJson());
+    }
+
+    /// <summary>
+    /// git.commitDiff {team | teamId, sha, path, repo?} (B072): one file's diff in the commit (a merge: against its first
+    /// parent), as hunks of lines for side-by-side and inline views; binary or too large: a summary and no hunks.
+    /// Errors: gone (git no longer has the commit), no_such_file (the commit does not change that path).
+    /// </summary>
+    private async Task<JsonNode?> CommitDiffAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var sha = OptStr(p, "sha") ?? throw new RpcException("bad_params", "sha is required");
+        var path = OptStr(p, "path") ?? throw new RpcException("bad_params", "path is required");
+        return await CommitCallAsync(async () => (await repos.GitCommitDiffAsync(team.Id, team.Name, sha, path, ct, OptStr(p, "repo"))).ToJson());
+    }
+
+    private static async Task<JsonNode?> CommitCallAsync(Func<Task<JsonObject>> read)
+    {
+        try
+        {
+            return await read();
+        }
+        catch (Teams.TeamGitRefusal e)
+        {
+            throw new RpcException(e.Code, e.Message);
+        }
+        catch (ArgumentException e)
+        {
+            throw new RpcException("bad_params", e.Message);
+        }
+        catch (Exception e) when (e is Teams.GitException or InvalidOperationException or IOException)
+        {
+            throw new RpcException("git_failed", e.Message);
+        }
     }
 
     /// <summary>Tells the Manager to bring the team branch current with the base (Yawble ask-team), as a new workflow.</summary>
