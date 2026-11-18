@@ -232,7 +232,7 @@ public sealed partial class BusEngine
 
     /// <summary>One workflow as the list shows it (bus.workflows, team_workflows, the cloud dashboard).</summary>
     private WorkflowSummary Summary(long teamId, string team, (long Id, DateTimeOffset First, DateTimeOffset Last, int Count) w,
-        IReadOnlyList<BusStore.PendingRow> pending, DateTimeOffset now)
+        IReadOnlyList<BusStore.PendingRow> pending, DateTimeOffset now, bool time = true)
     {
         var manager = _store.TeamMembers(teamId).Single(m => m.Role == MemberRole.Manager);
         var root = _store.Find(w.Id);
@@ -266,7 +266,20 @@ public sealed partial class BusEngine
         return new WorkflowSummary(w.Id, TitleOf(root), owner.Name, state, undeclared, busy, endingText, w.First, w.Last, w.Count,
             endedAt, expiredAt, idle?.ExpiresAt,
             idle is { Warned: true, Question: { } q } ? WarningText(w.Id, q.Seq) : null,
-            ended ? null : (idle?.Question ?? OpenQuestion(thread))?.Seq);
+            ended ? null : (idle?.Question ?? OpenQuestion(thread))?.Seq,
+            time ? TimeOf(w.Id, thread, now) : null);
+    }
+
+    /// <summary>B086: the workflow's time from the board (null without one, or when it cannot be read: the list still answers).</summary>
+    private Board.TimeSummary? TimeOf(long workflow, IReadOnlyList<Message> thread, DateTimeOffset now)
+    {
+        if (Board is not { } board) return null;
+        try { return board.Timeline.OfWorkflow(workflow, thread, LiveActivity(now), now)?.Time; }
+        catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or InvalidOperationException or FormatException or ArgumentException)
+        {
+            Log($"workflow {workflow}: its time could not be read: {ex.Message}");
+            return null;
+        }
     }
 
     private static DateTimeOffset? Time(Message m, string field) =>

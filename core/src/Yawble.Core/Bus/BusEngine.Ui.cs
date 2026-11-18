@@ -218,6 +218,19 @@ public sealed partial class BusEngine
     public Task<IReadOnlyList<Message>> RecentTeamMessagesAsync(string team, int limit, CancellationToken ct = default) =>
         WithGate(() => _store.RecentTeamMessages(team, limit), ct);
 
+    /// <summary>One workflow's messages, oldest first (the board's timeline of a workflow, B086).</summary>
+    public Task<IReadOnlyList<Message>> WorkflowThreadAsync(long correlation, CancellationToken ct = default) =>
+        WithGate(() => _store.Workflow(correlation), ct);
+
+    /// <summary>The runs working now and their quiet stretches so far (B086: live Stalled and Waiting-for-a-slot time).</summary>
+    public Task<IReadOnlyList<LiveRunActivity>> LiveActivityAsync(CancellationToken ct = default) =>
+        WithGate(() => LiveActivity(_store.Clock.GetUtcNow()), ct);
+
+    /// <summary>Under the gate.</summary>
+    private IReadOnlyList<LiveRunActivity> LiveActivity(DateTimeOffset now) =>
+        [.. _active.Values.Where(a => a.Context.IdleClock is not null)
+            .Select(a => new LiveRunActivity(a.Context.Member.Team, a.Context.Member.Name, a.Context.Correlation, a.Context.IdleClock!.Spans(now)))];
+
     /// <summary>The active run of a member, if any (the terminal window attaches to it).</summary>
     public Task<long?> ActiveRunOfAsync(long memberId, CancellationToken ct = default) =>
         WithGate(() => _active.Values.FirstOrDefault(a => a.Context.Member.Id == memberId)?.Context.RunId, ct);

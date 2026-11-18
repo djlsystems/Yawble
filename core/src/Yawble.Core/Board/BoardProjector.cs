@@ -65,30 +65,86 @@ public sealed class BoardProjector(BoardStore store)
             return;
         }
         if (team is null || sender is null) return;
-        var card = store.CardOf(team, sender, m.CorrelationId) ?? store.OpenCardOf(team, sender);
-        if (card is null) return;
+        var exact = store.CardOf(team, sender, m.CorrelationId);
+        var card = exact ?? store.OpenCardOf(team, sender);
         var p = Payload(m);
+        // B086: the time of this workflow's work goes on the member's card in it, or, with none (the Manager's own runs),
+        // on the member's card-less work in the workflow. Read before the report moves the card.
+        var lastActivity = exact is null || m.Type != MessageTypes.Failed ? null : store.Trail(exact.Id).LastOrDefault()?.At;
+        if (card is not null)
+        {
+            switch (m.Type)
+            {
+                case MessageTypes.Progress:
+                    Report(card, sender, "running", Text(p, "status"), "progress", giveUp: false);
+                    break;
+                case MessageTypes.Blocked:
+                    Report(card, sender, "blocked", Text(p, "reason"), "blocked", giveUp: true);
+                    break;
+                case MessageTypes.NeedsDecision:
+                    Report(card, sender, "needs-decision", Text(p, "question"), "asked", giveUp: true);
+                    break;
+                case MessageTypes.Failed:
+                    Report(card, sender, "failed", Text(p, "reason"), "failed", giveUp: true);
+                    break;
+                case MessageTypes.Completed:
+                    Report(card, sender, "completed", TesterRule.RunEndedText(p), "run ended", giveUp: false);
+                    break;
+                case MessageTypes.Handback:
+                    Report(card, sender, "handback", Text(p, "delivered"), "handed back", giveUp: false);
+                    break;
+            }
+        }
+        Time(m, p, exact is null ? null : store.Card(exact.Id), sender, lastActivity);
+    }
+
+    /// <summary>
+    /// B086: what a report adds to the timeline. A hand-back and a question are markers. A run's end carries its stalls and
+    /// lease waits (payload activity); a run the idle watchdog ended is a marker, and when its payload has no stalls (a run
+    /// from before B086), it was Stalled from its last sign of activity. A member's run that ends asking to be woken is
+    /// Scheduled until the wake.
+    /// </summary>
+    private void Time(Message m, JsonObject? p, CardRow? card, string sender, string? lastActivity)
+    {
+        var cardId = card?.Id;
+        long? workflow = m.CorrelationId;
         switch (m.Type)
         {
-            case MessageTypes.Progress:
-                Report(card, sender, "running", Text(p, "status"), "progress", giveUp: false);
-                break;
-            case MessageTypes.Blocked:
-                Report(card, sender, "blocked", Text(p, "reason"), "blocked", giveUp: true);
-                break;
-            case MessageTypes.NeedsDecision:
-                Report(card, sender, "needs-decision", Text(p, "question"), "asked", giveUp: true);
-                break;
-            case MessageTypes.Failed:
-                Report(card, sender, "failed", Text(p, "reason"), "failed", giveUp: true);
-                break;
-            case MessageTypes.Completed:
-                Report(card, sender, "completed", TesterRule.RunEndedText(p), "run ended", giveUp: false);
-                break;
             case MessageTypes.Handback:
-                Report(card, sender, "handback", Text(p, "delivered"), "handed back", giveUp: false);
+                store.AddMarker(cardId, workflow, sender, TimeMarkers.Handback, _at!);
+                return;
+            case MessageTypes.NeedsDecision:
+                store.AddMarker(cardId, workflow, sender, TimeMarkers.DecisionAsked, _at!);
+                return;
+            case MessageTypes.Completed or MessageTypes.Failed:
                 break;
+            default:
+                return;
         }
+        var stalls = Spans(p?["activity"]?["stalls"]);
+        foreach (var (start, end) in stalls) store.AddSpan(cardId, workflow, sender, "stall", start, end);
+        foreach (var (start, end) in Spans(p?["activity"]?["holds"])) store.AddSpan(cardId, workflow, sender, "hold", start, end);
+        if (m.Type == MessageTypes.Failed && Text(p, "failureClass") == FailureClasses.Idle)
+        {
+            if (stalls.Count == 0 && TimelineRebuild.IdleSeconds(Text(p, "reason")) is { } n)
+                store.AddSpan(cardId, workflow, sender, "stall", TimelineRebuild.StallStart(lastActivity, _at!, n), _at!);
+            store.AddMarker(cardId, workflow, sender, TimeMarkers.WatchdogEnd, _at!);
+        }
+        if (m.Type == MessageTypes.Completed && card is not null && p?["wake"]?["at"] is JsonValue w && w.TryGetValue<string>(out var wakeText)
+            && DateTimeOffset.TryParseExact(wakeText, "yyyy-MM-dd HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var wakeAt)
+            && wakeAt > m.OccurredAt)
+            store.AddScheduled(card, _at!, TimelineCalculator.Iso(wakeAt));
+    }
+
+    private static List<(string Start, string End)> Spans(JsonNode? node)
+    {
+        var list = new List<(string, string)>();
+        if (node is not JsonArray a) return list;
+        foreach (var s in a.OfType<JsonObject>())
+            if (s["start"] is JsonValue sv && sv.TryGetValue<string>(out var start) && s["end"] is JsonValue ev && ev.TryGetValue<string>(out var end))
+                list.Add((start, end));
+        return list;
     }
 
     private void Instruction(Message m, string team, string member)
@@ -108,6 +164,9 @@ public sealed class BoardProjector(BoardStore store)
         }
         if (store.CardOf(team, member, m.CorrelationId) is { } card)
         {
+            // B086: the person's word to a member that asked them something answers it.
+            if (m.Source == MessageTypes.PersonSource && card.Status == "needs-decision")
+                store.AddMarker(card.Id, card.Workflow, member, TimeMarkers.DecisionAnswered, _at!);
             store.Save(card with { Status = "queued", Lane = card.Placed && card.Lane != Lanes.Done ? card.Lane : Lanes.Todo }, _at);
             store.Unend(card.Id); // new work: a card its workflow's end ended is live again (B085)
             store.AddTrail(card.Id, from, "told", text, _at);
@@ -158,13 +217,16 @@ public sealed class BoardProjector(BoardStore store)
     {
         var how = m.Type switch { MessageTypes.WorkflowClosed => "closed", MessageTypes.WorkflowExpired => "expired", _ => "completed" };
         var p = Payload(m);
+        var lastActivity = m.Type == MessageTypes.WorkflowExpired && Text(p, "endedAt") is { } la ? la : null;
         foreach (var card in store.CardsOfWorkflow(m.CorrelationId))
         {
             if (m.Type == MessageTypes.WorkflowExpired)
             {
                 if (card.Lane == Lanes.Done && card.EndedAt is not null) continue;
-                if (card.Lane != Lanes.Done) store.Save(card with { Status = "done", Lane = Lanes.Done }, _at);
+                // B086: the card's time ends at the workflow's last activity, not at the expiry.
+                if (card.Lane != Lanes.Done) store.Save(card with { Status = "done", Lane = Lanes.Done }, _at, lastActivity);
                 store.AddTrail(card.Id, Who(m.Source), "workflow expired", Text(p, "detail") ?? "expired: nothing happened in it for too long", _at);
+                store.AddMarker(card.Id, card.Workflow, card.Member, TimeMarkers.Expired, _at!);
                 continue;
             }
             if (m.Type == MessageTypes.WorkflowClosed && card.Lane != Lanes.Done && Lanes.Loudness(card.Status) > 0)
