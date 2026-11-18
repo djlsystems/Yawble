@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
-import type { YawbleApi } from '../../../shared/api';
+import { computed, onMounted, reactive, ref } from 'vue';
+import type { TeamDefaultMember, TeamDefaults, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { type AgentCliId } from '../agentClis';
 import { useAgentOptions } from '../agentOptions';
 import Modal from './Modal.vue';
 import BusyLabel from './BusyLabel.vue';
 
-// Team creation: the repository, the Manager and the members, each with its agent CLI.
+// Team creation: the repository, the Manager and the members, each with its agent CLI. It starts from the saved
+// defaults (Settings > Teams, teams.defaults): the Manager's name and agent, the rows ticked "On new teams" in the
+// member list, and the other rows offered as one-click "+ <name>" buttons under it. Everything stays editable.
 const props = defineProps<{ api?: YawbleApi }>();
 const emit = defineEmits<{ close: []; created: [teamId: number] }>();
 const api = resolveApi(props.api);
@@ -15,6 +17,28 @@ const agentOptions = useAgentOptions(api);
 
 const form = reactive({ name: '', source: 'folder' as 'folder' | 'url', repoPath: '', repoUrl: '', managerName: 'Manager', managerCli: 'claude' as AgentCliId });
 const members = reactive<{ name: string; cli: AgentCliId }[]>([]);
+/** The agent "+ Add member" starts a row on: the saved Manager's agent. */
+const memberCli = ref<AgentCliId>('claude');
+/** Saved default rows not ticked "On new teams": offered under the list until added. */
+const offered = ref<TeamDefaultMember[]>([]);
+const offers = computed(() => offered.value.map((m, i) => ({ ...m, i })).filter((m) => !added.value.has(m.i)));
+const added = ref(new Set<number>());
+
+onMounted(async () => {
+  let d: TeamDefaults;
+  try { d = await api.call<TeamDefaults>('teams.defaults'); } catch { return; } // an older core: the built-in start
+  // (a field the person already changed while this loaded is kept)
+  if (d.manager?.name && form.managerName === 'Manager') form.managerName = d.manager.name;
+  if (d.manager?.cli) { if (form.managerCli === 'claude') form.managerCli = d.manager.cli as AgentCliId; memberCli.value = d.manager.cli as AgentCliId; }
+  const rows = (d.members ?? []).filter((m) => m.name?.trim());
+  members.push(...rows.filter((m) => m.onNewTeams).map((m) => ({ name: m.name, cli: m.cli as AgentCliId })));
+  offered.value = rows.filter((m) => !m.onNewTeams);
+});
+
+function offer(m: TeamDefaultMember & { i: number }) {
+  members.push({ name: m.name, cli: m.cli as AgentCliId });
+  added.value = new Set([...added.value, m.i]);
+}
 const error = ref<string | null>(null);
 const busy = ref(false);
 
@@ -73,7 +97,10 @@ async function create() {
       <button class="icon danger" title="Remove" @click="members.splice(i, 1)">✕</button>
     </div>
     <p v-if="members.length === 0" class="muted small" data-test="hire-hint">No members yet: the Manager hires its own team when you give it work. You can also add some now.</p>
-    <button data-test="add-member-row" @click="members.push({ name: '', cli: 'claude' })">+ Add member</button>
+    <div v-if="offers.length" class="row offers" data-test="member-offers">
+      <button v-for="m in offers" :key="m.i" type="button" class="offer" :data-test="`member-offer-${m.i}`" @click="offer(m)">+ {{ m.name }}</button>
+    </div>
+    <button data-test="add-member-row" @click="members.push({ name: '', cli: memberCli })">+ Add member</button>
     <div class="row actions"><span class="grow"></span>
       <button class="primary" data-test="create-team" :disabled="busy || !form.name.trim()" :aria-busy="busy" @click="create"><BusyLabel :busy="busy" text="Creating…">Create team</BusyLabel></button></div>
   </Modal>
@@ -87,4 +114,5 @@ h3 { font-size: 13px; margin: 8px 0 6px; }
 .agent input { width: 220px; }
 .actions { margin-top: 14px; }
 .sources { gap: 16px; margin: 4px 0; }
+.offers { gap: 6px; flex-wrap: wrap; margin: 2px 0 8px; }
 </style>
