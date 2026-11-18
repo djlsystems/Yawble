@@ -12,7 +12,7 @@ import type { LogSourceInfo, YawbleApi } from '../../src/shared/api';
 // A fake core only: the logs below are made up here, and nothing is pruned anywhere.
 const col = (key: string, label: string, kind: 'time' | 'text' | 'number' = 'text', filter = false) => ({ key, label, kind, filter });
 const sources: LogSourceInfo[] = [
-  { id: 'activity', title: 'All activity', group: 'Activity', about: 'Everything a member did.', columns: [col('at', 'Time', 'time'), col('source', 'Source', 'text', true), col('team', 'Team', 'text', true), col('member', 'Member'), col('event', 'Event'), col('details', 'Details')], prunable: false, loss: null, keptBecause: 'it is read from the other logs', defaultDays: null, retentionDays: null, team: true, member: true },
+  { id: 'activity', title: 'All activity', group: 'Activity', about: 'Everything that happened, by members, teams and the app.', columns: [col('at', 'Time', 'time'), col('source', 'Source', 'text', true), col('team', 'Team', 'text', true), col('member', 'Member'), col('event', 'Event'), col('details', 'Details')], prunable: false, loss: null, keptBecause: 'it is read from the other logs', defaultDays: null, retentionDays: null, team: true, member: true },
   { id: 'audit', title: 'Audit', group: 'Accountability', about: 'Every change.', columns: [col('at', 'Time', 'time'), col('via', 'Via', 'text', true), col('method', 'Call', 'text', true), col('outcome', 'Outcome')], prunable: true, loss: 'who changed what.', keptBecause: null, defaultDays: 365, retentionDays: 365, team: true, member: true },
   { id: 'runs', title: 'Runs', group: 'Security', about: 'Each run.', columns: [col('at', 'Started', 'time'), col('duration', 'Seconds', 'number')], prunable: true, loss: 'how runs ended.', keptBecause: null, defaultDays: 365, retentionDays: 90, team: true, member: true },
 ];
@@ -220,6 +220,121 @@ describe('LogsDialog', () => {
   });
 });
 
+// B101 (card 440): the Member filter picks a member, a team as a whole or the app. The core (card 438) answers
+// logs.query source=activity on this contract: member="team/Name" -> that member only; team="X" and no member -> X's
+// members plus X's team rows (member column "<X>"); app=true -> the app's own rows only (team empty, member "app").
+describe('LogsDialog: the Member filter on a member, a team or the app (B101)', () => {
+  const opts = (w: ReturnType<typeof mount>) => w.findAll('[data-test=logs-member] option').map((o) => [(o.element as HTMLOptionElement).value, o.text()]);
+
+  it('OffersEachMember_EachTeamAsAWhole_AndTheApp', async () => {
+    const { api } = fakeApi();
+    const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
+    await flushPromises();
+    expect(opts(w)).toEqual([
+      ['', 'Everyone'],
+      ['web/Manager', 'web/Manager'], ['web/DeveloperAda', 'web/DeveloperAda'],
+      ['team:web', 'web (whole team)'], ['team:docs', 'docs (whole team)'],
+      ['app', 'app (the app itself)'],
+    ]);
+    expect(w.find('[data-test=logs-about]').text()).not.toContain('Everything a member did');
+    w.unmount();
+  });
+
+  it('AMember_SendsMemberOnly', async () => {
+    const { api, calls } = fakeApi();
+    const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test=logs-member]').setValue('web/DeveloperAda');
+    await flushPromises();
+    const q = firsts(calls).at(-1);
+    expect(q).toMatchObject({ source: 'activity', member: 'web/DeveloperAda', team: undefined });
+    expect(q.app).toBeUndefined();
+    expect(w.find('[data-test=logs-team]').element).toHaveProperty('value', 'web');
+    w.unmount();
+  });
+
+  it('AWholeTeam_SendsTeamWithNoMember', async () => {
+    const { api, calls } = fakeApi();
+    const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test=logs-member]').setValue('team:docs');
+    await flushPromises();
+    const q = firsts(calls).at(-1);
+    expect(q).toMatchObject({ source: 'activity', team: 'docs', member: undefined });
+    expect(q.app).toBeUndefined();
+    expect(w.find('[data-test=logs-team]').element).toHaveProperty('value', 'docs');
+    expect(w.find('[data-test=logs-member]').element).toHaveProperty('value', 'team:docs');
+    // With a team chosen, its own whole-team option is the one offered.
+    expect(opts(w).filter(([v]) => v.startsWith('team:'))).toEqual([['team:docs', 'docs (whole team)']]);
+    w.unmount();
+  });
+
+  it('TheApp_SendsAppTrue_WithNoTeamOrMember', async () => {
+    const { api, calls } = fakeApi();
+    const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test=logs-member]').setValue('app');
+    await flushPromises();
+    const q = firsts(calls).at(-1);
+    expect(q).toMatchObject({ source: 'activity', app: true, team: undefined, member: undefined });
+    expect(w.find('[data-test=logs-team]').element).toHaveProperty('value', '');
+    expect(w.find('[data-test=logs-clear]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('PickingOneClearsTheOthers', async () => {
+    const { api, calls } = fakeApi();
+    const w = mount(LogsDialog, { props: { api, member: 'web/DeveloperAda' }, attachTo: document.body });
+    await flushPromises();
+    expect(firsts(calls)[0]).toMatchObject({ source: 'activity', member: 'web/DeveloperAda' });
+    // member -> app: the member and its team go.
+    await w.find('[data-test=logs-member]').setValue('app');
+    await flushPromises();
+    expect(firsts(calls).at(-1)).toMatchObject({ app: true, team: undefined, member: undefined });
+    // app -> a whole team: app goes.
+    await w.find('[data-test=logs-member]').setValue('team:web');
+    await flushPromises();
+    let q = firsts(calls).at(-1);
+    expect(q).toMatchObject({ team: 'web', member: undefined });
+    expect(q.app).toBeUndefined();
+    // whole team -> a member: the team filter becomes the member's, sent as the member alone.
+    await w.find('[data-test=logs-member]').setValue('web/Manager');
+    await flushPromises();
+    expect(firsts(calls).at(-1)).toMatchObject({ team: undefined, member: 'web/Manager' });
+    // app, then a team in the Team select: app goes.
+    await w.find('[data-test=logs-member]').setValue('app');
+    await flushPromises();
+    await w.find('[data-test=logs-team]').setValue('docs');
+    await flushPromises();
+    q = firsts(calls).at(-1);
+    expect(q).toMatchObject({ team: 'docs', member: undefined });
+    expect(q.app).toBeUndefined();
+    // Clear filters clears app too.
+    await w.find('[data-test=logs-member]').setValue('app');
+    await flushPromises();
+    await w.find('[data-test=logs-clear]').trigger('click');
+    await flushPromises();
+    q = firsts(calls).at(-1);
+    expect([q.team, q.member, q.app]).toEqual([undefined, undefined, undefined]);
+    w.unmount();
+  });
+
+  it('AppIsAllActivityOnly_AndLeavingAllActivityDropsIt', async () => {
+    const { api, calls } = fakeApi();
+    const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
+    await flushPromises();
+    await w.find('[data-test=logs-member]').setValue('app');
+    await flushPromises();
+    await w.find('[data-test=logs-source]').setValue('audit');
+    await flushPromises();
+    const q = firsts(calls).at(-1);
+    expect(q.source).toBe('audit');
+    expect(q.app).toBeUndefined();
+    expect(w.find('[data-test=logs-member-app]').exists()).toBe(false);
+    expect(opts(w)[0]).toEqual(['', 'All members']);
+    w.unmount();
+  });
+});
 describe('the member card', () => {
   it('HasALogsButton', async () => {
     const card = { member: { id: 1, team: 'web', name: 'DeveloperAda', role: 'member', cli: 'claude' }, state: 'idle', hasClone: false } as any;
