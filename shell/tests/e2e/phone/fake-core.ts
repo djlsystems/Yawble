@@ -221,7 +221,12 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'teams.repos': () => [],
   'agentProfiles.list': () => [],
   'board.list': () => ({ lanes, cards, teams: teamRows.map((t) => ({ id: t.id, name: t.name })), clearedCount: 0 }),
-  'board.card': (p) => ({ ...cards.find((c) => c.id === p?.id)!, trail: [{ id: 1, at: iso(30), source: 'Manager', kind: 'planned', text: 'Planned the card.' }, { id: 2, at: iso(20), source: 'Manager', kind: 'assigned', text: 'Assigned to DeveloperAda.' }], itemTitle: 'Partial refunds' }),
+  'board.card': (p) => ({ ...cards.find((c) => c.id === p?.id)!, trail: [{ id: 1, at: iso(30), source: 'Manager', kind: 'planned', text: 'Planned the card.' }, { id: 2, at: iso(20), source: 'Manager', kind: 'assigned', text: 'Assigned to DeveloperAda.' },
+    // B072: a hand-back naming commits (card 5 only): one the repository has, one git no longer has.
+    ...(p?.id === 5 ? [{ id: 3, at: iso(10), source: 'TesterBen', kind: 'handback', text: `Handed back: committed ${COMMIT_ADA.slice(0, 7)} on members/payments/developerada (the earlier ${COMMIT_GONE} is gone).` }] : [])], itemTitle: 'Partial refunds' }),
+  // B072 (card 444): the Commit view against the contract DeveloperTomas builds in core (git.commitShow, git.commitDiff).
+  'git.commitShow': (p) => commitShow(String(p?.sha ?? '')),
+  'git.commitDiff': (p) => commitDiff(String(p?.sha ?? ''), String(p?.path ?? '')),
   // B086: a card's own row, or workflow #10's rows and summary; an unknown one is refused like the core (not_found).
   'timeline.get': (p) => {
     if (p?.workflow != null) { const quiet = (expiry.on ? expiryWorkflows() : []).find((w) => w.id === Number(p.workflow));
@@ -258,7 +263,7 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'git.status': (p) => (p?.teamId == null ? { installed: true, version: '2.50', path: 'C:/fake/git.exe' } : {
     repoPath: 'C:/repos/payments', managed: true, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: null, baseSha: 'abc1234', originBaseSha: null,
     baseAheadOfOrigin: null, baseBehindOrigin: null, teamBranch: 'team/payments', teamSha: 'def5678', teamAheadOfBase: 2, teamBehindBase: 0, merge: 'fast-forward',
-    conflictFiles: [], members: [], oldBranches: [], blockingBranches: [],
+    conflictFiles: [], members: [{ branch: 'members/payments/developerada', sha: COMMIT_ADA, aheadOfBase: 2, inTeamBranch: true }], oldBranches: [], blockingBranches: [],
   }),
   // B067 (card 362): the Git dialog's Tidy… against the contract DeveloperMarlo builds in core (git.tidyPlan,
   // git.branchRealign; delete through git.deleteBranches, plan then token). DeveloperAda runs, so realigning her
@@ -327,6 +332,54 @@ function tidyPlan() {
     { repo: 'payments-cloud', baseBranch: 'main', branches: cloud.filter(keep), notes: ["TesterBen's clone was not read: its .git is a file (a gitdir pointer)"] }] };
 }
 
+/** B072: the commits the fake repository has (any prefix of 7+ finds one), as the core's git.commitShow answers them. */
+const COMMIT_ADA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
+const COMMIT_MERGE = 'def5678a9b0c1d2e3f405162738495a6b7c8d9e0';
+const COMMIT_BASE = 'abc1234f5e6d7c8b9a0f1e2d3c4b5a6978695a4b';
+const COMMIT_GONE = '0dead00b1';
+const commitState = { codeShown: true };
+const person = (name: string, mins: number) => ({ name, email: `${name.toLowerCase()}@yawble.local`, date: iso(mins) });
+function commitShow(sha: string) {
+  // As the core: a malformed ID is bad_params; a commit git no longer has is only {found, goneReason, sha}.
+  if (!/^[0-9a-f]{4,64}$/i.test(sha)) throw Object.assign(new Error('sha must be 4 to 64 hex digits'), { code: 'bad_params' });
+  const s = sha.toLowerCase();
+  const pick = [COMMIT_ADA, COMMIT_MERGE, COMMIT_BASE].find((c) => c.startsWith(s));
+  if (!pick) return { found: false, goneReason: `Commit ${sha} was on members/payments/old-cleo (Old Cleo's branch), and git no longer has it: that branch was deleted and git has since cleaned up its commits.`, sha };
+  const common = { found: true, sha: pick, shortSha: pick.slice(0, 7), codeShown: commitState.codeShown };
+  if (pick === COMMIT_ADA) return { ...common, title: 'Partial refunds: refund part of a payment', body: 'The refund takes an amount now.\n\nCard 3, workflow #10.',
+    author: person('DeveloperAda', 40), isMerge: false, parents: [COMMIT_BASE], made: { member: 'DeveloperAda', card: 3, workflow: 10 },
+    where: { inMain: false, branches: ['team/payments', 'members/payments/developerada'], pushed: false, tags: [] },
+    files: [
+      { path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false },
+      { path: 'src/payments/a-rather-long-folder-name/and-a-long-file-name-that-must-wrap-on-a-phone.test.ts', status: 'added', added: 12, deleted: 0, binary: false },
+      { path: 'docs/refund-flow.png', status: 'modified', added: 0, deleted: 0, binary: true },
+    ] };
+  if (pick === COMMIT_MERGE) return { ...common, title: "Merge DeveloperAda's branch into team/payments", body: '', author: person('Manager', 30), committer: person('Yawble', 30),
+    isMerge: true, parents: [COMMIT_BASE, COMMIT_ADA], merge: { intoBranch: 'team/payments', fromBranch: 'members/payments/developerada', fromMember: 'DeveloperAda', commitCount: 2 },
+    made: { member: 'Manager', workflow: 10 }, where: { inMain: false, branches: ['team/payments'], pushed: false, tags: [] },
+    files: [{ path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false }] };
+  return { ...common, title: 'Release 2026.11.18.1', body: '', author: person('Owner', 600), isMerge: false, parents: [],
+    where: { inMain: true, branches: ['team/payments'], pushed: true, tags: ['v2026.11.18.1'] },
+    files: [{ path: 'README.md', status: 'modified', added: 1, deleted: 1, binary: false }] };
+}
+function commitDiff(sha: string, path: string) {
+  const c = commitShow(sha) as { found: boolean; codeShown?: boolean; goneReason?: string; files: { path: string; oldPath?: string; status: string; added: number; deleted: number; binary: boolean }[] };
+  if (!c.found) throw Object.assign(new Error(c.goneReason!), { code: 'gone' });
+  if (!c.codeShown) throw Object.assign(new Error("Members' code is not shown to cloud viewers."), { code: 'remote_refused' });
+  const f = c.files.find((x) => x.path === path);
+  if (!f) throw Object.assign(new Error(`commit ${sha.slice(0, 12)} does not change ${path}`), { code: 'no_such_file' });
+  const head = { path, ...(f.oldPath ? { oldPath: f.oldPath } : {}), status: f.status, added: f.added, deleted: f.deleted };
+  if (f.binary) return { ...head, binary: true, tooLarge: false, summary: 'Binary file, 12 KB to 14 KB', hunks: [] };
+  const lines = [
+    { kind: 'context', old: 1, new: 1, text: 'export function refund(amount: number, limitDays = 30): boolean {' },
+    { kind: 'deleted', old: 2, text: '  return amount > 0;' },
+    { kind: 'added', new: 2, text: '  if (amount <= 0) return false; // a long comment that runs past the edge of a phone screen, to scroll inside the diff only' },
+    { kind: 'added', new: 3, text: '  return limitDays <= 90;' },
+    { kind: 'context', old: 3, new: 4, text: '}' },
+  ];
+  return { ...head, binary: false, tooLarge: false, hunks: [{ header: '@@ -1,3 +1,4 @@ export function refund', oldStart: 1, oldCount: 3, newStart: 1, newCount: 4, lines }] };
+}
+
 /** B054: with true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */
 let syncBehind = false;
 /** B054: with false, no integration ask and no Manager decision is pending (the team page shows its members under Tell). */
@@ -355,6 +408,8 @@ export function createFakeCore() {
     setExpiry(on: boolean) { expiry.on = on; expiry.extended.clear(); expiry.days.clear(); },
     /** B067: put the Tidy… plan back (nothing deleted or realigned). */
     resetTidy() { tidy.deleted.clear(); tidy.realigned.clear(); },
+    /** B072: with false, git.commitShow says codeShown=false (Show members' code to cloud viewers off). */
+    setCodeShown(on: boolean) { commitState.codeShown = on; },
     answer(text: string): string | null {
       const msg = JSON.parse(text) as { id: number; method: string; params: any };
       calls.push(msg.method);

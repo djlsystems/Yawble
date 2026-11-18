@@ -735,6 +735,47 @@ export interface TidyPlan { repos: TidyRepo[] }
  * the team repository (and origin). expectOld / expectNew bind the yes to the team and clone commits the person was
  * shown: the core refuses with code "stale" if either moved. Also refused (an error) while the member runs. */
 export interface BranchRealignResult { oldSha: string; newSha: string }
+/**
+ * B072 git.commitShow {team | teamId, sha, repo?} (core TeamRepos.CommitView.cs CommitInfo.ToJson): one commit of the
+ * team's repository, from plain git (never an agent's clone). sha: 4 to 64 hex digits, else the error bad_params.
+ * found=false: git no longer has it; the answer is then only {found, goneReason, sha} (goneReason is plain words and
+ * may name the branch and member). made: the member, card and workflow that made it (the app's own records); absent
+ * when unknown; a merge recorded on the team branch is credited to the Manager. merge: what a merge brought in;
+ * intoBranch / fromBranch are null when neither git nor the app's records can tell. where: inMain; branches: the team
+ * branch first, then member branches, never main; onlyOnMember only when it is in neither main nor the team branch;
+ * pushed (on origin); tags (the release tags that contain it). files: against the first parent for a merge.
+ * codeShown=false: a cloud viewer with "Show members' code to cloud viewers" off; the file list only, no diffs.
+ */
+export interface CommitPerson { name: string; email: string; date: string }
+export type CommitFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+export interface CommitFile { path: string; oldPath?: string | null; status: CommitFileStatus | string; added: number; deleted: number; binary: boolean }
+export interface CommitGone { found: false; goneReason?: string | null; sha: string }
+export interface CommitFound {
+  found: true;
+  sha: string; shortSha: string; title: string; body: string;
+  author: CommitPerson; committer?: CommitPerson | null;
+  isMerge: boolean; parents: string[];
+  merge?: { intoBranch: string | null; fromBranch: string | null; fromMember?: string | null; commitCount: number } | null;
+  made?: { member: string; card?: number | null; workflow?: number | null } | null;
+  where: { inMain: boolean; branches: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[] };
+  files: CommitFile[];
+  codeShown: boolean;
+}
+export type CommitShow = CommitGone | CommitFound;
+/**
+ * B072 git.commitDiff {team | teamId, sha, path, repo?} (core CommitFileDiff.ToJson): one file's diff against the first
+ * parent. Each hunk: git's header line, its starts and counts, and its lines (kind context / added / deleted; old / new:
+ * the 1-based line numbers, only on the side(s) the line is on). Binary, over 5000 changed lines or 2M characters, or a
+ * pure rename: a summary and no hunks. Errors: gone, no_such_file, bad_params, git_failed; remote_refused for a cloud
+ * viewer when members' code is hidden.
+ */
+export interface CommitDiffLine { kind: 'context' | 'added' | 'deleted'; old?: number | null; new?: number | null; text: string }
+export interface CommitDiffHunk { header: string; oldStart: number; oldCount: number; newStart: number; newCount: number; lines: CommitDiffLine[] }
+export interface CommitDiff {
+  path: string; oldPath?: string | null; status: CommitFileStatus | string; binary: boolean; tooLarge: boolean; summary?: string | null;
+  added: number; deleted: number; hunks: CommitDiffHunk[];
+}
+
 /** teams.syncToBase: the team's "Bring branches up to <base> before new work" setting, the note of a sync or fetch-back
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {
@@ -925,7 +966,8 @@ export interface ConciergeTurnEvent {
 }
 
 // ---- the Board (core Board/BoardService.cs): cards in four lanes, and the backlog ----
-export type CardStatus = 'queued' | 'running' | 'blocked' | 'needs-decision' | 'failed' | 'completed' | 'handback' | 'done';
+/** 'stopped' (B097): the person stopped the card's run; lane In Progress / To Do, never Needs you, never red. */
+export type CardStatus = 'queued' | 'running' | 'blocked' | 'needs-decision' | 'failed' | 'completed' | 'handback' | 'done' | 'stopped';
 export type LaneId = 'todo' | 'in-progress' | 'blocked' | 'done';
 export interface BoardCard {
   id: number; team: string; teamId: number | null; member: string | null; item: string | null; title: string; body: string;

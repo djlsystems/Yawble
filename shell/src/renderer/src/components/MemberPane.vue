@@ -168,7 +168,7 @@ defineExpose({ el: () => root.value });
     <div class="body" :class="`body-${view}`" :style="phone ? undefined : { height: `${height}px` }" data-test="member-pane-body">
       <template v-if="view === 'report'">
         <!-- Agent-written markdown: renderMarkdown never lets raw HTML through. -->
-        <div v-if="said" class="output md scrolls" data-test="agent-output" v-html="saidHtml" />
+        <div v-if="said" class="output md scrolls" data-test="agent-output" :data-commit-team="m.team" v-html="saidHtml" />
         <div v-else class="output md scrolls" data-test="agent-output">
           <p class="muted" data-test="agent-output-empty">{{ emptyText }}</p>
         </div>

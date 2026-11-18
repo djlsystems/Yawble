@@ -5,7 +5,8 @@ import { defineComponent, h } from 'vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
 import TeamMembers from '../../src/renderer/src/components/TeamMembers.vue';
 import BoardCardItem from '../../src/renderer/src/board/BoardCardItem.vue';
-import { cardFace, cardStatusLook, cardStopped, trailKind } from '../../src/renderer/src/board/cards';
+import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
+import { cardFace, cardStatusLook, cardStopped, StatusColor, StatusLabel, trailKind } from '../../src/renderer/src/board/cards';
 import { memberStateOf, MemberStateLabel } from '../../src/renderer/src/faces/faces';
 import { feedKindOf, MonitorModel, type Effect, type FeedRow, type TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import { MonitorSound } from '../../src/renderer/src/monitor/sound';
@@ -176,23 +177,38 @@ describe('Monitor: a stopped run never needs you', () => {
   });
 });
 
-// The board: a card whose member's run was stopped (the core marks the card "failed").
+// The board: the core sets a stopped run's card to status "stopped", in In Progress (or To Do), never Needs you.
 const boardCard = (over: Partial<BoardCard> = {}): BoardCard => ({
-  id: 12, team: 'payments', teamId: 1, member: 'DeveloperMarlo', item: 'B097', title: 'Stop it', body: '', status: 'failed', lane: 'blocked',
+  id: 12, team: 'payments', teamId: 1, member: 'DeveloperMarlo', item: 'B097', title: 'Stop it', body: '', status: 'stopped', lane: 'in-progress',
   placed: true, awaitingManager: false, workflow: 3, createdAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z', trailCount: 2, ...over,
 });
 
 describe('Board: a stopped run line reads Stopped in a neutral colour', () => {
-  it('cardStatusLook: Stopped in --state-stopped for a stopped run; Failed in red otherwise', () => {
-    const stopped = boardCard({ memberState: { state: 'idle', attention: 'stopped' } });
-    expect(cardStopped(stopped)).toBe(true);
-    expect(cardStatusLook(stopped)).toEqual({ label: 'Stopped', color: 'var(--state-stopped)', stopped: true });
-    expect(cardFace(stopped)).toBe('stopped');
-    const byClass = boardCard({ memberState: { state: 'idle', attention: 'failed', lastRunFailureClass: 'stopped' } });
+  it('status "stopped": Stopped in --state-stopped, with or without the member state', () => {
+    expect(StatusLabel.stopped).toBe('Stopped');
+    expect(StatusColor.stopped).toBe('var(--status-stopped)'); // styles.css: --status-stopped is var(--state-stopped)
+    for (const card of [boardCard(), boardCard({ memberState: { state: 'running' } }), boardCard({ lane: 'todo' })]) {
+      expect(cardStopped(card)).toBe(true);
+      expect(cardStatusLook(card)).toEqual({ label: 'Stopped', color: 'var(--state-stopped)', stopped: true });
+    }
+    expect(cardFace(boardCard())).toBe('stopped'); // no memberState: the card's own status
+  });
+  it("the member's attention alone never makes a card stopped (the member's older cards stay as they are)", () => {
+    const older = boardCard({ id: 13, status: 'running', memberState: { state: 'idle', attention: 'stopped' } });
+    expect(cardStopped(older)).toBe(false);
+    expect(cardStatusLook(older).label).toBe('Running');
+    const done = boardCard({ id: 14, status: 'handback', lane: 'done', memberState: { state: 'idle', attention: 'stopped' } });
+    expect(cardStatusLook(done).label).toBe('Handed back');
+  });
+  it('a card recorded before the change ("failed" + the member stopped) still reads Stopped; a real failure stays red', () => {
+    const legacy = boardCard({ status: 'failed', lane: 'blocked', memberState: { state: 'idle', attention: 'stopped' } });
+    expect(cardStatusLook(legacy)).toEqual({ label: 'Stopped', color: 'var(--state-stopped)', stopped: true });
+    const byClass = boardCard({ status: 'failed', lane: 'blocked', memberState: { state: 'idle', attention: 'failed', lastRunFailureClass: 'stopped' } });
     expect(cardStatusLook(byClass).label).toBe('Stopped');
-    const failed = boardCard({ memberState: { state: 'idle', attention: 'failed', lastRunFailureClass: 'timeout' } });
+    const failed = boardCard({ status: 'failed', lane: 'blocked', memberState: { state: 'idle', attention: 'failed', lastRunFailureClass: 'timeout' } });
     expect(cardStatusLook(failed)).toEqual({ label: 'Failed', color: 'var(--status-failed)', stopped: false });
-    expect(cardStatusLook(boardCard()).label).toBe('Failed');
+    expect(cardStatusLook(boardCard({ status: 'failed', lane: 'blocked' })).label).toBe('Failed');
+    expect(cardFace(boardCard({ status: 'failed' }))).toBe('failed');
   });
   it('the card on the board shows Stopped and its face the neutral ring', () => {
     const w = mount(BoardCardItem, { props: { card: boardCard({ memberState: { state: 'idle', attention: 'stopped' } }) } });
@@ -200,6 +216,28 @@ describe('Board: a stopped run line reads Stopped in a neutral colour', () => {
     expect(w.get('[data-test=card-status]').text()).toBe('Stopped');
     expect(w.get('[data-test=member-avatar]').attributes('data-state')).toBe('stopped');
     expect((w.get('[data-test=board-card-12]').element as HTMLElement).style.getPropertyValue('--status')).toBe('var(--state-stopped)');
+  });
+  it('the card panel: the chip says Stopped in the neutral colour and the status select shows Stopped, not a blank', async () => {
+    const detail = { ...boardCard(), trail: [{ id: 1, at: '2026-11-18T19:00:00Z', source: 'DeveloperMarlo', kind: 'stopped', text: 'stopped by the person' }] };
+    const api = { call: async (m: string) => (m === 'board.card' ? detail : null), onEvent: () => () => {} } as unknown as YawbleApi;
+    const w = mount(CardPanel, { props: { id: 12, lanes: [{ id: 'in-progress', label: 'In Progress' }], api } });
+    mounted.push(w);
+    await flushPromises();
+    const chip = w.get('[data-test=card-status-chip]');
+    expect(chip.text()).toBe('Stopped');
+    expect(chip.attributes('data-stopped')).toBe('true');
+    expect((chip.element as HTMLElement).style.color).toBe('var(--state-stopped)');
+    const select = w.get('[data-test=card-status-select]').element as HTMLSelectElement;
+    expect(select.value).toBe('stopped');
+    expect(select.selectedOptions[0]?.textContent).toBe('Stopped');
+  });
+  it('the status select offers Stopped only on a stopped card (the core sets it, the person does not)', async () => {
+    const detail = { ...boardCard({ status: 'running' }), trail: [] };
+    const api = { call: async (m: string) => (m === 'board.card' ? detail : null), onEvent: () => () => {} } as unknown as YawbleApi;
+    const w = mount(CardPanel, { props: { id: 12, lanes: [{ id: 'in-progress', label: 'In Progress' }], api } });
+    mounted.push(w);
+    await flushPromises();
+    expect(w.findAll('[data-test=card-status-select] option').map((o) => o.attributes('value'))).not.toContain('stopped');
   });
   it("a trail's failed line for a stopped run reads stopped; any other failed line stays failed", () => {
     expect(trailKind({ kind: 'failed', text: 'stopped by the person' })).toBe('stopped');
