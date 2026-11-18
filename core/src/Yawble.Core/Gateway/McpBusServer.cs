@@ -263,7 +263,8 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and queued instructions."),
         Tool("hiring", "The Manager: the agent CLIs you may hire, and whether each can run on this computer now."),
         Tool("hire", "The Manager: add a member to your team. It starts idle; give it work with tell.",
-            ("name", "string", "The job, a space, then a first name: 'Developer Priya', 'Tester Wren'. The answer gives the id to address it by ('DeveloperPriya').", true),
+            ("name", "string", "The job word alone, one word: 'Developer', 'Tester'. The app adds a first name from the person's list; the answer gives " +
+                "the id to address it by ('DeveloperPriya'). Only when a refusal asks for one: the job, a space, then a first name as the refusal says.", true),
             ("cli", "string", "Which agent CLI runs it (see hiring). Default: your own.", false),
             ("job", "string", "Its standing job on the team, e.g. 'Developer: writes the code' or 'Tester: builds and tests'.", false)),
         Tool("skills_get", "Load a skill: your role text (manager or member) or any skill skills_list offers you.",

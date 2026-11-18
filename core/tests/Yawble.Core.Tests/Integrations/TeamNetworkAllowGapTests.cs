@@ -68,8 +68,11 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
 
     private async Task<long> CreateTeam(string name, params string[] members)
     {
-        var r = await Call("teams.create", new { name, managerCli = "claude", members = members.Select(m => new { name = m, cli = "claude" }).ToArray() });
-        return r!["teamId"]!.GetValue<long>();
+        var r = await Call("teams.create", new { name, managerCli = "claude", members = Array.Empty<object>() });
+        var teamId = r!["teamId"]!.GetValue<long>();
+        // One-word names: added as typed (in teams.create a name with no space is a job word and gets a first name from the list).
+        foreach (var m in members) await Call("members.add", new { teamId, name = m, cli = "claude" });
+        return teamId;
     }
 
     private async Task<long> IdOf(long teamId, string name) =>

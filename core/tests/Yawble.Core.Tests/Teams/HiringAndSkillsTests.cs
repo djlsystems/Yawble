@@ -72,27 +72,27 @@ public class HiringAndSkillsTests
             Assert.Contains("\"cli\":\"codex\"", hiring);
             Assert.Contains("\"ready\":false", hiring);
 
-            var (dev, devError) = await Call(run, "hire", new { name = "Dev", cli = "codex", job = "Developer: writes the console app" });
+            var (dev, devError) = await Call(run, "hire", new { name = "Developer Dana", cli = "codex", job = "Developer: writes the console app" });
             Assert.False(devError, dev);
-            Assert.Contains("hired Dev (codex)", dev);
-            var (tester, _) = await Call(run, "hire", new { name = "Tess", job = "Tester: builds and checks it" });
-            Assert.Contains("hired Tess (claude)", tester); // the Manager's own CLI by default
+            Assert.Contains("hired DeveloperDana (codex)", dev);
+            var (tester, _) = await Call(run, "hire", new { name = "Tester Tess", job = "Tester: builds and checks it" });
+            Assert.Contains("hired TesterTess (claude)", tester); // the Manager's own CLI by default
 
-            var (again, againError) = await Call(run, "hire", new { name = "dev" });
+            var (again, againError) = await Call(run, "hire", new { name = "developer dana" });
             Assert.True(againError);
             Assert.Contains("exists", again);
             var (bad, badError) = await Call(run, "hire", new { name = "Con" });
             Assert.True(badError);
             Assert.Contains("bad_name", bad); // a Windows device name cannot be a member's folder
-            var (cli, cliError) = await Call(run, "hire", new { name = "Zed", cli = "nonesuch" });
+            var (cli, cliError) = await Call(run, "hire", new { name = "Writer Zed", cli = "nonesuch" });
             Assert.True(cliError);
             Assert.Contains("bad_cli", cli);
         });
         using var store = db.OpenStore();
         var rows = store.MemberRows(store.Teams().Single().Id);
-        Assert.Equal(["Manager", "Dev", "Tess"], rows.Select(r => r.Name));
-        Assert.Equal("Developer: writes the console app", rows.Single(r => r.Name == "Dev").Instructions);
-        Assert.Equal("member", rows.Single(r => r.Name == "Dev").Role);
+        Assert.Equal(["Manager", "DeveloperDana", "TesterTess"], rows.Select(r => r.Name));
+        Assert.Equal("Developer: writes the console app", rows.Single(r => r.Name == "DeveloperDana").Instructions);
+        Assert.Equal("member", rows.Single(r => r.Name == "DeveloperDana").Role);
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class HiringAndSkillsTests
         var memberDone = new TaskCompletionSource();
         await WithManagerRun(db, new SkillCatalog(db.ConnectionString), async run =>
         {
-            await Call(run, "hire", new { name = "Dev", job = "Developer: writes the console app" });
-            await run.TellAsync("Dev", "write it", Ct);
+            await Call(run, "hire", new { name = "Developer Dana", job = "Developer: writes the console app" });
+            await run.TellAsync("DeveloperDana", "write it", Ct);
         }, async run =>
         {
             memberPrompt = TeamPrompt.For(run);

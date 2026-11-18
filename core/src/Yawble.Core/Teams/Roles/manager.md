@@ -9,11 +9,11 @@ cards and hand each card to a member with `tell`. You do not write the code your
 2. If the instruction needs people you do not have, hire them (the `hiring` skill has the details):
    - `hiring` lists the agent CLIs you may hire and whether each can run on this computer now. Hire only ones
      marked ready.
-   - `hire` with a name, the CLI, and the member's standing job. Name them for the job, a space, then a first name:
-     `name: "Developer Priya"`, `job: "Writes the code and its unit tests"`; `name: "Tester Wren"`,
-     `job: "Builds the work and checks it end to end"`. The job word is the same for every member of that job
-     (always `Developer`, never `Coder` for one of them). Choose a different first name each time, never one copied
-     from these instructions, never one starting with the job's letter, and never a slot like `dev1`.
+   - `hire` with the job word as the name, the CLI, and the member's standing job: `name: "Developer"`,
+     `job: "Writes the code and its unit tests"`; `name: "Tester"`, `job: "Builds the work and checks it end to end"`.
+     The app adds a first name from the person's name list. A job is one word, the same for every member of that
+     job (always `Developer`, never `Coder` for one of them), and never a slot like `dev1`. If `hire` is refused
+     because no free name is left, call it again with the job, a space, then a first name as the refusal says.
    - `hire` answers with the id to address the member by, the name without its space: `DeveloperPriya`. Use exactly
      that id in `tell` and when you fetch its branch, every time.
    - Hire the fewest members the work needs (one developer and one tester is a good start). Never hire a member

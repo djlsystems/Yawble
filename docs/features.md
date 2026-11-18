@@ -13,8 +13,26 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - A team has one **Manager** and any number of **members**. You tell the Manager what you want. It splits the work,
   tells members, and declares the workflow complete.
 - **New team** asks for a team name, a repository (a folder on this computer, a new one the app makes, or
-  **Clone from an address**) and its agents, each with a role and a CLI.
+  **Clone from an address**) and its agents, each with a role and a CLI. It starts from the defaults in
+  **Settings > Teams**: the default Manager and the default members ticked **On new teams**; the others are offered as
+  one-click **+ name** buttons. The same defaults make the team when the Concierge or the companion creates one, or a
+  backlog item is dispatched to a new team, unless the caller names its own Manager, agent or members.
 - A member's name is a job and a first name, for example "Developer Priya". Its id names its folder and branch.
+- How members get their first names:
+  - A Manager hires with the job word alone ("Developer"). The app picks a random first name from the member-name
+    list (Settings > Teams) that no member of any team has, archived teams included; Managers do not count.
+  - When no free name is found (the list is empty, or 10 random tries all hit used names), the hire is refused and
+    the Manager hires again with a full name: a first name common in the list's country, unused on any team. A full
+    name whose first name a member already has is refused the same way.
+  - A default member or New Team row whose name is a job word alone gets a first name the same way when the team is
+    made; when none is free, the team is not made and the window says so. A full name is used as typed.
+  - Names typed in New Team or Add member are used as typed and checked only against their own team.
+- The member-name list (Settings > Teams) holds one first name per line. Save drops blank lines, surrounding spaces and
+  repeats (ignoring case); a line must be one word of the letters A-Z, 2 to 20 characters, a hyphen inside allowed, and
+  other lines are listed and not saved. Under it, how many names a member already uses. **Generate** asks the
+  Concierge's default agent once, with no Yawble tools and in a folder deleted afterwards, for 100 popular first names
+  of the chosen **Country** (default United States). Its names replace the text, unsaved until **Save**. The country is
+  saved with the list.
 - **Member settings** has General (CLI, model, credential, instructions) and Policy (see
   [Sandbox and policy](#sandbox-and-policy)).
 - Team **Settings** has the tabs General, Members, Repositories, Environment and Integrations:
@@ -246,6 +264,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 - The Concierge is a chat with an agent that knows every team on this computer and acts for you.
 - Conversations are kept. Each reply is one sandboxed run of the conversation's agent CLI.
+- A new conversation starts on the default agent from Settings > Concierge while that agent still exists; otherwise
+  on the first CLI that is installed and signed in. Existing conversations keep their own agent.
 - It can read teams, status, activity, workflows, documents, the backlog, the board, git state, integrations,
   usage and the doctor.
 - It can tell a Manager, answer a team's question, create a team, pause or resume a team, nudge, close or extend a
@@ -573,6 +593,8 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 |---|---|
 | General | **Keep running when the window is closed** (Yawble stays in the tray), **Start Yawble when I sign in to this computer**, Backups |
 | Agents | Detected CLIs and custom agents |
+| Concierge | **Default agent** for new Concierge conversations: an agent, or **First available on this computer** (the first CLI that is installed and signed in) |
+| Teams | **Default agents** for new teams (the Manager's name and agent, and optional members, each ticked **On new teams** or offered as a one-click add), and **Member names**: the list new members' first names come from, with **Generate** for a country |
 | Skills | Skills and which roles and teams they are offered to |
 | Guardrails | The global policy and the global run limit |
 | Integrations | CLIs, APIs, MCP servers, Connections, host tasks |

@@ -77,7 +77,7 @@ public sealed partial class BusEngine
             catch (ArgumentException e) { throw new BusRefusal("bad_name", e.Message); }
             if (_store.MemberRows(teamId).Any(m => string.Equals(m.Name, id, StringComparison.OrdinalIgnoreCase)))
                 throw new BusRefusal("exists", $"the team already has a member '{id}'");
-            var m = AddMember(teamId, id, MemberRole.Member, CheckCli(cli));
+            var m = AddMember(teamId, id, MemberRole.Member, CheckCli(cli), Teams.MemberNameList.GivenNameOf(name));
             return _store.MemberRows(memberId: m.Id).Single();
         }), ct);
 
@@ -252,20 +252,22 @@ public sealed partial class BusEngine
         WithGate(() => _store.InTransaction(() =>
         {
             if (run.Member.Role != MemberRole.Manager) throw new BusRefusal("not_allowed", "only the Manager hires members");
+            // The job word alone gets a first name from the person's list; a full name must have an unused first name.
+            var (label, given) = HireName(name);
             string trimmed;
             try
             {
-                trimmed = Teams.MemberNames.IdFor(name);
+                trimmed = Teams.MemberNames.IdFor(label);
             }
             catch (ArgumentException e)
             {
-                throw new BusRefusal("bad_name", e.Message + "; name them for the job, a space, then a first name, e.g. 'Developer Priya'");
+                throw new BusRefusal("bad_name", e.Message + "; name them for the job alone, e.g. 'Developer': the app adds the first name");
             }
             if (_store.MemberRows(run.Member.TeamId).Any(m => string.Equals(m.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
                 throw new BusRefusal("exists", $"the team already has a member named '{trimmed}'; pick another name, or tell that member");
             var own = _store.MemberRows(memberId: run.Member.Id).Single().Cli;
             var chosen = CheckCli(string.IsNullOrWhiteSpace(cli) ? own : cli.Trim());
-            var m = AddMember(run.Member.TeamId, trimmed, MemberRole.Member, chosen);
+            var m = AddMember(run.Member.TeamId, trimmed, MemberRole.Member, chosen, given);
             if (!string.IsNullOrWhiteSpace(instructions)) _store.UpdateMember(m.Id, chosen, instructions.Trim(), "", "default");
             Log($"{run.Member.Qualified} hired {m.Qualified} ({chosen})");
             return _store.MemberRows(memberId: m.Id).Single();
