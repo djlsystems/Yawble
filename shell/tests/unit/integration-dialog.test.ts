@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stopConfirmStubs, stubConfirm } from './confirm-stub';
 afterEach(() => { stopConfirmStubs(); });
 import IntegrationsPanel from '../../src/renderer/src/components/IntegrationsPanel.vue';
@@ -91,9 +91,7 @@ describe('integrations page and dialog', () => {
     expect(w.find('[data-test=dialog-status]').text()).toContain('not signed in');
     status = 'signed in: me';
     state = 'done';
-    await new Promise((r) => setTimeout(r, 800));
-    await flushPromises();
-    expect(w.find('[data-test=dialog-status]').text()).toContain('signed in: me');
+    await vi.waitFor(async () => { await flushPromises(); expect(w.find('[data-test=dialog-status]').text()).toContain('signed in: me'); }, { timeout: 4000 });
     expect(calls.filter((c) => c.method === 'integrations.list').length).toBe(2);
     expect(w.emitted('saved')).toHaveLength(1);
     w.unmount();

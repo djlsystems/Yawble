@@ -147,9 +147,7 @@ describe('focus on a team', () => {
     await settle(2);
     expect(scene.focus).toEqual([1]);
     teams = teams.filter((t) => t.id !== 1);
-    await new Promise((r) => setTimeout(r, 120));
-    await settle();
-    expect(scene.focus).toEqual([1, null]);
+    await vi.waitFor(async () => { await settle(); expect(scene.focus).toEqual([1, null]); }, { timeout: 4000 });
     expect(w.find('[data-test=monitor-focus]').exists()).toBe(false);
   });
 

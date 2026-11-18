@@ -25,10 +25,16 @@ function stubContext(): CanvasRenderingContext2D {
   }) as unknown as CanvasRenderingContext2D;
 }
 
-// The test runs the frames itself: the scene's own requestAnimationFrame loop must not run too.
-beforeEach(() => { vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {}); });
+// The test runs the frames itself: the scene's own requestAnimationFrame loop must not run too. The scene places new
+// nodes at random spots, so Math.random is seeded: every run lays out the same wall (unseeded, a few starts in a
+// hundred were still settling at 12 s and the drift check failed now and then).
+beforeEach(() => {
+  vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {});
+  let seed = 7;
+  vi.spyOn(Math, 'random').mockImplementation(() => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+});
 const scenes: MonitorScene[] = [];
-afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
+afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 type Inner = {
   frame: (t: number) => void; cam: { x: number; y: number; k: number };

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { memberKey, MonitorModel, RunEndShowMs, RunStaleMs, teamKey, workflowKey, type Effect, type FeedRow, type TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import { MonitorScene } from '../../src/renderer/src/monitor/scene';
 import { capEffects, cardOf, DensityCaps, FocusDim, focusAlpha, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt } from '../../src/renderer/src/monitor/rhythm';
@@ -277,7 +277,10 @@ function makeScene(w = 1280, h = 800): { scene: MonitorScene; canvas: HTMLCanvas
 /** One frame of the scene, at `now` (its frame loop is private; requestAnimationFrame would run it the same way). */
 const frame = (scene: MonitorScene, now: number) => (scene as unknown as { frame: (t: number) => void }).frame(now);
 
-afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; });
+// The tests run the frames themselves: the scene's own requestAnimationFrame loop must not run between them (under
+// load it did, with real times, and a label went missing from the frame the test looked at).
+beforeEach(() => { vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {}); });
+afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
 describe('the scene (B080)', () => {
   it('draws a node per open workflow, tied to the members working it or to its hub', () => {

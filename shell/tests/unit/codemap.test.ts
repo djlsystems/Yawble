@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CodeMap, codeEventKey, collapse, commitPhase, CommitGatherMs, CommitTravelMs, DefaultLimits, fileLight, layoutTeamMap, MaxMapNodes,
   PopMs, popScale, readCodeEvent, readCodeEvents, idleFade, MapIdleMs, MapFadeMs, type CodeEvent,
@@ -356,8 +356,8 @@ describe('the Monitor with the code read', () => {
       onEvent: () => () => {},
     } as unknown as YawbleApi;
     const w = mount(MonitorView, { props: { api, pollMs: 20 } });
-    for (let i = 0; i < 6; i++) await flushPromises();
-    await new Promise((r) => setTimeout(r, 80));
+    // A few polls of the steps go by (the Monitor goes on), and the code read is never asked again.
+    await vi.waitFor(async () => { await flushPromises(); expect(asked.filter((m) => m === 'monitor.steps').length).toBeGreaterThan(3); }, { timeout: 4000 });
     for (let i = 0; i < 6; i++) await flushPromises();
     expect(asked.filter((m) => m === 'monitor.codeEvents')).toHaveLength(2); // all teams, then per team, then off
     expect(asked.filter((m) => m === 'monitor.steps').length).toBeGreaterThan(1); // the Monitor goes on
@@ -386,8 +386,7 @@ describe('the Monitor with the code read', () => {
       onEvent: () => () => {},
     } as unknown as YawbleApi;
     const w = mount(MonitorView, { props: { api, pollMs: 20 } });
-    for (let i = 0; i < 6; i++) await flushPromises();
-    await new Promise((r) => setTimeout(r, 80));
+    await vi.waitFor(async () => { await flushPromises(); expect(asked.length).toBeGreaterThan(1); }, { timeout: 4000 });
     for (let i = 0; i < 6; i++) await flushPromises();
     expect(asked.length).toBeGreaterThan(1);
     expect(Date.parse(String(asked[0]!.since))).toBeLessThan(now - 60_000); // the start of the timeline
