@@ -14,11 +14,13 @@ export interface LayoutSettings {
   gravity: number;
   /** How quickly motion dies away: more settles sooner, less keeps it drifting. */
   friction: number;
+  /** How far apart the teams sit: a multiplier on the oval their places lie on (scene.ts rebuild). */
+  spacing: number;
 }
 
 export type LayoutKey = keyof LayoutSettings;
 
-export const LayoutDefaults: Readonly<LayoutSettings> = { distance: 0.3, strength: 2.75, repulsion: 0.35, gravity: 2.4, friction: 0.45 };
+export const LayoutDefaults: Readonly<LayoutSettings> = { distance: 0.3, strength: 2.75, repulsion: 0.35, gravity: 2.4, friction: 0.45, spacing: 1 };
 
 /** Every multiplier lies here; a stored one outside is brought inside, one that is not a number is the default. */
 export const LayoutMin = 0.25;
@@ -32,6 +34,7 @@ export const LayoutFields: readonly { key: LayoutKey; label: string; help: strin
   { key: 'repulsion', label: 'Repulsion', help: 'How hard nodes push each other apart.' },
   { key: 'gravity', label: 'Gravity', help: "How hard every node is pulled toward its team's place." },
   { key: 'friction', label: 'Friction', help: 'How quickly motion dies away: more settles sooner, less keeps it drifting.' },
+  { key: 'spacing', label: 'Team spacing', help: 'How far apart the teams sit.' },
 ];
 
 export const LayoutStorageKey = 'yawble.monitor.layout';

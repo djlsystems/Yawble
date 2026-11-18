@@ -292,8 +292,8 @@ describe('the scene (B080)', () => {
     frame(scene, 16);
     const nodes = scene.workflowNodes().sort((a, b) => a.id - b.id);
     expect(nodes).toEqual([
-      { key: workflowKey('payments', 1), id: 1, to: [memberKey('payments', 'DeveloperPriya'), memberKey('payments', 'TesterWren')], status: 'working' },
-      { key: workflowKey('payments', 2), id: 2, to: [teamKey('payments')], status: 'blocked' },
+      expect.objectContaining({ key: workflowKey('payments', 1), id: 1, to: [memberKey('payments', 'DeveloperPriya'), memberKey('payments', 'TesterWren')], status: 'working' }),
+      expect.objectContaining({ key: workflowKey('payments', 2), id: 2, to: [teamKey('payments')], status: 'blocked' }),
     ]);
     // Workflow 1 completes: its node leaves (drawn by its effect from where it was).
     m.setWorkflows('Payments', [wf(1, 'completed'), wf(2), wf(3, 'completed')], 32);
@@ -386,5 +386,101 @@ describe('the scene (B080)', () => {
     scene.setReducedMotion(false);
     frame(scene, 2600);
     expect(scene.drawn.some((e) => e.kind === 'comet')).toBe(false); // moving, its life is over
+  });
+});
+
+describe('no WORKFLOWS panel; the workflow nodes say "#id title" (B090)', () => {
+  const title = "Backlog item B081 Remote UI: xterm's link handler asks through confirmDialog";
+  type Inner = { nodes: Map<string, { kind: string; x?: number; y?: number }>; cam: { k: number }; toScreen: (x: number, y: number) => [number, number] };
+  function wall(w = 1280, h = 800) {
+    const made = makeScene(w, h);
+    const { scene, canvas } = made;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, right: w, bottom: h, width: w, height: h, x: 0, y: 0, toJSON() {} });
+    const m = new MonitorModel();
+    const teams = [team(7, 'Payments')];
+    m.reconcile(teams, 0);
+    m.setWorkflows('Payments', [{ ...wf(3848, 'open', ['DeveloperPriya is running']), title }, wf(2), wf(3, 'completed')], 0);
+    scene.model = m;
+    scene.setTeams(teams);
+    for (let i = 1; i <= 60; i++) frame(scene, i * 16);
+    const S = scene as unknown as Inner;
+    /** Where workflow `id`'s node is on the canvas, in CSS px. */
+    const at = (id: number) => { const n = scene.workflowNodes().find((x) => x.id === id)!; return S.toScreen(n.x, n.y); };
+    const pointer = (type: string, [x, y]: [number, number]) => canvas.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse' }));
+    return { ...made, S, at, pointer };
+  }
+
+  it('has no panel node: only the hub, the members and a node per open workflow', () => {
+    const { S } = wall();
+    expect(new Set([...S.nodes.values()].map((n) => n.kind))).toEqual(new Set(['team', 'member', 'wf']));
+    expect([...S.nodes.keys()].some((k) => k.startsWith('w:'))).toBe(false);
+  });
+
+  it('labels a node with its id and its title, clipped, "Backlog item " dropped; the text drawn is that label', () => {
+    const { scene, ctx } = wall();
+    const label = scene.workflowNodes().find((n) => n.id === 3848)!.label;
+    expect(label.startsWith('#3848 B081 Remote UI')).toBe(true);
+    expect(label).not.toContain('Backlog item');
+    expect(label.endsWith('…')).toBe(true);
+    expect(label.length).toBeLessThanOrEqual(32);
+    expect(scene.workflowNodes().find((n) => n.id === 2)!.label).toBe('#2 Workflow 2');
+    const texts: string[] = [];
+    (ctx as unknown as Record<string, unknown>).fillText = (s: string) => { texts.push(s); };
+    frame(scene, 2000);
+    expect(texts).toContain(label);
+    expect(texts).not.toContain('WORKFLOWS');
+  });
+
+  it('hover gives the whole title; a click opens that workflow; a drag does not', () => {
+    const { scene, at, pointer } = wall();
+    const tips: unknown[] = [];
+    scene.onHover = (h) => tips.push(h);
+    pointer('pointermove', at(3848));
+    expect(tips.at(-1)).toMatchObject({ kind: 'workflow', team: 'Payments', workflow: expect.objectContaining({ id: 3848, title }) });
+    const opened: [string, number | undefined][] = [];
+    const picks: (string | null)[] = [];
+    scene.onOpenWorkflow = (t, id) => opened.push([t, id]);
+    scene.onPick = (k) => picks.push(k);
+    pointer('pointerdown', at(3848));
+    pointer('pointerup', at(3848));
+    expect(opened).toEqual([['Payments', 3848]]);
+    expect(picks).toEqual([]); // it does not take the pick
+    const [x, y] = at(2);
+    pointer('pointerdown', [x, y]);
+    pointer('pointermove', [x + 40, y + 40]);
+    pointer('pointerup', [x + 40, y + 40]);
+    expect(opened).toHaveLength(1);
+  });
+
+  it('on a phone zoomed out a node says only "#id"; zoomed in, its title too', () => {
+    const { scene, S } = wall(375, 700);
+    scene.setPhone(true);
+    S.cam.k = 0.4;
+    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe('#3848');
+    S.cam.k = 1.2;
+    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label.startsWith('#3848 B081')).toBe(true);
+  });
+
+  it('a desktop window whose wall is narrow (Activity open) still shows the title zoomed out (card 409)', () => {
+    const { scene, S } = wall(660, 700); // 1280 x 800 with the sidebar and Activity open
+    S.cam.k = 0.4;
+    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe("#3848 B081 Remote UI: xterm's…");
+  });
+
+  it('draws the label at least 8 px on screen, dimmed when another team is focused', () => {
+    const { scene, S, ctx } = wall();
+    const fonts: { font: string; alpha: number; text: string }[] = [];
+    const c = ctx as unknown as Record<string, unknown>;
+    c.fillText = (text: string) => { fonts.push({ font: String(c.font), alpha: Number(c.globalAlpha), text }); };
+    S.cam.k = 0.25;
+    frame(scene, 3000);
+    const mine = fonts.find((f) => f.text.startsWith('#3848'))!;
+    expect(parseFloat(/(\d+(\.\d+)?)px/.exec(mine.font)![1]!) * S.cam.k).toBeGreaterThanOrEqual(8 - 1e-6);
+    expect(mine.alpha).toBe(1);
+    scene.setTeams([team(7, 'Payments'), team(9, 'Search')]);
+    scene.setFocus(9);
+    fonts.length = 0;
+    frame(scene, 3016);
+    expect(fonts.find((f) => f.text.startsWith('#3848'))!.alpha).toBeLessThan(1);
   });
 });

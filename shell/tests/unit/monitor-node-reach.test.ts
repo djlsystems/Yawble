@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MinHitPx, nearestNodeAt } from '../../src/renderer/src/monitor/scene';
+import { mapBeatsWorkflow, MinHitPx, nearestNodeAt } from '../../src/renderer/src/monitor/scene';
 
 /**
  * Card 398 (B087): a map node's tap reach has a floor of MinHitPx screen px at any zoom, so at the 375 px wall's zoom of
@@ -52,5 +52,20 @@ describe('nearestNodeAt (card 398)', () => {
     const panel: N = { key: 'workflows:payments', kind: 'workflows', r: 40, x: 0, y: 0 };
     expect(nearestNodeAt([panel], 0, 0, 0.2)).toBeNull();
     expect(nearestNodeAt([panel, hub], 0, 0, 0.2)).toBe(hub);
+  });
+});
+
+describe('mapBeatsWorkflow (card 411, F4)', () => {
+  const wf = { r: 10, x: 0, y: 0 };
+  it('a workflow square under its map folder still takes the hover and the click on the square', () => {
+    // The folder a few world px off the square's middle: a point on the square goes to the workflow, even nearer the folder.
+    expect(mapBeatsWorkflow(0, wf, 4, 0)).toBe(false);
+    expect(mapBeatsWorkflow(2, wf, 6, 0)).toBe(false);
+    expect(mapBeatsWorkflow(1, wf, 0, 0)).toBe(false);
+  });
+  it('off the square, the nearer of the two wins; with no workflow in reach the map node does', () => {
+    expect(mapBeatsWorkflow(3, wf, 20, 0)).toBe(true);
+    expect(mapBeatsWorkflow(25, wf, 20, 0)).toBe(false);
+    expect(mapBeatsWorkflow(5, null, 0, 0)).toBe(true);
   });
 });

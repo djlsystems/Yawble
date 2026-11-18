@@ -201,6 +201,8 @@ function toggleSound(): void {
  * there is not kept, so the desktop's choice stands), and the camera and legend controls sit in one compact row.
  */
 const phone = useNarrow();
+// The workflow nodes' labels go by the window being phone-wide, not by the wall's canvas (card 409).
+watch(phone, (on) => scene?.setPhone?.(on));
 const activityOpen = ref(phone.value ? false : (() => { try { return localStorage.getItem('yawble.monitor.activity') !== 'collapsed'; } catch { return true; } })());
 function toggleActivity(): void {
   activityOpen.value = !activityOpen.value;
@@ -648,6 +650,7 @@ onMounted(async () => {
     scene = new MonitorScene(canvas.value);
     scene.model = live;
     scene.setPinned(pinned.value);
+    scene.setPhone?.(phone.value); // a test's stub scene may have none
     if (layoutChanged.value) scene.setLayout(layout.value);
     scene.onHover = (h) => { hover.value = h; };
     scene.onPick = onScenePick;
@@ -847,10 +850,6 @@ onBeforeUnmount(() => {
             <span v-else-if="hover.workflow.ending" class="dim">{{ hover.workflow.state === 'closed' ? 'Closed' : 'Delivered' }}: {{ hover.workflow.ending }}</span>
             <span class="dim">started {{ entryTime(hover.workflow.startedAt) }} · last entry {{ entryTime(hover.workflow.lastAt) }}</span>
             <span class="dim">{{ hover.workflow.messages }} message{{ hover.workflow.messages === 1 ? '' : 's' }} · {{ hover.team }} · click to open</span>
-          </template>
-          <template v-else-if="hover.kind === 'workflow'">
-            <strong>{{ hover.team }} · workflows</strong>
-            <span class="dim">the last {{ WorkflowsShown }}, last updated first · click to open them all</span>
           </template>
           <template v-else>
             <strong>{{ hover.kind === 'team' ? hover.name : spaced(hover.name) }}</strong>
