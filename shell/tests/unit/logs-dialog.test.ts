@@ -353,6 +353,51 @@ describe('LogsDialog: the Member filter on a member, a team or the app (B101)', 
     w.unmount();
   });
 
+  it('Card451_PickingATeamOrClearFilters_AfterApp_WidensTheSourceValuesAgain', async () => {
+    // TesterWren, card 451 (B101 F1 re-check): the other two ways app goes away.
+    const { api, calls } = fakeApi();
+    const inner = api.call;
+    api.call = (async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'logs.values' && params?.app) { calls.push({ method, params }); return (params.column === 'source' ? ['Audit'] : []) as any; }
+      return inner(method, params);
+    }) as any;
+    const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
+    await flushPromises();
+    const valueCalls = () => calls.filter((c) => c.method === 'logs.values').map((c) => c.params);
+    const listed = (key: string) => w.findAll(`[data-test=logs-filter-${key}] option`).map((o) => o.text()).slice(1);
+    // Team select options come from logs.who, not logs.values: unchanged by app.
+    const teams = () => w.findAll('[data-test=logs-team] option').map((o) => o.text());
+    const teamsBefore = teams();
+
+    await w.find('[data-test=logs-member]').setValue('app');
+    await flushPromises();
+    expect(listed('source')).toEqual(['Audit']);
+    expect(teams()).toEqual(teamsBefore);
+
+    // app -> a team in the Team select: app goes, values asked without app and for that team.
+    let before = valueCalls().length;
+    await w.find('[data-test=logs-team]').setValue('docs');
+    await flushPromises();
+    let after = valueCalls().slice(before);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.at(-1)).toMatchObject({ source: 'activity', column: 'source', team: 'docs' });
+    expect(after.at(-1).app).toBeUndefined();
+    expect(listed('source')).toEqual(['Runs', 'Network']);
+
+    // app again, then Clear filters: app goes, the full list is back.
+    await w.find('[data-test=logs-member]').setValue('app');
+    await flushPromises();
+    expect(listed('source')).toEqual(['Audit']);
+    before = valueCalls().length;
+    await w.find('[data-test=logs-clear]').trigger('click');
+    await flushPromises();
+    after = valueCalls().slice(before);
+    expect(after.length).toBeGreaterThan(0);
+    expect([after.at(-1).team, after.at(-1).member, after.at(-1).app]).toEqual([undefined, undefined, undefined]);
+    expect(listed('source')).toEqual(['Runs', 'Network']);
+    w.unmount();
+  });
+
   it('AppIsAllActivityOnly_AndLeavingAllActivityDropsIt', async () => {
     const { api, calls } = fakeApi();
     const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
