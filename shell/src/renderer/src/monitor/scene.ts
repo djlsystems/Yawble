@@ -10,7 +10,7 @@ import {
   type MapFile, type TeamMapView,
 } from './codemap';
 import { busyMembers, nodeLabelFont, placeWorkflowLabels, workflowNodeLabel, workflowNodeLook, type LabelAsk, type LabelBox, type LabelObstacle, type PlacedLabel } from './workflows';
-import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt, type Density } from './rhythm';
+import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt, type Density, type KeepOut } from './rhythm';
 
 /**
  * THE MONITOR'S SCENE: one canvas on a dark wall. Teams are territories (a glow in the team's hue with its name),
@@ -430,8 +430,14 @@ export class MonitorScene {
   /** Whether a point in canvas CSS px (clientX - rect.left, clientY - rect.top) is on the You node. */
   hitYouNode(x: number, y: number): boolean {
     const w = this.w || this.canvas.clientWidth, h = this.h || this.canvas.clientHeight;
-    return w > 0 && h > 0 && onYouNode(x, y, w, h);
+    return w > 0 && h > 0 && onYouNode(x, y, w, h, this.youKeepOut);
   }
+
+  /** What the You node keeps clear of (canvas CSS px; the view measures its Legend button and controls, card 416). */
+  private youKeepOut: KeepOut[] = [];
+  setYouKeepOut(rects: readonly KeepOut[]): void { this.youKeepOut = rects.map((k) => ({ ...k })); }
+  /** The You node's place now: inside the wall, clear of the view's controls. */
+  private youNode(): { x: number; y: number; r: number } { return youNodeAt(this.w, this.h, this.youKeepOut); }
 
   /** The person's layout multipliers (the cog beside Pinned): from now on, and the graph is woken so it moves to them. */
   setLayout(layout: LayoutSettings): void {
@@ -1027,7 +1033,7 @@ export class MonitorScene {
     const from = this.nodes.get(e.from);
     if (!from) return;
     const [ax, ay] = this.toScreen(from.x!, from.y!);
-    const you = youNodeAt(this.w, this.h);
+    const you = this.youNode();
     const t = (now - e.at) / this.life(e);
     const color = Palette[e.color];
     c.globalAlpha = 1;
@@ -1054,7 +1060,7 @@ export class MonitorScene {
   /** The You node: a disc at the right edge saying "You", glowing with a count while something waits for the person. */
   private drawYouNode(c: CanvasRenderingContext2D, now: number, motion: number): void {
     if (!this.w || !this.h) return;
-    const { x, y, r } = youNodeAt(this.w, this.h);
+    const { x, y, r } = this.youNode();
     const count = this.model?.needYouItems().length ?? 0; // the header's "N need you" too (B088)
     const color = Palette.decision;
     // Something just arrived: a ring opens out from it.
@@ -1870,7 +1876,7 @@ export class MonitorScene {
       if (this.hoverYou) {
         this.hover = null; this.hoverMap = null; this.hoverCommit = null;
         cv.style.cursor = 'pointer';
-        const you = youNodeAt(this.w, this.h);
+        const you = this.youNode();
         this.onHover({ key: 'you', kind: 'you', team: '', name: 'You', x: you.x, y: you.y });
         return;
       }

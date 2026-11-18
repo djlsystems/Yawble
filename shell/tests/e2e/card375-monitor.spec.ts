@@ -994,9 +994,9 @@ for (const W of [1280, 375]) {
     // then a taller window: desktop re-hovers, on the phone the tapped panel stays open through the resize and follows.
     const H0 = page.viewportSize()!.height;
     await untip();
-    // 375 x 740, not shorter: at 640 the 12 asks' banners leave a wall of about 110 px and the You node (y clamped to 120)
-    // sits under the Legend button, out of reach (a separate note in the B088 report, not the card 406 fix).
-    await page.setViewportSize({ width: W, height: phone ? 740 : 600 });
+    // 375 x 640: the 12 asks' banners leave a wall of about 110 px; since card 416 the You node stays on it, clear of the
+    // controls row with Legend, so the tap below reaches it (before, at y 120, it sat under Legend, out of reach).
+    await page.setViewportSize({ width: W, height: phone ? 640 : 600 });
     await page.waitForTimeout(1200);
     let yn = youNode(await lastFrame(page));
     if (yn) you = { x: yn.x, y: yn.y };
@@ -1033,6 +1033,53 @@ for (const W of [1280, 375]) {
     await ctx.close();
   });
 }
+
+// Card 416 (B093 part 2): at 375 x 640 with 12 asks the banners leave a short wall (about 110 px with 3c's members
+// blocked and failed too, 169 px with the asks alone; 600, 580 and 556 make it 145, 133 and 119); the You node stays on it, clear of the
+// controls row with Legend, and a tap on it opens its panel (whose button opens Needs you).
+for (const H of [640, 600, 580, 556])
+test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, clear of Legend, a tap opens its panel`, async ({ browser }) => {
+  const feed = new Feed();
+  seed(feed);
+  feed.toolAsks = [];
+  feed.netAsks = Array.from({ length: 12 }, (_, i) => feed.netAsk(200 + i, i % 2 ? ADA : BEN, `s${i}.example${i}.com`));
+  const { page, ctx, errors } = await open(browser, { feed, w: 375, h: H });
+  const you = await until(page, youNode, (y) => !!y && y.count === '12', 15_000);
+  await page.waitForTimeout(600);
+  const f = youNode(await lastFrame(page))!;
+  const cb = await canvasBox(page);
+  const lb = (await page.locator('[data-test=monitor-legend-toggle]').boundingBox())!;
+  const rb = (await page.locator('.controls').boundingBox())!;
+  const node = { x: cb.x + f.x, y: cb.y + f.y, r: 24 };
+  const clear = (b: { x: number; y: number; width: number; height: number }) =>
+    Math.hypot(Math.max(b.x - node.x, 0, node.x - (b.x + b.width)), Math.max(b.y - node.y, 0, node.y - (b.y + b.height))) >= node.r;
+  const r: Record<string, unknown> = {
+    wallH: Math.round(cb.height), node: { x: f.x, y: f.y }, count: you?.count ?? null,
+    legend: { x: Math.round(lb.x - cb.x), y: Math.round(lb.y - cb.y), w: Math.round(lb.width), h: Math.round(lb.height) },
+  };
+  // Short enough that the old place (y 120) lay on the controls row (its top 52 px above the wall's bottom).
+  expect(cb.height, 'the 12 asks leave a short wall').toBeLessThan(120 + 24 + 52);
+  expect(f.y - 24, 'the node is inside the wall (top)').toBeGreaterThanOrEqual(0);
+  expect(f.y + 24, 'the node is inside the wall (bottom)').toBeLessThanOrEqual(cb.height);
+  expect(f.x + 24).toBeLessThanOrEqual(cb.width);
+  expect(clear(lb), 'the node is clear of the Legend button').toBe(true);
+  expect(clear(rb), 'the node is clear of the controls row').toBe(true);
+  // What is under the node's centre is the wall itself, not a control.
+  r.hit = await page.evaluate((q) => (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.dataset?.test ?? null, node);
+  expect(r.hit).toBe('monitor-canvas');
+  await page.touchscreen.tap(node.x, node.y);
+  await expect(page.locator('[data-test=monitor-you-tip]')).toBeVisible({ timeout: 4000 });
+  r.summary = await page.locator('[data-test=monitor-you-summary]').innerText();
+  expect(r.summary).toBe('12 network asks');
+  await shot(page, `card416-you-375x${H}-12-asks`);
+  // The panel's button opens Needs you.
+  await page.locator('[data-test=monitor-you-open]').click();
+  await expect(page.locator('[data-test=board]')).toBeVisible({ timeout: 5000 });
+  result[`3d-card416-${H}`] = r;
+  console.log('CARD416', JSON.stringify(r));
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
 
 test('4 cards: an instruction carries "#card", the hand-back comes home with a check, a failed run with a cross', async ({ browser }) => {
   const feed = new Feed();
