@@ -39,8 +39,15 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
   stopped after 2 minutes, and output is cut at 64 KB.
 - `git` as an integration only reads your checkout (log, status, diff, show, blame and similar). Every command that
   changes it is off. Agents have git in their own clones for their own work.
-- With `gh` enabled, agents also get `pr_open` (open a pull request from the team branch; asks first by default) and
-  `pr_status` (the team branch's pull requests).
+- Agents also get `pr_open` (open a pull request from the team branch; asks first by default) and `pr_status` (the
+  team branch's pull requests) when the repository's provider supports them from here. The CLI depends on the provider:
+  `gh` for GitHub, `glab` for GitLab (merge requests), and `az repos` for Azure DevOps. Each has to be installed and
+  signed in on this computer. Bitbucket, Gitea and a repository with no provider have no pull requests from here: the
+  tools say so and leave it to the host's site.
+- What works with any git remote, or none: everything plain git does (branches, fetch, sync, merge, push, delete). With
+  one of the five providers (GitHub, GitLab, Bitbucket, Azure DevOps, Gitea), or a link pattern you set in **Team
+  settings > Repositories**, the app also gets **Open on …** links to commits, branches, files and compares. See
+  [Repositories and git](features.md#repositories-and-git).
 
 ### MCP servers
 

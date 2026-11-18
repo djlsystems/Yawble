@@ -43,6 +43,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     picked is never touched.
   - **Reset** clears, per member, waiting instructions, the home folder (the CLI's own history), the clone, and the
     team's documents, as you choose.
+  - **Repositories** shows each repository's detected provider, with a provider override and an optional link pattern
+    (see [Repositories and git](#repositories-and-git)).
   - **Environment** holds team environment variables; the next runs get them.
   - On a phone it is laid out like the app's Settings on a phone: a list of its sections (one full-width row each, with a
     chevron); a tap opens that section alone under a Back and its title, and Back returns to the list.
@@ -270,8 +272,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   usage and the doctor.
 - It can tell a Manager, answer a team's question, create a team, pause or resume a team, nudge, close or extend a
   workflow, and add, dispatch, move or comment on backlog items and cards.
-- Git and team actions: delete, prune, push or sync branches, open or merge a pull request (GitHub repositories, with
-  your `gh`),
+- Git and team actions: delete, prune, push or sync branches, open or merge a pull request (GitHub with your `gh`,
+  GitLab with your `glab`, Azure DevOps with your `az repos`; see [Repositories and git](#repositories-and-git)),
   archive or delete a team, set environment variables, change an agent.
 - Anything destructive first shows the exact list. It runs only after you say yes in a later message in the same
   conversation.
@@ -514,9 +516,26 @@ a member's pane opens it at that member's activity.
 - When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are
   never forced. The origin can be on any git host, or there can be none: a team repository with no origin keeps
   every branch on this computer.
-- Pull requests are a hosting service's feature, not git's. The app reads, opens and merges them only for a
-  repository whose origin is on GitHub, through your `gh`. For any other host it says so and leaves the pull request
-  (or merge request) to that host's own site.
+- Everything above works with any git remote, or none: branches, fetch, sync, merge, push, delete and Tidy are plain
+  git. What depends on the host is only the web links and pull requests below.
+- Each repository has a **provider**, detected from its origin: GitHub, GitLab (gitlab.com, or a host with "gitlab" in
+  its name), Bitbucket, Azure DevOps (dev.azure.com, `<org>.visualstudio.com`, ssh.dev.azure.com), Gitea (also Forgejo
+  and codeberg.org), or none (plain git: any other host, a local folder, or no origin). https, ssh and `git@host:`
+  addresses all work.
+- **Team settings > Repositories** shows each repository's detected provider. You can override it with **Provider**, and
+  set a **Link pattern** for a self-hosted or unknown host, then **Save**. The pattern is an address with the placeholders
+  `{base}` `{path}` `{commit}` `{branch}` `{file}` `{from}` `{to}` `{pr}`, for example
+  `https://git.example.com/{path}/commit/{commit}`. **As detected** and a blank pattern go back to detection.
+- **Open on GitHub** (or GitLab, Bitbucket, Azure DevOps, Gitea; **Open in the browser** for a link pattern): the Git
+  dialog links the base and team branches, the member branches, their commits (the short commit is the link), the
+  conflicting files at the team branch's commit, and **Compare with** the base. A link shows only when the provider
+  (or a pattern) can build it and the commit or branch is on origin. A commit not pushed yet has no link, and a
+  repository with no provider and no pattern has none. Links open in your browser.
+- Pull requests (merge requests on GitLab) are a hosting service's feature, not git's. The app opens, lists and merges
+  them for GitHub through your `gh`, GitLab through your `glab` and Azure DevOps through your `az repos`, each installed
+  and signed in on this computer. Bitbucket, Gitea and plain git have none from here. The Git dialog's **Pull
+  requests** line says whether they work for the repository, and if not, why (for example the CLI is not signed in, or
+  the provider has none); the pull request is then left to the host's own site.
 - git 2.38 or later is required. When it is missing, too old or not working, a banner at the top of the window says
   so, with **Download Git** and **Check again**; on Windows with winget, **Install Git** (or **Update Git**) installs
   Git for Windows for everyone on the computer, so Windows asks for permission. The app finds a git installed while it
