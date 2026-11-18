@@ -162,7 +162,15 @@ function sortBy(key: string) {
 
 async function loadValues() {
   for (const c of filterColumns.value) {
-    try { values[c.key] = await props.api.call<string[]>('logs.values', { source: sourceId.value, column: c.key, team: member.value ? undefined : team.value || undefined, member: member.value || undefined }); }
+    try {
+      values[c.key] = await props.api.call<string[]>('logs.values', {
+        source: sourceId.value, column: c.key,
+        team: member.value ? undefined : team.value || undefined,
+        member: member.value || undefined,
+        // "app (the app itself)": only the values the app's own rows hold (no Runs, no teams).
+        ...(app.value && appOffered.value ? { app: true } : {}),
+      });
+    }
     catch { values[c.key] = []; }
   }
 }
@@ -186,7 +194,7 @@ watch(team, () => {
   if (member.value && !member.value.startsWith(`${team.value}/`)) member.value = '';
   if (team.value) app.value = false;
 });
-watch([team, member], () => { void loadValues(); });
+watch([team, member, app], () => { void loadValues(); });
 watch([team, member, app, fromDay, toDay, () => ({ ...filters })], () => { void reload(); }, { deep: true });
 let typing: ReturnType<typeof setTimeout> | undefined;
 watch(text, () => { clearTimeout(typing); typing = setTimeout(() => void reload(), 300); });

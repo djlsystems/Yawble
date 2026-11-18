@@ -319,6 +319,40 @@ describe('LogsDialog: the Member filter on a member, a team or the app (B101)', 
     w.unmount();
   });
 
+  it('TheApp_NarrowsTheSourceValues_AndClearingItWidensThemAgain', async () => {
+    const { api, calls } = fakeApi();
+    // The app's own rows: no Runs and no team; the fake core answers app:true with only those.
+    const inner = api.call;
+    api.call = (async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'logs.values' && params?.app) { calls.push({ method, params }); return (params.column === 'source' ? ['Audit'] : []) as any; }
+      return inner(method, params);
+    }) as any;
+    const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
+    await flushPromises();
+    const valueCalls = () => calls.filter((c) => c.method === 'logs.values').map((c) => c.params);
+    const listed = (key: string) => w.findAll(`[data-test=logs-filter-${key}] option`).map((o) => o.text()).slice(1);
+    // All activity's value list is Source (its Team column is the Team select, filled from logs.who).
+    expect(listed('source')).toEqual(['Runs', 'Network']);
+    expect(valueCalls().every((p) => p.app === undefined)).toBe(true);
+
+    let before = valueCalls().length;
+    await w.find('[data-test=logs-member]').setValue('app');
+    await flushPromises();
+    const picked = valueCalls().slice(before);
+    expect(picked.length).toBeGreaterThan(0);
+    for (const p of picked) expect(p).toMatchObject({ source: 'activity', column: 'source', app: true, team: undefined, member: undefined });
+    expect(listed('source')).toEqual(['Audit']);
+
+    before = valueCalls().length;
+    await w.find('[data-test=logs-member]').setValue('');
+    await flushPromises();
+    const cleared = valueCalls().slice(before);
+    expect(cleared.length).toBeGreaterThan(0);
+    for (const p of cleared) expect(p.app).toBeUndefined();
+    expect(listed('source')).toEqual(['Runs', 'Network']);
+    w.unmount();
+  });
+
   it('AppIsAllActivityOnly_AndLeavingAllActivityDropsIt', async () => {
     const { api, calls } = fakeApi();
     const w = mount(LogsDialog, { props: { api }, attachTo: document.body });
