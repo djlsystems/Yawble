@@ -390,21 +390,36 @@ function arcStep(n: number): number {
 
 /** How far past its members a map's folders sit (the scene lays the arc at the members' reach plus this). */
 export const MapPastMembers = 70;
-/** Room for a map node's label past the node. */
-const MapLabelRoom = 44;
+/** How far a team's members usually reach from its hub (the scene lays the map's arc at their reach + MapPastMembers). */
+export const MapMembersReach = 80;
+/** A map node with its label, as half a box round the node (world px): as the scene's clusters() counts it. */
+export const MapNodeHalfW = 40;
+export const MapNodeHalfH = 10;
+/** How far a team's cluster reaches from its hub toward the others before its code map (the scene's ClusterCore). */
+export const MapCore = 130;
 
 /**
- * How much room a team's map needs past its members toward the other teams, in world px (0 for no map). The map lies
- * on an arc pointing away from the others: its full depth (the folders, their files' fans, the labels) counts as far as
- * the arc wraps round toward them (a half-span of 90 degrees or more counts fully; a narrow arc, a share of it).
+ * How much room a team's map needs toward the other teams past `core`, in world px (0 for no map, or one that stays
+ * within it). The map lies on an arc pointing away from the others, so only the part of it that wraps back toward
+ * them counts: the map is laid out as the scene lays it (layoutTeamMap at MapMembersReach + MapPastMembers), and its
+ * nodes with their labels are measured along the directions to the neighbours, which lie `spread` radians either side
+ * of straight back (0 for two teams; neighbourSpread in the scene). Card 409: it counted the arc's sideways spread
+ * (depth × sin(half-span)), which lies across the line between the teams, not on it, so the default spacing left the
+ * middle of the wall empty.
  */
-export function mapRoomOf(view: TeamMapView): number {
+export function mapRoomOf(view: TeamMapView, core = MapCore, spread = 0): number {
   const n = view.folders.length + (view.moreFolders ? 1 : 0);
   if (n === 0) return 0;
-  const fans = view.folders.some((f) => f.files.length || f.more.length);
-  const depth = MapPastMembers + (fans ? FileReach + FileStagger : 0) + MapLabelRoom;
-  const half = ((n - 1) / 2) * arcStep(n);
-  return depth * (half >= Math.PI / 2 ? 1 : Math.max(0.3, Math.sin(half)));
+  const laid = layoutTeamMap(view, { x: 0, y: 0 }, 0, MapMembersReach + MapPastMembers);
+  const points: { x: number; y: number }[] = [...laid.folders, ...laid.files, ...laid.folders.map((f) => ({ x: f.moreX, y: f.moreY }))];
+  if (laid.rest) points.push(laid.rest);
+  let reach = 0;
+  for (const side of spread ? [-1, 1] : [1]) {
+    const ux = Math.cos(Math.PI + side * spread), uy = Math.sin(Math.PI + side * spread);
+    const pad = MapNodeHalfW * Math.abs(ux) + MapNodeHalfH * Math.abs(uy);
+    for (const p of points) reach = Math.max(reach, p.x * ux + p.y * uy + pad);
+  }
+  return Math.max(0, reach - core);
 }
 
 // --- how the nodes look over time -----------------------------------------------------------------------------------

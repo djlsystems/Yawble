@@ -454,10 +454,17 @@ describe('no WORKFLOWS panel; the workflow nodes say "#id title" (B090)', () => 
 
   it('on a phone zoomed out a node says only "#id"; zoomed in, its title too', () => {
     const { scene, S } = wall(375, 700);
+    scene.setPhone(true);
     S.cam.k = 0.4;
     expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe('#3848');
     S.cam.k = 1.2;
     expect(scene.workflowNodes().find((n) => n.id === 3848)!.label.startsWith('#3848 B081')).toBe(true);
+  });
+
+  it('a desktop window whose wall is narrow (Activity open) still shows the title zoomed out (card 409)', () => {
+    const { scene, S } = wall(660, 700); // 1280 x 800 with the sidebar and Activity open
+    S.cam.k = 0.4;
+    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe("#3848 B081 Remote UI: xterm's…");
   });
 
   it('draws the label at least 8 px on screen, dimmed when another team is focused', () => {

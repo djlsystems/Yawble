@@ -201,6 +201,8 @@ function toggleSound(): void {
  * there is not kept, so the desktop's choice stands), and the camera and legend controls sit in one compact row.
  */
 const phone = useNarrow();
+// The workflow nodes' labels go by the window being phone-wide, not by the wall's canvas (card 409).
+watch(phone, (on) => scene?.setPhone?.(on));
 const activityOpen = ref(phone.value ? false : (() => { try { return localStorage.getItem('yawble.monitor.activity') !== 'collapsed'; } catch { return true; } })());
 function toggleActivity(): void {
   activityOpen.value = !activityOpen.value;
@@ -648,6 +650,7 @@ onMounted(async () => {
     scene = new MonitorScene(canvas.value);
     scene.model = live;
     scene.setPinned(pinned.value);
+    scene.setPhone?.(phone.value); // a test's stub scene may have none
     if (layoutChanged.value) scene.setLayout(layout.value);
     scene.onHover = (h) => { hover.value = h; };
     scene.onPick = onScenePick;
