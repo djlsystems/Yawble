@@ -9,7 +9,7 @@ import TimelineDialog from '../../src/renderer/src/timeline/TimelineDialog.vue';
 import TeamWorkflows from '../../src/renderer/src/components/TeamWorkflows.vue';
 import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
 import {
-  BreakMinMs, buildAxis, clock, closeTimeline, formatDuration, formatShort, liveOverallMs, openTimeline, shares, subscribeNow, tickerState,
+  BreakMinMs, buildAxis, clock, closeTimeline, formatDuration, formatShort, liveOverallMs, openTimeline, placeBreakLabels, shares, subscribeNow, tickerState,
 } from '../../src/renderer/src/timeline/time';
 import { createFakeCore } from '../e2e/phone/fake-core';
 import type { BoardCard, ItemTime, YawbleApi } from '../../src/shared/api';
@@ -291,5 +291,26 @@ describe('card 430: the workflow rows', () => {
     vi.advanceTimersByTime(1000);
     await flushPromises();
     expect(meta.get('[data-test="overall-time-value"]').text()).toBe('2h 00m 01s');
+  });
+});
+
+describe('card 433 F3: placeBreakLabels keeps a break label clear of the start / end labels', () => {
+  // a 560 px axis, start label 0..40, end label 530..560 ("now"), gap 6
+  it('a label centred well inside stays centred under its mark', () => {
+    expect(placeBreakLabels(560, 40, 530, [{ x: 280, w: 60 }])).toEqual([250]);
+  });
+  it('a label near the end slides left until it clears the end label', () => {
+    // centred at 96%: 537.6 - 30 = 507.6, would end at 567.6 over "now"; slid to end at 530 - 6
+    expect(placeBreakLabels(560, 40, 530, [{ x: 537.6, w: 60 }])).toEqual([464]);
+  });
+  it('a label near the start slides right until it clears the start label', () => {
+    expect(placeBreakLabels(560, 40, 530, [{ x: 10, w: 60 }])).toEqual([46]);
+  });
+  it('a second label that would meet the first is pushed after it, and one with no room left hides', () => {
+    expect(placeBreakLabels(560, 40, 530, [{ x: 280, w: 60 }, { x: 300, w: 60 }])).toEqual([250, 316]);
+    expect(placeBreakLabels(200, 40, 170, [{ x: 100, w: 60 }, { x: 120, w: 60 }])).toEqual([70, null]);
+  });
+  it('a label wider than the room between the start and end labels hides', () => {
+    expect(placeBreakLabels(120, 40, 90, [{ x: 60, w: 60 }])).toEqual([null]);
   });
 });

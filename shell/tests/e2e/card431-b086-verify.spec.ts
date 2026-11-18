@@ -173,10 +173,9 @@ for (const [w, h, theme] of [[1280, 800, 'light'], [375, 667, 'dark']] as const)
 
 // F1 (card 431): at phone width the global touch rule (styles.css: button { min-height: 44px }) also hits the timeline's
 // band and marker buttons: a marker is a 44 px square turned 45 deg (62 x 62 px on screen) and a band 44 px tall in a
-// 26 px track, so the markers cover the bands and the start tick. Expected to fail until TimelineDialog.vue opts its
-// .band / .mk out of the 44 px minimum; then drop test.fail.
+// 26 px track, so the markers cover the bands and the start tick. Fixed in card 433: TimelineDialog.vue opts its
+// .band / .mk out of the 44 px minimum.
 test('F1: at 375 the bands stay inside their track and the markers keep their size', async ({ browser }) => {
-  test.fail();
   const { page, ctx } = await open(browser, { w: 375, h: 667, hash: '#workflow=10' });
   await page.locator('[data-test=workflow-10] [data-test=overall-time]').click();
   await expect(page.locator('[data-test=timeline-band]').first()).toBeVisible();
@@ -192,6 +191,38 @@ test('F1: at 375 the bands stay inside their track and the markers keep their si
   expect(m.mk, 'a marker stays about 14 px (20 px turned)').toBeLessThanOrEqual(22);
 });
 
+// F3 (card 431, fixed in card 433): workflow #12's break mark sits about 96% along the axis; its centred label
+// ("≈ 2d 17h") drew over the end label ("now"). Now it slides clear of the start / end labels, or hides if no room.
+for (const [w, h] of [[1280, 800], [375, 667]] as const) {
+  test(`F3: a break label near the axis end never meets the start / end labels at ${w}`, async ({ browser }) => {
+    const { page, ctx, errors } = await open(browser, { w, h, expiry: true, hash: '#workflow=10' });
+    await page.locator('[data-test=workflow-12] [data-test=overall-time]').click();
+    const dlg = page.locator('[data-test=timeline-dialog]');
+    await expect(dlg.locator('[data-test=timeline-break-label]').first()).toBeAttached();
+    await expect.poll(async () => page.evaluate(() => {
+      const r = (e: Element) => e.getBoundingClientRect();
+      const t0 = r(document.querySelector('.ticks .t0')!), t1 = r(document.querySelector('.ticks .t1')!);
+      const row = r(document.querySelector('.ticks')!);
+      const bad: string[] = [];
+      for (const tb of document.querySelectorAll<HTMLElement>('.ticks .tb')) {
+        if (getComputedStyle(tb).visibility === 'hidden') continue;
+        const b = r(tb);
+        if (b.left < t0.right) bad.push(`${tb.textContent} meets the start label`);
+        if (b.right > t1.left) bad.push(`${tb.textContent} meets the end label`);
+        if (b.left < row.left || b.right > row.right) bad.push(`${tb.textContent} leaves the axis`);
+      }
+      return bad;
+    })).toEqual([]);
+    // at 1280 there is room: the label shows (slid clear, not hidden) and still reads its length
+    if (w === 1280) {
+      const tb = dlg.locator('[data-test=timeline-break-label]').first();
+      await expect(tb).toBeVisible();
+      await expect(tb).toHaveText(/^≈ \d+d \d+h$/);
+    }
+    expect(errors).toEqual([]);
+    await ctx.close();
+  });
+}
 test('a Visitor gets the same card dialog (timeline.get is a read)', async ({ browser }) => {
   const { s, page, ctx, errors } = await open(browser, { access: 'read' });
   await board(page);
