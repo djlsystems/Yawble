@@ -31,11 +31,11 @@ public sealed class UiRpc(
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
 
-    /// <summary>The methods here, by prefix, B085's workflowExtend under its contract name (also bus.workflowExtend) and B075's git_web_link.</summary>
-    public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method is "workflowExtend" or WebLinkMethod;
+    /// <summary>The methods here, by prefix, and B085's workflowExtend under its contract name (also bus.workflowExtend).</summary>
+    public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method is "workflowExtend";
 
-    /// <summary>B075: { team (id or name) | teamId, repo?, kind, commit?, branch?, file?, from?, to?, pr? } -> { url: string|null }.</summary>
-    public const string WebLinkMethod = "git_web_link";
+    /// <summary>B075: { teamId, team (id or name), repo? (an extra's name; absent: main), kind, commit?, branch?, file?, from?, to?, pr? } -> { url: string|null }.</summary>
+    public const string WebLinkMethod = "git.webLink";
 
     public async Task<JsonNode?> DispatchAsync(string method, JsonObject? p, CancellationToken ct)
     {
@@ -87,8 +87,8 @@ public sealed class UiRpc(
                 "teams.addRepo" => await AddRepoAsync(Long(p, "teamId"), p, ct),
                 "teams.removeRepo" => await RemoveRepoAsync(Long(p, "teamId"), Str(p, "name"), ct),
                 // B075: a repository's provider override and link pattern (Team settings > Repositories).
-                "teams.setRepoProvider" => await SetRepoProviderAsync(Long(p, "teamId"), p, ct),
-                WebLinkMethod => await WebLinkAsync(p, ct),
+                "teams.setRepo" => await SetRepoAsync(Long(p, "teamId"), p, ct),
+                "git.webLink" => await WebLinkAsync(p, ct),
 
                 "members.get" => S(await MemberAsync(Long(p, "memberId"), ct)),
                 "members.add" => S(await bus.AddMemberAsync(Long(p, "teamId"), Str(p, "name"), Str(p, "cli"), ct)),
@@ -431,7 +431,7 @@ public sealed class UiRpc(
         }
         if (about.team is null) return null;
         var from = m.Source is MessageTypes.PersonSource or MessageTypes.HostSource ? m.Source : Split(m.Source).Member ?? m.Source;
-        if (text is { Length: > 240 }) text = text[..240] + "…";
+        if (text is { Length: > 240 }) text = text[..240] + "â€¦";
         return new JsonObject
         {
             ["seq"] = m.Seq, ["kind"] = kind, ["team"] = about.team, ["member"] = about.member, ["from"] = from,
@@ -659,47 +659,53 @@ public sealed class UiRpc(
     private async Task<JsonNode> TeamReposListAsync(long teamId, CancellationToken ct)
     {
         var repos = bus.Repos ?? throw new RpcException("unavailable", "team repositories need the app's data folder");
-        var main = repos.RepoOf(teamId);
         var extras = new JsonArray();
-        foreach (var e in repos.ExtrasOf(teamId))
-        {
-            var o = new JsonObject { ["name"] = e.Name, ["path"] = e.Path, ["writable"] = e.Writable, ["baseBranch"] = e.BaseBranch, ["source"] = e.Source };
-            AddHost(o, await repos.HostViewAsync(teamId, e.Name, ct));
-            extras.Add(o);
-        }
-        // The main repository's origin, so the person sees which repository it is (as the extras show where they came from).
-        JsonObject? mainJson = null;
-        if (main is not null)
-        {
-            var host = await repos.HostViewAsync(teamId, Teams.TeamRepos.MainRepoName, ct);
-            var origin = host.Origin is null ? null : Teams.PersonGitPush.Redact(host.Origin);
-            mainJson = new JsonObject
-            {
-                ["path"] = main.Path, ["baseBranch"] = main.BaseBranch, ["managed"] = main.Managed, ["origin"] = origin,
-                ["name"] = origin is null ? null : Teams.TeamRepos.SuggestRepoName(origin),
-            };
-            AddHost(mainJson, host);
-        }
-        return new JsonObject { ["main"] = mainJson, ["extras"] = extras };
+        foreach (var e in repos.ExtrasOf(teamId)) extras.Add(await ExtraRepoJsonAsync(repos, teamId, e, ct));
+        return new JsonObject { ["main"] = await MainRepoJsonAsync(repos, teamId, ct), ["extras"] = extras };
     }
 
-    /// <summary>B075's fields of a repository: provider (effective), providerDetected, providerOverride (null: detected),
-    /// linkPattern, prSupported and prUnavailable (why not, or null).</summary>
+    /// <summary>teams.repos' main entry, or null before the team's repository is made. Its origin (redacted) shows which repository it is.</summary>
+    private static async Task<JsonObject?> MainRepoJsonAsync(Teams.TeamRepos repos, long teamId, CancellationToken ct)
+    {
+        if (repos.RepoOf(teamId) is not { } main) return null;
+        var host = await repos.HostViewAsync(teamId, Teams.TeamRepos.MainRepoName, ct);
+        var origin = host.Origin is null ? null : Teams.PersonGitPush.Redact(host.Origin);
+        var o = new JsonObject
+        {
+            ["path"] = main.Path, ["baseBranch"] = main.BaseBranch, ["managed"] = main.Managed, ["origin"] = origin,
+            ["name"] = origin is null ? null : Teams.TeamRepos.SuggestRepoName(origin),
+        };
+        AddHost(o, host);
+        return o;
+    }
+
+    /// <summary>One entry of teams.repos' extras.</summary>
+    private static async Task<JsonObject> ExtraRepoJsonAsync(Teams.TeamRepos repos, long teamId, Teams.ExtraRepo e, CancellationToken ct)
+    {
+        var o = new JsonObject { ["name"] = e.Name, ["path"] = e.Path, ["writable"] = e.Writable, ["baseBranch"] = e.BaseBranch, ["source"] = e.Source };
+        AddHost(o, await repos.HostViewAsync(teamId, e.Name, ct));
+        return o;
+    }
+
+    /// <summary>
+    /// B075's fields of a repository (card 447's contract): provider = the person's OVERRIDE (null: detected),
+    /// providerDetected = what the origin says, linkPattern, prSupported and prUnavailable (why not, or null).
+    /// </summary>
     private static void AddHost(JsonObject o, Teams.RepoHostView h)
     {
-        o["provider"] = Teams.RepoProviders.WireName(h.Provider);
+        o["provider"] = h.Override is { } k ? Teams.RepoProviders.WireName(k) : null;
         o["providerDetected"] = Teams.RepoProviders.WireName(h.Detected);
-        o["providerOverride"] = h.Override is { } k ? Teams.RepoProviders.WireName(k) : null;
         o["linkPattern"] = h.LinkPattern;
         o["prSupported"] = h.PrSupported;
         o["prUnavailable"] = h.PrUnavailable;
     }
 
     /// <summary>
-    /// teams.setRepoProvider { teamId, repo ("main" or an extra's name; absent: main), provider (github, gitlab, bitbucket,
-    /// azuredevops, gitea, none; null or "" or "auto": detect), linkPattern (null or "": none) } -> the repository's B075 fields.
+    /// teams.setRepo { teamId, name (an extra's name; absent, null or "main": the main repository), provider (github,
+    /// gitlab, bitbucket, azuredevops, gitea, none; null, "" or "auto": no override, detect), linkPattern (null or "":
+    /// none) } -> the repository's entry as in teams.repos, or {} when the main repository is not made yet.
     /// </summary>
-    private async Task<JsonNode?> SetRepoProviderAsync(long teamId, JsonObject? p, CancellationToken ct)
+    private async Task<JsonNode?> SetRepoAsync(long teamId, JsonObject? p, CancellationToken ct)
     {
         var repos = bus.Repos ?? throw new RpcException("unavailable", "team repositories need the app's data folder");
         await TeamNameOf(teamId, ct);
@@ -707,12 +713,12 @@ public sealed class UiRpc(
         Teams.RepoProviderKind? provider = null;
         if (!string.IsNullOrWhiteSpace(wire) && !string.Equals(wire.Trim(), "auto", StringComparison.OrdinalIgnoreCase))
             provider = Teams.RepoProviders.FromWire(wire) ?? throw new RpcException("invalid", $"unknown provider '{wire}': use github, gitlab, bitbucket, azuredevops, gitea or none");
-        var repo = OptStr(p, "repo");
-        try { repos.SetHostSetting(teamId, repo, provider, OptStr(p, "linkPattern")); }
+        var name = OptStr(p, "name");
+        try { repos.SetHostSetting(teamId, name, provider, OptStr(p, "linkPattern")); }
         catch (ArgumentException e) { throw new RpcException("invalid", e.Message); }
-        var o = new JsonObject { ["repo"] = string.IsNullOrWhiteSpace(repo) ? Teams.TeamRepos.MainRepoName : repo.Trim() };
-        AddHost(o, await repos.HostViewAsync(teamId, repo, ct));
-        return o;
+        if (!string.IsNullOrWhiteSpace(name) && repos.ExtrasOf(teamId).FirstOrDefault(e => string.Equals(e.Name, name.Trim(), StringComparison.OrdinalIgnoreCase)) is { } extra)
+            return await ExtraRepoJsonAsync(repos, teamId, extra, ct);
+        return await MainRepoJsonAsync(repos, teamId, ct) ?? new JsonObject();
     }
 
     /// <summary>git_web_link (B075): the web address of a commit, branch, file, compare or pull request, or { url: null }.</summary>

@@ -56,7 +56,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
             // Opening and closing the read-only Code view change nothing (a download is recorded).
             || method is "code.open" or "code.close"
             // B075: a web link only reads the repository's refs.
-            || method == "git_web_link";
+            || method == "git.webLink";
     }
 
     /// <summary>What a call was about, from its identifying parameters only ("team=web member=DeveloperPriya").</summary>

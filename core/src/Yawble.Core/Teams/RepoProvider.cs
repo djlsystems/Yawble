@@ -6,7 +6,7 @@ namespace Yawble.Core.Teams;
 /// <summary>The hosting service of a repository's origin (B075). None: plain git, no links, no pull requests.</summary>
 public enum RepoProviderKind { None, GitHub, GitLab, Bitbucket, AzureDevOps, Gitea }
 
-/// <summary>What a web link points at (git_web_link's kind).</summary>
+/// <summary>What a web link points at (git.webLink's kind).</summary>
 public enum WebLinkKind { Commit, Branch, File, Compare, Pr }
 
 /// <summary>
@@ -28,7 +28,7 @@ public sealed record WebLinkRequest(WebLinkKind Kind, string? Commit = null, str
 /// </summary>
 public static class RepoProviders
 {
-    /// <summary>The provider's wire name (teams.repos, teams.setRepoProvider): github, gitlab, bitbucket, azuredevops, gitea or none.</summary>
+    /// <summary>The provider's wire name (teams.repos, teams.setRepo): github, gitlab, bitbucket, azuredevops, gitea or none.</summary>
     public static string WireName(RepoProviderKind k) => k switch
     {
         RepoProviderKind.GitHub => "github",
@@ -188,8 +188,8 @@ public static class RepoProviders
 
     /// <summary>
     /// A link pattern: one template or several separated by whitespace. A template is used for the kind whose
-    /// placeholders ({commit}, {branch}, {file}, {from}, {to}, {pr}) it holds exactly; {base} and {path} may appear in
-    /// any and need the origin. The first template that fits wins; none fits: null (the provider's own layout then).
+    /// placeholders ({commit}, {branch}, {file}, {from}, {to}, {pr}) it holds exactly; {base} (the repository's web
+    /// address, e.g. https://github.com/owner/name) and {path} (its owner/name path) may appear in any and need the origin. The first template that fits wins; none fits: null (the provider's own layout then).
     /// </summary>
     public static string? FromPattern(string pattern, WebOrigin? web, WebLinkRequest req)
     {
@@ -202,7 +202,8 @@ public static class RepoProviders
             if ((used.Contains("base") || used.Contains("path")) && web is null) continue;
             var url = Placeholder.Replace(template, m => m.Groups[1].Value switch
             {
-                "base" => web!.Base,
+                // {base}: the repository's web address (https://github.com/owner/name); {path}: its owner/name path.
+                "base" => $"{web!.Base}/{EscapePath(web.Path)}",
                 "path" => EscapePath(web!.Path),
                 "commit" => req.Commit!,
                 "branch" => EscapePath(req.Branch!),
