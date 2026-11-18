@@ -1065,7 +1065,19 @@ test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, 
   expect(f.y + 24, 'the node is inside the wall (bottom)').toBeLessThanOrEqual(cb.height);
   expect(f.x + 24).toBeLessThanOrEqual(cb.width);
   expect.soft(clear(lb), 'the node is clear of the Legend button').toBe(true);
-  expect.soft(clear(rb), 'the node is clear of the controls row').toBe(true);
+  // Card 417 round 2: a 48 px node can clear the controls row only if the wall is at least node height + the row's
+  // distance from the wall's bottom (~48 + 56 = 104 px). Below that no placement can, so there the node must instead
+  // keep its centre off the row (with inside the wall, clear of Legend and the tap, checked above and below).
+  const rowFromBottom = cb.y + cb.height - rb.y;
+  r.rowFromBottom = Math.round(rowFromBottom);
+  if (cb.height >= 2 * node.r + rowFromBottom) {
+    expect.soft(clear(rb), 'the node is clear of the controls row').toBe(true);
+  } else {
+    r.controlsCheck = 'relaxed: centre off the row';
+    expect(clear(lb), 'too short to clear the row: the node is still clear of Legend').toBe(true);
+    const onRow = node.x >= rb.x && node.x <= rb.x + rb.width && node.y >= rb.y && node.y <= rb.y + rb.height;
+    expect(onRow, "too short to clear the row: the node's centre is off the controls row").toBe(false);
+  }
   // What is under the node's centre is the wall itself, not a control.
   r.hit = await page.evaluate((q) => (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.dataset?.test ?? null, node);
   expect(r.hit).toBe('monitor-canvas');
