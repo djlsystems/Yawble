@@ -228,6 +228,80 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
   });
 }
 
+// F1 re-check (card 420, fix 18daf84): the window's New chat starts on the saved Concierge default when it is ready.
+// Agents here: claude and grok signed in, codex installed but signed out, gemini not installed.
+test.describe('F1: a new chat starts on the saved Concierge default', () => {
+  const detect = answers['agents.detect'];
+  test.afterEach(() => { answers['agents.detect'] = detect; });
+  const agents = () => [
+    { cliId: 'claude', found: true, version: '2.0.0', path: 'C:/fake/claude.exe', signIn: { status: 'signed-in', detail: null } },
+    { cliId: 'grok', found: true, version: '1.0.0', path: 'C:/fake/grok.exe', signIn: { status: 'signed-in', detail: null } },
+    { cliId: 'codex', found: true, version: '1.0.0', path: 'C:/fake/codex.exe', signIn: { status: 'signed-out', detail: null } },
+    { cliId: 'gemini', found: false, version: null, path: null, signIn: { status: 'unknown', detail: null } },
+  ];
+
+  async function newChat(page: Page) {
+    await page.locator('[data-test=sidebar] [data-test=new-chat]').first().click();
+    await page.waitForTimeout(400);
+  }
+  const composerAgent = (page: Page) => page.locator('[data-test=composer-agent]').first();
+  async function sendHello(page: Page, sent: { method: string; params: any }[]) {
+    const before = sent.filter((s) => s.method === 'concierge.send').length;
+    await page.locator('[data-test=composer-text]').first().fill('hello');
+    await page.locator('[data-test=composer-text]').first().press('Enter');
+    await expect.poll(() => sent.filter((s) => s.method === 'concierge.send').length).toBe(before + 1);
+    return sent.filter((s) => s.method === 'concierge.send').at(-1)!.params;
+  }
+
+  test('grok saved: New chat is on grok; changing the default applies to the next New chat; an existing chat keeps its agent', async ({ browser }) => {
+    answers['agents.detect'] = agents;
+    const { page, ctx, errors, sent, state } = await open(browser, DESKTOP);
+    state.defaultAgent = 'grok';
+    await page.reload();
+    await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
+    await page.waitForTimeout(400);
+    await newChat(page);
+    await expect(composerAgent(page)).toHaveValue('grok');
+    await page.screenshot({ path: path.join(SHOTS, 'card420-f1-new-chat-on-grok-desktop-1280.png') });
+    expect((await sendHello(page, sent)).cli).toBe('grok');
+
+    // Change the default in Settings > Concierge, then New chat: no reload.
+    await openTab(page, 'open-concierge');
+    await page.locator('[data-test=concierge-default-agent]').selectOption('claude');
+    await expect(page.locator('[data-test=concierge-defaults-saved]')).toBeVisible();
+    await newChat(page);
+    await expect(composerAgent(page)).toHaveValue('claude');
+    await openTab(page, 'open-concierge');
+    await page.locator('[data-test=concierge-default-agent]').selectOption('grok');
+    await expect(page.locator('[data-test=concierge-defaults-saved]')).toBeVisible();
+    await newChat(page);
+    await expect(composerAgent(page)).toHaveValue('grok');
+
+    // An existing chat (c2, on claude) keeps its agent.
+    await page.locator('[data-test=sidebar] [data-test=chat-item]').filter({ hasText: 'A long chat title' }).first().click();
+    await page.waitForTimeout(500);
+    await expect(composerAgent(page)).toHaveValue('claude');
+    expect(errors).toEqual([]);
+    await ctx.close();
+  });
+
+  for (const [why, saved] of [['signed out', 'codex'], ['not installed', 'gemini']] as const) {
+    test(`a saved default that is ${why} (${saved}) falls back to the first ready agent`, async ({ browser }) => {
+      answers['agents.detect'] = agents;
+      const { page, ctx, errors, sent, state } = await open(browser, DESKTOP);
+      state.defaultAgent = saved;
+      await page.reload();
+      await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
+      await page.waitForTimeout(400);
+      await newChat(page);
+      await expect(composerAgent(page)).toHaveValue('claude');
+      expect((await sendHello(page, sent)).cli).toBe('claude');
+      expect(errors).toEqual([]);
+      await ctx.close();
+    });
+  }
+});
+
 test('the New Team dialog starts from teams.defaults: ticked rows in the list, the other as "+ Researcher Amara"', async ({ browser }) => {
   const { page, ctx, errors, sent } = await open(browser, DESKTOP);
   await page.locator('[data-test=sidebar] [data-test=new-team]').first().click();
