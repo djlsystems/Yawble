@@ -447,8 +447,11 @@ provisional signal, and the only source for reads.
 a member's pane opens it at that member's activity.
 
 - **Logs:**
-  - **All activity**: everything a member did or was asked to do, gathered from every log below. Every member's
-    activity is auditable here.
+  - **All activity**: everything a member did or was asked to do, gathered from every log below, and every audit
+    entry. Its Member column shows the member, `<Team>` for an entry about a whole team, or `app` for one about the app
+    itself (backlog, settings, the link, backups...). Filter on a member (only theirs), a team (its members' entries
+    and its `<Team>` entries) or the app. Audit entries keep the team and member names they were written with, so an
+    entry about a team or member deleted since still says who it was about.
   - **Accountability**: **Audit** (every change made from the window, a Cloud Link viewer, the Concierge or a paired
     program; reads are not recorded), **Cloud Link**, **Tool calls**, **Approvals**, **Agent changes**, **Host tasks**.
   - **Security**: **Network** (each run's gateway: model requests, connections allowed and refused) and **Runs** (how
