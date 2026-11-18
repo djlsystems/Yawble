@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // B075 (card 447): "Open on …" links, the provider in Team settings > Repositories, and the Git dialog's pull request
-// line, against a fake core on the card 446 contract: git_web_link {teamId, team, repo?, kind, …} -> { url | null };
+// line, against a fake core on the card 446 contract: git.webLink {teamId, team, repo?, kind, …} -> { url | null };
 // teams.repos entries gain provider, providerDetected, linkPattern, prSupported, prUnavailable; teams.setRepo saves.
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -47,7 +47,7 @@ const webLink = (p: any) => {
 const gitAnswers = (s: TeamGitStatus, info: RepoProviderInfo | null, link: (p: any) => unknown = webLink) => ({
   'git.status': () => s,
   'teams.repos': () => ({ main: { name: 'svc', ...(info ?? {}) }, extras: [] }),
-  git_web_link: link,
+  'git.webLink': link,
 });
 
 afterEach(() => { document.body.innerHTML = ''; });
@@ -68,10 +68,10 @@ describe('Open on … links in the Git dialog (B075)', () => {
     expect(w.find('[data-test="git-link-branch-members/ops/ada"]').exists()).toBe(true);
     // Every link opens in the browser like the app's other external links.
     for (const a of w.findAll('a.web, a.sha')) expect(a.attributes('target')).toBe('_blank');
-    // The contract's names: git_web_link with the team (id and name), no repo for the main one, the kind and its fields.
-    const compare = calls.find((c) => c.method === 'git_web_link' && c.params.kind === 'compare')!;
+    // The contract's names: git.webLink with the team (id and name), no repo for the main one, the kind and its fields.
+    const compare = calls.find((c) => c.method === 'git.webLink' && c.params.kind === 'compare')!;
     expect(compare.params).toEqual({ teamId: 3, team: 'ops', kind: 'compare', from: 'main', to: 'team/ops' });
-    const file = calls.find((c) => c.method === 'git_web_link' && c.params.kind === 'file')!;
+    const file = calls.find((c) => c.method === 'git.webLink' && c.params.kind === 'file')!;
     expect(file.params).toEqual({ teamId: 3, team: 'ops', kind: 'file', commit: 'bbbbbbbbbbbb', file: 'src/a.ts' });
   });
 
@@ -83,10 +83,10 @@ describe('Open on … links in the Git dialog (B075)', () => {
     expect(w.find('[data-test=git-members]').text()).toContain('cccccccccc');
   });
 
-  it('no links at all when the core answers null for everything, when it has no git_web_link, or with no origin', async () => {
+  it('no links at all when the core answers null for everything, when it has no git.webLink, or with no origin', async () => {
     for (const [s, link] of [
       [status(), () => ({ url: null })],
-      [status(), () => { throw new Error('unknown method git_web_link'); }],
+      [status(), () => { throw new Error('unknown method git.webLink'); }],
       [status({ origin: null }), webLink],
     ] as [TeamGitStatus, (p: any) => unknown][]) {
       const { api, calls } = fakeApi(gitAnswers(s, gitlab, link));
@@ -94,7 +94,7 @@ describe('Open on … links in the Git dialog (B075)', () => {
       await flushPromises();
       expect(w.findAll('a.web, a.sha')).toHaveLength(0);
       expect(w.find('[data-test=git-merge-state]').text()).toContain('bbbbbbbbbb');
-      if (!s.origin) expect(calls.some((c) => c.method === 'git_web_link')).toBe(false);
+      if (!s.origin) expect(calls.some((c) => c.method === 'git.webLink')).toBe(false);
       w.unmount();
     }
   });
@@ -103,13 +103,13 @@ describe('Open on … links in the Git dialog (B075)', () => {
     const { api, calls } = fakeApi({
       'git.status': () => status({ merge: 'up-to-date', conflictFiles: [], members: [] }),
       'teams.repos': () => ({ main: { name: 'svc', ...gitlab }, extras: [{ name: 'tools', writable: true, provider: null, providerDetected: 'none', linkPattern: '{base}/c/{commit}', prSupported: false, prUnavailable: 'x' }] }),
-      git_web_link: (p: any) => ({ url: `https://git.example.com/${p.kind}` }),
+      'git.webLink': (p: any) => ({ url: `https://git.example.com/${p.kind}` }),
     });
     const w = mount(GitDialog, { props: { api, team } });
     await flushPromises();
     await w.find('[data-test=git-repo-tools]').trigger('click');
     await flushPromises();
-    expect(calls.filter((c) => c.method === 'git_web_link').some((c) => c.params.repo === 'tools')).toBe(true);
+    expect(calls.filter((c) => c.method === 'git.webLink').some((c) => c.params.repo === 'tools')).toBe(true);
     expect(w.find('[data-test=git-link-team-branch]').text()).toBe('Open in the browser');
   });
 
@@ -201,6 +201,28 @@ describe('Team settings > Repositories: provider and link pattern (B075)', () =>
     await flushPromises();
     expect(calls.filter((c) => c.method === 'teams.setRepo')[2].params).toEqual({ teamId: 3, name: 'tools', provider: null, linkPattern: null });
     expect(state.tools.provider).toBeNull();
+  });
+
+  it('a pattern of several templates is saved as typed; the hint gives each kind\'s placeholders; providerOverride is ignored', async () => {
+    const state = {
+      main: { provider: null, providerOverride: 'gitlab', providerDetected: 'none', linkPattern: null } as RepoProviderInfo,
+      tools: { provider: null, providerDetected: 'github', linkPattern: null } as RepoProviderInfo,
+    };
+    const { api, calls } = fakeApi(answers(state));
+    const w = mountIt(api);
+    await flushPromises();
+    await w.find('[data-test=manage-tab-repos]').trigger('click');
+    await flushPromises();
+    // Only provider is the override: providerOverride (core may send it, equal to provider) changes nothing.
+    expect((w.find('[data-test=repo-main-provider-select]').element as HTMLSelectElement).value).toBe('');
+    const hint = w.find('[data-test=repo-main-link-pattern-hint]').text();
+    for (const part of ['commit {commit}', 'branch {branch}', 'file {commit} {file}', 'compare {from} {to}', 'pr {pr}', '{base} and {path}'])
+      expect(hint).toContain(part);
+    const two = 'https://git.corp.example/{path}/commit/{commit} https://git.corp.example/{path}/src/{branch}';
+    await w.find('[data-test=repo-main-link-pattern]').setValue(` ${two} `);
+    await w.find('[data-test=repo-main-provider-save]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'teams.setRepo')!.params).toEqual({ teamId: 3, provider: null, linkPattern: two });
   });
 
   it('an older core (no providerDetected) shows no provider fields', async () => {

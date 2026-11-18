@@ -523,9 +523,20 @@ a member's pane opens it at that member's activity.
   and codeberg.org), or none (plain git: any other host, a local folder, or no origin). https, ssh and `git@host:`
   addresses all work.
 - **Team settings > Repositories** shows each repository's detected provider. You can override it with **Provider**, and
-  set a **Link pattern** for a self-hosted or unknown host, then **Save**. The pattern is an address with the placeholders
-  `{base}` `{path}` `{commit}` `{branch}` `{file}` `{from}` `{to}` `{pr}`, for example
-  `https://git.example.com/{path}/commit/{commit}`. **As detected** and a blank pattern go back to detection.
+  set a **Link pattern** for a self-hosted or unknown host, then **Save**. The pattern is one or more address templates
+  separated by spaces. Each template is used for the link whose placeholders it holds exactly:
+
+  | Link | Placeholders |
+  | --- | --- |
+  | commit | `{commit}` |
+  | branch | `{branch}` |
+  | file at a commit | `{commit}` and `{file}` |
+  | compare | `{from}` and `{to}` |
+  | pull request | `{pr}` |
+
+  `{base}` (the repository's web address) and `{path}` (its owner/name path) may appear in any template. For example
+  `https://git.example.com/{path}/commit/{commit} https://git.example.com/{path}/src/{branch}` gives commit and branch
+  links; the other kinds get none. **As detected** and a blank pattern go back to detection.
 - **Open on GitHub** (or GitLab, Bitbucket, Azure DevOps, Gitea; **Open in the browser** for a link pattern): the Git
   dialog links the base and team branches, the member branches, their commits (the short commit is the link), the
   conflicting files at the team branch's commit, and **Compare with** the base. A link shows only when the provider

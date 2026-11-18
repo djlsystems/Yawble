@@ -1,4 +1,4 @@
-// B075 (card 447): "Open on GitHub/GitLab/…" links. The core builds every url (git_web_link, card 446) from the
+// B075 (card 447): "Open on GitHub/GitLab/…" links. The core builds every url (git.webLink, card 446) from the
 // repository's provider or link pattern and answers null when there is no link (a commit not on origin, a host it does not
 // know with no pattern); the shell only asks and shows the ones it got.
 import type { GitProvider, GitWebLinkQuery, RepoProviderInfo, YawbleApi } from '../../shared/api';
@@ -34,7 +34,7 @@ export async function fetchWebLinks(api: YawbleApi, team: { id: number; name: st
     try {
       const r = await api.call<{ url: string | null }>(GIT_WEB_LINK, { teamId: team.id, team: team.name, ...(repo ? { repo } : {}), ...q });
       if (typeof r?.url === 'string' && /^https?:\/\//i.test(r.url)) out[key] = r.url;
-    } catch { /* an older core without git_web_link: no links */ }
+    } catch { /* an older core without git.webLink: no links */ }
   }));
   return out;
 }

@@ -46,7 +46,8 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
   tools say so and leave it to the host's site.
 - What works with any git remote, or none: everything plain git does (branches, fetch, sync, merge, push, delete). With
   one of the five providers (GitHub, GitLab, Bitbucket, Azure DevOps, Gitea), or a link pattern you set in **Team
-  settings > Repositories**, the app also gets **Open on …** links to commits, branches, files and compares. See
+  settings > Repositories**, the app also gets **Open on …** links to commits, branches, files and compares (with a pattern, only the kinds its
+  templates cover). See
   [Repositories and git](features.md#repositories-and-git).
 
 ### MCP servers

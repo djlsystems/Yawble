@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { GitProvider, RepoProviderInfo } from '../../../shared/api';
-import { GIT_PROVIDERS } from '../../../shared/api';
+import { GIT_PROVIDERS, LINK_PATTERN_KINDS } from '../../../shared/api';
 import { PROVIDER_LABELS } from '../gitWebLinks';
 import BusyLabel from './BusyLabel.vue';
 
@@ -24,6 +24,8 @@ const detected = computed(() => {
   const d = props.info.providerDetected;
   return d ? PROVIDER_LABELS[d] : 'not detected (plain git)';
 });
+// "commit {commit}, branch {branch}, file {commit} {file}, …" from the core's rule (card 446).
+const kindsHint = LINK_PATTERN_KINDS.map((k) => `${k.kind} ${k.placeholders.join(' ')}`).join(', ');
 const changed = computed(() => (provider.value || null) !== (props.info.provider ?? null) || (pattern.value.trim() || null) !== (props.info.linkPattern ?? null));
 const save = () => emit('save', { provider: provider.value || null, linkPattern: pattern.value.trim() || null });
 </script>
@@ -41,7 +43,8 @@ const save = () => emit('save', { provider: provider.value || null, linkPattern:
       <input v-model="pattern" class="mono wide" :data-test="`${testId}-link-pattern`" :disabled="busy"
         placeholder="{base}/{path}/commit/{commit}" />
     </label>
-    <p class="muted small">Placeholders: {base} {path} {commit} {branch} {file} {from} {to} {pr}. Blank: the provider's own links.</p>
+    <p class="muted small" :data-test="`${testId}-link-pattern-hint`">One or more templates separated by spaces; each is used
+      for the link whose placeholders it holds: {{ kindsHint }}. {base} and {path} may appear in any. Blank: the provider's own links.</p>
     <div class="buttons"><span class="grow" />
       <button class="primary" :data-test="`${testId}-provider-save`" :disabled="busy || !changed" @click="save"><BusyLabel :busy="saving" text="Saving…">Save</BusyLabel></button>
     </div>
