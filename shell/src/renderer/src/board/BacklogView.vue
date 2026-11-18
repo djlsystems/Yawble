@@ -199,7 +199,7 @@ async function simple(method: string) {
 
 // ---- dispatch
 const target = ref<number | 'new'>(props.teams[0]?.id ?? 'new');
-const newTeam = ref({ name: '', cli: 'claude', repo: '' });
+const newTeam = ref({ name: '', cli: '', repo: '' });
 const confirmAgain = ref(false);
 const confirmDelete = ref(false);
 const isAddress = (s: string) => /^(https?|ssh|file):|^[\w.-]+@[\w.-]+:/i.test(s.trim());
@@ -226,12 +226,12 @@ async function dispatch() {
   if (i.inFlight && !confirmAgain.value) { confirmAgain.value = true; return; }
   const r = target.value === 'new'
     ? await act<BacklogItem>('backlog.dispatchNew', {
-        id: i.id, name: newTeam.value.name.trim(), managerCli: newTeam.value.cli,
+        id: i.id, name: newTeam.value.name.trim(), ...(newTeam.value.cli ? { managerCli: newTeam.value.cli } : {}),
         ...(newTeam.value.repo.trim() ? { [isAddress(newTeam.value.repo) ? 'repoUrl' : 'repoPath']: newTeam.value.repo.trim() } : {}),
       }, 'dispatch')
     : await act<BacklogItem>('backlog.dispatch', { id: i.id, teamId: target.value, again: i.inFlight }, 'dispatch');
   confirmAgain.value = false;
-  if (r) { dispatchOpen.value = false; newTeam.value = { name: '', cli: 'claude', repo: '' }; await load(); await loadDetail(); }
+  if (r) { dispatchOpen.value = false; newTeam.value = { name: '', cli: '', repo: '' }; await load(); await loadDetail(); }
 }
 watch(() => props.teams, (ts) => { if (target.value !== 'new' && !ts.some((t) => t.id === target.value)) target.value = ts[0]?.id ?? 'new'; });
 
@@ -417,7 +417,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
               <label>New team's name<input v-model="newTeam.name" data-test="backlog-new-team" placeholder="e.g. Billing" /></label>
               <label>Its repository (address or folder, optional)<input v-model="newTeam.repo" class="mono" placeholder="https://git.example.com/owner/repo.git" /></label>
               <label>Manager's agent
-                <select v-model="newTeam.cli"><option value="claude">Claude</option><option value="codex">Codex</option><option value="grok">Grok</option><option value="copilot">Copilot</option><option value="antigravity">Antigravity</option></select>
+                <select v-model="newTeam.cli"><option value="">Default (Settings &gt; Teams)</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="grok">Grok</option><option value="copilot">Copilot</option><option value="antigravity">Antigravity</option></select>
               </label>
             </template>
             <p v-if="confirmAgain" class="warn small" data-test="backlog-again-confirm">

@@ -128,12 +128,21 @@ public sealed partial class BusEngine
     /// <summary>
     /// Whether a first name is used by a member of any team (archived too; Managers do not count), compared
     /// case-insensitively. A member whose first name is not known (from before first names were kept, and not
-    /// splittable from its id) counts by its id's end.
+    /// splittable from its id) counts by its id's end, only where a first name starts there: the id ends with the
+    /// name capitalized, after a lowercase letter ("DeveloperEster" uses Ester; "Tester" does not), or is the name.
     /// </summary>
     public static bool IsGivenNameUsed(string name, IReadOnlyList<GivenNameRow> members) =>
         members.Any(m => m.GivenName is { } given
             ? string.Equals(given, name, StringComparison.OrdinalIgnoreCase)
-            : m.Name.EndsWith(name, StringComparison.OrdinalIgnoreCase));
+            : EndsWithFirstName(m.Name, name));
+
+    private static bool EndsWithFirstName(string id, string name)
+    {
+        if (name.Length == 0 || id.Length < name.Length) return false;
+        if (id.Length == name.Length) return string.Equals(id, name, StringComparison.OrdinalIgnoreCase);
+        var tail = id[^name.Length..];
+        return char.IsUpper(tail[0]) && string.Equals(tail, name, StringComparison.OrdinalIgnoreCase) && char.IsLower(id[^(name.Length + 1)]);
+    }
 
     /// <summary>A free first name from the list (<see cref="MemberNameList.Pick"/>), also free of <paramref name="alsoTaken"/>; null when none.</summary>
     private string? PickGivenName(IReadOnlyCollection<string>? alsoTaken = null)
