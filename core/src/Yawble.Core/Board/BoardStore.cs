@@ -6,11 +6,18 @@ namespace Yawble.Core.Board;
 /// <summary>
 /// One card on a team's board (0014_board.sql). ClearedAt (0037): the person hid this Done card from the board view.
 /// EndedAt / EndedHow (0045): when its workflow's end ended it, and how (completed, closed or expired); null while it is live.
+/// StartedAt / Rebuilt (0047): when it first had a member and was queued or told; its timeline was rebuilt from its trail.
 /// </summary>
 public sealed record CardRow(
     long Id, string Team, string? Member, string? Item, string Title, string Body, string Status, string Lane,
     bool Placed, bool AwaitingManager, long? Workflow, string CreatedAt, string UpdatedAt, string? ClearedAt = null,
-    string? EndedAt = null, string? EndedHow = null);
+    string? EndedAt = null, string? EndedHow = null, string? StartedAt = null, bool Rebuilt = false);
+
+/// <summary>
+/// A line of a card's (or a card-less member's) timeline (0047): a state, a stall, a hold or a marker.
+/// </summary>
+public sealed record TimelineLine(long Id, long? CardId, long? Workflow, string? Member, string Kind, string At, string? Until,
+    string? Category, bool Done, string? Marker, bool Rebuilt);
 
 /// <summary>A line of a card's history: who did what, oldest first.</summary>
 public sealed record TrailRow(long Id, string At, string Source, string Kind, string Text);
@@ -42,13 +49,14 @@ public sealed class BoardStore(string connectionString, TimeProvider? clock = nu
 
     // ---------------------------------------------------------------- cards
 
-    private const string CardColumns = "id, team, member, item, title, body, status, lane, placed, awaiting_manager, workflow, created_at, updated_at, cleared_at, ended_at, ended_how";
+    private const string CardColumns = "id, team, member, item, title, body, status, lane, placed, awaiting_manager, workflow, created_at, updated_at, cleared_at, ended_at, ended_how, started_at, timeline_rebuilt";
 
     private static CardRow ReadCard(SqliteDataReader r) => new(
         r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3),
         r.GetString(4), r.GetString(5), r.GetString(6), r.GetString(7), r.GetInt64(8) != 0, r.GetInt64(9) != 0,
         r.IsDBNull(10) ? null : r.GetInt64(10), r.GetString(11), r.GetString(12), r.IsDBNull(13) ? null : r.GetString(13),
-        r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : r.GetString(15));
+        r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : r.GetString(15),
+        r.IsDBNull(16) ? null : r.GetString(16), r.GetInt64(17) != 0);
 
     public IReadOnlyList<CardRow> Cards(string? team = null) =>
         Query($"SELECT {CardColumns} FROM board_cards {(team is null ? "" : "WHERE team = $t COLLATE NOCASE")} ORDER BY updated_at DESC, id DESC;",
@@ -79,6 +87,8 @@ public sealed class BoardStore(string connectionString, TimeProvider? clock = nu
             """,
             ("$t", team), ("$m", (object?)member ?? DBNull.Value), ("$i", (object?)item ?? DBNull.Value), ("$title", Clip(title, 80)),
             ("$body", body), ("$s", status), ("$l", lane), ("$w", (object?)workflow ?? DBNull.Value), ("$now", now));
+        var card = Card(id)!;
+        RecordState(card, now);
         return Card(id)!;
     }
 
@@ -88,10 +98,12 @@ public sealed class BoardStore(string connectionString, TimeProvider? clock = nu
     /// <summary>
     /// Writes a card's changeable fields back, and its updated time. A card leaving Done is live work again: it is no
     /// longer cleared from the board (whoever moved it: the person, an agent's board tool, or the projector), and
-    /// <see cref="Uncleared"/> says so when it was.
+    /// <see cref="Uncleared"/> says so when it was. A change of the card's time category is a line of its timeline (0047),
+    /// at <paramref name="stateAt"/> when given (an expired workflow's cards end at its last activity), else at the save's time.
     /// </summary>
-    public void Save(CardRow c, string? at = null)
+    public void Save(CardRow c, string? at = null, string? stateAt = null)
     {
+        EnsureTimeline(c.Id);
         var uncleared = c.Lane != "done"
             && Exec("UPDATE board_cards SET cleared_at = NULL WHERE id = $id AND cleared_at IS NOT NULL;", ("$id", c.Id)) > 0;
         Exec(
@@ -102,8 +114,136 @@ public sealed class BoardStore(string connectionString, TimeProvider? clock = nu
             ("$m", (object?)c.Member ?? DBNull.Value), ("$i", (object?)c.Item ?? DBNull.Value), ("$title", Clip(c.Title, 80)), ("$body", c.Body),
             ("$s", c.Status), ("$l", c.Lane), ("$p", c.Placed ? 1 : 0), ("$a", c.AwaitingManager ? 1 : 0),
             ("$w", (object?)c.Workflow ?? DBNull.Value), ("$now", at ?? Now()), ("$id", c.Id));
+        RecordState(c, stateAt ?? at ?? Now());
         if (uncleared) Uncleared?.Invoke();
     }
+
+    // ---------------------------------------------------------------- timelines (0047)
+
+    private const string TimelineColumns = "id, card_id, workflow, member, kind, at, until, category, done, marker, rebuilt";
+
+    private static TimelineLine ReadLine(SqliteDataReader r) => new(
+        r.GetInt64(0), r.IsDBNull(1) ? null : r.GetInt64(1), r.IsDBNull(2) ? null : r.GetInt64(2), r.IsDBNull(3) ? null : r.GetString(3),
+        r.GetString(4), r.GetString(5), r.IsDBNull(6) ? null : r.GetString(6), r.IsDBNull(7) ? null : r.GetString(7),
+        r.GetInt64(8) != 0, r.IsDBNull(9) ? null : r.GetString(9), r.GetInt64(10) != 0);
+
+    /// <summary>
+    /// The card's category now, as a state line, when it differs from its last one (a Scheduled line in between does not
+    /// count: saving the same state again leaves the wake standing). Also its started time: the first save with a member
+    /// and queued.
+    /// </summary>
+    private void RecordState(CardRow c, string at)
+    {
+        var category = TimeCategories.OfState(c.Member, c.Status, c.Lane);
+        var done = c.Lane == Lanes.Done;
+        var lastBase = Query($"SELECT {TimelineColumns} FROM board_timeline WHERE card_id = $c AND kind = 'state' AND category <> $s ORDER BY at DESC, id DESC LIMIT 1;",
+            ReadLine, ("$c", c.Id), ("$s", TimeCategories.Scheduled)).FirstOrDefault();
+        if (lastBase is null || lastBase.Category != category || lastBase.Done != done
+            || !string.Equals(lastBase.Member, c.Member, StringComparison.OrdinalIgnoreCase))
+            AddLine(c.Id, c.Workflow, c.Member, "state", at, null, category, done, null, false);
+        if (c.Member is not null && c.Status == "queued")
+            Exec("UPDATE board_cards SET started_at = $at WHERE id = $id AND started_at IS NULL;", ("$at", at), ("$id", c.Id));
+    }
+
+    /// <summary>The card waits for its wake (wake_me) until <paramref name="until"/>: Scheduled; then Done again when it is in Done.</summary>
+    public void AddScheduled(CardRow c, string at, string until) =>
+        AddLine(c.Id, c.Workflow, c.Member, "state", at, until, TimeCategories.Scheduled, c.Lane == Lanes.Done, null, false);
+
+    /// <summary>A run's stall or lease wait (kind stall or hold), on a card or, with no card, on the member's work in the workflow.</summary>
+    public void AddSpan(long? cardId, long? workflow, string? member, string kind, string start, string end)
+    {
+        if (cardId is { } id) EnsureTimeline(id);
+        AddLine(cardId, workflow, member, kind, start, end, null, false, null, false);
+    }
+
+    public void AddMarker(long? cardId, long? workflow, string? member, string marker, string at)
+    {
+        if (cardId is { } id) EnsureTimeline(id);
+        AddLine(cardId, workflow, member, "marker", at, null, null, false, marker, false);
+    }
+
+    private void AddLine(long? cardId, long? workflow, string? member, string kind, string at, string? until, string? category, bool done, string? marker, bool rebuilt) =>
+        Exec("INSERT INTO board_timeline (card_id, workflow, member, kind, at, until, category, done, marker, rebuilt) VALUES ($c, $w, $m, $k, $at, $u, $cat, $d, $mk, $r);",
+            ("$c", (object?)cardId ?? DBNull.Value), ("$w", (object?)workflow ?? DBNull.Value), ("$m", (object?)member ?? DBNull.Value),
+            ("$k", kind), ("$at", at), ("$u", (object?)until ?? DBNull.Value), ("$cat", (object?)category ?? DBNull.Value),
+            ("$d", done ? 1 : 0), ("$mk", (object?)marker ?? DBNull.Value), ("$r", rebuilt ? 1 : 0));
+
+    /// <summary>A card's timeline lines, oldest first (filled in from its trail first, for a card made before 0047).</summary>
+    public IReadOnlyList<TimelineLine> Timeline(long cardId)
+    {
+        EnsureTimeline(cardId);
+        return Query($"SELECT {TimelineColumns} FROM board_timeline WHERE card_id = $c ORDER BY at, id;", ReadLine, ("$c", cardId));
+    }
+
+    /// <summary>The lines of members' work in the workflow that is on none of its cards (card_id NULL).</summary>
+    public IReadOnlyList<TimelineLine> LooseTimeline(long workflow) =>
+        Query($"SELECT {TimelineColumns} FROM board_timeline WHERE card_id IS NULL AND workflow = $w ORDER BY at, id;", ReadLine, ("$w", workflow));
+
+    /// <summary>
+    /// Fills in a card's timeline from its board_trail lines once, for a card made before 0047 (<see cref="TimelineRebuild"/>):
+    /// its lines are marked rebuilt, and so is the card. Claimed and written in one transaction, so it happens once.
+    /// </summary>
+    public void EnsureTimeline(long cardId)
+    {
+        using var c = Open();
+        using (var probe = Command(c, "SELECT timeline_rebuild FROM board_cards WHERE id = $id;", [("$id", cardId)]))
+            if (probe.ExecuteScalar() is not long pending || pending == 0) return;
+        using var tx = c.BeginTransaction();
+        using (var claim = Command(c, "UPDATE board_cards SET timeline_rebuild = 0, timeline_rebuilt = 1 WHERE id = $id AND timeline_rebuild = 1;", [("$id", cardId)]))
+        {
+            claim.Transaction = tx;
+            if (claim.ExecuteNonQuery() == 0) { tx.Rollback(); return; }
+        }
+        CardRow? card;
+        using (var read = Command(c, $"SELECT {CardColumns} FROM board_cards WHERE id = $id;", [("$id", cardId)]))
+        {
+            read.Transaction = tx;
+            using var r = read.ExecuteReader();
+            card = r.Read() ? ReadCard(r) : null;
+        }
+        var trail = new List<TrailRow>();
+        using (var read = Command(c, "SELECT id, at, source, kind, text FROM board_trail WHERE card_id = $c ORDER BY id;", [("$c", cardId)]))
+        {
+            read.Transaction = tx;
+            using var r = read.ExecuteReader();
+            while (r.Read()) trail.Add(new TrailRow(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4)));
+        }
+        if (card is null) { tx.Rollback(); return; }
+        var rebuilt = TimelineRebuild.FromTrail(card, trail);
+        foreach (var l in rebuilt.Lines)
+        {
+            using var insert = Command(c,
+                "INSERT INTO board_timeline (card_id, workflow, member, kind, at, until, category, done, marker, rebuilt) VALUES ($c, $w, $m, $k, $at, $u, $cat, $d, $mk, 1);",
+                [("$c", cardId), ("$w", (object?)card.Workflow ?? DBNull.Value), ("$m", (object?)l.Member ?? DBNull.Value), ("$k", l.Kind), ("$at", l.At),
+                 ("$u", (object?)l.Until ?? DBNull.Value), ("$cat", (object?)l.Category ?? DBNull.Value), ("$d", l.Done ? 1 : 0), ("$mk", (object?)l.Marker ?? DBNull.Value)]);
+            insert.Transaction = tx;
+            insert.ExecuteNonQuery();
+        }
+        if (rebuilt.StartedAt is { } started)
+            using (var set = Command(c, "UPDATE board_cards SET started_at = $at WHERE id = $id AND started_at IS NULL;", [("$at", started), ("$id", cardId)]))
+            {
+                set.Transaction = tx;
+                set.ExecuteNonQuery();
+            }
+        tx.Commit();
+    }
+
+    /// <summary>The runs of a workflow (B086): who, queued, started, ended (null while running; an interrupted one ends where it started).</summary>
+    public IReadOnlyList<RunSpan> RunsOf(long workflow) =>
+        Query(
+            "SELECT m.name, r.queued_at, r.started_at, r.ended_at, r.state FROM runs r JOIN members m ON m.id = r.member_id WHERE r.correlation_id = $w ORDER BY r.id;",
+            r =>
+            {
+                var queued = Time(r.GetString(1));
+                var started = Time(r.GetString(2));
+                DateTimeOffset? ended = r.IsDBNull(3) ? (r.GetString(4) == "running" ? null : started) : Time(r.GetString(3));
+                return new RunSpan(r.GetString(0), queued < started ? queued : started, started, ended);
+            }, ("$w", workflow));
+
+    public DateTimeOffset UtcNow() => _clock.GetUtcNow();
+
+    public static DateTimeOffset Time(string iso) =>
+        DateTimeOffset.Parse(iso, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
 
     // ---------------------------------------------------------------- a card's end (0045)
 
@@ -160,6 +300,7 @@ public sealed class BoardStore(string connectionString, TimeProvider? clock = nu
     public void DeleteTeam(string team)
     {
         Exec("DELETE FROM board_trail WHERE card_id IN (SELECT id FROM board_cards WHERE team = $t COLLATE NOCASE);", ("$t", team));
+        Exec("DELETE FROM board_timeline WHERE card_id IN (SELECT id FROM board_cards WHERE team = $t COLLATE NOCASE);", ("$t", team));
         Exec("DELETE FROM board_cards WHERE team = $t COLLATE NOCASE;", ("$t", team));
     }
 

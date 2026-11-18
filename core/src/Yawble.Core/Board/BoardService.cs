@@ -39,7 +39,11 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     private readonly SemaphoreSlim _gate = new(1, 1);
     private static readonly IReadOnlySet<string> NoTesters = new HashSet<string>();
 
-    public static bool Handles(string method) => method.StartsWith("board.", StringComparison.Ordinal) || method.StartsWith("backlog.", StringComparison.Ordinal);
+    public static bool Handles(string method) =>
+        method.StartsWith("board.", StringComparison.Ordinal) || method.StartsWith("backlog.", StringComparison.Ordinal) || method == "timeline.get";
+
+    /// <summary>B086: the cards' and workflows' times (the bus asks it for its workflow items).</summary>
+    public BoardTimeline Timeline { get; } = new(store);
 
     /// <summary>Reads the bus into the cards until stopped.</summary>
     public async Task RunAsync(CancellationToken ct)
@@ -91,6 +95,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
             "board.move" => await MoveAsync(Long(p, "id"), Str(p, "lane"), OptStr(p, "note"), ct),
             "board.edit" => await EditAsync(Long(p, "id"), OptStr(p, "title"), OptStr(p, "status"), OptStr(p, "note"), ct),
             "board.comment" => await CommentAsync(Long(p, "id"), Str(p, "text"), ct),
+            "timeline.get" => await TimelineAsync(OptLong(p, "card"), OptLong(p, "workflow"), ct),
 
             "backlog.list" => Items(store.Items(p?["archived"] is JsonValue a && a.TryGetValue<bool>(out var ar) && ar)),
             "backlog.add" => ItemJson(store.AddItem(Required(Str(p, "title"), "a title"), OptStr(p, "body") ?? "", OptStr(p, "team"))),
@@ -129,6 +134,9 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         }
         var list = new JsonArray();
         var open = new HashSet<long>();
+        var live = await bus.LiveActivityAsync(ct);
+        var now = store.UtcNow();
+        var runs = new Dictionary<long, IReadOnlyList<RunSpan>>();
         foreach (var card in store.Cards(team).Where(c => includeCleared || (c.ClearedAt is not null) == cleared))
         {
             // A member running right now is working on its newest open card, though no message has said so yet.
@@ -137,6 +145,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
                 && card.Status == "queued" && open.Add(card.Id) && store.OpenCardOf(card.Team, m)?.Id == card.Id)
                 shown = card with { Status = "running", Lane = card.Placed ? card.Lane : Lanes.InProgress };
             var node = CardJson(shown, teams);
+            node["time"] = TimeOf(card, live, now, runs);
             if (card.Member is { } who && running.TryGetValue($"{card.Team}/{who}", out var s))
             {
                 node["memberState"] = new JsonObject { ["state"] = s.State, ["attention"] = s.Attention };
@@ -177,6 +186,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     {
         var card = CardOr(id);
         var node = CardJson(card, await bus.TeamsAsync(ct));
+        node["time"] = TimeOf(card, await bus.LiveActivityAsync(ct), store.UtcNow(), new());
         node["trail"] = new JsonArray(store.Trail(id).Select(t => (JsonNode)new JsonObject
         {
             ["id"] = t.Id, ["at"] = t.At, ["source"] = t.Source, ["kind"] = t.Kind, ["text"] = t.Text,
@@ -184,6 +194,29 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         if (card.Item is { } label && BoardStore.ItemId(label) is { } itemId && store.Item(itemId) is { } item)
             node["itemTitle"] = item.Title;
         return node;
+    }
+
+    /// <summary>A card's time (B086), with the runs of its workflow read once per list.</summary>
+    private JsonObject TimeOf(CardRow card, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now, Dictionary<long, IReadOnlyList<RunSpan>> runs)
+    {
+        IReadOnlyList<RunSpan> mine = [];
+        if (card.Workflow is { } w && !runs.TryGetValue(w, out mine!)) runs[w] = mine = store.RunsOf(w);
+        return Timeline.OfCard(card, live, now, mine).Time.ToJson();
+    }
+
+    /// <summary>
+    /// timeline.get { card } | { workflow }: the time, a row of bands per card (one for a card), the workflow's summary
+    /// row (one category per moment) and the markers (B086).
+    /// </summary>
+    private async Task<JsonNode> TimelineAsync(long? cardId, long? workflow, CancellationToken ct)
+    {
+        var live = await bus.LiveActivityAsync(ct);
+        var now = store.UtcNow();
+        if (cardId is { } id) return BoardTimeline.Json(Timeline.OfCard(CardOr(id), live, now));
+        if (workflow is not { } w) throw new RpcException("bad_params", "timeline.get needs a card or a workflow");
+        var thread = await bus.WorkflowThreadAsync(w, ct);
+        var timeline = Timeline.OfWorkflow(w, thread, live, now) ?? throw new RpcException("no_such_workflow", $"there is no workflow {w}");
+        return BoardTimeline.Json(timeline);
     }
 
     private async Task<JsonNode> MoveAsync(long id, string lane, string? note, CancellationToken ct)
@@ -338,7 +371,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
             {
                 if (!workflows.TryGetValue(team.Name, out var known))
                 {
-                    try { known = await bus.WorkflowsAsync(team.Name, 200, ct); }
+                    try { known = await bus.WorkflowsAsync(team.Name, 200, ct, time: false); }
                     catch (Exception e) when (e is BusRefusal or ArgumentException or InvalidOperationException) { known = []; }
                     workflows[team.Name] = known;
                 }

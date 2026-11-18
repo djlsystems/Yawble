@@ -19,11 +19,11 @@ public class Card390ExpiryContractTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
-    /// <summary>The keys of a bus.workflows item: the shell's WorkflowSummary plus expiryWarning (the contract).</summary>
+    /// <summary>The keys of a bus.workflows item: the shell's WorkflowSummary plus expiryWarning (the contract), and B086's time.</summary>
     public static readonly string[] WorkflowItemKeys =
     [
         "id", "title", "owner", "state", "undeclared", "busy", "ending", "startedAt", "lastAt", "messages",
-        "endedAt", "expiredAt", "expiresAt", "expiryWarning", "question",
+        "endedAt", "expiredAt", "expiresAt", "expiryWarning", "question", "time",
     ];
 
     private sealed class Rig : IAsyncDisposable

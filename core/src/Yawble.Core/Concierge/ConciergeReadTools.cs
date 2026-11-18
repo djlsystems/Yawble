@@ -204,6 +204,18 @@ public sealed class ConciergeReadTools(
         sb.AppendLine($"Team {S(o, "team")}{(S(o, "member") is { Length: > 0 } m ? $", member {m}" : "")}; lane {S(o, "lane")}, status {S(o, "status")}" +
                       $"{(S(o, "item") is { Length: > 0 } item ? $"; from backlog {item}" : "")}{(S(o, "workflow") is { Length: > 0 } w ? $"; workflow {w}" : "")}");
         sb.AppendLine($"Created {S(o, "createdAt")}, updated {S(o, "updatedAt")}");
+        // B086: its overall time (created to its last Done) and where that time went, as the board shows it.
+        if (o["time"] is JsonObject time)
+        {
+            var overall = time["overallMs"] is JsonValue ms && ms.TryGetValue<long>(out var n) ? n : 0;
+            var parts = (time["breakdown"] as JsonArray ?? []).OfType<JsonObject>()
+                .Select(b => $"{S(b, "category")} {Board.BoardTimeline.Duration(b["ms"] is JsonValue v && v.TryGetValue<long>(out var x) ? x : 0)}").ToList();
+            var open = time["open"] is JsonValue ov && ov.TryGetValue<bool>(out var isOpen) && isOpen;
+            sb.AppendLine($"Time: {Board.BoardTimeline.Duration(overall)}{(open ? " so far, open" : $", ended {S(time, "endedHow")} {S(time, "endedAt")}")}" +
+                $"; planned {S(time, "createdAt")}{(S(time, "startedAt") is { Length: > 0 } st ? $", started {st}" : ", not started")}" +
+                $"{(parts.Count > 0 ? $" ({string.Join(", ", parts)})" : "")}" +
+                $"{(time["rebuilt"] is JsonValue rb && rb.TryGetValue<bool>(out var r) && r ? " [rebuilt from history]" : "")}");
+        }
         sb.AppendLine().AppendLine(S(o, "body"));
         sb.AppendLine().AppendLine("Trail:");
         foreach (var t in (o["trail"] as JsonArray ?? []).OfType<JsonObject>())

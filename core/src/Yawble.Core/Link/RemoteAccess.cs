@@ -15,6 +15,8 @@ public static class RemoteAccess
         .. Ui.UiRpc.Prefixes,
         "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
         "guardrail.", "agents.", "runs.", "concierge.", "board.", "backlog.", "integrations.", "tasks.",
+        // B086: a card's or a workflow's timeline (the cloud's detail dialog).
+        "timeline.get",
         "ops.backups",
         // Network asks: listed and answered like the other policy changes (policy. is a screen prefix above).
         "network.",
@@ -85,6 +87,8 @@ public static class RemoteAccess
             // concierge.read only clears the chat's unread marker: opening a chat is a read.
             "concierge.list", "concierge.get", "concierge.read",
             "board.list", "board.card", "backlog.list", "backlog.item",
+            // B086: a card's or a workflow's timeline (the detail dialog); a Visitor may view it.
+            "timeline.get",
             "integrations.list", "integrations.asks", "integrations.calls", "integrations.checklist", "integrations.connectionAttention",
             "integrations.connections", "integrations.discoverStatus", "integrations.mcpList", "integrations.apiList", "integrations.watches",
             "integrations.taskRuns", "integrations.mcpParse",
