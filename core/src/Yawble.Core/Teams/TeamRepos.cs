@@ -74,7 +74,7 @@ public sealed partial class TeamRepos
         _connectionString = connectionString;
         _clock = clock ?? TimeProvider.System;
         _log = log;
-        Git = new HostGit(Path.Combine(AppDataRoot, "data", "git", "empty.gitconfig"));
+        Git = new HostGit(Path.Combine(AppDataRoot, "data", "git", "empty.gitconfig")) { Log = log };
     }
 
     public string AppDataRoot { get; }
@@ -616,7 +616,7 @@ public sealed partial class TeamRepos
             // Into a staging ref first, never straight onto the branch: the host may have moved the branch since the
             // clone was made (a sync before new work), and a clone that has not pulled that must not put it back.
             var staging = FetchStagingPrefix + branch;
-            var fetched = await Git.TryRunAsync(repoPath,
+            var fetched = await Git.FetchLocalAsync(repoPath,
                 ["fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", StrictUploadPack, "--", gitDir, $"+{refName}:{staging}"], ct);
             if (fetched.ExitCode != 0) return Fail("could not fetch the member's branch: " + fetched.Stderr);
             recordFetched(sha);
@@ -751,8 +751,8 @@ public sealed partial class TeamRepos
             Directory.CreateDirectory(shared);
             await Git.RunAsync(null, ct, "init", "-q", "--bare", "-b", baseBranch, shared);
         }
-        await Git.RunAsync(shared, ct, "fetch", "-q", "--no-tags", "--prune", "--no-write-fetch-head", "--no-recurse-submodules", "--",
-            repoPath, "+refs/heads/*:refs/heads/*");
+        await Git.FetchLocalOrThrowAsync(shared, ["fetch", "-q", "--no-tags", "--prune", "--no-write-fetch-head", "--no-recurse-submodules", "--",
+            repoPath, "+refs/heads/*:refs/heads/*"], ct);
         await WriteSharedBundleAsync(shared, ct);
     }
 

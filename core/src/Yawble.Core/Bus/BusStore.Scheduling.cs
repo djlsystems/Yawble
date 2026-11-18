@@ -32,6 +32,15 @@ public sealed partial class BusStore
 
     public string? FailureClassOf(long runId) => Scalar<string?>("SELECT failure_class FROM runs WHERE id = $id;", ("$id", runId));
 
+    /// <summary>How many of the member's runs for this batch (its first item, <paramref name="causation"/>) ended before the agent started.</summary>
+    public long NotStartedRuns(long memberId, long causation) =>
+        Scalar<long>("SELECT count(*) FROM runs WHERE member_id = $m AND causation_seq = $c AND failure_class = $f;",
+            ("$m", memberId), ("$c", causation), ("$f", FailureClasses.NotStarted));
+
+    /// <summary>A run that never started its agent hands its deliveries back: they wait for the member's next run.</summary>
+    public void UnstartPendingOfRun(long runId) =>
+        Exec("UPDATE pending_deliveries SET started = 0, run_id = NULL WHERE run_id = $r;", ("$r", runId));
+
     public sealed record SessionRow(
         long Id, long MemberId, long QueueId, string State, string QueuedAt, string StartedAt, string? EndedAt, string? Reason);
 

@@ -110,4 +110,57 @@ public sealed class HostGit
     }
 
     public Task<string> RunAsync(string? workingDirectory, CancellationToken ct, params string[] args) => RunAsync(workingDirectory, args, ct);
+
+    /// <summary>How many times a fetch from a local repository path is tried when its transport fails (<see cref="FetchLocalAsync"/>).</summary>
+    public int LocalFetchAttempts { get; init; } = 3;
+
+    /// <summary>The pause before the second try; doubled before each later one.</summary>
+    public TimeSpan LocalFetchRetryDelay { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>Told each time a fetch from a local path is tried again, with git's error.</summary>
+    public Action<string>? Log { get; init; }
+
+    /// <summary>
+    /// A fetch whose source is a repository path on this computer. git reaches a path by starting git-upload-pack
+    /// through a shell, and on Windows that shell now and then fails to start when the computer is busy (git says only
+    /// "Could not read from remote repository"). A fetch only reads its source and lands where it lands again on a
+    /// second try, so a transport failure is tried again, <see cref="LocalFetchAttempts"/> times in all; any other
+    /// failure (a ref git refuses, a missing repository) is answered at once.
+    /// </summary>
+    public Task<GitResult> FetchLocalAsync(string? workingDirectory, IReadOnlyList<string> args, CancellationToken ct = default) =>
+        RetryTransportAsync(c => TryRunAsync(workingDirectory, args, c), LocalFetchAttempts, LocalFetchRetryDelay,
+            (n, stderr) => Log?.Invoke($"git {string.Join(' ', args)}: transport failed (try {n} of {LocalFetchAttempts}), trying again: {stderr}"), ct);
+
+    /// <summary>
+    /// Runs <paramref name="run"/> until it succeeds, fails for a reason other than the transport, or has been tried
+    /// <paramref name="attempts"/> times; returns the last result.
+    /// </summary>
+    public static async Task<GitResult> RetryTransportAsync(Func<CancellationToken, Task<GitResult>> run, int attempts, TimeSpan delay,
+        Action<int, string>? retrying, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var result = await run(ct);
+            if (result.ExitCode == 0 || attempt >= attempts || !IsTransportFailure(result.Stderr)) return result;
+            retrying?.Invoke(attempt, result.Stderr);
+            await Task.Delay(delay * Math.Pow(2, attempt - 1), ct);
+        }
+    }
+
+    /// <summary>git's words when the other side of a fetch went away or never came up (not a refusal of what was asked).</summary>
+    public static bool IsTransportFailure(string stderr) =>
+        // git adds "Could not read..." after a missing repository too; that one will not come back by itself.
+        !stderr.Contains("does not appear to be a git repository", StringComparison.OrdinalIgnoreCase) && (
+        stderr.Contains("Could not read from remote repository", StringComparison.OrdinalIgnoreCase)
+        || stderr.Contains("the remote end hung up unexpectedly", StringComparison.OrdinalIgnoreCase)
+        || stderr.Contains("early EOF", StringComparison.OrdinalIgnoreCase)
+        || stderr.Contains("Resource temporarily unavailable", StringComparison.OrdinalIgnoreCase)
+        || stderr.Contains("unable to fork", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary><see cref="FetchLocalAsync"/>, throwing <see cref="GitException"/> (with git's whole error) when it still fails.</summary>
+    public async Task FetchLocalOrThrowAsync(string? workingDirectory, IReadOnlyList<string> args, CancellationToken ct = default)
+    {
+        var result = await FetchLocalAsync(workingDirectory, args, ct);
+        if (result.ExitCode != 0) throw new GitException($"git {string.Join(' ', args)} failed ({result.ExitCode}): {result.Stderr}");
+    }
 }
