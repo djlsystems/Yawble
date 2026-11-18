@@ -82,24 +82,75 @@ public interface ICredentialModes
 /// <summary>
 /// The idle clock. Touched by every bridge tool call; read by the watchdog. Held while the run waits in the heavy-work
 /// lease's queue (the watchdog then sees no idle time); resumed with a full window when the wait ends.
+/// It also keeps the run's quiet stretches for the board's time accounting (B086): each gap between two signs of
+/// activity of at least <see cref="Bus.RunActivitySpans.StallAfter"/> (Stalled, from the last sign of activity), and each
+/// hold (Waiting for a slot).
 /// </summary>
 public sealed class RunActivity(TimeProvider clock) : Bus.IRunIdleClock
 {
     private long _lastTicks = clock.GetUtcNow().UtcTicks;
     private volatile bool _held;
+    private readonly object _lock = new();
+    private readonly List<Bus.ActivitySpan> _stalls = [], _holds = [];
+    private DateTimeOffset _heldSince;
 
     public DateTimeOffset Last => _held ? clock.GetUtcNow() : new(Interlocked.Read(ref _lastTicks), TimeSpan.Zero);
 
     public bool Held => _held;
 
-    public void Touch() => Interlocked.Exchange(ref _lastTicks, clock.GetUtcNow().UtcTicks);
+    public void Touch()
+    {
+        lock (_lock)
+        {
+            var now = clock.GetUtcNow();
+            NoteGap(now);
+            Interlocked.Exchange(ref _lastTicks, now.UtcTicks);
+        }
+    }
 
-    public void Hold() => _held = true;
+    public void Hold()
+    {
+        lock (_lock)
+        {
+            if (_held) return;
+            var now = clock.GetUtcNow();
+            NoteGap(now);
+            _heldSince = now;
+            _held = true;
+        }
+    }
 
     public void Resume()
     {
-        Touch();
-        _held = false;
+        lock (_lock)
+        {
+            var now = clock.GetUtcNow();
+            if (_held) _holds.Add(new(_heldSince, now));
+            else NoteGap(now);
+            Interlocked.Exchange(ref _lastTicks, now.UtcTicks);
+            _held = false;
+        }
+    }
+
+    public Bus.RunActivitySpans Spans(DateTimeOffset now)
+    {
+        lock (_lock)
+        {
+            var stalls = new List<Bus.ActivitySpan>(_stalls);
+            var holds = new List<Bus.ActivitySpan>(_holds);
+            var last = new DateTimeOffset(Interlocked.Read(ref _lastTicks), TimeSpan.Zero);
+            if (_held) holds.Add(new(_heldSince, now));
+            else if (now - last >= Bus.RunActivitySpans.StallAfter) stalls.Add(new(last, now));
+            return new(stalls, holds);
+        }
+    }
+
+    /// <summary>Called under the lock: the quiet time since the last sign of activity, when it is long enough, is a stall.</summary>
+    private void NoteGap(DateTimeOffset now)
+    {
+        if (_held) return;
+        var last = new DateTimeOffset(Interlocked.Read(ref _lastTicks), TimeSpan.Zero);
+        if (now - last >= Bus.RunActivitySpans.StallAfter) _stalls.Add(new(last, now));
     }
 }
 

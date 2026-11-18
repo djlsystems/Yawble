@@ -233,7 +233,9 @@ public sealed class ConciergeTools(
             (w.Ending is { } e ? $" - {w.State switch { "closed" => "closed", "expired" => "expired", _ => "delivered" }}: {e}" : "") +
             (w.State == "expired" && w.EndedAt is { } end ? $" (last activity {end:yyyy-MM-dd HH:mm} UTC; telling its team something reopens it)" : "") +
             (w.ExpiresAt is { } at ? $" - expires {at:yyyy-MM-dd HH:mm} UTC unless something happens in it (workflow_extend resets the clock)" : "") +
-            (w.ExpiryWarning is { } warn ? $" - {warn}" : "")));
+            (w.ExpiryWarning is { } warn ? $" - {warn}" : "") +
+            // B086: its overall time and where it went (the same numbers as the Workflows list).
+            (w.Time is { } time ? $" - time {Board.BoardTimeline.Describe(time)}" : "")));
     }
 
     private async Task<string> DocumentsListAsync(TeamSummary team, string? path, CancellationToken ct)

@@ -653,6 +653,8 @@ public sealed partial class BusEngine : IAsyncDisposable
                 var wakeManager = WakeManagerPolicy.OfRun(run.Items);
                 // A member that ends without handing back but asked to be woken is not stuck: say when it comes back.
                 var wake = run.Member.Role == MemberRole.Member && !run.HandedBack ? _store.NextWake(run.Member.Id) : null;
+                // B086: the run's stalls and lease waits, for the board's time accounting (none from a fake runner).
+                var spans = run.IdleClock?.Spans(_store.Clock.GetUtcNow());
                 _store.Append(new NewMessage(result.Succeeded ? MessageTypes.Completed : MessageTypes.Failed,
                     WakeManagerPolicy.WithChoice(JsonSerializer.Serialize(new
                     {
@@ -664,6 +666,11 @@ public sealed partial class BusEngine : IAsyncDisposable
                         handedBack = run.Member.Role == MemberRole.Member ? run.HandedBack : (bool?)null,
                         wake = wake is null ? null : new { at = wake.DueAt.ToString("yyyy-MM-dd HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture), note = wake.Note },
                         blocked = run.Blocked.Select(b => new { item = b.Item, instruction = b.Instruction, reason = b.Reason }).ToArray(),
+                        activity = spans is null || (spans.Stalls.Count == 0 && spans.Holds.Count == 0) ? null : new
+                        {
+                            stalls = spans.Stalls.Select(s => new { start = Iso(s.Start), end = Iso(s.End) }).ToArray(),
+                            holds = spans.Holds.Select(s => new { start = Iso(s.Start), end = Iso(s.End) }).ToArray(),
+                        },
                     }), wakeManager),
                     run.Member.Qualified, run.Causation));
                 _store.RemovePendingOfRun(run.RunId);
