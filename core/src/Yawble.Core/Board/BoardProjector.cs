@@ -32,7 +32,9 @@ public static class Lanes
 ///   card or a backlog item (payload <c>about</c> / <c>item</c>) makes no card.</item>
 /// <item>A member's reports move its card: progress to In Progress, blocked / a question / a failed run to Needs You,
 ///   a finished run or a hand-back to Done. A louder status (failed, blocked, needs a decision) is not overwritten by a
-///   quieter one until new work arrives. A card a person or the Manager placed keeps its lane, except for a give-up.</item>
+///   quieter one until new work arrives. A card a person or the Manager placed keeps its lane, except for a give-up.
+///   A run the person stopped (failure class "stopped", B097) is not a failure: the card stays where it is, and its
+///   trail says "stopped".</item>
 /// <item>The workflow declared complete sends its cards to Done, except those waiting on a person, and marks the backlog
 ///   item dispatched as that workflow "declared".</item>
 /// <item>Anything the team's Manager sends means it has seen the person's edits: the cards stop awaiting it.</item>
@@ -78,6 +80,11 @@ public sealed class BoardProjector(BoardStore store)
                 break;
             case MessageTypes.NeedsDecision:
                 Report(card, sender, "needs-decision", Text(p, "question"), "asked", giveUp: true);
+                break;
+            // B097: a run the person stopped is not a failure: the card keeps its status and lane (no Needs You), and the
+            // trail says "stopped".
+            case MessageTypes.Failed when Text(p, "failureClass") == FailureClasses.Stopped:
+                Report(card, sender, card.Status, Text(p, "reason"), "stopped", giveUp: false);
                 break;
             case MessageTypes.Failed:
                 Report(card, sender, "failed", Text(p, "reason"), "failed", giveUp: true);

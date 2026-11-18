@@ -300,14 +300,16 @@ public sealed class UiRpc(
 
     /// <summary>
     /// What the member needs from a person, loudest first: "decision" (a question of its is open), "blocked" (its last
-    /// report said it is blocked), "failed" (its last run failed); null when nothing. The faces' rings show it.
+    /// report said it is blocked), "failed" (its last run failed), "stopped" (the person stopped its last run: shown
+    /// quietly, not as a failure; B097); null when nothing. The faces' rings show it.
     /// </summary>
     internal static string? Attention(AgentCard card, IReadOnlySet<string> asking, IReadOnlyDictionary<string, Message> reports)
     {
         if (asking.Contains(card.Member.Name)) return "decision";
         if (card.State == "running") return null;
         if (reports.TryGetValue(card.Member.Name, out var last) && last.Type == MessageTypes.Blocked) return "blocked";
-        return card.LastRunState == "failed" ? "failed" : null;
+        if (card.LastRunStopped) return "stopped";
+        return card.LastRunFailed ? "failed" : null;
     }
 
     /// <summary>
@@ -381,7 +383,8 @@ public sealed class UiRpc(
             (kind, text) = m.Type switch
             {
                 MessageTypes.Completed => ("completed", Field("reason")),
-                MessageTypes.Failed => ("failed", Field("reason")),
+                // A run the person stopped is recorded failed with class "stopped": the feed says "stopped" (B097).
+                MessageTypes.Failed => (Field("failureClass") == FailureClasses.Stopped ? "stopped" : "failed", Field("reason")),
                 MessageTypes.Handback => ("handback", Field("delivered")),
                 MessageTypes.Progress => ("progress", Field("status")),
                 MessageTypes.Blocked => ("blocked", Field("reason")),
@@ -395,11 +398,15 @@ public sealed class UiRpc(
         if (about.team is null) return null;
         var from = m.Source is MessageTypes.PersonSource or MessageTypes.HostSource ? m.Source : Split(m.Source).Member ?? m.Source;
         if (text is { Length: > 240 }) text = text[..240] + "…";
-        return new JsonObject
+        var row = new JsonObject
         {
             ["seq"] = m.Seq, ["kind"] = kind, ["team"] = about.team, ["member"] = about.member, ["from"] = from,
             ["text"] = text, ["workflow"] = m.CorrelationId, ["at"] = m.OccurredAt.ToString("O"),
         };
+        // A run's end row says how it ended (B097): failureClass is null for a completed run.
+        if (m.Type is MessageTypes.Failed or MessageTypes.Completed)
+            row["failureClass"] = m.Type == MessageTypes.Failed ? Field("failureClass") ?? FailureClasses.Failed : null;
+        return row;
     }
 
     private async Task<MemberRow> MemberAsync(long memberId, CancellationToken ct) =>
@@ -921,6 +928,7 @@ public sealed class UiRpc(
             ["interactive"] = card.Interactive,
             ["lastRunState"] = card.LastRunState,
             ["lastRunReason"] = card.LastRunReason,
+            ["lastRunFailureClass"] = card.LastRunFailureClass,
         };
     }
 

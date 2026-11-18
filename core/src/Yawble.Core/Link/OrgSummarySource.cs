@@ -36,13 +36,14 @@ public sealed class AppOrgSummarySource(
         {
             var cards = await bus.AgentCardsAsync(t.Id, ct).ConfigureAwait(false);
             teams.Add(new OrgTeam(t.Name, t.Paused, t.Archived, cards.Select(c => new OrgAgent(c.Member.Name, Role(c.Member), c.State,
-                c.LastRunState == "failed", c.State == "running" ? Doing(t.Name, c) : null,
-                c.State == "running" ? ParseTime(c.RunStartedAt) : null)).ToList(), t.WorkflowExpiryDays));
+                // B097: a run the person stopped is reported as stopped, never as failed.
+                c.LastRunFailed, c.State == "running" ? Doing(t.Name, c) : null,
+                c.State == "running" ? ParseTime(c.RunStartedAt) : null, c.LastRunStopped)).ToList(), t.WorkflowExpiryDays));
 
             var decisions = await bus.OpenDecisionsAsync(t.Name, ct).ConfigureAwait(false);
             asks.AddRange(decisions.Select(d => new OrgAsk("decision", t.Name, Field(d, "question") ?? Field(d, "text") ?? "a decision")));
             var reports = await bus.LatestReportsAsync(t.Name, ct).ConfigureAwait(false);
-            var failedOwners = cards.Where(c => c.State != "running" && c.LastRunState == "failed").Select(c => c.Member.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var failedOwners = cards.Where(c => c.State != "running" && c.LastRunFailed).Select(c => c.Member.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var w in await bus.WorkflowsAsync(t.Name, 50, ct).ConfigureAwait(false))
             {
                 var state = StateOf(w, decisions.Any(d => d.CorrelationId == w.Id),
