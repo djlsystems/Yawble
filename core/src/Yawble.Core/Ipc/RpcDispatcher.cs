@@ -112,11 +112,12 @@ public sealed class RpcDispatcher(
             _ when backups is not null && Storage.BackupRpc.Handles(method) => backups.DispatchAsync(method, parameters, ct),
             // yawble-companion (Companion/CompanionRpc.cs): pairings, approvals and revocations, the window on this computer only.
             _ when companion is not null && Companion.CompanionRpc.Handles(method) => companion.DispatchAsync(method, parameters, ct),
+            // The Board: cards in four lanes and the backlog (Board/BoardService.cs). Before the screens: timeline.get is
+            // the Board's, though timeline. is a screen prefix (UiRpc.Prefixes, the shell's UI_METHOD_PREFIXES; B086).
+            _ when board is not null && Board.BoardService.Handles(method) => board.DispatchAsync(method, parameters, ct),
             _ when ui is not null && Ui.UiRpc.Handles(method) => ui.DispatchAsync(method, parameters, ct),
             // The Concierge: the person's chats with an agent that knows every team (Concierge/ConciergeService.cs).
             _ when concierge is not null && Concierge.ConciergeService.Handles(method) => concierge.DispatchAsync(method, parameters, ct),
-            // The Board: cards in four lanes and the backlog (Board/BoardService.cs).
-            _ when board is not null && Board.BoardService.Handles(method) => board.DispatchAsync(method, parameters, ct),
         // Custom agents and the agent/model change history (local only: not in RemoteAccess).
         _ when agentProfiles is not null && Agents.Profiles.AgentProfileRpc.Handles(method) => agentProfiles.DispatchAsync(method, parameters, ct),
             // Host tasks: the person's definitions, approvals and runs; refused for any actor but the window or a cloud viewer.

@@ -13,10 +13,12 @@ namespace Yawble.Core.Bus;
 /// <param name="ExpiresAt">When it will expire if nothing happens (open and idle only; null while something works it or is due to).</param>
 /// <param name="ExpiryWarning">The warning given for a workflow that waits on the person's answer ("#12 will expire tomorrow; ...").</param>
 /// <param name="Question">The question an open workflow waits on the person's answer to (its needs-decision message, as bus.decisions' id); null when none.</param>
+/// <param name="Time">B086: its overall time (created to its end, or now while open) and where that time went; null without a board.</param>
 public sealed record WorkflowSummary(
     long Id, string Title, string? Owner, string State, bool Undeclared, IReadOnlyList<string> Busy, string? Ending,
     DateTimeOffset StartedAt, DateTimeOffset LastAt, int Messages,
-    DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null, DateTimeOffset? ExpiresAt = null, string? ExpiryWarning = null, long? Question = null);
+    DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null, DateTimeOffset? ExpiresAt = null, string? ExpiryWarning = null, long? Question = null,
+    Board.TimeSummary? Time = null);
 
 /// <summary>
 /// The person's hold on a workflow: see each one's state, close one, stop what
@@ -37,7 +39,8 @@ public sealed partial class BusEngine
     /// so an open workflow nobody is working is never cut off a list (the team's Workflows, the Concierge, the
     /// companion's tools and the cloud dashboard all read this).
     /// </summary>
-    public Task<IReadOnlyList<WorkflowSummary>> WorkflowsAsync(string team, int limit = 30, CancellationToken ct = default) =>
+    /// <remarks><paramref name="time"/>: with each one's time (B086, from the board); false for readers that do not show it.</remarks>
+    public Task<IReadOnlyList<WorkflowSummary>> WorkflowsAsync(string team, int limit = 30, CancellationToken ct = default, bool time = true) =>
         WithGate<IReadOnlyList<WorkflowSummary>>(() =>
         {
             var teamId = TeamId(team);
@@ -45,7 +48,7 @@ public sealed partial class BusEngine
             var all = _store.WorkflowsOf(team, -1);
             var pending = _store.Pending();
             var now = _store.Clock.GetUtcNow();
-            return all.Where((w, i) => i < newest || !_store.WorkflowEnded(w.Id)).Select(w => Summary(teamId, team, w, pending, now)).ToArray();
+            return all.Where((w, i) => i < newest || !_store.WorkflowEnded(w.Id)).Select(w => Summary(teamId, team, w, pending, now, time)).ToArray();
         }, ct);
 
     /// <summary>
