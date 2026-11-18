@@ -1,0 +1,35 @@
+{
+  "found": true,
+  "sha": "5b4cf6f9952b21c0625ffdb47f9ab56e69851e4c",
+  "shortSha": "5b4cf6f9952b",
+  "title": "Local only",
+  "body": "",
+  "author": {
+    "name": "Person",
+    "email": "person@example.invalid",
+    "date": "2026-11-18T18:58:06-05:00"
+  },
+  "isMerge": false,
+  "parents": [
+    "b6ed9ee3da58f34b4efa2b0a27cb1c4705460a48"
+  ],
+  "where": {
+    "inMain": true,
+    "branches": [
+      "team/alpha",
+      "members/alpha/ada"
+    ],
+    "pushed": true,
+    "tags": []
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "status": "modified",
+      "added": 1,
+      "deleted": 1,
+      "binary": false
+    }
+  ],
+  "codeShown": true
+}

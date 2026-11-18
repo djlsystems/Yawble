@@ -1,0 +1,32 @@
+{
+  "found": true,
+  "sha": "4ac8468c6083b2d37d850d206e2f606d523bf688",
+  "shortSha": "4ac8468c6083",
+  "title": "Ben\u0027s",
+  "body": "",
+  "author": {
+    "name": "Ben",
+    "email": "ben@example.invalid",
+    "date": "2026-11-18T18:58:08-05:00"
+  },
+  "isMerge": false,
+  "parents": [
+    "ec676b610b31ba0a47f329c0e0425226a90237b6"
+  ],
+  "where": {
+    "inMain": false,
+    "branches": [],
+    "pushed": false,
+    "tags": []
+  },
+  "files": [
+    {
+      "path": "ben.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "codeShown": true
+}

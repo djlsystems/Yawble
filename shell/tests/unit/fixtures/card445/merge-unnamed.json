@@ -1,0 +1,38 @@
+{
+  "found": true,
+  "sha": "ffec0e5bd7f4ba35916fd08d44d2cd5867f6466d",
+  "shortSha": "ffec0e5bd7f4",
+  "title": "Integrate the work",
+  "body": "",
+  "author": {
+    "name": "Person",
+    "email": "p@example.invalid",
+    "date": "2026-11-18T18:58:12-05:00"
+  },
+  "isMerge": true,
+  "parents": [
+    "9e0cdcc95ad94cfa496e294a72c8a0c2bcc7cf5d",
+    "24dd4e8798546b4b67f53689c7918ac644766bfb"
+  ],
+  "merge": {
+    "intoBranch": null,
+    "fromBranch": null,
+    "commitCount": 1
+  },
+  "where": {
+    "inMain": false,
+    "branches": [],
+    "pushed": false,
+    "tags": []
+  },
+  "files": [
+    {
+      "path": "side.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "codeShown": true
+}

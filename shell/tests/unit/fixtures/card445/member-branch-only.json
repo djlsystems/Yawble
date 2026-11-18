@@ -1,0 +1,38 @@
+{
+  "found": true,
+  "sha": "7d73b5dfa25351f93605100447956fd44b495647",
+  "shortSha": "7d73b5dfa253",
+  "title": "Ada\u0027s work",
+  "body": "",
+  "author": {
+    "name": "Ada",
+    "email": "ada@example.invalid",
+    "date": "2026-11-18T18:58:04-05:00"
+  },
+  "isMerge": false,
+  "parents": [
+    "5ea7b0434b72e0ae7bcdb3ca789435b6da22b30e"
+  ],
+  "made": {
+    "member": "Ada"
+  },
+  "where": {
+    "inMain": false,
+    "branches": [
+      "members/alpha/ada"
+    ],
+    "onlyOnMember": "Ada",
+    "pushed": false,
+    "tags": []
+  },
+  "files": [
+    {
+      "path": "ada.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "codeShown": true
+}

@@ -1,0 +1,35 @@
+{
+  "found": true,
+  "sha": "5ea7b0434b72e0ae7bcdb3ca789435b6da22b30e",
+  "shortSha": "5ea7b0434b72",
+  "title": "Team work",
+  "body": "",
+  "author": {
+    "name": "Ada",
+    "email": "ada@example.invalid",
+    "date": "2026-11-18T18:58:04-05:00"
+  },
+  "isMerge": false,
+  "parents": [
+    "d14d39fce0c0e9d20e4be3dde1144398a3b49493"
+  ],
+  "where": {
+    "inMain": false,
+    "branches": [
+      "team/alpha",
+      "members/alpha/ada"
+    ],
+    "pushed": true,
+    "tags": []
+  },
+  "files": [
+    {
+      "path": "team.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "codeShown": true
+}
