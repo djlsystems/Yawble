@@ -25,6 +25,8 @@ const who = ref<LogWho>({ teams: [], members: [] });
 const sourceId = ref(props.source ?? 'activity');
 const team = ref(props.member ? props.member.slice(0, props.member.indexOf('/')) : props.team ?? '');
 const member = ref(props.member ?? '');
+/** All activity only (B101): the app's own rows (backlog, settings, triggers, link, backups...), no team or member. */
+const app = ref(false);
 const filters = reactive<Record<string, string>>({});
 const values = reactive<Record<string, string[]>>({});
 const fromDay = ref('');
@@ -51,6 +53,26 @@ const groups = computed(() => {
   return [...by.entries()];
 });
 const membersOfTeam = computed(() => who.value.members.filter((m) => !team.value || m.team === team.value));
+/** The teams the Member filter offers as a whole (all its members' rows plus its team's own rows): the chosen one, or each. */
+const wholeTeams = computed(() => (team.value ? [team.value] : who.value.teams));
+/** 'app' is a filter of All activity only (the per-source logs have no app rows of their own). */
+const appOffered = computed(() => sourceId.value === 'activity');
+const teamPrefix = 'team:';
+/**
+ * The Member filter (B101) picks one of: a member (member=team/Name), a team as a whole (team=X, no member) or the app
+ * (app=true, no team or member). Picking one clears the others.
+ */
+const whoPick = computed<string>({
+  get: () => (app.value ? 'app' : member.value ? member.value : team.value ? `${teamPrefix}${team.value}` : ''),
+  set: (v) => {
+    if (v === 'app') { member.value = ''; team.value = ''; app.value = true; return; }
+    app.value = false;
+    if (!v) { member.value = ''; return; }
+    if (v.startsWith(teamPrefix) && !who.value.members.some((m) => m.key === v)) { member.value = ''; team.value = v.slice(teamPrefix.length); return; }
+    team.value = v.slice(0, v.indexOf('/'));
+    member.value = v;
+  },
+});
 const local = computed(() => !props.api.remote);
 /** On a phone the filters fold behind a Filters button (closed at first), so the entries get the screen. */
 const filtersOpen = ref(false);
@@ -59,8 +81,8 @@ const actionsOpen = ref(false);
 /** Where the filters go on a phone: the top of the list's scroller (B057). */
 const phoneToolsId = `logs-phone-tools-${useId()}`;
 /** How many filters are set (the search box apart): shown on the phone's Filters button. */
-const activeFilters = computed(() => [team.value, member.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
-const filtered = computed(() => !!(team.value || member.value || fromDay.value || toDay.value || text.value.trim() || Object.values(filters).some((v) => v)));
+const activeFilters = computed(() => [team.value, member.value, app.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
+const filtered = computed(() => !!(team.value || member.value || app.value || fromDay.value || toDay.value || text.value.trim() || Object.values(filters).some((v) => v)));
 
 function query(offset: number) {
   const f: Record<string, string> = {};
@@ -69,6 +91,7 @@ function query(offset: number) {
     source: sourceId.value,
     team: source.value?.team && !member.value ? team.value || undefined : undefined,
     member: source.value?.member ? member.value || undefined : undefined,
+    ...(app.value && appOffered.value ? { app: true } : {}),
     from: fromDay.value ? `${fromDay.value}T00:00:00` : undefined,
     to: toDay.value ? `${toDay.value}T23:59:59.9999999` : undefined,
     text: text.value.trim() || undefined,
@@ -139,13 +162,21 @@ function sortBy(key: string) {
 
 async function loadValues() {
   for (const c of filterColumns.value) {
-    try { values[c.key] = await props.api.call<string[]>('logs.values', { source: sourceId.value, column: c.key, team: member.value ? undefined : team.value || undefined, member: member.value || undefined }); }
+    try {
+      values[c.key] = await props.api.call<string[]>('logs.values', {
+        source: sourceId.value, column: c.key,
+        team: member.value ? undefined : team.value || undefined,
+        member: member.value || undefined,
+        // "app (the app itself)": only the values the app's own rows hold (no Runs, no teams).
+        ...(app.value && appOffered.value ? { app: true } : {}),
+      });
+    }
     catch { values[c.key] = []; }
   }
 }
 
 function clearFilters() {
-  team.value = ''; member.value = ''; fromDay.value = ''; toDay.value = ''; text.value = '';
+  team.value = ''; member.value = ''; app.value = false; fromDay.value = ''; toDay.value = ''; text.value = '';
   for (const k of Object.keys(filters)) filters[k] = '';
 }
 
@@ -155,12 +186,16 @@ watch(sourceId, () => {
   sort.value = columns.value[0]?.key ?? 'at';
   descending.value = true;
   pruning.value = null;
+  if (!appOffered.value) app.value = false;
   void loadValues();
   void reload();
 });
-watch(team, () => { if (member.value && !member.value.startsWith(`${team.value}/`)) member.value = ''; });
-watch([team, member], () => { void loadValues(); });
-watch([team, member, fromDay, toDay, () => ({ ...filters })], () => { void reload(); }, { deep: true });
+watch(team, () => {
+  if (member.value && !member.value.startsWith(`${team.value}/`)) member.value = '';
+  if (team.value) app.value = false;
+});
+watch([team, member, app], () => { void loadValues(); });
+watch([team, member, app, fromDay, toDay, () => ({ ...filters })], () => { void reload(); }, { deep: true });
 let typing: ReturnType<typeof setTimeout> | undefined;
 watch(text, () => { clearTimeout(typing); typing = setTimeout(() => void reload(), 300); });
 onBeforeUnmount(() => clearTimeout(typing));
@@ -281,10 +316,16 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
           </select>
         </label>
         <label v-if="source?.member">Member
-          <select v-model="member" data-test="logs-member">
-            <option value="">All members</option>
-            <option v-for="m in membersOfTeam" :key="m.key" :value="m.key">{{ team ? m.name : m.key }}</option>
-            <option v-if="member && !membersOfTeam.some((m) => m.key === member)" :value="member">{{ memberLabel(member) }}</option>
+          <select v-model="whoPick" data-test="logs-member">
+            <option value="">{{ appOffered ? 'Everyone' : 'All members' }}</option>
+            <optgroup label="Members">
+              <option v-for="m in membersOfTeam" :key="m.key" :value="m.key">{{ team ? m.name : m.key }}</option>
+              <option v-if="member && !membersOfTeam.some((m) => m.key === member)" :value="member">{{ memberLabel(member) }}</option>
+            </optgroup>
+            <optgroup v-if="wholeTeams.length" label="Teams">
+              <option v-for="t in wholeTeams" :key="t" :value="`${teamPrefix}${t}`" :data-test="`logs-member-team-${t}`">{{ t }} (whole team)</option>
+            </optgroup>
+            <option v-if="appOffered" value="app" data-test="logs-member-app">app (the app itself)</option>
           </select>
         </label>
         <label v-for="c in filterColumns" :key="c.key">{{ c.label }}
