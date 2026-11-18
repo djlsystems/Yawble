@@ -60,12 +60,12 @@ public sealed class UiRpcTests : IAsyncLifetime
 
     private async Task<long> CreateMixedTeam(string name = "payments")
     {
-        var r = await Call("teams.create", new
-        {
-            name, managerCli = "claude", repoPath = "/home/pat/src/payments",
-            members = new[] { new { name = "Ada", cli = "claude" }, new { name = "Ben", cli = "grok" } },
-        });
-        return r!["teamId"]!.GetValue<long>();
+        var r = await Call("teams.create", new { name, managerCli = "claude", repoPath = "/home/pat/src/payments", members = Array.Empty<object>() });
+        var teamId = r!["teamId"]!.GetValue<long>();
+        // One-word names: added as typed (in teams.create a name with no space is a job word and gets a first name from the list).
+        await Call("members.add", new { teamId, name = "Ada", cli = "claude" });
+        await Call("members.add", new { teamId, name = "Ben", cli = "grok" });
+        return teamId;
     }
 
     [Fact]

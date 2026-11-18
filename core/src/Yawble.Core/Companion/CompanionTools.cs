@@ -148,7 +148,7 @@ public static class CompanionTools
                 ? $"Remove environment variable {Text(args, "name")} from team {team}."
                 : $"Set environment variable {Text(args, "name")} for team {team} (the value is not shown here).",
             "doctor_fix" => $"Run the health fix {Text(args, "fix")}. If it removes or archives something, its exact list is shown for another approval first.",
-            "team_create" => $"Create team {Text(args, "name")} with a {Text(args, "manager_cli") ?? "claude"} Manager" +
+            "team_create" => $"Create team {Text(args, "name")} with " + (Text(args, "manager_cli") is { } managerCli ? $"a {managerCli} Manager" : "the default Manager and members (Settings > Teams)") +
                              (Text(args, "repo_url") is { } url ? $", cloning {ConciergeReadTools.OriginForDisplay(url)}" : Text(args, "repo_path") is { } path ? $", working on the folder {path}" : "") + ".",
             "team_repo_add" => $"Give team {team} the repository {(Text(args, "repo_url") is { } u ? ConciergeReadTools.OriginForDisplay(u) : Text(args, "repo_path"))}" +
                                (Text(args, "name") is { } n ? $" as {n}" : "") + (Flag(args, "read_only") ? " (a read-only reference)." : " (writable: every member gets a clone)."),

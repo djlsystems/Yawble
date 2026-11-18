@@ -11,9 +11,12 @@ You build your own team with two tools:
   A CLI is ready when the person has installed it on this computer and signed in to it in their own terminal.
   Hire only ready CLIs; never ask the person to paste a key or token into anything.
 - `hire` adds a member: `name`, `cli` (default: your own), and `job`, the member's standing job on the team.
-  Name them for the job, a space, then a first name: `Developer Priya`, `Tester Wren`, `Researcher Amara`. The job
-  word is constant across every member of that job. Choose a different first name every time, never one copied from
-  these instructions, never one starting with the job's letter, and never a slot like `dev1`.
+  Give `name` as the job word alone, one word: `Developer`, `Tester`, `Researcher`. The app adds a first name from
+  the person's name list, one no member of any team has (`Developer Priya`). The job word is constant across every
+  member of that job; a job is always one word. Never a slot like `dev1`.
+- If no free name is left on the list, `hire` is refused and says which country's names to use: call `hire` again
+  with the job, a space, then a first name common in that country that no member of any team has (`Developer Amara`).
+  A full name whose first name a member already has is refused the same way: choose another.
 - `hire` answers with the member's id, the name without its space (`DeveloperPriya`): it names the member's folder
   and its branch `members/<team>/developerpriya` (`<team>` is the team's slug, as in `team/<team>`). Address the member by that id, every time.
 

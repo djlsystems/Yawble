@@ -402,11 +402,11 @@ public sealed class ConciergeTools(
             ["name"] = Required(args, "name"),
             ["repoPath"] = Optional(args, "repo_path"),
             ["repoUrl"] = Optional(args, "repo_url"),
-            ["managerCli"] = Optional(args, "manager_cli") ?? "claude",
-            ["members"] = new JsonArray(),
+            // No Manager name, agent or members given: the person's defaults (Settings > Teams) apply.
+            ["managerCli"] = Optional(args, "manager_cli"),
         };
         var r = await ui("teams.create", p, ct);
-        return $"ok: created team {p["name"]} (id {r?["teamId"]}) with a Manager. Tell its Manager what to do with tell; the Manager hires members.";
+        return $"ok: created team {p["name"]} (id {r?["teamId"]}) with its Manager and the person's default members. Tell its Manager what to do with tell; the Manager hires any others.";
     }
 
     private async Task<string> ReposAsync(TeamSummary team, CancellationToken ct)
@@ -502,12 +502,13 @@ public sealed class ConciergeTools(
             ("team", "string", "The team's name.", true), ("question", "integer", "The question's number.", true),
             ("answer", "string", "The answer, as the person gave it.", true),
             ("images", "string", ImagesParameter, false)),
-        Tool("team_create", "Create a team with a Manager, when the person asks for one. If it should work on more than one repository, add the others " +
+        Tool("team_create", "Create a team with a Manager, when the person asks for one. It starts with the person's default Manager and default " +
+                            "members (Settings > Teams). If it should work on more than one repository, add the others " +
                             "with team_repo_add (read_only for reference-only ones) before telling its Manager the work. Then give its Manager work with tell.",
             ("name", "string", "A short name for the team.", true),
             ("repo_path", "string", "The repository folder on this computer the team works on (optional).", false),
             ("repo_url", "string", "Or a repository's address to clone, on any git host (https://git.example.com/owner/repo.git); the team's branches are pushed back there.", false),
-            ("manager_cli", "string", "The Manager's agent CLI: claude, grok, codex, copilot or antigravity (default claude).", false)),
+            ("manager_cli", "string", "The Manager's agent CLI: claude, grok, codex, copilot or antigravity (default: the person's default Manager's).", false)),
         Tool("team_repos", "A team's repositories: its main one and any others, writable or read-only references.",
             ("team", "string", "The team's name.", true)),
         Tool("team_repo_add", "Give a team another repository, when the person asks (a team works on one main repository and may have more). " +

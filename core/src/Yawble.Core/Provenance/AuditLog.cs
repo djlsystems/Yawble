@@ -15,7 +15,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
 
     /// <summary>The parameters that say what a call was about; every other parameter is left out.</summary>
     private static readonly string[] TargetKeys =
-        ["team", "teamId", "member", "memberId", "name", "id", "card", "item", "lane", "workflow", "conversationId", "trigger", "cli", "mode"];
+        ["team", "teamId", "member", "memberId", "name", "id", "card", "item", "lane", "workflow", "conversationId", "trigger", "cli", "mode", "country"];
 
     private static readonly HashSet<string> ReadVerbs = new(StringComparer.Ordinal)
     {
@@ -31,6 +31,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "teamHosts",
         // The policy editors' host check (FloorRules.HostProblem for each entry typed).
         "checkHosts",
+        // Settings > Teams and Settings > Concierge as saved (teams.defaults, concierge.defaults); setDefaults and generateNames are audited.
+        "defaults",
     };
 
     /// <summary>Calls that read a setting, or set it when they carry its value: by method, the field that sets it.</summary>
