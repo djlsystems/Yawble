@@ -200,6 +200,25 @@ export function axisEnd(t: ItemTime, bands: TimelineBand[], markers: { at: strin
 }
 export const isoMs = ms;
 
+/** Room kept between a break label and the start / end labels or another break label, in px. */
+export const TickGapPx = 6;
+/**
+ * Where each break label goes on the tick row (its left edge in px), or null to hide it. A label is centred under
+ * its break mark, then slid inside the room between the start label's right edge and the end label's left edge
+ * (and after the previous break label). One that does not fit there is hidden rather than drawn over another
+ * (card 433, F3: "≈ 2d 17h" over "now" read "≈ 2d 1now").
+ */
+export function placeBreakLabels(width: number, startRight: number, endLeft: number, labels: { x: number; w: number }[], gap = TickGapPx): (number | null)[] {
+  let min = startRight + gap;
+  const max = Math.min(endLeft, width) - gap;
+  return labels.map(({ x, w }) => {
+    const left = Math.min(Math.max(x - w / 2, min), max - w);
+    if (left < min || left + w > max) return null;
+    min = left + w + gap;
+    return left;
+  });
+}
+
 // ---- the one Timeline dialog: opened from a card or a workflow row, one at a time ----
 export interface TimelineTarget { kind: 'card' | 'workflow'; id: number; title?: string; team?: string | null }
 export const timelineTarget = shallowRef<TimelineTarget | null>(null);

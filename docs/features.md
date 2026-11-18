@@ -336,6 +336,28 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Cards from before time accounting have their timeline rebuilt from their history (planned, assigned, told,
     progress, handed back, done, moved, run ended, failed), marked "rebuilt from history"; a run the idle watchdog
     ended is Stalled from the line before it to its end.
+  - The overall time shows as one quiet line (like 1h 12m 05s) on a card's bottom row, under each workflow in the
+    Workflows dialog and on the workflow rows of the Teams-list tiles. An open card or workflow counts on each second.
+  - Clicking or tapping the overall time (or Enter on it) opens the **Timeline** dialog; it does not open the card.
+    The dialog shows:
+    - the overall time, created → ended (or open, still counting) and how it ended;
+    - the planned and started line (for a workflow: first message and first card started), with how long it waited
+      before it started;
+    - the breakdown table: each category with time, its share (the shares add up to 100%) and the total;
+    - "rebuilt from history" when the timeline was rebuilt from an older card's history;
+    - the timeline: for a workflow an **All cards** summary row on top, then one row per card; for a card one row.
+      Each row is drawn as category bands on one time axis, with the start time on the left and the end time (or
+      now) on the right.
+  - Pointing at, tapping or tabbing to a band or a marker says it in the readout under the timeline (its category,
+    from and to, and its length; a marker's kind and time). **Events** lists the markers as text.
+  - Markers sit on a row under the bands: planned, started, reopen, hand-back, question asked and answered, a run
+    ended by the idle watchdog, and expired. The legend lists the categories that appear.
+  - **Stalled** is drawn in Agent working's colour, hatched, in the bands, the legend and the table.
+  - A long quiet stretch (2 hours or more and over a quarter of the whole, with nothing changing) is drawn shorter
+    behind a break mark, labelled with its real length (≈ 2d 17h). The label never covers the start and end times.
+  - On a phone the axis scrolls sideways inside the dialog; the page does not. Bands and markers keep their size.
+  - An open item's timeline is asked again every 30 seconds while the dialog is open.
+  - A Visitor sees the overall times and the same Timeline dialog.
   - Time only: no tokens or cost.
 - **Backlog**: work you want done, most important first.
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.

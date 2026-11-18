@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { TIMELINE_GET, type Timeline, type TimelineBand, type YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { displayName } from '../faces/faces';
@@ -7,7 +7,7 @@ import Modal from '../components/Modal.vue';
 import LoadingNote from '../components/LoadingNote.vue';
 import {
   axisEnd, between, buildAxis, categoryLabel, categoryVar, clock, clockSec, closeTimeline, endedHowLabel, formatDuration,
-  formatShort, isoMs, liveOverallMs, markerLabel, shares, TimeCategories, timelineTarget, useNow, type TimelineTarget,
+  formatShort, isoMs, liveOverallMs, markerLabel, placeBreakLabels, shares, TimeCategories, timelineTarget, useNow, type TimelineTarget,
 } from './time';
 
 // B086: the one Timeline dialog (mounted once in App.vue, like the Code dialog), opened by clicking an overall time on a
@@ -121,6 +121,35 @@ function bandStyle(b: TimelineBand) {
   const s = a.at(isoMs(b.start) ?? a.start), e = a.at(bandEnd(b));
   return { left: pct(s), width: pct(Math.max(e - s, 0)), '--c': categoryVar(b.category) };
 }
+// The break labels on the tick row: measured after they draw, slid clear of the start / end labels or hidden
+// (time.ts placeBreakLabels). Until measured they sit centred under their mark.
+const ticksEl = ref<HTMLElement | null>(null);
+const tbPlace = ref<(number | null)[]>([]);
+const endLabel = computed(() => (time.value && axis.value ? (time.value.open ? 'now' : clock(new Date(axis.value.end).toISOString(), axis.value.start)) : ''));
+const tickKey = computed(() => `${axis.value?.breaks.map((b) => `${b.at.toFixed(4)}:${formatShort(b.ms)}`).join(',') ?? ''}|${endLabel.value}`);
+function layoutTicks() {
+  const row = ticksEl.value;
+  if (!row || !axis.value?.breaks.length) { tbPlace.value = []; return; }
+  const width = row.clientWidth;
+  const t0 = row.querySelector<HTMLElement>('.t0'), t1 = row.querySelector<HTMLElement>('.t1');
+  const tbs = [...row.querySelectorAll<HTMLElement>('.tb')];
+  const startRight = t0 ? t0.offsetLeft + t0.offsetWidth : 0;
+  const endLeft = t1 ? t1.offsetLeft : width;
+  tbPlace.value = placeBreakLabels(width, startRight, endLeft, axis.value.breaks.map((b, i) => ({ x: b.at * width, w: tbs[i]?.offsetWidth ?? 0 })));
+}
+function tbStyle(i: number, at: number) {
+  if (i >= tbPlace.value.length) return { left: pct(at), transform: 'translateX(-50%)' };
+  const left = tbPlace.value[i];
+  return left == null ? { left: pct(at), visibility: 'hidden' as const } : { left: `${left}px` };
+}
+let ro: ResizeObserver | null = null;
+watch(tickKey, () => { tbPlace.value = []; void nextTick(layoutTicks); }, { flush: 'post' });
+watch(ticksEl, (el) => {
+  ro?.disconnect(); ro = null;
+  if (el && typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(() => layoutTicks()); ro.observe(el); }
+  if (el) void nextTick(layoutTicks);
+});
+onBeforeUnmount(() => ro?.disconnect());
 const bandLen = (b: TimelineBand) => Math.max(0, bandEnd(b) - (isoMs(b.start) ?? 0));
 const bandSays = (b: TimelineBand) =>
   `${categoryLabel(b.category)}, ${clockSec(b.start)} to ${b.end ? clockSec(b.end) : 'now'}, ${formatDuration(bandLen(b))}`;
@@ -205,10 +234,10 @@ const unpick = (key: string) => { if (picked.value?.key === key) picked.value = 
                   @mouseenter="pick(`m${i}`, markerSays(m))" @mouseleave="unpick(`m${i}`)" @focus="pick(`m${i}`, markerSays(m))" @blur="unpick(`m${i}`)"
                   @click="pick(`m${i}`, markerSays(m))" />
               </div>
-              <div class="ticks small muted">
+              <div ref="ticksEl" class="ticks small muted">
                 <span class="t0">{{ clock(new Date(axis.start).toISOString()) }}</span>
-                <span v-for="(br, i) in axis.breaks" :key="i" class="tb" :style="{ left: pct(br.at) }" :title="`${formatShort(br.ms)} with nothing changing, drawn shorter`">≈ {{ formatShort(br.ms) }}</span>
-                <span class="t1">{{ time.open ? 'now' : clock(new Date(axis.end).toISOString(), axis.start) }}</span>
+                <span v-for="(br, i) in axis.breaks" :key="i" class="tb" :style="tbStyle(i, br.at)" data-test="timeline-break-label" :title="`${formatShort(br.ms)} with nothing changing, drawn shorter`">≈ {{ formatShort(br.ms) }}</span>
+                <span class="t1">{{ endLabel }}</span>
               </div>
             </div>
           </div>
@@ -252,7 +281,9 @@ h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-soft);
 .track { position: relative; height: 16px; border-radius: 3px; background: var(--surface-sunken); }
 .lane.summary .track { height: 22px; }
 .lane.summary { padding-bottom: 6px; border-bottom: 1px dashed var(--line); }
-.band { position: absolute; top: 0; bottom: 0; min-width: 2px; padding: 0; border: 0; border-radius: 2px; background: var(--c); cursor: pointer; }
+/* .band and .mk keep their own sizes at phone width: min-width / min-height opt them out of styles.css's 44 px touch
+   minimum for buttons (card 433, F1); the track and the marker row are the tap targets' size there. */
+.band { position: absolute; top: 0; bottom: 0; min-width: 2px; min-height: 0; padding: 0; border: 0; border-radius: 2px; background: var(--c); cursor: pointer; }
 .band:hover, .band:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; z-index: 1; }
 .marks { position: absolute; inset: 0; pointer-events: none; }
 .mline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid color-mix(in srgb, var(--tl-marker) 22%, transparent); }
@@ -260,7 +291,7 @@ h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-soft);
 /* A compressed stretch: a break mark (two slanted strokes) across the rows. */
 .brk { position: absolute; top: -2px; bottom: -2px; width: 6px; margin-left: -3px; background: var(--surface); border-left: 1.5px solid var(--tl-break); border-right: 1.5px solid var(--tl-break); transform: skewX(-14deg); }
 .mrow { position: relative; height: 14px; margin-top: 3px; }
-.mk { position: absolute; top: 1px; width: 10px; height: 10px; margin-left: -5px; padding: 0; border: 1.5px solid var(--tl-marker); background: var(--surface); transform: rotate(45deg); cursor: pointer; }
+.mk { position: absolute; top: 1px; width: 10px; height: 10px; min-width: 0; min-height: 0; margin-left: -5px; padding: 0; border: 1.5px solid var(--tl-marker); background: var(--surface); transform: rotate(45deg); cursor: pointer; }
 .mk.planned, .mk.started { background: var(--tl-marker); }
 .mk.decision-asked, .mk.decision-answered { border-color: var(--tl-waiting-on-you); }
 .mk.decision-answered { background: var(--tl-waiting-on-you); }
@@ -270,7 +301,7 @@ h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-soft);
 .ticks { position: relative; height: 16px; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .ticks .t0 { position: absolute; left: 0; }
 .ticks .t1 { position: absolute; right: 0; }
-.ticks .tb { position: absolute; transform: translateX(-50%); white-space: nowrap; color: var(--tl-break); }
+.ticks .tb { position: absolute; white-space: nowrap; color: var(--tl-break); }
 .readout { margin: 6px 0 0; min-height: 1.4em; color: var(--ink-soft); }
 .events ul { margin: 4px 0 0; padding-left: 18px; }
 @media (prefers-reduced-motion: no-preference) {
