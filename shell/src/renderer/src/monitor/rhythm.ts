@@ -110,15 +110,87 @@ export function runFill(ms: number): number {
 
 // ---------- the You node ----------
 
-/** The You node's place on the wall (canvas CSS px): at the right edge, half way down below the counts. */
+/** A rectangle on the wall (canvas CSS px) the You node keeps clear of: the Legend button, the phone's control row. */
+export interface KeepOut { left: number; top: number; right: number; bottom: number }
+
 export const YouR = 24;
-export function youNodeAt(w: number, h: number): { x: number; y: number; r: number } {
-  return { x: Math.max(YouR + 8, w - YouR - 22), y: Math.max(120, h / 2), r: YouR };
+/** The gap kept between the You node and a keep-out rect, and between it and the wall's edge. */
+const YouGap = 6, YouEdge = 4;
+
+/** How far a node at (x, y) is from a rect's nearest point (0 when its centre is on the rect). */
+function distTo(x: number, y: number, k: KeepOut): number {
+  return Math.hypot(Math.max(k.left - x, 0, x - k.right), Math.max(k.top - y, 0, y - k.bottom));
+}
+function onRect(x: number, y: number, k: KeepOut, slop: number): boolean {
+  return x >= k.left - slop && x <= k.right + slop && y >= k.top - slop && y <= k.bottom + slop;
+}
+function clearOf(x: number, y: number, r: number, keepOut: readonly KeepOut[], gap = YouGap): boolean {
+  return keepOut.every((k) => distTo(x, y, k) >= r + gap);
+}
+
+let lastAt: { key: string; at: { x: number; y: number; r: number } } | null = null;
+
+/**
+ * The You node's place on the wall (canvas CSS px): at the right edge, half way down below the counts (at least 120 px
+ * down), always inside the wall and clear of the keep-out rects (card 416: on a short phone wall the controls row with
+ * Legend covers the bottom). The rects come most telling first: the Legend button, then the controls row, then the
+ * open legend. When its place is covered it moves the least it can: above, below or left of what covers it, else to
+ * the nearest clear spot on the wall; then the same with no gap to the edge or the rects. When no spot on the wall is
+ * clear of them all (a phone wall under ~104 px: the row takes all but its top 47 px), it never goes back to its old
+ * place: it stays clear of the first rect (Legend), keeps its centre off every rect (a tap on it reaches the wall, not
+ * a button) and overlaps the others the least it can. A wall too small to hold it keeps it inside, centred.
+ */
+export function youNodeAt(w: number, h: number, keepOut: readonly KeepOut[] = []): { x: number; y: number; r: number } {
+  const r = YouR;
+  const xMin = r + YouEdge, xMax = Math.max(xMin, w - r - YouEdge);
+  const yMin = r + YouEdge, yMax = Math.max(yMin, h - r - YouEdge);
+  const x0 = Math.min(xMax, Math.max(r + 8, w - r - 22));
+  const y0 = h < 2 * yMin ? h / 2 : Math.min(yMax, Math.max(yMin, Math.max(120, h / 2)));
+  if (keepOut.length === 0 || clearOf(x0, y0, r, keepOut)) return { x: x0, y: y0, r };
+  const key = `${w},${h},${keepOut.map((k) => `${k.left},${k.top},${k.right},${k.bottom}`).join(';')}`;
+  if (lastAt?.key === key) return lastAt.at;
+  const d = (x: number, y: number) => Math.hypot(x - x0, y - y0);
+  // Pass 1 with the edge and gap margins, pass 2 without them (the node may touch the wall's edge and the rects).
+  let best: { x: number; y: number } | null = null;
+  for (const [edge, gap] of [[YouEdge, YouGap], [0, 0]] as const) {
+    if (h < 2 * (r + edge)) continue;
+    const lx = r + edge, hx = Math.max(lx, w - r - edge), ly = r + edge, hy = Math.max(ly, h - r - edge);
+    const consider = (x: number, y: number) => {
+      if (x < lx || x > hx || y < ly || y > hy || !clearOf(x, y, r, keepOut, gap)) return;
+      if (!best || d(x, y) < d(best.x, best.y)) best = { x, y };
+    };
+    const reach = r + gap + 0.5;
+    const cy = (y: number) => Math.min(hy, Math.max(ly, y));
+    for (const k of keepOut) {
+      consider(x0, cy(k.top - reach));
+      consider(x0, cy(k.bottom + reach));
+      consider(k.left - reach, y0);
+      consider(k.left - reach, cy(k.top - reach));
+    }
+    if (!best) for (let y = ly; y <= hy; y += 2) for (let x = hx; x >= lx; x -= 2) consider(x, y);
+    if (best) break;
+  }
+  // No spot clear of them all: clear of the first rect (Legend) with a small gap, the centre off every rect, inside the
+  // wall; the least overlap with the others (the more telling weighs more), then the nearest to its own place.
+  if (!best && h >= 2 * r) {
+    const hard = keepOut[0]!, soft = keepOut.slice(1);
+    let bestCost = Infinity;
+    const lx = r, hx = Math.max(lx, w - r), ly = r, hy = Math.max(ly, h - r);
+    for (let y = ly; y <= hy; y += 1) for (let x = hx; x >= lx; x -= 2) {
+      if (distTo(x, y, hard) < r + 2 || keepOut.some((k) => onRect(x, y, k, 4))) continue;
+      const cost = soft.reduce((s, k, i) => s + Math.max(0, r - distTo(x, y, k)) * (soft.length - i), 0) * 1000 + d(x, y);
+      if (cost < bestCost) { bestCost = cost; best = { x, y }; }
+    }
+  }
+  // Still nothing (a wall too small, or Legend everywhere): the last (least telling) rect is given up, then the next.
+  const at = best ? { x: (best as { x: number }).x, y: (best as { y: number }).y, r } : youNodeAt(w, h, keepOut.slice(0, -1));
+  lastAt = { key, at };
+  return at;
 }
 
 /** Whether a point (canvas CSS px) is on the You node, with a few pixels to spare. */
-export function onYouNode(x: number, y: number, w: number, h: number): boolean {
-  const n = youNodeAt(w, h);
+export function onYouNode(x: number, y: number, w: number, h: number, keepOut: readonly KeepOut[] = []): boolean {
+  const n = youNodeAt(w, h, keepOut);
   return Math.hypot(x - n.x, y - n.y) <= n.r + 6;
 }
 
