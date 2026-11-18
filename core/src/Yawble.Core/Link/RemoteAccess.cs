@@ -79,6 +79,8 @@ public static class RemoteAccess
             "skills.list",
             "triggers.list", "triggers.preview",
             "git.status", "git.check", "git.tidyPlan",
+            // B075: the web address of a commit, branch, file, compare or pull request (reads only).
+            "git.webLink",
             "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
             "guardrail.get",
             "agents.detect", "agents.testSessions", "agents.commandLine", "agents.defaultModels", "agents.models", "agents.resolveModel",
@@ -108,7 +110,7 @@ public static class RemoteAccess
         changes:
         [
             "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",
-            "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo",
+            "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo", "teams.setRepo",
             "teams.setDefaults", "teams.generateNames", "concierge.setDefaults",
             "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
             "members.add", "members.remove", "members.update",
