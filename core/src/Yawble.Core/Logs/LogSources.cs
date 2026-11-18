@@ -42,7 +42,7 @@ public static class LogSources
     public static readonly IReadOnlyList<LogSource> All =
     [
         new(Activity, "All activity", "Activity",
-            "Everything that happened, from every log at once: what each member did or was asked to do (runs, network, tool calls, approvals, model requests, messages, transcripts, agent changes), and every audit entry, including those about a whole team (shown as <Team>) or the app itself (shown as app).",
+            "Everything that happened, by members, teams and the app. It gathers every log at once: what each member did or was asked to do (runs, network, tool calls, approvals, model requests, messages, transcripts, agent changes), and every Audit entry, including those about a whole team (shown as <Team>) or the app itself (shown as app).",
             ActivityFrom, "t.rid", "t.at",
             [
                 new("at", "Time", "t.at", "time"),
