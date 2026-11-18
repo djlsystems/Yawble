@@ -33,6 +33,7 @@ import LogsDialog from './components/LogsDialog.vue';
 import UpdateBanner from './components/UpdateBanner.vue';
 import ThemeToggle from './components/ThemeToggle.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
+import TimelineDialog from './timeline/TimelineDialog.vue';
 import { theme } from './theme';
 import type { AgentOption } from './components/Composer.vue';
 import { installTapTitles, usePhone } from './phone';
@@ -527,6 +528,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       @deleted="manageTeam = null; refresh()" />
     <LinkDialog v-if="dialog === 'link'" :api="api" @close="dialog = null" @changed="link = $event" />
     <MemberSettingsDialog v-if="settingsFor !== null" :key="`${settingsFor}-${settingsTab}`" :member-id="settingsFor" :initial-tab="settingsTab" :api="api" :poll-ms="pollMs" @close="settingsFor = null" @changed="changed" />
+    <TimelineDialog :api="api" />
     <ConfirmDialog />
   </div>
 </template>
