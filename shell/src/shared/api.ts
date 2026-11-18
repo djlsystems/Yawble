@@ -272,6 +272,26 @@ export interface CompanionStatus { endpoint: string | null; controlFile: string 
 /** packaged: an installed app (it can update itself), not a development run of the source. */
 export interface ShellSettings { runInBackground: boolean; startAtLogin: boolean; startAtLoginRegistered?: boolean; packaged?: boolean }
 
+/** concierge.defaults: the agent new Concierge conversations start on (null: the first one available on this computer). */
+export interface ConciergeDefaults { defaultAgent: string | null }
+
+/** A default member row for new teams: checked onNewTeams rows start in the New Team dialog's list, the others are offered. */
+export interface TeamDefaultMember { name: string; cli: string; onNewTeams: boolean }
+
+/** teams.defaults: the New Team defaults and the member-name list new members are named from. */
+export interface TeamDefaults {
+  manager: { name: string; cli: string };
+  members: TeamDefaultMember[];
+  memberNames: string[];
+  country: string;
+  countries: { code: string; label: string }[];
+  /** How many names on the list a member of some team already has. */
+  usedCount: number;
+}
+
+/** teams.setDefaults: what was saved, and the member-name lines that were not (with why). */
+export interface TeamDefaultsSaved { saved: unknown; rejected: { line: string; reason: string }[] }
+
 /** updates.status: the app's own updates (core Updates/UpdateService.cs). */
 export interface UpdateStatus {
   current: string; state: 'idle' | 'checking' | 'upToDate' | 'available' | 'downloading' | 'ready' | 'error' | 'managed';
