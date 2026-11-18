@@ -58,11 +58,13 @@ public sealed partial class BusStore : IDisposable
     public long CreateTeam(string name) =>
         Scalar<long>("INSERT INTO teams (name, created_at) VALUES ($n, $t) RETURNING id;", ("$n", name), ("$t", Now()));
 
-    public MemberRef AddMember(long teamId, string name, MemberRole role, string cli = "claude")
+    /// <param name="givenName">The member's first name (0046 members.given_name): the words after its job word, or null.</param>
+    public MemberRef AddMember(long teamId, string name, MemberRole role, string cli = "claude", string? givenName = null)
     {
         var id = Scalar<long>(
-            "INSERT INTO members (team_id, name, role, cli, created_at) VALUES ($team, $n, $r, $cli, $t) RETURNING id;",
-            ("$team", teamId), ("$n", name), ("$r", role == MemberRole.Manager ? "manager" : "member"), ("$cli", cli), ("$t", Now()));
+            "INSERT INTO members (team_id, name, role, cli, created_at, given_name) VALUES ($team, $n, $r, $cli, $t, $g) RETURNING id;",
+            ("$team", teamId), ("$n", name), ("$r", role == MemberRole.Manager ? "manager" : "member"), ("$cli", cli), ("$t", Now()),
+            ("$g", string.IsNullOrWhiteSpace(givenName) ? null : givenName.Trim()));
         return Member(id)!;
     }
 

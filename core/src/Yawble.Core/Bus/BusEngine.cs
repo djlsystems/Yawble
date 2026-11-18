@@ -206,7 +206,7 @@ public sealed partial class BusEngine : IAsyncDisposable
 
     public async Task<MemberRef> AddMemberAsync(string team, string name, string cli = "claude", CancellationToken ct = default)
     {
-        var m = await WithGate(() => _store.InTransaction(() => AddMember(TeamId(team), name, MemberRole.Member, cli)), ct);
+        var m = await WithGate(() => _store.InTransaction(() => AddMember(TeamId(team), name, MemberRole.Member, cli, Teams.MemberNameList.GivenNameOf(name))), ct);
         LogFirstAgent(_store.MemberRows(memberId: m.Id).Single(), HowNow());
         return m;
     }
@@ -215,10 +215,10 @@ public sealed partial class BusEngine : IAsyncDisposable
         _store.AllMembers().FirstOrDefault(m => string.Equals(m.Team, team, StringComparison.OrdinalIgnoreCase))?.TeamId
         ?? throw new BusRefusal("no_such_team", $"there is no team named '{team}'");
 
-    private MemberRef AddMember(long teamId, string name, MemberRole role, string cli)
+    private MemberRef AddMember(long teamId, string name, MemberRole role, string cli, string? givenName = null)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Contains('/')) throw new BusRefusal("bad_name", "a member name is non-empty and has no '/'");
-        var member = _store.AddMember(teamId, name.Trim(), role, cli);
+        var member = _store.AddMember(teamId, name.Trim(), role, cli, role == MemberRole.Manager ? null : givenName);
         _store.Subscribe(member.Qualified, MessageTypes.Instruction(member));
         if (role == MemberRole.Manager)
         {

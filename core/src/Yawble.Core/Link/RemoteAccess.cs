@@ -66,6 +66,8 @@ public static class RemoteAccess
         [
             "app.overview", "app.version", "monitor.messages", "monitor.steps", "monitor.codeEvents",
             "teams.list", "teams.agents", "teams.quiet", "teams.env", "teams.approvals", "teams.repos",
+            // Settings > Teams and Settings > Concierge as saved (saving them and Generate are changes).
+            "teams.defaults", "concierge.defaults",
             "docs.list", "docs.read", "docs.folder",
             "members.get",
             "bus.decisions", "bus.workflows",
@@ -103,6 +105,7 @@ public static class RemoteAccess
         [
             "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",
             "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo",
+            "teams.setDefaults", "teams.generateNames", "concierge.setDefaults",
             "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
             "members.add", "members.remove", "members.update",
             "bus.tellManager", "bus.answer", "bus.closeWorkflow", "bus.stopWorkflow", "bus.nudgeWorkflow",

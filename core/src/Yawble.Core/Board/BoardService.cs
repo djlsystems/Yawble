@@ -102,7 +102,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
             "backlog.dispatch" => await DispatchItemAsync(Long(p, "id"), Long(p, "teamId"), p?["again"] is JsonValue g && g.TryGetValue<bool>(out var again) && again, ct),
             "backlog.item" => await ItemDetailAsync(Long(p, "id"), ct),
             "backlog.position" => PlaceItem(Long(p, "id"), OptLong(p, "after"), OptLong(p, "before")),
-            "backlog.dispatchNew" => await DispatchNewAsync(Long(p, "id"), Required(OptStr(p, "name"), "the new team's name"), OptStr(p, "managerCli") ?? "claude",
+            "backlog.dispatchNew" => await DispatchNewAsync(Long(p, "id"), Required(OptStr(p, "name"), "the new team's name"), OptStr(p, "managerCli"),
                 OptStr(p, "repoPath"), OptStr(p, "repoUrl"), ct),
             _ => throw new RpcException("method_not_found", $"unknown method '{method}'"),
         };
@@ -291,22 +291,26 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     }
 
     /// <summary>
-    /// Makes a team for an item and dispatches it there (Yawble dispatch-to-new): a Manager on the CLI given, working on a
-    /// folder on this computer or a repository cloned from its address, like the New team dialog.
+    /// Makes a team for an item and dispatches it there (Yawble dispatch-to-new): the saved default Manager (Settings >
+    /// Teams; on the CLI given, when one is) and the default members ticked "On new teams", working on a folder on this
+    /// computer or a repository cloned from its address, like the New team dialog.
     /// </summary>
-    private async Task<JsonNode> DispatchNewAsync(long id, string name, string managerCli, string? repoPath, string? repoUrl, CancellationToken ct)
+    private async Task<JsonNode> DispatchNewAsync(long id, string name, string? managerCli, string? repoPath, string? repoUrl, CancellationToken ct)
     {
         var item = ItemOr(id);
         if (item.State != "ready") throw new RpcException("not_ready", "only a ready item can be dispatched: read it and mark it ready first");
         if ((await bus.TeamsAsync(ct)).Any(t => string.Equals(t.Name, name.Trim(), StringComparison.OrdinalIgnoreCase)))
             throw new RpcException("exists", $"a team named {name.Trim()} already exists");
+        NewTeamPlan plan;
+        try { plan = await bus.PlanNewTeamAsync(null, managerCli, null, ct); }
+        catch (BusRefusal e) { throw new RpcException(e.Code, e.Message); }
         if (repoUrl is not null)
         {
             var repos = bus.Repos ?? throw new RpcException("unavailable", "cloning needs the app's data folder");
             try { repoPath = await repos.CloneForTeamAsync(name.Trim(), repoUrl, ct); }
             catch (ArgumentException e) { throw new RpcException("clone_failed", e.Message); }
         }
-        var teamId = await bus.CreateTeamAsync(name.Trim(), "Manager", managerCli, repoPath, ct);
+        var teamId = await bus.CreatePlannedTeamAsync(name.Trim(), plan, repoPath, ct);
         return await DispatchItemAsync(id, teamId, again: true, ct);
     }
 
