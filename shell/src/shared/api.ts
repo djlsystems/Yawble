@@ -311,7 +311,7 @@ export interface UpdateStatus {
 export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
-export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.'] as const;
+export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'timeline.'] as const;
 
 export function isUiMethod(method: unknown): method is string {
   return typeof method === 'string' && UI_METHOD_PREFIXES.some((p) => method.startsWith(p)) && /^[a-zA-Z.]+$/.test(method);
@@ -380,7 +380,45 @@ export interface WorkflowSummary {
   expiresAt?: string | null;
   /** B085: the question an open workflow waits on the person for (its number), when the core names one. */
   question?: number | null;
+  /** B086: its overall time and breakdown, computed by the core (older cores: absent). */
+  time?: ItemTime | null;
 }
+
+// ---- B086: overall time and the timeline (core card 429). The core computes every time; the screens only format. ----
+/** The categories, each moment of a card or workflow in exactly one (kebab-case on the wire). */
+export type TimeCategory = 'agent-working' | 'stalled' | 'waiting-on-you' | 'waiting-for-slot' | 'waiting-on-teammate'
+  | 'blocked' | 'scheduled' | 'not-started' | 'idle' | 'was-done';
+/** How a card or workflow ended: a card is done; a workflow completed, closed, stopped or expired. */
+export type TimeEndedHow = 'done' | 'completed' | 'closed' | 'stopped' | 'expired';
+/** BoardCard.time and a workflow item's time: created -> ended (or open, still counting), and where the time went. */
+export interface ItemTime {
+  createdAt: string;
+  /** A card: the first time it had a member and was queued or told. A workflow: its first card started. */
+  startedAt?: string | null;
+  endedAt?: string | null;
+  endedHow?: TimeEndedHow | null;
+  open: boolean;
+  /** created -> ended, or created -> the core's now when open (the screens tick it on from there). */
+  overallMs: number;
+  /** Built from the trail lines of an older card (before the core recorded timelines). */
+  rebuilt: boolean;
+  /** Adds up to overallMs exactly. */
+  breakdown: { category: TimeCategory; ms: number }[];
+}
+export type TimelineMarkerKind = 'planned' | 'started' | 'reopen' | 'handback' | 'decision-asked' | 'decision-answered' | 'watchdog-end' | 'expired';
+/** One stretch of one category; end null (or absent) while it is still going. */
+export interface TimelineBand { category: TimeCategory; start: string; end?: string | null }
+export interface TimelineRow { card?: number | null; member?: string | null; title?: string | null; bands: TimelineBand[] }
+export interface TimelineMarker { kind: TimelineMarkerKind; at: string; card?: number | null }
+/** timeline.get { card } | { workflow }: a card's own row, or a workflow's rows (one per card) and its summary row. */
+export interface Timeline {
+  time: ItemTime;
+  rows: TimelineRow[];
+  /** A workflow only: the merged row (Agent working > Waiting on you > Stalled > ...). */
+  summary?: TimelineBand[] | null;
+  markers: TimelineMarker[];
+}
+export const TIMELINE_GET = 'timeline.get';
 /** A workflow's state (bus.workflows): "expired" is closed by the app after workflowExpiryDays without activity (B085). */
 export type WorkflowState = 'open' | 'completed' | 'closed' | 'expired';
 /** B085: the RPC that resets an open workflow's expiry clock ({ teamId, workflow }). */
@@ -876,6 +914,8 @@ export interface BoardCard {
   memberState?: { state: AgentCard['state']; attention: AgentCard['attention'] };
   /** The heavy-work lease of the card's member, on the card it is working on only: held, or waited for (queue position). */
   lease?: { state: 'holding' | 'waiting'; what: string | null; position: number | null };
+  /** B086: its overall time and breakdown, computed by the core (older cores: absent). */
+  time?: ItemTime | null;
 }
 export interface BoardTrailLine { id: number; at: string; source: string; kind: string; text: string }
 export interface BoardCardDetail extends BoardCard { trail: BoardTrailLine[]; itemTitle?: string }
