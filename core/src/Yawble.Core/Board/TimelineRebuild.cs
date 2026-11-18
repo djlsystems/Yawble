@@ -107,7 +107,9 @@ public static partial class TimelineRebuild
                     }
                     break;
                 case "stopped":
-                    // B097: a run the person stopped is not a failure: the card kept its status and lane, so nothing moves.
+                    // B097: a run the person stopped is not a failure: the card says "stopped" (Idle time) in its lane,
+                    // unless it is in Done or louder (as BoardProjector).
+                    if (!Lanes.StopKeeps(status, lane)) status = Lanes.Stopped;
                     break;
                 case "run ended":
                     Report("completed", giveUp: false);

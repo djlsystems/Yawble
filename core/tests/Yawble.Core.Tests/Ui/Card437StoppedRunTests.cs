@@ -98,10 +98,70 @@ public class Card437StoppedRunTests
         p.Apply(M(MessageTypes.Failed, new { reason = "wall-clock timeout", failureClass = FailureClasses.Timeout }, source: "web/Ines", seq: 5, workflow: 5));
 
         var cards = store.Cards("web").ToDictionary(c => c.Member!);
-        Assert.Equal(("running", Lanes.InProgress), (cards["Tomas"].Status, cards["Tomas"].Lane));
+        Assert.Equal(("stopped", Lanes.InProgress), (cards["Tomas"].Status, cards["Tomas"].Lane));
         Assert.Contains(store.Trail(cards["Tomas"].Id), t => t.Kind == "stopped");
         Assert.DoesNotContain(store.Trail(cards["Tomas"].Id), t => t.Kind == "failed");
         Assert.Equal(("failed", Lanes.NeedsYou), (cards["Ines"].Status, cards["Ines"].Lane));
+    }
+
+    // ------------------------------------------------------------------ the card's own status (round 2, card 441)
+
+    [Fact]
+    public void StoppedIsAKnownStatus_InProgress_NeverNeedsYou_AndQuiet()
+    {
+        Assert.Equal("stopped", Lanes.Stopped);
+        Assert.Contains(Lanes.Stopped, Lanes.Statuses);
+        Assert.Equal(Lanes.InProgress, Lanes.Of(Lanes.Stopped));
+        Assert.Equal(0, Lanes.Loudness(Lanes.Stopped));
+        Assert.Equal(TimeCategories.Idle, TimeCategories.OfState("Tomas", Lanes.Stopped, Lanes.InProgress));
+    }
+
+    [Fact]
+    public void AQueuedCardStopped_SaysStopped_AndStaysInToDo()
+    {
+        using var db = new TempDb();
+        var store = new BoardStore(db.ConnectionString);
+        var p = new BoardProjector(store);
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, workflow: 5));
+        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/Tomas", seq: 2, workflow: 5));
+        var card = store.Cards("web").Single();
+        Assert.Equal(("stopped", Lanes.Todo), (card.Status, card.Lane));
+    }
+
+    [Fact]
+    public void ANewInstructionAfterAStop_ReQueuesTheCard()
+    {
+        using var db = new TempDb();
+        var store = new BoardStore(db.ConnectionString);
+        var p = new BoardProjector(store);
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, workflow: 5));
+        p.Apply(M(MessageTypes.Progress, new { status = "coding" }, source: "web/Tomas", seq: 2, workflow: 5));
+        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/Tomas", seq: 3, workflow: 5));
+        Assert.Equal("stopped", store.Cards("web").Single().Status);
+
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Carry on" }, source: "web/Manager", seq: 4, workflow: 5));
+        var card = store.Cards("web").Single();
+        Assert.Equal(("queued", Lanes.Todo), (card.Status, card.Lane));
+        p.Apply(M(MessageTypes.Progress, new { status = "coding again" }, source: "web/Tomas", seq: 5, workflow: 5));
+        Assert.Equal(("running", Lanes.InProgress), (store.Cards("web").Single().Status, store.Cards("web").Single().Lane));
+    }
+
+    [Fact]
+    public void AStopKeeps_AQuestionStillOpen_AndAHandedBackCard()
+    {
+        using var db = new TempDb();
+        var store = new BoardStore(db.ConnectionString);
+        var p = new BoardProjector(store);
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, workflow: 5));
+        p.Apply(M("agent.instruction.web/Ines", new { text = "Test it" }, source: "web/Manager", seq: 2, workflow: 5));
+        p.Apply(M(MessageTypes.NeedsDecision, new { question = "MIT?" }, source: "web/Tomas", seq: 3, workflow: 5));
+        p.Apply(M(MessageTypes.Handback, new { delivered = "tested" }, source: "web/Ines", seq: 4, workflow: 5));
+        foreach (var (who, seq) in new[] { ("Tomas", 5L), ("Ines", 6L) })
+            p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/" + who, seq: seq, workflow: 5));
+        var cards = store.Cards("web").ToDictionary(c => c.Member!);
+        Assert.Equal(("needs-decision", Lanes.NeedsYou), (cards["Tomas"].Status, cards["Tomas"].Lane));
+        Assert.Equal(("handback", Lanes.Done), (cards["Ines"].Status, cards["Ines"].Lane));
+        Assert.Contains(store.Trail(cards["Ines"].Id), t => t.Kind == "stopped");
     }
 
     // ------------------------------------------------------------------ the remote summary

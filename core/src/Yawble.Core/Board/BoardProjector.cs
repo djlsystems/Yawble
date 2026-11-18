@@ -8,11 +8,14 @@ public static class Lanes
 {
     public const string Todo = "todo", InProgress = "in-progress", NeedsYou = "blocked", Done = "done";
     public static readonly (string Id, string Label)[] All = [(Todo, "To Do"), (InProgress, "In Progress"), (NeedsYou, "Needs You"), (Done, "Done")];
-    public static readonly string[] Statuses = ["queued", "running", "blocked", "needs-decision", "failed", "completed", "handback", "done"];
+    /// <summary>B097 (card 437): the card's run was stopped by the person. Not a failure: In Progress, never Needs You.</summary>
+    public const string Stopped = "stopped";
+
+    public static readonly string[] Statuses = ["queued", "running", Stopped, "blocked", "needs-decision", "failed", "completed", "handback", "done"];
 
     public static string Of(string status) => status switch
     {
-        "running" => InProgress,
+        "running" or Stopped => InProgress,
         "blocked" or "needs-decision" or "failed" => NeedsYou,
         "completed" or "handback" or "done" => Done,
         _ => Todo,
@@ -22,6 +25,12 @@ public static class Lanes
 
     /// <summary>How loudly a status calls for a person: a quieter one never overwrites a louder one.</summary>
     public static int Loudness(string status) => status switch { "failed" => 3, "blocked" => 2, "needs-decision" => 1, _ => 0 };
+
+    /// <summary>
+    /// B097: whether a stopped run leaves the card's status as it is: a card in Done (its work was delivered), or one
+    /// louder than "stopped" (a question, a block or a failure still waits on the person).
+    /// </summary>
+    public static bool StopKeeps(string status, string lane) => lane == Done || Loudness(status) > 0;
 }
 
 /// <summary>
@@ -33,8 +42,8 @@ public static class Lanes
 /// <item>A member's reports move its card: progress to In Progress, blocked / a question / a failed run to Needs You,
 ///   a finished run or a hand-back to Done. A louder status (failed, blocked, needs a decision) is not overwritten by a
 ///   quieter one until new work arrives. A card a person or the Manager placed keeps its lane, except for a give-up.
-///   A run the person stopped (failure class "stopped", B097) is not a failure: the card stays where it is, and its
-///   trail says "stopped".</item>
+///   A run the person stopped (failure class "stopped", B097) is not a failure: the card's status is "stopped" and it
+///   stays in its lane; its trail says "stopped". New work re-queues it as usual.</item>
 /// <item>The workflow declared complete sends its cards to Done, except those waiting on a person, and marks the backlog
 ///   item dispatched as that workflow "declared".</item>
 /// <item>Anything the team's Manager sends means it has seen the person's edits: the cards stop awaiting it.</item>
@@ -86,10 +95,10 @@ public sealed class BoardProjector(BoardStore store)
                 case MessageTypes.NeedsDecision:
                     Report(card, sender, "needs-decision", Text(p, "question"), "asked", giveUp: true);
                     break;
-                // B097: a run the person stopped is not a failure: the card keeps its status and lane (no Needs You), and the
-                // trail says "stopped".
+                // B097: a run the person stopped is not a failure: the card says "stopped" (nothing runs it any more) but
+                // keeps its lane (no Needs You), and the trail says "stopped".
                 case MessageTypes.Failed when Text(p, "failureClass") == FailureClasses.Stopped:
-                    Report(card, sender, card.Status, Text(p, "reason"), "stopped", giveUp: false);
+                    Stopped(card, sender, Text(p, "reason"));
                     break;
                 case MessageTypes.Failed:
                     Report(card, sender, "failed", Text(p, "reason"), "failed", giveUp: true);
@@ -110,7 +119,7 @@ public sealed class BoardProjector(BoardStore store)
     /// lease waits (payload activity); a run the idle watchdog ended is a marker, and when its payload has no stalls (a run
     /// from before B086), it was Stalled from its last sign of activity. A member's run that ends asking to be woken is
     /// Scheduled until the wake. A run the person stopped (B097) keeps its stalls and lease waits but is no watchdog end,
-    /// and its card keeps its status, so it adds no Blocked time.
+    /// and its card's status "stopped" is Idle time (not Blocked, not Agent working).
     /// </summary>
     private void Time(Message m, JsonObject? p, CardRow? card, string sender, string? lastActivity)
     {
@@ -210,6 +219,18 @@ public sealed class BoardProjector(BoardStore store)
                 $"Give it to {untested} with tell (card: {card.Id}), or move it to done with the reason in note.", _at);
         }
         store.Save(card with { Status = next, Lane = lane }, _at);
+    }
+
+    /// <summary>
+    /// B097 (card 437): the person stopped the member's run. The card says "stopped" and stays in its lane (To Do or In
+    /// Progress; never Needs You, no give-up). A card in Done, or one that calls louder for the person (a question, a
+    /// block, a failure), keeps its status: <see cref="Lanes.StopKeeps"/>.
+    /// </summary>
+    private void Stopped(CardRow card, string sender, string? reason)
+    {
+        store.AddTrail(card.Id, sender, "stopped", reason ?? "stopped", _at);
+        if (Lanes.StopKeeps(card.Status, card.Lane)) return;
+        store.Save(card with { Status = Lanes.Stopped }, _at);
     }
 
     /// <summary>Who the board's own comments are from.</summary>

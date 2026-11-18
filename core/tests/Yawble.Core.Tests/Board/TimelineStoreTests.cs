@@ -129,11 +129,14 @@ public class TimelineStoreTests
             activity = new { stalls = new[] { new { start = TimelineCalculator.Iso(At("17:20")), end = TimelineCalculator.Iso(At("17:30")) } } },
         }, "web/TesterKofi", 3573, At("17:52")));
         var card = store.Cards("web")[0];
-        Assert.Equal(("running", Lanes.InProgress), (card.Status, card.Lane));
+        Assert.Equal(("stopped", Lanes.InProgress), (card.Status, card.Lane));
 
+        // Card 437 round 2: after the stop the card is Idle (8 min to 18:00): not Blocked, not Agent working.
         var t = TimeOf(store, card.Id, At("18:00"));
         Assert.DoesNotContain(t.Markers, m => m.Kind == TimeMarkers.WatchdogEnd);
         Assert.Equal(0, Share(t.Time, C.Blocked));
+        Assert.Equal(Min(8), Share(t.Time, C.Idle));
+        Assert.DoesNotContain(t.Bands, b => b.Category == C.AgentWorking && b.End > At("17:52"));
         var stalled = Assert.Single(t.Bands, b => b.Category == C.Stalled);
         Assert.Equal((At("17:20"), At("17:30")), (stalled.Start, stalled.End));
 
@@ -141,6 +144,34 @@ public class TimelineStoreTests
         var rebuilt = TimeOf(store, card.Id, At("18:00"));
         Assert.DoesNotContain(rebuilt.Markers, m => m.Kind == TimeMarkers.WatchdogEnd);
         Assert.Equal(0, Share(rebuilt.Time, C.Blocked));
+        Assert.Equal(Min(8), Share(rebuilt.Time, C.Idle));
+    }
+
+    /// <summary>Card 437 round 2: new work after a stop re-queues the card (Waiting for a slot again), live and rebuilt.</summary>
+    [Fact]
+    public void NewWorkAfterAStop_IsWaitingForASlotAgain_LiveOrRebuilt()
+    {
+        var (db, store, p, _) = Rig(At("10:00"));
+        using var __ = db;
+        p.Apply(Tell("DeveloperAda", "Build it", 9, At("10:00")));
+        p.Apply(M(MessageTypes.Progress, new { status = "building" }, "web/DeveloperAda", 9, At("10:05")));
+        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, "web/DeveloperAda", 9, At("10:20")));
+        p.Apply(Tell("DeveloperAda", "Carry on", 9, At("10:50")));
+        var card = store.Cards("web")[0];
+        Assert.Equal(("queued", Lanes.Todo), (card.Status, card.Lane));
+
+        foreach (var t in new[] { TimeOf(store, card.Id, At("11:00")), Rebuilt() })
+        {
+            Assert.Equal(Min(30), Share(t.Time, C.Idle));            // 10:20 - 10:50, stopped
+            Assert.Equal(Min(15), Share(t.Time, C.WaitingForSlot));  // 10:00 - 10:05 and 10:50 - 11:00
+            Assert.Equal(0, Share(t.Time, C.Blocked));
+        }
+
+        CardTimeline Rebuilt()
+        {
+            MakeOld(db, card.Id);
+            return TimeOf(store, card.Id, At("11:00"));
+        }
     }
 
     [Fact]
