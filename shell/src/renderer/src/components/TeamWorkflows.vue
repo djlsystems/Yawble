@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue';
-import type { YawbleApi, WorkflowSummary } from '../../../shared/api';
+import { workflowTime, type YawbleApi, type WorkflowSummary } from '../../../shared/api';
 import LoadingNote from './LoadingNote.vue';
-import { entryTime, latestWorkflows, TileWorkflowsShown, workflowLook } from '../monitor/workflows';
+import { entryTime, latestWorkflows, TileWorkflowsShown, WorkflowIconPath, workflowLook } from '../monitor/workflows';
 
 // A team's workflows on its card in the Teams list: the 50 newest (TileWorkflowsShown) and every open one however old
 // (bus.workflows lists those), last updated first, scrolling inside the tile, each with its state (the Monitor's colours
-// and icons), "#id title" and the time of its last entry. A row opens the team's workflows with that one selected.
+// and icons; expired, B085, its own), "#id title" and the time of its last entry (an ended one: its recorded end, endedAt). A row opens the team's workflows with that one selected.
 const props = defineProps<{ teamId: number; api: YawbleApi; pollMs?: number }>();
 const emit = defineEmits<{ open: [workflow: number] }>();
 
 const list = ref<WorkflowSummary[] | null>(null);
 const failed = ref(false);
-const Glyph = { completed: '✓', working: '▶', waiting: '❚❚', closed: '✕' } as const;
 let timer: ReturnType<typeof setInterval> | null = null;
 
 async function load() {
@@ -38,9 +37,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
     <div class="twf-list" data-test="team-workflows-list">
     <button v-for="w in list ?? []" :key="w.id" type="button" class="twf-row" :class="workflowLook(w).status"
       :data-id="w.id" :data-status="workflowLook(w).status" :title="tip(w)" data-test="team-workflow" @click="emit('open', w.id)">
-      <span class="twf-icon" aria-hidden="true">{{ Glyph[workflowLook(w).status] }}</span>
-      <span class="twf-title"><span class="twf-id">#{{ w.id }}</span> {{ w.title }}</span>
-      <span class="twf-time" data-test="team-workflow-time">{{ entryTime(w.lastAt) }}</span>
+      <svg class="twf-icon" viewBox="3 3 10 10" aria-hidden="true"><path :d="WorkflowIconPath[workflowLook(w).icon]" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      <span class="twf-title"><span class="twf-id">#{{ w.id }}</span> {{ w.title }}<span v-if="w.state === 'expired'" class="twf-tag" data-test="team-workflow-expired"> · expired</span></span>
+      <span class="twf-time" data-test="team-workflow-time">{{ entryTime(workflowTime(w)) }}</span>
     </button>
     </div>
   </div>
@@ -57,13 +56,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .twf-row.completed { --tone: var(--ok); }
 .twf-row.working { --tone: var(--info); }
 .twf-row.waiting { --tone: var(--warn); }
-.twf-row.closed { --tone: var(--state-idle); }
-.twf-icon { color: var(--tone); font-size: 11px; font-weight: 700; text-align: center; }
+.twf-row.closed, .twf-row.expired { --tone: var(--state-idle); }
+.twf-icon { color: var(--tone); width: 11px; height: 11px; justify-self: center; align-self: center; }
 .twf-row.working .twf-icon { animation: twf-pulse 1.6s ease-in-out infinite; }
 @keyframes twf-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .twf-row.working .twf-icon { animation: none; } }
 .twf-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.twf-row.closed .twf-title { color: var(--ink-soft); }
+.twf-row.closed .twf-title, .twf-row.expired .twf-title { color: var(--ink-soft); }
+.twf-tag { font-size: 11px; }
 .twf-id { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .twf-time { color: var(--ink-soft); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* A phone (B037): each workflow row is a 44 px tap target. */

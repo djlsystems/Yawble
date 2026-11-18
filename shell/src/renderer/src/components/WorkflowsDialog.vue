@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { YawbleApi, TeamSummary, WorkflowSummary } from '../../../shared/api';
+import { WORKFLOW_EXTEND } from '../../../shared/api';
+import { expiresSoon, extendErrorText, until } from '../workflowExpiry';
 import { errorText, resolveApi } from '../api';
 import { ago } from '../board/cards';
 import { displayName } from '../faces/faces';
@@ -10,8 +12,8 @@ import BusyLabel from './BusyLabel.vue';
 import { vChange } from '../remoteAccess';
 
 /**
- * A team's workflows, newest activity first: open ones (and who is working them, or that nobody is), completed and
- * closed ones. On an open one the person can nudge it (its Manager is told to pick it up), stop what runs in it, or
+ * A team's workflows, newest activity first: open ones (and who is working them, or that nobody is), completed,
+ * closed and expired ones (B085: closed by the app after the team's idle days; their time is their last activity, endedAt). On an open one the person can nudge it (its Manager is told to pick it up), stop what runs in it, or
  * close it (v-change: disabled in a read-only Visitor view, card 305; the core refuses them anyway). Everything is also on the bus, so the Board and the Monitor follow.
  */
 // focus: a workflow to show selected when the list opens (a workflow clicked on the Monitor).
@@ -52,7 +54,10 @@ async function run(id: number, method: string, params: Record<string, unknown>) 
     await api.call(method, { teamId: props.team.id, workflow: id, ...params });
     acting.value = null;
     await load();
-  } catch (e) { error.value = errorText(e); } finally { busy.value = null; busyMethod.value = null; }
+  } catch (e) {
+    // already_ended: it ended meanwhile; said as such (the next poll shows how it ended).
+    error.value = method === WORKFLOW_EXTEND ? extendErrorText(e, id) : errorText(e);
+  } finally { busy.value = null; busyMethod.value = null; }
 }
 
 const confirmAct = () => {
@@ -60,7 +65,9 @@ const confirmAct = () => {
   void run(a.id, a.kind === 'nudge' ? 'bus.nudgeWorkflow' : 'bus.closeWorkflow', a.kind === 'nudge' ? { note: a.text || undefined } : { reason: a.text || undefined });
 };
 
-const stateLabel = (w: WorkflowSummary) => w.state === 'open' ? (w.undeclared ? 'Nobody is working it' : 'Open') : w.state === 'completed' ? 'Completed' : 'Closed';
+// Expired (B085): the app closed it after the team's idle days; distinct from completed and from closed by a person.
+const stateLabel = (w: WorkflowSummary) => w.state === 'open' ? (w.undeclared ? 'Nobody is working it' : 'Open')
+  : w.state === 'completed' ? 'Completed' : w.state === 'expired' ? 'Expired' : 'Closed';
 
 onMounted(async () => {
   timer = setInterval(load, props.pollMs ?? 2000);
@@ -105,10 +112,12 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         </div>
         <div class="meta muted">
           #{{ w.id }} · {{ w.owner ? displayName(w.owner) : 'the Manager' }} · {{ w.messages }} message{{ w.messages === 1 ? '' : 's' }} · started {{ ago(w.startedAt) }} ·
-          last {{ ago(w.lastAt) }}
+          <template v-if="w.state !== 'open' && w.endedAt">ended {{ ago(w.endedAt) }}</template><template v-else>last {{ ago(w.lastAt) }}</template>
+          <template v-if="w.state === 'expired' && w.expiredAt"> · expired {{ ago(w.expiredAt) }}</template>
         </div>
         <div v-if="w.busy.length" class="busy">{{ w.busy.join(' · ') }}</div>
-        <div v-if="w.ending" class="ending">{{ w.state === 'closed' ? 'Closed' : 'Delivered' }}: {{ w.ending }}</div>
+        <div v-if="w.ending" class="ending">{{ w.state === 'closed' ? 'Closed' : w.state === 'expired' ? 'Expired' : 'Delivered' }}: {{ w.ending }}</div>
+        <div v-if="expiresSoon(w)" class="ending warn" data-test="workflow-expires">Expires {{ until(w.expiresAt!) }} if nothing happens in it; Extend resets the clock.</div>
         <div v-if="w.state === 'open'" class="actions">
           <template v-if="acting?.id === w.id">
             <input v-model="acting.text" class="grow" :placeholder="acting.kind === 'nudge' ? 'A note for the Manager (optional)' : 'Why (optional)'"
@@ -120,6 +129,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
             <button v-change :disabled="busy === w.id" data-test="workflow-nudge" title="Tell the Manager to pick this up" @click="acting = { id: w.id, kind: 'nudge', text: '' }">Nudge</button>
             <button v-if="w.busy.some((b) => b.endsWith('is running'))" v-change :disabled="busy === w.id" data-test="workflow-stop" title="Stop the runs working on it now"
               @click="run(w.id, 'bus.stopWorkflow', {})"><BusyLabel :busy="doing(w.id, 'bus.stopWorkflow')" text="Stopping…">Stop runs</BusyLabel></button>
+            <button v-if="w.expiresAt" v-change :disabled="busy === w.id" data-test="workflow-extend" title="Reset its expiry clock"
+              @click="run(w.id, WORKFLOW_EXTEND, {})"><BusyLabel :busy="doing(w.id, WORKFLOW_EXTEND)" text="Extending…">Extend</BusyLabel></button>
             <button v-change :disabled="busy === w.id" data-test="workflow-close" title="End it without declaring it complete" @click="acting = { id: w.id, kind: 'close', text: '' }">Close</button>
           </template>
         </div>
@@ -133,7 +144,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .wfs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .wf { border: 1px solid var(--line); border-left: 4px solid var(--state-running); border-radius: 8px; padding: 8px 10px; background: var(--surface); }
 .wf.completed { border-left-color: var(--ok); opacity: .85; }
-.wf.closed { border-left-color: var(--muted); opacity: .8; }
+.wf.closed, .wf.expired { border-left-color: var(--muted); opacity: .8; }
+.wf.expired { border-left-style: dashed; }
+.warn { color: var(--warn); }
 .wf.idle { border-left-color: var(--warn); background: var(--warn-bg); }
 .top { display: flex; gap: 8px; align-items: baseline; }
 .chip { font-size: 11px; font-weight: 700; border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; white-space: nowrap; }

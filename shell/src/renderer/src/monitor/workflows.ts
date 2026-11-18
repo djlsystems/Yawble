@@ -2,7 +2,7 @@ import type { WorkflowSummary } from '../../../shared/api';
 
 /**
  * THE WORKFLOWS ON THE WALL: each team's last few pieces of work (bus.workflows), coloured and marked by how they
- * stand: done (a check), being worked (a play mark), waiting with nobody on it (a pause), closed (a cross). The open
+ * stand: done (a check), being worked (a play mark), waiting with nobody on it (a pause), closed (a cross), expired (a clock). The open
  * ones are nodes on the wall (below); the legend and the screen reader's list name them all. Live only: a replay
  * would have to fake their history, so it shows none.
  */
@@ -12,24 +12,35 @@ export const WorkflowsShown = 5;
 /** A team's tile in the Teams list: up to this many newest workflows (and every open one, however old), scrolling inside the tile. */
 export const TileWorkflowsShown = 50;
 
-export type WorkflowStatus = 'completed' | 'working' | 'waiting' | 'closed';
-export type WorkflowIcon = 'check' | 'play' | 'pause' | 'cross';
+export type WorkflowStatus = 'completed' | 'working' | 'waiting' | 'closed' | 'expired';
+export type WorkflowIcon = 'check' | 'flow' | 'pause' | 'cross' | 'clock';
+/**
+ * Each state's mark as SVG paths on a 16-unit box, drawn inside a ring of radius 6.6 (the Monitor legend) or cropped to
+ * viewBox "3 3 10 10" (a tile's workflow rows). 'flow', two linked steps, is the workflow mark the Workflows buttons
+ * carry too (Icon.vue `workflow`); the canvas draws the same shape (icons.ts).
+ */
+export const WorkflowIconPath: Record<WorkflowIcon, string> = {
+  check: 'M4.5 8.5l2.5 2.5 4.5-5', flow: 'M4.5 4.5h2.8v2.8H4.5Z M8.7 8.7h2.8v2.8H8.7Z M5.9 7.3v2.8h2.8', pause: 'M6.5 5v6M9.5 5v6', cross: 'M5.5 5.5l5 5M10.5 5.5l-5 5',
+  clock: 'M8 3.5a4.5 4.5 0 1 0 0.01 0M8 5.5V8l2 1.2',
+};
 /** A Palette key (scene.ts) for each state's colour. */
 export type WorkflowTone = 'done' | 'start' | 'handback' | 'inkDim';
 export interface WorkflowLook { status: WorkflowStatus; tone: WorkflowTone; icon: WorkflowIcon; label: string }
 
-/** The four states in the legend's order. */
+/** The five states in the legend's order (expired, B085: closed by the app after the team's idle days). */
 export const WorkflowLooks: readonly WorkflowLook[] = [
   { status: 'completed', tone: 'done', icon: 'check', label: 'Completed' },
-  { status: 'working', tone: 'start', icon: 'play', label: 'Being worked' },
+  { status: 'working', tone: 'start', icon: 'flow', label: 'Being worked' },
   { status: 'waiting', tone: 'handback', icon: 'pause', label: 'Waiting, nobody on it' },
   { status: 'closed', tone: 'inkDim', icon: 'cross', label: 'Closed' },
+  { status: 'expired', tone: 'inkDim', icon: 'clock', label: 'Expired' },
 ];
 const byStatus = Object.fromEntries(WorkflowLooks.map((l) => [l.status, l])) as Record<WorkflowStatus, WorkflowLook>;
 
 export function workflowStatus(w: Pick<WorkflowSummary, 'state' | 'busy'>): WorkflowStatus {
   if (w.state === 'completed') return 'completed';
   if (w.state === 'closed') return 'closed';
+  if (w.state === 'expired') return 'expired';
   return w.busy.length > 0 ? 'working' : 'waiting';
 }
 
@@ -148,7 +159,7 @@ export interface WorkflowNodeLook { status: WorkflowNodeStatus; tone: WorkflowTo
 
 export function workflowNodeLook(w: Pick<WorkflowSummary, 'state' | 'busy'>, blocked: boolean): WorkflowNodeLook {
   if (blocked) return { status: 'blocked', tone: 'blocked', icon: 'bang' };
-  return workflowStatus(w) === 'working' ? { status: 'working', tone: 'start', icon: 'play' } : { status: 'waiting', tone: 'handback', icon: 'pause' };
+  return workflowStatus(w) === 'working' ? { status: 'working', tone: 'start', icon: 'flow' } : { status: 'waiting', tone: 'handback', icon: 'pause' };
 }
 
 /** A team's open workflows, newest first, at most WorkflowNodesEach. */
@@ -161,10 +172,10 @@ export function busyMembers(w: Pick<WorkflowSummary, 'busy'>): string[] {
   return w.busy.map((b) => b.trim().split(/\s+/)[0] ?? '').filter((s) => s !== '');
 }
 
-/** The workflows that were open before and are completed or closed now (ids absent now are left alone). */
-export function workflowEnds(before: readonly WorkflowSummary[], now: readonly WorkflowSummary[]): { id: number; status: 'completed' | 'closed' }[] {
+/** The workflows that were open before and are completed, closed or expired now (ids absent now are left alone). */
+export function workflowEnds(before: readonly WorkflowSummary[], now: readonly WorkflowSummary[]): { id: number; status: 'completed' | 'closed' | 'expired' }[] {
   const was = new Set(before.filter((w) => w.state === 'open').map((w) => w.id));
-  return now.filter((w) => was.has(w.id) && w.state !== 'open').map((w) => ({ id: w.id, status: w.state as 'completed' | 'closed' }));
+  return now.filter((w) => was.has(w.id) && w.state !== 'open').map((w) => ({ id: w.id, status: w.state as 'completed' | 'closed' | 'expired' }));
 }
 
 const Months =['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

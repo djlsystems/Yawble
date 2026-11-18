@@ -253,7 +253,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
           <button class="hbtn" data-test="team-more" title="More" aria-label="More team actions" aria-haspopup="menu" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen"><Icon name="more" :size="18" /></button>
           <span v-if="moreOpen" class="menu" role="menu" data-test="team-more-menu">
             <button role="menuitem" data-test="open-documents-menu" @click="moreOpen = false; openDocuments()"><Icon name="docs" :size="18" />Documents</button>
-            <button role="menuitem" data-test="open-workflows-menu" @click="moreOpen = false; openWorkflows()"><Icon name="dispatch" :size="18" />Workflows</button>
+            <button role="menuitem" data-test="open-workflows-menu" @click="moreOpen = false; openWorkflows()"><Icon name="workflow" :size="18" />Workflows</button>
             <button role="menuitem" data-test="open-triggers" @click="moreOpen = false; showTriggers = true"><Icon name="clock" :size="18" />Triggers</button>
             <button role="menuitem" data-test="open-git" @click="moreOpen = false; showGit = true"><Icon name="branch" :size="18" />Git</button>
             <button role="menuitem" data-test="open-manage" @click="moreOpen = false; showManage = true"><Icon name="settings" :size="18" />Settings</button>
@@ -261,8 +261,8 @@ defineExpose({ refresh, openWorkflows, openDocuments });
         </span>
       </div>
       <div v-else class="actions">
-        <button data-test="open-documents" title="What the team writes for you, and what you add" @click="openDocuments">Documents</button>
-        <button data-test="open-workflows" title="The team's pieces of work: nudge, stop or close one" @click="openWorkflows()">Workflows</button>
+        <button data-test="open-documents" title="What the team writes for you, and what you add" @click="openDocuments"><Icon name="docs" :size="14" /> Documents</button>
+        <button data-test="open-workflows" title="The team's pieces of work: nudge, stop or close one" @click="openWorkflows()"><Icon name="workflow" :size="14" /> Workflows</button>
         <button data-test="open-triggers" title="Work on a schedule" @click="showTriggers = true">⏰ Triggers</button>
         <button data-test="open-git" title="The team's branches, merge to main" @click="showGit = true">⎇ Git</button>
         <button data-test="open-manage" title="The team's repositories, pause and archive, environment, reset, delete" @click="showManage = true">

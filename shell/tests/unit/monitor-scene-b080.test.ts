@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { memberKey, MonitorModel, RunEndShowMs, RunStaleMs, teamKey, workflowKey, type Effect, type FeedRow, type TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import { MonitorScene } from '../../src/renderer/src/monitor/scene';
 import { capEffects, cardOf, DensityCaps, FocusDim, focusAlpha, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt } from '../../src/renderer/src/monitor/rhythm';
@@ -104,7 +104,7 @@ describe('the workflow nodes (B080 item 1)', () => {
     expect(openWorkflows(list).map((w) => w.id)).toEqual([4, 2]);
     expect(openWorkflows(Array.from({ length: 20 }, (_, i) => wf(i + 1)))).toHaveLength(WorkflowNodesEach);
     expect(busyMembers(wf(2, 'open', ['DeveloperPriya is running', ' TesterWren queued ', '']))).toEqual(['DeveloperPriya', 'TesterWren']);
-    expect(workflowNodeLook(wf(2, 'open', ['x']), false)).toMatchObject({ status: 'working', icon: 'play' });
+    expect(workflowNodeLook(wf(2, 'open', ['x']), false)).toMatchObject({ status: 'working', icon: 'flow' });
     expect(workflowNodeLook(wf(4), false)).toMatchObject({ status: 'waiting', icon: 'pause' });
     expect(workflowNodeLook(wf(4), true)).toMatchObject({ status: 'blocked', tone: 'blocked', icon: 'bang' });
   });
@@ -277,7 +277,10 @@ function makeScene(w = 1280, h = 800): { scene: MonitorScene; canvas: HTMLCanvas
 /** One frame of the scene, at `now` (its frame loop is private; requestAnimationFrame would run it the same way). */
 const frame = (scene: MonitorScene, now: number) => (scene as unknown as { frame: (t: number) => void }).frame(now);
 
-afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; });
+// The tests run the frames themselves: the scene's own requestAnimationFrame loop must not run between them (under
+// load it did, with real times, and a label went missing from the frame the test looked at).
+beforeEach(() => { vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {}); });
+afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
 describe('the scene (B080)', () => {
   it('draws a node per open workflow, tied to the members working it or to its hub', () => {
@@ -323,7 +326,7 @@ describe('the scene (B080)', () => {
     expect(scene.focus).toBeNull();
     frame(scene, 120);
     expect(scene.drawn).toHaveLength(2);
-    expect(scene.densityLevel).toBe('normal');
+    expect(scene.densityLevel).toBe('lively');
     scene.setDensity('calm');
     expect(scene.densityLevel).toBe('calm');
     scene.setDensity('wild' as never);

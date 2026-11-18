@@ -15,15 +15,17 @@ public sealed record OrgRunningAgent(string Member, string Role, string? Doing, 
 /// <summary>One agent of a team, as the summary counts it: state running | queued | idle, and whether its last run failed.</summary>
 public sealed record OrgAgent(string Member, string Role, string State, bool LastRunFailed, string? Doing = null, DateTimeOffset? Since = null);
 
-/// <summary>A team and its agents.</summary>
-public sealed record OrgTeam(string Name, bool Paused, bool Archived, IReadOnlyList<OrgAgent> Agents);
+/// <summary>A team and its agents; <paramref name="WorkflowExpiryDays"/> is its setting (B085: an open workflow nobody works expires after it).</summary>
+public sealed record OrgTeam(string Name, bool Paused, bool Archived, IReadOnlyList<OrgAgent> Agents,
+    int WorkflowExpiryDays = Bus.BusEngine.DefaultWorkflowExpiryDays);
 
 /// <summary>
 /// A workflow. <paramref name="State"/> is one of <see cref="OrgSummary.WorkflowStates"/>; <paramref name="Item"/> is the
 /// backlog item's label (B048) when the workflow came from one.
 /// </summary>
 public sealed record OrgWorkflow(long Id, string Team, string Title, string? Item, string? ItemTitle, string State, int CardsDone, int CardsTotal,
-    DateTimeOffset StartedAt, DateTimeOffset LastActivity, string? Owner);
+    DateTimeOffset StartedAt, DateTimeOffset LastActivity, string? Owner, DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null,
+    DateTimeOffset? ExpiresAt = null);
 
 /// <summary>Something waiting for the person: <paramref name="Kind"/> is decision | toolCall | network | tool.</summary>
 public sealed record OrgAsk(string Kind, string? Team, string Title);
@@ -55,10 +57,10 @@ public static class OrgSummary
     public static readonly IReadOnlyList<string> Sections = ["computer", "teams", "workflows", "needsYou", "problems"];
 
     public const string Running = "running", WaitingOnPerson = "waitingOnPerson", Blocked = "blocked", NobodyWorking = "nobodyWorking",
-        Completed = "completed", Failed = "failed", Closed = "closed";
+        Completed = "completed", Failed = "failed", Closed = "closed", Expired = "expired";
 
-    /// <summary>Every workflow state. Only completed and closed are ended; the rest, failed included, are open.</summary>
-    public static readonly IReadOnlyList<string> WorkflowStates = [Running, WaitingOnPerson, Blocked, NobodyWorking, Completed, Failed, Closed];
+    /// <summary>Every workflow state. Only completed, closed and expired are ended; the rest, failed included, are open.</summary>
+    public static readonly IReadOnlyList<string> WorkflowStates = [Running, WaitingOnPerson, Blocked, NobodyWorking, Completed, Failed, Closed, Expired];
 
     public static readonly TimeSpan EndedWorkflowsFor = TimeSpan.FromHours(24);
     public static readonly TimeSpan ProblemsFor = TimeSpan.FromHours(1);
@@ -68,10 +70,10 @@ public static class OrgSummary
     private const int MaxMessage = 200;
 
     /// <summary>
-    /// Only completed (declared done) and closed (closed by a person) are ended; every other state, failed included, is
-    /// open and stays in the snapshot however old its last activity (docs/cloud-link.md).
+    /// Only completed (declared done), closed (closed by a person) and expired (closed by the app, B085) are ended; every
+    /// other state, failed included, is open and stays in the snapshot however old its last activity (docs/cloud-link.md).
     /// </summary>
-    public static bool Ended(string state) => state is Completed or Closed;
+    public static bool Ended(string state) => state is Completed or Closed or Expired;
 
     public static JsonObject Build(OrgSummaryFacts facts, DateTimeOffset now) => new()
     {
@@ -105,6 +107,7 @@ public static class OrgSummary
             ["name"] = t.Name,
             ["paused"] = t.Paused,
             ["archived"] = t.Archived,
+            ["workflowExpiryDays"] = t.WorkflowExpiryDays,
             ["agents"] = new JsonObject
             {
                 ["total"] = t.Agents.Count,
@@ -138,6 +141,11 @@ public static class OrgSummary
             ["startedAt"] = Time(w.StartedAt),
             ["lastActivityAt"] = Time(w.LastActivity),
             ["owner"] = w.Owner,
+            // B085: when it ended (an expired one: its last real activity, not the expiry) and when the app expired it.
+            ["endedAt"] = w.EndedAt is { } e ? Time(e) : null,
+            ["expiredAt"] = w.ExpiredAt is { } x ? Time(x) : null,
+            // B085: when it expires if nothing happens, as on the bus.workflows item; null while it is worked, and once ended.
+            ["expiresAt"] = w.ExpiresAt is { } d ? Time(d) : null,
         }).ToArray());
 
     /// <summary>needsYou: the counts across every team, and per team the counts and the first few short titles of each kind.</summary>

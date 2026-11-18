@@ -147,9 +147,7 @@ describe('focus on a team', () => {
     await settle(2);
     expect(scene.focus).toEqual([1]);
     teams = teams.filter((t) => t.id !== 1);
-    await new Promise((r) => setTimeout(r, 120));
-    await settle();
-    expect(scene.focus).toEqual([1, null]);
+    await vi.waitFor(async () => { await settle(); expect(scene.focus).toEqual([1, null]); }, { timeout: 4000 });
     expect(w.find('[data-test=monitor-focus]').exists()).toBe(false);
   });
 
@@ -189,25 +187,28 @@ describe('the You node', () => {
 });
 
 describe('density', () => {
-  it('normal by default; a choice reaches the scene and is kept for the next Monitor', async () => {
+  it('lively by default, in the cog settings panel; a choice reaches the scene and is kept for the next Monitor', async () => {
     const first = await view();
-    expect(first.w.get('[data-test=monitor-density-normal]').attributes('aria-pressed')).toBe('true');
+    expect(first.w.find('.controls [data-test=monitor-density]').exists()).toBe(false);
+    await first.w.get('[data-test=monitor-layout-toggle]').trigger('click');
+    expect(first.w.get('[data-test=monitor-density-lively]').attributes('aria-pressed')).toBe('true');
     expect(first.scene.density).toEqual([]);
     await first.w.get('[data-test=monitor-density-calm]').trigger('click');
     expect(first.scene.density).toEqual(['calm']);
     expect(localStorage.getItem(lay.DensityStorageKey)).toBe('calm');
     first.w.unmount(); mounted.length = 0;
     const second = await view();
+    await second.w.get('[data-test=monitor-layout-toggle]').trigger('click');
     expect(second.w.get('[data-test=monitor-density-calm]').attributes('aria-pressed')).toBe('true');
     expect(second.scene.density).toEqual(['calm']);
-    await second.w.get('[data-test=monitor-density-normal]').trigger('click');
+    await second.w.get('[data-test=monitor-density-lively]').trigger('click');
     expect(localStorage.getItem(lay.DensityStorageKey)).toBeNull();
   });
 
   it('reads only a known level; storage that refuses keeps the default', () => {
-    expect(lay.readDensity({ getItem: () => 'wild' })).toBe('normal');
-    expect(lay.readDensity({ getItem: () => 'lively' })).toBe('lively');
-    expect(lay.readDensity({ getItem: () => { throw new Error('no'); } })).toBe('normal');
+    expect(lay.readDensity({ getItem: () => 'wild' })).toBe('lively');
+    expect(lay.readDensity({ getItem: () => 'normal' })).toBe('normal');
+    expect(lay.readDensity({ getItem: () => { throw new Error('no'); } })).toBe('lively');
     expect(() => lay.writeDensity('calm', { setItem: () => { throw new Error('no'); }, removeItem: () => {} })).not.toThrow();
   });
 });
@@ -274,8 +275,8 @@ describe('the remote view at 375 px', () => {
     await w.get('[data-test=monitor-layout-toggle]').trigger('click');
     const panel = w.get('[data-test=monitor-layout]');
     expect(panel.find('[data-test=monitor-density]').exists()).toBe(true);
-    await panel.get('[data-test=monitor-density-lively]').trigger('click');
-    expect(scenes.at(-1)!.density).toEqual(['lively']);
+    await panel.get('[data-test=monitor-density-calm]').trigger('click');
+    expect(scenes.at(-1)!.density).toEqual(['calm']);
     expect(panel.get('[data-test=monitor-sound]').text()).toBe('Sound off');
   });
 });

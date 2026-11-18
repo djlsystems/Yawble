@@ -150,9 +150,7 @@ describe('the You node gets the network and tool asks (card 386)', () => {
     expect(spy).toHaveBeenCalledTimes(1);
     const real = Date.now;
     vi.spyOn(Date, 'now').mockImplementation(() => real() + 6000);
-    await new Promise((r) => setTimeout(r, 1100));
-    await settle();
-    expect(spy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await vi.waitFor(async () => { await settle(); expect(spy.mock.calls.length).toBeGreaterThanOrEqual(2); }, { timeout: 4000 });
   });
 
   it('unmounting stops listening', async () => {

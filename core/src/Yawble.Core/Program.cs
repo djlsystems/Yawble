@@ -225,6 +225,8 @@ var concierge = new Yawble.Core.Concierge.ConciergeService(
             if (found.FirstOrDefault(c => c.CliId == id) is { Found: true, SignIn.Status: Yawble.Core.Agents.SignInStatus.SignedIn }) return id;
         return "claude";
     });
+// B085: a workflow that waits on the person's answer and will expire tomorrow is posted once as a Concierge Update.
+bus.ExpiryWarned = w => concierge.PostAppUpdate(w.TeamId, w.Team, w.Text, "expiring");
 // The Cloud Link (optional): a remote viewer's calls go through this same dispatcher, after RemoteAccess.
 RpcDispatcher? dispatcherForLink = null;
 await using var link = new Yawble.Core.Link.CloudLink(options.DataDir!,

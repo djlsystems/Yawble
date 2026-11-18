@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import type { AgentCard, NetworkAsk, ToolAsk, YawbleApi, Overview, WorkflowSummary } from '../../../shared/api';
+import { workflowTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type WorkflowSummary } from '../../../shared/api';
 import { groupAsks, hostsLabel } from '../networkAskGroups';
 import { resolveApi } from '../api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
@@ -23,8 +23,8 @@ import { useNarrow } from '../narrowScreen';
 import {
   DefaultSpeed, DefaultWindowMinutes, inTimeOrder, MaxWindowMinutes, mergeByTime, ReplayClock, ReplayStates, Speeds, timeOf, trimByTime, Windows,
 } from './timeline';
-import { codeEventKey, MapIdleChoices, readCodeEvents, readMapIdle, writeMapIdle, type CodeEvent } from './codemap';
-import { entryTime, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown, type WorkflowIcon } from './workflows';
+import { codeEventKey, readCodeEvents, type CodeEvent } from './codemap';
+import { entryTime, workflowLabel, workflowLook, WorkflowIconPath, WorkflowLooks, WorkflowsShown } from './workflows';
 
 /**
  * THE MONITOR: every team and its members live on one dark wall (scene.ts), the counts across the top, the state
@@ -48,8 +48,8 @@ import { entryTime, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown, 
  *
  * A click on a team's hub focuses it (the scene zooms to it and dims the rest); Esc, a click on the empty wall or the
  * chip's × shows every team again. A click on the You node opens Needs you (emit openNeedsYou). Beside the camera:
- * the density (calm / normal / lively, kept) and the sound (off unless turned on, kept; sound.ts); on a phone both
- * sit at the top of the cog's panel.
+ * the sound (off unless turned on, kept; sound.ts). The cog opens the Monitor's settings: the density (calm / normal /
+ * lively, lively by default, kept) at the top, then the network forces; on a phone the sound sits there too.
  */
 const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
 const emit = defineEmits<{
@@ -269,15 +269,6 @@ const eventKeys = new Set<string>();
 let eventsSince = 0;
 /** How the code read is asked: for every team at once, per team, or not at all (a core without it). */
 let codeMode: 'all' | 'team' | 'off' = 'all';
-/** How long a file stays on the map after its last touch, minutes (the person's choice, kept). */
-const mapIdle = ref(readMapIdle());
-live.map.idleMs = mapIdle.value * 60_000;
-function setMapIdle(minutes: number): void {
-  mapIdle.value = minutes;
-  live.map.idleMs = minutes * 60_000;
-  if (model !== live) model.map.idleMs = minutes * 60_000;
-  writeMapIdle(minutes);
-}
 const WindowKey = 'yawble.monitor.windowMinutes';
 const windowMinutes = ref(readWindow());
 const now = ref(Date.now());
@@ -294,10 +285,6 @@ const WorkflowPollMs = 5000;
 const workflowsAt = new Map<number, number>();
 /** The workflows the wall shows, per team, for the list read aloud (and the tests): the canvas draws the same. */
 const workflowRows = shallowRef<{ teamId: number; team: string; list: WorkflowSummary[] }[]>([]);
-/** The legend's mark for each workflow state, as SVG paths on a 16-unit box. */
-const WorkflowIconPath: Record<WorkflowIcon, string> = {
-  check: 'M4.5 8.5l2.5 2.5 4.5-5', play: 'M6.5 5l4.5 3-4.5 3z', pause: 'M6.5 5v6M9.5 5v6', cross: 'M5.5 5.5l5 5M10.5 5.5l-5 5',
-};
 
 const states: MemberState[] = ['running', 'waiting', 'decision', 'blocked', 'failed', 'idle'];
 const stateColor = (s: MemberState) => `color-mix(in srgb, var(--state-${s}) 60%, white)`;
@@ -555,11 +542,10 @@ function startReplay(at: number) {
   const from = Math.max(at, wall - MaxWindowMinutes * 60_000);
   const m = new MonitorModel();
   m.reconcile(teams.value, performance.now());
-  m.map.idleMs = mapIdle.value * 60_000;
   m.logNow = () => replay?.at ?? from;
   const st = new ReplayStates();
-  // The stretch before the moment (the map's idle time, at least half an hour) sets the states, the map and the activity list.
-  const lead = from - Math.max(30, mapIdle.value) * 60_000;
+  // The half hour before the moment sets the states, the map (files idle two minutes have left it) and the activity list.
+  const lead = from - 30 * 60_000;
   const before = (x: { at: string }) => timeOf(x) >= lead && timeOf(x) < from;
   catchUp(m, rows.value.filter(before), steps.value.filter(before), events.value.filter(before), st);
   m.effects.length = 0;
@@ -721,8 +707,8 @@ onBeforeUnmount(() => {
               title="Pinned: the zoom and position stay where you put them" @click="setPinned(true)">Pinned</button>
           </div>
           <button class="ctl cog" :class="{ on: layoutOpen, changed: layoutChanged }" type="button" data-test="monitor-layout-toggle"
-            :aria-expanded="layoutOpen" aria-controls="monitor-layout" aria-label="Network forces"
-            :title="layoutChanged ? 'Network forces (changed from the defaults)' : 'Network forces'" @click="layoutOpen = !layoutOpen">
+            :aria-expanded="layoutOpen" aria-controls="monitor-layout" aria-label="Monitor settings"
+            :title="layoutChanged ? 'Monitor settings: activity and network forces (forces changed from the defaults)' : 'Monitor settings: activity and network forces'" @click="layoutOpen = !layoutOpen">
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M8 5.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z" fill="none" stroke="currentColor" stroke-width="1.3" />
               <path d="M6.9 1.5h2.2l.35 1.7 1.15.5 1.45-.95 1.55 1.55-.95 1.45.5 1.15 1.7.35v2.2l-1.7.35-.5 1.15.95 1.45-1.55 1.55-1.45-.95-1.15.5-.35 1.7H6.9l-.35-1.7-1.15-.5-1.45.95-1.55-1.55.95-1.45-.5-1.15-1.7-.35V6.9l1.7-.35.5-1.15-.95-1.45L3.95 2.4l1.45.95 1.15-.5z"
@@ -730,10 +716,6 @@ onBeforeUnmount(() => {
             </svg>
           </button>
           <template v-if="!phone">
-            <div class="seg" role="group" aria-label="Density" data-test="monitor-density">
-              <button v-for="d in Densities" :key="d.level" class="ctl" :class="{ on: density === d.level }" type="button" :aria-pressed="density === d.level"
-                :data-test="`monitor-density-${d.level}`" :title="d.help" @click="setDensity(d.level)">{{ d.label }}</button>
-            </div>
             <button class="ctl sound" :class="{ on: soundOn }" type="button" data-test="monitor-sound" :aria-pressed="soundOn"
               :aria-label="soundOn ? 'Sound on' : 'Sound off'" :title="soundOn ? 'Sound on: a quiet tone for needs you, failures, handbacks, commits and merges' : 'Sound off'"
               @click="toggleSound">
@@ -747,18 +729,19 @@ onBeforeUnmount(() => {
           <button v-if="phone" class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
             :aria-expanded="legendOpen" :title="legendOpen ? 'Hide the legend' : 'Show the legend'" @click="toggleLegend">{{ legendOpen ? 'Legend ▾' : 'Legend ▸' }}</button>
         </div>
-        <div v-if="layoutOpen" id="monitor-layout" class="forces" role="dialog" aria-label="Network forces" data-test="monitor-layout" @keydown="onLayoutKey">
+        <div v-if="layoutOpen" id="monitor-layout" class="forces" role="dialog" aria-label="Monitor settings" data-test="monitor-layout" @keydown="onLayoutKey">
           <header>
-            <strong>Network forces</strong>
+            <strong>Monitor settings</strong>
             <button class="ctl close" type="button" aria-label="Close" data-test="monitor-layout-close" @click="layoutOpen = false">×</button>
           </header>
-          <!-- A phone has no room beside the cog: the density and the sound sit at the top of its panel. -->
-          <div v-if="phone" class="wallprefs">
+          <!-- The density heads the settings; a phone has no room beside the cog, so its sound sits here too. -->
+          <div class="wallprefs">
+            <span class="name">Activity</span>
             <div class="seg" role="group" aria-label="Density" data-test="monitor-density">
               <button v-for="d in Densities" :key="d.level" class="ctl" :class="{ on: density === d.level }" type="button" :aria-pressed="density === d.level"
                 :data-test="`monitor-density-${d.level}`" :title="d.help" @click="setDensity(d.level)">{{ d.label }}</button>
             </div>
-            <button class="ctl sound" :class="{ on: soundOn }" type="button" data-test="monitor-sound" :aria-pressed="soundOn" @click="toggleSound">{{ soundOn ? 'Sound on' : 'Sound off' }}</button>
+            <button v-if="phone" class="ctl sound" :class="{ on: soundOn }" type="button" data-test="monitor-sound" :aria-pressed="soundOn" @click="toggleSound">{{ soundOn ? 'Sound on' : 'Sound off' }}</button>
           </div>
           <label v-for="f in LayoutFields" :key="f.key" class="force" :title="f.help">
             <span class="name">{{ f.label }}</span>
@@ -795,7 +778,7 @@ onBeforeUnmount(() => {
               <span v-for="l in WorkflowLooks" :key="l.status">
                 <svg class="wfi" :class="l.status" viewBox="0 0 16 16" aria-hidden="true" :style="{ color: Palette[l.tone] }">
                   <circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.4" :stroke-dasharray="l.status === 'working' ? '10 4.5' : undefined" />
-                  <path :d="WorkflowIconPath[l.icon]" :fill="l.icon === 'play' ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                  <path :d="WorkflowIconPath[l.icon]" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>{{ l.label.toLowerCase() }}
               </span>
             </span>
@@ -808,7 +791,7 @@ onBeforeUnmount(() => {
             </li>
             <li v-for="w in r.list" :key="w.id">
               <button type="button" data-test="monitor-workflow" :data-id="w.id" @click="openWorkflow(r.teamId, w.id)">
-                {{ r.team }}: {{ workflowLabel(w) }} · {{ workflowLook(w).label }} · last entry {{ entryTime(w.lastAt) }}
+                {{ r.team }}: {{ workflowLabel(w) }} · {{ workflowLook(w).label }} · {{ w.state === 'open' ? 'last entry' : 'ended' }} {{ entryTime(workflowTime(w)) }}
               </button>
             </li>
           </template>
@@ -847,7 +830,7 @@ onBeforeUnmount(() => {
             <strong>#{{ hover.workflow.id }} {{ hover.workflow.title }}</strong>
             <span :style="{ color: Palette[workflowLook(hover.workflow).tone] }">{{ workflowLook(hover.workflow).label }}</span>
             <span v-if="hover.workflow.busy.length" class="dim">{{ hover.workflow.busy.join(' · ') }}</span>
-            <span v-else-if="hover.workflow.ending" class="dim">{{ hover.workflow.state === 'closed' ? 'Closed' : 'Delivered' }}: {{ hover.workflow.ending }}</span>
+            <span v-else-if="hover.workflow.ending" class="dim">{{ hover.workflow.state === 'closed' ? 'Closed' : hover.workflow.state === 'expired' ? 'Expired' : 'Delivered' }}: {{ hover.workflow.ending }}</span>
             <span class="dim">started {{ entryTime(hover.workflow.startedAt) }} · last entry {{ entryTime(hover.workflow.lastAt) }}</span>
             <span class="dim">{{ hover.workflow.messages }} message{{ hover.workflow.messages === 1 ? '' : 's' }} · {{ hover.team }} · click to open</span>
           </template>
@@ -875,12 +858,6 @@ onBeforeUnmount(() => {
             <button class="ctl live-btn" data-test="monitor-live" @click="goLive">● Back to live</button>
           </template>
           <span v-else class="hint">click or drag the timeline to replay from a moment</span>
-          <label class="idle" title="How long a file stays on the code map after its last touch (it also leaves when its workflow ends)">
-            files stay
-            <select :value="mapIdle" data-test="monitor-map-idle" @change="setMapIdle(Number(($event.target as HTMLSelectElement).value))">
-              <option v-for="m in MapIdleChoices" :key="m" :value="m">{{ m < 60 ? `${m}m` : `${m / 60}h` }}</option>
-            </select>
-          </label>
         </div>
         <Timeline :from="windowFrom" :to="now" :rows="rows" :steps="steps" :events="events" :playhead="playhead" :live="mode === 'live'" @seek="startReplay" />
       </div>
@@ -944,6 +921,7 @@ onBeforeUnmount(() => {
 .focus-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .focus-chip .ctl { border-radius: 999px; padding: 0 8px; }
 .wallprefs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wallprefs .name { color: #e2e8f0; }
 .ctl { background: rgba(12, 19, 34, .85); color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px; padding: 3px 10px; font-size: 12px; }
 .ctl:hover:not(:disabled) { border-color: #38bdf8; }
 /* Auto fit | Fit | Pinned: one joined control; the camera's mode is lit. */
@@ -999,8 +977,6 @@ onBeforeUnmount(() => {
 .seg:hover:not(.on) { color: #e2e8f0; }
 .live-btn { color: #fda4af; padding: 2px 10px; font-size: 11px; }
 .hint { opacity: .8; }
-.idle { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.idle select { background: #0c1322; color: #cbd5e1; border: 1px solid #1e293b; border-radius: 6px; font-size: 11px; padding: 1px 4px; }
 .activity { width: 22rem; flex: none; display: flex; flex-direction: column; border-left: 1px solid #1e293b; background: #0c1322; min-height: 0; }
 .activity.collapsed { width: 2.25rem; }
 .rail { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 0; border: 0; background: transparent; color: #94a3b8; cursor: pointer; }
@@ -1045,7 +1021,6 @@ onBeforeUnmount(() => {
   .bar-controls { flex-wrap: wrap; }
   .bar-controls .hint { display: none; }
   .bar-controls .seg { min-height: 44px; min-width: 44px; }
-  .idle select { min-height: 44px; font-size: 16px; }
   .live-btn { min-height: 44px; }
   .activity { height: 50%; }
   .activity.collapsed { height: 44px; }

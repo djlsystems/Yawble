@@ -147,10 +147,10 @@ describe('the workflows on the wall', () => {
   it('gives each state its colour, icon and words', () => {
     const t = at(Date.now());
     expect(workflowLook(wf(1, t, 'completed'))).toMatchObject({ status: 'completed', tone: 'done', icon: 'check' });
-    expect(workflowLook(wf(1, t, 'open', ['DeveloperPriya is running']))).toMatchObject({ status: 'working', tone: 'start', icon: 'play' });
+    expect(workflowLook(wf(1, t, 'open', ['DeveloperPriya is running']))).toMatchObject({ status: 'working', tone: 'start', icon: 'flow' });
     expect(workflowLook(wf(1, t, 'open'))).toMatchObject({ status: 'waiting', tone: 'handback', icon: 'pause' });
     expect(workflowLook(wf(1, t, 'closed'))).toMatchObject({ status: 'closed', tone: 'inkDim', icon: 'cross' });
-    expect(WorkflowLooks.map((l) => l.status)).toEqual(['completed', 'working', 'waiting', 'closed']);
+    expect(WorkflowLooks.map((l) => l.status)).toEqual(['completed', 'working', 'waiting', 'closed', 'expired']);
     for (const l of WorkflowLooks) expect(l.label.length).toBeGreaterThan(0);
   });
 
@@ -382,11 +382,12 @@ describe('the Monitor view', () => {
     } as unknown as YawbleApi;
     const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
     await flushPromises();
-    // The cog sits in the camera controls, right after the Auto fit | Fit | Pinned group, then density and
-    // sound (card 374); the panel is closed.
+    // The cog sits in the camera controls, right after the Auto fit | Fit | Pinned group, then the sound
+    // (card 374; the density moved into the cog's settings panel); the panel is closed.
     const controls = w.get('.controls');
     const order = Array.from(controls.element.children).map((el) => el.getAttribute('data-test')).filter(Boolean);
-    expect(order.slice(-3)).toEqual(['monitor-layout-toggle', 'monitor-density', 'monitor-sound']);
+    expect(order.slice(-2)).toEqual(['monitor-layout-toggle', 'monitor-sound']);
+    expect(controls.find('[data-test=monitor-density]').exists()).toBe(false);
     expect(w.find('[data-test=monitor-layout]').exists()).toBe(false);
     await w.get('[data-test=monitor-layout-toggle]').trigger('click');
     const panel = w.get('[data-test=monitor-layout]');

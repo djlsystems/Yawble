@@ -246,14 +246,15 @@ public sealed partial class BusStore : IDisposable
         return Messages($"WHERE seq > $p AND seq <= $u AND type IN ({string.Join(",", names)})", [.. args]);
     }
 
-    /// <summary>Declared complete or closed by a person: the workflow has ended (new activity reopens it).</summary>
+    /// <summary>Declared complete, closed by a person or expired: the workflow has ended (new activity reopens it).</summary>
     public bool WorkflowEnded(long correlation) =>
         Scalar<long>(
             """
-            SELECT count(*) FROM messages e WHERE e.correlation_id = $c AND e.type IN ($done, $closed)
+            SELECT count(*) FROM messages e WHERE e.correlation_id = $c AND e.type IN ($done, $closed, $expired)
                AND NOT EXISTS (SELECT 1 FROM messages n WHERE n.correlation_id = $c AND n.seq > e.seq AND n.type LIKE 'agent.instruction.%');
             """,
-            ("$c", correlation), ("$done", MessageTypes.WorkflowCompleted), ("$closed", MessageTypes.WorkflowClosed)) > 0;
+            ("$c", correlation), ("$done", MessageTypes.WorkflowCompleted), ("$closed", MessageTypes.WorkflowClosed),
+            ("$expired", MessageTypes.WorkflowExpired)) > 0;
 
     /// <summary>The workflows that touched a team, newest activity first: id, first and last time, message count.</summary>
     public IReadOnlyList<(long Id, DateTimeOffset First, DateTimeOffset Last, int Count)> WorkflowsOf(string team, int limit)

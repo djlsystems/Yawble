@@ -59,7 +59,7 @@ public sealed class BoardProjector(BoardStore store)
             if (t is not null && member is not null) Instruction(m, t, member);
             return;
         }
-        if (m.Type is MessageTypes.WorkflowCompleted or MessageTypes.WorkflowClosed)
+        if (m.Type is MessageTypes.WorkflowCompleted or MessageTypes.WorkflowClosed or MessageTypes.WorkflowExpired)
         {
             WorkflowDone(m);
             return;
@@ -102,12 +102,14 @@ public sealed class BoardProjector(BoardStore store)
         {
             var lane = planned.Placed ? planned.Lane : Lanes.Todo;
             store.Save(planned with { Member = member, Workflow = m.CorrelationId, Status = "queued", Lane = lane }, _at);
+            store.Unend(planned.Id);
             store.AddTrail(planned.Id, from, "assigned", $"Assigned to {member}: {text}", _at);
             return;
         }
         if (store.CardOf(team, member, m.CorrelationId) is { } card)
         {
             store.Save(card with { Status = "queued", Lane = card.Placed && card.Lane != Lanes.Done ? card.Lane : Lanes.Todo }, _at);
+            store.Unend(card.Id); // new work: a card its workflow's end ended is live again (B085)
             store.AddTrail(card.Id, from, "told", text, _at);
             return;
         }
@@ -146,10 +148,31 @@ public sealed class BoardProjector(BoardStore store)
     /// <summary>Who the board's own comments are from.</summary>
     public const string BoardSource = "board";
 
+    /// <summary>
+    /// The workflow ended. Completed: its cards go to Done, except those waiting on a person and a tester's untested card.
+    /// Closed (by the person) or expired (by the app): every card of it goes to Done, a waiting one too: nobody works
+    /// it any more. Either way every card not ended yet records the end (B085): when, and how (completed, closed or
+    /// expired); an expired workflow's end is its last real activity, so the expiry adds no time to a card.
+    /// </summary>
     private void WorkflowDone(Message m)
     {
+        var how = m.Type switch { MessageTypes.WorkflowClosed => "closed", MessageTypes.WorkflowExpired => "expired", _ => "completed" };
+        var p = Payload(m);
         foreach (var card in store.CardsOfWorkflow(m.CorrelationId))
         {
+            if (m.Type == MessageTypes.WorkflowExpired)
+            {
+                if (card.Lane == Lanes.Done && card.EndedAt is not null) continue;
+                if (card.Lane != Lanes.Done) store.Save(card with { Status = "done", Lane = Lanes.Done }, _at);
+                store.AddTrail(card.Id, Who(m.Source), "workflow expired", Text(p, "detail") ?? "expired: nothing happened in it for too long", _at);
+                continue;
+            }
+            if (m.Type == MessageTypes.WorkflowClosed && card.Lane != Lanes.Done && Lanes.Loudness(card.Status) > 0)
+            {
+                store.Save(card with { Status = "done", Lane = Lanes.Done }, _at);
+                store.AddTrail(card.Id, Who(m.Source), "workflow closed", Text(p, "reason") ?? "closed without being declared complete", _at);
+                continue;
+            }
             if (Lanes.Loudness(card.Status) > 0) continue;
             // B027 item 1: declaring the workflow complete leaves out a tester's card the tester has not tested, and says why.
             if (m.Type == MessageTypes.WorkflowCompleted && card.Lane != Lanes.Done
@@ -165,6 +188,8 @@ public sealed class BoardProjector(BoardStore store)
             else
                 store.AddTrail(card.Id, Who(m.Source), "workflow done", Text(Payload(m), "delivered") ?? "the work is declared complete", _at);
         }
+        var endedAt = m.Type == MessageTypes.WorkflowExpired && Text(p, "endedAt") is { } last ? last : _at!;
+        store.EndCardsOf(m.CorrelationId, how, endedAt);
         if (m.Type == MessageTypes.WorkflowCompleted && store.ItemDispatchedAs(m.CorrelationId) is { State: "ready" } item) store.SaveItem(item with { State = "declared" });
     }
 

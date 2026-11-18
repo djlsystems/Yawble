@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import DiscoverChecklist from '../../src/renderer/src/components/DiscoverChecklist.vue';
 import type { DiscoverChecklistData, DiscoverNode, YawbleApi } from '../../src/shared/api';
 
@@ -369,9 +369,7 @@ describe('discover checklist', () => {
     await flushPromises();
     expect(w.emitted('discovered')).toBeUndefined();
     state = 'done';
-    await new Promise((r) => setTimeout(r, 800));
-    await flushPromises();
-    expect(w.emitted('discovered')).toHaveLength(1);
+    await vi.waitFor(async () => { await flushPromises(); expect(w.emitted('discovered')).toHaveLength(1); }, { timeout: 4000 });
     w.unmount();
   });
 

@@ -39,7 +39,7 @@ export type Effect =
    */
   | { kind: 'you'; from: string; color: Tone; label: string | null; at: number; id?: string }
   /** A workflow node leaves: completed (a green flash, drifting away) or closed (a cross, fading). key: its node. */
-  | { kind: 'wfdone'; key: string; team: string; status: 'completed' | 'closed'; at: number }
+  | { kind: 'wfdone'; key: string; team: string; status: 'completed' | 'closed' | 'expired'; at: number }
   | { kind: 'burst'; node: string; color: Tone; big: boolean; at: number }
   | { kind: 'ripple'; node: string; color: Tone; at: number }
   | { kind: 'float'; node: string; color: Tone; text: string; at: number }

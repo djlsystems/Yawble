@@ -74,7 +74,7 @@ export function isDefaultLayout(layout: LayoutSettings): boolean {
 }
 
 /**
- * How much the wall shows happening (the control beside the cog): calm keeps to the big moments, lively shows every
+ * How much the wall shows happening (the top of the cog's settings panel; lively by default): calm keeps to the big moments, lively shows every
  * step; the scene reads it (scene.setDensity). Reduced motion stands whatever the density. Kept like the forces.
  */
 export type Density = 'calm' | 'normal' | 'lively';
@@ -83,7 +83,7 @@ export const Densities: readonly { level: Density; label: string; help: string }
   { level: 'normal', label: 'Normal', help: 'Normal: what the team does, without the smallest steps' },
   { level: 'lively', label: 'Lively', help: 'Lively: every step and message moves' },
 ];
-export const DefaultDensity: Density = 'normal';
+export const DefaultDensity: Density = 'lively';
 export const DensityStorageKey = 'yawble.monitor.density';
 
 export function readDensity(storage: Pick<Storage, 'getItem'> | null = safeStorage()): Density {

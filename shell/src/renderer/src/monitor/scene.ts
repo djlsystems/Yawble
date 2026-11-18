@@ -2,11 +2,11 @@ import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY
 import { LayoutDefaults, type LayoutSettings } from './layout';
 import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type MemberState } from '../faces/faces';
 import { DoingMs, memberKey, RunEndShowMs, teamKey, spaced, workflowKey, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
-import type { WorkflowSummary } from '../../../shared/api';
+import { workflowTime, type WorkflowSummary } from '../../../shared/api';
 import { drawHandbackMark, drawStepIcon, drawWorkflowIcon } from './icons';
 import { StepLook } from './steps';
 import {
-  commitPhase, CommitLifeMs, DefaultLimits, fileLight, layoutTeamMap, LightMs, MapPastMembers, mapRoomOf, MaxMapNodes, popScale, shortSha,
+  commitPhase, CommitLifeMs, DefaultLimits, fileLight, idleFade, layoutTeamMap, LightMs, MapPastMembers, mapRoomOf, MaxMapNodes, popScale, shortSha,
   type MapFile, type TeamMapView,
 } from './codemap';
 import { busyMembers, nodeLabelFont, placeWorkflowLabels, workflowNodeLabel, workflowNodeLook, type LabelAsk, type LabelBox, type LabelObstacle, type PlacedLabel } from './workflows';
@@ -356,7 +356,7 @@ export class MonitorScene {
   /** Workflow nodes that have left, by key, so their wfdone effect knows where to flash and drift from. */
   private wfGhosts = new Map<string, WfGhost>();
   private reducedMotion: boolean;
-  private density: Density = 'normal';
+  private density: Density = 'lively';
   /** The focused team's id (TeamSnapshot.id), or null. */
   private focusId: number | null = null;
   /** The effects drawn in the last frame (capped by density and focus), for the tests and the hover. */
@@ -388,6 +388,7 @@ export class MonitorScene {
     this.raf = requestAnimationFrame(this.frame);  }
 
   destroy(): void {
+    this.destroyed = true;
     cancelAnimationFrame(this.raf);
     this.sim.stop();
     this.unlisten?.();
@@ -399,7 +400,7 @@ export class MonitorScene {
     this.reducedMotion = on;
   }
 
-  /** How many effects the wall draws per frame, and how many code-map files and commit dots: calm, normal (the default) or lively. */
+  /** How many effects the wall draws per frame, and how many code-map files and commit dots: calm, normal or lively (the default). */
   setDensity(level: Density): void {
     if (!isDensity(level) || level === this.density) return;
     this.density = level;
@@ -757,7 +758,12 @@ export class MonitorScene {
   private moved(): void { this.movedAt = performance.now(); this.fitUntil = -Infinity; }
 
   // ---------- the frame ----------
+  /** Set by destroy(): no frame draws or asks for another after it. */
+  private destroyed = false;
   private frame = (now: number) => {
+    // One frame loop only: a frame called while another is already asked for (a test driving frames by hand) takes its place.
+    cancelAnimationFrame(this.raf);
+    if (this.destroyed) return;
     this.raf = requestAnimationFrame(this.frame);
     const dt = this.last ? Math.min(100, now - this.last) : 16;
     this.last = now;
@@ -981,7 +987,7 @@ export class MonitorScene {
     c.globalAlpha = 1;
   }
 
-  /** A workflow node leaving: completed, a green flash and it drifts away fading; closed, a grey cross that fades. */
+  /** A workflow node leaving: completed, a green flash and it drifts away fading; closed, a grey cross that fades; expired, a grey clock. */
   private drawWorkflowEnd(c: CanvasRenderingContext2D, e: Extract<Effect, { kind: 'wfdone' }>, now: number, motion: number): void {
     const node = this.nodes.get(e.key);
     const ghost = this.wfGhosts.get(e.key);
@@ -1009,7 +1015,7 @@ export class MonitorScene {
     c.strokeStyle = color; c.lineWidth = 1.5;
     roundRect(c, x - WfR, y - WfR, WfR * 2, WfR * 2, 4); c.fill(); c.stroke();
     c.fillStyle = color;
-    drawWorkflowIcon(c, done ? 'check' : 'cross', x, y, WfR * 1.1);
+    drawWorkflowIcon(c, done ? 'check' : e.status === 'expired' ? 'clock' : 'cross', x, y, WfR * 1.1);
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'lighter';
   }
@@ -1181,6 +1187,17 @@ export class MonitorScene {
     this.mapById = byId;
   }
 
+  /** How much of a map node is still shown as its files near their idle time: a file its own fade, a folder or "+N" its freshest file's. */
+  private mapFade(m: MapNode): number {
+    const map = this.model?.map;
+    if (!map) return 1;
+    const t = this.model!.logNow();
+    if (m.file) return idleFade(m.file, t, map.idleMs);
+    let most = m.files.length ? 0 : 1;
+    for (const f of m.files) { most = Math.max(most, idleFade(f, t, map.idleMs)); if (most >= 1) break; }
+    return most;
+  }
+
   /** The tree's branches (hub to folder, folder to file) and a line from each member to every file it touched. */
   private drawMapLines(c: CanvasRenderingContext2D, now: number, dim: (k: string) => number, v: { x0: number; y0: number; x1: number; y1: number }): void {
     const off = (ax: number, ay: number, bx: number, by: number) =>
@@ -1188,7 +1205,7 @@ export class MonitorScene {
     c.lineWidth = 1;
     for (const m of this.mapNodes) {
       const t = m.team;
-      const a = dim(t.key);
+      const a = dim(t.key) * this.mapFade(m);
       if (m.kind === 'folder' || m.kind === 'rest') {
         if (off(t.x!, t.y!, m.x, m.y)) continue;
         c.strokeStyle = `hsl(${t.hue} 55% 60%)`;
@@ -1239,7 +1256,7 @@ export class MonitorScene {
     c.textBaseline = 'middle';
     for (const m of this.mapNodes) {
       if (m.x < v.x0 || m.x > v.x1 || m.y < v.y0 || m.y > v.y1) continue;
-      const a = dim(m.team.key);
+      const a = dim(m.team.key) * this.mapFade(m);
       const hovered = this.hoverMap?.id === m.id;
       if (m.kind === 'folder') {
         const hue = 205 - m.heat * 175; // cool blue to warm amber

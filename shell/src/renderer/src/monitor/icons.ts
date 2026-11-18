@@ -85,7 +85,7 @@ export function drawStepIcon(c: CanvasRenderingContext2D, kind: StepKind, x: num
   }
 }
 
-/** A workflow's mark, in a box of `s` px centred on (x, y): a check, a play triangle, a pause, a cross. */
+/** A workflow's mark, in a box of `s` px centred on (x, y): a check, the workflow mark (two linked steps), a pause, a cross. */
 export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon | 'bang', x: number, y: number, s: number): void {
   const u = s / 16;
   const P = (px: number, py: number): [number, number] => [x + (px - 8) * u, y + (py - 8) * u];
@@ -99,9 +99,20 @@ export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon
   c.lineJoin = 'round';
   switch (icon) {
     case 'check': path(false, [3, 8.5], [6.5, 12], [13, 4.5]); break;
-    case 'play': path(true, [5, 3], [13, 8], [5, 13]); break;
+    case 'flow':
+      // Two steps, one leading to the next: the workflow mark (WorkflowIconPath.flow, Icon.vue `workflow`).
+      path(false, [3.5, 3.5], [7, 3.5], [7, 7], [3.5, 7], [3.5, 3.5]);
+      path(false, [9, 9], [12.5, 9], [12.5, 12.5], [9, 12.5], [9, 9]);
+      path(false, [5.25, 7], [5.25, 10.75], [9, 10.75]);
+      break;
     case 'pause': path(false, [5.5, 3.5], [5.5, 12.5]); path(false, [10.5, 3.5], [10.5, 12.5]); break;
     case 'cross': path(false, [4, 4], [12, 12]); path(false, [12, 4], [4, 12]); break;
+    case 'clock': { // expired (B085): a clock face with its hands
+      const [cx, cy] = P(8, 8);
+      c.beginPath(); c.arc(cx, cy, 5 * u, 0, Math.PI * 2); c.stroke();
+      path(false, [8, 5.5], [8, 8], [10, 9.2]);
+      break;
+    }
     case 'bang': {
       // An exclamation mark: a bar and a dot (blocked).
       path(false, [8, 2.5], [8, 9.5]);

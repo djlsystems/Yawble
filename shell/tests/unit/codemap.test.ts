@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CodeMap, codeEventKey, collapse, commitPhase, CommitGatherMs, CommitTravelMs, DefaultLimits, fileLight, layoutTeamMap, MaxMapNodes,
-  PopMs, popScale, readCodeEvent, readCodeEvents, readMapIdle, type CodeEvent,
+  PopMs, popScale, readCodeEvent, readCodeEvents, idleFade, MapIdleMs, MapFadeMs, type CodeEvent,
 } from '../../src/renderer/src/monitor/codemap';
 import { MonitorModel, type FeedRow } from '../../src/renderer/src/monitor/model';
 import { inTimeOrder, ReplayClock } from '../../src/renderer/src/monitor/timeline';
@@ -356,8 +356,8 @@ describe('the Monitor with the code read', () => {
       onEvent: () => () => {},
     } as unknown as YawbleApi;
     const w = mount(MonitorView, { props: { api, pollMs: 20 } });
-    for (let i = 0; i < 6; i++) await flushPromises();
-    await new Promise((r) => setTimeout(r, 80));
+    // A few polls of the steps go by (the Monitor goes on), and the code read is never asked again.
+    await vi.waitFor(async () => { await flushPromises(); expect(asked.filter((m) => m === 'monitor.steps').length).toBeGreaterThan(3); }, { timeout: 4000 });
     for (let i = 0; i < 6; i++) await flushPromises();
     expect(asked.filter((m) => m === 'monitor.codeEvents')).toHaveLength(2); // all teams, then per team, then off
     expect(asked.filter((m) => m === 'monitor.steps').length).toBeGreaterThan(1); // the Monitor goes on
@@ -386,8 +386,7 @@ describe('the Monitor with the code read', () => {
       onEvent: () => () => {},
     } as unknown as YawbleApi;
     const w = mount(MonitorView, { props: { api, pollMs: 20 } });
-    for (let i = 0; i < 6; i++) await flushPromises();
-    await new Promise((r) => setTimeout(r, 80));
+    await vi.waitFor(async () => { await flushPromises(); expect(asked.length).toBeGreaterThan(1); }, { timeout: 4000 });
     for (let i = 0; i < 6; i++) await flushPromises();
     expect(asked.length).toBeGreaterThan(1);
     expect(Date.parse(String(asked[0]!.since))).toBeLessThan(now - 60_000); // the start of the timeline
@@ -400,15 +399,18 @@ describe('the Monitor with the code read', () => {
     w.unmount();
   });
 
-  it('remembers how long files stay on the map', async () => {
-    localStorage.removeItem('yawble.monitor.mapIdleMinutes');
-    expect(readMapIdle()).toBe(30);
+  it('keeps a file two minutes after its last touch, fading it over the last 20 s, with no setting for it', async () => {
+    expect(new CodeMap().idleMs).toBe(MapIdleMs);
+    expect(MapIdleMs).toBe(120_000);
+    const f = { lastAt: 0 };
+    expect(idleFade(f, 60_000)).toBe(1);
+    expect(idleFade(f, MapIdleMs - MapFadeMs)).toBe(1);
+    expect(idleFade(f, MapIdleMs - MapFadeMs / 2)).toBeCloseTo(0.5);
+    expect(idleFade(f, MapIdleMs)).toBe(0);
     const api = { call: async () => { throw new Error('offline'); }, onEvent: () => () => {} } as unknown as YawbleApi;
     const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
     await flushPromises();
-    await w.get('[data-test=monitor-map-idle]').setValue('60');
-    expect(readMapIdle()).toBe(60);
+    expect(w.find('[data-test=monitor-map-idle]').exists()).toBe(false);
     w.unmount();
-    localStorage.removeItem('yawble.monitor.mapIdleMinutes');
   });
 });
