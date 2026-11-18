@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { vChange } from '../remoteAccess';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { BacklogDispatch, BacklogItem, BacklogItemDetail, YawbleApi, TeamSummary } from '../../../shared/api';
+import type { BacklogItem, BacklogItemDetail, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { renderMarkdown } from '../markdown';
 import { ago } from './cards';
@@ -199,7 +199,7 @@ async function simple(method: string) {
 
 // ---- dispatch
 const target = ref<number | 'new'>(props.teams[0]?.id ?? 'new');
-const newTeam = ref({ name: '', cli: 'claude', repo: '' });
+const newTeam = ref({ name: '', cli: '', repo: '' });
 const confirmAgain = ref(false);
 const confirmDelete = ref(false);
 const isAddress = (s: string) => /^(https?|ssh|file):|^[\w.-]+@[\w.-]+:/i.test(s.trim());
@@ -226,23 +226,26 @@ async function dispatch() {
   if (i.inFlight && !confirmAgain.value) { confirmAgain.value = true; return; }
   const r = target.value === 'new'
     ? await act<BacklogItem>('backlog.dispatchNew', {
-        id: i.id, name: newTeam.value.name.trim(), managerCli: newTeam.value.cli,
+        id: i.id, name: newTeam.value.name.trim(), ...(newTeam.value.cli ? { managerCli: newTeam.value.cli } : {}),
         ...(newTeam.value.repo.trim() ? { [isAddress(newTeam.value.repo) ? 'repoUrl' : 'repoPath']: newTeam.value.repo.trim() } : {}),
       }, 'dispatch')
     : await act<BacklogItem>('backlog.dispatch', { id: i.id, teamId: target.value, again: i.inFlight }, 'dispatch');
   confirmAgain.value = false;
-  if (r) { dispatchOpen.value = false; newTeam.value = { name: '', cli: 'claude', repo: '' }; await load(); await loadDetail(); }
+  if (r) { dispatchOpen.value = false; newTeam.value = { name: '', cli: '', repo: '' }; await load(); await loadDetail(); }
 }
 watch(() => props.teams, (ts) => { if (target.value !== 'new' && !ts.some((t) => t.id === target.value)) target.value = ts[0]?.id ?? 'new'; });
 
-const tokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`);
-function elapsed(d: BacklogDispatch): string | null {
-  if (!d.firstStart) return null;
-  const end = d.state === 'open' || !d.lastEnd ? Date.now() : Date.parse(d.lastEnd);
-  const min = Math.max(0, Math.round((end - Date.parse(d.firstStart)) / 60000));
-  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
-}
-const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state === 'open' ? (d.busy?.length ? `working: ${d.busy.join(', ')}` : 'open, idle') : d.state ?? 'unknown';
+// The teams this item went to, newest dispatch first, once each (a deleted team has no links).
+const teamLinks = computed(() => {
+  if (detail.value?.id !== open.value?.id) return [];
+  const seen = new Set<number>();
+  const out: { teamId: number; team: string }[] = [];
+  for (const d of detail.value?.dispatches ?? []) {
+    if (d.teamId === null || d.teamGone || seen.has(d.teamId)) continue;
+    seen.add(d.teamId); out.push({ teamId: d.teamId, team: d.team });
+  }
+  return out;
+});
 </script>
 
 <template>
@@ -417,7 +420,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
               <label>New team's name<input v-model="newTeam.name" data-test="backlog-new-team" placeholder="e.g. Billing" /></label>
               <label>Its repository (address or folder, optional)<input v-model="newTeam.repo" class="mono" placeholder="https://git.example.com/owner/repo.git" /></label>
               <label>Manager's agent
-                <select v-model="newTeam.cli"><option value="claude">Claude</option><option value="codex">Codex</option><option value="grok">Grok</option><option value="copilot">Copilot</option><option value="antigravity">Antigravity</option></select>
+                <select v-model="newTeam.cli"><option value="">Default (Settings &gt; Teams)</option><option value="claude">Claude</option><option value="codex">Codex</option><option value="grok">Grok</option><option value="copilot">Copilot</option><option value="antigravity">Antigravity</option></select>
               </label>
             </template>
             <p v-if="confirmAgain" class="warn small" data-test="backlog-again-confirm">
@@ -440,25 +443,10 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
             <button class="primary" :disabled="busy" data-test="backlog-item-save" :aria-busy="doing === 'save'" @click="update({ title: editTitle, body: editBody })"><BusyLabel :busy="doing === 'save'" text="Saving…">Save</BusyLabel></button>
           </div>
 
-          <LoadingNote v-if="open.dispatchCount > 0 && detail?.id !== open.id" text="Loading its dispatches…" />
-          <div v-if="detail?.id === open.id && detail.dispatches.length" class="history" data-test="backlog-history">
-            <h4>Dispatches</h4>
-            <div v-for="d in detail.dispatches" :key="d.workflow" class="disp">
-              <div class="drow">
-                <b>{{ d.team }}</b><span class="muted small">workflow #{{ d.workflow }} · {{ ago(d.dispatchedAt) }}</span><span class="grow" />
-                <span class="dstate" :class="d.teamGone ? 'gone' : d.state">{{ stateText(d) }}</span>
-              </div>
-              <div class="muted small">
-                {{ d.cardsDone }}/{{ d.cards }} cards done · {{ d.runs }} run{{ d.runs === 1 ? '' : 's' }}<template v-if="d.members.length"> by {{ d.members.join(', ') }}</template>
-                <template v-if="elapsed(d)"> · {{ elapsed(d) }}</template>
-                <template v-if="d.inputTokens || d.outputTokens"> · {{ tokens(d.inputTokens) }} in / {{ tokens(d.outputTokens) }} out tokens</template>
-                <template v-if="d.ending"> · {{ d.ending }}</template>
-              </div>
-              <div v-if="d.teamId !== null" class="links">
-                <button class="link" @click="emit('openTeam', d.teamId!)">Open team</button>
-                <button class="link" @click="emit('board', d.teamId)">Its board</button>
-              </div>
-            </div>
+          <div v-for="t in teamLinks" :key="t.teamId" class="links" data-test="backlog-team-links">
+            <span class="muted small">{{ t.team }}</span>
+            <button class="link" @click="emit('openTeam', t.teamId)">Open team</button>
+            <button class="link" @click="emit('board', t.teamId)">Its board</button>
           </div>
         </section>
       </div>
@@ -545,14 +533,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 .buttons { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
 .dispatch { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
 .dispatch label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-soft); }
-.history h4 { margin: 4px 0; font-size: 13px; }
-.disp { border: 1px solid var(--line-soft); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 2px; }
-.drow { display: flex; gap: 6px; align-items: baseline; }
-.dstate { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--pill-neutral-bg); color: var(--pill-neutral-ink); }
-.dstate.open { background: var(--pill-info-bg); color: var(--pill-info-ink); }
-.dstate.completed { background: var(--pill-green-bg); color: var(--pill-green-ink); }
-.dstate.gone { background: var(--pill-red-bg); color: var(--pill-red-ink); }
-.links { display: flex; gap: 10px; }
+.links { display: flex; gap: 10px; align-items: baseline; flex: none; }
 .link { border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 12px; }
 .warn { color: var(--warn); margin: 0; }
 .error { color: var(--bad); }

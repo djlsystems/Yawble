@@ -70,6 +70,10 @@ public class Card418NameDefaultsTests
         Assert.True(BusEngine.IsGivenNameUsed("tomas", rows));
         Assert.True(BusEngine.IsGivenNameUsed("Alice", rows));
         Assert.False(BusEngine.IsGivenNameUsed("Priya", rows));
+        // A job-word-only member ("Tester") does not use names its id merely ends with.
+        GivenNameRow[] jobOnly = [new(4, "Tester", null), new(5, "DeveloperEster", null)];
+        Assert.False(BusEngine.IsGivenNameUsed("Per", jobOnly));
+        Assert.True(BusEngine.IsGivenNameUsed("ester", jobOnly));
         Assert.Equal("Priya", MemberNameList.GivenNameOf("Developer  Priya"));
         Assert.Null(MemberNameList.GivenNameOf("Developer"));
         Assert.Equal("Germany", MemberNameList.Country("de-de")!.DisplayName());

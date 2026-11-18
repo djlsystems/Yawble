@@ -158,7 +158,7 @@ public static class CompanionTools
             "host_task_run" => $"Ask to run host task {Text(args, "task")} of team {team} on this computer: {Text(args, "reason")}. It then waits for your Run once / Always in Needs you like an agent's request, unless it has a standing approval.",
             "git_merge_team" => $"Merge team {team}'s branch into the base branch of its {repo} repository.",
             "backup_restore" => $"Restore the backup {Text(args, "backup")}: it is staged and replaces the app's data when the app restarts.",
-            "backlog_dispatch" => $"Make a new team {Text(args, "new_team")} with a {Text(args, "manager_cli") ?? "claude"} Manager" +
+            "backlog_dispatch" => $"Make a new team {Text(args, "new_team")} with " + (Text(args, "manager_cli") is { } dispatchCli ? $"a {dispatchCli} Manager" : "the default Manager and members (Settings > Teams)") +
                                   (Text(args, "repo_url") is { } du ? $" (cloning {ConciergeReadTools.OriginForDisplay(du)})" : Text(args, "repo_path") is { } dp ? $" (on the folder {dp})" : "") +
                                   $" and dispatch {Text(args, "item")} to it. It starts paid agent work.",
             _ => $"Run {tool}.",

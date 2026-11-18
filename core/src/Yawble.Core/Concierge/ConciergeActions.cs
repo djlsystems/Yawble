@@ -216,7 +216,7 @@ public sealed class ConciergeActions(
                 var id = ItemId(args);
                 if (Optional(args, "new_team") is { } fresh)
                 {
-                    var n = await board("backlog.dispatchNew", new JsonObject { ["id"] = id, ["name"] = fresh, ["managerCli"] = Optional(args, "manager_cli") ?? "claude",
+                    var n = await board("backlog.dispatchNew", new JsonObject { ["id"] = id, ["name"] = fresh, ["managerCli"] = Optional(args, "manager_cli"),
                         ["repoPath"] = Optional(args, "repo_path"), ["repoUrl"] = Optional(args, "repo_url") }, ct);
                     return $"ok: made team {fresh} and dispatched {Label(n)} to its Manager.";
                 }
@@ -568,7 +568,7 @@ public sealed class ConciergeActions(
         Tool("backlog_dispatch", "Dispatch a ready backlog item to a team's Manager (or to a brand-new team with new_team), when the person asks or accepts. It starts paid agent work.",
             ("item", "string", "The item.", true), ("team", "string", "The team to dispatch to.", false),
             ("again", "boolean", "true to dispatch again though it is in flight (only on purpose).", false),
-            ("new_team", "string", "Instead: make a team with this name and dispatch there.", false), ("manager_cli", "string", "new_team: the Manager's CLI (default claude).", false),
+            ("new_team", "string", "Instead: make a team with this name and dispatch there.", false), ("manager_cli", "string", "new_team: the Manager's CLI (default: the saved default Manager, Settings > Teams).", false),
             ("repo_path", "string", "new_team: repository folder.", false), ("repo_url", "string", "new_team: repository address to clone.", false)),
         Tool("backlog_archive", "Archive a backlog item (reversible with backlog_restore).", ("item", "string", "The item.", true)),
         Tool("backlog_restore", "Bring an archived backlog item back.", ("item", "string", "The item.", true)),

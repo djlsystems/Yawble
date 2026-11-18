@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { workflowTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type WorkflowSummary } from '../../../shared/api';
 import { groupAsks, hostsLabel } from '../networkAskGroups';
 import { resolveApi } from '../api';
@@ -8,7 +8,7 @@ import { MemberStateLabel, memberStateOf, type MemberState } from '../faces/face
 import {
   memberKey, MonitorModel, needYouSummary, needYouWord, spaced, teamKey, type ActivityRow, type FeedRow, type NeedYouItem, type NeedYouKind, type TeamSnapshot,
 } from './model';
-import { youNodeAt } from './rhythm';
+import { youNodeAt, type KeepOut } from './rhythm';
 import { MonitorScene, Palette, type SceneHover } from './scene';
 import {
   clampLayout, Densities, DefaultDensity, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, LayoutStep, readDensity, readLayout,
@@ -233,16 +233,48 @@ const youShown = computed(() => youOpen.value || hover.value?.kind === 'you');
  * getBoundingClientRect() alone would keep its first answer.
  */
 const wallSize = ref({ w: 0, h: 0 });
+/**
+ * What the You node keeps clear of (card 416), in canvas CSS px: the controls (a phone's row along the bottom holds
+ * Legend), the desktop's Legend button and the open legend. Measured with the wall's size and given to the scene, so
+ * the node it draws and hits is where the panel is placed.
+ */
+const youKeepOut = shallowRef<KeepOut[]>([]);
+// Most telling first (youNodeAt keeps clear of the first above all): the Legend button (a phone's sits in the
+// controls row), the controls, the open legend.
+const KeepOutSelectors = [':scope > .legend-toggle, :scope > .controls > .legend-toggle', ':scope > .controls', ':scope > .legend'];
+function measureKeepOut(b: DOMRect): KeepOut[] {
+  const stage = canvas.value?.parentElement;
+  if (!stage) return [];
+  const out: KeepOut[] = [];
+  for (const sel of KeepOutSelectors) {
+    stage.querySelectorAll<HTMLElement>(sel).forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out.push({ left: r.left - b.left, top: r.top - b.top, right: r.right - b.left, bottom: r.bottom - b.top });
+    });
+  }
+  return out;
+}
 function measureWall(): void {
   const b = canvas.value?.getBoundingClientRect();
   const w = b?.width ?? 0, h = b?.height ?? 0;
   if (w !== wallSize.value.w || h !== wallSize.value.h) wallSize.value = { w, h };
+  const keep = b ? measureKeepOut(b) : [];
+  const same = keep.length === youKeepOut.value.length && keep.every((k, i) => {
+    const o = youKeepOut.value[i]!;
+    return k.left === o.left && k.top === o.top && k.right === o.right && k.bottom === o.bottom;
+  });
+  if (!same) {
+    youKeepOut.value = keep;
+    try { scene?.setYouKeepOut?.(keep); } catch { /* the scene could not; it keeps the node where it was */ }
+  }
 }
 watch(youShown, (shown) => { if (shown) measureWall(); }, { flush: 'sync' });
+// The legend opening or closing, and a phone's controls row coming or going, move what the node keeps clear of.
+watch([legendOpen, phone], () => { void nextTick(measureWall); });
 let wallObserver: ResizeObserver | null = null;
 const youTipStyle = computed(() => {
   const { w, h } = wallSize.value;
-  const n = youNodeAt(w, h);
+  const n = youNodeAt(w, h, youKeepOut.value);
   return { right: `${Math.max(4, w - n.x + n.r + 10)}px`, top: `${n.y}px` };
 });
 function openNeedsYouFromTip(): void {
@@ -652,6 +684,8 @@ onMounted(async () => {
   if (canvas.value && typeof ResizeObserver === 'function') {
     wallObserver = new ResizeObserver(() => measureWall());
     wallObserver.observe(canvas.value);
+    const controls = canvas.value.parentElement?.querySelector(':scope > .controls');
+    if (controls) wallObserver.observe(controls);
   }
   await tick(true);
   offAsks = api.onEvent?.((e) => { if (e.event === 'network.asksChanged' || e.event === 'tools.asksChanged') void loadAsks(); }) ?? null;

@@ -15,8 +15,17 @@ export async function loadConciergeDefault(api: YawbleApi): Promise<void> {
   } catch { savedConciergeAgent.value = null; /* an older core: the first ready agent */ }
 }
 
-/** The agent a new chat starts on: the saved default when it is among the ready agents, else the first ready one. */
-export function newChatAgent(agents: { id: string; ready: boolean }[], saved: string | null): string {
+/**
+ * The agent a new chat starts on: the saved default when it is ready (a built-in that is ready, or a custom agent whose
+ * base CLI is ready), else the first ready built-in.
+ */
+export function newChatAgent(agents: { id: string; ready: boolean }[], saved: string | null,
+  customs: { name: string; baseCli: string }[] = []): string {
   const ready = agents.filter((a) => a.ready);
-  return (saved && ready.find((a) => a.id === saved)?.id) || ready[0]?.id || 'claude';
+  if (saved) {
+    if (ready.some((a) => a.id === saved)) return saved;
+    const custom = customs.find((c) => c.name === saved);
+    if (custom && ready.some((a) => a.id === custom.baseCli)) return saved;
+  }
+  return ready[0]?.id || 'claude';
 }

@@ -160,7 +160,7 @@ async function confirmRealign() {
 
 /** Error codes that are a failure, not the core saying no (those show as "Refused: <reason>"). */
 const NOT_REFUSALS = new Set(['internal', 'method_not_found', 'bad_request', 'invalid_params', 'timeout', 'disconnected',
-  'git_failed', 'bad_params', 'no_such_member']);
+  'git_failed', 'bad_params', 'no_such_member', 'push_failed', 'clone']);
 
 /** After a "stale" refusal: read the plan again; if the branch is still moved, show the confirm with its new commits (a
  * new yes is bound to those), else close it and say what happened. The refusal stays shown either way. */

@@ -88,6 +88,14 @@ describe('Settings > Concierge', () => {
     expect(savedConciergeAgent.value).toBeNull();
   });
 
+  it('a new chat starts on a saved custom agent when its base CLI is ready, else on the first ready built-in', () => {
+    const agents = [{ id: 'claude', ready: true }, { id: 'codex', ready: false }];
+    const customs = [{ name: 'Reviewer', baseCli: 'claude' }, { name: 'Coder', baseCli: 'codex' }];
+    expect(newChatAgent(agents, 'Reviewer', customs)).toBe('Reviewer');
+    expect(newChatAgent(agents, 'Coder', customs)).toBe('claude');
+    expect(newChatAgent(agents, 'Gone', customs)).toBe('claude');
+  });
+
   it('shows the saved agent, and a refused save puts it back with the error', async () => {
     const f = fakeApi({
       'concierge.defaults': () => ({ defaultAgent: 'codex' }),

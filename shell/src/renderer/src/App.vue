@@ -3,7 +3,7 @@ import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
 import WorkflowsDialog from './components/WorkflowsDialog.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary, WorkflowSummary } from '../../shared/api';
+import type { AgentProfileRow, ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary, WorkflowSummary } from '../../shared/api';
 import { errorText, resolveApi } from './api';
 import { cliLabel } from './agentClis';
 import HostChecksBanner from './components/HostChecksBanner.vue';
@@ -85,6 +85,7 @@ const conversations = ref<ConversationSummary[]>([]);
 // The Concierge chats have had their first answer (the sidebar shows the loading state until then).
 const chatsLoaded = ref(false);
 const agents = ref<AgentOption[]>([]);
+const customAgents = ref<{ name: string; baseCli: string }[]>([]);
 /** Whether the agent CLIs have been looked for yet. */
 const agentsLoaded = ref(false);
 /** Logs (sidebar): every log the app keeps, in one dialog. */
@@ -131,8 +132,8 @@ function openTeamDialog(which: 'documents' | 'workflows') {
   if (which === 'documents') teamView.value?.openDocuments();
   else teamView.value?.openWorkflows();
 }
-// A new chat starts on the saved Concierge default when that agent is ready, else on the first ready agent (card 419 F1).
-const defaultCli = computed(() => newChatAgent(agents.value, savedConciergeAgent.value));
+// A new chat starts on the saved Concierge default when that agent is ready, else on the first ready agent.
+const defaultCli = computed(() => newChatAgent(agents.value, savedConciergeAgent.value, customAgents.value));
 const title = computed(() => {
   if (view.value === 'concierge') return conversations.value.find((c) => c.id === conversationId.value)?.title ?? 'New chat';
   if (view.value === 'teams') return team.value ? team.value.name : 'Teams';
@@ -163,6 +164,10 @@ async function loadAgents() {
     const found = await api.call<DetectedCli[]>('agents.detect');
     agents.value = found.filter((c) => c.found).map((c) => ({ id: c.cliId, label: cliLabel(c.cliId), ready: c.signIn?.status === 'signed-in' }));
   } catch { agents.value = []; } finally { agentsLoaded.value = true; }
+  try {
+    const rows = await api.call<AgentProfileRow[]>('agentProfiles.list');
+    customAgents.value = rows.filter((r) => r.custom).map((r) => ({ name: r.name, baseCli: r.baseCli }));
+  } catch { customAgents.value = []; /* a cloud viewer or an older core: built-ins only */ }
 }
 
 function newChat() {
