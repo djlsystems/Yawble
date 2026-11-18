@@ -436,9 +436,10 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
                 ?? throw new ArgumentException("the GitHub CLI is not enabled for your team");
             var baseBranch = repoBase ?? throw new ArgumentException("your team has no repository here");
             var teamBranch = Teams.TeamRepos.TeamBranchFor(run.Member.Team);
+            // The arguments are the GitHub pull request provider's (B075, Teams/PullRequestProviders.cs): gh's built-ins stay gh's.
             var ghArgs = tool == "pr_status"
-                ? new List<string> { "pr", "list", "--head", teamBranch, "--state", "all", "--limit", "5", "--json", "number,title,state,url,reviewDecision,mergeable,statusCheckRollup" }
-                : ["pr", "create", "--head", teamBranch, "--base", baseBranch, "--title", Text(args, "title"), "--body", Text(args, "body")];
+                ? Teams.GitHubPullRequests.StatusArgs(teamBranch)
+                : Teams.GitHubPullRequests.CreateArgs(teamBranch, baseBranch, Text(args, "title"), Text(args, "body"));
             // decided by the built-in's own row (pr_open / pr_status), the floors still checked on the real gh arguments
             return await DecideAndRunAsync(run, gh, ghArgs, tool == "pr_status" ? reason ?? "read the team branch's pull requests" : reason, ct, repoName,
                 decideOn: [tool], action: tool);

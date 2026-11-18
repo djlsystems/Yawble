@@ -25,6 +25,8 @@ public static class RemoteAccess
         "tools.catalog", "tools.asks", "tools.notNow", "tools.checkAgain",
         // Whether git is installed (the banner's text); installing it is git.install, refused below.
         "git.check",
+        // B075: the web address of a commit, branch, file, compare or pull request (reads only).
+        Ui.UiRpc.WebLinkMethod,
         // The Logs dialog, read only (pruning and retention are refused below).
         "logs.",
         // Whether an update is available (installing it is the window's alone, below).
@@ -79,6 +81,8 @@ public static class RemoteAccess
             "skills.list",
             "triggers.list", "triggers.preview",
             "git.status", "git.check", "git.tidyPlan",
+            // B075: the web address of a commit, branch, file, compare or pull request (reads only).
+            "git_web_link",
             "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
             "guardrail.get",
             "agents.detect", "agents.testSessions", "agents.commandLine", "agents.defaultModels", "agents.models", "agents.resolveModel",
@@ -108,7 +112,7 @@ public static class RemoteAccess
         changes:
         [
             "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",
-            "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo",
+            "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo", "teams.setRepoProvider",
             "teams.setDefaults", "teams.generateNames", "concierge.setDefaults",
             "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
             "members.add", "members.remove", "members.update",

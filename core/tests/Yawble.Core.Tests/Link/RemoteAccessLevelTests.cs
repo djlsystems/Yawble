@@ -270,6 +270,8 @@ public class RemoteAccessLevelTests
             if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")) continue;
             foreach (Match m in pattern.Matches(File.ReadAllText(file))) methods.Add(m.Groups[1].Value);
         }
+        // B075's git_web_link has no dot (its contract name), so the pattern above cannot see it; UiRpc dispatches it.
+        if (UiRpc.Handles(UiRpc.WebLinkMethod)) methods.Add(UiRpc.WebLinkMethod);
         return methods;
     }
 

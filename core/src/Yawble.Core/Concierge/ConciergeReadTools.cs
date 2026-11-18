@@ -563,16 +563,18 @@ public sealed class ConciergeReadTools(
         var compare = originBase ?? baseSha;
         var compareName = originBase is not null ? $"origin/{t.BaseBranch}" : t.BaseBranch;
 
-        // Pull requests are a hosting service's, not git's: read for GitHub (through the person's gh) only.
+        // Pull requests are a hosting service's, not git's (B075): read for GitHub (gh), GitLab (glab) and Azure DevOps (az repos).
         var host = Yawble.Core.Teams.RepoHost.HostOf(origin);
-        var onGitHub = Yawble.Core.Teams.RepoHost.IsGitHub(origin);
-        var prs = openPrs is null || !onGitHub ? null : await SafePrs(t, ct);
+        var provider = bus.Repos?.HostSettingOf(t.Team, t.Repo)?.Provider ?? Yawble.Core.Teams.RepoProviders.Detect(origin);
+        var supported = Yawble.Core.Teams.PullRequestProviders.Supports(provider);
+        var cli = Yawble.Core.Teams.PullRequestProviders.CliOf(provider);
+        var prs = openPrs is null || !supported ? null : await SafePrs(t, ct);
         sb.AppendLine(origin is null ? "  Pull requests: none (no origin)."
-            : host is null ? "  Pull requests: none (origin is a folder on this computer)."
-            : !onGitHub ? $"  Pull requests: not read for {host} (only GitHub's are read from here, through gh)."
-            : openPrs is null ? "  Open pull requests: check not run (gh is not available here)."
-            : prs is null ? "  Open pull requests: check not run (gh is not signed in or did not answer)." : $"  Open pull requests: {prs.Count}.");
-        if (openPrs is not null && onGitHub && prs is null) failed++;
+            : host is null && !supported ? "  Pull requests: none (origin is a folder on this computer)."
+            : !supported ? $"  Pull requests: not read for {host} (not supported for {(provider == Yawble.Core.Teams.RepoProviderKind.None ? host : Yawble.Core.Teams.RepoProviders.Label(provider))} from here; only GitHub through gh, GitLab through glab and Azure DevOps through az repos)."
+            : openPrs is null ? $"  Open pull requests: check not run ({cli} is not available here)."
+            : prs is null ? $"  Open pull requests: check not run ({cli} is not installed, not signed in or did not answer)." : $"  Open pull requests: {prs.Count}.");
+        if (openPrs is not null && supported && prs is null) failed++;
 
         var refs = await Out(t.Path, "for-each-ref", "--format=%(refname)%09%(objectname)%09%(committerdate:short)%09%(subject)", "refs/heads", "refs/remotes/origin");
         if (refs is null) { sb.AppendLine("  check not run: could not list branches."); failed++; }

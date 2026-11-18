@@ -682,7 +682,7 @@ public class ConciergeReadToolsTests : IDisposable
         Assert.Contains("origin: https://example.test/x.git", text);
         Assert.Contains("check not run: this folder is not a readable git repository.", text);
         Assert.Contains("1 check(s) could not run", text);
-        Assert.Contains("Pull requests: not read for example.test (only GitHub's are read from here, through gh).", text);
+        Assert.Contains("Pull requests: not read for example.test (not supported for example.test from here; only GitHub through gh, GitLab through glab and Azure DevOps through az repos).", text);
     }
 
     [Fact]
