@@ -522,10 +522,12 @@ describe('Team spacing (B089)', () => {
   /** A scene on a stub canvas with count teams of four, each with a wide code map and five open workflow nodes, settled. */
   const scenes: MonitorScene[] = [];
   afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-  function settledWall(count: number, spacing = LayoutDefaults.spacing, frames = 700) {
+  /** stagger: frames run between each team's map and each team's workflows arriving (as a live wall gets them, card 411). */
+  function settledWall(count: number, spacing = LayoutDefaults.spacing, frames = 700, opts: { seed?: number; stagger?: number } = {}) {
     // The test runs the frames itself: the scene's own requestAnimationFrame loop must not run too.
     vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {});
-    let seed = 7;
+    let seed = opts.seed ?? 7;
+    const stagger = opts.stagger ?? 0;
     vi.spyOn(Math, 'random').mockImplementation(() => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
     const ctx = new Proxy({} as Record<string, unknown>, {
       get: (t, k: string) => (k in t ? t[k] : k === 'measureText' ? (s: string) => ({ width: String(s).length * 6 }) : () => ({ addColorStop() {} })),
@@ -545,16 +547,23 @@ describe('Team spacing (B089)', () => {
     const t0 = Date.parse('2026-11-17T10:00:00Z');
     m.logNow = () => t0 + 60_000;
     const wfs: WorkflowSummary[] = [1, 2, 3, 4, 5].map((id) => ({ id, title: `Workflow ${id}`, owner: null, state: 'open', undeclared: false, busy: [], ending: null, startedAt: at(t0), lastAt: at(t0 + id), messages: 2 }));
-    let id = 0;
-    for (const name of names) {
-      for (let i = 0; i < 120; i++) m.applyStep({ id: ++id, at: at(t0 + i), team: name, member: i % 2 ? 'DeveloperTomas' : 'TesterKofi', run: 1, kind: i % 2 ? 'edit' : 'read', tool: 'Edit', target: `src/d${i % 11}/f${i}.ts` }, 1000, true);
-      m.setWorkflows(name, wfs, 0);
-    }
+    const frame = (scene as unknown as { frame: (t: number) => void }).frame;
+    let f = 0;
+    const run = (n: number) => { for (let i = 0; i < n; i++) frame(1000 + ++f * 16); };
+    const maps = () => {
+      let id = 0;
+      for (const name of names) {
+        if (stagger) run(stagger);
+        for (let i = 0; i < 120; i++) m.applyStep({ id: ++id, at: at(t0 + i), team: name, member: i % 2 ? 'DeveloperTomas' : 'TesterKofi', run: 1, kind: i % 2 ? 'edit' : 'read', tool: 'Edit', target: `src/d${i % 11}/f${i}.ts` }, 1000, true);
+      }
+    };
+    const flows = () => { for (const name of names) { if (stagger) run(stagger); m.setWorkflows(name, wfs, 0); } };
+    if (!stagger) { maps(); flows(); }
     scene.model = m;
     scene.setTeams(teams);
+    if (stagger) { maps(); flows(); }
     if (spacing !== LayoutDefaults.spacing) scene.setLayout({ ...LayoutDefaults, spacing });
-    const frame = (scene as unknown as { frame: (t: number) => void }).frame;
-    for (let i = 1; i <= frames; i++) frame(1000 + i * 16);
+    run(frames);
     return scene;
   }
   const gaps = (scene: MonitorScene) => {
@@ -581,21 +590,52 @@ describe('Team spacing (B089)', () => {
     const cl = scene.clusters();
     expect(cl).toHaveLength(2);
     for (const c of cl) expect(c.box.x1 - c.box.x0).toBeGreaterThan(300); // the map is in the boxes
-    expect(homeDistances(scene)).toEqual([440]); // 580 when the map's sideways spread was counted (card 409), 816 before
+    // Card 411: the oval is measured from the clusters drawn (settleSpacing), so the homes are what puts them ClusterGap
+    // apart: 440 by the estimate (card 409), 580 and 816 before.
+    expect(homeDistances(scene)[0]).toBeLessThan(440);
     for (const g of gaps(scene)) expect(g).toBeLessThan(300);
-    // Card 409: the clusters sit about ClusterGap apart (more by the forces' push), not 210-394 px, and never overlap.
-    for (const g of partGaps(scene)) { expect(g).toBeGreaterThan(0); expect(g).toBeLessThan(ClusterGap * 3); }
-    for (const c of cl) expect(Math.hypot(c.hub.x - c.home.x, c.hub.y - c.home.y)).toBeLessThan(80); // the hubs sit near their homes
+    for (const g of scene.drawnGaps()) { expect(g).toBeGreaterThan(ClusterGap - 12); expect(g).toBeLessThan(ClusterGap + 12); }
+    for (const c of cl) expect(Math.hypot(c.hub.x - c.home.x, c.hub.y - c.home.y)).toBeLessThan(1); // the hubs are held at their homes
   });
 
   it('at the default, three teams\' clusters sit close and do not overlap either', () => {
     const scene = settledWall(3);
-    expect(homeDistances(scene)).toEqual([771, 771, 520]); // were 860, 860, 580
-    const g = partGaps(scene);
+    expect(Math.max(...homeDistances(scene))).toBeLessThan(771); // were 771, 771, 520 (card 409), 860, 860, 580 before
+    const g = scene.drawnGaps();
     for (const d of g) expect(d).toBeGreaterThan(0);
-    // The nearest two sit close (about 154 here: ClusterGap, the forces' push of the hubs 12% past their homes, and
-    // the wide map's wrap toward a neighbour off to the side); card 403's spec wants under 160. Were 210-394.
-    expect(Math.min(...g)).toBeLessThan(ClusterGap * 4);
+    expect(Math.min(...g)).toBeGreaterThan(ClusterGap - 12); // the nearest two: ClusterGap apart (154 in card 409)
+    expect(Math.min(...g)).toBeLessThan(ClusterGap + 12);
+  });
+
+  it('settles to the same gap every run, whatever the birth spots and the order things arrive in (card 411, F6)', () => {
+    // Card 410 measured 3 teams' nearest gap at 4-248 and 2 teams' at -23 to 157 from run to run.
+    for (const count of [2, 3]) {
+      const nearest: number[] = [];
+      for (const seed of [1, 42, 555]) for (const stagger of [0, 37]) {
+        const scene = settledWall(count, LayoutDefaults.spacing, 1200, { seed, stagger });
+        nearest.push(Math.min(...scene.drawnGaps()));
+        for (const c of scene.clusters()) expect(Math.hypot(c.hub.x - c.home.x, c.hub.y - c.home.y)).toBeLessThan(1);
+        scene.destroy();
+      }
+      expect(Math.min(...nearest), `${count} teams: ${nearest.map(Math.round)}`).toBeGreaterThan(ClusterGap - 15);
+      expect(Math.max(...nearest) - Math.min(...nearest), `${count} teams: ${nearest.map(Math.round)}`).toBeLessThan(25);
+    }
+  }, 60_000);
+
+  it('a workflow label keeps off its own hub\'s name pill and its own team\'s map (card 411, F3 and F5)', () => {
+    for (const count of [2, 3]) {
+      const scene = settledWall(count);
+      const s = scene as unknown as { nodes: Map<string, { kind: string; team: string }>; mapNodes: { x: number; y: number; kind: string; team: { team: string } }[]; pillBox: (n: unknown) => { x: number; y: number; w: number; h: number } };
+      const pills = [...s.nodes.values()].filter((n) => n.kind === 'team').map((n) => s.pillBox(n));
+      const marks = s.mapNodes.map((m) => (m.kind === 'folder' ? { x: m.x - 6, y: m.y - 5, w: 12, h: 10 } : { x: m.x - 3.6, y: m.y - 3.6, w: 7.2, h: 7.2 }));
+      const hit = (a: { x: number; y: number; w: number; h: number }, b: typeof a) => a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1;
+      const boxes = scene.workflowNodes().flatMap((n) => (n.box ? [n.box] : []));
+      expect(boxes.length).toBeGreaterThan(0);
+      for (const b of boxes) {
+        for (const p of pills) expect(hit(b, p)).toBe(false);
+        for (const m of marks) expect(hit(b, m)).toBe(false);
+      }
+    }
   });
 
   it('the workflow labels on a settled wall do not overlap, and most show their title (card 409)', () => {

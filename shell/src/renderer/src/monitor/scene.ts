@@ -1,4 +1,4 @@
-import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Simulation, type SimulationNodeDatum } from 'd3-force';
+import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Force, type Simulation, type SimulationNodeDatum } from 'd3-force';
 import { LayoutDefaults, type LayoutSettings } from './layout';
 import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type MemberState } from '../faces/faces';
 import { DoingMs, memberKey, RunEndShowMs, teamKey, spaced, workflowKey, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
@@ -122,11 +122,69 @@ export function nearestPair(count: number): number {
  * teams two clusters (ClusterCore and the room their code maps need, mapRoom, from the maps drawn) and a gap apart, times
  * the person's Team spacing; its y radius is OvalY of its x radius. A team alone sits in the middle.
  */
-export function teamHome(i: number, count: number, mapRoom: number, spacing: number): { x: number; y: number } {
+export function teamHome(i: number, count: number, mapRoom: number, spacing: number, measuredRx: number | null = null): { x: number; y: number } {
   if (count <= 1) return { x: 0, y: 0 };
-  const rx = Math.max(140, (2 * (ClusterCore + mapRoom) + ClusterGap) / nearestPair(count)) * spacing, ry = rx * OvalY;
+  const rx = (measuredRx ?? estimatedRx(count, mapRoom)) * spacing, ry = rx * OvalY;
   const angle = teamAngle(i, count);
   return { x: Math.cos(angle) * rx, y: Math.sin(angle) * ry };
+}
+
+/** The oval's x radius at Team spacing 1 before the clusters are measured: from ClusterCore and the maps' room (the first guess). */
+export function estimatedRx(count: number, mapRoom: number): number {
+  return Math.max(MinOvalRx, (2 * (ClusterCore + mapRoom) + ClusterGap) / nearestPair(count));
+}
+const MinOvalRx = 140;
+/** The least the measured radius may be: the clusters' own size keeps them apart; this only keeps the hubs off each other. */
+const MinMeasuredRx = 60;
+/**
+ * settleSpacing: the nearest gap is widened when it is SpacingSlack (world px) under ClusterGap, and narrowed only when it
+ * is SpacingShrink over; at most SpacingMoves moves per set of things.
+ */
+const SpacingSlack = 1;
+const SpacingShrink = 16;
+const SpacingMoves = 12;
+
+/**
+ * Card 411 (F6): the oval's x radius at Team spacing 1 that puts the nearest two clusters ClusterGap apart, from the
+ * clusters as drawn now. For each pair of teams: their hubs' distance d, the least distance g between their drawn things
+ * (negative when they overlap), so they would touch at d - g; the radius scales with the hubs' distance, so the pair
+ * wants rx * (d - g + ClusterGap) / d. The widest want wins, never under MinMeasuredRx.
+ */
+export function measuredOvalRx(pairs: readonly { d: number; g: number }[], rxNow: number): number {
+  let want = MinMeasuredRx;
+  for (const { d, g } of pairs) if (d > 1) want = Math.max(want, rxNow * (d - g + ClusterGap) / d);
+  return want;
+}
+
+/** The least distance between two sets of world boxes: negative (how deep) when two of them overlap. */
+export function boxesGap(a: readonly Box[], b: readonly Box[]): number {
+  let best = Infinity;
+  for (const p of a) for (const q of b) {
+    const dx = Math.max(q.x0 - p.x1, p.x0 - q.x1), dy = Math.max(q.y0 - p.y1, p.y0 - q.y1);
+    best = Math.min(best, dx > 0 || dy > 0 ? Math.hypot(Math.max(0, dx), Math.max(0, dy)) : Math.max(dx, dy));
+  }
+  return best;
+}
+
+/**
+ * A force that acts only between nodes of the same team (card 411, F6): one `make()` per team, each given only its
+ * team's nodes. The teams' repulsion used to push whole clusters apart as well, so where they settled depended on the
+ * start (the random birth spots and the order the teams, workflows and maps arrived in): 3 teams' nearest gap ran 4-248.
+ * Now a cluster's own forces only shape it, and its place comes from its home alone (measuredOvalRx).
+ */
+function perTeam(make: () => Force<Node, undefined>): Force<Node, undefined> {
+  let subs: Force<Node, undefined>[] = [];
+  const force = (alpha: number) => { for (const s of subs) s(alpha); };
+  force.initialize = (nodes: Node[], random: () => number) => {
+    const by = new Map<string, Node[]>();
+    for (const n of nodes) {
+      const k = n.team.toLowerCase();
+      const list = by.get(k);
+      if (list) list.push(n); else by.set(k, [n]);
+    }
+    subs = [...by.values()].map((list) => { const f = make(); f.initialize?.(list, random); return f; });
+  };
+  return force;
 }
 
 /** The room the widest map drawn needs past its members (codemap mapRoomOf), in steps of this much, so it moves the teams seldom. */
@@ -202,6 +260,17 @@ export function nearestNodeAt<N extends { kind: string; r: number; x?: number; y
     if (d < reach && d < bestD) { best = n; bestD = d; }
   }
   return best;
+}
+
+/**
+ * Whether a map node mapD (world px) from the pointer at (wx, wy) takes the hover and the click over the workflow node
+ * in reach there (nearestNodeAt over the workflow nodes, or null): only when the point is off the workflow's square and
+ * the map node is the nearer (card 411, F4: a square under its map's folder could not be hovered or clicked).
+ */
+export function mapBeatsWorkflow(mapD: number, wf: { r: number; x?: number; y?: number } | null, wx: number, wy: number): boolean {
+  if (!wf) return true;
+  const d = Math.hypot(wf.x! - wx, wf.y! - wy);
+  return d > wf.r && mapD < d;
 }
 
 /**
@@ -316,8 +385,7 @@ export class MonitorScene {
     this.applyLayout();
     void loadAvatarSheet();
     this.listen();
-    this.raf = requestAnimationFrame(this.frame);
-  }
+    this.raf = requestAnimationFrame(this.frame);  }
 
   destroy(): void {
     cancelAnimationFrame(this.raf);
@@ -379,7 +447,7 @@ export class MonitorScene {
     const link = this.sim.force('link') as ReturnType<typeof forceLink<Node, Link>>;
     this.sim
       .velocityDecay(Math.min(0.9, Math.max(0.05, 0.32 * friction)))
-      .force('charge', forceManyBody<Node>().strength((n) => (n.kind === 'team' ? -600 : n.kind === 'wf' ? -90 : -280) * repulsion))
+      .force('charge', perTeam(() => forceManyBody<Node>().strength((n) => (n.kind === 'team' ? -600 : n.kind === 'wf' ? -90 : -280) * repulsion)))
       .force('x', forceX<Node>((n) => n.homeX).strength((n) => (n.kind === 'team' ? 0.12 : 0.02) * gravity))
       .force('y', forceY<Node>((n) => n.homeY).strength((n) => (n.kind === 'team' ? 0.12 : 0.02) * gravity));
     link.distance((l) => this.spoke(l.source.team) * distance).strength(Math.min(1, 0.55 * strength));
@@ -403,14 +471,15 @@ export class MonitorScene {
   }
 
   /** The nodes from the teams and the model's workflows (none in a replay): new ones born near their hub. */
-  private rebuild(): void {
+  private rebuild(wake = 0.3): void {
     const teams = this.teamList;
     this.wfFrom = { model: this.model, rev: this.model?.workflowsRev ?? -1 };
     const keep = new Set<string>();
     const count = teams.length;
     this.mapRoom = this.wantedRoom;
+    if (this.measured && this.measured.count !== count) this.measured = null; // another oval: measure it again
     teams.forEach((t, i) => {
-      const { x: homeX, y: homeY } = teamHome(i, count, this.mapRoom, this.layout.spacing);
+      const { x: homeX, y: homeY } = teamHome(i, count, this.mapRoom, this.layout.spacing, this.measured?.rx ?? null);
       const hue = (i * 137.508 + 190) % 360;
       const tk = teamKey(t.name);
       keep.add(tk);
@@ -466,7 +535,153 @@ export class MonitorScene {
     this.sim.nodes([...this.nodes.values()]);
     (this.sim.force('link') as ReturnType<typeof forceLink<Node, Link>>).links(this.links);
     (this.sim.force('wfmlink') as ReturnType<typeof forceLink<Node, Link>>).links(this.wfmLinks);
-    this.sim.alpha(Math.max(this.sim.alpha(), 0.3));
+    this.sim.alpha(Math.max(this.sim.alpha(), wake));
+  }
+
+  /** The oval's x radius at Team spacing 1 as measured from the clusters drawn (settleSpacing), for count teams; null: the estimate. */
+  private measured: { rx: number; count: number } | null = null;
+  /** What the clusters held when settleSpacing last looked, how many moves it made since that changed, and when it looked. */
+  private spacingFor = '';
+  private spacingMoves = 0;
+  private spacingAt = -Infinity;
+
+  /**
+   * Card 411 (F6): once the forces have nearly cooled, the clusters as drawn are measured and the oval is resized so the
+   * nearest two sit ClusterGap apart (measuredOvalRx), the same every run whatever the start. A small move is not made
+   * (SpacingSlack, SpacingShrink), and at most SpacingMoves are made while the clusters hold the same things (twice as
+   * many while two overlap), so it comes to rest. It measures only at Team spacing 1, under Auto fit; other spacings
+   * scale the radius it found.
+   */
+  private settleSpacing(now: number): void {
+    const count = this.teamList.length;
+    if (count < 2 || this.sim.alpha() > 0.04 || this.drag?.node || this.shifts.size || now - this.spacingAt < 150) return;
+    // Only under Auto fit while it aims at everything: the labels' size follows the zoom, so a wall the person zoomed or
+    // pinned would move under their hand (and a pinned camera would not follow the teams).
+    if (this.pinned || !this.fitting(now) || this.focusId !== null) return;
+    // And only at Team spacing 1: wider, the camera zooms out, the labels grow, and the radius measured grew with them
+    // (2x came out 4.7x). Other spacings scale the radius last measured at 1 (or the estimate).
+    if (this.layout.spacing !== LayoutDefaults.spacing) return;
+    this.spacingAt = now;
+    const what = `${count}|${this.nodes.size}|${this.mapNodes.length}`;
+    if (what !== this.spacingFor) { this.spacingFor = what; this.spacingMoves = 0; }
+    for (const n of this.nodes.values()) if (n.kind === 'team' && Math.hypot(n.homeX - n.x!, n.homeY - n.y!) > 1) return; // still on its way (holdHubs)
+    const parts = this.drawnParts();
+    const teams = [...parts.values()];
+    const pairs: { d: number; g: number }[] = [];
+    for (let a = 0; a < teams.length; a++) for (let b = a + 1; b < teams.length; b++) {
+      const p = teams[a]!, q = teams[b]!;
+      pairs.push({ d: Math.hypot(p.hub.x - q.hub.x, p.hub.y - q.hub.y), g: boxesGap(p.boxes, q.boxes) });
+    }
+    if (pairs.length !== (count * (count - 1)) / 2) return; // a hub not placed yet
+    const overlap = pairs.some((p) => p.g < 0);
+    const rx1 = this.measured?.rx ?? estimatedRx(count, this.mapRoom);
+    const want = measuredOvalRx(pairs, rx1);
+    // The gap's error, about: grown when the nearest two are closer than ClusterGap - SpacingSlack, shrunk only when they are
+    // over SpacingShrink too far apart. The labels grow as the camera zooms out to the wider oval, and jump from spot to
+    // spot as things move, so a narrow band each way kept it moving.
+    const err = (want - rx1) * nearestPair(count);
+    if (err < SpacingSlack && err > -SpacingShrink) return;
+    if (this.spacingMoves >= (overlap ? 2 * SpacingMoves : SpacingMoves)) return;
+    this.spacingMoves++;
+    this.measured = { rx: want, count };
+    const homes = new Map<string, { x: number; y: number }>();
+    for (const n of this.nodes.values()) if (n.kind === 'team') homes.set(n.team.toLowerCase(), { x: n.homeX, y: n.homeY });
+    this.rebuild(0.1);
+    // Each cluster slides whole to its new home (applyShifts), so its shape and so the gap measured hold: left to the forces,
+    // the hubs lagged behind their homes as the forces cooled, and the next measure was off by that lag.
+    for (const n of this.nodes.values()) {
+      const was = n.kind === 'team' ? homes.get(n.team.toLowerCase()) : undefined;
+      if (!was) continue;
+      const s = this.shifts.get(n.team.toLowerCase()) ?? { dx: 0, dy: 0 };
+      this.shifts.set(n.team.toLowerCase(), { dx: s.dx + n.homeX - was.x, dy: s.dy + n.homeY - was.y });
+    }
+  }
+
+  /** How far each team's cluster (by team in lower case) has still to slide to its new home (settleSpacing). */
+  private shifts = new Map<string, { dx: number; dy: number }>();
+
+  /**
+   * Card 411 (F6): each hub is held (fx, fy) and eases to its home; the person's drag moves it, and it eases back once let
+   * go. Left to the forces, a hub stopped wherever it was when they cooled to rest, up to 90 px short of its home and
+   * differently each run, so the teams' places and gaps changed from run to run.
+   */
+  private holdHubs(f: number): void {
+    for (const n of this.nodes.values()) {
+      if (n.kind !== 'team' || this.drag?.node === n) continue;
+      const x = n.fx ?? n.x!, y = n.fy ?? n.y!;
+      const dx = n.homeX - x, dy = n.homeY - y;
+      const done = Math.hypot(dx, dy) * (1 - f) < 0.3;
+      n.x = n.fx = done ? n.homeX : x + dx * f;
+      n.y = n.fy = done ? n.homeY : y + dy * f;
+    }
+  }
+
+  /** Slides each cluster part of its way to its new home this frame (all of it under reduced motion), and the hubs to theirs. */
+  private applyShifts(dt: number): void {
+    const f = this.reduced ? 1 : 1 - Math.pow(0.003, dt / 1000);
+    this.holdHubs(f);
+    if (!this.shifts.size) return;
+    const step = new Map<string, { dx: number; dy: number }>();
+    for (const [t, s] of this.shifts) {
+      const done = Math.hypot(s.dx, s.dy) * (1 - f) < 0.3;
+      const m = done ? s : { dx: s.dx * f, dy: s.dy * f };
+      step.set(t, m);
+      if (done) this.shifts.delete(t); else this.shifts.set(t, { dx: s.dx - m.dx, dy: s.dy - m.dy });
+    }
+    for (const n of this.nodes.values()) {
+      const m = step.get(n.team.toLowerCase());
+      if (!m || n.kind === 'team' || this.drag?.node === n) continue; // the hub eases itself; a dragged node stays under the pointer
+      n.x! += m.dx; n.y! += m.dy;
+    }
+  }
+
+  /**
+   * Each team's things as drawn now, as world boxes (card 411): its hub and name pill, its members' discs and names, its
+   * workflow squares (not their labels) and its code map's folders, files and "+N" nodes. With its hub, by team in lower case.
+   */
+  private drawnParts(): Map<string, { hub: { x: number; y: number }; boxes: Box[] }> {
+    const out = new Map<string, { hub: { x: number; y: number }; boxes: Box[] }>();
+    for (const n of this.nodes.values()) if (n.kind === 'team') out.set(n.team.toLowerCase(), { hub: { x: n.x!, y: n.y! }, boxes: [] });
+    const add = (team: string, b: LabelBox) => out.get(team.toLowerCase())?.boxes.push({ x0: b.x, y0: b.y, x1: b.x + b.w, y1: b.y + b.h });
+    const disc = (x: number, y: number, r: number): LabelBox => ({ x: x - r, y: y - r, w: r * 2, h: r * 2 });
+    const { labels } = this.wfLabelPlan();
+    for (const n of this.nodes.values()) {
+      if (n.kind === 'team') { add(n.team, disc(n.x!, n.y!, n.r)); add(n.team, this.pillBox(n)); }
+      else if (n.kind === 'member') {
+        // A name counts as round, as wide as it is (as card 403's spec measures it), so names never meet across the gap.
+        const b = this.memberNameBox(n);
+        add(n.team, disc(n.x!, n.y!, n.r)); add(n.team, disc(b.x + b.w / 2, b.y + b.h / 2, Math.max(b.h / 2, b.w / 2)));
+      }
+      else {
+        add(n.team, disc(n.x!, n.y!, n.r));
+        const l = labels.get(n.key);
+        if (l) add(n.team, { x: l.x - l.h / 2, y: l.y, w: l.w + l.h, h: l.h }); // its ends rounded, half its height past the text
+      }
+    }
+    for (const m of this.mapNodes) add(m.team.team, disc(m.x, m.y, 6)); // a folder's box, a file's dot and its rings
+    return out;
+  }
+
+  /** The least distance between each two teams' drawn things (drawnParts), as settleSpacing measures it, for the tests. */
+  drawnGaps(): number[] {
+    const t = [...this.drawnParts().values()];
+    return t.flatMap((a, i) => t.slice(i + 1).map((b) => boxesGap(a.boxes, b.boxes)));
+  }
+
+  /** A team hub's name pill (drawTeamPill): 34 px above the hub, its name's width + 18 wide, 22 high. */
+  private pillBox(n: Node): LabelBox {
+    this.ctx.font = `700 13px ${this.family()}`;
+    const w = this.ctx.measureText(n.name).width + 18;
+    return { x: n.x! - w / 2, y: n.y! - 34, w, h: 22 };
+  }
+
+  /** A member's name under its disc (as drawMember writes it, at most 22 characters). */
+  private memberNameBox(n: Node): LabelBox {
+    this.ctx.font = `500 11px ${this.family()}`;
+    const ring = n.r + 5;
+    const name = spaced(n.name);
+    const nw = this.ctx.measureText(name.length > 22 ? name.slice(0, 21) + '…' : name).width;
+    return { x: n.x! - nw / 2, y: n.y! + ring + 6, w: nw, h: 13 };
   }
 
   /** The workflow nodes on the wall now (for the tests): key, its workflow's id, the members it is tied to, and its label as drawn now. */
@@ -550,6 +765,7 @@ export class MonitorScene {
     this.model?.tidy(now);
     if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.workflowsRev ?? -1) || this.mapRoom !== this.wantedRoom) this.rebuild();
     this.resize();
+    this.applyShifts(dt);
     if (this.sim.alpha() > 0.001) this.sim.tick(); // at rest the nodes stay put (a wake: new nodes, a drag, new homes)
     if (this.fitting(now)) this.aimFit();
     const ease = 1 - Math.pow(0.0025, dt / 1000);
@@ -559,6 +775,7 @@ export class MonitorScene {
     this.effects = this.effects.filter((e) => now - e.at < this.life(e));
     this.drawn = capEffects(this.effects, this.density, this.focusTeam());
     this.draw(now);
+    this.settleSpacing(now);
   };
 
   /** How long an effect shows: under reduced motion a comet is a still line that stays a little longer. */
@@ -576,18 +793,30 @@ export class MonitorScene {
     const font = nodeLabelFont(k);
     const family = this.family();
     const c = this.ctx;
-    // The members' discs and names: a label must not run under them.
     const obstacles: LabelObstacle[] = [];
     // The other teams' code maps (a node and its label, as clusters() counts them): a label stays in its own cluster.
-    for (const m of this.mapNodes) obstacles.push({ x: m.x - 40, y: m.y - 10, w: 80, h: 20, owner: m.team.team.toLowerCase() });
-    c.font = `500 11px ${family}`;
+    // Card 411 (F5): every team's own map too, as drawn (a folder's box and, zoomed in, its name; a file's dot).
+    const mapNames = k > 0.55;
+    c.font = `600 10px ${family}`;
+    for (const m of this.mapNodes) {
+      obstacles.push({ x: m.x - 40, y: m.y - 10, w: 80, h: 20, owner: m.team.team.toLowerCase() });
+      if (m.kind === 'folder') {
+        obstacles.push({ x: m.x - 7, y: m.y - 6, w: 14, h: 12 });
+        if (mapNames) {
+          const fw = c.measureText(m.label.length > 24 ? m.label.slice(0, 23) + '…' : m.label).width;
+          obstacles.push({ x: m.x - fw / 2, y: m.y - 19, w: fw, h: 12 });
+        }
+      } else {
+        const r = m.kind === 'file' ? 5 : 7;
+        obstacles.push({ x: m.x - r, y: m.y - r, w: r * 2, h: r * 2 });
+      }
+    }
+    // The members' discs and names: a label must not run under them.
     for (const n of this.nodes.values()) {
-      if (n.kind !== 'member') continue;
-      const ring = n.r + 5;
-      obstacles.push({ x: n.x! - ring, y: n.y! - ring, w: ring * 2, h: ring * 2 });
-      const name = spaced(n.name);
-      const nw = c.measureText(name.length > 22 ? name.slice(0, 21) + '…' : name).width;
-      obstacles.push({ x: n.x! - nw / 2, y: n.y! + ring + 6, w: nw, h: 13 });
+      if (n.kind === 'member') {
+        const ring = n.r + 5;
+        obstacles.push({ x: n.x! - ring, y: n.y! - ring, w: ring * 2, h: ring * 2 }, this.memberNameBox(n));
+      } else if (n.kind === 'team') obstacles.push(this.pillBox(n)); // card 411 (F3): the hub's name pill, drawn over the labels
     }
     const asks: LabelAsk[] = [];
     for (const n of this.nodes.values()) {
@@ -684,10 +913,11 @@ export class MonitorScene {
     c.globalCompositeOperation = 'lighter';
     for (const e of this.drawn) this.drawEffect(c, e, now, motion);
     c.globalCompositeOperation = 'source-over';
-    const plan = this.wfLabelPlan();
-    for (const n of this.nodes.values()) if (n.kind === 'wf') this.drawWorkflowNode(c, n, now, motion, dim(n.key), plan.font, plan.labels.get(n.key) ?? null);
     for (const n of this.nodes.values()) if (n.kind === 'member') this.drawMember(c, n, now, motion, dim(n.key));
     this.drawMapNodes(c, now, dim, view);
+    // The workflow nodes over the maps (card 411, F4): a square that sits on its map's folder still shows, and is hit first.
+    const plan = this.wfLabelPlan();
+    for (const n of this.nodes.values()) if (n.kind === 'wf') this.drawWorkflowNode(c, n, now, motion, dim(n.key), plan.font, plan.labels.get(n.key) ?? null);
     this.drawCommits(c, now);
     for (const n of this.nodes.values()) if (n.kind === 'team') this.drawTeamPill(c, n, dim(n.key));
     const icons = this.drawSteps(c, now, motion, dim);
@@ -1216,11 +1446,8 @@ export class MonitorScene {
   }
 
   private drawTeamPill(c: CanvasRenderingContext2D, n: Node, alpha: number): void {
-    const font = 13;
-    c.font = `700 ${font}px ${this.family()}`;
     const text = n.name;
-    const w = c.measureText(text).width + 18;
-    const x = n.x! - w / 2, y = n.y! - 34;
+    const { x, y, w } = this.pillBox(n);
     c.globalAlpha = alpha;
     c.fillStyle = 'rgba(12, 19, 34, 0.86)';
     c.strokeStyle = `hsla(${n.hue}, 70%, 60%, 0.7)`;
@@ -1550,7 +1777,11 @@ export class MonitorScene {
     return nearestNodeAt(this.nodes.values(), x, y, this.cam.k);
   }
 
-  /** The map node under a screen point, if any (they are small, so the reach is a few pixels on screen). */
+  /**
+   * The map node under a screen point, if any (they are small, so the reach is a few pixels on screen). Card 411 (F4): not
+   * when a workflow node in reach is nearer the point, so a square that sits on its map's folder can still be hovered and
+   * clicked (mapBeatsWorkflow).
+   */
   private mapAt(sx: number, sy: number): MapNode | null {
     const [x, y] = this.toWorld(sx, sy);
     const reach = 9 / this.cam.k;
@@ -1559,7 +1790,9 @@ export class MonitorScene {
       const d = Math.hypot(m.x - x, m.y - y);
       if (d < reach && d < bestD) { best = m; bestD = d; }
     }
-    return best;
+    if (!best) return null;
+    const wfs = [...this.nodes.values()].filter((n) => n.kind === 'wf');
+    return mapBeatsWorkflow(bestD, nearestNodeAt(wfs, x, y, this.cam.k), x, y) ? best : null;
   }
 
   /** The commit dot under a screen point, if any. */

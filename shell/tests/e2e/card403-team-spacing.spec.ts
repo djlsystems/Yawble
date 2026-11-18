@@ -320,6 +320,10 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
   const pillOps = f.ops.filter((o) => o.op === 'text' && !isScreen(o) && names.includes(o.text!) && o.style === INK);
   const pw = await widths(page, pillOps.map((o) => [o.font!, o.text!] as [string, string]));
   const pillBox: WBox[] = pillOps.map((o, i) => ({ x: o.x! - (pw[i]! + 18) / 2, y: o.y! - 11.5, w: pw[i]! + 18, h: 22, what: `pill ${o.text}` }));
+  // The map's folder names (scene drawMapNodes: 600 10px, centred, zoomed in past 0.55).
+  const nameOps = f.ops.filter((o) => o.op === 'text' && !isScreen(o) && /^600 10px/.test(o.font ?? '') && !labels.some((l) => l.op === o));
+  const nw = await widths(page, nameOps.map((o) => [o.font!, o.text!] as [string, string]));
+  const folderNames: WBox[] = nameOps.map((o, i) => ({ x: o.x! - nw[i]! / 2, y: o.y! - 6, w: nw[i]!, h: 12, what: `folder name ${o.text}` }));
   const overlaps: string[] = [], ownMap: string[] = [];
   lab.forEach((a, i) => {
     const mineSq = sqs.findIndex((s) => s.label === labels[i]);
@@ -358,7 +362,8 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
   for (const p of pending) {
     const team = teamOfWf(p.id);
     const mineSq = sqs.indexOf(p.s);
-    const block = [...lab, ...sqBox.filter((_, j) => j !== mineSq), ...memBox, ...pillBox, ...otherMap(team)];
+    // Card 411 (F5, the Manager's decision): a label keeps off its own team's map too (folders, file dots, folder names).
+    const block = [...lab, ...sqBox.filter((_, j) => j !== mineSq), ...memBox, ...pillBox, ...otherMap(team), ...mapBox.filter((b) => b.team === team), ...folderNames];
     for (const text of p.texts) {
       const w = tw[ti++]!, h = font * 1.2, { x, y } = p.s, r = WF_R;
       const spots: [number, boolean][] = [[x - w / 2, false], [x - w / 2, true], [x - r, false], [x + r - w, false], [x - r, true], [x + r - w, true]];
@@ -463,8 +468,11 @@ async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
     f = await lastFrame(page);
     const hubs = TEAMS.slice(0, n).map((t) => hubAt(f, t));
     const ready = hubs.every(Boolean) && squaresOf(f).length >= n * 5 && mapThings(f).length >= n * (FOLDERS + FOLDERS * FILES);
-    if (ready && prev && hubs.every((h, i) => Math.hypot(h!.x - prev![i]!.x, h!.y - prev![i]!.y) < 1)) return f;
-    prev = ready ? (hubs as Pt[]) : null;
+    // Card 411: the hubs are held at their homes now, so they stand still from the start; the members and the workflow
+    // squares settle after them (and the teams' homes are measured once those come to rest), so they are watched too.
+    const pts: Pt[] = ready ? [...(hubs as Pt[]), ...membersOf(f).map((m) => ({ x: m.x, y: m.y })), ...squaresOf(f).map((s) => ({ x: s.x, y: s.y }))] : [];
+    if (ready && prev && prev.length === pts.length && pts.every((h, i) => Math.hypot(h.x - prev![i]!.x, h.y - prev![i]!.y) < 1)) return f;
+    prev = ready ? pts : null;
     await page.waitForTimeout(600);
   }
   return f;
@@ -617,8 +625,7 @@ test('403 setting: the cog shows Team spacing (0.25-3, step 0.05, default 1); it
   await page.locator('[data-test=monitor-fit]').click();
   await page.waitForTimeout(2500);
   f = await lastFrame(page);
-  r.fitAfter3 = { zoom: +zoomOf(f).toFixed(3), hubs: await hubsOnScreen(page, f, 3) };
-  expect(r.fitAfter3.hubs.every((h: any) => h.inside), 'Fit refits to the 3x layout').toBe(true);
+  r.fitAfter3 = { zoom: +zoomOf(f).toFixed(3), hubs: await hubsOnScreen(page, f, 3) };  expect(r.fitAfter3.hubs.every((h: any) => h.inside), 'Fit refits to the 3x layout').toBe(true);
   expect(r.fitAfter3.zoom, 'Fit zoomed out for 3x').toBeLessThan(r.pinned3.zoomBefore);
   await page.screenshot({ path: path.join(S89, 'screens', 'spacing-3x-fit-1280-dark.png') });
 
