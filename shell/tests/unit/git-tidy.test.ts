@@ -242,12 +242,23 @@ describe('TidyPanel', () => {
     ['git_failed', 'git update-ref failed: hook runs refused the update (exit 1)'],
     ['bad_params', 'member is required; the realign runs on one member branch'],
     ['no_such_member', 'No member Marlo in payments; was the member running elsewhere?'],
+    // B094 (card 427): a failed push or clone is a git failure, not the core saying no.
+    ['push_failed', 'git push origin members/payments/marlo failed: remote rejected (a hook runs on the server)'],
+    ['clone', 'git clone of payments failed: could not read from the remote repository'],
   ])('Realign answered %s: the error is shown plain, not as "Refused:"', async (code, message) => {
     expect(await realignError(code, message)).toBe(message);
   });
 
   it('Realign refused with a real refusal code still shows "Refused:"', async () => {
-    expect(await realignError('member_running', 'Marlo has a run open.')).toBe('Refused: Marlo has a run open.');
+    expect(await realignError('running', 'Marlo has a run open.')).toBe('Refused: Marlo has a run open.');
+  });
+
+  it.each([
+    ['moved', 'members/payments/marlo changed since it was shown.'],
+    ['no_such_team', 'No team payments.'],
+    ['no_repositories', 'Team payments has no repositories.'],
+  ])('Realign refused with %s still shows "Refused:"', async (code, message) => {
+    expect(await realignError(code, message)).toBe(`Refused: ${message}`);
   });
 
   it('Realign with an uncoded error that says the member runs still shows "Refused:"', async () => {
