@@ -142,7 +142,7 @@ public static class CompanionTools
         {
             "git_push_branch" => $"Push branch {Text(args, "branch")} of {team} ({repo} repository) to origin. Never forced.",
             "git_sync_branch" => $"Bring branch {Text(args, "branch")} of {team} ({repo} repository) current with the base branch: a merge commit; a conflict changes nothing.",
-            "git_pr_open" => $"Open a GitHub pull request for branch {Text(args, "branch")} of {team} ({repo} repository) into the base branch, titled \"{Text(args, "title")}\"." +
+            "git_pr_open" => $"Open a pull request for branch {Text(args, "branch")} of {team} ({repo} repository) into the base branch, titled \"{Text(args, "title")}\"." +
                              (Text(args, "body") is { } body ? $"\nIts description, in full:\n{body}" : ""),
             "team_env_set" => Flag(args, "remove")
                 ? $"Remove environment variable {Text(args, "name")} from team {team}."

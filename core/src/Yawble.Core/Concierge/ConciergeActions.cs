@@ -117,7 +117,8 @@ public sealed class ConciergeActions(
     ConfirmationBook book,
     Func<string, IReadOnlyList<string>, CancellationToken, Task<GitResult>>? gh = null,
     AuditLog? audit = null,
-    ConciergeTurn? turn = null)
+    ConciergeTurn? turn = null,
+    HostCliRunner? cli = null)
 {
     /// <summary>The turn these tools serve: its conversation, whether the person started it, and whether over the Cloud Link.</summary>
     private readonly ConciergeTurn _turn = turn ?? ConciergeTurn.None;
@@ -127,7 +128,7 @@ public sealed class ConciergeActions(
 
     /// <summary>The same actions for a new turn (the person's yes is a later turn than the list); with <paramref name="book"/>,
     /// bound to that book instead of these actions' own (the companion keeps its own, so neither accepts the other's tokens).</summary>
-    public ConciergeActions ForTurn(ConciergeTurn turn, ConfirmationBook? book = null) => new(bus, ui, board, git, repos, book ?? _book, gh, audit, turn) { HostTasks = HostTasks };
+    public ConciergeActions ForTurn(ConciergeTurn turn, ConfirmationBook? book = null) => new(bus, ui, board, git, repos, book ?? _book, gh, audit, turn, cli) { HostTasks = HostTasks };
 
     /// <summary>The teams' host tasks (host_task_list / run / status), set by the app when this computer has them; null: none.</summary>
     public ConciergeHostTasks? HostTasks { get; set; }
@@ -260,23 +261,23 @@ public sealed class ConciergeActions(
             }
             case "git_pr_open":
             {
-                var (_, repo) = await RepoAsync(args, ct);
-                await RequireGitHubAsync(repo, ct);
+                var (team, repo) = await RepoAsync(args, ct);
+                var prs = await PullRequestsAsync(team, repo, ct);
                 var branch = Required(args, "branch");
-                var r = await Gh(repo.Path, ["pr", "create", "--head", branch, "--base", repo.BaseBranch, "--title", Required(args, "title"), "--body", Optional(args, "body") ?? ""], ct);
-                return $"ok: opened a pull request for {branch} into {repo.BaseBranch}: {r}";
+                var r = await prs.OpenAsync(repo.Path, branch, repo.BaseBranch, Required(args, "title"), Optional(args, "body") ?? "", ct);
+                return $"ok: opened a pull request on {RepoProviders.Label(prs.Kind)} for {branch} into {repo.BaseBranch}: {r}";
             }
             case "git_pr_merge":
             {
                 var (team, repo) = await RepoAsync(args, ct);
-                await RequireGitHubAsync(repo, ct);
-                var pr = (Long(args, "pr") ?? throw new ArgumentException("'pr' is required")).ToString();
-                var view = await Gh(repo.Path, ["pr", "view", pr, "--json", "number,title,headRefName,baseRefName,state,isDraft"], ct);
-                if (JsonNode.Parse(view) is not JsonObject v || v["state"]?.GetValue<string>() != "OPEN") throw new ArgumentException($"pull request {pr} is not open; nothing to merge");
-                if (v["baseRefName"]?.GetValue<string>() != repo.BaseBranch) throw new ArgumentException($"pull request {pr} targets {v["baseRefName"]}, not {repo.BaseBranch}; refused");
-                var text = $"Merge pull request #{pr} \"{v["title"]}\" ({v["headRefName"]} into {v["baseRefName"]}) in {team.Name}. A merged pull request cannot simply be undone.";
-                return await ConfirmedAsync(name, args, text, view, false,
-                    async token => "merged: " + await Gh(repo.Path, ["pr", "merge", pr, "--merge"], token), ct);
+                var prs = await PullRequestsAsync(team, repo, ct);
+                var pr = Long(args, "pr") ?? throw new ArgumentException("'pr' is required");
+                var v = await prs.ViewAsync(repo.Path, pr, ct);
+                if (!v.Open) throw new ArgumentException($"pull request {pr} is not open; nothing to merge");
+                if (v.Base != repo.BaseBranch) throw new ArgumentException($"pull request {pr} targets {v.Base}, not {repo.BaseBranch}; refused");
+                var text = $"Merge pull request #{pr} on {RepoProviders.Label(prs.Kind)}: \"{v.Title}\" ({v.Head} into {v.Base}) in {team.Name}. A merged pull request cannot simply be undone.";
+                return await ConfirmedAsync(name, args, text, $"{prs.Kind}\n{v.Key}", false,
+                    async token => "merged: " + await prs.MergeAsync(repo.Path, pr, token), ct);
             }
 
             case "team_archive":
@@ -478,41 +479,41 @@ public sealed class ConciergeActions(
     }
 
     /// <summary>
-    /// The open pull requests of a repository, by head branch ("#7 Title"), through the person's gh on the host, run in the
-    /// team repository (which no agent writes). Null when gh is not available, fails or answers something unreadable;
-    /// team_git then says the check did not run.
+    /// The open pull requests of a repository, by head branch ("#7 Title"), through the person's CLI for its provider (gh,
+    /// glab or az repos) on the host, run in the team repository (which no agent writes). Null when the provider has no
+    /// pull requests here, or its CLI is not available, fails or answers something unreadable; team_git then says the
+    /// check did not run.
     /// </summary>
     public async Task<IReadOnlyDictionary<string, string>?> OpenPullRequestsAsync(GitRepoTarget repo, CancellationToken ct)
     {
-        if (gh is null) return null;
-        var r = await gh(repo.Path, ["pr", "list", "--state", "open", "--limit", "200", "--json", "number,title,headRefName"], ct);
-        if (r.ExitCode != 0) return null;
-        try
-        {
-            if (JsonNode.Parse(r.Stdout) is not JsonArray list) return null;
-            var map = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var pr in list.OfType<JsonObject>())
-                if (pr["headRefName"] is JsonValue h && h.TryGetValue<string>(out var head))
-                    map.TryAdd(head, $"#{pr["number"]} {pr["title"]?.ToString() ?? ""}".TrimEnd());
-            return map;
-        }
-        catch (System.Text.Json.JsonException) { return null; }
+        var kind = ProviderOf(await git.OriginUrlAsync(repo.Path, ct), bus.Repos?.HostSettingOf(repo.Team, repo.Repo));
+        return Runner(kind) is { } run && PullRequestProviders.For(kind, run) is { } prs ? await prs.OpenListAsync(repo.Path, ct) : null;
     }
 
     // ------------------------------------------------------------------ helpers
 
-    /// <summary>Pull requests are GitHub's (through gh): a repository with no origin, or hosted elsewhere, is refused with what to do instead.</summary>
-    private async Task RequireGitHubAsync(ActionRepo repo, CancellationToken ct)
-    {
-        if (RepoHost.PullRequestsUnavailable(repo.Name, await git.OriginUrlAsync(repo.Path, ct)) is { } why) throw new ArgumentException(why);
-    }
+    private static RepoProviderKind ProviderOf(string? origin, RepoHostSetting? setting) => setting?.Provider ?? RepoProviders.Detect(origin);
 
-    private async Task<string> Gh(string path, IReadOnlyList<string> args, CancellationToken ct)
+    /// <summary>The runner of a provider's CLI: gh as given (as before B075), the others through the host CLI runner; null: none here.</summary>
+    private HostCliRunner? Runner(RepoProviderKind kind) => kind == RepoProviderKind.GitHub
+        ? gh is { } g ? (_, path, a, token) => g(path, a, token) : null
+        : cli;
+
+    /// <summary>
+    /// The pull requests of a repository by its provider (the person's override, or detected from its origin): GitHub
+    /// through gh, GitLab through glab, Azure DevOps through az repos. No origin, another provider, or no CLI runner here
+    /// is refused with what to do instead.
+    /// </summary>
+    private async Task<IPullRequestProvider> PullRequestsAsync(TeamSummary team, ActionRepo repo, CancellationToken ct)
     {
-        if (gh is null) throw new ArgumentException("gh is not available on this computer, so pull requests cannot be opened or merged from here; the closest thing: push the branch (git_push_branch) and the person opens it on GitHub");
-        var r = await gh(path, args, ct);
-        if (r.ExitCode != 0) throw new ArgumentException("gh refused: " + PersonGitPush.Redact(string.Join(' ', r.Stderr, r.Stdout).Trim()));
-        return PersonGitPush.Redact(r.Stdout);
+        var origin = await git.OriginUrlAsync(repo.Path, ct);
+        var setting = bus.Repos?.HostSettingOf(team.Id, repo.Name);
+        var kind = ProviderOf(origin, setting);
+        if (RepoHost.PullRequestsUnavailable(repo.Name, origin, kind) is { } why) throw new ArgumentException(why);
+        var tool = PullRequestProviders.CliOf(kind)!;
+        if (Runner(kind) is not { } run)
+            throw new ArgumentException($"{tool} is not available on this computer, so pull requests cannot be opened or merged from here; the closest thing: push the branch (git_push_branch) and the person opens it on {RepoProviders.Label(kind)}");
+        return PullRequestProviders.For(kind, run)!;
     }
 
     private async Task<(TeamSummary Team, ActionRepo Repo)> RepoAsync(JsonObject args, CancellationToken ct)
@@ -592,9 +593,9 @@ public sealed class ConciergeActions(
             ("team", "string", "The team.", true), ("branch", "string", "The branch.", true), ("repo", "string", "Repository name (default main).", false)),
         Tool("git_sync_branch", "Bring a member's or team branch current with the base branch (a merge commit; a conflict changes nothing; a checked-out branch is refused).",
             ("team", "string", "The team.", true), ("branch", "string", "The branch.", true), ("repo", "string", "Repository name (default main).", false)),
-        Tool("git_pr_open", "Open a GitHub pull request for a branch into the base branch (only for a repository whose origin is on GitHub; needs gh signed in on this computer).",
+        Tool("git_pr_open", "Open a pull request (a merge request on GitLab) for a branch into the base branch, on the repository's provider: GitHub through gh, GitLab through glab, Azure DevOps through az repos, each signed in on this computer. Other hosts (Bitbucket, Gitea, plain git) are refused with what to do instead.",
             ("team", "string", "The team.", true), ("branch", "string", "The branch.", true), ("title", "string", "Title.", true), ("body", "string", "Description.", false), ("repo", "string", "Repository name (default main).", false)),
-        Tool("git_pr_merge", "Merge an open GitHub pull request (into the base branch only; origin on GitHub). Needs the person's yes: the first call shows the pull request and returns a token.",
+        Tool("git_pr_merge", "Merge an open pull request (into the base branch only) on the repository's provider: GitHub (gh), GitLab (glab) or Azure DevOps (az repos). Needs the person's yes: the first call shows the pull request and returns a token.",
             ("team", "string", "The team.", true), ("pr", "integer", "The pull request's number.", true), ("repo", "string", "Repository name (default main).", false), ("confirm", "string", "The token, after the person's yes.", false)),
         Tool("team_archive", "Archive a team. Needs the person's yes (first call shows it, returns a token).", ("team", "string", "The team.", true), ("confirm", "string", "The token, after the person's yes.", false)),
         Tool("team_unarchive", "Bring an archived team back.", ("team", "string", "The team.", true)),
@@ -642,7 +643,7 @@ public sealed class ConciergeActions(
             foreach (var e in teamRepos.ExtrasOf(team.Id))
                 list.Add(new ActionRepo(e.Name, e.Path, e.BaseBranch, With(e.Path, members.Select(m => teamRepos.ExtraClonePath(team.Name, m, e.Name)))));
             return list;
-        }, Shared, HostGh.RunAsync, audit, ConciergeTurn.None);
+        }, Shared, HostGh.RunAsync, audit, ConciergeTurn.None, PullRequestProviders.RunOnHostAsync);
 
     /// <summary>One book for the whole app: the person's yes arrives in a later turn than the list.</summary>
     public static ConfirmationBook Shared { get; } = new();
