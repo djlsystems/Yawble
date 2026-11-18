@@ -7,6 +7,7 @@ import type { CoreEvent, YawbleApi, TerminalSessionInfo, TerminalSnapshot } from
 import { resolveApi } from '../api';
 import { theme } from '../theme';
 import { xtermTheme } from '../terminalPane';
+import { terminalLinkHandler } from '../terminalLinks';
 
 // One terminal channel rendered with xterm.js: attach = replay the buffer, then stream pushes.
 // Pushes carry "end" (bytes ever written), so bytes already in the replay are never written twice.
@@ -110,6 +111,8 @@ onMounted(async () => {
     fontSize: 13,
     scrollback: 5000,
     theme: xtermTheme(theme.state.current),
+    // Card 393: links ask through the window's own dialog, not xterm's default (the browser's confirm()).
+    linkHandler: terminalLinkHandler,
   });
   fit = new FitAddon();
   term.loadAddon(fit);

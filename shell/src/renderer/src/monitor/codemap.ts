@@ -347,7 +347,9 @@ export interface TeamMapLayout { team: string; folders: PlacedFolder[]; files: P
 
 /** How far past a team's member spokes its folders sit, and how far a folder's files sit from it. */
 export const FolderPast = 120;
-const FileReach = 34;
+export const FileReach = 34;
+/** How much further than FileReach every other file of a fan sits. */
+export const FileStagger = 16;
 
 /**
  * Where a team's map goes: its folders on an arc round the team's hub at `radius`, centred on the angle `out`
@@ -355,7 +357,7 @@ const FileReach = 34;
  */
 export function layoutTeamMap(view: TeamMapView, hub: { x: number; y: number }, out: number, radius: number): TeamMapLayout {
   const n = view.folders.length + (view.moreFolders ? 1 : 0);
-  const step = n <= 1 ? 0 : Math.min(0.62, (Math.PI * 1.7) / n);
+  const step = arcStep(n);
   const tk = lower(view.team);
   const folders: PlacedFolder[] = [];
   const files: PlacedFile[] = [];
@@ -367,7 +369,7 @@ export function layoutTeamMap(view: TeamMapView, hub: { x: number; y: number }, 
     let mx = x, my = y;
     for (let j = 0; j < k; j++) {
       const fa = a + (j - (k - 1) / 2) * fan;
-      const d = FileReach + (j % 2) * 16;
+      const d = FileReach + (j % 2) * FileStagger;
       const px = x + Math.cos(fa) * d, py = y + Math.sin(fa) * d;
       const f = fv.files[j];
       if (f) files.push({ id: `${tk}|${f.path}`, file: f, folder: fv.path, x: px, y: py });
@@ -379,6 +381,45 @@ export function layoutTeamMap(view: TeamMapView, hub: { x: number; y: number }, 
     ? { x: hub.x + Math.cos(out + (n - 1 - (n - 1) / 2) * step) * radius, y: hub.y + Math.sin(out + (n - 1 - (n - 1) / 2) * step) * radius }
     : null;
   return { team: view.team, folders, files, rest };
+}
+
+/** The angle between two folders on a map's arc, for n places on it (the folders and a "+N folders"). */
+function arcStep(n: number): number {
+  return n <= 1 ? 0 : Math.min(0.62, (Math.PI * 1.7) / n);
+}
+
+/** How far past its members a map's folders sit (the scene lays the arc at the members' reach plus this). */
+export const MapPastMembers = 70;
+/** How far a team's members usually reach from its hub (the scene lays the map's arc at their reach + MapPastMembers). */
+export const MapMembersReach = 80;
+/** A map node with its label, as half a box round the node (world px): as the scene's clusters() counts it. */
+export const MapNodeHalfW = 40;
+export const MapNodeHalfH = 10;
+/** How far a team's cluster reaches from its hub toward the others before its code map (the scene's ClusterCore). */
+export const MapCore = 130;
+
+/**
+ * How much room a team's map needs toward the other teams past `core`, in world px (0 for no map, or one that stays
+ * within it). The map lies on an arc pointing away from the others, so only the part of it that wraps back toward
+ * them counts: the map is laid out as the scene lays it (layoutTeamMap at MapMembersReach + MapPastMembers), and its
+ * nodes with their labels are measured along the directions to the neighbours, which lie `spread` radians either side
+ * of straight back (0 for two teams; neighbourSpread in the scene). Card 409: it counted the arc's sideways spread
+ * (depth × sin(half-span)), which lies across the line between the teams, not on it, so the default spacing left the
+ * middle of the wall empty.
+ */
+export function mapRoomOf(view: TeamMapView, core = MapCore, spread = 0): number {
+  const n = view.folders.length + (view.moreFolders ? 1 : 0);
+  if (n === 0) return 0;
+  const laid = layoutTeamMap(view, { x: 0, y: 0 }, 0, MapMembersReach + MapPastMembers);
+  const points: { x: number; y: number }[] = [...laid.folders, ...laid.files, ...laid.folders.map((f) => ({ x: f.moreX, y: f.moreY }))];
+  if (laid.rest) points.push(laid.rest);
+  let reach = 0;
+  for (const side of spread ? [-1, 1] : [1]) {
+    const ux = Math.cos(Math.PI + side * spread), uy = Math.sin(Math.PI + side * spread);
+    const pad = MapNodeHalfW * Math.abs(ux) + MapNodeHalfH * Math.abs(uy);
+    for (const p of points) reach = Math.max(reach, p.x * ux + p.y * uy + pad);
+  }
+  return Math.max(0, reach - core);
 }
 
 // --- how the nodes look over time -----------------------------------------------------------------------------------

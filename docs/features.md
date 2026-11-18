@@ -306,7 +306,16 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots.
 - **Workflow nodes**: each open workflow is a small node tied by dashed lines to the members working it (to its team
   while nobody is on it). It flashes green and drifts away when it completes, fades with a cross when it is closed,
-  and shows a "!" while it is blocked. The team's **Workflows** panel stays as the list of its newest five.
+  and shows a "!" while it is blocked. Under it, its number and title ("#3848 B081 Remote UI: xterm's…"), cut to
+  30 characters, with a backlog workflow's "Backlog item " left out; hover it for the whole title, click it to open the
+  workflow. The label is never smaller than 8 px on screen and dims with its team. When the window is phone-wide
+  (under 760 px) and the wall is zoomed out, it shows only "#3848". A desktop window always shows the title, even
+  when the sidebar and Activity leave the wall narrow. Labels never cover each other, a member's disc or name, a
+  team's name pill, or any team's code map (its folders, folder names and files). A workflow square drawn on its
+  team's map stays on top and takes the hover and the click.
+  Where a label has no room, it moves above its node or off to one side. With no room there either, it shrinks to
+  "#3848", or it is left out and the hover still gives the title. Blocked and working workflows go first, then the
+  newest. There is no Workflows panel on the wall.
 - **Rhythm**: each member shows its recent tool steps rising off it and what it is doing now; a busier member pulses
   faster, a command or test run shows a ring filling while it runs, then a green or red burst by its exit code when
   that is known, and thinking shimmers softly.
@@ -344,12 +353,18 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - A focused team's code map, commits and merges stay bright; the other teams' maps dim with them.
 - With reduced motion nothing travels, pops or pulses: the map just updates, a commit's dot is simply at the hub, a
   comet is a still line with its label, and states are steady marks.
-- Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
+- Counts across the top and an **Activity** panel of messages.
 - A timeline replays any moment: the map, the commits and the merges play at their times. **● Back to live** returns.
 - The camera is **Auto fit**, **Fit** once, or **Pinned**. The cog beside them opens **Network forces**: link distance,
-  link strength, repulsion, gravity and friction, each a multiplier (0.25× to 3×) on the wall's own layout. They apply
-  as you drag and are remembered; **Reset** goes back to the defaults: distance 0.3×, strength 2.75×, repulsion 0.35×,
-  gravity 2.4×, friction 0.45×.
+  link strength, repulsion, gravity, friction and **Team spacing** (how far apart the teams sit), each a multiplier
+  (0.25× to 3×) on the wall's own layout. They apply as you drag and are remembered; **Reset** goes back to the
+  defaults: distance 0.3×, strength 2.75×, repulsion 0.35×, gravity 2.4×, friction 0.45×, team spacing 1×.
+- The teams sit on an oval sized so that, at team spacing 1×, the two nearest teams' clusters (members, workflow
+  nodes and their labels, and the code maps actually drawn) are close but do not overlap. A code map fans out away from
+  the other teams, so only the part of it that wraps back toward a neighbour adds to the room between them.
+- Under Auto fit at team spacing 1×, once the wall comes to rest it measures the clusters as drawn and slides them so
+  the nearest two are about 40 px apart, the same every time the wall opens. Each team's hub stays at its place on
+  the oval. Other spacings scale what was measured at 1×. Pinned, focused, or after you move the wall, nothing slides.
 
 **Code map sources.** The app records what really reaches the team repository: each new commit a member's run brings
 back (its files and whether each was added, modified, deleted or renamed), each merge into the team branch, each Merge
