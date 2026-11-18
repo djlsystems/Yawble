@@ -9,7 +9,7 @@ import {
   commitPhase, CommitLifeMs, DefaultLimits, fileLight, layoutTeamMap, LightMs, MapPastMembers, mapRoomOf, MaxMapNodes, popScale, shortSha,
   type MapFile, type TeamMapView,
 } from './codemap';
-import { busyMembers, nodeLabelFont, workflowNodeLabel, workflowNodeLook } from './workflows';
+import { busyMembers, nodeLabelFont, placeWorkflowLabels, workflowNodeLabel, workflowNodeLook, type LabelAsk, type LabelBox, type LabelObstacle, type PlacedLabel } from './workflows';
 import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt, type Density } from './rhythm';
 
 /**
@@ -59,6 +59,8 @@ interface Node extends SimulationNodeDatum {
 /** A workflow node that left: where it was, its way out from its hub, and (to follow the hub) its hub and offset from it. */
 interface WfGhost { x: number; y: number; hue: number; id: number; outX: number; outY: number; gone: number; hub: string | null; dx: number; dy: number }
 interface Link { source: Node; target: Node }
+/** A world box by its corners. */
+interface Box { x0: number; y0: number; x1: number; y1: number }
 
 export interface SceneHover {
   key: string; kind: 'team' | 'member' | 'file' | 'folder' | 'commit' | 'workflow' | 'you'; team: string; name: string; state?: MemberState; statusLine?: string | null; queued?: number; x: number; y: number;
@@ -98,9 +100,11 @@ const StepIconGap = 20;
 const OvalY = 0.62;
 /**
  * How far a team's cluster reaches from its hub toward the other teams before its code map: the members, their names
- * and the workflow nodes with their labels; and the room left between two clusters at Team spacing 1.
+ * and the workflow nodes with their labels; and the room left between two clusters at Team spacing 1. Card 409: 130
+ * (was 100): with the map's room counted only toward the neighbours, two teams at 100 apart settled with their workflow
+ * labels and members touching in 1 run of 8.
  */
-export const ClusterCore = 100;
+export const ClusterCore = 130;
 export const ClusterGap = 40;
 
 /** The distance between the two nearest of count places on an oval of x radius 1 (teamAngle; the y radius OvalY). */
@@ -127,10 +131,32 @@ export function teamHome(i: number, count: number, mapRoom: number, spacing: num
 
 /** The room the widest map drawn needs past its members (codemap mapRoomOf), in steps of this much, so it moves the teams seldom. */
 const MapRoomStep = 10;
-export function mapRoomFor(views: Iterable<TeamMapView>): number {
+export function mapRoomFor(views: Iterable<TeamMapView>, count = 2): number {
+  const spread = neighbourSpread(count);
   let room = 0;
-  for (const v of views) room = Math.max(room, mapRoomOf(v));
+  for (const v of views) room = Math.max(room, mapRoomOf(v, ClusterCore, spread));
   return Math.ceil(room / MapRoomStep) * MapRoomStep;
+}
+
+/**
+ * How far (radians) the direction from a team to its nearest neighbour turns off straight back from the team's way out
+ * (from the middle), at most, for count teams on the oval: 0 for two, which face each other; more for three or more.
+ */
+export function neighbourSpread(count: number): number {
+  if (count <= 2) return 0;
+  const near = nearestPair(count);
+  const place = (i: number) => { const a = teamAngle(i, count); return { x: Math.cos(a), y: OvalY * Math.sin(a) }; };
+  let worst = 0;
+  for (let a = 0; a < count; a++) for (let b = 0; b < count; b++) {
+    if (a === b) continue;
+    const p = place(a), q = place(b);
+    if (Math.hypot(p.x - q.x, p.y - q.y) > near + 1e-9) continue;
+    const back = Math.atan2(p.y, p.x) + Math.PI;
+    let dev = Math.atan2(q.y - p.y, q.x - p.x) - back;
+    dev = Math.abs(Math.atan2(Math.sin(dev), Math.cos(dev)));
+    worst = Math.max(worst, dev);
+  }
+  return worst;
 }
 /** How often a team's map view is worked out again when nothing came or went (its order follows the activity). */
 const MapViewMs = 400;
@@ -162,7 +188,7 @@ export const MinHitPx = 22;
 /**
  * The map node a world point (wx, wy) is on at zoom k, or null: each node reaches its own world reach (a team hub 14, others
  * their radius + 8) or MinHitPx on screen, whichever is more, and of the nodes in reach the nearest wins, so close nodes do
- * not steal each other's taps. Workflow panels are left out (they are hit as rectangles, panelAt).
+ * not steal each other's taps. Workflow nodes (B090) are hit like the rest; a 'workflows' panel (gone) is never picked.
  */
 export function nearestNodeAt<N extends { kind: string; r: number; x?: number; y?: number }>(
   nodes: Iterable<N>, wx: number, wy: number, k: number,
@@ -444,34 +470,50 @@ export class MonitorScene {
   }
 
   /** The workflow nodes on the wall now (for the tests): key, its workflow's id, the members it is tied to, and its label as drawn now. */
-  workflowNodes(): { key: string; id: number; to: string[]; status: string; label: string; x: number; y: number }[] {
-    return [...this.nodes.values()].filter((n) => n.kind === 'wf').map((n) => ({
-      key: n.key, id: n.wf!.id, to: this.wfmLinks.filter((l) => l.source === n).map((l) => l.target.key),
-      status: workflowNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key)).status, label: this.wfLabelBox(n).text, x: n.x!, y: n.y!,
-    }));
+  workflowNodes(): { key: string; id: number; to: string[]; status: string; label: string; box: LabelBox | null; x: number; y: number }[] {
+    const { labels } = this.wfLabelPlan();
+    return [...this.nodes.values()].filter((n) => n.kind === 'wf').map((n) => {
+      const l = labels.get(n.key) ?? null;
+      return {
+        key: n.key, id: n.wf!.id, to: this.wfmLinks.filter((k) => k.source === n).map((k) => k.target.key),
+        status: workflowNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key)).status, label: l?.text ?? '',
+        box: l && { x: l.x, y: l.y, w: l.w, h: l.h }, x: n.x!, y: n.y!,
+      };
+    });
   }
 
   /**
    * Each team's cluster as drawn now (for the tests and Team spacing): its hub and home, and the world box round its hub,
    * members (with their name labels), workflow nodes (with their labels) and code map (with its labels), by team in lower case.
    */
-  clusters(): { team: string; hub: { x: number; y: number }; home: { x: number; y: number }; box: { x0: number; y0: number; x1: number; y1: number } }[] {
-    const out = new Map<string, { team: string; hub: { x: number; y: number }; home: { x: number; y: number }; box: { x0: number; y0: number; x1: number; y1: number } }>();
+  clusters(): { team: string; hub: { x: number; y: number }; home: { x: number; y: number }; box: Box; parts: Box[] }[] {
+    const out = new Map<string, { team: string; hub: { x: number; y: number }; home: { x: number; y: number }; box: Box }>();
+    const parts = new Map<string, Box[]>();
     for (const n of this.nodes.values()) {
       if (n.kind === 'team') out.set(n.team.toLowerCase(), { team: n.team.toLowerCase(), hub: { x: n.x!, y: n.y! }, home: { x: n.homeX, y: n.homeY }, box: { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity } });
     }
+    // Each thing drawn is a part (its own box); the cluster's box holds them all.
     const add = (team: string, x: number, y: number, hw: number, hh: number) => {
-      const b = out.get(team.toLowerCase())?.box;
+      const key = team.toLowerCase();
+      const b = out.get(key)?.box;
       if (!b) return;
       b.x0 = Math.min(b.x0, x - hw); b.x1 = Math.max(b.x1, x + hw); b.y0 = Math.min(b.y0, y - hh); b.y1 = Math.max(b.y1, y + hh);
+      const list = parts.get(key) ?? [];
+      list.push({ x0: x - hw, y0: y - hh, x1: x + hw, y1: y + hh });
+      parts.set(key, list);
     };
+    const { labels } = this.wfLabelPlan();
     for (const n of this.nodes.values()) {
       if (n.kind === 'team') add(n.team, n.x!, n.y!, n.r + 30, n.r + 30); // its pill and ring
       else if (n.kind === 'member') add(n.team, n.x!, n.y!, n.r + 30, n.r + 18); // its name below it
-      else { add(n.team, n.x!, n.y!, n.r + 4, n.r + 4); const l = this.wfLabelBox(n); add(n.team, n.x!, l.y, l.w / 2, l.h / 2); }
+      else {
+        add(n.team, n.x!, n.y!, n.r + 4, n.r + 4);
+        const l = labels.get(n.key);
+        if (l) add(n.team, l.x + l.w / 2, l.y + l.h / 2, l.w / 2, l.h / 2);
+      }
     }
     for (const m of this.mapNodes) add(m.team.team, m.x, m.y, 40, 10); // a node and its label
-    return [...out.values()];
+    return [...out.values()].map((c) => ({ ...c, parts: parts.get(c.team) ?? [] }));
   }
 
   /** The graph's shape at the last rebuild that woke the forces (graphShape). */
@@ -525,16 +567,46 @@ export class MonitorScene {
   }
 
   /**
-   * A workflow node's label as drawn now (workflowNodeLabel at the zoom and the wall's width), its font size, and the
-   * box it fills under the node (world px; its centre y). The label stays the camera's size, never under 8 px on screen.
+   * The workflow nodes' labels as drawn now: workflowNodeLabel at the zoom (only "#id" on a phone zoomed out), each
+   * placed by placeWorkflowLabels so none covers another or a member (under its node, above it, shortened to "#id", or
+   * none), and their font size: the camera's size, never under 8 px on screen.
    */
-  private wfLabelBox(n: Node): { text: string; font: number; w: number; h: number; y: number } {
-    const text = n.wf ? workflowNodeLabel(n.wf, { zoom: this.cam.k, wallPx: this.w || this.canvas.clientWidth }) : n.name;
-    const font = nodeLabelFont(this.cam.k);
-    this.ctx.font = `600 ${font}px ${this.family()}`;
-    const w = this.ctx.measureText(text).width;
-    return { text, font, w, h: font * 1.2, y: n.y! + n.r + 3 + font * 0.6 };
+  private wfLabelPlan(): { font: number; labels: Map<string, PlacedLabel | null> } {
+    const k = this.cam.k;
+    const font = nodeLabelFont(k);
+    const family = this.family();
+    const c = this.ctx;
+    // The members' discs and names: a label must not run under them.
+    const obstacles: LabelObstacle[] = [];
+    // The other teams' code maps (a node and its label, as clusters() counts them): a label stays in its own cluster.
+    for (const m of this.mapNodes) obstacles.push({ x: m.x - 40, y: m.y - 10, w: 80, h: 20, owner: m.team.team.toLowerCase() });
+    c.font = `500 11px ${family}`;
+    for (const n of this.nodes.values()) {
+      if (n.kind !== 'member') continue;
+      const ring = n.r + 5;
+      obstacles.push({ x: n.x! - ring, y: n.y! - ring, w: ring * 2, h: ring * 2 });
+      const name = spaced(n.name);
+      const nw = c.measureText(name.length > 22 ? name.slice(0, 21) + '…' : name).width;
+      obstacles.push({ x: n.x! - nw / 2, y: n.y! + ring + 6, w: nw, h: 13 });
+    }
+    const asks: LabelAsk[] = [];
+    for (const n of this.nodes.values()) {
+      if (n.kind !== 'wf' || !n.wf) continue;
+      const status = workflowNodeLook(n.wf, !!this.model?.blockedWfs.has(n.key)).status;
+      const order = status === 'blocked' ? 0 : status === 'working' ? 1 : 2;
+      const at = Date.parse(n.wf.lastAt);
+      asks.push({
+        key: n.key, x: n.x!, y: n.y!, r: n.r, short: `#${n.wf.id}`, owner: n.team.toLowerCase(), rank: order * 1e14 - (Number.isFinite(at) ? at : 0),
+        full: workflowNodeLabel(n.wf, { zoom: k, phone: this.phone }),
+      });
+    }
+    c.font = `600 ${font}px ${family}`;
+    return { font, labels: placeWorkflowLabels(asks, (t) => c.measureText(t).width, font * 1.2, obstacles) };
   }
+
+  /** On a phone (the window phone-wide, narrowScreen.ts), zoomed out, the workflow nodes say only "#id". */
+  private phone = false;
+  setPhone(on: boolean): void { this.phone = on; }
 
   private resize(): void {
     const dpr = window.devicePixelRatio || 1;
@@ -612,7 +684,8 @@ export class MonitorScene {
     c.globalCompositeOperation = 'lighter';
     for (const e of this.drawn) this.drawEffect(c, e, now, motion);
     c.globalCompositeOperation = 'source-over';
-    for (const n of this.nodes.values()) if (n.kind === 'wf') this.drawWorkflowNode(c, n, now, motion, dim(n.key));
+    const plan = this.wfLabelPlan();
+    for (const n of this.nodes.values()) if (n.kind === 'wf') this.drawWorkflowNode(c, n, now, motion, dim(n.key), plan.font, plan.labels.get(n.key) ?? null);
     for (const n of this.nodes.values()) if (n.kind === 'member') this.drawMember(c, n, now, motion, dim(n.key));
     this.drawMapNodes(c, now, dim, view);
     this.drawCommits(c, now);
@@ -652,8 +725,8 @@ export class MonitorScene {
     c.globalAlpha = 1;
   }
 
-  /** A workflow node: a rounded square in its state's colour with its mark, and "#id title" under it (wfLabelBox). */
-  private drawWorkflowNode(c: CanvasRenderingContext2D, n: Node, now: number, motion: number, alpha: number): void {
+  /** A workflow node: a rounded square in its state's colour with its mark, and its label where wfLabelPlan put it. */
+  private drawWorkflowNode(c: CanvasRenderingContext2D, n: Node, now: number, motion: number, alpha: number, font: number, label: PlacedLabel | null): void {
     const look = workflowNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key));
     const color = Palette[look.tone];
     const x = n.x!, y = n.y!, r = n.r;
@@ -669,11 +742,12 @@ export class MonitorScene {
     }
     c.fillStyle = color; c.strokeStyle = color;
     drawWorkflowIcon(c, look.icon, x, y, r * 1.1);
-    const label = this.wfLabelBox(n);
-    c.font = `600 ${label.font}px ${this.family()}`;
-    c.textAlign = 'center'; c.textBaseline = 'top';
-    c.fillStyle = look.status === 'blocked' ? color : Palette.inkDim;
-    c.fillText(label.text, x, y + r + 3);
+    if (label) {
+      c.font = `600 ${font}px ${this.family()}`;
+      c.textAlign = 'center'; c.textBaseline = 'top';
+      c.fillStyle = look.status === 'blocked' ? color : Palette.inkDim;
+      c.fillText(label.text, label.x + label.w / 2, label.y);
+    }
     c.globalAlpha = 1;
   }
 
@@ -845,7 +919,7 @@ export class MonitorScene {
         if (team) list.push({ team, view: map.view(name, { maxFiles: each }) });
       }
       this.mapLayouts = { rev: map.rev, at: now, model: this.model, list };
-      this.wantedRoom = mapRoomFor(list.map((l) => l.view)); // the next frame moves the homes if it changed
+      this.wantedRoom = mapRoomFor(list.map((l) => l.view), this.teamList.length); // the next frame moves the homes if it changed
     }
     const ease = this.reduced ? 1 : 1 - Math.pow(0.0004, this.dt / 1000);
     const nodes: MapNode[] = [];
