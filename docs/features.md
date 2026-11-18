@@ -452,7 +452,8 @@ a member's pane opens it at that member's activity.
   - **All activity**: everything that happened, by members, teams and the app, gathered from every log below, with
     every Audit entry. Its Member column is the member an entry is about; else the team, as `<Team>` (a team created,
     deleted or changed, a backlog item for it); else `app` (settings, triggers without a member, the Cloud Link,
-    backups...). Every member's activity is auditable here.
+    backups...). Every member's activity is auditable here. Audit entries keep the team and member names they were
+    written with, so an entry about a team or member deleted since still says who it was about.
   - **Accountability**: **Audit** (every change made from the window, a Cloud Link viewer, the Concierge or a paired
     program; reads are not recorded), **Cloud Link**, **Tool calls**, **Approvals**, **Agent changes**, **Host tasks**.
   - **Security**: **Network** (each run's gateway: model requests, connections allowed and refused) and **Runs** (how

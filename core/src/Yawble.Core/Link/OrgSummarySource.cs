@@ -94,7 +94,10 @@ public sealed class AppOrgSummarySource(
         var from = (_clock.GetUtcNow() - OrgSummary.ProblemsFor).ToString("O", CultureInfo.InvariantCulture);
         try
         {
-            foreach (var row in Rows(logs.Query(new Logs.LogQuery(Logs.LogSources.Activity, From: from, Limit: Logs.LogService.MaxPage))))
+            // Only the sources a problem comes from, each its own page: every audit entry is in the activity log too (B101),
+            // and a busy hour of them must not push a failed run out of the page.
+            foreach (var row in ProblemSources.SelectMany(s => Rows(logs.Query(new Logs.LogQuery(Logs.LogSources.Activity, From: from,
+                         Filters: new Dictionary<string, string> { ["source"] = s }, Limit: Logs.LogService.MaxPage)))))
             {
                 var source = Str(row, "source") ?? "";
                 var ev = Str(row, "event") ?? "";
@@ -114,6 +117,9 @@ public sealed class AppOrgSummarySource(
         }
         return list;
     }
+
+    /// <summary>The activity log's sources <see cref="ProblemLevel"/> reads.</summary>
+    private static readonly string[] ProblemSources = ["Runs", "Network"];
 
     /// <summary>An activity row's level: a run that failed is an error; one cut short, and a refused network call, a warning. Model usage is never read.</summary>
     internal static string? ProblemLevel(string source, string ev) => source switch

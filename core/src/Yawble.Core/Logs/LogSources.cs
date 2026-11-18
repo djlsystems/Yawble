@@ -21,11 +21,13 @@ public sealed record LogPrune(string Table, string TimeColumn, int? DefaultDays,
 /// <summary>
 /// A log in the database. <paramref name="From"/> is its FROM clause with the alias t; <paramref name="TeamWhere"/> and
 /// <paramref name="MemberWhere"/> are predicates over the parameters @team, @teamId, @member ("Team/Name"), @name and
-/// @memberId. <paramref name="Prune"/> null: kept, because <paramref name="KeptBecause"/>.
+/// @memberId. <paramref name="Prune"/> null: kept, because <paramref name="KeptBecause"/>. <paramref name="AppWhere"/>: the
+/// rows about no team and no member (the app filter, B101); null: the source has none to offer.
 /// </summary>
 public sealed record LogSource(
     string Id, string Title, string Group, string About, string From, string RowId, string Time,
-    IReadOnlyList<LogColumn> Columns, string? TeamWhere, string? MemberWhere, LogPrune? Prune, string? KeptBecause = null);
+    IReadOnlyList<LogColumn> Columns, string? TeamWhere, string? MemberWhere, LogPrune? Prune, string? KeptBecause = null,
+    string? AppWhere = null);
 
 /// <summary>Every log the app keeps in its database, and the combined view of a member's activity across them.</summary>
 public static class LogSources
@@ -40,18 +42,19 @@ public static class LogSources
     public static readonly IReadOnlyList<LogSource> All =
     [
         new(Activity, "All activity", "Activity",
-            "Everything a member did or was asked to do, from every log at once: runs, network, tool calls, approvals, model requests, messages, transcripts, agent changes and the audit entries about it.",
+            "Everything that happened, by members, teams and the app. It gathers every log at once: what each member did or was asked to do (runs, network, tool calls, approvals, model requests, messages, transcripts, agent changes), and every Audit entry, including those about a whole team (shown as <Team>) or the app itself (shown as app).",
             ActivityFrom, "t.rid", "t.at",
             [
                 new("at", "Time", "t.at", "time"),
                 new("source", "Source", "t.source", Filter: true),
-                new("team", "Team", TeamOf("t.member"), Filter: true),
+                new("team", "Team", $"NULLIF({TeamOf("t.member")}, '')", Filter: true),
                 new("member", "Member", NameOf("t.member")),
                 new("event", "Event", "t.event"),
                 new("details", "Details", "t.details"),
             ],
             IsTeamOf("t.member"), "t.member = @member", null,
-            "it is read from the other logs; prune each of them instead"),
+            "it is read from the other logs; prune each of them instead",
+            AppWhere: $"t.member = '{Provenance.AuditLog.AppKey}'"),
 
         new("audit", "Audit", "Accountability",
             "Every change made from the window, a Cloud Link viewer, the Concierge or a paired program: who, how, which call, what it was about, and whether it worked. Never a key, a token or a message.",
@@ -283,8 +286,10 @@ public static class LogSources
         """;
 
     /// <summary>
-    /// The combined view: one row per thing that happened to or by a member, with its member as "Team/Name". Audit
-    /// entries are about a member when their target names it (memberId=…, or team=… member=…).
+    /// The combined view: one row per thing that happened to or by a member, with its member as "Team/Name", and every
+    /// audit entry (B101): about a member when its target names one (memberId=…, member=Team/Name, or team=… member=…),
+    /// else about a team as "Team/&lt;Team&gt;" (teamId=…, team=…, or the name= of teams.create), else about the app as
+    /// "/app" (<see cref="Provenance.AuditLog.WhoOf"/>). An id whose name is lost leaves the member null.
     /// A run's row is dated by its end once it has ended (what it says, "run failed", happened then), by its start while it
     /// runs: so a run that started hours ago and failed just now is in the last hour (org.summary problems) and is new to an
     /// open logs.tail (B051).
@@ -333,21 +338,25 @@ public static class LogSources
                  trim(COALESCE(ac.from_agent, '') || ' ' || COALESCE(ac.from_model, '') || ' -> ' || COALESCE(ac.to_agent, '') || ' ' || COALESCE(ac.to_model, '') || COALESCE(' by ' || ac.actor_user, '')), 'h' || ac.id
             FROM agent_changes ac WHERE ac.subject LIKE 'member:%' OR ac.subject LIKE 'manager:%'
           UNION ALL
-          SELECT x.at, 'Audit', COALESCE(tt.name || '/' || mm.name, x.tname || '/' || x.mname), x.method,
+          SELECT x.at, 'Audit', yawble_audit_who(x.target, x.method, tt.name || '/' || mm.name, tx.name), x.method,
                  trim(COALESCE(x.via, '') || ' ' || COALESCE(x.user_name, '') || ' ' || COALESCE(x.target, '') || ': ' || x.outcome), 'x' || x.id
             FROM (
-              SELECT x0.*, CASE WHEN instr(x0.mrest, ' ') > 0 THEN substr(x0.mrest, 1, instr(x0.mrest, ' ') - 1) ELSE x0.mrest END AS mname
-                FROM (
-                  SELECT au.id, au.at, au.via, au.user_name, au.method, au.target, au.outcome,
-                         CASE WHEN instr(au.target, 'memberId=') > 0 THEN CAST(substr(au.target, instr(au.target, 'memberId=') + 9) AS INTEGER) END AS mid,
-                         CASE WHEN instr(au.target, 'team=') > 0 AND instr(au.target, ' member=') > 0
-                              THEN substr(au.target, instr(au.target, 'team=') + 5, instr(au.target, ' member=') - instr(au.target, 'team=') - 5) END AS tname,
-                         CASE WHEN instr(au.target, ' member=') > 0 THEN substr(au.target, instr(au.target, ' member=') + 8) END AS mrest
-                    FROM audit_log au WHERE au.target LIKE '%memberId=%' OR au.target LIKE '% member=%'
-                ) x0
+              SELECT au.id, au.at, au.via, au.user_name, au.method, au.target, au.outcome,
+                     CASE WHEN instr(' ' || au.target, ' memberId=') > 0 THEN CAST(substr(' ' || au.target, instr(' ' || au.target, ' memberId=') + 10) AS INTEGER) END AS mid,
+                     CASE WHEN instr(' ' || au.target, ' teamId=') > 0 THEN CAST(substr(' ' || au.target, instr(' ' || au.target, ' teamId=') + 8) AS INTEGER) END AS tid
+                FROM audit_log au
             ) x
             LEFT JOIN members mm ON mm.id = x.mid
             LEFT JOIN teams tt ON tt.id = mm.team_id
+            LEFT JOIN teams tx ON tx.id = x.tid
         ) t
         """;
+
+    /// <summary>
+    /// The SQL functions <see cref="ActivityFrom"/> calls, added to each connection that reads it:
+    /// yawble_audit_who(target, method, joined member, joined team), <see cref="Provenance.AuditLog.WhoOf"/>.
+    /// </summary>
+    public static void AddFunctions(Microsoft.Data.Sqlite.SqliteConnection c) =>
+        c.CreateFunction<string?, string?, string?, string?, string?>("yawble_audit_who",
+            (target, method, member, team) => Provenance.AuditLog.WhoOf(target, method, member, team), isDeterministic: true);
 }
