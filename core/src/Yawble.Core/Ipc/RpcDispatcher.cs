@@ -44,20 +44,22 @@ public sealed class RpcDispatcher(
     public async Task<JsonNode?> DispatchAsAsync(Provenance.Actor actor, string method, JsonObject? parameters, CancellationToken ct)
     {
         using var acting = Provenance.Actor.Use(actor);
+        // The names the call's ids stand for, read before it runs: a delete removes what it names (B101).
+        var names = audit?.Names(method, parameters);
         try
         {
             var result = await DispatchAsync(method, parameters, ct).ConfigureAwait(false);
-            audit?.Record(actor, method, parameters, "done");
+            audit?.Record(actor, method, parameters, "done", names);
             return result;
         }
         catch (RpcException e)
         {
-            audit?.Record(actor, method, parameters, $"refused: {e.Code}: {e.Message}");
+            audit?.Record(actor, method, parameters, $"refused: {e.Code}: {e.Message}", names);
             throw;
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            audit?.Record(actor, method, parameters, $"failed: {e.GetType().Name}");
+            audit?.Record(actor, method, parameters, $"failed: {e.GetType().Name}", names);
             throw;
         }
     }

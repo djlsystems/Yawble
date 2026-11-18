@@ -228,9 +228,15 @@ The event carries the sections that changed, each in full:
 
 ### `logs.tail`, `logs.untail` and `logs.tailEntry`
 
-- `logs.tail {level: "default" | "all", team?: string, member?: string}` starts pushing this computer's new log
-  entries, as they are written, to this viewer. `default` sends warning and error entries and workflow events;
-  `all` sends every level. `team` and `member` narrow it to one team or one member.
+- `logs.tail {level: "default" | "all", team?: string, member?: string, app?: boolean}` starts pushing this computer's
+  new log entries, as they are written, to this viewer. `default` sends warning and error entries and workflow events;
+  `all` sends every level. `team` and `member` narrow it to one team or one member; `app: true` to the entries about
+  no team and no member.
+- The activity log carries every audit entry (B101). An entry about a member has its `team` and `member`; one about a
+  whole team has `member: "<Team>"` (the team's name in angle brackets) and its `team`; one about the app itself
+  (backlog, settings, the link, backups...) has `team: null, member: "app"`. A member filter takes that member's own
+  entries only; a team filter takes its members' entries and its `<Team>` entries. `logs.query {source: "activity"}`
+  takes the same `team`, `member` and `app: true`, and `logs.sources` says which source offers `app`.
 - Each entry that passes the filter is pushed as the event `logs.tailEntry`, carrying one entry. `logs.query` rows
   and `logs.tailEntry` entries are redacted the same way, by the same code as the window's Logs dialog: known secrets
   and token-shaped text become `[redacted]`.

@@ -7,12 +7,13 @@ namespace Yawble.Core.Logs;
 /// <summary>
 /// What the Logs dialog asks for. <paramref name="Member"/> is "Team/Name". <paramref name="From"/> and
 /// <paramref name="To"/> are ISO times (inclusive, compared as text). <paramref name="AsOf"/>: the time the first page
-/// was read, so later pages are of the same list while new entries arrive.
+/// was read, so later pages are of the same list while new entries arrive. <paramref name="App"/>: only the rows about no
+/// team and no member (the activity log's "app" rows, B101); a source without such rows has none.
 /// </summary>
 public sealed record LogQuery(
     string Source, string? Team = null, string? Member = null, string? From = null, string? To = null, string? Text = null,
     IReadOnlyDictionary<string, string>? Filters = null, string? Sort = null, bool Descending = true, int Offset = 0,
-    int Limit = 100, string? AsOf = null);
+    int Limit = 100, string? AsOf = null, bool App = false);
 
 /// <summary>What pruning a source before a cutoff would delete.</summary>
 public sealed record LogPrunePreview(string Source, string Title, string Cutoff, long Count, string? Oldest, string? Newest, string Loss, long Files);
@@ -38,15 +39,15 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         foreach (var s in LogSources.All)
         {
             list.Add(Describe(s.Id, s.Title, s.Group, s.About, s.Columns, s.Prune is not null, s.Prune?.Loss, s.KeptBecause, s.Prune?.DefaultDays,
-                team: s.TeamWhere is not null, member: s.MemberWhere is not null));
+                team: s.TeamWhere is not null, member: s.MemberWhere is not null, app: s.AppWhere is not null));
         }
         foreach (var f in FileLogs.All)
-            list.Add(Describe(f.Id, f.Title, f.Group, f.About, f.Columns, true, f.Loss, null, f.DefaultDays, f.MemberInText, f.MemberInText));
+            list.Add(Describe(f.Id, f.Title, f.Group, f.About, f.Columns, true, f.Loss, null, f.DefaultDays, f.MemberInText, f.MemberInText, false));
         return list;
     }
 
     private JsonObject Describe(string id, string title, string group, string about, IReadOnlyList<LogColumn> columns, bool prunable,
-        string? loss, string? kept, int? defaultDays, bool team, bool member) => new()
+        string? loss, string? kept, int? defaultDays, bool team, bool member, bool app) => new()
     {
         ["id"] = id,
         ["title"] = title,
@@ -63,6 +64,8 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         ["retentionDays"] = prunable ? RetentionDays(id, defaultDays) : null,
         ["team"] = team,
         ["member"] = member,
+        // The source offers the app filter (logs.query app: true): the activity log's rows about no team and no member.
+        ["app"] = app,
     };
 
     private static bool Known(string id) => LogSources.Find(id) is not null || FileLogs.Find(id) is not null;
@@ -131,6 +134,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             if (s.TeamWhere is null) parts.Add("0");
             else parts.Add($"({s.TeamWhere})");
         }
+        if (q.App) parts.Add(s.AppWhere is null ? "0" : $"({s.AppWhere})");
         if (!string.IsNullOrWhiteSpace(q.From)) { parts.Add($"{s.Time} >= @from"); cmd.Parameters.AddWithValue("@from", q.From); }
         if (!string.IsNullOrWhiteSpace(q.To)) { parts.Add($"{s.Time} <= @to"); cmd.Parameters.AddWithValue("@to", q.To); }
         var n = 0;
@@ -179,7 +183,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
     }
 
     /// <summary>The values a filter column has (most used first, at most 200), within the team or member chosen.</summary>
-    public JsonArray Values(string source, string column, string? team = null, string? member = null)
+    public JsonArray Values(string source, string column, string? team = null, string? member = null, bool app = false)
     {
         if (FileLogs.Find(source) is { } file)
         {
@@ -192,7 +196,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         var col = s.Columns.FirstOrDefault(x => x.Key == column && x.Filter) ?? throw new ArgumentException($"'{column}' is not a filter of {source}");
         using var c = Open();
         using var cmd = c.CreateCommand();
-        var where = Where(s, new LogQuery(source, team, member), _clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture), cmd, c);
+        var where = Where(s, new LogQuery(source, team, member, App: app), _clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture), cmd, c);
         cmd.CommandText = $"SELECT CAST({col.Sql} AS TEXT) AS v, COUNT(*) AS n FROM {s.From} WHERE {where} GROUP BY v HAVING v IS NOT NULL AND v <> '' ORDER BY n DESC, v LIMIT 200;";
         var list = new JsonArray();
         using var r = cmd.ExecuteReader();
@@ -203,6 +207,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
     private JsonObject QueryFile(FileLogSource f, LogQuery q, string asOf, int offset, int limit)
     {
         IEnumerable<string[]> rows = f.Read(dataDir).Select(e => e.Fields).Where(e => string.CompareOrdinal(e[0] ?? "", asOf) <= 0);
+        if (q.App) rows = [];
         if (!string.IsNullOrWhiteSpace(q.Member))
         {
             var name = q.Member[(q.Member.IndexOf('/') + 1)..];
@@ -255,8 +260,9 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             string? Str(int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture);
             var source = Str(2) ?? "";
             var key = Str(3);
+            // "Team/Name", "Team/<Team>" (about a team) or "/app" (about the app: no team, member "app"); B101.
             var slash = key?.IndexOf('/') ?? -1;
-            var (team, member) = slash > 0 ? (key![..slash], key[(slash + 1)..]) : ((string?)null, (string?)null);
+            var (team, member) = slash >= 0 ? (slash > 0 ? key![..slash] : null, key![(slash + 1)..]) : ((string?)null, (string?)null);
             var ev = Str(4);
             var text = Str(5);
             var message = source == "Messages";
@@ -469,6 +475,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
     {
         var c = new SqliteConnection(connectionString);
         c.Open();
+        LogSources.AddFunctions(c);
         return c;
     }
 

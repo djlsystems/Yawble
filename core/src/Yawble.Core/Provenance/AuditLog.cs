@@ -70,9 +70,126 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         return parts.Count == 0 ? null : string.Join(' ', parts);
     }
 
-    public void Record(Actor actor, string method, JsonObject? parameters, string outcome)
+    /// <summary>
+    /// The names a call's ids stand for, appended to its target so the row stays readable after a delete (B101):
+    /// teamId= gets " team=&lt;Team&gt;", memberId= gets " member=&lt;Team&gt;/&lt;Name&gt;", and a per-member action
+    /// addressed by its own id (a trigger, an asked tool call, a network or host tool ask) gets " memberId=… member=…".
+    /// Read before the call runs (a delete removes what it names); null when there is nothing to add or nothing found.
+    /// </summary>
+    public string? Names(string method, JsonObject? parameters)
+    {
+        if (parameters is null || IsReadOnly(method, parameters)) return null;
+        var hasTeam = Text(parameters, "team") is not null;
+        var hasMember = Text(parameters, "member") is not null;
+        var teamId = Id(parameters, "teamId");
+        var memberId = Id(parameters, "memberId");
+        var ownerSql = memberId is null && !hasMember && Id(parameters, "id") is not null ? OwnerSql(method) : null;
+        if ((teamId is null || hasTeam) && (memberId is null || hasMember) && ownerSql is null) return null;
+        try
+        {
+            using var c = new SqliteConnection(connectionString);
+            c.Open();
+            var parts = new List<string>();
+            if (teamId is not null && !hasTeam && Scalar(c, "SELECT name FROM teams WHERE id = $id;", teamId.Value) is { } team)
+                parts.Add("team=" + team);
+            if (memberId is not null && !hasMember
+                && Scalar(c, "SELECT tm.name || '/' || m.name FROM members m JOIN teams tm ON tm.id = m.team_id WHERE m.id = $id;", memberId.Value) is { } key)
+                parts.Add("member=" + key);
+            if (ownerSql is not null && Scalar(c, ownerSql, Id(parameters, "id")!.Value) is { } owner)
+            {
+                var id = Scalar(c, "SELECT m.id FROM members m JOIN teams tm ON tm.id = m.team_id WHERE tm.name || '/' || m.name = $id COLLATE NOCASE;", owner);
+                parts.Add((id is null ? "" : $"memberId={id} ") + "member=" + owner);
+            }
+            return parts.Count == 0 ? null : string.Join(' ', parts);
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The member ("Team/Name") a per-member action's own id belongs to, by method; null: the id is not a member's thing.</summary>
+    private static string? OwnerSql(string method) => method switch
+    {
+        _ when method.StartsWith("triggers.", StringComparison.Ordinal) =>
+            "SELECT tm.name || '/' || m.name FROM triggers g JOIN members m ON m.id = g.member_id JOIN teams tm ON tm.id = m.team_id WHERE g.id = $id;",
+        "integrations.approve" or "integrations.decline" => "SELECT member FROM integration_asks WHERE id = $id;",
+        "network.answer" => "SELECT member FROM network_asks WHERE id = $id;",
+        _ when method.StartsWith("tools.", StringComparison.Ordinal) => "SELECT member FROM tool_asks WHERE id = $id;",
+        _ => null,
+    };
+
+    private static string? Scalar(SqliteConnection c, string sql, object id)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("$id", id);
+        return cmd.ExecuteScalar() is { } v and not DBNull ? Convert.ToString(v, CultureInfo.InvariantCulture) : null;
+    }
+
+    private static string? Text(JsonObject p, string key) => p[key] is JsonValue v && v.ToString() is { Length: > 0 } s ? s : null;
+
+    private static long? Id(JsonObject p, string key) =>
+        p[key] is JsonValue v && long.TryParse(v.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : null;
+
+    /// <summary>
+    /// A target's key=value pairs (the keys of <see cref="TargetKeys"/>, the names appended at write time among them). A
+    /// value runs to the next " key=", so a team name may hold spaces; the first of a key repeated wins.
+    /// </summary>
+    public static Dictionary<string, string> ParseTarget(string? target)
+    {
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(target)) return found;
+        var starts = new List<(int At, string Key)>();
+        foreach (var key in TargetKeys)
+        {
+            var probe = key + "=";
+            for (var i = target.IndexOf(probe, StringComparison.Ordinal); i >= 0; i = target.IndexOf(probe, i + 1, StringComparison.Ordinal))
+                if (i == 0 || target[i - 1] == ' ') starts.Add((i, key));
+        }
+        starts.Sort((a, b) => a.At.CompareTo(b.At));
+        for (var n = 0; n < starts.Count; n++)
+        {
+            var (at, key) = starts[n];
+            var end = n + 1 < starts.Count ? starts[n + 1].At - 1 : target.Length;
+            if (end < at + key.Length + 1) continue;
+            found.TryAdd(key, target[(at + key.Length + 1)..end]);
+        }
+        return found;
+    }
+
+    /// <summary>The activity log's key of an audit row about no team and no member: team empty, member "app" (B101).</summary>
+    public const string AppKey = "/app";
+
+    /// <summary>
+    /// Who an audit row is about, as the activity log keys it (B101): "Team/Name" for a member; "Team/&lt;Team&gt;" for a
+    /// team; "/app" for neither. <paramref name="joinedMember"/> and <paramref name="joinedTeam"/>: what the target's
+    /// memberId= and teamId= name today (null when gone); else the names written into the target. An id whose name is
+    /// lost (a row written before names were kept, about something deleted since): null.
+    /// </summary>
+    public static string? WhoOf(string? target, string? method, string? joinedMember, string? joinedTeam)
+    {
+        if (joinedMember is not null) return joinedMember;
+        var t = ParseTarget(target);
+        var team = joinedTeam
+            ?? (t.TryGetValue("team", out var named) && named.Length > 0 ? named : null)
+            ?? (method == "teams.create" && t.TryGetValue("name", out var created) && created.Length > 0 ? created : null);
+        if (t.TryGetValue("member", out var member) && member.Length > 0)
+        {
+            if (member.Contains('/')) return member;
+            if (team is not null) return team + "/" + member;
+        }
+        if (t.ContainsKey("memberId")) return null;
+        if (team is not null) return $"{team}/<{team}>";
+        return t.ContainsKey("teamId") ? null : AppKey;
+    }
+
+    public void Record(Actor actor, string method, JsonObject? parameters, string outcome, string? names = null)
     {
         if (IsReadOnly(method, parameters)) return;
+        names ??= Names(method, parameters);
+        var target = Target(parameters);
+        if (names is not null) target = target is null ? names : target + " " + names;
         try
         {
             using var c = new SqliteConnection(connectionString);
@@ -84,7 +201,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
             cmd.Parameters.AddWithValue("$user", (object?)actor.User ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$client", (object?)actor.Client ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$method", method);
-            cmd.Parameters.AddWithValue("$target", (object?)Target(parameters) ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$target", (object?)target ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$outcome", outcome.Length > 300 ? outcome[..300] : outcome);
             cmd.ExecuteNonQuery();
         }
