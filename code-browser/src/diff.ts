@@ -1,36 +1,45 @@
-// One file's diff, as the core's git.commitDiff sends it (B072), and the pure rules the read-only diff viewer
-// (DiffView.vue) shows it by: inline (one column, old and new numbers) or side by side (old left, new right, a run of
-// removed lines paired with the added run that follows it).
+// One file's diff, as the core's git.commitDiff sends it (B072, core TeamRepos.CommitView.cs CommitFileDiff), and the
+// pure rules the read-only diff viewer (DiffView.vue) shows it by: inline (one column, old and new numbers) or side by
+// side (old left, new right, a run of deleted lines paired with the added run that follows it).
 
-/** ' ' context, '+' added, '-' removed. oldLine / newLine: the line's number on each side; absent on the side it is not on. */
-export interface DiffLine { kind: ' ' | '+' | '-'; text: string; oldLine?: number | null; newLine?: number | null }
-export interface DiffHunk { oldStart: number; oldLines: number; newStart: number; newLines: number; header?: string | null; lines: DiffLine[] }
+/**
+ * A line as the core sends it: kind context, added or deleted; old / new: its 1-based line number on each side, present
+ * only on the side(s) the line is on.
+ */
+export interface DiffWireLine { kind: 'context' | 'added' | 'deleted'; old?: number | null; new?: number | null; text: string }
+/** A hunk as the core sends it: header is git's own "@@ -a,b +c,d @@ ..." line. */
+export interface DiffWireHunk { header?: string | null; oldStart: number; oldCount: number; newStart: number; newCount: number; lines: DiffWireLine[] }
+
+/** A line as the viewer shows it: ' ' context, '+' added, '-' deleted; oldLine / newLine set on the side(s) it is on. */
+export interface DiffLine { kind: ' ' | '+' | '-'; text: string; oldLine?: number; newLine?: number }
+export interface DiffHunk { title: string; lines: DiffLine[] }
 
 /** One row of the side-by-side view: the old side, the new side, or both; null is an empty cell. */
 export interface DiffCell { num: number; text: string; kind: ' ' | '+' | '-' }
 export interface DiffRow { left: DiffCell | null; right: DiffCell | null }
 
+const KIND: Record<string, DiffLine['kind']> = { context: ' ', added: '+', deleted: '-' };
+
 /**
- * The hunks with every line numbered: numbers the core sent are kept, missing ones are counted from the hunk's starts.
- * A diff sent as a flat `lines` list (no hunks) becomes one hunk starting at line 1.
+ * The core's hunks as the viewer shows them, every line numbered: the numbers the core sent are kept, a missing one is
+ * counted on from the hunk's start (or the line before). A binary, too-large or pure-rename diff has no hunks.
  */
-export function normalizeHunks(diff: { hunks?: DiffHunk[] | null; lines?: DiffLine[] | null }): DiffHunk[] {
-  const raw = diff.hunks?.length ? diff.hunks : diff.lines?.length ? [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 0, lines: diff.lines }] : [];
-  return raw.map((h) => {
+export function normalizeHunks(diff: { hunks?: DiffWireHunk[] | null }): DiffHunk[] {
+  return (diff.hunks ?? []).map((h) => {
     let o = h.oldStart || 1;
     let n = h.newStart || 1;
     const lines = (h.lines ?? []).map((l): DiffLine => {
-      const kind: DiffLine['kind'] = l.kind === '+' || l.kind === '-' ? l.kind : ' ';
+      const kind = KIND[l.kind] ?? ' ';
       const line: DiffLine = { kind, text: l.text ?? '' };
-      if (kind !== '+') { line.oldLine = l.oldLine ?? o; o = line.oldLine + 1; }
-      if (kind !== '-') { line.newLine = l.newLine ?? n; n = line.newLine + 1; }
+      if (kind !== '+') { line.oldLine = l.old ?? o; o = line.oldLine + 1; }
+      if (kind !== '-') { line.newLine = l.new ?? n; n = line.newLine + 1; }
       return line;
     });
-    return { ...h, lines };
+    return { title: hunkTitle(h), lines };
   });
 }
 
-/** A hunk's rows side by side: context on both sides; each run of removed lines beside the added run right after it. */
+/** A hunk's rows side by side: context on both sides; each run of deleted lines beside the added run right after it. */
 export function sideBySide(hunk: DiffHunk): DiffRow[] {
   const rows: DiffRow[] = [];
   const lines = hunk.lines;
@@ -55,7 +64,10 @@ export function sideBySide(hunk: DiffHunk): DiffRow[] {
   return rows;
 }
 
-/** "@@ -12,5 +12,7 @@ header" for a hunk's separator line. */
-export function hunkTitle(h: DiffHunk): string {
-  return `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@${h.header ? ` ${h.header}` : ''}`;
+/** A hunk's separator line: git's own header as the core sent it, else "@@ -12,5 +12,7 @@" made from its numbers. */
+export function hunkTitle(h: DiffWireHunk): string {
+  const header = h.header?.trim();
+  if (header?.startsWith('@@')) return header;
+  const made = `@@ -${h.oldStart},${h.oldCount} +${h.newStart},${h.newCount} @@`;
+  return header ? `${made} ${header}` : made;
 }

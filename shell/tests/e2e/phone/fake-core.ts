@@ -340,16 +340,15 @@ const COMMIT_GONE = '0dead00b1';
 const commitState = { codeShown: true };
 const person = (name: string, mins: number) => ({ name, email: `${name.toLowerCase()}@yawble.local`, date: iso(mins) });
 function commitShow(sha: string) {
+  // As the core: a malformed ID is bad_params; a commit git no longer has is only {found, goneReason, sha}.
+  if (!/^[0-9a-f]{4,64}$/i.test(sha)) throw Object.assign(new Error('sha must be 4 to 64 hex digits'), { code: 'bad_params' });
   const s = sha.toLowerCase();
-  const pick = [COMMIT_ADA, COMMIT_MERGE, COMMIT_BASE].find((c) => s.length >= 7 && c.startsWith(s));
-  const gone = { found: false, goneReason: "Its branch members/payments/old-cleo was deleted and git no longer has the commit.", sha, shortSha: sha.slice(0, 7), title: '', body: '',
-    author: person('Unknown', 0), committer: null, isMerge: false, parents: [], merge: null, made: null,
-    where: { inMain: false, branches: [], onlyOnMember: null, pushed: false, tags: [] }, files: [], codeShown: commitState.codeShown };
-  if (!pick) return gone;
-  const common = { found: true, sha: pick, shortSha: pick.slice(0, 7), committer: null, codeShown: commitState.codeShown };
+  const pick = [COMMIT_ADA, COMMIT_MERGE, COMMIT_BASE].find((c) => c.startsWith(s));
+  if (!pick) return { found: false, goneReason: `Commit ${sha} was on members/payments/old-cleo (Old Cleo's branch), and git no longer has it: that branch was deleted and git has since cleaned up its commits.`, sha };
+  const common = { found: true, sha: pick, shortSha: pick.slice(0, 7), codeShown: commitState.codeShown };
   if (pick === COMMIT_ADA) return { ...common, title: 'Partial refunds: refund part of a payment', body: 'The refund takes an amount now.\n\nCard 3, workflow #10.',
-    author: person('DeveloperAda', 40), isMerge: false, parents: [COMMIT_BASE], merge: null, made: { member: 'DeveloperAda', card: 3, workflow: 10 },
-    where: { inMain: false, branches: ['team/payments', 'members/payments/developerada'], onlyOnMember: null, pushed: false, tags: [] },
+    author: person('DeveloperAda', 40), isMerge: false, parents: [COMMIT_BASE], made: { member: 'DeveloperAda', card: 3, workflow: 10 },
+    where: { inMain: false, branches: ['team/payments', 'members/payments/developerada'], pushed: false, tags: [] },
     files: [
       { path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false },
       { path: 'src/payments/a-rather-long-folder-name/and-a-long-file-name-that-must-wrap-on-a-phone.test.ts', status: 'added', added: 12, deleted: 0, binary: false },
@@ -357,25 +356,28 @@ function commitShow(sha: string) {
     ] };
   if (pick === COMMIT_MERGE) return { ...common, title: "Merge DeveloperAda's branch into team/payments", body: '', author: person('Manager', 30), committer: person('Yawble', 30),
     isMerge: true, parents: [COMMIT_BASE, COMMIT_ADA], merge: { intoBranch: 'team/payments', fromBranch: 'members/payments/developerada', fromMember: 'DeveloperAda', commitCount: 2 },
-    made: { member: 'Manager', card: null, workflow: 10 }, where: { inMain: false, branches: ['team/payments'], onlyOnMember: null, pushed: false, tags: [] },
+    made: { member: 'Manager', workflow: 10 }, where: { inMain: false, branches: ['team/payments'], pushed: false, tags: [] },
     files: [{ path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false }] };
-  return { ...common, title: 'Release 2026.11.18.1', body: '', author: person('Owner', 600), isMerge: false, parents: [], merge: null, made: null,
-    where: { inMain: true, branches: ['main', 'team/payments'], onlyOnMember: null, pushed: true, tags: ['v2026.11.18.1'] },
+  return { ...common, title: 'Release 2026.11.18.1', body: '', author: person('Owner', 600), isMerge: false, parents: [],
+    where: { inMain: true, branches: ['team/payments'], pushed: true, tags: ['v2026.11.18.1'] },
     files: [{ path: 'README.md', status: 'modified', added: 1, deleted: 1, binary: false }] };
 }
 function commitDiff(sha: string, path: string) {
-  const c = commitShow(sha) as { found: boolean; files: { path: string; oldPath?: string; binary: boolean }[] };
-  const f = c.found ? c.files.find((x) => x.path === path) : null;
-  if (!f) throw Object.assign(new Error(`${path} is not in commit ${sha.slice(0, 7)}`), { code: 'not_found' });
-  if (f.binary) return { path, binary: true, tooLarge: false, summary: 'Binary file, 12 KB to 14 KB', hunks: [] };
+  const c = commitShow(sha) as { found: boolean; codeShown?: boolean; goneReason?: string; files: { path: string; oldPath?: string; status: string; added: number; deleted: number; binary: boolean }[] };
+  if (!c.found) throw Object.assign(new Error(c.goneReason!), { code: 'gone' });
+  if (!c.codeShown) throw Object.assign(new Error("Members' code is not shown to cloud viewers."), { code: 'remote_refused' });
+  const f = c.files.find((x) => x.path === path);
+  if (!f) throw Object.assign(new Error(`commit ${sha.slice(0, 12)} does not change ${path}`), { code: 'no_such_file' });
+  const head = { path, ...(f.oldPath ? { oldPath: f.oldPath } : {}), status: f.status, added: f.added, deleted: f.deleted };
+  if (f.binary) return { ...head, binary: true, tooLarge: false, summary: 'Binary file, 12 KB to 14 KB', hunks: [] };
   const lines = [
-    { kind: ' ', text: 'export function refund(amount: number, limitDays = 30): boolean {' },
-    { kind: '-', text: '  return amount > 0;' },
-    { kind: '+', text: '  if (amount <= 0) return false; // a long comment that runs past the edge of a phone screen, to scroll inside the diff only' },
-    { kind: '+', text: '  return limitDays <= 90;' },
-    { kind: ' ', text: '}' },
+    { kind: 'context', old: 1, new: 1, text: 'export function refund(amount: number, limitDays = 30): boolean {' },
+    { kind: 'deleted', old: 2, text: '  return amount > 0;' },
+    { kind: 'added', new: 2, text: '  if (amount <= 0) return false; // a long comment that runs past the edge of a phone screen, to scroll inside the diff only' },
+    { kind: 'added', new: 3, text: '  return limitDays <= 90;' },
+    { kind: 'context', old: 3, new: 4, text: '}' },
   ];
-  return { path, oldPath: f.oldPath ?? null, binary: false, tooLarge: false, summary: null, hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 4, header: null, lines }] };
+  return { ...head, binary: false, tooLarge: false, hunks: [{ header: '@@ -1,3 +1,4 @@ export function refund', oldStart: 1, oldCount: 3, newStart: 1, newCount: 4, lines }] };
 }
 
 /** B054: with true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */

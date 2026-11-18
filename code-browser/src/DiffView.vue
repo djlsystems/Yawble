@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { highlightLines, languageFor } from './highlight';
-import { hunkTitle, normalizeHunks, sideBySide, type DiffHunk, type DiffLine } from './diff';
+import { normalizeHunks, sideBySide, type DiffWireHunk } from './diff';
 import { useNarrow } from './narrow';
 import './theme.css';
 
 // One file's diff, read-only (B072's Commit view): inline (one column with the old and new line numbers) or side by side
 // (old left, new right). Text is highlighted by highlight.js line by line (its escaped HTML only, as CodeLines). A
-// binary or too-large file shows the core's summary line instead of any content. A narrow screen starts inline.
+// binary or too-large file, or a pure rename, shows the core's summary line instead of any content (git.commitDiff sends no
+// hunks then). A narrow screen starts inline.
 export interface DiffInput {
-  path: string; oldPath?: string | null; binary: boolean; tooLarge: boolean; summary?: string | null;
-  hunks?: DiffHunk[] | null; lines?: DiffLine[] | null;
+  path: string; oldPath?: string | null; binary: boolean; tooLarge: boolean; summary?: string | null; hunks?: DiffWireHunk[] | null;
 }
 const props = withDefaults(defineProps<{ diff: DiffInput; mode?: 'inline' | 'split' | null }>(), { mode: null });
 const emit = defineEmits<{ 'update:mode': [mode: 'inline' | 'split'] }>();
@@ -27,7 +27,7 @@ const html = (text: string) => highlightLines(text, language.value)[0] ?? '';
 const noContent = computed(() => props.diff.binary || props.diff.tooLarge);
 const summary = computed(() => props.diff.summary
   || (props.diff.binary ? 'Binary file: its content is not shown.' : props.diff.tooLarge ? 'This diff is too large to show.' : ''));
-const split = computed(() => hunks.value.map((h) => ({ title: hunkTitle(h), rows: sideBySide(h) })));
+const split = computed(() => hunks.value.map((h) => ({ title: h.title, rows: sideBySide(h) })));
 const width = computed(() => {
   let max = 1;
   for (const h of hunks.value) for (const l of h.lines) max = Math.max(max, l.oldLine ?? 0, l.newLine ?? 0);
@@ -51,7 +51,7 @@ const mark = (k: ' ' | '+' | '-') => (k === ' ' ? ' ' : k === '+' ? '+' : '−')
     <p v-else-if="!hunks.length" class="cb-diff-summary" data-test="diff-empty">{{ diff.summary || 'No line changed (only the file’s mode or name).' }}</p>
     <div v-else-if="shown === 'inline'" class="cb-diff-body" data-test="diff-inline">
       <template v-for="(h, hi) in hunks" :key="hi">
-        <div class="cb-diff-hunk" data-test="diff-hunk">{{ hunkTitle(h) }}</div>
+        <div class="cb-diff-hunk" data-test="diff-hunk">{{ h.title }}</div>
         <div v-for="(l, li) in h.lines" :key="`${hi}-${li}`" class="cb-diff-line" :class="{ add: l.kind === '+', del: l.kind === '-' }" data-test="diff-line" :data-kind="l.kind">
           <span class="cb-dnum">{{ l.oldLine ?? '' }}</span><span class="cb-dnum">{{ l.newLine ?? '' }}</span>
           <span class="cb-dmark" aria-hidden="true">{{ mark(l.kind) }}</span><span class="cb-dtext" v-html="html(l.text)" />

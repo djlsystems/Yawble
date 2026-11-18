@@ -1,5 +1,5 @@
 import { shallowRef } from 'vue';
-import type { CommitShow } from '../../shared/api';
+import type { CommitFound } from '../../shared/api';
 
 // B072: the one Commit view any commit ID in the app opens (hand-backs, the board's trail, the Monitor, the Tidy panel,
 // the Git dialog). One at a time: opening another commit replaces it. teams: where to look, in order; the first team
@@ -11,7 +11,7 @@ export const commitTarget = shallowRef<CommitTarget | null>(null);
 
 export function openCommit(team: string | string[], sha: string): void {
   const teams = (Array.isArray(team) ? team : [team]).filter((t, i, all) => !!t && all.indexOf(t) === i);
-  if (!teams.length || !isCommitId(sha)) return;
+  if (!teams.length || !isAskableId(sha)) return;
   commitTarget.value = { teams, sha: sha.toLowerCase() };
 }
 
@@ -54,7 +54,12 @@ export function installCommitLinks(doc: Document = document): () => void {
 export interface GitRequest { team: string; focus: 'compare' | 'branch'; branch: string | null; sha: string }
 export const gitRequest = shallowRef<GitRequest | null>(null);
 
-/** A commit ID as git prints one: 7 to 40 hex digits, with at least one digit and one letter (so "deadbeef" or a
+/** What git.commitShow takes: 4 to 64 hex digits (a full ID the app passes, short or long; the core refuses others). */
+export function isAskableId(text: string): boolean {
+  return /^[0-9a-f]{4,64}$/i.test(text);
+}
+
+/** A commit ID in text, as git prints one: 7 to 40 hex digits, with at least one digit and one letter (so "deadbeef" or a
  * number like 1234567 is not taken for one). */
 export function isCommitId(text: string): boolean {
   return /^[0-9a-f]{7,40}$/i.test(text) && /[0-9]/.test(text) && /[a-f]/i.test(text);
@@ -86,17 +91,18 @@ export function commitParts(text: string): CommitPart[] {
 
 export const spaced = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-/** "Merged DeveloperMarlo's branch into team/x, 4 commits". */
-export function mergeLine(c: CommitShow): string | null {
+/** "Merged DeveloperMarlo's branch into team/x, 4 commits". Either branch may be unknown (null): left out, never "null". */
+export function mergeLine(c: CommitFound): string | null {
   if (!c.isMerge) return null;
   const m = c.merge;
   if (!m) return `A merge of ${c.parents.length} parents.`;
-  const from = m.fromMember ? `${m.fromMember}'s branch` : m.fromBranch;
-  return `Merged ${from} into ${m.intoBranch}, ${m.commitCount} commit${m.commitCount === 1 ? '' : 's'}`;
+  const from = m.fromMember ? `${m.fromMember}'s branch` : m.fromBranch || 'another branch';
+  const into = m.intoBranch ? ` into ${m.intoBranch}` : '';
+  return `Merged ${from}${into}, ${m.commitCount} commit${m.commitCount === 1 ? '' : 's'}`;
 }
 
 /** Where the commit is, in plain words, most important first. */
-export function whereLines(c: CommitShow): { key: string; text: string; tone: 'ok' | 'warn' | 'plain' }[] {
+export function whereLines(c: CommitFound): { key: string; text: string; tone: 'ok' | 'warn' | 'plain' }[] {
   const w = c.where;
   const out: { key: string; text: string; tone: 'ok' | 'warn' | 'plain' }[] = [];
   const teamBranch = w.branches.find((b) => b.startsWith('team/'));
@@ -111,7 +117,7 @@ export function whereLines(c: CommitShow): { key: string; text: string; tone: 'o
 }
 
 /** The branch "Show its branch" opens: the member's, else the team branch, else the first that holds it. */
-export function itsBranch(c: CommitShow): string | null {
+export function itsBranch(c: CommitFound): string | null {
   const b = c.where.branches;
   return b.find((x) => x.startsWith('members/')) ?? b.find((x) => x.startsWith('team/')) ?? b.find((x) => x !== 'main') ?? b[0] ?? null;
 }
@@ -120,7 +126,7 @@ const STATUS_WORDS: Record<string, string> = { added: 'added', deleted: 'deleted
 export const fileStatusWord = (s: string) => STATUS_WORDS[s] ?? s;
 
 /** "a@x.com" style person line; the committer only when someone else committed it. */
-export function differentCommitter(c: CommitShow): boolean {
+export function differentCommitter(c: CommitFound): boolean {
   const a = c.author;
   const k = c.committer;
   return !!k && (k.name !== a.name || k.email !== a.email);

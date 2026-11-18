@@ -736,37 +736,44 @@ export interface TidyPlan { repos: TidyRepo[] }
  * shown: the core refuses with code "stale" if either moved. Also refused (an error) while the member runs. */
 export interface BranchRealignResult { oldSha: string; newSha: string }
 /**
- * B072 git.commitShow {team, sha}: one commit of the team's repository, from plain git (never an agent's clone).
- * found=false: git no longer has it (goneReason says why, e.g. its branch was deleted and the commit pruned); the other
- * fields may then be empty. made: the member, card and workflow that made it (the app's own records), when known.
- * merge: what a merge brought in. where: inMain, the branches that contain it, onlyOnMember (only on that member's branch),
- * pushed (on origin), tags (the release tags that contain it). files: against the first parent for a merge.
- * codeShown=false: a cloud viewer with "Show members' code to cloud viewers" off; the diffs are not offered.
+ * B072 git.commitShow {team | teamId, sha, repo?} (core TeamRepos.CommitView.cs CommitInfo.ToJson): one commit of the
+ * team's repository, from plain git (never an agent's clone). sha: 4 to 64 hex digits, else the error bad_params.
+ * found=false: git no longer has it; the answer is then only {found, goneReason, sha} (goneReason is plain words and
+ * may name the branch and member). made: the member, card and workflow that made it (the app's own records); absent
+ * when unknown; a merge recorded on the team branch is credited to the Manager. merge: what a merge brought in;
+ * intoBranch / fromBranch are null when neither git nor the app's records can tell. where: inMain; branches: the team
+ * branch first, then member branches, never main; onlyOnMember only when it is in neither main nor the team branch;
+ * pushed (on origin); tags (the release tags that contain it). files: against the first parent for a merge.
+ * codeShown=false: a cloud viewer with "Show members' code to cloud viewers" off; the file list only, no diffs.
  */
 export interface CommitPerson { name: string; email: string; date: string }
-export type CommitFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'typechange';
+export type CommitFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 export interface CommitFile { path: string; oldPath?: string | null; status: CommitFileStatus | string; added: number; deleted: number; binary: boolean }
-export interface CommitShow {
-  found: boolean; goneReason?: string | null;
+export interface CommitGone { found: false; goneReason?: string | null; sha: string }
+export interface CommitFound {
+  found: true;
   sha: string; shortSha: string; title: string; body: string;
   author: CommitPerson; committer?: CommitPerson | null;
   isMerge: boolean; parents: string[];
-  merge?: { intoBranch: string; fromBranch: string; fromMember?: string | null; commitCount: number } | null;
+  merge?: { intoBranch: string | null; fromBranch: string | null; fromMember?: string | null; commitCount: number } | null;
   made?: { member: string; card?: number | null; workflow?: number | null } | null;
   where: { inMain: boolean; branches: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[] };
   files: CommitFile[];
   codeShown: boolean;
 }
+export type CommitShow = CommitGone | CommitFound;
 /**
- * B072 git.commitDiff {team, sha, path}: one file's diff against the first parent (the same shape as the code browser's
- * DiffHunk, code-browser/src/diff.ts). binary or tooLarge: no hunks; summary says what changed in one line
- * ("Binary file, 12 KB to 14 KB"). Each hunk's lines: kind ' ' context, '+' added, '-' removed; oldLine / newLine are
- * the line numbers on each side (absent on the side a line is not on).
+ * B072 git.commitDiff {team | teamId, sha, path, repo?} (core CommitFileDiff.ToJson): one file's diff against the first
+ * parent. Each hunk: git's header line, its starts and counts, and its lines (kind context / added / deleted; old / new:
+ * the 1-based line numbers, only on the side(s) the line is on). Binary, over 5000 changed lines or 2M characters, or a
+ * pure rename: a summary and no hunks. Errors: gone, no_such_file, bad_params, git_failed; remote_refused for a cloud
+ * viewer when members' code is hidden.
  */
-export interface DiffLine { kind: ' ' | '+' | '-'; text: string; oldLine?: number | null; newLine?: number | null }
-export interface DiffHunk { oldStart: number; oldLines: number; newStart: number; newLines: number; header?: string | null; lines: DiffLine[] }
+export interface CommitDiffLine { kind: 'context' | 'added' | 'deleted'; old?: number | null; new?: number | null; text: string }
+export interface CommitDiffHunk { header: string; oldStart: number; oldCount: number; newStart: number; newCount: number; lines: CommitDiffLine[] }
 export interface CommitDiff {
-  path: string; oldPath?: string | null; binary: boolean; tooLarge: boolean; summary?: string | null; hunks: DiffHunk[];
+  path: string; oldPath?: string | null; status: CommitFileStatus | string; binary: boolean; tooLarge: boolean; summary?: string | null;
+  added: number; deleted: number; hunks: CommitDiffHunk[];
 }
 
 /** teams.syncToBase: the team's "Bring branches up to <base> before new work" setting, the note of a sync or fetch-back

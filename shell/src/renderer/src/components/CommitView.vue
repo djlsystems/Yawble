@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import { DiffView } from '@yawble/code-browser';
-import type { CommitDiff, CommitFile, CommitShow, YawbleApi } from '../../../shared/api';
+import type { CommitDiff, CommitFile, CommitFound, CommitShow, YawbleApi } from '../../../shared/api';
 import { resolveApi } from '../api';
 import { copyText } from '../markdown';
 import { differentCommitter, fileStatusWord, gitRequest, itsBranch, mergeLine, spaced, whereLines } from '../commitView';
@@ -38,10 +38,12 @@ onMounted(async () => {
 });
 
 const c = computed(() => commit.value);
-const merged = computed(() => (c.value ? mergeLine(c.value) : null));
-const where = computed(() => (c.value?.found ? whereLines(c.value) : []));
+/** The commit when git has it (a gone commit's answer is only found, goneReason and sha). */
+const known = computed<CommitFound | null>(() => (commit.value?.found ? commit.value : null));
+const merged = computed(() => (known.value ? mergeLine(known.value) : null));
+const where = computed(() => (known.value ? whereLines(known.value) : []));
 const when = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(); };
-const totals = computed(() => (c.value?.files ?? []).reduce((a, f) => ({ added: a.added + (f.added || 0), deleted: a.deleted + (f.deleted || 0) }), { added: 0, deleted: 0 }));
+const totals = computed(() => (known.value?.files ?? []).reduce((a, f) => ({ added: a.added + (f.added || 0), deleted: a.deleted + (f.deleted || 0) }), { added: 0, deleted: 0 }));
 
 // ---- Copy ID.
 const copied = ref<boolean | null>(null);
@@ -55,25 +57,27 @@ const openPath = ref<string | null>(null);
 const diff = shallowRef<CommitDiff | null>(null);
 const diffLoading = ref(false);
 const diffError = ref<string | null>(null);
-async function openFile(f: CommitFile) {
-  if (!c.value?.codeShown) return;
-  if (openPath.value === f.path) { openPath.value = null; diff.value = null; return; }
-  openPath.value = f.path;
+async function openFile(file: CommitFile) {
+  const shown = known.value;
+  if (!shown?.codeShown) return;
+  if (openPath.value === file.path) { openPath.value = null; diff.value = null; return; }
+  openPath.value = file.path;
   diff.value = null;
   diffError.value = null;
   diffLoading.value = true;
   try {
-    const d = await api.call<CommitDiff>('git.commitDiff', { team: team.value, sha: c.value.sha, path: f.path });
-    if (openPath.value === f.path) diff.value = d;
+    // Errors (gone, no_such_file, bad_params, git_failed, remote_refused) carry the core's own plain message.
+    const d = await api.call<CommitDiff>('git.commitDiff', { team: team.value, sha: shown.sha, path: file.path });
+    if (openPath.value === file.path) diff.value = d;
   } catch (e) {
-    if (openPath.value === f.path) diffError.value = (e as Error)?.message ?? String(e);
+    if (openPath.value === file.path) diffError.value = (e as Error)?.message ?? String(e);
   } finally {
-    if (openPath.value === f.path) diffLoading.value = false;
+    if (openPath.value === file.path) diffLoading.value = false;
   }
 }
 
 // ---- Compare with main / Show its branch: the team's Git dialog (App.vue opens the team, TeamView the dialog).
-const branch = computed(() => (c.value?.found ? itsBranch(c.value) : null));
+const branch = computed(() => (known.value ? itsBranch(known.value) : null));
 function askGit(focus: 'compare' | 'branch') {
   if (!c.value) return;
   gitRequest.value = { team: team.value, focus, branch: focus === 'branch' ? branch.value : null, sha: c.value.sha };

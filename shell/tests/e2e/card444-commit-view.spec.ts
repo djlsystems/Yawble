@@ -116,7 +116,7 @@ test('1280 x 800: commit IDs in a card\'s trail open the view; a gone one says w
   await page.locator('[data-test=commit-dialog]').locator('xpath=ancestor::section[@role="dialog"]').locator('[data-test=modal-close]').click();
   await line.locator('[data-test=commit-link]').nth(1).click();
   await expect(page.locator('[data-test=commit-gone] h3')).toHaveText('This commit is gone');
-  await expect(page.locator('[data-test=commit-gone-reason]')).toContainText('members/payments/old-cleo was deleted');
+  await expect(page.locator('[data-test=commit-gone-reason]')).toContainText("was on members/payments/old-cleo (Old Cleo's branch), and git no longer has it");
   await shot(page, 'gone-1280');
   expect(errors).toEqual([]);
   await ctx.close();

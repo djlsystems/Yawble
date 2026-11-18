@@ -8,26 +8,27 @@ import {
   closeCommit, commitParts, commitTarget, commitTeams, gitRequest, installCommitLinks, isCommitId, itsBranch, mergeLine, openCommit, whereLines,
 } from '../../src/renderer/src/commitView';
 import { renderMarkdown } from '../../src/renderer/src/markdown';
-import { isUiMethod, type CommitDiff, type CommitShow, type YawbleApi } from '../../src/shared/api';
+import { isUiMethod, type CommitDiff, type CommitFound, type CommitShow, type YawbleApi } from '../../src/shared/api';
 
 // B072 (card 444): the Commit view against a fake core with the card's contract (git.commitShow, git.commitDiff).
 
 const SHA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
-const base = (over: Partial<CommitShow> = {}): CommitShow => ({
+const base = (over: Partial<CommitFound> = {}): CommitFound => ({
   found: true, sha: SHA, shortSha: SHA.slice(0, 7), title: 'Add partial refunds', body: 'Refunds can be partial now.\n\nCard 12.',
   author: { name: 'DeveloperAda', email: 'ada@yawble.local', date: '2026-11-18T10:00:00Z' }, committer: null,
-  isMerge: false, parents: ['1111111aaaaaaa'], merge: null, made: { member: 'DeveloperAda', card: 12, workflow: 10 },
-  where: { inMain: true, branches: ['main', 'team/payments'], onlyOnMember: null, pushed: true, tags: [] },
+  isMerge: false, parents: ['1111111aaaaaaa'], made: { member: 'DeveloperAda', card: 12, workflow: 10 },
+  where: { inMain: true, branches: ['team/payments'], pushed: true, tags: [] },
   files: [{ path: 'src/refund.ts', status: 'modified', added: 3, deleted: 1, binary: false }],
   codeShown: true, ...over,
 });
 const diffOf = (path: string, over: Partial<CommitDiff> = {}): CommitDiff => ({
-  path, binary: false, tooLarge: false, hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 4, header: 'function refund', lines: [
-    { kind: ' ', text: 'export function refund(amount: number) {' },
-    { kind: '-', text: '  return amount > 0;' },
-    { kind: '+', text: '  if (amount <= 0) return false;' },
-    { kind: '+', text: '  return amount <= limit();' },
-    { kind: ' ', text: '}' },
+  path, status: 'modified', binary: false, tooLarge: false, added: 2, deleted: 1,
+  hunks: [{ header: '@@ -1,3 +1,4 @@ function refund', oldStart: 1, oldCount: 3, newStart: 1, newCount: 4, lines: [
+    { kind: 'context', old: 1, new: 1, text: 'export function refund(amount: number) {' },
+    { kind: 'deleted', old: 2, text: '  return amount > 0;' },
+    { kind: 'added', new: 2, text: '  if (amount <= 0) return false;' },
+    { kind: 'added', new: 3, text: '  return amount <= limit();' },
+    { kind: 'context', old: 3, new: 4, text: '}' },
   ] }], ...over,
 });
 
@@ -40,13 +41,13 @@ function fakeCore(commits: Record<string, CommitShow | Error>, diffs: Record<str
       calls.push({ method, params });
       if (method === 'git.commitShow') {
         const c = commits[String(params?.team)];
-        if (!c) return { ...base(), found: false, goneReason: 'not in this repository' } as any;
+        if (!c) return { found: false, goneReason: 'not in this repository', sha: params?.sha } as any;
         if (c instanceof Error) throw c;
         return structuredClone(c) as any;
       }
       if (method === 'git.commitDiff') {
         const d = diffs[String(params?.path)];
-        if (!d) throw new Error('no such file in the commit');
+        if (!d) throw Object.assign(new Error('commit 3f9c2a1b7d4e does not change that file'), { code: 'no_such_file' });
         return structuredClone(d) as any;
       }
       throw new Error(`unexpected ${method}`);
@@ -140,9 +141,17 @@ describe('commit IDs in the app', () => {
     expect(none.text()).toBe('—');
   });
 
-  it('openCommit ignores something that is not an ID', () => {
+  it('openCommit ignores something that is not an ID; takes 4 to 64 hex as the core does', () => {
     openCommit('payments', 'main');
     expect(commitTarget.value).toBeNull();
+    openCommit('payments', 'abc');
+    expect(commitTarget.value).toBeNull();
+    openCommit('payments', 'a'.repeat(65));
+    expect(commitTarget.value).toBeNull();
+    openCommit('payments', 'ABCD');
+    expect(commitTarget.value).toEqual({ teams: ['payments'], sha: 'abcd' });
+    openCommit('payments', 'f'.repeat(64));
+    expect(commitTarget.value?.sha).toHaveLength(64);
   });
 });
 
@@ -183,6 +192,55 @@ describe('the Commit view', () => {
     expect(mergeLine({ ...c, merge: { ...c.merge!, fromMember: null, commitCount: 1 } })).toBe('Merged members/yawble-engineering-team/developermarlo into team/yawble-engineering-team, 1 commit');
   });
 
+  it('a merge whose branches git and the records cannot tell (null) never prints "null"', async () => {
+    const c = base({ isMerge: true, parents: ['aaaaaaa1', 'bbbbbbb2'], merge: { intoBranch: null, fromBranch: null, commitCount: 3 } });
+    const w = await view(fakeCore({ payments: c }));
+    expect(w.get('[data-test=commit-merge]').text()).toBe('Merged another branch, 3 commits');
+    expect(w.text()).not.toContain('null');
+    expect(mergeLine({ ...c, merge: { intoBranch: 'team/payments', fromBranch: null, commitCount: 1 } })).toBe('Merged another branch into team/payments, 1 commit');
+    expect(mergeLine({ ...c, merge: { intoBranch: null, fromBranch: 'members/payments/ada', commitCount: 2 } })).toBe('Merged members/payments/ada, 2 commits');
+  });
+
+  it('made missing: no "Made by" row; a team-branch merge credited to the Manager', async () => {
+    const { made: _, ...noMade } = base();
+    const w = await view(fakeCore({ payments: noMade as CommitFound }));
+    expect(w.find('[data-test=commit-made]').exists()).toBe(false);
+    expect(w.text()).not.toMatch(/undefined|null/);
+    const m = await view(fakeCore({ payments: base({ isMerge: true, parents: ['a1a1a1a', 'b2b2b2b'], made: { member: 'Manager', workflow: 7 },
+      merge: { intoBranch: 'team/payments', fromBranch: 'members/payments/developerada', fromMember: 'DeveloperAda', commitCount: 2 } }) }));
+    expect(m.get('[data-test=commit-made]').text()).toBe('Manager · workflow #7');
+  });
+
+  it('a malformed ID: the core\'s bad_params message is shown', async () => {
+    const w = await view(fakeCore({ payments: Object.assign(new Error('sha must be 4 to 64 hex digits'), { code: 'bad_params' }) }));
+    expect(w.get('[data-test=commit-error]').text()).toContain('sha must be 4 to 64 hex digits');
+  });
+
+  it('a pure rename: the core\'s summary, no hunks, no mode buttons', async () => {
+    const files = [{ path: 'src/refunds.ts', oldPath: 'src/refund.ts', status: 'renamed', added: 0, deleted: 0, binary: false }];
+    const core = fakeCore({ payments: base({ files }) }, { 'src/refunds.ts': { path: 'src/refunds.ts', oldPath: 'src/refund.ts', status: 'renamed', binary: false, tooLarge: false,
+      summary: 'Renamed from src/refund.ts; no line changed.', added: 0, deleted: 0, hunks: [] } });
+    const w = await view(core);
+    await w.get('[data-test=commit-file-open]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=diff-empty]').text()).toBe('Renamed from src/refund.ts; no line changed.');
+    expect(w.find('[data-test=diff-line]').exists()).toBe(false);
+  });
+
+  it('a diff the Cloud Link refuses (remote_refused) shows its message', async () => {
+    const api = fakeCore({ payments: base() }).api;
+    const refusing: YawbleApi = { ...api, call: async (m: string, p?: Record<string, unknown>) => {
+      if (m === 'git.commitDiff') throw Object.assign(new Error("Members' code is not shown to cloud viewers."), { code: 'remote_refused' });
+      return api.call(m, p);
+    } } as YawbleApi;
+    const w = mount(CommitView, { props: { api: refusing, teams: ['payments'], sha: SHA }, attachTo: document.body });
+    wrappers.push(w);
+    await flushPromises();
+    await w.get('[data-test=commit-file-open]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=commit-diff-error]').text()).toContain("Members' code is not shown to cloud viewers.");
+  });
+
   it('a renamed file shows old → new and its diff opens side by side and inline', async () => {
     const files = [{ path: 'src/refunds.ts', oldPath: 'src/refund.ts', status: 'renamed', added: 2, deleted: 1, binary: false }];
     const core = fakeCore({ payments: base({ files }) }, { 'src/refunds.ts': diffOf('src/refunds.ts', { oldPath: 'src/refund.ts' }) });
@@ -213,8 +271,8 @@ describe('the Commit view', () => {
   it('a binary file and a too-large diff show the summary line, not content', async () => {
     const files = [{ path: 'logo.png', status: 'modified', added: 0, deleted: 0, binary: true }, { path: 'big.json', status: 'modified', added: 90000, deleted: 10, binary: false }];
     const core = fakeCore({ payments: base({ files }) }, {
-      'logo.png': { path: 'logo.png', binary: true, tooLarge: false, summary: 'Binary file, 12 KB to 14 KB', hunks: [] },
-      'big.json': { path: 'big.json', binary: false, tooLarge: true, summary: 'Too large to show: 90,000 lines added, 10 removed', hunks: [] },
+      'logo.png': { path: 'logo.png', status: 'modified', binary: true, tooLarge: false, summary: 'Binary file, 12 KB to 14 KB', added: 0, deleted: 0, hunks: [] },
+      'big.json': { path: 'big.json', status: 'modified', binary: false, tooLarge: true, summary: 'Too large to show: 90,000 lines added, 10 removed', added: 90000, deleted: 10, hunks: [] },
     });
     const w = await view(core);
     const [png, big] = w.findAll('[data-test=commit-file]');
@@ -242,7 +300,7 @@ describe('the Commit view', () => {
   });
 
   it('a tagged commit is included in a release', async () => {
-    const w = await view(fakeCore({ payments: base({ where: { inMain: true, branches: ['main'], onlyOnMember: null, pushed: true, tags: ['v2026.11.18.1'] } }) }));
+    const w = await view(fakeCore({ payments: base({ where: { inMain: true, branches: [], pushed: true, tags: ['v2026.11.18.1'] } }) }));
     expect(w.get('[data-test=commit-where-tags]').text()).toBe('Included in release v2026.11.18.1');
   });
 
@@ -252,10 +310,11 @@ describe('the Commit view', () => {
   });
 
   it('a gone commit says it is gone and why; only Copy ID is offered', async () => {
-    const gone = { ...base(), found: false, goneReason: "Its branch members/payments/old-cleo was deleted and git pruned the commit.", files: [] };
+    // As the core sends it: only found, goneReason and sha.
+    const gone: CommitShow = { found: false, goneReason: "Commit 3f9c2a1b7d4e was on members/payments/old-cleo (OldCleo's branch), and git no longer has it: that branch was deleted.", sha: SHA };
     const w = await view(fakeCore({ payments: gone }));
     expect(w.get('[data-test=commit-gone] h3').text()).toBe('This commit is gone');
-    expect(w.get('[data-test=commit-gone-reason]').text()).toContain('was deleted and git pruned');
+    expect(w.get('[data-test=commit-gone-reason]').text()).toBe("Commit 3f9c2a1b7d4e was on members/payments/old-cleo (OldCleo's branch), and git no longer has it: that branch was deleted.");
     expect(w.find('[data-test=commit-compare]').exists()).toBe(false);
     expect(w.find('[data-test=commit-copy]').exists()).toBe(true);
   });
@@ -273,7 +332,7 @@ describe('the Commit view', () => {
   });
 
   it('several teams: the first whose repository has it is shown', async () => {
-    const core = fakeCore({ web: { ...base(), found: false, goneReason: 'not here' }, payments: base() });
+    const core = fakeCore({ web: { found: false, goneReason: 'not here', sha: SHA }, payments: base() });
     const w = await view(core, ['web', 'payments', 'ops']);
     expect(core.called('git.commitShow').map((c) => c.params.team)).toEqual(['web', 'payments']);
     expect(w.get('[data-test=commit-view]').attributes('data-team')).toBe('payments');
@@ -289,7 +348,7 @@ describe('the Commit view', () => {
     const w = await view(fakeCore({ payments: base() }));
     await w.get('[data-test=commit-file-open]').trigger('click');
     await flushPromises();
-    expect(w.get('[data-test=commit-diff-error]').text()).toContain('no such file in the commit');
+    expect(w.get('[data-test=commit-diff-error]').text()).toContain('commit 3f9c2a1b7d4e does not change that file');
   });
 
   it('Copy ID copies the full ID', async () => {
