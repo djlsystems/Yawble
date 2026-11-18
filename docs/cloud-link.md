@@ -182,6 +182,12 @@ still an agent's terminal window.
   `completed` and `closed` are the ended states. Every other state, `failed` included, is open, so the workflow is
   listed however long ago its last activity was.
 
+  `time` (B086) is the workflow's overall time and where it went, the same object as on the `bus.workflows` item:
+  `createdAt`, `startedAt`, `endedAt` and `endedHow` (null while open), `open`, `overallMs`, `rebuilt` (from history,
+  for workflows from before time accounting) and `breakdown` (`[{ "category", "ms" }]`, whose ms add up to `overallMs`).
+  It is null when the app has no board. The timeline itself is `timeline.get { "workflow": id }` (or `{ "card": id }`),
+  which a Visitor may call.
+
 - **needsYou**: what waits for the person: decisions (questions), tool-call approvals, network requests and tool
   requests. The totals across every team, then per team the count and the first five short titles of each kind.
 - **problems**: the last 20 warning and error entries of the last hour, newest first: failed or cut-short runs,
@@ -197,7 +203,9 @@ or goes away.
   `org.summary` does.
 - While at least one viewer watches, the app rebuilds the snapshot every 2 seconds. When a section changed, it pushes
   the event `org.summaryChanged` once, however much changed in those 2 seconds. The uptime ticking alone is not a
-  change.
+  change, nor is an open workflow's `time` growing (its `overallMs` and breakdown ms; a new category is a change):
+  the workflows section then carries the current ms with its next real change, so a dashboard counts an open
+  workflow's time on from `overallMs` itself between pushes.
 - `org.summary.unwatch` stops it for this viewer and answers `{"watching": false}`.
 - A viewer is a sign-in: each viewer's watch is its own. A viewer who leaves (the site's viewer list no longer names
   them) or a dropped connection counts as an unwatch.
