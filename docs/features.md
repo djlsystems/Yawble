@@ -54,9 +54,12 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - Each team's tile on **Teams** lists its 50 newest workflows and every open one, last updated first, scrolling inside
   the tile; a row opens that workflow.
 - On the team page each member is one framed pane:
-  - A title bar: face, name, role and CLI chips, its state and how many instructions wait behind its run, and at the
-    right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
+  - A title bar: face, name, a role chip and an agent chip, its state and how many instructions wait behind its run,
+    and at the right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
     Stop and Remove.
+  - The agent chip reads agent/model, e.g. `claude/claude-opus-5-5`: the model set on the member, else the agent's
+    default model, else (the CLI picks its own) the model the member's last run used most, as the provider reported
+    it; before a first run it reads `claude/default`. Its tooltip says which of these it is.
   - A row of tabs, **Report | Activity | Terminal**, with the run's details beside them (how its last run ended, its
     queue position, policy problems).
   - One view, the chosen tab's. **Report**: what the member last said, formatted. **Activity**: the Monitor's lines

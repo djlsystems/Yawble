@@ -306,6 +306,8 @@ Yawble.Core.Agents.Profiles.AgentProfileStore? agentProfileStore = null;
 var agentChangeLog = new Yawble.Core.Agents.Profiles.AgentChangeLog($"Data Source={dbPath}", null, (agent, model) => agentProfileStore!.ResolveModel(agent, model));
 agentProfileStore = new Yawble.Core.Agents.Profiles.AgentProfileStore($"Data Source={dbPath}", agentChangeLog, new Yawble.Core.Agents.Profiles.SqliteAgentUsage($"Data Source={dbPath}"), defaults: agentDefaults);
 bus.AgentChanges = agentChangeLog;
+// The member panes' agent pill: the model each member runs (set, the agent's default, or the one its last run used).
+ui.Models = new Yawble.Core.Agents.MemberModels($"Data Source={dbPath}", agentResolver, agentDefaults);
 var agentProfileRpc = new Yawble.Core.Agents.Profiles.AgentProfileRpc(agentProfileStore, agentChangeLog);
 boardForConcierge = board.DispatchAsync;
 if (bus.Repos is { } actionRepos)

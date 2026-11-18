@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, provide, reactive, ref, useId, watch } from 
 import { PaneHeaderKey } from '../terminalPane';
 import type { AgentCard, YawbleApi } from '../../../shared/api';
 import type { ActivityRow } from '../monitor/model';
+import { agentPillText, agentPillTitle } from '../memberModel';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import Icon from './Icon.vue';
 import MemberActivity from './MemberActivity.vue';
@@ -125,7 +126,7 @@ defineExpose({ el: () => root.value });
       <MemberAvatar class="avatar" :team="m.team" :member="m.name" :state="face" :size="26" :title="MemberStateLabel[face]" />
       <strong data-test="agent-name" :title="m.name">{{ displayName(m.name) }}</strong>
       <span class="chip">{{ m.role }}</span>
-      <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli">{{ m.cli }}</span>
+      <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
       <span class="label" data-test="agent-face-state">{{ MemberStateLabel[face] }}</span>
       <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
       <span class="spacer" />

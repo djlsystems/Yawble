@@ -31,6 +31,9 @@ public sealed class UiRpc(
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
 
+    /// <summary>teams.agents' agentModel per card: the model the member's pill names and where the name comes from.</summary>
+    public Agents.MemberModels? Models { get; set; }
+
     /// <summary>The methods here, by prefix, and B085's workflowExtend under its contract name (also bus.workflowExtend).</summary>
     public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method == "workflowExtend";
 
@@ -312,6 +315,7 @@ public sealed class UiRpc(
             var node = S(card)!.AsObject();
             node["attention"] = Attention(card, asking, reports);
             node["hasClone"] = Code.CodeHost.HasClone(bus.Repos, card.Member);
+            if (Models is { } models) node["agentModel"] = Agents.MemberModels.Json(models.For(card.Member));
             try
             {
                 var effective = Effective(card.Member, everyone);

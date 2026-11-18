@@ -755,8 +755,12 @@ export interface MemberRow {
   instructions: string; model: string; credential: string;
 }
 
+/** teams.agents' agentModel: the model a member runs and where its name comes from: set on the member, the agent's default,
+ *  observed (the CLI's own default; the model its last run used most, at = that run's last request), or cli (not run yet; name ''). */
+export interface AgentModelShown { name: string; source: 'member' | 'agent' | 'observed' | 'cli' | string; at: string | null }
+
 export interface AgentCard {
-  member: MemberRow; state: 'running' | 'queued' | 'idle'; queuePosition: number | null; queueLength: number;
+  member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'queued' | 'idle'; queuePosition: number | null; queueLength: number;
   queuedInstructions: number; statusLine: string | null; runId: number | null; runStartedAt: string | null;
   lastRunState: string | null; lastRunReason: string | null;
   /** The heavy-work lease: this member's run holds it or waits in its queue (position), for what step. */
