@@ -70,19 +70,19 @@ describe('the You node (B080 item 3)', () => {
   it('a question flies to it; it counts open questions and asks until they are answered', () => {
     const m = new MonitorModel();
     m.reconcile([team(1, 'payments', [member('Manager', 'idle', 'manager'), member('DeveloperPriya', 'decision')])], 0);
-    expect(m.youCount()).toBe(1);
+    expect(m.needYouItems().length).toBe(1);
     m.apply(row(1, 'decision', 'DeveloperPriya', 'DeveloperPriya', 'MIT or Apache?'), 5);
-    expect(m.effects.filter((e) => e.kind === 'you')).toEqual([{ kind: 'you', from: memberKey('payments', 'DeveloperPriya'), color: 'decision', label: 'MIT or Apache?', at: 5 }]);
+    expect(m.effects.filter((e) => e.kind === 'you')).toEqual([{ kind: 'you', from: memberKey('payments', 'DeveloperPriya'), color: 'decision', label: 'MIT or Apache?', at: 5, id: 'q:payments/developerpriya' }]);
     // Network and tool asks: each new one flies once; the count follows the list.
     m.setAsks([{ key: 'net:1', team: 'payments', member: 'TesterWren', label: 'api.example.com' }, { key: 'tool:2', team: 'payments', member: null }], 10);
-    expect(m.youCount()).toBe(3);
+    expect(m.needYouItems().length).toBe(3);
     m.setAsks([{ key: 'net:1', team: 'payments', member: 'TesterWren' }, { key: 'tool:2', team: 'payments', member: null }], 20);
     const you = m.effects.filter((e) => e.kind === 'you');
     expect(you.map((e) => (e as Extract<Effect, { kind: 'you' }>).from)).toEqual([memberKey('payments', 'DeveloperPriya'), memberKey('payments', 'TesterWren'), teamKey('payments')]);
     // Answered: the question's member goes back to work, the asks are gone.
     m.reconcile([team(1, 'payments', [member('Manager', 'idle', 'manager'), member('DeveloperPriya', 'running')])], 30);
     m.setAsks([], 30);
-    expect(m.youCount()).toBe(0);
+    expect(m.needYouItems().length).toBe(0);
   });
 
   it('sits at the wall\'s right edge and is hit within a few pixels', () => {
