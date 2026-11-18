@@ -149,9 +149,10 @@ public sealed class Card446RepoProviderTests
     [Fact]
     public void ALinkPatternServesTheKindWhosePlaceholdersItHoldsExactly()
     {
-        var pattern = new RepoHostSetting(null, "{base}/cgit/{path}/commit/?id={commit} https://browse.example.com/{path}/tree/{commit}/{file}");
+        var pattern = new RepoHostSetting(null, "{base}/-/c/{commit} https://browse.example.com/{path}/tree/{commit}/{file}");
         const string origin = "ssh://git@git.example.com:29418/acme/app.git";
-        Assert.Equal("https://git.example.com/cgit/acme/app/commit/?id=" + Sha, RepoProviders.Link(origin, pattern, Request("commit")));
+        // {base} is the repository's web address (https://git.example.com/acme/app), {path} its owner/name.
+        Assert.Equal("https://git.example.com/acme/app/-/c/" + Sha, RepoProviders.Link(origin, pattern, Request("commit")));
         Assert.Equal("https://browse.example.com/acme/app/tree/" + Sha + "/src/a%20b.cs", RepoProviders.Link(origin, pattern, Request("file")));
         // No template for these kinds and no provider: no link.
         Assert.Null(RepoProviders.Link(origin, pattern, Request("branch")));
@@ -160,13 +161,16 @@ public sealed class Card446RepoProviderTests
         var gh = new RepoHostSetting(null, "https://mirror.example.com/{path}/c/{commit}");
         Assert.Equal("https://mirror.example.com/acme/app/c/" + Sha, RepoProviders.Link("https://github.com/acme/app.git", gh, Request("commit")));
         Assert.Equal("https://github.com/acme/app/pull/7", RepoProviders.Link("https://github.com/acme/app.git", gh, Request("pr")));
+        // Card 447's docs: {base} = https://github.com/owner/name, {path} = owner/name.
+        var docs = new RepoHostSetting(null, "{base}/commit/{commit}?from={path}");
+        Assert.Equal($"https://github.com/owner/name/commit/{Sha}?from=owner/name", RepoProviders.Link("git@github.com:owner/name.git", docs, Request("commit")));
         // A pattern without {base}/{path} works with no origin host at all; one that needs them does not.
         Assert.Equal("https://review.example.com/c/7", RepoProviders.Link(@"C:\repos\app", new RepoHostSetting(null, "https://review.example.com/c/{pr}"), Request("pr")));
-        Assert.Null(RepoProviders.Link(@"C:\repos\app", new RepoHostSetting(null, "{base}/{path}/c/{pr}"), Request("pr")));
+        Assert.Null(RepoProviders.Link(@"C:\repos\app", new RepoHostSetting(null, "{base}/c/{pr}"), Request("pr")));
     }
 
     [Theory]
-    [InlineData("{base}/{path}/commit/{commit}", null)]
+    [InlineData("{base}/commit/{commit}", null)]
     [InlineData("https://x.example/{path}/c/{commit} https://x.example/{path}/b/{branch}", null)]
     [InlineData("javascript:alert({commit})", "does not start with")]
     [InlineData("https://x.example/{sha}", "unknown placeholder {sha}")]

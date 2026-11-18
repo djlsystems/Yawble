@@ -101,7 +101,7 @@ public sealed partial class TeamRepos
     }
 
     /// <summary>
-    /// git_web_link (B075): the web address of a commit, branch, file at a commit, compare or pull request of a team's
+    /// git.webLink (B075): the web address of a commit, branch, file at a commit, compare or pull request of a team's
     /// repository, or null: no origin, no provider layout or pattern for it, or the commit/branch is not on origin (as of
     /// the last fetch: an unpushed commit has no page there).
     /// </summary>
