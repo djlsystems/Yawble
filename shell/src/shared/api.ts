@@ -925,7 +925,8 @@ export interface ConciergeTurnEvent {
 }
 
 // ---- the Board (core Board/BoardService.cs): cards in four lanes, and the backlog ----
-export type CardStatus = 'queued' | 'running' | 'blocked' | 'needs-decision' | 'failed' | 'completed' | 'handback' | 'done';
+/** 'stopped' (B097): the person stopped the card's run; lane In Progress / To Do, never Needs you, never red. */
+export type CardStatus = 'queued' | 'running' | 'blocked' | 'needs-decision' | 'failed' | 'completed' | 'handback' | 'done' | 'stopped';
 export type LaneId = 'todo' | 'in-progress' | 'blocked' | 'done';
 export interface BoardCard {
   id: number; team: string; teamId: number | null; member: string | null; item: string | null; title: string; body: string;

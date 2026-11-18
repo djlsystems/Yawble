@@ -43,6 +43,7 @@
   /* Kanban card statuses (board/cards.ts StatusColor) */
   --status-queued: #64748b; --status-running: #2563eb; --status-blocked: #b45309; --status-decision: #c2410c;
   --status-failed: #b91c1c; --status-completed: #0f766e; --status-done: #15803d;
+  --status-stopped: var(--state-stopped); /* B097: a run the person stopped, the neutral member-state colour */
   /* fenced code blocks in markdown: dark in both themes */
   --code-block-bg: #1f2430; --code-block-ink: #e7e9ee; --code-block-muted: #9aa3b5; --code-block-control: #c3c9d6;
   --code-block-hover: #323949; --code-block-ok: #7ad19b;
@@ -88,6 +89,7 @@
   --chip-claude-bg: #3a2a1e; --chip-claude-ink: #e8a878; --chip-grok-bg: #222b45; --chip-grok-ink: #a8b8ec;
   --status-queued: #94a3b8; --status-running: #6b9cf8; --status-blocked: #e5a04f; --status-decision: #f0884f;
   --status-failed: #f2736d; --status-completed: #2dbfa8; --status-done: #4fca7a;
+  --status-stopped: var(--state-stopped);
   --code-block-bg: #111419; --code-block-ink: #e7e9ee; --code-block-muted: #9aa3b5; --code-block-control: #c3c9d6;
   --code-block-hover: #262b36; --code-block-ok: #7ad19b;
   --console-bg: #0c0f13; --console-ink: #d8dee9; --console-ink-strong: #eef2f7; --console-text: #c9d4e3; --console-soft: #9aa6b8;

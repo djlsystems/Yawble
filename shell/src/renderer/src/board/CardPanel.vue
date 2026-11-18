@@ -30,7 +30,10 @@ const status = ref<CardStatus>('queued');
 const lane = ref<LaneId>('todo');
 const note = ref('');
 const comment = ref('');
-const statuses: CardStatus[] = ['queued', 'running', 'blocked', 'needs-decision', 'failed', 'completed', 'handback', 'done'];
+const settable: CardStatus[] = ['queued', 'running', 'blocked', 'needs-decision', 'failed', 'completed', 'handback', 'done'];
+// 'stopped' (B097) is set by the core when the person stops a run; it is offered only on a card that already has it,
+// so the select shows "Stopped" instead of a blank.
+const statuses = computed<CardStatus[]>(() => (card.value?.status === 'stopped' ? [...settable, 'stopped'] : settable));
 
 const body = computed(() => (card.value?.body ? renderMarkdown(card.value.body) : ''));
 // The status chip: a run the person stopped reads "Stopped" in the neutral colour, not "Failed" in red (B097).
