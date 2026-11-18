@@ -208,7 +208,7 @@ describe('the Monitor does not change with the theme', () => {
   it('the canvas palette (scene.ts reads --state-* from <html>) is the same in both themes', () => {
     const l = page('light'); const atLight = l.read(l.html, states);
     const d = page('dark'); const atDark = d.read(d.html, states);
-    expect(states.length).toBe(6);
+    expect(states.length).toBe(7); // card 439 (B097) added --state-stopped
     expect(atDark).toEqual(atLight);
     expect(atLight['--state-running']).toBe(light.get('--state-running'));
   });

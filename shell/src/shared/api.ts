@@ -759,10 +759,18 @@ export interface AgentCard {
   member: MemberRow; state: 'running' | 'queued' | 'idle'; queuePosition: number | null; queueLength: number;
   queuedInstructions: number; statusLine: string | null; runId: number | null; runStartedAt: string | null;
   lastRunState: string | null; lastRunReason: string | null;
+  /**
+   * B097: the last run's failure class (core FailureClasses: failed, timeout, idle, stopped, credential, start_failed,
+   * interrupted, rate); null when it did not fail. "stopped": the person stopped it (recorded failed, never a failure).
+   */
+  lastRunFailureClass?: RunFailureClass | null;
   /** The heavy-work lease: this member's run holds it or waits in its queue (position), for what step. */
   lease?: 'holding' | 'waiting' | null; leaseWhat?: string | null; leasePosition?: number | null;
-  /** What the member needs from a person, loudest first: an open question, blocked, its last run failed (core UiRpc.Attention). */
-  attention?: 'decision' | 'blocked' | 'failed' | null;
+  /**
+   * What the member needs from a person, loudest first: an open question, blocked, its last run failed (core
+   * UiRpc.Attention). "stopped" (B097): the person stopped its last run; shown neutral, never as needing the person.
+   */
+  attention?: 'decision' | 'blocked' | 'failed' | 'stopped' | null;
   net?: string; wallTimeout?: string; loosened?: string[]; policyProblems?: string[];
   /** The member has a working copy (clone) on this computer: its card offers the Code browser (teams.agents). */
   hasClone?: boolean;
@@ -825,6 +833,20 @@ export interface TerminalBanner {
   /** The member holds or waits for an INTERACTIVE session (never a headless run). */
   interactive?: boolean;
   lastRunState: string | null; lastRunReason: string | null;
+  /** B097: the last run's failure class, as AgentCard.lastRunFailureClass. */
+  lastRunFailureClass?: RunFailureClass | null;
+}
+
+/** B097: a failed run's class (core Bus/Messages.cs FailureClasses); a string for a class this shell does not know. */
+export type RunFailureClass = 'failed' | 'timeout' | 'idle' | 'stopped' | 'credential' | 'start_failed' | 'interrupted' | 'rate' | (string & {});
+
+/**
+ * B097: whether a run (a member's last run, a feed row, a run row) was stopped by the person: failure class "stopped",
+ * even when its state still says "failed" (the core records a stopped run as failed with class "stopped").
+ */
+export function isStoppedRun(r: { state?: string | null; failureClass?: string | null; attention?: string | null } | null | undefined): boolean {
+  if (!r) return false;
+  return r.attention === 'stopped' || r.failureClass === 'stopped' || r.state === 'stopped';
 }
 
 // ---- the Concierge (core: Concierge/ConciergeService.cs) ----
@@ -911,7 +933,7 @@ export interface BoardCard {
   createdAt: string; updatedAt: string; trailCount: number;
   /** When the person cleared this Done card from the board view (0037); null or absent when it shows. */
   clearedAt?: string | null;
-  memberState?: { state: AgentCard['state']; attention: AgentCard['attention'] };
+  memberState?: { state: AgentCard['state']; attention: AgentCard['attention']; lastRunFailureClass?: AgentCard['lastRunFailureClass'] };
   /** The heavy-work lease of the card's member, on the card it is working on only: held, or waited for (queue position). */
   lease?: { state: 'holding' | 'waiting'; what: string | null; position: number | null };
   /** B086: its overall time and breakdown, computed by the core (older cores: absent). */
