@@ -111,8 +111,89 @@ public sealed class ConciergeService
         "concierge.read" => Read(Id(p)),
         "concierge.unwatch" => new JsonObject { ["stopped"] = EndWatch(Id(p), WatchId(p)) },
         "concierge.setWatch" => SetWatch(Id(p), WatchId(p), p?["followUp"] is JsonValue f && f.TryGetValue<bool>(out var b) && b),
+        // Settings > Concierge: the default agent for new conversations (null = the first available on this computer).
+        "concierge.defaults" => new JsonObject { ["defaultAgent"] = await _bus.ConciergeDefaultAgentAsync(ct) },
+        "concierge.setDefaults" => new JsonObject { ["defaultAgent"] = await SetDefaultAgentAsync(p, ct) },
         _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
     };
+
+    private async Task<string?> SetDefaultAgentAsync(JsonObject? p, CancellationToken ct)
+    {
+        var agent = p?["defaultAgent"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+        if (!string.IsNullOrWhiteSpace(agent) && AgentResolver.Canonical(agent) is null)
+            throw new RpcException("bad_cli", $"no agent named '{agent}'");
+        try { return await _bus.SetConciergeDefaultAgentAsync(agent is null ? null : AgentResolver.Canonical(agent) ?? agent, ct); }
+        catch (BusRefusal e) { throw new RpcException(e.Code, e.Message); }
+    }
+
+    /// <summary>The agent a new conversation (and Generate) uses: the saved default when it still resolves, else the first available.</summary>
+    public async Task<string> DefaultAgentAsync(CancellationToken ct)
+    {
+        if (await _bus.ConciergeDefaultAgentAsync(ct) is { Length: > 0 } saved && AgentResolver.Canonical(saved) is { } agent) return agent;
+        return await _defaultCli(ct);
+    }
+
+    // ---------------------------------------------------------------- Generate names (Settings > Teams)
+
+    /// <summary>How many first names Generate asks for.</summary>
+    public const int GenerateCount = 100;
+
+    /// <summary>Generate's prompt: popular first names for the country, as one JSON array.</summary>
+    public static string NamesPrompt(Teams.NameCountry country) =>
+        $"""
+        Reply with exactly {GenerateCount} popular first names for people in {country.DisplayName()} ({country.Label}, locale {country.Code}),
+        a mix of common male and female names.
+        Write each in plain Latin letters A-Z without accents (for example "Jose", "Zoe"); a hyphen inside a name is allowed;
+        one word each, 2 to 20 letters. No surnames, no repeats.
+        Reply with only a JSON array of strings, nothing before or after it, for example: ["Emma", "Liam"]
+        Do not use any tools.
+        """;
+
+    private readonly ConcurrentDictionary<string, ConciergeOutput> _generating = new();
+
+    /// <summary>
+    /// Generate: one headless run of the Concierge's default agent with no Yawble tools, in a throwaway folder deleted
+    /// afterwards, asked for popular first names of the country. The names in its reply, folded and cleaned; an error
+    /// when the run fails or the reply has none. Nothing is saved.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GenerateNamesAsync(string countryCode, CancellationToken ct)
+    {
+        var country = Teams.MemberNameList.Country(countryCode) ?? throw new RpcException("bad_country", $"'{countryCode}' is not a country of the list");
+        var cli = await DefaultAgentAsync(ct);
+        var agent = AgentResolver.Resolve(cli);
+        var name = "names-" + Guid.NewGuid().ToString("N")[..12];
+        var output = new ConciergeOutput(agent.Cli);
+        _generating[name] = output;
+        try
+        {
+            var member = new LaunchMember(0, Team, name, agent.Cli, Agent: agent.RecordedAgent, Custom: agent.Argv, AgentModel: agent.Custom ? agent.DefaultModel : null);
+            var outcome = await _launch(new LaunchRequest(Team, name, RunKind.Headless, NamesPrompt(country), null, Subject: member,
+                Tools: new NoBusEndpoint()), ct);
+            output.Complete();
+            if (outcome.End != RunEnd.Completed)
+                throw new RpcException("generate_failed", $"the {cli} run did not finish: {outcome.Reason ?? RunEnds.Code(outcome.End)}");
+            if (output.Error is { } error) throw new RpcException("generate_failed", $"the {cli} run failed: {error}");
+            var names = Teams.MemberNameList.FromReply(output.Text);
+            if (names.Count == 0) throw new RpcException("no_names", $"the {cli} reply had no names; try Generate again");
+            return names;
+        }
+        finally
+        {
+            _generating.TryRemove(name, out _);
+            if (_bus.Repos is { } repos)
+            {
+                try
+                {
+                    var folder = repos.MemberRoot(Team, name);
+                    if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"concierge: the Generate folder was not deleted: {e.Message}");
+                }
+            }
+        }
+    }
 
     // ---------------------------------------------------------------- reading
 
@@ -186,7 +267,7 @@ public sealed class ConciergeService
         if (id is null)
         {
             id = Guid.NewGuid().ToString("N");
-            conversation = _store.Create(id, ConciergePrompt.Title(text), cli ?? await _defaultCli(ct), p?.ContainsKey("teamId") == true ? TeamId(p) : null);
+            conversation = _store.Create(id, ConciergePrompt.Title(text), cli ?? await DefaultAgentAsync(ct), p?.ContainsKey("teamId") == true ? TeamId(p) : null);
             // Its first agent, as a new member's is (from nothing).
             _bus.AgentChanges?.RecordSubjectChange(Agents.Profiles.AgentChangeLog.KindConciergeAgent, Agents.Profiles.AgentChangeLog.ConciergeSubject(id),
                 new Agents.Profiles.AgentSetting("", ""), new Agents.Profiles.AgentSetting(conversation.Cli, ""), Agents.Profiles.AgentChangeLog.HowSettings);
@@ -418,6 +499,11 @@ public sealed class ConciergeService
     private void Attach(LiveRun run)
     {
         if (run.Team != Team) return;
+        if (_generating.TryGetValue(run.Member, out var names))
+        {
+            run.Output.Data += data => names.Write(data);
+            return;
+        }
         var turn = _turns.Values.FirstOrDefault(t => MemberOf(t.ConversationId) == run.Member);
         if (turn is null) return;
         run.Output.Data += data =>

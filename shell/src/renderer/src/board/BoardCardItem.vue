@@ -4,12 +4,17 @@ import type { BoardCard } from '../../../shared/api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName } from '../faces/faces';
 import { cardFace, StatusColor, StatusLabel } from './cards';
+import OverallTime from '../timeline/OverallTime.vue';
+import { hasTime } from '../timeline/time';
 
 // One card: the member's face in its state ring (none when unassigned), the item it comes from, the title, who and
 // which team, the status in its colour, and what is waiting (the Manager, the person).
 const props = defineProps<{ card: BoardCard; selected?: boolean }>();
 const emit = defineEmits<{ open: [] }>();
 const color = computed(() => StatusColor[props.card.status]);
+// B086: its overall time (the core's BoardCard.time), the quiet last thing in the bottom row; clicking it opens the
+// timeline. An older core sends none: nothing shows.
+const time = computed(() => (hasTime(props.card.time) ? props.card.time : null));
 // The heavy-work lease (one full test suite, build or image build at a time on this computer), when this card's member
 // holds it or waits for it in the run working this card.
 const leaseLabel = computed(() => {
@@ -46,6 +51,7 @@ const leaseTitle = computed(() => {
       <span v-if="card.lease" class="badge lease" :class="card.lease.state === 'waiting' ? 'queued' : 'held'" :title="leaseTitle" data-test="card-lease">{{ leaseLabel }}</span>
       <span v-if="card.awaitingManager" class="badge waiting" title="You changed this card; the Manager has not acted on it yet">awaiting Manager</span>
       <span v-if="card.trailCount" class="muted small">{{ card.trailCount }} update{{ card.trailCount === 1 ? '' : 's' }}</span>
+      <OverallTime v-if="time" class="time" :time="time" :target="{ kind: 'card', id: card.id, title: card.title, team: card.team }" />
     </div>
   </button>
 </template>
@@ -62,6 +68,8 @@ const leaseTitle = computed(() => {
 .title { font-weight: 600; font-size: 13.5px; line-height: 1.3; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .meta { font-size: 12px; color: var(--ink-soft); }
 .foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* The overall time stays one line, at the row's end. */
+.foot .time { margin-left: auto; flex: none; }
 .status { font-size: 11.5px; font-weight: 700; color: var(--status); }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; }
 .waiting { background: var(--bad-bg-soft); color: var(--bad-ink); border: 1px solid var(--bad-line-soft); }

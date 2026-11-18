@@ -26,7 +26,7 @@ public sealed class UiRpc(
     Monitor.StepFeed? steps = null,
     Monitor.CodeEvents? codeEvents = null)
 {
-    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs."];
+    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline."];
 
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
@@ -48,6 +48,10 @@ public sealed class UiRpc(
 
                 "teams.list" => S(await bus.TeamsAsync(ct)),
                 "teams.create" => await CreateTeamAsync(p, ct),
+                // Settings > Teams: the default agents for new teams, the member-name list and its country.
+                "teams.defaults" => S(await bus.TeamDefaultsAsync(ct)),
+                "teams.setDefaults" => S(await SetTeamDefaultsAsync(p, ct)),
+                "teams.generateNames" => await GenerateNamesAsync(p, ct),
                 "teams.agents" => await AgentsAsync(Long(p, "teamId"), ct),
                 "docs.list" => Docs().List(await TeamNameOf(Long(p, "teamId"), ct), OptStr(p, "path")),
                 "docs.read" => Docs().Read(await TeamNameOf(Long(p, "teamId"), ct), Str(p, "path")),
@@ -246,13 +250,18 @@ public sealed class UiRpc(
         };
     }
 
+    /// <summary>
+    /// teams.create {name, managerName?, managerCli?, members?: [{name, cli}], repoPath? | repoUrl?}. What is not given
+    /// comes from Settings > Teams (the saved Manager, the member rows ticked "On new teams"); a member name that is a
+    /// job word alone gets a first name from the member-name list, or the team is refused before anything is made.
+    /// </summary>
     private async Task<JsonNode?> CreateTeamAsync(JsonObject? p, CancellationToken ct)
     {
         var name = Str(p, "name");
-        var managerCli = OptStr(p, "managerCli") ?? "claude";
-        var members = (p?["members"] as JsonArray ?? []).Select(n => (Name: n?["name"]?.GetValue<string>() ?? "", Cli: n?["cli"]?.GetValue<string>() ?? "claude")).ToList();
-        if (members.Select(m => m.Name.Trim()).Append(OptStr(p, "managerName") ?? "Manager").GroupBy(n => n, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
-            throw new RpcException("exists", "two agents of the new team have the same name");
+        var members = p?["members"] is JsonArray given
+            ? given.Select(n => (Name: n?["name"]?.GetValue<string>() ?? "", Cli: n?["cli"]?.GetValue<string>())).ToList()
+            : null;
+        var plan = await bus.PlanNewTeamAsync(OptStr(p, "managerName"), OptStr(p, "managerCli"), members, ct);
         var repoPath = OptStr(p, "repoPath");
         if (OptStr(p, "repoUrl") is { Length: > 0 } url)
         {
@@ -263,9 +272,31 @@ public sealed class UiRpc(
             try { repoPath = await repos.CloneForTeamAsync(name.Trim(), url, ct); }
             catch (ArgumentException e) { throw new RpcException("clone_failed", e.Message); }
         }
-        var teamId = await bus.CreateTeamAsync(name, OptStr(p, "managerName") ?? "Manager", managerCli, repoPath, ct);
-        foreach (var (memberName, cli) in members) await bus.AddMemberAsync(teamId, memberName, cli, ct, Agents.Profiles.AgentChangeLog.HowTeamCreate);
+        var teamId = await bus.CreatePlannedTeamAsync(name, plan, repoPath, ct);
         return new JsonObject { ["teamId"] = teamId };
+    }
+
+    /// <summary>teams.setDefaults {manager?: {name, cli}, members?: [{name, cli, onNewTeams}], memberNamesText?, country?} -> {saved, rejected}.</summary>
+    private Task<TeamDefaultsSaved> SetTeamDefaultsAsync(JsonObject? p, CancellationToken ct)
+    {
+        var manager = p?["manager"] is JsonObject m
+            ? new ManagerDefault(OptStr(m, "name") ?? "", OptStr(m, "cli") ?? "")
+            : null;
+        var members = p?["members"] is JsonArray rows
+            ? rows.Select(r => new MemberDefault(OptStr(r as JsonObject, "name") ?? "", OptStr(r as JsonObject, "cli") ?? "claude",
+                r?["onNewTeams"] is JsonValue v && v.TryGetValue<bool>(out var on) && on)).ToList()
+            : null;
+        var text = p?["memberNamesText"] is JsonValue t && t.TryGetValue<string>(out var s) ? s : null;
+        return bus.SetTeamDefaultsAsync(manager, members, text, OptStr(p, "country"), ct);
+    }
+
+    /// <summary>teams.generateNames {country} -> {names}: popular first names of the country from the Concierge's default agent, not saved.</summary>
+    private async Task<JsonNode?> GenerateNamesAsync(JsonObject? p, CancellationToken ct)
+    {
+        var country = Teams.MemberNameList.Country(Str(p, "country")) ?? throw new RpcException("bad_country", $"'{Str(p, "country")}' is not a country of the list");
+        var generate = bus.NameGenerator ?? throw new RpcException("unavailable", "generating names needs the app's agents");
+        var names = await generate(country.Code, ct);
+        return new JsonObject { ["names"] = new JsonArray(names.Select(n => (JsonNode?)n).ToArray()) };
     }
 
     private async Task<JsonNode?> AgentsAsync(long teamId, CancellationToken ct)

@@ -5,7 +5,7 @@ import { defineConfig } from '@playwright/test';
 // PHONE_WORKERS workers (B037_PHONE_WORKERS to change it); every other spec keeps the run's full worker count.
 const PHONE_SPECS = [
   /[\\/]phone[\\/][^\\/]+\.spec\.ts$/,
-  /[\\/](card320|card332|card347|card367|card372|card375|member-pane-phone|phone-remote|team-settings-phone|tell-icons|workflows-visitor)[^\\/]*\.spec\.ts$/,
+  /[\\/](card320|card332|card347|card367|card372|card375|card430|member-pane-phone|phone-remote|team-settings-phone|tell-icons|workflows-visitor)[^\\/]*\.spec\.ts$/,
 ];
 const PHONE_WORKERS = Number(process.env.B037_PHONE_WORKERS) || 2;
 

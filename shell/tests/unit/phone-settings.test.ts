@@ -94,6 +94,9 @@ const answers: Record<string, (p: any) => unknown> = {
   'ops.backups': () => [],
   'ops.keepDaily': () => ({ keepDaily: 7 }),
   'companion.list': () => ({ devices: [] }),
+  'concierge.defaults': () => ({ defaultAgent: null }),
+  'teams.defaults': () => ({ manager: { name: 'Manager', cli: 'claude' }, members: [{ name: 'Developer', cli: 'claude', onNewTeams: true }],
+    memberNames: ['Amara', 'Tomas'], country: 'en-US', countries: [{ code: 'en-US', label: 'United States (US English)' }], usedCount: 0 }),
 };
 function fakeApi(): YawbleApi {
   return {
@@ -113,7 +116,8 @@ function fakeApi(): YawbleApi {
 }
 
 const Sections: { tab: SettingsTab; open: string }[] = [
-  { tab: 'general', open: 'open-general' }, { tab: 'agents', open: 'open-agents' }, { tab: 'skills', open: 'open-skills' },
+  { tab: 'general', open: 'open-general' }, { tab: 'agents', open: 'open-agents' }, { tab: 'concierge', open: 'open-concierge' },
+  { tab: 'teams', open: 'open-teams' }, { tab: 'skills', open: 'open-skills' },
   { tab: 'globalPolicy', open: 'open-global-policy' }, { tab: 'integrations', open: 'open-integrations' }, { tab: 'link', open: 'open-link' },
   { tab: 'health', open: 'open-health' }, { tab: 'companion', open: 'open-companion' }, { tab: 'system', open: 'open-system' },
 ];
@@ -196,6 +200,14 @@ describe.each(Phones)('Settings on a phone, $name', ({ width, height }) => {
     const inputs = w.findAll('[data-test=global-section-files] input');
     expect(inputs.length).toBeGreaterThan(0);
     for (const i of inputs) expect(getComputedStyle(i.element).fontSize).toBe('16px');
+  });
+
+  it('Concierge and Teams draw their fields (the size checks above cover them)', async () => {
+    const c = await openSection('concierge');
+    expect(c.find('[data-test=concierge-default-agent]').exists()).toBe(true);
+    const t = await openSection('teams');
+    for (const id of ['default-manager-name', 'default-member-name-0', 'member-names', 'names-country', 'names-generate', 'team-defaults-save'])
+      expect(t.find(`[data-test=${id}]`).exists(), id).toBe(true);
   });
 
   it('Skills: a picked skill opens as its own view in place of the list, scrolled into view; Back returns to the list', async () => {

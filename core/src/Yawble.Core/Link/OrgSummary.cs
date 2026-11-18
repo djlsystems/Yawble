@@ -23,11 +23,12 @@ public sealed record OrgTeam(string Name, bool Paused, bool Archived, IReadOnlyL
 
 /// <summary>
 /// A workflow. <paramref name="State"/> is one of <see cref="OrgSummary.WorkflowStates"/>; <paramref name="Item"/> is the
-/// backlog item's label (B048) when the workflow came from one.
+/// backlog item's label (B048) when the workflow came from one. <paramref name="Time"/>: its overall time and where it went
+/// (B086), the wire contract's <c>time</c> as on the bus.workflows item; null without a board.
 /// </summary>
 public sealed record OrgWorkflow(long Id, string Team, string Title, string? Item, string? ItemTitle, string State, int CardsDone, int CardsTotal,
     DateTimeOffset StartedAt, DateTimeOffset LastActivity, string? Owner, DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null,
-    DateTimeOffset? ExpiresAt = null);
+    DateTimeOffset? ExpiresAt = null, Board.TimeSummary? Time = null);
 
 /// <summary>Something waiting for the person: <paramref name="Kind"/> is decision | toolCall | network | tool.</summary>
 public sealed record OrgAsk(string Kind, string? Team, string Title);
@@ -150,6 +151,8 @@ public static class OrgSummary
             ["expiredAt"] = w.ExpiredAt is { } x ? Time(x) : null,
             // B085: when it expires if nothing happens, as on the bus.workflows item; null while it is worked, and once ended.
             ["expiresAt"] = w.ExpiresAt is { } d ? Time(d) : null,
+            // B086: its overall time and where it went, as on the bus.workflows item (null without a board).
+            ["time"] = w.Time?.ToJson(),
         }).ToArray());
 
     /// <summary>needsYou: the counts across every team, and per team the counts and the first few short titles of each kind.</summary>
@@ -203,6 +206,18 @@ public static class OrgSummary
 
     private static string Comparable(string section, JsonNode? node)
     {
+        if (section == "workflows" && node is JsonArray rows)
+        {
+            // B086: an open workflow's time grows every second, like the uptime: its ms alone are not a change (the
+            // breakdown's categories still are). The section goes out in full with the next real change.
+            var flows = rows.DeepClone().AsArray();
+            foreach (var time in flows.Select(r => r?["time"]).OfType<JsonObject>().Where(t => t["open"]?.GetValue<bool>() == true))
+            {
+                time.Remove("overallMs");
+                foreach (var share in (time["breakdown"] as JsonArray ?? []).OfType<JsonObject>()) share.Remove("ms");
+            }
+            return flows.ToJsonString();
+        }
         if (section != "computer" || node is not JsonObject o) return node?.ToJsonString() ?? "null";
         var copy = o.DeepClone().AsObject();
         copy.Remove("uptimeSeconds");

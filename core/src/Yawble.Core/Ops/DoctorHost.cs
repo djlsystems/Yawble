@@ -78,7 +78,7 @@ public sealed class DoctorHostTeams(BusEngine bus, string connectionString, Time
         {
             var last = (await bus.RecentTeamMessagesAsync(t.Name, 1, ct).ConfigureAwait(false)).FirstOrDefault()?.OccurredAt;
             var created = Created(t.Id);
-            var workflows = await bus.WorkflowsAsync(t.Name, 200, ct).ConfigureAwait(false);
+            var workflows = await bus.WorkflowsAsync(t.Name, 200, ct, time: false).ConfigureAwait(false);
             Teams.TeamBehind? behind = null;
             if (!t.Archived && bus.Repos is { } repos)
             {
