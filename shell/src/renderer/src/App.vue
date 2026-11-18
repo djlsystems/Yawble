@@ -38,6 +38,7 @@ import type { AgentOption } from './components/Composer.vue';
 import { installTapTitles, usePhone } from './phone';
 import { pushEscape } from './escapeClose';
 import { findWorkflowTeam, parseRemoteHash } from './remoteHash';
+import { loadConciergeDefault, newChatAgent, savedConciergeAgent } from './conciergeDefault';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
 // Concierge is home: a chat with an agent that knows every team. The same screens run in a browser through the
@@ -129,7 +130,8 @@ function openTeamDialog(which: 'documents' | 'workflows') {
   if (which === 'documents') teamView.value?.openDocuments();
   else teamView.value?.openWorkflows();
 }
-const defaultCli = computed(() => agents.value.find((a) => a.ready)?.id ?? 'claude');
+// A new chat starts on the saved Concierge default when that agent is ready, else on the first ready agent (card 419 F1).
+const defaultCli = computed(() => newChatAgent(agents.value, savedConciergeAgent.value));
 const title = computed(() => {
   if (view.value === 'concierge') return conversations.value.find((c) => c.id === conversationId.value)?.title ?? 'New chat';
   if (view.value === 'teams') return team.value ? team.value.name : 'Teams';
@@ -165,6 +167,8 @@ async function loadAgents() {
 function newChat() {
   view.value = 'concierge';
   conversationId.value = null;
+  // Read again: the default may have been changed elsewhere (another window, the remote view).
+  void loadConciergeDefault(api);
 }
 
 function openConversation(id: string) {
@@ -330,6 +334,7 @@ onMounted(() => {
   } else void refresh();
   void loadConversations();
   void loadAgents();
+  void loadConciergeDefault(api);
   timer = setInterval(refresh, props.pollMs ?? 1000);
   // Back in the window (an agent CLI may have been installed or signed in to meanwhile): the agents again.
   window.addEventListener('focus', loadAgentsOnFocus);

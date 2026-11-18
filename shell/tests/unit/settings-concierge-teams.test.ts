@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import SettingsView from '../../src/renderer/src/components/SettingsView.vue';
 import NewTeamDialog from '../../src/renderer/src/components/NewTeamDialog.vue';
 import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remoteAccess';
+import { newChatAgent, savedConciergeAgent } from '../../src/renderer/src/conciergeDefault';
 import type { TeamDefaults, YawbleApi } from '../../src/shared/api';
 
 // B096: Settings > Concierge (the default agent) and Settings > Teams (New Team defaults, the member-name list and
@@ -78,9 +79,13 @@ describe('Settings > Concierge', () => {
     await flushPromises();
     expect(f.of('concierge.setDefaults').at(-1)!.params).toEqual({ defaultAgent: 'codex' });
     expect(w.find('[data-test=concierge-defaults-saved]').exists()).toBe(true);
+    // Card 419 F1: the window's next new chat starts on it without reading concierge.defaults again.
+    expect(savedConciergeAgent.value).toBe('codex');
+    expect(newChatAgent([{ id: 'claude', ready: true }, { id: 'codex', ready: true }], savedConciergeAgent.value)).toBe('codex');
     await select.setValue('');
     await flushPromises();
     expect(f.of('concierge.setDefaults').at(-1)!.params).toEqual({ defaultAgent: null });
+    expect(savedConciergeAgent.value).toBeNull();
   });
 
   it('shows the saved agent, and a refused save puts it back with the error', async () => {

@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import type { ConciergeDefaults, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { useAgentOptions } from '../agentOptions';
+import { savedConciergeAgent } from '../conciergeDefault';
 import { readOnly } from '../remoteAccess';
 import LoadingNote from './LoadingNote.vue';
 
@@ -22,6 +23,7 @@ onMounted(async () => {
   try {
     const d = await api.call<ConciergeDefaults>('concierge.defaults');
     value.value = d.defaultAgent ?? null;
+    savedConciergeAgent.value = value.value;
     loaded.value = true;
   } catch (e) { error.value = errorText(e); }
 });
@@ -34,6 +36,7 @@ async function pick(next: string | null) {
   saving.value = true;
   try {
     await api.call('concierge.setDefaults', { defaultAgent: next });
+    savedConciergeAgent.value = next; // the window's next new chat starts on it (App.vue defaultCli)
     saved.value = true;
   } catch (e) {
     value.value = before;
