@@ -318,7 +318,7 @@ const workflowsAt = new Map<number, number>();
 /** The workflows the wall shows, per team, for the list read aloud (and the tests): the canvas draws the same. */
 const workflowRows = shallowRef<{ teamId: number; team: string; list: WorkflowSummary[] }[]>([]);
 
-const states: MemberState[] = ['running', 'waiting', 'decision', 'blocked', 'failed', 'idle'];
+const states: MemberState[] = ['running', 'waiting', 'decision', 'blocked', 'failed', 'stopped', 'idle'];
 const stateColor = (s: MemberState) => `color-mix(in srgb, var(--state-${s}) 60%, white)`;
 const legendSteps: StepKind[] = ['read', 'edit', 'create', 'run', 'search', 'web', 'bus'];
 
