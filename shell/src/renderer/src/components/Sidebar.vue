@@ -100,7 +100,7 @@ function finishRename(id: string) {
     <div v-if="drawer && openTeamName" class="team-group" data-test="drawer-team">
       <h3 class="team-name" :title="`Team ${openTeamName}`">Team {{ openTeamName }}</h3>
       <button class="item" data-test="drawer-team-documents" @click="emit('teamDocuments')"><Icon name="docs" />Documents</button>
-      <button class="item" data-test="drawer-team-workflows" @click="emit('teamWorkflows')"><Icon name="dispatch" />Workflows</button>
+      <button class="item" data-test="drawer-team-workflows" @click="emit('teamWorkflows')"><Icon name="workflow" />Workflows</button>
     </div>
 
     <nav class="places">

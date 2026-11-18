@@ -104,7 +104,7 @@ describe('the workflow nodes (B080 item 1)', () => {
     expect(openWorkflows(list).map((w) => w.id)).toEqual([4, 2]);
     expect(openWorkflows(Array.from({ length: 20 }, (_, i) => wf(i + 1)))).toHaveLength(WorkflowNodesEach);
     expect(busyMembers(wf(2, 'open', ['DeveloperPriya is running', ' TesterWren queued ', '']))).toEqual(['DeveloperPriya', 'TesterWren']);
-    expect(workflowNodeLook(wf(2, 'open', ['x']), false)).toMatchObject({ status: 'working', icon: 'play' });
+    expect(workflowNodeLook(wf(2, 'open', ['x']), false)).toMatchObject({ status: 'working', icon: 'flow' });
     expect(workflowNodeLook(wf(4), false)).toMatchObject({ status: 'waiting', icon: 'pause' });
     expect(workflowNodeLook(wf(4), true)).toMatchObject({ status: 'blocked', tone: 'blocked', icon: 'bang' });
   });
@@ -323,7 +323,7 @@ describe('the scene (B080)', () => {
     expect(scene.focus).toBeNull();
     frame(scene, 120);
     expect(scene.drawn).toHaveLength(2);
-    expect(scene.densityLevel).toBe('normal');
+    expect(scene.densityLevel).toBe('lively');
     scene.setDensity('calm');
     expect(scene.densityLevel).toBe('calm');
     scene.setDensity('wild' as never);

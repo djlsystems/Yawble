@@ -340,8 +340,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     files are.
   - A line runs from each member to every file it touched. A file two members touched wears a double ring. A file a
     commit confirmed wears a ring; hover a file for its path, who touched it and its commit.
-  - A file leaves when every workflow that touched it has ended, or after it has been idle for **files stay** (under
-    the timeline: 10 minutes, 30 minutes (the default), 1 hour or 4 hours; remembered).
+  - A file leaves when every workflow that touched it has ended, or after it has been idle for 2 minutes. It fades
+    out over the last 20 seconds.
   - A large map collapses to its busiest folders, each with **+N** for the rest, and a **+N folders** node. All the
     maps together show at most 240 files, and nodes off the screen are not drawn.
 - **Code events** on the wall, also listed in **Activity** and marked on the timeline:

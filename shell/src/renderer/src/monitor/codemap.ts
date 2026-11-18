@@ -8,8 +8,8 @@ import { fileName, type StepRow } from './steps';
  *   - The code events (monitor.codeEvents, from the core) are the truth: a commit's files confirm, add or delete
  *     nodes and override what the steps said (a Write over a file the commit says was modified is an edit, not a new
  *     file; a file the commit deleted is gone, and a step older than that commit does not bring it back).
- * A file leaves when every workflow that touched it has ended, or when it has been idle for the idle time (log time,
- * so a replay prunes as the past did). A large map collapses to its busiest folders, each with a "+N" for the rest.
+ * A file leaves when every workflow that touched it has ended, or when it has been idle for MapIdleMs (log time, so a
+ * replay prunes as the past did), fading out over the last MapFadeMs of that (idleFade). A large map collapses to its busiest folders, each with a "+N" for the rest.
  * Everything here is plain data and arithmetic, so the scene can draw hundreds of files at 60 fps and the tests can
  * build it without a canvas.
  */
@@ -78,19 +78,14 @@ export const shortSha = (sha: string) => sha.slice(0, 7);
 
 // --- the map --------------------------------------------------------------------------------------------------------
 
-/** How long a file stays on the map after its last touch (log time), as the person can choose it. */
-export const MapIdleChoices = [10, 30, 60, 240] as const;
-export const DefaultMapIdleMinutes = 30;
-export const MapIdleKey = 'yawble.monitor.mapIdleMinutes';
+/** How long a file stays on the map after its last touch (log time): two minutes, the last MapFadeMs of it fading out. */
+export const MapIdleMs = 2 * 60_000;
+export const MapFadeMs = 20_000;
 
-export function readMapIdle(storage: Pick<Storage, 'getItem'> | null = safeStorage()): number {
-  try {
-    const n = Number(storage?.getItem(MapIdleKey));
-    return (MapIdleChoices as readonly number[]).includes(n) ? n : DefaultMapIdleMinutes;
-  } catch { return DefaultMapIdleMinutes; }
-}
-export function writeMapIdle(minutes: number, storage: Pick<Storage, 'setItem'> | null = safeStorage()): void {
-  try { storage?.setItem(MapIdleKey, String(minutes)); } catch { /* kept while the Monitor is open */ }
+/** How much of a file is still shown, 1 down to 0 over the last MapFadeMs before it goes idle (log time). */
+export function idleFade(f: { lastAt: number }, logNow: number, idleMs = MapIdleMs): number {
+  const left = idleMs - (logNow - f.lastAt);
+  return Math.max(0, Math.min(1, left / Math.min(MapFadeMs, idleMs)));
 }
 
 export type TouchKind = 'read' | 'edit' | 'create';
@@ -132,7 +127,7 @@ export class CodeMap {
   /** Moves whenever a file comes or goes or a node's look changes; the scene re-lays the map only then. */
   rev = 0;
   /** How long a file stays after its last touch, log time. */
-  idleMs = DefaultMapIdleMinutes * 60_000;
+  idleMs = MapIdleMs;
 
   private tree(team: string): TeamTree {
     const k = lower(team);
@@ -452,8 +447,4 @@ export function commitPhase(age: number, reduced: boolean): { gather: number | n
   if (age < CommitGatherMs) return { gather: age / CommitGatherMs, travel: 0, resting: false };
   const u = (age - CommitGatherMs) / CommitTravelMs;
   return u >= 1 ? { gather: null, travel: 1, resting: true } : { gather: null, travel: 1 - Math.pow(1 - u, 2), resting: false };
-}
-
-function safeStorage(): Storage | null {
-  try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; }
 }

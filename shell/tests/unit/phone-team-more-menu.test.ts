@@ -66,7 +66,7 @@ describe('the team ⋯ menu on a phone (card 331)', () => {
     const d = (i: number) => items(w)[i]!.get('path').attributes('d');
     const icon = readFileSync(resolve(__dirname, '../../src/renderer/src/components/Icon.vue'), 'utf8');
     expect(icon).toContain(`docs: '${d(0)}'`);
-    expect(icon).toContain(`dispatch: '${d(1)}'`);
+    expect(icon).toContain(`workflow: '${d(1)}'`);
   });
 
   it('Documents and Workflows each close the menu and open their dialog', async () => {

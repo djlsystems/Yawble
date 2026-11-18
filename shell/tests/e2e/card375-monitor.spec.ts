@@ -1198,7 +1198,8 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   await page.waitForTimeout(4000);
   await unhover(page);
   const r: Record<string, any> = {};
-  expect(await page.locator('[data-test=monitor-density-normal]').first().getAttribute('aria-pressed'), 'normal by default').toBe('true');
+  await page.locator('[data-test=monitor-layout-toggle]').click(); // the density sits in the cog's settings panel
+  expect(await page.locator('[data-test=monitor-density-lively]').first().getAttribute('aria-pressed'), 'lively by default').toBe('true');
   let shaN = 0;
   for (const level of ['calm', 'normal', 'lively'] as const) {
     await page.locator(`[data-test=monitor-density-${level}]`).first().click();
