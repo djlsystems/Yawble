@@ -111,7 +111,8 @@ function seedWall(feed: Feed, n: number) {
     });
     // A wide map: 6 folders of 4 files, one commit per folder.
     for (let f = 0; f < FOLDERS; f++) {
-      const at = feed.iso(300_000 - f * 10_000);
+      // Inside the code map's 2 minute file life (main 6dcc8eb): 35-60 s ago, so the map stays for the whole test.
+      const at = feed.iso(60_000 - f * 5_000);
       const sha = `${ti}${f}`.padEnd(40, 'a');
       feed.events.push({
         id: (feed as any).eid++, kind: 'commit', team, member: ms[(f % 3) + 1], branch: `members/${team}/x`, sha, message: `Work ${f}`,
@@ -286,7 +287,8 @@ const hit = (a: WBox, b: WBox, slack = 1) => a.x < b.x + b.w - slack && b.x < a.
 /**
  * Card 409's label rules on one frame, in world px with the page's own text widths:
  *   overlaps   - a label over another label, any workflow square, a member's disc (r + 5) or name, or a map folder / file dot
- *                (map things of the label's own team listed apart: the scene keeps labels off the OTHER teams' maps).
+ *                (map things and folder names of the label's own team listed apart as ownMapOverlaps; since card 411 (F5)
+ *                those are faults too and the tests assert both).
  *   roomMissed - a label left out (or cut to "#id") although one of the scene's own spots (under, above, to a side; full,
  *                then "#id") is clear of everything drawn in the final frame; checking against the final frame is lenient
  *                (later labels only take room after), so a hit here is a real fault.
@@ -323,7 +325,7 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
   // The map's folder names (scene drawMapNodes: 600 10px, centred, zoomed in past 0.55).
   const nameOps = f.ops.filter((o) => o.op === 'text' && !isScreen(o) && /^600 10px/.test(o.font ?? '') && !labels.some((l) => l.op === o));
   const nw = await widths(page, nameOps.map((o) => [o.font!, o.text!] as [string, string]));
-  const folderNames: WBox[] = nameOps.map((o, i) => ({ x: o.x! - nw[i]! / 2, y: o.y! - 6, w: nw[i]!, h: 12, what: `folder name ${o.text}` }));
+  const folderNames: WBox[] = nameOps.map((o, i) => ({ x: o.x! - nw[i]! / 2, y: o.y! - 6, w: nw[i]!, h: 12, what: `folder name ${o.text}`, team: near({ x: o.x!, y: o.y! + 13 }) }));
   const overlaps: string[] = [], ownMap: string[] = [];
   lab.forEach((a, i) => {
     const mineSq = sqs.findIndex((s) => s.label === labels[i]);
@@ -331,7 +333,7 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
     sqBox.forEach((b, j) => { if (j !== mineSq && hit(a, b)) overlaps.push(`${a.what} / ${b.what}`); });
     memBox.forEach((b) => { if (hit(a, b)) overlaps.push(`${a.what} / ${b.what}`); });
     pillBox.forEach((b) => { if (hit(a, b)) overlaps.push(`${a.what} / ${b.what}`); });
-    mapBox.forEach((b) => { if (hit(a, b)) (b.team === a.team ? ownMap : overlaps).push(`${a.what} / ${b.team === a.team ? 'own' : names[b.team!]} ${b.what}`); });
+    [...mapBox, ...folderNames].forEach((b) => { if (hit(a, b)) (b.team === a.team ? ownMap : overlaps).push(`${a.what} / ${b.team === a.team ? 'own' : names[b.team!]} ${b.what}`); });
   });
   // Room for what was left out or cut short. The other teams' maps as the scene keeps clear of them (80 x 20 round each node).
   const otherMap = (team: number) => mapBox.filter((b) => b.team !== team).map((b) => ({ x: b.x + b.w / 2 - 40, y: b.y + b.h / 2 - 10, w: 80, h: 20, what: 'map zone' }));
@@ -551,7 +553,12 @@ for (const theme of ['dark', 'light'] as const) for (const w of [1280, 375]) for
     const f = await settle(page, n);
     const m = measure(f, n, await labelWidthMap(page, f));
     const screen = await hubsOnScreen(page, f, n);
-    results.b089[`${theme}-${w}-${n}`] = { ...m, hubsOnScreen: screen };
+    // Card 412 (F6, steady): measured again 4 s later; a late settleSpacing move shows here (hubs moved, gap changed).
+    await page.waitForTimeout(4000);
+    const f2 = await lastFrame(page);
+    const m2 = measure(f2, n, await labelWidthMap(page, f2));
+    const hubMove = Math.round(Math.max(...TEAMS.slice(0, n).map((t) => { const a = hubAt(f, t)!, b = hubAt(f2, t)!; return Math.hypot(a.x - b.x, a.y - b.y); })));
+    results.b089[`${theme}-${w}-${n}`] = { ...m, hubsOnScreen: screen, later: { gap: m2.gap, zoom: m2.zoom, hubMove } };
     console.log(`B089 ${theme} ${w} ${n} teams:`, JSON.stringify({ ...m }));
     await page.screenshot({ path: path.join(S89, 'screens', `spacing-${theme}-${w}-${n}teams.png`) });
     expect(m.mapCount, 'each team gets exactly its own map (6 folders + 24 files) by nearest hub').toEqual(Array(n).fill(FOLDERS * (FILES + 1)));
@@ -625,7 +632,8 @@ test('403 setting: the cog shows Team spacing (0.25-3, step 0.05, default 1); it
   await page.locator('[data-test=monitor-fit]').click();
   await page.waitForTimeout(2500);
   f = await lastFrame(page);
-  r.fitAfter3 = { zoom: +zoomOf(f).toFixed(3), hubs: await hubsOnScreen(page, f, 3) };  expect(r.fitAfter3.hubs.every((h: any) => h.inside), 'Fit refits to the 3x layout').toBe(true);
+  r.fitAfter3 = { zoom: +zoomOf(f).toFixed(3), hubs: await hubsOnScreen(page, f, 3) };
+  expect(r.fitAfter3.hubs.every((h: any) => h.inside), 'Fit refits to the 3x layout').toBe(true);
   expect(r.fitAfter3.zoom, 'Fit zoomed out for 3x').toBeLessThan(r.pinned3.zoomBefore);
   await page.screenshot({ path: path.join(S89, 'screens', 'spacing-3x-fit-1280-dark.png') });
 
@@ -726,6 +734,8 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     expect.soft(r.panelWords, 'no WORKFLOWS panel on the wall').toEqual([]);
     expect.soft(r.check.overlaps, 'no label over a label, square, member disc or name, or another team\'s map').toEqual([]);
     expect.soft(r.check.roomMissed, 'no label left out or cut short when it had room').toEqual([]);
+    // Card 412 (F5, the Manager's decision): a label over its own team's map (folder, file dot, folder name) is a fault too.
+    expect.soft(r.check.ownMapOverlaps, 'no label over its own team\'s map').toEqual([]);
 
     // Where the panel was (260 out from the hub, away from the middle): hover and click do nothing workflow-ish.
     const hubs = TEAMS.map((t) => hubAt(f, t)!);
@@ -805,6 +815,7 @@ test('405 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels stay 
   r.outCheck = await labelCheck(page, f, 3, 375);
   expect.soft(r.outCheck.overlaps, 'phone zoomed out: no overlaps').toEqual([]);
   expect.soft(r.outCheck.roomMissed, 'phone zoomed out: nothing left out that had room').toEqual([]);
+  expect.soft(r.outCheck.ownMapOverlaps, 'phone zoomed out: no label over its own map').toEqual([]);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); // labelCheck's hovers moved the mouse off the wall
   expect(r.out.zoom).toBeLessThan(0.6);
   expect(r.out.labels.every((t: string) => /^#\d+$/.test(t)), 'only "#id" zoomed out on a phone').toBe(true);
@@ -836,7 +847,7 @@ test('405 1280 wide zoomed out (Activity hidden, wall over 760): titles stay (on
     const f = await lastFrame(page);
     const labels = wfLabels(f);
     const check = await labelCheck(page, f, 3, 1280);
-    steps.push({ zoom: +zoomOf(f).toFixed(3), drawn: labels.length, withTitle: labels.filter((l) => l.text.includes(' ')).length, idOnly: labels.filter((l) => !l.text.includes(' ')).map((l) => l.id), dropped: check.dropped, overlaps: check.overlaps, roomMissed: check.roomMissed, px: Math.min(...labels.map((l) => +(l.font * zoomOf(f)).toFixed(2))) });
+    steps.push({ zoom: +zoomOf(f).toFixed(3), drawn: labels.length, withTitle: labels.filter((l) => l.text.includes(' ')).length, idOnly: labels.filter((l) => !l.text.includes(' ')).map((l) => l.id), dropped: check.dropped, overlaps: check.overlaps, ownMap: check.ownMapOverlaps, roomMissed: check.roomMissed, px: Math.min(...labels.map((l) => +(l.font * zoomOf(f)).toFixed(2))) });
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     if (i === 5) await page.screenshot({ path: path.join(S90, 'screens', 'wide-zoomed-out.png') });
   }
@@ -852,6 +863,7 @@ test('405 1280 wide zoomed out (Activity hidden, wall over 760): titles stay (on
   for (const s of steps) {
     expect.soft(s.overlaps, `zoom ${s.zoom}: no overlaps`).toEqual([]);
     expect.soft(s.roomMissed, `zoom ${s.zoom}: nothing left out that had room`).toEqual([]);
+    expect.soft(s.ownMap, `zoom ${s.zoom}: no label over its own map`).toEqual([]);
     expect.soft(s.px).toBeGreaterThanOrEqual(7.99);
   }
   expect(errors).toEqual([]);

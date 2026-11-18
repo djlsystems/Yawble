@@ -1037,7 +1037,7 @@ for (const W of [1280, 375]) {
 // Card 416 (B093 part 2): at 375 x 640 with 12 asks the banners leave a short wall (about 110 px with 3c's members
 // blocked and failed too, 169 px with the asks alone; 600, 580 and 556 make it 145, 133 and 119); the You node stays on it, clear of the
 // controls row with Legend, and a tap on it opens its panel (whose button opens Needs you).
-for (const H of [640, 600, 580, 556])
+for (const H of [640, 600, 580, 556, 546, 530])
 test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, clear of Legend, a tap opens its panel`, async ({ browser }) => {
   const feed = new Feed();
   seed(feed);
@@ -1057,13 +1057,15 @@ test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, 
     wallH: Math.round(cb.height), node: { x: f.x, y: f.y }, count: you?.count ?? null,
     legend: { x: Math.round(lb.x - cb.x), y: Math.round(lb.y - cb.y), w: Math.round(lb.width), h: Math.round(lb.height) },
   };
+  console.log('CARD416-AT', H, JSON.stringify({ ...r, controls: { y: Math.round(rb.y - cb.y), h: Math.round(rb.height) } }));
+  await shot(page, `card417-you-375x${H}-before-tap`);
   // Short enough that the old place (y 120) lay on the controls row (its top 52 px above the wall's bottom).
   expect(cb.height, 'the 12 asks leave a short wall').toBeLessThan(120 + 24 + 52);
   expect(f.y - 24, 'the node is inside the wall (top)').toBeGreaterThanOrEqual(0);
   expect(f.y + 24, 'the node is inside the wall (bottom)').toBeLessThanOrEqual(cb.height);
   expect(f.x + 24).toBeLessThanOrEqual(cb.width);
-  expect(clear(lb), 'the node is clear of the Legend button').toBe(true);
-  expect(clear(rb), 'the node is clear of the controls row').toBe(true);
+  expect.soft(clear(lb), 'the node is clear of the Legend button').toBe(true);
+  expect.soft(clear(rb), 'the node is clear of the controls row').toBe(true);
   // What is under the node's centre is the wall itself, not a control.
   r.hit = await page.evaluate((q) => (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.dataset?.test ?? null, node);
   expect(r.hit).toBe('monitor-canvas');
