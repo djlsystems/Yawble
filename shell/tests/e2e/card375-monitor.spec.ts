@@ -990,16 +990,28 @@ for (const W of [1280, 375]) {
     expect(r.many.summary).toBe('11 network asks, 1 blocked, 1 failed');
     await shot88(page, `${tag}-07-more-than-ten`);
 
-    // The wall changes size (a desktop window made shorter): the hover panel follows the You node.
-    if (!phone) {
-      await unhover(page);
-      await page.setViewportSize({ width: W, height: 600 });
-      await page.waitForTimeout(1200);
-      const y = youNode(await lastFrame(page));
-      if (y) you = { x: y.x, y: y.y };
-      r.resized = await tip();
-      await shot88(page, `${tag}-08-after-resize-tip`);
-    }
+    // The wall changes size (card 408): a shorter window, then the panel shown again (hover / tap) follows the You node;
+    // then a taller window: desktop re-hovers, on the phone the tapped panel stays open through the resize and follows.
+    const H0 = page.viewportSize()!.height;
+    await untip();
+    // 375 x 740, not shorter: at 640 the 12 asks' banners leave a wall of about 110 px and the You node (y clamped to 120)
+    // sits under the Legend button, out of reach (a separate note in the B088 report, not the card 406 fix).
+    await page.setViewportSize({ width: W, height: phone ? 740 : 600 });
+    await page.waitForTimeout(1200);
+    let yn = youNode(await lastFrame(page));
+    if (yn) you = { x: yn.x, y: yn.y };
+    r.resized = await tip();
+    await shot88(page, `${tag}-08-after-resize-tip`);
+    if (!phone) await unhover(page);
+    await page.setViewportSize({ width: W, height: H0 });
+    await page.waitForTimeout(1200);
+    yn = youNode(await lastFrame(page));
+    if (yn) you = { x: yn.x, y: yn.y };
+    const stayedOpen = (await page.locator('[data-test=monitor-you-tip]').count()) > 0;
+    if (phone) expect.soft(stayedOpen, 'the tapped panel stays open through the resize').toBe(true);
+    r.grown = { ...(await tip()), stayedOpen };
+    await shot88(page, `${tag}-09-after-grow-tip`);
+    if (!phone) await unhover(page);
 
     // Opening Needs you: a desktop click on the You node; a phone tap shows the panel with its button, which opens it.
     if (phone) {
