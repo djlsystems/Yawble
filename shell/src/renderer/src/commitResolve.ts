@@ -104,13 +104,13 @@ export function answerMatches(answer: CommitsResolved | null | undefined, id: st
 
 /**
  * The commits an ID can mean where it is shown, teams in order (commitView.ts teamsFor: its place's team, the team on
- * screen, every team). When the first team has it, only that team's count (a hand-back means its own team's commit);
- * else every team's, nearest team first. The same commit twice is once.
+ * screen, every team). own: the team the place itself names (data-commit-team, CommitText's team), never the screen's
+ * or a fallback. When own has it, only own's count (a hand-back means its own team's commit); else every team's,
+ * nearest team first, so an ID in two teams with no team of its place opens the chooser. The same commit twice is once.
  */
-export function pickMatches(all: CommitMatch[], teams: string[]): CommitMatch[] {
+export function pickMatches(all: CommitMatch[], teams: string[], own?: string | null): CommitMatch[] {
   const seen = new Set<string>();
   const uniq = all.filter((m) => { const k = `${m.team}\n${m.repo ?? ''}\n${m.fullId}`; if (seen.has(k)) return false; seen.add(k); return true; });
-  const own = teams[0];
   const mine = own ? uniq.filter((m) => m.team === own) : [];
   const list = mine.length ? mine : uniq;
   const rank = (m: CommitMatch) => { const i = teams.indexOf(m.team); return i < 0 ? teams.length : i; };
@@ -146,9 +146,14 @@ export function upgradeCandidates(root: ParentNode, teamsOf: (el: Element) => st
     const id = el.dataset.commitId ?? '';
     const all = cachedMatches(id);
     if (!all) { if (failed.has(id.toLowerCase())) el.dataset.commitState = 'text'; else pending.push(id); continue; }
-    settle(el, id, pickMatches(all, teamsOf(el)));
+    settle(el, id, pickMatches(all, teamsOf(el), placeTeam(el)));
   }
   if (pending.length) requestResolve(pending);
+}
+
+/** The team el's place names itself (the nearest data-commit-team), or null: the screen's team does not count. */
+export function placeTeam(el: Element | null): string | null {
+  return (el?.closest('[data-commit-team]') as HTMLElement | null)?.dataset.commitTeam || null;
 }
 
 function settle(el: HTMLElement, id: string, matches: CommitMatch[]): void {

@@ -1,7 +1,7 @@
 import { shallowRef } from 'vue';
 import type { CommitFound } from '../../shared/api';
 import { LOCAL_MARK } from './localMark';
-import { cachedMatches, commitChoice, pickMatches } from './commitResolve';
+import { cachedMatches, commitChoice, pickMatches, placeTeam } from './commitResolve';
 
 // B072: the one Commit view any commit ID in the app opens (hand-backs, the board's trail, the Monitor, the Tidy panel,
 // the Git dialog). One at a time: opening another commit replaces it. teams: where to look, in order; the first team
@@ -30,7 +30,7 @@ export const commitTeams = shallowRef<{ current: string | null; all: string[] }>
 
 /** The teams to try for a commit ID clicked at el: its place's team first, then the team on screen, then every team. */
 export function teamsFor(el: Element | null): string[] {
-  const own = (el?.closest('[data-commit-team]') as HTMLElement | null)?.dataset.commitTeam ?? null;
+  const own = placeTeam(el);
   const t = commitTeams.value;
   return [own, t.current, ...t.all].filter((x): x is string => !!x);
 }
@@ -51,7 +51,7 @@ export function installCommitLinks(doc: Document = document): () => void {
     // B074: an ID that names several commits opens the chooser (repository and title); one confirmed by
     // git.commitsResolve opens in the team and repository it was found in, then the usual order.
     if (el.dataset.commitChoose !== undefined) {
-      const matches = pickMatches(cachedMatches(id) ?? [], teams);
+      const matches = pickMatches(cachedMatches(id) ?? [], teams, placeTeam(el));
       if (matches.length > 1) { commitChoice.value = { id, teams, matches }; return; }
       if (matches.length === 1) { openCommit([matches[0].team, ...teams], matches[0].fullId, matches[0].repo); return; }
     }

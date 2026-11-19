@@ -27,7 +27,7 @@ const shown = computed<Shown[]>(() => {
   void resolvedVersion.value;
   return parts.value.map((p) => {
     if (!p.sha) return { text: p.text };
-    const matches = pickMatches(cachedMatches(p.sha) ?? [], teams.value);
+    const matches = pickMatches(cachedMatches(p.sha) ?? [], teams.value, props.team);
     return matches.length ? { text: p.text, link: { id: p.sha, matches } } : { text: p.text };
   });
 });
