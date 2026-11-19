@@ -236,13 +236,57 @@ describe('the text filter on the real rows (spec: "over id, title, item label, t
   });
 
   // F1 (shell, minor): the item label is one of the filter's fields, but its match is not highlighted (the Item cell is
-  // ItemLink, which has no highlight). Pinned with .fails: this test starts passing (and so failing here) once it is.
-  it.fails('F1: the matched item label is highlighted in the Item column', async () => {
+  // ItemLink, which had no highlight). Pinned with .fails until card 477's fix; ItemLink now takes the filter (q).
+  it('F1: the matched item label is highlighted in the Item column', async () => {
     const w = await page();
     await w.find('[data-test=workflows-chip-all]').trigger('click');
     await flushPromises();
     await w.find('[data-test=workflows-search]').setValue(String(ID.spec));
     expect(rowOf(w, n('dispatched')).find('td.itm mark').exists()).toBe(true);
+  });
+
+  // Card 477 fix: the highlight keeps the link (it still opens the Backlog at the item) and covers the archived and
+  // plain-label (no backlog read) cases; a partial match marks only its part.
+  it('F1: the highlighted label is still the link; archived items too; only the matched part is marked', async () => {
+    const w = await page();
+    await w.find('[data-test=workflows-chip-all]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test=workflows-search]').setValue(String(ID.old).toLowerCase());
+    const link = rowOf(w, n('archived')).find('td.itm [data-test=workflow-item-link]');
+    expect(link.find('mark').text()).toBe(String(ID.old));
+    expect(link.text()).toBe(String(ID.old));
+    await link.trigger('click');
+    expect(backlogRequest.value).toMatchObject({ label: String(ID.old), archived: true });
+    await w.find('[data-test=workflows-search]').setValue('001');
+    const cell = rowOf(w, n('dispatched')).find('td.itm');
+    expect(cell.find('mark').text()).toBe('001');
+    expect(cell.text()).toBe(String(ID.spec));
+  });
+
+  it('F1: a plain label (the backlog may not be read) is highlighted too', async () => {
+    const f = fake();
+    f.shape = (a) => (a && 'workflows' in a ? { ...a, backlog: false } : a);
+    const w = await page(f);
+    await w.find('[data-test=workflows-chip-all]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test=workflows-search]').setValue(String(ID.spec));
+    const plain = rowOf(w, n('dispatched')).find('td.itm [data-test=workflow-item-text]');
+    expect(plain.find('mark').text()).toBe(String(ID.spec));
+    expect(rowOf(w, n('dispatched')).find('[data-test=workflow-item-link]').exists()).toBe(false);
+  });
+
+  // O2 (nit): the page opens on Open, its default; Clear shows only once the filters differ and puts the defaults back.
+  it('O2: Clear is hidden at the defaults and resets to them', async () => {
+    const w = await page();
+    expect(w.find('[data-test=workflows-chip-open]').attributes('aria-selected')).toBe('true');
+    expect(w.find('[data-test=workflows-clear]').exists()).toBe(false);
+    await w.find('[data-test=workflows-chip-all]').trigger('click');
+    await w.find('[data-test=workflows-search]').setValue('cloud');
+    await w.find('[data-test=workflows-clear]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=workflows-chip-open]').attributes('aria-selected')).toBe('true');
+    expect((w.find('[data-test=workflows-search]').element as HTMLInputElement).value).toBe('');
+    expect(w.find('[data-test=workflows-clear]').exists()).toBe(false);
   });
 });
 
