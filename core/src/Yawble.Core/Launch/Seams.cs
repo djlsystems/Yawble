@@ -83,12 +83,15 @@ public interface ICredentialModes
 /// The idle clock. Touched by every bridge tool call; read by the watchdog. Held while the run waits in the heavy-work
 /// lease's queue (the watchdog then sees no idle time); resumed with a full window when the wait ends.
 /// It also keeps the run's quiet stretches for the board's time accounting (B086): each gap between two signs of
-/// activity of at least <see cref="Bus.RunActivitySpans.StallAfter"/> (Stalled, from the last sign of activity), and each
+/// activity (a bus call, or a model request going out or streaming back: <see cref="Saw"/>) of at least <see cref="Bus.RunActivitySpans.StallAfter"/> (Stalled, from the last sign of activity), and each
 /// hold (Waiting for a slot).
 /// </summary>
 public sealed class RunActivity(TimeProvider clock) : Bus.IRunIdleClock
 {
     private long _lastTicks = clock.GetUtcNow().UtcTicks;
+
+    /// <summary>The last sign of any activity, model requests included: what Stalled is measured from.</summary>
+    private long _signTicks = clock.GetUtcNow().UtcTicks;
     private volatile bool _held;
     private readonly object _lock = new();
     private readonly List<Bus.ActivitySpan> _stalls = [], _holds = [];
@@ -105,6 +108,22 @@ public sealed class RunActivity(TimeProvider clock) : Bus.IRunIdleClock
             var now = clock.GetUtcNow();
             NoteGap(now);
             Interlocked.Exchange(ref _lastTicks, now.UtcTicks);
+            _signTicks = now.UtcTicks;
+        }
+    }
+
+    /// <summary>
+    /// The agent is working without calling the bus: a model request went out or its answer is streaming back. It
+    /// counts against Stalled in the time accounting, but does not reset the idle watchdog (that still waits for a
+    /// bus call, so a run that only talks to the model is stopped as before).
+    /// </summary>
+    public void Saw()
+    {
+        lock (_lock)
+        {
+            var now = clock.GetUtcNow();
+            NoteGap(now);
+            _signTicks = now.UtcTicks;
         }
     }
 
@@ -128,6 +147,7 @@ public sealed class RunActivity(TimeProvider clock) : Bus.IRunIdleClock
             if (_held) _holds.Add(new(_heldSince, now));
             else NoteGap(now);
             Interlocked.Exchange(ref _lastTicks, now.UtcTicks);
+            _signTicks = now.UtcTicks;
             _held = false;
         }
     }
@@ -138,7 +158,7 @@ public sealed class RunActivity(TimeProvider clock) : Bus.IRunIdleClock
         {
             var stalls = new List<Bus.ActivitySpan>(_stalls);
             var holds = new List<Bus.ActivitySpan>(_holds);
-            var last = new DateTimeOffset(Interlocked.Read(ref _lastTicks), TimeSpan.Zero);
+            var last = new DateTimeOffset(_signTicks, TimeSpan.Zero);
             if (_held) holds.Add(new(_heldSince, now));
             else if (now - last >= Bus.RunActivitySpans.StallAfter) stalls.Add(new(last, now));
             return new(stalls, holds);
@@ -149,7 +169,7 @@ public sealed class RunActivity(TimeProvider clock) : Bus.IRunIdleClock
     private void NoteGap(DateTimeOffset now)
     {
         if (_held) return;
-        var last = new DateTimeOffset(Interlocked.Read(ref _lastTicks), TimeSpan.Zero);
+        var last = new DateTimeOffset(_signTicks, TimeSpan.Zero);
         if (now - last >= Bus.RunActivitySpans.StallAfter) _stalls.Add(new(last, now));
     }
 }

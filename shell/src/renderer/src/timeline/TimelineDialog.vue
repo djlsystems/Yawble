@@ -6,7 +6,7 @@ import { displayName } from '../faces/faces';
 import Modal from '../components/Modal.vue';
 import LoadingNote from '../components/LoadingNote.vue';
 import {
-  axisEnd, between, buildAxis, categoryLabel, categoryVar, clock, clockSec, closeTimeline, endedHowLabel, formatDuration,
+  axisEnd, between, buildAxis, categoryLabel, categoryVar, clock, clockSec, closeTimeline, cutMs, endedHowLabel, formatDuration,
   formatShort, isoMs, liveOverallMs, markerLabel, placeBreakLabels, shares, TimeCategories, timelineTarget, useNow, type TimelineTarget,
 } from './time';
 
@@ -151,8 +151,13 @@ watch(ticksEl, (el) => {
 });
 onBeforeUnmount(() => ro?.disconnect());
 const bandLen = (b: TimelineBand) => Math.max(0, bandEnd(b) - (isoMs(b.start) ?? 0));
-const bandSays = (b: TimelineBand) =>
-  `${categoryLabel(b.category)}, ${clockSec(b.start)} to ${b.end ? clockSec(b.end) : 'now'}, ${formatDuration(bandLen(b))}`;
+// A band that crosses a break is drawn much shorter than it is: say how much of it the break hides.
+const bandCut = (b: TimelineBand) => (axis.value ? cutMs(axis.value, isoMs(b.start) ?? 0, bandEnd(b)) : 0);
+const bandSays = (b: TimelineBand) => {
+  const cut = bandCut(b);
+  return `${categoryLabel(b.category)}, ${clockSec(b.start)} to ${b.end ? clockSec(b.end) : 'now'}, ${formatDuration(bandLen(b))}`
+    + (cut > 0 ? ` (${formatShort(cut)} of it drawn shorter, behind the break)` : '');
+};
 const markerSays = (m: { kind: string; at: string; card?: number | null }) =>
   `${markerLabel(m.kind)}${m.card != null && !isCard.value ? ` (card ${m.card})` : ''}, ${clockSec(m.at)}`;
 const legend = computed(() => {
@@ -213,7 +218,7 @@ const unpick = (key: string) => { if (picked.value?.key === key) picked.value = 
           <div class="scroll" data-test="timeline-scroll">
             <div class="plot">
               <div class="lanes">
-                <div v-for="r in rows" :key="r.key" class="lane" :class="{ summary: r.summary }" data-test="timeline-row">
+                <div v-for="(r, ri) in rows" :key="r.key" class="lane" :class="{ summary: r.summary }" data-test="timeline-row">
                   <div class="lane-label"><strong>{{ r.label }}</strong><span v-if="r.sub" class="muted"> · {{ r.sub }}</span></div>
                   <div class="track" role="group" :aria-label="r.label">
                     <button v-for="(b, i) in r.bands" :key="i" type="button" class="band" :class="b.category" :style="bandStyle(b)"
@@ -221,10 +226,15 @@ const unpick = (key: string) => { if (picked.value?.key === key) picked.value = 
                       @mouseenter="pick(`${r.key}:${i}`, `${r.label}: ${bandSays(b)}`)" @mouseleave="unpick(`${r.key}:${i}`)"
                       @focus="pick(`${r.key}:${i}`, `${r.label}: ${bandSays(b)}`)" @blur="unpick(`${r.key}:${i}`)"
                       @click="pick(`${r.key}:${i}`, `${r.label}: ${bandSays(b)}`)" />
+                    <!-- A compressed stretch: a short break mark in each row (never one long slanted line across the
+                         labels), and on the first row the time it hides, where the eye is. -->
+                    <span v-for="(br, i) in axis.breaks" :key="`b${i}`" class="brk" :style="{ left: pct(br.at) }" aria-hidden="true"
+                      :data-test="ri === 0 ? 'timeline-break' : undefined" />
+                    <span v-for="(br, i) in ri === 0 ? axis.breaks : []" :key="`bc${i}`" class="brk-chip" :style="{ left: pct(br.at) }"
+                      data-test="timeline-break-chip" :title="`${formatDuration(br.ms)} with nothing changing, drawn shorter`">{{ formatShort(br.ms) }}</span>
                   </div>
                 </div>
                 <div class="marks" aria-hidden="true">
-                  <span v-for="(br, i) in axis.breaks" :key="`b${i}`" class="brk" :style="{ left: pct(br.at) }" data-test="timeline-break" />
                   <span v-for="(m, i) in markers" :key="`m${i}`" class="mline" :class="m.kind" :style="{ left: pct(axis.at(isoMs(m.at) ?? axis.start)) }" />
                 </div>
               </div>
@@ -288,8 +298,10 @@ h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-soft);
 .marks { position: absolute; inset: 0; pointer-events: none; }
 .mline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid color-mix(in srgb, var(--tl-marker) 22%, transparent); }
 .mline.reopen, .mline.watchdog-end, .mline.expired { border-left-style: dashed; }
-/* A compressed stretch: a break mark (two slanted strokes) across the rows. */
-.brk { position: absolute; top: -2px; bottom: -2px; width: 6px; margin-left: -3px; background: var(--surface); border-left: 1.5px solid var(--tl-break); border-right: 1.5px solid var(--tl-break); transform: skewX(-14deg); }
+/* A compressed stretch: in each row, a short break mark (a gap between two slanted strokes) over the band it cuts. */
+.brk { position: absolute; top: -2px; bottom: -2px; width: 6px; margin-left: -3px; background: var(--surface); border-left: 1.5px solid var(--tl-break); border-right: 1.5px solid var(--tl-break); transform: skewX(-14deg); pointer-events: none; z-index: 2; }
+/* On the first row, the time the break hides, centred on it. */
+.brk-chip { position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 3; padding: 0 5px; border: 1px solid var(--tl-break); border-radius: 8px; background: var(--surface); color: var(--tl-break); font-size: 10.5px; line-height: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; pointer-events: none; }
 .mrow { position: relative; height: 14px; margin-top: 3px; }
 .mk { position: absolute; top: 1px; width: 10px; height: 10px; min-width: 0; min-height: 0; margin-left: -5px; padding: 0; border: 1.5px solid var(--tl-marker); background: var(--surface); transform: rotate(45deg); cursor: pointer; }
 .mk.planned, .mk.started { background: var(--tl-marker); }

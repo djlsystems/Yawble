@@ -323,8 +323,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - A card records its planned time and its started time: the first time it has a member and is queued or told.
     Every change of a card's state is recorded with its time and category.
   - Every moment is in exactly one category, so the categories add up to the overall time: **Agent working** (a run
-    is active on it), **Stalled** (a run is active but shows no tool call or progress for 10 minutes or more; from its
-    last sign of activity to its next one, or to the run's end), **Waiting on you** (an open question to you),
+    is active on it), **Stalled** (a run is active but shows no sign of work for 10 minutes or more: no tool call, no
+    progress and no model request going out or answer streaming back; from its last sign of activity to its next
+    one, or to the run's end), **Waiting on you** (an open question to you),
     **Waiting for a slot** (queued for a run slot, or waiting for the heavy-work lease), **Waiting on a teammate**
     (handed back, or its run ended, and it waits for the Manager or a tester), **Blocked** (blocked, or its run failed),
     **Scheduled** (parked until the wake it asked for), **Not started** (planned, no member yet), **Idle** (open,
@@ -357,7 +358,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     ended by the idle watchdog, and expired. The legend lists the categories that appear.
   - **Stalled** is drawn in Agent working's colour, hatched, in the bands, the legend and the table.
   - A long quiet stretch (2 hours or more and over a quarter of the whole, with nothing changing) is drawn shorter
-    behind a break mark, labelled with its real length (≈ 2d 17h). The label never covers the start and end times.
+    behind a break mark in each row. The first row shows its real length on the mark (2h 37m), and so does the time
+    axis (≈ 2h 37m); that label never covers the start and end times. A band that runs across a break says in the
+    readout how much of it is drawn shorter.
   - On a phone the axis scrolls sideways inside the dialog; the page does not. Bands and markers keep their size.
   - An open item's timeline is asked again every 30 seconds while the dialog is open.
   - A Visitor sees the overall times and the same Timeline dialog.
