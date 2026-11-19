@@ -9,6 +9,7 @@ import { displayName } from '../faces/faces';
 import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import CommitText from './CommitText.vue';
 import { vChange } from '../remoteAccess';
 import OverallTime from '../timeline/OverallTime.vue';
 import { hasTime } from '../timeline/time';
@@ -118,7 +119,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
           <template v-if="w.state === 'expired' && w.expiredAt"> · expired {{ ago(w.expiredAt) }}</template>
         </div>
         <div v-if="w.busy.length" class="busy">{{ w.busy.join(' · ') }}</div>
-        <div v-if="w.ending" class="ending">{{ w.state === 'closed' ? 'Closed' : w.state === 'expired' ? 'Expired' : 'Delivered' }}: {{ w.ending }}</div>
+        <div v-if="w.ending" class="ending">{{ w.state === 'closed' ? 'Closed' : w.state === 'expired' ? 'Expired' : 'Delivered' }}: <CommitText :text="w.ending" :team="team.name" /></div>
         <div v-if="expiresSoon(w)" class="ending warn" data-test="workflow-expires">Expires {{ until(w.expiresAt!) }} if nothing happens in it; Extend resets the clock.</div>
         <div v-if="w.state === 'open'" class="actions">
           <template v-if="acting?.id === w.id">

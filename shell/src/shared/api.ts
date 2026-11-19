@@ -797,6 +797,23 @@ export interface CommitFound {
 }
 export type CommitShow = CommitGone | CommitFound;
 /**
+ * B074 git.commitsResolve {team? | teamId?, ids} (contract B074/contract.md, core card 470): which of the commit-shaped IDs
+ * on a screen are real commits, in ONE call. ids: 7 to 40 hex digits each, short or full; at most 200 distinct per call
+ * (GIT_COMMITS_RESOLVE_MAX; more is bad_params, so the shell splits above it). Neither team nor teamId: every team.
+ * results: one per distinct ID, in the order asked (id lower case); matches: none (not a commit: the text stays text),
+ * one, or more (ambiguous: the chooser). repo null: the team's main repository. pushed: as the Commit view's
+ * where.pushed. errors: repositories that could not be read (absent when none). A read; a Visitor may call it.
+ */
+export const GIT_COMMITS_RESOLVE = 'git.commitsResolve';
+export const GIT_COMMITS_RESOLVE_MAX = 200;
+export interface CommitMatch { team: string; teamId?: number; repo: string | null; fullId: string; shortId?: string; title: string; pushed: boolean }
+export interface CommitsResolveParams { team?: string; teamId?: number; ids: string[] }
+export interface CommitsResolved {
+  max?: number;
+  results: { id: string; valid: boolean; matches: CommitMatch[] }[];
+  errors?: { team: string; teamId: number; repo: string | null; message: string }[];
+}
+/**
  * B072 git.commitDiff {team | teamId, sha, path, repo?} (core CommitFileDiff.ToJson): one file's diff against the first
  * parent. Each hunk: git's header line, its starts and counts, and its lines (kind context / added / deleted; old / new:
  * the 1-based line numbers, only on the side(s) the line is on). Binary, over 5000 changed lines or 2M characters, or a

@@ -12,7 +12,9 @@ import LocalMark from './LocalMark.vue';
 // (git.commitDiff, shown by the code browser's read-only DiffView), and three read-only actions. teams: where to look,
 // in order (the first whose repository has it). A commit git no longer has says so and why. A cloud viewer with
 // members' code hidden (codeShown=false) gets the commit and its file list only: no diff opens.
-const props = defineProps<{ api?: YawbleApi; teams: string[]; sha: string }>();
+// repo (B074): the repository a confirmed link named, in teams[0]; the other teams are asked about their main repository.
+const props = defineProps<{ api?: YawbleApi; teams: string[]; sha: string; repo?: string | null }>();
+const repoOf = (t: string) => (props.repo && t === props.teams[0] ? { repo: props.repo } : {});
 const emit = defineEmits<{ done: [] }>();
 const api = resolveApi(props.api);
 
@@ -26,7 +28,7 @@ onMounted(async () => {
   let lastError: string | null = null;
   for (const t of props.teams) {
     try {
-      const c = await api.call<CommitShow>('git.commitShow', { team: t, sha: props.sha });
+      const c = await api.call<CommitShow>('git.commitShow', { team: t, sha: props.sha, ...repoOf(t) });
       last = c; team.value = t; lastError = null;
       if (c?.found) break;
     } catch (e) {
@@ -68,7 +70,7 @@ async function openFile(file: CommitFile) {
   diffLoading.value = true;
   try {
     // Errors (gone, no_such_file, bad_params, git_failed, remote_refused) carry the core's own plain message.
-    const d = await api.call<CommitDiff>('git.commitDiff', { team: team.value, sha: shown.sha, path: file.path });
+    const d = await api.call<CommitDiff>('git.commitDiff', { team: team.value, sha: shown.sha, path: file.path, ...repoOf(team.value) });
     if (openPath.value === file.path) diff.value = d;
   } catch (e) {
     if (openPath.value === file.path) diffError.value = (e as Error)?.message ?? String(e);

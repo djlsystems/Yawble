@@ -227,6 +227,9 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   // B072 (card 444): the Commit view against the contract DeveloperTomas builds in core (git.commitShow, git.commitDiff).
   'git.commitShow': (p) => commitShow(String(p?.sha ?? '')),
   'git.commitDiff': (p) => commitDiff(String(p?.sha ?? ''), String(p?.path ?? '')),
+  // B074 (card 471): which IDs on a screen are commits, as the card's contract says (B074/contract.md): per ID its
+  // commits; one git no longer has is none (it stays text).
+  'git.commitsResolve': (p) => ({ max: 200, results: ((p?.ids ?? []) as string[]).map((id) => ({ id: id.toLowerCase(), valid: true, matches: commitsResolve(id) })) }),
   // B086: a card's own row, or workflow #10's rows and summary; an unknown one is refused like the core (not_found).
   'timeline.get': (p) => {
     if (p?.workflow != null) { const quiet = (expiry.on ? expiryWorkflows() : []).find((w) => w.id === Number(p.workflow));
@@ -389,6 +392,10 @@ function commitShow(sha: string) {
   return { ...common, title: 'Release 2026.11.18.1', body: '', author: person('Owner', 600), isMerge: false, parents: [],
     where: { inMain: true, branches: ['team/payments'], otherBranches: [], pushed: true, tags: ['v2026.11.18.1'] },
     files: [{ path: 'README.md', status: 'modified', added: 1, deleted: 1, binary: false }] };
+}
+function commitsResolve(id: string) {
+  const c = commitShow(id) as { found: boolean; sha?: string; title?: string; where?: { pushed: boolean } };
+  return c.found ? [{ team: 'payments', teamId: 1, repo: null, fullId: c.sha!, shortId: c.sha!.slice(0, 12), title: c.title ?? '', pushed: !!c.where?.pushed }] : [];
 }
 function commitDiff(sha: string, path: string) {
   const c = commitShow(sha) as { found: boolean; codeShown?: boolean; goneReason?: string; files: { path: string; oldPath?: string; status: string; added: number; deleted: number; binary: boolean }[] };
