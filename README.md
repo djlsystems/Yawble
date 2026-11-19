@@ -111,7 +111,7 @@ On Windows, `--sign` signs every `.exe` and `.dll` that ships, and the installer
 (`packaging/signing.json` names the account and certificate profile), and writes `Yawble-Setup-<version>-<arch>.exe`
 and `SHA256SUMS`. Files their maker signed (the .NET runtime, the sandbox) keep that signature, and the build fails if
 any file ends unsigned. It needs the Windows SDK's `signtool`, the Artifact Signing client tools
-(`Azure.CodeSigning.Dlib.dll`; `YAWBLE_SIGNING_DLIB` names it when it is not where they install it), an `az login`, and
+(`Azure.CodeSigning.Dlib.dll`; `SIGNING_DLIB` names it when it is not where they install it, and `SIGNTOOL` names `signtool.exe`), an `az login`, and
 the Certificate Profile Signer role on the account.
 
 ### Run in development

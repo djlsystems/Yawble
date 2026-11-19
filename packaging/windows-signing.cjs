@@ -4,8 +4,10 @@
 //
 // The signer signs in through Azure (DefaultAzureCredential: `az login` is enough) and needs the "Artifact Signing
 // Certificate Profile Signer" role on the account. Where the tools are:
-//   YAWBLE_SIGNTOOL        signtool.exe (default: the newest x64 one in the Windows 10/11 SDK)
-//   YAWBLE_SIGNING_DLIB    Azure.CodeSigning.Dlib.dll (default: where the Artifact Signing client tools install it)
+//   SIGNTOOL        signtool.exe (default: the newest x64 one in the Windows 10/11 SDK)
+//   SIGNING_DLIB    Azure.CodeSigning.Dlib.dll (default: where the Artifact Signing client tools install it)
+// The old names YAWBLE_SIGNTOOL and YAWBLE_SIGNING_DLIB are still read when the new ones are not set. A host task can be
+// given SIGNTOOL and SIGNING_DLIB (from the app's environment or a Connection), never a YAWBLE_ name: the app keeps those.
 // Which account and certificate profile: signing.json beside this file.
 'use strict';
 const { spawnSync } = require('node:child_process');
@@ -19,7 +21,8 @@ const settings = JSON.parse(fs.readFileSync(path.join(__dirname, 'signing.json')
 const SIGNABLE = ['.exe', '.dll', '.node'];
 
 function findSigntool() {
-  if (process.env.YAWBLE_SIGNTOOL) return process.env.YAWBLE_SIGNTOOL;
+  const named = process.env.SIGNTOOL || process.env.YAWBLE_SIGNTOOL;
+  if (named) return named;
   const kits = path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Windows Kits', '10', 'bin');
   const versions = fs.existsSync(kits) ? fs.readdirSync(kits).filter((v) => /^10\.\d+\.\d+\.\d+$/.test(v)) : [];
   versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -27,16 +30,17 @@ function findSigntool() {
     const candidate = path.join(kits, v, 'x64', 'signtool.exe');
     if (fs.existsSync(candidate)) return candidate;
   }
-  throw new Error('signtool.exe not found: install the Windows SDK, or set YAWBLE_SIGNTOOL');
+  throw new Error('signtool.exe not found: install the Windows SDK, or set SIGNTOOL');
 }
 
 function findDlib() {
   const candidates = [
+    process.env.SIGNING_DLIB,
     process.env.YAWBLE_SIGNING_DLIB,
     path.join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'MicrosoftArtifactSigningClientTools', 'Azure.CodeSigning.Dlib.dll'),
   ].filter(Boolean);
   const found = candidates.find((c) => fs.existsSync(c));
-  if (!found) throw new Error('Azure.CodeSigning.Dlib.dll not found: install the Artifact Signing client tools, or set YAWBLE_SIGNING_DLIB');
+  if (!found) throw new Error('Azure.CodeSigning.Dlib.dll not found: install the Artifact Signing client tools, or set SIGNING_DLIB');
   return found;
 }
 
@@ -119,4 +123,4 @@ async function electronBuilderSign(configuration) {
   }
 }
 
-module.exports = { signFiles, signableFiles, verifyAll, isSigned, electronBuilderSign, failures, settings };
+module.exports = { findSigntool, findDlib, signFiles, signableFiles, verifyAll, isSigned, electronBuilderSign, failures, settings };
