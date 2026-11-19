@@ -456,9 +456,13 @@ a member's pane opens it at that member's activity.
     written with, so an entry about a team or member deleted since still says who it was about.
   - **Accountability**: **Audit** (every change made from the window, a Cloud Link viewer, the Concierge or a paired
     program; reads are not recorded), **Cloud Link**, **Tool calls**, **Approvals**, **Agent changes**, **Host tasks**.
-  - **Security**: **Network** (each run's gateway: model requests, connections allowed and refused) and **Runs** (how
-    each sandboxed run ended).
-  - **Usage**: **Model usage**, tokens per model request.
+  - **Security**: **Network** and **Runs** (how each sandboxed run ended). Network is what each run's gateway
+    decided: host connections allowed and refused (repeated refusals of one host in a run are counted on one row),
+    errors and requests answered with anything other than 2xx, credential problems, rate limits, and each run's first
+    successful model request per model host (`model`, `grok`, `xai`, `copilot`, `codex` `.yawble.internal`). The
+    run's other successful model requests are not rows here: they are counted in **Model usage**. Rows written one
+    per model request before this are removed when the app updates, keeping each run's first per model host.
+  - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
   - **Work history**: **Team messages** and **Board history**.
   - **Diagnostics**: what the app itself reported (`<data>/logs/`).
