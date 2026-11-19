@@ -1,0 +1,35 @@
+{
+  "found": true,
+  "sha": "0fe5f2a8e087d50b4cb1594e3f04fbe326c83b37",
+  "shortSha": "0fe5f2a8e087",
+  "title": "Feature x",
+  "body": "",
+  "author": {
+    "name": "Person",
+    "email": "person@example.invalid",
+    "date": "2026-11-18T19:29:05-05:00"
+  },
+  "isMerge": false,
+  "parents": [
+    "439842cff34c537287c5f7767af0a15c62b30eb1"
+  ],
+  "where": {
+    "inMain": false,
+    "branches": [],
+    "otherBranches": [
+      "feature/x"
+    ],
+    "pushed": false,
+    "tags": []
+  },
+  "files": [
+    {
+      "path": "x.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "codeShown": true
+}
