@@ -123,6 +123,13 @@ public class Card469B100VerifyTests
             Assert.True(lessons.Workflow == root.Seq,
                 $"team_retros version says workflow {lessons.Workflow} (the retro item's own workflow is {retroWorkflow}); " +
                 $"the completed workflow the retro was for is {root.Seq}");
+
+            // Card 481: Settings > Skills' version history (shell versionWriter: "the retro of workflow <id>") reads the
+            // same version row, so it names the completed workflow too, and the retro item's own workflow appears nowhere.
+            var version = Assert.Single(skills.Versions(team, TeamRetros.Name));
+            Assert.Equal("Manager", version.Writer);
+            Assert.Equal(root.Seq, version.Workflow);
+            Assert.NotEqual(retroWorkflow, version.Workflow);
         }
     }
 
