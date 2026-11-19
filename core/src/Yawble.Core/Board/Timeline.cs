@@ -43,6 +43,8 @@ public static class TimeCategories
             "needs-decision" => WaitingOnYou,
             "blocked" or "failed" => Blocked,
             "handback" or "completed" => WaitingOnTeammate,
+            // B097 (card 437): the person stopped the run; nothing works the card and nothing blocks it until new work.
+            Lanes.Stopped => Idle,
             _ => Idle,
         };
 }

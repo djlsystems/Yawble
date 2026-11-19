@@ -68,6 +68,13 @@ public static class FailureClasses
     public const string Credential = "credential";
     public const string StartFailed = "start_failed";
 
+    /// <summary>
+    /// The host could not get the run ready (the member's clone, the team's shared view), so the agent never started.
+    /// The bus gives the batch back to the member's queue and tries again (<see cref="BusOptions.NotStartedRetries"/>)
+    /// before it reports the run failed.
+    /// </summary>
+    public const string NotStarted = "not_started";
+
     /// <summary>The model API's usage or rate limit stopped the run; the failed row's run.retryAfter says when to come back.</summary>
     public const string Rate = "rate";
 }

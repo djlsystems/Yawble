@@ -445,8 +445,9 @@ public class ConciergeActionTests : IDisposable
         }, "");
         var opened = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x", ["body"] = "Why" });
         Assert.StartsWith("ok: opened a pull request on GitLab for members/ines into main", opened);
-        Assert.Equal(("glab", new[] { "mr", "create", "--source-branch", "members/ines", "--target-branch", "main", "--title", "Add x", "--description", "Why", "--yes" }),
-            (rig.CliCalls[0].Cli, rig.CliCalls[0].Args));
+        Assert.Equal("glab", rig.CliCalls[0].Cli);
+        Assert.Equal(new[] { "mr", "create", "--source-branch", "members/ines", "--target-branch", "main", "--title", "Add x", "--description", "Why", "--yes" },
+            rig.CliCalls[0].Args);
         var shown = Call("git_pr_merge", rig.Actions(), new() { ["team"] = "alpha", ["pr"] = 7 });
         Assert.StartsWith("NOT DONE", shown);
         Assert.Contains("Merge pull request #7 on GitLab: \"Add x\" (members/ines into main)", shown);

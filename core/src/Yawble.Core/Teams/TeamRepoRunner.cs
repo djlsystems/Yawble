@@ -37,7 +37,9 @@ public sealed class TeamRepoRunner(IAgentRunner inner, TeamRepos repos, Action<s
         }
         catch (Exception ex) when (ex is GitException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
-            return RunResult.Fail("could not prepare the member's clone: " + ex.Message);
+            // The agent never started: the bus gives the batch back and tries again (FailureClasses.NotStarted).
+            log?.Invoke($"{run.Member.Qualified}: run {run.RunId}: could not prepare the member's clone: {ex.Message}");
+            return new RunResult(false, "could not prepare the member's clone: " + ex.Message, FailureClasses.NotStarted);
         }
 
         RunResult result;

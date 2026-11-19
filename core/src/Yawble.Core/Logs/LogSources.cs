@@ -84,6 +84,7 @@ public static class LogSources
                 new("target", "Host or path", "COALESCE(t.target, t.vhost)"),
                 new("status", "Status", "t.status", "number"),
                 new("detail", "Detail", "t.detail"),
+                new("count", "Times", "t.count", "number"),
             ],
             IsTeamOf("t.member"), "t.member = @member",
             new("gateway_events", "at", 365, "the record of which hosts each run reached or was refused. The guardrail check's report of its own run is kept.")),
@@ -301,7 +302,7 @@ public static class LogSources
                  'r' || r.id AS rid
             FROM run_records r
           UNION ALL
-          SELECT g.at, 'Network', g.member, g.kind, trim(COALESCE(g.method, '') || ' ' || COALESCE(g.target, g.vhost, '') || COALESCE(' ' || g.status, '') || COALESCE(' ' || g.detail, '')), 'g' || g.id
+          SELECT g.at, 'Network', g.member, g.kind, trim(COALESCE(g.method, '') || ' ' || COALESCE(g.target, g.vhost, '') || COALESCE(' ' || g.status, '') || COALESCE(' ' || g.detail, '') || CASE WHEN g.count > 1 THEN ' (' || g.count || 'x)' ELSE '' END), 'g' || g.id
             FROM gateway_events g
           UNION ALL
           SELECT c.at, 'Tool calls', c.member, c.integration || ' ' || COALESCE(c.decision, ''), trim(COALESCE(c.args, '') || COALESCE(' exit ' || c.exit_code, '')), 'c' || c.id

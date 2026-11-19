@@ -3,7 +3,7 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { PaneHeaderKey } from './terminalPane';
 import LoadingNote from './components/LoadingNote.vue';
 import BusyLabel from './components/BusyLabel.vue';
-import type { YawbleApi, TerminalBanner, TerminalSessionInfo } from '../../shared/api';
+import { isStoppedRun, type YawbleApi, type TerminalBanner, type TerminalSessionInfo } from '../../shared/api';
 import { errorText, resolveApi } from './api';
 import TerminalScreen from './components/TerminalScreen.vue';
 
@@ -54,7 +54,9 @@ const stateLine = computed(() => {
   if (s && !s.ended && s.kind === 'interactive') return joinFields(['Interactive', s.command, 'session'].filter(Boolean).join(' '), 'input on');
   if (b.state === 'running') return joinFields(`Run ${b.runId ?? ''}`, s?.command, 'input off during headless run');
   if (b.state === 'queued') return `Queued · position ${b.queuePosition} of ${b.queueLength} · waiting for a global run slot`;
-  const last = b.lastRunState ? ` · last run ${b.lastRunState}${b.lastRunReason ? `: ${b.lastRunReason}` : ''}` : '';
+  // B097: a run the person stopped (recorded failed, class "stopped") reads as stopped, not failed.
+  const stopped = !!b.lastRunState && b.lastRunState !== 'completed' && b.lastRunState !== 'interrupted' && isStoppedRun({ state: b.lastRunState, failureClass: b.lastRunFailureClass });
+  const last = stopped ? ' · last run stopped by you' : b.lastRunState ? ` · last run ${b.lastRunState}${b.lastRunReason ? `: ${b.lastRunReason}` : ''}` : '';
   return `Idle${last} · showing the last transcript`;
 });
 

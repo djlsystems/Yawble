@@ -10,7 +10,7 @@ import type { ItemTime, TimeCategory, TimeEndedHow, TimelineBand, TimelineMarker
 export const TimeCategories: { id: TimeCategory; label: string; hint: string }[] = [
   { id: 'agent-working', label: 'Agent working', hint: 'A member was running on it.' },
   { id: 'waiting-on-you', label: 'Waiting on you', hint: 'A question or a hand-back waited on a person.' },
-  { id: 'stalled', label: 'Stalled', hint: 'A run was on, but showed no activity for 10 minutes or more.' },
+  { id: 'stalled', label: 'Stalled', hint: 'A run was on, but showed no sign of work (no tool call, progress or model request) for 10 minutes or more.' },
   { id: 'waiting-for-slot', label: 'Waiting for a slot', hint: 'Queued for a run slot or the heavy-work lease.' },
   { id: 'waiting-on-teammate', label: 'Waiting on a teammate', hint: 'Waiting for another card or member.' },
   { id: 'blocked', label: 'Blocked', hint: 'Blocked, with nobody able to go on.' },
@@ -151,8 +151,8 @@ export interface Axis {
   start: number; end: number;
   /** A time's place on the axis, 0..1. */
   at: (t: number) => number;
-  /** The compressed stretches: where the break mark sits (0..1) and how long the stretch really is. */
-  breaks: { at: number; ms: number }[];
+  /** The compressed stretches: where the break mark sits (0..1), how long the stretch really is, and its real start and end. */
+  breaks: { at: number; ms: number; from: number; to: number }[];
 }
 /** A stretch with nothing changing (no band edge, no marker) at least this long AND this share of the whole is compressed. */
 export const BreakMinMs = 2 * 60 * MIN;
@@ -185,8 +185,13 @@ export function buildAxis(start: number, end: number, edges: number[]): Axis {
     const s = seg[i];
     return (starts[i] + ((t - s.a) / (s.b - s.a || 1)) * s.w) / sum;
   };
-  const breaks = seg.flatMap((s, i) => (s.long ? [{ at: (starts[i] + s.w / 2) / sum, ms: s.b - s.a }] : []));
+  const breaks = seg.flatMap((s, i) => (s.long ? [{ at: (starts[i] + s.w / 2) / sum, ms: s.b - s.a, from: s.a, to: s.b }] : []));
   return { start, end, at, breaks };
+}
+
+/** How much of a band (start..end, ms) lies inside the axis's compressed stretches, so is drawn shorter than it is. */
+export function cutMs(axis: Pick<Axis, 'breaks'>, start: number, end: number): number {
+  return axis.breaks.reduce((sum, b) => sum + Math.max(0, Math.min(end, b.to) - Math.max(start, b.from)), 0);
 }
 
 /** The axis's end: the item's end, else the latest of now and the bands' and markers' last times. */

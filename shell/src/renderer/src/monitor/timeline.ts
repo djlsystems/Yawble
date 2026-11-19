@@ -1,5 +1,5 @@
 import type { MemberState } from '../faces/faces';
-import { memberKey, type FeedRow, type Tone } from './model';
+import { feedKindOf, memberKey, type FeedRow, type Tone } from './model';
 import type { StepRow } from './steps';
 import type { CodeEvent } from './codemap';
 
@@ -22,11 +22,12 @@ export const MaxGapMs = 20_000;
 export const timeOf = (x: { at: string }): number => Date.parse(x.at);
 
 /** A row's tone, as the model gives it (the timeline's colour). */
-export function toneOfRow(row: Pick<FeedRow, 'kind' | 'from'>): Tone {
-  switch (row.kind) {
+export function toneOfRow(row: Pick<FeedRow, 'kind' | 'from'> & Partial<Pick<FeedRow, 'failureClass'>>): Tone {
+  switch (feedKindOf(row)) {
     case 'instruction': return row.from === 'person' ? 'person' : 'tell';
     case 'completed': case 'done': return 'done';
     case 'failed': return 'fail';
+    case 'stopped': return 'stopped';
     case 'handback': return 'handback';
     case 'progress': return 'progress';
     case 'blocked': return 'blocked';
@@ -153,7 +154,8 @@ export class ReplayStates {
     const key = memberKey(row.team, row.member);
     const at = timeOf(row);
     const state: MemberState | null =
-      row.kind === 'instruction' ? (this.states.get(key)?.state === 'running' ? null : 'waiting')
+      feedKindOf(row) === 'stopped' ? 'stopped'
+      : row.kind === 'instruction' ? (this.states.get(key)?.state === 'running' ? null : 'waiting')
         : row.kind === 'completed' || row.kind === 'handback' || row.kind === 'done' ? 'idle'
           : row.kind === 'failed' ? 'failed'
             : row.kind === 'decision' ? 'decision'

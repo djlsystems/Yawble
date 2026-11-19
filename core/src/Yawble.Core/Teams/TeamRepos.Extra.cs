@@ -264,8 +264,8 @@ public sealed partial class TeamRepos
             await Git.RunAsync(dir, ct, "remote", "remove", "source");
         }
         const string tracking = "refs/remotes/source/base";
-        await Git.RunAsync(dir, ct, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--",
-            extra.Path, $"+refs/heads/{extra.BaseBranch}:{tracking}");
+        await Git.FetchLocalOrThrowAsync(dir, ["fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--",
+            extra.Path, $"+refs/heads/{extra.BaseBranch}:{tracking}"], ct);
         await Git.RunAsync(dir, ct, "checkout", "-q", "-f", "--detach", tracking);
         await Git.RunAsync(dir, ct, "clean", "-q", "-f", "-d", "-x");
         return dir;

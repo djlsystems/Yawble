@@ -153,6 +153,12 @@ public sealed record RunGatewaySpec(
     /// <summary>The doctor's self-test gateway: its denials are not written to the gateway log (they are not a run's).</summary>
     public bool Quiet { get; init; }
 
+    /// <summary>
+    /// Told while a model request is forwarded: when it goes out and as its answer streams back. The run's time
+    /// accounting counts it as the agent working (RunActivity.Saw), so a run that talks to the model is never Stalled.
+    /// </summary>
+    public Action? ModelActivity { get; init; }
+
     /// <summary>The launcher's run key (run_records.run_key): what usage_events are filed under, unique for every run
     /// (the run number is the bus run's id, or a local counter for runs that are not bus runs).</summary>
     public string? RunKey { get; init; }

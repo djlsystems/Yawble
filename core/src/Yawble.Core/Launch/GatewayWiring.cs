@@ -31,6 +31,7 @@ public sealed class GatewayRunFactory(GatewayHost host) : IRunGatewayFactory
             ClaudeFromHost = run.Credential == CredentialMode.ClaudeGatewaySignIn,
             CopilotFromHost = copilotFromHost,
             CodexFromHost = codexFromHost,
+            ModelActivity = activity.Saw,
         };
         IBusEndpoint bus = run.Tools ?? (run.Bus is null ? new NoBusEndpoint() : new McpBusServer(run.Bus));
         var since = host.Log.Now;

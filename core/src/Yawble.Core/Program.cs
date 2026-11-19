@@ -297,6 +297,9 @@ if (bus.Repos is { } taskRepos)
 var board = new Yawble.Core.Board.BoardService(new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), bus,
     line => Console.Error.WriteLine($"board: {line}"));
 bus.Board = board;
+// B100: workflow_digest reads the runs' transcripts.
+var digestTranscripts = new Yawble.Core.Transcripts.TranscriptStore(options.DataDir!, $"Data Source={dbPath}");
+bus.TranscriptOf = digestTranscripts.Read;
 board.Changed = () => events.Publish(Yawble.Core.Board.BoardService.ChangedEvent, null); // clear done / restore: open boards refresh
 bus.LeaseChanged = () => events.Publish(Yawble.Core.Bus.BusEngine.LeaseChangedEvent, null); // the Monitor's heavy-work line, the member cards
 // Custom agents and the agent/model change log (rows are written by the stores that change things; local only).
@@ -306,6 +309,8 @@ Yawble.Core.Agents.Profiles.AgentProfileStore? agentProfileStore = null;
 var agentChangeLog = new Yawble.Core.Agents.Profiles.AgentChangeLog($"Data Source={dbPath}", null, (agent, model) => agentProfileStore!.ResolveModel(agent, model));
 agentProfileStore = new Yawble.Core.Agents.Profiles.AgentProfileStore($"Data Source={dbPath}", agentChangeLog, new Yawble.Core.Agents.Profiles.SqliteAgentUsage($"Data Source={dbPath}"), defaults: agentDefaults);
 bus.AgentChanges = agentChangeLog;
+// The member panes' agent pill: the model each member runs (set, the agent's default, or the one its last run used).
+ui.Models = new Yawble.Core.Agents.MemberModels($"Data Source={dbPath}", agentResolver, agentDefaults);
 var agentProfileRpc = new Yawble.Core.Agents.Profiles.AgentProfileRpc(agentProfileStore, agentChangeLog);
 boardForConcierge = board.DispatchAsync;
 if (bus.Repos is { } actionRepos)

@@ -305,6 +305,7 @@ public sealed class RunGateway : IAsyncDisposable
             foreach (var (name, value) in credential.Extra) request.Headers.TryAddWithoutValidation(name, value);
 
         HttpResponseMessage response;
+        _spec.ModelActivity?.Invoke();
         try
         {
             response = await _host.Upstream.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -350,6 +351,7 @@ public sealed class RunGateway : IAsyncDisposable
             int n;
             while ((n = await from.ReadAsync(buffer, ct)) > 0)
             {
+                _spec.ModelActivity?.Invoke(); // a long answer streaming back is the agent working
                 meter?.Add(buffer.AsSpan(0, n));
                 if (chunked)
                 {
@@ -366,6 +368,7 @@ public sealed class RunGateway : IAsyncDisposable
             // Filed before the response's end reaches the CLI (a streamed one's last chunk), so whatever reads the
             // usage after a request has finished finds it.
             if (meter is not null) RecordUsage(vhost, pathAndQuery, status, meter);
+            _spec.ModelActivity?.Invoke();
             if (chunked) await HttpWire.WriteAsync(s, "0\r\n\r\n", ct);
             await s.FlushAsync(ct);
         }

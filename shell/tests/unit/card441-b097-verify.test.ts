@@ -1,0 +1,113 @@
+// @vitest-environment happy-dom
+import { flushPromises, mount } from '@vue/test-utils';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import BoardCardItem from '../../src/renderer/src/board/BoardCardItem.vue';
+import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
+import { cardFace, cardStatusLook, trailKind } from '../../src/renderer/src/board/cards';
+import { memberStateOf } from '../../src/renderer/src/faces/faces';
+import { feedKindOf, MonitorModel, type FeedRow } from '../../src/renderer/src/monitor/model';
+import type { BoardCard, YawbleApi } from '../../src/shared/api';
+
+/**
+ * Card 441 (B097 verify, TesterKofi): the window fed exactly what the core (card 437, 742c73e) sends, not the shapes the
+ * window's own tests assumed. The core's side is pinned in core Ui/Card441B097VerifyTests.cs:
+ * - board.list for a stopped run: round 1 the card KEPT its status ("running" / "queued"); round 2 (b864021) its status is
+ *   "stopped" in the lane it had; memberState is { state: 'idle', attention: 'stopped' } (no lastRunFailureClass); the trail line kind is "stopped".
+ * - the feed row: kind "stopped", failureClass "stopped"; a timeout: kind "failed", failureClass "timeout".
+ */
+
+const mounted: { unmount(): void }[] = [];
+afterEach(() => { while (mounted.length) mounted.pop()!.unmount(); });
+
+// The board node as the core sends it after a stop (BoardService.ListAsync + BoardProjector, B097).
+const coreStoppedCard = (status: BoardCard['status'], lane: string): BoardCard => ({
+  id: 41, team: 'Alpha', teamId: 1, member: 'stop', item: 'B097', title: 'job stop', body: '', status, lane,
+  placed: false, awaitingManager: false, workflow: 5, createdAt: '2026-11-18T12:00:00Z', updatedAt: '2026-11-18T12:02:00Z', trailCount: 3,
+  memberState: { state: 'idle', attention: 'stopped' },
+});
+
+describe('the board card for a run the person stopped, as the core sends it', () => {
+  it('the face wears the neutral Stopped ring (passes)', () => {
+    expect(cardFace(coreStoppedCard('running', 'in-progress'))).toBe('stopped');
+  });
+
+  it('the core\'s trail line kind "stopped" shows as stopped (passes)', () => {
+    expect(trailKind({ kind: 'stopped', text: 'stopped by the person' })).toBe('stopped');
+  });
+
+  // Round 1 (742c73e + 96ddd99) fed status "running" / "queued" here, as the core then sent, and FAILED. Round 2
+  // (core b864021): the core sends the card's own status "stopped", keeping its lane (In Progress after a progress line,
+  // To Do before one; core Card441B097Round2VerifyTests pins that). Changed: the fed status is now 'stopped'.
+  it.each([['stopped', 'in-progress'], ['stopped', 'todo']] as const)('status %s (lane %s) from the core: the run line reads Stopped', (status, lane) => {
+    const card = coreStoppedCard(status, lane);
+    expect(cardStatusLook(card)).toMatchObject({ label: 'Stopped', stopped: true });
+    expect(cardStatusLook(card).color).toMatch(/^var\(--(state|status)-stopped\)$/); // the neutral colour, not red/blue
+    const w = mount(BoardCardItem, { props: { card } });
+    mounted.push(w);
+    expect(w.get('[data-test=card-status]').text()).toBe('Stopped');
+    expect(w.get('[data-test=card-status]').text()).not.toMatch(/Running|Queued/);
+  });
+
+  // Round 2: the member's attention says "stopped" on every card of that member; only the stopped run's card is marked.
+  it.each([['running', 'in-progress', 'Running'], ['queued', 'todo', 'Queued'], ['handback', 'done', 'Handed back'], ['completed', 'done', 'Run finished']] as const)(
+    "the member's older card (status %s) is not marked Stopped", (status, lane, label) => {
+      const older = { ...coreStoppedCard(status, lane), id: 40, workflow: 4 };
+      expect(cardStatusLook(older).label).toBe(label);
+      const w = mount(BoardCardItem, { props: { card: older } });
+      mounted.push(w);
+      expect(w.get('[data-test=card-status]').text()).toBe(label);
+    });
+
+  it('the card panel fed the core\'s stopped card: the chip reads Stopped, the lane chip stays To Do', async () => {
+    const detail = { ...coreStoppedCard('stopped', 'todo'), trail: [{ id: 1, at: '2026-11-18T12:02:00Z', source: 'stop', kind: 'stopped', text: 'stopped by the person' }] };
+    const api = { call: async (m: string) => (m === 'board.card' ? detail : null), onEvent: () => () => {} } as unknown as YawbleApi;
+    const w = mount(CardPanel, { props: { id: 41, lanes: [{ id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' }], api } });
+    mounted.push(w);
+    await flushPromises();
+    const chips = w.findAll('.chips .chip').map((c) => c.text());
+    expect(chips.slice(0, 2)).toEqual(['Stopped', 'To Do']);
+    expect(w.get('[data-test=card-status-chip]').attributes('data-stopped')).toBe('true');
+    expect((w.get('[data-test=card-status-select]').element as HTMLSelectElement).value).toBe('stopped');
+    expect(w.get('header').text() + w.get('.chips').text()).not.toMatch(/Running|Queued|Failed/);
+  });
+
+  it('after a new instruction the core re-queues / runs the same card: it reads Queued / Running again', () => {
+    expect(cardStatusLook({ ...coreStoppedCard('queued', 'todo'), memberState: { state: 'queued', attention: 'stopped' } }).label).toBe('Queued');
+    expect(cardStatusLook({ ...coreStoppedCard('running', 'in-progress'), memberState: { state: 'running', attention: 'stopped' } }).label).toBe('Running');
+    expect(cardFace({ ...coreStoppedCard('running', 'in-progress'), memberState: { state: 'running', attention: 'stopped' } })).toBe('running');
+  });
+});
+
+describe('the stopped colour in both themes (styles.css)', () => {
+  it('--status-stopped maps to --state-stopped in the light and the dark theme, and --state-stopped is set in both', () => {
+    const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
+    expect(css.match(/--status-stopped:\s*var\(--state-stopped\)/g)?.length).toBe(2);
+    expect(css.match(/--state-stopped:\s*#[0-9a-fA-F]{3,8}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('the Monitor fed the core\'s rows', () => {
+  const row = (seq: number, extra: Partial<FeedRow>): FeedRow =>
+    ({ seq, kind: 'failed', team: 'Alpha', member: 'stop', from: 'stop', text: null, workflow: 5, at: new Date().toISOString(), ...extra });
+
+  it('kind "stopped" + failureClass "stopped" is stopped; kind "failed" + "timeout" stays failed', () => {
+    expect(feedKindOf(row(1, { kind: 'stopped', failureClass: 'stopped' }))).toBe('stopped');
+    expect(feedKindOf(row(2, { kind: 'failed', failureClass: 'timeout' }))).toBe('failed');
+  });
+
+  it('the teams.agents node (attention "stopped", lastRunFailureClass "stopped") makes no Needs you; a timeout does', () => {
+    const stop = memberStateOf({ state: 'idle', attention: 'stopped', lastRunFailureClass: 'stopped' });
+    const slow = memberStateOf({ state: 'idle', attention: 'failed', lastRunFailureClass: 'timeout' });
+    expect([stop, slow]).toEqual(['stopped', 'failed']);
+    const m = new MonitorModel();
+    m.reconcile([{ id: 1, name: 'Alpha', members: [
+      { id: 1, name: 'stop', role: 'member', state: stop, queued: 0, statusLine: null, cli: 'claude' },
+      { id: 2, name: 'slow', role: 'member', state: slow, queued: 0, statusLine: null, cli: 'claude' },
+    ] }], 0);
+    m.apply(row(3, { kind: 'stopped', failureClass: 'stopped' }), 1);
+    expect(m.needYouItems().map((i) => i.member)).toEqual(['slow']);
+    expect(m.effects.some((e) => e.kind === 'comet' && e.mark === 'cross')).toBe(false);
+  });
+});

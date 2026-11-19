@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import type { BranchRealignResult, GitDeletePlan, GitDeleteResult, TeamSummary, TidyPlan, YawbleApi } from '../../../shared/api';
 import { errorCode, errorText, resolveApi } from '../api';
 import { canDelete, defaultSelection, deleteRequests, groupTidy, keptReport, whereText, type DeleteRequest, type TidyRow } from '../tidyPlan';
+import CommitLink from './CommitLink.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 
@@ -225,13 +226,13 @@ defineExpose({ load });
           </div>
           <div v-if="r.branch.class === 'working'" class="small muted">{{ r.branch.member ? `${r.branch.member}'s` : "The member's" }} working branch, not a leftover.</div>
           <div v-if="r.branch.class === 'moved'" class="small moved">
-            <span data-test="tidy-moved-shas">team {{ short(r.branch.teamSha) }} · {{ r.branch.member ? `${r.branch.member}'s ` : '' }}clone {{ short(r.branch.cloneSha) }}</span>
+            <span data-test="tidy-moved-shas">team <CommitLink :team="team.name" :sha="r.branch.teamSha" /> · {{ r.branch.member ? `${r.branch.member}'s ` : '' }}clone <CommitLink :team="team.name" :sha="r.branch.cloneSha" /></span>
             <button class="small-btn" data-test="tidy-realign" :disabled="!!busy" @click="startRealign(r)">Realign…</button>
           </div>
           <template v-if="r.branch.commits?.length && commitsLabel(r)">
             <div class="small muted">{{ commitsLabel(r) }}</div>
             <ul class="commits small" data-test="tidy-commits">
-              <li v-for="c in r.branch.commits" :key="c.sha"><code>{{ short(c.sha) }}</code> {{ c.subject }}</li>
+              <li v-for="c in r.branch.commits" :key="c.sha"><CommitLink :team="team.name" :sha="c.sha" /> {{ c.subject }}</li>
             </ul>
           </template>
           <div v-if="r.branch.proof && r.branch.class !== 'working'" class="small proof" :data-test="r.branch.class === 'contained' ? 'tidy-proof' : 'tidy-why'">{{ r.branch.proof }}</div>
@@ -246,7 +247,7 @@ defineExpose({ load });
         <template v-if="realigning.row.branch.commits?.length">
           <div class="small">The team's copy drops these commits:</div>
           <ul class="commits small" data-test="tidy-realign-commits">
-            <li v-for="c in realigning.row.branch.commits" :key="c.sha"><code>{{ short(c.sha) }}</code> {{ c.subject }}</li>
+            <li v-for="c in realigning.row.branch.commits" :key="c.sha"><CommitLink :team="team.name" :sha="c.sha" /> {{ c.subject }}</li>
           </ul>
         </template>
         <div v-if="realigning.row.branch.proof" class="small proof" data-test="tidy-realign-proof">{{ realigning.row.branch.proof }}</div>

@@ -13,12 +13,23 @@ public sealed record TeamSummary(long Id, string Name, string? RepoPath, int Mem
 public sealed record RunSlots(int Running, int Limit, int Queued);
 
 /// <summary>One agent card: the member, its state, queue position and the last run's outcome. Interactive: the
-/// member holds or waits for an interactive terminal session (not a headless run), so the pane's ✕ may end it.</summary>
+/// member holds or waits for an interactive terminal session (not a headless run), so the pane's ✕ may end it.
+/// LastRunFailureClass: the last run's runs.failure_class (stopped, timeout, idle, interrupted, ...; null when it did not
+/// fail): a run the person stopped is recorded failed with class "stopped" and is shown as stopped, not failed (B097).</summary>
 public sealed record AgentCard(
     MemberRow Member, string State, int? QueuePosition, int QueueLength, int QueuedInstructions, string? StatusLine,
     long? RunId, string? RunStartedAt, string? LastRunState, string? LastRunReason,
     string? Lease = null, string? LeaseWhat = null, int? LeasePosition = null,
-    bool Interactive = false);
+    bool Interactive = false, string? LastRunFailureClass = null)
+{
+    /// <summary>The last run ended because the person (or the app on their behalf) stopped it: not a failure to flag.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool LastRunStopped => LastRunState == "failed" && LastRunFailureClass == FailureClasses.Stopped;
+
+    /// <summary>The last run failed in a way that wants the person's eye (any failure but a stop).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool LastRunFailed => LastRunState == "failed" && !LastRunStopped;
+}
 
 /// <summary>The UI's operations on the bus. Every one goes through the same gate as the pump.</summary>
 public sealed partial class BusEngine
@@ -178,7 +189,7 @@ public sealed partial class BusEngine
                     active is null ? null : last?.StartedAt,
                     last?.State, last?.Reason,
                     lease?.State, lease?.What, lease?.Position,
-                    HasSession(m.Id));
+                    HasSession(m.Id), last?.FailureClass);
             }).ToArray();
         }, ct);
 

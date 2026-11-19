@@ -56,9 +56,12 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - Each team's tile on **Teams** lists its 50 newest workflows and every open one, last updated first, scrolling inside
   the tile; a row opens that workflow.
 - On the team page each member is one framed pane:
-  - A title bar: face, name, role and CLI chips, its state and how many instructions wait behind its run, and at the
-    right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
+  - A title bar: face, name, a role chip and an agent chip, its state and how many instructions wait behind its run,
+    and at the right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
     Stop and Remove.
+  - The agent chip reads agent/model, e.g. `claude/claude-opus-5-5`: the model set on the member, else the agent's
+    default model, else (the CLI picks its own) the model the member's last run used most, as the provider reported
+    it; before a first run it reads `claude/default`. Its tooltip says which of these it is.
   - A row of tabs, **Report | Activity | Terminal**, with the run's details beside them (how its last run ended, its
     queue position, policy problems).
   - One view, the chosen tab's. **Report**: what the member last said, formatted. **Activity**: the Monitor's lines
@@ -338,8 +341,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - A card records its planned time and its started time: the first time it has a member and is queued or told.
     Every change of a card's state is recorded with its time and category.
   - Every moment is in exactly one category, so the categories add up to the overall time: **Agent working** (a run
-    is active on it), **Stalled** (a run is active but shows no tool call or progress for 10 minutes or more; from its
-    last sign of activity to its next one, or to the run's end), **Waiting on you** (an open question to you),
+    is active on it), **Stalled** (a run is active but shows no sign of work for 10 minutes or more: no tool call, no
+    progress and no model request going out or answer streaming back; from its last sign of activity to its next
+    one, or to the run's end), **Waiting on you** (an open question to you),
     **Waiting for a slot** (queued for a run slot, or waiting for the heavy-work lease), **Waiting on a teammate**
     (handed back, or its run ended, and it waits for the Manager or a tester), **Blocked** (blocked, or its run failed),
     **Scheduled** (parked until the wake it asked for), **Not started** (planned, no member yet), **Idle** (open,
@@ -372,7 +376,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     ended by the idle watchdog, and expired. The legend lists the categories that appear.
   - **Stalled** is drawn in Agent working's colour, hatched, in the bands, the legend and the table.
   - A long quiet stretch (2 hours or more and over a quarter of the whole, with nothing changing) is drawn shorter
-    behind a break mark, labelled with its real length (≈ 2d 17h). The label never covers the start and end times.
+    behind a break mark in each row. The first row shows its real length on the mark (2h 37m), and so does the time
+    axis (≈ 2h 37m); that label never covers the start and end times. A band that runs across a break says in the
+    readout how much of it is drawn shorter.
   - On a phone the axis scrolls sideways inside the dialog; the page does not. Bands and markers keep their size.
   - An open item's timeline is asked again every 30 seconds while the dialog is open.
   - A Visitor sees the overall times and the same Timeline dialog.

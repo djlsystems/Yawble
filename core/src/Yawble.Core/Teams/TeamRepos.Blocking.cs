@@ -72,7 +72,7 @@ public sealed partial class TeamRepos
     private async Task<IReadOnlyList<string>> BlockingInCloneAsync(string repoPath, string clonePath, IReadOnlyList<string> names, CancellationToken ct)
     {
         if (!Directory.Exists(clonePath) || CloneGitDirProblem(clonePath) is not null) return [];
-        var r = await Git.TryRunAsync(repoPath, ["ls-remote", "--heads", StrictUploadPack, "--", Path.Combine(clonePath, ".git")], ct);
+        var r = await Git.FetchLocalAsync(repoPath, ["ls-remote", "--heads", StrictUploadPack, "--", Path.Combine(clonePath, ".git")], ct);
         if (r.ExitCode != 0) throw new GitException($"could not read the branches of the clone {clonePath}: {r.Stderr}");
         return BlockingHeads(r.Stdout, names);
     }

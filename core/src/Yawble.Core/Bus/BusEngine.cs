@@ -19,11 +19,23 @@ public sealed class BusOptions
     /// <summary>Tell a workflow's owner, once, when its run ends with the workflow open and nobody working it (on by default).</summary>
     public bool IdleOffer { get; init; } = true;
 
+    /// <summary>B100: queue a retro item for the team's Manager when a workflow_complete is accepted (on by default).</summary>
+    public bool Retros { get; init; } = true;
+
     /// <summary>The most deliveries of one workflow in one run.</summary>
     public int BatchLimit { get; init; } = 16;
 
     /// <summary>The pump is woken in process after every commit; this poll is only the safety net.</summary>
     public TimeSpan SafetyPoll { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// A run that ends before its agent started (<see cref="FailureClasses.NotStarted"/>) is tried again this many times,
+    /// <see cref="NotStartedRetryDelay"/> apart, before it is reported failed. Its deliveries stay queued in between, so a
+    /// Manager's own run cannot leave its workflow with nobody working it.
+    /// </summary>
+    public int NotStartedRetries { get; init; } = 2;
+
+    public TimeSpan NotStartedRetryDelay { get; init; } = TimeSpan.FromSeconds(20);
 
     public Action<string>? Log { get; init; }
 
@@ -67,6 +79,9 @@ public sealed partial class BusEngine : IAsyncDisposable
     private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
     private readonly CancellationTokenSource _stop = new();
     private readonly Dictionary<long, ActiveRun> _active = [];
+
+    /// <summary>Members whose last run did not start its agent: their deliveries wait until this time (UTC), then go again.</summary>
+    private readonly Dictionary<long, DateTime> _notStartedUntil = [];
     private readonly Dictionary<long, string> _statusLines = [];
     private Task? _pump;
     private volatile bool _stopping;
@@ -324,7 +339,9 @@ public sealed partial class BusEngine : IAsyncDisposable
         // Before the declaration: does the team branch merge cleanly into the base? A conflict does not stop the
         // declaration; it rides on it, so the work is not reported as ready to land.
         var check = string.IsNullOrWhiteSpace(delivered) ? null : await MergeCheckForAsync(run.Member, ct);
-        return await CompleteAsync(run, delivered, check, ct);
+        var completed = await CompleteAsync(run, delivered, check, ct);
+        await QueueRetroAsync(run.Member, completed, ct); // B100: the Manager's look back, when the workflow was eventful
+        return completed;
     }
 
     private async Task<Teams.TeamMergeCheck?> MergeCheckForAsync(MemberRef member, CancellationToken ct)
@@ -555,17 +572,26 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// <summary>Every member with undelivered work and no run joins the back of the queue, oldest work first.</summary>
     private void EnqueueEligible()
     {
+        // B100: a member whose only waiting work is retro items comes last, and joins only while nobody else is queued.
         var waiting = _store.Pending(started: false)
             .Where(Ripe)
             .GroupBy(p => p.Subscriber, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g.Min(p => p.Seq));
+            .Select(g => (Group: g, RetroOnly: g.All(IsRetro)))
+            .OrderBy(x => x.RetroOnly).ThenBy(x => x.Group.Min(p => p.Seq))
+            .ToList();
         var held = _store.HeldTeams();
-        foreach (var group in waiting)
+        foreach (var (group, retroOnly) in waiting)
         {
             if (_store.MemberBySubscriber(group.Key) is not { } member) continue;
+            if (retroOnly && _store.Queue().Any(q => q.MemberId != member.Id)) continue;
             if (Held(member, held)) continue; // a paused or archived team's work waits where it is
             if (_active.Values.Any(a => a.Context.Member.Id == member.Id)) continue;
             if (HasSession(member.Id)) continue; // its instructions wait while a session is open or queued
+            if (_notStartedUntil.TryGetValue(member.Id, out var until))
+            {
+                if (DateTime.UtcNow < until) continue; // a run that could not start waits a moment before it goes again
+                _notStartedUntil.Remove(member.Id);
+            }
             _store.Enqueue(member.Id); // INSERT OR IGNORE: a queued member keeps its place
         }
     }
@@ -591,7 +617,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (member is null) return ((long, List<BusStore.PendingRow>)?)null;
             var unstarted = _store.Pending(member.Qualified, started: false).Where(Ripe).ToList();
             if (unstarted.Count == 0) return null;
-            var first = unstarted[0];
+            var first = unstarted.FirstOrDefault(p => !IsRetro(p)) ?? unstarted[0]; // B100: a retro item after any other work
             var batch = unstarted.Where(p => p.Correlation == first.Correlation).Take(Math.Max(1, _options.BatchLimit)).ToList();
             var runId = _store.InsertRun(member.Id, entry.Id, first.Seq, first.Correlation, batch.Count, entry.EnqueuedAt);
             foreach (var row in batch) _store.StartPending(member.Qualified, row.Seq, runId);
@@ -647,6 +673,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             ReleaseLeaseOf(run.RunId);
             _stopRequested.TryRemove(run.RunId, out _);
             if (_stopping || result is null) return; // left open: the next start reports it interrupted
+            if (RetryNotStarted(run, result)) return;
             _store.InTransaction(() =>
             {
                 _store.EndRun(run.RunId, result.Succeeded ? "completed" : "failed", result.Reason);
@@ -686,6 +713,31 @@ public sealed partial class BusEngine : IAsyncDisposable
             cancel.Dispose();
             _gate.Release();
         }
+    }
+
+    /// <summary>
+    /// A run whose agent never started (the host could not get it ready) gives its deliveries back to the member's queue
+    /// and goes again after <see cref="BusOptions.NotStartedRetryDelay"/>, up to <see cref="BusOptions.NotStartedRetries"/>
+    /// times for the same batch. Nothing is published for such a try, so nobody is woken by it; the last one is reported
+    /// failed as usual. The caller holds the gate.
+    /// </summary>
+    private bool RetryNotStarted(RunContext run, RunResult result)
+    {
+        if (result.Succeeded || result.FailureClass != FailureClasses.NotStarted) return false;
+        var tries = _store.NotStartedRuns(run.Member.Id, run.Causation);
+        if (tries >= _options.NotStartedRetries) return false;
+        _store.InTransaction(() =>
+        {
+            _store.EndRun(run.RunId, "failed", result.Reason);
+            _store.SetFailureClass(run.RunId, FailureClasses.NotStarted);
+            _store.UnstartPendingOfRun(run.RunId);
+        });
+        var delay = _options.NotStartedRetryDelay;
+        _notStartedUntil[run.Member.Id] = DateTime.UtcNow + delay;
+        Log($"run {run.RunId} of {run.Member.Qualified} did not start ({result.Reason}); its {run.Items.Count} item(s) go again in {delay.TotalSeconds:0}s (try {tries + 2} of {_options.NotStartedRetries + 1})");
+        _ = Task.Delay(delay, _stop.Token).ContinueWith(_ => Signal(), TaskScheduler.Default);
+        Signal();
+        return true;
     }
 
     /// <summary>

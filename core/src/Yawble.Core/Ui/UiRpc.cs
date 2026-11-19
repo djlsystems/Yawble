@@ -31,6 +31,9 @@ public sealed class UiRpc(
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
 
+    /// <summary>teams.agents' agentModel per card: the model the member's pill names and where the name comes from.</summary>
+    public Agents.MemberModels? Models { get; set; }
+
     /// <summary>The methods here, by prefix, and B085's workflowExtend under its contract name (also bus.workflowExtend).</summary>
     public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method is "workflowExtend";
 
@@ -160,6 +163,9 @@ public sealed class UiRpc(
                 "git.deleteBranches" => await DeleteBranchesAsync(p, ct),
                 "git.tidyPlan" => await TidyPlanAsync(p, ct),
                 "git.branchRealign" => await BranchRealignAsync(p, ct),
+                // B072, the commit view: reads only.
+                "git.commitShow" => await CommitShowAsync(p, ct),
+                "git.commitDiff" => await CommitDiffAsync(p, ct),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -322,6 +328,7 @@ public sealed class UiRpc(
             var node = S(card)!.AsObject();
             node["attention"] = Attention(card, asking, reports);
             node["hasClone"] = Code.CodeHost.HasClone(bus.Repos, card.Member);
+            if (Models is { } models) node["agentModel"] = Agents.MemberModels.Json(models.For(card.Member));
             try
             {
                 var effective = Effective(card.Member, everyone);
@@ -341,14 +348,16 @@ public sealed class UiRpc(
 
     /// <summary>
     /// What the member needs from a person, loudest first: "decision" (a question of its is open), "blocked" (its last
-    /// report said it is blocked), "failed" (its last run failed); null when nothing. The faces' rings show it.
+    /// report said it is blocked), "failed" (its last run failed), "stopped" (the person stopped its last run: shown
+    /// quietly, not as a failure; B097); null when nothing. The faces' rings show it.
     /// </summary>
     internal static string? Attention(AgentCard card, IReadOnlySet<string> asking, IReadOnlyDictionary<string, Message> reports)
     {
         if (asking.Contains(card.Member.Name)) return "decision";
         if (card.State == "running") return null;
         if (reports.TryGetValue(card.Member.Name, out var last) && last.Type == MessageTypes.Blocked) return "blocked";
-        return card.LastRunState == "failed" ? "failed" : null;
+        if (card.LastRunStopped) return "stopped";
+        return card.LastRunFailed ? "failed" : null;
     }
 
     /// <summary>
@@ -422,7 +431,8 @@ public sealed class UiRpc(
             (kind, text) = m.Type switch
             {
                 MessageTypes.Completed => ("completed", Field("reason")),
-                MessageTypes.Failed => ("failed", Field("reason")),
+                // A run the person stopped is recorded failed with class "stopped": the feed says "stopped" (B097).
+                MessageTypes.Failed => (Field("failureClass") == FailureClasses.Stopped ? "stopped" : "failed", Field("reason")),
                 MessageTypes.Handback => ("handback", Field("delivered")),
                 MessageTypes.Progress => ("progress", Field("status")),
                 MessageTypes.Blocked => ("blocked", Field("reason")),
@@ -435,12 +445,16 @@ public sealed class UiRpc(
         }
         if (about.team is null) return null;
         var from = m.Source is MessageTypes.PersonSource or MessageTypes.HostSource ? m.Source : Split(m.Source).Member ?? m.Source;
-        if (text is { Length: > 240 }) text = text[..240] + "â€¦";
-        return new JsonObject
+        if (text is { Length: > 240 }) text = text[..240] + "…";
+        var row = new JsonObject
         {
             ["seq"] = m.Seq, ["kind"] = kind, ["team"] = about.team, ["member"] = about.member, ["from"] = from,
             ["text"] = text, ["workflow"] = m.CorrelationId, ["at"] = m.OccurredAt.ToString("O"),
         };
+        // A run's end row says how it ended (B097): failureClass is null for a completed run.
+        if (m.Type is MessageTypes.Failed or MessageTypes.Completed)
+            row["failureClass"] = m.Type == MessageTypes.Failed ? Field("failureClass") ?? FailureClasses.Failed : null;
+        return row;
     }
 
     private async Task<MemberRow> MemberAsync(long memberId, CancellationToken ct) =>
@@ -608,6 +622,51 @@ public sealed class UiRpc(
             ["oldSha"] = done.OldSha, ["newSha"] = done.NewSha, ["branch"] = done.Branch, ["repo"] = done.Repo, ["member"] = done.Member,
             ["originOldSha"] = done.OriginOldSha, ["originUpdated"] = done.OriginUpdated, ["changed"] = done.Changed, ["message"] = done.Message,
         };
+    }
+
+    /// <summary>
+    /// git.commitShow {team | teamId, sha, repo?} (B072): a commit of the team's repository, read with plain git: what it
+    /// is, where it is, its files. {found: false, goneReason, sha} when git does not have it. codeShown is true here; the
+    /// Cloud Link sets it false when members' code is not shown to cloud viewers (and refuses git.commitDiff).
+    /// </summary>
+    private async Task<JsonNode?> CommitShowAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var sha = OptStr(p, "sha") ?? throw new RpcException("bad_params", "sha is required");
+        return await CommitCallAsync(async () => (await repos.GitCommitShowAsync(team.Id, team.Name, sha, ct, OptStr(p, "repo"))).ToJson());
+    }
+
+    /// <summary>
+    /// git.commitDiff {team | teamId, sha, path, repo?} (B072): one file's diff in the commit (a merge: against its first
+    /// parent), as hunks of lines for side-by-side and inline views; binary or too large: a summary and no hunks.
+    /// Errors: gone (git no longer has the commit), no_such_file (the commit does not change that path).
+    /// </summary>
+    private async Task<JsonNode?> CommitDiffAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var sha = OptStr(p, "sha") ?? throw new RpcException("bad_params", "sha is required");
+        var path = OptStr(p, "path") ?? throw new RpcException("bad_params", "path is required");
+        return await CommitCallAsync(async () => (await repos.GitCommitDiffAsync(team.Id, team.Name, sha, path, ct, OptStr(p, "repo"))).ToJson());
+    }
+
+    private static async Task<JsonNode?> CommitCallAsync(Func<Task<JsonObject>> read)
+    {
+        try
+        {
+            return await read();
+        }
+        catch (Teams.TeamGitRefusal e)
+        {
+            throw new RpcException(e.Code, e.Message);
+        }
+        catch (ArgumentException e)
+        {
+            throw new RpcException("bad_params", e.Message);
+        }
+        catch (Exception e) when (e is Teams.GitException or InvalidOperationException or IOException)
+        {
+            throw new RpcException("git_failed", e.Message);
+        }
     }
 
     /// <summary>Tells the Manager to bring the team branch current with the base (Yawble ask-team), as a new workflow.</summary>
@@ -1028,6 +1087,7 @@ public sealed class UiRpc(
             ["interactive"] = card.Interactive,
             ["lastRunState"] = card.LastRunState,
             ["lastRunReason"] = card.LastRunReason,
+            ["lastRunFailureClass"] = card.LastRunFailureClass,
         };
     }
 
