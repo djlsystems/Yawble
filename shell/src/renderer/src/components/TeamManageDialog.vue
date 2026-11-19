@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
-import type { AgentCard, ApiRow, IntegrationInfo, McpServerInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
-import { TEAM_WORKFLOW_EXPIRY, WorkflowExpiryDefaultDays } from '../../../shared/api';
+import type { AgentCard, ApiRow, GitProvider, IntegrationInfo, McpServerInfo, RepoProviderInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
+import { TEAM_WORKFLOW_EXPIRY, TEAMS_SET_REPO, WorkflowExpiryDefaultDays } from '../../../shared/api';
+import RepoProviderFields from './RepoProviderFields.vue';
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
 import IntegrationDialog from './IntegrationDialog.vue';
@@ -105,8 +106,15 @@ const saveExpiry = () => act(TEAM_WORKFLOW_EXPIRY, { days: expiryDraft.value }, 
 });
 
 // ---- repositories: the main one (every member's working directory) and the others, writable or read-only
-interface ExtraRepo { name: string; path: string; writable: boolean; baseBranch: string; source: string | null }
-const repos = ref<{ main: { path: string; baseBranch: string; managed: boolean; origin: string | null; name: string | null } | null; extras: ExtraRepo[] } | null>(null);
+interface ExtraRepo extends RepoProviderInfo { name: string; path: string; writable: boolean; baseBranch: string; source: string | null }
+const repos = ref<{ main: ({ path: string; baseBranch: string; managed: boolean; origin: string | null; name: string | null } & RepoProviderInfo) | null; extras: ExtraRepo[] } | null>(null);
+// B075: the provider fields show only when the core sends providerDetected (an older core does not).
+const hasProvider = (r: RepoProviderInfo | null | undefined) => !!r && r.providerDetected !== undefined;
+const saveProvider = (name: string | null, v: { provider: GitProvider | null; linkPattern: string | null }) =>
+  act(TEAMS_SET_REPO, { ...(name ? { name } : {}), provider: v.provider, linkPattern: v.linkPattern }, () => {
+    repoNote.value = `Saved the provider settings of ${name ?? repos.value?.main?.name ?? 'the main repository'}.`;
+    void loadRepos();
+  });
 const newRepo = ref({ where: '', name: '', readOnly: false });
 const repoNote = ref<string | null>(null);
 async function loadRepos() { try { repos.value = await api.call('teams.repos', { teamId: props.team.id }); } catch (e) { error.value = errorText(e); } finally { ready.repos = true; } }
@@ -294,6 +302,8 @@ onMounted(() => { void loadExpiry(); void checkQuiet(); void loadEnv(); void loa
           <p class="mono small">{{ repos.main.path }} <span class="muted">({{ repos.main.baseBranch }})</span></p>
           <p v-if="repos.main.origin" class="muted small" data-test="repo-main-origin">Cloned from {{ repos.main.origin }}</p>
           <p v-else-if="repos.main.managed" class="muted small">A repository the app made for the team (no origin).</p>
+          <RepoProviderFields v-if="hasProvider(repos.main)" :info="repos.main" test-id="repo-main" :busy="busy" :saving="doing(TEAMS_SET_REPO)"
+            @save="saveProvider(null, $event)" />
         </template>
         <p v-else class="muted small">Made at the team's first run.</p>
       </div>
@@ -310,6 +320,8 @@ onMounted(() => { void loadExpiry(); void checkQuiet(); void loadEnv(); void loa
           <h4>{{ r.name }} <span class="tag">{{ r.writable ? 'writable' : 'read-only' }}</span></h4>
           <p class="mono small">{{ r.path }} <span class="muted">({{ r.baseBranch }})</span></p>
           <p v-if="r.source" class="muted small">Cloned from {{ r.source }}</p>
+          <RepoProviderFields v-if="hasProvider(r)" :info="r" :test-id="`repo-${r.name}`" :busy="busy" :saving="doing(TEAMS_SET_REPO)"
+            @save="saveProvider(r.name, $event)" />
         </div>
         <button class="link" :data-test="`repo-remove-${r.name}`" :disabled="busy" @click="removeRepo(r.name)"><BusyLabel :busy="doing('teams.removeRepo')" text="Removing…">Remove</BusyLabel></button>
       </div>

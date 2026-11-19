@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type {
   BranchSyncResult, GitDeletePlan, GitDeleteResult, YawbleApi, TeamGitBranch, TeamGitOldBranch, TeamGitResult, TeamGitStatus, TeamSummary,
 } from '../../../shared/api';
@@ -8,6 +8,8 @@ import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import TidyPanel from './TidyPanel.vue';
+import type { GitWebLinkQuery, RepoProviderInfo } from '../../../shared/api';
+import { PROVIDER_LABELS, effectiveProvider, fetchWebLinks, linkKey, openOnText } from '../gitWebLinks';
 
 // The Git dialog: for the team's main repository or one of its writable extra repositories (the tabs on
 // top), see the team's branches against the base branch, fetch origin,
@@ -29,12 +31,47 @@ const choices = ref<{ name: string; label: string }[]>([]);
 const mainName = ref<string | null>(null);
 // B067: Tidy… (every branch of the team's repositories in one plan; TidyPanel).
 const tidying = ref(false);
+// B075: each repository's provider (teams.repos), for the "Open on …" text and the pull request line.
+const providers = ref<Record<string, RepoProviderInfo>>({});
 async function loadChoices() {
   try {
-    const r = await api.call<{ main: { name: string | null } | null; extras: { name: string; writable: boolean }[] }>('teams.repos', { teamId: props.team.id });
+    const r = await api.call<{ main: ({ name: string | null } & RepoProviderInfo) | null; extras: ({ name: string; writable: boolean } & RepoProviderInfo)[] }>('teams.repos', { teamId: props.team.id });
     mainName.value = r.main?.name ?? null;
     choices.value = [{ name: '', label: r.main?.name ?? 'main' }, ...r.extras.filter((e) => e.writable).map((e) => ({ name: e.name, label: e.name }))];
+    providers.value = { ...(r.main ? { '': r.main } : {}), ...Object.fromEntries(r.extras.map((e) => [e.name, e])) };
   } catch { choices.value = []; }
+}
+const providerInfo = computed<RepoProviderInfo | null>(() => providers.value[repo.value] ?? null);
+const openOn = computed(() => openOnText(effectiveProvider(providerInfo.value)));
+// The pull request line: only when the core says (prSupported or prUnavailable); an older core shows nothing.
+const prLine = computed(() => {
+  const p = providerInfo.value;
+  if (!p || (p.prSupported === undefined && !p.prUnavailable)) return null;
+  if (p.prSupported) {
+    const name = effectiveProvider(p);
+    return { ok: true, text: `Pull requests on ${name && name !== 'none' ? PROVIDER_LABELS[name] : 'this host'}: the team and the Companion can open, list and merge them (each asks you first).` };
+  }
+  return { ok: false, text: p.prUnavailable || 'Pull requests are not supported for this repository from here.' };
+});
+
+// B075: "Open on …" links for what the dialog shows (the core answers null for anything not on origin: no link then).
+const links = ref<Record<string, string>>({});
+const link = (q: GitWebLinkQuery) => links.value[linkKey(q)] ?? null;
+function linkQueries(s: TeamGitStatus): GitWebLinkQuery[] {
+  const q: GitWebLinkQuery[] = [{ kind: 'branch', branch: s.baseBranch }];
+  if (s.baseSha) q.push({ kind: 'commit', commit: s.baseSha });
+  if (s.teamSha) {
+    q.push({ kind: 'branch', branch: s.teamBranch }, { kind: 'commit', commit: s.teamSha }, { kind: 'compare', from: s.baseBranch, to: s.teamBranch });
+    for (const f of s.conflictFiles) q.push({ kind: 'file', commit: s.teamSha, file: f });
+  }
+  for (const m of s.members) q.push({ kind: 'branch', branch: m.branch }, { kind: 'commit', commit: m.sha });
+  return q;
+}
+async function loadLinks(s: TeamGitStatus) {
+  const forRepo = repo.value;
+  if (!s.origin) { links.value = {}; return; }
+  const got = await fetchWebLinks(api, props.team, forRepo || null, linkQueries(s));
+  if (repo.value === forRepo && status.value === s) links.value = got;
 }
 const which = () => (repo.value ? { teamId: props.team.id, repo: repo.value } : { teamId: props.team.id });
 function pick(name: string) {
@@ -232,6 +269,9 @@ async function confirmDelete() {
   if (replan) await planDelete(); // the stale note stays above the new plan
 }
 
+// Every new status (open, refresh, fetch, merge, sync, another repository) asks for its links again.
+watch(status, (s) => { links.value = {}; if (s) void loadLinks(s); });
+
 onMounted(() => { void loadChoices(); void load(); });
 </script>
 
@@ -247,7 +287,10 @@ onMounted(() => { void loadChoices(); void load(); });
       <section class="repo">
         <div><strong>{{ status.repoPath }}</strong><span v-if="status.managed" class="chip">made by the app</span></div>
         <div class="muted small">
-          Base branch <code>{{ status.baseBranch }}</code> at {{ short(status.baseSha) }}
+          Base branch <code>{{ status.baseBranch }}</code><a v-if="link({ kind: 'branch', branch: status.baseBranch })" class="web" data-test="git-link-base-branch"
+            :href="link({ kind: 'branch', branch: status.baseBranch })!" target="_blank" rel="noopener">{{ openOn }}</a>
+          at <a v-if="status.baseSha && link({ kind: 'commit', commit: status.baseSha })" class="sha" data-test="git-link-base-commit" :title="openOn"
+            :href="link({ kind: 'commit', commit: status.baseSha })!" target="_blank" rel="noopener">{{ short(status.baseSha) }}</a><template v-else>{{ short(status.baseSha) }}</template>
           <template v-if="status.checkedOut"> · checked out: <code>{{ status.checkedOut }}</code></template>
           <span v-if="status.dirty" class="chip warn">uncommitted changes</span>
         </div>
@@ -261,12 +304,23 @@ onMounted(() => { void loadChoices(); void load(); });
           </template>
           <template v-else>No origin: merges stay in this repository.</template>
         </div>
+        <div v-if="prLine" class="small" :class="{ muted: !prLine.ok }" data-test="git-prs">{{ prLine.text }}</div>
       </section>
 
       <section class="merge" :class="`state-${status.merge}`" data-test="git-merge-state">
-        <div><strong>{{ status.teamBranch }}</strong> {{ short(status.teamSha) }}</div>
+        <div><strong>{{ status.teamBranch }}</strong>
+          <a v-if="status.teamSha && link({ kind: 'commit', commit: status.teamSha })" class="sha" data-test="git-link-team-commit" :title="openOn"
+            :href="link({ kind: 'commit', commit: status.teamSha })!" target="_blank" rel="noopener">{{ short(status.teamSha) }}</a><template v-else>{{ short(status.teamSha) }}</template>
+          <a v-if="link({ kind: 'branch', branch: status.teamBranch })" class="web" data-test="git-link-team-branch"
+            :href="link({ kind: 'branch', branch: status.teamBranch })!" target="_blank" rel="noopener">{{ openOn }}</a>
+          <a v-if="link({ kind: 'compare', from: status.baseBranch, to: status.teamBranch })" class="web" data-test="git-link-compare" :title="openOn"
+            :href="link({ kind: 'compare', from: status.baseBranch, to: status.teamBranch })!" target="_blank" rel="noopener">Compare with {{ status.baseBranch }}</a>
+        </div>
         <div>{{ mergeText }}</div>
-        <div v-if="status.conflictFiles.length" class="small">Conflicting files: <code>{{ status.conflictFiles.join(', ') }}</code></div>
+        <div v-if="status.conflictFiles.length" class="small">Conflicting files:
+          <template v-for="(f, i) in status.conflictFiles" :key="f">{{ i ? ', ' : '' }}<a v-if="status.teamSha && link({ kind: 'file', commit: status.teamSha, file: f })"
+            class="mono" :data-test="`git-link-file-${f}`" :title="`${openOn} (at ${short(status.teamSha)})`" :href="link({ kind: 'file', commit: status.teamSha, file: f })!"
+            target="_blank" rel="noopener">{{ f }}</a><code v-else>{{ f }}</code></template></div>
         <div v-if="behindText" class="small behind" data-test="git-behind">{{ behindText }}
           <button v-if="canSync" data-test="git-sync-now" :disabled="!!busy" title="Merge the base into the team and member branches (never a rebase; a conflict changes nothing)"
             @click="syncNow"><BusyLabel :busy="busy === 'sync'" text="Syncing…">Sync now</BusyLabel></button>
@@ -328,7 +382,10 @@ onMounted(() => { void loadChoices(); void load(); });
       <table class="list" data-test="git-members">
         <tr><th>Member branch</th><th>Commit</th><th>Ahead of {{ status.baseBranch }}</th><th>In {{ status.teamBranch }}</th><th></th></tr>
         <tr v-for="b in status.members" :key="b.branch">
-          <td><code>{{ b.branch }}</code></td><td>{{ short(b.sha) }}</td><td>{{ b.aheadOfBase }}</td><td>{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
+          <td><code>{{ b.branch }}</code><a v-if="link({ kind: 'branch', branch: b.branch })" class="web" :data-test="`git-link-branch-${b.branch}`"
+            :href="link({ kind: 'branch', branch: b.branch })!" target="_blank" rel="noopener">{{ openOn }}</a></td>
+          <td><a v-if="link({ kind: 'commit', commit: b.sha })" class="sha" :data-test="`git-link-commit-${b.branch}`" :title="openOn"
+            :href="link({ kind: 'commit', commit: b.sha })!" target="_blank" rel="noopener">{{ short(b.sha) }}</a><template v-else>{{ short(b.sha) }}</template></td><td>{{ b.aheadOfBase }}</td><td>{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
           <td><button class="small-btn" :data-test="`git-delete-${b.branch}`" :disabled="!!busy" @click="startDelete(memberTarget(b))">Delete…</button></td>
         </tr>
         <tr v-if="status.members.length === 0 && oldBranches.length === 0"><td colspan="5" class="muted">No member has committed yet.</td></tr>
@@ -358,6 +415,8 @@ onMounted(() => { void loadChoices(); void load(); });
 .delete .note { color: var(--warn-ink); }
 .blocking { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--warn-rule); background: var(--chip); margin: 8px 0; }
 .small-btn { font-size: 12px; padding: 1px 8px; }
+.web { margin-left: 8px; font-size: 12px; }
+.sha { font-family: ui-monospace, Consolas, monospace; }
 .result { padding: 6px 8px; border-left: 3px solid var(--warn-rule); }
 .result.ok { border-left-color: var(--ok-rule); }
 .list { width: 100%; border-collapse: collapse; margin: 8px 0; }
