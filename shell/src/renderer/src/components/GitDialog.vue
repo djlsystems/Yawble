@@ -314,7 +314,7 @@ onMounted(() => { void loadChoices(); void load(); });
           <CommitLink :team="team.name" :sha="status.teamSha" /><a v-if="status.teamSha && link({ kind: 'commit', commit: status.teamSha })" class="web"
             data-test="git-link-team-commit" :title="`The commit ${openOn}`" :href="link({ kind: 'commit', commit: status.teamSha })!" target="_blank" rel="noopener">{{ openOn }}</a>
           <a v-if="link({ kind: 'branch', branch: status.teamBranch })" class="web" data-test="git-link-team-branch" :title="`The branch ${openOn}`"
-            :href="link({ kind: 'branch', branch: status.teamBranch })!" target="_blank" rel="noopener">Branch</a>
+            :href="link({ kind: 'branch', branch: status.teamBranch })!" target="_blank" rel="noopener">{{ openOn }}</a>
           <a v-if="link({ kind: 'compare', from: status.baseBranch, to: status.teamBranch })" class="web" data-test="git-link-compare" :title="openOn"
             :href="link({ kind: 'compare', from: status.baseBranch, to: status.teamBranch })!" target="_blank" rel="noopener">Compare with {{ status.baseBranch }}</a>
         </div>
