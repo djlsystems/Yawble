@@ -20,9 +20,12 @@ public sealed record CommitMade(string Member, long? Card, long? Workflow);
 /// <summary>
 /// Where the commit is: in the base branch (local or origin's); the team branch and member branches that have it;
 /// <see cref="OnlyOnMember"/> when it is in neither the base nor the team branch, only a member's branch; whether any
-/// origin ref has it (as of the last fetch); the tags that contain it.
+/// origin ref has it (as of the last fetch); the tags that contain it. <see cref="OtherBranches"/>: the other local
+/// branches that have it (not the base, the team branch or any members/ branch), sorted, so a commit on the person's
+/// own branch is told apart from one whose branch was deleted.
 /// </summary>
-public sealed record CommitWhere(bool InMain, IReadOnlyList<string> Branches, string? OnlyOnMember, bool Pushed, IReadOnlyList<string> Tags);
+public sealed record CommitWhere(bool InMain, IReadOnlyList<string> Branches, string? OnlyOnMember, bool Pushed, IReadOnlyList<string> Tags,
+    IReadOnlyList<string>? OtherBranches = null);
 
 /// <summary>One file the commit changed (a merge: against its first parent). Status: added, deleted, modified or renamed.</summary>
 public sealed record CommitFileChange(string Path, string? OldPath, string Status, int Added, int Deleted, bool Binary)
@@ -82,6 +85,7 @@ public sealed record CommitInfo(
         }
         var w = Where!;
         var where = new JsonObject { ["inMain"] = w.InMain, ["branches"] = new JsonArray([.. w.Branches.Select(b => (JsonNode?)b)]) };
+        where["otherBranches"] = new JsonArray([.. (w.OtherBranches ?? []).Select(b => (JsonNode?)b)]);
         if (w.OnlyOnMember is not null) where["onlyOnMember"] = w.OnlyOnMember;
         where["pushed"] = w.Pushed;
         where["tags"] = new JsonArray([.. w.Tags.Select(t => (JsonNode?)t)]);
@@ -166,9 +170,11 @@ public sealed partial class TeamRepos
         var asked = CheckCommitId(sha);
         var repo = await GitRepoAsync(teamId, team, repoName, ct);
         var path = repo.Path;
+        var (resolved, ambiguous) = await ResolveCommitAsync(path, asked, ct);
+        if (resolved is null) return new CommitInfo(false, GoneReason(team, asked, ambiguous), asked);
         var head = await Git.TryRunAsync(path, ["show", "-s", "--no-color",
-            $"--format=%H{Sep}%P{Sep}%an{Sep}%ae{Sep}%aI{Sep}%cn{Sep}%ce{Sep}%cI{Sep}%s{Sep}%b", asked + "^{commit}", "--"], ct);
-        if (head.ExitCode != 0) return new CommitInfo(false, GoneReason(team, asked, head.Stderr), asked);
+            $"--format=%H{Sep}%P{Sep}%an{Sep}%ae{Sep}%aI{Sep}%cn{Sep}%ce{Sep}%cI{Sep}%s{Sep}%b", resolved, "--"], ct);
+        if (head.ExitCode != 0) return new CommitInfo(false, GoneReason(team, asked, false), asked);
         var f = head.Stdout.Split('\x1f', 10);
         if (f.Length < 10) throw new GitException($"git show {asked} printed what the app cannot read");
         var full = f[0].Trim();
@@ -193,6 +199,8 @@ public sealed partial class TeamRepos
         if (heads.Contains(teamBranch)) branches.Add(teamBranch);
         branches.AddRange(memberBranches);
         var inMain = heads.Contains(repo.BaseBranch) || origin.Contains(repo.BaseBranch);
+        var others = heads.Where(h => h != repo.BaseBranch && h != teamBranch && !h.StartsWith(BranchPrefix, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal).ToList();
 
         var record = RecordedEventOf(team, full);
         CommitMerge? merge = null;
@@ -208,7 +216,7 @@ public sealed partial class TeamRepos
         }
 
         return new CommitInfo(true, null, full, full[..Math.Min(12, full.Length)], f[8].Trim(), f[9].Trim(), author, differs ? committer : null,
-            parents, merge, made, new CommitWhere(inMain, branches, onlyOn, origin.Count > 0, tags), files);
+            parents, merge, made, new CommitWhere(inMain, branches, onlyOn, origin.Count > 0, tags, others), files);
     }
 
     /// <summary>git.commitDiff: one file of the commit, as hunks of lines (a merge against its first parent); binary or too large, a summary only.</summary>
@@ -218,9 +226,8 @@ public sealed partial class TeamRepos
         if (string.IsNullOrEmpty(file)) throw new ArgumentException("path is required: the file of the commit to show");
         var repo = await GitRepoAsync(teamId, team, repoName, ct);
         var path = repo.Path;
-        var head = await Git.TryRunAsync(path, ["show", "-s", "--format=%H", asked + "^{commit}", "--"], ct);
-        if (head.ExitCode != 0) throw new TeamGitRefusal("gone", GoneReason(team, asked, head.Stderr));
-        var full = head.Stdout.Trim();
+        var (resolved, ambiguous) = await ResolveCommitAsync(path, asked, ct);
+        var full = resolved ?? throw new TeamGitRefusal("gone", GoneReason(team, asked, ambiguous));
         var files = await CommitFilesOfAsync(path, full, ct);
         var change = files.FirstOrDefault(c => c.Path == file) ?? files.FirstOrDefault(c => c.OldPath == file)
                      ?? throw new TeamGitRefusal("no_such_file", $"commit {full[..Math.Min(12, full.Length)]} does not change {file}");
@@ -255,10 +262,36 @@ public sealed partial class TeamRepos
         return s.ToLowerInvariant();
     }
 
-    /// <summary>Why git has no such commit, in plain words: the app's records say which branch it was on, when they know.</summary>
-    private string GoneReason(string team, string sha, string stderr)
+    /// <summary>The most objects an ID's prefix is looked at for (a 4-digit prefix in a large repository can match many).</summary>
+    private const int MaxCommitIdCandidates = 64;
+
+    /// <summary>
+    /// The full ID of the commit an ID names, read as an object ID only, never a ref name (a branch called "cafe" never
+    /// wins over the commit cafe...): the objects whose names start with it (git rev-parse --disambiguate), each peeled
+    /// to its commit (an annotated tag's commit, as git's ^{commit} does). Null when none is a commit; ambiguous when
+    /// they peel to more than one commit.
+    /// </summary>
+    private async Task<(string? Full, bool Ambiguous)> ResolveCommitAsync(string path, string asked, CancellationToken ct)
     {
-        if (stderr.Contains("ambiguous", StringComparison.OrdinalIgnoreCase))
+        var listed = await Git.TryRunAsync(path, ["rev-parse", "--disambiguate=" + asked], ct);
+        if (listed.ExitCode != 0) return (null, false);
+        var objects = listed.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(o => CommitIdPattern.IsMatch(o) && o.StartsWith(asked, StringComparison.OrdinalIgnoreCase)).Take(MaxCommitIdCandidates + 1).ToList();
+        if (objects.Count > MaxCommitIdCandidates) return (null, true);
+        var commits = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var o in objects)
+        {
+            // A full object ID: git reads it as the object even when a ref has the same name.
+            var peeled = await Git.TryRunAsync(path, ["rev-parse", "--verify", "--quiet", o + "^{commit}"], ct);
+            if (peeled.ExitCode == 0 && peeled.Stdout.Trim() is { Length: > 0 } c) commits.Add(c);
+        }
+        return commits.Count switch { 1 => (commits.First(), false), 0 => (null, false), _ => (null, true) };
+    }
+
+    /// <summary>Why git has no such commit, in plain words: the app's records say which branch it was on, when they know.</summary>
+    private string GoneReason(string team, string sha, bool ambiguous)
+    {
+        if (ambiguous)
             return $"{sha} matches more than one object in the team's repository: use more of the commit ID.";
         var record = RecordedEventOf(team, sha);
         var shown = sha[..Math.Min(12, sha.Length)];
@@ -516,8 +549,21 @@ public sealed partial class TeamRepos
         }
         if (into is null)
         {
+            // The branch the merge was made on: one whose first-parent line holds it. A branch that only contains it
+            // (a team branch moved up to the base afterwards) did not receive it. The base first, then the team branch,
+            // members' branches and any other; null when no branch has it on its own line.
             var teamBranch = TeamBranchFor(team);
-            into = heads.Contains(teamBranch) ? teamBranch : heads.Contains(baseBranch) ? baseBranch : heads.Order(StringComparer.Ordinal).FirstOrDefault();
+            var order = new List<string>();
+            if (heads.Contains(baseBranch)) order.Add(baseBranch);
+            if (heads.Contains(teamBranch)) order.Add(teamBranch);
+            order.AddRange(heads.Where(h => h != baseBranch && h != teamBranch)
+                .OrderBy(h => h.StartsWith(BranchPrefix, StringComparison.Ordinal) ? 0 : 1).ThenBy(h => h, StringComparer.Ordinal));
+            foreach (var h in order)
+            {
+                if (!await OnFirstParentLineAsync(path, h, sha, ct)) continue;
+                into = h;
+                break;
+            }
         }
         string? fromMember = null;
         if (from is not null)
@@ -527,5 +573,22 @@ public sealed partial class TeamRepos
                 fromMember = record is { Kind: CodeEvent.MergeTeam, Member: { } rm } ? rm : MemberOfBranch(teamId, local);
         }
         return new CommitMerge(into, from, fromMember, count);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="sha"/> is on <paramref name="branch"/>'s first-parent line: the branch's tip, or the first
+    /// parent of a commit on that line. The line is walked from the tip down to the commit and no further.
+    /// </summary>
+    private async Task<bool> OnFirstParentLineAsync(string path, string branch, string sha, CancellationToken ct)
+    {
+        var walked = await Git.TryRunAsync(path, ["rev-list", "--first-parent", "--parents", "refs/heads/" + branch, "^" + sha, "--"], ct);
+        if (walked.ExitCode != 0) return false;
+        var lines = walked.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0)
+        {
+            var tip = await Git.TryRunAsync(path, ["rev-parse", "--verify", "--quiet", "refs/heads/" + branch], ct);
+            return tip.ExitCode == 0 && tip.Stdout.Trim() == sha;
+        }
+        return lines.Any(l => l.Split(' ') is { Length: > 1 } p && p[1] == sha);
     }
 }
