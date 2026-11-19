@@ -1,0 +1,70 @@
+{
+  "repoPath": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-zdb4rrz3.pzj\\person-repo",
+  "managed": false,
+  "baseBranch": "trunk",
+  "checkedOut": "trunk",
+  "dirty": false,
+  "origin": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-zdb4rrz3.pzj\\origin.git",
+  "baseSha": "9ec39605b735cb40542f2389dbf2557b86f063ad",
+  "originBaseSha": "3ba872dcd43c81be086945d91cbe0b7d33f56b05",
+  "baseAheadOfOrigin": 1,
+  "baseBehindOrigin": 0,
+  "teamBranch": "team/alpha",
+  "teamSha": "dcd0986a5b8e3b8684c3c0ed69b36dfb90f51347",
+  "teamAheadOfBase": 2,
+  "teamBehindBase": 1,
+  "merge": "merge",
+  "conflictFiles": [],
+  "members": [
+    {
+      "branch": "members/alpha/ada",
+      "sha": "d4ecb275e9f13edbd417ea26d47582c20fc569fc",
+      "aheadOfBase": 1,
+      "inTeamBranch": true,
+      "aheadRange": {
+        "from": "9ec39605b735cb40542f2389dbf2557b86f063ad",
+        "to": "d4ecb275e9f13edbd417ea26d47582c20fc569fc"
+      },
+      "push": {
+        "branch": "members/alpha/ada",
+        "onOrigin": true,
+        "notPushed": 0
+      }
+    },
+    {
+      "branch": "members/alpha/ben",
+      "sha": "471863878e87fc29c6bbde3ba65e7a480e3a6630",
+      "aheadOfBase": 2,
+      "inTeamBranch": false,
+      "aheadRange": {
+        "from": "9ec39605b735cb40542f2389dbf2557b86f063ad",
+        "to": "471863878e87fc29c6bbde3ba65e7a480e3a6630"
+      },
+      "push": {
+        "branch": "members/alpha/ben",
+        "onOrigin": false,
+        "notPushed": 2
+      }
+    }
+  ],
+  "oldBranches": [],
+  "blockingBranches": [],
+  "ranges": {
+    "baseAheadOfOrigin": {
+      "from": "3ba872dcd43c81be086945d91cbe0b7d33f56b05",
+      "to": "9ec39605b735cb40542f2389dbf2557b86f063ad"
+    },
+    "baseBehindOrigin": {
+      "from": "9ec39605b735cb40542f2389dbf2557b86f063ad",
+      "to": "3ba872dcd43c81be086945d91cbe0b7d33f56b05"
+    },
+    "teamAheadOfBase": {
+      "from": "9ec39605b735cb40542f2389dbf2557b86f063ad",
+      "to": "dcd0986a5b8e3b8684c3c0ed69b36dfb90f51347"
+    },
+    "teamBehindBase": {
+      "from": "dcd0986a5b8e3b8684c3c0ed69b36dfb90f51347",
+      "to": "9ec39605b735cb40542f2389dbf2557b86f063ad"
+    }
+  }
+}

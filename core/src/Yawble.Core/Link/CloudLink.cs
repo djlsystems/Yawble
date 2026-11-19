@@ -542,7 +542,7 @@ public sealed class CloudLink : IAsyncDisposable
                 var result = await _dispatch(method, parameters, ct).ConfigureAwait(false);
                 // The remote view learns its access from the app info it already asks for (the window never sees this field).
                 if (method == "core.getInfo" && result is JsonObject info) info["remoteAccess"] = access;
-                RemoteAccess.ShapeResult(method, result, showCode);
+                RemoteAccess.ShapeResult(method, result, showCode, access);
                 reply["result"] = result;
             }
             catch (RpcException e)

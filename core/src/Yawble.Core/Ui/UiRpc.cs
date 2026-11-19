@@ -26,7 +26,7 @@ public sealed class UiRpc(
     Monitor.StepFeed? steps = null,
     Monitor.CodeEvents? codeEvents = null)
 {
-    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline."];
+    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "workflows."];
 
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
@@ -108,6 +108,9 @@ public sealed class UiRpc(
                 "bus.nudgeWorkflow" => S(await bus.NudgeWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), OptStr(p, "note"), ct)),
                 // B085 Extend: resets an open workflow's idle clock. teamId is optional (the workflow names its team).
                 "workflowExtend" or "bus.workflowExtend" => S(await ExtendAsync(p, ct)),
+                // B104, the Workflows page: every team's workflows, and one in full (reads only; contract B104/contract.md).
+                "workflows.list" => await WorkflowsListAsync(p, ct),
+                "workflows.get" => await WorkflowGetAsync(Long(p, "workflow"), ct),
 
                 "policy.getGlobal" => policies.GetGlobal().ToJson(),
                 "policy.saveGlobal" => await SaveGlobalAsync(p, ct),
@@ -162,6 +165,12 @@ public sealed class UiRpc(
                 // B072, the commit view: reads only.
                 "git.commitShow" => await CommitShowAsync(p, ct),
                 "git.commitDiff" => await CommitDiffAsync(p, ct),
+            "git.commitsResolve" => await CommitsResolveAsync(p, ct),
+                // B073: the commits behind a count, and the previews of Merge to main and Delete: reads only.
+                "git.commitRange" => await CommitRangeAsync(p, ct),
+                "git.mergePreview" => await MergePreviewAsync(p, ct),
+                "git.mergeDiff" => await MergeDiffAsync(p, ct),
+                "git.deletePreview" => await DeletePreviewAsync(p, ct),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -645,6 +654,78 @@ public sealed class UiRpc(
         return await CommitCallAsync(async () => (await repos.GitCommitDiffAsync(team.Id, team.Name, sha, path, ct, OptStr(p, "repo"))).ToJson());
     }
 
+    /// <summary>
+    /// git.commitsResolve {team? | teamId?, ids:[...]} (B074): which of a batch of 7-40 digit hex IDs are commits of the
+    /// team's repositories (no team: every team's), {max, results:[{id, valid, matches:[{team, teamId, repo, fullId,
+    /// shortId, title, pushed}]}], errors?}. At most <see cref="Teams.TeamRepos.MaxResolveIds"/> distinct IDs. Reads only.
+    /// Contract: B074/contract.md in the team's documents.
+    /// </summary>
+    private async Task<JsonNode?> CommitsResolveAsync(JsonObject? p, CancellationToken ct)
+    {
+        if (p?["ids"] is not JsonArray array) throw new RpcException("bad_params", "ids is required: an array of commit IDs");
+        var ids = new List<string>();
+        foreach (var item in array)
+        {
+            if (item is not JsonValue v || !v.TryGetValue<string>(out var s)) throw new RpcException("bad_params", "ids holds strings only");
+            ids.Add(s);
+        }
+        Teams.TeamRepos repos;
+        List<(long, string)> teams;
+        if (OptLong(p, "teamId") is not null || OptStr(p, "team") is not null)
+        {
+            var (r, team) = await TidyTeamAsync(p, ct);
+            repos = r;
+            teams = [(team.Id, team.Name)];
+        }
+        else
+        {
+            repos = bus.Repos ?? throw new RpcException("no_repositories", "this core has no team repositories (no app data folder)");
+            teams = [.. (await bus.TeamsAsync(ct)).Select(t => (t.Id, t.Name))];
+        }
+        return await CommitCallAsync(async () => (await repos.ResolveCommitIdsAsync(teams, ids, ct)).ToJson());
+    }
+
+    /// <summary>git.commitRange {team | teamId, repo?, from, to, limit?} (B073): the commits on to that from lacks (the pair a count gives), newest first.</summary>
+    private async Task<JsonNode?> CommitRangeAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var from = OptStr(p, "from") ?? throw new RpcException("bad_params", "from is required");
+        var to = OptStr(p, "to") ?? throw new RpcException("bad_params", "to is required");
+        var limit = OptLong(p, "limit") is { } l ? (int)Math.Clamp(l, 1, Teams.GitPreviews.MaxLimit) : (int?)null;
+        return await CommitCallAsync(async () => S(await repos.GitCommitRangeAsync(team.Id, team.Name, from, to, limit, ct, OptStr(p, "repo")))!.AsObject());
+    }
+
+    /// <summary>git.mergePreview {team | teamId, repo?} (B073): what Merge to main would do, its commits and combined diff; nothing moves.</summary>
+    private async Task<JsonNode?> MergePreviewAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        return await CommitCallAsync(async () =>
+        {
+            var preview = await repos.GitMergePreviewAsync(team.Id, team.Name, ct, OptStr(p, "repo"));
+            var o = S(preview)!.AsObject();
+            o["files"] = new JsonArray([.. preview.Files.Select(f => (JsonNode)f.ToJson())]);
+            return o;
+        });
+    }
+
+    /// <summary>git.mergeDiff {team | teamId, repo?, from, to, path} (B073): one file of a merge preview's combined diff, shaped as git.commitDiff.</summary>
+    private async Task<JsonNode?> MergeDiffAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var from = OptStr(p, "from") ?? throw new RpcException("bad_params", "from is required");
+        var to = OptStr(p, "to") ?? throw new RpcException("bad_params", "to is required");
+        var path = OptStr(p, "path") ?? throw new RpcException("bad_params", "path is required");
+        return await CommitCallAsync(async () => (await repos.GitMergeDiffAsync(team.Id, team.Name, from, to, path, ct, OptStr(p, "repo"))).ToJson());
+    }
+
+    /// <summary>git.deletePreview {team | teamId, repo?, branch} (B073): what deleting the local branch loses.</summary>
+    private async Task<JsonNode?> DeletePreviewAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var branch = OptStr(p, "branch") ?? throw new RpcException("bad_params", "branch is required");
+        return await CommitCallAsync(async () => S(await repos.GitDeletePreviewAsync(team.Id, team.Name, branch, ct, OptStr(p, "repo")))!.AsObject());
+    }
+
     private static async Task<JsonNode?> CommitCallAsync(Func<Task<JsonObject>> read)
     {
         try
@@ -710,7 +791,7 @@ public sealed class UiRpc(
         {
             ["on"] = repos.SyncsToBase(teamId), ["note"] = repos.SyncNote(teamId),
             ["baseBranch"] = repos.RepoOf(teamId)?.BaseBranch,
-            ["behind"] = behind is { Behind: > 0 } b ? new JsonObject { ["teamBranch"] = b.TeamBranch, ["count"] = b.Behind, ["text"] = b.Text } : null,
+            ["behind"] = behind is { Behind: > 0 } b ? new JsonObject { ["teamBranch"] = b.TeamBranch, ["count"] = b.Behind, ["text"] = b.Text, ["from"] = b.Range?.From, ["to"] = b.Range?.To } : null,
         };
     }
 
@@ -868,6 +949,108 @@ public sealed class UiRpc(
         (p?["entries"] as JsonArray ?? []).OfType<JsonObject>()
             .Select(e => new KeyValuePair<string, string>((e["name"]?.GetValue<string>() ?? "").Trim(), e["value"]?.GetValue<string>() ?? ""))
             .Where(e => e.Key.Length > 0).ToList();
+
+    // ---------------------------------------------------------------- B104: the Workflows page
+
+    /// <summary>How many of a workflow's messages workflows.get gives (newest first).</summary>
+    public const int WorkflowMessages = 30;
+
+    /// <summary>workflows.list {teamId?, q?, state?, limit?}: {workflows, counts, truncated, backlog, now} (contract B104/contract.md).</summary>
+    private async Task<JsonNode> WorkflowsListAsync(JsonObject? p, CancellationToken ct)
+    {
+        if (p?["limit"] is JsonValue lv && !WholeNumber(lv, out _)) throw new RpcException("bad_params", "limit must be a number");
+        long? teamId = p?["teamId"] is null ? null : Long(p, "teamId");
+        if (bus.Board is { } board) await board.ProjectAsync(ct); // the cards and times include everything said so far
+        var page = await bus.WorkflowsPageAsync(teamId, OptStr(p, "q"), OptStr(p, "state"), (int)(OptLong(p, "limit") ?? BusEngine.DefaultPageLimit), ct);
+        return new JsonObject
+        {
+            ["workflows"] = new JsonArray([.. page.Rows.Select(r => (JsonNode)WorkflowRowJson(r))]),
+            ["counts"] = new JsonObject([.. page.Counts.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, kv.Value))]),
+            ["truncated"] = page.Truncated,
+            // The window may always read the backlog; the Cloud Link sets this per viewer (RemoteAccess.ShapeResult).
+            ["backlog"] = true,
+            ["now"] = page.Now.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+        };
+    }
+
+    /// <summary>workflows.get {workflow}: {workflow, cards, messages, spec, backlog} (contract B104/contract.md).</summary>
+    private async Task<JsonNode> WorkflowGetAsync(long workflow, CancellationToken ct)
+    {
+        var board = bus.Board;
+        if (board is not null) await board.ProjectAsync(ct);
+        var row = await bus.WorkflowRowAsync(workflow, ct) ?? throw new RpcException("no_such_workflow", $"there is no workflow {workflow}");
+        var cards = new JsonArray();
+        if (board is not null)
+        {
+            var live = await bus.LiveActivityAsync(ct);
+            var now = board.Store.UtcNow();
+            var lanes = Board.Lanes.All.Select(l => l.Id).ToList();
+            foreach (var c in board.Store.CardsOfWorkflow(workflow).OrderBy(c => lanes.IndexOf(c.Lane) is var i && i < 0 ? lanes.Count : i).ThenBy(c => c.Id))
+                cards.Add(new JsonObject
+                {
+                    ["id"] = c.Id, ["title"] = c.Title, ["lane"] = c.Lane, ["member"] = c.Member, ["status"] = c.Status,
+                    ["time"] = board.Timeline.OfCard(c, live, now).Time.ToJson(),
+                });
+        }
+        var thread = await bus.WorkflowThreadAsync(workflow, ct);
+        var messages = new JsonArray();
+        foreach (var m in thread.Reverse())
+        {
+            if (messages.Count >= WorkflowMessages) break;
+            if (WorkflowMessageRow(m) is { } node) messages.Add(node);
+        }
+        return new JsonObject
+        {
+            ["workflow"] = WorkflowRowJson(row),
+            ["cards"] = cards,
+            ["messages"] = messages,
+            ["spec"] = row.Item?.Spec,
+            ["backlog"] = true,
+        };
+    }
+
+    /// <summary>A WorkflowRow on the wire: bus.workflows' summary fields, then B104's own.</summary>
+    internal static JsonObject WorkflowRowJson(WorkflowRow r)
+    {
+        var node = S(r.Summary)!.AsObject();
+        node["ownerId"] = r.OwnerId;
+        node["team"] = r.Team;
+        node["teamId"] = r.TeamId;
+        node["status"] = r.Status;
+        node["waitingFor"] = r.WaitingFor;
+        node["working"] = r.Working;
+        node["item"] = r.Item is { } i ? new JsonObject { ["label"] = i.Label, ["title"] = i.Title, ["archived"] = i.Archived } : null;
+        node["members"] = new JsonArray([.. r.Members.Select(m => (JsonNode)new JsonObject { ["id"] = m.Id, ["name"] = m.Name, ["state"] = m.State })]);
+        return node;
+    }
+
+    /// <summary>One message of workflows.get in plain words (the Monitor's wording, plus a workflow's close and expiry); null for the rest.</summary>
+    internal static JsonObject? WorkflowMessageRow(Message m)
+    {
+        if (MonitorRow(m) is { } row)
+        {
+            row.Remove("team");
+            row.Remove("workflow");
+            row.Remove("failureClass");
+            return Ordered(row["seq"]!.GetValue<long>(), row["at"]!.GetValue<string>(), row["kind"]!.GetValue<string>(),
+                row["from"]?.GetValue<string>(), row["member"]?.GetValue<string>(), row["text"]?.GetValue<string>());
+        }
+        if (m.Type is not (MessageTypes.WorkflowClosed or MessageTypes.WorkflowExpired)) return null;
+        string? text = null;
+        try
+        {
+            if (JsonNode.Parse(m.Payload) is JsonObject p)
+                text = (m.Type == MessageTypes.WorkflowClosed ? p["reason"] : p["detail"] ?? p["reason"]) is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s.Trim() : null;
+        }
+        catch (JsonException) { }
+        if (text is { Length: > 240 }) text = text[..240] + "…";
+        return Ordered(m.Seq, m.OccurredAt.ToString("O"), m.Type == MessageTypes.WorkflowClosed ? "closed" : "expired", m.Source, null, text);
+
+        static JsonObject Ordered(long seq, string at, string kind, string? from, string? member, string? text) => new()
+        {
+            ["seq"] = seq, ["at"] = at, ["kind"] = kind, ["from"] = from, ["member"] = member, ["text"] = text,
+        };
+    }
 
     private async Task<string> TeamNameOf(long teamId, CancellationToken ct) =>
         (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId)?.Name ?? throw new RpcException("no_such_team", $"there is no team {teamId}");

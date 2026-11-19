@@ -1,0 +1,72 @@
+{
+  "outcome": "merged",
+  "message": "team/alpha merged with a merge commit into trunk: now 370330ff8919.",
+  "changed": true,
+  "sha": "370330ff8919d32eea6665f25787a91cd50d0359",
+  "files": null,
+  "status": {
+    "repoPath": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-mftpnh0o.zo0\\person-repo",
+    "managed": false,
+    "baseBranch": "trunk",
+    "checkedOut": null,
+    "dirty": true,
+    "origin": null,
+    "baseSha": "370330ff8919d32eea6665f25787a91cd50d0359",
+    "originBaseSha": null,
+    "baseAheadOfOrigin": null,
+    "baseBehindOrigin": null,
+    "teamBranch": "team/alpha",
+    "teamSha": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee",
+    "teamAheadOfBase": 0,
+    "teamBehindBase": 2,
+    "merge": "up-to-date",
+    "conflictFiles": [],
+    "members": [],
+    "oldBranches": [],
+    "blockingBranches": [],
+    "ranges": {
+      "baseAheadOfOrigin": null,
+      "baseBehindOrigin": null,
+      "teamAheadOfBase": {
+        "from": "370330ff8919d32eea6665f25787a91cd50d0359",
+        "to": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee"
+      },
+      "teamBehindBase": {
+        "from": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee",
+        "to": "370330ff8919d32eea6665f25787a91cd50d0359"
+      }
+    }
+  },
+  "commits": [
+    {
+      "sha": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee",
+      "shortSha": "892536a1cfb6",
+      "subject": "Four",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T22:04:53-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "sha": "750c6692271312ede136f5131cf784b2dd611a6a",
+      "shortSha": "750c66922713",
+      "subject": "Team work",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T22:04:53-05:00",
+      "isMerge": false,
+      "notPushed": true
+    }
+  ],
+  "commitCount": 2,
+  "commitsTruncated": false,
+  "range": {
+    "from": "d60edebc132e92ab4aed7056af110ff2a6ef8bb9",
+    "to": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee"
+  }
+}

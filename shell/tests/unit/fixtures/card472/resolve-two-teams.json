@@ -1,0 +1,144 @@
+{
+  "shas": {
+    "pushed": "1ca1c017296b719928813d48f6ab2e345877ba0a",
+    "local": "03fdb1a842cefa4bfcb5e9243789e339045bf9cb",
+    "shared": "133a905199998bf0e93d549403208111821069d6",
+    "cloudOnly": "4a677d3787df1b8a66ed8badc8ba44ce0cdd8cb8",
+    "blob": "2ff1b8d26697c538bc3265486b91c4116196dfad",
+    "tree": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "tagObject": "8fabdb83e41ad8b51c19c9d0927cc431d4f675b4"
+  },
+  "teams": {
+    "web": 1,
+    "cloud": 2
+  },
+  "answer": {
+    "max": 200,
+    "results": [
+      {
+        "id": "1ca1c01",
+        "valid": true,
+        "matches": [
+          {
+            "team": "web",
+            "teamId": 1,
+            "repo": null,
+            "fullId": "1ca1c017296b719928813d48f6ab2e345877ba0a",
+            "shortId": "1ca1c017296b",
+            "title": "Partial refunds: refund part of a payment",
+            "pushed": true
+          }
+        ]
+      },
+      {
+        "id": "1ca1c017296b719928813d48f6ab2e345877ba0a",
+        "valid": true,
+        "matches": [
+          {
+            "team": "web",
+            "teamId": 1,
+            "repo": null,
+            "fullId": "1ca1c017296b719928813d48f6ab2e345877ba0a",
+            "shortId": "1ca1c017296b",
+            "title": "Partial refunds: refund part of a payment",
+            "pushed": true
+          }
+        ]
+      },
+      {
+        "id": "03fdb1a842",
+        "valid": true,
+        "matches": [
+          {
+            "team": "web",
+            "teamId": 1,
+            "repo": null,
+            "fullId": "03fdb1a842cefa4bfcb5e9243789e339045bf9cb",
+            "shortId": "03fdb1a842ce",
+            "title": "Receipts: a new layout",
+            "pushed": false
+          }
+        ]
+      },
+      {
+        "id": "133a9051",
+        "valid": true,
+        "matches": [
+          {
+            "team": "web",
+            "teamId": 1,
+            "repo": null,
+            "fullId": "133a905199998bf0e93d549403208111821069d6",
+            "shortId": "133a90519999",
+            "title": "Shared: the common README",
+            "pushed": false
+          },
+          {
+            "team": "cloud",
+            "teamId": 2,
+            "repo": null,
+            "fullId": "133a905199998bf0e93d549403208111821069d6",
+            "shortId": "133a90519999",
+            "title": "Shared: the common README",
+            "pushed": false
+          }
+        ]
+      },
+      {
+        "id": "4a677d3",
+        "valid": true,
+        "matches": [
+          {
+            "team": "cloud",
+            "teamId": 2,
+            "repo": null,
+            "fullId": "4a677d3787df1b8a66ed8badc8ba44ce0cdd8cb8",
+            "shortId": "4a677d3787df",
+            "title": "Cloud: retry the webhook",
+            "pushed": false
+          }
+        ]
+      },
+      {
+        "id": "cafe1234",
+        "valid": true,
+        "matches": []
+      },
+      {
+        "id": "deadbee1",
+        "valid": true,
+        "matches": []
+      },
+      {
+        "id": "beefcafe",
+        "valid": true,
+        "matches": []
+      },
+      {
+        "id": "2ff1b8d26",
+        "valid": true,
+        "matches": []
+      },
+      {
+        "id": "4b825dc64",
+        "valid": true,
+        "matches": []
+      },
+      {
+        "id": "8fabdb83e",
+        "valid": true,
+        "matches": []
+      },
+      {
+        "id": "abc1234",
+        "valid": true,
+        "matches": []
+      },
+      {
+        "id": "zz",
+        "valid": false,
+        "matches": []
+      }
+    ]
+  }
+}

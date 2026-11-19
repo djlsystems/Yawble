@@ -1,0 +1,43 @@
+{
+  "outcome": "synced",
+  "baseBranch": "trunk",
+  "baseSha": "44514bb84e35fe429777d6e6523d1acfa4552ba1",
+  "behind": 0,
+  "moved": [
+    "team/alpha"
+  ],
+  "conflicts": [],
+  "note": null,
+  "incoming": [
+    {
+      "sha": "44514bb84e35fe429777d6e6523d1acfa4552ba1",
+      "shortSha": "44514bb84e35",
+      "subject": "Person 2",
+      "author": {
+        "name": "Person",
+        "email": "person@example.invalid"
+      },
+      "date": "2026-11-18T22:08:15-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "sha": "bebded4b98503323d89016b991efd455aae5fa78",
+      "shortSha": "bebded4b9850",
+      "subject": "Person 1",
+      "author": {
+        "name": "Person",
+        "email": "person@example.invalid"
+      },
+      "date": "2026-11-18T22:08:14-05:00",
+      "isMerge": false,
+      "notPushed": true
+    }
+  ],
+  "incomingCount": 2,
+  "incomingTruncated": false,
+  "incomingRange": {
+    "from": "01987a92074018ac7262746c6c26db49292b6645",
+    "to": "44514bb84e35fe429777d6e6523d1acfa4552ba1"
+  }
+}
