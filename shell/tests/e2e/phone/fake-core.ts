@@ -178,7 +178,84 @@ const warningText = (workflow: number, question: number) => `#${workflow} will e
 const expiry = { on: false, extended: new Map<number, string>(), days: new Map<number, number>() };
 const expiryDays = (teamId: number) => expiry.days.get(teamId) ?? 3;
 
+/** B104 (card 477): the Workflows page's rows (workflows.list / workflows.get, YAWBLE_TEAM_DOCS/B104/contract.md), across
+ *  both teams: #10 running (B011, Ada on it), #12 waiting on you, #15 waiting for the lease, #16 idle (expires in 20 h),
+ *  and ended ones: #9 expired, #14 completed today (B013, archived), #8 closed. */
+function b104Rows() {
+  const wfTime = (createdAgo: number, endedAgo: number | null, how: string | null, segs: [Cat, number][]) => {
+    const overallMs = (createdAgo - (endedAgo ?? 0)) * 60_000;
+    const known = segs.reduce((a, [, m]) => a + m * 60_000, 0);
+    return { createdAt: iso(createdAgo), startedAt: iso(createdAgo - 5), endedAt: endedAgo == null ? null : iso(endedAgo), endedHow: how, open: endedAgo == null,
+      overallMs, rebuilt: false, breakdown: [...segs.map(([category, m]) => ({ category, ms: m * 60_000 })), ...(overallMs > known ? [{ category: 'idle', ms: overallMs - known }] : [])] };
+  };
+  const base = { undeclared: false, busy: [] as string[], ending: null as string | null, endedAt: null as string | null, expiredAt: null, expiresAt: null as string | null,
+    expiryWarning: null, question: null as number | null, waitingFor: null as string | null, working: false, item: null as unknown, members: [] as unknown[], ownerId: 1 };
+  const t1 = { team: 'payments', teamId: 1 }, t2 = { team: teamRows[1].name, teamId: 2 };
+  return [
+    { ...base, ...t1, id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', status: 'running', working: true, busy: ['DeveloperAda is running'], startedAt: iso(120), lastAt: iso(1), messages: 14,
+      item: { label: 'B011', title: 'Partial refunds', archived: false }, members: [{ id: 2, name: 'DeveloperAda', state: 'running' }, { id: 3, name: 'TesterBen', state: 'queued' }], time: timeline.workflow.time },
+    { ...base, ...t1, id: 12, title: 'Refund limits per merchant', owner: 'Manager', state: 'open', status: 'needs-you', question: 3, startedAt: iso(400), lastAt: iso(30), messages: 6,
+      item: { label: 'B012', title: 'Refund limits per merchant, set by the Owner in Settings', archived: false }, time: wfTime(400, null, null, [['not-started', 5], ['agent-working', 60], ['waiting-on-you', 300]]) },
+    { ...base, ...t2, id: 15, title: 'Checkout button states', owner: 'Manager', state: 'open', status: 'waiting', waitingFor: 'lease', working: true, startedAt: iso(90), lastAt: iso(4), messages: 9,
+      members: [{ id: 5, name: 'DeveloperCleo', state: 'lease' }], time: wfTime(90, null, null, [['not-started', 4], ['agent-working', 50], ['waiting-for-slot', 30]]) },
+    { ...base, ...t2, id: 16, title: 'Tidy the checkout styles', owner: 'Manager', state: 'open', status: 'idle', undeclared: true, startedAt: iso(2000), lastAt: iso(1500), messages: 3,
+      expiresAt: later(20 * 60), time: wfTime(2000, null, null, [['not-started', 5], ['agent-working', 40]]) },
+    { ...base, ...t1, id: 14, title: 'Refund report', owner: 'Manager', state: 'completed', status: 'completed', ending: 'Delivered the report', startedAt: iso(300), lastAt: iso(20), endedAt: iso(20), messages: 11,
+      item: { label: 'B013', title: 'Refund report', archived: true }, time: wfTime(300, 20, 'completed', [['not-started', 10], ['agent-working', 200], ['waiting-on-teammate', 40], ['stalled', 30]]) },
+    { ...base, ...t1, id: 9, title: 'Old refund export', owner: 'Manager', state: 'expired', status: 'expired', ending: 'no activity for 3 days', startedAt: iso(9000), lastAt: iso(4 * 1440), endedAt: iso(4 * 1440), expiredAt: iso(1440), messages: 4,
+      time: wfTime(9000, 4 * 1440, 'expired', [['not-started', 5], ['agent-working', 40]]) },
+    { ...base, ...t2, id: 8, title: 'Try a new payment provider', owner: 'Manager', state: 'closed', status: 'closed', ending: 'Not now', startedAt: iso(6000), lastAt: iso(3000), endedAt: iso(3000), messages: 2,
+      time: wfTime(6000, 3000, 'closed', [['not-started', 5], ['agent-working', 15]]) },
+  ];
+}
+const b104Chip: Record<string, (s: string) => boolean> = {
+  all: () => true, open: (s) => ['running', 'needs-you', 'waiting', 'idle', 'stopped'].includes(s), 'needs-you': (s) => s === 'needs-you', done: (s) => s === 'completed', closed: (s) => s === 'closed' || s === 'expired',
+};
+function workflowsList(p: any) {
+  // The contract's request: only these keys; refused as the core refuses them.
+  const bad = (m: string) => Object.assign(new Error(m), { code: 'bad_params' });
+  for (const k of Object.keys(p ?? {})) if (!['teamId', 'q', 'state', 'limit'].includes(k)) throw bad(`unknown parameter ${k}`);
+  if (p?.limit != null && !Number.isInteger(p.limit)) throw bad('limit must be a number');
+  const limit = Math.min(1000, Math.max(1, p?.limit ?? 200));
+  let rows = b104Rows();
+  if (p?.teamId != null) {
+    if (!teamRows.some((t) => t.id === Number(p.teamId))) throw Object.assign(new Error('no such team'), { code: 'no_such_team' });
+    rows = rows.filter((w) => w.teamId === Number(p.teamId));
+  }
+  const words = String(p?.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  rows = rows.filter((w) => words.every((x) => [`#${w.id}`, String(w.id), w.title, (w.item as any)?.label ?? '', (w.item as any)?.title ?? '', w.team, w.owner, ...w.members.map((m: any) => m.name)]
+    .some((f) => f.toLowerCase().includes(x))));
+  const n = (f: (s: string) => boolean) => rows.filter((w) => f(w.status)).length;
+  const counts = { all: rows.length, open: n(b104Chip.open), needsYou: n(b104Chip['needs-you']), done: n(b104Chip.done), closed: n(b104Chip.closed),
+    running: n((s) => s === 'running'), waiting: n((s) => s === 'waiting'), idle: n((s) => s === 'idle'), stopped: n((s) => s === 'stopped'), completed: n((s) => s === 'completed'), expired: n((s) => s === 'expired'), completedToday: n((s) => s === 'completed') };
+  const st = String(p?.state ?? 'all').toLowerCase();
+  const keep = b104Chip[st] ?? (['running', 'waiting', 'idle', 'stopped', 'completed', 'expired'].includes(st) ? (s: string) => s === st : undefined);
+  if (!keep) throw bad('state: not a chip or a status');
+  // Newest activity first; the newest `limit` plus every open row however old.
+  const matching = rows.filter((w) => keep(w.status)).sort((a, b) => Date.parse(b.lastAt) - Date.parse(a.lastAt));
+  const shown = matching.filter((w, i) => i < limit || w.state === 'open');
+  return { workflows: shown, counts, truncated: shown.length < matching.length, backlog: true, now: new Date().toISOString() };
+}
+function workflowsGet(p: any) {
+  const w = b104Rows().find((x) => x.id === Number(p?.workflow));
+  if (!w) throw Object.assign(new Error('no such workflow'), { code: 'no_such_workflow' });
+  const own = w.id === 10 ? cards : [];
+  return {
+    workflow: w,
+    cards: own.map((c) => ({ id: c.id, title: c.title, lane: c.lane, member: c.member, status: c.status, time: c.time })),
+    messages: [
+      { seq: 120, at: iso(1), kind: 'progress', from: 'DeveloperAda', member: 'DeveloperAda', text: 'Card 3: wiring the refund webhook' },
+      { seq: 110, at: iso(25), kind: 'handback', from: 'TesterBen', member: 'TesterBen', text: `Card 5 verified on ${COMMIT_ADA.slice(0, 7)}: 42 tests pass.` },
+      { seq: 100, at: iso(118), kind: 'instruction', from: 'person', member: 'Manager', text: 'Backlog item B011 is dispatched to your team.' },
+    ],
+    spec: w.item ? `**Why:** refunds are asked for every day.\n\n## What\n- Partial refunds from the payment page\n- A refund report\n- Limits per merchant\n\n## Checks\n- Unit tests for every amount\n- An e2e run at 1280 and 375 px\n- The docs updated` : null,
+    backlog: true,
+  };
+}
+
 export const answers: Record<string, (p: any, access: Access) => unknown> = {
+  'workflows.list': (p) => workflowsList(p),
+  'workflows.get': (p) => workflowsGet(p),
   'core.getInfo': (_p, access) => ({ product: 'Yawble', version: '0.0.0+dev.fake', platform: 'win32', os: 'Windows (fake)', dotnet: '10', pid: 1, sandbox: { backend: 'fake' }, schema: [], hostChecks: [], remoteAccess: access }),
   'sandbox.getAvailableBackends': () => [],
   'teams.list': () => teamList(),
@@ -227,6 +304,9 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   // B072 (card 444): the Commit view against the contract DeveloperTomas builds in core (git.commitShow, git.commitDiff).
   'git.commitShow': (p) => commitShow(String(p?.sha ?? '')),
   'git.commitDiff': (p) => commitDiff(String(p?.sha ?? ''), String(p?.path ?? '')),
+  // B074 (card 471): which IDs on a screen are commits, as the card's contract says (B074/contract.md): per ID its
+  // commits; one git no longer has is none (it stays text).
+  'git.commitsResolve': (p) => ({ max: 200, results: ((p?.ids ?? []) as string[]).map((id) => ({ id: id.toLowerCase(), valid: true, matches: commitsResolve(id) })) }),
   // B086: a card's own row, or workflow #10's rows and summary; an unknown one is refused like the core (not_found).
   'timeline.get': (p) => {
     if (p?.workflow != null) { const quiet = (expiry.on ? expiryWorkflows() : []).find((w) => w.id === Number(p.workflow));
@@ -260,7 +340,7 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'code.close': () => ({}),
   // A team's Git dialog asks with its teamId (a TeamGitStatus); without one, the computer's git (B054 verify: the Git
   // sheet behind the team page's ⋯ rendered nothing with the computer's answer).
-  'git.status': (p) => (p?.teamId == null ? { installed: true, version: '2.50', path: 'C:/fake/git.exe' } : {
+  'git.status': (p) => (p?.teamId == null ? { installed: true, version: '2.50', path: 'C:/fake/git.exe' } : b073.on ? b073Status() : {
     repoPath: 'C:/repos/payments', managed: true, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: null, baseSha: 'abc1234', originBaseSha: null,
     baseAheadOfOrigin: null, baseBehindOrigin: null, teamBranch: 'team/payments', teamSha: 'def5678', teamAheadOfBase: 2, teamBehindBase: 0, merge: 'fast-forward',
     conflictFiles: [], members: [{ branch: 'members/payments/developerada', sha: COMMIT_ADA, aheadOfBase: 2, inTeamBranch: true }], oldBranches: [], blockingBranches: [],
@@ -272,8 +352,28 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'git.deleteBranches': (p) => {
     const names: string[] = p?.branches ?? [];
     if (!p?.confirm) return { plan: names.map((n) => `Delete ${n}${p?.remote ? ' here and on origin' : ' here'} (merged into main).`).join('\n'), token: `tok:${names.join(',')}`, empty: names.length === 0 };
-    for (const n of names) tidy.deleted.add(n);
+    for (const n of names) { tidy.deleted.add(n); b073.deleted.add(n); }
     return { result: `Deleted ${names.join(', ')}.` };
+  },
+  // B073 (card 465): the Git dialog's counts and previews, as the contract in YAWBLE_TEAM_DOCS\B073\contract.md proposes.
+  'git.commitRange': (p) => commitRange(String(p?.from ?? ''), String(p?.to ?? '')),
+  'git.mergePreview': () => mergePreview(),
+  'git.mergeDiff': (p) => commitDiff(COMMIT_ADA, String(p?.path ?? '')),
+  'git.deletePreview': (p) => deletePreview(String(p?.branch ?? '')),
+  'git.merge': (p) => {
+    b073.merged = true;
+    return { outcome: 'merge', message: 'Merged team/payments into main and pushed main to origin.', changed: true, sha: COMMIT_MERGE, files: null, status: b073Status(),
+      commits: [R.merge(), R.ada()], commitCount: 2, commitsTruncated: false, range: pair(COMMIT_BASE, COMMIT_MERGE) };
+  },
+  'git.bringCurrent': () => {
+    b073.broughtCurrent = true;
+    return { outcome: 'fast-forward', message: 'main fast-forwarded to origin/main.', changed: true, sha: B073_ORIGIN_SHA, files: null, status: b073Status(),
+      commits: [R.feature()], commitCount: 1, commitsTruncated: false, range: pair(COMMIT_BASE, B073_ORIGIN_SHA) };
+  },
+  'git.sync': () => {
+    b073.synced = true;
+    return { outcome: 'synced', baseBranch: 'main', baseSha: COMMIT_BASE, behind: 0, moved: ['team/payments'], conflicts: [], note: null,
+      incoming: [R.base()], incomingCount: 1, incomingTruncated: false, incomingRange: pair(COMMIT_MERGE, COMMIT_BASE) };
   },
   'git.branchRealign': (p) => {
     if (p?.member === 'DeveloperAda') throw Object.assign(new Error('DeveloperAda is running: realign it when the run ends.'), { code: 'running' });
@@ -297,7 +397,10 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
     compute: { wallTimeoutSec: 7200, idleTimeoutSec: 1800, memoryMb: null, cpuPercent: null, maxProcesses: null },
     ui: { clipboard: 'read' }, app: { maxConcurrentAgents: 4, backend: 'sandbox', heavyWorkAtOnce: 1 },
   }),
-  'teams.syncToBase': () => (syncBehind ? { on: true, note: null, baseBranch: 'main', behind: { teamBranch: 'team/payments', count: 3, text: '3 commits behind main' } } : { on: true, note: null, baseBranch: 'main', behind: null }),
+  // B073: with setB073(true), team/payments is 1 behind main until Sync now or Merge, with the contract's from / to.
+  'teams.syncToBase': () => (b073.on ? { on: true, note: null, baseBranch: 'main',
+    behind: b073.synced || b073.merged ? null : { teamBranch: 'team/payments', count: 1, text: '1 commit behind main', from: COMMIT_MERGE, to: COMMIT_BASE } }
+    : syncBehind ? { on: true, note: null, baseBranch: 'main', behind: { teamBranch: 'team/payments', count: 3, text: '3 commits behind main' } } : { on: true, note: null, baseBranch: 'main', behind: null }),
   'tasks.list': () => [],
   'members.get': (p) => (agents[1] as any[]).map((a) => a.member).find((m) => m.id === p?.id) ?? (agents[1] as any)[0].member,
 };
@@ -361,11 +464,15 @@ function commitShow(sha: string) {
     made: { member: 'Manager', workflow: 10 }, where: { inMain: false, branches: ['team/payments'], otherBranches: [], pushed: false, tags: [] },
     files: [{ path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false }] };
   if (pick === COMMIT_FEATURE) return { ...common, title: 'Try a new receipt layout', body: '', author: person('Owner', 20), isMerge: false, parents: [COMMIT_BASE],
-    where: { inMain: false, branches: [], otherBranches: ['feature/x'], pushed: false, tags: [] },
+    where: { inMain: false, branches: [], otherBranches: ['feature/x'], pushed: false, tags: [], ...(b073.deleted.has(B073_BO) ? { deletedFrom: B073_BO } : {}) },
     files: [{ path: 'src/payments/receipt.ts', status: 'modified', added: 3, deleted: 1, binary: false }] };
   return { ...common, title: 'Release 2026.11.18.1', body: '', author: person('Owner', 600), isMerge: false, parents: [],
     where: { inMain: true, branches: ['team/payments'], otherBranches: [], pushed: true, tags: ['v2026.11.18.1'] },
     files: [{ path: 'README.md', status: 'modified', added: 1, deleted: 1, binary: false }] };
+}
+function commitsResolve(id: string) {
+  const c = commitShow(id) as { found: boolean; sha?: string; title?: string; where?: { pushed: boolean } };
+  return c.found ? [{ team: 'payments', teamId: 1, repo: null, fullId: c.sha!, shortId: c.sha!.slice(0, 12), title: c.title ?? '', pushed: !!c.where?.pushed }] : [];
 }
 function commitDiff(sha: string, path: string) {
   const c = commitShow(sha) as { found: boolean; codeShown?: boolean; goneReason?: string; files: { path: string; oldPath?: string; status: string; added: number; deleted: number; binary: boolean }[] };
@@ -385,6 +492,75 @@ function commitDiff(sha: string, path: string) {
   return { ...head, binary: false, tooLarge: false, hunks: [{ header: '@@ -1,3 +1,4 @@ export function refund', oldStart: 1, oldCount: 3, newStart: 1, newCount: 4, lines }] };
 }
 
+/** B073 (card 465): with setB073(true), git.status is a repository with an origin, shaped as DeveloperTomas's contract
+ *  (YAWBLE_TEAM_DOCS\B073\contract.md): main 1 behind origin's, team/payments 2 ahead and 1 behind main (a merge), not
+ *  pushed; DeveloperAda's branch pushed, DeveloperBo's not and not in the team branch (one commit of its own, one already
+ *  in main). Each count carries its full-ID pair; Merge, Bring main current and Sync now move it on and list what came in. */
+const b073 = { on: false, merged: false, broughtCurrent: false, synced: false, deleted: new Set<string>() };
+const B073_BO = 'members/payments/developerbo';
+const B073_ORIGIN_SHA = '0f1e2d3c4b5a69788796a5b4c3d2e1f0a9b8c7d6';
+const B073_SYNCED_SHA = '5ce0d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7a8b';
+const commitRow = (sha: string, subject: string, author: string, notPushed: boolean, isMerge = false) =>
+  ({ sha, shortSha: sha.slice(0, 12), subject, author: { name: author, email: `${author.toLowerCase()}@yawble.local` }, date: iso(30), isMerge, notPushed });
+const R = {
+  merge: () => commitRow(COMMIT_MERGE, "Merge DeveloperAda's branch into team/payments", 'Manager', true, true),
+  ada: () => commitRow(COMMIT_ADA, 'Partial refunds: refund part of a payment', 'DeveloperAda', false),
+  base: () => commitRow(COMMIT_BASE, 'Release 2026.11.18.1', 'Owner', false),
+  feature: () => commitRow(COMMIT_FEATURE, 'Try a new receipt layout', 'DeveloperBo', true),
+};
+const pair = (from: string, to: string) => ({ from, to });
+/** The commits behind each pair the fake hands out (git rev-list to ^from). */
+const B073_RANGES: Record<string, () => ReturnType<typeof commitRow>[]> = {
+  [`${COMMIT_BASE}..${COMMIT_MERGE}`]: () => [R.merge(), R.ada()],
+  [`${COMMIT_MERGE}..${COMMIT_BASE}`]: () => [R.base()],
+  [`${COMMIT_BASE}..${COMMIT_ADA}`]: () => [R.ada()],
+  [`${COMMIT_BASE}..${COMMIT_FEATURE}`]: () => [R.feature(), R.ada()],
+  [`${COMMIT_BASE}..${B073_ORIGIN_SHA}`]: () => [R.feature()],
+  [`${COMMIT_MERGE}..${B073_SYNCED_SHA}`]: () => [R.base()],
+};
+function b073Status() {
+  const members = [
+    { branch: 'members/payments/developerada', sha: COMMIT_ADA, aheadOfBase: 1, inTeamBranch: true, aheadRange: pair(COMMIT_BASE, COMMIT_ADA),
+      push: { branch: 'members/payments/developerada', onOrigin: true, notPushed: 0 } },
+    { branch: B073_BO, sha: COMMIT_FEATURE, aheadOfBase: 2, inTeamBranch: false, aheadRange: pair(COMMIT_BASE, COMMIT_FEATURE),
+      push: { branch: B073_BO, onOrigin: false, notPushed: 1 } },
+  ].filter((m) => !b073.deleted.has(m.branch));
+  const behindBase = b073.synced || b073.merged ? 0 : 1;
+  return {
+    repoPath: 'C:/repos/payments', managed: true, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: 'https://example.invalid/payments.git',
+    baseSha: b073.broughtCurrent ? B073_ORIGIN_SHA : COMMIT_BASE, originBaseSha: B073_ORIGIN_SHA, baseAheadOfOrigin: 0, baseBehindOrigin: b073.broughtCurrent ? 0 : 1,
+    teamBranch: 'team/payments', teamSha: b073.synced ? B073_SYNCED_SHA : COMMIT_MERGE,
+    teamAheadOfBase: b073.merged ? 0 : 2, teamBehindBase: behindBase,
+    merge: b073.merged ? 'up-to-date' : b073.synced ? 'fast-forward' : 'merge', conflictFiles: [], members, oldBranches: [], blockingBranches: [],
+    ranges: {
+      baseAheadOfOrigin: null, baseBehindOrigin: b073.broughtCurrent ? null : pair(COMMIT_BASE, B073_ORIGIN_SHA),
+      teamAheadOfBase: b073.merged ? null : pair(COMMIT_BASE, COMMIT_MERGE), teamBehindBase: behindBase ? pair(COMMIT_MERGE, COMMIT_BASE) : null,
+    },
+  };
+}
+function commitRange(from: string, to: string) {
+  if (!/^[0-9a-f]{4,64}$/i.test(from) && !/^refs\/(heads|remotes\/origin)\//.test(from)) throw Object.assign(new Error(`bad ref ${from}`), { code: 'bad_params' });
+  const list = B073_RANGES[`${from}..${to}`]?.() ?? [];
+  return { from, to, fromSha: from, toSha: to, count: list.length, truncated: false, hasOrigin: true, commits: list };
+}
+function mergePreview() {
+  const commits = [R.merge(), R.ada()];
+  return {
+    baseBranch: 'main', teamBranch: 'team/payments', outcome: 'merge', summary: 'A merge commit will be made: main has 1 commit team/payments lacks.',
+    text: 'A merge commit will be made: main has 1 commit team/payments lacks.\n2 commits land.\n1 file changes.',
+    from: COMMIT_BASE, to: COMMIT_MERGE, newSha: null, conflictFiles: [], commits, count: commits.length, truncated: false,
+    files: [{ path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false }],
+    diffFrom: COMMIT_BASE, diffTo: COMMIT_MERGE, hasOrigin: true, teamPush: { branch: 'team/payments', onOrigin: true, notPushed: 1 },
+  };
+}
+function deletePreview(branch: string) {
+  const push = { branch, onOrigin: branch !== B073_BO, notPushed: branch === B073_BO ? 1 : 0 };
+  if (branch === B073_BO) return { branch, baseBranch: 'main', exists: true, sha: COMMIT_FEATURE, merged: false, own: 1, inBase: 1, truncated: false,
+    commits: [{ ...R.feature(), state: 'own' }, { ...R.ada(), state: 'in-base' }],
+    lost: `Deleting it loses 1 commit of its own (${COMMIT_FEATURE.slice(0, 12)}); it is not on origin either.`, text: '', hasOrigin: true, push };
+  return { branch, baseBranch: 'main', exists: true, sha: COMMIT_ADA, merged: false, own: 0, inBase: 1, truncated: false, commits: [{ ...R.ada(), state: 'in-base' }],
+    lost: 'Nothing is lost: each of its 1 commits not in main already has the same change there.', text: '', hasOrigin: true, push };
+}
 /** B054: with true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */
 let syncBehind = false;
 /** B054: with false, no integration ask and no Manager decision is pending (the team page shows its members under Tell). */
@@ -415,6 +591,8 @@ export function createFakeCore() {
     resetTidy() { tidy.deleted.clear(); tidy.realigned.clear(); },
     /** B072: with false, git.commitShow says codeShown=false (Show members' code to cloud viewers off). */
     setCodeShown(on: boolean) { commitState.codeShown = on; },
+    /** B073: the Git dialog's repository with an origin, counts and previews (off: the plain status); resets what moved. */
+    setB073(on: boolean) { b073.on = on; b073.merged = false; b073.broughtCurrent = false; b073.synced = false; b073.deleted.clear(); },
     answer(text: string): string | null {
       const msg = JSON.parse(text) as { id: number; method: string; params: any };
       calls.push(msg.method);

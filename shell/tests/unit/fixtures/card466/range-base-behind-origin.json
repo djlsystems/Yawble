@@ -1,0 +1,23 @@
+{
+  "from": "0a65fc84cd1b5be89dd5e1d7f06b61b2fe5dd2de",
+  "to": "08285e8bb77ac484c1c1f6d7e60828eb5f213491",
+  "fromSha": "0a65fc84cd1b5be89dd5e1d7f06b61b2fe5dd2de",
+  "toSha": "08285e8bb77ac484c1c1f6d7e60828eb5f213491",
+  "count": 1,
+  "truncated": false,
+  "hasOrigin": true,
+  "commits": [
+    {
+      "sha": "08285e8bb77ac484c1c1f6d7e60828eb5f213491",
+      "shortSha": "08285e8bb77a",
+      "subject": "On origin",
+      "author": {
+        "name": "Person",
+        "email": "person@example.invalid"
+      },
+      "date": "2026-11-18T23:08:10-05:00",
+      "isMerge": false,
+      "notPushed": false
+    }
+  ]
+}

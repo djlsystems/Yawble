@@ -45,7 +45,7 @@ describe('workflows dialog for a Visitor (card 305)', () => {
     await w.get('[data-test=workflow-nudge]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test=workflow-confirm]').exists()).toBe(false);
-    expect(calls.filter((c) => c !== 'bus.workflows')).toEqual([]);
+    expect(calls.filter((c) => c !== 'bus.workflows' && c !== 'workflows.list')).toEqual([]);
     w.unmount();
   });
 

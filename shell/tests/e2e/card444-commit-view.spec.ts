@@ -104,20 +104,20 @@ test('1280 x 800: a member branch commit from the Git dialog: what, where, files
   await ctx.close();
 });
 
-test('1280 x 800: commit IDs in a card\'s trail open the view; a gone one says why', async ({ browser }) => {
+// B074 (card 471): an ID is a link only once git.commitsResolve confirms it; the gone one is not a commit any more, so it
+// stays text (the Commit view's gone state is still reached from a commit the app lists, and is unit-tested).
+test('1280 x 800: a confirmed commit ID in a card\'s trail opens the view; a gone one stays text', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, 1280, 800, '');
   await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
   await page.locator('[data-test=nav-board]').first().click();
   await page.locator('[data-test=board-card-5]').click();
   const line = page.locator('[data-test=card-trail-line]').filter({ hasText: 'Handed back' });
-  await expect(line.locator('[data-test=commit-link]')).toHaveCount(2);
+  await expect(line.locator('[data-test=commit-link]')).toHaveCount(1);
+  await expect(line).toContainText('0dead00b1 is gone');
+  await expect(line.locator('[data-test=commit-link]')).toHaveAttribute('title', /^Partial refunds: refund part of a payment\nNot pushed: only on this computer$/);
   await line.locator('[data-test=commit-link]').first().click();
   await expect(page.locator('[data-test=commit-title]')).toHaveText('Partial refunds: refund part of a payment');
-  await page.locator('[data-test=commit-dialog]').locator('xpath=ancestor::section[@role="dialog"]').locator('[data-test=modal-close]').click();
-  await line.locator('[data-test=commit-link]').nth(1).click();
-  await expect(page.locator('[data-test=commit-gone] h3')).toHaveText('This commit is gone');
-  await expect(page.locator('[data-test=commit-gone-reason]')).toContainText("was on members/payments/old-cleo (Old Cleo's branch), and git no longer has it");
-  await shot(page, 'gone-1280');
+  await shot(page, 'trail-confirmed-1280');
   expect(errors).toEqual([]);
   await ctx.close();
 });

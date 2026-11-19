@@ -436,4 +436,63 @@ public class GuardrailCheckTests
             (await bus.SchedulerSnapshotAsync(Ct)).Live.Any(l => l.Member == "eve"), "eve admitted after the check");
         Assert.Equal(1, (await bus.SchedulerSnapshotAsync(Ct)).Running);
     }
+
+    // ---------------------------------------------------------------- card 474: check.no-model-call on the B103 log
+
+    private static readonly DateTimeOffset T474 = new(2026, 11, 18, 9, 0, 0, TimeSpan.Zero);
+
+    private static GatewayEvent Forward(string vhost, int status) =>
+        new(40, "beta/Tess", T474, GatewayEventKinds.Forward, false, vhost, "POST", "/v1/messages", status);
+
+    /// <summary>The events go through the real GatewayLog (temp database), so the check reads what B103 writes.</summary>
+    private static GuardrailResult NoModelCallOnLog(IEnumerable<GatewayEvent> events)
+    {
+        using var db = new Yawble.Core.Tests.Bus.TempDb();
+        var log = new GatewayLog(db.ConnectionString, new FakeClock(T474));
+        foreach (var e in events) log.Write(e);
+        return GuardrailCheck.NoModelCall(log.Read(40));
+    }
+
+    [Fact]
+    public void NoModelCall_TwelveRequests_FailsAndNamesTheVhostWithoutAWrongCount()
+    {
+        var r = NoModelCallOnLog(Enumerable.Range(0, 12).Select(_ => Forward(Vhosts.Model, 200)));
+        Assert.Equal((Verdicts.Allowed, Verdicts.Blocked, false), (r.Verdict, r.Expected, r.AsExpected));
+        Assert.Equal($"the run's gateway forwarded request(s) to a model vhost ({Vhosts.Model})", r.Evidence);
+    }
+
+    [Fact]
+    public void NoModelCall_MixedOkFailedAndTwoVhosts_FailsAndNamesBothVhosts()
+    {
+        // 5 ok + one 401 + 3 ok on model, 2 ok on grok: the log keeps 3 forward rows of 11 requests.
+        var events = Enumerable.Range(0, 5).Select(_ => Forward(Vhosts.Model, 200))
+            .Append(Forward(Vhosts.Model, 401))
+            .Concat(Enumerable.Range(0, 3).Select(_ => Forward(Vhosts.Model, 200)))
+            .Concat(Enumerable.Range(0, 2).Select(_ => Forward(Vhosts.Grok, 200)));
+        var r = NoModelCallOnLog(events);
+        Assert.Equal((Verdicts.Allowed, false), (r.Verdict, r.AsExpected));
+        Assert.Equal($"the run's gateway forwarded request(s) to a model vhost ({Vhosts.Model}, {Vhosts.Grok})", r.Evidence);
+        Assert.DoesNotMatch(@"\d+ request", r.Evidence);
+    }
+
+    [Fact]
+    public void NoModelCall_NoModelForward_PassesWithTheSameText()
+    {
+        var r = NoModelCallOnLog([
+            new GatewayEvent(40, "beta/Tess", T474, GatewayEventKinds.Bus, false, Vhosts.Bus, "POST", "/rpc", 200),
+            new GatewayEvent(40, "beta/Tess", T474, GatewayEventKinds.Forward, false, Vhosts.Bus, "POST", "/rpc", 200),
+            new GatewayEvent(40, "beta/Tess", T474, GatewayEventKinds.HostDenied, true, "example.com", "GET", "http://example.com/", 403),
+        ]);
+        Assert.Equal((Verdicts.Blocked, Verdicts.Blocked, true), (r.Verdict, r.Expected, r.AsExpected));
+        Assert.Equal("the run's gateway forwarded nothing to a model vhost during the check, so no credential was swapped in", r.Evidence);
+    }
+
+    [Fact]
+    public void NetworkLogDescription_SaysWhatTheGatewayLogKeeps()
+    {
+        var about = Yawble.Core.Logs.LogSources.Find("gateway")!.About;
+        Assert.DoesNotContain("every model request it forwarded", about);
+        Assert.Contains("first model request", about);
+        Assert.Contains("rate limits", about);
+    }
 }

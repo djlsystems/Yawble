@@ -5,6 +5,7 @@ import { Palette } from './scene';
 import { StepLook, type StepKind, type StepRow } from './steps';
 import { axisTicks, timeOf, toneOfRow } from './timeline';
 import { shortSha, type CodeEvent } from './codemap';
+import CommitText from '../components/CommitText.vue';
 
 /**
  * THE TIMELINE across the bottom of the Monitor: from `from` to now, a tick for each bus message in its tone (the
@@ -223,7 +224,7 @@ onBeforeUnmount(() => observer?.disconnect());
     <div v-if="near" class="tip" :style="{ left: `${near.left}px` }" data-test="monitor-timeline-tip">
       <strong>{{ clock(near.at, true) }}</strong><span class="dim"> · click to replay from here</span>
       <div v-for="r in near.rows" :key="r.seq" class="row">
-        <i :style="{ background: Palette[toneOfRow(r)] }" /><span class="what">{{ rowWords(r) }}<span v-if="r.text" class="dim">: {{ r.text }}</span></span>
+        <i :style="{ background: Palette[toneOfRow(r)] }" /><span class="what">{{ rowWords(r) }}<span v-if="r.text" class="dim">: <CommitText :text="r.text" :team="r.team" /></span></span>
       </div>
       <div v-for="e in near.code" :key="e.key" class="row" data-test="monitor-timeline-code"><i :style="{ background: Palette[e.tone] }" /><span class="what">{{ e.text }}</span></div>
       <div v-for="s in near.steps" :key="s.who" class="row"><i class="steps" /><span class="what">{{ s.who }} <span class="dim">{{ s.what }}</span></span></div>

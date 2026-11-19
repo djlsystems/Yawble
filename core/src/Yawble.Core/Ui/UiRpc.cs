@@ -145,6 +145,10 @@ public sealed class UiRpc(
                     (p?["roles"] as JsonArray ?? []).Select(n => n?.GetValue<string>() ?? ""), Str(p, "body"),
                     p?["teamId"] is JsonValue t && t.TryGetValue<long>(out var team) ? team : null)),
                 "skills.delete" => new JsonObject { ["deleted"] = Catalog().Delete(Long(p, "id")) },
+                // B100: a team skill's kept versions (team_retros: the Manager's retros and the person's edits), newest first; Restore.
+                "skills.versions" => S(Catalog().Versions(Long(p, "teamId"), Str(p, "name"))),
+                "skills.restore" => S(Catalog().Restore(Long(p, "id"))),
+                "teams.lessons" => S(Catalog().Lessons(Long(p, "teamId"))),
 
                 "triggers.list" => S(await bus.TriggersAsync(Long(p, "teamId"), ct)),
                 "triggers.save" => S(await bus.SaveTriggerAsync(TriggerDraftOf(p), ct)),

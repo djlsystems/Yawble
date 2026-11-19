@@ -73,7 +73,7 @@ public static class LogSources
             new("audit_log", "at", 365, "who changed what, and when, for those entries. The record of changes made before the cutoff is gone; nothing in the app itself changes.")),
 
         new("gateway", "Network", "Security",
-            "Each run's gateway: every model request it forwarded, every connection it allowed or refused, and sign-in problems.",
+            "Each run's gateway: its first model request to each model API (where the credential is swapped in) and every one that failed, every connection it allowed or refused (a plain-http host refused again is counted on one row), sign-in problems and rate limits.",
             "gateway_events t", "t.id", "t.at",
             [
                 new("at", "Time", "t.at", "time"),
@@ -84,6 +84,7 @@ public static class LogSources
                 new("target", "Host or path", "COALESCE(t.target, t.vhost)"),
                 new("status", "Status", "t.status", "number"),
                 new("detail", "Detail", "t.detail"),
+                new("count", "Times", "t.count", "number"),
             ],
             IsTeamOf("t.member"), "t.member = @member",
             new("gateway_events", "at", 365, "the record of which hosts each run reached or was refused. The guardrail check's report of its own run is kept.")),
@@ -301,7 +302,7 @@ public static class LogSources
                  'r' || r.id AS rid
             FROM run_records r
           UNION ALL
-          SELECT g.at, 'Network', g.member, g.kind, trim(COALESCE(g.method, '') || ' ' || COALESCE(g.target, g.vhost, '') || COALESCE(' ' || g.status, '') || COALESCE(' ' || g.detail, '')), 'g' || g.id
+          SELECT g.at, 'Network', g.member, g.kind, trim(COALESCE(g.method, '') || ' ' || COALESCE(g.target, g.vhost, '') || COALESCE(' ' || g.status, '') || COALESCE(' ' || g.detail, '') || CASE WHEN g.count > 1 THEN ' (' || g.count || 'x)' ELSE '' END), 'g' || g.id
             FROM gateway_events g
           UNION ALL
           SELECT c.at, 'Tool calls', c.member, c.integration || ' ' || COALESCE(c.decision, ''), trim(COALESCE(c.args, '') || COALESCE(' exit ' || c.exit_code, '')), 'c' || c.id
