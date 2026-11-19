@@ -212,16 +212,29 @@ const b104Chip: Record<string, (s: string) => boolean> = {
   all: () => true, open: (s) => ['running', 'needs-you', 'waiting', 'idle', 'stopped'].includes(s), 'needs-you': (s) => s === 'needs-you', done: (s) => s === 'completed', closed: (s) => s === 'closed' || s === 'expired',
 };
 function workflowsList(p: any) {
+  // The contract's request: only these keys; refused as the core refuses them.
+  const bad = (m: string) => Object.assign(new Error(m), { code: 'bad_params' });
+  for (const k of Object.keys(p ?? {})) if (!['teamId', 'q', 'state', 'limit'].includes(k)) throw bad(`unknown parameter ${k}`);
+  if (p?.limit != null && !Number.isInteger(p.limit)) throw bad('limit must be a number');
+  const limit = Math.min(1000, Math.max(1, p?.limit ?? 200));
   let rows = b104Rows();
-  if (p?.teamId != null) rows = rows.filter((w) => w.teamId === Number(p.teamId));
+  if (p?.teamId != null) {
+    if (!teamRows.some((t) => t.id === Number(p.teamId))) throw Object.assign(new Error('no such team'), { code: 'no_such_team' });
+    rows = rows.filter((w) => w.teamId === Number(p.teamId));
+  }
   const words = String(p?.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
-  rows = rows.filter((w) => words.every((x) => [`#${w.id}`, w.title, (w.item as any)?.label ?? '', w.team, w.owner, ...w.members.map((m: any) => m.name)].some((f) => f.toLowerCase().includes(x))));
+  rows = rows.filter((w) => words.every((x) => [`#${w.id}`, String(w.id), w.title, (w.item as any)?.label ?? '', (w.item as any)?.title ?? '', w.team, w.owner, ...w.members.map((m: any) => m.name)]
+    .some((f) => f.toLowerCase().includes(x))));
   const n = (f: (s: string) => boolean) => rows.filter((w) => f(w.status)).length;
   const counts = { all: rows.length, open: n(b104Chip.open), needsYou: n(b104Chip['needs-you']), done: n(b104Chip.done), closed: n(b104Chip.closed),
-    running: n((s) => s === 'running'), waiting: n((s) => s === 'waiting'), idle: n((s) => s === 'idle'), stopped: 0, completed: n((s) => s === 'completed'), expired: n((s) => s === 'expired'), completedToday: n((s) => s === 'completed') };
-  const keep = b104Chip[String(p?.state ?? 'all').toLowerCase()];
-  if (!keep) throw Object.assign(new Error('state: not a chip or a status'), { code: 'bad_params' });
-  return { workflows: rows.filter((w) => keep(w.status)).sort((a, b) => Date.parse(b.lastAt) - Date.parse(a.lastAt)), counts, truncated: false, backlog: true, now: new Date().toISOString() };
+    running: n((s) => s === 'running'), waiting: n((s) => s === 'waiting'), idle: n((s) => s === 'idle'), stopped: n((s) => s === 'stopped'), completed: n((s) => s === 'completed'), expired: n((s) => s === 'expired'), completedToday: n((s) => s === 'completed') };
+  const st = String(p?.state ?? 'all').toLowerCase();
+  const keep = b104Chip[st] ?? (['running', 'waiting', 'idle', 'stopped', 'completed', 'expired'].includes(st) ? (s: string) => s === st : undefined);
+  if (!keep) throw bad('state: not a chip or a status');
+  // Newest activity first; the newest `limit` plus every open row however old.
+  const matching = rows.filter((w) => keep(w.status)).sort((a, b) => Date.parse(b.lastAt) - Date.parse(a.lastAt));
+  const shown = matching.filter((w, i) => i < limit || w.state === 'open');
+  return { workflows: shown, counts, truncated: shown.length < matching.length, backlog: true, now: new Date().toISOString() };
 }
 function workflowsGet(p: any) {
   const w = b104Rows().find((x) => x.id === Number(p?.workflow));

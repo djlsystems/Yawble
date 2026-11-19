@@ -414,6 +414,59 @@ describe('the Workflows page', () => {
     w.unmount();
   });
 
+  it('asks the core only in the contract\'s words: workflows.list {teamId?, q?, state?, limit?}, workflows.get {workflow}', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = fake();
+    const w = mount(WorkflowsView, { props: { teams: [{ id: 1, name: 'payments' }, { id: 2, name: 'billing' }], api: f.api, pollMs: 600_000 }, attachTo: document.body });
+    await flushPromisesFake();
+    for (const c of ['needs-you', 'done', 'closed', 'all', 'open']) { await w.get(`[data-test=workflows-chip-${c}]`).trigger('click'); await flushPromisesFake(); }
+    await w.get('[data-test=workflows-team-filter]').setValue('2');
+    await w.get('[data-test=workflows-search]').setValue('  b096 ada ');
+    vi.advanceTimersByTime(250);
+    await flushPromisesFake();
+    await w.get('[data-test=workflows-team-filter]').setValue('');
+    await w.get('[data-test=workflows-chip-all]').trigger('click');
+    await flushPromisesFake();
+    await w.get('[data-wf="11"]').trigger('click');
+    await flushPromisesFake();
+    const lists = f.calls.filter((c) => c.method === 'workflows.list').map((c) => c.params);
+    expect(lists.length).toBeGreaterThan(6);
+    for (const p of lists) {
+      expect(Object.keys(p).every((k) => ['teamId', 'q', 'state', 'limit'].includes(k))).toBe(true);
+      expect(['all', 'open', 'needs-you', 'done', 'closed']).toContain(p.state);
+      expect(Number.isInteger(p.limit) && p.limit >= 1 && p.limit <= 1000).toBe(true);
+      if ('teamId' in p) expect(typeof p.teamId).toBe('number');
+      if ('q' in p) expect(p.q).toBe(p.q.trim());
+    }
+    expect(lists.some((p) => p.teamId === 2 && p.q === 'b096 ada')).toBe(true);
+    expect(f.calls.filter((c) => c.method === 'workflows.get').map((c) => c.params)).toEqual([{ workflow: 11 }]);
+    w.unmount();
+  });
+
+  it('says when the core cut ended rows off (truncated)', async () => {
+    const f = fake();
+    const call = f.api.call;
+    f.api.call = (async (m: string, p: any) => (m === 'workflows.list' ? { ...(await call(m, p)) as object, truncated: true } : call(m, p))) as YawbleApi['call'];
+    const w = await page(f);
+    expect(w.get('[data-test=workflows-truncated]').text()).toContain('newest 500');
+    w.unmount();
+  });
+
+  it('a team filter the core no longer knows (no_such_team) goes back to every team', async () => {
+    history.replaceState(null, '', '/#workflows?t=9');
+    const f = fake();
+    const call = f.api.call;
+    f.api.call = (async (m: string, p: any) => {
+      if (m === 'workflows.list' && p.teamId === 9) { f.calls.push({ method: m, params: p }); throw Object.assign(new Error('no such team'), { code: 'no_such_team' }); }
+      return call(m, p);
+    }) as YawbleApi['call'];
+    const w = await page(f);
+    expect(lastList(f)).toEqual({ state: 'open', limit: 500 });
+    expect(ids(w)).toEqual([12, 11, 13]);
+    expect(w.find('[data-test=workflows-error]').exists()).toBe(false);
+    w.unmount();
+  });
+
   it('shows no tokens or cost anywhere', async () => {
     const w = await page();
     await w.get('[data-wf="11"]').trigger('click');
