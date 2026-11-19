@@ -39,8 +39,27 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
   stopped after 2 minutes, and output is cut at 64 KB.
 - `git` as an integration only reads your checkout (log, status, diff, show, blame and similar). Every command that
   changes it is off. Agents have git in their own clones for their own work.
-- With `gh` enabled, agents also get `pr_open` (open a pull request from the team branch; asks first by default) and
-  `pr_status` (the team branch's pull requests).
+- Agents can also get `pr_open` (open a pull request from the team branch) and `pr_status` (the team branch's pull
+  requests). Each call follows its repository's provider (your override in **Team settings > Repositories**, else the
+  one detected from the origin) and runs as that provider's CLI: `gh` for GitHub, `glab` for GitLab (merge requests),
+  `az repos` for Azure DevOps. It is that CLI's integration call, decided by its `pr_open` / `pr_status` row.
+  - **When the tools are offered:** `gh`, `glab` or `az` is enabled for the team and, for at least one of the team's
+    repositories, either that CLI is the one its provider needs, or its provider has no pull requests from here
+    (Bitbucket, Gitea, an unknown host, provider set to none). In that second case the tools are offered but only
+    answer "pull requests are not supported for <provider or host> from here (…); …" and point to the host's site. Nothing runs.
+  - **What a call answers instead of running:** a repository with no origin gets "… has no remote (no origin) …".
+    A provider with pull requests whose CLI is not enabled for the team gets an error naming the CLI it needs (for
+    example `glab`) and how to sign it in. Nothing runs. For example, with a GitLab origin and only `gh` enabled, an
+    agent's `pr_open` says it needs `glab` and never runs `gh pr create`.
+  - **Rows and preset:** `gh`, `glab` and `az` each have `pr_open` and `pr_status` rows in their checklist, with the
+    same preset: `pr_status` runs, `pr_open` asks first. (`glab` is not in the app's catalog: add it with
+    **+ Add CLI**, and it gets these two rows as well.) The CLI has to be installed and signed in on this computer.
+- What works with any git remote, or none: everything plain git does (branches, fetch, sync, merge, push, delete). With
+  one of the five providers (GitHub, GitLab, Bitbucket, Azure DevOps, Gitea), or a link pattern you set in **Team
+  settings > Repositories**, the app also gets **Open on …** links to commits, branches, files and compares. On a
+  provider's host a pattern replaces only the kinds its templates cover, and the other kinds keep the provider's own
+  links; only with no provider (none) does a pattern limit the links to the kinds its templates cover. See
+  [Repositories and git](features.md#repositories-and-git).
 
 ### MCP servers
 

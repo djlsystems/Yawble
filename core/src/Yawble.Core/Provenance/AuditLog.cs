@@ -67,6 +67,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "agents.resolveModel", "agents.checkForUpdates",
         // The tidy plan (what Tidy would do; doing it is audited).
         "git.tidyPlan",
+        // B075: a web link only reads the repository's refs.
+        "git.webLink",
         // Opening and closing the read-only Code view change nothing (a download is recorded).
         "code.open", "code.close",
     };

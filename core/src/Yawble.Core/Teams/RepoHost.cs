@@ -1,8 +1,10 @@
 namespace Yawble.Core.Teams;
 
 /// <summary>
-/// Where a repository's remote is hosted, read from its address. git itself works with any host, or none; only pull
-/// requests are host-specific, and the app opens, lists and merges them for GitHub (through the person's gh) alone.
+/// Where a repository's remote is hosted, read from its address. git itself works with any host, or none; only web links
+/// and pull requests are host-specific (<see cref="RepoProviders"/>, <see cref="PullRequestProviders"/>): pull requests
+/// are opened, listed and merged for GitHub (gh), GitLab (glab) and Azure DevOps (az repos), each through the person's
+/// own CLI signed in on this computer.
 /// </summary>
 public static class RepoHost
 {
@@ -32,16 +34,19 @@ public static class RepoHost
     public static bool IsGitHub(string? address) => HostOf(address) is "github.com" or "www.github.com" or "ssh.github.com";
 
     /// <summary>
-    /// Null when the app can work with pull requests for a repository whose origin is <paramref name="origin"/>; otherwise
-    /// why not, for the person.
+    /// Null when the app can work with pull requests for a repository whose origin is <paramref name="origin"/> (its
+    /// provider, or <paramref name="provider"/> when the person set one, has a pull request CLI); otherwise why not, for
+    /// the person. Whether that CLI is installed and signed in is found when it runs.
     /// </summary>
-    public static string? PullRequestsUnavailable(string repoName, string? origin)
+    public static string? PullRequestsUnavailable(string repoName, string? origin, RepoProviderKind? provider = null)
     {
         if (string.IsNullOrWhiteSpace(origin))
             return $"{repoName} has no remote (no origin), so it has no pull requests; its branches stay on this computer";
-        if (IsGitHub(origin)) return null;
+        var kind = provider ?? RepoProviders.Detect(origin);
+        if (PullRequestProviders.Supports(kind)) return null;
         var host = HostOf(origin) ?? "a local folder";
-        return $"pull requests are opened, listed and merged from here only for repositories hosted on GitHub; {repoName}'s origin is on {host}. " +
-               $"Push the branch and open the pull request (or merge request) on {host}";
+        var what = kind == RepoProviderKind.None ? host : RepoProviders.Label(kind);
+        return $"pull requests are not supported for {what} from here (only GitHub through gh, GitLab through glab and Azure DevOps through az repos); " +
+               $"{repoName}'s origin is on {host}. Push the branch and open the pull request (or merge request) on {host}";
     }
 }

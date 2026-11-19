@@ -716,6 +716,33 @@ export interface TeamGitBlockingBranch { name: string; repo: string; location: '
  * means the branches changed since the plan. */
 export interface GitDeletePlan { plan: string; token: string; empty: boolean }
 export interface GitDeleteResult { result: string }
+/** B075 (cards 446/447): the hosting provider of a repository's origin. none: plain git (no links unless a link pattern). */
+export type GitProvider = 'github' | 'gitlab' | 'bitbucket' | 'azuredevops' | 'gitea' | 'none';
+export const GIT_PROVIDERS: GitProvider[] = ['github', 'gitlab', 'bitbucket', 'azuredevops', 'gitea', 'none'];
+/** B075: what teams.repos adds to main and to each extra (absent from an older core). provider: the person's override
+ * (null: none, detection is used); providerDetected: from origin; linkPattern: one or more templates separated by
+ * whitespace, each used for the link kind whose placeholders it holds (LINK_PATTERN_KINDS); prSupported, or
+ * prUnavailable: why not (shown as is). The core may also send providerOverride, equal to provider: ignored. */
+export interface RepoProviderInfo {
+  provider?: GitProvider | null; providerDetected?: GitProvider | null; linkPattern?: string | null;
+  prSupported?: boolean; prUnavailable?: string | null;
+}
+/** B075 git.webLink {teamId, team, repo?, kind, commit?, branch?, file?, from?, to?, pr?} -> { url } (null: no link, e.g.
+ * a commit not on origin or a host with no provider and no pattern). */
+export const GIT_WEB_LINK = 'git.webLink';
+export type GitWebLinkKind = 'commit' | 'branch' | 'file' | 'compare' | 'pr';
+export interface GitWebLinkQuery { kind: GitWebLinkKind; commit?: string; branch?: string; file?: string; from?: string; to?: string; pr?: number }
+/** B075 teams.setRepo {teamId, name? (an extra's; absent: the main one), provider (null: detect), linkPattern (null: none)}. */
+export const TEAMS_SET_REPO = 'teams.setRepo';
+/** B075 (Marlo, card 446): a linkPattern template is used for the kind whose placeholders it holds exactly; {base} and
+ * {path} may appear in any template. */
+export const LINK_PATTERN_KINDS: { kind: GitWebLinkKind; placeholders: string[] }[] = [
+  { kind: 'commit', placeholders: ['{commit}'] },
+  { kind: 'branch', placeholders: ['{branch}'] },
+  { kind: 'file', placeholders: ['{commit}', '{file}'] },
+  { kind: 'compare', placeholders: ['{from}', '{to}'] },
+  { kind: 'pr', placeholders: ['{pr}'] },
+];
 /** B067 git.tidyPlan {team}: every branch of the team's repositories (here, on origin, in the members' clones) in one class.
  * merged: in the base; contained: every commit has an equivalent in the base (proof: git cherry's answer, as text);
  * working: a member's working branch (in use, kept); moved: the team's copy differs from the member's clone (teamSha vs
