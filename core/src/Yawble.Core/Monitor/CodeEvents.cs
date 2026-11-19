@@ -30,6 +30,10 @@ public sealed record CodeEvent(
     public const string Landed = "landed";
     public const string Push = "push";
 
+    /// <summary>B073: a commit of a branch the person deleted (its tip and each commit not in the base), so the commit view
+    /// still says where it was. Kept for git.commitShow only: never in <see cref="CodeEvents.Read"/> (the Monitor's feed).</summary>
+    public const string BranchDeleted = "branch-deleted";
+
     /// <summary>The store's id (0 before it is stored): increasing in recording order.</summary>
     public long Id { get; init; }
 
@@ -121,7 +125,7 @@ public sealed class CodeEvents(string connectionString, TimeProvider? clock = nu
         using var c = new SqliteConnection(connectionString);
         c.Open();
         using var cmd = c.CreateCommand();
-        var where = new List<string> { "id > $after" };
+        var where = new List<string> { "id > $after", "kind <> '" + CodeEvent.BranchDeleted + "'" };
         cmd.Parameters.AddWithValue("$after", after);
         if (team is not null) { where.Add("team = $t"); cmd.Parameters.AddWithValue("$t", team); }
         // The times are all written as UTC round-trip strings, so they compare as text.

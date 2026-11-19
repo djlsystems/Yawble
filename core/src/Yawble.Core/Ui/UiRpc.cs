@@ -162,6 +162,11 @@ public sealed class UiRpc(
                 // B072, the commit view: reads only.
                 "git.commitShow" => await CommitShowAsync(p, ct),
                 "git.commitDiff" => await CommitDiffAsync(p, ct),
+                // B073: the commits behind a count, and the previews of Merge to main and Delete: reads only.
+                "git.commitRange" => await CommitRangeAsync(p, ct),
+                "git.mergePreview" => await MergePreviewAsync(p, ct),
+                "git.mergeDiff" => await MergeDiffAsync(p, ct),
+                "git.deletePreview" => await DeletePreviewAsync(p, ct),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -645,6 +650,47 @@ public sealed class UiRpc(
         return await CommitCallAsync(async () => (await repos.GitCommitDiffAsync(team.Id, team.Name, sha, path, ct, OptStr(p, "repo"))).ToJson());
     }
 
+    /// <summary>git.commitRange {team | teamId, repo?, from, to, limit?} (B073): the commits on to that from lacks (the pair a count gives), newest first.</summary>
+    private async Task<JsonNode?> CommitRangeAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var from = OptStr(p, "from") ?? throw new RpcException("bad_params", "from is required");
+        var to = OptStr(p, "to") ?? throw new RpcException("bad_params", "to is required");
+        var limit = OptLong(p, "limit") is { } l ? (int)Math.Clamp(l, 1, Teams.GitPreviews.MaxLimit) : (int?)null;
+        return await CommitCallAsync(async () => S(await repos.GitCommitRangeAsync(team.Id, team.Name, from, to, limit, ct, OptStr(p, "repo")))!.AsObject());
+    }
+
+    /// <summary>git.mergePreview {team | teamId, repo?} (B073): what Merge to main would do, its commits and combined diff; nothing moves.</summary>
+    private async Task<JsonNode?> MergePreviewAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        return await CommitCallAsync(async () =>
+        {
+            var preview = await repos.GitMergePreviewAsync(team.Id, team.Name, ct, OptStr(p, "repo"));
+            var o = S(preview)!.AsObject();
+            o["files"] = new JsonArray([.. preview.Files.Select(f => (JsonNode)f.ToJson())]);
+            return o;
+        });
+    }
+
+    /// <summary>git.mergeDiff {team | teamId, repo?, from, to, path} (B073): one file of a merge preview's combined diff, shaped as git.commitDiff.</summary>
+    private async Task<JsonNode?> MergeDiffAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var from = OptStr(p, "from") ?? throw new RpcException("bad_params", "from is required");
+        var to = OptStr(p, "to") ?? throw new RpcException("bad_params", "to is required");
+        var path = OptStr(p, "path") ?? throw new RpcException("bad_params", "path is required");
+        return await CommitCallAsync(async () => (await repos.GitMergeDiffAsync(team.Id, team.Name, from, to, path, ct, OptStr(p, "repo"))).ToJson());
+    }
+
+    /// <summary>git.deletePreview {team | teamId, repo?, branch} (B073): what deleting the local branch loses.</summary>
+    private async Task<JsonNode?> DeletePreviewAsync(JsonObject? p, CancellationToken ct)
+    {
+        var (repos, team) = await TidyTeamAsync(p, ct);
+        var branch = OptStr(p, "branch") ?? throw new RpcException("bad_params", "branch is required");
+        return await CommitCallAsync(async () => S(await repos.GitDeletePreviewAsync(team.Id, team.Name, branch, ct, OptStr(p, "repo")))!.AsObject());
+    }
+
     private static async Task<JsonNode?> CommitCallAsync(Func<Task<JsonObject>> read)
     {
         try
@@ -710,7 +756,7 @@ public sealed class UiRpc(
         {
             ["on"] = repos.SyncsToBase(teamId), ["note"] = repos.SyncNote(teamId),
             ["baseBranch"] = repos.RepoOf(teamId)?.BaseBranch,
-            ["behind"] = behind is { Behind: > 0 } b ? new JsonObject { ["teamBranch"] = b.TeamBranch, ["count"] = b.Behind, ["text"] = b.Text } : null,
+            ["behind"] = behind is { Behind: > 0 } b ? new JsonObject { ["teamBranch"] = b.TeamBranch, ["count"] = b.Behind, ["text"] = b.Text, ["from"] = b.Range?.From, ["to"] = b.Range?.To } : null,
         };
     }
 
