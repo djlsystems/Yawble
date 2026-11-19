@@ -288,7 +288,7 @@ public sealed class BoardProjector(BoardStore store)
     public static string Title(string text)
     {
         var line = text.Split('\n').Select(l => l.Trim().TrimStart('#', '-', '*', ' ')).FirstOrDefault(l => l.Length > 0) ?? "(no text)";
-        return line.Length <= 80 ? line : line[..79] + "â€¦";
+        return line.Length <= 80 ? line : line[..79] + "…";
     }
 
     private static (string? Team, string? Member) Split(string qualified) =>

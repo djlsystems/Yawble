@@ -150,6 +150,7 @@ public class AuditClassificationTests
         "teams.resume",
         "teams.setDefaults",
         "teams.setEnv",
+        "teams.setRepo",
         "teams.syncToBase",
         "teams.unarchive",
         "teams.workflowExpiry",
