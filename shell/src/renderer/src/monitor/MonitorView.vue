@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { workflowTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type WorkflowSummary } from '../../../shared/api';
+import { workflowTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type WorkflowItem, type WorkflowSummary } from '../../../shared/api';
+import { workflowItems } from '../workflows/page';
 import { groupAsks, hostsLabel } from '../networkAskGroups';
 import { resolveApi } from '../api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
@@ -227,6 +228,16 @@ function publishCounts(): void {
 /** The heavy-work lease line under the counts (null: hidden, the lease is free and nobody waits). */
 const heavy = ref<string | null>(null);
 const hover = ref<SceneHover | null>(null);
+// B098 (B104): a workflow node's panel names the backlog item it came from. Looked up (workflows.list) when a workflow
+// is first hovered, once per workflow; an older core without workflows.list names none.
+const itemOf = shallowRef(new Map<number, WorkflowItem | null>());
+const hoverItem = computed(() => (hover.value?.kind === 'workflow' && hover.value.workflow ? itemOf.value.get(hover.value.workflow.id) ?? null : null));
+watch(() => (hover.value?.kind === 'workflow' ? hover.value.workflow?.id ?? null : null), async (id) => {
+  if (id == null || itemOf.value.has(id)) return;
+  itemOf.value = new Map(itemOf.value).set(id, null);
+  const got = await workflowItems(api, { q: `#${id}`, limit: 20 });
+  if (got?.items.has(id)) itemOf.value = new Map(itemOf.value).set(id, got.items.get(id)!);
+});
 // The You node's breakdown: shown while it is hovered (a desktop) or after a tap on it (a phone, until the next tap).
 const YouTipLines = 10;
 const NeedYouLook: Record<NeedYouKind, 'decision' | 'blocked' | 'fail'> = { question: 'decision', network: 'decision', tool: 'decision', blocked: 'blocked', failed: 'fail' };
@@ -867,6 +878,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else-if="hover.kind === 'workflow' && hover.workflow">
             <strong>#{{ hover.workflow.id }} {{ hover.workflow.title }}</strong>
+            <span v-if="hoverItem" class="dim" data-test="monitor-tip-item">Backlog item <b>{{ hoverItem.label }}</b>{{ hoverItem.archived ? ' (archived)' : '' }}</span>
             <span :style="{ color: Palette[workflowLook(hover.workflow).tone] }">{{ workflowLook(hover.workflow).label }}</span>
             <span v-if="hover.workflow.busy.length" class="dim">{{ hover.workflow.busy.join(' · ') }}</span>
             <span v-else-if="hover.workflow.ending" class="dim">{{ hover.workflow.state === 'closed' ? 'Closed' : hover.workflow.state === 'expired' ? 'Expired' : 'Delivered' }}: {{ hover.workflow.ending }}</span>
