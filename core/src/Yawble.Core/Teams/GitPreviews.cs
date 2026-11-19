@@ -180,9 +180,12 @@ public sealed class GitPreviews(HostGit git)
 
     /// <summary>
     /// What Merge to main would do with the repository as it is now (origin as of the last fetch: the merge itself fetches
-    /// first): the same start, refusals and outcomes as TeamRepos' merge, and nothing moves.
+    /// first): the same start, refusals and outcomes as TeamRepos' merge, and nothing moves. <paramref name="dirty"/> is the
+    /// merge's own check of a checked-out base with uncommitted changes (its refusal sentence, or null), run at the same
+    /// point as the merge runs it, so the preview refuses exactly when Merge would.
     /// </summary>
-    public async Task<MergePreview> MergePreviewAsync(string path, string baseBranch, string teamBranch, CancellationToken ct, int limit = DefaultLimit)
+    public async Task<MergePreview> MergePreviewAsync(string path, string baseBranch, string teamBranch, CancellationToken ct, int limit = DefaultLimit,
+        Func<CancellationToken, Task<string?>>? dirty = null)
     {
         var hasOrigin = await HasOriginAsync(path, ct);
         var teamSha = await RevAsync(path, "refs/heads/" + teamBranch, ct);
@@ -204,6 +207,7 @@ public sealed class GitPreviews(HostGit git)
         if (start is null) return Plain("refused", $"There is no {baseBranch} branch to merge into.") with { TeamPush = teamPush };
         if (await IsAncestorAsync(path, teamSha, start, ct))
             return Plain("up-to-date", $"{baseBranch} already has everything on {teamBranch}: nothing to merge.", start) with { TeamPush = teamPush };
+        if (dirty is not null && await dirty(ct) is { } refusal) return Plain("refused", refusal, start) with { TeamPush = teamPush };
 
         var list = await ListAsync(path, teamSha, [start], limit, ct);
         string outcome, summary;
