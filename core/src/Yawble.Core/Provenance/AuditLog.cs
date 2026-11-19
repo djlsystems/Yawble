@@ -73,6 +73,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "git.commitsResolve",
         // B073: the commits behind a count and the Merge / Delete previews change nothing.
         "git.commitRange", "git.mergePreview", "git.mergeDiff", "git.deletePreview",
+        // B104: the Workflows page's list of every team's workflows, and one workflow in full.
+        "workflows.list", "workflows.get",
         // Opening and closing the read-only Code view change nothing (a download is recorded).
         "code.open", "code.close",
     };

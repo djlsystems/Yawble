@@ -206,6 +206,8 @@ public class AuditClassificationTests
     [InlineData("integrations.mcpImportScan")]
     [InlineData("integrations.mcpCheck")]
     [InlineData("agents.resolveModel")]
+    [InlineData("workflows.list")]
+    [InlineData("workflows.get")]
     public void TheScreensPollsAndLookups_AreNotAudited(string method)
     {
         var dir = Directory.CreateTempSubdirectory("yawble-audit-").FullName;
