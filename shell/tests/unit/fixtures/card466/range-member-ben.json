@@ -1,33 +1,33 @@
 {
-  "from": "ae2de644168aed7c1ebb056f7ceb474a968a9d33",
-  "to": "cb0f6d3e86dc1252f0b3543c886e0f7b8b9e7673",
-  "fromSha": "ae2de644168aed7c1ebb056f7ceb474a968a9d33",
-  "toSha": "cb0f6d3e86dc1252f0b3543c886e0f7b8b9e7673",
+  "from": "9ec39605b735cb40542f2389dbf2557b86f063ad",
+  "to": "471863878e87fc29c6bbde3ba65e7a480e3a6630",
+  "fromSha": "9ec39605b735cb40542f2389dbf2557b86f063ad",
+  "toSha": "471863878e87fc29c6bbde3ba65e7a480e3a6630",
   "count": 2,
   "truncated": false,
   "hasOrigin": true,
   "commits": [
     {
-      "sha": "cb0f6d3e86dc1252f0b3543c886e0f7b8b9e7673",
-      "shortSha": "cb0f6d3e86dc",
+      "sha": "471863878e87fc29c6bbde3ba65e7a480e3a6630",
+      "shortSha": "471863878e87",
       "subject": "Ben 2",
       "author": {
         "name": "Ben",
         "email": "ben@example.invalid"
       },
-      "date": "2026-11-18T21:18:54-05:00",
+      "date": "2026-11-18T22:05:08-05:00",
       "isMerge": false,
       "notPushed": true
     },
     {
-      "sha": "5df2eb873c17310738870bda695f3ac407a73dbb",
-      "shortSha": "5df2eb873c17",
+      "sha": "01a97bea5d4ae3dfe2fd209afb5d1d7eb474a023",
+      "shortSha": "01a97bea5d4a",
       "subject": "Ben 1",
       "author": {
         "name": "Ben",
         "email": "ben@example.invalid"
       },
-      "date": "2026-11-18T21:18:54-05:00",
+      "date": "2026-11-18T22:05:08-05:00",
       "isMerge": false,
       "notPushed": true
     }

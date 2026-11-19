@@ -1,0 +1,12 @@
+{
+  "on": true,
+  "note": null,
+  "baseBranch": "trunk",
+  "behind": {
+    "teamBranch": "team/alpha",
+    "count": 2,
+    "text": "team/alpha is 2 commits behind trunk",
+    "from": "88f3e44a4ff6d62d6dbbed271fcb5e80400473e5",
+    "to": "ea3814caf07a6dfa67974c08912d292f2101d61a"
+  }
+}

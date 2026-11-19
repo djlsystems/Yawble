@@ -2,32 +2,32 @@
   "branch": "feature/half",
   "baseBranch": "trunk",
   "exists": true,
-  "sha": "c3fbed8a58f098d97c7098bb4bd336b64391b1a1",
+  "sha": "489f409bde28c6ce03e8052301fc7647c284e5ae",
   "merged": false,
   "commits": [
     {
       "state": "own",
-      "sha": "c3fbed8a58f098d97c7098bb4bd336b64391b1a1",
-      "shortSha": "c3fbed8a58f0",
+      "sha": "489f409bde28c6ce03e8052301fc7647c284e5ae",
+      "shortSha": "489f409bde28",
       "subject": "Half 2",
       "author": {
         "name": "Ada",
         "email": "ada@example.invalid"
       },
-      "date": "2026-11-18T21:18:59-05:00",
+      "date": "2026-11-18T22:05:31-05:00",
       "isMerge": false,
       "notPushed": true
     },
     {
       "state": "own",
-      "sha": "639a0630381218d7b7ea4851780911222ccb8e64",
-      "shortSha": "639a06303812",
+      "sha": "7cb8cc0aab366a051b6d560da151395c9b91439a",
+      "shortSha": "7cb8cc0aab36",
       "subject": "Half 1",
       "author": {
         "name": "Ada",
         "email": "ada@example.invalid"
       },
-      "date": "2026-11-18T21:18:59-05:00",
+      "date": "2026-11-18T22:05:31-05:00",
       "isMerge": false,
       "notPushed": false
     }
@@ -35,8 +35,8 @@
   "own": 2,
   "inBase": 0,
   "truncated": false,
-  "lost": "Deleting it loses 2 commits of its own (c3fbed8a58f0, 639a06303812); 1 of them is not on origin either.",
-  "text": "feature/half at c3fbed8a58f0: Deleting it loses 2 commits of its own (c3fbed8a58f0, 639a06303812); 1 of them is not on origin either.\n2 commits not in trunk:\n  - c3fbed8a58f0 Half 2 (Ada): work of its own, not pushed\n  - 639a06303812 Half 1 (Ada): work of its own",
+  "lost": "Deleting it loses 2 commits of its own (489f409bde28, 7cb8cc0aab36); 1 of them is not on origin either.",
+  "text": "feature/half at 489f409bde28: Deleting it loses 2 commits of its own (489f409bde28, 7cb8cc0aab36); 1 of them is not on origin either.\n2 commits not in trunk:\n  - 489f409bde28 Half 2 (Ada): work of its own, not pushed\n  - 7cb8cc0aab36 Half 1 (Ada): work of its own",
   "hasOrigin": true,
   "push": {
     "branch": "feature/half",
