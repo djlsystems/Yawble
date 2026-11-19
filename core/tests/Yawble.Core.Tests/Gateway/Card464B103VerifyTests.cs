@@ -274,7 +274,8 @@ public class Card464B103VerifyTests
                 for (var i = 0; i < 9; i++) gone.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 200));
                 kept.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 401));
                 kept.Add(Row(c, 1, GatewayEventKinds.CredentialProblem, Vhosts.Model, 401));
-                for (var i = 0; i < 10; i++) gone.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 200));
+                kept.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 200)); // the success after the problem (card 475)
+                for (var i = 0; i < 9; i++) gone.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 200));
                 kept.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Grok, 200));
                 gone.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Grok, 200));
                 gone.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Grok, 200));
@@ -297,9 +298,9 @@ public class Card464B103VerifyTests
                 c.Open();
                 Assert.Equal(kept.Order(), Ids(c));
                 Assert.Equal(kept.Count, Scalar(c, "SELECT count(*) FROM gateway_events WHERE count = 1;"));
-                // The verdict over what is left: run 1's credential problem is NOT cleared (the success after it was a
-                // deleted row). The old log said it was cleared. See the hand-back.
             }
+            // The verdict over what is left: run 1's credential problem is cleared, as the old log said.
+            Assert.False(GatewayVerdicts.From(new GatewayLog(cs).Read(1)).CredentialRejected);
 
             // The app writes on the migrated database: the count works, the old denial rows are left as they were.
             var log = new GatewayLog(cs, new FakeClock(T0));
@@ -314,12 +315,12 @@ public class Card464B103VerifyTests
     }
 
     /// <summary>
-    /// Observed, for the Manager: on an existing database 0051 keeps only the FIRST success per run and vhost, so a run
-    /// written before B103 whose credential problem was later cleared by a success reads as still rejected afterwards
-    /// (the live log keeps the first success after a problem; the migration does not).
+    /// Card 475: on an existing database 0051 keeps the first success after each credential problem / rate limit, so a
+    /// run written before B103 whose problem was cleared by a success still reads as cleared (it read as rejected with
+    /// 9d32165's 0051).
     /// </summary>
     [Fact]
-    public void P5_Observed_0051_DropsTheSuccessThatClearedAnOldCredentialProblem()
+    public void P5_0051_KeepsTheSuccessThatClearedAnOldCredentialProblemOrRateLimit()
     {
         var dir = Directory.CreateTempSubdirectory("yawble-464-").FullName;
         var cs = $"Data Source={Path.Combine(dir, "t.db")};Pooling=False";
@@ -332,10 +333,20 @@ public class Card464B103VerifyTests
             Row(c, 9, GatewayEventKinds.Forward, Vhosts.Model, 200);
             Row(c, 9, GatewayEventKinds.CredentialProblem, Vhosts.Model, 401);
             Row(c, 9, GatewayEventKinds.Forward, Vhosts.Model, 200);
+            Row(c, 9, GatewayEventKinds.Forward, Vhosts.Model, 200);
+            Row(c, 10, GatewayEventKinds.Forward, Vhosts.Grok, 200);
+            Row(c, 10, GatewayEventKinds.RateLimited, Vhosts.Grok, 429);
+            Row(c, 10, GatewayEventKinds.Forward, Vhosts.Grok, 200);
             var log = new GatewayLog(cs);
-            Assert.False(GatewayVerdicts.From(log.Read(9)).CredentialRejected);
+            var before9 = GatewayVerdicts.From(log.Read(9));
+            var before10 = GatewayVerdicts.From(log.Read(10));
+            Assert.False(before9.CredentialRejected);
             SchemaMigrator.Migrate(cs);
-            Assert.True(GatewayVerdicts.From(log.Read(9)).CredentialRejected);
+            Assert.Equal(1, Scalar(c, "SELECT count(*) FROM schema_migrations WHERE name = '0051_gateway_model_forwards';"));
+            Assert.Equal(before9 with { DeniedHosts = [] }, GatewayVerdicts.From(log.Read(9)) with { DeniedHosts = [] });
+            Assert.Equal(before10 with { DeniedHosts = [] }, GatewayVerdicts.From(log.Read(10)) with { DeniedHosts = [] });
+            Assert.Equal(3, log.Read(9).Count); // first ok, problem, the ok after it; the second ok after it is gone
+            Assert.Equal(3, log.Read(10).Count);
         }
         finally
         {
@@ -344,17 +355,96 @@ public class Card464B103VerifyTests
         }
     }
 
+    /// <summary>
+    /// 0051 against the live rule: random pre-B103 logs (every event a row) through the migration give exactly the rows
+    /// GatewayLog.Write keeps for the same events. Runs, mixed-case model vhosts, non-model vhosts, non-2xx forwards,
+    /// credential problems and rate limits on either vhost, and rows with no run.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void P5_0051_EqualsTheLiveGatewayLogRule_OnRandomLogs(int seed)
+    {
+        var rnd = new Random(seed);
+        string[] vhosts = [Vhosts.Model, Vhosts.Model.ToUpperInvariant(), Vhosts.Grok, Vhosts.Xai, "registry.npmjs.org"];
+        long?[] runs = [1, 2, 3, null];
+        var events = new List<GatewayEvent>();
+        for (var i = 0; i < 400; i++)
+        {
+            var run = runs[rnd.Next(runs.Length)];
+            var vhost = vhosts[rnd.Next(vhosts.Length)];
+            var roll = rnd.Next(20);
+            events.Add(roll switch
+            {
+                0 => new(run, "beta/Tess", T0, GatewayEventKinds.CredentialProblem, false, vhost, "POST", "/v1/messages", 401, null),
+                1 => new(run, "beta/Tess", T0, GatewayEventKinds.RateLimited, false, vhost, "POST", "/v1/messages", 429, null),
+                2 => new(run, "beta/Tess", T0, GatewayEventKinds.Forward, false, vhost, "POST", "/v1/messages", 500, null),
+                _ => new(run, "beta/Tess", T0, GatewayEventKinds.Forward, false, vhost, "POST", "/v1/messages", 200 + rnd.Next(2), null),
+            });
+        }
+
+        var dir = Directory.CreateTempSubdirectory("yawble-464-").FullName;
+        try
+        {
+            // Live: GatewayLog.Write on a fresh database.
+            var live = $"Data Source={Path.Combine(dir, "live.db")};Pooling=False";
+            SchemaMigrator.Migrate(live);
+            var log = new GatewayLog(live, new FakeClock(T0));
+            foreach (var e in events) log.Write(e);
+
+            // Migrated: every event a row, then 0051.
+            var old = $"Data Source={Path.Combine(dir, "old.db")};Pooling=False";
+            SchemaMigrator.Migrate(old);
+            using (var c = new SqliteConnection(old))
+            {
+                c.Open();
+                Exec(c, "DELETE FROM schema_migrations WHERE name = '0051_gateway_model_forwards';");
+                foreach (var e in events) RowOf(c, e);
+            }
+            SchemaMigrator.Migrate(old);
+            Assert.Equal(1, Scalar(old, "SELECT count(*) FROM schema_migrations WHERE name = '0051_gateway_model_forwards';"));
+
+            var a = Rows(live);
+            var b = Rows(old);
+            Assert.True(b.Count < events.Count); // the migration did delete
+            Assert.Equal(a, b);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(dir, true);
+        }
+
+        static List<string> Rows(string cs)
+        {
+            using var c = new SqliteConnection(cs);
+            c.Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT ifnull(run_id, -1) || '|' || kind || '|' || ifnull(vhost, '') || '|' || ifnull(status, '') FROM gateway_events ORDER BY id;";
+            using var r = cmd.ExecuteReader();
+            var list = new List<string>();
+            while (r.Read()) list.Add(r.GetString(0));
+            return list;
+        }
+    }
+
     // ------------------------------------------------------------------ point 6: GuardrailCheck report
 
-    /// <summary>The check's own guard on the events as the old log stored them vs as the new log stores them.</summary>
+    /// <summary>
+    /// The check's own guard on the events as the old log stored them (every one) vs as the thinned log stores them.
+    /// Card 474: the text names the vhosts and no number, so it is the same either way (it was "forwarded 12 request(s)"
+    /// vs "forwarded 1 request(s)" before).
+    /// </summary>
     [Fact]
-    public void P6_GuardrailNoModelCall_VerdictSame_TextNowCountsWrittenRows()
+    public void P6_GuardrailNoModelCall_VerdictAndText_SameOnFullAndThinnedLog()
     {
         var (before, after) = NoModelCallBeforeAfter(Enumerable.Range(0, 12).Select(_ => Fwd(Vhosts.Model, 200)));
-        Assert.Equal((before.Verdict, before.AsExpected), (after.Verdict, after.AsExpected));
+        Assert.Equal(before, after);
         Assert.Equal((Verdicts.Allowed, false), (after.Verdict, after.AsExpected));
-        Assert.Equal("the run's gateway forwarded 12 request(s) to a model vhost (model.yawble.internal)", before.Evidence);
-        Assert.Equal("the run's gateway forwarded 1 request(s) to a model vhost (model.yawble.internal)", after.Evidence);
+        Assert.Equal("the run's gateway forwarded request(s) to a model vhost (model.yawble.internal)", after.Evidence);
 
         // Mixed: 5 ok + one 401 + 3 ok on model, 2 ok on grok.
         var mixed = Enumerable.Range(0, 5).Select(_ => Fwd(Vhosts.Model, 200))
@@ -362,9 +452,14 @@ public class Card464B103VerifyTests
             .Concat(Enumerable.Range(0, 3).Select(_ => Fwd(Vhosts.Model, 200)))
             .Concat(Enumerable.Range(0, 2).Select(_ => Fwd(Vhosts.Grok, 200)));
         (before, after) = NoModelCallBeforeAfter(mixed);
-        Assert.Equal(before.Verdict, after.Verdict);
-        Assert.Equal("the run's gateway forwarded 11 request(s) to a model vhost (model.yawble.internal, grok.yawble.internal)", before.Evidence);
-        Assert.Equal("the run's gateway forwarded 3 request(s) to a model vhost (model.yawble.internal, grok.yawble.internal)", after.Evidence);
+        Assert.Equal(before, after);
+        Assert.Equal("the run's gateway forwarded request(s) to a model vhost (model.yawble.internal, grok.yawble.internal)", after.Evidence);
+
+        // The same vhost in two casings is named once (the first seen); a bus call is not a model call.
+        (before, after) = NoModelCallBeforeAfter([Fwd(Vhosts.Model, 200), Fwd(Vhosts.Model.ToUpperInvariant(), 500), Ev(GatewayEventKinds.Bus, Vhosts.Bus, 200)]);
+        Assert.Equal(before, after);
+        Assert.Equal("the run's gateway forwarded request(s) to a model vhost (model.yawble.internal)", after.Evidence);
+        Assert.DoesNotMatch(@"\d+ request", after.Evidence);
 
         // No model call: identical.
         (before, after) = NoModelCallBeforeAfter([Ev(GatewayEventKinds.Bus, Vhosts.Bus, 200), Ev(GatewayEventKinds.HostDenied, "example.com", 403)]);
@@ -398,12 +493,29 @@ public class Card464B103VerifyTests
         foreach (var vhost in Vhosts.ProductionUpstreams.Keys) Assert.Contains($"`{vhost.Split('.')[0]}`", text);
         Assert.Contains("`.yawble.internal`", text);
         Assert.Contains("counted in **Model usage**", text);
-        Assert.Contains("repeated refusals of one host in a run are counted on one row", text);
-        // What it does not say (reported, not asserted as a fault): the Times column and the " (Nx)" on All activity rows.
-        Assert.DoesNotContain("Times", text);
-        Assert.DoesNotContain("x)", text);
-        // The app's own description of the Network source still says every model request is a row.
-        Assert.Contains("every model request it forwarded", LogSources.Find("gateway")!.About);
+        // Card 475: only plain-http host denials fold into one row; the Times column and " (Nx)" are described.
+        Assert.Contains("A plain-http request to a host that is not allowed (`host-denied`)", text);
+        Assert.Contains("**Times** column", text);
+        Assert.Contains("` (Nx)`", text);
+        Assert.Contains("` (5x)` for five", text);
+        Assert.Contains("(`connect-denied`) and refused paths are not folded into one row", text);
+        Assert.Contains("the first after each credential problem or rate limit on that\n    host", text.Replace("\r\n", "\n"));
+        Assert.DoesNotContain("repeated refusals of one host in a run are counted on one row", text);
+        // The names the doc uses are the code's: kinds, the Times label, the repeat limit's window.
+        Assert.Equal("host-denied", GatewayEventKinds.HostDenied);
+        Assert.Equal("connect-denied", GatewayEventKinds.ConnectDenied);
+        Assert.Equal("Times", Assert.Single(LogSources.Find("gateway")!.Columns, c => c.Key == "count").Label);
+        Assert.Equal(TimeSpan.FromMinutes(1), GatewayLog.RepeatWindow);
+
+        // Card 474: the app's own description of the Network source no longer says every model request is a row.
+        var about = LogSources.Find("gateway")!.About;
+        Assert.DoesNotContain("every model request it forwarded", about);
+        Assert.Contains("its first model request to each model API", about);
+        Assert.Contains("every one that failed", about);
+        Assert.Contains("a plain-http host refused again is counted on one row", about);
+        Assert.Contains("rate limits", about);
+        // Observed (nit, not asserted as a fault): it does not mention the success kept after each problem, which the doc does.
+        Assert.DoesNotContain("after", about);
     }
 
     // ------------------------------------------------------------------ helpers
@@ -455,6 +567,20 @@ public class Card464B103VerifyTests
         cmd.Parameters.AddWithValue("$v", (object?)vhost ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$s", (object?)status ?? DBNull.Value);
         return (long)cmd.ExecuteScalar()!;
+    }
+
+    private static void RowOf(SqliteConnection c, GatewayEvent e)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO gateway_events (run_id, member, at, kind, guardrail, vhost, method, target, status)
+            VALUES ($r, 'beta/Tess', '2026-11-10T10:00:00.0000000+00:00', $k, 0, $v, 'POST', '/v1/messages', $s);
+            """;
+        cmd.Parameters.AddWithValue("$r", (object?)e.RunId ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$k", e.Kind);
+        cmd.Parameters.AddWithValue("$v", (object?)e.Vhost ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$s", (object?)e.Status ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
     }
 
     private static List<long> Ids(SqliteConnection c)
