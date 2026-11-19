@@ -540,4 +540,30 @@ describe('the team page sync banner (teams.syncToBase behind.from / to, git.sync
     expect(came.findAll('[data-test=commit-list-row]').map((r) => r.attributes('data-sha'))).toEqual([D]);
     w.unmount();
   });
+
+  it('F4b: the commits that came in carry the not-pushed mark only in a repository with an origin (git.status origin)', async () => {
+    const marked = async (st: (() => unknown) | null) => {
+      const { api, calls } = fakeApi({
+        'teams.syncToBase': sync({ teamBranch: 'team/ops', count: 2, text: '2 commits behind main', from: B, to: D }),
+        'git.sync': () => ({ outcome: 'synced', baseBranch: 'main', baseSha: D, behind: 0, moved: ['team/ops'], conflicts: [], note: null,
+          incoming: [row(D, 'Release', true), row(C, 'Pushed')], incomingCount: 2, incomingTruncated: false, incomingRange: { from: B, to: D } }),
+        ...(st ? { 'git.status': st } : {}),
+      });
+      const w = mount(TeamSyncBanner, { props: { api, team, pollMs: 1e9 } });
+      await flushPromises();
+      await w.find('[data-test=team-sync-now]').trigger('click');
+      await flushPromises();
+      const came = w.find('[data-test=team-sync-came-in]');
+      const rows = came.findAll('[data-test=commit-list-row]').map((r) => r.find('[data-test=local-mark]').exists());
+      const status = of(calls, 'git.status').map((c) => c.params);
+      w.unmount();
+      return { rows, status };
+    };
+    // with an origin: the not-pushed commit is marked, the pushed one is not; status asked for this team.
+    expect(await marked(() => status)).toEqual({ rows: [true, false], status: [{ teamId: 3 }] });
+    // without one: nothing marked.
+    expect((await marked(() => ({ ...status, origin: null }))).rows).toEqual([false, false]);
+    // git.status unreadable (an older core, a failure): the list still shows, unmarked.
+    expect((await marked(null)).rows).toEqual([false, false]);
+  });
 });
