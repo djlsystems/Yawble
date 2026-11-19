@@ -1,22 +1,22 @@
 {
   "outcome": "merged",
-  "message": "team/alpha merged with a merge commit into trunk: now 6419624b5682.",
+  "message": "team/alpha merged with a merge commit into trunk: now 370330ff8919.",
   "changed": true,
-  "sha": "6419624b56826b901379418c092913fb6119e800",
+  "sha": "370330ff8919d32eea6665f25787a91cd50d0359",
   "files": null,
   "status": {
-    "repoPath": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-ovqj2ur3.cl0\\person-repo",
+    "repoPath": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-mftpnh0o.zo0\\person-repo",
     "managed": false,
     "baseBranch": "trunk",
     "checkedOut": null,
     "dirty": true,
     "origin": null,
-    "baseSha": "6419624b56826b901379418c092913fb6119e800",
+    "baseSha": "370330ff8919d32eea6665f25787a91cd50d0359",
     "originBaseSha": null,
     "baseAheadOfOrigin": null,
     "baseBehindOrigin": null,
     "teamBranch": "team/alpha",
-    "teamSha": "78c81d3450763191ab3fb2866e7f538152f63b11",
+    "teamSha": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee",
     "teamAheadOfBase": 0,
     "teamBehindBase": 2,
     "merge": "up-to-date",
@@ -28,37 +28,37 @@
       "baseAheadOfOrigin": null,
       "baseBehindOrigin": null,
       "teamAheadOfBase": {
-        "from": "6419624b56826b901379418c092913fb6119e800",
-        "to": "78c81d3450763191ab3fb2866e7f538152f63b11"
+        "from": "370330ff8919d32eea6665f25787a91cd50d0359",
+        "to": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee"
       },
       "teamBehindBase": {
-        "from": "78c81d3450763191ab3fb2866e7f538152f63b11",
-        "to": "6419624b56826b901379418c092913fb6119e800"
+        "from": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee",
+        "to": "370330ff8919d32eea6665f25787a91cd50d0359"
       }
     }
   },
   "commits": [
     {
-      "sha": "78c81d3450763191ab3fb2866e7f538152f63b11",
-      "shortSha": "78c81d345076",
+      "sha": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee",
+      "shortSha": "892536a1cfb6",
       "subject": "Four",
       "author": {
         "name": "Ada",
         "email": "ada@example.invalid"
       },
-      "date": "2026-11-18T21:18:43-05:00",
+      "date": "2026-11-18T22:04:53-05:00",
       "isMerge": false,
       "notPushed": true
     },
     {
-      "sha": "bf73c22d78437dbed4592a544ef7fbbb1c333c1f",
-      "shortSha": "bf73c22d7843",
+      "sha": "750c6692271312ede136f5131cf784b2dd611a6a",
+      "shortSha": "750c66922713",
       "subject": "Team work",
       "author": {
         "name": "Ada",
         "email": "ada@example.invalid"
       },
-      "date": "2026-11-18T21:18:43-05:00",
+      "date": "2026-11-18T22:04:53-05:00",
       "isMerge": false,
       "notPushed": true
     }
@@ -66,7 +66,7 @@
   "commitCount": 2,
   "commitsTruncated": false,
   "range": {
-    "from": "b2dfc75e260555a5bbd60b1e46f9de23709b425a",
-    "to": "78c81d3450763191ab3fb2866e7f538152f63b11"
+    "from": "d60edebc132e92ab4aed7056af110ff2a6ef8bb9",
+    "to": "892536a1cfb6258ae3dbcd5201e6cd29bab354ee"
   }
 }

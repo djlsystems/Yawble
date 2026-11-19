@@ -490,4 +490,75 @@ public class Card466PreviewVerifyTests
         Emit("range-team-behind", S(shownBefore));
         Emit("sync-ff", S(synced));
     }
+
+    // ------------------------------------------------------------------ teams.syncToBase behind.from / to (3ad0991)
+
+    /// <summary>teams.syncToBase exactly as UiRpc sends it (the RpcDispatcher a window calls).</summary>
+    private static async Task<JsonObject> SyncToBaseJson(Rig r)
+    {
+        await using var bus = new BusEngine(r.F.Db.OpenStore(), new UnavailableRunner(), new BusOptions { IdleOffer = false, Repos = r.F.Repos });
+        await bus.StartAsync(Ct);
+        var terminals = new Yawble.Core.Ui.TerminalHub(new Yawble.Core.Ui.AppEvents());
+        var ui = new Yawble.Core.Ui.UiRpc(bus, new Yawble.Core.Policy.PolicyStore(r.F.Db.ConnectionString),
+            new Yawble.Core.Ui.MemberLayouts(Path.Combine(r.F.Db.Dir, "data"), r.F.Db.Dir, r.F.Db.Dir), new Yawble.Core.Ui.FakeModelCredentials(),
+            new Yawble.Core.Ui.FakeHostTerminals(terminals, TimeSpan.FromMilliseconds(5)), new Yawble.Core.Ui.FakeInteractiveSessions(terminals, bus), terminals, 16_384);
+        var rpc = new RpcDispatcher(new Yawble.Core.Sandboxing.SandboxPlatformInfo(), () => [], ui: ui);
+        return (await rpc.DispatchAsync("teams.syncToBase", new JsonObject { ["teamId"] = r.TeamId }, Ct))!.AsObject();
+    }
+
+    [Fact]
+    public async Task SyncToBase_Behind_FromIsTeamTip_ToIsLocalBase_RangeIsExactlyTheCount()
+    {
+        using var f = new TeamsFixture();
+        var r = await RigAsync(f);
+        AgentGit.Host(r.Repo, "branch", "team/alpha", r.Root);
+        Write(r.Repo, "p1.txt", "1\n");
+        Commit(r.Repo, "Person 1", author: "Person");
+        Write(r.Repo, "p2.txt", "2\n");
+        var p2 = Commit(r.Repo, "Person 2", author: "Person");
+
+        var j = await SyncToBaseJson(r);
+        var b = j["behind"]!.AsObject();
+        Assert.Equal("team/alpha", (string?)b["teamBranch"]);
+        Assert.Equal(2, (int)b["count"]!);
+        Assert.Equal("team/alpha is 2 commits behind trunk", (string?)b["text"]);
+        Assert.True(b.ContainsKey("from") && b.ContainsKey("to"));
+        Assert.Equal(r.Root, (string?)b["from"]);
+        Assert.Equal(p2, (string?)b["to"]);
+        // the same pair git.status gives for the team-behind count, and git.commitRange of it lists exactly count commits.
+        var s = await f.Repos.GitStatusAsync(r.TeamId, "Alpha", Ct);
+        Assert.Equal(new CommitRangeRef(r.Root, p2), s.Ranges.TeamBehindBase);
+        var range = await f.Repos.GitCommitRangeAsync(r.TeamId, "Alpha", (string)b["from"]!, (string)b["to"]!, ct: Ct);
+        Assert.Equal(2, range.Count);
+        Assert.Equal(AgentGit.Host(r.Repo, "rev-list", p2, "^" + r.Root).Split('\n', StringSplitOptions.RemoveEmptyEntries),
+            range.Commits.Select(c => c.Sha));
+        Emit("synctobase-behind", j);
+        Emit("synctobase-range", S(range));
+
+        // after Sync now the team branch is level: behind is null (no from / to sent at all).
+        await f.Repos.SyncNowAsync(r.TeamId, "Alpha", Ct);
+        var after = await SyncToBaseJson(r);
+        Assert.Null(after["behind"]);
+        Emit("synctobase-level", after);
+    }
+
+    [Fact]
+    public async Task SyncToBase_Behind_ToIsOriginsBase_WhenLocalIsOnlyBehindIt()
+    {
+        using var f = new TeamsFixture();
+        var r = await RigAsync(f);
+        AgentGit.Host(r.Repo, "branch", "team/alpha", r.Root);
+        AgentGit.Host(r.Repo, "switch", "-q", "-c", "tmp");
+        Write(r.Repo, "o.txt", "origin\n");
+        var o1 = Commit(r.Repo, "On origin", author: "Person");
+        AgentGit.Host(r.Repo, "switch", "-q", "trunk");
+        AddOrigin(r, ("trunk", o1));
+
+        var b = (await SyncToBaseJson(r))["behind"]!.AsObject();
+        Assert.Equal(1, (int)b["count"]!);
+        Assert.Equal(r.Root, (string?)b["from"]);
+        Assert.Equal(o1, (string?)b["to"]); // origin's base, as Merge to main reads it
+        var range = await f.Repos.GitCommitRangeAsync(r.TeamId, "Alpha", (string)b["from"]!, (string)b["to"]!, ct: Ct);
+        Assert.Equal([o1], range.Commits.Select(c => c.Sha));
+    }
 }
