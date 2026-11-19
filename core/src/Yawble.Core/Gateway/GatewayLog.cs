@@ -32,12 +32,18 @@ public sealed record GatewayEvent(
     string? Method = null,
     string? Target = null,
     int? Status = null,
-    string? Detail = null);
+    string? Detail = null)
+{
+    /// <summary>How many times it happened: a host denied again in the same run adds to its first row (gateway_events.count).</summary>
+    public int Count { get; init; } = 1;
+}
 
 /// <summary>
 /// The gateway log (a refusal is a 403 and is logged to the agent's card): every denial, every
-/// unauthorised call, every CONNECT and every upstream credential failure, in gateway_events. Forwards and bus calls
-/// are written too, so a person can see what a run reached. Observers (the card, tests) get each event as written.
+/// unauthorised call, every CONNECT and every upstream credential failure, in gateway_events. Bus calls and failed
+/// forwards are written too, so a person can see what a run reached; a successful model request is written only the
+/// first time per run and model vhost, and again after a credential problem or rate limit there (each request's usage is
+/// a usage_events row). Observers (the card, tests) get each event as written.
 /// </summary>
 public sealed class GatewayLog(string connectionString, TimeProvider? clock = null)
 {
@@ -53,11 +59,58 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
 
     public static readonly TimeSpan RepeatWindow = TimeSpan.FromMinutes(1);
 
-    private static readonly HashSet<string> Repeating = [GatewayEventKinds.ConnectDenied, GatewayEventKinds.HostDenied, GatewayEventKinds.PathDenied];
+    private static readonly HashSet<string> Repeating = [GatewayEventKinds.ConnectDenied, GatewayEventKinds.PathDenied];
     private readonly Dictionary<(long?, string, string?), (DateTimeOffset Start, int Count)> _repeats = [];
+
+    /// <summary>The run's host-denied row per host (gateway_events.id), which a repeat of that denial counts on.</summary>
+    private readonly Dictionary<(long, string), long> _hostDenied = [];
+
+    /// <summary>
+    /// Runs and model vhosts whose successful forward is written, with no credential problem or rate limit there since
+    /// (which a later success must answer). Absent: the next 2xx forward on it is written.
+    /// </summary>
+    private readonly HashSet<(long, string)> _forwardWritten = [];
+
+    /// <summary>A model vhost: one of the gateway's virtual hosts that forward to a model API (not the bus).</summary>
+    public static bool IsModelVhost(string? vhost) => vhost is not null && Vhosts.ProductionUpstreams.ContainsKey(vhost);
 
     public void Write(GatewayEvent e)
     {
+        if (e.RunId is { } run && e.Vhost is { } vhost)
+        {
+            var key = (run, vhost.ToLowerInvariant());
+            if (e.Kind == GatewayEventKinds.Forward && e.Status is >= 200 and < 300 && IsModelVhost(vhost))
+            {
+                // A run makes hundreds of model requests, each already a usage_events row. The first success per model
+                // vhost is kept (it shows the credential swap), and the first after a credential problem or a rate limit
+                // on that vhost: GatewayVerdicts.From reads that one as the problem having cleared.
+                lock (_lock)
+                {
+                    if (!_forwardWritten.Add(key)) return;
+                    if (_forwardWritten.Count > 10_000)
+                    {
+                        _forwardWritten.Clear();
+                        _forwardWritten.Add(key);
+                    }
+                }
+            }
+            else if (e.Kind is GatewayEventKinds.CredentialProblem or GatewayEventKinds.RateLimited)
+            {
+                lock (_lock) _forwardWritten.Remove(key);
+            }
+            else if (e.Kind == GatewayEventKinds.HostDenied)
+            {
+                // The same host refused again in the run: one row, its count raised.
+                lock (_lock)
+                {
+                    if (_hostDenied.TryGetValue(key, out var id) && Increment(id)) return;
+                    if (_hostDenied.Count > 10_000) _hostDenied.Clear();
+                    _hostDenied[key] = Insert(e);
+                }
+                return;
+            }
+        }
+
         // A tool that retries a refused connection in a loop (npm against a host not allowed) would write a row per try:
         // half a million in one run. The first few of each are written; the rest are counted, and the count is written
         // as one row when the window ends (at the next such denial).
@@ -85,16 +138,18 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
         Insert(e);
     }
 
-    private void Insert(GatewayEvent e)
+    private long Insert(GatewayEvent e)
     {
+        long id;
         lock (_lock)
         {
             using var connection = new SqliteConnection(connectionString);
             connection.Open();
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO gateway_events (run_id, member, at, kind, guardrail, vhost, method, target, status, detail)
-                VALUES ($run, $member, $at, $kind, $guardrail, $vhost, $method, $target, $status, $detail);
+                INSERT INTO gateway_events (run_id, member, at, kind, guardrail, vhost, method, target, status, detail, count)
+                VALUES ($run, $member, $at, $kind, $guardrail, $vhost, $method, $target, $status, $detail, $count);
+                SELECT last_insert_rowid();
                 """;
             cmd.Parameters.AddWithValue("$run", (object?)e.RunId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$member", (object?)e.Member ?? DBNull.Value);
@@ -106,9 +161,25 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
             cmd.Parameters.AddWithValue("$target", (object?)Truncate(e.Target, 2048) ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$status", (object?)e.Status ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$detail", (object?)Truncate(e.Detail, 4096) ?? DBNull.Value);
-            cmd.ExecuteNonQuery();
+            cmd.Parameters.AddWithValue("$count", e.Count);
+            id = (long)cmd.ExecuteScalar()!;
         }
         Written?.Invoke(e);
+        return id;
+    }
+
+    /// <summary>Adds one to a row's count; false when the row is gone (the log was pruned), so the caller writes a new one.</summary>
+    private bool Increment(long id)
+    {
+        lock (_lock)
+        {
+            using var connection = new SqliteConnection(connectionString);
+            connection.Open();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "UPDATE gateway_events SET count = count + 1 WHERE id = $id;";
+            cmd.Parameters.AddWithValue("$id", id);
+            return cmd.ExecuteNonQuery() == 1;
+        }
     }
 
     /// <summary>One forwarded model request's usage, as the provider reported it (0015_provenance.sql usage_events).</summary>
@@ -147,7 +218,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
         using var connection = new SqliteConnection(connectionString);
         connection.Open();
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT run_id, member, at, kind, guardrail, vhost, method, target, status, detail FROM gateway_events"
+        cmd.CommandText = "SELECT run_id, member, at, kind, guardrail, vhost, method, target, status, detail, count FROM gateway_events"
             + (runId is null ? "" : " WHERE run_id = $run") + " ORDER BY id;";
         if (runId is not null) cmd.Parameters.AddWithValue("$run", runId);
         using var reader = cmd.ExecuteReader();
@@ -164,7 +235,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
                 reader.IsDBNull(6) ? null : reader.GetString(6),
                 reader.IsDBNull(7) ? null : reader.GetString(7),
                 reader.IsDBNull(8) ? null : reader.GetInt32(8),
-                reader.IsDBNull(9) ? null : reader.GetString(9)));
+                reader.IsDBNull(9) ? null : reader.GetString(9)) { Count = reader.GetInt32(10) });
         }
         return list;
     }
