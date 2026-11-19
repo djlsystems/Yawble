@@ -12,6 +12,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkflowDetail, WorkflowsListAnswer, YawbleApi } from '../../src/shared/api';
 import WorkflowsView from '../../src/renderer/src/workflows/WorkflowsView.vue';
+import ItemLink from '../../src/renderer/src/workflows/ItemLink.vue';
 import { backlogRequest, sortRows, statusTip, timeBar, workflowsRequest } from '../../src/renderer/src/workflows/page';
 import { closeTimeline, timelineTarget } from '../../src/renderer/src/timeline/time';
 import { confirmState } from '../../src/renderer/src/confirm';
@@ -302,5 +303,68 @@ describe('the pure rules on the real rows', () => {
 
   it('statusTip for every row has words (no raw status leaks)', () => {
     for (const r of ALL.workflows) expect(statusTip(r)).toMatch(/^[A-Z]/);
+  });
+});
+
+// Card 478 re-check (TesterKofi, on Ines 0b5f41e): what her own tests did not cover.
+describe('card 478 re-check: F1 stays on the Workflows table; O2 the defaults', () => {
+  it('F1: with the filter on, the pane\'s item link (another ItemLink user) is not marked while the row is', async () => {
+    const w = await page();
+    await w.find('[data-test=workflows-chip-all]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test=workflows-search]').setValue(String(ID.spec));
+    await rowOf(w, n('dispatched')).trigger('click');
+    await flushPromises();
+    expect(rowOf(w, n('dispatched')).find('td.itm mark').text()).toBe(String(ID.spec));
+    const pane = w.find('[data-test=workflow-pane]');
+    expect(pane.find('[data-test=workflow-item-link]').text()).toBe(String(ID.spec));
+    expect(pane.find('[data-test=workflow-item-link] mark').exists()).toBe(false);
+  });
+
+  it('F1: ItemLink without q marks nothing (button, nested span, plain label), as the team tiles and the dialog use it', async () => {
+    const item = { label: String(ID.spec), title: 'Workflows page', archived: false } as any;
+    for (const props of [{ item }, { item, nested: true }, { item, backlog: false }]) {
+      const c = mount(ItemLink, { props });
+      expect(c.text()).toBe(String(ID.spec));
+      expect(c.find('mark').exists()).toBe(false);
+    }
+  });
+
+  it('F1: the team tiles, the Workflows dialog and the pane pass no q', () => {
+    const src = (p: string) => readFileSync(path.join(__dirname, '..', '..', 'src', 'renderer', 'src', p), 'utf8');
+    for (const p of ['components/TeamWorkflows.vue', 'components/WorkflowsDialog.vue', 'workflows/WorkflowPane.vue']) {
+      const tags = src(p).match(/<ItemLink\b[^>]*>/g) ?? [];
+      expect(tags.length, p).toBeGreaterThan(0);
+      for (const t of tags) expect(t, p).not.toMatch(/\bq=|:q\b/);
+    }
+  });
+
+  it('O2: a team alone shows Clear; Clear goes back to Open with no team and no text', async () => {
+    const w = await page();
+    expect(w.find('[data-test=workflows-clear]').exists()).toBe(false);
+    await w.find('[data-test=workflows-team-filter]').setValue(String(n('web')));
+    await flushPromises();
+    expect(w.find('[data-test=workflows-clear]').exists()).toBe(true);
+    await w.find('[data-test=workflows-clear]').trigger('click');
+    await flushPromises();
+    expect((w.find('[data-test=workflows-team-filter]').element as HTMLSelectElement).value).toBe('');
+    expect(w.find('[data-test=workflows-chip-open]').attributes('aria-selected')).toBe('true');
+    expect(w.find('[data-test=workflows-clear]').exists()).toBe(false);
+    // Spaces only count as no text.
+    await w.find('[data-test=workflows-search]').setValue('   ');
+    expect(w.find('[data-test=workflows-clear]').exists()).toBe(false);
+  });
+
+  it('O2: the empty state\'s Show all workflows still goes to All (no text)', async () => {
+    const w = await page();
+    await w.find('[data-test=workflows-search]').setValue('zzz-no-such');
+    await flushPromises();
+    expect(w.find('[data-test=workflows-empty-clear]').exists()).toBe(true);
+    await w.find('[data-test=workflows-empty-clear]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=workflows-chip-all]').attributes('aria-selected')).toBe('true');
+    expect((w.find('[data-test=workflows-search]').element as HTMLInputElement).value).toBe('');
+    expect(ids(w).length).toBe(ALL.workflows.length);
+    expect(w.find('[data-test=workflows-clear]').exists()).toBe(true); // All is not the default
   });
 });

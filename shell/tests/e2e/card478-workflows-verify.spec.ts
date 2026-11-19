@@ -149,3 +149,91 @@ test('1280 dark: the board\'s Workflows button opens the page', async ({ browser
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+// Card 478 re-check (TesterKofi, on Ines 0b5f41e). The Backlog answers the two items the rows point at (B001 live,
+// B002 archived), so an Item link can land on its item.
+const bItem = (id: number, label: string, archivedAt: string | null) => ({
+  id, label, team: null, title: label === String(ID.spec) ? 'Workflows page' : 'Old item', body: '# x', state: archivedAt ? 'done' : 'declared', archivedAt,
+  dispatchedTeam: null, dispatchedWorkflow: null, dispatchedAt: null, inFlight: false, createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-02T00:00:00Z', dispatchCount: 1,
+});
+const B_LIVE = [bItem(901, String(ID.spec), null)];
+const B_ARCH = [bItem(902, String(ID.old), '2026-11-03T00:00:00Z')];
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`re-check 1280 ${theme}: F1 the Item column marks the match; the archived link opens the archive`, async ({ browser }) => {
+    answers['backlog.list'] = (p) => structuredClone(p?.archived ? B_ARCH : B_LIVE);
+    answers['backlog.item'] = (p) => ({ ...[...B_LIVE, ...B_ARCH].find((b) => b.id === Number(p?.id))!, dispatches: [] });
+    const { page, ctx, errors } = await open(browser, 'full', 1280, 800, theme);
+    await page.locator('[data-test=workflows-chip-all]').click();
+    const search = page.locator('[data-test=workflows-search]');
+    const link = (id: number) => row(page, id).locator('td.itm [data-test=workflow-item-link]');
+
+    // The full label.
+    await search.fill(String(ID.spec));
+    await expect(link(n('dispatched')).locator('mark')).toHaveText(String(ID.spec));
+    await expect(link(n('dispatched'))).toHaveText(String(ID.spec));
+    // Same look as the title cell's mark (the ink is inherited in both rules: the link's blue stays blue).
+    const look = (sel: string) => page.locator(sel).first().evaluate((e) => { const s = getComputedStyle(e); return [s.backgroundColor, s.boxShadow, s.borderRadius, s.paddingLeft].join('|'); });
+    await search.fill('workflows');
+    const titleLook = await look('[data-test=workflows-hit]');
+    await search.fill(String(ID.spec));
+    expect(await look(`[data-test=workflows-row][data-wf="${n('dispatched')}"] td.itm mark`)).toBe(titleLook);
+    if (shots) await page.screenshot({ path: path.join(shots, `c478r-f1-full-${theme}.png`) });
+
+    // A partial match: only 001 is marked.
+    await search.fill('001');
+    await expect(link(n('dispatched')).locator('mark')).toHaveText('001');
+    await expect(link(n('dispatched'))).toHaveText(String(ID.spec));
+    if (shots) await page.screenshot({ path: path.join(shots, `c478r-f1-partial-${theme}.png`) });
+
+    // The pane (another ItemLink user) is not marked while the row is.
+    await row(page, n('dispatched')).click();
+    const pane = page.locator('[data-test=workflow-pane]');
+    await expect(pane.locator('[data-test=workflow-item-link]')).toHaveText(String(ID.spec));
+    await expect(pane.locator('[data-test=workflow-item-link] mark')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // The archived item, lower case: marked, and the link opens the Backlog's archive at it.
+    await search.fill(String(ID.old).toLowerCase());
+    await expect(link(n('archived')).locator('mark')).toHaveText(String(ID.old));
+    if (shots) await page.screenshot({ path: path.join(shots, `c478r-f1-archived-${theme}.png`) });
+    await link(n('archived')).click();
+    await expect(page.locator('[data-test=workflows-view]')).toHaveCount(0);
+    await expect(page.locator('[data-test=backlog-tab-archived]').first()).toHaveClass(/on/);
+    await expect(page.locator('[data-test=backlog-row][aria-selected=true]')).toContainText(String(ID.old));
+    if (shots) await page.screenshot({ path: path.join(shots, `c478r-f1-archive-opened-${theme}.png`) });
+    expect(errors).toEqual([]);
+    await ctx.close();
+  });
+}
+
+for (const [w, h] of [[1280, 800], [375, 740]] as const) {
+  test(`re-check ${w}px: O2 Clear is hidden at the defaults and puts them back; Show all workflows goes to All`, async ({ browser }) => {
+    const { page, ctx, errors } = await open(browser, 'full', w, h, 'light');
+    const clear = page.locator('[data-test=workflows-clear]');
+    const chip = (c: string) => page.locator(`[data-test=workflows-chip-${c}]`);
+    await expect(chip('open')).toHaveAttribute('aria-selected', 'true');
+    await expect(clear).toHaveCount(0);
+    await chip('all').click();
+    await expect(clear).toBeVisible();
+    await page.locator('[data-test=workflows-team-filter]').selectOption(String(n('web')));
+    await page.locator('[data-test=workflows-search]').fill('lead');
+    if (shots) await page.screenshot({ path: path.join(shots, `c478r-o2-filtered-${w}.png`) });
+    await clear.click();
+    await expect(chip('open')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-test=workflows-search]')).toHaveValue('');
+    await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue('');
+    await expect(clear).toHaveCount(0);
+    await expect(page.locator('[data-test=workflows-row]')).toHaveCount(4);
+    // Nothing matches: the empty state's button goes to All.
+    await page.locator('[data-test=workflows-search]').fill('zzz-no-such');
+    await page.locator('[data-test=workflows-empty-clear]').click();
+    await expect(chip('all')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-test=workflows-search]')).toHaveValue('');
+    await expect(page.locator('[data-test=workflows-row]')).toHaveCount(7);
+    await expect(clear).toBeVisible();
+    expect(await noSideScroll(page)).toBe(true);
+    expect(errors).toEqual([]);
+    await ctx.close();
+  });
+}
