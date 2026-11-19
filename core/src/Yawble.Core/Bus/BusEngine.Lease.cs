@@ -27,7 +27,36 @@ public sealed record LeaseSnapshot(int Limit, IReadOnlyList<LeaseEntry> Holders,
 /// </summary>
 public sealed partial class BusEngine
 {
-    private sealed record LeaseHold(RunContext Run, string What, DateTimeOffset Since);
+    private sealed record LeaseHold(RunContext Run, string What, DateTimeOffset Since, LeaseUse Use);
+
+    /// <summary>
+    /// One use of the lease, for workflow_digest (B100): asked, given, given back. Kept in memory like the lease itself
+    /// (the newest <see cref="LeaseHistoryMax"/>), so a restart forgets them.
+    /// </summary>
+    internal sealed class LeaseUse(long workflow, string member, string what, DateTimeOffset askedAt)
+    {
+        public long Workflow { get; } = workflow;
+        public string Member { get; } = member;
+        public string What { get; } = what;
+        public DateTimeOffset AskedAt { get; } = askedAt;
+        public DateTimeOffset? GrantedAt { get; set; }
+        public DateTimeOffset? EndedAt { get; set; }
+    }
+
+    internal const int LeaseHistoryMax = 2000;
+    private readonly List<LeaseUse> _leaseHistory = [];
+
+    private LeaseUse NewLeaseUse(RunContext run, string what, DateTimeOffset now)
+    {
+        var use = new LeaseUse(run.Correlation, run.Member.Name, what, now);
+        _leaseHistory.Add(use);
+        if (_leaseHistory.Count > LeaseHistoryMax) _leaseHistory.RemoveRange(0, _leaseHistory.Count - LeaseHistoryMax);
+        return use;
+    }
+
+    /// <summary>The lease's uses in one workflow (under the gate).</summary>
+    private IReadOnlyList<Teams.DigestLease> LeaseUsesOf(long workflow) =>
+        [.. _leaseHistory.Where(u => u.Workflow == workflow).Select(u => new Teams.DigestLease(u.Member, u.What, u.AskedAt, u.GrantedAt, u.EndedAt))];
 
     private readonly List<LeaseHold> _leaseHolders = [];
     private readonly List<LeaseHold> _leaseQueue = [];
@@ -99,13 +128,14 @@ public sealed partial class BusEngine
                     {
                         if (_leaseQueue.Count == 0 && _leaseHolders.Count < HeavyAtOnce)
                         {
-                            var hold = new LeaseHold(run, step, now);
+                            var hold = new LeaseHold(run, step, now, NewLeaseUse(run, step, now));
+                            hold.Use.GrantedAt = now;
                             _leaseHolders.Add(hold);
                             Log($"lease: {run.Member.Qualified} holds it for \"{step}\"");
                             LeaseChanged?.Invoke();
                             return Granted(hold);
                         }
-                        _leaseQueue.Add(new LeaseHold(run, step, now));
+                        _leaseQueue.Add(new LeaseHold(run, step, now, NewLeaseUse(run, step, now)));
                         place = _leaseQueue.Count - 1;
                         run.IdleClock?.Hold();
                         Log($"lease: {run.Member.Qualified} queued for \"{step}\" at position {place + 1}");
@@ -117,6 +147,7 @@ public sealed partial class BusEngine
                 }
                 case "release":
                 {
+                    foreach (var gone in _leaseHolders.Concat(_leaseQueue).Where(h => h.Run.RunId == run.RunId)) gone.Use.EndedAt ??= now;
                     var held = _leaseHolders.RemoveAll(h => h.Run.RunId == run.RunId);
                     var queued = _leaseQueue.RemoveAll(q => q.Run.RunId == run.RunId);
                     _leaseNotices.TryRemove(run.RunId, out _);
@@ -151,12 +182,14 @@ public sealed partial class BusEngine
     /// </summary>
     private void TidyLease(DateTimeOffset now)
     {
+        foreach (var gone in _leaseQueue.Where(q => !_active.ContainsKey(q.Run.RunId))) gone.Use.EndedAt ??= now;
         var changed = _leaseQueue.RemoveAll(q => !_active.ContainsKey(q.Run.RunId)) > 0;
         foreach (var h in _leaseHolders.ToArray())
         {
             var ended = !_active.ContainsKey(h.Run.RunId);
             if (!ended && now - h.Since <= LeaseLimit) continue;
             _leaseHolders.Remove(h);
+            h.Use.EndedAt ??= now;
             changed = true;
             if (!ended)
             {
@@ -172,6 +205,7 @@ public sealed partial class BusEngine
             var next = _leaseQueue[0];
             _leaseQueue.RemoveAt(0);
             _leaseHolders.Add(next with { Since = now });
+            next.Use.GrantedAt = now;
             next.Run.IdleClock?.Resume(); // a full idle window from now
             _leaseNotices[next.Run.RunId] = $"You now hold the heavy-work lease for \"{next.What}\"; run it, then release.";
             Log($"lease: handed to {next.Run.Member.Qualified} for \"{next.What}\"");
