@@ -31,6 +31,15 @@ public interface IPullRequestProvider
 
     /// <summary>The open ones by head branch ("#7 Title"); null when the CLI is missing, fails or answers something unreadable.</summary>
     Task<IReadOnlyDictionary<string, string>?> OpenListAsync(string repoPath, CancellationToken ct);
+
+    /// <summary>
+    /// The arguments (after <see cref="Cli"/>) that open one from <paramref name="head"/> into <paramref name="baseBranch"/>: an
+    /// agent's pr_open, which the integration rules decide and the person may be asked about before it runs.
+    /// </summary>
+    IReadOnlyList<string> OpenArgs(string head, string baseBranch, string title, string body);
+
+    /// <summary>The arguments (after <see cref="Cli"/>) that list the pull requests of a head branch in any state: an agent's pr_status.</summary>
+    IReadOnlyList<string> StatusArgs(string head);
 }
 
 /// <summary>The pull request providers, chosen by the repository's provider: GitHub (gh), GitLab (glab), Azure DevOps (az repos).</summary>
@@ -114,6 +123,8 @@ public abstract class CliPullRequests(HostCliRunner run) : IPullRequestProvider
     public abstract Task<string> OpenAsync(string repoPath, string head, string baseBranch, string title, string body, CancellationToken ct);
     public abstract Task<PullRequestInfo> ViewAsync(string repoPath, long number, CancellationToken ct);
     public abstract Task<string> MergeAsync(string repoPath, long number, CancellationToken ct);
+    public abstract IReadOnlyList<string> OpenArgs(string head, string baseBranch, string title, string body);
+    public abstract IReadOnlyList<string> StatusArgs(string head);
 
     /// <summary>The arguments that list the open ones; <see cref="ReadList"/> reads the answer.</summary>
     protected abstract IReadOnlyList<string> ListArgs { get; }
@@ -165,15 +176,14 @@ public sealed class GitHubPullRequests(HostCliRunner run) : CliPullRequests(run)
     public override RepoProviderKind Kind => RepoProviderKind.GitHub;
     public override string Cli => "gh";
 
-    public static IReadOnlyList<string> CreateArgs(string head, string baseBranch, string title, string body) =>
+    public override IReadOnlyList<string> OpenArgs(string head, string baseBranch, string title, string body) =>
         ["pr", "create", "--head", head, "--base", baseBranch, "--title", title, "--body", body];
 
-    /// <summary>The pull requests of a head branch, any state (an agent's pr_status).</summary>
-    public static IReadOnlyList<string> StatusArgs(string head) =>
+    public override IReadOnlyList<string> StatusArgs(string head) =>
         ["pr", "list", "--head", head, "--state", "all", "--limit", "5", "--json", "number,title,state,url,reviewDecision,mergeable,statusCheckRollup"];
 
     public override Task<string> OpenAsync(string repoPath, string head, string baseBranch, string title, string body, CancellationToken ct) =>
-        RunAsync(repoPath, CreateArgs(head, baseBranch, title, body), ct);
+        RunAsync(repoPath, OpenArgs(head, baseBranch, title, body), ct);
 
     public override async Task<PullRequestInfo> ViewAsync(string repoPath, long number, CancellationToken ct)
     {
@@ -197,8 +207,14 @@ public sealed class GitLabMergeRequests(HostCliRunner run) : CliPullRequests(run
     public override RepoProviderKind Kind => RepoProviderKind.GitLab;
     public override string Cli => "glab";
 
+    public override IReadOnlyList<string> OpenArgs(string head, string baseBranch, string title, string body) =>
+        ["mr", "create", "--source-branch", head, "--target-branch", baseBranch, "--title", title, "--description", body, "--yes"];
+
+    public override IReadOnlyList<string> StatusArgs(string head) =>
+        ["mr", "list", "--source-branch", head, "--all", "--per-page", "5", "--output", "json"];
+
     public override Task<string> OpenAsync(string repoPath, string head, string baseBranch, string title, string body, CancellationToken ct) =>
-        RunAsync(repoPath, ["mr", "create", "--source-branch", head, "--target-branch", baseBranch, "--title", title, "--description", body, "--yes"], ct);
+        RunAsync(repoPath, OpenArgs(head, baseBranch, title, body), ct);
 
     public override async Task<PullRequestInfo> ViewAsync(string repoPath, long number, CancellationToken ct)
     {
@@ -224,11 +240,16 @@ public sealed class AzureDevOpsPullRequests(HostCliRunner run) : CliPullRequests
     public override RepoProviderKind Kind => RepoProviderKind.AzureDevOps;
     public override string Cli => "az";
 
+    public override IReadOnlyList<string> OpenArgs(string head, string baseBranch, string title, string body) =>
+        ["repos", "pr", "create", "--source-branch", head, "--target-branch", baseBranch, "--title", title,
+            .. body.Length > 0 ? new[] { "--description", body } : [], "--detect", "true", "--output", "json"];
+
+    public override IReadOnlyList<string> StatusArgs(string head) =>
+        ["repos", "pr", "list", "--source-branch", head, "--status", "all", "--top", "5", "--detect", "true", "--output", "json"];
+
     public override async Task<string> OpenAsync(string repoPath, string head, string baseBranch, string title, string body, CancellationToken ct)
     {
-        IReadOnlyList<string> args = ["repos", "pr", "create", "--source-branch", head, "--target-branch", baseBranch, "--title", title,
-            .. body.Length > 0 ? new[] { "--description", body } : [], "--detect", "true", "--output", "json"];
-        var text = await RunAsync(repoPath, args, ct);
+        var text = await RunAsync(repoPath, OpenArgs(head, baseBranch, title, body), ct);
         try
         {
             if (JsonNode.Parse(text) is JsonObject o && Num(o["pullRequestId"]) is > 0 and var id) return $"pull request {id}";
