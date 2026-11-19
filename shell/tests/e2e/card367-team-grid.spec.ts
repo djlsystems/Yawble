@@ -1,4 +1,4 @@
-﻿// Card 367 (verify B076, cards 365 + 366): the team page's members as a grid of equal tiles, in headless Chrome against
+// Card 367 (verify B076, cards 365 + 366): the team page's members as a grid of equal tiles, in headless Chrome against
 // the phone-remote fake core (remote.html, tests/e2e/phone). At 1280 px: two tiles per row by default with New member
 // last; the w / h handles resize every tile together and the size is kept in yawble.memberTiles across a reload (apart
 // from the Teams list's size); each MemberPane fills its tile, its view scrolling inside; at the narrowest tile the title
@@ -8,7 +8,7 @@
 //
 //   npx playwright test card367-team-grid      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/b076-team-grid (else test-results/b076-team-grid).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';

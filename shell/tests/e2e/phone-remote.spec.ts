@@ -8,7 +8,7 @@
 //
 //   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B037-screens (else test-results/B037-screens); the audit to test-results/b037-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { audit, type Audit } from './phone/audit';

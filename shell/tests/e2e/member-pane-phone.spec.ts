@@ -9,7 +9,7 @@
 // back to the Report.
 //
 //   npx playwright test member-pane-phone      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';

@@ -5,7 +5,7 @@
 // with full access and as a Visitor (read-only). Screenshots go to $YAWBLE_TEAM_DOCS/B104/verify.
 //
 //   npx playwright test card478-workflows-verify      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { answers, type Access } from './phone/fake-core';
