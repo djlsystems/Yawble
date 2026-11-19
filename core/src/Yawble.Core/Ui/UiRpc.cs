@@ -721,7 +721,7 @@ public sealed class UiRpc(
         return await MainRepoJsonAsync(repos, teamId, ct) ?? new JsonObject();
     }
 
-    /// <summary>git_web_link (B075): the web address of a commit, branch, file, compare or pull request, or { url: null }.</summary>
+    /// <summary>git.webLink (B075): the web address of a commit, branch, file, compare or pull request, or { url: null }.</summary>
     private async Task<JsonNode?> WebLinkAsync(JsonObject? p, CancellationToken ct)
     {
         // team: the team's id or its name (teamId also taken).

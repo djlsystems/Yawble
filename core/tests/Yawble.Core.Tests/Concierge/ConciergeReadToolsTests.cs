@@ -701,7 +701,7 @@ public class ConciergeReadToolsTests : IDisposable
         var silent = new ConciergeReadTools(_bus, (_, _, _) => Task.FromResult<JsonNode?>(null), _db.ConnectionString,
             (_, _) => Task.FromResult<IReadOnlyList<GitRepoTarget>>([target]), _git, (_, _) => Task.FromResult<IReadOnlyDictionary<string, string>?>(null), remote: false);
         var no = await silent.CallAsync("team_git", [], Ct);
-        Assert.Contains("Open pull requests: check not run (gh is not signed in", no);
+        Assert.Contains("Open pull requests: check not run (gh is not installed, not signed in or did not answer).", no);
         Assert.Contains("1 check(s) could not run", no);
     }
 
