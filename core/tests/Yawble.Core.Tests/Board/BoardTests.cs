@@ -289,4 +289,16 @@ public class BoardTests
         Assert.Equal(4, list["lanes"]!.AsArray().Count);
         Assert.Single(list["cards"]!.AsArray());
     }
+
+    /// <summary>B097 (card 437): "stopped" is a card status board.edit knows; it puts the card in In Progress, never Needs You.</summary>
+    [Fact]
+    public async Task EditingACardToStopped_IsKnown_AndInProgress()
+    {
+        await using var rig = await Rig.StartAsync();
+        var card = rig.Store.AddCard("payments", "Manager", null, "Ship it", "", "queued", Lanes.Todo, null);
+        var after = (await rig.Call("board.edit", new { id = card.Id, status = "stopped" }))!;
+        Assert.Equal(("stopped", Lanes.InProgress), (after["status"]!.GetValue<string>(), after["lane"]!.GetValue<string>()));
+        var bad = await Assert.ThrowsAsync<RpcException>(() => rig.Call("board.edit", new { id = card.Id, status = "halted" }));
+        Assert.Equal("bad_params", bad.Code);
+    }
 }

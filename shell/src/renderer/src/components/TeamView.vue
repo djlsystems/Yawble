@@ -25,6 +25,7 @@ import TeamManageDialog from './TeamManageDialog.vue';
 import DocumentsDialog from './DocumentsDialog.vue';
 import CodeDialog from './CodeDialog.vue';
 import { closeCode, openCode } from '../codeDialog';
+import { gitRequest } from '../commitView';
 import TeamSyncBanner from './TeamSyncBanner.vue';
 import { renderMarkdown } from '../markdown';
 import { asksForApproval, questionMarkdown, questionOptions } from '../questionFormat';
@@ -60,6 +61,14 @@ const error = ref<string | null>(null);
 const refreshError = ref<string | null>(null);
 const showTriggers = ref(false);
 const showGit = ref(false);
+// B072: the Commit view's Compare with main / Show its branch open this team's Git dialog (at the commit's branch).
+const gitBranch = ref<string | null>(null);
+watch(gitRequest, (r) => {
+  if (!r || r.team !== props.team.name) return;
+  gitBranch.value = r.focus === 'branch' ? r.branch : null;
+  showGit.value = true;
+  gitRequest.value = null;
+}, { immediate: true });
 const showWorkflows = ref(false);
 const showManage = ref(false);
 const showDocs = ref(false);
@@ -234,7 +243,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
 </script>
 
 <template>
-  <section class="team" :class="{ phone }">
+  <section class="team" :class="{ phone }" :data-commit-team="team.name">
     <header class="teamhead">
       <!-- One line: the name and three counts. The "·" separators stay in the text (what the title reads as, and what
            tests read) but are hidden: the counts show as chips. -->
@@ -277,7 +286,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
     <!-- A phone (card 282): the "commits behind" bar goes under Tell the Manager, so Tell stays the first row. -->
     <TeamSyncBanner v-if="!phone" :key="team.id" :api="api" :team="team" />
     <TriggersDialog v-if="showTriggers" :api="api" :team="team" :agents="cards" @close="showTriggers = false" />
-    <GitDialog v-if="showGit" :api="api" :team="team" @close="showGit = false" />
+    <GitDialog v-if="showGit" :api="api" :team="team" :focus-branch="gitBranch" @close="showGit = false; gitBranch = null" />
     <WorkflowsDialog v-if="showWorkflows" :key="workflowFocus ?? 0" :api="api" :team="team" :poll-ms="pollMs" :focus="workflowFocus" @close="showWorkflows = false" />
     <DocumentsDialog v-if="showDocs" :api="api" :team="team" @close="showDocs = false" />
     <CodeDialog :api="api" />

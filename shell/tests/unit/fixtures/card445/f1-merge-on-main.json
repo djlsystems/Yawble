@@ -1,0 +1,41 @@
+{
+  "found": true,
+  "sha": "a98880a6d167cc34bbd32135098b04d8dcfb9440",
+  "shortSha": "a98880a6d167",
+  "title": "Merge branch \u0027feature/login\u0027",
+  "body": "",
+  "author": {
+    "name": "Person",
+    "email": "p@example.invalid",
+    "date": "2026-11-18T19:29:10-05:00"
+  },
+  "isMerge": true,
+  "parents": [
+    "e692c8b9b963bd19650263dcf11c7b37db487d5c",
+    "5168eb78a0163beb43d669ec564e087a84f1f259"
+  ],
+  "merge": {
+    "intoBranch": "main",
+    "fromBranch": "feature/login",
+    "commitCount": 1
+  },
+  "where": {
+    "inMain": true,
+    "branches": [
+      "team/alpha"
+    ],
+    "otherBranches": [],
+    "pushed": false,
+    "tags": []
+  },
+  "files": [
+    {
+      "path": "login.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "codeShown": true
+}

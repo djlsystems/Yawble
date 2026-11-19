@@ -17,10 +17,18 @@ import { CodeMap, codeEventKey, shortSha, type CodeEvent } from './codemap';
  * bursts larger, a push pulses off the edge of the wall.
  */
 
-export type FeedKind = 'instruction' | 'completed' | 'failed' | 'handback' | 'progress' | 'blocked' | 'decision' | 'done';
+/** stopped (B097): a run the person stopped - a neutral step, never a failure and never "needs you". */
+export type FeedKind = 'instruction' | 'completed' | 'failed' | 'stopped' | 'handback' | 'progress' | 'blocked' | 'decision' | 'done';
 
 export interface FeedRow {
   seq: number; kind: FeedKind; team: string; member: string | null; from: string; text: string | null; workflow: number; at: string;
+  /** B097: a failed run's class (a run the person stopped may come as kind "failed" with class "stopped"). */
+  failureClass?: string | null;
+}
+
+/** B097: a row's kind as the Monitor shows it: a "failed" row whose class is "stopped" is a stopped run. */
+export function feedKindOf(row: Pick<FeedRow, 'kind'> & { failureClass?: string | null }): FeedKind {
+  return row.kind === 'failed' && row.failureClass === 'stopped' ? 'stopped' : row.kind;
 }
 
 export interface MemberSnapshot {
@@ -52,7 +60,7 @@ export type Effect =
   | { kind: 'push'; team: string; at: number };
 
 /** The wall's colours for what happens (the scene reads the hex values from CSS). */
-export type Tone = 'tell' | 'start' | 'progress' | 'done' | 'handback' | 'fail' | 'blocked' | 'decision' | 'person' | 'edit' | 'commit';
+export type Tone = 'tell' | 'start' | 'progress' | 'done' | 'handback' | 'fail' | 'stopped' | 'blocked' | 'decision' | 'person' | 'edit' | 'commit';
 
 /** A line of the activity list: a bus message (key "m<seq>"), or a member's file changes gathered ("f<step id>"). */
 export interface ActivityRow { key: string; seq: number; tone: Tone; team: string; member: string | null; verb: string; who: string; text: string | null; at: string }
@@ -83,6 +91,7 @@ const verbs: Record<FeedKind, { verb: string; tone: Tone }> = {
   instruction: { verb: 'told', tone: 'tell' },
   completed: { verb: 'finished a run', tone: 'done' },
   failed: { verb: 'run failed', tone: 'fail' },
+  stopped: { verb: 'run stopped by you', tone: 'stopped' },
   handback: { verb: 'handed back', tone: 'handback' },
   progress: { verb: 'progress', tone: 'progress' },
   blocked: { verb: 'is blocked', tone: 'blocked' },
@@ -277,7 +286,10 @@ export class MonitorModel {
   }
 
   /** Applies a feed row: an effect for the scene and a line for the activity list. */
-  apply(row: FeedRow, now: number, live = true): void {
+  apply(input: FeedRow, now: number, live = true): void {
+    // A run the person stopped may come as kind "failed" with class "stopped": it plays as stopped (B097).
+    const kind = feedKindOf(input);
+    const row = kind === input.kind ? input : { ...input, kind };
     const v = verbs[row.kind];
     const target = row.member ? memberKey(row.team, row.member) : teamKey(row.team);
     const whoName = row.kind === 'instruction' ? row.member ?? row.team : row.member ?? row.from;
@@ -302,7 +314,7 @@ export class MonitorModel {
     this.recent.push(now);
     // The member's run is over: so is any command it was running.
     const run = this.runs.get(target);
-    if (run && run.ended === null && (row.kind === 'completed' || row.kind === 'failed' || row.kind === 'handback' || row.kind === 'blocked')) run.ended = now;
+    if (run && run.ended === null && (row.kind === 'completed' || row.kind === 'failed' || row.kind === 'stopped' || row.kind === 'handback' || row.kind === 'blocked')) run.ended = now;
     const told = this.told.get(target);
     const back = (mark: 'check' | 'cross', color: Tone, words: string) => {
       if (!row.member) return;
@@ -327,6 +339,11 @@ export class MonitorModel {
       case 'failed':
         this.effects.push({ kind: 'burst', node: target, color: 'fail', big: true, at: now });
         back('cross', 'fail', 'failed');
+        break;
+      case 'stopped':
+        // B097: the person stopped it - a small neutral burst and a word; no cross carried home, no sound, no need-you.
+        this.effects.push({ kind: 'burst', node: target, color: 'stopped', big: false, at: now });
+        this.effects.push({ kind: 'float', node: target, color: 'stopped', text: 'stopped', at: now });
         break;
       case 'blocked':
         this.effects.push({ kind: 'burst', node: target, color: 'blocked', big: true, at: now });

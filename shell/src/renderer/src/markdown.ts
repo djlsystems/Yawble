@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it';
+import { commitParts, isCommitId } from './commitView';
 
 // Agent-written markdown, rendered inside a window that can reach the app's API: raw HTML is NOT allowed (html: false
 // escapes it), markdown-it's own link validation refuses javascript:, vbscript:, file: and most data: URLs, and links
@@ -36,6 +37,39 @@ for (const rule of ['fence', 'code_block'] as const) {
       + `</div>`;
   };
 }
+
+// B072: a commit ID in the text (or alone in inline code) opens the Commit view. It becomes our own markup around the
+// escaped ID, never a web link: <a role="button" data-commit="<id>">, which App.vue's click handler opens (openCommit).
+// IDs inside a link, a code block or a longer inline code stay as they are.
+const commitAnchor = (sha: string, inner: string) =>
+  `<a role="button" tabindex="0" class="commit-link" data-commit="${sha}" data-test="commit-link" title="Open commit ${sha}">${inner}</a>`;
+md.core.ruler.push('commit_ids', (state) => {
+  for (const block of state.tokens) {
+    if (block.type !== 'inline' || !block.children) continue;
+    const out: typeof block.children = [];
+    let inLink = 0;
+    for (const t of block.children) {
+      if (t.type === 'link_open') inLink++;
+      if (t.type === 'link_close') inLink--;
+      if (!inLink && t.type === 'code_inline' && isCommitId(t.content.trim()) && t.content.trim() === t.content.trim().toLowerCase()) {
+        const sha = t.content.trim();
+        const tok = new state.Token('html_inline', '', 0);
+        tok.content = commitAnchor(sha, `<code>${sha}</code>`);
+        out.push(tok);
+        continue;
+      }
+      if (inLink || t.type !== 'text') { out.push(t); continue; }
+      const parts = commitParts(t.content);
+      if (!parts.some((p) => p.sha)) { out.push(t); continue; }
+      for (const p of parts) {
+        const tok = new state.Token(p.sha ? 'html_inline' : 'text', '', 0);
+        tok.content = p.sha ? commitAnchor(p.sha, p.sha) : p.text;
+        out.push(tok);
+      }
+    }
+    block.children = out;
+  }
+});
 
 export function renderMarkdown(text: string): string {
   return md.render(text);

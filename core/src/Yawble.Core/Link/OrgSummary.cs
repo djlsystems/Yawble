@@ -12,8 +12,10 @@ public sealed record OrgComputer(string Name, string? Label, string Version, str
 /// <summary>An agent that is running now: who, its role, what it is doing (its card, or its workflow), since when.</summary>
 public sealed record OrgRunningAgent(string Member, string Role, string? Doing, DateTimeOffset? Since);
 
-/// <summary>One agent of a team, as the summary counts it: state running | queued | idle, and whether its last run failed.</summary>
-public sealed record OrgAgent(string Member, string Role, string State, bool LastRunFailed, string? Doing = null, DateTimeOffset? Since = null);
+/// <summary>One agent of a team, as the summary counts it: state running | queued | idle, whether its last run failed, and
+/// whether the person stopped its last run (B097: a stopped run is not a failure).</summary>
+public sealed record OrgAgent(string Member, string Role, string State, bool LastRunFailed, string? Doing = null, DateTimeOffset? Since = null,
+    bool LastRunStopped = false);
 
 /// <summary>A team and its agents; <paramref name="WorkflowExpiryDays"/> is its setting (B085: an open workflow nobody works expires after it).</summary>
 public sealed record OrgTeam(string Name, bool Paused, bool Archived, IReadOnlyList<OrgAgent> Agents,
@@ -117,6 +119,8 @@ public static class OrgSummary
                 // An idle agent whose last run failed counts as errored, not idle.
                 ["idle"] = idle.Count(a => !a.LastRunFailed),
                 ["errored"] = idle.Count(a => a.LastRunFailed),
+                // B097: an idle agent whose last run the person stopped: counted in idle (not errored), and said here.
+                ["stopped"] = idle.Count(a => a.LastRunStopped && !a.LastRunFailed),
             },
             ["running"] = new JsonArray(running.Select(a => (JsonNode)new JsonObject
             {

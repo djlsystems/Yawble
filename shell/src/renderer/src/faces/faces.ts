@@ -101,20 +101,27 @@ export function initials(name: string): string {
   return (words[0]!.slice(0, 1) + words[words.length - 1]!.slice(0, 1)).toUpperCase();
 }
 
-/** A member's state as its ring shows it, loudest first. */
-export type MemberState = 'decision' | 'blocked' | 'failed' | 'running' | 'waiting' | 'idle';
+/**
+ * A member's state as its ring shows it, loudest first. stopped (B097): the person stopped its last run - a neutral
+ * ring that does not throb, never a failure and never "needs you".
+ */
+export type MemberState = 'decision' | 'blocked' | 'failed' | 'running' | 'waiting' | 'stopped' | 'idle';
 
-export function memberStateOf(card: Pick<AgentCard, 'state' | 'attention'>): MemberState {
+export function memberStateOf(card: Pick<AgentCard, 'state' | 'attention'> & Partial<Pick<AgentCard, 'lastRunFailureClass'>>): MemberState {
   if (card.attention === 'decision') return 'decision';
   if (card.attention === 'blocked') return 'blocked';
-  if (card.attention === 'failed') return 'failed';
+  // A run the person stopped is recorded failed with class "stopped": it is stopped, whichever the core sent.
+  const stopped = card.attention === 'stopped' || (card.attention === 'failed' && card.lastRunFailureClass === 'stopped');
+  if (card.attention === 'failed' && !stopped) return 'failed';
   if (card.state === 'running') return 'running';
   if (card.state === 'queued') return 'waiting';
+  if (stopped) return 'stopped';
   return 'idle';
 }
 
 export const MemberStateLabel: Record<MemberState, string> = {
-  decision: 'Needs you', blocked: 'Blocked', failed: 'Last run failed', running: 'Running', waiting: 'Waiting to start', idle: 'Idle',
+  decision: 'Needs you', blocked: 'Blocked', failed: 'Last run failed', running: 'Running', waiting: 'Waiting to start',
+  stopped: 'Stopped', idle: 'Idle',
 };
 
 /**

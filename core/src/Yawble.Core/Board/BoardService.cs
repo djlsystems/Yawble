@@ -139,7 +139,8 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         var runs = new Dictionary<long, IReadOnlyList<RunSpan>>();
         foreach (var card in store.Cards(team).Where(c => includeCleared || (c.ClearedAt is not null) == cleared))
         {
-            // A member running right now is working on its newest open card, though no message has said so yet.
+            // A member running right now is working on its newest open card, though no message has said so yet. Only a
+            // queued card: a "stopped" one (B097) stays stopped until new work re-queues it.
             var shown = card;
             if (card.Member is { } m && running.TryGetValue($"{card.Team}/{m}", out var state) && state.State == "running"
                 && card.Status == "queued" && open.Add(card.Id) && store.OpenCardOf(card.Team, m)?.Id == card.Id)

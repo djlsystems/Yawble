@@ -43,6 +43,7 @@
   /* Kanban card statuses (board/cards.ts StatusColor) */
   --status-queued: #64748b; --status-running: #2563eb; --status-blocked: #b45309; --status-decision: #c2410c;
   --status-failed: #b91c1c; --status-completed: #0f766e; --status-done: #15803d;
+  --status-stopped: var(--state-stopped); /* B097: a run the person stopped, the neutral member-state colour */
   /* fenced code blocks in markdown: dark in both themes */
   --code-block-bg: #1f2430; --code-block-ink: #e7e9ee; --code-block-muted: #9aa3b5; --code-block-control: #c3c9d6;
   --code-block-hover: #323949; --code-block-ok: #7ad19b;
@@ -54,6 +55,8 @@
   /* Member states, as the faces' rings and the Monitor show them. */
   --state-running: #2e7d4f; --state-waiting: #5f7385; --state-decision: #7a4fc4; --state-blocked: #b26a00;
   --state-failed: #c62828; --state-idle: #8a847c;
+  /* B097: a run the person stopped - neutral slate, never the failure red. */
+  --state-stopped: #6b7280;
   /* B086: the timeline's categories (timeline/time.ts TimeCategories), one token each. Stalled is Agent working's hue,
      drawn hatched (timeline.css), so it reads apart from it without a colour of its own. */
   --tl-agent-working: #2e7d4f; --tl-stalled: #2e7d4f; --tl-waiting-on-you: #7a4fc4; --tl-waiting-for-slot: #0891b2;
@@ -86,6 +89,7 @@
   --chip-claude-bg: #3a2a1e; --chip-claude-ink: #e8a878; --chip-grok-bg: #222b45; --chip-grok-ink: #a8b8ec;
   --status-queued: #94a3b8; --status-running: #6b9cf8; --status-blocked: #e5a04f; --status-decision: #f0884f;
   --status-failed: #f2736d; --status-completed: #2dbfa8; --status-done: #4fca7a;
+  --status-stopped: var(--state-stopped);
   --code-block-bg: #111419; --code-block-ink: #e7e9ee; --code-block-muted: #9aa3b5; --code-block-control: #c3c9d6;
   --code-block-hover: #262b36; --code-block-ok: #7ad19b;
   --console-bg: #0c0f13; --console-ink: #d8dee9; --console-ink-strong: #eef2f7; --console-text: #c9d4e3; --console-soft: #9aa6b8;
@@ -100,7 +104,7 @@
    from <html>, so it keeps the light values in both themes; the .monitor block above resets them for its DOM. */
 :root[data-theme="dark"] body {
   --state-running: #4cc47f; --state-waiting: #93a6b8; --state-decision: #b493f0; --state-blocked: #e09a3e;
-  --state-failed: #f2736d; --state-idle: #a8a299;
+  --state-failed: #f2736d; --state-idle: #a8a299; --state-stopped: #a3aab6;
 }
 
 /* Card 334: a phone browser enlarges text in landscape unless told not to; the page keeps its own sizes in every

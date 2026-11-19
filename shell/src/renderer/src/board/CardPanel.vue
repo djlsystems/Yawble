@@ -6,7 +6,9 @@ import { errorText, resolveApi } from '../api';
 import { renderMarkdown } from '../markdown';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName } from '../faces/faces';
-import { ago, cardFace, StatusColor, StatusLabel } from './cards';
+import { commitParts } from '../commitView';
+import CommitLink from '../components/CommitLink.vue';
+import { ago, cardFace, cardStatusLook, StatusLabel, trailKind } from './cards';
 import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
 import { cardPrompt, discussWithConcierge } from '../conciergeDiscuss';
@@ -30,9 +32,14 @@ const status = ref<CardStatus>('queued');
 const lane = ref<LaneId>('todo');
 const note = ref('');
 const comment = ref('');
-const statuses: CardStatus[] = ['queued', 'running', 'blocked', 'needs-decision', 'failed', 'completed', 'handback', 'done'];
+const settable: CardStatus[] = ['queued', 'running', 'blocked', 'needs-decision', 'failed', 'completed', 'handback', 'done'];
+// 'stopped' (B097) is set by the core when the person stops a run; it is offered only on a card that already has it,
+// so the select shows "Stopped" instead of a blank.
+const statuses = computed<CardStatus[]>(() => (card.value?.status === 'stopped' ? [...settable, 'stopped'] : settable));
 
 const body = computed(() => (card.value?.body ? renderMarkdown(card.value.body) : ''));
+// The status chip: a run the person stopped reads "Stopped" in the neutral colour, not "Failed" in red (B097).
+const look = computed(() => (card.value ? cardStatusLook(card.value) : null));
 
 async function load() {
   // Another card than the one shown: the panel shows the loading state, not the old card, until it arrives.
@@ -95,7 +102,7 @@ defineExpose({ load });
           · card {{ card.id }}<template v-if="card.workflow"> · workflow #{{ card.workflow }}</template>
         </div>
         <button v-if="card" class="discuss" title="Talk this card through with the Concierge" data-test="card-discuss"
-          @click="discussWithConcierge(card.teamId, cardPrompt(card, lanes.find((l) => l.id === card!.lane)?.label ?? card.lane, StatusLabel[card.status]))">Discuss with the Concierge</button>
+          @click="discussWithConcierge(card.teamId, cardPrompt(card, lanes.find((l) => l.id === card!.lane)?.label ?? card.lane, look?.label ?? StatusLabel[card.status]))">Discuss with the Concierge</button>
       </div>
       <button class="icon" title="Close" data-test="card-close" @click="emit('close')">✕</button>
     </header>
@@ -103,12 +110,12 @@ defineExpose({ load });
     <LoadingNote v-if="!card && !error" text="Loading the card…" />
     <template v-if="card">
       <div class="chips">
-        <span class="chip" :style="{ color: StatusColor[card.status], borderColor: StatusColor[card.status] }">{{ StatusLabel[card.status] }}</span>
+        <span class="chip" data-test="card-status-chip" :data-stopped="look?.stopped || undefined" :style="{ color: look?.color, borderColor: look?.color }">{{ look?.label }}</span>
         <span class="chip">{{ lanes.find((l) => l.id === card!.lane)?.label }}</span>
         <span v-if="card.item" class="chip item" :title="card.itemTitle">{{ card.item }}<template v-if="card.itemTitle">: {{ card.itemTitle }}</template></span>
         <span v-if="card.awaitingManager" class="chip waiting">awaiting Manager</span>
       </div>
-      <div v-if="body" class="md body" v-html="body"></div>
+      <div v-if="body" class="md body" :data-commit-team="card.team" v-html="body"></div>
 
       <section class="edit">
         <h4>Change it <span class="muted">(the Manager is told and acts on it)</span></h4>
@@ -133,11 +140,11 @@ defineExpose({ load });
       <section class="trail">
         <h4>Trail</h4>
         <ol>
-          <li v-for="t in card.trail" :key="t.id" :title="t.kind">
+          <li v-for="t in card.trail" :key="t.id" :title="trailKind(t)" data-test="card-trail-line">
             <span class="who">{{ t.source === 'you' ? 'You' : displayName(t.source) }}</span>
-            <span class="kind">{{ t.kind }}</span>
+            <span class="kind" :class="{ stopped: trailKind(t) === 'stopped' }">{{ trailKind(t) }}</span>
             <span class="muted when">{{ ago(t.at) }}</span>
-            <div class="txt">{{ t.text }}</div>
+            <div class="txt"><template v-for="(p, pi) in commitParts(t.text)" :key="pi"><CommitLink v-if="p.sha" :team="card.team" :sha="p.sha" :length="40" /><template v-else>{{ p.text }}</template></template></div>
           </li>
           <li v-if="!card.trail.length" class="muted">Nothing yet.</li>
         </ol>
@@ -170,6 +177,7 @@ h4 { margin: 6px 0; font-size: 13px; }
 .trail li { font-size: 12.5px; border-left: 2px solid var(--line); padding-left: 8px; }
 .who { font-weight: 600; margin-right: 6px; }
 .kind { font-size: 11px; color: var(--accent); margin-right: 6px; }
+.kind.stopped { color: var(--state-stopped); }
 .when { font-size: 11px; }
 .txt { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-soft); }
 .muted { color: var(--muted); font-weight: 400; }

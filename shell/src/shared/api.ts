@@ -762,6 +762,47 @@ export interface TidyPlan { repos: TidyRepo[] }
  * the team repository (and origin). expectOld / expectNew bind the yes to the team and clone commits the person was
  * shown: the core refuses with code "stale" if either moved. Also refused (an error) while the member runs. */
 export interface BranchRealignResult { oldSha: string; newSha: string }
+/**
+ * B072 git.commitShow {team | teamId, sha, repo?} (core TeamRepos.CommitView.cs CommitInfo.ToJson): one commit of the
+ * team's repository, from plain git (never an agent's clone). sha: 4 to 64 hex digits, else the error bad_params.
+ * found=false: git no longer has it; the answer is then only {found, goneReason, sha} (goneReason is plain words and
+ * may name the branch and member). made: the member, card and workflow that made it (the app's own records); absent
+ * when unknown; a merge recorded on the team branch is credited to the Manager. merge: what a merge brought in;
+ * intoBranch / fromBranch are null when neither git nor the app's records can tell. where: inMain; branches: the team
+ * branch first, then member branches, never main; otherBranches: the other local branches that hold it (not main, the team\n * branch or members/*; absent from an older core, read as []); onlyOnMember only when it is in neither main nor the team branch;
+ * pushed (on origin); tags (the release tags that contain it). files: against the first parent for a merge.
+ * codeShown=false: a cloud viewer with "Show members' code to cloud viewers" off; the file list only, no diffs.
+ */
+export interface CommitPerson { name: string; email: string; date: string }
+export type CommitFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+export interface CommitFile { path: string; oldPath?: string | null; status: CommitFileStatus | string; added: number; deleted: number; binary: boolean }
+export interface CommitGone { found: false; goneReason?: string | null; sha: string }
+export interface CommitFound {
+  found: true;
+  sha: string; shortSha: string; title: string; body: string;
+  author: CommitPerson; committer?: CommitPerson | null;
+  isMerge: boolean; parents: string[];
+  merge?: { intoBranch: string | null; fromBranch: string | null; fromMember?: string | null; commitCount: number } | null;
+  made?: { member: string; card?: number | null; workflow?: number | null } | null;
+  where: { inMain: boolean; branches: string[]; otherBranches?: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[] };
+  files: CommitFile[];
+  codeShown: boolean;
+}
+export type CommitShow = CommitGone | CommitFound;
+/**
+ * B072 git.commitDiff {team | teamId, sha, path, repo?} (core CommitFileDiff.ToJson): one file's diff against the first
+ * parent. Each hunk: git's header line, its starts and counts, and its lines (kind context / added / deleted; old / new:
+ * the 1-based line numbers, only on the side(s) the line is on). Binary, over 5000 changed lines or 2M characters, or a
+ * pure rename: a summary and no hunks. Errors: gone, no_such_file, bad_params, git_failed; remote_refused for a cloud
+ * viewer when members' code is hidden.
+ */
+export interface CommitDiffLine { kind: 'context' | 'added' | 'deleted'; old?: number | null; new?: number | null; text: string }
+export interface CommitDiffHunk { header: string; oldStart: number; oldCount: number; newStart: number; newCount: number; lines: CommitDiffLine[] }
+export interface CommitDiff {
+  path: string; oldPath?: string | null; status: CommitFileStatus | string; binary: boolean; tooLarge: boolean; summary?: string | null;
+  added: number; deleted: number; hunks: CommitDiffHunk[];
+}
+
 /** teams.syncToBase: the team's "Bring branches up to <base> before new work" setting, the note of a sync or fetch-back
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {
@@ -790,10 +831,18 @@ export interface AgentCard {
   member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'queued' | 'idle'; queuePosition: number | null; queueLength: number;
   queuedInstructions: number; statusLine: string | null; runId: number | null; runStartedAt: string | null;
   lastRunState: string | null; lastRunReason: string | null;
+  /**
+   * B097: the last run's failure class (core FailureClasses: failed, timeout, idle, stopped, credential, start_failed,
+   * interrupted, rate); null when it did not fail. "stopped": the person stopped it (recorded failed, never a failure).
+   */
+  lastRunFailureClass?: RunFailureClass | null;
   /** The heavy-work lease: this member's run holds it or waits in its queue (position), for what step. */
   lease?: 'holding' | 'waiting' | null; leaseWhat?: string | null; leasePosition?: number | null;
-  /** What the member needs from a person, loudest first: an open question, blocked, its last run failed (core UiRpc.Attention). */
-  attention?: 'decision' | 'blocked' | 'failed' | null;
+  /**
+   * What the member needs from a person, loudest first: an open question, blocked, its last run failed (core
+   * UiRpc.Attention). "stopped" (B097): the person stopped its last run; shown neutral, never as needing the person.
+   */
+  attention?: 'decision' | 'blocked' | 'failed' | 'stopped' | null;
   net?: string; wallTimeout?: string; loosened?: string[]; policyProblems?: string[];
   /** The member has a working copy (clone) on this computer: its card offers the Code browser (teams.agents). */
   hasClone?: boolean;
@@ -856,6 +905,20 @@ export interface TerminalBanner {
   /** The member holds or waits for an INTERACTIVE session (never a headless run). */
   interactive?: boolean;
   lastRunState: string | null; lastRunReason: string | null;
+  /** B097: the last run's failure class, as AgentCard.lastRunFailureClass. */
+  lastRunFailureClass?: RunFailureClass | null;
+}
+
+/** B097: a failed run's class (core Bus/Messages.cs FailureClasses); a string for a class this shell does not know. */
+export type RunFailureClass = 'failed' | 'timeout' | 'idle' | 'stopped' | 'credential' | 'start_failed' | 'interrupted' | 'rate' | (string & {});
+
+/**
+ * B097: whether a run (a member's last run, a feed row, a run row) was stopped by the person: failure class "stopped",
+ * even when its state still says "failed" (the core records a stopped run as failed with class "stopped").
+ */
+export function isStoppedRun(r: { state?: string | null; failureClass?: string | null; attention?: string | null } | null | undefined): boolean {
+  if (!r) return false;
+  return r.attention === 'stopped' || r.failureClass === 'stopped' || r.state === 'stopped';
 }
 
 // ---- the Concierge (core: Concierge/ConciergeService.cs) ----
@@ -934,7 +997,8 @@ export interface ConciergeTurnEvent {
 }
 
 // ---- the Board (core Board/BoardService.cs): cards in four lanes, and the backlog ----
-export type CardStatus = 'queued' | 'running' | 'blocked' | 'needs-decision' | 'failed' | 'completed' | 'handback' | 'done';
+/** 'stopped' (B097): the person stopped the card's run; lane In Progress / To Do, never Needs you, never red. */
+export type CardStatus = 'queued' | 'running' | 'blocked' | 'needs-decision' | 'failed' | 'completed' | 'handback' | 'done' | 'stopped';
 export type LaneId = 'todo' | 'in-progress' | 'blocked' | 'done';
 export interface BoardCard {
   id: number; team: string; teamId: number | null; member: string | null; item: string | null; title: string; body: string;
@@ -942,7 +1006,7 @@ export interface BoardCard {
   createdAt: string; updatedAt: string; trailCount: number;
   /** When the person cleared this Done card from the board view (0037); null or absent when it shows. */
   clearedAt?: string | null;
-  memberState?: { state: AgentCard['state']; attention: AgentCard['attention'] };
+  memberState?: { state: AgentCard['state']; attention: AgentCard['attention']; lastRunFailureClass?: AgentCard['lastRunFailureClass'] };
   /** The heavy-work lease of the card's member, on the card it is working on only: held, or waited for (queue position). */
   lease?: { state: 'holding' | 'waiting'; what: string | null; position: number | null };
   /** B086: its overall time and breakdown, computed by the core (older cores: absent). */

@@ -81,6 +81,8 @@ public static class RemoteAccess
             "git.status", "git.check", "git.tidyPlan",
             // B075: the web address of a commit, branch, file, compare or pull request (reads only).
             "git.webLink",
+            // B072, the commit view: a commit and its file list; a file's diff only while members' code is shown (below).
+            "git.commitShow", "git.commitDiff",
             "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
             "guardrail.get",
             "agents.detect", "agents.testSessions", "agents.commandLine", "agents.defaultModels", "agents.models", "agents.resolveModel",
@@ -165,6 +167,18 @@ public static class RemoteAccess
     /// <summary>The field a get-or-set call carries when it sets its setting (B085 teams.workflowExpiry: "days"; the rest "on").</summary>
     public static string SetKey(string method) => method == "teams.workflowExpiry" ? "days" : "on";
 
+    /// <summary>What a cloud viewer reads when members' code is not shown (Settings > Cloud Link) and a call would show it.</summary>
+    public const string CodeHidden = "members' code is not shown to cloud viewers; the person can turn it on in the app on the computer (Settings > Cloud Link)";
+
+    /// <summary>
+    /// A relayed call's answer as a cloud viewer may see it. B072: with members' code not shown, git.commitShow keeps the
+    /// commit and its file list and says codeShown = false (its diffs, git.commitDiff, are refused above).
+    /// </summary>
+    public static void ShapeResult(string method, JsonNode? result, bool showCode)
+    {
+        if (method == "git.commitShow" && !showCode && result is JsonObject commit && commit.ContainsKey("codeShown")) commit["codeShown"] = false;
+    }
+
     /// <summary>Null when the call is allowed for a viewer with this access; otherwise the reason, as the remote person reads it.</summary>
     /// <param name="access"><see cref="Full"/> or <see cref="Read"/> (<see cref="AccessOf"/>): a read-only viewer's change call gets
     /// <see cref="ReadOnlyRefusal"/>, whatever else would refuse it; a read goes on to the checks every viewer has.</param>
@@ -180,8 +194,8 @@ public static class RemoteAccess
     public static string? Refusal(string method, JsonObject? parameters, bool allowHostTerminals, Func<string, bool>? isIntegration = null, Func<string, bool>? isRemoteMcp = null,
         bool showCode = true)
     {
-        if (method.StartsWith("code.", StringComparison.Ordinal) && !showCode)
-            return "members' code is not shown to cloud viewers; the person can turn it on in the app on the computer (Settings > Cloud Link)";
+        if ((method.StartsWith("code.", StringComparison.Ordinal) || method == "git.commitDiff") && !showCode)
+            return CodeHidden;
         // yawble-companion is local only: never paired, approved, listed or revoked from the Cloud Link.
         if (method.StartsWith("companion.", StringComparison.Ordinal))
             return "yawble-companion is paired, approved and revoked on the computer itself";

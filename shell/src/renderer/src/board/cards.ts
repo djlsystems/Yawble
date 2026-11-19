@@ -4,7 +4,7 @@ import { memberStateOf, type MemberState } from '../faces/faces';
 /** How each status reads and its colour token (the lane comes from the core). */
 export const StatusLabel: Record<CardStatus, string> = {
   queued: 'Queued', running: 'Running', blocked: 'Blocked', 'needs-decision': 'Needs your decision', failed: 'Failed',
-  completed: 'Run finished', handback: 'Handed back', done: 'Done',
+  completed: 'Run finished', handback: 'Handed back', done: 'Done', stopped: 'Stopped',
 };
 
 /** The colour is a theme variable (styles.css --status-*), so it has a light and a dark value. */
@@ -12,7 +12,38 @@ export const StatusColor: Record<CardStatus, string> = {
   queued: 'var(--status-queued)', running: 'var(--status-running)', blocked: 'var(--status-blocked)',
   'needs-decision': 'var(--status-decision)', failed: 'var(--status-failed)',
   completed: 'var(--status-completed)', handback: 'var(--status-completed)', done: 'var(--status-done)',
+  stopped: 'var(--status-stopped)', // = var(--state-stopped), the neutral colour; cardStatusLook shows StoppedLook
 };
+
+/** The core's reason for a run the person stopped (Bus BusEngine.StoppedReason), as a card's "failed" trail line says it. */
+export const StoppedReason = 'stopped by the person';
+
+/**
+ * B097: the card's run was stopped by the person, not failed. The core sets the card's own status to "stopped" (lane
+ * In Progress / To Do, never Needs you). The member's attention alone never decides it: that would also mark the
+ * member's older cards. Fallback for cards recorded before that change: status "failed" and the member's state says
+ * stopped (attention "stopped", or class "stopped").
+ */
+export function cardStopped(card: Pick<BoardCard, 'status' | 'memberState'>): boolean {
+  if (card.status === 'stopped') return true;
+  if (card.status !== 'failed' || !card.memberState) return false;
+  const m = card.memberState;
+  return m.attention === 'stopped' || (m.attention === 'failed' && m.lastRunFailureClass === 'stopped');
+}
+
+/** The neutral look of a stopped run (B097): the member state's own colour, never the failure red. */
+export const StoppedLook = { label: 'Stopped', color: 'var(--state-stopped)' } as const;
+
+/** How a card's status reads and its colour: a stopped run reads "Stopped" in the neutral colour (B097). */
+export function cardStatusLook(card: Pick<BoardCard, 'status' | 'memberState'>): { label: string; color: string; stopped: boolean } {
+  if (cardStopped(card)) return { ...StoppedLook, stopped: true };
+  return { label: StatusLabel[card.status], color: StatusColor[card.status], stopped: false };
+}
+
+/** A trail line's kind as shown: the core's "failed" line for a run the person stopped reads "stopped" (B097). */
+export function trailKind(t: { kind: string; text: string }): string {
+  return t.kind === 'failed' && t.text.trim().toLowerCase() === StoppedReason ? 'stopped' : t.kind;
+}
 
 /** The ring a card's member wears: the member's own state when it is known, otherwise the card's. */
 export function cardFace(card: BoardCard): MemberState {
@@ -22,6 +53,7 @@ export function cardFace(card: BoardCard): MemberState {
     case 'needs-decision': return 'decision';
     case 'blocked': return 'blocked';
     case 'failed': return 'failed';
+    case 'stopped': return 'stopped';
     default: return 'idle';
   }
 }

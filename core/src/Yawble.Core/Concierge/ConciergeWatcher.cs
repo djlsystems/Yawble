@@ -112,6 +112,8 @@ public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimePr
                 ("decision", $"**{team}**{by} needs your decision (question {m.Seq}): {Clip(Str(p, "question") ?? "")}"),
             MessageTypes.Blocked =>
                 ("blocked", $"**{team}**{by} is blocked: {Clip(Str(p, "reason") ?? "no reason given")}"),
+            // B097: a run the person stopped is not a failure to tell them about.
+            MessageTypes.Failed when Str(p, "failureClass") == FailureClasses.Stopped => null,
             MessageTypes.Failed =>
                 ("failed", $"**{team}**{by}'s run {(Str(p, "failureClass") is { } fc && fc != FailureClasses.Failed ? $"ended ({fc})" : "failed")}: " +
                            Clip(Str(p, "reason") ?? "no reason given")),

@@ -381,7 +381,7 @@ public sealed partial class BusStore : IDisposable
 
     public sealed record RunRow(
         long Id, long MemberId, long QueueId, long CausationSeq, long CorrelationId, int Items, string State,
-        string QueuedAt, string StartedAt, string? EndedAt, string? Reason);
+        string QueuedAt, string StartedAt, string? EndedAt, string? Reason, string? FailureClass = null);
 
     public long InsertRun(long memberId, long queueId, long causation, long correlation, int items, string queuedAt) =>
         Scalar<long>(
@@ -399,7 +399,7 @@ public sealed partial class BusStore : IDisposable
     {
         using var cmd = Command(
             $"""
-             SELECT id, member_id, queue_id, causation_seq, correlation_id, items, state, queued_at, started_at, ended_at, reason
+             SELECT id, member_id, queue_id, causation_seq, correlation_id, items, state, queued_at, started_at, ended_at, reason, failure_class
              FROM runs {(state is null ? "" : "WHERE state = $st")} ORDER BY id;
              """, ("$st", state));
         using var r = cmd.ExecuteReader();
@@ -407,7 +407,8 @@ public sealed partial class BusStore : IDisposable
         while (r.Read())
         {
             list.Add(new RunRow(r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4), r.GetInt32(5),
-                r.GetString(6), r.GetString(7), r.GetString(8), r.IsDBNull(9) ? null : r.GetString(9), r.IsDBNull(10) ? null : r.GetString(10)));
+                r.GetString(6), r.GetString(7), r.GetString(8), r.IsDBNull(9) ? null : r.GetString(9), r.IsDBNull(10) ? null : r.GetString(10),
+                r.IsDBNull(11) ? null : r.GetString(11)));
         }
         return list;
     }
