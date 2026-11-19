@@ -319,8 +319,8 @@ describe('the Commit view', () => {
   });
 
   it('several other branches are joined with commas', () => {
-    const lines = whereLines(base({ where: { inMain: false, branches: [], otherBranches: ['feature/x', 'spike/y'], pushed: true, tags: [] } }));
-    expect(lines[0]).toEqual({ key: 'other', text: 'On feature/x, spike/y (not a team or member branch)', tone: 'warn' });
+    const lines = whereLines(base({ where: { inMain: false, branches: [], otherBranches: ['feature/x', 'trial/y'], pushed: true, tags: [] } }));
+    expect(lines[0]).toEqual({ key: 'other', text: 'On feature/x, trial/y (not a team or member branch)', tone: 'warn' });
   });
 
   it('no branch and no other branch keeps the deleted wording, also when otherBranches is missing (older core)', async () => {
