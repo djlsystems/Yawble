@@ -51,6 +51,8 @@ public class B073PreviewTests
         var repo = Path.Combine(f.Db.Dir, "person-repo");
         Directory.CreateDirectory(repo);
         AgentGit.Host(repo, "init", "-q", "-b", "trunk");
+        // The merge's dirty check runs the person's git without the system config: keep both gits on the same line endings.
+        AgentGit.Host(repo, "config", "core.autocrlf", "false");
         Write(repo, "README.md", "readme\n");
         Write(repo, "a.txt", "one\ntwo\nthree\n");
         var root = Commit(repo, "Start", author: "Person");
@@ -115,6 +117,43 @@ public class B073PreviewTests
         Assert.Equal([second, first], landed.Commits!.Select(c => c.Sha));
         Assert.Equal(new CommitRangeRef(r.Root, second), landed.Range);
         Assert.Equal("up-to-date", (await f.Repos.GitMergePreviewAsync(r.TeamId, "Alpha", Ct)).Outcome);
+    }
+
+    [Fact]
+    public async Task MergePreview_BaseCheckedOutWithUncommittedChanges_RefusesWithMergesSentence()
+    {
+        using var f = new TeamsFixture();
+        var r = await RigAsync(f);
+        AgentGit.Host(r.Repo, "switch", "-q", "-c", "team/alpha");
+        Write(r.Repo, "t.txt", "t\n");
+        var team = Commit(r.Repo, "Team");
+        AgentGit.Host(r.Repo, "switch", "-q", "trunk");
+        Write(r.Repo, "a.txt", "one\nedited, not committed\nthree\n");
+        await using var bus = new BusEngine(f.Db.OpenStore(), new UnavailableRunner(), new BusOptions { IdleOffer = false, Repos = f.Repos });
+
+        var p = await f.Repos.GitMergePreviewAsync(r.TeamId, "Alpha", Ct);
+        var said = await new ConciergeReadTools(bus, (_, _, _) => Task.FromResult<JsonNode?>(null), f.Db.ConnectionString, remote: false)
+            .CallAsync("git_merge_preview", new JsonObject { ["team"] = "Alpha" }, Ct);
+        var done = await f.Repos.GitMergeTeamToBaseAsync(r.TeamId, "Alpha", Ct);
+
+        Assert.Equal("refused", done.Outcome);
+        Assert.Equal("refused", p.Outcome);
+        Assert.Equal(done.Message, p.Summary);
+        Assert.Equal(done.Message, p.Text);
+        Assert.Equal(p.Text, said);
+        Assert.StartsWith($"trunk is checked out in {r.Repo} with uncommitted changes.", p.Text);
+        Assert.Null(p.NewSha);
+        Assert.Empty(p.Commits);
+        Assert.Equal(new BranchPush("team/alpha", false, 2), p.TeamPush);
+        Assert.Equal(r.Root, Rev(r.Repo, "refs/heads/trunk"));
+        Assert.Equal("one\nedited, not committed\nthree\n", File.ReadAllText(Path.Combine(r.Repo, "a.txt")));
+
+        // Clean again: the preview and Merge agree on fast-forward. An untracked file never blocks (the merge ignores those too).
+        AgentGit.Host(r.Repo, "checkout", "--", "a.txt");
+        Write(r.Repo, "scratch.txt", "untracked\n");
+        Assert.Equal("fast-forward", (await f.Repos.GitMergePreviewAsync(r.TeamId, "Alpha", Ct)).Outcome);
+        Assert.Equal("fast-forward", (await f.Repos.GitMergeTeamToBaseAsync(r.TeamId, "Alpha", Ct)).Outcome);
+        Assert.Equal(team, Rev(r.Repo, "refs/heads/trunk"));
     }
 
     [Fact]

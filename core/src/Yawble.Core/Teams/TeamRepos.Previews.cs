@@ -48,7 +48,8 @@ public sealed partial class TeamRepos
     public async Task<MergePreview> GitMergePreviewAsync(long teamId, string team, CancellationToken ct = default, string? repoName = null)
     {
         var repo = await GitRepoAsync(teamId, team, repoName, ct);
-        return await WithTeamLock(teamId, () => Previews.MergePreviewAsync(repo.Path, repo.BaseBranch, TeamBranchFor(team), ct), ct);
+        return await WithTeamLock(teamId, () => Previews.MergePreviewAsync(repo.Path, repo.BaseBranch, TeamBranchFor(team), ct,
+            dirty: async c => (await DirtyCheckoutAsync(repo, c))?.Message), ct);
     }
 
     /// <summary>git.mergeDiff: one file of a merge preview's combined diff (<paramref name="from"/>/<paramref name="to"/>: its diffFrom/diffTo).</summary>
