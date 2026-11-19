@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { usePhone } from '../phone';
-import type { YawbleApi, Skill, TeamSummary } from '../../../shared/api';
-import { errorText, resolveApi } from '../api';
+import type { YawbleApi, Skill, SkillVersion, TeamSummary } from '../../../shared/api';
+import { SKILLS_RESTORE, SKILLS_VERSIONS, TEAM_RETROS, writerText } from '../../../shared/api';
+import { errorText, resolveApi, when } from '../api';
+import { skillLink } from '../skillLink';
 import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
@@ -39,6 +41,7 @@ async function load() {
   try {
     skills.value = await api.call<Skill[]>('skills.list');
     if (selected.value) selected.value = skills.value.find((s) => key(s) === key(selected.value!)) ?? null;
+    followLink();
   } catch (e) {
     error.value = errorText(e);
   } finally {
@@ -113,6 +116,49 @@ async function doRemove(s: Skill) {
   }
 }
 
+// B100: a team skill's kept versions (the team's team_retros: each Manager's retro and each of the person's edits), with
+// who last wrote it and Restore. A skill without versions (an ordinary one, an older core) shows none of this.
+const versions = ref<SkillVersion[]>([]);
+const versionsFor = ref<string | null>(null);
+const showVersion = ref<number | null>(null);
+async function loadVersions(s: Skill | null) {
+  versions.value = [];
+  showVersion.value = null;
+  versionsFor.value = s ? key(s) : null;
+  if (!s || s.kind !== 'custom' || s.teamId === null) return;
+  try {
+    const list = await api.call<SkillVersion[]>(SKILLS_VERSIONS, { teamId: s.teamId, name: s.name });
+    if (versionsFor.value === key(s)) versions.value = Array.isArray(list) ? list : [];
+  } catch { /* no versions to show (an older core) */ }
+}
+watch(selected, (s) => void loadVersions(s));
+const lastWrite = computed(() => versions.value[0] ?? null);
+
+async function restore(v: SkillVersion) {
+  if (!(await confirmDialog({ message: `Bring back version ${v.version} of ${v.name}? Its text becomes the current text (a new version); agents get it at their next run.`, okLabel: 'Restore' }))) return;
+  return work.run('restore', async () => {
+    error.value = null;
+    try {
+      const s = await api.call<Skill>(SKILLS_RESTORE, { id: v.id });
+      await load();
+      selected.value = skills.value.find((x) => key(x) === key(s)) ?? s;
+      saved.value = `Restored version ${v.version} of ${s.name}. Agents get it at their next run.`;
+    } catch (e) {
+      error.value = errorText(e);
+    }
+  }, String(v.id));
+}
+
+// Team settings' "Lessons" link: select that team's skill once the list is in.
+function followLink() {
+  const link = skillLink.value;
+  if (!link) return;
+  const s = skills.value.find((x) => x.kind === 'custom' && x.teamId === link.teamId && x.name === link.name);
+  skillLink.value = null;
+  if (s) pick(s);
+}
+watch(skillLink, (l) => { if (l && loaded.value) followLink(); });
+
 function toggleRole(id: string) {
   form.roles = form.roles.includes(id) ? form.roles.filter((r) => r !== id) : [...form.roles, id];
 }
@@ -169,7 +215,26 @@ onMounted(load);
             <span class="chip">for {{ selected.roles.join(', ') }}</span>
           </header>
           <p class="muted">{{ selected.description }}</p>
+          <p v-if="selected.name === TEAM_RETROS && selected.teamId !== null" class="muted small" data-test="skill-lessons-note">
+            The team's lessons: every run of team {{ selected.team }} gets this text in its prompt. The Manager rewrites it after each completed
+            workflow's retrospective, starting from the text here, so your edits are kept.</p>
+          <p v-if="lastWrite" class="muted small" data-test="skill-last-writer">Last written by {{ writerText(lastWrite) }}, {{ when(lastWrite.writtenAt) }} (version {{ lastWrite.version }}).</p>
           <pre class="body" data-test="skill-view">{{ selected.body }}</pre>
+          <details v-if="versions.length > 0" class="versions" data-test="skill-versions">
+            <summary>Versions ({{ versions.length }})</summary>
+            <ul>
+              <li v-for="v in versions" :key="v.id" :data-test="`skill-version-${v.version}`">
+                <div class="row">
+                  <span class="grow"><b>Version {{ v.version }}</b> <span class="muted small">· {{ writerText(v) }} · {{ when(v.writtenAt) }}</span>
+                    <span v-if="v === versions[0]" class="chip">current</span></span>
+                  <button class="small-btn" :data-test="`skill-version-show-${v.version}`" @click="showVersion = showVersion === v.id ? null : v.id">{{ showVersion === v.id ? 'Hide' : 'Show' }}</button>
+                  <button v-if="v !== versions[0]" class="small-btn" :data-test="`skill-version-restore-${v.version}`" :disabled="work.is('restore')"
+                    :aria-busy="work.is('restore', String(v.id))" @click="restore(v)"><BusyLabel :busy="work.is('restore', String(v.id))" text="Restoring…">Restore</BusyLabel></button>
+                </div>
+                <pre v-if="showVersion === v.id" class="body" :data-test="`skill-version-body-${v.version}`">{{ v.body }}</pre>
+              </li>
+            </ul>
+          </details>
           <div class="row"><span class="grow"></span>
             <span v-if="saved" class="muted small" data-test="skill-saved">{{ saved }}</span>
             <button v-if="selected.kind === 'builtin'" data-test="skill-customize" @click="startNew(selected)">Customize…</button>
@@ -200,6 +265,11 @@ onMounted(load);
 .pane h3 { margin: 0; font-size: 15px; }
 .body { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; max-height: 420px; overflow: auto; font-size: 12px; }
 textarea { width: 100%; font-size: 12px; }
+.versions { margin: 0 0 10px; font-size: 12px; }
+.versions ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.versions li { border-top: 1px solid var(--line); padding-top: 4px; }
+.versions .row { align-items: center; gap: 6px; }
+.small-btn { font-size: 12px; padding: 2px 8px; }
 /* Filling the page: one row as tall as the space left; the list and the right pane scroll on their own; the skill's
    text takes the right pane's height above its button row, which stays at the bottom. */
 .layout.fill { flex: 1 1 0; min-height: 0; grid-template-rows: minmax(0, 1fr); }
