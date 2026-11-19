@@ -473,11 +473,18 @@ a member's pane opens it at that member's activity.
   - **Accountability**: **Audit** (every change made from the window, a Cloud Link viewer, the Concierge or a paired
     program; reads are not recorded), **Cloud Link**, **Tool calls**, **Approvals**, **Agent changes**, **Host tasks**.
   - **Security**: **Network** and **Runs** (how each sandboxed run ended). Network is what each run's gateway
-    decided: host connections allowed and refused (repeated refusals of one host in a run are counted on one row),
-    errors and requests answered with anything other than 2xx, credential problems, rate limits, and each run's first
-    successful model request per model host (`model`, `grok`, `xai`, `copilot`, `codex` `.yawble.internal`). The
-    run's other successful model requests are not rows here: they are counted in **Model usage**. Rows written one
-    per model request before this are removed when the app updates, keeping each run's first per model host.
+    decided: host connections allowed and refused, errors and requests answered with anything other than 2xx,
+    credential problems, rate limits, and each run's first successful model request per model host (`model`, `grok`,
+    `xai`, `copilot`, `codex` `.yawble.internal`) and the first after each credential problem or rate limit on that
+    host. The run's other successful model requests are not rows here: they are counted in **Model usage**. Rows
+    written one per model request before this are removed when the app updates by the same rule, so an old run still
+    shows the success that followed a problem.
+    A plain-http request to a host that is not allowed (`host-denied`), refused again in the same run, is counted on
+    that run's first row for the host: its **Times** column says how many times, and in **All activity** the row's
+    detail ends in ` (Nx)` when it counts more than one (` (5x)` for five). Refused HTTPS connections
+    (`connect-denied`) and refused paths are not folded into one row: the first few of each in a minute are written,
+    and the rest are counted in one more row written at the next such refusal after the minute. Every other row's
+    Times is 1.
   - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
   - **Work history**: **Team messages** and **Board history**.
