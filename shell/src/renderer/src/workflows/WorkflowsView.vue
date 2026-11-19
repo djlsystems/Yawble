@@ -18,7 +18,7 @@ import TimeBar from './TimeBar.vue';
 import WorkflowPane from './WorkflowPane.vue';
 import WorkflowStatusIcon from './WorkflowStatusIcon.vue';
 import {
-  Chips, formatHash, highlight, inChip, isWorkflowsHash, loadFilters, matchesText, nextSort, parseHash, saveFilters, sortRows, statusLook, statusTip,
+  Chips, DefaultFilters, formatHash, highlight, inChip, isWorkflowsHash, loadFilters, matchesText, nextSort, parseHash, saveFilters, sortRows, statusLook, statusTip,
   summaryLine, todayByHour, type Chip, type Filters, type SortKey, type WorkflowsRequest,
 } from './page';
 
@@ -119,6 +119,9 @@ const counts = computed(() => answer.value?.counts ?? null);
 const backlogReadable = computed(() => answer.value?.backlog ?? true);
 const open = computed(() => (selected.value === null ? null : answer.value?.workflows.find((w) => w.id === selected.value) ?? null));
 const filtered = computed(() => filters.value.teamId !== null || !!filters.value.q.trim() || filters.value.chip !== 'all');
+// The header's Clear shows only when the filters differ from the defaults (the page opens on the Open chip) and puts them back.
+const atDefaults = computed(() => filters.value.teamId === DefaultFilters.teamId && !filters.value.q.trim() && filters.value.chip === DefaultFilters.chip);
+function resetFilters() { filters.value = { ...filters.value, teamId: DefaultFilters.teamId, q: '', chip: DefaultFilters.chip }; }
 
 // ---- the summary line and today's sparkline (started per hour, completed per hour) ----
 const summary = computed(() => summaryLine(counts.value));
@@ -204,7 +207,7 @@ const timeline = (w: WorkflowRow) => openTimeline({ kind: 'workflow', id: w.id, 
           </select>
           <input v-model="filters.q" class="search" type="search" placeholder="Filter: id, title, item, team, member" aria-label="Filter the workflows" data-test="workflows-search" />
           <span class="grow" />
-          <button v-if="filtered" class="link" data-test="workflows-clear" @click="clearFilters">{{ phone ? 'Clear' : 'Clear filters' }}</button>
+          <button v-if="!atDefaults" class="link" data-test="workflows-clear" @click="resetFilters">{{ phone ? 'Clear' : 'Clear filters' }}</button>
         </header>
         <div v-show="!(phone && open)" class="chips" role="tablist" aria-label="Status" data-test="workflows-chips">
           <button v-for="c in Chips" :key="c.id" type="button" role="tab" class="chip" :class="[c.id, { on: filters.chip === c.id }]" :aria-selected="filters.chip === c.id"
@@ -246,7 +249,7 @@ const timeline = (w: WorkflowRow) => openTimeline({ kind: 'workflow', id: w.id, 
                     <span class="wid mono">#<template v-for="(p, i) in highlight(String(w.id), filters.q)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                     <span class="wtitle" data-test="workflows-title"><template v-for="(p, i) in highlight(w.title, filters.q)" :key="i"><mark v-if="p.hit" data-test="workflows-hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></span>
                   </td>
-                  <td class="itm"><ItemLink :item="w.item" :backlog="backlogReadable" /></td>
+                  <td class="itm"><ItemLink :item="w.item" :backlog="backlogReadable" :q="filters.q" /></td>
                   <td class="tm"><template v-for="(p, i) in highlight(w.team, filters.q)" :key="i"><mark v-if="p.hit">{{ p.text }}</mark><template v-else>{{ p.text }}</template></template></td>
                   <td class="who">
                     <span class="faces" data-test="workflows-who">
