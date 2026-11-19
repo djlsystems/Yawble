@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Teams;
 
-/// <summary>Where a remote is hosted, read from its address: pull requests are GitHub's alone, everything else works with any host.</summary>
+/// <summary>Where a remote is hosted, read from its address: pull requests need a supported provider (B075), everything else works with any host.</summary>
 public class RepoHostTests
 {
     [Theory]
@@ -41,9 +41,12 @@ public class RepoHostTests
     {
         Assert.Null(RepoHost.PullRequestsUnavailable("main", "https://github.com/acme/app.git"));
         Assert.Contains("no remote", RepoHost.PullRequestsUnavailable("main", null));
-        var gitlab = RepoHost.PullRequestsUnavailable("main", "https://gitlab.com/acme/app.git");
-        Assert.Contains("only for repositories hosted on GitHub", gitlab);
-        Assert.Contains("on gitlab.com", gitlab);
+        // B075: GitLab and Azure DevOps have pull requests here too (glab, az repos); Bitbucket does not.
+        Assert.Null(RepoHost.PullRequestsUnavailable("main", "https://gitlab.com/acme/app.git"));
+        Assert.Null(RepoHost.PullRequestsUnavailable("main", "https://dev.azure.com/acme/proj/_git/app"));
+        var bitbucket = RepoHost.PullRequestsUnavailable("main", "https://bitbucket.org/acme/app.git");
+        Assert.Contains("pull requests are not supported for Bitbucket from here", bitbucket);
+        Assert.Contains("on bitbucket.org", bitbucket);
         Assert.Contains("a local folder", RepoHost.PullRequestsUnavailable("main", "/srv/git/app.git"));
     }
 }

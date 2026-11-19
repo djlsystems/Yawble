@@ -682,7 +682,7 @@ public class ConciergeReadToolsTests : IDisposable
         Assert.Contains("origin: https://example.test/x.git", text);
         Assert.Contains("check not run: this folder is not a readable git repository.", text);
         Assert.Contains("1 check(s) could not run", text);
-        Assert.Contains("Pull requests: not read for example.test (only GitHub's are read from here, through gh).", text);
+        Assert.Contains("Pull requests: not read for example.test (not supported for example.test from here; only GitHub through gh, GitLab through glab and Azure DevOps through az repos).", text);
     }
 
     [Fact]
@@ -701,7 +701,7 @@ public class ConciergeReadToolsTests : IDisposable
         var silent = new ConciergeReadTools(_bus, (_, _, _) => Task.FromResult<JsonNode?>(null), _db.ConnectionString,
             (_, _) => Task.FromResult<IReadOnlyList<GitRepoTarget>>([target]), _git, (_, _) => Task.FromResult<IReadOnlyDictionary<string, string>?>(null), remote: false);
         var no = await silent.CallAsync("team_git", [], Ct);
-        Assert.Contains("Open pull requests: check not run (gh is not signed in", no);
+        Assert.Contains("Open pull requests: check not run (gh is not installed, not signed in or did not answer).", no);
         Assert.Contains("1 check(s) could not run", no);
     }
 

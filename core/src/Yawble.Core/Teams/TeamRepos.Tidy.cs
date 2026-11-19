@@ -78,7 +78,7 @@ public sealed partial class TeamRepos
     /// <summary>The log in the team repository's .git of every realign (old commit, new commit): restore from it.</summary>
     public const string RealignLog = Concierge.ConciergeGit.DeletedLog;
 
-    private const string MainRepoName = "main";
+    public const string MainRepoName = "main";
 
     /// <summary>Where a realign fetches the clone's commit first (the host's own namespace, never in the bundle; removed after).</summary>
     public const string RealignStagingPrefix = "refs/sandbox/realign/";

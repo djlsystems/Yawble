@@ -54,7 +54,9 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         var verb = dot < 0 ? method : method[(dot + 1)..];
         return ReadVerbs.Contains(verb) || method.StartsWith("git.status", StringComparison.Ordinal) || method == "git.tidyPlan"
             // Opening and closing the read-only Code view change nothing (a download is recorded).
-            || method is "code.open" or "code.close";
+            || method is "code.open" or "code.close"
+            // B075: a web link only reads the repository's refs.
+            || method == "git.webLink";
     }
 
     /// <summary>What a call was about, from its identifying parameters only ("team=web member=DeveloperPriya").</summary>

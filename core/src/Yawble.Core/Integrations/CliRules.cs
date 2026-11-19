@@ -154,6 +154,8 @@ public static class CliCatalog
             [
                 ("* list*", Decisions.Allow), ("* show*", Decisions.Allow), ("account show*", Decisions.Allow), ("version*", Decisions.Allow),
                 ("* logs*", Decisions.Allow), ("* delete*", Decisions.Deny),
+                // the built-in tools on an Azure DevOps repository (az repos): reading the team branch's PRs runs, opening one asks
+                ("pr_status*", Decisions.Allow), ("pr_open*", Decisions.Ask),
             ],
             // (On Windows az runs in Python's UTF-8 mode: CliRunner.AzureCliDirect. Env vars would not reach it: az.cmd
             // starts Python isolated, -I, which ignores PYTHON* variables.)
@@ -163,18 +165,28 @@ public static class CliCatalog
 
     public static CliEntry? Of(string name) => Known.FirstOrDefault(k => string.Equals(k.Name, name, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The checklist rows the app ships for a CLI's built-in tools (gh: pr_open, pr_status), shown with origin "builtin".</summary>
+    /// <summary>The CLIs that make the agents' pull requests (pr_open / pr_status, B075): gh (GitHub), glab (GitLab), az (Azure DevOps, az repos).</summary>
+    public static readonly IReadOnlyList<string> PullRequestClis = ["gh", "glab", "az"];
+
+    public static bool MakesPullRequests(string cli) => PullRequestClis.Contains(cli, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The checklist rows the app ships for a CLI's built-in tools (gh, glab, az: pr_open, pr_status), shown with origin "builtin".
+    /// Which CLI a call runs is the repository's provider's (IntegrationService).
+    /// </summary>
     public static IReadOnlyList<(string Path, string Summary, string Class)> BuiltinRows(string cli) =>
-        string.Equals(cli, "gh", StringComparison.OrdinalIgnoreCase)
+        MakesPullRequests(cli)
             ? [("pr_open", "open a PR from the team branch", CommandClass.Change), ("pr_status", "the team branch's PRs", CommandClass.ReadOnly)]
             : [];
 
     /// <summary>
     /// A CLI the app does not know: help and version allowed, everything else asks. Its help is asked with --help only, never -h
-    /// (Ruling 11: "shutdown -h" hibernates the computer; an unknown program's short flags mean anything).
+    /// (Ruling 11: "shutdown -h" hibernates the computer; an unknown program's short flags mean anything). glab (not in the
+    /// catalog) also gets the built-in tools' preset, as gh has it: pr_status runs, pr_open asks.
     /// </summary>
     public static CliEntry Generic(string name) => new(name, name, $"The {name} command on this computer.", ["--version"], [],
-        [("--version", Decisions.Allow), ("version", Decisions.Allow), ("--help", Decisions.Allow), ("* --help", Decisions.Allow)], HelpFlag: "--help");
+        [("--version", Decisions.Allow), ("version", Decisions.Allow), ("--help", Decisions.Allow), ("* --help", Decisions.Allow),
+         .. MakesPullRequests(name) ? new[] { ("pr_status*", Decisions.Allow), ("pr_open*", Decisions.Ask) } : []], HelpFlag: "--help");
 
     /// <summary>System and destructive programs that can never be added as a CLI integration (Ruling 11), compared without .exe/.cmd/.bat.</summary>
     private static readonly HashSet<string> Denied = new(StringComparer.OrdinalIgnoreCase)

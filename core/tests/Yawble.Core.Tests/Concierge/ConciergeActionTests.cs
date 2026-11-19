@@ -67,7 +67,12 @@ public class ConciergeActionTests : IDisposable
             (m, p, _) => { Board.Add((m, p)); return Task.FromResult<JsonNode?>(new JsonObject { ["label"] = "B006" }); },
             Git, (_, _) => Task.FromResult<IReadOnlyList<ActionRepo>>([Repo]), Book,
             WithGh ? (_, a, _) => { GhCalls.Add([.. a]); return Task.FromResult(new GitResult(0, a[1] switch { "view" => GhView, "list" => GhList, _ => "https://example.test/pr/7" }, "")); } : null,
-            turn: turn ?? new ConciergeTurn("c1", byPerson: true, remote: false));
+            turn: turn ?? new ConciergeTurn("c1", byPerson: true, remote: false),
+            cli: (tool, _, a, _) => { CliCalls.Add((tool, [.. a])); return Task.FromResult(CliAnswer(tool, a)); });
+
+        /// <summary>B075: the other providers' CLIs (glab, az), faked; never a real one.</summary>
+        public List<(string Cli, string[] Args)> CliCalls { get; } = [];
+        public Func<string, IReadOnlyList<string>, GitResult> CliAnswer = (_, _) => new GitResult(0, "{}", "");
 
         public string GhList = """[{"number":7,"title":"Add x","headRefName":"members/ines"},{"number":9,"title":"Docs","headRefName":"members/ben"}]""";
     }
@@ -403,21 +408,80 @@ public class ConciergeActionTests : IDisposable
     }
 
     [Fact]
-    public async Task PullRequests_ForARepositoryNotOnGitHub_AreRefusedWithWhatToDoInstead_AndGhNeverRuns()
+    public async Task PullRequests_ForAnUnsupportedHost_AreRefusedWithWhatToDoInstead_AndNoCliRuns()
     {
         var rig = await MakeRigAsync();
         var local = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" });
-        Assert.Contains("only for repositories hosted on GitHub", local);
-        Assert.Contains("a local folder", local);
+        Assert.Contains("pull requests are not supported for a local folder from here", local);
 
-        Run(Work, "remote", "set-url", "origin", "https://gitlab.com/acme/app.git");
-        var gitlab = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" });
-        Assert.Contains("on gitlab.com", gitlab);
-        Assert.Contains("Push the branch", gitlab);
-        Assert.Contains("on gitlab.com", Call("git_pr_merge", rig.Actions(), new() { ["team"] = "alpha", ["pr"] = 7 }));
+        Run(Work, "remote", "set-url", "origin", "https://bitbucket.org/acme/app.git");
+        var bitbucket = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" });
+        Assert.Contains("pull requests are not supported for Bitbucket from here", bitbucket);
+        Assert.Contains("on bitbucket.org", bitbucket);
+        Assert.Contains("Push the branch", bitbucket);
+        Assert.Contains("not supported for Bitbucket", Call("git_pr_merge", rig.Actions(), new() { ["team"] = "alpha", ["pr"] = 7 }));
+
+        Run(Work, "remote", "set-url", "origin", "https://codeberg.org/acme/app.git");
+        Assert.Contains("not supported for Gitea", Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" }));
+        Run(Work, "remote", "set-url", "origin", "https://git.example.test/acme/app.git");
+        Assert.Contains("not supported for git.example.test", Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" }));
 
         Run(Work, "remote", "remove", "origin");
         Assert.Contains("has no remote", Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" }));
+        Assert.Empty(rig.GhCalls);
+        Assert.Empty(rig.CliCalls);
+    }
+
+    [Fact]
+    public async Task PullRequests_OnGitLab_GoThroughGlab_AndOnAzureDevOps_ThroughAzRepos()
+    {
+        var rig = await MakeRigAsync();
+        Run(Work, "remote", "set-url", "origin", "git@gitlab.example.com:acme/web/app.git");
+        rig.CliAnswer = (cli, a) => new GitResult(0, a[1] switch
+        {
+            "view" => """{"iid":7,"title":"Add x","source_branch":"members/ines","target_branch":"main","state":"opened","sha":"abc"}""",
+            "list" => """[{"iid":7,"title":"Add x","source_branch":"members/ines","state":"opened"}]""",
+            _ => "https://gitlab.example.com/acme/web/app/-/merge_requests/7",
+        }, "");
+        var opened = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x", ["body"] = "Why" });
+        Assert.StartsWith("ok: opened a pull request on GitLab for members/ines into main", opened);
+        Assert.Equal(("glab", new[] { "mr", "create", "--source-branch", "members/ines", "--target-branch", "main", "--title", "Add x", "--description", "Why", "--yes" }),
+            (rig.CliCalls[0].Cli, rig.CliCalls[0].Args));
+        var shown = Call("git_pr_merge", rig.Actions(), new() { ["team"] = "alpha", ["pr"] = 7 });
+        Assert.StartsWith("NOT DONE", shown);
+        Assert.Contains("Merge pull request #7 on GitLab: \"Add x\" (members/ines into main)", shown);
+        Assert.StartsWith("ok: merged", Call("git_pr_merge", rig.Actions(), new() { ["team"] = "alpha", ["pr"] = 7, ["confirm"] = Token(shown) }));
+        Assert.Equal(new[] { "mr", "merge", "7", "--yes" }, rig.CliCalls.Last().Args);
+        var prs = await rig.Actions().OpenPullRequestsAsync(new GitRepoTarget("alpha", "main", Work, "main", []), Ct);
+        Assert.Equal("#7 Add x", prs!["members/ines"]);
+        Assert.Empty(rig.GhCalls);
+
+        rig.CliCalls.Clear();
+        Run(Work, "remote", "set-url", "origin", "https://acme@dev.azure.com/acme/Proj/_git/app");
+        rig.CliAnswer = (cli, a) => new GitResult(0, a[2] switch
+        {
+            "show" => """{"pullRequestId":12,"title":"Add x","sourceRefName":"refs/heads/members/ines","targetRefName":"refs/heads/main","status":"active"}""",
+            "list" => """[{"pullRequestId":12,"title":"Add x","sourceRefName":"refs/heads/members/ines"}]""",
+            _ => """{"pullRequestId":12}""",
+        }, "");
+        Assert.StartsWith("ok: opened a pull request on Azure DevOps for members/ines into main: pull request 12",
+            Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" }));
+        Assert.Equal("az", rig.CliCalls[0].Cli);
+        Assert.Equal(new[] { "repos", "pr", "create", "--source-branch", "members/ines", "--target-branch", "main", "--title", "Add x", "--detect", "true", "--output", "json" }, rig.CliCalls[0].Args);
+        var azShown = Call("git_pr_merge", rig.Actions(), new() { ["team"] = "alpha", ["pr"] = 12 });
+        Assert.Contains("Merge pull request #12 on Azure DevOps", azShown);
+        Assert.StartsWith("ok: merged", Call("git_pr_merge", rig.Actions(), new() { ["team"] = "alpha", ["pr"] = 12, ["confirm"] = Token(azShown) }));
+        Assert.Equal(new[] { "repos", "pr", "update", "--id", "12", "--status", "completed", "--detect", "true", "--output", "json" }, rig.CliCalls.Last().Args);
+        Assert.Equal("#12 Add x", (await rig.Actions().OpenPullRequestsAsync(new GitRepoTarget("alpha", "main", Work, "main", []), Ct))!["members/ines"]);
+
+        // glab not signed in: its refusal says how to sign in on this computer; not installed: install and sign in.
+        Run(Work, "remote", "set-url", "origin", "https://gitlab.com/acme/app.git");
+        rig.CliAnswer = (_, _) => new GitResult(1, "", "401 Unauthorized");
+        var refused = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" });
+        Assert.Contains("glab refused: 401 Unauthorized", refused);
+        Assert.Contains("glab auth login", refused);
+        rig.CliAnswer = (cli, _) => new GitResult(-1, "", $"{cli} is not installed on this computer");
+        Assert.Contains("glab is not available on this computer", Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" }));
         Assert.Empty(rig.GhCalls);
     }
 
@@ -942,6 +1006,7 @@ public class ConciergeActionTests : IDisposable
     public async Task OpenPullRequestsAreReadThroughGh_AndNotAtAllWithoutIt()
     {
         var rig = await MakeRigAsync();
+        Run(Work, "remote", "set-url", "origin", "https://github.com/acme/app.git"); // read through gh for a GitHub origin (B075)
         var target = new GitRepoTarget("alpha", "main", Work, "main", []);
         var prs = await rig.Actions().OpenPullRequestsAsync(target, Ct);
         Assert.NotNull(prs);

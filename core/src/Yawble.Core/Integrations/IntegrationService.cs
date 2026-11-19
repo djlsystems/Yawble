@@ -347,6 +347,41 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         return (extra.Path, extra.BaseBranch);
     }
 
+    /// <summary>
+    /// A team repository's provider for pull requests (B075): the person's override, else detected from its origin; with
+    /// the origin (null: none) and the repository's name ("main" or an extra's).
+    /// </summary>
+    private async Task<(Teams.RepoProviderKind Kind, string? Origin, string Name)> PullRequestProviderOfAsync(long teamId, string? repo, string? path, CancellationToken ct)
+    {
+        var name = string.IsNullOrWhiteSpace(repo) ? Teams.TeamRepos.MainRepoName : repo.Trim();
+        if (bus.Repos is not { } repos) return (Teams.RepoProviderKind.None, null, name);
+        var origin = await repos.OriginOfAsync(path, ct);
+        return (repos.HostSettingOf(teamId, name)?.Provider ?? Teams.RepoProviders.Detect(origin), origin, name);
+    }
+
+    /// <summary>
+    /// Whether the agents get pr_open / pr_status: one of the pull request CLIs (gh, glab, az) is enabled for the team, and
+    /// for one of its repositories it is the one its provider needs, or its provider has no pull requests from here (the
+    /// tools then say so instead of running anything).
+    /// </summary>
+    private bool OffersPullRequests(long teamId, IReadOnlyList<IntegrationRow> enabled)
+    {
+        var clis = enabled.Select(r => r.Name).Where(CliCatalog.MakesPullRequests).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (clis.Count == 0 || bus.Repos is not { } repos) return false;
+        var names = repos.ExtrasOf(teamId).Select(e => e.Name).Prepend(null);
+        foreach (var name in names)
+        {
+            var (path, _) = RepoFolder(teamId, name);
+            var (kind, _, _) = PullRequestProviderOfAsync(teamId, name, path, CancellationToken.None).GetAwaiter().GetResult();
+            if (Teams.PullRequestProviders.CliOf(kind) is not { } cli || clis.Contains(cli)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>The pull request providers give the agents' tools their arguments only: the call itself runs as the integration's, under its rules.</summary>
+    private static readonly Teams.HostCliRunner NotRunHere = (cli, _, _, _) =>
+        throw new InvalidOperationException($"an agent's {cli} pull request call runs through the integration, not the provider");
+
     /// <summary>The integrations enabled for a team, as MCP tools (one per CLI, named after it) plus cli_help.</summary>
     public IReadOnlyList<JsonObject> ToolsFor(long teamId)
     {
@@ -368,14 +403,17 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
                 ("reason", "string", "Why you need this call, in one line (shown to the person if it asks them).", true),
                 ("repo", "string", RepoParameter, false));
         }).ToList();
-        if (enabled.Any(r => string.Equals(r.Name, "gh", StringComparison.OrdinalIgnoreCase)))
+        if (OffersPullRequests(teamId, enabled))
         {
-            // The GitHub built-in: the team branch as a pull request, under the same gh rules (pr create asks by default).
-            tools.Add(Tool("pr_open", "Open a pull request on GitHub from your team's branch into the repository's base branch, with your delivery as its description. " +
-                "It shows the team branch as last pushed: your run's own commits are pushed when the run ends, and the pull request updates then. Under the gh rules (asks the person unless allowed).",
+            // The built-ins (B075): the team branch as a pull request on the repository's provider, through that provider's CLI and
+            // under its rules (pr_open asks by default, pr_status runs).
+            tools.Add(Tool("pr_open", "Open a pull request (a merge request on GitLab) from your team's branch into the repository's base branch, with your delivery as its description, " +
+                "on the repository's provider: GitHub through gh, GitLab through glab, Azure DevOps through az repos. Bitbucket, Gitea and a repository with no provider have none from here: it says so. " +
+                "It shows the team branch as last pushed: your run's own commits are pushed when the run ends, and the pull request updates then. Under that CLI's rules (asks the person unless allowed).",
                 ("title", "string", "The pull request's title.", true), ("body", "string", "What it delivers and how it was checked (Markdown).", true),
                 ("reason", "string", "Why now, in one line (shown to the person if it asks them).", true), ("repo", "string", RepoParameter, false)));
-            tools.Add(Tool("pr_status", "Your team branch's pull requests on GitHub: state, review decision, checks, mergeable, and links.",
+            tools.Add(Tool("pr_status", "Your team branch's pull requests (merge requests on GitLab) on the repository's provider, as its CLI lists them (gh, glab or az repos): " +
+                "state, links, and what the provider says of reviews, checks and merging.",
                 ("repo", "string", RepoParameter, false)));
         }
         tools.AddRange(mcp);
@@ -429,18 +467,24 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         }
         var reason = args["reason"] is JsonValue rv && rv.TryGetValue<string>(out var rs) && !string.IsNullOrWhiteSpace(rs) ? rs.Trim() : null;
         var repoName = args["repo"] is JsonValue pv && pv.TryGetValue<string>(out var ps) && !string.IsNullOrWhiteSpace(ps) ? ps.Trim() : null;
-        var (_, repoBase) = RepoFolder(run.Member.TeamId, repoName); // an unknown name is refused here, before anything runs
+        var (repoPath, repoBase) = RepoFolder(run.Member.TeamId, repoName); // an unknown name is refused here, before anything runs
         if (tool is "pr_open" or "pr_status")
         {
-            var gh = enabled.FirstOrDefault(r => string.Equals(r.Name, "gh", StringComparison.OrdinalIgnoreCase))
-                ?? throw new ArgumentException("the GitHub CLI is not enabled for your team");
             var baseBranch = repoBase ?? throw new ArgumentException("your team has no repository here");
+            // The repository's provider (the person's override, else its origin's) picks the pull request provider (B075,
+            // Teams/PullRequestProviders.cs) and so the CLI: gh, glab or az repos. Others have none from here, and nothing runs.
+            var (kind, origin, name) = await PullRequestProviderOfAsync(run.Member.TeamId, repoName, repoPath, ct);
+            if (Teams.RepoHost.PullRequestsUnavailable(name, origin, kind) is { } why) throw new ArgumentException(why);
+            var provider = Teams.PullRequestProviders.For(kind, NotRunHere)!;
+            var cli = enabled.FirstOrDefault(r => string.Equals(r.Name, provider.Cli, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"{name} is on {Teams.RepoProviders.Label(kind)}, whose pull requests are made from here with {provider.Cli}, " +
+                                               $"which is not enabled for your team; the person can offer it in Integrations (and sign it in: {Teams.PullRequestProviders.SignInOf(provider.Cli)})");
             var teamBranch = Teams.TeamRepos.TeamBranchFor(run.Member.Team);
-            var ghArgs = tool == "pr_status"
-                ? new List<string> { "pr", "list", "--head", teamBranch, "--state", "all", "--limit", "5", "--json", "number,title,state,url,reviewDecision,mergeable,statusCheckRollup" }
-                : ["pr", "create", "--head", teamBranch, "--base", baseBranch, "--title", Text(args, "title"), "--body", Text(args, "body")];
-            // decided by the built-in's own row (pr_open / pr_status), the floors still checked on the real gh arguments
-            return await DecideAndRunAsync(run, gh, ghArgs, tool == "pr_status" ? reason ?? "read the team branch's pull requests" : reason, ct, repoName,
+            var prArgs = tool == "pr_status"
+                ? provider.StatusArgs(teamBranch)
+                : provider.OpenArgs(teamBranch, baseBranch, Text(args, "title"), Text(args, "body"));
+            // decided by the built-in's own row (pr_open / pr_status) of that CLI, the floors still checked on its real arguments
+            return await DecideAndRunAsync(run, cli, prArgs, tool == "pr_status" ? reason ?? "read the team branch's pull requests" : reason, ct, repoName,
                 decideOn: [tool], action: tool);
         }
         var row = enabled.FirstOrDefault(r => ToolName(r.Name) == tool) ?? throw new ArgumentException($"'{tool}' is not enabled for your team");
