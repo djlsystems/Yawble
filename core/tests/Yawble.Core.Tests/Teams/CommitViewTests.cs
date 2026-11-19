@@ -460,4 +460,125 @@ public class CommitViewTests
         RemoteAccess.ShapeResult("git.commitShow", gone, showCode: false);
         Assert.False(gone.ContainsKey("codeShown"));
     }
+
+    /// <summary>A merge with git's own message (no "into": git leaves it out for main, or for any branch with merge.suppressDest).</summary>
+    private static string MergeDefault(string repo, string branch, string? suppressDest = null)
+    {
+        string[] dest = suppressDest is null ? [] : ["-c", "merge.suppressDest=" + suppressDest];
+        AgentGit.Host(repo, ["-c", "user.name=P", "-c", "user.email=p@example.invalid", "-c", "commit.gpgSign=false", .. dest, "merge", "-q", "--no-ff", "--no-edit", branch]);
+        return AgentGit.Host(repo, "rev-parse", "HEAD");
+    }
+
+    [Fact]
+    public async Task F1_AMergeOnTheBase_WithGitsDefaultMessage_IsIntoTheBase_EvenWhenTheTeamBranchHasIt()
+    {
+        using var f = new TeamsFixture();
+        var r = await RigAsync(f);
+        AgentGit.Host(r.Repo, "switch", "-q", "-c", "feature/login", "trunk");
+        Write(r.Repo, "login.txt", "login\n");
+        Commit(r.Repo, "Login", author: "Person");
+        AgentGit.Host(r.Repo, "switch", "-q", "trunk");
+        var merge = MergeDefault(r.Repo, "feature/login", suppressDest: "trunk");
+        Assert.Equal("Merge branch 'feature/login'", AgentGit.Host(r.Repo, "log", "-1", "--format=%s", merge));
+        Assert.Equal(new CommitMerge("trunk", "feature/login", null, 1), (await Show(r, merge)).Merge);
+
+        // The team branch moved up to trunk: it contains the merge, but the merge was made on trunk.
+        AgentGit.Host(r.Repo, "branch", "-f", "team/alpha", "trunk");
+        var m = await Show(r, merge);
+        Assert.Equal(new CommitMerge("trunk", "feature/login", null, 1), m.Merge);
+        Assert.Equal("trunk", (string)m.ToJson()["merge"]!["intoBranch"]!);
+    }
+
+    [Fact]
+    public async Task F1_AMergeOnTheTeamBranch_WithNoInto_IsIntoTheTeamBranch_AndOneOnNoBranchsLineSaysNone()
+    {
+        using var f = new TeamsFixture();
+        var r = await RigAsync(f);
+        AgentGit.Host(r.Repo, "switch", "-q", "-c", "feature/y", "trunk");
+        Write(r.Repo, "y.txt", "y\n");
+        Commit(r.Repo, "Y", author: "Person");
+        AgentGit.Host(r.Repo, "switch", "-q", "team/alpha");
+        var onTeam = MergeDefault(r.Repo, "feature/y", suppressDest: "team/alpha");
+        Assert.Equal("Merge branch 'feature/y'", AgentGit.Host(r.Repo, "log", "-1", "--format=%s", onTeam));
+        // trunk does not have it; the team branch has it on its own line.
+        Assert.Equal("team/alpha", (await Show(r, onTeam)).Merge!.IntoBranch);
+
+        // A merge on a branch that was then deleted, later merged into another branch on its second-parent side: no
+        // branch has it on its own line, so the core does not guess one.
+        AgentGit.Host(r.Repo, "switch", "-q", "-c", "feature/side", "trunk");
+        Write(r.Repo, "side.txt", "s\n");
+        Commit(r.Repo, "Side", author: "Person");
+        var sideMerge = MergeDefault(r.Repo, "feature/y", suppressDest: "feature/side");
+        AgentGit.Host(r.Repo, "switch", "-q", "trunk");
+        MergeDefault(r.Repo, "feature/side", suppressDest: "trunk");
+        AgentGit.Host(r.Repo, "branch", "-q", "-D", "feature/side");
+        var side = await Show(r, sideMerge);
+        Assert.Null(side.Merge!.IntoBranch);
+        Assert.Equal("feature/y", side.Merge.FromBranch);
+        var json = side.ToJson()["merge"]!.AsObject();
+        Assert.True(json.ContainsKey("intoBranch"));
+        Assert.Null(json["intoBranch"]);
+    }
+
+    [Fact]
+    public async Task F2_ACommitOnThePersonsOwnBranch_IsListedInOtherBranches_WhichIsAlwaysThere()
+    {
+        using var f = new TeamsFixture();
+        var r = await RigAsync(f);
+        AgentGit.Host(r.Repo, "switch", "-q", "-c", "feature/x", "trunk");
+        Write(r.Repo, "x.txt", "x\n");
+        var x = Commit(r.Repo, "Feature x", author: "Person");
+        AgentGit.Host(r.Repo, "switch", "-q", "trunk");
+
+        var c = await Show(r, x);
+        Assert.False(c.Where!.InMain);
+        Assert.Empty(c.Where.Branches);
+        Assert.Null(c.Where.OnlyOnMember);
+        Assert.Equal(["feature/x"], c.Where.OtherBranches);
+        var where = c.ToJson()["where"]!;
+        Assert.Equal(["feature/x"], where["otherBranches"]!.AsArray().Select(n => (string)n!));
+        Assert.Empty(where["branches"]!.AsArray());
+
+        // A deleted member branch's commit: no other branch either, so the two read differently.
+        var gone = (await Show(r, r.BenGone)).ToJson()["where"]!;
+        Assert.Empty(gone["branches"]!.AsArray());
+        Assert.Empty(gone["otherBranches"]!.AsArray());
+
+        // Never the base, the team branch or a member's branch; sorted; branches as before.
+        AgentGit.Host(r.Repo, "branch", "zeta", r.Ordinary);
+        AgentGit.Host(r.Repo, "branch", "feature/a", r.Ordinary);
+        var o = await Show(r, r.Ordinary);
+        Assert.Equal(["team/alpha", "members/alpha/ada"], o.Where!.Branches);
+        Assert.Equal(["feature/a", "zeta"], o.Where.OtherBranches);
+        var root = (await Show(r, r.Root)).ToJson()["where"]!;
+        Assert.Equal(["feature/a", "feature/x", "zeta"], root["otherBranches"]!.AsArray().Select(n => (string)n!));
+    }
+
+    [Fact]
+    public async Task M1_AHexIdIsNeverABranchName()
+    {
+        using var f = new TeamsFixture();
+        var r = await RigAsync(f);
+        // Branches named like other commits' IDs (short and full), pointing at the root: the IDs still mean the commits.
+        var shortId = r.Ordinary[..8];
+        AgentGit.Host(r.Repo, "branch", shortId, r.Root);
+        AgentGit.Host(r.Repo, "branch", r.Binary, r.Root);
+        Assert.Equal(r.Ordinary, (await Show(r, shortId)).Sha);
+        Assert.Equal(r.Ordinary, (await Show(r, shortId.ToUpperInvariant())).Sha);
+        Assert.Equal(r.Binary, (await Show(r, r.Binary)).Sha);
+        Assert.Single((await Diff(r, shortId, "README.md")).Hunks);
+
+        // A branch whose hex name is no object's ID: not found, never the branch's commit.
+        var objects = AgentGit.Host(r.Repo, "rev-parse", "--disambiguate=cafe");
+        Assert.True(string.IsNullOrWhiteSpace(objects), "the fixture happens to have an object starting with cafe");
+        AgentGit.Host(r.Repo, "branch", "cafe", r.Root);
+        var c = await Show(r, "cafe");
+        Assert.False(c.Found);
+        Assert.Equal("cafe", c.Sha);
+        Assert.Equal("gone", (await Assert.ThrowsAsync<TeamGitRefusal>(() => Diff(r, "cafe", "README.md"))).Code);
+
+        // An annotated tag's ID still opens its commit, as before.
+        var tag = AgentGit.Host(r.Repo, "rev-parse", "v2.0");
+        Assert.Equal(r.Merge, (await Show(r, tag)).Sha);
+    }
 }
