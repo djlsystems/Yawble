@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import GitDialog from '../../src/renderer/src/components/GitDialog.vue';
 import CommitView from '../../src/renderer/src/components/CommitView.vue';
 import TidyPanel from '../../src/renderer/src/components/TidyPanel.vue';
+import TeamSyncBanner from '../../src/renderer/src/components/TeamSyncBanner.vue';
 import { closeCommit, commitTarget, whereLines } from '../../src/renderer/src/commitView';
 import { IN_MAIN, MERGE_COMMIT, OWN_WORK, commitsInHeading, deletePreviewView, mergePreviewView, moreText, rangeFor } from '../../src/renderer/src/gitRange';
 import { LOCAL_MARK, branchLocalOnly, commitLocalOnly, tidyLocalOnly } from '../../src/renderer/src/localMark';
@@ -441,5 +442,50 @@ describe('the one not-pushed mark elsewhere', () => {
     expect(w.find('[data-test="tidy-row-feature/a"] .line [data-test=local-mark]').exists()).toBe(true);
     expect(w.find('[data-test="tidy-row-members/ops/old"] [data-test=local-mark]').exists()).toBe(false);
     expect(w.find('[data-test="tidy-row-feature/b"] [data-test=local-mark]').exists()).toBe(false);
+  });
+});
+
+describe('the team page sync banner (teams.syncToBase behind.from / to, git.sync incoming)', () => {
+  const sync = (behind: any) => () => ({ on: true, note: null, baseBranch: 'main', behind });
+  it('its "behind" count opens git.commitRange with the exact pair, and closes again', async () => {
+    const { api, calls } = fakeApi({
+      'teams.syncToBase': sync({ teamBranch: 'team/ops', count: 2, text: '2 commits behind main', from: B, to: D }),
+      'git.commitRange': range,
+    });
+    const w = mount(TeamSyncBanner, { props: { api, team, pollMs: 1e9 } });
+    await flushPromises();
+    await w.find('[data-test=team-behind-count]').trigger('click');
+    await flushPromises();
+    expect(of(calls, 'git.commitRange')[0].params).toEqual({ teamId: 3, from: B, to: D });
+    expect(w.findAll('[data-test=team-behind-list] [data-test=commit-list-row]').map((r) => r.attributes('data-sha'))).toEqual([B, C]);
+    await w.find('[data-test=team-behind-count]').trigger('click');
+    expect(w.find('[data-test=team-behind-list]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('an older core (no from / to) keeps the count as text', async () => {
+    const { api } = fakeApi({ 'teams.syncToBase': sync({ teamBranch: 'team/ops', count: 2, text: '2 commits behind main' }) });
+    const w = mount(TeamSyncBanner, { props: { api, team, pollMs: 1e9 } });
+    await flushPromises();
+    expect(w.find('[data-test=team-behind-count]').exists()).toBe(false);
+    expect(w.find('[data-test=team-behind]').text()).toContain('2 commits behind main');
+    w.unmount();
+  });
+
+  it('Sync now lists the commits that came in, each opening the Commit view link', async () => {
+    let synced = false;
+    const { api } = fakeApi({
+      'teams.syncToBase': () => sync(synced ? null : { teamBranch: 'team/ops', count: 1, text: '1 commit behind main', from: B, to: D })(),
+      'git.sync': () => { synced = true; return { outcome: 'synced', baseBranch: 'main', baseSha: D, behind: 0, moved: ['team/ops'], conflicts: [], note: null,
+        incoming: [row(D, 'Release')], incomingCount: 1, incomingTruncated: false, incomingRange: { from: B, to: D } }; },
+    });
+    const w = mount(TeamSyncBanner, { props: { api, team, pollMs: 1e9 } });
+    await flushPromises();
+    await w.find('[data-test=team-sync-now]').trigger('click');
+    await flushPromises();
+    const came = w.find('[data-test=team-sync-came-in]');
+    expect(came.text()).toContain(commitsInHeading(1, 'team/ops'));
+    expect(came.findAll('[data-test=commit-list-row]').map((r) => r.attributes('data-sha'))).toEqual([D]);
+    w.unmount();
   });
 });

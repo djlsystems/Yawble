@@ -182,7 +182,8 @@ const DesktopCss: Record<string, string> = {
   // ending with the New member tile (.new-tile, its form .add); the old add row's rule went. Card 368: the pane clips
   // sideways only (overflow-x clip, y visible) so its ☰ menu draws past a short tile; the focused cell is raised.
   'components/TeamView.vue': '5f8d83d315b69e96',
-  'components/TeamSyncBanner.vue': '8305253f8317a684',
+  // B073 (card 465): the sync banner's "N commits behind" is a link (.count, as in the Git dialog) opening a list (.list).
+  'components/TeamSyncBanner.vue': '72abffaf508279af',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
   // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the
   // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
