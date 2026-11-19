@@ -1,33 +1,33 @@
 {
-  "from": "3332ee5e3f402e643c06a6297a5a57681e136d1c",
-  "to": "fe7fb5d243adbd258a9b6e9e89aacc6d4022d650",
-  "fromSha": "3332ee5e3f402e643c06a6297a5a57681e136d1c",
-  "toSha": "fe7fb5d243adbd258a9b6e9e89aacc6d4022d650",
+  "from": "08285e8bb77ac484c1c1f6d7e60828eb5f213491",
+  "to": "ef1507c1e4cc970ca43d1fcc6b47eeaf93d02903",
+  "fromSha": "08285e8bb77ac484c1c1f6d7e60828eb5f213491",
+  "toSha": "ef1507c1e4cc970ca43d1fcc6b47eeaf93d02903",
   "count": 2,
   "truncated": false,
   "hasOrigin": true,
   "commits": [
     {
-      "sha": "fe7fb5d243adbd258a9b6e9e89aacc6d4022d650",
-      "shortSha": "fe7fb5d243ad",
+      "sha": "ef1507c1e4cc970ca43d1fcc6b47eeaf93d02903",
+      "shortSha": "ef1507c1e4cc",
       "subject": "Team 2",
       "author": {
         "name": "Ada",
         "email": "ada@example.invalid"
       },
-      "date": "2026-11-18T22:04:27-05:00",
+      "date": "2026-11-18T23:08:10-05:00",
       "isMerge": false,
       "notPushed": true
     },
     {
-      "sha": "adfb47944730a345008b4935bd345e64d7c79340",
-      "shortSha": "adfb47944730",
+      "sha": "967e39f3e79b10b2f848f9e57ef6998a460b03d8",
+      "shortSha": "967e39f3e79b",
       "subject": "Team 1",
       "author": {
         "name": "Ada",
         "email": "ada@example.invalid"
       },
-      "date": "2026-11-18T22:04:26-05:00",
+      "date": "2026-11-18T23:08:10-05:00",
       "isMerge": false,
       "notPushed": false
     }

@@ -2,58 +2,58 @@
   "branch": "members/alpha/ben",
   "baseBranch": "trunk",
   "exists": true,
-  "sha": "00a37b50aed8ec81c32af97cd00ef0f1788d4757",
+  "sha": "fc3f495a2c179095115c079299a6e256d37ac6a7",
   "merged": false,
   "commits": [
     {
       "state": "merge",
-      "sha": "00a37b50aed8ec81c32af97cd00ef0f1788d4757",
-      "shortSha": "00a37b50aed8",
+      "sha": "fc3f495a2c179095115c079299a6e256d37ac6a7",
+      "shortSha": "fc3f495a2c17",
       "subject": "Merge side",
       "author": {
         "name": "Ben",
         "email": "ben@example.invalid"
       },
-      "date": "2026-11-18T22:05:33-05:00",
+      "date": "2026-11-18T23:08:36-05:00",
       "isMerge": true,
       "notPushed": true
     },
     {
       "state": "in-base",
-      "sha": "3e93f1c6b29743cb233978054ec65a26961b2976",
-      "shortSha": "3e93f1c6b297",
+      "sha": "44c02730547e00211d22544e9bb95cb33ec54179",
+      "shortSha": "44c02730547e",
       "subject": "Shared fix",
       "author": {
         "name": "Ben",
         "email": "ben@example.invalid"
       },
-      "date": "2026-11-18T22:05:33-05:00",
+      "date": "2026-11-18T23:08:36-05:00",
       "isMerge": false,
       "notPushed": true
     },
     {
       "state": "own",
-      "sha": "a0b19ceb24a405fe5a66de4b99de95e1b857c790",
-      "shortSha": "a0b19ceb24a4",
-      "subject": "Side work",
-      "author": {
-        "name": "Ben",
-        "email": "ben@example.invalid"
-      },
-      "date": "2026-11-18T22:05:32-05:00",
-      "isMerge": false,
-      "notPushed": true
-    },
-    {
-      "state": "own",
-      "sha": "34b34e5e69f8d93bb822d2f7fde240081a143638",
-      "shortSha": "34b34e5e69f8",
+      "sha": "93cc002426060069779537f48527748855c5bae4",
+      "shortSha": "93cc00242606",
       "subject": "Ben\u0027s own",
       "author": {
         "name": "Ben",
         "email": "ben@example.invalid"
       },
-      "date": "2026-11-18T22:05:32-05:00",
+      "date": "2026-11-18T23:08:36-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "state": "own",
+      "sha": "61c5e2e1b40dae9419257a297d415a5362dc71d2",
+      "shortSha": "61c5e2e1b40d",
+      "subject": "Side work",
+      "author": {
+        "name": "Ben",
+        "email": "ben@example.invalid"
+      },
+      "date": "2026-11-18T23:08:35-05:00",
       "isMerge": false,
       "notPushed": true
     }
@@ -61,8 +61,8 @@
   "own": 2,
   "inBase": 1,
   "truncated": false,
-  "lost": "Deleting it loses 2 commits of its own (a0b19ceb24a4, 34b34e5e69f8); they are not on origin either.",
-  "text": "members/alpha/ben at 00a37b50aed8: Deleting it loses 2 commits of its own (a0b19ceb24a4, 34b34e5e69f8); they are not on origin either.\n4 commits not in trunk:\n  - 00a37b50aed8 Merge side (Ben): a merge, not pushed\n  - 3e93f1c6b297 Shared fix (Ben): already in trunk, not pushed\n  - a0b19ceb24a4 Side work (Ben): work of its own, not pushed\n  - 34b34e5e69f8 Ben\u0027s own (Ben): work of its own, not pushed",
+  "lost": "Deleting it loses 2 commits of its own (93cc00242606, 61c5e2e1b40d); they are not on origin either.",
+  "text": "members/alpha/ben at fc3f495a2c17: Deleting it loses 2 commits of its own (93cc00242606, 61c5e2e1b40d); they are not on origin either.\n4 commits not in trunk:\n  - fc3f495a2c17 Merge side (Ben): a merge, not pushed\n  - 44c02730547e Shared fix (Ben): already in trunk, not pushed\n  - 93cc00242606 Ben\u0027s own (Ben): work of its own, not pushed\n  - 61c5e2e1b40d Side work (Ben): work of its own, not pushed",
   "hasOrigin": true,
   "push": {
     "branch": "members/alpha/ben",

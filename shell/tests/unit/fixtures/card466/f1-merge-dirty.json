@@ -1,40 +1,19 @@
 {
   "baseBranch": "trunk",
   "teamBranch": "team/alpha",
-  "outcome": "fast-forward",
-  "summary": "trunk will fast-forward to 061b0c744fd1: 1 commit land.",
-  "text": "trunk will fast-forward to 061b0c744fd1: 1 commit land.\n1 commit will land on trunk:\n  - 061b0c744fd1 Team (Ada), local only\nFiles changed (1):\n  added t.txt (\u002B1 -0)",
-  "from": "77df14571b7341526ab27b4a69e2fdb59b5dc4e9",
-  "to": "061b0c744fd15bea50db4376bc73e75e499f8c84",
-  "newSha": "061b0c744fd15bea50db4376bc73e75e499f8c84",
+  "outcome": "refused",
+  "summary": "trunk is checked out in C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-k0fltt4u.mze\\person-repo with uncommitted changes. Commit or stash them yourself first; the app never touches uncommitted work. Nothing changed.",
+  "text": "trunk is checked out in C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-k0fltt4u.mze\\person-repo with uncommitted changes. Commit or stash them yourself first; the app never touches uncommitted work. Nothing changed.",
+  "from": "f3452e5022cd4c70acd6ae44e7fa2e8dec4b64ca",
+  "to": "175aa628f005c57798a874dbef9152d89a7ae5ef",
+  "newSha": null,
   "conflictFiles": [],
-  "commits": [
-    {
-      "sha": "061b0c744fd15bea50db4376bc73e75e499f8c84",
-      "shortSha": "061b0c744fd1",
-      "subject": "Team",
-      "author": {
-        "name": "Ada",
-        "email": "ada@example.invalid"
-      },
-      "date": "2026-11-18T22:07:13-05:00",
-      "isMerge": false,
-      "notPushed": true
-    }
-  ],
-  "count": 1,
+  "commits": [],
+  "count": 0,
   "truncated": false,
-  "files": [
-    {
-      "path": "t.txt",
-      "status": "added",
-      "added": 1,
-      "deleted": 0,
-      "binary": false
-    }
-  ],
-  "diffFrom": "77df14571b7341526ab27b4a69e2fdb59b5dc4e9",
-  "diffTo": "061b0c744fd15bea50db4376bc73e75e499f8c84",
+  "files": [],
+  "diffFrom": null,
+  "diffTo": null,
   "hasOrigin": false,
   "teamPush": {
     "branch": "team/alpha",

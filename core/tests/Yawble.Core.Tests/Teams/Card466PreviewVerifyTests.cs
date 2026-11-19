@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Teams;
 ///  - a merge commit: Merge to main makes exactly the tree the preview diffed against, and lands the previewed commits;
 ///  - a conflict: nothing changes (refs, index, working tree, no MERGE_HEAD), and Merge to main names the same files;
 ///  - refused (the person's base ahead of origin's): preview and Concierge say so;
-///  - F1: base checked out with uncommitted changes: the preview says fast-forward, Merge to main refuses;
+///  - F1 (fixed in 9214afe): base checked out with uncommitted changes: preview, Concierge and Merge to main all refuse with one sentence;
 ///  - delete: a branch origin still has, one half pushed, one with a merge commit; after the delete each recorded
 ///    commit still opens with where.deletedFrom; the Concierge lists each branch's preview text;
 ///  - every count opens exactly its commits, and each row's notPushed is the commit view's !where.pushed;
@@ -52,6 +52,8 @@ public class Card466PreviewVerifyTests
         var repo = Path.Combine(f.Db.Dir, "person-repo");
         Directory.CreateDirectory(repo);
         AgentGit.Host(repo, "init", "-q", "-b", "trunk");
+        // Tests run the person's git with GIT_CONFIG_NOSYSTEM while the host has core.autocrlf=true: pin it so both agree on dirty.
+        AgentGit.Host(repo, "config", "core.autocrlf", "false");
         Write(repo, "README.md", "readme\n");
         Write(repo, "a.txt", "one\ntwo\nthree\n");
         var root = Commit(repo, "Start", author: "Person");
@@ -268,30 +270,41 @@ public class Card466PreviewVerifyTests
     }
 
     /// <summary>
-    /// F1 (fault). Merge to main refuses when the base is checked out with uncommitted changes (DirtyCheckoutAsync), but
-    /// git.mergePreview never checks it: the preview (and the Concierge's git_merge_preview) say "trunk will fast-forward"
-    /// and the dialog enables Merge, which then refuses. The contract says the preview has "the same start, refusals and
-    /// outcomes as TeamRepos' merge". This test pins what happens today (flip it when fixed: outcome "refused").
+    /// F1 (round 1 fault, fixed by DeveloperTomas 9214afe). With the base checked out and a tracked file changed,
+    /// git.mergePreview refuses with git.merge's sentence word for word, the Concierge's git_merge_preview says the same,
+    /// Merge to main still refuses with that sentence, and nothing in the repository moves. Clean again, both fast-forward.
     /// </summary>
     [Fact]
-    public async Task F1_BaseCheckedOutWithUncommittedChanges_PreviewSaysFastForward_ButMergeRefuses()
+    public async Task F1_BaseCheckedOutWithUncommittedChanges_PreviewRefusesWithMergesSentence()
     {
         using var f = new TeamsFixture();
         var r = await RigAsync(f);
         AgentGit.Host(r.Repo, "switch", "-q", "-c", "team/alpha");
         Write(r.Repo, "t.txt", "t\n");
-        Commit(r.Repo, "Team");
+        var team = Commit(r.Repo, "Team");
         AgentGit.Host(r.Repo, "switch", "-q", "trunk");
         Write(r.Repo, "a.txt", "one\nedited, not committed\nthree\n");
+        var before = Snapshot(r.Repo);
 
         var p = await f.Repos.GitMergePreviewAsync(r.TeamId, "Alpha", Ct);
+        var said = await ConciergeMergeText(r);
         var done = await f.Repos.GitMergeTeamToBaseAsync(r.TeamId, "Alpha", Ct);
 
+        Assert.Equal("refused", p.Outcome);
         Assert.Equal("refused", done.Outcome);
-        Assert.Contains("uncommitted changes", done.Message);
-        Assert.Equal("fast-forward", p.Outcome); // FAULT: should be "refused", as Merge to main is
-        Assert.DoesNotContain("uncommitted", p.Text);
+        Assert.StartsWith($"trunk is checked out in {r.Repo} with uncommitted changes.", done.Message);
+        Assert.Equal(done.Message, p.Summary);
+        Assert.Equal(done.Message, p.Text);
+        Assert.Equal(p.Text, said);
+        Assert.Null(p.NewSha);
+        Assert.Empty(p.Commits);
+        Assert.Equal(before, Snapshot(r.Repo));
         Emit("f1-merge-dirty", MergeJson(p));
+
+        AgentGit.Host(r.Repo, "checkout", "--", "a.txt");
+        Assert.Equal("fast-forward", (await f.Repos.GitMergePreviewAsync(r.TeamId, "Alpha", Ct)).Outcome);
+        Assert.Equal("fast-forward", (await f.Repos.GitMergeTeamToBaseAsync(r.TeamId, "Alpha", Ct)).Outcome);
+        Assert.Equal(team, Rev(r.Repo, "refs/heads/trunk"));
     }
 
     // ------------------------------------------------------------------ Delete
