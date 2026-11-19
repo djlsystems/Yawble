@@ -7,7 +7,7 @@ namespace Yawble.Core.Tests.Gateway;
 
 /// <summary>
 /// Card 462 (B103): migration 0051 deletes the old one-row-per-request successful model forwards, keeping each run's
-/// first per model vhost, and leaves everything else in gateway_events as it was.
+/// first per model vhost and the first after each credential problem or rate limit there (card 475), and leaves everything else in gateway_events as it was.
 /// </summary>
 public class GatewayModelForwardsMigrationTests
 {
@@ -52,8 +52,8 @@ public class GatewayModelForwardsMigrationTests
                 kept.Add(Insert(c, null, GatewayEventKinds.Forward, vhost, 200));
                 kept.Add(Insert(c, null, GatewayEventKinds.Forward, vhost, 200));
             }
-            // The vhost in another case is the same vhost (run 1 already has its first on model).
-            dropped.Add(Insert(c, 1, GatewayEventKinds.Forward, "MODEL.yawble.internal", 200));
+            // The vhost in another case is the same vhost (run 2 already has its first on model).
+            dropped.Add(Insert(c, 2, GatewayEventKinds.Forward, "MODEL.yawble.internal", 200));
             // Not a model vhost: every row kept.
             kept.Add(Insert(c, 1, GatewayEventKinds.Forward, Vhosts.Bus, 200));
             kept.Add(Insert(c, 1, GatewayEventKinds.Forward, Vhosts.Bus, 200));
@@ -63,6 +63,77 @@ public class GatewayModelForwardsMigrationTests
             kept.Add(Insert(c, 1, GatewayEventKinds.ConnectAllowed, null, null));
             kept.Add(Insert(c, 1, GatewayEventKinds.Bus, null, 200));
             kept.Add(Insert(c, 1, GatewayEventKinds.Bus, null, 200));
+
+            Assert.Contains(Migration, SchemaMigrator.Migrate(cs));
+
+            var left = Ids(c);
+            Assert.Equal(kept.Order(), left);
+            Assert.Empty(dropped.Intersect(left));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void KeepsTheFirstSuccessAfterEachCredentialProblemOrRateLimitOnThatRunsVhost()
+    {
+        // Card 475: the live rule (GatewayLog.Write) writes the first 2xx forward after a credential problem or rate
+        // limit on the vhost again, and GatewayVerdicts.From reads it as the problem cleared; 0051 must keep it too.
+        var dir = Directory.CreateTempSubdirectory("yawble-db-").FullName;
+        var cs = $"Data Source={Path.Combine(dir, "t.db")};Pooling=False";
+        try
+        {
+            Assert.Contains(Migration, SchemaMigrator.Migrate(cs));
+            using var c = new SqliteConnection(cs);
+            c.Open();
+            Exec(c, $"DELETE FROM schema_migrations WHERE name = '{Migration}';");
+
+            const string model = "model.yawble.internal";
+            const string grok = "grok.yawble.internal";
+            const string F = GatewayEventKinds.Forward, Cred = GatewayEventKinds.CredentialProblem, Rate = GatewayEventKinds.RateLimited;
+            var kept = new List<long>();
+            var dropped = new List<long>();
+
+            kept.Add(Insert(c, 10, F, model, 200));
+            dropped.Add(Insert(c, 10, F, model, 200));
+            // A credential problem: the next success is kept, the one after it is not.
+            kept.Add(Insert(c, 10, Cred, model, 401));
+            kept.Add(Insert(c, 10, F, model, 200));
+            dropped.Add(Insert(c, 10, F, model, 204));
+            // Two rate limits in a row: one success kept after them.
+            kept.Add(Insert(c, 10, Rate, model, 429));
+            kept.Add(Insert(c, 10, Rate, model, 429));
+            kept.Add(Insert(c, 10, F, model, 201));
+            dropped.Add(Insert(c, 10, F, model, 200));
+            // A failed forward after the problem is kept and is not the success that answers it.
+            kept.Add(Insert(c, 10, Cred, model, 401));
+            kept.Add(Insert(c, 10, F, model, 401));
+            kept.Add(Insert(c, 10, F, model, 200));
+            dropped.Add(Insert(c, 10, F, model, 200));
+            // A problem on another vhost, or in another run, does not reopen model in run 10.
+            kept.Add(Insert(c, 10, Rate, grok, 429));
+            kept.Add(Insert(c, 11, Cred, model, 401));
+            dropped.Add(Insert(c, 10, F, model, 200));
+            // Grok and run 11 keep their own first success, once.
+            kept.Add(Insert(c, 10, F, grok, 200));
+            dropped.Add(Insert(c, 10, F, grok, 200));
+            kept.Add(Insert(c, 11, F, model, 200));
+            dropped.Add(Insert(c, 11, F, model, 200));
+            // The vhost's case does not matter, for the problem or the forward.
+            kept.Add(Insert(c, 10, Cred, "Model.Yawble.Internal", 401));
+            kept.Add(Insert(c, 10, F, "MODEL.yawble.internal", 200));
+            dropped.Add(Insert(c, 10, F, model, 200));
+            // A problem before the run's first success: that success is kept once.
+            kept.Add(Insert(c, 12, Rate, model, 429));
+            kept.Add(Insert(c, 12, F, model, 200));
+            dropped.Add(Insert(c, 12, F, model, 200));
+            // No run: kept, and a no-run problem reopens nothing.
+            kept.Add(Insert(c, null, Cred, model, 401));
+            kept.Add(Insert(c, null, F, model, 200));
+            dropped.Add(Insert(c, 12, F, model, 200));
 
             Assert.Contains(Migration, SchemaMigrator.Migrate(cs));
 
