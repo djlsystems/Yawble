@@ -12,9 +12,9 @@ const api = resolveApi(props.api);
 </script>
 
 <template>
-  <Modal v-if="commitTarget" :key="`${commitTarget.teams.join(',')}/${commitTarget.sha}`" :title="`Commit ${commitTarget.sha.slice(0, 10)}`" wide @close="closeCommit">
+  <Modal v-if="commitTarget" :key="`${commitTarget.teams.join(',')}/${commitTarget.repo ?? ''}/${commitTarget.sha}`" :title="`Commit ${commitTarget.sha.slice(0, 10)}`" wide @close="closeCommit">
     <div data-test="commit-dialog" :data-sha="commitTarget.sha">
-      <CommitView :api="api" :teams="commitTarget.teams" :sha="commitTarget.sha" @done="closeCommit" />
+      <CommitView :api="api" :teams="commitTarget.teams" :sha="commitTarget.sha" :repo="commitTarget.repo" @done="closeCommit" />
     </div>
   </Modal>
 </template>

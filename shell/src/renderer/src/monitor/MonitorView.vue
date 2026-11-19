@@ -19,6 +19,7 @@ import { MonitorSound, readSound, writeSound } from './sound';
 import { readStep, StepLook, type StepKind, type StepRow } from './steps';
 import Timeline from './Timeline.vue';
 import LoadingNote from '../components/LoadingNote.vue';
+import CommitText from '../components/CommitText.vue';
 import { heavyLine } from '../heavyLease';
 import { useNarrow } from '../narrowScreen';
 import {
@@ -922,7 +923,7 @@ onBeforeUnmount(() => {
           <span v-else class="noface" />
           <div class="line">
             <div><b>{{ r.verb }}</b> <template v-if="r.verb.endsWith('told')">{{ r.who }}</template><template v-else>· {{ r.who }}</template> <span class="dim">· {{ r.team }} · {{ ago(r.at) }}</span></div>
-            <div v-if="r.text" class="text">{{ r.text }}</div>
+            <div v-if="r.text" class="text"><CommitText :text="r.text" :team="r.team" /></div>
           </div>
         </li>
         <li v-if="!loaded" class="none"><LoadingNote text="Loading activity…" /></li>

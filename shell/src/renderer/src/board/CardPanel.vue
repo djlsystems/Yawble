@@ -6,8 +6,7 @@ import { errorText, resolveApi } from '../api';
 import { renderMarkdown } from '../markdown';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName } from '../faces/faces';
-import { commitParts } from '../commitView';
-import CommitLink from '../components/CommitLink.vue';
+import CommitText from '../components/CommitText.vue';
 import { ago, cardFace, cardStatusLook, StatusLabel, trailKind } from './cards';
 import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
@@ -144,7 +143,7 @@ defineExpose({ load });
             <span class="who">{{ t.source === 'you' ? 'You' : displayName(t.source) }}</span>
             <span class="kind" :class="{ stopped: trailKind(t) === 'stopped' }">{{ trailKind(t) }}</span>
             <span class="muted when">{{ ago(t.at) }}</span>
-            <div class="txt"><template v-for="(p, pi) in commitParts(t.text)" :key="pi"><CommitLink v-if="p.sha" :team="card.team" :sha="p.sha" :length="40" /><template v-else>{{ p.text }}</template></template></div>
+            <div class="txt"><CommitText :text="t.text" :team="card.team" /></div>
           </li>
           <li v-if="!card.trail.length" class="muted">Nothing yet.</li>
         </ol>

@@ -1,19 +1,21 @@
 import { shallowRef } from 'vue';
 import type { CommitFound } from '../../shared/api';
 import { LOCAL_MARK } from './localMark';
+import { cachedMatches, commitChoice, pickMatches } from './commitResolve';
 
 // B072: the one Commit view any commit ID in the app opens (hand-backs, the board's trail, the Monitor, the Tidy panel,
 // the Git dialog). One at a time: opening another commit replaces it. teams: where to look, in order; the first team
 // whose repository has the commit is shown (a hand-back in the Concierge does not say its team).
 
-export interface CommitTarget { teams: string[]; sha: string }
+/** repo (B074): the repository a resolved link named, in teams[0] (absent: the team's main repository). */
+export interface CommitTarget { teams: string[]; sha: string; repo?: string }
 
 export const commitTarget = shallowRef<CommitTarget | null>(null);
 
-export function openCommit(team: string | string[], sha: string): void {
+export function openCommit(team: string | string[], sha: string, repo?: string | null): void {
   const teams = (Array.isArray(team) ? team : [team]).filter((t, i, all) => !!t && all.indexOf(t) === i);
   if (!teams.length || !isAskableId(sha)) return;
-  commitTarget.value = { teams, sha: sha.toLowerCase() };
+  commitTarget.value = { teams, sha: sha.toLowerCase(), ...(repo ? { repo } : {}) };
 }
 
 export function closeCommit(): void {
@@ -44,7 +46,17 @@ export function installCommitLinks(doc: Document = document): () => void {
     if (e instanceof KeyboardEvent && e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     e.stopPropagation();
-    openCommit(teamsFor(el), el.dataset.commit ?? '');
+    const id = el.dataset.commit ?? '';
+    const teams = teamsFor(el);
+    // B074: an ID that names several commits opens the chooser (repository and title); one confirmed by
+    // git.commitsResolve opens in the team and repository it was found in, then the usual order.
+    if (el.dataset.commitChoose !== undefined) {
+      const matches = pickMatches(cachedMatches(id) ?? [], teams);
+      if (matches.length > 1) { commitChoice.value = { id, teams, matches }; return; }
+      if (matches.length === 1) { openCommit([matches[0].team, ...teams], matches[0].fullId, matches[0].repo); return; }
+    }
+    const inTeam = el.dataset.commitIn;
+    openCommit(inTeam ? [inTeam, ...teams] : teams, id, inTeam ? el.dataset.commitRepo : null);
   };
   doc.addEventListener('click', open, true);
   doc.addEventListener('keydown', open, true);

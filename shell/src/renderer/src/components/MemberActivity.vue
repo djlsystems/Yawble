@@ -4,6 +4,7 @@ import { Palette } from '../monitor/scene';
 import { ago } from '../monitor/teamActivity';
 import { computed } from 'vue';
 import LoadingNote from './LoadingNote.vue';
+import CommitText from './CommitText.vue';
 
 // A member's activity beside its card on the team board: the lines the Monitor's activity list shows for that member,
 // newest first, in the board's light look and without the face (the card beside it has it). It is as tall as the card
@@ -21,7 +22,7 @@ const more = computed(() => (props.limit ? Math.max(0, props.rows.length - props
     <ol>
       <li v-for="r in shown" :key="r.key" :style="{ '--tone': Palette[r.tone] }" data-test="member-activity-row">
         <div><b>{{ r.verb }}</b> <template v-if="r.verb.endsWith('told')">{{ r.who }}</template><template v-else>· {{ r.who }}</template> <span class="dim">· {{ ago(r.at, now) }}</span></div>
-        <div v-if="r.text" class="text">{{ r.text }}</div>
+        <div v-if="r.text" class="text"><CommitText :text="r.text" :team="r.team" /></div>
       </li>
       <li v-if="more" class="none dim more" data-test="member-activity-more">+{{ more }} older in Logs</li>
       <li v-if="!loaded" class="none"><LoadingNote text="Loading activity…" /></li>
