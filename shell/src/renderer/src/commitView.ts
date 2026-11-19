@@ -110,6 +110,7 @@ export function whereLines(c: CommitFound): { key: string; text: string; tone: '
   else if (w.onlyOnMember) out.push({ key: 'member', text: `Only on ${w.onlyOnMember}'s branch`, tone: 'warn' });
   else if (teamBranch) out.push({ key: 'team', text: 'In the team branch only, not in main yet', tone: 'warn' });
   else if (w.branches.length) out.push({ key: 'branches', text: `On ${w.branches.join(', ')}, not in main yet`, tone: 'warn' });
+  else if (w.otherBranches?.length) out.push({ key: 'other', text: `On ${w.otherBranches.join(', ')} (not a team or member branch)`, tone: 'warn' });
   else out.push({ key: 'none', text: 'On no branch (a branch that held it was deleted)', tone: 'warn' });
   out.push(w.pushed ? { key: 'pushed', text: 'On origin', tone: 'ok' } : { key: 'unpushed', text: 'Not pushed: only on this computer', tone: 'warn' });
   if (w.tags.length) out.push({ key: 'tags', text: `Included in release ${w.tags.join(', ')}`, tone: 'plain' });

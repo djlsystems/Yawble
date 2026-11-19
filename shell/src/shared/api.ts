@@ -742,7 +742,7 @@ export interface BranchRealignResult { oldSha: string; newSha: string }
  * may name the branch and member). made: the member, card and workflow that made it (the app's own records); absent
  * when unknown; a merge recorded on the team branch is credited to the Manager. merge: what a merge brought in;
  * intoBranch / fromBranch are null when neither git nor the app's records can tell. where: inMain; branches: the team
- * branch first, then member branches, never main; onlyOnMember only when it is in neither main nor the team branch;
+ * branch first, then member branches, never main; otherBranches: the other local branches that hold it (not main, the team\n * branch or members/*; absent from an older core, read as []); onlyOnMember only when it is in neither main nor the team branch;
  * pushed (on origin); tags (the release tags that contain it). files: against the first parent for a merge.
  * codeShown=false: a cloud viewer with "Show members' code to cloud viewers" off; the file list only, no diffs.
  */
@@ -757,7 +757,7 @@ export interface CommitFound {
   isMerge: boolean; parents: string[];
   merge?: { intoBranch: string | null; fromBranch: string | null; fromMember?: string | null; commitCount: number } | null;
   made?: { member: string; card?: number | null; workflow?: number | null } | null;
-  where: { inMain: boolean; branches: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[] };
+  where: { inMain: boolean; branches: string[]; otherBranches?: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[] };
   files: CommitFile[];
   codeShown: boolean;
 }
