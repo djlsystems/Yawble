@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, GitProvider, IntegrationInfo, McpServerInfo, RepoProviderInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
-import { TEAM_WORKFLOW_EXPIRY, TEAMS_SET_REPO, WorkflowExpiryDefaultDays } from '../../../shared/api';
+import { TEAM_WORKFLOW_EXPIRY, TEAMS_SET_REPO, WorkflowExpiryDefaultDays, TEAM_RETROS, TEAMS_LESSONS, PERSON_WRITER } from '../../../shared/api';
+import type { TeamLessons } from '../../../shared/api';
+import { openSkill } from '../skillLink';
 import RepoProviderFields from './RepoProviderFields.vue';
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
@@ -105,6 +107,18 @@ const saveExpiry = () => act(TEAM_WORKFLOW_EXPIRY, { days: expiryDraft.value }, 
   expirySaved.value = true;
 });
 
+// ---- B100: the team's lessons (its team_retros skill, kept by the Manager's retrospectives). An older core: not shown.
+const lessons = ref<TeamLessons | null>(null);
+async function loadLessons() { try { lessons.value = await api.call<TeamLessons>(TEAMS_LESSONS, { teamId: props.team.id }); } catch { lessons.value = null; } }
+const day = (iso: string | null) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(); };
+const lessonsText = computed(() => {
+  const l = lessons.value;
+  if (!l || l.version === 0 && l.skillId === null) return 'Lessons: none yet. The Manager keeps them after each completed workflow.';
+  const by = l.writer === PERSON_WRITER ? 'by you' : l.workflow !== null ? `by the retro of workflow ${l.workflow}` : l.writer ? `by ${l.writer}` : '';
+  return `Lessons: ${l.count}` + (l.updatedAt ? `, last updated ${day(l.updatedAt)}${by ? ' ' + by : ''}` : '');
+});
+function showLessons() { openSkill(props.team.id, TEAM_RETROS); emit('close'); }
+
 // ---- repositories: the main one (every member's working directory) and the others, writable or read-only
 interface ExtraRepo extends RepoProviderInfo { name: string; path: string; writable: boolean; baseBranch: string; source: string | null }
 const repos = ref<{ main: ({ path: string; baseBranch: string; managed: boolean; origin: string | null; name: string | null } & RepoProviderInfo) | null; extras: ExtraRepo[] } | null>(null);
@@ -197,7 +211,7 @@ const doReset = () => act('teams.reset', { members: [...resetPick.value], ...res
   resetDone.value = `Done: ${r.done.join('; ') || 'nothing to clear'}.` + (r.left.length ? ` Not removed: ${r.left.join('; ')}.` : '');
 });
 
-onMounted(() => { void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
+onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
 </script>
 
 <template>
@@ -229,6 +243,12 @@ onMounted(() => { void loadExpiry(); void checkQuiet(); void loadEnv(); void loa
         <p v-else-if="team.repoPath" class="mono small path" data-test="team-repo-path">{{ team.repoPath }}</p>
         <p v-else class="muted small">Made at the team's first run.</p>
         <p class="muted small">Other repositories, and adding more, are on the <a href="#" @click.prevent="tab = 'repos'">Repositories</a> tab.</p>
+      </div>
+      <div v-if="lessons" class="block" data-test="team-lessons">
+        <h4>What the team has learned</h4>
+        <p class="small"><span data-test="team-lessons-line">{{ lessonsText }}</span>
+          <template v-if="lessons.skillId !== null"> · <a href="#" data-test="team-lessons-link" @click.prevent="showLessons">Read or edit them in Settings &gt; Skills</a></template></p>
+        <p class="muted small">Every run of the team gets its lessons (the team_retros skill) in its prompt, at once.</p>
       </div>
       <div v-if="!ready.expiry || expiry !== null" class="block" data-test="team-workflow-expiry">
         <h4>Idle workflows</h4>
