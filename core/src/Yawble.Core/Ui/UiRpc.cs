@@ -162,6 +162,7 @@ public sealed class UiRpc(
                 // B072, the commit view: reads only.
                 "git.commitShow" => await CommitShowAsync(p, ct),
                 "git.commitDiff" => await CommitDiffAsync(p, ct),
+            "git.commitsResolve" => await CommitsResolveAsync(p, ct),
                 // B073: the commits behind a count, and the previews of Merge to main and Delete: reads only.
                 "git.commitRange" => await CommitRangeAsync(p, ct),
                 "git.mergePreview" => await MergePreviewAsync(p, ct),
@@ -648,6 +649,37 @@ public sealed class UiRpc(
         var sha = OptStr(p, "sha") ?? throw new RpcException("bad_params", "sha is required");
         var path = OptStr(p, "path") ?? throw new RpcException("bad_params", "path is required");
         return await CommitCallAsync(async () => (await repos.GitCommitDiffAsync(team.Id, team.Name, sha, path, ct, OptStr(p, "repo"))).ToJson());
+    }
+
+    /// <summary>
+    /// git.commitsResolve {team? | teamId?, ids:[...]} (B074): which of a batch of 7-40 digit hex IDs are commits of the
+    /// team's repositories (no team: every team's), {max, results:[{id, valid, matches:[{team, teamId, repo, fullId,
+    /// shortId, title, pushed}]}], errors?}. At most <see cref="Teams.TeamRepos.MaxResolveIds"/> distinct IDs. Reads only.
+    /// Contract: B074/contract.md in the team's documents.
+    /// </summary>
+    private async Task<JsonNode?> CommitsResolveAsync(JsonObject? p, CancellationToken ct)
+    {
+        if (p?["ids"] is not JsonArray array) throw new RpcException("bad_params", "ids is required: an array of commit IDs");
+        var ids = new List<string>();
+        foreach (var item in array)
+        {
+            if (item is not JsonValue v || !v.TryGetValue<string>(out var s)) throw new RpcException("bad_params", "ids holds strings only");
+            ids.Add(s);
+        }
+        Teams.TeamRepos repos;
+        List<(long, string)> teams;
+        if (OptLong(p, "teamId") is not null || OptStr(p, "team") is not null)
+        {
+            var (r, team) = await TidyTeamAsync(p, ct);
+            repos = r;
+            teams = [(team.Id, team.Name)];
+        }
+        else
+        {
+            repos = bus.Repos ?? throw new RpcException("no_repositories", "this core has no team repositories (no app data folder)");
+            teams = [.. (await bus.TeamsAsync(ct)).Select(t => (t.Id, t.Name))];
+        }
+        return await CommitCallAsync(async () => (await repos.ResolveCommitIdsAsync(teams, ids, ct)).ToJson());
     }
 
     /// <summary>git.commitRange {team | teamId, repo?, from, to, limit?} (B073): the commits on to that from lacks (the pair a count gives), newest first.</summary>
