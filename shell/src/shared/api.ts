@@ -831,7 +831,9 @@ export interface CommitDiff {
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {
   on: boolean; note: string | null; baseBranch: string | null;
-  behind: { teamBranch: string; count: number; text: string } | null;
+  /** from / to (B073; absent from an older core): the pair behind count (from = the team tip, to = the base it is behind),
+   * passed unchanged to git.commitRange. */
+  behind: { teamBranch: string; count: number; text: string; from?: string | null; to?: string | null } | null;
 }
 /** git.sync, "Sync now" (core Teams/TeamRepos.Sync.cs BranchSyncResult). */
 export interface BranchSyncResult {
