@@ -191,8 +191,12 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
         }
     }
 
-    /// <summary>The check's own guard: the gateway forwarded nothing to a model vhost, so no credential was swapped in.</summary>
-    private static GuardrailResult NoModelCall(IReadOnlyList<GatewayEvent> events)
+    /// <summary>
+    /// The check's own guard: the gateway forwarded nothing to a model vhost, so no credential was swapped in. The text
+    /// names the vhosts, not a number of requests: the log writes a run's successful model request once per vhost (B103),
+    /// and usage_events has a row only for a POST whose response had a body, so neither counts every request.
+    /// </summary>
+    internal static GuardrailResult NoModelCall(IReadOnlyList<GatewayEvent> events)
     {
         var model = events.Where(e => e.Kind == GatewayEventKinds.Forward
                                       && !string.Equals(e.Vhost, Vhosts.Bus, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -200,7 +204,7 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
             ? new GuardrailResult("check.no-model-call", "check", Verdicts.Blocked, Verdicts.Blocked, true,
                 "the run's gateway forwarded nothing to a model vhost during the check, so no credential was swapped in")
             : new GuardrailResult("check.no-model-call", "check", Verdicts.Allowed, Verdicts.Blocked, false,
-                $"the run's gateway forwarded {model.Count} request(s) to a model vhost ({string.Join(", ", model.Select(e => e.Vhost).Distinct())})");
+                $"the run's gateway forwarded request(s) to a model vhost ({string.Join(", ", model.Select(e => e.Vhost).Distinct(StringComparer.OrdinalIgnoreCase))})");
     }
 
     /// <summary>The probe launch: plants the canaries and builds the plan on the launcher's layout and policy.</summary>
