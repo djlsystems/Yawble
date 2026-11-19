@@ -2,7 +2,7 @@
 import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
 import WorkflowsDialog from './components/WorkflowsDialog.vue';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AgentProfileRow, ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary, WorkflowSummary } from '../../shared/api';
 import { errorText, resolveApi } from './api';
 import { cliLabel } from './agentClis';
@@ -24,6 +24,10 @@ import TerminalPane from './components/TerminalPane.vue';
 import { terminalPane, toggleTerminalPane } from './terminalPane';
 import { openMemberTerminal, registerTeamPage } from './memberTerminal';
 import BacklogView from './board/BacklogView.vue';
+// The Workflows page (B104) is loaded when first opened: the window's first paint does not wait for it.
+const WorkflowsView = defineAsyncComponent(() => import('./workflows/WorkflowsView.vue'));
+import { backlogRequest, isWorkflowsHash, workflowsRequest } from './workflows/page';
+import { WORKFLOWS_LIST, type WorkflowsListAnswer } from '../../shared/api';
 import Sidebar, { type View } from './components/Sidebar.vue';
 import SettingsView, { type SettingsTab } from './components/SettingsView.vue';
 import Icon from './components/Icon.vue';
@@ -58,7 +62,8 @@ interface Place { view: View; conversationId: string | null; teamId: number | nu
 const read = (s: () => Storage): Partial<Place> => { try { return JSON.parse(s().getItem('yawble.place') ?? '{}'); } catch { return {}; } };
 const kept = read(() => localStorage);
 const saved = read(() => sessionStorage);
-const view = ref<View>(saved.view ?? 'concierge');
+// A #workflows hash (a link to the Workflows page, B104) opens that page.
+const view = ref<View>(typeof location !== 'undefined' && isWorkflowsHash(location.hash) ? 'workflows' : saved.view ?? 'concierge');
 const prefTab = ref<SettingsTab>('general');
 const conversationId = ref<string | null>(saved.view ? saved.conversationId ?? null : null);
 const selected = ref<number | null>(saved.view ? saved.teamId ?? null : null);
@@ -143,6 +148,7 @@ const title = computed(() => {
   if (view.value === 'teams') return team.value ? team.value.name : 'Teams';
   if (view.value === 'documents') return 'Documents';
   if (view.value === 'backlog') return 'Backlog';
+  if (view.value === 'workflows') return 'Workflows';
   return view.value === 'board' ? 'Kanban board' : view.value === 'settings' ? 'Settings' : 'Monitor';
 });
 
@@ -206,6 +212,20 @@ function openTeam(id: number, panel?: 'workflows', workflow?: number) {
   // The Monitor's workflow nodes open the team at its workflows.
   if (panel === 'workflows') void nextTick(() => teamView.value?.openWorkflows(workflow));
 }
+
+// B104: the Workflows page opened from elsewhere (the board's button, a team's "All workflows", a Backlog item's
+// "workflow #N"), and the Backlog opened at an item (an Item link). The page / the Backlog take the request as a prop.
+watch(workflowsRequest, (r) => { if (!r) return; monitorWorkflows.value = null; view.value = 'workflows'; });
+watch(backlogRequest, (r) => { if (!r) return; monitorWorkflows.value = null; view.value = 'backlog'; });
+/** The sidebar's Workflows badge: how many are open, across the teams (an older core without workflows.list: none). */
+const openWorkflows = ref<number | null>(null);
+async function loadOpenWorkflows() {
+  try { openWorkflows.value = (await api.call<WorkflowsListAnswer>(WORKFLOWS_LIST, { state: 'open', limit: 1 }))?.counts?.open ?? null; }
+  catch { openWorkflows.value = null; }
+}
+let workflowsTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => { void loadOpenWorkflows(); workflowsTimer = setInterval(loadOpenWorkflows, Math.max(5000, props.pollMs ?? 5000)); });
+onBeforeUnmount(() => { if (workflowsTimer) clearInterval(workflowsTimer); });
 
 /**
  * A link into the remote view (remoteHash.ts): #team={id} opens that team, #workflow={wf} that workflow's thread in its
@@ -290,6 +310,9 @@ async function remove(id: string) {
 /** A place in the sidebar. Teams always opens the list of teams, not the team last looked at. */
 function go(place: View) {
   monitorWorkflows.value = null;
+  // A place chosen here opens as it was left, not at what a link last asked for.
+  workflowsRequest.value = null;
+  backlogRequest.value = null;
   if (place === 'settings') { settingsLanding.value = true; if (phone.value) settingsKey.value++; }
   view.value = place;
   if (place === 'teams') selected.value = null;
@@ -399,7 +422,7 @@ const menus = computed<Menu[]>(() => [
     { id: 'theme:dark', label: 'Theme: Dark', radio: true, checked: theme.state.mode === 'dark' },
     { id: 'toggleTheme', label: 'Toggle theme' },
     { separator: true },
-    { id: 'go:concierge', label: 'Concierge' }, { id: 'go:teams', label: 'Teams' }, { id: 'go:backlog', label: 'Backlog' },
+    { id: 'go:concierge', label: 'Concierge' }, { id: 'go:teams', label: 'Teams' }, { id: 'go:backlog', label: 'Backlog' }, { id: 'go:workflows', label: 'Workflows' },
     { id: 'go:board', label: 'Kanban board' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
     ...(desktop ? [
       { separator: true } as const,
@@ -472,7 +495,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
       @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
-      @logs="drawerOpen = false; logsOpen = true" :open-team-name="openTeamName" @team-documents="openTeamDialog('documents')" @team-workflows="openTeamDialog('workflows')" />
+      @logs="drawerOpen = false; logsOpen = true" :open-team-name="openTeamName" :open-workflows="openWorkflows" @team-documents="openTeamDialog('documents')" @team-workflows="openTeamDialog('workflows')" />
 
     <main class="main">
       <header class="bar">
@@ -529,8 +552,10 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
         <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" @open-terminal="openMemberTerminal"
           @open-needs-you="focusTeamId = null; go('board')" />
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />
-        <BacklogView v-else-if="view === 'backlog'" :teams="teams" :teams-loading="!overview && !error" :api="api" :poll-ms="pollMs" @open-team="openTeam"
+        <BacklogView v-else-if="view === 'backlog'" :teams="teams" :teams-loading="!overview && !error" :api="api" :poll-ms="pollMs" :focus="backlogRequest" @open-team="openTeam"
           @board="focusTeamId = $event; go('board')" />
+        <WorkflowsView v-else-if="view === 'workflows'" :teams="teams" :api="api" :poll-ms="pollMs" :request="workflowsRequest" @open-team="openTeam"
+          @board="focusTeamId = $event; go('board')" @backlog="go('backlog')" />
         <SettingsView v-else-if="view === 'settings'" :key="settingsKey" :landing="settingsLanding" :api="api":tab="prefTab" :teams="teams" :poll-ms="pollMs" :integrations-tab="integrationsTab" @tab="prefTab = $event; integrationsTab = null" @connections="openConnections" @changed="changed" @link="link = $event as LinkStatus" />
 
       </div>

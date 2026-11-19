@@ -178,7 +178,84 @@ const warningText = (workflow: number, question: number) => `#${workflow} will e
 const expiry = { on: false, extended: new Map<number, string>(), days: new Map<number, number>() };
 const expiryDays = (teamId: number) => expiry.days.get(teamId) ?? 3;
 
+/** B104 (card 477): the Workflows page's rows (workflows.list / workflows.get, YAWBLE_TEAM_DOCS/B104/contract.md), across
+ *  both teams: #10 running (B011, Ada on it), #12 waiting on you, #15 waiting for the lease, #16 idle (expires in 20 h),
+ *  and ended ones: #9 expired, #14 completed today (B013, archived), #8 closed. */
+function b104Rows() {
+  const wfTime = (createdAgo: number, endedAgo: number | null, how: string | null, segs: [Cat, number][]) => {
+    const overallMs = (createdAgo - (endedAgo ?? 0)) * 60_000;
+    const known = segs.reduce((a, [, m]) => a + m * 60_000, 0);
+    return { createdAt: iso(createdAgo), startedAt: iso(createdAgo - 5), endedAt: endedAgo == null ? null : iso(endedAgo), endedHow: how, open: endedAgo == null,
+      overallMs, rebuilt: false, breakdown: [...segs.map(([category, m]) => ({ category, ms: m * 60_000 })), ...(overallMs > known ? [{ category: 'idle', ms: overallMs - known }] : [])] };
+  };
+  const base = { undeclared: false, busy: [] as string[], ending: null as string | null, endedAt: null as string | null, expiredAt: null, expiresAt: null as string | null,
+    expiryWarning: null, question: null as number | null, waitingFor: null as string | null, working: false, item: null as unknown, members: [] as unknown[], ownerId: 1 };
+  const t1 = { team: 'payments', teamId: 1 }, t2 = { team: teamRows[1].name, teamId: 2 };
+  return [
+    { ...base, ...t1, id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', status: 'running', working: true, busy: ['DeveloperAda is running'], startedAt: iso(120), lastAt: iso(1), messages: 14,
+      item: { label: 'B011', title: 'Partial refunds', archived: false }, members: [{ id: 2, name: 'DeveloperAda', state: 'running' }, { id: 3, name: 'TesterBen', state: 'queued' }], time: timeline.workflow.time },
+    { ...base, ...t1, id: 12, title: 'Refund limits per merchant', owner: 'Manager', state: 'open', status: 'needs-you', question: 3, startedAt: iso(400), lastAt: iso(30), messages: 6,
+      item: { label: 'B012', title: 'Refund limits per merchant, set by the Owner in Settings', archived: false }, time: wfTime(400, null, null, [['not-started', 5], ['agent-working', 60], ['waiting-on-you', 300]]) },
+    { ...base, ...t2, id: 15, title: 'Checkout button states', owner: 'Manager', state: 'open', status: 'waiting', waitingFor: 'lease', working: true, startedAt: iso(90), lastAt: iso(4), messages: 9,
+      members: [{ id: 5, name: 'DeveloperCleo', state: 'lease' }], time: wfTime(90, null, null, [['not-started', 4], ['agent-working', 50], ['waiting-for-slot', 30]]) },
+    { ...base, ...t2, id: 16, title: 'Tidy the checkout styles', owner: 'Manager', state: 'open', status: 'idle', undeclared: true, startedAt: iso(2000), lastAt: iso(1500), messages: 3,
+      expiresAt: later(20 * 60), time: wfTime(2000, null, null, [['not-started', 5], ['agent-working', 40]]) },
+    { ...base, ...t1, id: 14, title: 'Refund report', owner: 'Manager', state: 'completed', status: 'completed', ending: 'Delivered the report', startedAt: iso(300), lastAt: iso(20), endedAt: iso(20), messages: 11,
+      item: { label: 'B013', title: 'Refund report', archived: true }, time: wfTime(300, 20, 'completed', [['not-started', 10], ['agent-working', 200], ['waiting-on-teammate', 40], ['stalled', 30]]) },
+    { ...base, ...t1, id: 9, title: 'Old refund export', owner: 'Manager', state: 'expired', status: 'expired', ending: 'no activity for 3 days', startedAt: iso(9000), lastAt: iso(4 * 1440), endedAt: iso(4 * 1440), expiredAt: iso(1440), messages: 4,
+      time: wfTime(9000, 4 * 1440, 'expired', [['not-started', 5], ['agent-working', 40]]) },
+    { ...base, ...t2, id: 8, title: 'Try a new payment provider', owner: 'Manager', state: 'closed', status: 'closed', ending: 'Not now', startedAt: iso(6000), lastAt: iso(3000), endedAt: iso(3000), messages: 2,
+      time: wfTime(6000, 3000, 'closed', [['not-started', 5], ['agent-working', 15]]) },
+  ];
+}
+const b104Chip: Record<string, (s: string) => boolean> = {
+  all: () => true, open: (s) => ['running', 'needs-you', 'waiting', 'idle', 'stopped'].includes(s), 'needs-you': (s) => s === 'needs-you', done: (s) => s === 'completed', closed: (s) => s === 'closed' || s === 'expired',
+};
+function workflowsList(p: any) {
+  // The contract's request: only these keys; refused as the core refuses them.
+  const bad = (m: string) => Object.assign(new Error(m), { code: 'bad_params' });
+  for (const k of Object.keys(p ?? {})) if (!['teamId', 'q', 'state', 'limit'].includes(k)) throw bad(`unknown parameter ${k}`);
+  if (p?.limit != null && !Number.isInteger(p.limit)) throw bad('limit must be a number');
+  const limit = Math.min(1000, Math.max(1, p?.limit ?? 200));
+  let rows = b104Rows();
+  if (p?.teamId != null) {
+    if (!teamRows.some((t) => t.id === Number(p.teamId))) throw Object.assign(new Error('no such team'), { code: 'no_such_team' });
+    rows = rows.filter((w) => w.teamId === Number(p.teamId));
+  }
+  const words = String(p?.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  rows = rows.filter((w) => words.every((x) => [`#${w.id}`, String(w.id), w.title, (w.item as any)?.label ?? '', (w.item as any)?.title ?? '', w.team, w.owner, ...w.members.map((m: any) => m.name)]
+    .some((f) => f.toLowerCase().includes(x))));
+  const n = (f: (s: string) => boolean) => rows.filter((w) => f(w.status)).length;
+  const counts = { all: rows.length, open: n(b104Chip.open), needsYou: n(b104Chip['needs-you']), done: n(b104Chip.done), closed: n(b104Chip.closed),
+    running: n((s) => s === 'running'), waiting: n((s) => s === 'waiting'), idle: n((s) => s === 'idle'), stopped: n((s) => s === 'stopped'), completed: n((s) => s === 'completed'), expired: n((s) => s === 'expired'), completedToday: n((s) => s === 'completed') };
+  const st = String(p?.state ?? 'all').toLowerCase();
+  const keep = b104Chip[st] ?? (['running', 'waiting', 'idle', 'stopped', 'completed', 'expired'].includes(st) ? (s: string) => s === st : undefined);
+  if (!keep) throw bad('state: not a chip or a status');
+  // Newest activity first; the newest `limit` plus every open row however old.
+  const matching = rows.filter((w) => keep(w.status)).sort((a, b) => Date.parse(b.lastAt) - Date.parse(a.lastAt));
+  const shown = matching.filter((w, i) => i < limit || w.state === 'open');
+  return { workflows: shown, counts, truncated: shown.length < matching.length, backlog: true, now: new Date().toISOString() };
+}
+function workflowsGet(p: any) {
+  const w = b104Rows().find((x) => x.id === Number(p?.workflow));
+  if (!w) throw Object.assign(new Error('no such workflow'), { code: 'no_such_workflow' });
+  const own = w.id === 10 ? cards : [];
+  return {
+    workflow: w,
+    cards: own.map((c) => ({ id: c.id, title: c.title, lane: c.lane, member: c.member, status: c.status, time: c.time })),
+    messages: [
+      { seq: 120, at: iso(1), kind: 'progress', from: 'DeveloperAda', member: 'DeveloperAda', text: 'Card 3: wiring the refund webhook' },
+      { seq: 110, at: iso(25), kind: 'handback', from: 'TesterBen', member: 'TesterBen', text: `Card 5 verified on ${COMMIT_ADA.slice(0, 7)}: 42 tests pass.` },
+      { seq: 100, at: iso(118), kind: 'instruction', from: 'person', member: 'Manager', text: 'Backlog item B011 is dispatched to your team.' },
+    ],
+    spec: w.item ? `**Why:** refunds are asked for every day.\n\n## What\n- Partial refunds from the payment page\n- A refund report\n- Limits per merchant\n\n## Checks\n- Unit tests for every amount\n- An e2e run at 1280 and 375 px\n- The docs updated` : null,
+    backlog: true,
+  };
+}
+
 export const answers: Record<string, (p: any, access: Access) => unknown> = {
+  'workflows.list': (p) => workflowsList(p),
+  'workflows.get': (p) => workflowsGet(p),
   'core.getInfo': (_p, access) => ({ product: 'Yawble', version: '0.0.0+dev.fake', platform: 'win32', os: 'Windows (fake)', dotnet: '10', pid: 1, sandbox: { backend: 'fake' }, schema: [], hostChecks: [], remoteAccess: access }),
   'sandbox.getAvailableBackends': () => [],
   'teams.list': () => teamList(),

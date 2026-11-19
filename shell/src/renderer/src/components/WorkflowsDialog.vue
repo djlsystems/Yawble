@@ -13,6 +13,8 @@ import CommitText from './CommitText.vue';
 import { vChange } from '../remoteAccess';
 import OverallTime from '../timeline/OverallTime.vue';
 import { hasTime } from '../timeline/time';
+import ItemLink from '../workflows/ItemLink.vue';
+import { openWorkflowsPage, workflowItems, type ItemsOf } from '../workflows/page';
 
 /**
  * A team's workflows, newest activity first: open ones (and who is working them, or that nobody is), completed,
@@ -45,8 +47,22 @@ async function load() {
   try {
     list.value = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: props.team.id, limit: limit.value });
     error.value = null;
+    void loadItems();
   } catch (e) { error.value = errorText(e); }
 }
+
+// B098 (B104): each workflow's backlog item as a link (workflows.list carries it); asked again only when a workflow it
+// has not looked up appears.
+const items = ref<ItemsOf | null>(null);
+const looked = new Set<number>();
+async function loadItems() {
+  const ids = (list.value ?? []).map((w) => w.id);
+  if (!ids.some((id) => !looked.has(id))) return;
+  for (const id of ids) looked.add(id);
+  const got = await workflowItems(api, { teamId: props.team.id, limit: limit.value });
+  if (got) items.value = got;
+}
+function allWorkflows() { openWorkflowsPage({ teamId: props.team.id }); emit('close'); }
 
 async function run(id: number, method: string, params: Record<string, unknown>) {
   if (busy.value !== null) return;
@@ -99,6 +115,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
     <p class="muted intro">
       A workflow is one piece of work and everything it led to: who was told what, their reports, and how it ended. If one is open
       and nobody is working it, nudge it: its Manager is told to pick it up.
+      <button class="link" data-test="workflows-all" title="This team's workflows on the Workflows page" @click="allWorkflows">All workflows →</button>
     </p>
     <p v-if="error" class="error" data-test="workflows-error">{{ error }}</p>
     <p v-if="missing !== null" class="muted" data-test="workflow-not-found">
@@ -111,6 +128,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
         :aria-current="selected === w.id" :data-wf="w.id" :data-test="`workflow-${w.id}`" @click="selected = w.id">
         <div class="top">
           <span class="chip" data-test="workflow-state">{{ stateLabel(w) }}</span>
+          <ItemLink v-if="items?.items.get(w.id)" :item="items.items.get(w.id)" :backlog="items.backlog" :dash="false" />
           <span class="title" :title="w.title">{{ w.title }}</span>
         </div>
         <div class="meta muted">
@@ -169,5 +187,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .grow { flex: 1; }
 .primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .muted { color: var(--muted); }
+.link { border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 13px; cursor: pointer; margin-left: 4px; }
+.link:hover { text-decoration: underline; }
 .error { color: var(--bad); }
 </style>

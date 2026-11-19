@@ -475,7 +475,7 @@ onMounted(() => { void loadChoices(); void load(); });
         <template v-if="result.files?.length"> Files: <code>{{ result.files.join(', ') }}</code></template></p>
       <section v-if="result?.commitsList?.length" class="came-in" data-test="git-result-commits">
         <div class="small"><strong>{{ result.commitsHeading }}</strong></div>
-        <CommitList :team="team.name" :commits="result.commitsList" :total="result.commitsTotal" />
+        <CommitList :team="team.name" :commits="result.commitsList" :total="result.commitsTotal" :has-origin="!!status?.origin" />
       </section>
       <p v-if="result?.recorded?.length" class="small" data-test="git-result-recorded">
         <template v-for="(x, i) in result.recorded" :key="x.branch">{{ i ? ' · ' : '' }}<code>{{ x.branch }}</code>'s last commit, kept on record:

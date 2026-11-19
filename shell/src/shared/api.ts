@@ -430,6 +430,43 @@ export const WorkflowExpiryDefaultDays = 3;
 export function workflowTime(w: Pick<WorkflowSummary, 'state' | 'lastAt' | 'endedAt'>): string {
   return w.state !== 'open' && w.endedAt ? w.endedAt : w.lastAt;
 }
+// ---- B104: the Workflows page (core card 476, YAWBLE_TEAM_DOCS/B104/contract.md): every team's workflows in one table ----
+export const WORKFLOWS_LIST = 'workflows.list';
+export const WORKFLOWS_GET = 'workflows.get';
+/** The Status column: an ended workflow's state, or how an open one stands (first match: needs-you, running, waiting, stopped, idle). */
+export type WorkflowRowStatus = 'running' | 'needs-you' | 'waiting' | 'idle' | 'stopped' | 'completed' | 'closed' | 'expired';
+/** The backlog item a workflow was dispatched from (archived: open it in the Backlog's archive). */
+export interface WorkflowItem { label: string; title: string; archived: boolean }
+/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits for a run slot. */
+export interface WorkflowMember { id: number; name: string; state: 'running' | 'lease' | 'queued' }
+/** A workflows.list row: every WorkflowSummary field (title cleaned), plus the B104 fields. No tokens, no cost. */
+export interface WorkflowRow extends WorkflowSummary {
+  ownerId: number | null;
+  team: string; teamId: number;
+  status: WorkflowRowStatus;
+  waitingFor: 'slot' | 'lease' | 'wake' | null;
+  /** A run of it is active right now (the icon is animated), whatever the status. */
+  working: boolean;
+  item: WorkflowItem | null;
+  members: WorkflowMember[];
+}
+/** The chips' numbers, over the team and text filters, before the state filter and the limit. */
+export interface WorkflowCounts {
+  all: number; open: number; needsYou: number; done: number; closed: number;
+  running: number; waiting: number; idle: number; stopped: number; completed: number; expired: number;
+  completedToday: number;
+}
+export interface WorkflowsListAnswer {
+  workflows: WorkflowRow[]; counts: WorkflowCounts; truncated: boolean;
+  /** The session may read the backlog: the item label is a link (else plain text) and the spec is shown. */
+  backlog: boolean;
+  now: string;
+}
+export interface WorkflowCardRow { id: number; title: string; lane: LaneId; member: string | null; status: CardStatus | string; time?: ItemTime | null }
+export type WorkflowMessageKind = 'instruction' | 'progress' | 'handback' | 'blocked' | 'decision' | 'completed' | 'failed' | 'stopped' | 'done' | 'closed' | 'expired';
+export interface WorkflowMessage { seq: number; at: string; kind: WorkflowMessageKind | string; from: string | null; member: string | null; text: string | null }
+export interface WorkflowDetail { workflow: WorkflowRow; cards: WorkflowCardRow[]; messages: WorkflowMessage[]; spec: string | null; backlog: boolean }
+
 /** A team's documents (docs.list / docs.read): paths are relative to the team's documents folder. */
 export interface DocEntry { name: string; path: string; folder: boolean; size: number | null; modified: string }
 export interface DocList { path: string; entries: DocEntry[] }

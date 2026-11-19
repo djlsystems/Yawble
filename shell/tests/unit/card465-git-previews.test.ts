@@ -10,7 +10,8 @@ import CommitView from '../../src/renderer/src/components/CommitView.vue';
 import TidyPanel from '../../src/renderer/src/components/TidyPanel.vue';
 import TeamSyncBanner from '../../src/renderer/src/components/TeamSyncBanner.vue';
 import { closeCommit, commitTarget, whereLines } from '../../src/renderer/src/commitView';
-import { IN_MAIN, MERGE_COMMIT, OWN_WORK, commitsInHeading, deletePreviewView, mergePreviewView, moreText, rangeFor } from '../../src/renderer/src/gitRange';
+import { MERGE_COMMIT, OWN_WORK, commitsInHeading, deletePreviewView, inBaseMark, mergePreviewView, moreText, rangeFor } from '../../src/renderer/src/gitRange';
+const IN_MAIN = inBaseMark('main');
 import { LOCAL_MARK, branchLocalOnly, commitLocalOnly, tidyLocalOnly } from '../../src/renderer/src/localMark';
 import type { CommitFound, CommitRow, DeletePreview, MergePreview, TeamGitStatus, YawbleApi } from '../../src/shared/api';
 
@@ -100,7 +101,10 @@ describe('gitRange words (pure)', () => {
     const m = mergePreviewView(preview({ summary: '' }));
     expect(m).toMatchObject({ tone: 'ok', canMerge: true, sentence: 'A merge commit will join team/ops into main (no rebase).', commitsHeading: '11 commits will land on main' });
     const c = mergePreviewView(preview({ outcome: 'conflict', summary: 'team/ops would conflict in src/refund.ts: nothing changes.', conflictFiles: ['src/refund.ts'], files: [] }));
-    expect(c).toMatchObject({ tone: 'bad', canMerge: false, sentence: 'team/ops would conflict in src/refund.ts: nothing changes.', filesHeading: null });
+    // Nothing lands on a conflict: the core's wording (card 466 F2).
+    expect(c).toMatchObject({ tone: 'bad', canMerge: false, sentence: 'team/ops would conflict in src/refund.ts: nothing changes.', filesHeading: null,
+      commitsHeading: '11 commits on team/ops not in main' });
+    expect(mergePreviewView(preview({ outcome: 'conflict', baseBranch: 'trunk', count: 1 })).commitsHeading).toBe('1 commit on team/ops not in trunk');
     const r = mergePreviewView(preview({ outcome: 'refused', summary: 'Your main has 1 commit(s) that origin does not have.' }));
     expect(r).toMatchObject({ tone: 'bad', canMerge: false });
     expect(mergePreviewView(preview({ outcome: 'up-to-date', count: 0, commits: [] }))).toMatchObject({ canMerge: false, commitsHeading: null, tone: 'plain' });
@@ -110,6 +114,9 @@ describe('gitRange words (pure)', () => {
     const v = deletePreviewView(delPreview({ commits: [...delPreview().commits, { ...row(D, 'Merge main'), isMerge: true, state: 'merge' }] }));
     expect(v.rows.map((r) => r.mark)).toEqual([OWN_WORK, IN_MAIN, MERGE_COMMIT]);
     expect(v.rows.map((r) => r.own)).toEqual([true, false, false]);
+    // The in-base mark names the base (card 466 F3).
+    expect(IN_MAIN).toBe('already in main');
+    expect(deletePreviewView(delPreview({ baseBranch: 'trunk' })).rows.map((r) => r.mark)).toEqual([OWN_WORK, 'already in trunk']);
     expect(v).toMatchObject({ loses: true, summary: 'Deleting it loses 1 commit of its own (c3c3c3c3c3c3); it is not on origin either.' });
     // Without the core's line: the dialog's own words.
     expect(deletePreviewView(delPreview({ lost: '', own: 2 })).summary).toBe('Deleting it loses 2 commits of its own.');
@@ -277,6 +284,7 @@ describe('Git dialog merge preview', () => {
     await flushPromises();
     expect(w.find('[data-test=git-merge-preview]').attributes('data-outcome')).toBe('conflict');
     expect(w.find('[data-test=git-merge-conflicts]').text()).toContain('src/refund.ts');
+    expect(w.find('[data-test=git-merge-commits-heading]').text()).toBe('11 commits on team/ops not in main');
     expect(w.find('[data-test=git-merge-yes]').attributes('disabled')).toBeDefined();
 
     p = preview({ outcome: 'refused', summary: 'Your main has 1 commit(s) that origin does not have.' });
@@ -348,6 +356,15 @@ describe('Git dialog delete preview', () => {
     expect(w2.find('[data-test=git-delete-preview]').exists()).toBe(false);
     expect(w2.find('[data-test=git-delete-preview-error]').exists()).toBe(false); // method_not_found: quiet
   });
+
+  it('a base named trunk: the mark says "already in trunk" (card 466 F3)', async () => {
+    const { api } = fakeApi({ 'git.status': () => ({ ...status, baseBranch: 'trunk' }), 'git.deleteBranches': del, 'git.deletePreview': () => delPreview({ baseBranch: 'trunk' }) });
+    const w = mount(GitDialog, { props: { api, team } });
+    await flushPromises();
+    await w.find('[data-test="git-delete-members/ops/ada"]').trigger('click');
+    await flushPromises();
+    expect(w.findAll('[data-test=git-delete-preview] [data-test=commit-list-mark]').map((m) => m.text())).toEqual([OWN_WORK, 'already in trunk']);
+  });
 });
 
 describe('Git dialog sync and bring current list what came in', () => {
@@ -404,6 +421,41 @@ describe('Git dialog sync and bring current list what came in', () => {
     await flushPromises();
     expect(w.find('[data-test=git-result-commits]').exists()).toBe(false);
     expect(of(calls, 'git.commitRange')).toHaveLength(0);
+  });
+
+  it('what came in after Sync, Merge and Bring current marks not-pushed rows with an origin, and none without (card 466 F4)', async () => {
+    const marked = async (st: TeamGitStatus): Promise<number[]> => {
+      const { api } = fakeApi({
+        'git.status': () => st,
+        'git.sync': () => ({ outcome: 'synced', baseBranch: 'main', baseSha: A, behind: 0, moved: ['team/ops'], conflicts: [], note: null,
+          incoming: [row(A, 'From main', true), row(D, 'Pushed')], incomingCount: 2, incomingTruncated: false, incomingRange: { from: B, to: A } }),
+        'git.mergePreview': () => preview({ commits: [row(B, 'Partial refunds', true)], count: 1, truncated: false }),
+        'git.merge': () => ({ outcome: 'merge', message: 'Merged.', changed: true, sha: B, files: null, status: st,
+          commits: [row(B, 'Partial refunds', true)], commitCount: 1, commitsTruncated: false, range: null }),
+        'git.bringCurrent': () => ({ outcome: 'fast-forward', message: 'main fast-forwarded to origin/main.', changed: true, sha: C, files: null,
+          status: st, commits: [row(C, 'From origin', true)], commitCount: 1, commitsTruncated: false, range: null }),
+      });
+      const w = mount(GitDialog, { props: { api, team } });
+      await flushPromises();
+      const count = () => w.findAll('[data-test=git-result-commits] [data-test=local-mark]').length;
+      const out: number[] = [];
+      await w.find('[data-test=git-sync-now]').trigger('click');
+      await flushPromises();
+      out.push(count());
+      await w.find('[data-test=git-merge]').trigger('click');
+      await flushPromises();
+      await w.find('[data-test=git-merge-yes]').trigger('click');
+      await flushPromises();
+      out.push(count());
+      if (st.origin) { // Bring current is offered only with an origin
+        await w.find('[data-test=git-bring-current]').trigger('click');
+        await flushPromises();
+        out.push(count());
+      }
+      return out;
+    };
+    expect(await marked(status)).toEqual([1, 1, 1]);
+    expect(await marked({ ...status, origin: null })).toEqual([0, 0]);
   });
 
   it('a sync that changed nothing lists nothing', async () => {
