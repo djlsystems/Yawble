@@ -1,0 +1,65 @@
+{
+  "workflows": [
+    {
+      "id": 1,
+      "title": "Commit view",
+      "owner": "Ada",
+      "state": "open",
+      "undeclared": true,
+      "busy": [],
+      "ending": null,
+      "startedAt": "2026-11-19T03:31:48.8571961\u002B00:00",
+      "lastAt": "2026-11-19T03:31:48.8571961\u002B00:00",
+      "messages": 1,
+      "endedAt": null,
+      "expiredAt": null,
+      "expiresAt": "2026-11-22T03:31:48.8571961\u002B00:00",
+      "expiryWarning": null,
+      "question": null,
+      "time": {
+        "createdAt": "2026-11-19T03:31:48.8571961\u002B00:00",
+        "startedAt": "2026-11-19T03:31:48.8571961\u002B00:00",
+        "endedAt": null,
+        "endedHow": null,
+        "open": true,
+        "overallMs": 28,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "waiting-for-slot",
+            "ms": 28
+          }
+        ]
+      },
+      "ownerId": 2,
+      "team": "Web",
+      "teamId": 1,
+      "status": "idle",
+      "waitingFor": null,
+      "working": false,
+      "item": {
+        "label": "B001",
+        "title": "Commit view",
+        "archived": false
+      },
+      "members": []
+    }
+  ],
+  "counts": {
+    "all": 1,
+    "open": 1,
+    "needsYou": 0,
+    "done": 0,
+    "closed": 0,
+    "completedToday": 0,
+    "running": 0,
+    "waiting": 0,
+    "idle": 1,
+    "stopped": 0,
+    "completed": 0,
+    "expired": 0
+  },
+  "truncated": false,
+  "backlog": true,
+  "now": "2026-11-19T03:31:48.8850268\u002B00:00"
+}
