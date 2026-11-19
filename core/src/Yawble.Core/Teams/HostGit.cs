@@ -49,8 +49,17 @@ public sealed class HostGit
         "-c", "init.defaultBranch=main",
     ];
 
+    /// <summary>Called with the folder and the arguments (after the safety options) of every git this runs: tests count calls with it.</summary>
+    public Action<string?, IReadOnlyList<string>>? OnRun { get; set; }
+
     public async Task<GitResult> TryRunAsync(string? workingDirectory, IEnumerable<string> args, CancellationToken ct = default)
     {
+        if (OnRun is { } onRun)
+        {
+            var listed = args as IReadOnlyList<string> ?? args.ToList();
+            args = listed;
+            onRun(workingDirectory, listed);
+        }
         var psi = new ProcessStartInfo("git")
         {
             UseShellExecute = false,
