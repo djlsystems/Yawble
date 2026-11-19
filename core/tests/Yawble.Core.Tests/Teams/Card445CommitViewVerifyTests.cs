@@ -12,13 +12,14 @@ namespace Yawble.Core.Tests.Teams;
 ///    "members/..." sorts before "team/...";
 ///  - the where facts behind the wording: team branch only, member branch only, pushed while not in main;
 ///  - a merge nobody can name: intoBranch / fromBranch are JSON null (the shell must not print "null"), made absent;
-///  - F1: a merge made on main with git's default message ("Merge branch 'x'", git leaves out "into main") is said to
-///    have gone into the team branch when the team branch also has it;
+///  - F1: a merge made on main with git's default message ("Merge branch 'x'", git leaves out "into main") is into main
+///    even when the team branch also has it (round 1 found "team/alpha"; fixed in f669165, checked in card 460);
 ///  - F2 (core side of a shell wording fault): a commit on a branch that is neither the team's nor a member's (the
-///    person's own feature branch) has where.branches empty, so the view says the branch holding it was deleted;
+///    person's own feature branch) has where.branches empty and where.otherBranches ["feature/x"] (round 2), so the view
+///    can tell it from a deleted branch's commit (both empty);
 ///  - the core reads the team's repository, never an agent's clone (a commit only in Ada's clone is "not found");
 ///  - a file name with spaces and non-ASCII, deleted, opens its diff;
-///  - minor: a branch whose name is 4+ hex digits is resolved as that branch.
+///  - M1: a branch whose name is 4+ hex digits is not read as a commit ID (round 1 found it was; fixed in f669165).
 /// With CARD445_FIXTURE_OUT set, the real core's JSON for each case is written there (shell/tests/unit/fixtures/card445)
 /// for the shell's card445 test to render.
 /// </summary>
@@ -193,12 +194,12 @@ public class Card445CommitViewVerifyTests
     }
 
     /// <summary>
-    /// F1. git's own message for a merge into main is "Merge branch 'feature/login'" (no "into main"). The core then
-    /// falls back to the team branch first, so a merge the person made on main reads "into team/alpha" once the team
-    /// branch has main. This test passes while the fault is there: flip the expectation to "main" when it is fixed.
+    /// F1. git's own message for a merge into main is "Merge branch 'feature/login'" (no "into main"). Round 1 (954cde7)
+    /// found the core fell back to the team branch first, so the merge read "into team/alpha" once the team branch had
+    /// main. Round 2 (card 460, fix f669165): into is the branch whose first-parent line holds the merge, so it is main.
     /// </summary>
     [Fact]
-    public async Task F1_AMergeMadeOnMain_WithGitsDefaultMessage_IsSaidToBeIntoTheTeamBranch()
+    public async Task F1_AMergeMadeOnMain_WithGitsDefaultMessage_IsIntoMain_EvenWhenTheTeamBranchHasIt()
     {
         using var f = new TeamsFixture();
         var r = await RigAsync(f);
@@ -215,16 +216,40 @@ public class Card445CommitViewVerifyTests
         AgentGit.Host(r.Repo, "branch", "-f", "team/alpha", "main");
         var m = await Show(r, merge);
         Assert.Equal("feature/login", m.Merge!.FromBranch);
-        Assert.Equal("team/alpha", m.Merge.IntoBranch); // FAULT F1: should be "main"
+        Assert.Equal("main", m.Merge.IntoBranch); // F1 fixed (round 1 said "team/alpha")
         Emit("f1-merge-on-main", m.ToJson());
+
+        // The team branch moved past main by its own commit still has the merge only by containing it: still main.
+        AgentGit.Host(r.Repo, "switch", "-q", "team/alpha");
+        Commit(r.Repo, "Team work after");
+        AgentGit.Host(r.Repo, "switch", "-q", "main");
+        Assert.Equal("main", (await Show(r, merge)).Merge!.IntoBranch);
+    }
+
+    /// <summary>F1, the other way: a merge made on the team branch (git's default message) is into the team branch.</summary>
+    [Fact]
+    public async Task F1_AMergeMadeOnTheTeamBranch_WithGitsDefaultMessage_IsIntoTheTeamBranch()
+    {
+        using var f = new TeamsFixture();
+        var r = await RigAsync(f);
+        AgentGit.Host(r.Repo, "switch", "-q", "-c", "members/alpha/ada", "main");
+        Write(r.Repo, "ada.txt", "ada\n");
+        Commit(r.Repo, "Ada's work");
+        AgentGit.Host(r.Repo, "switch", "-q", "-c", "team/alpha", "main");
+        var merge = Merge(r.Repo, "members/alpha/ada", null);
+        AgentGit.Host(r.Repo, "switch", "-q", "main");
+        var m = await Show(r, merge);
+        Assert.Equal("team/alpha", m.Merge!.IntoBranch);
+        Assert.Equal("members/alpha/ada", m.Merge.FromBranch);
     }
 
     /// <summary>
-    /// F2 (core side). A commit on the person's own branch (neither team/ nor members/) is listed on no branch; the shell
-    /// then words it "On no branch (a branch that held it was deleted)" though feature/x is there.
+    /// F2 (core side). A commit on the person's own branch (neither team/ nor members/) has where.branches empty, as
+    /// before; round 2 (fix f669165): where.otherBranches lists feature/x, so the shell can tell it from a deleted branch,
+    /// whose commit has otherBranches empty. otherBranches is always in the JSON, sorted, never base/team/members.
     /// </summary>
     [Fact]
-    public async Task F2_ACommitOnThePersonsOwnBranch_IsListedOnNoBranch()
+    public async Task F2_ACommitOnThePersonsOwnBranch_IsInOtherBranches_ADeletedBranchsIsNot()
     {
         using var f = new TeamsFixture();
         var r = await RigAsync(f);
@@ -239,9 +264,12 @@ public class Card445CommitViewVerifyTests
         Assert.False(c.Where!.InMain);
         Assert.Empty(c.Where.Branches);
         Assert.Null(c.Where.OnlyOnMember);
-        Emit("f2-own-branch", c.ToJson());
+        Assert.Equal(["feature/x"], c.Where.OtherBranches);
+        var cj = c.ToJson();
+        Assert.Equal(["feature/x"], cj["where"]!["otherBranches"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Emit("f2-own-branch", cj);
 
-        // A deleted member branch's commit gives the same where: the view cannot tell the two apart.
+        // A deleted member branch's commit: branches and otherBranches both empty (and otherBranches still present).
         AgentGit.Host(r.Repo, "switch", "-q", "-c", "members/alpha/ben", "main");
         Write(r.Repo, "ben.txt", "ben\n");
         var ben = Commit(r.Repo, "Ben's", "Ben");
@@ -249,7 +277,20 @@ public class Card445CommitViewVerifyTests
         AgentGit.Host(r.Repo, "branch", "-q", "-D", "members/alpha/ben");
         var gone = await Show(r, ben);
         Assert.Empty(gone.Where!.Branches);
-        Emit("deleted-branch", gone.ToJson());
+        var gj = gone.ToJson();
+        Assert.True(gj["where"]!.AsObject().ContainsKey("otherBranches"));
+        Assert.Empty(gj["where"]!["otherBranches"]!.AsArray());
+        Emit("deleted-branch", gj);
+
+        // Several other branches, sorted; base, team and member branches that hold it are never in otherBranches.
+        AgentGit.Host(r.Repo, "branch", "zeta", x);
+        AgentGit.Host(r.Repo, "branch", "alpha-topic", x);
+        AgentGit.Host(r.Repo, "branch", "team/alpha", x);
+        AgentGit.Host(r.Repo, "branch", "members/alpha/ada", x);
+        var many = await Show(r, x);
+        Assert.Equal(["alpha-topic", "feature/x", "zeta"], many.Where!.OtherBranches);
+        Assert.Equal(["team/alpha", "members/alpha/ada"], many.Where.Branches);
+        Assert.DoesNotContain("main", many.Where.OtherBranches!);
     }
 
     [Fact]
@@ -302,21 +343,33 @@ public class Card445CommitViewVerifyTests
         Assert.All(h.Lines, l => Assert.Equal("deleted", l.Kind));
     }
 
-    /// <summary>Minor: 4+ hex digits that are also a branch's name are read as that branch (git prefers the ref).</summary>
+    /// <summary>
+    /// M1: 4+ hex digits that are also a branch's name. Round 1 found them read as that branch (git prefers the ref);
+    /// round 2 (fix f669165): IDs resolve only as objects, so "cafe" is not found and its diff is "gone".
+    /// </summary>
     [Fact]
-    public async Task Minor_AHexBranchName_IsResolvedAsTheBranch()
+    public async Task Minor_AHexBranchName_IsNotFound_AndItsDiffIsGone()
     {
         using var f = new TeamsFixture();
         var r = await RigAsync(f);
         Write(r.Repo, "z.txt", "z\n");
         var tip = Commit(r.Repo, "Tip", "Person");
         AgentGit.Host(r.Repo, "branch", "cafe", r.Root);
+        AgentGit.Host(r.Repo, "tag", "beef", r.Root);
+        var objects = AgentGit.Host(r.Repo, "rev-list", "--all", "--objects");
+        Assert.SkipWhen(objects.Split('\n').Any(l => l.StartsWith("cafe", StringComparison.Ordinal) || l.StartsWith("beef", StringComparison.Ordinal)),
+            "an object ID starts with cafe or beef in this run");
+
         var c = await Show(r, "cafe");
-        // Unless an object's ID starts with "cafe", this is the branch cafe's commit (the root), not "not found".
-        if (!r.Root.StartsWith("cafe", StringComparison.Ordinal) && !tip.StartsWith("cafe", StringComparison.Ordinal))
-        {
-            Assert.True(c.Found);
-            Assert.Equal(r.Root, c.Sha);
-        }
+        Assert.False(c.Found);
+        Assert.Equal("cafe", c.Sha);
+        var refused = await Assert.ThrowsAsync<TeamGitRefusal>(() => f.Repos.GitCommitDiffAsync(r.TeamId, "Alpha", "cafe", "README.md", Ct));
+        Assert.Equal("gone", refused.Code);
+        Assert.False((await Show(r, "beef")).Found); // a tag named like an ID is not read either
+
+        // The real commit IDs still resolve, by a 4-digit prefix too.
+        var byPrefix = await Show(r, tip[..7]);
+        Assert.True(byPrefix.Found);
+        Assert.Equal(tip, byPrefix.Sha);
     }
 }

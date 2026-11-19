@@ -1,18 +1,18 @@
 {
   "found": true,
-  "sha": "ffec0e5bd7f4ba35916fd08d44d2cd5867f6466d",
-  "shortSha": "ffec0e5bd7f4",
+  "sha": "b2a0e0545d2908be0a6c9d0828e8e276fe7f2eb4",
+  "shortSha": "b2a0e0545d29",
   "title": "Integrate the work",
   "body": "",
   "author": {
     "name": "Person",
     "email": "p@example.invalid",
-    "date": "2026-11-18T18:58:12-05:00"
+    "date": "2026-11-18T19:29:07-05:00"
   },
   "isMerge": true,
   "parents": [
-    "9e0cdcc95ad94cfa496e294a72c8a0c2bcc7cf5d",
-    "24dd4e8798546b4b67f53689c7918ac644766bfb"
+    "04adf8cfe987adfcfe79acc6af0329924676035d",
+    "0e7aacb2b1985a7177d6cebb28b6fff8ff94ab20"
   ],
   "merge": {
     "intoBranch": null,
@@ -22,6 +22,7 @@
   "where": {
     "inMain": false,
     "branches": [],
+    "otherBranches": [],
     "pushed": false,
     "tags": []
   },

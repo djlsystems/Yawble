@@ -1,17 +1,17 @@
 {
   "found": true,
-  "sha": "7d73b5dfa25351f93605100447956fd44b495647",
-  "shortSha": "7d73b5dfa253",
+  "sha": "bbcd9dc7623a646230264f16d22bce4e55c61a19",
+  "shortSha": "bbcd9dc7623a",
   "title": "Ada\u0027s work",
   "body": "",
   "author": {
     "name": "Ada",
     "email": "ada@example.invalid",
-    "date": "2026-11-18T18:58:04-05:00"
+    "date": "2026-11-18T19:29:00-05:00"
   },
   "isMerge": false,
   "parents": [
-    "5ea7b0434b72e0ae7bcdb3ca789435b6da22b30e"
+    "b3a0f16bf198f85bea72dcc898db65d87a6b4d4a"
   ],
   "made": {
     "member": "Ada"
@@ -21,6 +21,7 @@
     "branches": [
       "members/alpha/ada"
     ],
+    "otherBranches": [],
     "onlyOnMember": "Ada",
     "pushed": false,
     "tags": []

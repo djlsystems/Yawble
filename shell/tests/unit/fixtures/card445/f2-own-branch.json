@@ -1,21 +1,24 @@
 {
   "found": true,
-  "sha": "2fbac5f665d6c920bb2aa0e0c98ff52b83e89fa3",
-  "shortSha": "2fbac5f665d6",
+  "sha": "0fe5f2a8e087d50b4cb1594e3f04fbe326c83b37",
+  "shortSha": "0fe5f2a8e087",
   "title": "Feature x",
   "body": "",
   "author": {
     "name": "Person",
     "email": "person@example.invalid",
-    "date": "2026-11-18T18:58:08-05:00"
+    "date": "2026-11-18T19:29:05-05:00"
   },
   "isMerge": false,
   "parents": [
-    "ec676b610b31ba0a47f329c0e0425226a90237b6"
+    "439842cff34c537287c5f7767af0a15c62b30eb1"
   ],
   "where": {
     "inMain": false,
     "branches": [],
+    "otherBranches": [
+      "feature/x"
+    ],
     "pushed": false,
     "tags": []
   },

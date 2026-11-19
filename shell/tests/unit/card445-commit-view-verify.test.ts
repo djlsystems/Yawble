@@ -3,9 +3,10 @@
 // are git.commitShow results the core wrote from a fixture repository (core Card445CommitViewVerifyTests with
 // CARD445_FIXTURE_OUT set), so these check the shell against the core's actual contract, not a hand-made fake:
 // not found is only {found, goneReason, sha}; merge.intoBranch/fromBranch null; made missing; where.branches with the
-// team branch first and never main; codeShown false; a diff refused with remote_refused. Plus the faults found:
-// F1 (core) a merge made on main reads "into team/alpha"; F2 a commit on the person's own branch reads "a branch that
-// held it was deleted". The F tests pass while the fault is there: flip them when it is fixed.
+// team branch first and never main; codeShown false; a diff refused with remote_refused. Plus the faults round 1 found,
+// flipped in round 2 (card 460) after the fixes (core f669165, shell 7ec603b): F1 a merge made on main now reads
+// "into main" (was "into team/alpha"); F2 a commit only on feature/x now reads "On feature/x (not a team or member
+// branch)" (was "a branch that held it was deleted"), from where.otherBranches.
 import { flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -105,18 +106,35 @@ describe('card 445: the real core\'s answers', () => {
     expect(w.find('[data-test=commit-branch]').attributes('disabled')).toBeDefined();
   });
 
-  it('F1 (core): a merge made on main with git\'s default message reads "into team/alpha"', () => {
+  it('F1 (core, fixed in card 458): a merge made on main with git\'s default message reads "into main"', async () => {
     const c = real('f1-merge-on-main') as CommitFound;
     expect(c.title).toBe("Merge branch 'feature/login'");
-    expect(mergeLine(c)).toBe('Merged feature/login into team/alpha, 1 commit'); // FAULT: should say into main
+    expect(c.merge?.intoBranch).toBe('main');
+    expect(mergeLine(c)).toBe('Merged feature/login into main, 1 commit'); // round 1 said "into team/alpha"
+    const { w } = await view(c);
+    expect(w.find('[data-test=commit-merge]').text()).toBe('Merged feature/login into main, 1 commit');
   });
 
-  it('F2: a commit on the person\'s own branch (feature/x) is worded as if its branch were deleted', async () => {
-    const own = await view(real('f2-own-branch'));
-    expect(whereTexts(own.w)[0]).toBe('On no branch (a branch that held it was deleted)'); // FAULT: feature/x holds it
-    // The same words as a member branch that really was deleted: the view cannot tell them apart.
-    const gone = await view(real('deleted-branch'));
-    expect(whereTexts(gone.w)[0]).toBe(whereTexts(own.w)[0]);
+  it('F2 (fixed in cards 458, 459): a commit only on feature/x reads "On feature/x (not a team or member branch)"', async () => {
+    const c = real('f2-own-branch') as CommitFound;
+    expect(c.where.branches).toEqual([]);
+    expect(c.where.otherBranches).toEqual(['feature/x']);
+    const own = await view(c);
+    expect(whereTexts(own.w)[0]).toBe('On feature/x (not a team or member branch)'); // round 1 said "deleted"
+    expect(own.w.find('[data-test=commit-branch]').attributes('disabled')).toBeDefined();
+    // A member branch that really was deleted keeps the deleted wording: the two now read differently.
+    const g = real('deleted-branch') as CommitFound;
+    expect(g.where.otherBranches).toEqual([]);
+    const gone = await view(g);
+    expect(whereTexts(gone.w)[0]).toBe('On no branch (a branch that held it was deleted)');
+  });
+
+  it('F2: otherBranches is in every found answer from the real core, an array, never base/team/member branches', () => {
+    for (const name of ALL.filter((n) => n !== 'not-found')) {
+      const c = real(name) as CommitFound;
+      expect(Array.isArray(c.where.otherBranches), name).toBe(true);
+      for (const b of c.where.otherBranches!) expect(b === 'main' || b === 'team/alpha' || b.startsWith('members/'), `${name}: ${b}`).toBe(false);
+    }
   });
 
   it('no write actions: only Copy ID, Compare with main and Show its branch', async () => {
