@@ -77,6 +77,8 @@ public static class RemoteAccess
             "credentials.status",
             "terminal.banner",
             "skills.list",
+            // B100: a team skill's versions and Team settings' "Lessons" line (Restore, skills.restore, is a change).
+            "skills.versions", "teams.lessons",
             "triggers.list", "triggers.preview",
             "git.status", "git.check", "git.tidyPlan",
             // B075: the web address of a commit, branch, file, compare or pull request (reads only).
@@ -122,7 +124,7 @@ public static class RemoteAccess
             "credentials.setClaudeSetupToken", "credentials.setAnthropicApiKey", "credentials.setXaiApiKey", "credentials.remove", "credentials.setMode",
             "hostTerminal.start",
             "terminal.attach", "terminal.input", "terminal.resize", "terminal.openInteractive", "terminal.stop",
-            "skills.save", "skills.delete",
+            "skills.save", "skills.delete", "skills.restore",
             "triggers.save", "triggers.delete", "triggers.runNow",
             "git.fetch", "git.bringCurrent", "git.merge", "git.sync", "git.askTeam", "git.deleteBranches", "git.branchRealign", "git.install",
             "guardrail.start", "guardrail.stop",

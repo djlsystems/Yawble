@@ -123,7 +123,19 @@ public sealed class RunContext
     /// <summary>The skills offered to this member (skills_list), and one of them by name (skills_get).</summary>
     public IReadOnlyList<Skills.Skill> Skills() => _engine.SkillsFor(Member);
 
-    public Skills.Skill Skill(string name) => _engine.SkillFor(Member, name);
+    public Skills.Skill Skill(string name) => _engine.SkillForRun(this, name);
+
+    /// <summary>
+    /// B100: the team's lessons (its team_retros skill) for the run's prompt, null when there are none. Reading them
+    /// records the version this run saw: team_retros_write is refused once the text changed since (a person's edit).
+    /// </summary>
+    public string? Lessons() => _engine.LessonsFor(this);
+
+    /// <summary>The team_retros version this run last read (its prompt, skills_get team_retros); null before it read it.</summary>
+    internal int? RetrosSeenVersion { get; set; }
+
+    /// <summary>team_retros_write: the Manager writes the whole new text of its own team's team_retros.</summary>
+    public Task<string> TeamRetrosWriteAsync(string text, CancellationToken ct = default) => _engine.TeamRetrosWriteAsync(this, text, ct);
 
     /// <summary>The member's standing instructions (its job on the team), set by the person or by the Manager's hire.</summary>
     public string Instructions { get; internal set; } = "";

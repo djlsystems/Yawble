@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
+import { skillLink } from './skillLink';
 import WorkflowsDialog from './components/WorkflowsDialog.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AgentProfileRow, ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary, WorkflowSummary } from '../../shared/api';
@@ -301,6 +302,8 @@ function menu(item: SettingsTab) {
   integrationsTab.value = null;
   view.value = 'settings';
 }
+// B100: Team settings' "Lessons" link opens Settings at Skills, where the linked skill is selected (SkillsDialog).
+watch(skillLink, (l) => { if (l) { manageTeam.value = null; menu('skills'); } });
 /** Which Integrations tab Settings opens at (Needs You's "reconnect" link opens Connections). */
 const integrationsTab = ref<'cli' | 'api' | 'mcp' | 'connections' | null>(null);
 function openConnections() {

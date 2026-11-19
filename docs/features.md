@@ -110,6 +110,24 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     Closed and expired move every card to Done, a waiting one too; completed leaves a card waiting on a person where
     it is. Telling the card's member something in the workflow makes the card live again.
 - **Skills** (Settings > Skills) are instructions agents load through the app, offered to chosen roles and teams.
+- **How a team learns** (B100). Agents keep no memory between runs, so a team keeps its lessons in one place: its
+  **team_retros** skill, a team-scoped skill (offered to every role) with a short list of lessons, each
+  "- <lesson> (<date>, workflow <id>)", under a few headings (Building and testing, Git, Working with the person ...).
+  - After a workflow completes, the Manager looks back on it (a retrospective) and keeps at most a few lessons a later run
+    should act on, merging them into team_retros with the Manager-only tool **team_retros_write** (the whole new text).
+    Only an eventful workflow gets one: a small, uneventful workflow gets no retrospective, and a workflow that was
+    closed or expired instead of completed never does (nor does a retrospective's own workflow).
+    The tool writes only its own team's team_retros, nothing else; it refuses a text over 4000 characters (saying its
+    size), and refuses a write when the text changed since that run read it (the person edited it meanwhile), so the
+    Manager reads it again and merges into the person's text: a person's edit is never reset.
+  - Live at once, no approval: every run of that team, the Manager's and the members', gets the text in its prompt under
+    "Lessons from this team's earlier work". No other team's runs get it, and the Concierge does not.
+  - **Settings > Skills**: team_retros is an ordinary team skill there: read it, edit it (your edit is kept by the next
+    retro), see who last wrote it ("the retro of workflow <id>" or you) and its versions, newest first. Every write, the
+    Manager's or yours, is kept as a version (who, which workflow, when; the last 100); **Restore** brings an older text back
+    as a new version.
+  - **Team settings > General** shows "Lessons: n, last updated <date> by the retro of workflow <id>" (or "by you"), with
+    a link that opens the skill in Settings > Skills; "Lessons: none yet" before the first.
 
 ## Agent CLIs
 
@@ -462,9 +480,20 @@ a member's pane opens it at that member's activity.
     written with, so an entry about a team or member deleted since still says who it was about.
   - **Accountability**: **Audit** (every change made from the window, a Cloud Link viewer, the Concierge or a paired
     program; reads are not recorded), **Cloud Link**, **Tool calls**, **Approvals**, **Agent changes**, **Host tasks**.
-  - **Security**: **Network** (each run's gateway: model requests, connections allowed and refused) and **Runs** (how
-    each sandboxed run ended).
-  - **Usage**: **Model usage**, tokens per model request.
+  - **Security**: **Network** and **Runs** (how each sandboxed run ended). Network is what each run's gateway
+    decided: host connections allowed and refused, errors and requests answered with anything other than 2xx,
+    credential problems, rate limits, and each run's first successful model request per model host (`model`, `grok`,
+    `xai`, `copilot`, `codex` `.yawble.internal`) and the first after each credential problem or rate limit on that
+    host. The run's other successful model requests are not rows here: they are counted in **Model usage**. Rows
+    written one per model request before this are removed when the app updates by the same rule, so an old run still
+    shows the success that followed a problem.
+    A plain-http request to a host that is not allowed (`host-denied`), refused again in the same run, is counted on
+    that run's first row for the host: its **Times** column says how many times, and in **All activity** the row's
+    detail ends in ` (Nx)` when it counts more than one (` (5x)` for five). Refused HTTPS connections
+    (`connect-denied`) and refused paths are not folded into one row: the first few of each in a minute are written,
+    and the rest are counted in one more row written at the next such refusal after the minute. Every other row's
+    Times is 1.
+  - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
   - **Work history**: **Team messages** and **Board history**.
   - **Diagnostics**: what the app itself reported (`<data>/logs/`).
