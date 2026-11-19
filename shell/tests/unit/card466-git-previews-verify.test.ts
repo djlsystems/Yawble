@@ -201,19 +201,23 @@ describe('card 466: the merge preview shows the core\'s words', () => {
     expect(w.find('[data-test=git-merge-yes]').attributes('disabled')).toBeDefined();
   });
 
-  it('F2 (fault): on a conflict the dialog says the commits "will land" on trunk; the core (and the Concierge) say they are "on team/alpha not in trunk"', async () => {
+  it('F2 (fixed, Ines efac07d): on a conflict the dialog says the commits are "on team/alpha not in trunk", as the core and the Concierge do', async () => {
     const p = real<MergePreview>('merge-conflict');
     expect(p.text).toContain('1 commit on team/alpha not in trunk:');
     const { w } = await openPreview(p, { ...real<TeamGitStatus>('status-ff-origin'), merge: 'merge' });
-    expect(w.find('[data-test=git-merge-commits-heading]').text()).toBe('1 commit will land on trunk'); // FAULT: nothing lands
-    expect(mergePreviewView(p).commitsHeading).toBe('1 commit will land on trunk');
+    expect(w.find('[data-test=git-merge-commits-heading]').text()).toBe('1 commit on team/alpha not in trunk');
+    expect(mergePreviewView(p).commitsHeading).toBe('1 commit on team/alpha not in trunk');
+    expect(w.text()).not.toContain('will land');
   });
 
-  it('F1 (core fault, seen in the dialog): base checked out with uncommitted changes, the preview says fast-forward and Merge is offered', async () => {
+  it('F1 (fixed, Tomas 9214afe), seen in the dialog: base checked out with uncommitted changes, the core\'s refusal and no Merge', async () => {
     const p = real<MergePreview>('f1-merge-dirty');
+    expect(p.outcome).toBe('refused');
+    expect(p.summary).toMatch(/^trunk is checked out in .* with uncommitted changes\./);
     const { w } = await openPreview(p, { ...real<TeamGitStatus>('status-ff-origin'), dirty: true, checkedOut: 'trunk' });
-    expect(w.find('[data-test=git-merge-preview]').attributes('data-outcome')).toBe('fast-forward');
-    expect(w.find('[data-test=git-merge-yes]').attributes('disabled')).toBeUndefined(); // FAULT: git.merge then refuses
+    expect(w.find('[data-test=git-merge-preview]').attributes('data-outcome')).toBe('refused');
+    expect(w.find('[data-test=git-merge-outcome]').text()).toBe(p.summary);
+    expect(w.find('[data-test=git-merge-yes]').attributes('disabled')).toBeDefined();
   });
 
   it('Merge: what landed is the core\'s list, the same commits the preview showed', async () => {
@@ -250,18 +254,18 @@ describe('card 466: the delete preview shows the core\'s words', () => {
     const box = w.find('[data-test=git-delete-preview]');
     expect(box.find('[data-test=git-delete-summary]').text()).toBe(p.lost);
     expect(box.findAll('[data-test=commit-list-row]').map((r) => r.attributes('data-sha'))).toEqual(p.commits.map((c) => c.sha));
-    expect(box.findAll('[data-test=commit-list-mark]').map((m) => m.text())).toEqual(['a merge commit', 'already in main', 'work of its own', 'work of its own']);
+    expect(box.findAll('[data-test=commit-list-mark]').map((m) => m.text())).toEqual(['a merge commit', 'already in trunk', 'work of its own', 'work of its own']);
     expect(box.findAll('[data-test=commit-list-row]').every((r) => r.find('[data-test=local-mark]').exists())).toBe(true);
   });
 
-  it('F3 (fault): the base is trunk, but the dialog marks a picked commit "already in main"; the core and the Concierge say "already in trunk"', async () => {
+  it('F3 (fixed, Ines efac07d): the base is trunk, and the dialog marks a picked commit "already in trunk", as the core and the Concierge do', async () => {
     const p = real<DeletePreview>('delete-with-merge');
     expect(p.baseBranch).toBe('trunk');
     expect(p.text).toContain(': already in trunk, not pushed');
     const { w } = await openDelete(p);
     const marks = w.findAll('[data-test=git-delete-preview] [data-test=commit-list-mark]').map((m) => m.text());
-    expect(marks).toContain('already in main'); // FAULT: should name the base, trunk
-    expect(marks).not.toContain('already in trunk');
+    expect(marks).toContain('already in trunk');
+    expect(marks).not.toContain('already in main');
   });
 
   it('a branch origin still has: no mark on the rows or the branch, the core says origin still has them', async () => {
@@ -314,7 +318,7 @@ describe('card 466: Sync lists what came in', () => {
     expect(commitTarget.value?.sha).toBe(listed.commits[0].sha);
   });
 
-  it('F4 (fault): the commits that came in carry no "not pushed" mark, though the same rows in the count\'s list do', async () => {
+  it('F4 (fixed, Ines efac07d): the commits that came in carry the "not pushed" mark, as the same rows in the count\'s list do', async () => {
     const before = real<TeamGitStatus>('status-before-sync');
     const listed = real<CommitRange>('range-team-behind');
     const sync = real<BranchSyncResult>('sync-ff');
@@ -331,6 +335,22 @@ describe('card 466: Sync lists what came in', () => {
     expect(w.findAll('[data-test=git-range] [data-test=local-mark]')).toHaveLength(2); // the count's list marks both
     await w.find('[data-test=git-sync-now]').trigger('click');
     await flushPromises();
-    expect(w.findAll('[data-test=git-result-commits] [data-test=local-mark]')).toHaveLength(0); // FAULT: should be 2
+    const came = w.findAll('[data-test=git-result-commits] [data-test=commit-list-row]');
+    expect(came).toHaveLength(2);
+    expect(came.map((r) => r.find('[data-test=local-mark]').exists())).toEqual(sync.incoming!.map((c) => c.notPushed));
+  });
+
+  it('F4, no origin: the commits that came in carry no per-row mark', async () => {
+    const before = { ...real<TeamGitStatus>('status-before-sync'), origin: null };
+    const sync = real<BranchSyncResult>('sync-ff');
+    let synced = false;
+    const { w } = await dialog({
+      'git.status': () => (synced ? { ...before, teamSha: sync.incomingRange!.to, teamBehindBase: 0, merge: 'up-to-date' } : before),
+      'git.sync': () => { synced = true; return sync; },
+    });
+    await w.find('[data-test=git-sync-now]').trigger('click');
+    await flushPromises();
+    expect(w.findAll('[data-test=git-result-commits] [data-test=commit-list-row]')).toHaveLength(2);
+    expect(w.findAll('[data-test=git-result-commits] [data-test=local-mark]')).toHaveLength(0);
   });
 });

@@ -1,18 +1,18 @@
 {
   "found": true,
-  "sha": "00a37b50aed8ec81c32af97cd00ef0f1788d4757",
-  "shortSha": "00a37b50aed8",
+  "sha": "fc3f495a2c179095115c079299a6e256d37ac6a7",
+  "shortSha": "fc3f495a2c17",
   "title": "Merge side",
   "body": "",
   "author": {
     "name": "Ben",
     "email": "ben@example.invalid",
-    "date": "2026-11-18T22:05:33-05:00"
+    "date": "2026-11-18T23:08:36-05:00"
   },
   "isMerge": true,
   "parents": [
-    "3e93f1c6b29743cb233978054ec65a26961b2976",
-    "a0b19ceb24a405fe5a66de4b99de95e1b857c790"
+    "44c02730547e00211d22544e9bb95cb33ec54179",
+    "61c5e2e1b40dae9419257a297d415a5362dc71d2"
   ],
   "merge": {
     "intoBranch": null,

@@ -71,7 +71,7 @@ describe('card466 + 3ad0991: TeamSyncBanner on the real core\'s teams.syncToBase
     expect(rc[0].params).toEqual({ teamId: 7, from: behind.behind.from, to: behind.behind.to });
     expect(shas(w, '[data-test=team-behind-list]')).toEqual(range.commits.map((c: any) => c.sha));
     // no origin in this rig: no not-pushed mark.
-    expect(w.find('[data-test=team-behind-list]').text()).not.toContain(LOCAL_MARK);
+    expect(w.find('[data-test=team-behind-list] [data-test=local-mark]').exists()).toBe(false);
     await link.trigger('click');
     expect(w.find('[data-test=team-behind-list]').exists()).toBe(false);
   });
@@ -98,13 +98,44 @@ describe('card466 + 3ad0991: TeamSyncBanner on the real core\'s teams.syncToBase
     expect(w.find('[data-test=team-behind-count]').exists()).toBe(false);
   });
 
-  it('F4 again, in the banner: the commits that came in carry no not-pushed mark though the core says notPushed', async () => {
+  // F4b (fixed, Ines 82de5bb): the banner asks git.status and marks the rows only when the repository has an origin.
+  const marks = (w: any) => w.findAll('[data-test=team-sync-came-in] [data-test=commit-list-row]')
+    .map((r: any) => r.find('[data-test=local-mark]').exists());
+  async function syncWith(status: (() => unknown) | null, synced = real('sync-ff')) {
+    const answers: Record<string, (params: any) => unknown> = { 'teams.syncToBase': () => behind, 'git.sync': () => synced };
+    if (status) answers['git.status'] = status;
+    const b = await banner(answers);
+    await b.w.find('[data-test=team-sync-now]').trigger('click');
+    await flushPromises();
+    return b;
+  }
+
+  it('F4b, origin (real git.status status-ff-origin): every not-pushed row that came in carries the mark', async () => {
+    const status = real('status-ff-origin');
+    expect(status.origin).toBeTruthy();
     const synced = real('sync-ff');
     expect(synced.incoming.every((c: any) => c.notPushed)).toBe(true);
-    const { w } = await banner({ 'teams.syncToBase': () => behind, 'git.sync': () => synced });
-    await w.find('[data-test=team-sync-now]').trigger('click');
-    await flushPromises();
-    // pins today's behaviour (CommitList without :has-origin); flip to toContain once fixed.
-    expect(w.find('[data-test=team-sync-came-in]').text()).not.toContain(LOCAL_MARK);
+    const { w, calls } = await syncWith(() => status, synced);
+    expect(calls.filter((c) => c.method === 'git.status').map((c) => c.params)).toContainEqual({ teamId: 7 });
+    expect(marks(w)).toEqual([true, true]);
+    expect(w.find('[data-test=team-sync-came-in]').text()).toContain(LOCAL_MARK.short);
+  });
+
+  it('F4b, origin, one row pushed: the mark is on the not-pushed row only', async () => {
+    const synced = real('sync-ff');
+    synced.incoming[1].notPushed = false;
+    const { w } = await syncWith(() => real('status-ff-origin'), synced);
+    expect(marks(w)).toEqual([true, false]);
+  });
+
+  it('F4b, origin null: no mark on any row', async () => {
+    const { w } = await syncWith(() => ({ ...real('status-ff-origin'), origin: null }));
+    expect(marks(w)).toEqual([false, false]);
+    expect(w.find('[data-test=team-sync-came-in] [data-test=local-mark]').exists()).toBe(false);
+  });
+
+  it('F4b, git.status fails: the list shows with no mark', async () => {
+    const { w } = await syncWith(null);
+    expect(marks(w)).toEqual([false, false]);
   });
 });
