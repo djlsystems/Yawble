@@ -49,7 +49,8 @@ public class TeamWorkflowTests
             return RunResult.Ok;
         };
 
-        await using var engine = new BusEngine(db.OpenStore(), runner, new BusOptions { SafetyPoll = TimeSpan.FromMilliseconds(200) });
+        // Retros off: this is about one workflow's causation, and a two-piece workflow's retro is a workflow of its own (RetroTests).
+        await using var engine = new BusEngine(db.OpenStore(), runner, new BusOptions { SafetyPoll = TimeSpan.FromMilliseconds(200), Retros = false });
         await engine.CreateTeamAsync("Alpha", ct: Ct);
         await engine.AddMemberAsync("Alpha", "Ada", ct: Ct);
         await engine.AddMemberAsync("Alpha", "Bo", ct: Ct);

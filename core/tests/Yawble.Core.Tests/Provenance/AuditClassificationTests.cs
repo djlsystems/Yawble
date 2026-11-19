@@ -128,6 +128,7 @@ public class AuditClassificationTests
         "policy.saveOverride",
         "runs.stop",
         "skills.delete",
+        "skills.restore",
         "skills.save",
         "tasks.approve",
         "tasks.cancel",
