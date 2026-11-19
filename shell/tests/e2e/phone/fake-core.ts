@@ -317,7 +317,10 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
     compute: { wallTimeoutSec: 7200, idleTimeoutSec: 1800, memoryMb: null, cpuPercent: null, maxProcesses: null },
     ui: { clipboard: 'read' }, app: { maxConcurrentAgents: 4, backend: 'sandbox', heavyWorkAtOnce: 1 },
   }),
-  'teams.syncToBase': () => (syncBehind ? { on: true, note: null, baseBranch: 'main', behind: { teamBranch: 'team/payments', count: 3, text: '3 commits behind main' } } : { on: true, note: null, baseBranch: 'main', behind: null }),
+  // B073: with setB073(true), team/payments is 1 behind main until Sync now or Merge, with the contract's from / to.
+  'teams.syncToBase': () => (b073.on ? { on: true, note: null, baseBranch: 'main',
+    behind: b073.synced || b073.merged ? null : { teamBranch: 'team/payments', count: 1, text: '1 commit behind main', from: COMMIT_MERGE, to: COMMIT_BASE } }
+    : syncBehind ? { on: true, note: null, baseBranch: 'main', behind: { teamBranch: 'team/payments', count: 3, text: '3 commits behind main' } } : { on: true, note: null, baseBranch: 'main', behind: null }),
   'tasks.list': () => [],
   'members.get': (p) => (agents[1] as any[]).map((a) => a.member).find((m) => m.id === p?.id) ?? (agents[1] as any)[0].member,
 };

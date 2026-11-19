@@ -154,3 +154,32 @@ test('390 x 844: the counts list and the merge preview fit a phone', async ({ br
   expect(errors).toEqual([]);
   await ctx.close();
 });
+
+test('1280 x 800: the team page "1 commit behind main" opens its commits; Sync now lists what came in', async ({ browser }) => {
+  const s = fakeRemote(builtDir);
+  s.core.setAccess('full');
+  s.core.setAsks(false);
+  s.core.setNeedsYou(false);
+  s.core.setB073(true);
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await s.attach(ctx);
+  const page = await ctx.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(`${s.url}#team=1`);
+  const count = page.locator('[data-test=team-behind-count]');
+  await expect(count).toHaveText('1 commit behind main', { timeout: 30_000 });
+  await count.click();
+  const list = page.locator('[data-test=team-behind-list]');
+  await expect(list.locator('[data-test=commit-list-row]')).toHaveCount(1);
+  await list.locator('[data-test=commit-link]').click();
+  await expect(page.locator('[data-test=commit-title]')).toHaveText('Release 2026.11.18.1');
+  await closeCommitDialog(page);
+  await page.locator('[data-test=team-sync-now]').click();
+  const came = page.locator('[data-test=team-sync-came-in]');
+  await expect(came).toContainText('1 commit came into team/payments:');
+  await expect(came.locator('[data-test=commit-link]')).toHaveAttribute('data-sha', /^[0-9a-f]{40}$/);
+  await expect(page.locator('[data-test=team-behind]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
