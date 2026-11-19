@@ -12,7 +12,7 @@ import type { MenuItem as MenuBarItem } from './MenuBar.vue';
 
 // The app's left pane, like the chat apps people know: New chat, the places (Concierge, Teams, and what comes next),
 // the teams, and the person's chats with the Concierge; settings at the bottom.
-export type View = 'concierge' | 'documents' | 'backlog' | 'teams' | 'board' | 'monitor' | 'settings';
+export type View = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'settings';
 export type MenuItem = 'agents' | 'skills' | 'globalPolicy' | 'integrations' | 'system' | 'link';
 
 defineProps<{
@@ -38,6 +38,8 @@ defineProps<{
   /** The team whose page is open (card 316): on a phone its Documents and Workflows sit near the drawer's top, not in
    *  the team page's header. Null with no team page open; ignored on the desktop. */
   openTeamName?: string | null;
+  /** B104: how many workflows are open across the teams (the Workflows badge); null: not known. */
+  openWorkflows?: number | null;
 }>();
 const emit = defineEmits<{
   newChat: []; openConversation: [id: string]; openTeam: [id: number]; go: [view: View]; logs: [];
@@ -47,7 +49,7 @@ const emit = defineEmits<{
 
 const railPlaces: { view: View; label: string; icon: string }[] = [
   { view: 'concierge', label: 'Concierge', icon: 'spark' }, { view: 'documents', label: 'Documents', icon: 'docs' },
-  { view: 'backlog', label: 'Backlog', icon: 'backlog' }, { view: 'teams', label: 'Teams', icon: 'teams' },
+  { view: 'backlog', label: 'Backlog', icon: 'backlog' }, { view: 'workflows', label: 'Workflows', icon: 'workflow' }, { view: 'teams', label: 'Teams', icon: 'teams' },
   { view: 'board', label: 'Kanban board', icon: 'board' }, { view: 'monitor', label: 'Monitor', icon: 'monitor' },
 ];
 
@@ -79,6 +81,7 @@ function finishRename(id: string) {
         @click="emit('go', p.view)">
         <Icon :name="p.icon" />
         <span v-if="p.view === 'teams' && slots?.running" class="rail-badge" title="agents running">{{ slots.running }}</span>
+        <span v-else-if="p.view === 'workflows' && openWorkflows" class="rail-badge" data-test="rail-workflows-count" :title="`${openWorkflows} open`">{{ openWorkflows }}</span>
       </button>
       <button class="rail-btn" title="Logs" data-test="rail-logs" @click="emit('logs')"><Icon name="logs" /></button>
     </nav>
@@ -107,6 +110,7 @@ function finishRename(id: string) {
       <button class="item" :class="{ on: view === 'concierge' }" data-test="nav-concierge" @click="emit('go', 'concierge')"><Icon name="spark" />Concierge</button>
       <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="teams.length" class="badge" data-test="nav-teams-count" :title="`${teams.length} team${teams.length === 1 ? '' : 's'}`">{{ teams.length }}</span></button>
       <button class="item" :class="{ on: view === 'backlog' }" data-test="nav-backlog" @click="emit('go', 'backlog')"><Icon name="backlog" />Backlog</button>
+      <button class="item" :class="{ on: view === 'workflows' }" data-test="nav-workflows" @click="emit('go', 'workflows')"><Icon name="workflow" />Workflows<span v-if="openWorkflows" class="badge" data-test="nav-workflows-count" :title="`${openWorkflows} open workflow${openWorkflows === 1 ? '' : 's'}`">{{ openWorkflows }}</span></button>
       <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Kanban board</button>
       <button class="item" :class="{ on: view === 'documents' }" data-test="nav-documents" @click="emit('go', 'documents')"><Icon name="docs" />Documents</button>
       <button class="item" :class="{ on: view === 'monitor' }" data-test="nav-monitor" @click="emit('go', 'monitor')"><Icon name="monitor" />Monitor</button>
