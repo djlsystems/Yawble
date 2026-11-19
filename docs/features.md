@@ -115,6 +115,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   "- <lesson> (<date>, workflow <id>)", under a few headings (Building and testing, Git, Working with the person ...).
   - After a workflow completes, the Manager looks back on it (a retrospective) and keeps at most a few lessons a later run
     should act on, merging them into team_retros with the Manager-only tool **team_retros_write** (the whole new text).
+    Only an eventful workflow gets one: a small, uneventful workflow gets no retrospective, and a workflow that was
+    closed or expired instead of completed never does (nor does a retrospective's own workflow).
     The tool writes only its own team's team_retros, nothing else; it refuses a text over 4000 characters (saying its
     size), and refuses a write when the text changed since that run read it (the person edited it meanwhile), so the
     Manager reads it again and merges into the person's text: a person's edit is never reset.

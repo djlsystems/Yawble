@@ -297,6 +297,9 @@ if (bus.Repos is { } taskRepos)
 var board = new Yawble.Core.Board.BoardService(new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), bus,
     line => Console.Error.WriteLine($"board: {line}"));
 bus.Board = board;
+// B100: workflow_digest reads the runs' transcripts.
+var digestTranscripts = new Yawble.Core.Transcripts.TranscriptStore(options.DataDir!, $"Data Source={dbPath}");
+bus.TranscriptOf = digestTranscripts.Read;
 board.Changed = () => events.Publish(Yawble.Core.Board.BoardService.ChangedEvent, null); // clear done / restore: open boards refresh
 bus.LeaseChanged = () => events.Publish(Yawble.Core.Bus.BusEngine.LeaseChangedEvent, null); // the Monitor's heavy-work line, the member cards
 // Custom agents and the agent/model change log (rows are written by the stores that change things; local only).

@@ -33,8 +33,8 @@ public class GatewayLogRepeatTests
         Assert.Equal(GatewayLog.RepeatLimit + 3, Rows(db)); // the count of the last window, then the new one
         Assert.Contains($"and {1000 - GatewayLog.RepeatLimit} more like it", Details(db));
 
-        // Forwards are never thinned: each is what a run reached.
-        for (var i = 0; i < 20; i++) log.Write(new GatewayEvent(7, "alpha/Wren", clock.Now, GatewayEventKinds.Forward, false, "model.yawble.internal", "POST", "/v1/messages", 200));
+        // Failed forwards are never thinned: each is what a run reached (successful ones are, B103: GatewayLogThinningTests).
+        for (var i = 0; i < 20; i++) log.Write(new GatewayEvent(7, "alpha/Wren", clock.Now, GatewayEventKinds.Forward, false, "model.yawble.internal", "POST", "/v1/messages", 500));
         Assert.Equal(GatewayLog.RepeatLimit + 23, Rows(db));
     }
 
