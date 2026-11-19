@@ -124,7 +124,7 @@ public class HiringAndSkillsTests
     {
         using var db = new TempDb();
         var skills = new SkillCatalog(db.ConnectionString);
-        Assert.Equal(["manager", "member", "board", "dev-tools", "hiring", "integrations", "recovery", "team-git", "test-credentials", "testing-a-web-app", "testing-console-apps", "wrap-up", "writing-skills"],
+        Assert.Equal(["manager", "member", "board", "dev-tools", "hiring", "integrations", "recovery", "retrospective", "team-git", "test-credentials", "testing-a-web-app", "testing-console-apps", "wrap-up", "writing-skills"],
             SkillCatalog.BuiltIns.Select(s => s.Name));
         Assert.Contains("integrations", skills.Offered("manager", 1).Select(s => s.Name));
         Assert.Contains("integrations", skills.Offered("member", 1).Select(s => s.Name));

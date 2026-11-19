@@ -19,6 +19,9 @@ public sealed class BusOptions
     /// <summary>Tell a workflow's owner, once, when its run ends with the workflow open and nobody working it (on by default).</summary>
     public bool IdleOffer { get; init; } = true;
 
+    /// <summary>B100: queue a retro item for the team's Manager when a workflow_complete is accepted (on by default).</summary>
+    public bool Retros { get; init; } = true;
+
     /// <summary>The most deliveries of one workflow in one run.</summary>
     public int BatchLimit { get; init; } = 16;
 
@@ -336,7 +339,9 @@ public sealed partial class BusEngine : IAsyncDisposable
         // Before the declaration: does the team branch merge cleanly into the base? A conflict does not stop the
         // declaration; it rides on it, so the work is not reported as ready to land.
         var check = string.IsNullOrWhiteSpace(delivered) ? null : await MergeCheckForAsync(run.Member, ct);
-        return await CompleteAsync(run, delivered, check, ct);
+        var completed = await CompleteAsync(run, delivered, check, ct);
+        await QueueRetroAsync(run.Member, completed, ct); // B100: the Manager's look back, when the workflow was eventful
+        return completed;
     }
 
     private async Task<Teams.TeamMergeCheck?> MergeCheckForAsync(MemberRef member, CancellationToken ct)
@@ -567,14 +572,18 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// <summary>Every member with undelivered work and no run joins the back of the queue, oldest work first.</summary>
     private void EnqueueEligible()
     {
+        // B100: a member whose only waiting work is retro items comes last, and joins only while nobody else is queued.
         var waiting = _store.Pending(started: false)
             .Where(Ripe)
             .GroupBy(p => p.Subscriber, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g.Min(p => p.Seq));
+            .Select(g => (Group: g, RetroOnly: g.All(IsRetro)))
+            .OrderBy(x => x.RetroOnly).ThenBy(x => x.Group.Min(p => p.Seq))
+            .ToList();
         var held = _store.HeldTeams();
-        foreach (var group in waiting)
+        foreach (var (group, retroOnly) in waiting)
         {
             if (_store.MemberBySubscriber(group.Key) is not { } member) continue;
+            if (retroOnly && _store.Queue().Any(q => q.MemberId != member.Id)) continue;
             if (Held(member, held)) continue; // a paused or archived team's work waits where it is
             if (_active.Values.Any(a => a.Context.Member.Id == member.Id)) continue;
             if (HasSession(member.Id)) continue; // its instructions wait while a session is open or queued
@@ -608,7 +617,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (member is null) return ((long, List<BusStore.PendingRow>)?)null;
             var unstarted = _store.Pending(member.Qualified, started: false).Where(Ripe).ToList();
             if (unstarted.Count == 0) return null;
-            var first = unstarted[0];
+            var first = unstarted.FirstOrDefault(p => !IsRetro(p)) ?? unstarted[0]; // B100: a retro item after any other work
             var batch = unstarted.Where(p => p.Correlation == first.Correlation).Take(Math.Max(1, _options.BatchLimit)).ToList();
             var runId = _store.InsertRun(member.Id, entry.Id, first.Seq, first.Correlation, batch.Count, entry.EnqueuedAt);
             foreach (var row in batch) _store.StartPending(member.Qualified, row.Seq, runId);
