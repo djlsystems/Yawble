@@ -83,6 +83,8 @@ public static class RemoteAccess
             "git.webLink",
             // B072, the commit view: a commit and its file list; a file's diff only while members' code is shown (below).
             "git.commitShow", "git.commitDiff",
+            // B074: which hex words in text are commits (IDs, titles, pushed; no code).
+            "git.commitsResolve",
             // B073: the commits behind a count and the Merge / Delete previews; a preview's file diff only while members' code is shown.
             "git.commitRange", "git.mergePreview", "git.deletePreview", "git.mergeDiff",
             "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
