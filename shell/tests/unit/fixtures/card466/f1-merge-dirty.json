@@ -1,0 +1,44 @@
+{
+  "baseBranch": "trunk",
+  "teamBranch": "team/alpha",
+  "outcome": "fast-forward",
+  "summary": "trunk will fast-forward to ab5252e656cd: 1 commit land.",
+  "text": "trunk will fast-forward to ab5252e656cd: 1 commit land.\n1 commit will land on trunk:\n  - ab5252e656cd Team (Ada), local only\nFiles changed (1):\n  added t.txt (\u002B1 -0)",
+  "from": "a4841da77192d9dfd9ee41fdcfd5a8c026418642",
+  "to": "ab5252e656cd9d02cb5764d08600e579d3cc3266",
+  "newSha": "ab5252e656cd9d02cb5764d08600e579d3cc3266",
+  "conflictFiles": [],
+  "commits": [
+    {
+      "sha": "ab5252e656cd9d02cb5764d08600e579d3cc3266",
+      "shortSha": "ab5252e656cd",
+      "subject": "Team",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:19:15-05:00",
+      "isMerge": false,
+      "notPushed": true
+    }
+  ],
+  "count": 1,
+  "truncated": false,
+  "files": [
+    {
+      "path": "t.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "diffFrom": "a4841da77192d9dfd9ee41fdcfd5a8c026418642",
+  "diffTo": "ab5252e656cd9d02cb5764d08600e579d3cc3266",
+  "hasOrigin": false,
+  "teamPush": {
+    "branch": "team/alpha",
+    "onOrigin": false,
+    "notPushed": 2
+  }
+}

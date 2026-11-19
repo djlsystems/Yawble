@@ -1,0 +1,43 @@
+{
+  "found": true,
+  "sha": "a5d6e4c96cf29b533500cc8946d375f6179fdecc",
+  "shortSha": "a5d6e4c96cf2",
+  "title": "Merge side",
+  "body": "",
+  "author": {
+    "name": "Ben",
+    "email": "ben@example.invalid",
+    "date": "2026-11-18T21:19:00-05:00"
+  },
+  "isMerge": true,
+  "parents": [
+    "8d534ce765dda67e3879a900b6c2bd3969711a6c",
+    "74a930d1c0dcb374d7333021929f57637c9e5256"
+  ],
+  "merge": {
+    "intoBranch": null,
+    "fromBranch": null,
+    "commitCount": 1
+  },
+  "made": {
+    "member": "Ben"
+  },
+  "where": {
+    "inMain": false,
+    "branches": [],
+    "otherBranches": [],
+    "deletedFrom": "members/alpha/ben",
+    "pushed": false,
+    "tags": []
+  },
+  "files": [
+    {
+      "path": "side.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "codeShown": true
+}

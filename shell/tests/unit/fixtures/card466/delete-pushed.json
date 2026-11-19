@@ -1,0 +1,46 @@
+{
+  "branch": "feature/pushed",
+  "baseBranch": "trunk",
+  "exists": true,
+  "sha": "14dc3569d301594925b6cb3dfa10a553a4cb7dac",
+  "merged": false,
+  "commits": [
+    {
+      "state": "own",
+      "sha": "14dc3569d301594925b6cb3dfa10a553a4cb7dac",
+      "shortSha": "14dc3569d301",
+      "subject": "Pushed 2",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:18:59-05:00",
+      "isMerge": false,
+      "notPushed": false
+    },
+    {
+      "state": "own",
+      "sha": "3c667095cc866bdeb7bfc3db92c15c9c6693acb8",
+      "shortSha": "3c667095cc86",
+      "subject": "Pushed 1",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:18:59-05:00",
+      "isMerge": false,
+      "notPushed": false
+    }
+  ],
+  "own": 2,
+  "inBase": 0,
+  "truncated": false,
+  "lost": "Deleting it loses 2 commits of its own (14dc3569d301, 3c667095cc86); origin still has them.",
+  "text": "feature/pushed at 14dc3569d301: Deleting it loses 2 commits of its own (14dc3569d301, 3c667095cc86); origin still has them.\n2 commits not in trunk:\n  - 14dc3569d301 Pushed 2 (Ada): work of its own\n  - 3c667095cc86 Pushed 1 (Ada): work of its own",
+  "hasOrigin": true,
+  "push": {
+    "branch": "feature/pushed",
+    "onOrigin": true,
+    "notPushed": 0
+  }
+}

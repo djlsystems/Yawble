@@ -1,0 +1,39 @@
+{
+  "repoPath": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-me3d2dqo.jgn\\person-repo",
+  "managed": false,
+  "baseBranch": "trunk",
+  "checkedOut": "trunk",
+  "dirty": false,
+  "origin": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-me3d2dqo.jgn\\origin.git",
+  "baseSha": "4bbdede6b09929ae79d1cd538a9ee2556203ae51",
+  "originBaseSha": "e63d3e002446d420b8c6822b9be96e2e078ba28a",
+  "baseAheadOfOrigin": 0,
+  "baseBehindOrigin": 1,
+  "teamBranch": "team/alpha",
+  "teamSha": "49683050afb7f6802362892d278b6477d159eaf5",
+  "teamAheadOfBase": 2,
+  "teamBehindBase": 0,
+  "merge": "fast-forward",
+  "conflictFiles": [],
+  "members": [],
+  "oldBranches": [],
+  "blockingBranches": [],
+  "ranges": {
+    "baseAheadOfOrigin": {
+      "from": "e63d3e002446d420b8c6822b9be96e2e078ba28a",
+      "to": "4bbdede6b09929ae79d1cd538a9ee2556203ae51"
+    },
+    "baseBehindOrigin": {
+      "from": "4bbdede6b09929ae79d1cd538a9ee2556203ae51",
+      "to": "e63d3e002446d420b8c6822b9be96e2e078ba28a"
+    },
+    "teamAheadOfBase": {
+      "from": "e63d3e002446d420b8c6822b9be96e2e078ba28a",
+      "to": "49683050afb7f6802362892d278b6477d159eaf5"
+    },
+    "teamBehindBase": {
+      "from": "49683050afb7f6802362892d278b6477d159eaf5",
+      "to": "e63d3e002446d420b8c6822b9be96e2e078ba28a"
+    }
+  }
+}

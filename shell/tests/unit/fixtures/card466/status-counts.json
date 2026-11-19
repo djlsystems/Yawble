@@ -1,0 +1,70 @@
+{
+  "repoPath": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-zvrz5wbd.lbb\\person-repo",
+  "managed": false,
+  "baseBranch": "trunk",
+  "checkedOut": "trunk",
+  "dirty": false,
+  "origin": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-zvrz5wbd.lbb\\origin.git",
+  "baseSha": "ae2de644168aed7c1ebb056f7ceb474a968a9d33",
+  "originBaseSha": "6a3c7253686afc07792e842e2829aabe603cbe30",
+  "baseAheadOfOrigin": 1,
+  "baseBehindOrigin": 0,
+  "teamBranch": "team/alpha",
+  "teamSha": "ce2e5daaf9e86104640c018d8ec9988ae4e3f32f",
+  "teamAheadOfBase": 2,
+  "teamBehindBase": 1,
+  "merge": "merge",
+  "conflictFiles": [],
+  "members": [
+    {
+      "branch": "members/alpha/ada",
+      "sha": "7bc655620fc3d569071687693e16906859f166db",
+      "aheadOfBase": 1,
+      "inTeamBranch": true,
+      "aheadRange": {
+        "from": "ae2de644168aed7c1ebb056f7ceb474a968a9d33",
+        "to": "7bc655620fc3d569071687693e16906859f166db"
+      },
+      "push": {
+        "branch": "members/alpha/ada",
+        "onOrigin": true,
+        "notPushed": 0
+      }
+    },
+    {
+      "branch": "members/alpha/ben",
+      "sha": "cb0f6d3e86dc1252f0b3543c886e0f7b8b9e7673",
+      "aheadOfBase": 2,
+      "inTeamBranch": false,
+      "aheadRange": {
+        "from": "ae2de644168aed7c1ebb056f7ceb474a968a9d33",
+        "to": "cb0f6d3e86dc1252f0b3543c886e0f7b8b9e7673"
+      },
+      "push": {
+        "branch": "members/alpha/ben",
+        "onOrigin": false,
+        "notPushed": 2
+      }
+    }
+  ],
+  "oldBranches": [],
+  "blockingBranches": [],
+  "ranges": {
+    "baseAheadOfOrigin": {
+      "from": "6a3c7253686afc07792e842e2829aabe603cbe30",
+      "to": "ae2de644168aed7c1ebb056f7ceb474a968a9d33"
+    },
+    "baseBehindOrigin": {
+      "from": "ae2de644168aed7c1ebb056f7ceb474a968a9d33",
+      "to": "6a3c7253686afc07792e842e2829aabe603cbe30"
+    },
+    "teamAheadOfBase": {
+      "from": "ae2de644168aed7c1ebb056f7ceb474a968a9d33",
+      "to": "ce2e5daaf9e86104640c018d8ec9988ae4e3f32f"
+    },
+    "teamBehindBase": {
+      "from": "ce2e5daaf9e86104640c018d8ec9988ae4e3f32f",
+      "to": "ae2de644168aed7c1ebb056f7ceb474a968a9d33"
+    }
+  }
+}

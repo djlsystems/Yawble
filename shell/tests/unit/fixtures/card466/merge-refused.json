@@ -1,0 +1,23 @@
+{
+  "baseBranch": "trunk",
+  "teamBranch": "team/alpha",
+  "outcome": "refused",
+  "summary": "Your trunk has 1 commit that origin does not have, so Merge to main would refuse: push them (or drop them) yourself first. Nothing changes.",
+  "text": "Your trunk has 1 commit that origin does not have, so Merge to main would refuse: push them (or drop them) yourself first. Nothing changes.",
+  "from": null,
+  "to": "c5c898f3528752ebf8de6ab5892bc68bfd889d6c",
+  "newSha": null,
+  "conflictFiles": [],
+  "commits": [],
+  "count": 0,
+  "truncated": false,
+  "files": [],
+  "diffFrom": null,
+  "diffTo": null,
+  "hasOrigin": true,
+  "teamPush": {
+    "branch": "team/alpha",
+    "onOrigin": false,
+    "notPushed": 1
+  }
+}

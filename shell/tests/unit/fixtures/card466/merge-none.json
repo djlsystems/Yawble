@@ -1,0 +1,19 @@
+{
+  "baseBranch": "trunk",
+  "teamBranch": "team/alpha",
+  "outcome": "none",
+  "summary": "There is no team/alpha yet: nothing to merge.",
+  "text": "There is no team/alpha yet: nothing to merge.",
+  "from": null,
+  "to": null,
+  "newSha": null,
+  "conflictFiles": [],
+  "commits": [],
+  "count": 0,
+  "truncated": false,
+  "files": [],
+  "diffFrom": null,
+  "diffTo": null,
+  "hasOrigin": false,
+  "teamPush": null
+}

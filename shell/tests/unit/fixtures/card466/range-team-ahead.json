@@ -1,0 +1,35 @@
+{
+  "from": "e63d3e002446d420b8c6822b9be96e2e078ba28a",
+  "to": "49683050afb7f6802362892d278b6477d159eaf5",
+  "fromSha": "e63d3e002446d420b8c6822b9be96e2e078ba28a",
+  "toSha": "49683050afb7f6802362892d278b6477d159eaf5",
+  "count": 2,
+  "truncated": false,
+  "hasOrigin": true,
+  "commits": [
+    {
+      "sha": "49683050afb7f6802362892d278b6477d159eaf5",
+      "shortSha": "49683050afb7",
+      "subject": "Team 2",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:18:36-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "sha": "18ee6f23fe374d95d5aba0c80702a4c6f0c0d009",
+      "shortSha": "18ee6f23fe37",
+      "subject": "Team 1",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:18:36-05:00",
+      "isMerge": false,
+      "notPushed": false
+    }
+  ]
+}
