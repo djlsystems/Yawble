@@ -24,6 +24,7 @@ const ADA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
 const LOCAL = 'c62216a90b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e';
 const TWIN_WEB = '7c63337aaaa1111bbbb2222cccc3333dddd4444e';
 const TWIN_CLOUD = '7c63337ffff9999eeee8888dddd7777cccc6666b';
+const SHARED = 'e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6';
 
 /** The fake core's repositories: what each prefix names. */
 const COMMITS: CommitMatch[] = [
@@ -31,6 +32,9 @@ const COMMITS: CommitMatch[] = [
   { team: 'payments', repo: null, fullId: LOCAL, title: 'Receipts: a new layout', pushed: false },
   { team: 'payments', repo: null, fullId: TWIN_WEB, title: 'Web: fix the refund button', pushed: true },
   { team: 'payments', repo: 'payments-cloud', fullId: TWIN_CLOUD, title: 'Cloud: retry the webhook', pushed: true },
+  // The same commit in two teams (card 471 F1: a merged base both teams carry).
+  { team: 'web', repo: null, fullId: SHARED, title: 'Shared: the base both teams have', pushed: true },
+  { team: 'cloud', repo: null, fullId: SHARED, title: 'Shared: the base both teams have', pushed: true },
 ];
 const resolve = (ids: string[]) => ({ max: 200, results: ids.map((id) => ({ id: id.toLowerCase(), valid: true,
   matches: COMMITS.filter((c) => c.fullId.startsWith(id.toLowerCase())).map((c) => ({ ...c, teamId: 1, shortId: c.fullId.slice(0, 12) })) })) });
@@ -189,9 +193,54 @@ describe('B074: commit links only for confirmed commits', () => {
   it('team order: the place\'s team first; it alone when it has the commit, else every team, nearest first', () => {
     const a = { team: 'web', repo: null, fullId: ADA, title: 'a', pushed: true };
     const b = { team: 'payments', repo: null, fullId: LOCAL, title: 'b', pushed: true };
-    expect(pickMatches([a, b], ['payments', 'web'])).toEqual([b]);
+    expect(pickMatches([a, b], ['payments', 'web'], 'payments')).toEqual([b]);
+    // Card 471 F1: only the place's own team narrows; the screen's team (or the first of every team) only orders.
+    expect(pickMatches([a, b], ['payments', 'web'])).toEqual([b, a]);
+    expect(pickMatches([a, b], ['payments', 'web'], null)).toEqual([b, a]);
+    expect(pickMatches([a, b], ['ops', 'payments', 'web'], 'ops')).toEqual([b, a]);
     expect(pickMatches([a, b], ['ops', 'payments', 'web'])).toEqual([b, a]);
     expect(pickMatches([a, a], ['web'])).toEqual([a]);
+  });
+  it('card 471 F1: an ID in two teams, in a place with no team of its own, opens the chooser whatever the team order', async () => {
+    for (const all of [['web', 'cloud'], ['cloud', 'web']]) {
+      resetCommitResolve();
+      document.body.innerHTML = '';
+      commitTeams.value = { current: null, all };
+      const box = document.createElement('div');
+      box.innerHTML = renderMarkdown(`Both teams have ${SHARED.slice(0, 8)}.`);
+      document.body.appendChild(box);
+      await settle();
+      const [a] = links(box);
+      expect(a.dataset.commitState).toBe('choose');
+      expect(a.dataset.commitIn).toBeUndefined();
+      a.click();
+      expect(commitChoice.value?.matches.map((m) => m.team)).toEqual(all);
+      closeChoice();
+    }
+  });
+  it('card 471 F1: the screen\'s team alone does not narrow (it only comes first); the place\'s own team does', async () => {
+    commitTeams.value = { current: 'cloud', all: ['web', 'cloud'] };
+    const open = document.createElement('div');
+    open.innerHTML = renderMarkdown(`Both teams have ${SHARED.slice(0, 8)}.`);
+    document.body.appendChild(open);
+    const own = place(`Both teams have ${SHARED.slice(0, 8)}.`, 'web');
+    await settle();
+    expect(links(open)[0].dataset.commitState).toBe('choose');
+    links(open)[0].click();
+    expect(commitChoice.value?.matches.map((m) => m.team)).toEqual(['cloud', 'web']);
+    closeChoice();
+    expect(links(own)[0].dataset.commitState).toBe('link');
+    expect(links(own)[0].dataset.commitIn).toBe('web');
+  });
+  it('card 471 F1: CommitText narrows only to its own team prop', async () => {
+    commitTeams.value = { current: 'cloud', all: ['web', 'cloud'] };
+    const bare = mount(CommitText, { props: { text: `Merged ${SHARED.slice(0, 8)}` }, attachTo: document.body });
+    const mine = mount(CommitText, { props: { text: `Merged ${SHARED.slice(0, 8)}`, team: 'web' }, attachTo: document.body });
+    await settle();
+    expect(bare.find('[data-test=commit-link]').attributes('data-commit-state')).toBe('choose');
+    expect(mine.find('[data-test=commit-link]').attributes('data-commit-state')).toBe('link');
+    expect(mine.find('[data-test=commit-link]').attributes('data-commit-in')).toBe('web');
+    bare.unmount(); mine.unmount();
   });
 });
 
