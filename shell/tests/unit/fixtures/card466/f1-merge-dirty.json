@@ -1,0 +1,23 @@
+{
+  "baseBranch": "trunk",
+  "teamBranch": "team/alpha",
+  "outcome": "refused",
+  "summary": "trunk is checked out in C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-k0fltt4u.mze\\person-repo with uncommitted changes. Commit or stash them yourself first; the app never touches uncommitted work. Nothing changed.",
+  "text": "trunk is checked out in C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-k0fltt4u.mze\\person-repo with uncommitted changes. Commit or stash them yourself first; the app never touches uncommitted work. Nothing changed.",
+  "from": "f3452e5022cd4c70acd6ae44e7fa2e8dec4b64ca",
+  "to": "175aa628f005c57798a874dbef9152d89a7ae5ef",
+  "newSha": null,
+  "conflictFiles": [],
+  "commits": [],
+  "count": 0,
+  "truncated": false,
+  "files": [],
+  "diffFrom": null,
+  "diffTo": null,
+  "hasOrigin": false,
+  "teamPush": {
+    "branch": "team/alpha",
+    "onOrigin": false,
+    "notPushed": 2
+  }
+}

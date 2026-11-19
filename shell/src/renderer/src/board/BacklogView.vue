@@ -9,6 +9,7 @@ import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
 import Icon from '../components/Icon.vue';
 import { useNarrow } from '../narrowScreen';
+import { openWorkflowsPage, type BacklogRequest } from '../workflows/page';
 
 /**
  * The Backlog: the person's list of work not yet given to a team, in priority order. An item
@@ -17,7 +18,8 @@ import { useNarrow } from '../narrowScreen';
  * "declared"; only the person marks it implemented. Every dispatch is kept with its workflow, cards and usage.
  */
 // teamsLoading: the app's first overview (the teams to dispatch to) has not arrived yet.
-const props = defineProps<{ teams: TeamSummary[]; teamsLoading?: boolean; api?: YawbleApi; pollMs?: number }>();
+// focus (B104): open with this item selected (an Item link on the Workflows page; an archived one in the archive).
+const props = defineProps<{ teams: TeamSummary[]; teamsLoading?: boolean; api?: YawbleApi; pollMs?: number; focus?: BacklogRequest | null }>();
 const emit = defineEmits<{ openTeam: [id: number]; board: [teamId: number | null] }>();
 const api = resolveApi(props.api);
 
@@ -55,6 +57,7 @@ async function load() {
     loaded.value = true;
     error.value = null;
     if (openId.value !== null && !open.value) openId.value = null;
+    focusItem();
   } catch (e) { if (t === tab.value) error.value = errorText(e); }
 }
 async function loadDetail() {
@@ -73,6 +76,26 @@ function switchTab(t: 'live' | 'archived') {
   tab.value = t; openId.value = null; loaded.value = false; items.value = []; error.value = null;
   void load();
 }
+
+// ---- opened at an item (B104: an Item link): its tab, then the item selected once the list has it ----
+const pendingFocus = ref<{ label: string; archived: boolean; other: boolean } | null>(null);
+function focusItem() {
+  const f = pendingFocus.value;
+  if (!f || !loaded.value) return;
+  const hit = items.value.find((i) => i.label === f.label);
+  if (hit) { pendingFocus.value = null; select(hit); return; }
+  // Not in this tab (restored or archived since the link was drawn): the other tab, once.
+  if (!f.other) { pendingFocus.value = { ...f, other: true }; switchTab(tab.value === 'live' ? 'archived' : 'live'); return; }
+  pendingFocus.value = null;
+}
+watch(() => props.focus?.seq, () => {
+  const f = props.focus;
+  if (!f) return;
+  pendingFocus.value = { label: f.label, archived: f.archived, other: false };
+  const want = f.archived ? 'archived' : 'live';
+  if (tab.value !== want) switchTab(want);
+  else focusItem();
+}, { immediate: true });
 
 let timer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => { void load(); timer = setInterval(() => { void load(); void loadDetail(); }, props.pollMs ?? 5000); });
@@ -239,10 +262,10 @@ watch(() => props.teams, (ts) => { if (target.value !== 'new' && !ts.some((t) =>
 const teamLinks = computed(() => {
   if (detail.value?.id !== open.value?.id) return [];
   const seen = new Set<number>();
-  const out: { teamId: number; team: string }[] = [];
+  const out: { teamId: number; team: string; workflow: number }[] = [];
   for (const d of detail.value?.dispatches ?? []) {
     if (d.teamId === null || d.teamGone || seen.has(d.teamId)) continue;
-    seen.add(d.teamId); out.push({ teamId: d.teamId, team: d.team });
+    seen.add(d.teamId); out.push({ teamId: d.teamId, team: d.team, workflow: d.workflow });
   }
   return out;
 });
@@ -447,6 +470,8 @@ const teamLinks = computed(() => {
             <span class="muted small">{{ t.team }}</span>
             <button class="link" @click="emit('openTeam', t.teamId)">Open team</button>
             <button class="link" @click="emit('board', t.teamId)">Its board</button>
+            <button class="link" data-test="backlog-team-workflow" :title="`${t.team}'s latest workflow for ${open.label}, on the Workflows page`"
+              @click="openWorkflowsPage({ teamId: t.teamId, workflow: t.workflow })">workflow #{{ t.workflow }}</button>
           </div>
         </section>
       </div>

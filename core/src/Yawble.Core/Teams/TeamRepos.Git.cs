@@ -1,7 +1,10 @@
 namespace Yawble.Core.Teams;
 
 /// <summary>One branch the team made, as the Git dialog shows it.</summary>
-public sealed record TeamGitBranch(string Branch, string Sha, int AheadOfBase, bool InTeamBranch);
+public sealed record TeamGitBranch(string Branch, string Sha, int AheadOfBase, bool InTeamBranch, CommitRangeRef? AheadRange = null, BranchPush? Push = null);
+
+/// <summary>B073: the exact from/to each of the Git dialog's counts stands for (git.commitRange opens the matching list); null when an end is missing.</summary>
+public sealed record TeamGitRanges(CommitRangeRef? BaseAheadOfOrigin, CommitRangeRef? BaseBehindOrigin, CommitRangeRef? TeamAheadOfBase, CommitRangeRef? TeamBehindBase);
 
 /// <summary>
 /// The team repository as the Git dialog shows it (one repository).
@@ -23,6 +26,9 @@ public sealed record TeamGitStatus(
     /// branches (members/&lt;team&gt;, or members), for the dialog's Delete; empty when none. An old-style one is
     /// also in <see cref="OldBranches"/>.</summary>
     public IReadOnlyList<TeamGitBlockingBranch> BlockingBranches { get; init; } = [];
+
+    /// <summary>B073: the from/to of each count above.</summary>
+    public TeamGitRanges Ranges { get; init; } = new(null, null, null, null);
 }
 
 /// <summary>An old-style member branch: where it is, and whether every copy of it is in the base (local or origin's).</summary>
@@ -41,6 +47,23 @@ public sealed record TeamGitDelete(string Plan, string Token, bool Empty, string
 public sealed record TeamGitResult(string Outcome, string Message, bool Changed, string? Sha = null, IReadOnlyList<string>? Files = null)
 {
     public TeamGitStatus? Status { get; init; }
+
+    /// <summary>B073: what came in (brought-current) or landed (fast-forward, merged), newest first; null otherwise.</summary>
+    public IReadOnlyList<CommitRow>? Commits { get; init; }
+
+    public int CommitCount { get; init; }
+
+    public bool CommitsTruncated { get; init; }
+
+    /// <summary>B073: the from/to of <see cref="Commits"/> (git.commitRange gives the whole list).</summary>
+    public CommitRangeRef? Range { get; init; }
+
+    /// <summary>This result with the commits on <paramref name="to"/> that <paramref name="from"/> lacks.</summary>
+    internal async Task<TeamGitResult> WithCommitsAsync(GitPreviews previews, string path, string? from, string to, CancellationToken ct)
+    {
+        var list = await previews.ListAsync(path, to, [from], GitPreviews.DefaultLimit, ct);
+        return this with { Commits = list.Commits, CommitCount = list.Count, CommitsTruncated = list.Truncated, Range = from is null ? null : new CommitRangeRef(from, to) };
+    }
 }
 
 /// <summary>
@@ -217,7 +240,8 @@ public sealed partial class TeamRepos
         {
             var aheadOfBase = start is null ? 0 : await CountAsync(path, sha, start, ct);
             var inTeam = teamSha is not null && await IsAncestorAsync(path, sha, teamSha, ct);
-            members.Add(new TeamGitBranch(branch, sha, aheadOfBase, inTeam));
+            members.Add(new TeamGitBranch(branch, sha, aheadOfBase, inTeam, start is null ? null : new CommitRangeRef(start, sha),
+                await Previews.BranchPushAsync(path, branch, ct)));
         }
         var checkedOut = await CurrentBranchAsync(path, ct);
         // The working tree is the person's: their git (and its core.autocrlf) decides what changed. The app's config-free
@@ -228,6 +252,11 @@ public sealed partial class TeamRepos
         {
             OldBranches = await OldBranchesAsync(path, baseSha, originBase, legacyInUse, ct),
             BlockingBranches = await BlockingLockedAsync(repo, team, ct),
+            Ranges = new TeamGitRanges(
+                baseSha is not null && originBase is not null ? new CommitRangeRef(originBase, baseSha) : null,
+                baseSha is not null && originBase is not null ? new CommitRangeRef(baseSha, originBase) : null,
+                teamSha is not null && start is not null ? new CommitRangeRef(start, teamSha) : null,
+                teamSha is not null && start is not null ? new CommitRangeRef(teamSha, start) : null),
         };
     }
 
@@ -311,7 +340,8 @@ public sealed partial class TeamRepos
                 return new TeamGitDelete(only, "", true, confirm is null ? null : "Nothing to delete.", false);
             }
             // Card 171: with no names ("every merged branch") the same in-use check applies to each branch the plan considers.
-            var plan = await git.PlanDeleteAsync(action, allowed.Count > 0 ? allowed : branches, unmergedOk, remote, ct, HeldElsewhere);
+            var plan = await git.PlanDeleteAsync(action, allowed.Count > 0 ? allowed : branches, unmergedOk, remote, ct, HeldElsewhere,
+                (b, sha, token) => RecordBranchDeletedAsync(teamId, team, repo.Path, repo.BaseBranch, b, sha, token));
             if (refusals.Count > 0)
             {
                 var lines = plan.Text.Split('\n', 2);
@@ -353,7 +383,8 @@ public sealed partial class TeamRepos
                 + "Push or merge them yourself; the app never rebases, resets or pushes your own commits.", false);
         }
         if (await MoveBaseAsync(repo, local, remote, ct) is { } refused) return refused;
-        return new TeamGitResult("brought-current", $"{repo.BaseBranch} moved to origin's {Short(remote)}.", true, remote);
+        return await new TeamGitResult("brought-current", $"{repo.BaseBranch} moved to origin's {Short(remote)}.", true, remote)
+            .WithCommitsAsync(Previews, path, local, remote, ct);
     }
 
     private async Task<TeamGitResult> MergeLockedAsync(TeamRepo repo, string team, CancellationToken ct)
@@ -424,7 +455,8 @@ public sealed partial class TeamRepos
         var how = outcome == "fast-forward" ? "fast-forwarded" : "merged with a merge commit";
         var where = hasOrigin ? $"{repo.BaseBranch} and origin's {repo.BaseBranch}" : repo.BaseBranch;
         _log?.Invoke($"team {team}: {teamBranch} {how} into {repo.BaseBranch} at {Short(merged)}");
-        return new TeamGitResult(outcome, $"{teamBranch} {how} into {where}: now {Short(merged)}.", true, merged);
+        return await new TeamGitResult(outcome, $"{teamBranch} {how} into {where}: now {Short(merged)}.", true, merged)
+            .WithCommitsAsync(Previews, path, start, teamSha, ct);
     }
 
     /// <summary>

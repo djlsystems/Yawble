@@ -6,6 +6,8 @@ import { canDelete, defaultSelection, deleteRequests, groupTidy, keptReport, whe
 import CommitLink from './CommitLink.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import LocalMark from './LocalMark.vue';
+import { tidyLocalOnly } from '../localMark';
 
 // B067 (card 362): the Git dialog's "Tidy…". One plan (git.tidyPlan) of every branch of the team's repositories, grouped
 // by class; the merged and contained ones are pre-selected, and one yes deletes them through git.deleteBranches (its own
@@ -29,6 +31,9 @@ const selectedCount = computed(() => requests.value.reduce((n, q) => n + q.branc
 const multiRepo = computed(() => (plan.value?.repos.length ?? 0) > 1);
 const short = (sha: string | null | undefined) => (sha ? sha.slice(0, 10) : '—');
 const baseOf = (repo: string) => plan.value?.repos.find((x) => x.repo === repo)?.baseBranch || null;
+/** B073: a repository has an origin when any of its branches is on origin; only then is a local-only branch "not pushed". */
+const withOrigin = computed(() => new Set((plan.value?.repos ?? []).filter((r) => r.branches.some((b) => b.where.includes('origin'))).map((r) => r.repo)));
+const notPushed = (r: TidyRow) => tidyLocalOnly(r.branch.where, withOrigin.value.has(r.repo));
 
 /** The plan's notes (what the core could not read, e.g. a member's clone), each with its repository. */
 const notes = computed(() => (plan.value?.repos ?? []).flatMap((r) => (r.notes ?? []).map((text) => ({ repo: r.repo, text }))));
@@ -223,6 +228,7 @@ defineExpose({ load });
             <code class="name">{{ r.branch.name }}</code>
             <span v-if="multiRepo" class="chip" data-test="tidy-repo">{{ r.repo }}</span>
             <span class="muted small">{{ whereText(r.branch.where) }}</span>
+            <LocalMark v-if="notPushed(r)" />
           </div>
           <div v-if="r.branch.class === 'working'" class="small muted">{{ r.branch.member ? `${r.branch.member}'s` : "The member's" }} working branch, not a leftover.</div>
           <div v-if="r.branch.class === 'moved'" class="small moved">

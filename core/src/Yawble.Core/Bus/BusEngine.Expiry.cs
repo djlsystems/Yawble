@@ -184,19 +184,24 @@ public sealed partial class BusEngine
     /// The workflow's idle state as of <paramref name="now"/>, or null when it is not idle: a run of it is active, a
     /// delivery in it is pending (queued or running), a wake is set in it, or an automatic resume is due in it.
     /// </summary>
-    private IdleWorkflow? IdleOf(long teamId, long correlation, IReadOnlyList<Message> thread, IReadOnlyList<BusStore.PendingRow> pending, DateTimeOffset now)
+    private IdleWorkflow? IdleOf(long teamId, long correlation, IReadOnlyList<Message> thread, IReadOnlyList<BusStore.PendingRow> pending, DateTimeOffset now) =>
+        IdleOf(correlation, thread, pending, now, () => _store.OpenWakes(correlation), () => _store.WorkflowExpiry(correlation), () => ExpiryDaysOf(teamId));
+
+    /// <summary><see cref="IdleOf(long, long, IReadOnlyList{Message}, IReadOnlyList{BusStore.PendingRow}, DateTimeOffset)"/> with its reads given (B104 reads them for every workflow at once).</summary>
+    private IdleWorkflow? IdleOf(long correlation, IReadOnlyList<Message> thread, IReadOnlyList<BusStore.PendingRow> pending, DateTimeOffset now,
+        Func<int> openWakes, Func<WorkflowExpiryRow?> expiry, Func<int> expiryDays)
     {
         if (thread.Count == 0) return null;
         if (_active.Values.Any(a => a.Context.Correlation == correlation)) return null;
         if (pending.Any(p => p.Correlation == correlation)) return null;
-        if (_store.OpenWakes(correlation) != 0) return null;
+        if (openWakes() != 0) return null;
         if (ResumeDue(thread)) return null;
         var activity = thread.Where(m => m.Type is not (MessageTypes.WorkflowExpired or WorkflowExpiring)).ToList();
         if (activity.Count == 0) return null;
         var last = activity.Max(m => m.OccurredAt);
-        var row = _store.WorkflowExpiry(correlation);
+        var row = expiry();
         var since = row?.ExtendedAt is { } ext && ext > last ? ext : last;
-        var days = ExpiryDaysOf(teamId);
+        var days = expiryDays();
         var expires = since + TimeSpan.FromDays(days);
         var question = OpenQuestion(thread);
         if (question is null) return new IdleWorkflow(last, since, days, expires, null, null, false);
