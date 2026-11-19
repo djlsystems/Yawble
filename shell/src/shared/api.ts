@@ -692,7 +692,10 @@ export interface Trigger {
 export interface TriggerFire { outcome: string; seq: number | null; reason: string | null }
 
 /** The Git dialog (git.status / git.fetch / git.bringCurrent / git.merge / git.askTeam / git.deleteBranches; core Teams/TeamRepos.Git.cs). */
-export interface TeamGitBranch { branch: string; sha: string; aheadOfBase: number; inTeamBranch: boolean }
+/** B073 (absent from an older core): aheadRange, the pair behind aheadOfBase; push, the branch's local-only flag. */
+export interface TeamGitBranch {
+  branch: string; sha: string; aheadOfBase: number; inTeamBranch: boolean; aheadRange?: CommitRangeRef | null; push?: BranchPush | null;
+}
 /** An old-style members/<member> branch left from before member branches were named members/<team>/<member>:
  * here (local) and/or on origin (remote), and whether its commits are merged. */
 export interface TeamGitOldBranch { name: string; local: boolean; remote: boolean; merged: boolean }
@@ -707,6 +710,8 @@ export interface TeamGitStatus {
    * they block this team's member branches: one entry per ref, here (local) or on origin (remote). Absent from a core
    * that does not list them. */
   blockingBranches?: TeamGitBlockingBranch[];
+  /** B073: the commit pair behind each count (absent from an older core). */
+  ranges?: TeamGitRanges | null;
 }
 /** inUseBy (core card 104): a member is still on it, its old members/<name> ("team Alpha's member Ada", or "member Docs of
  * this team"); it is not deleted from the dialog but moves to movesTo at that member's next start. Absent otherwise. */
@@ -769,7 +774,8 @@ export interface BranchRealignResult { oldSha: string; newSha: string }
  * may name the branch and member). made: the member, card and workflow that made it (the app's own records); absent
  * when unknown; a merge recorded on the team branch is credited to the Manager. merge: what a merge brought in;
  * intoBranch / fromBranch are null when neither git nor the app's records can tell. where: inMain; branches: the team
- * branch first, then member branches, never main; otherBranches: the other local branches that hold it (not main, the team\n * branch or members/*; absent from an older core, read as []); onlyOnMember only when it is in neither main nor the team branch;
+ * branch first, then member branches, never main; otherBranches: the other local branches that hold it (not main, the team
+ * branch or members/*; absent from an older core, read as []); onlyOnMember only when it is in neither main nor the team branch;
  * pushed (on origin); tags (the release tags that contain it). files: against the first parent for a merge.
  * codeShown=false: a cloud viewer with "Show members' code to cloud viewers" off; the file list only, no diffs.
  */
@@ -784,7 +790,8 @@ export interface CommitFound {
   isMerge: boolean; parents: string[];
   merge?: { intoBranch: string | null; fromBranch: string | null; fromMember?: string | null; commitCount: number } | null;
   made?: { member: string; card?: number | null; workflow?: number | null } | null;
-  where: { inMain: boolean; branches: string[]; otherBranches?: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[] };
+  /** deletedFrom (B073): the deleted branch it was on (absent otherwise). */
+  where: { inMain: boolean; branches: string[]; otherBranches?: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[]; deletedFrom?: string };
   files: CommitFile[];
   codeShown: boolean;
 }
@@ -813,9 +820,57 @@ export interface TeamSyncState {
 export interface BranchSyncResult {
   outcome: 'off' | 'no-base' | 'in-step' | 'synced' | 'conflict'; baseBranch: string; baseSha: string | null; behind: number;
   moved: string[]; conflicts: string[]; note: string | null;
+  /** B073: the commits the team branch received from the base, newest first (empty when nothing came in; absent from an
+   * older core: the dialog reads them with git.commitRange from the team commit before to the one after). */
+  incoming?: CommitRow[]; incomingCount?: number; incomingTruncated?: boolean; incomingRange?: CommitRangeRef | null;
 }
 export interface TeamGitResult {
   outcome: string; message: string; changed: boolean; sha: string | null; files: string[] | null; status: TeamGitStatus | null;
+  /** B073 (git.bringCurrent, git.merge): the commits that came in / landed, null otherwise; absent from an older core. */
+  commits?: CommitRow[] | null; commitCount?: number; commitsTruncated?: boolean; range?: CommitRangeRef | null;
+}
+
+// ---- B073 (cards 463 core, 465 shell): clickable counts and previews in the Git dialog. Contract (DeveloperTomas):
+// YAWBLE_TEAM_DOCS\B073\contract.md. Every call takes {teamId | team, repo?} and is a read.
+/** One commit of a list, newest first. notPushed: THE local-only flag (no origin ref has it; always true without an
+ * origin: hasOrigin words it "local only" then, else "not pushed"). */
+export interface CommitRow {
+  sha: string; shortSha: string; subject: string; author: { name: string; email: string }; date: string; isMerge: boolean; notPushed: boolean;
+}
+/** The exact pair a count stands for (full commit IDs): the commits on to that from lacks. Passed unchanged to git.commitRange. */
+export interface CommitRangeRef { from: string; to: string }
+/** THE branch local-only flag. onOrigin: origin has the branch; notPushed: its commits no origin ref has. */
+export interface BranchPush { branch: string; onOrigin: boolean; notPushed: number }
+/** git.status's ranges (absent from an older core): the pair behind each count; null when an end is missing. */
+export interface TeamGitRanges {
+  baseAheadOfOrigin: CommitRangeRef | null; baseBehindOrigin: CommitRangeRef | null;
+  teamAheadOfBase: CommitRangeRef | null; teamBehindBase: CommitRangeRef | null;
+}
+/** git.commitRange {from, to, limit?}: from / to a commit ID or refs/heads/<b> / refs/remotes/origin/<b>; limit 200 (max 1000). */
+export const GIT_COMMIT_RANGE = 'git.commitRange';
+export interface CommitRange {
+  from: string; to: string; fromSha: string; toSha: string; count: number; truncated: boolean; hasOrigin: boolean; commits: CommitRow[];
+}
+/** git.mergePreview: what Merge to <base>… would do (git merge-tree; nothing moves). summary: the outcome in one line;
+ * text: the whole preview as the Concierge shows it; commits: what lands; files: the combined diff, each opened with
+ * git.mergeDiff {from: diffFrom, to: diffTo, path} (git.commitDiff's shape). refused: Merge to main would refuse (summary
+ * says why). */
+export const GIT_MERGE_PREVIEW = 'git.mergePreview';
+export const GIT_MERGE_DIFF = 'git.mergeDiff';
+export interface MergePreview {
+  baseBranch: string; teamBranch: string; outcome: TeamGitStatus['merge'] | 'refused'; summary: string; text: string;
+  from: string | null; to: string | null; newSha: string | null; conflictFiles: string[];
+  commits: CommitRow[]; count: number; truncated: boolean; files: CommitFile[]; diffFrom: string | null; diffTo: string | null;
+  hasOrigin: boolean; teamPush: BranchPush | null;
+}
+/** git.deletePreview {branch}: the branch's commits not in the base, each in-base ("already in main", git cherry), own
+ * ("work of its own") or merge (git cherry skips merges). lost: the one line on what deleting loses. After the delete the
+ * core records them, so git.commitShow still opens them (where.deletedFrom names the branch). */
+export const GIT_DELETE_PREVIEW = 'git.deletePreview';
+export interface DeletePreviewCommit extends CommitRow { state: 'in-base' | 'own' | 'merge' }
+export interface DeletePreview {
+  branch: string; baseBranch: string; exists: boolean; sha: string | null; merged: boolean; commits: DeletePreviewCommit[];
+  own: number; inBase: number; truncated: boolean; lost: string; text: string; hasOrigin: boolean; push: BranchPush | null;
 }
 
 export interface MemberRow {
