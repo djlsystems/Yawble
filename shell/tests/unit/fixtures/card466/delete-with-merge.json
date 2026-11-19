@@ -1,0 +1,72 @@
+{
+  "branch": "members/alpha/ben",
+  "baseBranch": "trunk",
+  "exists": true,
+  "sha": "a5d6e4c96cf29b533500cc8946d375f6179fdecc",
+  "merged": false,
+  "commits": [
+    {
+      "state": "merge",
+      "sha": "a5d6e4c96cf29b533500cc8946d375f6179fdecc",
+      "shortSha": "a5d6e4c96cf2",
+      "subject": "Merge side",
+      "author": {
+        "name": "Ben",
+        "email": "ben@example.invalid"
+      },
+      "date": "2026-11-18T21:19:00-05:00",
+      "isMerge": true,
+      "notPushed": true
+    },
+    {
+      "state": "in-base",
+      "sha": "8d534ce765dda67e3879a900b6c2bd3969711a6c",
+      "shortSha": "8d534ce765dd",
+      "subject": "Shared fix",
+      "author": {
+        "name": "Ben",
+        "email": "ben@example.invalid"
+      },
+      "date": "2026-11-18T21:19:00-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "state": "own",
+      "sha": "74a930d1c0dcb374d7333021929f57637c9e5256",
+      "shortSha": "74a930d1c0dc",
+      "subject": "Side work",
+      "author": {
+        "name": "Ben",
+        "email": "ben@example.invalid"
+      },
+      "date": "2026-11-18T21:19:00-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "state": "own",
+      "sha": "26a39b07da374b9cc062032eef52dc668ad7639a",
+      "shortSha": "26a39b07da37",
+      "subject": "Ben\u0027s own",
+      "author": {
+        "name": "Ben",
+        "email": "ben@example.invalid"
+      },
+      "date": "2026-11-18T21:19:00-05:00",
+      "isMerge": false,
+      "notPushed": true
+    }
+  ],
+  "own": 2,
+  "inBase": 1,
+  "truncated": false,
+  "lost": "Deleting it loses 2 commits of its own (74a930d1c0dc, 26a39b07da37); they are not on origin either.",
+  "text": "members/alpha/ben at a5d6e4c96cf2: Deleting it loses 2 commits of its own (74a930d1c0dc, 26a39b07da37); they are not on origin either.\n4 commits not in trunk:\n  - a5d6e4c96cf2 Merge side (Ben): a merge, not pushed\n  - 8d534ce765dd Shared fix (Ben): already in trunk, not pushed\n  - 74a930d1c0dc Side work (Ben): work of its own, not pushed\n  - 26a39b07da37 Ben\u0027s own (Ben): work of its own, not pushed",
+  "hasOrigin": true,
+  "push": {
+    "branch": "members/alpha/ben",
+    "onOrigin": false,
+    "notPushed": 4
+  }
+}

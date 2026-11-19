@@ -1,0 +1,63 @@
+{
+  "baseBranch": "trunk",
+  "teamBranch": "team/alpha",
+  "outcome": "merge",
+  "summary": "A merge commit will be made: team/alpha brings 2 commits, and trunk has 1 commit team/alpha lacks.",
+  "text": "A merge commit will be made: team/alpha brings 2 commits, and trunk has 1 commit team/alpha lacks.\n2 commits will land on trunk:\n  - 78c81d345076 Four (Ada), local only\n  - bf73c22d7843 Team work (Ada), local only\nFiles changed (2):\n  modified a.txt (\u002B1 -0)\n  added team.txt (\u002B1 -0)",
+  "from": "b2dfc75e260555a5bbd60b1e46f9de23709b425a",
+  "to": "78c81d3450763191ab3fb2866e7f538152f63b11",
+  "newSha": null,
+  "conflictFiles": [],
+  "commits": [
+    {
+      "sha": "78c81d3450763191ab3fb2866e7f538152f63b11",
+      "shortSha": "78c81d345076",
+      "subject": "Four",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:18:43-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "sha": "bf73c22d78437dbed4592a544ef7fbbb1c333c1f",
+      "shortSha": "bf73c22d7843",
+      "subject": "Team work",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:18:43-05:00",
+      "isMerge": false,
+      "notPushed": true
+    }
+  ],
+  "count": 2,
+  "truncated": false,
+  "files": [
+    {
+      "path": "a.txt",
+      "status": "modified",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    },
+    {
+      "path": "team.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "diffFrom": "b2dfc75e260555a5bbd60b1e46f9de23709b425a",
+  "diffTo": "9ad424811d6a4bbeb5a22454a5189f24fcfaa4fd",
+  "hasOrigin": false,
+  "teamPush": {
+    "branch": "team/alpha",
+    "onOrigin": false,
+    "notPushed": 3
+  }
+}

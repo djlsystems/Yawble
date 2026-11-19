@@ -1,0 +1,19 @@
+{
+  "branch": "members/alpha/ada",
+  "baseBranch": "trunk",
+  "exists": true,
+  "sha": "d3ede1f85066d235407d8c06f24638f72f131a82",
+  "merged": true,
+  "commits": [],
+  "own": 0,
+  "inBase": 0,
+  "truncated": false,
+  "lost": "Nothing is lost: every commit of members/alpha/ada is in trunk.",
+  "text": "members/alpha/ada at d3ede1f85066: Nothing is lost: every commit of members/alpha/ada is in trunk.",
+  "hasOrigin": false,
+  "push": {
+    "branch": "members/alpha/ada",
+    "onOrigin": false,
+    "notPushed": 2
+  }
+}

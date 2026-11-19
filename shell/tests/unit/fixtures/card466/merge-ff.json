@@ -1,0 +1,63 @@
+{
+  "baseBranch": "trunk",
+  "teamBranch": "team/alpha",
+  "outcome": "fast-forward",
+  "summary": "trunk will fast-forward to 49683050afb7: 2 commits land.",
+  "text": "trunk will fast-forward to 49683050afb7: 2 commits land.\n2 commits will land on trunk:\n  - 49683050afb7 Team 2 (Ada), not pushed\n  - 18ee6f23fe37 Team 1 (Ada)\nFiles changed (2):\n  added t1.txt (\u002B1 -0)\n  added t2.txt (\u002B1 -0)\n(origin as of the last fetch; Merge to main fetches first.)",
+  "from": "e63d3e002446d420b8c6822b9be96e2e078ba28a",
+  "to": "49683050afb7f6802362892d278b6477d159eaf5",
+  "newSha": "49683050afb7f6802362892d278b6477d159eaf5",
+  "conflictFiles": [],
+  "commits": [
+    {
+      "sha": "49683050afb7f6802362892d278b6477d159eaf5",
+      "shortSha": "49683050afb7",
+      "subject": "Team 2",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:18:36-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "sha": "18ee6f23fe374d95d5aba0c80702a4c6f0c0d009",
+      "shortSha": "18ee6f23fe37",
+      "subject": "Team 1",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T21:18:36-05:00",
+      "isMerge": false,
+      "notPushed": false
+    }
+  ],
+  "count": 2,
+  "truncated": false,
+  "files": [
+    {
+      "path": "t1.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    },
+    {
+      "path": "t2.txt",
+      "status": "added",
+      "added": 1,
+      "deleted": 0,
+      "binary": false
+    }
+  ],
+  "diffFrom": "e63d3e002446d420b8c6822b9be96e2e078ba28a",
+  "diffTo": "49683050afb7f6802362892d278b6477d159eaf5",
+  "hasOrigin": true,
+  "teamPush": {
+    "branch": "team/alpha",
+    "onOrigin": true,
+    "notPushed": 1
+  }
+}

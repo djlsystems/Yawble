@@ -1,0 +1,35 @@
+{
+  "from": "015c2ef12495af52116c1843da16b283c8d6dc21",
+  "to": "90a92190f0c1d0cab3b3100cecab67223fc95778",
+  "fromSha": "015c2ef12495af52116c1843da16b283c8d6dc21",
+  "toSha": "90a92190f0c1d0cab3b3100cecab67223fc95778",
+  "count": 2,
+  "truncated": false,
+  "hasOrigin": true,
+  "commits": [
+    {
+      "sha": "90a92190f0c1d0cab3b3100cecab67223fc95778",
+      "shortSha": "90a92190f0c1",
+      "subject": "Person 2",
+      "author": {
+        "name": "Person",
+        "email": "person@example.invalid"
+      },
+      "date": "2026-11-18T21:19:23-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "sha": "45847a7892ef73d6b8f82cc92b9a08676c6eee73",
+      "shortSha": "45847a7892ef",
+      "subject": "Person 1",
+      "author": {
+        "name": "Person",
+        "email": "person@example.invalid"
+      },
+      "date": "2026-11-18T21:19:23-05:00",
+      "isMerge": false,
+      "notPushed": true
+    }
+  ]
+}

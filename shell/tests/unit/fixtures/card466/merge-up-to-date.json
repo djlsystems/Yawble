@@ -1,0 +1,23 @@
+{
+  "baseBranch": "trunk",
+  "teamBranch": "team/alpha",
+  "outcome": "up-to-date",
+  "summary": "trunk already has everything on team/alpha: nothing to merge.",
+  "text": "trunk already has everything on team/alpha: nothing to merge.",
+  "from": "347ea9abf343f8c2ce9f5455d7984d1720dfd1d6",
+  "to": "347ea9abf343f8c2ce9f5455d7984d1720dfd1d6",
+  "newSha": null,
+  "conflictFiles": [],
+  "commits": [],
+  "count": 0,
+  "truncated": false,
+  "files": [],
+  "diffFrom": null,
+  "diffTo": null,
+  "hasOrigin": false,
+  "teamPush": {
+    "branch": "team/alpha",
+    "onOrigin": false,
+    "notPushed": 1
+  }
+}
