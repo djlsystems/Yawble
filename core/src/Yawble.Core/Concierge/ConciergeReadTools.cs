@@ -39,7 +39,7 @@ public sealed class ConciergeReadTools(
     public static readonly IReadOnlyList<string> LocalOnly = ["backup_now"];
 
     public static readonly IReadOnlyList<string> Names =
-        ["backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "integrations_status", "usage", "doctor", "backup_now"];
+        ["backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "git_merge_preview", "integrations_status", "usage", "doctor", "backup_now"];
 
     public static bool Handles(string name) => Names.Contains(name);
 
@@ -58,6 +58,7 @@ public sealed class ConciergeReadTools(
             "system_status" => await SystemStatusAsync(ct),
             "team_git" => await TeamGitAsync(Optional(args, "team"), ct),
             "git_tidy_plan" => await TidyPlanAsync(Optional(args, "team"), ct),
+            "git_merge_preview" => await MergePreviewAsync(Required(args, "team"), Optional(args, "repo"), ct),
             "integrations_status" => await IntegrationsAsync(ct),
             "usage" => await UsageAsync(Optional(args, "team"), Int(args, "days") ?? 7, ct),
             "doctor" => await DoctorAsync(ct),
@@ -484,6 +485,21 @@ public sealed class ConciergeReadTools(
         (TidyClasses.Scratch, "scratch: only in a member's clone (the member's to delete; the app never changes a clone)"),
     ];
 
+    /// <summary>git_merge_preview (B073): the Git dialog's git.mergePreview text, built by the same function.</summary>
+    private async Task<string> MergePreviewAsync(string team, string? repo, CancellationToken ct)
+    {
+        var repos = bus.Repos ?? throw new ArgumentException("this app has no team repositories, so there is nothing to merge");
+        var t = await TeamNamedAsync(team, ct);
+        try
+        {
+            return (await repos.GitMergePreviewAsync(t.Id, t.Name, ct, repo)).Text;
+        }
+        catch (Exception e) when (e is GitException or IOException or InvalidOperationException)
+        {
+            throw new ArgumentException($"{t.Name}: the merge preview could not be made: {e.Message}");
+        }
+    }
+
     /// <summary>git_tidy_plan (B067): <see cref="TeamRepos.GitTidyPlanAsync"/> for the team (or every team), as text.</summary>
     private async Task<string> TidyPlanAsync(string? team, CancellationToken ct)
     {
@@ -839,6 +855,10 @@ public sealed class ConciergeReadTools(
                                            "working (a member's working branch, in use: kept); moved (the team's copy has commits the member's clone no longer has: the clone was reset or rebased; git_branch_realign fixes it); " +
                                            "own-work (commits of its own: needs a look); origin-only (only on origin, not in the base); scratch (a member clone's local-only branch). Reads only; use it for 'tidy branches'.",
             ("team", "string", "Only this team (optional).", false));
+        yield return Tool("git_merge_preview", "What the Git dialog's Merge to main would do for a team now, in the dialog's own words: fast-forward, a merge commit, or a conflict " +
+                                               "(nothing changes); the commits that would land and the files they change. Reads only (origin as of the last fetch). " +
+                                               "Show it before the person merges; the merge itself is the person's button in the Git dialog.",
+            ("team", "string", "The team.", true), ("repo", "string", "Repository name (default main).", false));
         yield return Tool("integrations_status", "What is connected: Connections (name, kind, status, what uses each; never a secret or a masked value), APIs, websites, " +
                                                 "MCP servers, the person's tools (gh, az, ...), which teams have each turned on, and the agents' model sign-ins. " +
                                                 "Over the Cloud Link, Connections show only name, kind and status.");
