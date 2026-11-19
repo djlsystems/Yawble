@@ -33,6 +33,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "checkHosts",
         // Settings > Teams and Settings > Concierge as saved (teams.defaults, concierge.defaults); setDefaults and generateNames are audited.
         "defaults",
+        // B100: a team skill's kept versions (skills.versions) and Team settings' "Lessons" line (teams.lessons); skills.restore is audited.
+        "versions", "lessons",
     };
 
     /// <summary>Calls that read a setting, or set it when they carry its value: by method, the field that sets it.</summary>

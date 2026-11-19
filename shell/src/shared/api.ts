@@ -710,6 +710,32 @@ export interface Skill {
   teamId: number | null; team: string | null; id: number | null; updatedAt: string | null;
 }
 
+/** B100: a team's lessons, the team-scoped skill the Manager's retrospectives keep (team_retros_write). */
+export const TEAM_RETROS = 'team_retros';
+/** A team skill's kept versions, newest first ({ teamId, name } → SkillVersion[]). */
+export const SKILLS_VERSIONS = 'skills.versions';
+/** Brings a version's text back as the current text, a new version by the person ({ id } → Skill). */
+export const SKILLS_RESTORE = 'skills.restore';
+/** Team settings' "Lessons: n, last updated ..." line ({ teamId } → TeamLessons). */
+export const TEAMS_LESSONS = 'teams.lessons';
+/** The writer of a version saved or restored in Settings > Skills; any other writer is the member who wrote it (the Manager). */
+export const PERSON_WRITER = 'person';
+/** One kept write of a team skill (core: Skills/TeamRetros.cs). */
+export interface SkillVersion {
+  id: number; teamId: number; name: string; version: number; body: string;
+  writer: string; workflow: number | null; restoredFrom: number | null; writtenAt: string;
+}
+/** A team's lessons: how many (list lines), and the last write (version 0 and nulls: none yet). */
+export interface TeamLessons {
+  count: number; version: number; updatedAt: string | null; writer: string | null; workflow: number | null; skillId: number | null;
+}
+/** Who wrote a version, as a person reads it: "you (Settings > Skills)", "the retro of workflow 12" or the writer's name. */
+export function writerText(v: { writer: string | null; workflow: number | null; restoredFrom?: number | null }): string {
+  if (v.writer === PERSON_WRITER) return v.restoredFrom ? `you (restored version ${v.restoredFrom})` : 'you (Settings > Skills)';
+  if (v.workflow !== null) return `the retro of workflow ${v.workflow}`;
+  return v.writer ?? 'unknown';
+}
+
 /** A trigger (triggers.list / triggers.save): work a member is told on a schedule, as a new workflow. */
 export interface TriggerSchedule {
   kind: 'every' | 'cron' | 'once' | 'folder' | 'event'; intervalSec: number | null; cron: string | null; timezone: string | null; fireAt: string | null;

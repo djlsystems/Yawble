@@ -16,7 +16,8 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     public static readonly string[] SupportedProtocolVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
     public static readonly IReadOnlyList<string> ToolNames =
-        ["tell", "progress", "handback", "blocked", "needs_decision", "workflow_complete", "status", "hiring", "hire", "board", "backlog", "skills_get", "skills_list", "wake_me", "workflow_show", "lease", "repo", "request_host", "request_tool"];
+        ["tell", "progress", "handback", "blocked", "needs_decision", "workflow_complete", "status", "hiring", "hire", "board", "backlog", "skills_get", "skills_list", "wake_me", "workflow_show", "workflow_digest", "lease", "repo", "request_host", "request_tool",
+         "team_retros_write"];
 
     public async Task<BusReply> HandleAsync(byte[] body, CancellationToken ct)
     {
@@ -110,7 +111,9 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                     .RequestFromAgent(run.Member, Required(args, "host"), Required(args, "reason"), run.Correlation, run.Causation),
                 "request_tool" => await (run.Engine.ToolAsks ?? throw new BusRefusal("unavailable", "tool requests are not available here: hand back blocked on the tool instead"))
                     .RequestFromAgentAsync(run.Member, Required(args, "tool"), Required(args, "reason"), run.Correlation, run.Causation, ct),
+                "team_retros_write" => await run.TeamRetrosWriteAsync(Required(args, "text"), ct),
                 "workflow_show" => WorkflowText(await run.WorkflowShowAsync(OptionalLong(args, "workflow") ?? run.Correlation, ct)),
+                "workflow_digest" => await run.Engine.WorkflowDigestAsync(run, OptionalLong(args, "workflow"), ct),
                 _ when run.Engine.Integrations?.IsTool(name) == true => await CallIntegrationAsync(name, args, img => png = img, ct),
                 _ => throw new RpcError(-32602, $"unknown tool: {name}"),
             };
@@ -272,6 +275,10 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         Tool("skills_list", "The skills offered to you: name and one line each. Load one with skills_get."),
         Tool("workflow_show", "Read a workflow's whole thread, oldest first: who was told what, progress, hand-backs, questions, how it ended. Use it after a restart, a nudge or an idle reminder to see where the work stands.",
             ("workflow", "integer", "The workflow's number (default: the one you are working in now).", false)),
+        Tool("workflow_digest", "The Manager: the facts of how one of your team's workflows went, by member and card: runs (time, how each ended, exit codes), " +
+                                "failed and repeated commands, files edited many times, tests that failed then passed, lease waits, host and tool asks, " +
+                                "blocked reports, questions to the person, work sent back. For a retrospective (skills_get retrospective).",
+            ("workflow", "integer", "The workflow's number (default: the one you are working in now, or the one your retro item is for).", false)),
         Tool("wake_me", "Be woken once, later, in the work you are doing now: after this many minutes you get a run with your note. Use it to check again later instead of waiting or sleeping; then end your turn.",
             ("minutes", "integer", "How long from now (1 to 10080, a week).", true),
             ("note", "string", "What to look at when you are woken.", true)),
@@ -285,6 +292,13 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                              "Then hand back blocked on that tool: never install it yourself, never retry in a loop.",
             ("tool", "string", "One of: " + string.Join(", ", Integrations.ToolCatalog.Names) + ".", true),
             ("reason", "string", "One line on what you need it for, e.g. 'build and test the .NET 10 console app'.", true)),
+        Tool("team_retros_write", "The Manager: write your team's lessons, the team_retros skill every run of your team gets in its prompt (live at once). " +
+                                  "Give the WHOLE new text: start from the current text (in your prompt under \"" + Skills.TeamRetros.PromptHeading + "\", or skills_get team_retros), " +
+                                  "keep the person's edits, merge, reword or drop lessons, add at most a few new ones. Layout: a short list under a few headings " +
+                                  "(e.g. ## Building and testing, ## Git, ## Working with the person), one lesson per line: \"- <lesson> (<date>, workflow <id>)\". " +
+                                  $"At most {Skills.TeamRetros.MaxChars} characters. Refused when the text changed since you read it: read it again and merge. " +
+                                  "Each write is kept as a version the person can see and restore. No secrets, tokens, personal data or command output.",
+            ("text", "string", "The whole new text of team_retros (Markdown), at most " + Skills.TeamRetros.MaxChars + " characters.", true)),
     ];
 
     /// <summary>A long report is shown formatted on the card and in the workflow: a summary line first, then Markdown.</summary>
