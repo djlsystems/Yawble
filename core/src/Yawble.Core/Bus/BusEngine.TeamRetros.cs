@@ -31,17 +31,19 @@ public sealed partial class BusEngine
     {
         if (run.Member.Role != MemberRole.Manager) throw new BusRefusal("not_allowed", "only the Manager writes team_retros");
         if (_options.Skills is not { } catalog) throw new BusRefusal("unavailable", "skills are not available in this core");
+        // In a retro run the version names the completed workflow the retro looks back on, not the retro item's own.
+        var workflow = run.Items.Select(BusStore.RetroOf).FirstOrDefault(r => r is not null) ?? run.Workflow;
         SkillVersion v;
         try
         {
-            v = catalog.WriteTeamRetros(run.Member.TeamId, text, run.Member.Name, run.Workflow, run.RetrosSeenVersion);
+            v = catalog.WriteTeamRetros(run.Member.TeamId, text, run.Member.Name, workflow, run.RetrosSeenVersion);
         }
         catch (TeamRetrosRefusal refusal)
         {
             throw new BusRefusal(refusal.Code, refusal.Message);
         }
         run.RetrosSeenVersion = v.Version;
-        Log($"team {run.Member.Team}: team_retros version {v.Version} written by {run.Member.Name} in workflow {run.Workflow}");
+        Log($"team {run.Member.Team}: team_retros version {v.Version} written by {run.Member.Name} in workflow {run.Workflow}{(workflow != run.Workflow ? $" (retro of workflow {workflow})" : "")}");
         return Task.FromResult($"ok: team_retros version {v.Version} saved ({v.Body.Length} of {TeamRetros.MaxChars} characters, {TeamRetros.CountLessons(v.Body)} lessons). " +
                                $"Every later run of team {run.Member.Team} gets it in its prompt; the person can read, edit and restore it in Settings > Skills.");
     }
