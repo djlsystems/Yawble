@@ -600,7 +600,7 @@ public sealed partial class TeamRepos
                 return new FetchResult(false, null, e);
             }
             var refName = "refs/heads/" + branch;
-            var listed = await Git.TryRunAsync(repoPath, ["ls-remote", StrictUploadPack, "--", gitDir, refName], ct);
+            var listed = await Git.FetchLocalAsync(repoPath, ["ls-remote", StrictUploadPack, "--", gitDir, refName], ct);
             if (listed.ExitCode != 0) return Fail("could not read the member's branch: " + listed.Stderr);
             var sha = listed.Stdout.Split('\t', 2)[0].Trim();
             if (sha.Length == 0) return FetchResult.Nothing; // no commit on the branch yet

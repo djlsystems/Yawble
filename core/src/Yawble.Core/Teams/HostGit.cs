@@ -121,7 +121,7 @@ public sealed class HostGit
     public Action<string>? Log { get; init; }
 
     /// <summary>
-    /// A fetch whose source is a repository path on this computer. git reaches a path by starting git-upload-pack
+    /// A fetch (or ls-remote) whose source is a repository path on this computer. git reaches a path by starting git-upload-pack
     /// through a shell, and on Windows that shell now and then fails to start when the computer is busy (git says only
     /// "Could not read from remote repository"). A fetch only reads its source and lands where it lands again on a
     /// second try, so a transport failure is tried again, <see cref="LocalFetchAttempts"/> times in all; any other

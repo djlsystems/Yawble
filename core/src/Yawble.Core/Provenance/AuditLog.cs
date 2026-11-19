@@ -47,14 +47,36 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
     public static bool IsReadOnly(string method, JsonObject? parameters) =>
         GetOrSet.TryGetValue(method, out var key) ? parameters?[key] is null : IsReadOnly(method);
 
+    /// <summary>
+    /// Calls that only read although their last word is not a read verb. Every call the core answers is either a read
+    /// (here or by <see cref="ReadVerbs"/>) or a change listed in AuditClassificationTests: a new call must be put in
+    /// one or the other, so a screen's poll can never fill the audit again.
+    /// </summary>
+    private static readonly HashSet<string> ReadMethods = new(StringComparer.Ordinal)
+    {
+        // The Monitor's code map, polled about once a second.
+        "monitor.codeEvents",
+        // The Logs dialog's live tail, started and stopped as the dialog opens and closes (locally or from the cloud).
+        "logs.tail", "logs.untail",
+        // The cloud's org summary: one snapshot, and the push started and stopped with a viewer's page.
+        "org.summary", "org.summary.watch", "org.summary.unwatch",
+        // Integrations read-outs: recent calls and task runs, a pasted MCP config parsed, the configs found on this
+        // computer, and a server's tools listed (a check that saves nothing).
+        "integrations.calls", "integrations.taskRuns", "integrations.mcpParse", "integrations.mcpImportScan", "integrations.mcpCheck",
+        // Which model a member's run would use, and whether an agent CLI has a newer version (installing one is audited).
+        "agents.resolveModel", "agents.checkForUpdates",
+        // The tidy plan (what Tidy would do; doing it is audited).
+        "git.tidyPlan",
+        // Opening and closing the read-only Code view change nothing (a download is recorded).
+        "code.open", "code.close",
+    };
+
     /// <summary>A call that only reads, by its name alone.</summary>
     public static bool IsReadOnly(string method)
     {
         var dot = method.LastIndexOf('.');
         var verb = dot < 0 ? method : method[(dot + 1)..];
-        return ReadVerbs.Contains(verb) || method.StartsWith("git.status", StringComparison.Ordinal) || method == "git.tidyPlan"
-            // Opening and closing the read-only Code view change nothing (a download is recorded).
-            || method is "code.open" or "code.close";
+        return ReadVerbs.Contains(verb) || ReadMethods.Contains(method) || method.StartsWith("git.status", StringComparison.Ordinal);
     }
 
     /// <summary>What a call was about, from its identifying parameters only ("team=web member=DeveloperPriya").</summary>
