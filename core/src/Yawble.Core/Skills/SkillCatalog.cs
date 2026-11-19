@@ -35,7 +35,7 @@ public sealed record Skill(
 /// team the offer is: built-ins, then global custom skills, then the team's own; a later one of the same name wins, so
 /// the person can replace a built-in.
 /// </summary>
-public sealed class SkillCatalog(string connectionString)
+public sealed partial class SkillCatalog(string connectionString)
 {
     public static readonly IReadOnlyList<string> Roles = ["manager", "member", "any"];
 
@@ -62,8 +62,15 @@ public sealed class SkillCatalog(string connectionString)
     /// <summary>Every skill, for the Skills dialog: the built-ins, then each custom one (global, then per team).</summary>
     public IReadOnlyList<Skill> All() => [.. BuiltIns, .. Custom(null), .. CustomOfEveryTeam()];
 
-    /// <summary>Adds or replaces a custom skill (by name, in its scope). The name is a lower-case slug.</summary>
-    public Skill Save(string name, string description, IEnumerable<string> roles, string body, long? teamId)
+    /// <summary>
+    /// Adds or replaces a custom skill (by name, in its scope). The name is a lower-case slug. The person's save of a
+    /// team's team_retros is kept as a version (B100), like the Manager's writes.
+    /// </summary>
+    public Skill Save(string name, string description, IEnumerable<string> roles, string body, long? teamId) =>
+        Save(name, description, roles, body, teamId, new VersionStamp(TeamRetros.PersonWriter, null, null));
+
+    private Skill Save(string name, string description, IEnumerable<string> roles, string body, long? teamId, VersionStamp stamp,
+        Action<SqliteConnection, SqliteTransaction>? check = null)
     {
         var n = CheckName(name);
         var d = (description ?? "").Trim();
@@ -78,6 +85,7 @@ public sealed class SkillCatalog(string connectionString)
 
         using var c = Open();
         using var tx = c.BeginTransaction();
+        check?.Invoke(c, tx);
         using (var del = c.CreateCommand())
         {
             del.Transaction = tx;
@@ -100,6 +108,7 @@ public sealed class SkillCatalog(string connectionString)
             ins.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
             ins.ExecuteNonQuery();
         }
+        if (teamId is { } team && n == TeamRetros.Name) AddVersion(c, tx, team, n, b, stamp);
         tx.Commit();
         return (teamId is null ? Custom(null) : Custom(teamId)).Single(s => s.Name == n);
     }
@@ -117,6 +126,7 @@ public sealed class SkillCatalog(string connectionString)
     public static string CheckName(string name)
     {
         var n = (name ?? "").Trim();
+        if (n == TeamRetros.Name) return n; // B100: the one name with an underscore, the team's lessons
         if (n.Length is 0 or > 64 || !n.All(ch => ch is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-') || n.StartsWith('-') || n.EndsWith('-'))
             throw new ArgumentException("a skill name is 1-64 lower-case letters, digits and hyphens, e.g. 'release-notes'");
         return n;

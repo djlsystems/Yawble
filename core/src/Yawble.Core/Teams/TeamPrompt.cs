@@ -21,9 +21,11 @@ public static class TeamPrompt
             lines.Add($"Your standing job on the team: {run.Instructions.Trim()}");
         lines.AddRange(ApprovalLines(run.Approvals));
         lines.AddRange(OpenQuestionLines(run.OpenQuestions));
-        var skills = run.Skills().Where(x => x.Name != role).ToList();
+        // team_retros is not offered by name: its text is in the prompt below.
+        var skills = run.Skills().Where(x => x.Name != role && x.Name != Skills.TeamRetros.Name).ToList();
         if (skills.Count > 0)
             lines.Add("Other skills you can load with skills_get when they apply: " + string.Join("; ", skills.Select(x => $"{x.Name} ({x.Description})")));
+        lines.AddRange(LessonLines(run.Lessons()));
         if (run.Checkout is { } c)
         {
             lines.Add(run.Member.Role == MemberRole.Manager
@@ -68,6 +70,17 @@ public static class TeamPrompt
             lines.Add($"- question {seq}: {(first.Length > 200 ? first[..199] + "…" : first)}");
         }
         return lines;
+    }
+
+    /// <summary>
+    /// B100: the team's lessons (its team_retros skill, kept by the Manager's retrospectives), in every run of the team,
+    /// the Manager's and the members'. None when the team has none; another team's are never here (by team).
+    /// </summary>
+    public static IReadOnlyList<string> LessonLines(string? lessons)
+    {
+        if (string.IsNullOrWhiteSpace(lessons)) return [];
+        return [$"{Skills.TeamRetros.PromptHeading} (the team_retros skill: the Manager keeps it after each completed workflow, the person may edit it). " +
+                "Act on them where they apply:", lessons.Trim()];
     }
 
     /// <summary>The person's standing approvals for the team: things the Manager no longer asks about.</summary>
