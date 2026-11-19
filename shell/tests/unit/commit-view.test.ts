@@ -309,6 +309,38 @@ describe('the Commit view', () => {
     expect(lines[0].text).toBe('On no branch (a branch that held it was deleted)');
   });
 
+  // Card 459 (F2 from verify card 445): where.otherBranches, the other local branches holding it.
+  it('a commit only on the person\'s own branch names it, not as deleted; Show its branch stays off', async () => {
+    const c = base({ where: { inMain: false, branches: [], otherBranches: ['feature/x'], onlyOnMember: null, pushed: false, tags: [] } });
+    const w = await view(fakeCore({ payments: c }));
+    expect(whereTexts(w)).toEqual(['On feature/x (not a team or member branch)', 'Not pushed: only on this computer']);
+    expect(itsBranch(c)).toBeNull();
+    expect(w.get('[data-test=commit-branch]').attributes('disabled')).toBeDefined();
+  });
+
+  it('several other branches are joined with commas', () => {
+    const lines = whereLines(base({ where: { inMain: false, branches: [], otherBranches: ['feature/x', 'spike/y'], pushed: true, tags: [] } }));
+    expect(lines[0]).toEqual({ key: 'other', text: 'On feature/x, spike/y (not a team or member branch)', tone: 'warn' });
+  });
+
+  it('no branch and no other branch keeps the deleted wording, also when otherBranches is missing (older core)', async () => {
+    const empty = base({ where: { inMain: false, branches: [], otherBranches: [], onlyOnMember: null, pushed: false, tags: [] } });
+    const w = await view(fakeCore({ payments: empty }));
+    expect(whereTexts(w)[0]).toBe('On no branch (a branch that held it was deleted)');
+    expect(w.get('[data-test=commit-branch]').attributes('disabled')).toBeDefined();
+    const older = base({ where: { inMain: false, branches: [], pushed: false, tags: [] } });
+    expect(whereLines(older)[0].text).toBe('On no branch (a branch that held it was deleted)');
+  });
+
+  it('otherBranches changes nothing when the commit is in main, the team branch or a member branch', () => {
+    const other = ['feature/x'];
+    expect(whereLines(base({ where: { inMain: true, branches: [], otherBranches: other, pushed: true, tags: [] } }))[0].text).toBe('In main');
+    expect(whereLines(base({ where: { inMain: false, branches: ['team/payments'], otherBranches: other, pushed: true, tags: [] } }))[0].text)
+      .toBe('In the team branch only, not in main yet');
+    expect(whereLines(base({ where: { inMain: false, branches: ['members/payments/developerada'], otherBranches: other, onlyOnMember: 'DeveloperAda', pushed: true, tags: [] } }))[0].text)
+      .toBe("Only on DeveloperAda's branch");
+  });
+
   it('a gone commit says it is gone and why; only Copy ID is offered', async () => {
     // As the core sends it: only found, goneReason and sha.
     const gone: CommitShow = { found: false, goneReason: "Commit 3f9c2a1b7d4e was on members/payments/old-cleo (OldCleo's branch), and git no longer has it: that branch was deleted.", sha: SHA };

@@ -337,18 +337,20 @@ const COMMIT_ADA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
 const COMMIT_MERGE = 'def5678a9b0c1d2e3f405162738495a6b7c8d9e0';
 const COMMIT_BASE = 'abc1234f5e6d7c8b9a0f1e2d3c4b5a6978695a4b';
 const COMMIT_GONE = '0dead00b1';
+/** Card 459: a commit only on the person's own feature/x branch (not a team or member branch, not in main). */
+const COMMIT_FEATURE = 'fea7c0de1a2b3c4d5e6f708192a3b4c5d6e7f809';
 const commitState = { codeShown: true };
 const person = (name: string, mins: number) => ({ name, email: `${name.toLowerCase()}@yawble.local`, date: iso(mins) });
 function commitShow(sha: string) {
   // As the core: a malformed ID is bad_params; a commit git no longer has is only {found, goneReason, sha}.
   if (!/^[0-9a-f]{4,64}$/i.test(sha)) throw Object.assign(new Error('sha must be 4 to 64 hex digits'), { code: 'bad_params' });
   const s = sha.toLowerCase();
-  const pick = [COMMIT_ADA, COMMIT_MERGE, COMMIT_BASE].find((c) => c.startsWith(s));
+  const pick = [COMMIT_ADA, COMMIT_MERGE, COMMIT_BASE, COMMIT_FEATURE].find((c) => c.startsWith(s));
   if (!pick) return { found: false, goneReason: `Commit ${sha} was on members/payments/old-cleo (Old Cleo's branch), and git no longer has it: that branch was deleted and git has since cleaned up its commits.`, sha };
   const common = { found: true, sha: pick, shortSha: pick.slice(0, 7), codeShown: commitState.codeShown };
   if (pick === COMMIT_ADA) return { ...common, title: 'Partial refunds: refund part of a payment', body: 'The refund takes an amount now.\n\nCard 3, workflow #10.',
     author: person('DeveloperAda', 40), isMerge: false, parents: [COMMIT_BASE], made: { member: 'DeveloperAda', card: 3, workflow: 10 },
-    where: { inMain: false, branches: ['team/payments', 'members/payments/developerada'], pushed: false, tags: [] },
+    where: { inMain: false, branches: ['team/payments', 'members/payments/developerada'], otherBranches: [], pushed: false, tags: [] },
     files: [
       { path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false },
       { path: 'src/payments/a-rather-long-folder-name/and-a-long-file-name-that-must-wrap-on-a-phone.test.ts', status: 'added', added: 12, deleted: 0, binary: false },
@@ -356,10 +358,13 @@ function commitShow(sha: string) {
     ] };
   if (pick === COMMIT_MERGE) return { ...common, title: "Merge DeveloperAda's branch into team/payments", body: '', author: person('Manager', 30), committer: person('Yawble', 30),
     isMerge: true, parents: [COMMIT_BASE, COMMIT_ADA], merge: { intoBranch: 'team/payments', fromBranch: 'members/payments/developerada', fromMember: 'DeveloperAda', commitCount: 2 },
-    made: { member: 'Manager', workflow: 10 }, where: { inMain: false, branches: ['team/payments'], pushed: false, tags: [] },
+    made: { member: 'Manager', workflow: 10 }, where: { inMain: false, branches: ['team/payments'], otherBranches: [], pushed: false, tags: [] },
     files: [{ path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false }] };
+  if (pick === COMMIT_FEATURE) return { ...common, title: 'Try a new receipt layout', body: '', author: person('Owner', 20), isMerge: false, parents: [COMMIT_BASE],
+    where: { inMain: false, branches: [], otherBranches: ['feature/x'], pushed: false, tags: [] },
+    files: [{ path: 'src/payments/receipt.ts', status: 'modified', added: 3, deleted: 1, binary: false }] };
   return { ...common, title: 'Release 2026.11.18.1', body: '', author: person('Owner', 600), isMerge: false, parents: [],
-    where: { inMain: true, branches: ['team/payments'], pushed: true, tags: ['v2026.11.18.1'] },
+    where: { inMain: true, branches: ['team/payments'], otherBranches: [], pushed: true, tags: ['v2026.11.18.1'] },
     files: [{ path: 'README.md', status: 'modified', added: 1, deleted: 1, binary: false }] };
 }
 function commitDiff(sha: string, path: string) {
