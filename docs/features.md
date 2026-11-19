@@ -537,7 +537,10 @@ a member's pane opens it at that member's activity.
 
   `{base}` (the repository's web address) and `{path}` (its owner/name path) may appear in any template. For example
   `https://git.example.com/{path}/commit/{commit} https://git.example.com/{path}/src/{branch}` gives commit and branch
-  links; the other kinds get none. **As detected** and a blank pattern go back to detection.
+  links. With no provider (none: detected or chosen), the other kinds get none. On a provider's host (detected or
+  chosen) a pattern replaces only the kinds it covers and the other kinds keep the provider's own links: with a GitHub
+  origin and a commit-only pattern, a pull request still links to GitHub's `/pull/<n>`. **As detected** and a blank
+  pattern go back to detection.
 - **Open on GitHub** (or GitLab, Bitbucket, Azure DevOps, Gitea; **Open in the browser** for a link pattern): the Git
   dialog links the base and team branches, the member branches, their commits (the short commit is the link), the
   conflicting files at the team branch's commit, and **Compare with** the base. A link shows only when the provider
@@ -546,8 +549,10 @@ a member's pane opens it at that member's activity.
 - Pull requests (merge requests on GitLab) are a hosting service's feature, not git's. The app opens, lists and merges
   them for GitHub through your `gh`, GitLab through your `glab` and Azure DevOps through your `az repos`, each installed
   and signed in on this computer. Bitbucket, Gitea and plain git have none from here. The Git dialog's **Pull
-  requests** line says whether they work for the repository, and if not, why (for example the CLI is not signed in, or
-  the provider has none); the pull request is then left to the host's own site.
+  requests** line says whether they work for the repository, and if not, why: the repository has no origin, its
+  provider has no pull requests from here, or the provider's CLI is not installed on this computer. The pull request is
+  then left to the host's own site. Whether the CLI is signed in is not checked there: a CLI that is not signed in shows
+  only when a pull request call is refused (the tool or action says so).
 - git 2.38 or later is required. When it is missing, too old or not working, a banner at the top of the window says
   so, with **Download Git** and **Check again**; on Windows with winget, **Install Git** (or **Update Git**) installs
   Git for Windows for everyone on the computer, so Windows asks for permission. The app finds a git installed while it
