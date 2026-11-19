@@ -2,7 +2,7 @@
 import { discussWithConcierge, syncNotePrompt } from '../conciergeDiscuss';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { GIT_COMMIT_RANGE } from '../../../shared/api';
-import type { BranchSyncResult, CommitRange, CommitRow, YawbleApi, TeamSummary, TeamSyncState } from '../../../shared/api';
+import type { BranchSyncResult, CommitRange, CommitRow, YawbleApi, TeamGitStatus, TeamSummary, TeamSyncState } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { commitsInHeading } from '../gitRange';
 import BusyLabel from './BusyLabel.vue';
@@ -19,7 +19,7 @@ const error = ref<string | null>(null);
 const done = ref<string | null>(null);
 const busy = ref(false);
 // B073: the commits Sync now brought into the team branch (the core's incoming; empty or absent: none listed).
-const cameIn = ref<{ heading: string; commits: CommitRow[]; total: number } | null>(null);
+const cameIn = ref<{ heading: string; commits: CommitRow[]; total: number; hasOrigin: boolean } | null>(null);
 // B073: "N commits behind" opens those commits (git.commitRange with the pair teams.syncToBase gave; an older core
 // sends none and the count stays text). The same link again closes the list.
 const range = ref<{ data: CommitRange | null; error: string | null } | null>(null);
@@ -40,7 +40,13 @@ async function syncNow() {
     const r = await api.call<BranchSyncResult>('git.sync', { teamId: props.team.id });
     const team = state.value?.behind?.teamBranch;
     const total = r.incomingCount ?? r.incoming?.length ?? 0;
-    if (r.incoming?.length && team) cameIn.value = { heading: commitsInHeading(total, team), commits: r.incoming, total };
+    if (r.incoming?.length && team) {
+      // F4b: the not-pushed mark as in the Git dialog - only when the repository has an origin (git.status origin; neither
+      // teams.syncToBase nor git.sync says). Unreadable status: no mark.
+      let hasOrigin = false;
+      try { hasOrigin = !!(await api.call<TeamGitStatus>('git.status', { teamId: props.team.id }))?.origin; } catch { /* no mark */ }
+      cameIn.value = { heading: commitsInHeading(total, team), commits: r.incoming, total, hasOrigin };
+    }
     done.value = r.outcome === 'synced' ? `Brought the branches up to ${r.baseBranch}${r.moved.length ? ` (${r.moved.join(', ')})` : ''}.`
       : r.outcome === 'conflict' ? null : `Already up to ${r.baseBranch}.`;
     await load();
@@ -100,7 +106,7 @@ defineExpose({ load });
     <p v-if="done" class="muted small" data-test="team-sync-done">{{ done }}</p>
     <div v-if="cameIn" class="list" data-test="team-sync-came-in">
       <p class="small">{{ cameIn.heading }}</p>
-      <CommitList :team="team.name" :commits="cameIn.commits" :total="cameIn.total" />
+      <CommitList :team="team.name" :commits="cameIn.commits" :total="cameIn.total" :has-origin="cameIn.hasOrigin" />
     </div>
     <p v-if="error" class="error small" data-test="team-sync-error">{{ error }}</p>
   </div>
