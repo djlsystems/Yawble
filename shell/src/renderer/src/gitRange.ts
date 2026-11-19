@@ -68,22 +68,26 @@ export function mergePreviewView(p: MergePreview): MergePreviewView {
     tone: canMerge ? 'ok' : p.outcome === 'conflict' || p.outcome === 'refused' ? 'bad' : 'plain',
     sentence: p.summary?.trim() || fallback[p.outcome] || p.outcome,
     canMerge,
-    commitsHeading: p.count > 0 ? `${commits(p.count)} will land on ${p.baseBranch}` : null,
+    // On a conflict nothing lands: the core's wording, "N commits on <team> not in <base>".
+    commitsHeading: p.count <= 0 ? null
+      : p.outcome === 'conflict' ? `${commits(p.count)} on ${p.teamBranch} not in ${p.baseBranch}`
+      : `${commits(p.count)} will land on ${p.baseBranch}`,
     filesHeading: p.files.length ? `${p.files.length} file${p.files.length === 1 ? '' : 's'} changed, all together` : null,
   };
 }
 
-export const IN_MAIN = 'already in main';
+/** The mark on a commit whose change is already in the base, named for that base ("already in trunk"). */
+export const inBaseMark = (base: string): string => `already in ${base || 'main'}`;
 export const OWN_WORK = 'work of its own';
 export const MERGE_COMMIT = 'a merge commit';
-const MARKS: Record<DeletePreviewCommit['state'], string> = { 'in-base': IN_MAIN, own: OWN_WORK, merge: MERGE_COMMIT };
 
 export interface DeleteRow { commit: DeletePreviewCommit; mark: string; own: boolean }
 
 /** git.deletePreview as rows (each marked by its state) and the core's one line on what deleting loses. */
 export function deletePreviewView(p: DeletePreview): { rows: DeleteRow[]; summary: string; loses: boolean } {
-  const rows = (p.exists ? p.commits : []).map((c) => ({ commit: c, mark: MARKS[c.state] ?? c.state, own: c.state === 'own' }));
   const base = p.baseBranch || 'main';
+  const marks: Record<DeletePreviewCommit['state'], string> = { 'in-base': inBaseMark(base), own: OWN_WORK, merge: MERGE_COMMIT };
+  const rows = (p.exists ? p.commits : []).map((c) => ({ commit: c, mark: marks[c.state] ?? c.state, own: c.state === 'own' }));
   const fallback = !p.exists ? `There is no local branch ${p.branch}.`
     : p.own > 0 ? `Deleting it loses ${commits(p.own)} of its own.`
     : rows.length ? `Nothing is lost: each of its ${commits(rows.length)} not in ${base} already has the same change there.`
