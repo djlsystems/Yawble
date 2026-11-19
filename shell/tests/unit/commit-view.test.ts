@@ -95,33 +95,36 @@ describe('commit IDs in the app', () => {
     expect(parts.map((p) => p.text).join('')).toBe('at c62216a.');
   });
 
-  it('rendered markdown links an ID in text and in inline code, never in a link or a code block', () => {
+  // B074: rendered IDs are candidates (text) until git.commitsResolve confirms them; commit-links-resolve.test.ts covers
+  // the upgrade to a link.
+  it('rendered markdown marks an ID in text and in inline code as a candidate, never in a link or a code block', () => {
     const html = renderMarkdown('Commit 56b5597 on `aefd652`.\n\n```\ngit show 96ddd99\n```\n\n[see](https://x.dev/56b5597abc)');
     const box = document.createElement('div');
     box.innerHTML = html;
-    expect([...box.querySelectorAll('[data-commit]')].map((a) => a.getAttribute('data-commit'))).toEqual(['56b5597', 'aefd652']);
+    expect([...box.querySelectorAll('[data-commit-id]')].map((a) => a.getAttribute('data-commit-id'))).toEqual(['56b5597', 'aefd652']);
+    expect(box.querySelector('[data-commit]')).toBeNull();
     expect(box.querySelector('pre')!.textContent).toContain('git show 96ddd99');
-    expect(box.querySelector('pre [data-commit]')).toBeNull();
-    expect(box.querySelector('a[href] [data-commit], a[href][data-commit]')).toBeNull();
+    expect(box.querySelector('pre [data-commit-id]')).toBeNull();
+    expect(box.querySelector('a[href] [data-commit-id], a[href][data-commit-id]')).toBeNull();
   });
 
-  it('rendered markdown stays safe: the ID link is our markup only', () => {
+  it('rendered markdown stays safe: the ID candidate is our markup only', () => {
     const html = renderMarkdown('<img src=x onerror=alert(1)> c62216a');
     expect(html).not.toContain('<img');
-    expect(html).toContain('data-commit="c62216a"');
+    expect(html).toContain('data-commit-id="c62216a"');
   });
 
   it('a click on a rendered ID opens the view in its place\'s team first, then the team on screen, then every team', async () => {
     const off = installCommitLinks(document);
     commitTeams.value = { current: 'web', all: ['web', 'payments', 'ops'] };
     const box = document.createElement('div');
-    box.innerHTML = `<div data-commit-team="payments">${renderMarkdown('Done in c62216a.')}</div>`;
+    box.innerHTML = '<div data-commit-team="payments"><p>Done in <span data-commit="c62216a">c62216a</span>.</p></div>';
     document.body.appendChild(box);
     (box.querySelector('[data-commit]') as HTMLElement).click();
     expect(commitTarget.value).toEqual({ teams: ['payments', 'web', 'ops'], sha: 'c62216a' });
     closeCommit();
     const free = document.createElement('div');
-    free.innerHTML = renderMarkdown('And 7c63337.');
+    free.innerHTML = '<p>And <span data-commit="7c63337">7c63337</span>.</p>';
     document.body.appendChild(free);
     (free.querySelector('[data-commit]') as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(commitTarget.value).toEqual({ teams: ['web', 'payments', 'ops'], sha: '7c63337' });
