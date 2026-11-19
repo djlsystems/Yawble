@@ -1,5 +1,6 @@
 import { shallowRef } from 'vue';
 import type { CommitFound } from '../../shared/api';
+import { LOCAL_MARK } from './localMark';
 
 // B072: the one Commit view any commit ID in the app opens (hand-backs, the board's trail, the Monitor, the Tidy panel,
 // the Git dialog). One at a time: opening another commit replaces it. teams: where to look, in order; the first team
@@ -111,8 +112,9 @@ export function whereLines(c: CommitFound): { key: string; text: string; tone: '
   else if (teamBranch) out.push({ key: 'team', text: 'In the team branch only, not in main yet', tone: 'warn' });
   else if (w.branches.length) out.push({ key: 'branches', text: `On ${w.branches.join(', ')}, not in main yet`, tone: 'warn' });
   else if (w.otherBranches?.length) out.push({ key: 'other', text: `On ${w.otherBranches.join(', ')} (not a team or member branch)`, tone: 'warn' });
+  else if (w.deletedFrom) out.push({ key: 'none', text: `On no branch: it was on ${w.deletedFrom}, which was deleted`, tone: 'warn' });
   else out.push({ key: 'none', text: 'On no branch (a branch that held it was deleted)', tone: 'warn' });
-  out.push(w.pushed ? { key: 'pushed', text: 'On origin', tone: 'ok' } : { key: 'unpushed', text: 'Not pushed: only on this computer', tone: 'warn' });
+  out.push(w.pushed ? { key: 'pushed', text: 'On origin', tone: 'ok' } : { key: 'unpushed', text: LOCAL_MARK.long, tone: 'warn' });
   if (w.tags.length) out.push({ key: 'tags', text: `Included in release ${w.tags.join(', ')}`, tone: 'plain' });
   return out;
 }

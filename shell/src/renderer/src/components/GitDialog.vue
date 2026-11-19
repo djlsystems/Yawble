@@ -11,6 +11,13 @@ import TidyPanel from './TidyPanel.vue';
 import type { GitWebLinkQuery, RepoProviderInfo } from '../../../shared/api';
 import { PROVIDER_LABELS, effectiveProvider, fetchWebLinks, linkKey, openOnText } from '../gitWebLinks';
 import CommitLink from './CommitLink.vue';
+import CommitList from './CommitList.vue';
+import LocalMark from './LocalMark.vue';
+import MergePreviewPanel from './MergePreviewPanel.vue';
+import { GIT_COMMIT_RANGE, GIT_DELETE_PREVIEW, GIT_MERGE_PREVIEW } from '../../../shared/api';
+import type { CommitRange, CommitRow, DeletePreview, MergePreview } from '../../../shared/api';
+import { commits, commitsInHeading, deletePreviewView, mergePreviewView, rangeFor, type CountKind, type RangeAsk } from '../gitRange';
+import { branchLocalOnly, branchLocalTitle } from '../localMark';
 
 // The Git dialog: for the team's main repository or one of its writable extra repositories (the tabs on
 // top), see the team's branches against the base branch, fetch origin,
@@ -23,7 +30,10 @@ const api = resolveApi(props.api);
 
 const status = ref<TeamGitStatus | null>(null);
 const error = ref<string | null>(null);
-const result = ref<TeamGitResult | null>(null);
+/** B073: a result may list the commits that came in (each opens the Commit view) and, after a delete, the deleted
+ * branches' last commits the app keeps on record. */
+type DialogResult = TeamGitResult & { commitsHeading?: string | null; commitsList?: CommitRow[] | null; commitsTotal?: number; recorded?: { branch: string; sha: string }[] | null };
+const result = ref<DialogResult | null>(null);
 const busy = ref<string | null>(null);
 const confirming = ref(false);
 
@@ -83,6 +93,8 @@ function pick(name: string) {
   result.value = null;
   confirming.value = false;
   deleting.value = null;
+  range.value = null;
+  preview.value = null;
   void load();
 }
 
@@ -121,18 +133,80 @@ async function act(method: 'git.fetch' | 'git.bringCurrent' | 'git.merge', label
   if (busy.value) return;
   busy.value = label;
   error.value = null;
+  const before = status.value?.baseSha ?? null;
+  const base = status.value?.baseBranch ?? 'main';
   try {
     const r = await api.call<TeamGitResult>(method, which());
     result.value = r;
     if (r.status) status.value = r.status;
+    if (method !== 'git.fetch') {
+      // B073: the commits that came in / landed (the core's commits; an older core: read the range before..after).
+      const given = r.commits === undefined ? undefined : { commits: r.commits ?? [], count: r.commitCount ?? r.commits?.length ?? 0 };
+      void commitsIn(base, given, before, r.status?.baseSha ?? r.sha ?? null);
+    }
   } catch (e) {
     error.value = errorText(e);
   } finally {
     busy.value = null;
     // The merge confirmation stays up (its Merge button shows Merging…) until the core answers.
     confirming.value = false;
+    preview.value = null;
   }
 }
+
+// ---- B073: the commits an action brought into a branch: the core's list when it sent one (empty: nothing came in),
+// else (an older core) git.commitRange from the commit before to the one after.
+async function commitsIn(branch: string, given: { commits: CommitRow[]; count: number } | undefined, before: string | null, after: string | null) {
+  const res = result.value;
+  if (!res) return;
+  const show = (list: CommitRow[], count: number) => {
+    if (result.value !== res || !list.length) return;
+    res.commitsHeading = commitsInHeading(count, branch);
+    res.commitsList = list;
+    res.commitsTotal = count;
+  };
+  if (given) { show(given.commits, given.count); return; }
+  if (!before || !after || before === after) return;
+  try {
+    const d = await api.call<CommitRange>(GIT_COMMIT_RANGE, { ...which(), from: before, to: after });
+    show(d?.commits ?? [], d?.count ?? 0);
+  } catch { /* an older core: the result's message only */ }
+}
+
+// ---- B073: a count opens the list of those commits (git.commitRange); the same link again closes it (another link for
+// the same range, e.g. the two "behind" counts, shows it again).
+const range = ref<{ key: string; ask: RangeAsk; data: CommitRange | null; error: string | null } | null>(null);
+async function openRange(kind: CountKind, branch?: string, source: string = kind) {
+  const s = status.value;
+  if (!s) return;
+  const key = `${source}:${branch ?? ''}`;
+  if (range.value?.key === key) { range.value = null; return; }
+  const ask = rangeFor(s, kind, branch);
+  if (!ask) return;
+  range.value = { key, ask, data: null, error: null };
+  const cur = range.value;
+  try {
+    const d = await api.call<CommitRange>(GIT_COMMIT_RANGE, { ...which(), from: ask.from, to: ask.to });
+    if (range.value === cur) cur.data = { ...d, commits: d?.commits ?? [] };
+  } catch (e) {
+    if (range.value === cur) cur.error = errorText(e);
+  }
+}
+
+// ---- B073: Merge to <base>… reads git.mergePreview first; Merge is offered under it (an older core: no preview, as before).
+const preview = ref<{ data: MergePreview | null; error: string | null } | null>(null);
+const previewView = computed(() => (preview.value?.data ? mergePreviewView(preview.value.data) : null));
+function startMerge() {
+  confirming.value = true;
+  deleting.value = null;
+  preview.value = { data: null, error: null };
+  const cur = preview.value;
+  void api.call<MergePreview>(GIT_MERGE_PREVIEW, which()).then(
+    (d) => { if (preview.value === cur) cur.data = { ...d, commits: d?.commits ?? [], files: d?.files ?? [], conflictFiles: d?.conflictFiles ?? [], count: d?.count ?? 0 }; },
+    (e) => { if (preview.value === cur) cur.error = errorText(e); },
+  );
+}
+function cancelMerge() { confirming.value = false; preview.value = null; }
 
 // The team branch's own distance from the base, and Sync now (the same sync as before new work; a conflict changes nothing).
 const behindText = computed(() => {
@@ -147,6 +221,8 @@ async function syncNow() {
   if (busy.value) return;
   busy.value = 'sync';
   error.value = null;
+  const before = status.value?.teamSha ?? null;
+  const teamBranch = status.value?.teamBranch ?? 'the team branch';
   try {
     const r = await api.call<BranchSyncResult>('git.sync', which());
     const moved = r.moved.length ? ` (${r.moved.join(', ')})` : '';
@@ -156,6 +232,8 @@ async function syncNow() {
         : r.outcome === 'synced' ? `Brought the branches up to ${r.baseBranch}${moved}.` : `Already up to ${r.baseBranch}.`,
     };
     await load();
+    const given = r.incoming === undefined ? undefined : { commits: r.incoming ?? [], count: r.incomingCount ?? r.incoming?.length ?? 0 };
+    if (r.outcome === 'synced') await commitsIn(teamBranch, given, before, status.value?.teamSha ?? null);
   } catch (e) {
     error.value = errorText(e);
   } finally {
@@ -182,7 +260,24 @@ async function askTeam() {
 // branch is deleted only when the person ticks it, which re-plans with it in unmergedOk so the plan shown is the one
 // confirmed. A stale answer (the branches changed since the plan) is shown and planned again.
 interface DeleteTarget { branch: string; remote: boolean; unmerged: boolean; mergeUnknown?: boolean }
-const deleting = ref<(DeleteTarget & { unmergedOk: boolean; plan: GitDeletePlan | null; note: string | null; error: string | null }) | null>(null);
+// B073: beside the plan, git.deletePreview lists the branch's commits not in the base, each "already in main" or "work of
+// its own", so the person sees what is lost (an older core: the plan alone, as before).
+const deleting = ref<(DeleteTarget & {
+  unmergedOk: boolean; plan: GitDeletePlan | null; note: string | null; error: string | null;
+  preview: DeletePreview | null; previewError: string | null;
+}) | null>(null);
+const deleteView = computed(() => (deleting.value?.preview ? deletePreviewView(deleting.value.preview) : null));
+const deleteMarks = computed(() => Object.fromEntries((deleteView.value?.rows ?? []).map((r) => [r.commit.sha, { text: r.mark, own: r.own }])));
+async function loadDeletePreview() {
+  const d = deleting.value;
+  if (!d) return;
+  try {
+    const p = await api.call<DeletePreview>(GIT_DELETE_PREVIEW, { ...which(), branch: d.branch });
+    if (deleting.value === d) d.preview = { ...p, commits: p?.commits ?? [] };
+  } catch (e) {
+    if (deleting.value === d) d.previewError = errorCode(e) === 'method_not_found' ? null : errorText(e);
+  }
+}
 const oldBranches = computed(() => status.value?.oldBranches ?? []);
 const memberTarget = (b: TeamGitBranch): DeleteTarget => ({ branch: b.branch, remote: !!status.value?.origin, unmerged: !b.inTeamBranch && b.aheadOfBase > 0 });
 const oldTarget = (o: TeamGitOldBranch): DeleteTarget => ({ branch: o.name, remote: o.remote, unmerged: !o.merged });
@@ -237,9 +332,11 @@ async function planDelete() {
 function startDelete(t: DeleteTarget) {
   if (busy.value) return;
   confirming.value = false;
+  preview.value = null;
   result.value = null;
-  deleting.value = { ...t, unmergedOk: false, plan: null, note: null, error: null };
+  deleting.value = { ...t, unmergedOk: false, plan: null, note: null, error: null, preview: null, previewError: null };
   void planDelete();
+  void loadDeletePreview();
 }
 
 function chooseUnmerged(ok: boolean) {
@@ -260,7 +357,9 @@ async function confirmDelete() {
   try {
     const r = await api.call<GitDeleteResult>('git.deleteBranches', deleteParams(d, d.plan.token));
     deleting.value = null;
-    result.value = { outcome: 'deleted', message: r.result, changed: true, sha: null, files: null, status: null };
+    // The deleted branch's last commit still opens (the core keeps it on record); an older core: the preview's tip.
+    const recorded = d.preview?.exists && d.preview.sha ? [{ branch: d.branch, sha: d.preview.sha }] : null;
+    result.value = { outcome: 'deleted', message: r.result, changed: true, sha: null, files: null, status: null, recorded };
     await load();
   } catch (e) {
     if (errorCode(e) === 'stale') { d.note = errorText(e); replan = true; }
@@ -299,8 +398,10 @@ onMounted(() => { void loadChoices(); void load(); });
         <div class="muted small" data-test="git-origin">
           <template v-if="status.origin">Origin {{ status.origin }}:
             <template v-if="status.originBaseSha">its {{ status.baseBranch }} at <CommitLink :team="team.name" :sha="status.originBaseSha" />
-              <span v-if="status.baseBehindOrigin" class="chip">yours is {{ status.baseBehindOrigin }} behind</span>
-              <span v-if="status.baseAheadOfOrigin" class="chip warn">yours has {{ status.baseAheadOfOrigin }} not on origin</span>
+              <button v-if="status.baseBehindOrigin" type="button" class="chip count" data-test="git-count-base-behind-origin" :title="`List the commits on origin's ${status.baseBranch} not in yours`"
+                @click="openRange('base-behind-origin')">yours is {{ status.baseBehindOrigin }} behind</button>
+              <button v-if="status.baseAheadOfOrigin" type="button" class="chip warn count" data-test="git-count-base-ahead-of-origin" :title="`List the commits on your ${status.baseBranch} not on origin`"
+                @click="openRange('base-ahead-of-origin')">yours has {{ status.baseAheadOfOrigin }} not on origin</button>
             </template>
             <template v-else>not fetched yet</template>
           </template>
@@ -318,26 +419,50 @@ onMounted(() => { void loadChoices(); void load(); });
           <a v-if="link({ kind: 'compare', from: status.baseBranch, to: status.teamBranch })" class="web" data-test="git-link-compare" :title="openOn"
             :href="link({ kind: 'compare', from: status.baseBranch, to: status.teamBranch })!" target="_blank" rel="noopener">Compare with {{ status.baseBranch }}</a>
         </div>
-        <div>{{ mergeText }}</div>
+        <div data-test="git-merge-text">
+          <template v-if="status.merge === 'fast-forward'">{{ status.teamBranch }} is <button type="button" class="count" data-test="git-count-team-ahead"
+            @click="openRange('team-ahead')">{{ commits(status.teamAheadOfBase) }} ahead</button>: {{ status.baseBranch }} will fast-forward to it.</template>
+          <template v-else-if="status.merge === 'merge' || (status.merge === 'conflict' && status.teamAheadOfBase > 0)">{{ status.teamBranch }} is <button type="button" class="count"
+            data-test="git-count-team-ahead" @click="openRange('team-ahead')">{{ commits(status.teamAheadOfBase) }} ahead</button> and <button type="button" class="count"
+            data-test="git-count-team-behind" @click="openRange('team-behind')">{{ status.teamBehindBase }} behind</button><template
+            v-if="status.merge === 'merge'">: a merge commit will join them (no rebase).</template><template v-else>: it does not merge cleanly into {{ status.baseBranch }}.</template></template>
+          <template v-else>{{ mergeText }}</template>
+        </div>
         <div v-if="status.conflictFiles.length" class="small">Conflicting files:
           <template v-for="(f, i) in status.conflictFiles" :key="f">{{ i ? ', ' : '' }}<a v-if="status.teamSha && link({ kind: 'file', commit: status.teamSha, file: f })"
             class="mono" :data-test="`git-link-file-${f}`" :title="`${openOn} (at ${short(status.teamSha)})`" :href="link({ kind: 'file', commit: status.teamSha, file: f })!"
             target="_blank" rel="noopener">{{ f }}</a><code v-else>{{ f }}</code></template></div>
-        <div v-if="behindText" class="small behind" data-test="git-behind">{{ behindText }}
+        <div v-if="behindText" class="small behind" data-test="git-behind">{{ status.teamBranch }} is <button type="button" class="count" data-test="git-count-behind"
+          @click="openRange('team-behind', undefined, 'behind-line')">{{ commits(status.teamBehindBase) }} behind</button> {{ status.baseBranch }}
           <button v-if="canSync" data-test="git-sync-now" :disabled="!!busy" title="Merge the base into the team and member branches (never a rebase; a conflict changes nothing)"
             @click="syncNow"><BusyLabel :busy="busy === 'sync'" text="Syncing…">Sync now</BusyLabel></button>
         </div>
       </section>
 
+      <section v-if="range" class="range" data-test="git-range" :data-from="range.ask.from" :data-to="range.ask.to">
+        <div class="range-head"><strong data-test="git-range-title">{{ range.ask.title }}</strong>
+          <button type="button" class="small-btn" data-test="git-range-close" @click="range = null">Close</button></div>
+        <LoadingNote v-if="!range.data && !range.error" text="Reading the commits…" />
+        <p v-if="range.error" class="error" data-test="git-range-error">{{ range.error }}</p>
+        <CommitList v-if="range.data" :team="team.name" :commits="range.data.commits" :total="range.data.count" :has-origin="range.data.hasOrigin" empty="No commits: the branches are level here." />
+      </section>
+
+      <template v-if="confirming && preview">
+        <LoadingNote v-if="!preview.data && !preview.error" text="Reading what the merge would do…" />
+        <p v-if="preview.error" class="muted small" data-test="git-merge-preview-error">The preview could not be read: {{ preview.error }}</p>
+        <MergePreviewPanel v-if="preview.data" :api="api" :team="team.name" :params="which()" :preview="preview.data" />
+      </template>
+
       <div class="row actions">
         <button v-if="status.origin" data-test="git-fetch" :disabled="!!busy" @click="act('git.fetch', 'fetch')"><BusyLabel :busy="busy === 'fetch'" text="Fetching…">Fetch</BusyLabel></button>
         <button v-if="status.origin" data-test="git-bring-current" :disabled="!!busy" title="Fast-forward your base branch to origin's"
           @click="act('git.bringCurrent', 'bring')"><BusyLabel :busy="busy === 'bring'" text="Bringing current…">Bring {{ status.baseBranch }} current</BusyLabel></button>
-        <button v-if="canMerge && !confirming" class="primary" data-test="git-merge" :disabled="!!busy" @click="confirming = true">Merge to {{ status.baseBranch }}…</button>
+        <button v-if="canMerge && !confirming" class="primary" data-test="git-merge" :disabled="!!busy" @click="startMerge">Merge to {{ status.baseBranch }}…</button>
         <span v-if="confirming" class="confirm" data-test="git-merge-confirm">
           Merge {{ status.teamBranch }} into {{ status.baseBranch }}<template v-if="status.origin"> and push {{ status.baseBranch }} to origin</template>?
-          <button class="primary" data-test="git-merge-yes" :disabled="!!busy" @click="act('git.merge', 'merge')"><BusyLabel :busy="busy === 'merge'" text="Merging…">Merge</BusyLabel></button>
-          <button data-test="git-merge-cancel" @click="confirming = false">Cancel</button>
+          <button class="primary" data-test="git-merge-yes" :disabled="!!busy || (!!preview && !preview.data && !preview.error) || (!!previewView && !previewView.canMerge)"
+            @click="act('git.merge', 'merge')"><BusyLabel :busy="busy === 'merge'" text="Merging…">Merge</BusyLabel></button>
+          <button data-test="git-merge-cancel" @click="cancelMerge">Cancel</button>
         </span>
         <button v-if="status.merge === 'conflict' || (status.teamBehindBase > 0 && status.merge !== 'none')" data-test="git-ask-team" :disabled="!!busy"
           title="Tell the Manager to merge the base into its branch and resolve the conflicts" @click="askTeam"><BusyLabel :busy="busy === 'ask'" text="Asking…">Ask the team to bring it current</BusyLabel></button>
@@ -348,6 +473,13 @@ onMounted(() => { void loadChoices(); void load(); });
 
       <p v-if="result" class="result" :class="{ ok: result.changed }" data-test="git-result">{{ result.message }}
         <template v-if="result.files?.length"> Files: <code>{{ result.files.join(', ') }}</code></template></p>
+      <section v-if="result?.commitsList?.length" class="came-in" data-test="git-result-commits">
+        <div class="small"><strong>{{ result.commitsHeading }}</strong></div>
+        <CommitList :team="team.name" :commits="result.commitsList" :total="result.commitsTotal" />
+      </section>
+      <p v-if="result?.recorded?.length" class="small" data-test="git-result-recorded">
+        <template v-for="(x, i) in result.recorded" :key="x.branch">{{ i ? ' · ' : '' }}<code>{{ x.branch }}</code>'s last commit, kept on record:
+          <CommitLink :team="team.name" :sha="x.sha" /></template></p>
 
       <TidyPanel v-if="tidying" :api="api" :team="team" :main-name="mainName" @close="tidying = false" @changed="load()" />
 
@@ -363,13 +495,19 @@ onMounted(() => { void loadChoices(); void load(); });
       </section>
 
       <section v-if="deleting" class="delete" data-test="git-delete">
-        <div><strong>Delete <code>{{ deleting.branch }}</code></strong><template v-if="deleting.remote"> here and on origin</template></div>
+        <div><strong>Delete <code>{{ deleting.branch }}</code></strong><template v-if="deleting.remote"> here and on origin</template><LocalMark
+          v-if="deleting.preview && branchLocalOnly(deleting.preview.push, deleting.preview.hasOrigin)" :title="branchLocalTitle(deleting.preview.push!)" /></div>
         <p v-if="deleting.note" class="small note" data-test="git-delete-stale">{{ deleting.note }} Planned again below.</p>
         <label v-if="deleting.unmerged" class="small" data-test="git-delete-unmerged">
           <input type="checkbox" :checked="deleting.unmergedOk" :disabled="!!busy" @change="chooseUnmerged(($event.target as HTMLInputElement).checked)" />
           <template v-if="deleting.mergeUnknown">Delete it even if the plan keeps it as not merged (its unmerged commits are lost)</template>
           <template v-else>Delete it although its commits are not merged (they are lost)</template>
         </label>
+        <div v-if="deleteView" class="lost" data-test="git-delete-preview">
+          <div class="small" :class="{ loses: deleteView.loses }" data-test="git-delete-summary">{{ deleteView.summary }}</div>
+          <CommitList v-if="deleteView.rows.length" :team="team.name" :commits="deleting.preview!.commits" :has-origin="deleting.preview!.hasOrigin" :marks="deleteMarks" />
+        </div>
+        <p v-else-if="deleting.previewError" class="muted small" data-test="git-delete-preview-error">Its commits could not be listed: {{ deleting.previewError }}</p>
         <LoadingNote v-if="!deleting.plan && !deleting.error" text="Planning the delete…" />
         <pre v-if="deleting.plan" class="plan" data-test="git-delete-plan">{{ deleting.plan.plan }}</pre>
         <p v-if="deleting.plan?.empty" class="muted small" data-test="git-delete-empty">Nothing to delete.</p>
@@ -384,10 +522,12 @@ onMounted(() => { void loadChoices(); void load(); });
       <table class="list" data-test="git-members">
         <tr><th>Member branch</th><th>Commit</th><th>Ahead of {{ status.baseBranch }}</th><th>In {{ status.teamBranch }}</th><th></th></tr>
         <tr v-for="b in status.members" :key="b.branch" :class="{ focus: focusBranch === b.branch }" :data-focus="focusBranch === b.branch ? 'true' : undefined" data-test="git-member-row">
-          <td><code>{{ b.branch }}</code><a v-if="link({ kind: 'branch', branch: b.branch })" class="web" :data-test="`git-link-branch-${b.branch}`"
+          <td><code>{{ b.branch }}</code><LocalMark v-if="branchLocalOnly(b.push, !!status.origin)" :title="branchLocalTitle(b.push!)" /><a v-if="link({ kind: 'branch', branch: b.branch })" class="web" :data-test="`git-link-branch-${b.branch}`"
             :href="link({ kind: 'branch', branch: b.branch })!" target="_blank" rel="noopener">{{ openOn }}</a></td>
           <td><CommitLink :team="team.name" :sha="b.sha" /><a v-if="link({ kind: 'commit', commit: b.sha })" class="web" :data-test="`git-link-commit-${b.branch}`"
-            :title="`The commit ${openOn}`" :href="link({ kind: 'commit', commit: b.sha })!" target="_blank" rel="noopener">↗</a></td><td>{{ b.aheadOfBase }}</td><td>{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
+            :title="`The commit ${openOn}`" :href="link({ kind: 'commit', commit: b.sha })!" target="_blank" rel="noopener">↗</a></td>
+          <td><button v-if="b.aheadOfBase > 0" type="button" class="count" :data-test="`git-count-member-${b.branch}`" :title="`List the ${commits(b.aheadOfBase)} on ${b.branch} not in ${status.baseBranch}`"
+            @click="openRange('member-ahead', b.branch)">{{ b.aheadOfBase }}</button><template v-else>{{ b.aheadOfBase }}</template></td><td>{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
           <td><button class="small-btn" :data-test="`git-delete-${b.branch}`" :disabled="!!busy" @click="startDelete(memberTarget(b))">Delete…</button></td>
         </tr>
         <tr v-if="status.members.length === 0 && oldBranches.length === 0"><td colspan="5" class="muted">No member has committed yet.</td></tr>
@@ -426,5 +566,12 @@ onMounted(() => { void loadChoices(); void load(); });
 .repos { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
 .repos button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 6px 10px; font-weight: 600; color: var(--ink-soft); }
 .repos button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.count { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; border-radius: 3px; }
+.chip.count { color: var(--accent); margin-left: 6px; font-size: 11px; padding: 0 5px; border-radius: 8px; }
+.count:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.range, .came-in { padding: 8px 10px; border-radius: 6px; background: var(--chip); margin: 8px 0; min-width: 0; }
+.range-head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.lost { margin: 6px 0; }
+.lost .loses { color: var(--warn-ink); font-weight: 600; }
 .focus { box-shadow: inset 4px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
 </style>

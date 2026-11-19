@@ -6,6 +6,7 @@ import { resolveApi } from '../api';
 import { copyText } from '../markdown';
 import { differentCommitter, fileStatusWord, gitRequest, itsBranch, mergeLine, spaced, whereLines } from '../commitView';
 import LoadingNote from './LoadingNote.vue';
+import LocalMark from './LocalMark.vue';
 
 // B072: one commit, explained (git.commitShow): what it is, where it is, the files it changed and their diffs
 // (git.commitDiff, shown by the code browser's read-only DiffView), and three read-only actions. teams: where to look,
@@ -117,7 +118,7 @@ function askGit(focus: 'compare' | 'branch') {
 
       <section class="where" data-test="commit-where">
         <h4>Where it is</h4>
-        <ul><li v-for="w in where" :key="w.key" :class="w.tone" :data-test="`commit-where-${w.key}`">{{ w.text }}</li></ul>
+        <ul><li v-for="w in where" :key="w.key" :class="w.tone" :data-test="`commit-where-${w.key}`"><LocalMark v-if="w.key === 'unpushed'" long /><template v-else>{{ w.text }}</template></li></ul>
         <p v-if="c.where.branches.length" class="small muted" data-test="commit-branches">Branches: {{ c.where.branches.join(', ') }}</p>
       </section>
 
