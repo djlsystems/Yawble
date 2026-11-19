@@ -112,22 +112,57 @@ describe('Card 472: links from the real core\'s answers', () => {
     expect(box.textContent).toBe(`Not commits: ${words.join(', ')}. A branch called cafe stays a word.\n`);
   });
 
-  it('3a / F1 (pins today\'s behaviour): the same short ID in two teams, where no team is said and none is on screen (the Concierge): a link to the first team in the list, no chooser', async () => {
+  // Card 482 (F1 re-verify on Ines 54c31b4): flipped from 'link to the first team' to the chooser.
+  const choiceRepos = () => [...document.querySelectorAll('[data-test=commit-choice-repo]')].map((e) => e.textContent);
+  for (const all of [['web', 'cloud'], ['cloud', 'web']]) {
+    it(`3a / F1 fixed: the same short ID in two teams, no team on the place and none on screen (the Concierge), all ${all.join(',')}: the chooser, both teams in that order`, async () => {
+      const id = S.shared.slice(0, 8);
+      commitTeams.value = { current: null, all };
+      const box = place(`Both teams have ${id}.`, null);
+      keep(mount(CommitChooser, { attachTo: document.body }));
+      await settle();
+      const [a] = links(box);
+      expect(a.dataset.commitState).toBe('choose');
+      expect(a.dataset.commitIn).toBeUndefined();
+      expect(a.title).toBe(`2 commits start with ${id}: click to choose one`);
+      a.click();
+      await flushPromises();
+      expect(commitTarget.value).toBeNull();
+      expect(choiceRepos()).toEqual(all.map((t) => `${t} · main`));
+    });
+  }
+
+  it('3a / observation 4: the screen\'s team (commitTeams.current) only orders the chooser; it does not pick the team', async () => {
     const id = S.shared.slice(0, 8);
-    commitTeams.value = { current: null, all: ['web', 'cloud'] };
+    commitTeams.value = { current: 'cloud', all: ['web', 'cloud'] };
     const box = place(`Both teams have ${id}.`, null);
+    keep(mount(CommitChooser, { attachTo: document.body }));
     await settle();
     const [a] = links(box);
-    // Expected 'choose' (two teams have it, nothing says which); pickMatches takes teams[0] as "the place's own team"
-    // even when it is only the first of every team. Flip to 'choose' when F1 is fixed.
-    expect(a.dataset.commitState).toBe('link');
-    expect(a.dataset.commitIn).toBe('web');
-    commitTeams.value = { current: null, all: ['cloud', 'web'] };
-    resetCommitResolve();
-    use(core);
-    const box2 = place(`Both teams have ${id}.`, null);
+    expect(a.dataset.commitState).toBe('choose');
+    a.click();
+    await flushPromises();
+    expect(choiceRepos()).toEqual(['cloud · main', 'web · main']);
+    // The same, plain text with no team (CommitText without team prop): the chooser too.
+    const t = keep(mount(CommitText, { props: { text: `Trail ${id}` }, attachTo: document.body }));
     await settle();
-    expect(links(box2)[0].dataset.commitIn).toBe('cloud'); // which team depends only on the list's order
+    expect(t.find('[data-test=commit-link]').attributes('data-commit-state')).toBe('choose');
+  });
+
+  it('3b / own team in plain text (CommitText team prop): a link straight to that team\'s commit, no chooser', async () => {
+    const id = S.shared.slice(0, 8);
+    commitTeams.value = { current: 'web', all: ['web', 'cloud'] };
+    const t = keep(mount(CommitText, { props: { text: `Trail ${id}`, team: 'cloud' }, attachTo: document.body }));
+    keep(mount(CommitChooser, { attachTo: document.body }));
+    await settle();
+    const a = t.find('[data-test=commit-link]');
+    expect(a.attributes('data-commit-state')).toBe('link');
+    expect(a.attributes('data-commit-in')).toBe('cloud');
+    (a.element as HTMLElement).click();
+    await flushPromises();
+    expect(document.querySelectorAll('[data-test=commit-choice]')).toHaveLength(0);
+    expect(commitTarget.value).toMatchObject({ sha: S.shared });
+    expect(commitTarget.value!.teams[0]).toBe('cloud');
   });
 
   it('3a. the chooser for an ID in two teams (as when F1 is fixed): team, repository and title; picking one opens it', async () => {
