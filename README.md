@@ -114,6 +114,12 @@ any file ends unsigned. It needs the Windows SDK's `signtool`, the Artifact Sign
 (`Azure.CodeSigning.Dlib.dll`; `SIGNING_DLIB` names it when it is not where they install it, and `SIGNTOOL` names `signtool.exe`), an `az login`, and
 the Certificate Profile Signer role on the account.
 
+On macOS, `--sign` signs every Mach-O in the bundle and the app with the keychain's Developer ID Application identity
+(`YAWBLE_MAC_IDENTITY` picks one when there are several), with the hardened runtime and
+`packaging/mac/entitlements.plist`, notarizes the app with the notarytool keychain profile that `YAWBLE_NOTARY_PROFILE`
+names (`xcrun notarytool store-credentials <name>`), staples the ticket, and writes `Yawble-<version>-mac-arm64.dmg`,
+the `.zip` and `SHA256SUMS-mac`. The build fails unless `codesign`, Gatekeeper (`spctl`) and `stapler` accept the app.
+
 ### Run in development
 
 The shell finds the core in this order: `YAWBLE_CORE_PATH` (a `.dll` runs under `dotnet`), `resources/core` in a

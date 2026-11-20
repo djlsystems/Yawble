@@ -6,6 +6,10 @@
 // --sign (Windows): every .exe and .dll that ships, and the installer, signed with the DJL Systems certificate through
 // Azure Artifact Signing (windows-signing.cjs, signing.json); files already signed by their maker keep that signature.
 // The build fails if any file ends unsigned. Output: Yawble-Setup-<version>-<arch>.exe and SHA256SUMS.
+// --sign (macOS): every Mach-O in the bundle and the app signed with the keychain's Developer ID Application identity
+// (YAWBLE_MAC_IDENTITY picks one, e.g. "Name (TEAMID)"), hardened runtime with mac/entitlements.plist, then notarized
+// with the notarytool keychain profile named in YAWBLE_NOTARY_PROFILE and stapled. The build fails unless Gatekeeper
+// accepts the app. Output: Yawble-<version>-mac-arm64.dmg and .zip, and SHA256SUMS-mac.
 //
 // 1. Stage the .NET payload for the RID into packaging/stage/<rid>/:
 //      core/  yawble-core, self-contained (no .NET install needed), with the sandbox's native lib (and wxc-exec.exe on Windows)
@@ -13,9 +17,9 @@
 //             and yawble, the companion client (Claude Code's MCP server and a CLI; README "Using Yawble from Claude Code")
 // 2. Build the shell (`npm run build` in shell/, so shell/out matches this checkout) and package it with Electron and that payload under resources/:
 //      Windows  NSIS setup .exe, per-user, no admin, with an uninstaller in Settings > Apps
-//      macOS    .app in a .dmg and a .zip, arm64 only, ad-hoc signed (mac-adhoc-sign.cjs)
+//      macOS    .app in a .dmg and a .zip, arm64 only; ad-hoc signed (mac-adhoc-sign.cjs) unless --sign
 //      Linux    .tar.gz with install.sh / uninstall.sh and install-apparmor.sh (root, once)
-// Output: artifacts/installers/<rid>/. Without --sign nothing is signed; macOS is not notarized. No agent CLI is bundled, pinned or fetched:
+// Output: artifacts/installers/<rid>/. Without --sign nothing is signed with a certificate and macOS is not notarized. No agent CLI is bundled, pinned or fetched:
 // the app detects the person's own installed Claude Code and Grok and runs them from where they are installed.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -44,8 +48,12 @@ if (!supported.includes(rid)) {
 }
 if (rid.split('-')[0] !== hostRid.split('-')[0]) throw new Error(`build ${rid} on its own OS (this is ${hostRid})`);
 const os = rid.split('-')[0];
-if (sign && os !== 'win') throw new Error('--sign signs Windows builds; macOS and Linux are not signed here');
-const signing = sign ? require('./windows-signing.cjs') : null;
+if (sign && os === 'linux') throw new Error('--sign signs Windows and macOS builds; Linux is not signed (SHA256SUMS-linux)');
+const signing = sign && os === 'win' ? require('./windows-signing.cjs') : null;
+const macSign = sign && os === 'osx';
+if (macSign && !process.env.YAWBLE_NOTARY_PROFILE) {
+  throw new Error('--sign on macOS notarizes: set YAWBLE_NOTARY_PROFILE to a notarytool keychain profile (xcrun notarytool store-credentials <name>)');
+}
 const exe = os === 'win' ? '.exe' : '';
 const stage = path.join(here, 'stage', rid);
 const out = path.join(repo, 'artifacts', 'installers', rid);
@@ -162,7 +170,7 @@ const archName = rid.endsWith('arm64') ? 'arm64' : 'x64';
 const arch = builder.Arch[archName];
 // Linux is never signed (its updates trust the release's SHA256SUMS-linux), so its tarball is named for the release:
 // yawble-<version>-linux-<arch>.tar.gz, what the app's updater looks for.
-const name = sign ? `Yawble-Setup-${buildVersion}-${archName}` : os === 'linux' ? `yawble-${buildVersion}-${rid}` : `yawble-${buildVersion}-${rid}-unsigned`;
+const name = macSign ? `Yawble-${buildVersion}-mac-${archName}` : sign ? `Yawble-Setup-${buildVersion}-${archName}` : os === 'linux' ? `yawble-${buildVersion}-${rid}` : `yawble-${buildVersion}-${rid}-unsigned`;
 // The NSIS hooks (nsis-include.mjs): customInstall puts the build's version in the uninstall entry (Settings > Apps,
 // inventory tools; electron-builder writes package.json's, and yyyy.mm.dd.N is not semver), and customUnInstall
 // removes the person's data on a real uninstall (never on an update; "Keep my data" and --keep-data keep it).
@@ -233,13 +241,28 @@ const config = {
     target: [{ target: 'dmg', arch: [archName] }, { target: 'zip', arch: [archName] }],
     artifactName: `${name}.\${ext}`,
     category: 'public.app-category.developer-tools',
-    identity: null, // no Developer ID: ad-hoc signed in afterPack instead, which Apple silicon requires to run at all
-    hardenedRuntime: false,
-    gatekeeperAssess: false,
-    notarize: false,
+    ...(macSign
+      ? {
+          // The keychain's Developer ID Application identity (or the one YAWBLE_MAC_IDENTITY names). Every Mach-O in the
+          // bundle, the core, bin/ and Electron's helpers included, is signed with the hardened runtime and the same
+          // entitlements: the .NET core and V8 both generate code at run time.
+          identity: process.env.YAWBLE_MAC_IDENTITY || undefined,
+          hardenedRuntime: true,
+          entitlements: path.join(here, 'mac', 'entitlements.plist'),
+          entitlementsInherit: path.join(here, 'mac', 'entitlements.plist'),
+          gatekeeperAssess: false,
+          // electron-builder submits the app with notarytool (APPLE_KEYCHAIN_PROFILE) and staples the ticket.
+          notarize: true,
+        }
+      : {
+          identity: null, // no Developer ID: ad-hoc signed in afterPack instead, which Apple silicon requires to run at all
+          hardenedRuntime: false,
+          gatekeeperAssess: false,
+          notarize: false,
+        }),
   },
   dmg: { artifactName: `${name}.\${ext}`, writeUpdateInfo: false },
-  afterPack: path.join(here, 'mac-adhoc-sign.cjs'),
+  ...(macSign ? {} : { afterPack: path.join(here, 'mac-adhoc-sign.cjs') }),
   linux: {
     target: [{ target: 'tar.gz', arch: [archName] }],
     artifactName: `${name}.\${ext}`,
@@ -249,6 +272,10 @@ const config = {
     extraFiles: [{ from: path.join(here, 'linux'), to: '.', filter: ['*.sh', '*.desktop.in'] }, { from: path.join(shell, 'resources'), to: '.', filter: ['icon.png'] }],
   },
 };
+if (macSign) {
+  process.env.APPLE_KEYCHAIN_PROFILE = process.env.YAWBLE_NOTARY_PROFILE;
+  process.env.CSC_IDENTITY_AUTO_DISCOVERY = 'true';
+}
 const platform = { win: builder.Platform.WINDOWS, osx: builder.Platform.MAC, linux: builder.Platform.LINUX }[os];
 rmSync(out, { recursive: true, force: true });
 const files = await builder.build({ targets: platform.createTarget(null, arch), config, publish: 'never', projectDir: here });
@@ -261,6 +288,16 @@ if (signing) {
   const { createHash } = await import('node:crypto');
   const sums = installers.map((f) => `${createHash('sha256').update(readFileSync(f)).digest('hex')}  ${path.basename(f)}`).join('\n') + '\n';
   writeFileSync(path.join(out, 'SHA256SUMS'), sums);
+}
+if (macSign) {
+  // Gatekeeper's own verdict on what ships: the signed, notarized, stapled app, and the stapled ticket on it.
+  const app = path.join(out, `mac-${archName}`, 'Yawble.app');
+  run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
+  run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app]);
+  run('xcrun', ['stapler', 'validate', app]);
+  const { createHash } = await import('node:crypto');
+  const sums = installers.map((f) => `${createHash('sha256').update(readFileSync(f)).digest('hex')}  ${path.basename(f)}`).join('\n') + '\n';
+  writeFileSync(path.join(out, 'SHA256SUMS-mac'), sums);
 }
 if (os === 'linux') {
   // The Linux release's own checksum file (the Windows updater reads SHA256SUMS, which this never touches).
