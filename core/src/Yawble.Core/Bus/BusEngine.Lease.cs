@@ -33,8 +33,9 @@ public sealed partial class BusEngine
     /// One use of the lease, for workflow_digest (B100): asked, given, given back. Kept in memory like the lease itself
     /// (the newest <see cref="LeaseHistoryMax"/>), so a restart forgets them.
     /// </summary>
-    internal sealed class LeaseUse(long workflow, string member, string what, DateTimeOffset askedAt)
+    internal sealed class LeaseUse(long runId, long workflow, string member, string what, DateTimeOffset askedAt)
     {
+        public long RunId { get; } = runId;
         public long Workflow { get; } = workflow;
         public string Member { get; } = member;
         public string What { get; } = what;
@@ -48,7 +49,7 @@ public sealed partial class BusEngine
 
     private LeaseUse NewLeaseUse(RunContext run, string what, DateTimeOffset now)
     {
-        var use = new LeaseUse(run.Correlation, run.Member.Name, what, now);
+        var use = new LeaseUse(run.RunId, run.Correlation, run.Member.Name, what, now);
         _leaseHistory.Add(use);
         if (_leaseHistory.Count > LeaseHistoryMax) _leaseHistory.RemoveRange(0, _leaseHistory.Count - LeaseHistoryMax);
         return use;
@@ -57,6 +58,49 @@ public sealed partial class BusEngine
     /// <summary>The lease's uses in one workflow (under the gate).</summary>
     private IReadOnlyList<Teams.DigestLease> LeaseUsesOf(long workflow) =>
         [.. _leaseHistory.Where(u => u.Workflow == workflow).Select(u => new Teams.DigestLease(u.Member, u.What, u.AskedAt, u.GrantedAt, u.EndedAt))];
+
+    /// <summary>
+    /// B106 (card 494): a run's waits in the lease's queue as of <paramref name="now"/> (under the gate), from asking to
+    /// being given it, leaving the queue or the run's end; one still waiting runs to now. A lease given at once is no wait.
+    /// The lease itself is the record, so every run has them, whatever its idle clock keeps.
+    /// </summary>
+    private List<ActivitySpan> LeaseWaitsOf(long runId, DateTimeOffset now)
+    {
+        var waits = new List<ActivitySpan>();
+        foreach (var u in _leaseHistory)
+        {
+            if (u.RunId != runId) continue;
+            var end = u.GrantedAt ?? u.EndedAt ?? now;
+            if (end > u.AskedAt) waits.Add(new ActivitySpan(u.AskedAt, end));
+        }
+        return waits;
+    }
+
+    /// <summary>
+    /// A run's stalls and lease waits for the board's time (B086): what its idle clock keeps, with its waits in the lease's
+    /// queue (<see cref="LeaseWaitsOf"/>) added to the holds and overlapping holds joined into one.
+    /// </summary>
+    private RunActivitySpans ActivityOf(RunContext run, DateTimeOffset now)
+    {
+        var spans = run.IdleClock?.Spans(now) ?? RunActivitySpans.None;
+        var waits = LeaseWaitsOf(run.RunId, now);
+        return waits.Count == 0 ? spans : new RunActivitySpans(spans.Stalls, JoinSpans([.. spans.Holds, .. waits]));
+    }
+
+    /// <summary>Spans in start order, those that overlap or touch joined into one.</summary>
+    internal static IReadOnlyList<ActivitySpan> JoinSpans(IEnumerable<ActivitySpan> spans)
+    {
+        var joined = new List<ActivitySpan>();
+        foreach (var s in spans.OrderBy(s => s.Start))
+        {
+            if (joined.Count > 0 && s.Start <= joined[^1].End)
+            {
+                if (s.End > joined[^1].End) joined[^1] = joined[^1] with { End = s.End };
+            }
+            else joined.Add(s);
+        }
+        return joined;
+    }
 
     private readonly List<LeaseHold> _leaseHolders = [];
     private readonly List<LeaseHold> _leaseQueue = [];
