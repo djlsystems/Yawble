@@ -1,0 +1,110 @@
+{
+  "workflow": {
+    "id": 15,
+    "title": "pick the theme",
+    "owner": "Dee",
+    "state": "open",
+    "undeclared": false,
+    "busy": [
+      "Dee is running"
+    ],
+    "ending": null,
+    "startedAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+    "lastAt": "2026-11-19T03:31:47.3702312\u002B00:00",
+    "messages": 2,
+    "endedAt": null,
+    "expiredAt": null,
+    "expiresAt": null,
+    "expiryWarning": null,
+    "question": 16,
+    "time": {
+      "createdAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+      "startedAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+      "endedAt": null,
+      "endedHow": null,
+      "open": true,
+      "overallMs": 468,
+      "rebuilt": false,
+      "breakdown": [
+        {
+          "category": "agent-working",
+          "ms": 2
+        },
+        {
+          "category": "waiting-on-you",
+          "ms": 460
+        },
+        {
+          "category": "waiting-for-slot",
+          "ms": 6
+        }
+      ]
+    },
+    "ownerId": 5,
+    "team": "Cloud",
+    "teamId": 2,
+    "status": "needs-you",
+    "waitingFor": null,
+    "working": true,
+    "item": null,
+    "members": [
+      {
+        "id": 5,
+        "name": "Dee",
+        "state": "running"
+      }
+    ]
+  },
+  "cards": [
+    {
+      "id": 6,
+      "title": "pick the theme",
+      "lane": "blocked",
+      "member": "Dee",
+      "status": "needs-decision",
+      "time": {
+        "createdAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+        "startedAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+        "endedAt": null,
+        "endedHow": null,
+        "open": true,
+        "overallMs": 477,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "agent-working",
+            "ms": 2
+          },
+          {
+            "category": "waiting-on-you",
+            "ms": 469
+          },
+          {
+            "category": "waiting-for-slot",
+            "ms": 6
+          }
+        ]
+      }
+    }
+  ],
+  "messages": [
+    {
+      "seq": 16,
+      "at": "2026-11-19T03:31:47.3702312\u002B00:00",
+      "kind": "decision",
+      "from": "Dee",
+      "member": "Dee",
+      "text": "Dark or light by default?"
+    },
+    {
+      "seq": 15,
+      "at": "2026-11-19T03:31:47.3622645\u002B00:00",
+      "kind": "instruction",
+      "from": "person",
+      "member": "Dee",
+      "text": "pick the theme"
+    }
+  ],
+  "spec": null,
+  "backlog": true
+}

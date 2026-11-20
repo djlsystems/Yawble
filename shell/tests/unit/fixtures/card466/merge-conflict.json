@@ -1,0 +1,54 @@
+{
+  "baseBranch": "trunk",
+  "teamBranch": "team/alpha",
+  "outcome": "conflict",
+  "summary": "Merging team/alpha would conflict in README.md, a.txt: nothing changes.",
+  "text": "Merging team/alpha would conflict in README.md, a.txt: nothing changes.\n1 commit on team/alpha not in trunk:\n  - 01e233e137fa Team two (Ada), local only\nFiles team/alpha changes (2):\n  modified README.md (\u002B1 -1)\n  modified a.txt (\u002B1 -1)",
+  "from": "79c4a48d3162b5483ad48dbe020b5a97370023a2",
+  "to": "01e233e137fa8e7a06ef2310dd6e28792f6d441d",
+  "newSha": null,
+  "conflictFiles": [
+    "README.md",
+    "a.txt"
+  ],
+  "commits": [
+    {
+      "sha": "01e233e137fa8e7a06ef2310dd6e28792f6d441d",
+      "shortSha": "01e233e137fa",
+      "subject": "Team two",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T23:08:20-05:00",
+      "isMerge": false,
+      "notPushed": true
+    }
+  ],
+  "count": 1,
+  "truncated": false,
+  "files": [
+    {
+      "path": "README.md",
+      "status": "modified",
+      "added": 1,
+      "deleted": 1,
+      "binary": false
+    },
+    {
+      "path": "a.txt",
+      "status": "modified",
+      "added": 1,
+      "deleted": 1,
+      "binary": false
+    }
+  ],
+  "diffFrom": "016634ecf483654bc643132e6033be1fd1e6176e",
+  "diffTo": "01e233e137fa8e7a06ef2310dd6e28792f6d441d",
+  "hasOrigin": false,
+  "teamPush": {
+    "branch": "team/alpha",
+    "onOrigin": false,
+    "notPushed": 2
+  }
+}

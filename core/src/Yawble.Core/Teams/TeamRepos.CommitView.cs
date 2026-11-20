@@ -25,7 +25,7 @@ public sealed record CommitMade(string Member, long? Card, long? Workflow);
 /// own branch is told apart from one whose branch was deleted.
 /// </summary>
 public sealed record CommitWhere(bool InMain, IReadOnlyList<string> Branches, string? OnlyOnMember, bool Pushed, IReadOnlyList<string> Tags,
-    IReadOnlyList<string>? OtherBranches = null);
+    IReadOnlyList<string>? OtherBranches = null, string? DeletedFrom = null);
 
 /// <summary>One file the commit changed (a merge: against its first parent). Status: added, deleted, modified or renamed.</summary>
 public sealed record CommitFileChange(string Path, string? OldPath, string Status, int Added, int Deleted, bool Binary)
@@ -87,6 +87,7 @@ public sealed record CommitInfo(
         var where = new JsonObject { ["inMain"] = w.InMain, ["branches"] = new JsonArray([.. w.Branches.Select(b => (JsonNode?)b)]) };
         where["otherBranches"] = new JsonArray([.. (w.OtherBranches ?? []).Select(b => (JsonNode?)b)]);
         if (w.OnlyOnMember is not null) where["onlyOnMember"] = w.OnlyOnMember;
+        if (w.DeletedFrom is not null) where["deletedFrom"] = w.DeletedFrom;
         where["pushed"] = w.Pushed;
         where["tags"] = new JsonArray([.. w.Tags.Select(t => (JsonNode?)t)]);
         o["where"] = where;
@@ -216,7 +217,9 @@ public sealed partial class TeamRepos
         }
 
         return new CommitInfo(true, null, full, full[..Math.Min(12, full.Length)], f[8].Trim(), f[9].Trim(), author, differs ? committer : null,
-            parents, merge, made, new CommitWhere(inMain, branches, onlyOn, origin.Count > 0, tags, others), files);
+            parents, merge, made, new CommitWhere(inMain, branches, onlyOn, origin.Count > 0, tags, others,
+                // B073: on no branch now, and the app recorded the branch it was on when the person deleted it.
+                !inMain && heads.Count == 0 ? DeletedFromOf(team, full) : null), files);
     }
 
     /// <summary>git.commitDiff: one file of the commit, as hunks of lines (a merge against its first parent); binary or too large, a summary only.</summary>
@@ -251,7 +254,7 @@ public sealed partial class TeamRepos
             hunks.Count == 0 ? "No lines changed: only the file's name or mode changed." : null, change.Added, change.Deleted, hunks);
     }
 
-    private static string TooLargeText(CommitFileChange c) =>
+    internal static string TooLargeText(CommitFileChange c) =>
         $"Too large to show here: {c.Added.ToString(CultureInfo.InvariantCulture)} lines added, {c.Deleted.ToString(CultureInfo.InvariantCulture)} deleted.";
 
     /// <summary>A commit ID as asked: 4 to 64 hex digits (never an option, a ref name or a revision expression).</summary>
@@ -425,8 +428,8 @@ public sealed partial class TeamRepos
         // A short ID matches by prefix (the IDs are stored in full, lower case).
         cmd.CommandText = """
             SELECT kind, member, branch, workflow_id, extra FROM code_events
-            WHERE team = $t COLLATE NOCASE AND kind IN ('commit', 'merge-team') AND (sha = $s OR (length($s) < 40 AND substr(sha, 1, length($s)) = $s))
-            ORDER BY CASE kind WHEN 'commit' THEN 0 ELSE 1 END, id LIMIT 1;
+            WHERE team = $t COLLATE NOCASE AND kind IN ('commit', 'merge-team', 'branch-deleted') AND (sha = $s OR (length($s) < 40 AND substr(sha, 1, length($s)) = $s))
+            ORDER BY CASE kind WHEN 'commit' THEN 0 WHEN 'merge-team' THEN 1 ELSE 2 END, CASE kind WHEN 'branch-deleted' THEN -id ELSE id END LIMIT 1;
             """;
         cmd.Parameters.AddWithValue("$t", team);
         cmd.Parameters.AddWithValue("$s", sha.ToLowerInvariant());
@@ -439,6 +442,17 @@ public sealed partial class TeamRepos
             catch (System.Text.Json.JsonException) { }
         }
         return new RecordedEvent(r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.GetString(2), r.IsDBNull(3) ? null : r.GetInt64(3), into);
+    }
+
+    /// <summary>B073: the branch the commit was on when the person deleted it (the newest such record), or null.</summary>
+    private string? DeletedFromOf(string team, string sha)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT branch FROM code_events WHERE team = $t COLLATE NOCASE AND kind = 'branch-deleted' AND sha = $s ORDER BY id DESC LIMIT 1;";
+        cmd.Parameters.AddWithValue("$t", team);
+        cmd.Parameters.AddWithValue("$s", sha.ToLowerInvariant());
+        return cmd.ExecuteScalar() as string;
     }
 
     /// <summary>
@@ -458,6 +472,10 @@ public sealed partial class TeamRepos
         {
             member = isMerge ? ManagerOf(teamId) : record.Member;
             workflow = record.WorkflowId;
+        }
+        else if (record is { Kind: CodeEvent.BranchDeleted, Member: { } dm })
+        {
+            member = dm;
         }
         else if (memberBranches.Count == 1)
         {

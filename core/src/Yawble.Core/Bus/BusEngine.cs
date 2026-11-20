@@ -287,6 +287,9 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// <summary>The host tool asks (tools from the app's catalog an agent asked for), behind the request_tool tool; null when not wired.</summary>
     public Integrations.ToolAskService? ToolAsks { get; set; }
 
+    /// <summary>The folder asks (B111: a folder an agent asked to read or write), behind the request_folder tool; null when not wired.</summary>
+    public Integrations.FolderAskService? FolderAsks { get; set; }
+
     internal Task<Message> HandbackAsync(RunContext run, string delivered, CancellationToken ct) =>
         WithGate(() =>
         {
@@ -444,7 +447,11 @@ public sealed partial class BusEngine : IAsyncDisposable
     }
 
     /// <summary>What still works a workflow, from the team's runs and pending deliveries (one sentence each).</summary>
-    private List<string> Busy(MemberRef declarer, long correlation, MemberRef? watcher)
+    private List<string> Busy(MemberRef declarer, long correlation, MemberRef? watcher) =>
+        Busy(declarer, correlation, watcher, _store.TeamMembers(declarer.TeamId), _store.Pending());
+
+    /// <summary><see cref="Busy(MemberRef, long, MemberRef?)"/> with the team's members and the pending deliveries already read.</summary>
+    private List<string> Busy(MemberRef declarer, long correlation, MemberRef? watcher, IReadOnlyList<MemberRef> teamMembers, IReadOnlyList<BusStore.PendingRow> pending)
     {
         var busy = new List<string>();
         foreach (var run in _active.Values.Select(a => a.Context))
@@ -453,9 +460,9 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (watcher is not null && run.Member.Id == watcher.Id && Watching(run.Items[0], declarer.TeamId, correlation, watcher)) continue;
             busy.Add($"{run.Member.Name} is running");
         }
-        var team = _store.TeamMembers(declarer.TeamId).ToDictionary(m => m.Qualified, StringComparer.OrdinalIgnoreCase);
+        var team = teamMembers.ToDictionary(m => m.Qualified, StringComparer.OrdinalIgnoreCase);
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in _store.Pending())
+        foreach (var row in pending)
         {
             if (row.Correlation != correlation || !team.TryGetValue(row.Subscriber, out var holder)) continue;
             if (holder.Id == declarer.Id && row.Started) continue;

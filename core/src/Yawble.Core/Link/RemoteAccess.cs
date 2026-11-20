@@ -23,6 +23,8 @@ public static class RemoteAccess
         // Host tool asks: listed and answered Not now like the network asks; Install is the window's alone (below).
         // Check again only looks for the program again (it runs no installer): a remote viewer may use it after installing by hand.
         "tools.catalog", "tools.asks", "tools.notNow", "tools.checkAgain",
+        // Folder asks (B111): exactly as the network asks, listed by any viewer and answered by a full one.
+        "folder.",
         // Whether git is installed (the banner's text); installing it is git.install, refused below.
         "git.check",
         // The Logs dialog, read only (pruning and retention are refused below).
@@ -73,6 +75,8 @@ public static class RemoteAccess
             "docs.list", "docs.read", "docs.folder",
             "members.get",
             "bus.decisions", "bus.workflows",
+            // B104, the Workflows page: every team's workflows, and one in full (its spec only when the viewer may read the backlog; ShapeResult).
+            "workflows.list", "workflows.get",
             "policy.getGlobal", "policy.getMember", "policy.previewLoosen", "policy.teamHosts", "policy.checkHosts",
             "credentials.status",
             "terminal.banner",
@@ -85,6 +89,10 @@ public static class RemoteAccess
             "git.webLink",
             // B072, the commit view: a commit and its file list; a file's diff only while members' code is shown (below).
             "git.commitShow", "git.commitDiff",
+            // B074: which hex words in text are commits (IDs, titles, pushed; no code).
+            "git.commitsResolve",
+            // B073: the commits behind a count and the Merge / Delete previews; a preview's file diff only while members' code is shown.
+            "git.commitRange", "git.mergePreview", "git.deletePreview", "git.mergeDiff",
             "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
             "guardrail.get",
             "agents.detect", "agents.testSessions", "agents.commandLine", "agents.defaultModels", "agents.models", "agents.resolveModel",
@@ -102,6 +110,7 @@ public static class RemoteAccess
             "ops.backups",
             "network.asks",
             "tools.catalog", "tools.asks",
+            "folder.asks",
             "logs.query", "logs.sources", "logs.values", "logs.who", "logs.prunePreview",
             // Live logs (B048): watching new entries, and stopping, change nothing.
             "logs.tail", "logs.untail",
@@ -146,6 +155,7 @@ public static class RemoteAccess
             "tasks.preview", "tasks.approve", "tasks.cancel", "tasks.decline", "tasks.delete", "tasks.revoke", "tasks.runNow", "tasks.save",
             "network.answer",
             "tools.notNow", "tools.checkAgain",
+            "folder.answer",
             "logs.prune", "logs.setRetention",
         ]);
 
@@ -176,9 +186,17 @@ public static class RemoteAccess
     /// A relayed call's answer as a cloud viewer may see it. B072: with members' code not shown, git.commitShow keeps the
     /// commit and its file list and says codeShown = false (its diffs, git.commitDiff, are refused above).
     /// </summary>
-    public static void ShapeResult(string method, JsonNode? result, bool showCode)
+    /// <remarks>B104: workflows.list and workflows.get say whether this viewer may read the backlog (<c>backlog</c>; the shell
+    /// links item labels only then), and workflows.get drops the item's spec when it may not.</remarks>
+    public static void ShapeResult(string method, JsonNode? result, bool showCode, string access = Full)
     {
         if (method == "git.commitShow" && !showCode && result is JsonObject commit && commit.ContainsKey("codeShown")) commit["codeShown"] = false;
+        if (method is "workflows.list" or "workflows.get" && result is JsonObject page)
+        {
+            var backlog = Refusal("backlog.item", null, allowHostTerminals: false, access, showCode: showCode) is null;
+            page["backlog"] = backlog;
+            if (!backlog && method == "workflows.get") page["spec"] = null;
+        }
     }
 
     /// <summary>Null when the call is allowed for a viewer with this access; otherwise the reason, as the remote person reads it.</summary>
@@ -196,7 +214,7 @@ public static class RemoteAccess
     public static string? Refusal(string method, JsonObject? parameters, bool allowHostTerminals, Func<string, bool>? isIntegration = null, Func<string, bool>? isRemoteMcp = null,
         bool showCode = true)
     {
-        if ((method.StartsWith("code.", StringComparison.Ordinal) || method == "git.commitDiff") && !showCode)
+        if ((method.StartsWith("code.", StringComparison.Ordinal) || method is "git.commitDiff" or "git.mergeDiff") && !showCode)
             return CodeHidden;
         // yawble-companion is local only: never paired, approved, listed or revoked from the Cloud Link.
         if (method.StartsWith("companion.", StringComparison.Ordinal))

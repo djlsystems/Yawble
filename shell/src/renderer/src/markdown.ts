@@ -38,11 +38,14 @@ for (const rule of ['fence', 'code_block'] as const) {
   };
 }
 
-// B072: a commit ID in the text (or alone in inline code) opens the Commit view. It becomes our own markup around the
-// escaped ID, never a web link: <a role="button" data-commit="<id>">, which App.vue's click handler opens (openCommit).
+// B072: a commit ID in the text (or alone in inline code) opens the Commit view. B074: only once the core confirms it is
+// a commit. It renders as a plain-text candidate, our own markup around the escaped ID (never a web link):
+// <span data-commit-id="<id>">; the document's observer (commitResolve.ts installCommitResolve, App.vue) asks
+// git.commitsResolve for every candidate on the screen in one call and turns a confirmed one into a [data-commit] link,
+// which App.vue's click handler opens (installCommitLinks). Not a commit: it stays text.
 // IDs inside a link, a code block or a longer inline code stay as they are.
 const commitAnchor = (sha: string, inner: string) =>
-  `<a role="button" tabindex="0" class="commit-link" data-commit="${sha}" data-test="commit-link" title="Open commit ${sha}">${inner}</a>`;
+  `<span class="commit-id" data-commit-id="${sha}">${inner}</span>`;
 md.core.ruler.push('commit_ids', (state) => {
   for (const block of state.tokens) {
     if (block.type !== 'inline' || !block.children) continue;

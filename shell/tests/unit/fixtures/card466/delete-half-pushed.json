@@ -1,0 +1,46 @@
+{
+  "branch": "feature/half",
+  "baseBranch": "trunk",
+  "exists": true,
+  "sha": "2e97419d3cb14363f243a9c68aab84f146ebc562",
+  "merged": false,
+  "commits": [
+    {
+      "state": "own",
+      "sha": "2e97419d3cb14363f243a9c68aab84f146ebc562",
+      "shortSha": "2e97419d3cb1",
+      "subject": "Half 2",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T23:08:35-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "state": "own",
+      "sha": "631bb5377a8325746dc9c9a7e2e0f47b4c6d51bb",
+      "shortSha": "631bb5377a83",
+      "subject": "Half 1",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T23:08:35-05:00",
+      "isMerge": false,
+      "notPushed": false
+    }
+  ],
+  "own": 2,
+  "inBase": 0,
+  "truncated": false,
+  "lost": "Deleting it loses 2 commits of its own (2e97419d3cb1, 631bb5377a83); 1 of them is not on origin either.",
+  "text": "feature/half at 2e97419d3cb1: Deleting it loses 2 commits of its own (2e97419d3cb1, 631bb5377a83); 1 of them is not on origin either.\n2 commits not in trunk:\n  - 2e97419d3cb1 Half 2 (Ada): work of its own, not pushed\n  - 631bb5377a83 Half 1 (Ada): work of its own",
+  "hasOrigin": true,
+  "push": {
+    "branch": "feature/half",
+    "onOrigin": true,
+    "notPushed": 1
+  }
+}
