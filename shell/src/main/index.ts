@@ -4,7 +4,7 @@ import { wheelZoom, zoom } from './zoom';
 import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { copyFileSync, rmSync } from 'node:fs';
+import { copyFileSync, rmSync, statSync } from 'node:fs';
 import { linuxUpdatePlan } from './linux-update';
 import { captureMainOutput, diagnosticLog, processGoneLine, shellStartLine } from './diagnostic-log';
 import { installScope, isAdministrator, otherSessionsRunning, updaterArgs } from './install-scope';
@@ -380,6 +380,13 @@ app.whenReady().then(async () => {
       ? await dialog.showOpenDialog(owner, { properties: ['openDirectory'] })
       : await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  // B110: Member settings > Policy warns before granting a folder that is not there. Only looks (stat), never creates.
+  ipcMain.handle(Channels.folderExists, (_e, p: unknown) => {
+    if (typeof p !== 'string' || p.length > 4096) return false;
+    const full = p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;
+    if (!path.isAbsolute(full)) return false;
+    try { return statSync(full).isDirectory(); } catch { return false; }
   });
   ipcMain.handle(Channels.shellSettings, () => ({ ...settings, startAtLoginRegistered: startAtLoginRegistered(), packaged: app.isPackaged }));
   // How this copy is installed: for everyone (an administrator updates it) or for this person; who else has it open.
