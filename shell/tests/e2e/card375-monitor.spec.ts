@@ -217,23 +217,27 @@ function sparks(f: Frame, p: Pt, color: string) {
 }
 /** The workflow node squares (and leaving ones): a fill rgba(7, 11, 20, 0.95) with one moveTo, then its stroke. */
 function wfBoxes(f: Frame) {
-  const out: { x: number; y: number; color: string; lw: number; alpha: number }[] = [];
+  const out: { x: number; y: number; color: string; lw: number; alpha: number; at: number }[] = [];
   f.ops.forEach((o, i) => {
     if (o.op !== 'fill' || o.style !== 'rgba(7, 11, 20, 0.95)' || o.items?.length !== 1 || o.items[0].t !== 'm') return;
     const s = f.ops[i + 1];
     if (!s || s.op !== 'stroke' || s.items?.[0]?.t !== 'm') return;
-    out.push({ x: o.items[0].x + 6, y: o.items[0].y + 10, color: s.style, lw: s.lw!, alpha: o.alpha });
+    out.push({ x: o.items[0].x + 6, y: o.items[0].y + 10, color: s.style, lw: s.lw!, alpha: o.alpha, at: i });
   });
   return out;
 }
-/** A workflow node by its "#id" label (drawn 13 under its centre). */
+/**
+ * A workflow node by its "#id" label: the square drawn last before the label (scene drawWorkflowNode draws the square, its
+ * icon, then its label). Card 500: the label is not always 13 under the centre - placeWorkflowLabels moves a label above or
+ * beside its node when the place under it is taken (by #11's or #12's label, as the graph drifts), so finding the square by
+ * the label's place missed about half the runs of 1b.
+ */
 function wfNode(f: Frame, id: number) {
   // B090: the label is "#id title" (or "#id" on a phone's wall zoomed out).
-  const t = f.ops.find((o) => o.op === 'text' && (o.text === `#${id}` || o.text!.startsWith(`#${id} `)) && (o.style === C.inkDim || o.style === C.blocked));
-  if (!t) return null;
-  const c = { x: t.x!, y: t.y! - 13 };
-  const box = wfBoxes(f).find((b) => near(b, c, 0.05));
-  return box ? { ...box, label: t.style, op: t } : null;
+  const at = f.ops.findIndex((o) => o.op === 'text' && (o.text === `#${id}` || o.text!.startsWith(`#${id} `)) && (o.style === C.inkDim || o.style === C.blocked));
+  if (at < 0) return null;
+  const box = wfBoxes(f).filter((b) => b.at < at).at(-1);
+  return box ? { ...box, label: f.ops[at]!.style, op: f.ops[at]! } : null;
 }
 /** Dashed lines from a to b (either way). */
 function dashedBetween(f: Frame, a: Pt, b: Pt, tol = 1.5) {
@@ -518,8 +522,7 @@ test('1b a workflow node click with a team focused: the workflow opens; is the f
   await unhover(page);
   for (let i = 0; i < 4; i++) {
     f = await lastFrame(page);
-    const n = wfNode(f, 10)!;
-    await clickWorld(page, n.op, n);
+    const n = wfNode(f, 10)!;    await clickWorld(page, n.op, n);
     if (await page.locator('[data-test=workflow-10]').count()) break;
     await page.waitForTimeout(300);
   }
