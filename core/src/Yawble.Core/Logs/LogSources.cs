@@ -73,7 +73,7 @@ public static class LogSources
             new("audit_log", "at", 365, "who changed what, and when, for those entries. The record of changes made before the cutoff is gone; nothing in the app itself changes.")),
 
         new("gateway", "Network", "Security",
-            "Each run's gateway: its first model request to each model API (where the credential is swapped in) and every one that failed, every connection it allowed or refused (a plain-http host refused again is counted on one row), sign-in problems and rate limits.",
+            "Each run's gateway: its first model request to each model API (where the credential is swapped in) and every one that failed, every connection it allowed or refused (a host refused again, over plain http or https, is counted on one row), sign-in problems and rate limits.",
             "gateway_events t", "t.id", "t.at",
             [
                 new("at", "Time", "t.at", "time"),
