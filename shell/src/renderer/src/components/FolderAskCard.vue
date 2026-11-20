@@ -6,7 +6,7 @@ import { errorText, isRemoteRefusal } from '../api';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { usePhone } from '../phone';
-import { accessWords, folderAnswerText, folderAskChoices, folderAskMember, type FolderAsk, type FolderAskChoice } from '../folderAsks';
+import { accessWords, askerWords, folderAnswerText, folderAskAskedBy, folderAskChoices, folderAskMember, type FolderAsk, type FolderAskChoice } from '../folderAsks';
 
 /**
  * One folder ask in Needs you (B111): an agent asks for a folder outside its clone, read-only or read-write, with its
@@ -31,6 +31,8 @@ const choices = computed(() => folderAskChoices(props.ask).map((c) => ({
   label: c === 'read' && props.ask.access === 'readwrite' ? 'Approve read-only' : LABELS[c].label,
 })));
 const member = computed(() => folderAskMember(props.ask));
+/** Card 507: the Manager asked for this member (askedBy is not member); null for the member's own ask. */
+const asker = computed(() => folderAskAskedBy(props.ask));
 const access = computed(() => accessWords(props.ask.access));
 
 const busy = useBusy();
@@ -63,8 +65,9 @@ async function answer(choice: FolderAskChoice) {
 <template>
   <article class="folder-ask" :class="{ phone }" data-test="folder-ask" :data-id="ask.id">
     <p class="head" data-test="folder-ask-head">
-      <span data-test="folder-ask-team">{{ ask.team }}</span> / <strong data-test="folder-ask-member">{{ member }}</strong>
-      asks <b data-test="folder-ask-access">{{ access }}</b> on <code data-test="folder-ask-path">{{ ask.path }}</code><template v-if="ask.reason"> - <span data-test="folder-ask-reason">{{ ask.reason }}</span></template>
+      <span data-test="folder-ask-team">{{ ask.team }}</span> /
+      <template v-if="asker"><strong data-test="folder-ask-asked-by" :data-asked-by="asker">{{ askerWords(asker) }}</strong> asks, for <strong data-test="folder-ask-member">{{ member }}</strong>,</template>
+      <template v-else><strong data-test="folder-ask-member">{{ member }}</strong> asks</template> <b data-test="folder-ask-access">{{ access }}</b> on <code data-test="folder-ask-path">{{ ask.path }}</code><template v-if="ask.reason"> - <span data-test="folder-ask-reason">{{ ask.reason }}</span></template>
     </p>
     <p class="small" :class="ask.exists ? 'muted' : 'missing'" data-test="folder-ask-exists" :data-exists="ask.exists">
       {{ ask.exists ? 'The folder exists.' : 'The folder does not exist on this computer (yet).' }}

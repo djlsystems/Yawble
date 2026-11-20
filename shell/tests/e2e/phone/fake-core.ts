@@ -122,11 +122,17 @@ const toolAsk = {
 };
 /** B111 (card 497): a read-write folder ask; listed only after setFolderAsks(true), so the other phone tests see no extra banner. */
 const folderAsk = {
-  id: 21, team: 'payments', member: 'payments/TesterBen', askedBy: 'TesterBen', path: 'Z:\\smokesessions', access: 'readwrite',
-  reason: 'read the smoke session recordings and write the results next to them', exists: true, state: 'pending', grantedAccess: null,
-  decidedBy: null, decidedAt: null, workflow: 10, choices: ['readwrite', 'read', 'deny'],
+  id: 21, at: iso(6), teamId: 1, team: 'payments', memberId: 2, member: 'payments/TesterBen', memberName: 'TesterBen', askedBy: 'payments/TesterBen',
+  path: 'Z:\\smokesessions', access: 'readwrite', reason: 'read the smoke session recordings and write the results next to them', exists: true,
+  existedWhenAsked: true, state: 'pending', grantedAccess: null, decidedBy: null, decidedVia: null, decidedAt: null, note: null, workflow: 10,
+  choices: ['readwrite', 'read', 'deny'],
 };
-const folder = { on: false, answered: new Map<number, string>() };
+/** Card 507: the Manager asks for DeveloperAda (askedBy is not member); listed only with setFolderAsks(true, true). */
+const managerFolderAsk = {
+  ...folderAsk, id: 22, at: iso(5), memberId: 1, member: 'payments/DeveloperAda', memberName: 'DeveloperAda', askedBy: 'payments/Manager',
+  path: 'Z:\\shared\\fixtures', access: 'read', reason: 'read the payment fixtures for card 1', choices: ['read', 'deny'],
+};
+const folder = { on: false, manager: false, answered: new Map<number, string>() };
 const integrationAsk = {
   id: 9, at: iso(8), integration: 'gh', teamId: 1, member: 'DeveloperAda', command: 'gh pr create --title "Partial refunds" --body-file pr.md',
   reason: 'open the pull request for card 1', workflow: 10, repo: 'payments', action: 'pr create', canAlways: true,
@@ -275,7 +281,7 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'concierge.read': () => ({ ok: true }),
   'network.asks': () => [networkAsk],
   'tools.asks': () => [toolAsk],
-  'folder.asks': () => (folder.on && !folder.answered.has(folderAsk.id) ? [folderAsk] : []),
+  'folder.asks': () => (folder.on ? [folderAsk, ...(folder.manager ? [managerFolderAsk] : [])] : []).filter((a) => !folder.answered.has(a.id)),
   'folder.answer': (p) => { folder.answered.set(Number(p?.id), String(p?.choice)); return { id: p?.id, state: p?.choice === 'deny' ? 'denied' : 'approved' }; },
   'integrations.asks': () => (needsYou ? [integrationAsk] : []),
   'integrations.connectionAttention': () => [{ id: 3, name: 'Stripe test key', reason: '401 from the API', where: 'Settings, Connections' }],
@@ -590,8 +596,8 @@ export function createFakeCore() {
     setAccess(a: Access) { access = a; },
     /** With false, no network or tool asks are pending (the global Needs-you banners stay away). */
     setAsks(on: boolean) { asks = on; },
-    /** B111: with true, one read-write folder ask is pending (off by default); answers are forgotten. */
-    setFolderAsks(on: boolean) { folder.on = on; folder.answered.clear(); },
+    /** B111: with true, one read-write folder ask is pending (off by default); manager (card 507) adds the Manager's read-only ask for DeveloperAda; answers are forgotten. */
+    setFolderAsks(on: boolean, manager = false) { folder.on = on; folder.manager = manager; folder.answered.clear(); },
     /** B111: the folder answers given, by ask id (the choice). */
     folderAnswers() { return new Map(folder.answered); },
     /** B054: the team branch behind its base (the team page's sync bar shows). */

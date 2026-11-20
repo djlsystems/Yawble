@@ -3,7 +3,7 @@
 // Needs-you banner shows the card (team / member, read-write, the path, the reason, the folder exists) with Approve,
 // Approve read-only and Deny; Approve read-only sends folder.answer read and the banner says it applies from the next
 // run; the page never scrolls sideways. A Visitor (read-only) sees the card with its answers held. Screenshots go to
-// $YAWBLE_TEAM_DOCS/b111/.
+// $YAWBLE_TEAM_DOCS/b111/. Card 507: the Manager's ask for a member says so ("payments / Manager asks, for DeveloperAda, ...").
 //
 //   npx playwright test card497-folder-asks      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 import { expect, test, type Browser } from '@playwright/test';
@@ -20,10 +20,10 @@ test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); })
 const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'b111') : null;
 if (shots) mkdirSync(shots, { recursive: true });
 
-async function open(browser: Browser, access: Access, w: number, h: number, theme: 'light' | 'dark') {
+async function open(browser: Browser, access: Access, w: number, h: number, theme: 'light' | 'dark', manager = false) {
   const s = fakeRemote(builtDir);
   s.core.setAsks(false);
-  s.core.setFolderAsks(true);
+  s.core.setFolderAsks(true, manager);
   s.core.setAccess(access);
   const mobile = w < 760;
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, isMobile: mobile, hasTouch: mobile, colorScheme: theme, reducedMotion: 'reduce' });
@@ -32,7 +32,7 @@ async function open(browser: Browser, access: Access, w: number, h: number, them
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(s.url);
-  await expect(page.locator('[data-test=banners] [data-test=folder-ask]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-test=banners] [data-test=folder-ask]').first()).toBeVisible({ timeout: 30_000 });
   return { s, page, ctx, errors };
 }
 const noSideScroll = async (page: import('@playwright/test').Page) =>
@@ -66,6 +66,30 @@ for (const [w, h, theme] of [[1280, 800, 'light'], [1280, 800, 'dark'], [375, 74
   });
 }
 
+// Card 507: the Manager asked for DeveloperAda (askedBy is not member): the card says so, next to the member's own ask.
+for (const [w, h, theme] of [[1280, 800, 'light'], [1280, 800, 'dark'], [375, 740, 'light'], [375, 740, 'dark']] as const) {
+  test(`at ${w}px (${theme}): the Manager's folder ask for a member says the Manager asks, Deny tells the Manager`, async ({ browser }) => {
+    const { s, page, ctx, errors } = await open(browser, 'full', w, h, theme, true);
+    const cards = page.locator('[data-test=banners] [data-test=folder-ask]');
+    await expect(cards).toHaveCount(2);
+    const own = page.locator('[data-test=banners] [data-test=folder-ask][data-id="21"]');
+    const card = page.locator('[data-test=banners] [data-test=folder-ask][data-id="22"]');
+    await expect(own.locator('[data-test=folder-ask-head]')).toContainText('payments / TesterBen asks read-write on Z:\\smokesessions');
+    await expect(own.locator('[data-test=folder-ask-asked-by]')).toHaveCount(0);
+    await expect(card.locator('[data-test=folder-ask-head]')).toHaveText(/^\s*payments \/\s+Manager asks, for DeveloperAda, read-only on Z:\\shared\\fixtures - read the payment fixtures for card 1\s*$/);
+    await expect(card.locator('[data-test=folder-ask-asked-by]')).toHaveAttribute('data-asked-by', 'Manager');
+    await expect(card.locator('.buttons button')).toHaveText(['Approve', 'Deny']);
+    expect(await noSideScroll(page), 'the page never scrolls sideways').toBe(true);
+    if (shots) await card.screenshot({ path: path.join(shots, `b111-manager-ask-${w}-${theme}.png`) });
+
+    await card.locator('[data-test=folder-ask-deny]').click();
+    await expect(page.locator('[data-test=folder-ask-answered]')).toContainText('Denied DeveloperAda read-only on Z:\\shared\\fixtures; the Manager is told.');
+    await expect(cards).toHaveCount(1);
+    expect(s.core.folderAnswers().get(22)).toBe('deny');
+    expect(errors).toEqual([]);
+    await ctx.close();
+  });
+}
 test('a Visitor (read-only) sees the ask with its answers held, and sends nothing', async ({ browser }) => {
   const { s, page, ctx, errors } = await open(browser, 'read', 375, 740, 'light');
   const card = page.locator('[data-test=banners] [data-test=folder-ask]');

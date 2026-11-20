@@ -8,14 +8,14 @@ import FolderAskCard from '../../src/renderer/src/components/FolderAskCard.vue';
 import FolderAsks from '../../src/renderer/src/components/FolderAsks.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
 import BoardView from '../../src/renderer/src/board/BoardView.vue';
-import { folderAskChoices, type FolderAsk } from '../../src/renderer/src/folderAsks';
+import { folderAnswerText, folderAskAskedBy, folderAskChoices, folderAskHeadText, type FolderAsk } from '../../src/renderer/src/folderAsks';
 import { MonitorModel, needYouSummary } from '../../src/renderer/src/monitor/model';
 import type { AgentCard, YawbleApi } from '../../src/shared/api';
 
 /**
  * Card 497 (B111, shell): folder asks - an agent asks for a folder outside its clone - shown wherever network and tool
  * asks show: Needs you (the window's banner, the Board's lane), the member's pane, and the Monitor's You node. Fakes
- * only: no core. The FolderAsk shape is the card's (shell-side folderAsks.ts until card 496's shared/api.ts lands).
+ * only: no core. The FolderAsk shape is shared/api.ts's (card 496), re-exported by folderAsks.ts (card 507).
  */
 
 vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
@@ -27,11 +27,13 @@ vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
   return { ...real, MonitorScene: FakeScene };
 });
 
-const ask = (o: Partial<FolderAsk> = {}): FolderAsk => ({
-  id: 9, team: 'Smoke-sessions', member: 'Smoke-sessions/OperatorClifford', askedBy: 'OperatorClifford', path: 'Z:\\smokesessions',
-  access: 'readwrite', reason: 'write the smoke results next to the recordings', exists: true, state: 'pending', grantedAccess: null,
-  decidedBy: null, decidedAt: null, workflow: 40, choices: null, ...o,
-});
+// The full shared/api.ts shape (card 507: folderAsks.ts re-exports it). reason is null in one case: older/odd data.
+const ask = (o: Partial<Omit<FolderAsk, 'reason' | 'choices'>> & { reason?: string | null; choices?: FolderAsk['choices'] | null } = {}): FolderAsk => ({
+  id: 9, at: '2026-11-19T10:00:00Z', teamId: 1, team: 'Smoke-sessions', memberId: 7, member: 'Smoke-sessions/OperatorClifford', memberName: 'OperatorClifford',
+  askedBy: 'Smoke-sessions/OperatorClifford', path: 'Z:\\smokesessions', access: 'readwrite', reason: 'write the smoke results next to the recordings',
+  exists: true, existedWhenAsked: true, state: 'pending', grantedAccess: null, decidedBy: null, decidedVia: null, decidedAt: null, note: null,
+  workflow: 40, choices: [], ...o,
+} as FolderAsk);
 
 type Call = { method: string; params: any };
 function fakeApi(list: () => FolderAsk[], opts: { fail?: Error; remote?: boolean } = {}) {
@@ -84,6 +86,65 @@ describe('FolderAskCard: what it says', () => {
   });
 });
 
+describe('FolderAskCard: when the Manager asked for the member (card 507)', () => {
+  const managerAsk = (o: Parameters<typeof ask>[0] = {}) => ask({ askedBy: 'Smoke-sessions/Manager', ...o });
+
+  it('says the Manager asks, for the member, the access, the path and the reason', () => {
+    const { api } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: managerAsk(), api } }));
+    expect(w.get('[data-test=folder-ask-head]').text().replace(/\s+/g, ' '))
+      .toBe('Smoke-sessions / Manager asks, for OperatorClifford, read-write on Z:\\smokesessions - write the smoke results next to the recordings');
+    expect(w.get('[data-test=folder-ask-asked-by]').attributes('data-asked-by')).toBe('Manager');
+    expect(w.get('[data-test=folder-ask-member]').text()).toBe('OperatorClifford');
+    expect(folderAskHeadText(managerAsk())).toBe(w.get('[data-test=folder-ask-head]').text().replace(/\s+/g, ' '));
+  });
+
+  it('a Manager with its own name is named, with (Manager); read-only and no reason read the same way', () => {
+    const { api } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: managerAsk({ askedBy: 'Smoke-sessions/Ada', access: 'read', reason: null }), api } }));
+    expect(w.get('[data-test=folder-ask-head]').text().replace(/\s+/g, ' '))
+      .toBe('Smoke-sessions / Ada (Manager) asks, for OperatorClifford, read-only on Z:\\smokesessions');
+  });
+
+  it('the member\'s own ask is unchanged, whether askedBy is "Team/Name", a bare name, another case or missing', () => {
+    const { api } = fakeApi(() => []);
+    const own = 'Smoke-sessions / OperatorClifford asks read-write on Z:\\smokesessions - write the smoke results next to the recordings';
+    for (const askedBy of ['Smoke-sessions/OperatorClifford', 'OperatorClifford', 'smoke-sessions/operatorclifford', '', undefined as unknown as string]) {
+      const w = keep(mount(FolderAskCard, { props: { ask: ask({ askedBy }), api } }));
+      expect(w.get('[data-test=folder-ask-head]').text().replace(/\s+/g, ' ')).toBe(own);
+      expect(w.find('[data-test=folder-ask-asked-by]').exists()).toBe(false);
+      expect(folderAskAskedBy(ask({ askedBy }))).toBeNull();
+    }
+  });
+
+  it('the Manager\'s name is plain text, never HTML', () => {
+    const { api } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: managerAsk({ askedBy: 'Smoke-sessions/<img src=x onerror=alert(1)>' }), api } }));
+    expect(w.find('img').exists()).toBe(false);
+    expect(w.get('[data-test=folder-ask-asked-by]').text()).toBe('<img src=x onerror=alert(1)> (Manager)');
+  });
+
+  it('Deny on a Manager\'s ask says the Manager is told; Approve reads as for the member\'s own', async () => {
+    expect(folderAnswerText(managerAsk(), 'deny')).toBe('Denied OperatorClifford read-write on Z:\\smokesessions; the Manager is told.');
+    expect(folderAnswerText(ask(), 'deny')).toBe('Denied OperatorClifford read-write on Z:\\smokesessions; the agent is told.');
+    expect(folderAnswerText(managerAsk(), 'read')).toBe('Approved read-only for OperatorClifford on Z:\\smokesessions: applies from its next run.');
+    const { api, calls } = fakeApi(() => []);
+    const w = keep(mount(FolderAskCard, { props: { ask: managerAsk(), api } }));
+    await w.get('[data-test=folder-ask-deny]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'folder.answer')!.params).toEqual({ id: 9, choice: 'deny' });
+    expect(w.get('[data-test=folder-ask-done]').text()).toBe('Denied OperatorClifford read-write on Z:\\smokesessions; the Manager is told.');
+  });
+});
+
+describe('folderAsks.ts re-exports the shared/api.ts types (card 507)', () => {
+  it('declares no FolderAsk / FolderAskChoice of its own', () => {
+    const src = readFileSync(resolve(__dirname, '../../src/renderer/src/folderAsks.ts'), 'utf8');
+    expect(src).toContain("export type { FolderAsk, FolderAskChoice } from '../../shared/api';");
+    expect(src).not.toMatch(/export (interface|type) FolderAsk\b\s*[={]/);
+    expect(src).not.toMatch(/export type FolderAskChoice\s*=/);
+  });
+});
 describe('FolderAskCard: the answers', () => {
   it('a read-write ask offers Approve, Approve read-only and Deny', () => {
     const { api } = fakeApi(() => []);
