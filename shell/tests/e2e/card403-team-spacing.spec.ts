@@ -18,7 +18,7 @@ import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore } from './phone/fake-core';
-import { ORIGIN, buildRenderer, builtDir } from './phone/server';
+import { ORIGIN, buildRenderer, builtDir, ensureDir } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(180_000);
@@ -28,7 +28,7 @@ const S89 = path.join(DOCS, 'b089-team-spacing');
 const S90 = path.join(DOCS, 'b090-workflow-nodes');
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  for (const d of [S89, S90]) mkdirSync(path.join(d, 'screens'), { recursive: true });
+  for (const d of [S89, S90]) ensureDir(path.join(d, 'screens'));
   await buildRenderer();
 });
 
