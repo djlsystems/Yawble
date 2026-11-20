@@ -42,6 +42,39 @@ public class GatewayWiringTests
     }
 
     [Fact]
+    public void DeniedConnectsSumsTheFoldedRefusals()
+    {
+        // B105: five CONNECT refusals of one host in a run are one row with Count 5.
+        var one = GatewayVerdicts.From([E(GatewayEventKinds.ConnectDenied, target: "api.anthropic.com:443") with { Count = 5 }]);
+        Assert.Equal(5, one.DeniedConnects);
+        Assert.Equal(["api.anthropic.com:443"], one.DeniedHosts);
+
+        var mix = GatewayVerdicts.From([
+            E(GatewayEventKinds.ConnectDenied, target: "api.anthropic.com:443") with { Count = 5 },
+            E(GatewayEventKinds.Forward, Vhosts.Model, 200) with { Count = 9 }, // other kinds never count
+            E(GatewayEventKinds.ConnectDenied, target: "example.com:443") with { Count = 2 },
+            E(GatewayEventKinds.ConnectDenied, target: "other.example:8443"),
+        ]);
+        Assert.Equal(8, mix.DeniedConnects);
+        Assert.Equal(["api.anthropic.com:443", "example.com:443", "other.example:8443"], mix.DeniedHosts);
+    }
+
+    [Fact]
+    public void DeniedConnectsCountsFoldedRowsWrittenThroughTheGatewayLog()
+    {
+        using var db = new TempDb();
+        db.OpenStore().Dispose(); // the schema
+        var log = new GatewayLog(db.ConnectionString);
+        for (var i = 0; i < 5; i++) log.Write(new GatewayEvent(51, "alpha/dev2", DateTimeOffset.UtcNow, GatewayEventKinds.ConnectDenied, false, Target: "blocked.example:443"));
+        log.Write(new GatewayEvent(51, "alpha/dev2", DateTimeOffset.UtcNow, GatewayEventKinds.ConnectDenied, false, Target: "other.example:443"));
+        var rows = log.Read(51).Where(e => e.Kind == GatewayEventKinds.ConnectDenied).ToList();
+        Assert.Equal(2, rows.Count);
+        var verdict = GatewayVerdicts.From(log.Read(51));
+        Assert.Equal(6, verdict.DeniedConnects);
+        Assert.Equal(["blocked.example:443", "other.example:443"], verdict.DeniedHosts);
+    }
+
+    [Fact]
     public async Task CredentialModesFollowTheCredentialServiceAndTheHostGrokHome()
     {
         await using var f = await GatewayFixture.StartAsync();
