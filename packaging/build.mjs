@@ -205,7 +205,7 @@ const config = {
     // yawble.exe, the installer and the uninstaller carry the Yawble icon (the taskbar and Start show it), not Electron's.
     icon: path.join(shell, 'resources', 'icon.ico'),
     signAndEditExecutable: true,
-    ...(sign
+    ...(signing
       ? {
           // The app's executable, its DLLs and the installer and uninstaller, through the same signing (sign-hook.cjs).
           signtoolOptions: { sign: path.join(here, 'sign-hook.cjs'), signingHashAlgorithms: ['sha256'], publisherName: signing.settings.publisher },
@@ -218,7 +218,7 @@ const config = {
         }),
   },
   nsis: {
-    artifactName: sign ? `${name}.\${ext}` : `${name}-setup.\${ext}`,
+    artifactName: signing ? `${name}.\${ext}` : `${name}-setup.\${ext}`,
     oneClick: false,
     // The person chooses: "Only for me" (the default: %LOCALAPPDATA%\Programs\Yawble, no administrator prompt) or "Anyone
     // who uses this computer" (%ProgramFiles%\Yawble, with Windows' permission prompt). IT deploys silently with
