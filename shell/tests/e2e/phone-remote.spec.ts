@@ -271,14 +271,15 @@ for (const size of PHONES) {
       expect(errors).toEqual([]);
     });
 
-    test('Logs (a dialog as a sheet): the list and an entry', async ({ browser }) => {
+    test('Logs (a page): the list and an entry', async ({ browser }) => {
       const { page, errors } = await open(browser, size, { asks: false });
       await nav(page, 'nav-logs');
-      const sheet = page.locator('.modal, [role=dialog]').first();
+      const sheet = page.locator('[data-test=logs]').first();
       await expect(sheet).toBeVisible();
+      await expect(page.locator('.modal, [role=dialog]')).toHaveCount(0);
       await page.waitForTimeout(600);
       const b = (await sheet.boundingBox())!;
-      expect.soft(Math.round(b.width), 'the dialog is a full-width sheet').toBeGreaterThanOrEqual(size.w - 1);
+      expect.soft(Math.round(b.width), 'the page takes the width (less its padding)').toBeGreaterThanOrEqual(size.w - 40);
       await check(page, 'logs', size);
       const row = page.locator('[data-test=logs-cards] [data-test=logs-row]').first();
       if (await row.count()) {
@@ -388,25 +389,15 @@ for (const size of PHONES) {
       expect.soft(d.maxRight, 'Documents bar controls inside the bar').toBeLessThanOrEqual(d.barRight + 1);
       await check(page, 'reverify2-visitor-documents', size);
       await nav(page, 'nav-logs');
-      await expect(page.locator('.modal, [role=dialog]').first()).toBeVisible();
+      await expect(page.locator('[data-test=logs]').first()).toBeVisible();
       await page.waitForTimeout(600);
-      const l = await barInfo('.modal .bar, [role=dialog] .bar');
+      const l = await barInfo('[data-test=logs] .bar');
       results.push({ screen: 'f7-logs-bar', size: tag(size), audit: l as unknown as Audit });
       expect.soft(parseFloat(l.padR), 'Logs bar padding-right under 150').toBeLessThan(150);
       expect.soft(l.sw, 'Logs bar does not overflow').toBeLessThanOrEqual(l.cw + 1);
       expect.soft(l.maxRight, 'Logs bar controls inside the bar').toBeLessThanOrEqual(l.barRight + 1);
       await check(page, 'reverify2-visitor-logs', size);
-      // A dialog sheet's Close (top right) must not be drawn under the chip (the chip lets taps through, but hides the ✕).
-      const close = await page.evaluate(() => {
-        const c = document.querySelector('[data-test=modal-close]')!.getBoundingClientRect();
-        const chip = document.querySelector('[data-test=remote-access-chip]')!.getBoundingClientRect();
-        const ow = Math.max(0, Math.min(c.right, chip.right) - Math.max(c.left, chip.left)), oh = Math.max(0, Math.min(c.bottom, chip.bottom) - Math.max(c.top, chip.top));
-        return { close: [Math.round(c.left), Math.round(c.top), Math.round(c.width), Math.round(c.height)], chip: [Math.round(chip.left), Math.round(chip.top), Math.round(chip.width), Math.round(chip.height)], coveredPct: Math.round((100 * ow * oh) / (c.width * c.height)) };
-      });
-      results.push({ screen: 'f8-logs-close', size: tag(size), audit: close as unknown as Audit });
-      expect.soft(close.coveredPct, `Logs sheet's Close under the Visitor chip (close ${close.close}, chip ${close.chip})`).toBe(0);
-      await page.locator('[data-test=modal-close]').click();
-      await expect(page.locator('[data-test=modal-close]')).toHaveCount(0);
+      // Logs is a page (no sheet, so no Close for the Visitor chip to cover).
       expect(errors).toEqual([]);
     });
 
@@ -428,9 +419,8 @@ for (const size of PHONES) {
         return { title: h2.textContent!.trim(), padR: getComputedStyle(head).paddingRight, close: [Math.round(c.left), Math.round(c.right), Math.round(c.width), Math.round(c.height)], chip: chip ? [Math.round(chip.left), Math.round(chip.right)] : null,
           closeCoveredPct: cover(c), titleCoveredPct: cover(t), titleW: Math.round(t.width), titleTruncated: h2.scrollWidth > h2.clientWidth + 1, sw: document.documentElement.scrollWidth, iw: innerWidth };
       });
-      // Openers: Logs from the drawer, then each sheet the team page and its first agent card offer (when shown).
+      // Openers: each sheet the team page and its first agent card offer (when shown). The app's Logs is a page.
       const openers: { name: string; go: (page: Page) => Promise<boolean> }[] = [
-        { name: 'logs', go: async (p) => { await nav(p, 'nav-logs'); return true; } },
         ...['open-code', 'open-settings', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
           name: id.replace('open-', 'team-'),
           go: async (p: Page) => {
@@ -604,7 +594,7 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
     'settings-integrations': [tap('[data-test=settings] [data-test=open-integrations]')],
     'settings-system': [tap('[data-test=settings] [data-test=open-system]')],
   };
-  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'], ['nav-logs', 'logs'],
+  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'],
     ['nav-teams', 'team-page'], ['nav-documents', 'documents-folder'], ['open-app-settings', 'settings-skill'], ['open-app-settings', 'settings-guardrails'], ['open-app-settings', 'settings-integrations'], ['open-app-settings', 'settings-system']] as const) {
     test(`${name}: every [data-test] element in the same place and size`, async ({ browser }) => {
       const size = { w: 1280, h: 800 };

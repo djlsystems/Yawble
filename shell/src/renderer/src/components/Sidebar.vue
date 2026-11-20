@@ -15,7 +15,7 @@ import type { MenuItem as MenuBarItem } from './MenuBar.vue';
 // B115: embedded in the cloud page (remote.html?embed=1) this pane is not drawn at all; the same content goes to the cloud as
 // data (embed.ts buildNav, yawble.nav) and the cloud's clicks come back to App.vue's handlers for this pane's emits. A
 // place, a badge or a chat action added here goes into buildNav too (tests/unit/embed.test.ts compares the two).
-export type View = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'settings';
+export type View = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'logs' | 'settings';
 export type MenuItem = 'agents' | 'skills' | 'globalPolicy' | 'integrations' | 'system' | 'link';
 
 defineProps<{
@@ -86,7 +86,7 @@ function finishRename(id: string) {
         <span v-if="p.view === 'teams' && slots?.running" class="rail-badge" title="agents running">{{ slots.running }}</span>
         <span v-else-if="p.view === 'workflows' && openWorkflows" class="rail-badge" data-test="rail-workflows-count" :title="`${openWorkflows} open`">{{ openWorkflows }}</span>
       </button>
-      <button class="rail-btn" title="Logs" data-test="rail-logs" @click="emit('logs')"><Icon name="logs" /></button>
+      <button class="rail-btn" :class="{ on: view === 'logs' }" title="Logs" data-test="rail-logs" @click="emit('logs')"><Icon name="logs" /></button>
     </nav>
   </aside>
   <aside v-else class="side" :class="{ drawer, open: drawer && open }" data-test="sidebar" :data-drawer="drawer ? (open ? 'open' : 'closed') : undefined"
@@ -115,7 +115,7 @@ function finishRename(id: string) {
       <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Kanban board</button>
       <button class="item" :class="{ on: view === 'documents' }" data-test="nav-documents" @click="emit('go', 'documents')"><Icon name="docs" />Documents</button>
       <button class="item" :class="{ on: view === 'monitor' }" data-test="nav-monitor" @click="emit('go', 'monitor')"><Icon name="monitor" />Monitor</button>
-      <button class="item" data-test="nav-logs" @click="emit('logs')"><Icon name="logs" />Logs</button>
+      <button class="item" :class="{ on: view === 'logs' }" data-test="nav-logs" @click="emit('logs')"><Icon name="logs" />Logs</button>
     </nav>
 
     <div class="lists">

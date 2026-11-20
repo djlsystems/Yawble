@@ -155,13 +155,15 @@ describe('parsing the cloud\'s messages', () => {
   it('navigate: every kind, and malformed ones refused', () => {
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'place', id: 'board' } })).toEqual({ kind: 'place', id: 'board' });
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'team', id: 2 } })).toEqual({ kind: 'team', id: 2 });
+    // The cloud keeps every nav id as text: a decimal string is the same team.
+    expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'team', id: '2' } })).toEqual({ kind: 'team', id: 2 });
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'chat', id: 'c1' } })).toEqual({ kind: 'chat', id: 'c1' });
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'newTeam' } })).toEqual({ kind: 'newTeam' });
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'delete' } })).toEqual({ kind: 'chatAction', id: 'c1', action: 'delete' });
     for (const bad of [
       null, 'yawble.navigate', { type: 'yawble.navigate' }, { type: 'yawble.nav', to: { kind: 'newTeam' } },
       { type: 'yawble.navigate', to: { kind: 'place', id: 'settings' } }, { type: 'yawble.navigate', to: { kind: 'place', id: 'kanban' } },
-      { type: 'yawble.navigate', to: { kind: 'team', id: '2' } }, { type: 'yawble.navigate', to: { kind: 'team', id: 1.5 } },
+      { type: 'yawble.navigate', to: { kind: 'team', id: '2x' } }, { type: 'yawble.navigate', to: { kind: 'team', id: 1.5 } },
       { type: 'yawble.navigate', to: { kind: 'chat', id: '' } }, { type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'archive' } },
       { type: 'yawble.navigate', to: { kind: 'open', id: 'x' } },
     ]) expect(parseNavigate(bad)).toBeNull();

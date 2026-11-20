@@ -77,8 +77,8 @@ export function buildNav(s: EmbedNavState): EmbedNav {
     if (id === 'workflows') return s.openWorkflows || null;
     return null;
   };
-  // New chat and Logs open something rather than show a place: never highlighted, as in the sidebar.
-  const activeOf = (id: EmbedPlaceId) => id !== 'newChat' && id !== 'logs' && s.view === id;
+  // New chat opens something rather than show a place: never highlighted, as in the sidebar.
+  const activeOf = (id: EmbedPlaceId) => id !== 'newChat' && s.view === id;
   return {
     places: PLACES.map((p) => ({ ...p, badge: badgeOf(p.id), active: activeOf(p.id), disabled: false })),
     teams: s.teams.map((t) => ({
@@ -133,7 +133,11 @@ export function parseNavigate(data: unknown): EmbedNavigateTarget | null {
   if (!to || typeof to !== 'object') return null;
   switch (to.kind) {
     case 'place': return typeof to.id === 'string' && PLACE_SET.has(to.id) ? { kind: 'place', id: to.id as EmbedPlaceId } : null;
-    case 'team': return typeof to.id === 'number' && Number.isInteger(to.id) ? { kind: 'team', id: to.id } : null;
+    case 'team': {
+      // A number, or its decimal string (a parent that keeps every id as text).
+      const id = typeof to.id === 'string' && /^\d+$/.test(to.id) ? Number(to.id) : to.id;
+      return typeof id === 'number' && Number.isInteger(id) ? { kind: 'team', id } : null;
+    }
     case 'chat': return typeof to.id === 'string' && to.id ? { kind: 'chat', id: to.id } : null;
     case 'newTeam': return { kind: 'newTeam' };
     case 'chatAction':

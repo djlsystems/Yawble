@@ -292,7 +292,7 @@ The event carries the sections that changed, each in full:
   entries only; a team filter takes its members' entries and its `<Team>` entries. `logs.query {source: "activity"}`
   takes the same `team`, `member` and `app: true`, and `logs.sources` says which source offers `app`.
 - Each entry that passes the filter is pushed as the event `logs.tailEntry`, carrying one entry. `logs.query` rows
-  and `logs.tailEntry` entries are redacted the same way, by the same code as the window's Logs dialog: known secrets
+  and `logs.tailEntry` entries are redacted the same way, by the same code as the window's Logs page: known secrets
   and token-shaped text become `[redacted]`.
 - The filtering happens on the computer. Nothing is kept for the cloud beyond the logs the app already keeps, and with
   no viewer tailing nothing is done.

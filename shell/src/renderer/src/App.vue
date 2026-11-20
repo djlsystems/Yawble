@@ -106,7 +106,6 @@ const customAgents = ref<{ name: string; baseCli: string }[]>([]);
 /** Whether the agent CLIs have been looked for yet. */
 const agentsLoaded = ref(false);
 /** Logs (sidebar): every log the app keeps, in one dialog. */
-const logsOpen = ref(false);
 /** The update line (Help > Check for updates asks it to check now). */
 const updateBanner = ref<InstanceType<typeof UpdateBanner> | null>(null);
 const error = ref<string | null>(null);
@@ -157,6 +156,7 @@ const title = computed(() => {
   if (view.value === 'documents') return 'Documents';
   if (view.value === 'backlog') return 'Backlog';
   if (view.value === 'workflows') return 'Workflows';
+  if (view.value === 'logs') return 'Logs';
   return view.value === 'board' ? 'Kanban board' : view.value === 'settings' ? 'Settings' : 'Monitor';
 });
 
@@ -458,7 +458,6 @@ function command(id: string) {
   if (id.startsWith('go:')) {
     const place = id.slice(3);
     if (place === 'settings-agents') { menu('agents'); return; }
-    if (place === 'logs') { logsOpen.value = true; return; }
     go(place as View);
     return;
   }
@@ -524,7 +523,7 @@ if (embed) {
       state: embedState,
       handlers: {
         newChat, go, openTeam: (id) => openTeam(id), openConversation, rename, remove,
-        logs: () => { logsOpen.value = true; },
+        logs: () => go('logs'),
         newTeam: () => { dialog.value = 'newTeam'; },
       },
       dialogs: { askTitle: askEmbedTitle },
@@ -544,7 +543,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
       @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
-      @logs="drawerOpen = false; logsOpen = true" :open-team-name="openTeamName" :open-workflows="openWorkflows" @team-documents="openTeamDialog('documents')" @team-workflows="openTeamDialog('workflows')" />
+      @logs="drawerOpen = false; go('logs')" :open-team-name="openTeamName" :open-workflows="openWorkflows" @team-documents="openTeamDialog('documents')" @team-workflows="openTeamDialog('workflows')" />
 
     <main class="main">
       <header class="bar">
@@ -585,7 +584,6 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <!-- Folders outside a clone agents asked for (B111): Approve / Deny, in a remote view too; on the Board, its Needs You lane. -->
       <FolderAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
       </div>
-      <LogsDialog v-if="logsOpen" :api="api" @close="logsOpen = false" />
 
       <div class="content">
       <div class="place">
@@ -604,6 +602,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
         </section>
 
         <DocumentsView v-else-if="view === 'documents'" :teams="teams" :archived="archivedTeams" :api="api" :loading="!overview && !error" />
+        <LogsDialog v-else-if="view === 'logs'" page :api="api" />
         <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" @open-terminal="openMemberTerminal"
           @open-needs-you="focusTeamId = null; go('board')" />
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />

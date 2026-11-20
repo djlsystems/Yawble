@@ -222,7 +222,7 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
     test('other Modal sheets: Close 44x44, shown, 18 px glyph, title not clipped, Close closes', async ({ browser }) => {
       const { page, ctx, errors } = await openTeam(browser, w, h);
       const seen: Record<string, unknown> = {};
-      for (const id of ['open-manage', 'open-triggers', 'open-git', 'drawer-team-documents', 'drawer-team-workflows', 'nav-logs']) {
+      for (const id of ['open-manage', 'open-triggers', 'open-git', 'drawer-team-documents', 'drawer-team-workflows']) { // Logs is a page, not a sheet
         if (id.startsWith('drawer-') || id.startsWith('nav-')) {
           await page.goto(page.url().replace(/#.*/, '#team=1'));
           await expect(page.locator('[data-test=team-title]')).toBeVisible();

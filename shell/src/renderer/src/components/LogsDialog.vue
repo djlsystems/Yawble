@@ -14,7 +14,8 @@ import { useNarrow } from '../narrowScreen';
  * each log is kept. A cloud viewer reads only. Opened from the sidebar, or from a member's card already filtered to
  * that member's activity.
  */
-const props = defineProps<{ api: YawbleApi; source?: string; team?: string; member?: string }>();
+// `page`: drawn as the app's Logs place (inline, filling it) instead of a dialog; a member's logs stay a dialog.
+const props = defineProps<{ api: YawbleApi; source?: string; team?: string; member?: string; page?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 /** A phone (B037): each entry is a card of its columns' values (tap for them in full), sorted with a select. */
@@ -281,8 +282,8 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 </script>
 
 <template>
-  <Modal title="Logs" full @close="emit('close')">
-    <div class="logs" data-test="logs">
+  <component :is="page ? 'section' : Modal" v-bind="page ? { class: 'logs-page', 'aria-label': 'Logs' } : { title: 'Logs', full: true }" @close="emit('close')">
+    <div class="logs" :class="{ page }" data-test="logs">
       <div class="bar">
         <label class="source">Log
           <select v-model="sourceId" data-test="logs-source">
@@ -451,11 +452,13 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
         <button v-else-if="next !== null" type="button" class="mini more" data-test="logs-more" @click="more">Load more</button>
       </div>
     </div>
-  </Modal>
+  </component>
 </template>
 
 <style scoped>
 .logs { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; gap: 8px; }
+.logs-page { flex: 1 1 0; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.logs.page { padding: 12px 16px; }
 .bar, .filters, .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .bar .source select { margin-left: 6px; min-width: 200px; }
 .bar .search { min-width: 200px; }

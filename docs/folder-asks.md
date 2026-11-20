@@ -123,4 +123,4 @@ The org summary (`org.summary`) counts them as `needsYou.folderRequests` (per te
 - A member removed from its team has its waiting asks closed (`closed`); a team deleted has its asks deleted.
 - Role texts (member.md, manager.md) and the tool's description: "ask with request_folder; never ask the person to
   edit policy by hand".
-- Not done here: the Logs dialog's Approvals log and `workflow_digest` do not list folder asks yet.
+- Not done here: the Logs page's Approvals log and `workflow_digest` do not list folder asks yet.

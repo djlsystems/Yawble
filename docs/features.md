@@ -504,8 +504,8 @@ provisional signal, and the only source for reads.
 
 ## Logs
 
-**Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. **Logs** in the ☰ menu of
-a member's pane opens it at that member's activity.
+**Logs** (in the sidebar under Monitor) is a page that shows every log the app keeps, one at a time, as a table. **Logs** in
+the ☰ menu of a member's pane opens the same table as a dialog, at that member's activity.
 
 - **Logs:**
   - **All activity**: everything that happened, by members, teams and the app, gathered from every log below, with
@@ -546,7 +546,7 @@ a member's pane opens it at that member's activity.
   are built from them.
 - **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
-- Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs dialog, `logs.query` over the Cloud Link and the live tail all use the
+- Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs page, `logs.query` over the Cloud Link and the live tail all use the
   same redaction, so a row reads the same everywhere.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
 - A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
