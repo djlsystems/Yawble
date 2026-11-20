@@ -10,8 +10,8 @@
         "Eve has 1 pending delivery in this workflow"
       ],
       "ending": null,
-      "startedAt": "2026-11-19T03:31:47.6134032\u002B00:00",
-      "lastAt": "2026-11-19T03:31:47.6134032\u002B00:00",
+      "startedAt": "2026-11-20T01:23:33.6344834\u002B00:00",
+      "lastAt": "2026-11-20T01:23:33.6344834\u002B00:00",
       "messages": 1,
       "endedAt": null,
       "expiredAt": null,
@@ -19,17 +19,17 @@
       "expiryWarning": null,
       "question": null,
       "time": {
-        "createdAt": "2026-11-19T03:31:47.6134032\u002B00:00",
-        "startedAt": "2026-11-19T03:31:47.6134032\u002B00:00",
+        "createdAt": "2026-11-20T01:23:33.6344834\u002B00:00",
+        "startedAt": "2026-11-20T01:23:33.6344834\u002B00:00",
         "endedAt": null,
         "endedHow": null,
         "open": true,
-        "overallMs": 204,
+        "overallMs": 237,
         "rebuilt": false,
         "breakdown": [
           {
             "category": "waiting-for-slot",
-            "ms": 204
+            "ms": 237
           }
         ]
       },
@@ -58,8 +58,8 @@
         "Dee is running"
       ],
       "ending": null,
-      "startedAt": "2026-11-19T03:31:47.3622645\u002B00:00",
-      "lastAt": "2026-11-19T03:31:47.3702312\u002B00:00",
+      "startedAt": "2026-11-20T01:23:33.3492527\u002B00:00",
+      "lastAt": "2026-11-20T01:23:33.3579276\u002B00:00",
       "messages": 2,
       "endedAt": null,
       "expiredAt": null,
@@ -67,12 +67,12 @@
       "expiryWarning": null,
       "question": 16,
       "time": {
-        "createdAt": "2026-11-19T03:31:47.3622645\u002B00:00",
-        "startedAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+        "createdAt": "2026-11-20T01:23:33.3492527\u002B00:00",
+        "startedAt": "2026-11-20T01:23:33.3492527\u002B00:00",
         "endedAt": null,
         "endedHow": null,
         "open": true,
-        "overallMs": 455,
+        "overallMs": 522,
         "rebuilt": false,
         "breakdown": [
           {
@@ -81,7 +81,7 @@
           },
           {
             "category": "waiting-on-you",
-            "ms": 447
+            "ms": 514
           },
           {
             "category": "waiting-for-slot",
@@ -114,8 +114,8 @@
         "Cy is running"
       ],
       "ending": null,
-      "startedAt": "2026-11-19T03:31:47.3387559\u002B00:00",
-      "lastAt": "2026-11-19T03:31:47.3387559\u002B00:00",
+      "startedAt": "2026-11-20T01:23:33.3264638\u002B00:00",
+      "lastAt": "2026-11-20T01:23:33.3264638\u002B00:00",
       "messages": 1,
       "endedAt": null,
       "expiredAt": null,
@@ -123,21 +123,21 @@
       "expiryWarning": null,
       "question": null,
       "time": {
-        "createdAt": "2026-11-19T03:31:47.3387559\u002B00:00",
-        "startedAt": "2026-11-19T03:31:47.3387559\u002B00:00",
+        "createdAt": "2026-11-20T01:23:33.3264638\u002B00:00",
+        "startedAt": "2026-11-20T01:23:33.3264638\u002B00:00",
         "endedAt": null,
         "endedHow": null,
         "open": true,
-        "overallMs": 479,
+        "overallMs": 545,
         "rebuilt": false,
         "breakdown": [
           {
             "category": "agent-working",
-            "ms": 473
+            "ms": 2
           },
           {
             "category": "waiting-for-slot",
-            "ms": 6
+            "ms": 543
           }
         ]
       },
@@ -157,7 +157,7 @@
       ]
     },
     {
-      "id": 9,
+      "id": 8,
       "title": "lead it",
       "owner": "Manager",
       "state": "open",
@@ -168,8 +168,8 @@
         "Ben has 1 pending delivery in this workflow"
       ],
       "ending": null,
-      "startedAt": "2026-11-19T03:31:47.2922745\u002B00:00",
-      "lastAt": "2026-11-19T03:31:47.3276465\u002B00:00",
+      "startedAt": "2026-11-20T01:23:33.2810694\u002B00:00",
+      "lastAt": "2026-11-20T01:23:33.3212241\u002B00:00",
       "messages": 3,
       "endedAt": null,
       "expiredAt": null,
@@ -177,21 +177,21 @@
       "expiryWarning": null,
       "question": null,
       "time": {
-        "createdAt": "2026-11-19T03:31:47.2922745\u002B00:00",
-        "startedAt": "2026-11-19T03:31:47.2922745\u002B00:00",
+        "createdAt": "2026-11-20T01:23:33.2810694\u002B00:00",
+        "startedAt": "2026-11-20T01:23:33.2810694\u002B00:00",
         "endedAt": null,
         "endedHow": null,
         "open": true,
-        "overallMs": 525,
+        "overallMs": 590,
         "rebuilt": false,
         "breakdown": [
           {
             "category": "agent-working",
-            "ms": 507
+            "ms": 575
           },
           {
             "category": "waiting-for-slot",
-            "ms": 18
+            "ms": 15
           }
         ]
       },
@@ -232,5 +232,5 @@
   },
   "truncated": false,
   "backlog": true,
-  "now": "2026-11-19T03:31:47.8171833\u002B00:00"
+  "now": "2026-11-20T01:23:33.8715563\u002B00:00"
 }

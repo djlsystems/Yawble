@@ -7,23 +7,28 @@
     "undeclared": false,
     "busy": [],
     "ending": "Not now",
-    "startedAt": "2026-11-19T03:31:47.2520654\u002B00:00",
-    "lastAt": "2026-11-19T03:31:47.2884889\u002B00:00",
+    "startedAt": "2026-11-20T01:23:33.226635\u002B00:00",
+    "lastAt": "2026-11-20T01:23:33.2780216\u002B00:00",
     "messages": 3,
-    "endedAt": "2026-11-19T03:31:47.252873\u002B00:00",
+    "endedAt": "2026-11-20T01:23:33.2280085\u002B00:00",
     "expiredAt": null,
     "expiresAt": null,
     "expiryWarning": null,
     "question": null,
     "time": {
-      "createdAt": "2026-11-19T03:31:47.2520654\u002B00:00",
+      "createdAt": "2026-11-20T01:23:33.2266350\u002B00:00",
       "startedAt": null,
-      "endedAt": "2026-11-19T03:31:47.2520000\u002B00:00",
+      "endedAt": "2026-11-20T01:23:33.2280000\u002B00:00",
       "endedHow": "closed",
       "open": false,
-      "overallMs": 0,
+      "overallMs": 2,
       "rebuilt": false,
-      "breakdown": []
+      "breakdown": [
+        {
+          "category": "idle",
+          "ms": 2
+        }
+      ]
     },
     "ownerId": 4,
     "team": "Cloud",
@@ -42,7 +47,7 @@
   "messages": [
     {
       "seq": 7,
-      "at": "2026-11-19T03:31:47.2884889\u002B00:00",
+      "at": "2026-11-20T01:23:33.2780216\u002B00:00",
       "kind": "completed",
       "from": "Manager",
       "member": "Manager",
@@ -50,7 +55,7 @@
     },
     {
       "seq": 4,
-      "at": "2026-11-19T03:31:47.2528730\u002B00:00",
+      "at": "2026-11-20T01:23:33.2280085\u002B00:00",
       "kind": "closed",
       "from": "person",
       "member": null,
@@ -58,7 +63,7 @@
     },
     {
       "seq": 3,
-      "at": "2026-11-19T03:31:47.2520654\u002B00:00",
+      "at": "2026-11-20T01:23:33.2266350\u002B00:00",
       "kind": "instruction",
       "from": "person",
       "member": "Manager",
