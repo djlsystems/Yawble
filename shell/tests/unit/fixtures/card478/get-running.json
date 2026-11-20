@@ -1,6 +1,6 @@
 {
   "workflow": {
-    "id": 9,
+    "id": 8,
     "title": "lead it",
     "owner": "Manager",
     "state": "open",
@@ -11,8 +11,8 @@
       "Ben has 1 pending delivery in this workflow"
     ],
     "ending": null,
-    "startedAt": "2026-11-19T03:31:47.2922745\u002B00:00",
-    "lastAt": "2026-11-19T03:31:47.3276465\u002B00:00",
+    "startedAt": "2026-11-20T01:23:33.2810694\u002B00:00",
+    "lastAt": "2026-11-20T01:23:33.3212241\u002B00:00",
     "messages": 3,
     "endedAt": null,
     "expiredAt": null,
@@ -20,21 +20,21 @@
     "expiryWarning": null,
     "question": null,
     "time": {
-      "createdAt": "2026-11-19T03:31:47.2922745\u002B00:00",
-      "startedAt": "2026-11-19T03:31:47.2922745\u002B00:00",
+      "createdAt": "2026-11-20T01:23:33.2810694\u002B00:00",
+      "startedAt": "2026-11-20T01:23:33.2810694\u002B00:00",
       "endedAt": null,
       "endedHow": null,
       "open": true,
-      "overallMs": 466,
+      "overallMs": 518,
       "rebuilt": false,
       "breakdown": [
         {
           "category": "agent-working",
-          "ms": 448
+          "ms": 503
         },
         {
           "category": "waiting-for-slot",
-          "ms": 18
+          "ms": 15
         }
       ]
     },
@@ -66,21 +66,21 @@
       "member": "Ben",
       "status": "queued",
       "time": {
-        "createdAt": "2026-11-19T03:31:47.3207916\u002B00:00",
-        "startedAt": "2026-11-19T03:31:47.3207916\u002B00:00",
+        "createdAt": "2026-11-20T01:23:33.3126697\u002B00:00",
+        "startedAt": "2026-11-20T01:23:33.3126697\u002B00:00",
         "endedAt": null,
         "endedHow": null,
         "open": true,
-        "overallMs": 447,
+        "overallMs": 499,
         "rebuilt": false,
         "breakdown": [
           {
             "category": "agent-working",
-            "ms": 441
+            "ms": 2
           },
           {
             "category": "waiting-for-slot",
-            "ms": 6
+            "ms": 497
           }
         ]
       }
@@ -92,21 +92,21 @@
       "member": "Manager",
       "status": "running",
       "time": {
-        "createdAt": "2026-11-19T03:31:47.2922745\u002B00:00",
-        "startedAt": "2026-11-19T03:31:47.2922745\u002B00:00",
+        "createdAt": "2026-11-20T01:23:33.2810694\u002B00:00",
+        "startedAt": "2026-11-20T01:23:33.2810694\u002B00:00",
         "endedAt": null,
         "endedHow": null,
         "open": true,
-        "overallMs": 475,
+        "overallMs": 530,
         "rebuilt": false,
         "breakdown": [
           {
             "category": "agent-working",
-            "ms": 457
+            "ms": 515
           },
           {
             "category": "waiting-for-slot",
-            "ms": 18
+            "ms": 15
           }
         ]
       }
@@ -115,7 +115,7 @@
   "messages": [
     {
       "seq": 13,
-      "at": "2026-11-19T03:31:47.3276465\u002B00:00",
+      "at": "2026-11-20T01:23:33.3212241\u002B00:00",
       "kind": "progress",
       "from": "Manager",
       "member": "Manager",
@@ -123,15 +123,15 @@
     },
     {
       "seq": 12,
-      "at": "2026-11-19T03:31:47.3207916\u002B00:00",
+      "at": "2026-11-20T01:23:33.3126697\u002B00:00",
       "kind": "instruction",
       "from": "Manager",
       "member": "Ben",
       "text": "Card 1: build the page"
     },
     {
-      "seq": 9,
-      "at": "2026-11-19T03:31:47.2922745\u002B00:00",
+      "seq": 8,
+      "at": "2026-11-20T01:23:33.2810694\u002B00:00",
       "kind": "instruction",
       "from": "person",
       "member": "Manager",

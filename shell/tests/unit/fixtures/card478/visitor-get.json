@@ -7,26 +7,26 @@
     "undeclared": true,
     "busy": [],
     "ending": null,
-    "startedAt": "2026-11-19T03:31:48.8571961\u002B00:00",
-    "lastAt": "2026-11-19T03:31:48.8571961\u002B00:00",
+    "startedAt": "2026-11-20T01:23:35.001337\u002B00:00",
+    "lastAt": "2026-11-20T01:23:35.001337\u002B00:00",
     "messages": 1,
     "endedAt": null,
     "expiredAt": null,
-    "expiresAt": "2026-11-22T03:31:48.8571961\u002B00:00",
+    "expiresAt": "2026-11-23T01:23:35.001337\u002B00:00",
     "expiryWarning": null,
     "question": null,
     "time": {
-      "createdAt": "2026-11-19T03:31:48.8571961\u002B00:00",
-      "startedAt": "2026-11-19T03:31:48.8571961\u002B00:00",
+      "createdAt": "2026-11-20T01:23:35.0013370\u002B00:00",
+      "startedAt": "2026-11-20T01:23:35.0013370\u002B00:00",
       "endedAt": null,
       "endedHow": null,
       "open": true,
-      "overallMs": 37,
+      "overallMs": 49,
       "rebuilt": false,
       "breakdown": [
         {
           "category": "waiting-for-slot",
-          "ms": 37
+          "ms": 49
         }
       ]
     },
@@ -51,17 +51,17 @@
       "member": "Ada",
       "status": "queued",
       "time": {
-        "createdAt": "2026-11-19T03:31:48.8571961\u002B00:00",
-        "startedAt": "2026-11-19T03:31:48.8571961\u002B00:00",
+        "createdAt": "2026-11-20T01:23:35.0013370\u002B00:00",
+        "startedAt": "2026-11-20T01:23:35.0013370\u002B00:00",
         "endedAt": null,
         "endedHow": null,
         "open": true,
-        "overallMs": 47,
+        "overallMs": 58,
         "rebuilt": false,
         "breakdown": [
           {
             "category": "waiting-for-slot",
-            "ms": 47
+            "ms": 58
           }
         ]
       }
@@ -70,7 +70,7 @@
   "messages": [
     {
       "seq": 1,
-      "at": "2026-11-19T03:31:48.8571961\u002B00:00",
+      "at": "2026-11-20T01:23:35.0013370\u002B00:00",
       "kind": "instruction",
       "from": "person",
       "member": "Ada",
