@@ -3,7 +3,7 @@ import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
 import { skillLink } from './skillLink';
 import WorkflowsDialog from './components/WorkflowsDialog.vue';
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { AgentProfileRow, ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary, WorkflowSummary } from '../../shared/api';
 import { errorText, resolveApi } from './api';
 import { cliLabel } from './agentClis';
@@ -50,12 +50,18 @@ import { installTapTitles, usePhone } from './phone';
 import { pushEscape } from './escapeClose';
 import { findWorkflowTeam, parseRemoteHash } from './remoteHash';
 import { loadConciergeDefault, newChatAgent, savedConciergeAgent } from './conciergeDefault';
+import { isEmbed, startEmbedBridge, type EmbedNavState } from './embed';
+import { readOnly } from './remoteAccess';
+import EmbedRenameDialog from './components/EmbedRenameDialog.vue';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
 // Concierge is home: a chat with an agent that knows every team. The same screens run in a browser through the
 // Cloud Link (remote.html), where the computer-only parts are hidden.
 const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
 const api = resolveApi(props.api);
+/** B115: the remote view embedded in the cloud page (?embed=1): no sidebar and no theme switch; the cloud draws the
+ *  sidebar from yawble.nav and sends yawble.navigate / yawble.theme back (embed.ts, the bridge started below). */
+const embed = isEmbed();
 
 // ---- where the person is ----
 // A fresh start opens a new message to the Concierge. The screen the person is on is kept in sessionStorage, which a
@@ -418,13 +424,16 @@ const menus = computed<Menu[]>(() => [
   ] }] : []),
   { label: 'View', items: [
     { id: 'terminal', label: 'Terminal', keys: `${mod}\``, checked: terminalPane.open },
-    { id: 'sidebar', label: 'Sidebar', keys: `${mod}B`, checked: !collapsed.value },
-    { separator: true },
-    // The theme (theme.ts): the three modes as a radio, and the title-bar button's flip as a command.
-    { id: 'theme:system', label: 'Theme: Use system setting', radio: true, checked: theme.state.mode === 'system' },
-    { id: 'theme:light', label: 'Theme: Light', radio: true, checked: theme.state.mode === 'light' },
-    { id: 'theme:dark', label: 'Theme: Dark', radio: true, checked: theme.state.mode === 'dark' },
-    { id: 'toggleTheme', label: 'Toggle theme' },
+    // Embedded (B115): the cloud page has the sidebar and the theme, so neither is offered here.
+    ...(embed ? [] : [
+      { id: 'sidebar', label: 'Sidebar', keys: `${mod}B`, checked: !collapsed.value },
+      { separator: true } as const,
+      // The theme (theme.ts): the three modes as a radio, and the title-bar button's flip as a command.
+      { id: 'theme:system', label: 'Theme: Use system setting', radio: true, checked: theme.state.mode === 'system' },
+      { id: 'theme:light', label: 'Theme: Light', radio: true, checked: theme.state.mode === 'light' },
+      { id: 'theme:dark', label: 'Theme: Dark', radio: true, checked: theme.state.mode === 'dark' },
+      { id: 'toggleTheme', label: 'Toggle theme' },
+    ]),
     { separator: true },
     { id: 'go:concierge', label: 'Concierge' }, { id: 'go:teams', label: 'Teams' }, { id: 'go:backlog', label: 'Backlog' }, { id: 'go:workflows', label: 'Workflows' },
     { id: 'go:board', label: 'Kanban board' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
@@ -443,6 +452,8 @@ const menus = computed<Menu[]>(() => [
 ]);
 
 function command(id: string) {
+  // Embedded: no sidebar to fold or open (Ctrl+B) and no theme of its own (the cloud's yawble.theme sets it).
+  if (embed && (id === 'sidebar' || id === 'toggleTheme' || id.startsWith('theme:'))) return;
   if (id !== 'sidebar') drawerOpen.value = false;
   if (id.startsWith('go:')) {
     const place = id.slice(3);
@@ -489,13 +500,47 @@ function shortcut(e: KeyboardEvent) {
   command(id);
 }
 window.addEventListener('keydown', shortcut);
+
+// ---- B115: embedded in the cloud page. The bridge publishes what the sidebar would draw (yawble.ready, then yawble.nav
+// on load and on every change) and follows the parent's yawble.navigate through the sidebar's own handlers below, and its
+// yawble.theme through theme.ts, which keeps nothing in embed mode (pageThemeEnv).
+// shallowRef: resolve compares the request itself (a ref would hold a proxy of it, never === r, and the dialog stayed open).
+const embedRename = shallowRef<{ title: string; resolve: (t: string | null) => void } | null>(null);
+function askEmbedTitle(current: string): Promise<string | null> {
+  embedRename.value?.resolve(null);
+  return new Promise((resolve) => {
+    const r = { title: current, resolve: (t: string | null) => { if (embedRename.value === r) embedRename.value = null; resolve(t); } };
+    embedRename.value = r;
+  });
+}
+const embedState = (): EmbedNavState => ({
+  view: view.value, conversations: conversations.value, teams: teams.value, conversationId: conversationId.value, teamId: selected.value,
+  slots: overview.value?.slots ?? null, readOnly: readOnly.value, removing: removingChat.value, openWorkflows: openWorkflows.value,
+});
+if (embed) {
+  let bridge: { dispose(): void } | null = null;
+  onMounted(() => {
+    bridge = startEmbedBridge({
+      state: embedState,
+      handlers: {
+        newChat, go, openTeam: (id) => openTeam(id), openConversation, rename, remove,
+        logs: () => { logsOpen.value = true; },
+        newTeam: () => { dialog.value = 'newTeam'; },
+      },
+      dialogs: { askTitle: askEmbedTitle },
+      applyTheme: (t) => theme.setMode(t),
+    });
+  });
+  onBeforeUnmount(() => { bridge?.dispose(); embedRename.value?.resolve(null); });
+}
 watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settings' && tBefore === 'agents' && (v !== 'settings' || t !== 'agents')) void loadAgents(); });
 </script>
 
 <template>
-  <div class="app" :class="{ collapsed: collapsed && !phone, 'own-bar': ownBar, mac, phone, 'drawer-open': phone && drawerOpen }">
-    <div v-if="phone && drawerOpen" class="scrim" data-test="drawer-scrim" @click="drawerOpen = false" />
-    <Sidebar id="app-drawer" :rail="collapsed && !phone" :drawer="phone" :open="drawerOpen" :menu="drawerMenu" @command="command":view="view" :conversations="conversations" :teams="teams" :conversation-id="conversationId"
+  <div class="app" :class="{ collapsed: collapsed && !phone && !embed, 'own-bar': ownBar, mac, phone, embed, 'drawer-open': phone && drawerOpen && !embed }" :data-embed="embed ? '1' : undefined">
+    <div v-if="phone && drawerOpen && !embed" class="scrim" data-test="drawer-scrim" @click="drawerOpen = false" />
+    <!-- Embedded in the cloud page (B115): no sidebar at all, wide or phone; the cloud draws it from yawble.nav. -->
+    <Sidebar v-if="!embed" id="app-drawer":rail="collapsed && !phone" :drawer="phone" :open="drawerOpen" :menu="drawerMenu" @command="command":view="view" :conversations="conversations" :teams="teams" :conversation-id="conversationId"
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
       @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
@@ -503,7 +548,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 
     <main class="main">
       <header class="bar">
-        <button v-if="phone" class="ghost icon-btn menu-btn" data-test="drawer-toggle" :aria-label="drawerOpen ? 'Close the menu' : 'Open the menu'" title="Menu"
+        <button v-if="phone && !embed" class="ghost icon-btn menu-btn" data-test="drawer-toggle" :aria-label="drawerOpen ? 'Close the menu' : 'Open the menu'" title="Menu"
           :aria-expanded="drawerOpen" aria-controls="app-drawer" @click="drawerOpen = !drawerOpen">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
         </button>
@@ -517,7 +562,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           <span class="cdot" />
           <span v-if="link?.state === 'connected' && link.viewers.length" class="cnum" data-test="cloud-link-viewers">{{ link.viewers.length }}</span>
         </button>
-        <ThemeToggle />
+        <!-- Embedded (B115): the cloud page's theme is shown (yawble.theme), so there is no switch here; the gear stays. -->
+        <ThemeToggle v-if="!embed" />
         <!-- B115: Settings is this gear at the top right, just right of the theme switch (desktop window, remote view, phone). -->
         <button class="ghost gear" :class="{ on: view === 'settings' }" type="button" data-testid="settings-gear" data-test="settings-gear" title="Settings" aria-label="Settings"
           :aria-current="view === 'settings' ? 'page' : undefined" @click="go('settings')"><Icon name="settings" :size="18" /></button>
@@ -584,6 +630,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
     <CommitDialog :api="api" />
     <CommitChooser />
     <ConfirmDialog />
+    <EmbedRenameDialog v-if="embedRename" :title="embedRename.title" @done="embedRename.resolve($event)" />
   </div>
 </template>
 
@@ -636,6 +683,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 /* ---- a phone (below 760 px; phone.ts): one column, a slim top bar with the menu button, the sidebar a drawer over the
    page (Sidebar.vue) with a scrim behind it. dvh: the height a phone browser really shows, its own bars left out. */
 .app.phone { grid-template-columns: minmax(0, 1fr); height: 100dvh; }
+/* Embedded in the cloud page (B115): no sidebar column, the screens take the full width. */
+.app.embed { grid-template-columns: minmax(0, 1fr); }
 .phone .bar { gap: 2px; min-height: 52px;
   padding: calc(4px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) 4px calc(4px + env(safe-area-inset-left, 0px)); }
 .own-bar.phone .bar { height: auto; }

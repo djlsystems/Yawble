@@ -12,6 +12,9 @@ import type { MenuItem as MenuBarItem } from './MenuBar.vue';
 
 // The app's left pane, like the chat apps people know: New chat, the places (Concierge, Teams, and what comes next),
 // the teams, and the person's chats with the Concierge; the run slots at the bottom. Settings is the gear at the top right (App.vue).
+// B115: embedded in the cloud page (remote.html?embed=1) this pane is not drawn at all; the same content goes to the cloud as
+// data (embed.ts buildNav, yawble.nav) and the cloud's clicks come back to App.vue's handlers for this pane's emits. A
+// place, a badge or a chat action added here goes into buildNav too (tests/unit/embed.test.ts compares the two).
 export type View = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'settings';
 export type MenuItem = 'agents' | 'skills' | 'globalPolicy' | 'integrations' | 'system' | 'link';
 

@@ -197,6 +197,8 @@ export interface EmbedBridgeOptions {
   win?: Pick<Window, 'addEventListener' | 'removeEventListener' | 'parent' | 'location'>;
   /** Where a theme is shown (default <html>). */
   root?: HTMLElement;
+  /** Shows a theme the parent sent (App.vue: theme.ts setMode, which keeps nothing in embed mode); default applyEmbedTheme. */
+  applyTheme?: (theme: EmbedTheme) => void;
 }
 
 export interface EmbedBridge {
@@ -216,7 +218,7 @@ export function startEmbedBridge(o: EmbedBridgeOptions): EmbedBridge {
   const win = o.win ?? window;
   const root = o.root ?? (typeof document !== 'undefined' ? document.documentElement : undefined);
   const queryTheme = embedThemeFromQuery(win.location.search);
-  if (queryTheme) applyEmbedTheme(queryTheme, root);
+  if (queryTheme) { if (o.applyTheme) o.applyTheme(queryTheme); else applyEmbedTheme(queryTheme, root); }
   const parent = win.parent;
   if (!parent || parent === (win as unknown)) return { dispose() { /* not framed */ } };
   const origin = win.location.origin;
@@ -226,7 +228,7 @@ export function startEmbedBridge(o: EmbedBridgeOptions): EmbedBridge {
     const m = e as MessageEvent;
     if (m.origin !== origin || m.source !== parent) return;
     const theme = parseTheme(m.data);
-    if (theme) { applyEmbedTheme(theme, root); return; }
+    if (theme) { if (o.applyTheme) o.applyTheme(theme); else applyEmbedTheme(theme, root); return; }
     const to = parseNavigate(m.data);
     if (to) void dispatchNavigate(to, o.state(), o.handlers, o.dialogs);
   };
