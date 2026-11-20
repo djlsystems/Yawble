@@ -430,18 +430,16 @@ describe('Settings on a phone: one section per screen', () => {
     expect(w.get('[data-test=open-general]').classes()).toContain('on');
   });
 
-  it('App: Settings from the drawer is the list; File > Settings too; a fresh list each time it is opened', async () => {
+  it('App: Settings from the gear in the top bar is the list; File > Settings too; a fresh list each time it is opened', async () => {
     setWidth(390);
     const { w } = await mountApp();
-    await w.get('[data-test=drawer-toggle]').trigger('click');
-    await w.get('[data-test=open-app-settings]').trigger('click');
+    await w.get('[data-testid=settings-gear]').trigger('click');
     await flushPromises();
     expect(w.get('[data-test=settings]').attributes('data-phone-screen')).toBe('list');
     await w.get('[data-test=open-system]').trigger('click');
     await flushPromises();
     expect(w.get('[data-test=settings]').attributes('data-phone-screen')).toBe('section');
-    await w.get('[data-test=drawer-toggle]').trigger('click');
-    await w.get('[data-test=open-app-settings]').trigger('click');
+    await w.get('[data-testid=settings-gear]').trigger('click');
     await flushPromises();
     expect(w.get('[data-test=settings]').attributes('data-phone-screen')).toBe('list');
   });
@@ -562,8 +560,8 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(w.emitted('command')?.[0]).toEqual(['about']);
     await w.get('[data-test=drawer-more]').trigger('click');
     expect(items().style.display).toBe('none');
-    // Settings and the run-slots line are in the drawer, after the lists.
-    expect(w.find('[data-test=open-app-settings]').exists()).toBe(true);
+    // The run-slots line is in the drawer, after the lists; Settings is not (B115: it is the gear in the top bar).
+    expect(w.find('[data-test=open-app-settings]').exists()).toBe(false);
     expect(w.get('[data-test=slots]').text()).toContain('Run slots');
   });
 

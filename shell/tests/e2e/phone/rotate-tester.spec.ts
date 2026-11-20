@@ -126,11 +126,11 @@ for (const device of ['iPhone 13', 'iPhone SE'] as const) {
         expect(b.x, `drawer left after turn ${i}`).toBeGreaterThanOrEqual(0);
         expect(b.x + b.width, `drawer right after turn ${i}`).toBeLessThanOrEqual(v.width + 1);
         expect(b.y + b.height, `drawer bottom after turn ${i}`).toBeLessThanOrEqual(v.height + 1);
-        // Settings reachable in the drawer at the new height.
-        const settings = side.locator('[data-test=open-app-settings]');
-        await settings.scrollIntoViewIfNeeded();
-        const sb = (await settings.boundingBox())!;
-        expect(sb.y + sb.height, `Settings on screen after turn ${i}`).toBeLessThanOrEqual(v.height + 1);
+        // The run slots (the drawer's bottom) reachable in the drawer at the new height.
+        const slots = side.locator('[data-test=slots]');
+        await slots.scrollIntoViewIfNeeded();
+        const sb = (await slots.boundingBox())!;
+        expect(sb.y + sb.height, `the run slots on screen after turn ${i}`).toBeLessThanOrEqual(v.height + 1);
       }
     }
     expect(errors).toEqual([]);
@@ -168,11 +168,11 @@ test('iPhone 14 Pro Max: drawer open in portrait, turned to the desktop width (8
   await fits(page, land, 'to desktop');
   expect(await page.locator('[data-test=sidebar]').getAttribute('data-drawer')).toBeNull();
   await expect(page.locator('.menu-btn')).toHaveCount(0);
-  // The 380 px tall desktop sidebar scrolls (overflow-y: auto) so Settings is reachable.
-  const settings = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
-  await settings.scrollIntoViewIfNeeded();
-  const sb = (await settings.boundingBox())!;
-  expect(sb.y + sb.height, 'Settings reachable at 814x380').toBeLessThanOrEqual(land.height + 1);
+  // The 380 px tall desktop sidebar scrolls (overflow-y: auto) so its run slots are reachable.
+  const slots = page.locator('[data-test=sidebar] [data-test=slots]');
+  await slots.scrollIntoViewIfNeeded();
+  const sb = (await slots.boundingBox())!;
+  expect(sb.y + sb.height, 'run slots reachable at 814x380').toBeLessThanOrEqual(land.height + 1);
   // And back to portrait: the phone layout again, drawer closed or open but inside the screen.
   const port = devices['iPhone 14 Pro Max'].viewport;
   await rotate(page, port);

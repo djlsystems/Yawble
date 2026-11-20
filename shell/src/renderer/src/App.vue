@@ -87,7 +87,7 @@ watch(drawerOpen, (open) => {
 });
 watch(phone, (p) => { if (!p) drawerOpen.value = false; });
 watch([view, conversationId, selected], () => { drawerOpen.value = false; });
-/** Settings opened from the sidebar starts at its list of sections on a phone (a new key: a fresh list each time). */
+/** Settings opened from the gear at the top right starts at its list of sections on a phone (a new key: a fresh list each time). */
 const settingsLanding = ref(true);
 const settingsKey = ref(0);
 
@@ -468,8 +468,8 @@ function command(id: string) {
 }
 
 // A remote view on a phone has no menu bar (no room, and most of it is the desktop window's): what a viewer needs from
-// it (the theme, the terminal, Help) is at the bottom of the drawer instead. New chat, New team, Settings, Logs and the
-// places are in the drawer already.
+// it (the theme, the terminal, Help) is at the bottom of the drawer instead. New chat, New team, Logs and the places are in
+// the drawer already, and Settings is the gear in the top bar.
 const menuInDrawer = computed(() => phone.value && !!api.remote);
 const DRAWER_COMMANDS = ['theme:system', 'theme:light', 'theme:dark', 'terminal', 'checkUpdates', 'about', 'go:settings-agents'];
 const drawerMenu = computed<MenuBarItem[]>(() => (menuInDrawer.value
@@ -518,6 +518,9 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           <span v-if="link?.state === 'connected' && link.viewers.length" class="cnum" data-test="cloud-link-viewers">{{ link.viewers.length }}</span>
         </button>
         <ThemeToggle />
+        <!-- B115: Settings is this gear at the top right, just right of the theme switch (desktop window, remote view, phone). -->
+        <button class="ghost gear" :class="{ on: view === 'settings' }" type="button" data-testid="settings-gear" data-test="settings-gear" title="Settings" aria-label="Settings"
+          :aria-current="view === 'settings' ? 'page' : undefined" @click="go('settings')"><Icon name="settings" :size="18" /></button>
       </header>
       <!-- The banners above every view, in one scrolling box no taller than half the window (40% on a phone), so the view
            below keeps its share and the Concierge's composer stays on screen however many banners there are. -->
@@ -609,6 +612,11 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .cloud-ind.connecting .cdot, .cloud-ind.pairing .cdot { display: block; background: var(--dot-wait); }
 .cloud-ind.offline .cdot { display: block; background: var(--dot-bad); }
 .cnum { font-size: 12px; font-weight: 600; }
+/* The Settings gear (B115): as the theme switch beside it (ThemeToggle.vue). */
+.gear { display: inline-flex; align-items: center; padding: 6px 8px; border-radius: 8px; color: var(--muted); }
+.gear:hover { background: var(--hover); color: var(--ink); }
+.gear.on { background: var(--selected); color: var(--ink); }
+.gear :deep(svg) { display: block; flex: none; }
 /* Own title bar: drag by the top bar and the sidebar's top row; keep clear of the window controls. */
 .own-bar .bar { -webkit-app-region: drag; height: 52px; box-sizing: border-box;
   padding-right: calc(10px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
@@ -635,6 +643,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .phone .title { flex: 0 1 auto; min-width: 0; padding-left: 2px; }
 .phone .pill { min-width: 44px; justify-content: center; }
 .phone .pill .pill-text { display: none; }
+.phone .gear { min-width: 44px; min-height: 44px; justify-content: center; }
 .phone .banner { padding: 6px 12px; }
 /* All the banners together: at most half the window (40% of a phone's height), scrolling; the view (.content) gets the rest. */
 .banners { display: block; flex: none; max-height: 50vh; max-height: 50dvh; overflow-y: auto; overscroll-behavior: contain; }

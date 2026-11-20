@@ -11,7 +11,7 @@ import BusyLabel from './BusyLabel.vue';
 import type { MenuItem as MenuBarItem } from './MenuBar.vue';
 
 // The app's left pane, like the chat apps people know: New chat, the places (Concierge, Teams, and what comes next),
-// the teams, and the person's chats with the Concierge; settings at the bottom.
+// the teams, and the person's chats with the Concierge; the run slots at the bottom. Settings is the gear at the top right (App.vue).
 export type View = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'settings';
 export type MenuItem = 'agents' | 'skills' | 'globalPolicy' | 'integrations' | 'system' | 'link';
 
@@ -23,7 +23,7 @@ defineProps<{
   teamId: number | null;
   slots: RunSlots | null;
   remote: boolean;
-  /** Folded: a narrow rail of icons (the places, New chat, Settings), each named on hover. */
+  /** Folded: a narrow rail of icons (the places, New chat), each named on hover. */
   rail?: boolean;
   /** The teams / the chats have not had their first answer yet. */
   loading?: { teams: boolean; chats: boolean };
@@ -85,8 +85,6 @@ function finishRename(id: string) {
       </button>
       <button class="rail-btn" title="Logs" data-test="rail-logs" @click="emit('logs')"><Icon name="logs" /></button>
     </nav>
-    <span class="grow" />
-    <button class="rail-btn" :class="{ on: view === 'settings' }" title="Settings" data-test="rail-settings" @click="emit('go', 'settings')"><Icon name="settings" /></button>
   </aside>
   <aside v-else class="side" :class="{ drawer, open: drawer && open }" data-test="sidebar" :data-drawer="drawer ? (open ? 'open' : 'closed') : undefined"
     :inert="drawer && !open" :aria-hidden="drawer && !open ? 'true' : undefined" :aria-label="drawer ? 'Menu' : undefined">
@@ -169,7 +167,6 @@ function finishRename(id: string) {
         </button>
         </div>
       </div>
-      <button class="item" :class="{ on: view === 'settings' }" data-test="open-app-settings" @click="emit('go', 'settings')"><Icon name="settings" />Settings</button>
       <div class="status">
         <span class="muted tiny" data-test="slots" :title="'global run slots'">{{ slots ? `Run slots: ${slots.running} / ${slots.limit} in use · ${slots.queued} queued` : 'Starting…' }}</span>
       </div>
@@ -187,7 +184,7 @@ function finishRename(id: string) {
 .logo-btn img { width: 28px; height: 28px; object-fit: contain; }
 .rail-badge { position: absolute; top: 2px; right: 1px; font-size: 10px; background: var(--brand); color: var(--on-accent); border-radius: 8px; padding: 0 5px; line-height: 15px; }
 /* overflow-y (card 334): a window shorter than the sidebar's fixed rows (a phone in landscape at a desktop width) scrolls
-   the sidebar, its Settings and run slots reachable; a taller one shows no scrollbar (the Teams and Chats lists scroll). */
+   the sidebar, its run slots reachable; a taller one shows no scrollbar (the Teams and Chats lists scroll). */
 .side { background: var(--side); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 8px 8px 6px; }
 .brand { display: flex; align-items: center; gap: 8px; padding: 6px 6px 10px; }
 .logo { height: 26px; width: auto; flex: none; margin-left: 2px; }
@@ -246,7 +243,7 @@ h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4
 .drawer .chat .actions { display: flex; }
 .drawer .chat .actions .icon-btn { width: 44px; height: 44px; }
 /* The drawer scrolls as ONE list (a phone's screen is short): the Teams and Chats lists are not a box of their own, so
-   every chat is reached by scrolling the drawer, and the footer (the folded menu, Settings, the run slots) follows them
+   every chat is reached by scrolling the drawer, and the footer (the folded menu, the run slots) follows them
    instead of being pinned under a squeezed list. */
 .side.drawer { overflow-y: auto; overscroll-behavior: contain; }
 .drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot, .drawer .lists { flex: none; }
