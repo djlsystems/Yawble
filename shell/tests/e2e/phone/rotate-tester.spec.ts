@@ -6,7 +6,7 @@
 // (phone below PHONE_BREAKPOINT, the desktop sidebar from it), and an open modal inside the viewport.
 //
 //   npx playwright test rotate-tester      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
-import { devices, expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Page } from './fixtures';
 import { PHONE_BREAKPOINT } from '../../../src/renderer/src/phone';
 import { buildRenderer, builtDir, fakeRemote } from './server';
 

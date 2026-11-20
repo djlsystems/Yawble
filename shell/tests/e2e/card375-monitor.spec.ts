@@ -1,4 +1,4 @@
-﻿// Card 375 (verify B080, cards 373 + 374, with card 371's code map): the livelier Monitor end to end, in headless Chrome
+// Card 375 (verify B080, cards 373 + 374, with card 371's code map): the livelier Monitor end to end, in headless Chrome
 // against the phone-remote fake core (remote.html, tests/e2e/phone). The fake serves monitor.messages, monitor.steps
 // (with StepRow.exit when the test gives one), monitor.codeEvents and bus.workflows from a feed the test changes while
 // the page polls, and patches teams.agents with the attention the test sets (a member that needs the person).
@@ -18,7 +18,7 @@
 //
 //   npx playwright test card375-monitor --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots and the results go to $YAWBLE_TEAM_DOCS/b080-monitor (else test-results/b080-monitor).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';

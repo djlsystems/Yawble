@@ -8,7 +8,7 @@
 //
 //   npx playwright test card390-workflow-expiry      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B085 (else test-results/B085).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';

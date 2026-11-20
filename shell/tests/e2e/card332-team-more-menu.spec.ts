@@ -6,7 +6,7 @@
 //  - each item closes the menu and opens its dialog.
 //  - 1280 x 900: no ⋯; the header's five buttons.
 //   npx playwright test card332-team-more-menu     (measurements: test-results/card332-*.json; screenshots: test-results/card332-*.png)
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildRenderer, fakeRemote } from './phone/server';

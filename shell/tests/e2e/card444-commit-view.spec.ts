@@ -8,7 +8,7 @@
 //    hidden from cloud viewers the files are listed and no diff opens.
 //   npx playwright test card444-commit-view      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B072 (else test-results/B072).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
