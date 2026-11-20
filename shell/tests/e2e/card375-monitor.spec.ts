@@ -522,7 +522,8 @@ test('1b a workflow node click with a team focused: the workflow opens; is the f
   await unhover(page);
   for (let i = 0; i < 4; i++) {
     f = await lastFrame(page);
-    const n = wfNode(f, 10)!;    await clickWorld(page, n.op, n);
+    const n = wfNode(f, 10)!;
+    await clickWorld(page, n.op, n);
     if (await page.locator('[data-test=workflow-10]').count()) break;
     await page.waitForTimeout(300);
   }
