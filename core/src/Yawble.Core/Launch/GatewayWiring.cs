@@ -87,7 +87,8 @@ public static class GatewayVerdicts
             else if (limited is not null && e.Kind == GatewayEventKinds.Forward && e.Status is >= 200 and < 300
                 && string.Equals(e.Vhost, limited.Vhost, StringComparison.OrdinalIgnoreCase)) limited = null;
         }
-        return new GatewayVerdict(problem is not null, denied.Count, hosts, problem?.Detail)
+        // A CONNECT refused again in the same run is folded onto its first row (B105): count the refusals, not the rows.
+        return new GatewayVerdict(problem is not null, denied.Sum(e => e.Count), hosts, problem?.Detail)
         {
             RateLimitedUntil = limited?.Detail is { } d && DateTimeOffset.TryParse(d, System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.RoundtripKind, out var until) ? until : null,
