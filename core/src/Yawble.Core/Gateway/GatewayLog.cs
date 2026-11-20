@@ -34,7 +34,7 @@ public sealed record GatewayEvent(
     int? Status = null,
     string? Detail = null)
 {
-    /// <summary>How many times it happened: a host denied again in the same run adds to its first row (gateway_events.count).</summary>
+    /// <summary>How many times it happened: a host (plain http) or CONNECT (https) denied again in the same run adds to its first row (gateway_events.count).</summary>
     public int Count { get; init; } = 1;
 }
 
@@ -59,11 +59,17 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
 
     public static readonly TimeSpan RepeatWindow = TimeSpan.FromMinutes(1);
 
-    private static readonly HashSet<string> Repeating = [GatewayEventKinds.ConnectDenied, GatewayEventKinds.PathDenied];
+    private static readonly HashSet<string> Repeating = [GatewayEventKinds.PathDenied];
     private readonly Dictionary<(long?, string, string?), (DateTimeOffset Start, int Count)> _repeats = [];
 
     /// <summary>The run's host-denied row per host (gateway_events.id), which a repeat of that denial counts on.</summary>
     private readonly Dictionary<(long, string), long> _hostDenied = [];
+
+    /// <summary>
+    /// The run's connect-denied row per CONNECT authority (host:port, gateway_events.id), which a repeat counts on (B105).
+    /// Its own map, so a host's plain-http (host-denied) and https (connect-denied) refusals stay separate rows.
+    /// </summary>
+    private readonly Dictionary<(long, string), long> _connectDenied = [];
 
     /// <summary>
     /// Runs and model vhosts whose successful forward is written, with no credential problem or rate limit there since
@@ -76,6 +82,20 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
 
     public void Write(GatewayEvent e)
     {
+        if (e.Kind == GatewayEventKinds.ConnectDenied && e.RunId is { } connectRun)
+        {
+            // The same CONNECT refused again in the run (a tool retrying https to a host off the allowlist): one row, its
+            // count raised, as host-denied.
+            var key = (connectRun, (e.Target ?? "").ToLowerInvariant());
+            lock (_lock)
+            {
+                if (_connectDenied.TryGetValue(key, out var id) && Increment(id)) return;
+                if (_connectDenied.Count > 10_000) _connectDenied.Clear();
+                _connectDenied[key] = Insert(e);
+            }
+            return;
+        }
+
         if (e.RunId is { } run && e.Vhost is { } vhost)
         {
             var key = (run, vhost.ToLowerInvariant());
@@ -111,9 +131,9 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
             }
         }
 
-        // A tool that retries a refused connection in a loop (npm against a host not allowed) would write a row per try:
-        // half a million in one run. The first few of each are written; the rest are counted, and the count is written
-        // as one row when the window ends (at the next such denial).
+        // A tool that retries a refused path in a loop would write a row per try: half a million in one run. The first
+        // few of each are written; the rest are counted, and the count is written as one row when the window ends (at
+        // the next such denial). Host and CONNECT refusals are counted on one row per run above instead.
         GatewayEvent? summary = null;
         if (Repeating.Contains(e.Kind))
         {
