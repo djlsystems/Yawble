@@ -11,6 +11,7 @@ import HostChecksBanner from './components/HostChecksBanner.vue';
 import CompanionAsks from './components/CompanionAsks.vue';
 import NetworkAsks from './components/NetworkAsks.vue';
 import ToolAsks from './components/ToolAsks.vue';
+import FolderAsks from './components/FolderAsks.vue';
 import MemberSettingsDialog from './components/MemberSettingsDialog.vue';
 import NewTeamDialog from './components/NewTeamDialog.vue';
 import TeamView from './components/TeamView.vue';
@@ -532,6 +533,8 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <NetworkAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
       <!-- Developer tools agents asked for (request_tool): Install in the window only, Not now anywhere; on the Board, its Needs You lane. -->
       <ToolAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
+      <!-- Folders outside a clone agents asked for (B111): Approve / Deny, in a remote view too; on the Board, its Needs You lane. -->
+      <FolderAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
       </div>
       <LogsDialog v-if="logsOpen" :api="api" @close="logsOpen = false" />
 

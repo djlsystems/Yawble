@@ -198,11 +198,11 @@ public class Card464B103VerifyTests
     }
 
     /// <summary>
-    /// Behaviour as built, for the Manager to judge: a CONNECT refusal (https to a host off the allowlist, kind
-    /// connect_denied) is NOT counted on one row; it keeps the old repeat window (5 rows a minute, then a summary).
+    /// Card 504 (B105): a CONNECT refusal (https to a host off the allowlist, kind connect-denied) refused again in the
+    /// run is counted on its first row, as host-denied is (it was five rows, each count 1, under the repeat window).
     /// </summary>
     [Fact]
-    public async Task P4_Observed_FiveConnectDenialsOfOneHost_AreFiveRows_EachCountOne()
+    public async Task P4_FiveConnectDenialsOfOneHost_OneRowCountFive()
     {
         await using var f = await GatewayFixture.StartAsync();
         await using var gateway = f.StartRun(467);
@@ -212,9 +212,15 @@ public class Card464B103VerifyTests
             client.Dispose();
             Assert.StartsWith("HTTP/1.1 403", status);
         }
-        var rows = f.Log.Read(467).Where(e => e.Kind == GatewayEventKinds.ConnectDenied).ToList();
-        Assert.Equal(5, rows.Count);
-        Assert.All(rows, r => Assert.Equal(1, r.Count));
+        var row = Assert.Single(f.Log.Read(467), e => e.Kind == GatewayEventKinds.ConnectDenied);
+        Assert.Equal(5, row.Count);
+        Assert.Equal("blocked.example:443", row.Target);
+
+        var logs = new LogService(f.Db.Dir, f.Db.ConnectionString, new FakeClock(DateTimeOffset.UtcNow.AddMinutes(5)));
+        var net = Assert.Single(Rows(logs.Query(new LogQuery("gateway", Limit: 200))), r => S(r, "kind") == GatewayEventKinds.ConnectDenied);
+        Assert.Equal("5", net["count"]!.ToString());
+        var act = Assert.Single(Rows(logs.Query(new LogQuery(LogSources.Activity, Limit: 200))), r => S(r, "source") == "Network" && S(r, "event") == GatewayEventKinds.ConnectDenied);
+        Assert.EndsWith(" (5x)", S(act, "details"));
     }
 
     // ------------------------------------------------------------------ point 5: migrations 0050 + 0051
@@ -493,12 +499,14 @@ public class Card464B103VerifyTests
         foreach (var vhost in Vhosts.ProductionUpstreams.Keys) Assert.Contains($"`{vhost.Split('.')[0]}`", text);
         Assert.Contains("`.yawble.internal`", text);
         Assert.Contains("counted in **Model usage**", text);
-        // Card 475: only plain-http host denials fold into one row; the Times column and " (Nx)" are described.
+        // Card 475, then card 504 (B105): host-denied and connect-denied fold into one row; the Times column and " (Nx)" are described.
         Assert.Contains("A plain-http request to a host that is not allowed (`host-denied`)", text);
+        Assert.Contains("(`connect-denied`), refused again in the same run, are both counted on one row", text);
+        Assert.Contains("A host's plain-http and HTTPS refusals stay two rows", text);
         Assert.Contains("**Times** column", text);
         Assert.Contains("` (Nx)`", text);
         Assert.Contains("` (5x)` for five", text);
-        Assert.Contains("(`connect-denied`) and refused paths are not folded into one row", text);
+        Assert.Contains("Refused paths are not folded into one row", text);
         Assert.Contains("the first after each credential problem or rate limit on that\n    host", text.Replace("\r\n", "\n"));
         Assert.DoesNotContain("repeated refusals of one host in a run are counted on one row", text);
         // The names the doc uses are the code's: kinds, the Times label, the repeat limit's window.
@@ -512,7 +520,7 @@ public class Card464B103VerifyTests
         Assert.DoesNotContain("every model request it forwarded", about);
         Assert.Contains("its first model request to each model API", about);
         Assert.Contains("every one that failed", about);
-        Assert.Contains("a plain-http host refused again is counted on one row", about);
+        Assert.Contains("a host refused again, over plain http or https, is counted on one row", about); // card 504 (B105)
         Assert.Contains("rate limits", about);
         // Observed (nit, not asserted as a fault): it does not mention the success kept after each problem, which the doc does.
         Assert.DoesNotContain("after", about);

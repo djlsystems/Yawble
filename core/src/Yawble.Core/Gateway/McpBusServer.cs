@@ -17,7 +17,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
 
     public static readonly IReadOnlyList<string> ToolNames =
         ["tell", "progress", "handback", "blocked", "needs_decision", "workflow_complete", "status", "hiring", "hire", "board", "backlog", "skills_get", "skills_list", "wake_me", "workflow_show", "workflow_digest", "lease", "repo", "request_host", "request_tool",
-         "team_retros_write"];
+         "request_folder", "team_retros_write"];
 
     public async Task<BusReply> HandleAsync(byte[] body, CancellationToken ct)
     {
@@ -111,6 +111,9 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                     .RequestFromAgent(run.Member, Required(args, "host"), Required(args, "reason"), run.Correlation, run.Causation),
                 "request_tool" => await (run.Engine.ToolAsks ?? throw new BusRefusal("unavailable", "tool requests are not available here: hand back blocked on the tool instead"))
                     .RequestFromAgentAsync(run.Member, Required(args, "tool"), Required(args, "reason"), run.Correlation, run.Causation, ct),
+                "request_folder" => await (run.Engine.FolderAsks ?? throw new BusRefusal("unavailable", "folder requests are not available here: hand back blocked on the folder instead"))
+                    .RequestFromAgentAsync(run.Member, Required(args, "path"), Required(args, "access"), Required(args, "reason"), Optional(args, "member"),
+                        run.Correlation, run.Causation, ct),
                 "team_retros_write" => await run.TeamRetrosWriteAsync(Required(args, "text"), ct),
                 "workflow_show" => WorkflowText(await run.WorkflowShowAsync(OptionalLong(args, "workflow") ?? run.Correlation, ct)),
                 "workflow_digest" => await run.Engine.WorkflowDigestAsync(run, OptionalLong(args, "workflow"), ct),
@@ -292,6 +295,14 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                              "Then hand back blocked on that tool: never install it yourself, never retry in a loop.",
             ("tool", "string", "One of: " + string.Join(", ", Integrations.ToolCatalog.Names) + ".", true),
             ("reason", "string", "One line on what you need it for, e.g. 'build and test the .NET 10 console app'.", true)),
+        Tool("request_folder", "Ask the person for read or read-write access to a folder on this computer outside your own folders (e.g. a data folder the work reads " +
+                               "or writes). The person approves or denies in Needs you; an approved folder is reachable from your next run. Ask with request_folder; " +
+                               "never ask the person to edit the policy by hand. Then hand back blocked on that folder: never retry in a loop or reach it another way. " +
+                               "Refused at once: relative paths, drive roots, the user profile folder, secrets and Yawble's own folders, other teams' folders, system folders.",
+            ("path", "string", @"The folder's full absolute path, e.g. Z:\smokesessions or /srv/data.", true),
+            ("access", "string", "read or readwrite: only what the work needs.", true),
+            ("reason", "string", "One line on what you need it for, e.g. 'read the recorded smoke sessions the tests replay'.", true),
+            ("member", "string", "The Manager only: the member of your own team the access is for (default: yourself).", false)),
         Tool("team_retros_write", "The Manager: write your team's lessons, the team_retros skill every run of your team gets in its prompt (live at once). " +
                                   "Give the WHOLE new text: start from the current text (in your prompt under \"" + Skills.TeamRetros.PromptHeading + "\", or skills_get team_retros), " +
                                   "keep the person's edits, merge, reword or drop lessons, add at most a few new ones. Layout: a short list under a few headings " +

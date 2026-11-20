@@ -73,11 +73,14 @@ tests only, `-TagOnly` stops after the tag.
    `GitHub release (Yawble)`, with the token in its `token` field.
 2. **Signing.** The signer signs in through Azure: run `az login` once on this computer with an account that has the
    "Artifact Signing Certificate Profile Signer" role; the task uses that sign-in. Install the Artifact Signing client
-   tools in their default place (`%LOCALAPPDATA%\Microsoft\MicrosoftArtifactSigningClientTools`) and the Windows SDK
-   (for `signtool.exe`).
-   `packaging/windows-signing.cjs` also reads `YAWBLE_SIGNING_DLIB` (and `YAWBLE_SIGNTOOL`) for a tool in another
-   place, but a task cannot be given a `YAWBLE_` variable, neither from your environment nor from a Connection: the
-   app refuses the name. For a release run as a host task, keep the tools in their default places.
+   tools and the Windows SDK (for `signtool.exe`). In their default places
+   (`%LOCALAPPDATA%\Microsoft\MicrosoftArtifactSigningClientTools`, and the newest x64 `signtool.exe` under
+   `Windows Kits\10\bin`) the task needs nothing more.
+   For a tool in another place, `packaging/windows-signing.cjs` reads `SIGNING_DLIB` (the full path of
+   `Azure.CodeSigning.Dlib.dll`) and `SIGNTOOL` (the full path of `signtool.exe`). Give them to the task like any other
+   variable: under **Environment variable names to pass on** when they are set in your environment, or under
+   **Environment from a Connection** from a field of a Connection. (The script still reads the old names
+   `YAWBLE_SIGNING_DLIB` and `YAWBLE_SIGNTOOL` when you build by hand, but a task can never be given a `YAWBLE_` name.)
 3. **The task** (team of your choice, repository `main`):
 
    | Field | Value |
@@ -108,8 +111,8 @@ In the yawble-cloud repository, two steps make a deploy:
    repository at that commit with yawble-cloud's `remote-ui-build/` folder copied in (and its `context.dockerignore`
    copied as `.dockerignore`), by `az acr build --registry djlacr --image yawble-remote-ui:<commit>
    --build-arg GIT_SHA=<commit> --build-arg APP_VERSION=<version> -f remote-ui-build/Dockerfile .` run inside that
-   folder. Today no script in yawble-cloud does this step; its README (infra section 5) and `scripts/deploy.ps1`'s
-   error message give the command.
+   folder. `scripts/deploy-with-screens.ps1` does this step when it is needed (below); yawble-cloud's README (infra
+   section 5) and `scripts/deploy.ps1`'s error message also give the command.
 2. **`scripts/deploy.ps1`**: checks the tree is clean and on `origin/main`, checks the screens image exists (and stops,
    printing the step 1 command, if not), prints the rollback command, builds `yawble-cloud:<short sha>` in the
    registry `djlacr` with `az acr build`, rolls the container app `yawble-cloud` (resource group `yawble-cloud`) onto
@@ -141,20 +144,35 @@ goes into the task.
 A `-DryRun` twin (`deploy-cloud-dry-run`) is a cheap first task to approve: it runs no `az` that changes anything.
 
 **When the lock's commit changed** (a new desktop release pinned for the screens), the two steps form one chain, and
-the chain must live in one script. Ask a team for a yawble-cloud card that adds such a script, for example
-`scripts/deploy-with-screens.ps1`, which:
+the chain lives in one script: yawble-cloud's **`scripts/deploy-with-screens.ps1`**. It takes the same parameters as
+`scripts/deploy.ps1` (`-Version <yyyy.mm.dd.N>`, `-Release`, `-DryRun`) and no input. It:
 
-1. reads `commit` (and `repo`) from `remote-ui.lock.json`;
-2. lists the tags of `yawble-remote-ui` in `djlacr` (`az acr repository show-tags`), and only if `<commit>` is missing:
-   clones `repo` into a temporary folder, makes the git archive at `<commit>`, copies in `remote-ui-build/` and
-   `context.dockerignore` as `.dockerignore`, and runs the step 1 `az acr build` inside it, stopping on a failed
-   build;
-3. runs `scripts/deploy.ps1` with the same parameters it was given, and fails if that fails.
+1. reads the lock's commit from `remote-ui.lock.json`;
+2. builds the screens image `yawble-remote-ui:<lock commit>` in `djlacr` (step 1 above) **only when that tag is
+   missing** from the registry, and stops if that build fails; when the tag is already there it builds nothing;
+3. then runs `scripts/deploy.ps1` with the parameters it was given, and fails if that fails.
 
-Then define the task as above with `scripts/deploy-with-screens.ps1` as the script and add `scripts/deploy.ps1` and
-`remote-ui-build/**` to **Also pin these paths**, so a change to any step asks you again. Do not make two tasks that
-must run in order: each would be approved and run on its own, and nothing would stop the second one running when the
-first one failed.
+So it is safe to use for every deploy: when the screens image already exists it is the everyday deploy with one
+registry check first.
+
+| Field | Value |
+|---|---|
+| Name | `deploy-cloud-with-screens` |
+| Program | `pwsh` |
+| Arguments | `-NoProfile`, `-File`, `scripts/deploy-with-screens.ps1` (add `-Version`, `<yyyy.mm.dd.N>` or `-Release` as for `deploy-cloud`) |
+| Working folder | `.` |
+| Time limit | `3600` (a screens image build, then the deploy's image build and rollout) |
+| Pin mode | `files` |
+| Also pin these paths | `scripts/deploy.ps1`, `scripts/version-functions.ps1`, `Dockerfile`, `remote-ui.lock.json`, `remote-ui-build/**` |
+| Description | `Builds the desktop screens image in djlacr when the lock's commit has none, then deploys yawble-cloud` |
+| What to check after | `https://cloud.yawble.ai/api/health answers 200 with the new version` |
+
+Pinning `scripts/deploy.ps1` and `remote-ui-build/**` as well as the entry script means a change to any step asks you
+again. The setup is the same as for `deploy-cloud` (`az login` with rights on `yawble-cloud` and `djlacr`). A
+`-DryRun` twin (`deploy-cloud-with-screens-dry-run`) is again a cheap first task to approve.
+
+Do not make two tasks that must run in order (a screens build task, then `deploy-cloud`): each would be approved and
+run on its own, and nothing would stop the second one running when the first one failed.
 
 Ask: "deploy the cloud". Approve; the result holds the rollback command the script printed, and **What to check
 after** says where to confirm it is live.
