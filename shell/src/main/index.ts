@@ -12,7 +12,7 @@ import { appFolder } from './app-folder';
 import { Channels, isUiMethod, type Overview } from '../shared/api';
 import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, startedInBackground, type ShellSettings } from './background';
 import { CoreClient } from './core-client';
-import { DataFolderInUseError, locateCore, startCore, type RunningCore } from './core-process';
+import { DataFolderInUseError, locateCore, locateInstallDir, startCore, type RunningCore } from './core-process';
 import { inUseDialog, removedDialog, type LifetimeDialog } from './lifetime-dialogs';
 import { WebsiteBridge, type PageWindow, type WindowFactory } from './website-host';
 import { ThemeFile, TitleBars, TITLE_BAR, windowBackground } from './title-bar';
@@ -59,7 +59,7 @@ async function connectCore(): Promise<CoreClient> {
   const launch = locateCore(repoRoot, app.isPackaged ? process.resourcesPath : undefined);
   // The app's install folder (bin/ with yawble-bridge, yawble-grok-auth, yawble-guardcheck; roles/). The agent CLIs are not in
   // it: the core runs the ones the person installed, found where they are at every launch.
-  const installDir = process.env.YAWBLE_INSTALL_DIR ?? (app.isPackaged ? process.resourcesPath : undefined);
+  const installDir = locateInstallDir(repoRoot, app.isPackaged ? process.resourcesPath : undefined);
   core = await startCore(launch, { dataDir, installDir, onStarting: () => onCoreStarting?.() });
   report.file(`the core started (process ${core.child.pid ?? '?'})`);
   core.child.once('exit', (code) => {
