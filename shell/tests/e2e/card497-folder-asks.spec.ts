@@ -6,7 +6,7 @@
 // $YAWBLE_TEAM_DOCS/b111/. Card 507: the Manager's ask for a member says so ("payments / Manager asks, for DeveloperAda, ...").
 //
 //   npx playwright test card497-folder-asks      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { type Access } from './phone/fake-core';
@@ -35,7 +35,7 @@ async function open(browser: Browser, access: Access, w: number, h: number, them
   await expect(page.locator('[data-test=banners] [data-test=folder-ask]').first()).toBeVisible({ timeout: 30_000 });
   return { s, page, ctx, errors };
 }
-const noSideScroll = async (page: import('@playwright/test').Page) =>
+const noSideScroll = async (page: import('./phone/fixtures').Page) =>
   page.evaluate(() => document.scrollingElement!.scrollWidth <= window.innerWidth + 1);
 
 for (const [w, h, theme] of [[1280, 800, 'light'], [1280, 800, 'dark'], [375, 740, 'light'], [375, 740, 'dark']] as const) {
