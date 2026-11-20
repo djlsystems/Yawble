@@ -819,8 +819,11 @@ for (const size of SE) {
         if (after) expect.soft(m.inputs.some((i) => /docs-name/.test(i.what)), `${where('documents-new-file')}: the name field shown`).toBe(true);
 
         // Settings: the list, then each section; Guardrails scrolled to its bottom; Skills with a skill picked.
+        // B115: the after build has the Settings gear at the top right; the before build (the base renderer) has no
+        // gear, Settings is in the sidebar drawer.
         const openSettings = async () => {
-          await page.getByTestId('settings-gear').click();
+          if (after) await page.getByTestId('settings-gear').click();
+          else await nav(page, 'open-app-settings');
           await expect(page.locator('[data-test=settings]')).toBeVisible();
           await page.waitForTimeout(400);
         };
