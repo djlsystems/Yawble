@@ -113,15 +113,17 @@ export const ActivityKeep = 80;
  * failed one. The header's "N need you" and the You node both count needYouItems(), so they always agree; each thing
  * is one item (a member asking a question and also asking for a host is two).
  */
-export type NeedYouKind = 'question' | 'network' | 'tool' | 'blocked' | 'failed';
+export type NeedYouKind = 'question' | 'network' | 'tool' | 'folder' | 'blocked' | 'failed';
+/** What the view hands setAsks: a network, tool or folder ask (B111). */
+export type AskKind = 'network' | 'tool' | 'folder';
 export interface NeedYouItem { id: string; kind: NeedYouKind; team: string; member: string | null; label: string | null }
 /** The order the kinds are listed in (the You node's breakdown, the item list). */
-export const NeedYouKinds: readonly NeedYouKind[] = ['question', 'network', 'tool', 'blocked', 'failed'];
+export const NeedYouKinds: readonly NeedYouKind[] = ['question', 'network', 'tool', 'folder', 'blocked', 'failed'];
 const NeedYouWords: Record<NeedYouKind, [string, string]> = {
-  question: ['question', 'questions'], network: ['network ask', 'network asks'], tool: ['tool ask', 'tool asks'],
+  question: ['question', 'questions'], network: ['network ask', 'network asks'], tool: ['tool ask', 'tool asks'], folder: ['folder ask', 'folder asks'],
   blocked: ['blocked', 'blocked'], failed: ['failed', 'failed'],
 };
-const NeedYouTone: Record<NeedYouKind, Tone> = { question: 'decision', network: 'decision', tool: 'decision', blocked: 'blocked', failed: 'fail' };
+const NeedYouTone: Record<NeedYouKind, Tone> = { question: 'decision', network: 'decision', tool: 'decision', folder: 'decision', blocked: 'blocked', failed: 'fail' };
 /** One item's kind in words ("question", "network ask", "blocked"). */
 export const needYouWord = (kind: NeedYouKind): string => NeedYouWords[kind][0];
 /** What is in the list by kind: "2 questions, 1 network ask, 1 failed"; "Nothing needs you" when empty. */
@@ -171,7 +173,7 @@ export class MonitorModel {
   /** Each member's step times (display time) over the last minute, for its pulse. */
   private stepTimes = new Map<string, number[]>();
   /** What waits for the person besides questions (network and tool asks), by the view's key for each. */
-  private asks = new Map<string, { team: string; member: string | null; kind: 'network' | 'tool'; label: string | null }>();
+  private asks = new Map<string, { team: string; member: string | null; kind: AskKind; label: string | null }>();
   /** The words of each member's last question (by member key), for its flyer to the You node. */
   private questions = new Map<string, string | null>();
   /** The need-you items that have flown (and sounded), by id; seen: the list has shown it since. */
@@ -230,10 +232,10 @@ export class MonitorModel {
   /**
    * What waits for the person besides questions: network and tool asks (the view's list, keyed as it likes). A new one
    * flies from its member to the You node once (syncNeedYou); the You node counts them until they are gone from the list.
-   * kind: network or tool (without it, read from the key: "n:" / "net" is a network ask, anything else a tool ask).
+   * kind: network, tool or folder (without it, read from the key: "n:" / "net" is a network ask, anything else a tool ask).
    */
-  setAsks(asks: readonly { key: string; team: string; member: string | null; label?: string | null; kind?: 'network' | 'tool' }[], now = performance.now()): void {
-    const next = new Map<string, { team: string; member: string | null; kind: 'network' | 'tool'; label: string | null }>();
+  setAsks(asks: readonly { key: string; team: string; member: string | null; label?: string | null; kind?: AskKind }[], now = performance.now()): void {
+    const next = new Map<string, { team: string; member: string | null; kind: AskKind; label: string | null }>();
     for (const a of asks)
       next.set(a.key, { team: a.team, member: a.member, kind: a.kind ?? (/^n(et)?[:/-]/i.test(a.key) ? 'network' : 'tool'), label: a.label ?? null });
     this.asks = next;

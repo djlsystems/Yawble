@@ -120,6 +120,13 @@ const toolAsk = {
   lastSeen: iso(5), workflow: 10, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
   canInstall: true, command: 'winget install --id Microsoft.DotNet.SDK.10 --exact --silent', choices: ['install', 'checkAgain', 'notNow'], installer: 'winget',
 };
+/** B111 (card 497): a read-write folder ask; listed only after setFolderAsks(true), so the other phone tests see no extra banner. */
+const folderAsk = {
+  id: 21, team: 'payments', member: 'payments/TesterBen', askedBy: 'TesterBen', path: 'Z:\\smokesessions', access: 'readwrite',
+  reason: 'read the smoke session recordings and write the results next to them', exists: true, state: 'pending', grantedAccess: null,
+  decidedBy: null, decidedAt: null, workflow: 10, choices: ['readwrite', 'read', 'deny'],
+};
+const folder = { on: false, answered: new Map<number, string>() };
 const integrationAsk = {
   id: 9, at: iso(8), integration: 'gh', teamId: 1, member: 'DeveloperAda', command: 'gh pr create --title "Partial refunds" --body-file pr.md',
   reason: 'open the pull request for card 1', workflow: 10, repo: 'payments', action: 'pr create', canAlways: true,
@@ -268,6 +275,8 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'concierge.read': () => ({ ok: true }),
   'network.asks': () => [networkAsk],
   'tools.asks': () => [toolAsk],
+  'folder.asks': () => (folder.on && !folder.answered.has(folderAsk.id) ? [folderAsk] : []),
+  'folder.answer': (p) => { folder.answered.set(Number(p?.id), String(p?.choice)); return { id: p?.id, state: p?.choice === 'deny' ? 'denied' : 'approved' }; },
   'integrations.asks': () => (needsYou ? [integrationAsk] : []),
   'integrations.connectionAttention': () => [{ id: 3, name: 'Stripe test key', reason: '401 from the API', where: 'Settings, Connections' }],
   'companion.list': () => ({ clients: [], pairings: [{ id: 'p1', name: 'claude-code', level: 'act', code: 'K7Q2ZD', expires: later(5) }], actions: [] }),
@@ -581,6 +590,10 @@ export function createFakeCore() {
     setAccess(a: Access) { access = a; },
     /** With false, no network or tool asks are pending (the global Needs-you banners stay away). */
     setAsks(on: boolean) { asks = on; },
+    /** B111: with true, one read-write folder ask is pending (off by default); answers are forgotten. */
+    setFolderAsks(on: boolean) { folder.on = on; folder.answered.clear(); },
+    /** B111: the folder answers given, by ask id (the choice). */
+    folderAnswers() { return new Map(folder.answered); },
     /** B054: the team branch behind its base (the team page's sync bar shows). */
     setSync(behind: boolean) { syncBehind = behind; },
     /** B054: with false, no integration ask and no decision is pending. */

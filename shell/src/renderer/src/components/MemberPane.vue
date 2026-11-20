@@ -7,6 +7,7 @@ import { agentPillText, agentPillTitle } from '../memberModel';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import Icon from './Icon.vue';
 import MemberActivity from './MemberActivity.vue';
+import FolderAsks from './FolderAsks.vue';
 import TerminalApp from '../TerminalApp.vue';
 import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
 import { renderMarkdown } from '../markdown';
@@ -165,6 +166,8 @@ defineExpose({ el: () => root.value });
       </div>
       <span v-if="error" class="error small" data-test="member-pane-error">{{ error }}</span>
     </div>
+    <!-- B111: this member's folder asks (a folder outside its clone), answered here as in Needs you. -->
+    <FolderAsks class="member-folder-asks" :api="resolveApi(api)" :poll-ms="pollMs" :team="m.team" :member="m.name" />
 
     <div class="body" :class="`body-${view}`" :style="phone ? undefined : { height: `${height}px` }" data-test="member-pane-body">
       <template v-if="view === 'report'">
@@ -215,6 +218,7 @@ defineExpose({ el: () => root.value });
 .menu button.danger { color: var(--bad); }
 .mi { display: inline-flex; justify-content: center; width: 18px; flex: none; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; letter-spacing: -.04em; }
+.member-folder-asks { flex: none; margin: 2px 0 4px; }
 .tabs { display: flex; align-items: center; gap: 10px; min-height: 26px; margin-bottom: 2px; border-top: 1px solid var(--line-soft); padding-top: 2px;
   flex: none; flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
 .tabs > .error { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
