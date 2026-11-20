@@ -14,6 +14,7 @@ const api: YawbleApi = {
   },
   openTerminal: (memberId) => ipcRenderer.invoke('window:openTerminal', memberId),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+  folderExists: (p) => ipcRenderer.invoke('dialog:folderExists', p),
   platform: process.platform,
   dimTitleBar: (dim) => ipcRenderer.send('window:dimTitleBar', dim),
   setTheme: (theme) => ipcRenderer.send('window:setTheme', theme),
