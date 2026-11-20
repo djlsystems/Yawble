@@ -95,9 +95,27 @@ export interface FolderRow {
   covered?: boolean;
 }
 
-/** A path compared as the core resolves it, roughly: forward slashes, no trailing slash, Windows paths case-insensitive. */
+/** "." and ".." folded as the core's PolicyPaths.Resolve does, below the root (`C:`, `//server/share`, `~` or `/`). */
+function foldDots(s: string): string {
+  const root = /^(\/\/[^/]+\/[^/]+|[a-z]:|~)?/i.exec(s)![0];
+  const rest = s.slice(root.length);
+  const absolute = rest.startsWith('/');
+  const segs: string[] = [];
+  for (const seg of rest.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (segs.length && segs[segs.length - 1] !== '..') segs.pop();
+      else if (!absolute && !root) segs.push('..');
+      continue;
+    }
+    segs.push(seg);
+  }
+  return root + (absolute ? '/' : '') + segs.join('/');
+}
+
+/** A path compared as the core resolves it, roughly: forward slashes, "." and ".." folded, no trailing slash, Windows paths case-insensitive. */
 function norm(p: string): string {
-  let s = p.trim().replace(/\\/g, '/');
+  let s = foldDots(p.trim().replace(/\\/g, '/'));
   if (s.length > 1) s = s.replace(/\/+$/, '');
   return /^[a-z]:/i.test(s) || s.startsWith('//') ? s.toLowerCase() : s;
 }
@@ -121,17 +139,27 @@ function listOf(doc: any, list: FolderList): string[] {
   return Array.isArray(v) ? v : [];
 }
 
+/**
+ * What the core resolved one loosened entry to (its `policy.previewLoosen` of that entry alone): the effective path, null
+ * when the core adds nothing for it (already covered), undefined when not known yet (then the entry is matched by samePath).
+ */
+export type ResolvedEntry = (list: 'readwrite' | 'readonly', entry: string) => string | null | undefined;
+
 /** The rows of one folder list: each effective folder with its source, then the member's loosened entries the core skips. */
-export function folderRows(view: MemberPolicyView, list: FolderList): FolderRow[] {
+export function folderRows(view: MemberPolicyView, list: FolderList, resolved?: ResolvedEntry): FolderRow[] {
   const effective: string[] = (view.effective as any)[list] ?? [];
   const implicit: string[] = (view.implicit as any)[list] ?? [];
   const loosened = new Set(view.effective.loosened ?? []);
   const loosen = list === 'denied' ? [] : listOf(view.loosen, list);
   const override = listOf(view.override, list);
   const global = listOf(view.global, list);
+  const ownIs = (l: string, p: string) => {
+    const r = list === 'denied' ? undefined : resolved?.(list, l);
+    return r === undefined ? samePath(l, p) : r === p;
+  };
   const rows: FolderRow[] = effective.map((p) => {
     if (implicit.some((i) => samePath(i, p))) return { path: p, source: 'implicit', own: null };
-    if (loosened.has(`filesystem.${list} + ${p}`)) return { path: p, source: 'loosen', own: loosen.find((l) => samePath(l, p)) ?? p };
+    if (loosened.has(`filesystem.${list} + ${p}`)) return { path: p, source: 'loosen', own: loosen.find((l) => ownIs(l, p)) ?? p };
     const o = override.find((x) => samePath(x, p));
     if (o !== undefined && !global.some((g) => samePath(g, p))) return { path: p, source: 'override', own: o };
     return { path: p, source: 'global', own: null };
@@ -142,6 +170,21 @@ export function folderRows(view: MemberPolicyView, list: FolderList): FolderRow[
   }
   return rows;
 }
+
+/**
+ * What the Folder access block has typed and not saved: the path, its mode and the step waiting for Confirm. The Member
+ * settings dialog keeps it, so leaving the Policy tab (which unmounts the block) drops nothing (B110).
+ */
+export interface FolderPending {
+  kind: 'add' | 'remove';
+  lines: string[];
+  title: string;
+  warnings: string[];
+  save: () => Promise<MemberPolicyView>;
+}
+export interface FolderDraft { path: string; mode: 'readwrite' | 'readonly'; pending: FolderPending | null }
+export const newFolderDraft = (): FolderDraft => ({ path: '', mode: 'readwrite', pending: null });
+export const folderDraftDirty = (d: FolderDraft) => d.path.trim().length > 0 || d.pending !== null;
 
 /** A document with its keys sorted and empty objects dropped, as one string: two that equal mean the same policy. */
 export function canon(doc: unknown): string {

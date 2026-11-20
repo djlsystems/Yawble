@@ -217,8 +217,8 @@ describe('card 493: B110 verify against a core-like fake', () => {
 
   // FAULT (reported in B110\verify.md): samePath does not fold "." / ".." as the core does, so a folder typed with ".." is
   // listed twice (resolved, and again as "already covered, not added") and Remove on the resolved row saves the same block
-  // back ("Nothing changed.") instead of taking it out. it.fails: turns red once fixed, so flip it to it() then.
-  it.fails('a folder typed with ".." is listed once and Remove on it takes it out', async () => {
+  // back ("Nothing changed.") instead of taking it out. Fixed in card 492's fix round: now a plain it().
+  it('a folder typed with ".." is listed once and Remove on it takes it out', async () => {
     const core = realishCore();
     const w = await open(core.api);
     await addFolder(w, 'C:\\work\\x\\..\\shared');
@@ -304,8 +304,8 @@ describe('card 493: B110 verify against a core-like fake', () => {
   });
 
   // FAULT (reported in B110\verify.md): the Policy tab is v-if, so FolderAccess is unmounted by a tab switch: the typed path
-  // (and a pending confirm) is gone with no word, and closing then closes without "Discard?". it.fails: flip to it() once fixed.
-  it.fails('a folder path typed then the General tab and back: the path is kept and closing still asks (nothing dropped silently)', async () => {
+  // (and a pending confirm) is gone with no word, and closing then closes without "Discard?". Fixed in card 492's fix round: now a plain it().
+  it('a folder path typed then the General tab and back: the path is kept and closing still asks (nothing dropped silently)', async () => {
     const core = realishCore();
     const w = await open(core.api);
     await w.get('[data-test=folder-add-path]').setValue('C:\\work\\shared');

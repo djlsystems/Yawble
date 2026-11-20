@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import type { AgentModelList, AgentProfileRow, AvailableBackend, CommandLines, CredentialStatus, MemberPolicyView, MemberRow, YawbleApi, PolicyPatchDoc } from '../../../shared/api';
 import { errorText, resolveApi, when } from '../api';
 import { addedFolders, canon, changedFields, CLIPBOARD, describeChange, effectiveOf, FOLDER_LISTS, fromText, getPath, POLICY_FIELDS, setPath, show, testId, toText,
-  type FieldDef, type FolderList } from '../policyFields';
+  folderDraftDirty, newFolderDraft, type FieldDef, type FolderList } from '../policyFields';
 import { confirmDialog } from '../confirm';
 import FolderAccess from './FolderAccess.vue';
 import { agentClis } from '../agentClis';
@@ -149,7 +149,10 @@ function applyView(v: MemberPolicyView, saved: 'all' | 'override' | 'loosen' | '
 // B110: the save model. What is typed and not saved, per section; closing with any of it asks "Discard?".
 const overrideDirty = computed(() => !!view.value && POLICY_FIELDS.some((f) => rowDirty(view.value!, f)));
 const loosenDirty = computed(() => !!view.value && LOOSEN_FIELDS.some((f) => loosenFieldDirty(view.value!, f)));
-const foldersDirty = ref(false);
+// The Folder access block's typed path and pending confirm live here, not in the block: the Policy tab is v-if, and a
+// switch to General and back must keep them (and closing must still ask).
+const folderDraft = reactive(newFolderDraft());
+const foldersDirty = computed(() => folderDraftDirty(folderDraft));
 const policyDirty = computed(() => overrideDirty.value || loosenDirty.value || foldersDirty.value);
 
 async function requestClose() {
@@ -319,8 +322,8 @@ const loosenChanged = () => { preview.value = null; };
 
     <!-- Policy -->
     <div v-if="tab === 'policy' && view" class="policy">
-      <FolderAccess :view="view" :api="api" :member-id="memberId" :member-name="member?.name ?? 'this member'" :work="work" :fresh="freshFolders"
-        @applied="foldersApplied" @error="foldersError" @dirty="foldersDirty = $event" @nothing="foldersNothing" />
+      <FolderAccess :view="view" :api="api" :member-id="memberId" :member-name="member?.name ?? 'this member'" :work="work" :fresh="freshFolders" :draft="folderDraft"
+        @applied="foldersApplied" @error="foldersError" @nothing="foldersNothing" />
       <p class="muted">Backend: <strong>{{ view.backend }}</strong>.</p>
       <p v-if="view.net" class="small" data-test="policy-net"><strong>Network:</strong> {{ view.net }}</p>
       <h3 class="sub">Effective policy (what the next run gets)</h3>

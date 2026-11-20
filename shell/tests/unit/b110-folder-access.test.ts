@@ -86,6 +86,34 @@ const rowsOf = (w: any, list: string) => w.findAll(`[data-test=folders-${list}] 
 afterEach(() => { confirmState.value?.resolve(false); });
 
 describe('B110 Folder access', () => {
+  it('a typed path and a pending confirm survive a switch to General and back; closing still asks', async () => {
+    const core = fakeCore();
+    const w = await open(core.api);
+    await w.get('[data-test=folder-add-mode]').setValue('readonly');
+    await w.get('[data-test=folder-add-path]').setValue('C:\\work\\shared');
+    await w.get('[data-test=folder-add]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=folder-confirm-box]').exists()).toBe(true);
+    await w.get('[data-test=tab-general]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=folder-access]').exists()).toBe(false);
+    await w.get('[data-test=tab-policy]').trigger('click');
+    await flushPromises();
+    expect((w.get('[data-test=folder-add-path]').element as HTMLInputElement).value).toBe('C:\\work\\shared');
+    expect((w.get('[data-test=folder-add-mode]').element as HTMLSelectElement).value).toBe('readonly');
+    expect(w.get('[data-test=folder-confirm-title]').text()).toBe('This gives Ben read-only on:');
+    await w.get('[data-test=modal-close]').trigger('click');
+    await flushPromises();
+    expect(confirmState.value?.message).toBe('Policy has unsaved changes. Discard?');
+    confirmState.value!.resolve(false);
+    await flushPromises();
+    // The kept confirm still saves what it showed.
+    await w.get('[data-test=folder-confirm]').trigger('click');
+    await flushPromises();
+    expect(core.calls.find((c) => c.method === 'policy.saveLoosen')!.params.loosen).toEqual({ filesystem: { readonly: ['C:\\work\\shared'] } });
+    expect((w.get('[data-test=folder-add-path]').element as HTMLInputElement).value).toBe('');
+  });
+
   it('add -> confirm -> shows in Read/write as this member\'s; reopen -> still there; remove -> confirm -> gone', async () => {
     const core = fakeCore();
     let w = await open(core.api);
@@ -293,6 +321,29 @@ describe('B110 helpers', () => {
     const v: any = { global: { filesystem: { readwrite: ['C:/w'] } }, implicit: { readwrite: [], readonly: [], denied: [] }, override: {},
       loosen: { filesystem: { readonly: ['C:/w/sub'] } }, effective: { readwrite: ['C:/w'], readonly: [], denied: [], loosened: [] } };
     expect(folderRows(v, 'readonly')).toEqual([{ path: 'C:/w/sub', source: 'loosen', own: 'C:/w/sub', covered: true }]);
+  });
+
+  it('samePath folds "." and ".." as the core does, never above the root', () => {
+    expect(samePath('C:\\work\\x\\..\\shared', 'C:\\work\\shared')).toBe(true);
+    expect(samePath('C:\\work\\.\\shared\\', 'c:/work/shared')).toBe(true);
+    expect(samePath('C:\\..\\work', 'C:\\work')).toBe(true);
+    expect(samePath('/a/b/../../c', '/c')).toBe(true);
+    expect(samePath('\\\\srv\\share\\..\\x', '\\\\srv\\share\\x')).toBe(true);
+    expect(samePath('C:\\work\\x\\..\\shared', 'C:\\work\\x\\shared')).toBe(false);
+  });
+
+  it('folderRows matches an own entry to its effective row by what the core resolved it to (a junction, say)', () => {
+    const v: any = { global: { filesystem: {} }, implicit: { readwrite: [], readonly: [], denied: [] }, override: {},
+      loosen: { filesystem: { readwrite: ['J:\\link'] } },
+      effective: { readwrite: ['D:\\real\\target'], readonly: [], denied: [], loosened: ['filesystem.readwrite + D:\\real\\target'] } };
+    // Not known yet: the spelling does not match, so the entry also shows as not added (as before).
+    expect(folderRows(v, 'readwrite').map((r) => [r.path, r.own, !!r.covered])).toEqual([['D:\\real\\target', 'D:\\real\\target', false], ['J:\\link', 'J:\\link', true]]);
+    // With the core's answer for the entry: one row, and Remove takes out the stored spelling.
+    const resolved = (list: string, e: string) => (list === 'readwrite' && e === 'J:\\link' ? 'D:\\real\\target' : undefined);
+    expect(folderRows(v, 'readwrite', resolved)).toEqual([{ path: 'D:\\real\\target', source: 'loosen', own: 'J:\\link' }]);
+    // The core adds nothing for the entry (covered): it is listed as such even if the spelling looks like an effective row.
+    const covered = { ...v, loosen: { filesystem: { readwrite: ['D:\\real\\target'] } }, effective: { ...v.effective, loosened: [] } };
+    expect(folderRows(covered, 'readwrite', () => null).map((r) => [r.source, !!r.covered])).toEqual([['global', false], ['loosen', true]]);
   });
 
   it('describeChange: the same stored policy and effective policy is "Nothing changed"', () => {
