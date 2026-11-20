@@ -66,6 +66,7 @@ public class AuditClassificationTests
         "docs.rename",
         "docs.upload",
         "docs.write",
+        "folder.answer",
         "git.askTeam",
         "git.branchRealign",
         "git.bringCurrent",

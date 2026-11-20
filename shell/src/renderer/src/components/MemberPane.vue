@@ -7,6 +7,7 @@ import { agentPillText, agentPillTitle } from '../memberModel';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import Icon from './Icon.vue';
 import MemberActivity from './MemberActivity.vue';
+import FolderAsks from './FolderAsks.vue';
 import TerminalApp from '../TerminalApp.vue';
 import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
 import { renderMarkdown } from '../markdown';
@@ -74,6 +75,8 @@ const TabLabel: Record<MemberView, string> = { report: 'Report', activity: 'Acti
 const termLive = ref(false);
 watch(view, (v) => { if (v !== 'terminal') termLive.value = false; });
 const remote = computed(() => !!resolveApi(props.api)?.remote);
+/** B111: the folder asks read through the same api; none in a view without one. */
+const folderApi = computed(() => resolveApi(props.api) as YawbleApi | undefined);
 const canOpen = computed(() => props.card.state === 'idle' && !termLive.value);
 const canStop = computed(() => props.card.state === 'running' || termLive.value);
 const opening = ref(false);
@@ -165,6 +168,8 @@ defineExpose({ el: () => root.value });
       </div>
       <span v-if="error" class="error small" data-test="member-pane-error">{{ error }}</span>
     </div>
+    <!-- B111: this member's folder asks (a folder outside its clone), answered here as in Needs you. -->
+    <FolderAsks v-if="folderApi" style="flex: none; margin: 2px 0 4px" :api="folderApi" :poll-ms="pollMs" :team="m.team" :member="m.name" />
 
     <div class="body" :class="`body-${view}`" :style="phone ? undefined : { height: `${height}px` }" data-test="member-pane-body">
       <template v-if="view === 'report'">

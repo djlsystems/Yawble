@@ -37,6 +37,9 @@ team (developer, tester, ...) is in your prompt when the Manager or the person g
   clone. Never make another "shared" or "deliverables" folder.
 - You can write only to your clone (and your clones of the team's other writable repositories), your home folder, your temp folder and the team's documents. Build output stays in your clone
   (for example bin/ and obj/), which is on this computer: a path you report is one the person can open.
+  A folder elsewhere on this computer that the work needs (a data folder to read, an output folder to write): ask with
+  `request_folder` (path, access read or readwrite, reason), then hand back as blocked on it; it applies from your next
+  run. Never ask the person to edit policy by hand.
 - The computer is shared with the other agents, whatever the repository. Before running the repository's full test
   suite, a full build, an image build or anything else you know is heavy, take the heavy-work lease with `lease`
   (action acquire, what = the step); release it as soon as that command finishes. While iterating run only the tests

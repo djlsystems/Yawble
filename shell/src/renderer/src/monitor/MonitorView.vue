@@ -3,11 +3,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import { workflowTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type WorkflowItem, type WorkflowSummary } from '../../../shared/api';
 import { workflowItems } from '../workflows/page';
 import { groupAsks, hostsLabel } from '../networkAskGroups';
+import { FOLDER_ASKS_CHANGED, folderAskMember, pendingFolderAsks, type FolderAsk } from '../folderAsks';
 import { resolveApi } from '../api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { MemberStateLabel, memberStateOf, type MemberState } from '../faces/faces';
 import {
-  memberKey, MonitorModel, needYouSummary, needYouWord, spaced, teamKey, type ActivityRow, type FeedRow, type NeedYouItem, type NeedYouKind, type TeamSnapshot,
+  memberKey, MonitorModel, needYouSummary, needYouWord, spaced, teamKey, type ActivityRow, type FeedRow, type AskKind, type NeedYouItem, type NeedYouKind, type TeamSnapshot,
 } from './model';
 import { youNodeAt, type KeepOut } from './rhythm';
 import { openCommit } from '../commitView';
@@ -240,7 +241,7 @@ watch(() => (hover.value?.kind === 'workflow' ? hover.value.workflow?.id ?? null
 });
 // The You node's breakdown: shown while it is hovered (a desktop) or after a tap on it (a phone, until the next tap).
 const YouTipLines = 10;
-const NeedYouLook: Record<NeedYouKind, 'decision' | 'blocked' | 'fail'> = { question: 'decision', network: 'decision', tool: 'decision', blocked: 'blocked', failed: 'fail' };
+const NeedYouLook: Record<NeedYouKind, 'decision' | 'blocked' | 'fail'> = { question: 'decision', network: 'decision', tool: 'decision', folder: 'decision', blocked: 'blocked', failed: 'fail' };
 const youOpen = ref(false);
 const youShown = computed(() => youOpen.value || hover.value?.kind === 'you');
 /**
@@ -494,7 +495,8 @@ async function codeFeed(first: boolean): Promise<CodeEvent[]> {
 }
 
 /**
- * The network and tool asks waiting for the person (network.asks, pending; tools.asks, pending or installing), read the
+ * The network, tool and folder asks waiting for the person (network.asks, pending; tools.asks, pending or installing;
+ * folder.asks, pending, B111), read the
  * way Needs you reads them (NetworkAsks.vue, ToolAsks.vue): at the start, on network.asksChanged / tools.asksChanged and
  * on a slow poll. One You item per Needs-you item (a member's network asks on one domain are one, groupAsks), handed to
  * the live model's setAsks, which counts them on the You node and flies a new one to it. Those waiting at the start
@@ -512,16 +514,20 @@ async function loadAsks(): Promise<void> {
     do {
       asksAgain = false;
       asksAt = Date.now();
-      const [net, tools] = await Promise.all([
+      const [net, tools, folders] = await Promise.all([
         api.call<NetworkAsk[]>('network.asks', {}).then((r) => (Array.isArray(r) ? r : []), () => [] as NetworkAsk[]),
         api.call<ToolAsk[]>('tools.asks', {}).then((r) => (Array.isArray(r) ? r : []), () => [] as ToolAsk[]),
+        api.call<FolderAsk[]>('folder.asks', {}).then((r) => (Array.isArray(r) ? r : []), () => [] as FolderAsk[]),
       ]);
-      const asks: { key: string; kind: 'network' | 'tool'; team: string; member: string | null; label: string | null }[] = [
+      const asks: { key: string; kind: AskKind; team: string; member: string | null; label: string | null }[] = [
         ...groupAsks(net.filter((a) => a && a.state === 'pending')).map((g) => ({
           key: `n:${g.key}`, kind: 'network' as const, team: g.asks[0].team, member: g.asks[0].memberName || null, label: hostsLabel(g.hosts),
         })),
         ...tools.filter((a) => a && (a.state === 'pending' || a.state === 'installing')).map((a) => ({
           key: `t:${a.id}`, kind: 'tool' as const, team: a.team, member: a.memberName || null, label: a.displayName || a.tool,
+        })),
+        ...pendingFolderAsks(folders).map((a) => ({
+          key: `f:${a.id}`, kind: 'folder' as const, team: a.team, member: folderAskMember(a) || null, label: a.path,
         })),
       ];
       const setAsks = (live as Partial<Pick<MonitorModel, 'setAsks'>>).setAsks;
@@ -704,7 +710,7 @@ onMounted(async () => {
     if (controls) wallObserver.observe(controls);
   }
   await tick(true);
-  offAsks = api.onEvent?.((e) => { if (e.event === 'network.asksChanged' || e.event === 'tools.asksChanged') void loadAsks(); }) ?? null;
+  offAsks = api.onEvent?.((e) => { if (e.event === 'network.asksChanged' || e.event === 'tools.asksChanged' || e.event === FOLDER_ASKS_CHANGED) void loadAsks(); }) ?? null;
   await loadAsks();
   timers = [
     setInterval(() => void tick(), props.pollMs ?? 1200),

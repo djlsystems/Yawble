@@ -38,6 +38,9 @@ public sealed partial class IntegrationService
             // Tool asks (0040) and what happened to them.
             "DELETE FROM tool_ask_events WHERE ask_id IN (SELECT id FROM tool_asks WHERE team_id = $t);",
             "DELETE FROM tool_asks WHERE team_id = $t;",
+            // Folder asks (0053) and what happened to them.
+            "DELETE FROM folder_ask_events WHERE ask_id IN (SELECT id FROM folder_asks WHERE team_id = $t);",
+            "DELETE FROM folder_asks WHERE team_id = $t;",
         })
             Exec(c, tx, sql, ("$t", teamId));
         tx.Commit();
