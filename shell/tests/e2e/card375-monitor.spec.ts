@@ -1,4 +1,4 @@
-﻿// Card 375 (verify B080, cards 373 + 374, with card 371's code map): the livelier Monitor end to end, in headless Chrome
+// Card 375 (verify B080, cards 373 + 374, with card 371's code map): the livelier Monitor end to end, in headless Chrome
 // against the phone-remote fake core (remote.html, tests/e2e/phone). The fake serves monitor.messages, monitor.steps
 // (with StepRow.exit when the test gives one), monitor.codeEvents and bus.workflows from a feed the test changes while
 // the page polls, and patches teams.agents with the attention the test sets (a member that needs the person).
@@ -18,7 +18,7 @@
 //
 //   npx playwright test card375-monitor --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots and the results go to $YAWBLE_TEAM_DOCS/b080-monitor (else test-results/b080-monitor).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';
@@ -217,23 +217,27 @@ function sparks(f: Frame, p: Pt, color: string) {
 }
 /** The workflow node squares (and leaving ones): a fill rgba(7, 11, 20, 0.95) with one moveTo, then its stroke. */
 function wfBoxes(f: Frame) {
-  const out: { x: number; y: number; color: string; lw: number; alpha: number }[] = [];
+  const out: { x: number; y: number; color: string; lw: number; alpha: number; at: number }[] = [];
   f.ops.forEach((o, i) => {
     if (o.op !== 'fill' || o.style !== 'rgba(7, 11, 20, 0.95)' || o.items?.length !== 1 || o.items[0].t !== 'm') return;
     const s = f.ops[i + 1];
     if (!s || s.op !== 'stroke' || s.items?.[0]?.t !== 'm') return;
-    out.push({ x: o.items[0].x + 6, y: o.items[0].y + 10, color: s.style, lw: s.lw!, alpha: o.alpha });
+    out.push({ x: o.items[0].x + 6, y: o.items[0].y + 10, color: s.style, lw: s.lw!, alpha: o.alpha, at: i });
   });
   return out;
 }
-/** A workflow node by its "#id" label (drawn 13 under its centre). */
+/**
+ * A workflow node by its "#id" label: the square drawn last before the label (scene drawWorkflowNode draws the square, its
+ * icon, then its label). Card 500: the label is not always 13 under the centre - placeWorkflowLabels moves a label above or
+ * beside its node when the place under it is taken (by #11's or #12's label, as the graph drifts), so finding the square by
+ * the label's place missed about half the runs of 1b.
+ */
 function wfNode(f: Frame, id: number) {
   // B090: the label is "#id title" (or "#id" on a phone's wall zoomed out).
-  const t = f.ops.find((o) => o.op === 'text' && (o.text === `#${id}` || o.text!.startsWith(`#${id} `)) && (o.style === C.inkDim || o.style === C.blocked));
-  if (!t) return null;
-  const c = { x: t.x!, y: t.y! - 13 };
-  const box = wfBoxes(f).find((b) => near(b, c, 0.05));
-  return box ? { ...box, label: t.style, op: t } : null;
+  const at = f.ops.findIndex((o) => o.op === 'text' && (o.text === `#${id}` || o.text!.startsWith(`#${id} `)) && (o.style === C.inkDim || o.style === C.blocked));
+  if (at < 0) return null;
+  const box = wfBoxes(f).filter((b) => b.at < at).at(-1);
+  return box ? { ...box, label: f.ops[at]!.style, op: f.ops[at]! } : null;
 }
 /** Dashed lines from a to b (either way). */
 function dashedBetween(f: Frame, a: Pt, b: Pt, tol = 1.5) {

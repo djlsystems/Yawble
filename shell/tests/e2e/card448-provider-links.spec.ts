@@ -10,7 +10,7 @@
 //  - Settings: detected GitLab shown; Provider none + a link pattern saved through teams.setRepo; the Git dialog then
 //    says "Open in the browser" and uses the pattern's urls; "As detected" + blank clears (provider null, linkPattern null).
 //   npx playwright test card448-provider-links     (CARD448_SKIP_BUILD=1 reuses out/card448/renderer)
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { answers } from './phone/fake-core';
 import { buildRenderer, fakeRemote } from './phone/server';

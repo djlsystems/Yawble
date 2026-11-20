@@ -8,7 +8,7 @@
 //  - 390 x 844 (a phone): the counts' list and the merge preview do not scroll sideways.
 //   npx playwright test card465-git-previews      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B073 (else test-results/B073).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';

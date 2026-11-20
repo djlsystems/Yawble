@@ -5,7 +5,7 @@
 // $YAWBLE_TEAM_DOCS/B086 when that is set.
 //
 //   npx playwright test card430-timeline      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from './phone/fixtures';
 import path from 'node:path';
 import { type Access } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';

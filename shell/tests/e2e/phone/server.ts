@@ -30,6 +30,24 @@ export const baseShellDir = process.env.B037_BASE_DIR ? path.resolve(process.env
 export const baseBuiltDir = process.env.B037_BASE_DIR ? path.resolve(process.env.B037_BASE_DIR, 'renderer') : path.join(shellDir, 'out', 'b037', 'renderer-base');
 
 /**
+ * mkdirSync(dir, { recursive: true }) that survives another worker making the same folder at the same moment. On Windows
+ * two workers' beforeAll racing on one new folder can get EPERM (or EEXIST/EBUSY) from the loser even though the folder
+ * now exists (card 500: card403's beforeAll with 2 workers). So such an error counts as done once the folder is there;
+ * otherwise it is tried again a few times, then thrown.
+ */
+export function ensureDir(dir: string, tries = 5) {
+  for (let i = 1; ; i++) {
+    try { mkdirSync(dir, { recursive: true }); return; } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      const racy = code === 'EPERM' || code === 'EEXIST' || code === 'EBUSY' || code === 'EACCES';
+      if (racy && existsSync(dir) && statSync(dir).isDirectory()) return;
+      if (!racy || i >= tries) throw e;
+      const until = Date.now() + 50 * i; while (Date.now() < until) { /* short wait, then again */ }
+    }
+  }
+}
+
+/**
  * Extracts BASE_COMMIT's shell/ and code-browser/ into out/b037/main (`git archive BASE_COMMIT shell code-browser`),
  * unless out/b037/main/.commit already names it. A new tree drops the old base build, so it is built again even with
  * B037_SKIP_BUILD=1. The tree sits under shell/, so its imports (vue, highlight.js, ...) resolve from shell/node_modules.

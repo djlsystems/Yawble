@@ -5,7 +5,7 @@
 // core's RemoteAccess refuses it. With full access the same buttons are enabled.
 //
 //   npx playwright test workflows-visitor      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from './phone/fixtures';
 import { type Access } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 

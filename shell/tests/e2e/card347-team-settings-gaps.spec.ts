@@ -13,7 +13,7 @@
 //    main BASE_COMMIT (before cards 328 and 346); both screenshots are saved (kept from card 329).
 //
 //   npx playwright test card347-team-settings-gaps   (B037_SKIP_BUILD=1 reuses out/b037/renderer and renderer-base)
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';

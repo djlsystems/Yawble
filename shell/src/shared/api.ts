@@ -147,6 +147,8 @@ export interface YawbleApi {
   windowCommand?(command: WindowCommand): void;
   /** The OS folder picker, for a team's repository (null when the window has none: a remote view). */
   pickFolder(): Promise<string | null>;
+  /** Whether an absolute path is a folder on this computer (desktop window only: a remote view cannot look). */
+  folderExists?(path: string): Promise<boolean>;
   /**
    * Set when this window is a remote view of the instance (the same screens in a browser, through the Cloud
    * Link): screens hide what only the person at the computer may do.
@@ -197,6 +199,7 @@ export const Channels = {
   event: 'core:event',
   openTerminal: 'window:openTerminal',
   pickFolder: 'dialog:pickFolder',
+  folderExists: 'dialog:folderExists',
   shellSettings: 'shell:settings',
   setShellSettings: 'shell:setSettings',
   openDocuments: 'window:openDocuments',

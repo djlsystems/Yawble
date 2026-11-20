@@ -5,7 +5,7 @@
 // The sheet's Close keeps its 44 px tap target (card 328). At 1280x800 the tab row is as before.
 //
 //   npx playwright test team-settings-phone      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';

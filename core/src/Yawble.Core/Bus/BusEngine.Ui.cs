@@ -238,9 +238,11 @@ public sealed partial class BusEngine
         WithGate(() => LiveActivity(_store.Clock.GetUtcNow()), ct);
 
     /// <summary>Under the gate.</summary>
+    /// <remarks>B106: every active run, with its lease waits from the lease's own queue (not only a run with an idle clock).</remarks>
     private IReadOnlyList<LiveRunActivity> LiveActivity(DateTimeOffset now) =>
-        [.. _active.Values.Where(a => a.Context.IdleClock is not null)
-            .Select(a => new LiveRunActivity(a.Context.Member.Team, a.Context.Member.Name, a.Context.Correlation, a.Context.IdleClock!.Spans(now)))];
+        [.. _active.Values.Select(a => (a.Context, Spans: ActivityOf(a.Context, now)))
+            .Where(x => x.Spans.Stalls.Count > 0 || x.Spans.Holds.Count > 0)
+            .Select(x => new LiveRunActivity(x.Context.Member.Team, x.Context.Member.Name, x.Context.Correlation, x.Spans))];
 
     /// <summary>The active run of a member, if any (the terminal window attaches to it).</summary>
     public Task<long?> ActiveRunOfAsync(long memberId, CancellationToken ct = default) =>

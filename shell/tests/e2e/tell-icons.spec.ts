@@ -6,7 +6,7 @@
 //
 //   npx playwright test tell-icons      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/card344-tell-icons (else test-results/card344-tell-icons).
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore } from './phone/fake-core';

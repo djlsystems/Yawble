@@ -7,7 +7,7 @@
 //  - deleting a contained branch sends no unmergedOk; the main repository goes as "main" or no repo
 //  - 1280 x 800 and 390 x 844: nothing scrolls sideways
 //   npx playwright test card363-tidy-gaps     (screenshots: $YAWBLE_TEAM_DOCS/B067/card363-*.png)
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { answers } from './phone/fake-core';

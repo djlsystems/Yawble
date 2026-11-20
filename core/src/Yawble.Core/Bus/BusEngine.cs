@@ -687,8 +687,9 @@ public sealed partial class BusEngine : IAsyncDisposable
                 var wakeManager = WakeManagerPolicy.OfRun(run.Items);
                 // A member that ends without handing back but asked to be woken is not stuck: say when it comes back.
                 var wake = run.Member.Role == MemberRole.Member && !run.HandedBack ? _store.NextWake(run.Member.Id) : null;
-                // B086: the run's stalls and lease waits, for the board's time accounting (none from a fake runner).
-                var spans = run.IdleClock?.Spans(_store.Clock.GetUtcNow());
+                // B086: the run's stalls and lease waits, for the board's time accounting. B106: the lease waits come from the
+                // lease's own queue too (ReleaseLeaseOf above ended a wait still queued), so a run without an idle clock has them.
+                var spans = ActivityOf(run, _store.Clock.GetUtcNow());
                 _store.Append(new NewMessage(result.Succeeded ? MessageTypes.Completed : MessageTypes.Failed,
                     WakeManagerPolicy.WithChoice(JsonSerializer.Serialize(new
                     {

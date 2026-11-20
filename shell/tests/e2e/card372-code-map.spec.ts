@@ -11,7 +11,7 @@
 //
 //   npx playwright test card372-code-map --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots and the frame times go to $YAWBLE_TEAM_DOCS/b079-code-map (else test-results/b079-code-map).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';
