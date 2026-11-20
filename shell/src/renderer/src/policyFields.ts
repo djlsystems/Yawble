@@ -71,6 +71,133 @@ export function toText(value: unknown): string {
   return Array.isArray(value) ? value.join('\n') : String(value);
 }
 
+// ---------------------------------------------------------------- B110: the Folder access block, honest save results
+
+export type FolderList = 'readwrite' | 'readonly' | 'denied';
+export const FOLDER_LISTS: { list: FolderList; label: string }[] = [
+  { list: 'readwrite', label: 'Read/write' },
+  { list: 'readonly', label: 'Read-only' },
+  { list: 'denied', label: 'Denied' },
+];
+/** Where an effective folder comes from: the global policy, the app's implicit folders, this member's loosening or override. */
+export type FolderSource = 'global' | 'implicit' | 'loosen' | 'override';
+export const SOURCE_LABEL: Record<FolderSource, string> = {
+  global: 'global', implicit: 'implicit', loosen: 'this member (loosened)', override: 'this member (override)',
+};
+
+export interface FolderRow {
+  /** The path as the effective policy has it (resolved by the core), or the member's own entry as typed when not in effect. */
+  path: string;
+  source: FolderSource;
+  /** The member's own entry as stored (loosen or override), which Remove takes out; null for global / implicit rows. */
+  own: string | null;
+  /** A loosened entry the core does not add, because other access already covers it. */
+  covered?: boolean;
+}
+
+/** A path compared as the core resolves it, roughly: forward slashes, no trailing slash, Windows paths case-insensitive. */
+function norm(p: string): string {
+  let s = p.trim().replace(/\\/g, '/');
+  if (s.length > 1) s = s.replace(/\/+$/, '');
+  return /^[a-z]:/i.test(s) || s.startsWith('//') ? s.toLowerCase() : s;
+}
+
+/** Whether an entry as typed (`~/src`, `C:\work`) names the resolved path the core shows (`/home/pat/src`, `C:\work`). */
+export function samePath(typed: string, resolved: string): boolean {
+  const t = norm(typed);
+  const r = norm(resolved);
+  if (t === r) return true;
+  return t.startsWith('~/') && r.endsWith(t.slice(1));
+}
+
+/** An absolute path: `C:\..`, `\\server\share`, `/..` or `~/..` (the core expands `~`). */
+export function isAbsolutePath(p: string): boolean {
+  const s = p.trim();
+  return /^[a-z]:[\\/]/i.test(s) || /^[\\/]/.test(s) || s === '~' || /^~[\\/]/.test(s);
+}
+
+function listOf(doc: any, list: FolderList): string[] {
+  const v = doc?.filesystem?.[list];
+  return Array.isArray(v) ? v : [];
+}
+
+/** The rows of one folder list: each effective folder with its source, then the member's loosened entries the core skips. */
+export function folderRows(view: MemberPolicyView, list: FolderList): FolderRow[] {
+  const effective: string[] = (view.effective as any)[list] ?? [];
+  const implicit: string[] = (view.implicit as any)[list] ?? [];
+  const loosened = new Set(view.effective.loosened ?? []);
+  const loosen = list === 'denied' ? [] : listOf(view.loosen, list);
+  const override = listOf(view.override, list);
+  const global = listOf(view.global, list);
+  const rows: FolderRow[] = effective.map((p) => {
+    if (implicit.some((i) => samePath(i, p))) return { path: p, source: 'implicit', own: null };
+    if (loosened.has(`filesystem.${list} + ${p}`)) return { path: p, source: 'loosen', own: loosen.find((l) => samePath(l, p)) ?? p };
+    const o = override.find((x) => samePath(x, p));
+    if (o !== undefined && !global.some((g) => samePath(g, p))) return { path: p, source: 'override', own: o };
+    return { path: p, source: 'global', own: null };
+  });
+  for (const l of loosen) {
+    if (rows.some((r) => r.own === l)) continue;
+    rows.push({ path: l, source: 'loosen', own: l, covered: true });
+  }
+  return rows;
+}
+
+/** A document with its keys sorted and empty objects dropped, as one string: two that equal mean the same policy. */
+export function canon(doc: unknown): string {
+  const walk = (v: any): any => {
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const out: any = {};
+      for (const k of Object.keys(v).sort()) {
+        const w = walk(v[k]);
+        if (w === undefined || w === null || (typeof w === 'object' && !Array.isArray(w) && Object.keys(w).length === 0)) continue;
+        out[k] = w;
+      }
+      return out;
+    }
+    return v;
+  };
+  return JSON.stringify(walk(doc ?? {}));
+}
+
+const SHORT: Record<string, string> = {
+  'filesystem.readwrite': 'Read/write', 'filesystem.readonly': 'Read-only', 'filesystem.denied': 'Denied', 'network.allowHosts': 'Allowed hosts',
+};
+
+/** The fields whose effective value differs between two views (the rows the Effective view highlights after a save). */
+export function changedFields(before: MemberPolicyView, after: MemberPolicyView): string[] {
+  return POLICY_FIELDS.filter((f) => canon({ v: effectiveOf(before, f.path) }) !== canon({ v: effectiveOf(after, f.path) })).map((f) => f.path);
+}
+
+/** The folders of a list in `after` that `before` did not have (highlighted in the Folder access block). */
+export function addedFolders(before: MemberPolicyView, after: MemberPolicyView, list: FolderList): string[] {
+  const old: string[] = (before.effective as any)[list] ?? [];
+  return ((after.effective as any)[list] ?? []).filter((p: string) => !old.includes(p));
+}
+
+/**
+ * What a save changed, in words: one line per changed field ("Read/write now: C:\a, Z:\b"), or "Nothing changed" when the
+ * stored override and loosening and the effective policy are all as before. Never "saved" for a no-op.
+ */
+export function describeChange(before: MemberPolicyView, after: MemberPolicyView): { changed: boolean; text: string } {
+  const fields = changedFields(before, after);
+  if (fields.length === 0) {
+    const stored = canon(before.override) !== canon(after.override) || canon(before.loosen) !== canon(after.loosen);
+    return stored
+      ? { changed: true, text: 'Saved. The effective policy is the same as before.' }
+      : { changed: false, text: 'Nothing changed.' };
+  }
+  const lines = fields.map((path) => {
+    const def = POLICY_FIELDS.find((f) => f.path === path)!;
+    const label = SHORT[path] ?? def.label;
+    const now = effectiveOf(after, path);
+    if (Array.isArray(now)) return `${label} now: ${show(now)}.`;
+    return `${label} now: ${show(now)} (was ${show(effectiveOf(before, path))}).`;
+  });
+  return { changed: true, text: `${lines.join(' ')} It applies from the next run; a running sandbox keeps its policy.` };
+}
+
 export function fromText(def: FieldDef, text: string): unknown {
   if (def.kind === 'list') return text.split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
   if (def.kind === 'number') {

@@ -220,10 +220,12 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     // ---- Change one agent's policy: Ben (Grok) gets a 15-minute timeout, and a confirmed loosening.
     await memberAction(main, 'Ben', 'open-settings');
     await main.locator('[data-test=tab-policy]').click();
+    // B110: the tighten-only override table is under Advanced (collapsed while the member has no override).
+    await main.locator('[data-test=policy-advanced-toggle]').click();
     await main.locator('[data-test=inherit-compute-wallTimeoutSec]').uncheck();
     await main.locator('[data-test=override-compute-wallTimeoutSec]').fill('900');
     await main.locator('[data-test=save-override]').click();
-    await expectSaved(main, '[data-test=settings-saved]', '[data-test=settings-error]', 'Override saved');
+    await expectSaved(main, '[data-test=settings-saved]', '[data-test=settings-error]', 'Wall-clock timeout now: 900 (was 7200)');
     await expect(main.locator('[data-test=effective-compute-wallTimeoutSec]')).toHaveText('900');
     // Widening through the override is refused.
     await main.locator('[data-test=inherit-network-allowHosts]').uncheck();

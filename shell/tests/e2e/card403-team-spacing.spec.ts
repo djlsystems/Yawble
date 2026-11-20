@@ -14,7 +14,7 @@
 //
 //   npx playwright test card403-team-spacing --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots and results go to $YAWBLE_TEAM_DOCS/b089-team-spacing and b090-workflow-nodes.
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore } from './phone/fake-core';

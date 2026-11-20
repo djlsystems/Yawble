@@ -5,7 +5,7 @@
 //    is refused (she is running) with the reason; Realign on TesterBen's shows old -> new, one yes, done.
 //  - 360 x 740 and 390 x 844 (through the team page's ⋯ menu), and 1280 x 800: nothing in the dialog scrolls sideways.
 //   npx playwright test card362-tidy      (screenshots: $YAWBLE_TEAM_DOCS/B067 when set, else test-results/card362-*.png)
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildRenderer, fakeRemote } from './phone/server';

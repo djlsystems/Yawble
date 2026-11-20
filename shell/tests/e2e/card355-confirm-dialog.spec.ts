@@ -7,7 +7,7 @@
 //  - No browser dialog (page 'dialog' event) at any point.
 //
 //   npx playwright test card355-confirm-dialog   (B037_SKIP_BUILD=1 reuses out/b037/renderer)
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { answers } from './phone/fake-core';
 import { buildRenderer, fakeRemote } from './phone/server';
 

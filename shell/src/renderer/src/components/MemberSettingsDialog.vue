@@ -2,7 +2,10 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import type { AgentModelList, AgentProfileRow, AvailableBackend, CommandLines, CredentialStatus, MemberPolicyView, MemberRow, YawbleApi, PolicyPatchDoc } from '../../../shared/api';
 import { errorText, resolveApi, when } from '../api';
-import { CLIPBOARD, effectiveOf, fromText, getPath, POLICY_FIELDS, setPath, show, testId, toText } from '../policyFields';
+import { addedFolders, canon, changedFields, CLIPBOARD, describeChange, effectiveOf, FOLDER_LISTS, fromText, getPath, POLICY_FIELDS, setPath, show, testId, toText,
+  type FieldDef, type FolderList } from '../policyFields';
+import { confirmDialog } from '../confirm';
+import FolderAccess from './FolderAccess.vue';
 import { agentClis } from '../agentClis';
 import { agentDefaultLabel } from '../agentArgs';
 import GuardrailPanel from './GuardrailPanel.vue';
@@ -13,9 +16,11 @@ import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { useHostProblems } from '../hostChecks';
 
-// ⚙ Settings: General (CLI preset, model, credential, instructions) and Policy (global, override
-// and effective per field, an "inherit" toggle, and the separate Loosen… section with its confirmation), and
-// Guardrails (the guardrail check under this agent's effective policy; the card's 🛡 opens it directly).
+// ⚙ Settings: General (CLI preset, model, credential, instructions) and Policy, and Guardrails (the guardrail check
+// under this agent's effective policy; the card's 🛡 opens it directly). Policy (B110), top to bottom: Folder access (the
+// effective folders with their sources; Add folder is a confirmed loosening), the Effective policy per field (rows a save
+// changed are highlighted), "Advanced: tighten this member (override)" (collapsed; inherit toggles), and Loosen… for hosts
+// and limits. Each save says what it changed or "Nothing changed"; unsaved boxes say so, and closing asks "Discard?".
 const props = defineProps<{ memberId: number; initialTab?: 'general' | 'policy' | 'guardrails'; api?: YawbleApi; pollMs?: number }>();
 const emit = defineEmits<{ close: []; changed: [] }>();
 const api = resolveApi(props.api);
@@ -34,6 +39,10 @@ const busy = computed(() => work.any());
 const general = reactive({ cli: 'claude', model: '', credential: 'default', instructions: '' });
 const rows = reactive<Record<string, { inherit: boolean; text: string }>>({});
 const loosenText = reactive<Record<string, string>>({});
+// The Loosen… boxes: hosts and compute. Folders are added in the Folder access block (B110: one place to type a path).
+const LOOSEN_FIELDS = POLICY_FIELDS.filter((f) => f.loosen && !f.path.startsWith('filesystem.'));
+/** "Advanced: tighten this member (override)": open when the member has an override. */
+const advancedOpen = ref(false);
 const preview = ref<string[] | null>(null);
 /** The loosen block's hosts the core refuses (FloorRules.HostProblem), in its words, as they are typed. */
 const loosenHostProblems = useHostProblems(api, () => (loosenText['network.allowHosts'] ?? '').split(/[\r\n,]+/));
@@ -106,16 +115,72 @@ async function load() {
   }
 }
 
-function applyView(v: MemberPolicyView) {
-  view.value = v;
+/** An override row as the saved view has it (an inherited select still shows a value: the global one). */
+function savedRow(v: MemberPolicyView, f: FieldDef) {
+  const o = getPath(v.override, f.path);
+  const shown = o === undefined && f.kind === 'clipboard' ? getPath(v.global, f.path) : o;
+  return { inherit: o === undefined, text: toText(shown) };
+}
+const rowDirty = (v: MemberPolicyView, f: FieldDef) => {
+  const r = rows[f.path];
+  if (!r) return false;
+  const s = savedRow(v, f);
+  return r.inherit !== s.inherit || (!r.inherit && r.text !== s.text);
+};
+const loosenFieldDirty = (v: MemberPolicyView, f: FieldDef) => (loosenText[f.path] ?? '') !== toText(getPath(v.loosen, f.path));
+
+/**
+ * Shows a view the core answered. `saved` names the section the save came from, whose boxes take the saved values; the
+ * other sections keep what the person typed and did not save yet (B110: no edit is silently dropped).
+ */
+function applyView(v: MemberPolicyView, saved: 'all' | 'override' | 'loosen' | 'folders' = 'all') {
+  const old = view.value;
   for (const f of POLICY_FIELDS) {
-    const o = getPath(v.override, f.path);
-    // An inherited select still shows a value: the global one.
-    const shown = o === undefined && f.kind === 'clipboard' ? getPath(v.global, f.path) : o;
-    rows[f.path] = { inherit: o === undefined, text: toText(shown) };
-    if (f.loosen) loosenText[f.path] = toText(getPath(v.loosen, f.path));
+    if (saved === 'all' || saved === 'override' || !old || !rowDirty(old, f)) rows[f.path] = savedRow(v, f);
+    if (LOOSEN_FIELDS.includes(f) && (saved === 'all' || saved === 'loosen' || !old || !loosenFieldDirty(old, f)))
+      loosenText[f.path] = toText(getPath(v.loosen, f.path));
   }
-  preview.value = null;
+  view.value = v;
+  // A preview stays only beside an override save (the core refuses a confirm that no longer matches, in its words).
+  if (saved !== 'override' || !loosenDirty.value) preview.value = null;
+  if (saved === 'all') advancedOpen.value = canon(v.override) !== canon({});
+}
+
+// B110: the save model. What is typed and not saved, per section; closing with any of it asks "Discard?".
+const overrideDirty = computed(() => !!view.value && POLICY_FIELDS.some((f) => rowDirty(view.value!, f)));
+const loosenDirty = computed(() => !!view.value && LOOSEN_FIELDS.some((f) => loosenFieldDirty(view.value!, f)));
+const foldersDirty = ref(false);
+const policyDirty = computed(() => overrideDirty.value || loosenDirty.value || foldersDirty.value);
+
+async function requestClose() {
+  if (policyDirty.value && !(await confirmDialog({ message: 'Policy has unsaved changes. Discard?', okLabel: 'Discard', danger: true }))) return;
+  emit('close');
+}
+
+/** The Effective rows and the folders a save changed (highlighted until the next save), and its result in words. */
+const changedRows = ref<string[]>([]);
+const freshFolders = ref<Partial<Record<FolderList, string[]>>>({});
+function report(before: MemberPolicyView, after: MemberPolicyView) {
+  const r = describeChange(before, after);
+  saved.value = r.text;
+  changedRows.value = changedFields(before, after);
+  freshFolders.value = Object.fromEntries(FOLDER_LISTS.map((l) => [l.list, addedFolders(before, after, l.list)]));
+  if (r.changed) emit('changed');
+}
+function foldersApplied(v: MemberPolicyView) {
+  const before = view.value!;
+  applyView(v, 'folders');
+  report(before, v);
+}
+function foldersError(text: string | null) {
+  error.value = text;
+  if (text !== null) saved.value = null;
+}
+function foldersNothing(text: string) {
+  error.value = null;
+  saved.value = text;
+  changedRows.value = [];
+  freshFolders.value = {};
 }
 
 onMounted(load);
@@ -148,9 +213,13 @@ function overrideDoc(): PolicyPatchDoc {
   return doc;
 }
 
+// The Loosen… block's document: its boxes (hosts, compute), with the saved folders of the Folder access block kept as they are.
 function loosenDoc(): PolicyPatchDoc {
   const doc: any = {};
-  for (const f of POLICY_FIELDS.filter((f) => f.loosen)) {
+  const fs = view.value?.loosen?.filesystem;
+  if (fs?.readonly?.length) setPath(doc, 'filesystem.readonly', [...fs.readonly]);
+  if (fs?.readwrite?.length) setPath(doc, 'filesystem.readwrite', [...fs.readwrite]);
+  for (const f of LOOSEN_FIELDS) {
     const value = fromText(f, loosenText[f.path] ?? '');
     if (value === undefined || (Array.isArray(value) && value.length === 0)) continue;
     setPath(doc, f.path, value);
@@ -162,9 +231,10 @@ const saveOverride = () => work.run('override', doSaveOverride);
 async function doSaveOverride() {
   error.value = saved.value = null;
   try {
-    applyView(await api.call<MemberPolicyView>('policy.saveOverride', { memberId: props.memberId, override: overrideDoc() }));
-    saved.value = 'Override saved. It applies from the next run; a running sandbox keeps its policy.';
-    emit('changed');
+    const before = view.value!;
+    const after = await api.call<MemberPolicyView>('policy.saveOverride', { memberId: props.memberId, override: overrideDoc() });
+    applyView(after, 'override');
+    report(before, after);
   } catch (e) {
     error.value = errorText(e);
   }
@@ -188,9 +258,10 @@ async function doConfirmLoosen() {
   error.value = saved.value = null;
   try {
     const doc = JSON.parse(previewFor.value);
-    applyView(await api.call<MemberPolicyView>('policy.saveLoosen', { memberId: props.memberId, loosen: doc, confirmed: [...(preview.value ?? [])] }));
-    saved.value = 'Loosening saved with your confirmation.';
-    emit('changed');
+    const before = view.value!;
+    const after = await api.call<MemberPolicyView>('policy.saveLoosen', { memberId: props.memberId, loosen: doc, confirmed: [...(preview.value ?? [])] });
+    applyView(after, 'loosen');
+    report(before, after);
   } catch (e) {
     error.value = errorText(e);
   }
@@ -200,7 +271,7 @@ const loosenChanged = () => { preview.value = null; };
 </script>
 
 <template>
-  <Modal :title="member ? `${member.team} / ${member.name} · settings` : 'Agent settings'" wide @close="emit('close')">
+  <Modal :title="member ? `${member.team} / ${member.name} · settings` : 'Agent settings'" wide @close="requestClose">
     <nav class="tabs">
       <button :class="{ on: tab === 'general' }" data-test="tab-general" @click="tab = 'general'">General</button>
       <button :class="{ on: tab === 'policy' }" data-test="tab-policy" @click="tab = 'policy'">Policy</button>
@@ -248,28 +319,49 @@ const loosenChanged = () => { preview.value = null; };
 
     <!-- Policy -->
     <div v-if="tab === 'policy' && view" class="policy">
-      <p class="muted">Backend: <strong>{{ view.backend }}</strong>. An override can only tighten the global policy; widening needs the Loosen… section below.</p>
+      <FolderAccess :view="view" :api="api" :member-id="memberId" :member-name="member?.name ?? 'this member'" :work="work" :fresh="freshFolders"
+        @applied="foldersApplied" @error="foldersError" @dirty="foldersDirty = $event" @nothing="foldersNothing" />
+      <p class="muted">Backend: <strong>{{ view.backend }}</strong>.</p>
       <p v-if="view.net" class="small" data-test="policy-net"><strong>Network:</strong> {{ view.net }}</p>
+      <h3 class="sub">Effective policy (what the next run gets)</h3>
       <table data-test="policy-table">
-        <thead><tr><th>Field</th><th>Global</th><th>Inherit</th><th>Override</th><th>Effective</th></tr></thead>
+        <thead><tr><th>Field</th><th>Global</th><th>Effective</th></tr></thead>
         <tbody>
-          <tr v-for="f in POLICY_FIELDS" :key="f.path" :data-test="`row-${testId(f.path)}`">
+          <tr v-for="f in POLICY_FIELDS" :key="f.path" :data-test="`row-${testId(f.path)}`" :class="{ changed: changedRows.includes(f.path) }"
+            :data-changed="changedRows.includes(f.path) ? 'true' : undefined">
             <td>{{ f.label }}<div v-if="f.hint" class="muted small">{{ f.hint }}</div></td>
             <td class="mono">{{ show(getPath(view.global, f.path)) }}</td>
-            <td><input type="checkbox" v-model="rows[f.path].inherit" :data-test="`inherit-${testId(f.path)}`" /></td>
-            <td>
-              <select v-if="f.kind === 'clipboard'" v-model="rows[f.path].text" :disabled="rows[f.path].inherit" :data-test="`override-${testId(f.path)}`">
-                <option v-for="c in CLIPBOARD" :key="c" :value="c">{{ c }}</option>
-              </select>
-              <textarea v-else-if="f.kind === 'list'" v-model="rows[f.path].text" rows="1" :disabled="rows[f.path].inherit"
-                :placeholder="rows[f.path].inherit ? 'inherits' : 'one per line'" :data-test="`override-${testId(f.path)}`"></textarea>
-              <input v-else v-model="rows[f.path].text" :disabled="rows[f.path].inherit" inputmode="numeric"
-                :placeholder="rows[f.path].inherit ? 'inherits' : ''" :data-test="`override-${testId(f.path)}`" />
-            </td>
             <td class="mono" :data-test="`effective-${testId(f.path)}`">{{ show(effectiveOf(view, f.path)) }}</td>
           </tr>
         </tbody>
       </table>
+
+      <details class="advanced" data-test="policy-advanced" :open="advancedOpen" @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open">
+        <summary data-test="policy-advanced-toggle">Advanced: tighten this member (override)
+          <span v-if="overrideDirty" class="unsaved small" data-test="override-unsaved">Unsaved changes</span></summary>
+        <p class="small muted">An override can only narrow the global policy for this member; it never gives more. To give a folder, use Folder access above; for hosts and limits, Loosen… below.</p>
+        <table data-test="override-table">
+          <thead><tr><th>Field</th><th>Inherit</th><th>Override</th></tr></thead>
+          <tbody>
+            <tr v-for="f in POLICY_FIELDS" :key="f.path">
+              <td>{{ f.label }}</td>
+              <td><input type="checkbox" v-model="rows[f.path].inherit" :data-test="`inherit-${testId(f.path)}`" /></td>
+              <td>
+                <select v-if="f.kind === 'clipboard'" v-model="rows[f.path].text" :disabled="rows[f.path].inherit" :data-test="`override-${testId(f.path)}`">
+                  <option v-for="c in CLIPBOARD" :key="c" :value="c">{{ c }}</option>
+                </select>
+                <textarea v-else-if="f.kind === 'list'" v-model="rows[f.path].text" rows="1" :disabled="rows[f.path].inherit"
+                  :placeholder="rows[f.path].inherit ? 'inherits' : 'one per line'" :data-test="`override-${testId(f.path)}`"></textarea>
+                <input v-else v-model="rows[f.path].text" :disabled="rows[f.path].inherit" inputmode="numeric"
+                  :placeholder="rows[f.path].inherit ? 'inherits' : ''" :data-test="`override-${testId(f.path)}`" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="row"><span class="grow muted small">Every save is compiled and dry-run through the sandbox; its errors appear as they are.</span>
+          <span v-if="overrideDirty" class="unsaved small" data-test="override-unsaved-save">Unsaved changes</span>
+          <button class="primary" data-test="save-override" :disabled="busy" :aria-busy="work.is('override')" @click="saveOverride"><BusyLabel :busy="work.is('override')" text="Saving…">Save override</BusyLabel></button></div>
+      </details>
       <section v-if="member" class="team-allows" data-test="policy-team-hosts">
         <TeamNetworkAllows :team-id="member.teamId" :api="api" @changed="teamHostsChanged" />
       </section>
@@ -278,8 +370,6 @@ const loosenChanged = () => { preview.value = null; };
       </ul>
       <ul v-if="view.violations.length" class="error small"><li v-for="w in view.violations" :key="w">{{ w }}</li></ul>
       <ul v-if="view.effective.notes.length" class="muted small"><li v-for="n in view.effective.notes" :key="n">{{ n }}</li></ul>
-      <div class="row"><span class="grow muted small">Every save is compiled and dry-run through the sandbox; its errors appear as they are.</span>
-        <button class="primary" data-test="save-override" :disabled="busy" :aria-busy="work.is('override')" @click="saveOverride"><BusyLabel :busy="work.is('override')" text="Saving…">Save override</BusyLabel></button></div>
 
       <details class="implicit">
         <summary>Implicit (always, not editable)</summary>
@@ -304,7 +394,7 @@ const loosenChanged = () => { preview.value = null; };
           Currently loosened (confirmed {{ when(view.loosenApprovedAt) }}): <strong>{{ view.loosenSummary.join('; ') }}</strong>
         </p>
         <div class="loosen-grid">
-          <label v-for="f in POLICY_FIELDS.filter((x) => x.loosen)" :key="f.path">
+          <label v-for="f in LOOSEN_FIELDS" :key="f.path">
             {{ f.label }} <span v-if="f.hint" class="muted small">({{ f.hint }})</span>
             <textarea v-if="f.kind === 'list'" v-model="loosenText[f.path]" rows="1"
               :placeholder="f.path === 'network.allowHosts' ? 'add, one per line: api.github.com or *.digicert.com' : 'add, one per line'"
@@ -315,7 +405,10 @@ const loosenChanged = () => { preview.value = null; };
             </template>
           </label>
         </div>
-        <div class="row"><span class="grow"></span><button data-test="preview-loosen" :disabled="busy" :aria-busy="work.is('preview')" @click="previewLoosen"><BusyLabel :busy="work.is('preview')" text="Checking…">Preview loosening</BusyLabel></button></div>
+        <p class="small muted">Folders are given in Folder access at the top.</p>
+        <div class="row"><span class="grow"></span>
+          <span v-if="loosenDirty" class="unsaved small" data-test="loosen-unsaved">Unsaved changes</span>
+          <button data-test="preview-loosen" :disabled="busy" :aria-busy="work.is('preview')" @click="previewLoosen"><BusyLabel :busy="work.is('preview')" text="Checking…">Preview loosening</BusyLabel></button></div>
         <div v-if="preview" class="confirm" data-test="loosen-preview">
           <template v-if="preview.length">
             <p><strong>This loosens exactly:</strong></p>
@@ -341,13 +434,23 @@ const loosenChanged = () => { preview.value = null; };
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
 td textarea, td input:not([type=checkbox]), td select { width: 100%; }
+td.mono { overflow-wrap: anywhere; }
 .small { font-size: 12px; }
 .problem { font-size: 12px; color: var(--bad); }
 details { margin: 10px 0; }
 .loosen { border: 2px solid var(--warn-line-strong); background: var(--warn-bg); border-radius: 6px; padding: 8px 12px; margin-top: 12px; }
 .loosen h3 { margin: 2px 0 6px; font-size: 14px; color: var(--warn); }
 .loosen-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
-.loosen-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+@media (max-width: 720px) { .loosen-grid { grid-template-columns: minmax(0, 1fr); } }
+.loosen-grid label { min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
 .confirm { border-top: 1px dashed var(--warn-line-strong); margin-top: 8px; padding-top: 6px; }
 .confirm ul { margin: 4px 0; }
+.sub { margin: 10px 0 4px; font-size: 14px; }
+.unsaved { color: var(--warn); font-weight: 600; margin: 0 6px; }
+.advanced { border: 1px solid var(--line-soft); border-radius: 8px; padding: 6px 10px; }
+.advanced summary { cursor: pointer; font-weight: 600; }
+tr.changed td { background: var(--warn-bg); }
+tr.changed td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.changed { animation: rowflash 2.4s ease-out 1; }
+@keyframes rowflash { 0% { outline: 2px solid var(--accent); } 100% { outline: 2px solid transparent; } }
 </style>

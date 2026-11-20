@@ -11,7 +11,7 @@
 //
 //   npx playwright test card420-settings-b096 --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B096 (else test-results/B096).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { answers, createFakeCore, type Access } from './phone/fake-core';

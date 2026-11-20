@@ -11,7 +11,7 @@
 //
 //   npx playwright test card431-b086-verify      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B086 (else test-results/B086).
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { type Access } from './phone/fake-core';

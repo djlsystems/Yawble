@@ -5,7 +5,7 @@
 //
 //   npx playwright test card468-lessons      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B100 (else test-results/B100).
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { answers, createFakeCore } from './phone/fake-core';

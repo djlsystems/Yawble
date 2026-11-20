@@ -6,7 +6,7 @@
 //    the buttons 44 px tall, nothing past the row's edge.
 //  - 1280 x 900 (desktop): the labels shown on one row.
 //   npx playwright test card320-teams-buttons     (measurements: test-results/card320-measure.json; screenshots: test-results/card320-*.png)
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildRenderer, fakeRemote } from './phone/server';
