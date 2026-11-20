@@ -287,6 +287,9 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// <summary>The host tool asks (tools from the app's catalog an agent asked for), behind the request_tool tool; null when not wired.</summary>
     public Integrations.ToolAskService? ToolAsks { get; set; }
 
+    /// <summary>The folder asks (B111: a folder an agent asked to read or write), behind the request_folder tool; null when not wired.</summary>
+    public Integrations.FolderAskService? FolderAsks { get; set; }
+
     internal Task<Message> HandbackAsync(RunContext run, string delivered, CancellationToken ct) =>
         WithGate(() =>
         {
