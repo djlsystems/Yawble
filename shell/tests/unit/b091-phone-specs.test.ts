@@ -132,8 +132,9 @@ describe('the real tests/e2e', () => {
 
   it('the old hand-kept list missed these phone specs', () => {
     const missed = checkPhoneSpecs(E2E, OLD_PHONE_SPECS).filter((p) => /not in the phone project/.test(p)).map((p) => p.split('-')[0]);
-    // A phone spec added after card 484 was never on the old list either; it joins the project by its imports (next test).
-    expect(missed.filter((m) => !(Number(m.replace(/^card/, '')) > 484))).toEqual(STRAYS);
+    // A phone spec added after card 484 (cardNNN with NNN > 484, or one named for its B-item, as b115-settings-gear) was
+    // never on the old list either; it joins the project by its imports (next test).
+    expect(missed.filter((m) => /^card\d+$/.test(m) && Number(m.replace(/^card/, '')) <= 484)).toEqual(STRAYS);
   });
 
   it('every phone spec is in the project built from the imports and uses phone/fixtures; the Electron specs stay in default', () => {

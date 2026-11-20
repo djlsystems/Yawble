@@ -82,6 +82,59 @@ read-only viewers until it is listed as a read.
 The remote view learns its access from `core.getInfo`: over the Cloud Link the answer carries
 `"remoteAccess": "full"` or `"remoteAccess": "read"`. In the window on the computer the field is absent.
 
+## Embedded in the cloud page
+
+The cloud opens the remote view in a frame as `/i/<id>/ui/remote.html?embed=1&theme=light|dark`. With `embed=1`
+the cloud draws one left pane (its own items, then this computer's sidebar items) and one theme switch for the whole
+page; the remote view publishes its sidebar to the cloud and does what the cloud asks, over the contract below.
+`remote.html` without `embed=1` is the plain remote view, with its own sidebar and theme switch. In embed mode the
+viewer's own stored remote theme is neither read nor written: the theme comes from the `theme` query parameter at
+load, then from `yawble.theme` messages.
+
+The contract (the cloud has the same text; the TypeScript types are in `shell/src/shared/embedContract.ts`, the
+desktop's side in `shell/src/renderer/src/embed.ts`):
+
+```text
+CONTRACT (window.postMessage, both sides check event.origin === location.origin and event.source; anything else is ignored)
+Desktop to cloud: {type:'yawble.nav', version:1, nav} each time anything in it changes, and once on load. nav =
+  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs: the same ids/order as Sidebar.vue
+    teams:  [{id, name, dot:'idle'|'running'|'attention'|..., badge|null, active}],
+    canNewTeam: bool,
+    chats:  [{id, title, active, busy:'deleting'|null, actions:[{id, label, danger}]}],
+    runSlots: string|null,           // the line under the sidebar today
+    readOnly: bool }                 // a Visitor's view
+  icon is a short key: newChat, concierge, teams, backlog, workflows, kanban, documents, monitor, logs; the cloud draws its own icon for a key it knows.
+Cloud to desktop: {type:'yawble.navigate', to:{kind:'place', id} | {kind:'team', id} | {kind:'chat', id} | {kind:'newTeam'} | {kind:'chatAction', id, action}} does exactly what the same click in the desktop sidebar does (including the confirm dialogs for a chat's actions, drawn inside the frame).
+Cloud to desktop: {type:'yawble.theme', theme}.
+Desktop to cloud: {type:'yawble.ready', version:1} once it listens.
+```
+
+The values the desktop sends:
+
+- **Places**, in this order, as `id` / `icon`: `newChat` / `newChat`, `concierge` / `concierge`, `teams` / `teams`,
+  `backlog` / `backlog`, `workflows` / `workflows`, `board` / `kanban` (label Kanban board), `documents` /
+  `documents`, `monitor` / `monitor`, `logs` / `logs`. Settings is not a place. `badge` is a number: Teams has the
+  number of teams, Workflows the number of open workflows; otherwise, or when it is 0, `null`. `active` is the screen
+  shown now; New chat and Logs are never active. `disabled` is `false`.
+- **Teams**: `id` is the team's number. `dot` is `running`, `queued`, `paused` or `idle`, as the sidebar's dot; the
+  cloud draws a value it does not know as idle. `badge` is how many of its agents are running, or `null`. `active`
+  is the team whose page is open.
+- **Chats**: `actions` are `{id:'rename', label:'Rename', danger:false}` and `{id:'delete', label:'Delete', danger:true}`,
+  and none for a read-only viewer. `busy` is `'deleting'` while the chat is being deleted.
+- **runSlots** is the line under the sidebar, such as `Run slots: 1 / 4 in use · 0 queued`, or `null` before the
+  computer's first answer. **canNewTeam** is `false` for a read-only viewer.
+
+What the desktop does with the cloud's messages:
+
+- `{kind:'place', id}` takes an `id` from the places above; `{kind:'team', id}` a team's number; `{kind:'chat', id}`
+  and `{kind:'chatAction', id, action}` a chat's id, with `action` `rename` or `delete`.
+- Delete asks **Delete this chat?** in the frame first; Rename asks for the new title in the frame.
+- A message is ignored, as a missing or turned-off button would be, when the team or chat is not in the nav, when a
+  read-only viewer asks for New team or a chat's action, or when a Delete is asked while a chat is being deleted. A
+  message with another `type`, an unknown `kind`, place, action or theme, or the wrong origin or source is ignored.
+- The desktop posts to its own origin only (`location.origin`) and takes messages only from its parent window.
+  Opened outside a frame, it posts nothing and listens to nothing.
+
 ## Capabilities in the hello
 
 When it connects, the app sends a hello: `{"type": "hello", "name", "os", "version", "caps": [...]}`. `caps` says

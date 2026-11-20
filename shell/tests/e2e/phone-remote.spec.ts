@@ -139,7 +139,7 @@ for (const size of PHONES) {
       await drawer(page);
       await check(page, 'drawer', size);
       // The drawer scrolls as one list: no inner box holds the Teams and Chats lists, the first chat comes on screen by
-      // scrolling the drawer, and Settings is on screen or reachable by scrolling.
+      // scrolling the drawer, and the run-slots line at its bottom is on screen or reachable by scrolling.
       const room = await page.locator('[data-test=sidebar]').evaluate((side) => {
         const inner = [...side.querySelectorAll<HTMLElement>('*')].find((e) => /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.querySelector('[data-test=chat-item]'));
         return { inner: !!inner, sideScrolls: /(auto|scroll)/.test(getComputedStyle(side).overflowY), sideOver: side.scrollHeight - side.clientHeight };
@@ -149,10 +149,10 @@ for (const size of PHONES) {
       await chat.scrollIntoViewIfNeeded();
       const cb = (await chat.boundingBox())!;
       expect.soft(cb.y >= 0 && cb.y + cb.height <= size.h + 1, `drawer @${tag(size)}: the first chat on screen after scrolling`).toBe(true);
-      const settings = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
-      await settings.scrollIntoViewIfNeeded().catch(() => {});
-      const sb = (await settings.boundingBox())!;
-      expect.soft(sb.y + sb.height, `drawer @${tag(size)}: Settings on screen (drawer overflows by ${room.sideOver} px, scrolls: ${room.sideScrolls})`).toBeLessThanOrEqual(size.h + 1);
+      const slots = page.locator('[data-test=sidebar] [data-test=slots]');
+      await slots.scrollIntoViewIfNeeded().catch(() => {});
+      const sb = (await slots.boundingBox())!;
+      expect.soft(sb.y + sb.height, `drawer @${tag(size)}: the run slots on screen (drawer overflows by ${room.sideOver} px, scrolls: ${room.sideScrolls})`).toBeLessThanOrEqual(size.h + 1);
       await openFirstChat(page, size);
       await expect(page.locator('[data-test=concierge-thread]')).toBeVisible();
       await check(page, 'concierge-chat', size);
@@ -291,12 +291,8 @@ for (const size of PHONES) {
 
     test('Settings: the sections list and a section', async ({ browser }) => {
       const { page, errors } = await open(browser, size, { asks: false });
-      await drawer(page);
-      const settingsItem = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
-      if (!(await settingsItem.click({ timeout: 3000 }).then(() => true, () => false))) {
-        expect.soft(false, `drawer @${tag(size)}: Settings cannot be tapped in the drawer (below the screen)`).toBe(true);
-        await settingsItem.dispatchEvent('click');
-      }
+      // B115: Settings is the gear at the right of the phone top bar.
+      await page.getByTestId('settings-gear').click();
       await expect(page.locator('[data-test=settings]')).toBeVisible();
       await page.waitForTimeout(500);
       await check(page, 'settings', size);
@@ -617,7 +613,8 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
       const layouts: Record<string, Layout> = {};
       for (const [which, dir] of [['base', baseBuiltDir], ['branch', builtDir]] as const) {
         const { page } = await open(browser, size, { dir, mobile: false });
-        if (id) await page.locator(`[data-test=sidebar] [data-test=${id}]`).first().click();
+        // B115: the base build has Settings in the sidebar, this one the gear at the top right.
+        if (id) await page.locator(id === 'open-app-settings' ? '[data-test=sidebar] [data-test=open-app-settings], [data-test=settings-gear]' : `[data-test=sidebar] [data-test=${id}]`).first().click();
         for (const step of deeper[name] ?? []) await step(page);
         await page.waitForTimeout(900);
         await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${name}-${which}.png`) });
@@ -822,11 +819,11 @@ for (const size of SE) {
         if (after) expect.soft(m.inputs.some((i) => /docs-name/.test(i.what)), `${where('documents-new-file')}: the name field shown`).toBe(true);
 
         // Settings: the list, then each section; Guardrails scrolled to its bottom; Skills with a skill picked.
+        // B115: the after build has the Settings gear at the top right; the before build (the base renderer) has no
+        // gear, Settings is in the sidebar drawer.
         const openSettings = async () => {
-          await drawer(page);
-          const item = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
-          await item.scrollIntoViewIfNeeded().catch(() => {});
-          await item.click();
+          if (after) await page.getByTestId('settings-gear').click();
+          else await nav(page, 'open-app-settings');
           await expect(page.locator('[data-test=settings]')).toBeVisible();
           await page.waitForTimeout(400);
         };

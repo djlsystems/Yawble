@@ -50,7 +50,7 @@ try {
   const hostChecks = (await window.locator('[data-test=host-checks] li').allTextContents()).map((t) => t.trim());
   // The Guardrails panel is off with "Not available: ..." when the core cannot find <install>/bin/yawble-guardcheck
   // or its launcher is off. The global policy's Guardrails tab on the Settings page holds the panel; read whether it is available.
-  await window.locator('[data-test=open-app-settings]').click();
+  await window.locator('[data-test=settings-gear]').click();
   await window.locator('[data-test=open-global-policy]').click();
   const guardrailAvailable = window.locator('[data-test=guardrail-none]');
   const guardrailOff = window.locator('[data-test=guardrail-unavailable]');
