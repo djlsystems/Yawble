@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import type { MemberPolicyView, PolicyPatchDoc, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
-import { FOLDER_LISTS, folderRows, isAbsolutePath, SOURCE_LABEL, type FolderList, type FolderRow } from '../policyFields';
+import {
+  FOLDER_LISTS, folderDraftDirty, folderRows, isAbsolutePath, newFolderDraft, SOURCE_LABEL,
+  type FolderDraft, type FolderList, type FolderPending, type FolderRow, type ResolvedEntry,
+} from '../policyFields';
 import BusyLabel from './BusyLabel.vue';
 import type { Busy } from '../busy';
 
@@ -14,26 +17,47 @@ const props = defineProps<{
   view: MemberPolicyView; api: YawbleApi; memberId: number; memberName: string; work: Busy;
   /** The folders a save just added, per list: highlighted. */
   fresh?: Partial<Record<FolderList, string[]>>;
+  /** What is typed and not saved (path, mode, the step waiting for Confirm), kept by the dialog so a tab switch drops nothing. */
+  draft?: FolderDraft;
 }>();
 const emit = defineEmits<{ applied: [view: MemberPolicyView]; error: [text: string | null]; dirty: [dirty: boolean]; nothing: [text: string] }>();
 
-const addPath = ref('');
-const addMode = ref<'readwrite' | 'readonly'>('readwrite');
+const draft = props.draft ?? reactive(newFolderDraft());
+const addPath = computed({ get: () => draft.path, set: (v: string) => { draft.path = v; } });
+const addMode = computed({ get: () => draft.mode, set: (v: FolderDraft['mode']) => { draft.mode = v; } });
 /** The step waiting for the person's Confirm: what it does in words, and the exact call it makes. */
-interface Pending {
-  kind: 'add' | 'remove';
-  lines: string[];
-  title: string;
-  warnings: string[];
-  save: () => Promise<MemberPolicyView>;
-}
-const pending = ref<Pending | null>(null);
+const pending = computed({ get: () => draft.pending, set: (v: FolderPending | null) => { draft.pending = v; } });
 const busy = computed(() => props.work.any());
 // The native picker in the desktop window only; a remote view types the path (as TriggersDialog).
 const canPick = typeof props.api.pickFolder === 'function' && !props.api.remote;
 
-const lists = computed(() => FOLDER_LISTS.map((l) => ({ ...l, rows: folderRows(props.view, l.list) })));
-const dirty = computed(() => addPath.value.trim().length > 0 || pending.value !== null);
+// Each of the member's own loosened entries as the core resolved it (its previewLoosen alone), so an entry typed with
+// "..", a junction or any other spelling is matched to its effective row by the core's answer, not by a guess here.
+const resolvedOwn = ref<Record<string, string | null>>({});
+let resolveRun = 0;
+const resolveKey = (list: string, entry: string) => `${list}\n${entry}`;
+async function resolveOwn() {
+  const run = ++resolveRun;
+  const out: Record<string, string | null> = {};
+  for (const list of ['readwrite', 'readonly'] as const) {
+    const entries: unknown = (props.view.loosen as any)?.filesystem?.[list];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries as string[]) {
+      try {
+        const got = await previewOf({ filesystem: { [list]: [entry] } } as PolicyPatchDoc);
+        const prefix = `filesystem.${list} + `;
+        const hit = got.find((l) => l.startsWith(prefix));
+        out[resolveKey(list, entry)] = hit ? hit.slice(prefix.length) : null;
+      } catch { /* not known: matched by samePath */ }
+    }
+  }
+  if (run === resolveRun) resolvedOwn.value = out;
+}
+watch(() => JSON.stringify(props.view.loosen ?? null), () => { void resolveOwn(); }, { immediate: true });
+const resolved: ResolvedEntry = (list, entry) => resolvedOwn.value[resolveKey(list, entry)];
+
+const lists = computed(() => FOLDER_LISTS.map((l) => ({ ...l, rows: folderRows(props.view, l.list, resolved) })));
+const dirty = computed(() => folderDraftDirty(draft));
 watch(dirty, (d) => emit('dirty', d), { immediate: true });
 watch(addPath, () => { if (pending.value?.kind === 'add') pending.value = null; });
 
