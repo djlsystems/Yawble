@@ -60,8 +60,18 @@ public sealed class AppOrgSummarySource(
                 asks.AddRange(networkAsks.Asks(pendingOnly: true, teamId: t.Id).Select(a => new OrgAsk("network", t.Name, $"{a.MemberName}: {a.Host}")));
             if (toolAsks is not null)
                 asks.AddRange(toolAsks.Asks(openOnly: true, teamId: t.Id).Select(a => new OrgAsk("tool", t.Name, $"{a.MemberName}: {a.Tool}")));
+            if (bus.FolderAsks is { } folderAsks)
+                asks.AddRange(folderAsks.Asks(openOnly: true, teamId: t.Id).Select(a => new OrgAsk("folder", t.Name, $"{a.MemberName}: folder {FolderName(a.Path)}")));
         }
         return new OrgSummaryFacts(computer, teams, workflows, asks, Problems());
+    }
+
+    /// <summary>A folder ask's title on the org dashboard: the folder's own name only, never the full path (it can name the person's account).</summary>
+    internal static string FolderName(string path)
+    {
+        var trimmed = path.TrimEnd('\\', '/');
+        var cut = trimmed.LastIndexOfAny(['\\', '/']);
+        return cut < 0 ? trimmed : trimmed[(cut + 1)..];
     }
 
     /// <summary>Manager or Member, as the bus keeps it (the member's instructions are not sent).</summary>

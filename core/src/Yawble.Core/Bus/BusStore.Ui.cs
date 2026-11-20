@@ -117,6 +117,8 @@ public sealed partial class BusStore
     public int DeleteMember(MemberRef member)
     {
         var closed = Integrations.NetworkAskService.CloseForRemovedMember(_connection, _tx, member.Id, member.TeamId, member.Qualified, Now());
+        // Its waiting folder asks (B111) close too; the count returned stays the network asks'.
+        Integrations.FolderAskService.CloseForRemovedMember(_connection, _tx, member.Id, Now());
         Exec("DELETE FROM subscriptions WHERE subscriber = $s;", ("$s", member.Qualified));
         Exec("DELETE FROM cursors WHERE subscriber = $s;", ("$s", member.Qualified));
         Exec("DELETE FROM pending_deliveries WHERE subscriber = $s;", ("$s", member.Qualified));

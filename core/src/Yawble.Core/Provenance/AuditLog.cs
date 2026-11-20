@@ -147,6 +147,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
             "SELECT tm.name || '/' || m.name FROM triggers g JOIN members m ON m.id = g.member_id JOIN teams tm ON tm.id = m.team_id WHERE g.id = $id;",
         "integrations.approve" or "integrations.decline" => "SELECT member FROM integration_asks WHERE id = $id;",
         "network.answer" => "SELECT member FROM network_asks WHERE id = $id;",
+        "folder.answer" => "SELECT member FROM folder_asks WHERE id = $id;",
         _ when method.StartsWith("tools.", StringComparison.Ordinal) => "SELECT member FROM tool_asks WHERE id = $id;",
         _ => null,
     };

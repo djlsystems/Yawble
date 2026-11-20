@@ -267,6 +267,32 @@ var toolAsks = new Yawble.Core.Integrations.ToolAskService($"Data Source={dbPath
 toolAsks.Changed = () => events.Publish(Yawble.Core.Integrations.ToolAskService.ChangedEvent, null);
 toolAsks.Progress = e => events.Publish(Yawble.Core.Integrations.ToolAskService.ProgressEvent, e);
 bus.ToolAsks = toolAsks;
+// Folder asks (B111): a folder an agent asked to read or write (request_folder) waits for the person in Needs you; an
+// approval writes the member's loosen block through the policy store, as policy.saveLoosen does.
+var folderAsks = new Yawble.Core.Integrations.FolderAskService($"Data Source={dbPath}", policies,
+    async (memberId, ct) =>
+    {
+        var everyone = await bus.AllMemberRowsAsync(ct);
+        return layouts.For(everyone.FirstOrDefault(m => m.Id == memberId) ?? throw new ArgumentException($"no member {memberId}"), everyone);
+    },
+    async (teamId, ct) =>
+    {
+        // Every other team's repositories (the person's checkouts, the extras) and documents folders.
+        var folders = new List<string>();
+        if (bus.Repos is not { } repos) return folders;
+        foreach (var t in await bus.TeamsAsync(ct))
+        {
+            if (t.Id == teamId) continue;
+            if (repos.RepoOf(t.Id) is { } main) folders.Add(main.Path);
+            folders.AddRange(repos.ExtrasOf(t.Id).Select(e => e.Path));
+            folders.Add(Path.Combine(repos.TeamRoot(t.Name), Yawble.Core.Teams.TeamDocuments.Folder));
+        }
+        return folders;
+    },
+    (team, member, text, causation, ct) => bus.PersonTellAsync(team, member, text, causation, ct),
+    canonicalize: Yawble.Core.Policy.HostPathCanonicalizer.Canonicalize);
+folderAsks.Changed = () => events.Publish(Yawble.Core.Integrations.FolderAskService.ChangedEvent, null);
+bus.FolderAsks = folderAsks;
 link.IsIntegration = integrations.HasIntegration; // a remote viewer may detect or discover a CLI that is already added, not a new unknown one
 link.IsRemoteMcp = integrations.IsRemoteMcp;
 // Host tasks: the person's named programs, run on this computer on the base branch of their own checkout, under a hash-pinned approval.
@@ -394,7 +420,8 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
     code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService, logTail),
-    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks, orgSummary: orgSummary);
+    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks, orgSummary: orgSummary,
+    folderAsks: folderAsks);
 dispatcherForLink = dispatcher;
 link.Start();
 
