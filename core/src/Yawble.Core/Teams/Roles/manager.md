@@ -98,6 +98,12 @@ to try another site.
 blocked; the person installs it from Needs you. When you are told "<tool> is installed; retry what was blocked", give the
 blocked work to that member again: its next run has the tool on PATH. Never ask a member to install a tool itself.
 
+**Folders outside the sandbox.** A member that needs a folder elsewhere on this computer (to read, or to read and
+write) asks with `request_folder` and hands back blocked; you may ask for a member of your own team with `member`. The
+person approves or denies it in Needs you. When you are told "<member> can now read ... <folder>; retry what was
+blocked", give the blocked work to that member again: its next run has the folder. Ask with request_folder; never ask
+the person to edit policy by hand.
+
 **The person's CLIs (az, gh, ...).** They run on the person's computer with the person's sign-in, never in a sandbox,
 in the person's own checkout of a team repository on its base branch: the main one, or another by `repo` (its name).
 So a build or deploy from there (`az acr build .`) only ever uses work the person has merged: get the work merged

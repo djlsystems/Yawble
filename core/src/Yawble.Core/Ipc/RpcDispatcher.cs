@@ -35,7 +35,8 @@ public sealed class RpcDispatcher(
     Updates.UpdateRpc? updates = null,
     Integrations.NetworkAskService? networkAsks = null,
     Integrations.ToolAskService? toolAsks = null,
-    Yawble.Core.Link.OrgSummaryService? orgSummary = null)
+    Yawble.Core.Link.OrgSummaryService? orgSummary = null,
+    Integrations.FolderAskService? folderAsks = null)
 {
     /// <summary>
     /// A call as the person (or a cloud viewer) made it: run as <paramref name="actor"/>, so whatever it records carries
@@ -128,6 +129,8 @@ public sealed class RpcDispatcher(
             _ when networkAsks is not null && Integrations.NetworkAskService.Handles(method) => networkAsks.DispatchAsync(method, parameters, ct),
             // Host tool asks: tools from the app's catalog agents asked for; Install runs winget for the person at the window (Integrations/ToolAsks.cs).
             _ when toolAsks is not null && Integrations.ToolAskService.Handles(method) => toolAsks.DispatchAsync(method, parameters, ct),
+            // Folder asks (B111): folders agents asked to read or write; the person's answer writes the loosen block (Integrations/FolderAsks.cs).
+            _ when folderAsks is not null && Integrations.FolderAskService.Handles(method) => folderAsks.DispatchAsync(method, parameters, ct),
             // Integrations: the person's CLIs, their rules, and the calls waiting for approval.
             _ when integrations is not null && Integrations.IntegrationService.Handles(method) => integrations.DispatchAsync(method, parameters, ct),
             // The doctor: health checks and their fixes (Ops/DoctorRpc.cs). Not offered over the Cloud Link.

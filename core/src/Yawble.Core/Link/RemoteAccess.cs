@@ -23,6 +23,8 @@ public static class RemoteAccess
         // Host tool asks: listed and answered Not now like the network asks; Install is the window's alone (below).
         // Check again only looks for the program again (it runs no installer): a remote viewer may use it after installing by hand.
         "tools.catalog", "tools.asks", "tools.notNow", "tools.checkAgain",
+        // Folder asks (B111): exactly as the network asks, listed by any viewer and answered by a full one.
+        "folder.",
         // Whether git is installed (the banner's text); installing it is git.install, refused below.
         "git.check",
         // The Logs dialog, read only (pruning and retention are refused below).
@@ -108,6 +110,7 @@ public static class RemoteAccess
             "ops.backups",
             "network.asks",
             "tools.catalog", "tools.asks",
+            "folder.asks",
             "logs.query", "logs.sources", "logs.values", "logs.who", "logs.prunePreview",
             // Live logs (B048): watching new entries, and stopping, change nothing.
             "logs.tail", "logs.untail",
@@ -152,6 +155,7 @@ public static class RemoteAccess
             "tasks.preview", "tasks.approve", "tasks.cancel", "tasks.decline", "tasks.delete", "tasks.revoke", "tasks.runNow", "tasks.save",
             "network.answer",
             "tools.notNow", "tools.checkAgain",
+            "folder.answer",
             "logs.prune", "logs.setRetention",
         ]);
 

@@ -264,8 +264,13 @@ public sealed class ConciergeReadTools(
         sb.AppendLine(toolLines.Count == 0 ? "Tool requests (tools agents asked the person to install): none."
             : $"Tool requests waiting for the person ({toolLines.Count}; Install is in Needs you in the app's window on this computer, not from here or the Cloud Link):");
         foreach (var l in toolLines) sb.AppendLine(l);
-        sb.AppendLine($"Needs the person: {needsYou + asks + hostLines.Count + toolLines.Count} item(s) ({needsYou} decision(s), {asks} approval(s), " +
-                      $"{hostLines.Count} network request(s), {toolLines.Count} tool request(s)).");
+        // Folders agents asked to read or write (B111): answered in Needs you, in the window or over the Cloud Link.
+        var folderLines = bus.FolderAsks?.PendingLines() ?? [];
+        sb.AppendLine(folderLines.Count == 0 ? "Folder requests (folders agents asked to read or write): none."
+            : $"Folder requests waiting for the person ({folderLines.Count}; they are answered in Needs you, in the window or over the Cloud Link, not from here):");
+        foreach (var l in folderLines) sb.AppendLine(l);
+        sb.AppendLine($"Needs the person: {needsYou + asks + hostLines.Count + toolLines.Count + folderLines.Count} item(s) ({needsYou} decision(s), {asks} approval(s), " +
+                      $"{hostLines.Count} network request(s), {toolLines.Count} tool request(s), {folderLines.Count} folder request(s)).");
         if (remote)
         {
             sb.AppendLine("Cloud Link: only on the computer itself (its state is not shown over the Cloud Link).");

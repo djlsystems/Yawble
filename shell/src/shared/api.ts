@@ -311,7 +311,7 @@ export interface UpdateStatus {
 export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
-export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'timeline.', 'workflows.'] as const;
+export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'workflows.'] as const;
 
 export function isUiMethod(method: unknown): method is string {
   return typeof method === 'string' && UI_METHOD_PREFIXES.some((p) => method.startsWith(p)) && /^[a-zA-Z.]+$/.test(method);
@@ -616,7 +616,30 @@ export interface TaskPreview {
   problem: string | null; programResolved: string | null; commit: string | null; pinned: string[]; warnings: string[]; commandLineOnly: boolean;
 }
 export interface RunSlots { running: number; limit: number; queued: number }
-export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; networkAsks?: number; toolAsks?: number; heavy?: LeaseSnapshot }
+/** folderAsks: folder asks waiting for the person (folder.asks, B111), already counted in needsYou. Older cores omit it. */
+export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; networkAsks?: number; toolAsks?: number; folderAsks?: number; heavy?: LeaseSnapshot }
+/** How the person answers a folder ask: read-write (only for a read-write ask), read-only, or deny. Never wider than asked. */
+export type FolderAskChoice = 'readwrite' | 'read' | 'deny';
+/**
+ * A folder an agent asked to read or write with request_folder, waiting for the person in Needs you (folder.asks; core:
+ * Integrations/FolderAsks.cs; contract: docs/folder-asks.md). member is the member the access is for, askedBy who asked
+ * (the member itself, or its Manager), both "Team/Name". path: the resolved absolute path. exists: whether the folder
+ * exists now (while pending; the value when it was asked once answered). choices: what the person may answer (empty once
+ * answered). grantedAccess: what was granted (approved only). state closed: the member was removed while it waited.
+ */
+export interface FolderAsk {
+  id: number; at: string; teamId: number; team: string; memberId: number; member: string; memberName: string; askedBy: string;
+  path: string; access: 'read' | 'readwrite'; reason: string; exists: boolean; existedWhenAsked: boolean;
+  state: 'pending' | 'approved' | 'denied' | 'closed'; grantedAccess: 'read' | 'readwrite' | null;
+  decidedBy: string | null; decidedVia: string | null; decidedAt: string | null; note: string | null; workflow: number | null;
+  choices: FolderAskChoice[];
+}
+/** folder.answer {id, choice, note?}'s reply: told is who was told ("Team/Name": the Manager after an approval, the asker after a deny), or null. */
+export interface FolderAnswer { ok: boolean; id: number; choice: FolderAskChoice; path: string; member: string; grantedAccess: 'read' | 'readwrite' | null; told: string | null }
+export const FOLDER_ASKS = 'folder.asks';
+export const FOLDER_ANSWER = 'folder.answer';
+/** Pushed when a folder ask is raised or answered: Needs you, the You node and the Monitor refresh. */
+export const FOLDER_ASKS_CHANGED = 'folder.asksChanged';
 /** How the person answers a network ask: allow the host for the agent, its team or everyone, or deny it. */
 export type NetworkAskChoice = 'agent' | 'team' | 'everywhere' | 'deny';
 /**
