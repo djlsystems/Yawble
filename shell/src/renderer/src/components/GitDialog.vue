@@ -519,22 +519,22 @@ onMounted(() => { void loadChoices(); void load(); });
         </div>
       </section>
 
-      <table class="list" data-test="git-members">
-        <tr><th>Member branch</th><th>Commit</th><th>Ahead of {{ status.baseBranch }}</th><th>In {{ status.teamBranch }}</th><th></th></tr>
+      <table class="list members" data-test="git-members">
+        <tr class="head"><th>Member branch</th><th>Commit</th><th>Ahead of {{ status.baseBranch }}</th><th>In {{ status.teamBranch }}</th><th></th></tr>
         <tr v-for="b in status.members" :key="b.branch" :class="{ focus: focusBranch === b.branch }" :data-focus="focusBranch === b.branch ? 'true' : undefined" data-test="git-member-row">
           <td><code>{{ b.branch }}</code><LocalMark v-if="branchLocalOnly(b.push, !!status.origin)" :title="branchLocalTitle(b.push!)" /><a v-if="link({ kind: 'branch', branch: b.branch })" class="web" :data-test="`git-link-branch-${b.branch}`"
             :href="link({ kind: 'branch', branch: b.branch })!" target="_blank" rel="noopener">{{ openOn }}</a></td>
-          <td><CommitLink :team="team.name" :sha="b.sha" /><a v-if="link({ kind: 'commit', commit: b.sha })" class="web" :data-test="`git-link-commit-${b.branch}`"
+          <td data-label="Commit"><CommitLink :team="team.name" :sha="b.sha" /><a v-if="link({ kind: 'commit', commit: b.sha })" class="web" :data-test="`git-link-commit-${b.branch}`"
             :title="`The commit ${openOn}`" :href="link({ kind: 'commit', commit: b.sha })!" target="_blank" rel="noopener">↗</a></td>
-          <td><button v-if="b.aheadOfBase > 0" type="button" class="count" :data-test="`git-count-member-${b.branch}`" :title="`List the ${commits(b.aheadOfBase)} on ${b.branch} not in ${status.baseBranch}`"
-            @click="openRange('member-ahead', b.branch)">{{ b.aheadOfBase }}</button><template v-else>{{ b.aheadOfBase }}</template></td><td>{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
-          <td><button class="small-btn" :data-test="`git-delete-${b.branch}`" :disabled="!!busy" @click="startDelete(memberTarget(b))">Delete…</button></td>
+          <td :data-label="`Ahead of ${status.baseBranch}`"><button v-if="b.aheadOfBase > 0" type="button" class="count" :data-test="`git-count-member-${b.branch}`" :title="`List the ${commits(b.aheadOfBase)} on ${b.branch} not in ${status.baseBranch}`"
+            @click="openRange('member-ahead', b.branch)">{{ b.aheadOfBase }}</button><template v-else>{{ b.aheadOfBase }}</template></td><td :data-label="`In ${status.teamBranch}`">{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
+          <td class="del"><button class="small-btn" :data-test="`git-delete-${b.branch}`" :disabled="!!busy" @click="startDelete(memberTarget(b))">Delete…</button></td>
         </tr>
         <tr v-if="status.members.length === 0 && oldBranches.length === 0"><td colspan="5" class="muted">No member has committed yet.</td></tr>
         <tr v-for="o in oldBranches" :key="`old:${o.name}`" class="old" data-test="git-old-branch">
           <td><code>{{ o.name }}</code><span class="chip" title="Named before member branches were members/<team>/<member>; nothing uses it now">old</span></td>
-          <td>{{ oldWhere(o) }}</td><td>—</td><td>{{ o.merged ? 'merged' : 'not merged' }}</td>
-          <td><button class="small-btn" :data-test="`git-delete-old-${o.name}`" :disabled="!!busy" @click="startDelete(oldTarget(o))">Delete…</button></td>
+          <td data-label="Where">{{ oldWhere(o) }}</td><td :data-label="`Ahead of ${status.baseBranch}`">—</td><td>{{ o.merged ? 'merged' : 'not merged' }}</td>
+          <td class="del"><button class="small-btn" :data-test="`git-delete-old-${o.name}`" :disabled="!!busy" @click="startDelete(oldTarget(o))">Delete…</button></td>
         </tr>
       </table>
       <p class="muted small">The app never forces, rebases or stashes, and never pushes your own commits on {{ status.baseBranch }}. A merge that
@@ -574,4 +574,18 @@ onMounted(() => { void loadChoices(); void load(); });
 .lost { margin: 6px 0; }
 .lost .loses { color: var(--warn-ink); font-weight: 600; }
 .focus { box-shadow: inset 4px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+/* B108 (card 499): on a phone the member-branch table (long branch names in <code>, "In team/<name>") made the dialog's
+   body 548 px wide at 360 px, so it scrolled sideways. There each branch is a block instead: the branch name on its own
+   line (breaking anywhere), then the commit, "Ahead of <base>: n", "In <team branch>: yes" and Delete… labelled from the
+   cells' data-label. The desktop keeps the table. */
+@media (max-width: 759.98px) {
+  .members, .members tbody { display: block; }
+  .members tr.head { display: none; }
+  .members tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  .members td { display: block; padding: 0; border: 0; min-width: 0; }
+  .members td:first-child { flex: 1 1 100%; overflow-wrap: anywhere; }
+  .members td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); }
+  .members td.del { margin-left: auto; }
+  .members td.muted { flex: 1 1 100%; }
+}
 </style>
