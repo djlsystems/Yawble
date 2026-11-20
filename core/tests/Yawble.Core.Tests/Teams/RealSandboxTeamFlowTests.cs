@@ -208,7 +208,8 @@ public class RealSandboxTeamFlowTests
             // ---- the gateways refused the git host and logged it; nothing reached it
             var events = kit.Gateway.Log.Read();
             // Two per member: the raw CONNECT and git's own push over https, both through the gateway and both refused.
-            Assert.Equal(4, events.Count(e => e.Kind == GatewayEventKinds.ConnectDenied && e.Target!.StartsWith("github.com", StringComparison.Ordinal)));
+            // The same CONNECT refused again in a run is counted on its first row (card 504, B105): add the counts up.
+            Assert.Equal(4, events.Where(e => e.Kind == GatewayEventKinds.ConnectDenied && e.Target!.StartsWith("github.com", StringComparison.Ordinal)).Sum(e => e.Count));
             Assert.DoesNotContain(events, e => e.Kind is GatewayEventKinds.Forward or GatewayEventKinds.ConnectAllowed
                 && (e.Target ?? "").Contains("github", StringComparison.OrdinalIgnoreCase));
             RealSandbox.Report($"team flow, real sandboxes: runs {string.Join(", ", runs.Select(r => $"{members[r.MemberId].Name}#{r.Id}({r.State})"))}; " +
