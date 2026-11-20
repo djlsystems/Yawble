@@ -158,8 +158,8 @@ public static class OrgSummary
     /// <summary>needsYou: the counts across every team, and per team the counts and the first few short titles of each kind.</summary>
     private static JsonObject NeedsYouOf(IReadOnlyList<OrgAsk> asks)
     {
-        string[] kinds = ["decision", "toolCall", "network", "tool"];
-        string[] keys = ["decisions", "toolCalls", "networkRequests", "toolRequests"];
+        string[] kinds = ["decision", "toolCall", "network", "tool", "folder"];
+        string[] keys = ["decisions", "toolCalls", "networkRequests", "toolRequests", "folderRequests"];
         JsonObject Counts(IEnumerable<OrgAsk> of, bool titles)
         {
             var list = of.ToList();

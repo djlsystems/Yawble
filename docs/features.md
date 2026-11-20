@@ -522,12 +522,13 @@ a member's pane opens it at that member's activity.
     host. The run's other successful model requests are not rows here: they are counted in **Model usage**. Rows
     written one per model request before this are removed when the app updates by the same rule, so an old run still
     shows the success that followed a problem.
-    A plain-http request to a host that is not allowed (`host-denied`), refused again in the same run, is counted on
-    that run's first row for the host: its **Times** column says how many times, and in **All activity** the row's
-    detail ends in ` (Nx)` when it counts more than one (` (5x)` for five). Refused HTTPS connections
-    (`connect-denied`) and refused paths are not folded into one row: the first few of each in a minute are written,
-    and the rest are counted in one more row written at the next such refusal after the minute. Every other row's
-    Times is 1.
+    A plain-http request to a host that is not allowed (`host-denied`) and a refused HTTPS connection
+    (`connect-denied`), refused again in the same run, are both counted on one row: that run's first row for the host
+    (for `connect-denied`, the host and port it asked for). A host's plain-http and HTTPS refusals stay two rows. Its
+    **Times** column says how many times, and in **All activity** the row's detail ends in ` (Nx)` when it counts
+    more than one (` (5x)` for five). Refused paths are not folded into one row: the first few of each in a minute are
+    written, and the rest are counted in one more row written at the next such refusal after the minute. Every other
+    row's Times is 1.
   - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
   - **Work history**: **Team messages** and **Board history**.

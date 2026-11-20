@@ -253,6 +253,8 @@ public sealed class UiRpc(
         needsYou += networkAsks;
         var toolAsks = bus.ToolAsks?.PendingCount() ?? 0; // tools agents asked the person to install (tools.asks)
         needsYou += toolAsks;
+        var folderAsks = bus.FolderAsks?.PendingCount() ?? 0; // folders agents asked to read or write (folder.asks)
+        needsYou += folderAsks;
         // Connections a service refused (needs reconnect): only the count here; names and reasons come from
         // integrations.connectionAttention, which the Cloud Link refuses like every integrations.connection* method.
         var reconnect = bus.Integrations?.ConnectionsNeedingReconnect().Count ?? 0;
@@ -272,6 +274,7 @@ public sealed class UiRpc(
             ["needsReconnect"] = reconnect,
             ["networkAsks"] = networkAsks,
             ["toolAsks"] = toolAsks,
+            ["folderAsks"] = folderAsks,
         };
     }
 
