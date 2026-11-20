@@ -32,7 +32,7 @@ async function load() {
     do {
       again = false;
       try {
-        const r = await props.api.call<FolderAsk[]>('folder.asks', {});
+        const r = await props.api?.call<FolderAsk[]>('folder.asks', {});
         asks.value = Array.isArray(r) ? r : [];
       } catch { asks.value = []; } // an older core, or a remote view that may not read them: nothing to show
     } while (again);
@@ -48,7 +48,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let off: (() => void) | null = null;
 onMounted(() => {
   void load();
-  off = props.api.onEvent?.((e) => { if (e.event === FOLDER_ASKS_CHANGED) void load(); }) ?? null;
+  off = props.api?.onEvent?.((e) => { if (e.event === FOLDER_ASKS_CHANGED) void load(); }) ?? null;
   timer = setInterval(load, Math.max(props.pollMs ?? 5000, 5000));
 });
 onBeforeUnmount(() => { off?.(); if (timer) clearInterval(timer); });

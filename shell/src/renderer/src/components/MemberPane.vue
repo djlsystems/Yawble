@@ -75,6 +75,8 @@ const TabLabel: Record<MemberView, string> = { report: 'Report', activity: 'Acti
 const termLive = ref(false);
 watch(view, (v) => { if (v !== 'terminal') termLive.value = false; });
 const remote = computed(() => !!resolveApi(props.api)?.remote);
+/** B111: the folder asks read through the same api; none in a view without one. */
+const folderApi = computed(() => resolveApi(props.api) as YawbleApi | undefined);
 const canOpen = computed(() => props.card.state === 'idle' && !termLive.value);
 const canStop = computed(() => props.card.state === 'running' || termLive.value);
 const opening = ref(false);
@@ -167,7 +169,7 @@ defineExpose({ el: () => root.value });
       <span v-if="error" class="error small" data-test="member-pane-error">{{ error }}</span>
     </div>
     <!-- B111: this member's folder asks (a folder outside its clone), answered here as in Needs you. -->
-    <FolderAsks class="member-folder-asks" :api="resolveApi(api)" :poll-ms="pollMs" :team="m.team" :member="m.name" />
+    <FolderAsks v-if="folderApi" style="flex: none; margin: 2px 0 4px" :api="folderApi" :poll-ms="pollMs" :team="m.team" :member="m.name" />
 
     <div class="body" :class="`body-${view}`" :style="phone ? undefined : { height: `${height}px` }" data-test="member-pane-body">
       <template v-if="view === 'report'">
@@ -218,7 +220,6 @@ defineExpose({ el: () => root.value });
 .menu button.danger { color: var(--bad); }
 .mi { display: inline-flex; justify-content: center; width: 18px; flex: none; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; letter-spacing: -.04em; }
-.member-folder-asks { flex: none; margin: 2px 0 4px; }
 .tabs { display: flex; align-items: center; gap: 10px; min-height: 26px; margin-bottom: 2px; border-top: 1px solid var(--line-soft); padding-top: 2px;
   flex: none; flex-wrap: nowrap; white-space: nowrap; min-width: 0; }
 .tabs > .error { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
