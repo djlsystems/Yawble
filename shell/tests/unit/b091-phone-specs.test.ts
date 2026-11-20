@@ -51,6 +51,57 @@ describe('which specs are phone specs', () => {
   });
 });
 
+// B108 (card 500): B091's verify found two ways in that the static `from` test missed.
+describe('a spec that loads phone/ by a dynamic import() or through a helper module (B108)', () => {
+  const DYNAMIC = `import { expect, test } from '@playwright/test';\ntest('x', async () => { const { fakeRemote } = await import('./phone/server'); });\n`;
+
+  it('a dynamic import(), require() or bare import of a phone/ module makes a phone spec, without reading other files', () => {
+    expect(isPhoneSpec('a.spec.ts', DYNAMIC)).toBe(true);
+    expect(isPhoneSpec('a.spec.ts', `const s = await import( "../e2e/phone/fake-core" );`)).toBe(true);
+    expect(isPhoneSpec('a.spec.ts', 'const s = await import(`./phone/server`);')).toBe(true);
+    expect(isPhoneSpec('a.spec.ts', `const { builtDir } = require('./phone/server');`)).toBe(true);
+    expect(isPhoneSpec('a.spec.ts', `import './phone/server';`)).toBe(true);
+    expect(isPhoneSpec('a.spec.ts', `export { fakeRemote } from './phone/server';`)).toBe(true);
+    expect(isPhoneSpec('a.spec.ts', `const fs = await import('node:fs'); import('./telephone/x');`)).toBe(false);
+  });
+
+  it('a helper that imports phone/server makes the spec using it a phone spec, followed transitively; a plain helper does not', () => {
+    const dir = tree({
+      'via-helper.spec.ts': `import { expect, test } from '@playwright/test';\nimport { openPhone } from './helpers/open';\n`,
+      'via-two.spec.ts': `import { expect, test } from '@playwright/test';\nimport { more } from './more';\n`,
+      'via-dynamic-helper.spec.ts': `import { test } from '@playwright/test';\ntest('x', async () => { await import('./helpers/lazy.ts'); });\n`,
+      'plain.spec.ts': `import { test } from '@playwright/test';\nimport { home } from './companion-home';\n`,
+      'cycle.spec.ts': `import { test } from '@playwright/test';\nimport { a } from './cycle-a';\n`,
+      'helpers/open.ts': `export { fakeRemote as openPhone } from '../phone/server';\n`,
+      'helpers/lazy.ts': `export async function lazy() { return import('../phone/fake-core'); }\n`,
+      'more.ts': `import { openPhone } from './helpers/open';\nexport const more = openPhone;\n`,
+      'companion-home.ts': `import path from 'node:path';\nexport const home = path.join('a', 'b');\n`,
+      'cycle-a.ts': `import { b } from './cycle-b';\nexport const a = 1;\n`,
+      'cycle-b.ts': `import { a } from './cycle-a';\nexport const b = 2;\n`,
+      'phone/server.ts': 'export const fakeRemote = 1;\n',
+      'phone/fake-core.ts': 'export const answers = 1;\n',
+    });
+    // Without the folder the helper is not read, so only the spec's own source counts.
+    expect(isPhoneSpec('via-helper.spec.ts', `import { openPhone } from './helpers/open';`)).toBe(false);
+    expect(phoneSpecs(dir)).toEqual(['via-dynamic-helper.spec.ts', 'via-helper.spec.ts', 'via-two.spec.ts']);
+    // All three take test from @playwright/test, so the config check refuses each of them.
+    const problems = checkPhoneSpecs(dir, specMatcher(phoneSpecs(dir)));
+    expect(problems.map((p) => p.split(' ')[0])).toEqual(['via-dynamic-helper.spec.ts', 'via-helper.spec.ts', 'via-two.spec.ts']);
+    for (const p of problems) expect(p).toMatch(/phone\/fixtures/);
+  });
+
+  it('checkPhoneSpecs against the old list reports a dynamic-import spec and a helper spec as outside the phone project', () => {
+    const dir = tree({
+      'zz-dynamic.spec.ts': DYNAMIC,
+      'zz-helper.spec.ts': `import { expect, test } from './phone/fixtures';\nimport { openPhone } from './helpers/open';\n`,
+      'helpers/open.ts': `export { fakeRemote as openPhone } from '../phone/server';\n`,
+      'phone/server.ts': 'export const fakeRemote = 1;\n',
+    });
+    const outside = checkPhoneSpecs(dir, OLD_PHONE_SPECS).filter((p) => /not in the phone project/.test(p)).map((p) => p.split(' ')[0]);
+    expect(outside).toEqual(['zz-dynamic.spec.ts', 'zz-helper.spec.ts']);
+  });
+});
+
 describe('checkPhoneSpecs: the check playwright.config.ts runs at load', () => {
   it('a stray spec (imports phone/server, not on a hand-kept list, test from @playwright/test) fails it on both counts', () => {
     const dir = tree({ 'zz-stray.spec.ts': STRAY, 'card367-team-grid.spec.ts': GOOD, 'window.spec.ts': ELECTRON });

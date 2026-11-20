@@ -15,10 +15,10 @@
 //   npx playwright test card403-team-spacing --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
 // Screenshots and results go to $YAWBLE_TEAM_DOCS/b089-team-spacing and b090-workflow-nodes.
 import { expect, test, type Browser, type Page } from './phone/fixtures';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore } from './phone/fake-core';
-import { ORIGIN, buildRenderer, builtDir } from './phone/server';
+import { ORIGIN, buildRenderer, builtDir, ensureDir } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(180_000);
@@ -28,7 +28,7 @@ const S89 = path.join(DOCS, 'b089-team-spacing');
 const S90 = path.join(DOCS, 'b090-workflow-nodes');
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  for (const d of [S89, S90]) mkdirSync(path.join(d, 'screens'), { recursive: true });
+  for (const d of [S89, S90]) ensureDir(path.join(d, 'screens'));
   await buildRenderer();
 });
 
@@ -847,7 +847,8 @@ test('405 1280 wide zoomed out (Activity hidden, wall over 760): titles stay (on
     const f = await lastFrame(page);
     const labels = wfLabels(f);
     const check = await labelCheck(page, f, 3, 1280);
-    steps.push({ zoom: +zoomOf(f).toFixed(3), drawn: labels.length, withTitle: labels.filter((l) => l.text.includes(' ')).length, idOnly: labels.filter((l) => !l.text.includes(' ')).map((l) => l.id), dropped: check.dropped, overlaps: check.overlaps, ownMap: check.ownMapOverlaps, roomMissed: check.roomMissed, px: Math.min(...labels.map((l) => +(l.font * zoomOf(f)).toFixed(2))) });
+    const zoom = zoomOf(f);
+    steps.push({ zoom: +zoom.toFixed(3), squares: check.squares, drawn: labels.length, withTitle: labels.filter((l) => l.text.includes(' ')).length, wrongTitle: labels.filter((l) => l.text.includes(' ') && l.text !== expectLabel(l.id, zoom, 1280)).map((l) => l.text), idOnly: labels.filter((l) => !l.text.includes(' ')).map((l) => l.id), dropped: check.dropped, overlaps: check.overlaps, ownMap: check.ownMapOverlaps, roomMissed: check.roomMissed, px: Math.min(...labels.map((l) => +(l.font * zoomOf(f)).toFixed(2))) });
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     if (i === 5) await page.screenshot({ path: path.join(S90, 'screens', 'wide-zoomed-out.png') });
   }
@@ -859,7 +860,16 @@ test('405 1280 wide zoomed out (Activity hidden, wall over 760): titles stay (on
   expect(fit, 'a zoom under 0.6 reached').toBeTruthy();
   // Titles kept: no label is cut to "#id" by the phone rule on a wide wall. A label that is "#id" or left out must have had
   // no room (roomMissed below); the rest carry their title.
-  expect.soft(fit.withTitle, `most labels keep a title at zoom ${fit.zoom}`).toBeGreaterThanOrEqual(10);
+  // Card 500: this was "at least 10 of the 15 keep a title", which failed about half the runs with the scene right each
+  // time (no overlaps, nothing left out that had room). The workflow nodes are born at a random offset beside their member
+  // (scene.ts rebuild), so the forces settle a different layout each run, and how many 30-character titles find room at
+  // zoom ~0.37 went from 8 to 12. So every node is accounted for instead: it shows exactly its wide-wall title, or it is
+  // "#id" or left out (and roomMissed proves it had no room). At least one title is drawn: the phone rule would cut all.
+  expect(fit.squares, 'all 15 workflow nodes drawn').toBe(ALL_WFS.length);
+  expect.soft(fit.withTitle + fit.idOnly.length + fit.dropped.length, `every node titled, "#id" or left out at zoom ${fit.zoom}`).toBe(fit.squares);
+  expect.soft(fit.dropped.filter((id: number) => !Number.isFinite(id)), 'each left-out label\'s node named by its hover (so its room was checked)').toEqual([]);
+  expect.soft(fit.wrongTitle, 'a drawn title is the wide-wall label, not a phone cut').toEqual([]);
+  expect.soft(fit.withTitle, `labels keep a title at zoom ${fit.zoom} (the phone rule would leave none)`).toBeGreaterThan(0);
   for (const s of steps) {
     expect.soft(s.overlaps, `zoom ${s.zoom}: no overlaps`).toEqual([]);
     expect.soft(s.roomMissed, `zoom ${s.zoom}: nothing left out that had room`).toEqual([]);

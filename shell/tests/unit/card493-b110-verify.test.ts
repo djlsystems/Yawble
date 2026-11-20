@@ -379,3 +379,176 @@ describe('card 493: B110 verify against a core-like fake', () => {
     expect(r.find('[data-test=folder-add-path]').exists()).toBe(true);
   });
 });
+
+// Card 493 re-check of 9d7d0af (Ines' fix round): the two faults in the real dialog, the fallback and the root rule.
+const toGeneralAndBack = async (w: any) => {
+  await w.get('[data-test=tab-general]').trigger('click');
+  await flushPromises();
+  expect(w.find('[data-test=folder-access]').exists()).toBe(false);
+  await w.get('[data-test=tab-policy]').trigger('click');
+  await flushPromises();
+};
+const pathValue = (w: any) => (w.get('[data-test=folder-add-path]').element as HTMLInputElement).value;
+const modeValue = (w: any) => (w.get('[data-test=folder-add-mode]').element as HTMLSelectElement).value;
+const removeRow = async (w: any, list: string, path: string) => {
+  const r = w.findAll(`[data-test=folders-${list}] [data-test=folder-row]`).find((x: any) => x.attributes('data-path') === path);
+  expect(r, `row ${path}`).toBeTruthy();
+  await r.get('[data-test=folder-remove]').trigger('click');
+  await flushPromises();
+};
+
+describe('card 493 re-check: 9d7d0af', () => {
+  it('tab round trip with a typed path, read-only mode and a pending add: all kept; Close asks; Confirm saves what it showed', async () => {
+    const core = realishCore();
+    const w = await open(core.api);
+    await addFolder(w, 'C:\\work\\shared', 'readonly');
+    expect(w.findAll('[data-test=folder-confirm-item]').map((x) => x.text())).toEqual(['C:\\work\\shared']);
+    await toGeneralAndBack(w);
+    await toGeneralAndBack(w); // twice: nothing drifts
+    expect(pathValue(w)).toBe('C:\\work\\shared');
+    expect(modeValue(w)).toBe('readonly');
+    expect(w.get('[data-test=folder-confirm-title]').text()).toBe('This gives OperatorClifford read-only on:');
+    expect(w.findAll('[data-test=folder-confirm-item]').map((x) => x.text())).toEqual(['C:\\work\\shared']);
+    // Close on General asks too.
+    await w.get('[data-test=tab-general]').trigger('click');
+    await flushPromises();
+    expect(await closeAsks(w)).toBe('Policy has unsaved changes. Discard?');
+    confirmState.value!.resolve(false);
+    await flushPromises();
+    expect(w.emitted('close')).toBeUndefined();
+    await w.get('[data-test=tab-policy]').trigger('click');
+    await flushPromises();
+    expect(core.row.loosen_json).toBeNull();
+    await confirmPending(w);
+    expect(errorText(w)).toBe('');
+    expect(JSON.parse(core.row.loosen_json!)).toEqual({ filesystem: { readonly: ['C:\\work\\shared'] } });
+    expect(core.row.loosen_summary).toBe('filesystem.readonly + C:\\work\\shared');
+    expect(savedText(w)).toContain('C:\\work\\shared');
+    expect(rowsOf(w, 'readonly')).toContain('C:\\work\\shared | this member (loosened)');
+    expect(pathValue(w)).toBe('');
+    expect(w.find('[data-test=folder-confirm-box]').exists()).toBe(false);
+    // Saved: nothing left, so Close closes straight away.
+    expect(await closeAsks(w)).toBeNull();
+    expect(w.emitted('close')).toHaveLength(1);
+  });
+
+  it('tab round trip with a pending Remove: kept, Confirm removes it (stored row back to null)', async () => {
+    const core = realishCore();
+    const w = await open(core.api);
+    await addFolder(w, 'C:\\work\\shared');
+    await confirmPending(w);
+    await removeRow(w, 'readwrite', 'C:\\work\\shared');
+    expect(w.get('[data-test=folder-confirm-title]').text()).toBe("This takes away OperatorClifford's read-write access to:");
+    await toGeneralAndBack(w);
+    expect(w.get('[data-test=folder-confirm-title]').text()).toBe("This takes away OperatorClifford's read-write access to:");
+    expect(await closeAsks(w)).toBe('Policy has unsaved changes. Discard?');
+    confirmState.value!.resolve(false);
+    await flushPromises();
+    await confirmPending(w);
+    expect(core.row.loosen_json).toBeNull();
+    expect(rowsOf(w, 'readwrite')).toEqual(['C:\\clone | implicit', 'C:\\scratch | global']);
+  });
+
+  it('Discard after a round trip really drops the draft: a new dialog starts empty', async () => {
+    const core = realishCore();
+    const w = await open(core.api);
+    await addFolder(w, 'C:\\work\\shared');
+    await toGeneralAndBack(w);
+    expect(await closeAsks(w)).toBe('Policy has unsaved changes. Discard?');
+    confirmState.value!.resolve(true);
+    await flushPromises();
+    expect(w.emitted('close')).toHaveLength(1);
+    w.unmount();
+    const v = await open(core.api);
+    expect(pathValue(v)).toBe('');
+    expect(v.find('[data-test=folder-confirm-box]').exists()).toBe(false);
+    expect(await closeAsks(v)).toBeNull();
+    expect(core.row.loosen_json).toBeNull();
+  });
+
+  it('a ".." entry stored before the dialog opens: listed once after reopen; Remove takes the stored spelling out', async () => {
+    const core = realishCore();
+    let w = await open(core.api);
+    await addFolder(w, 'C:\\work\\x\\..\\shared');
+    await confirmPending(w);
+    expect(JSON.parse(core.row.loosen_json!)).toEqual({ filesystem: { readwrite: ['C:\\work\\x\\..\\shared'] } });
+    w.unmount();
+    w = await open(core.api);
+    expect(rowsOf(w, 'readwrite').filter((x: string) => x.includes('shared'))).toEqual(['C:\\work\\shared | this member (loosened)']);
+    await removeRow(w, 'readwrite', 'C:\\work\\shared');
+    await confirmPending(w);
+    expect(savedText(w)).not.toBe('Nothing changed.');
+    expect(core.row.loosen_json).toBeNull();
+    expect(rowsOf(w, 'readwrite').filter((x: string) => x.includes('shared'))).toEqual([]);
+  });
+
+  it('".." next to a plain entry: each listed once, Remove on either takes out only its own spelling', async () => {
+    const core = realishCore();
+    const w = await open(core.api);
+    await addFolder(w, 'C:\\work\\x\\..\\shared');
+    await confirmPending(w);
+    await addFolder(w, 'Z:\\data\\.\\sub\\..');
+    await confirmPending(w);
+    expect(rowsOf(w, 'readwrite')).toEqual(['C:\\clone | implicit', 'C:\\scratch | global',
+      'C:\\work\\shared | this member (loosened)', 'Z:\\data | this member (loosened)']);
+    await removeRow(w, 'readwrite', 'Z:\\data');
+    await confirmPending(w);
+    expect(JSON.parse(core.row.loosen_json!)).toEqual({ filesystem: { readwrite: ['C:\\work\\x\\..\\shared'] } });
+  });
+
+  it('fallback: previewLoosen of single entries failing still gives one row per folder, and Remove still works', async () => {
+    const core = realishCore();
+    let w = await open(core.api);
+    await addFolder(w, 'C:\\work\\x\\..\\shared');
+    await confirmPending(w);
+    await addFolder(w, 'C:\\scratch\\inside'); // covered by the global C:\scratch
+    w.unmount();
+    // Every previewLoosen now fails (the core is down for it) while the dialog opens.
+    let fail = true;
+    const call = core.api.call;
+    (core.api as any).call = async (m: string, p?: any) => {
+      if (fail && m === 'policy.previewLoosen') throw new Error('preview down');
+      return call(m, p);
+    };
+    w = await open(core.api);
+    expect(errorText(w)).toBe(''); // the background previews do not shout
+    expect(rowsOf(w, 'readwrite').filter((x: string) => x.includes('shared'))).toEqual(['C:\\work\\shared | this member (loosened)']);
+    fail = false;
+    await removeRow(w, 'readwrite', 'C:\\work\\shared');
+    await confirmPending(w);
+    expect(core.row.loosen_json).toBeNull();
+  });
+
+  it('fallback while previews have not returned yet: rows are sane from the first paint', async () => {
+    const core = realishCore();
+    let w = await open(core.api);
+    await addFolder(w, 'C:\\work\\x\\..\\shared');
+    await confirmPending(w);
+    w.unmount();
+    const call = core.api.call;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    (core.api as any).call = async (m: string, p?: any) => { if (m === 'policy.previewLoosen') await gate; return call(m, p); };
+    w = await open(core.api);
+    expect(rowsOf(w, 'readwrite').filter((x: string) => x.includes('shared'))).toEqual(['C:\\work\\shared | this member (loosened)']);
+    release();
+    await flushPromises(); await flushPromises();
+    expect(rowsOf(w, 'readwrite').filter((x: string) => x.includes('shared'))).toEqual(['C:\\work\\shared | this member (loosened)']);
+  });
+
+  it('samePath: ".." never climbs above a root (C:, \\\\srv\\share, ~, /), relative ".." is kept', async () => {
+    const { samePath } = await import('../../src/renderer/src/policyFields');
+    expect(samePath('C:\\..\\..\\work', 'C:\\work')).toBe(true);
+    expect(samePath('C:\\..', 'C:\\')).toBe(true);
+    expect(samePath('\\\\srv\\share\\..\\..\\x', '\\\\srv\\share\\x')).toBe(true);
+    expect(samePath('\\\\srv\\share\\..\\x', '\\\\srv\\x')).toBe(false);
+    expect(samePath('\\\\srv\\share\\..\\x', '\\\\srv\\x\\share')).toBe(false);
+    expect(samePath('~/../x', '~/x')).toBe(true);
+    expect(samePath('/../../etc', '/etc')).toBe(true);
+    expect(samePath('/..', '/')).toBe(true);
+    expect(samePath('..\\x', 'x')).toBe(false);
+    expect(samePath('a\\..\\..\\x', '..\\x')).toBe(true);
+    expect(samePath('C:\\work\\..\\..\\..\\Windows', 'C:\\Windows')).toBe(true);
+    expect(samePath('C:\\work\\shared\\..', 'C:\\work\\shared')).toBe(false);
+  });
+});
