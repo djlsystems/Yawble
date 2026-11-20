@@ -4,7 +4,7 @@ A short reference to what Yawble does. Yawble is a desktop app that runs teams o
 CLIs you already installed. It is agent-agnostic: each member picks its own CLI and model, and different agents work
 side by side in one team. Each agent run is isolated in its own sandbox (Microsoft's MXC sandbox).
 
-The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Kanban board**, **Monitor** and **Logs**, plus Settings.
+The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Kanban board**, **Monitor** and **Logs**, and the run-slots line at its bottom. **Settings** is the gear button at the top right, just right of the theme switch (on a phone, at the right of the top bar); **File > Settings** and Ctrl+, open it too.
 
 The window has light and dark themes: the sun or moon button right of the Cloud Link icon in the title bar switches them (also **View > Theme** and **Toggle theme**); until you choose, the theme follows the OS, and **Theme: Use system setting** follows it again. The Monitor is always dark.
 

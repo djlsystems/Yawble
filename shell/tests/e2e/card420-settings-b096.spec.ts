@@ -112,14 +112,8 @@ async function openTab(page: Page, tab: 'open-concierge' | 'open-teams') {
     await page.waitForTimeout(400);
     return;
   }
-  const toggle = page.locator('[data-test=drawer-toggle]');
-  if (await toggle.isVisible().catch(() => false)) {
-    await toggle.click();
-    await expect(page.locator('[data-test=sidebar]')).toHaveAttribute('data-drawer', 'open');
-  }
-  const item = page.locator('[data-test=sidebar] [data-test=open-app-settings]');
-  await item.scrollIntoViewIfNeeded().catch(() => {});
-  await item.click();
+  // B115: Settings is the gear at the top right (the desktop window, the remote view and the phone top bar).
+  await page.getByTestId('settings-gear').click();
   await expect(page.locator('[data-test=settings]')).toBeVisible();
   await page.locator(`[data-test=settings] [data-test=${tab}]`).first().click();
   await page.waitForTimeout(400);

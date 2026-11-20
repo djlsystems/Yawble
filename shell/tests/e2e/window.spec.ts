@@ -22,7 +22,7 @@ test('window shows core version and getAvailableBackends() over IPC', async () =
     const window = await app.firstWindow();
     await expect(window).toHaveTitle('Yawble');
     // The core's identity and the backend probe are on the System panel.
-    await window.locator('[data-test=open-app-settings]').click();
+    await window.locator('[data-test=settings-gear]').click();
     await window.locator('[data-test=open-system]').click();
     const version = window.locator('[data-test=core-version]');
     await expect(version).toHaveText(/^\d+\.\d+\.\d+/, { timeout: 60_000 });

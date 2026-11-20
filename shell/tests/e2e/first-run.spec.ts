@@ -127,7 +127,7 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await shot(main, '01-first-start');
 
     // ---- Agents: a live agents.detect against this computer's real PATH (found or not depends on the machine).
-    await main.locator('[data-test=open-app-settings]').click();
+    await main.locator('[data-test=settings-gear]').click();
     await main.locator('[data-test=open-agents]').click();
     for (const cli of ['claude', 'grok']) {
       const row = main.locator(`[data-test=agent-cli-${cli}]`);
@@ -274,7 +274,7 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await main.locator('[data-test=modal-close]').click();
 
     // ---- The global run limit
-    await main.locator('[data-test=open-app-settings]').click();
+    await main.locator('[data-test=settings-gear]').click();
     await main.locator('[data-test=open-global-policy]').click();
     await main.locator('[data-test=global-maxConcurrentAgents]').fill('3');
     await main.locator('[data-test=save-global]').click();

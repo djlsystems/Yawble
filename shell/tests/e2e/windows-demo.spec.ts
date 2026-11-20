@@ -35,7 +35,7 @@ test('real demo: a Claude Manager splits a task between a Claude member and a Gr
     await shot(main, 'first-start');
 
     // The person's own CLIs, detected.
-    await main.locator('[data-test=open-app-settings]').click();
+    await main.locator('[data-test=settings-gear]').click();
     await main.locator('[data-test=open-agents]').click();
     for (const cli of ['claude', 'grok'])
       await expect(main.locator(`[data-test=agent-cli-${cli}] [data-test=cli-found]`)).toHaveText('Found', { timeout: 60_000 });
