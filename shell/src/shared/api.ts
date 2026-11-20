@@ -311,7 +311,7 @@ export interface UpdateStatus {
 export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
-export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'timeline.'] as const;
+export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'timeline.', 'workflows.'] as const;
 
 export function isUiMethod(method: unknown): method is string {
   return typeof method === 'string' && UI_METHOD_PREFIXES.some((p) => method.startsWith(p)) && /^[a-zA-Z.]+$/.test(method);
@@ -430,6 +430,43 @@ export const WorkflowExpiryDefaultDays = 3;
 export function workflowTime(w: Pick<WorkflowSummary, 'state' | 'lastAt' | 'endedAt'>): string {
   return w.state !== 'open' && w.endedAt ? w.endedAt : w.lastAt;
 }
+// ---- B104: the Workflows page (core card 476, YAWBLE_TEAM_DOCS/B104/contract.md): every team's workflows in one table ----
+export const WORKFLOWS_LIST = 'workflows.list';
+export const WORKFLOWS_GET = 'workflows.get';
+/** The Status column: an ended workflow's state, or how an open one stands (first match: needs-you, running, waiting, stopped, idle). */
+export type WorkflowRowStatus = 'running' | 'needs-you' | 'waiting' | 'idle' | 'stopped' | 'completed' | 'closed' | 'expired';
+/** The backlog item a workflow was dispatched from (archived: open it in the Backlog's archive). */
+export interface WorkflowItem { label: string; title: string; archived: boolean }
+/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits for a run slot. */
+export interface WorkflowMember { id: number; name: string; state: 'running' | 'lease' | 'queued' }
+/** A workflows.list row: every WorkflowSummary field (title cleaned), plus the B104 fields. No tokens, no cost. */
+export interface WorkflowRow extends WorkflowSummary {
+  ownerId: number | null;
+  team: string; teamId: number;
+  status: WorkflowRowStatus;
+  waitingFor: 'slot' | 'lease' | 'wake' | null;
+  /** A run of it is active right now (the icon is animated), whatever the status. */
+  working: boolean;
+  item: WorkflowItem | null;
+  members: WorkflowMember[];
+}
+/** The chips' numbers, over the team and text filters, before the state filter and the limit. */
+export interface WorkflowCounts {
+  all: number; open: number; needsYou: number; done: number; closed: number;
+  running: number; waiting: number; idle: number; stopped: number; completed: number; expired: number;
+  completedToday: number;
+}
+export interface WorkflowsListAnswer {
+  workflows: WorkflowRow[]; counts: WorkflowCounts; truncated: boolean;
+  /** The session may read the backlog: the item label is a link (else plain text) and the spec is shown. */
+  backlog: boolean;
+  now: string;
+}
+export interface WorkflowCardRow { id: number; title: string; lane: LaneId; member: string | null; status: CardStatus | string; time?: ItemTime | null }
+export type WorkflowMessageKind = 'instruction' | 'progress' | 'handback' | 'blocked' | 'decision' | 'completed' | 'failed' | 'stopped' | 'done' | 'closed' | 'expired';
+export interface WorkflowMessage { seq: number; at: string; kind: WorkflowMessageKind | string; from: string | null; member: string | null; text: string | null }
+export interface WorkflowDetail { workflow: WorkflowRow; cards: WorkflowCardRow[]; messages: WorkflowMessage[]; spec: string | null; backlog: boolean }
+
 /** A team's documents (docs.list / docs.read): paths are relative to the team's documents folder. */
 export interface DocEntry { name: string; path: string; folder: boolean; size: number | null; modified: string }
 export interface DocList { path: string; entries: DocEntry[] }
@@ -718,7 +755,10 @@ export interface Trigger {
 export interface TriggerFire { outcome: string; seq: number | null; reason: string | null }
 
 /** The Git dialog (git.status / git.fetch / git.bringCurrent / git.merge / git.askTeam / git.deleteBranches; core Teams/TeamRepos.Git.cs). */
-export interface TeamGitBranch { branch: string; sha: string; aheadOfBase: number; inTeamBranch: boolean }
+/** B073 (absent from an older core): aheadRange, the pair behind aheadOfBase; push, the branch's local-only flag. */
+export interface TeamGitBranch {
+  branch: string; sha: string; aheadOfBase: number; inTeamBranch: boolean; aheadRange?: CommitRangeRef | null; push?: BranchPush | null;
+}
 /** An old-style members/<member> branch left from before member branches were named members/<team>/<member>:
  * here (local) and/or on origin (remote), and whether its commits are merged. */
 export interface TeamGitOldBranch { name: string; local: boolean; remote: boolean; merged: boolean }
@@ -733,6 +773,8 @@ export interface TeamGitStatus {
    * they block this team's member branches: one entry per ref, here (local) or on origin (remote). Absent from a core
    * that does not list them. */
   blockingBranches?: TeamGitBlockingBranch[];
+  /** B073: the commit pair behind each count (absent from an older core). */
+  ranges?: TeamGitRanges | null;
 }
 /** inUseBy (core card 104): a member is still on it, its old members/<name> ("team Alpha's member Ada", or "member Docs of
  * this team"); it is not deleted from the dialog but moves to movesTo at that member's next start. Absent otherwise. */
@@ -795,7 +837,8 @@ export interface BranchRealignResult { oldSha: string; newSha: string }
  * may name the branch and member). made: the member, card and workflow that made it (the app's own records); absent
  * when unknown; a merge recorded on the team branch is credited to the Manager. merge: what a merge brought in;
  * intoBranch / fromBranch are null when neither git nor the app's records can tell. where: inMain; branches: the team
- * branch first, then member branches, never main; otherBranches: the other local branches that hold it (not main, the team\n * branch or members/*; absent from an older core, read as []); onlyOnMember only when it is in neither main nor the team branch;
+ * branch first, then member branches, never main; otherBranches: the other local branches that hold it (not main, the team
+ * branch or members/*; absent from an older core, read as []); onlyOnMember only when it is in neither main nor the team branch;
  * pushed (on origin); tags (the release tags that contain it). files: against the first parent for a merge.
  * codeShown=false: a cloud viewer with "Show members' code to cloud viewers" off; the file list only, no diffs.
  */
@@ -810,11 +853,29 @@ export interface CommitFound {
   isMerge: boolean; parents: string[];
   merge?: { intoBranch: string | null; fromBranch: string | null; fromMember?: string | null; commitCount: number } | null;
   made?: { member: string; card?: number | null; workflow?: number | null } | null;
-  where: { inMain: boolean; branches: string[]; otherBranches?: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[] };
+  /** deletedFrom (B073): the deleted branch it was on (absent otherwise). */
+  where: { inMain: boolean; branches: string[]; otherBranches?: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[]; deletedFrom?: string };
   files: CommitFile[];
   codeShown: boolean;
 }
 export type CommitShow = CommitGone | CommitFound;
+/**
+ * B074 git.commitsResolve {team? | teamId?, ids} (contract B074/contract.md, core card 470): which of the commit-shaped IDs
+ * on a screen are real commits, in ONE call. ids: 7 to 40 hex digits each, short or full; at most 200 distinct per call
+ * (GIT_COMMITS_RESOLVE_MAX; more is bad_params, so the shell splits above it). Neither team nor teamId: every team.
+ * results: one per distinct ID, in the order asked (id lower case); matches: none (not a commit: the text stays text),
+ * one, or more (ambiguous: the chooser). repo null: the team's main repository. pushed: as the Commit view's
+ * where.pushed. errors: repositories that could not be read (absent when none). A read; a Visitor may call it.
+ */
+export const GIT_COMMITS_RESOLVE = 'git.commitsResolve';
+export const GIT_COMMITS_RESOLVE_MAX = 200;
+export interface CommitMatch { team: string; teamId?: number; repo: string | null; fullId: string; shortId?: string; title: string; pushed: boolean }
+export interface CommitsResolveParams { team?: string; teamId?: number; ids: string[] }
+export interface CommitsResolved {
+  max?: number;
+  results: { id: string; valid: boolean; matches: CommitMatch[] }[];
+  errors?: { team: string; teamId: number; repo: string | null; message: string }[];
+}
 /**
  * B072 git.commitDiff {team | teamId, sha, path, repo?} (core CommitFileDiff.ToJson): one file's diff against the first
  * parent. Each hunk: git's header line, its starts and counts, and its lines (kind context / added / deleted; old / new:
@@ -833,15 +894,65 @@ export interface CommitDiff {
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {
   on: boolean; note: string | null; baseBranch: string | null;
-  behind: { teamBranch: string; count: number; text: string } | null;
+  /** from / to (B073): the pair behind count (from = the team tip, to = the base it is behind), passed unchanged to
+   * git.commitRange. The core sends both whenever behind is non-null (contract.md); optional only for an older core. */
+  behind: { teamBranch: string; count: number; text: string; from?: string | null; to?: string | null } | null;
 }
 /** git.sync, "Sync now" (core Teams/TeamRepos.Sync.cs BranchSyncResult). */
 export interface BranchSyncResult {
   outcome: 'off' | 'no-base' | 'in-step' | 'synced' | 'conflict'; baseBranch: string; baseSha: string | null; behind: number;
   moved: string[]; conflicts: string[]; note: string | null;
+  /** B073: the commits the team branch received from the base, newest first (empty when nothing came in; absent from an
+   * older core: the dialog reads them with git.commitRange from the team commit before to the one after). */
+  incoming?: CommitRow[]; incomingCount?: number; incomingTruncated?: boolean; incomingRange?: CommitRangeRef | null;
 }
 export interface TeamGitResult {
   outcome: string; message: string; changed: boolean; sha: string | null; files: string[] | null; status: TeamGitStatus | null;
+  /** B073 (git.bringCurrent, git.merge): the commits that came in / landed, null otherwise; absent from an older core. */
+  commits?: CommitRow[] | null; commitCount?: number; commitsTruncated?: boolean; range?: CommitRangeRef | null;
+}
+
+// ---- B073 (cards 463 core, 465 shell): clickable counts and previews in the Git dialog. Contract (DeveloperTomas):
+// YAWBLE_TEAM_DOCS\B073\contract.md. Every call takes {teamId | team, repo?} and is a read.
+/** One commit of a list, newest first. notPushed: THE local-only flag (no origin ref has it; always true without an
+ * origin: hasOrigin words it "local only" then, else "not pushed"). */
+export interface CommitRow {
+  sha: string; shortSha: string; subject: string; author: { name: string; email: string }; date: string; isMerge: boolean; notPushed: boolean;
+}
+/** The exact pair a count stands for (full commit IDs): the commits on to that from lacks. Passed unchanged to git.commitRange. */
+export interface CommitRangeRef { from: string; to: string }
+/** THE branch local-only flag. onOrigin: origin has the branch; notPushed: its commits no origin ref has. */
+export interface BranchPush { branch: string; onOrigin: boolean; notPushed: number }
+/** git.status's ranges (absent from an older core): the pair behind each count; null when an end is missing. */
+export interface TeamGitRanges {
+  baseAheadOfOrigin: CommitRangeRef | null; baseBehindOrigin: CommitRangeRef | null;
+  teamAheadOfBase: CommitRangeRef | null; teamBehindBase: CommitRangeRef | null;
+}
+/** git.commitRange {from, to, limit?}: from / to a commit ID or refs/heads/<b> / refs/remotes/origin/<b>; limit 200 (max 1000). */
+export const GIT_COMMIT_RANGE = 'git.commitRange';
+export interface CommitRange {
+  from: string; to: string; fromSha: string; toSha: string; count: number; truncated: boolean; hasOrigin: boolean; commits: CommitRow[];
+}
+/** git.mergePreview: what Merge to <base>… would do (git merge-tree; nothing moves). summary: the outcome in one line;
+ * text: the whole preview as the Concierge shows it; commits: what lands; files: the combined diff, each opened with
+ * git.mergeDiff {from: diffFrom, to: diffTo, path} (git.commitDiff's shape). refused: Merge to main would refuse (summary
+ * says why). */
+export const GIT_MERGE_PREVIEW = 'git.mergePreview';
+export const GIT_MERGE_DIFF = 'git.mergeDiff';
+export interface MergePreview {
+  baseBranch: string; teamBranch: string; outcome: TeamGitStatus['merge'] | 'refused'; summary: string; text: string;
+  from: string | null; to: string | null; newSha: string | null; conflictFiles: string[];
+  commits: CommitRow[]; count: number; truncated: boolean; files: CommitFile[]; diffFrom: string | null; diffTo: string | null;
+  hasOrigin: boolean; teamPush: BranchPush | null;
+}
+/** git.deletePreview {branch}: the branch's commits not in the base, each in-base ("already in main", git cherry), own
+ * ("work of its own") or merge (git cherry skips merges). lost: the one line on what deleting loses. After the delete the
+ * core records them, so git.commitShow still opens them (where.deletedFrom names the branch). */
+export const GIT_DELETE_PREVIEW = 'git.deletePreview';
+export interface DeletePreviewCommit extends CommitRow { state: 'in-base' | 'own' | 'merge' }
+export interface DeletePreview {
+  branch: string; baseBranch: string; exists: boolean; sha: string | null; merged: boolean; commits: DeletePreviewCommit[];
+  own: number; inBase: number; truncated: boolean; lost: string; text: string; hasOrigin: boolean; push: BranchPush | null;
 }
 
 export interface MemberRow {

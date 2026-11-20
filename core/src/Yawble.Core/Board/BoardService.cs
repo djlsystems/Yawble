@@ -45,6 +45,9 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     /// <summary>B086: the cards' and workflows' times (the bus asks it for its workflow items).</summary>
     public BoardTimeline Timeline { get; } = new(store);
 
+    /// <summary>The board's store (B104: the Workflows page reads cards, items and times of many workflows at once).</summary>
+    public BoardStore Store => store;
+
     /// <summary>Reads the bus into the cards until stopped.</summary>
     public async Task RunAsync(CancellationToken ct)
     {

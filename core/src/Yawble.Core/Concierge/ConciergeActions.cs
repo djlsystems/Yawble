@@ -238,7 +238,9 @@ public sealed class ConciergeActions(
             case "git_branches_delete":
             {
                 var (team, repo) = await RepoAsync(args, ct);
-                var plan = await git.PlanDeleteAsync(repo, List(args, "branches"), List(args, "unmerged_ok"), Bool(args, "remote"), ct);
+                // B073: each deleted branch's commits are recorded, so the commit view still opens them.
+                var plan = await git.PlanDeleteAsync(repo, List(args, "branches"), List(args, "unmerged_ok"), Bool(args, "remote"), ct,
+                    deleted: bus.Repos is { } teamRepos ? (b, sha, token) => teamRepos.RecordBranchDeletedAsync(team.Id, team.Name, repo.Path, repo.BaseBranch, b, sha, token) : null);
                 return await ConfirmedAsync(name, args, $"Delete these branches in {team.Name}:\n{plan.Text}", plan.Key, plan.Empty, plan.Run, ct);
             }
             case "git_branch_realign":

@@ -53,7 +53,9 @@ async function menu(w: Awaited<ReturnType<typeof page>>['w'], id: string) {
   await flushPromises();
 }
 
-describe('B029 theme switch in the window (App.vue)', () => {
+// Each test imports App.vue afresh (vi.resetModules): its whole module graph, cold, which under the full suite's load ran
+// past vitest's default 5 s (card 477). The tests themselves take milliseconds once it is loaded.
+describe('B029 theme switch in the window (App.vue)', { timeout: 30_000 }, () => {
   beforeEach(() => { vi.resetModules(); localStorage.clear(); sessionStorage.clear(); html().removeAttribute('data-theme'); });
   afterEach(() => { document.body.innerHTML = ''; delete (window as any).yawble; vi.unstubAllGlobals(); });
 

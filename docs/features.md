@@ -389,6 +389,41 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
   - Items can be archived and restored. **Dispatches** shows each dispatch with its token counts.
+  - An opened item lists each team it went to on one line: **Open team**, **Its board**, and **workflow #N** (that
+    team's latest workflow for the item), which opens the Workflows page with that workflow selected.
+- **Workflows**: every team's workflows in one table, in the sidebar directly below Backlog (its badge counts the
+  open ones).
+  - **Ways in**: the sidebar; the board's **Workflows** button next to Backlog (filtered to the board's team when it
+    shows one, else all teams); **All workflows** in a team's Workflows dialog and on its tile in the Teams list; a
+    Backlog item's **workflow #N**. A link of the form `#workflows?t=3&s=open&q=…&sel=12` opens it filtered.
+  - **Filters**: a team (or all teams), free text over the id, title, item label, team and member names (filters as
+    you type, the matches highlighted), and the status chips **Open**, **Needs you**, **Done**, **Closed/Expired** and
+    **All**, each with its count. A summary line ("5 open · 1 needs you · 12 completed today") with a tiny sparkline of
+    today's starts and completions per hour. The filters are remembered and kept in the page's address.
+  - **Columns**: **Status** (an icon and a word: Running, Needs you, Waiting (for a slot, the lease or a wake-up),
+    Idle (its tooltip counts down to its expiry), Stopped, Completed, Closed, Expired; a workflow someone is working
+    breathes gently, and holds still when the system asks for reduced motion); **Workflow** (#id and the clean title: a dispatched item's own
+    title); **Item** (the backlog label, a link to the Backlog with that item selected, an archived one in the
+    archive; "—" when it was not dispatched from the backlog); **Team**; **Who** (the faces of the members working it
+    now, then its owner); **Elapsed** (the overall time, ticking while open; it and the timeline icon beside it open
+    the Timeline dialog; under it a thin bar of where the time went, in the Timeline's colours, named on hover);
+    **Last activity**.
+  - **Order**: what needs you first, then running, then the other open ones, then the ended ones by when they ended.
+    Click a header to sort by that column; again to reverse.
+  - **The pane** (click a row, or Enter; Esc closes it; up and down arrows move the selection): the status, #id,
+    title, item link, team (Open team, Its board); the item's spec (a few lines, **Show all**); the cards by lane, each
+    with its member, status and own time (a card opens in the board's card panel); the last messages newest first
+    (commit IDs are links); the overall time with its breakdown and a **Timeline** button.
+  - **Actions** in the pane, each asked in the app's confirm dialog: **Nudge** (nobody is working it), **Extend** (it
+    will expire), **Stop** (what runs in it) and **Close**. A Visitor sees none of them.
+  - A new workflow's row eases in; a workflow that completes turns its mark into a check. With nothing open, a short
+    note and a button to the Backlog.
+  - On a phone the list comes first and an opened workflow takes the page (**← Workflows** goes back). Through the
+    Cloud Link a Visitor sees the page read-only; the item link and the spec show only when the viewer may read the
+    backlog.
+  - The Workflows dialog and a team tile's workflows show each workflow's item label as the same link, and a
+    workflow node's panel on the Monitor names its backlog item.
+  - Time only: no tokens or cost.
 - **Documents**: each team has a shared documents folder for reports, specs and plans. The list shows each entry's
   size and when it was last modified.
   - Every member reads and writes it as plain files.

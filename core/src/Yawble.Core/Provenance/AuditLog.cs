@@ -71,6 +71,12 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "git.tidyPlan",
         // B075: a web link only reads the repository's refs. B072: the commit view reads a commit and a file's diff.
         "git.webLink", "git.commitShow", "git.commitDiff",
+        // B074: resolving a batch of hex words to commits only reads.
+        "git.commitsResolve",
+        // B073: the commits behind a count and the Merge / Delete previews change nothing.
+        "git.commitRange", "git.mergePreview", "git.mergeDiff", "git.deletePreview",
+        // B104: the Workflows page's list of every team's workflows, and one workflow in full.
+        "workflows.list", "workflows.get",
         // Opening and closing the read-only Code view change nothing (a download is recorded).
         "code.open", "code.close",
     };

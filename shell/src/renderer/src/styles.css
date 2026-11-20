@@ -183,3 +183,10 @@ code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
      chip (card 181). Only a sheet's header: a bar inside the sheet's body is not hit. */
   :root[data-remote-access="read"] .modal.sheet > header.row { padding-right: calc(150px + env(safe-area-inset-right, 0px)); }
 }
+
+/* B074: a commit ID the core confirmed (commitResolve.ts): a link in the accent colour, wherever the text was rendered.
+   A candidate not confirmed yet, or not a commit, has no rule: it reads as the text around it. */
+.commit-id.commit-link { cursor: pointer; color: var(--accent); border-radius: 3px; }
+.commit-id.commit-link code { color: inherit; }
+.commit-id.commit-link:hover { text-decoration: underline; }
+.commit-id.commit-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

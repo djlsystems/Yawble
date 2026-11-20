@@ -31,7 +31,7 @@ public sealed record ItemRow(
 }
 
 /// <summary>The board's cards and their trails, the backlog, and how far the projector has read the bus.</summary>
-public sealed class BoardStore(string connectionString, TimeProvider? clock = null)
+public sealed partial class BoardStore(string connectionString, TimeProvider? clock = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
@@ -423,8 +423,14 @@ public sealed class BoardStore(string connectionString, TimeProvider? clock = nu
         return c;
     }
 
+    private long _queries;
+
+    /// <summary>How many statements this store has run (tests count a read's queries: B104's no-N+1 check).</summary>
+    public long Queries => Interlocked.Read(ref _queries);
+
     private SqliteCommand Command(SqliteConnection c, string sql, (string, object)[] args)
     {
+        Interlocked.Increment(ref _queries);
         var cmd = c.CreateCommand();
         cmd.CommandText = sql;
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v);

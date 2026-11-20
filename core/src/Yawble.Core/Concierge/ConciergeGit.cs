@@ -35,9 +35,11 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
     /// <summary>Plans deleting <paramref name="names"/> (or, when none, every merged branch) from the repository; refusals are listed with the reason.
     /// <paramref name="refuse"/>: the caller's own refusal for a branch (why it is not deleted), or null; applied to every
     /// branch considered, named or not (card 171: another team's member still on it).</summary>
+    /// <param name="deleted">B073: called after each local branch is deleted, with its name and the SHA it had (the app records its commits).</param>
     public async Task<GitPlan> PlanDeleteAsync(ActionRepo repo, IReadOnlyList<string> names, IReadOnlyList<string> unmergedOk, bool remote, CancellationToken ct,
-        Func<string, string?>? refuse = null)
+        Func<string, string?>? refuse = null, Func<string, string, CancellationToken, Task>? deleted = null)
     {
+        var previews = new GitPreviews(git);
         var path = repo.Path;
         var baseSha = await RevAsync(path, "refs/heads/" + repo.BaseBranch, ct)
                       ?? throw new ArgumentException($"{repo.Name}: there is no base branch {repo.BaseBranch}");
@@ -100,6 +102,9 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
                     continue;
                 }
                 sb.AppendLine($"- delete {branch} at {sha}{How(state)}");
+                // B073: what deleting it loses, the same text as the Git dialog's git.deletePreview.
+                foreach (var line in (await previews.DeletePreviewAsync(path, repo.BaseBranch, branch, ct)).Text.Split('\n'))
+                    sb.Append("    ").AppendLine(line);
                 key.Append("L ").Append(branch).Append(' ').AppendLine(sha);
                 deletable.Add((branch, sha));
             }
@@ -130,6 +135,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
                 if (r.ExitCode != 0) { done.AppendLine($"- {branch}: kept (it moved since the list was shown: {r.Stderr})"); continue; }
                 done.AppendLine($"- deleted {branch}; was {sha}; restore with: git branch {branch} {sha}");
                 log.AppendLine($"{_now():O} deleted {branch} {sha}");
+                if (deleted is not null) await deleted(branch, sha, token);
             }
             foreach (var (branch, sha) in remoteDeletable)
             {

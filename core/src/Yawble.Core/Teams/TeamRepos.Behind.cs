@@ -3,6 +3,9 @@ namespace Yawble.Core.Teams;
 /// <summary>How far a team's branch is behind its base branch. <c>Age</c>: how old the oldest base commit it lacks is.</summary>
 public sealed record TeamBehind(string TeamBranch, string BaseBranch, int Behind, TimeSpan? Age)
 {
+    /// <summary>B073: the pair the count stands for (the commits on <c>To</c> that <c>From</c> lacks): the team tip, and the base it is behind.</summary>
+    public CommitRangeRef? Range { get; init; }
+
     /// <summary>"team/x is 3 commits behind main" (what the team page, team_status and system_status say).</summary>
     public string Text => $"{TeamBranch} is {Behind} commit{(Behind == 1 ? "" : "s")} behind {BaseBranch}";
 }
@@ -32,13 +35,14 @@ public sealed partial class TeamRepos
             var (teamBranch, teamSha, start) = await TeamAndStartAsync(repo, team, ct);
             if (teamSha is null || start is null) return null;
             var behind = await CountAsync(repo.Path, start, teamSha, ct);
-            if (behind == 0) return new TeamBehind(teamBranch, repo.BaseBranch, 0, null);
+            var range = new CommitRangeRef(teamSha, start);
+            if (behind == 0) return new TeamBehind(teamBranch, repo.BaseBranch, 0, null) { Range = range };
             // The oldest base commit the team branch lacks: its committer date.
             var log = await Git.TryRunAsync(repo.Path, ["log", "--format=%ct", start, "^" + teamSha], ct);
             var oldest = log.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(l => long.TryParse(l.Trim(), out var s) ? s : (long?)null).Where(s => s is not null).Select(s => s!.Value).DefaultIfEmpty(-1).Min();
             TimeSpan? age = oldest < 0 ? null : now - DateTimeOffset.FromUnixTimeSeconds(oldest);
-            return new TeamBehind(teamBranch, repo.BaseBranch, behind, age);
+            return new TeamBehind(teamBranch, repo.BaseBranch, behind, age) { Range = range };
         }, ct);
     }
 

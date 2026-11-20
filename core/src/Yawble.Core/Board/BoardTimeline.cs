@@ -16,6 +16,13 @@ public sealed class BoardTimeline(BoardStore store)
     {
         var lines = store.Timeline(card.Id); // fills in an old card's timeline from its trail first
         var fresh = store.Card(card.Id) ?? card;
+        return OfCard(fresh, lines, live, now, runs ?? (fresh.Workflow is { } wf ? store.RunsOf(wf) : []));
+    }
+
+    /// <summary>A card's timeline from what is already read: the card (after its rebuild), its lines and its workflow's runs.</summary>
+    private static CardTimeline OfCard(CardRow fresh, IReadOnlyList<TimelineLine> lines, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now,
+        IReadOnlyList<RunSpan> workflowRuns)
+    {
         var states = new List<TimelineState>();
         var stalls = new List<ActivitySpan>();
         var holds = new List<ActivitySpan>();
@@ -44,7 +51,6 @@ public sealed class BoardTimeline(BoardStore store)
                 stalls.AddRange(a.Spans.Stalls);
                 holds.AddRange(a.Spans.Holds);
             }
-        var workflowRuns = runs ?? (fresh.Workflow is { } wf ? store.RunsOf(wf) : []);
         var input = new CardTimelineInput(fresh.Id, fresh.Member, fresh.Title, T(fresh.CreatedAt), fresh.StartedAt is { } s ? T(s) : null,
             fresh.EndedHow, fresh.EndedAt is { } e ? T(e) : null, fresh.Rebuilt, states, stalls, holds,
             fresh.Member is null ? [] : workflowRuns, markers);
@@ -57,9 +63,37 @@ public sealed class BoardTimeline(BoardStore store)
         if (thread.Count == 0) return null;
         var runs = store.RunsOf(workflow);
         var cards = store.CardsOfWorkflow(workflow).OrderBy(c => c.Id).Select(c => OfCard(c, live, now, runs)).ToList();
+        return OfWorkflow(workflow, thread, runs, cards, store.LooseTimeline(workflow), live, now);
+    }
+
+    /// <summary>
+    /// B104: the times of many workflows at once (the Workflows page), in a fixed number of statements however many there
+    /// are. <paramref name="threads"/>: each workflow's messages, oldest first. Workflows without messages are left out.
+    /// </summary>
+    public IReadOnlyDictionary<long, TimeSummary> TimesOf(IReadOnlyDictionary<long, IReadOnlyList<Message>> threads, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
+    {
+        var ids = threads.Where(t => t.Value.Count > 0).Select(t => t.Key).ToList();
+        var result = new Dictionary<long, TimeSummary>();
+        if (ids.Count == 0) return result;
+        var lines = store.TimelinesOfWorkflows(ids); // rebuilds the old cards first, so the cards read next are current
+        var cards = store.CardsOfWorkflows(ids).Where(c => c.Workflow is not null).GroupBy(c => c.Workflow!.Value).ToDictionary(g => g.Key, g => g.OrderBy(c => c.Id).ToList());
+        var runs = store.RunsOfWorkflows(ids);
+        var cardLines = lines.Where(l => l.CardId is not null).GroupBy(l => l.CardId!.Value).ToDictionary(g => g.Key, g => (IReadOnlyList<TimelineLine>)[.. g]);
+        var loose = lines.Where(l => l.CardId is null && l.Workflow is not null).GroupBy(l => l.Workflow!.Value).ToDictionary(g => g.Key, g => (IReadOnlyList<TimelineLine>)[.. g]);
+        foreach (var w in ids)
+        {
+            var wfRuns = runs.GetValueOrDefault(w) ?? [];
+            var cardTimes = (cards.GetValueOrDefault(w) ?? []).Select(c => OfCard(c, cardLines.GetValueOrDefault(c.Id) ?? [], live, now, wfRuns)).ToList();
+            result[w] = OfWorkflow(w, threads[w], wfRuns, cardTimes, loose.GetValueOrDefault(w) ?? [], live, now).Time;
+        }
+        return result;
+    }
+
+    private static WorkflowTimeline OfWorkflow(long workflow, IReadOnlyList<Message> thread, IReadOnlyList<RunSpan> runs, IReadOnlyList<CardTimeline> cards,
+        IReadOnlyList<TimelineLine> looseLines, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
+    {
         var ends = Ends(thread);
         var withCards = cards.Where(c => c.Member is not null).Select(c => c.Member!).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var looseLines = store.LooseTimeline(workflow);
         var names = runs.Select(r => r.Member)
             .Concat(thread.Where(m => m.Type == MessageTypes.NeedsDecision).Select(m => MemberOf(m.Source)).OfType<string>())
             .Concat(looseLines.Select(l => l.Member).OfType<string>())

@@ -1,0 +1,72 @@
+{
+  "outcome": "merged",
+  "message": "team/alpha merged with a merge commit into trunk: now a736d70db2d1.",
+  "changed": true,
+  "sha": "a736d70db2d1002e27f3de2a365128f38c362fe5",
+  "files": null,
+  "status": {
+    "repoPath": "C:\\Users\\micro\\AppData\\Local\\Yawble\\teams\\Yawble Code Browser Team\\members\\TesterKofi\\home\\t\\yawble-bus-4rgevnno.4i5\\person-repo",
+    "managed": false,
+    "baseBranch": "trunk",
+    "checkedOut": null,
+    "dirty": false,
+    "origin": null,
+    "baseSha": "a736d70db2d1002e27f3de2a365128f38c362fe5",
+    "originBaseSha": null,
+    "baseAheadOfOrigin": null,
+    "baseBehindOrigin": null,
+    "teamBranch": "team/alpha",
+    "teamSha": "4bf78bedf255f16f84c52797af61b230b66a89e8",
+    "teamAheadOfBase": 0,
+    "teamBehindBase": 2,
+    "merge": "up-to-date",
+    "conflictFiles": [],
+    "members": [],
+    "oldBranches": [],
+    "blockingBranches": [],
+    "ranges": {
+      "baseAheadOfOrigin": null,
+      "baseBehindOrigin": null,
+      "teamAheadOfBase": {
+        "from": "a736d70db2d1002e27f3de2a365128f38c362fe5",
+        "to": "4bf78bedf255f16f84c52797af61b230b66a89e8"
+      },
+      "teamBehindBase": {
+        "from": "4bf78bedf255f16f84c52797af61b230b66a89e8",
+        "to": "a736d70db2d1002e27f3de2a365128f38c362fe5"
+      }
+    }
+  },
+  "commits": [
+    {
+      "sha": "4bf78bedf255f16f84c52797af61b230b66a89e8",
+      "shortSha": "4bf78bedf255",
+      "subject": "Four",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T23:08:23-05:00",
+      "isMerge": false,
+      "notPushed": true
+    },
+    {
+      "sha": "ab392a31a64c5faed6b1ffebeb4a9b75f4c8c2ba",
+      "shortSha": "ab392a31a64c",
+      "subject": "Team work",
+      "author": {
+        "name": "Ada",
+        "email": "ada@example.invalid"
+      },
+      "date": "2026-11-18T23:08:23-05:00",
+      "isMerge": false,
+      "notPushed": true
+    }
+  ],
+  "commitCount": 2,
+  "commitsTruncated": false,
+  "range": {
+    "from": "2e8c413d8b20a2c285c45ef23591f1ecb3754783",
+    "to": "4bf78bedf255f16f84c52797af61b230b66a89e8"
+  }
+}

@@ -1,0 +1,359 @@
+{
+  "workflows": [
+    {
+      "id": 17,
+      "title": "write the docs",
+      "owner": "Eve",
+      "state": "open",
+      "undeclared": false,
+      "busy": [
+        "Eve has 1 pending delivery in this workflow"
+      ],
+      "ending": null,
+      "startedAt": "2026-11-19T03:31:47.6134032\u002B00:00",
+      "lastAt": "2026-11-19T03:31:47.6134032\u002B00:00",
+      "messages": 1,
+      "endedAt": null,
+      "expiredAt": null,
+      "expiresAt": null,
+      "expiryWarning": null,
+      "question": null,
+      "time": {
+        "createdAt": "2026-11-19T03:31:47.6134032\u002B00:00",
+        "startedAt": "2026-11-19T03:31:47.6134032\u002B00:00",
+        "endedAt": null,
+        "endedHow": null,
+        "open": true,
+        "overallMs": 42,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "waiting-for-slot",
+            "ms": 42
+          }
+        ]
+      },
+      "ownerId": 6,
+      "team": "Cloud",
+      "teamId": 2,
+      "status": "waiting",
+      "waitingFor": "slot",
+      "working": false,
+      "item": null,
+      "members": [
+        {
+          "id": 6,
+          "name": "Eve",
+          "state": "queued"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "pick the theme",
+      "owner": "Dee",
+      "state": "open",
+      "undeclared": false,
+      "busy": [
+        "Dee is running"
+      ],
+      "ending": null,
+      "startedAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+      "lastAt": "2026-11-19T03:31:47.3702312\u002B00:00",
+      "messages": 2,
+      "endedAt": null,
+      "expiredAt": null,
+      "expiresAt": null,
+      "expiryWarning": null,
+      "question": 16,
+      "time": {
+        "createdAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+        "startedAt": "2026-11-19T03:31:47.3622645\u002B00:00",
+        "endedAt": null,
+        "endedHow": null,
+        "open": true,
+        "overallMs": 293,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "agent-working",
+            "ms": 2
+          },
+          {
+            "category": "waiting-on-you",
+            "ms": 285
+          },
+          {
+            "category": "waiting-for-slot",
+            "ms": 6
+          }
+        ]
+      },
+      "ownerId": 5,
+      "team": "Cloud",
+      "teamId": 2,
+      "status": "needs-you",
+      "waitingFor": null,
+      "working": true,
+      "item": null,
+      "members": [
+        {
+          "id": 5,
+          "name": "Dee",
+          "state": "running"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "build the image",
+      "owner": "Cy",
+      "state": "open",
+      "undeclared": false,
+      "busy": [
+        "Cy is running"
+      ],
+      "ending": null,
+      "startedAt": "2026-11-19T03:31:47.3387559\u002B00:00",
+      "lastAt": "2026-11-19T03:31:47.3387559\u002B00:00",
+      "messages": 1,
+      "endedAt": null,
+      "expiredAt": null,
+      "expiresAt": null,
+      "expiryWarning": null,
+      "question": null,
+      "time": {
+        "createdAt": "2026-11-19T03:31:47.3387559\u002B00:00",
+        "startedAt": "2026-11-19T03:31:47.3387559\u002B00:00",
+        "endedAt": null,
+        "endedHow": null,
+        "open": true,
+        "overallMs": 317,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "agent-working",
+            "ms": 311
+          },
+          {
+            "category": "waiting-for-slot",
+            "ms": 6
+          }
+        ]
+      },
+      "ownerId": 3,
+      "team": "Web",
+      "teamId": 1,
+      "status": "waiting",
+      "waitingFor": "lease",
+      "working": true,
+      "item": null,
+      "members": [
+        {
+          "id": 3,
+          "name": "Cy",
+          "state": "lease"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "lead it",
+      "owner": "Manager",
+      "state": "open",
+      "undeclared": false,
+      "busy": [
+        "Manager is running",
+        "Ben is running",
+        "Ben has 1 pending delivery in this workflow"
+      ],
+      "ending": null,
+      "startedAt": "2026-11-19T03:31:47.2922745\u002B00:00",
+      "lastAt": "2026-11-19T03:31:47.3276465\u002B00:00",
+      "messages": 3,
+      "endedAt": null,
+      "expiredAt": null,
+      "expiresAt": null,
+      "expiryWarning": null,
+      "question": null,
+      "time": {
+        "createdAt": "2026-11-19T03:31:47.2922745\u002B00:00",
+        "startedAt": "2026-11-19T03:31:47.2922745\u002B00:00",
+        "endedAt": null,
+        "endedHow": null,
+        "open": true,
+        "overallMs": 363,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "agent-working",
+            "ms": 345
+          },
+          {
+            "category": "waiting-for-slot",
+            "ms": 18
+          }
+        ]
+      },
+      "ownerId": 1,
+      "team": "Web",
+      "teamId": 1,
+      "status": "running",
+      "waitingFor": null,
+      "working": true,
+      "item": null,
+      "members": [
+        {
+          "id": 1,
+          "name": "Manager",
+          "state": "running"
+        },
+        {
+          "id": 2,
+          "name": "Ben",
+          "state": "lease"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Look at the flaky test",
+      "owner": "Eve",
+      "state": "expired",
+      "undeclared": false,
+      "busy": [],
+      "ending": "no activity for 3 days",
+      "startedAt": "2026-11-19T03:31:47.2536143\u002B00:00",
+      "lastAt": "2026-11-19T03:31:47.3058476\u002B00:00",
+      "messages": 4,
+      "endedAt": "2026-11-19T03:31:47.2547219\u002B00:00",
+      "expiredAt": "2026-11-19T03:31:47.2547219\u002B00:00",
+      "expiresAt": null,
+      "expiryWarning": null,
+      "question": null,
+      "time": {
+        "createdAt": "2026-11-19T03:31:47.2536143\u002B00:00",
+        "startedAt": "2026-11-19T03:31:47.2536143\u002B00:00",
+        "endedAt": "2026-11-19T03:31:47.2540000\u002B00:00",
+        "endedHow": "expired",
+        "open": false,
+        "overallMs": 1,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "waiting-for-slot",
+            "ms": 1
+          }
+        ]
+      },
+      "ownerId": 6,
+      "team": "Cloud",
+      "teamId": 2,
+      "status": "expired",
+      "waitingFor": null,
+      "working": false,
+      "item": null,
+      "members": []
+    },
+    {
+      "id": 1,
+      "title": "Workflows page",
+      "owner": "Manager",
+      "state": "completed",
+      "undeclared": false,
+      "busy": [],
+      "ending": "page shipped at 1a2b3c4",
+      "startedAt": "2026-11-19T03:31:47.2394723\u002B00:00",
+      "lastAt": "2026-11-19T03:31:47.3050905\u002B00:00",
+      "messages": 3,
+      "endedAt": "2026-11-19T03:31:47.2425932\u002B00:00",
+      "expiredAt": null,
+      "expiresAt": null,
+      "expiryWarning": null,
+      "question": null,
+      "time": {
+        "createdAt": "2026-11-19T03:31:47.2394723\u002B00:00",
+        "startedAt": "2026-11-19T03:31:47.2394723\u002B00:00",
+        "endedAt": "2026-11-19T03:31:47.2420000\u002B00:00",
+        "endedHow": "completed",
+        "open": false,
+        "overallMs": 3,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "waiting-for-slot",
+            "ms": 3
+          }
+        ]
+      },
+      "ownerId": 1,
+      "team": "Web",
+      "teamId": 1,
+      "status": "completed",
+      "waitingFor": null,
+      "working": false,
+      "item": {
+        "label": "B001",
+        "title": "Workflows page",
+        "archived": false
+      },
+      "members": []
+    },
+    {
+      "id": 3,
+      "title": "Old export",
+      "owner": "Manager",
+      "state": "closed",
+      "undeclared": false,
+      "busy": [],
+      "ending": "Not now",
+      "startedAt": "2026-11-19T03:31:47.2520654\u002B00:00",
+      "lastAt": "2026-11-19T03:31:47.2884889\u002B00:00",
+      "messages": 3,
+      "endedAt": "2026-11-19T03:31:47.252873\u002B00:00",
+      "expiredAt": null,
+      "expiresAt": null,
+      "expiryWarning": null,
+      "question": null,
+      "time": {
+        "createdAt": "2026-11-19T03:31:47.2520654\u002B00:00",
+        "startedAt": null,
+        "endedAt": "2026-11-19T03:31:47.2520000\u002B00:00",
+        "endedHow": "closed",
+        "open": false,
+        "overallMs": 0,
+        "rebuilt": false,
+        "breakdown": []
+      },
+      "ownerId": 4,
+      "team": "Cloud",
+      "teamId": 2,
+      "status": "closed",
+      "waitingFor": null,
+      "working": false,
+      "item": {
+        "label": "B002",
+        "title": "Old export",
+        "archived": true
+      },
+      "members": []
+    }
+  ],
+  "counts": {
+    "all": 7,
+    "open": 4,
+    "needsYou": 1,
+    "done": 1,
+    "closed": 2,
+    "completedToday": 1,
+    "running": 1,
+    "waiting": 2,
+    "idle": 0,
+    "stopped": 0,
+    "completed": 1,
+    "expired": 1
+  },
+  "truncated": false,
+  "backlog": true,
+  "now": "2026-11-19T03:31:47.6550771\u002B00:00"
+}
