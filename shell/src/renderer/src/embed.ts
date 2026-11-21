@@ -49,8 +49,15 @@ export interface EmbedNavState {
   removing?: string | null;
   /** How many workflows are open across the teams; null: not known. */
   openWorkflows?: number | null;
+  /** The terminal pane is shown (terminalPane.ts open): the Terminal place is active. */
+  terminalOpen?: boolean;
+  /** Settings' tab (App.vue prefTab): Help is active while Settings shows System. */
+  settingsTab?: string | null;
 }
 
+// The order of the sidebar's places, then the two the phone's drawer has at its bottom (App.vue DRAWER_COMMANDS): the
+// drawer's Terminal and its About Yawble (Help). The drawer's theme items are the cloud's own; Check for updates and
+// Agents and sign-ins are on the Help screen (Settings > System) and in Settings.
 const PLACES: readonly { id: EmbedPlaceId; label: string; icon: EmbedIcon }[] = [
   { id: 'newChat', label: 'New chat', icon: 'newChat' },
   { id: 'concierge', label: 'Concierge', icon: 'concierge' },
@@ -61,9 +68,22 @@ const PLACES: readonly { id: EmbedPlaceId; label: string; icon: EmbedIcon }[] = 
   { id: 'documents', label: 'Documents', icon: 'documents' },
   { id: 'monitor', label: 'Monitor', icon: 'monitor' },
   { id: 'logs', label: 'Logs', icon: 'logs' },
+  { id: 'terminal', label: 'Terminal', icon: 'terminal' },
+  { id: 'help', label: 'Help', icon: 'help' },
 ];
 
 export const EMBED_PLACE_IDS: readonly EmbedPlaceId[] = PLACES.map((p) => p.id);
+
+/** The Settings tab Help opens (the drawer's About Yawble: App.vue menu('system')). */
+export const HELP_SETTINGS_TAB = 'system';
+
+/**
+ * Whether this viewer can open a place, as the drawer offers it: the core refuses every terminal call to a read-only
+ * viewer (Visitor; core Link/RemoteAccess.cs), so neither the drawer nor the embed offers Terminal to one.
+ */
+export function placeAllowed(id: EmbedPlaceId, readOnly: boolean): boolean {
+  return !(readOnly && id === 'terminal');
+}
 
 /** The run-slots line under the sidebar, word for word; null before the core's first answer. */
 export function runSlotsLine(slots: RunSlots | null): string | null {
@@ -78,9 +98,16 @@ export function buildNav(s: EmbedNavState): EmbedNav {
     return null;
   };
   // New chat opens something rather than show a place: never highlighted, as in the sidebar.
-  const activeOf = (id: EmbedPlaceId) => id !== 'newChat' && s.view === id;
+  // Terminal is a pane beside the screen: active while it is shown. Help: while Settings shows its System tab.
+  const activeOf = (id: EmbedPlaceId) => {
+    if (id === 'newChat') return false;
+    if (id === 'terminal') return s.terminalOpen === true;
+    if (id === 'help') return s.view === 'settings' && s.settingsTab === HELP_SETTINGS_TAB;
+    return s.view === id;
+  };
   return {
-    places: PLACES.map((p) => ({ ...p, badge: badgeOf(p.id), active: activeOf(p.id), disabled: false })),
+    places: PLACES.filter((p) => placeAllowed(p.id, s.readOnly))
+      .map((p) => ({ ...p, badge: badgeOf(p.id), active: activeOf(p.id), disabled: false })),
     teams: s.teams.map((t) => ({
       id: t.id,
       name: t.name,
@@ -109,6 +136,10 @@ export interface EmbedHandlers {
   newChat(): void;
   go(view: EmbedView): void;
   logs(): void;
+  /** The drawer's Terminal (App.vue command('terminal'): shows or hides the terminal pane). */
+  terminal(): void;
+  /** The drawer's About Yawble (App.vue menu('system'): Settings at System). */
+  help(): void;
   openTeam(id: number): void;
   openConversation(id: string): void;
   newTeam(): void;
@@ -156,14 +187,17 @@ export function parseTheme(data: unknown): EmbedTheme | null {
 
 /**
  * Does what the same click in the sidebar does. Returns a promise for a chat action (its dialog), else undefined.
- * Ignored, as the sidebar's disabled or missing buttons are: a team or chat not in the state, New team and a chat's
- * actions for a read-only viewer, Delete while a chat is being deleted.
+ * Ignored, as the sidebar's disabled or missing buttons are: a team or chat not in the state, New team, a chat's
+ * actions and Terminal for a read-only viewer, Delete while a chat is being deleted.
  */
 export function dispatchNavigate(to: EmbedNavigateTarget, s: EmbedNavState, h: EmbedHandlers, d: EmbedDialogs = {}): Promise<void> | undefined {
   switch (to.kind) {
     case 'place':
+      if (!placeAllowed(to.id, s.readOnly)) return undefined;
       if (to.id === 'newChat') h.newChat();
       else if (to.id === 'logs') h.logs();
+      else if (to.id === 'terminal') h.terminal();
+      else if (to.id === 'help') h.help();
       else h.go(to.id);
       return undefined;
     case 'team':
