@@ -17,19 +17,24 @@
       "DISABLE_UPDATES=1",
       "DOTNET_CLI_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home",
       "DOTNET_CLI_TELEMETRY_OPTOUT=1",
+      "DOTNET_CLI_USE_MSBUILD_SERVER=0",
       "DOTNET_GENERATE_ASPNET_CERTIFICATE=false",
       "DOTNET_NOLOGO=1",
       "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1",
+      "DOTNET_SYSTEM_NET_DISABLEIPV6=1",
       "ENABLE_CLAUDEAI_MCP_SERVERS=false",
       "HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home",
       "IS_SANDBOX=1",
       "LANG=C.UTF-8",
+      "MSBUILDDISABLENODEREUSE=1",
+      "MSBUILDUSESERVER=0",
       "NODE_USE_ENV_PROXY=1",
       "NUGET_PACKAGES=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.nuget/packages",
-      "PATH=/opt/homebrew/Caskroom/claude-code/2.1.318:/Applications/Yawble.app/Contents/Resources/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+      "PATH=/Applications/Yawble.app/Contents/Resources/bin/dotnet-shim:/opt/homebrew/Caskroom/claude-code/2.1.318:/Applications/Yawble.app/Contents/Resources/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
       "TERM=xterm-256color",
       "TMPDIR=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp",
       "TMPPREFIX=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp/zsh",
+      "UseSharedCompilation=false",
       "XDG_CACHE_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.cache",
       "XDG_CONFIG_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.config",
       "XDG_DATA_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.local/share",
@@ -43,6 +48,7 @@
       "/opt/homebrew/Caskroom/claude-code/2.1.318",
       "/Applications/Yawble.app/Contents/Resources/bin",
       "/Applications/Yawble.app/Contents/Resources/roles",
+      "/private/var/db/mds",
       "/Users/alice/src/reference"
     ],
     "readwritePaths": [
@@ -91,7 +97,13 @@
     "injection": false
   },
   "seatbelt": {
-    "keychainAccess": false
+    "keychainAccess": false,
+    "extraMachLookups": [
+      "com.apple.trustd",
+      "com.apple.trustd.agent",
+      "com.apple.ocspd",
+      "com.apple.system.opendirectoryd.membership"
+    ]
   },
   "telemetry": {
     "enabled": false
