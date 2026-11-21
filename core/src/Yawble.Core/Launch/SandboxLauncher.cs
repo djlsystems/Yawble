@@ -17,7 +17,8 @@ namespace Yawble.Core.Launch;
 /// <paramref name="ToolFolders"/>. <paramref name="RealPath"/> finds the Linux resolver paths to mask
 /// (<see cref="LinuxResolverMasks.Present"/>; the real disk when null, tests pass a fake). <paramref name="UserTempDir"/> is
 /// macOS's per-user temp folder (DARWIN_USER_TEMP_DIR), where each run gets its own short folder
-/// (<see cref="RunTempFolder"/>); read from the system when null.
+/// (<see cref="RunTempFolder"/>); read from the system when null. <paramref name="RunTempOwner"/> is this core, written in
+/// the owner marker beside each run's folder so another app instance's sweep keeps it.
 /// </summary>
 public sealed record LaunchHost(
     TargetOs Os,
@@ -30,7 +31,8 @@ public sealed record LaunchHost(
     IReadOnlyList<string>? ToolFolders = null,
     Func<IReadOnlyList<string>>? ToolFoldersNow = null,
     Func<string, string?>? RealPath = null,
-    string? UserTempDir = null);
+    string? UserTempDir = null,
+    RunTempOwner? RunTempOwner = null);
 
 /// <summary>Host tools every run gets on PATH, read-only (<see cref="RunLayout.HostToolFolders"/>).</summary>
 public static class HostTools
@@ -556,7 +558,7 @@ public sealed class SandboxLauncher(
                     if (spec.RunTemp is { } folder)
                     {
                         runTemp = folder;
-                        RunTempFolder.Create(folder);
+                        RunTempFolder.Create(folder, host.RunTempOwner);
                     }
                     // Codex, gateway-held: the placeholder replaces whatever is there (an earlier run's copy of the real sign-in).
                     if (mode == CredentialMode.CodexGatewaySignIn)

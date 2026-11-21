@@ -112,17 +112,19 @@ public sealed class LaunchWiring : IAsyncDisposable
             ? new WxcExecBackend(Path.Combine(AppContext.BaseDirectory, "wxc-exec.exe"), Path.Combine(data, "requests"))
             : new NativeSandboxBackend();
         // macOS: the per-user temp folder each run's own short folder goes in; what a crash or restart left there is
-        // removed now (no run of this core is live yet).
+        // removed now (no run of this core is live yet). Another app instance of the same user shares that folder: the
+        // owner marker beside each run folder (this core's data folder, pid and start time) keeps a live core's folders.
         var userTemp = Sandboxing.RunTempFolder.DarwinUserTempDir() is { } t ? HostPathCanonicalizer.Canonicalize(t) : null;
+        var runTempOwner = userTemp is not null ? Sandboxing.RunTempOwner.ForThisProcess(data) : null;
         if (userTemp is not null)
         {
-            var swept = Sandboxing.RunTempFolder.Sweep(userTemp, name => registry.All().Any(r => Sandboxing.RunTempFolder.Name(r.RunKey) == name));
+            var swept = Sandboxing.RunTempFolder.Sweep(userTemp, name => registry.All().Any(r => Sandboxing.RunTempFolder.Name(r.RunKey) == name), runTempOwner);
             if (swept.Count > 0) log?.Invoke($"removed {swept.Count} leftover run temp folder(s) from {userTemp}");
         }
         var host = new LaunchHost(TargetOsExtensions.Host, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             appRoot, Path.GetFullPath(install), clis, HostPathCanonicalizer.Canonicalize,
             ToolFoldersNow: () => HostTools.Detect(appRoot), // read at every run: a git installed while the app runs is on the next run's PATH
-            UserTempDir: userTemp);
+            UserTempDir: userTemp, RunTempOwner: runTempOwner);
         // Paths are canonicalised (symlinks resolved) before they are compared or handed to the sandbox.
         var agentDefaults = new Agents.AgentDefaultsStore(connectionString);
         var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(connectionString),
