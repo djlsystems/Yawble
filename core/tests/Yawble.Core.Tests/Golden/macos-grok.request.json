@@ -13,6 +13,7 @@
       "DOTNET_GENERATE_ASPNET_CERTIFICATE=false",
       "DOTNET_NOLOGO=1",
       "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1",
+      "DOTNET_SYSTEM_NET_DISABLEIPV6=1",
       "GROK_AUTH_PROVIDER_COMMAND=/Applications/Yawble.app/Contents/Resources/bin/yawble-grok-auth",
       "GROK_AUTO_UPDATE=0",
       "GROK_CHANGELOG_OFFLINE=1",

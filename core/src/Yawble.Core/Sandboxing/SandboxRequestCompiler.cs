@@ -307,6 +307,11 @@ public static partial class SandboxRequestCompiler
         // leaves idle workers that keep the agent's shell open. The dotnet wrapper first on PATH (DotnetShimFolder) builds
         // with -m:1; these keep MSBuild from starting anything else that would wait on a pipe. macOS the same: MSBuild's
         // and the compiler server's sockets are made in /tmp, which the sandbox refuses ("Permission denied" at bind).
+        // macOS: .NET opens dual-mode IPv6 sockets and reaches the gateway at 127.0.0.1 as ::ffff:127.0.0.1, which the
+        // sandbox profile's loopback rule does not match: NuGet's restore failed "NU1301 ... Permission denied
+        // (127.0.0.1:<port>)" while curl got through. Plain IPv4 sockets for every .NET program in the run (yawble-bridge
+        // connects that way itself).
+        if (l.Os == TargetOs.MacOS) env["DOTNET_SYSTEM_NET_DISABLEIPV6"] = "1";
         if (l.Os is TargetOs.Windows or TargetOs.MacOS)
         {
             env["MSBUILDDISABLENODEREUSE"] = "1";
