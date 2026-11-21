@@ -118,6 +118,10 @@ public static class SandboxRequestInvariants
                 foreach (var n in names)
                     if (n is null || !SandboxRequestCompiler.MacMachLookups.Contains(n, StringComparer.Ordinal))
                         Fail($"seatbelt.extraMachLookups: {n ?? "(not a name)"} is not one of the certificate and group-lookup services");
+                // SecurityServer serves any keychain whose file the run can read: the login keychain's folder must be denied.
+                if (names.Contains("com.apple.SecurityServer")
+                    && !((request["filesystem"]?["deniedPaths"] as JsonArray)?.Select(x => Str(x) ?? "") ?? []).Any(d => new PolicyPaths(os, l.Home, canonicalize).Same(d, new PolicyPaths(os, l.Home).Combine(l.Home, "Library", "Keychains"))))
+                    Fail("seatbelt.extraMachLookups names com.apple.SecurityServer, so ~/Library/Keychains must be in deniedPaths");
             }
             foreach (var key in sb.Select(p => p.Key))
                 if (key is not ("keychainAccess" or "extraMachLookups")) Fail($"seatbelt.{key} is never emitted");
