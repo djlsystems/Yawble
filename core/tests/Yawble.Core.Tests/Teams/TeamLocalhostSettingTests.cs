@@ -161,9 +161,33 @@ public class TeamLocalhostSettingTests
         Assert.Contains("## macOS", body);
         Assert.Contains("\"Allow localhost (macOS)\" (Team settings > Network; off by default)", text);
         Assert.Contains("xUnit v3 on Microsoft.Testing.Platform", text);
-        Assert.Contains("`SocketException (13): Permission denied` at `TcpListener.Start`", text);
-        Assert.Contains("Tell your Manager in one line: \"dotnet test needs Allow localhost (macOS): Team settings > Network\". Do not guess", text);
+        Assert.Contains("`SocketException (13): Permission denied`, tell your Manager in one line", text);
+        Assert.Contains("(at `TcpListener.Start`, vstest's SocketServer): \"dotnet test needs Allow localhost (macOS): Team settings > Network\"", text);
         Assert.DoesNotContain("m" + "xc", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>B121 part B (card 542, corrected by the person): MTP `dotnet test` binds its pipe as a socket file at a fixed
+    /// /tmp path, so it fails on a Mac with the setting on or off; only classic VSTest `dotnet test` works, and only with the
+    /// setting on. The skill says MTP projects always build and run their executable or dotnet exec their dll with the
+    /// runner's own filters, names that route in the one-line SocketException message, and keeps /tmp closed.</summary>
+    [Fact]
+    public void TheDevToolsSkill_OnMac_RunsMtpTestsAsTheExe_DotnetTestOnlyForVstestWithTheSetting_AndKeepsTmpClosed()
+    {
+        var body = SkillCatalog.BuiltIns.Single(s => s.Name == "dev-tools").Body;
+        var mac = body[body.IndexOf("## macOS", StringComparison.Ordinal)..];
+        mac = mac[..mac.IndexOf("\n## ", 1, StringComparison.Ordinal)];
+        var text = string.Join(' ', mac.Split((char[])['\r', '\n', ' '], StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("on macOS, always build the test project (`dotnet build <test project>`), then run its executable", text);
+        Assert.Contains("`dotnet exec bin/Debug/<tfm>/<Project>.dll`", text);
+        Assert.Contains("Filter with the runner's own options (xUnit v3: `-class`, `-method`, `-namespace`, `-filter`), not `--filter`", text);
+        Assert.Contains("`dotnet test` does not work for them on macOS, with the setting on or off", text);
+        Assert.Contains("Classic VSTest `dotnet test` (xunit 2.x + Microsoft.NET.Test.Sdk) opens a local port, so it works only with \"Allow localhost (macOS)\" on", text);
+        Assert.Contains("xUnit v3 / MTP (at `NamedPipeServerStream`, exit 134): \"MTP dotnet test cannot run on macOS here, with Allow localhost (macOS) on or off; I ran the built test executable instead\"", text);
+        Assert.Contains("that does not cover `dotnet test`'s pipe", text);
+        Assert.Contains("`/tmp` stays closed, so do not ask for a folder grant on `/tmp`, `/private/tmp` or any path under them", text);
+        Assert.DoesNotContain("in either mode", text);
+        Assert.DoesNotContain("/tmp/MSBuild", text);
+        Assert.DoesNotContain("request_folder", text);
     }
 
     /// <summary>The run inputs whose clone is the member's (members/&lt;member&gt; in its path).</summary>
