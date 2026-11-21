@@ -137,9 +137,14 @@ native library.
   `TMPDIR` points at it and `TMPPREFIX` is `<folder>/zsh`; `CLAUDE_CODE_TMPDIR` stays the member's `tmp/`. The point is
   length: a Unix socket path holds 104 bytes, and .NET puts a named pipe at `$TMPDIR/CoreFxPipe_<name>`. The member's
   `tmp/` is too long for any pipe, while this folder leaves room for a 24-character name (MSBuild's `MSBuild<pid>`).
-  The launcher makes the folder before the run and removes it when the run ends, however it ends. At start the core
-  removes the `yr-*` folders that no live run owns, which covers a crash or a restart. The dotnet wrapper and the
-  MSBuild variables are unchanged.
+  The launcher makes the folder before the run and removes it when the run ends, however it ends. Beside each folder
+  (not inside it, where the run can write) is an owner-only marker, `yr-<8 hex>.owner`, that names the core that made
+  it: a hash of its data folder, its pid and its process start time (a pid alone can be reused). It is removed with the
+  folder. At start the core sweeps that temp folder, which covers a crash or a restart. Two app instances of one Mac
+  user (a dev build next to the installed app) share it, so the sweep removes a `yr-*` folder only when it is this
+  core's own and its run is not live, when its owner's process is gone (pid not running, or running with another start
+  time), or when it has no readable marker and is more than 24 hours old. It keeps another live core's folders, removes
+  a marker whose folder is gone, and never follows a link. The dotnet wrapper and the MSBuild variables are unchanged.
 - **Allow localhost (macOS).** The request input has `AllowLocalhost`, set from the team's setting. The setting is off
   by default and set per team; turning it on or off is in the audit log, and a Cloud Link Visitor cannot set it (the
   core refuses the change).

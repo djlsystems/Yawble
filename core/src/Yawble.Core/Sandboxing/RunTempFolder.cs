@@ -43,47 +43,134 @@ public static partial class RunTempFolder
     /// <summary>A name this class makes (yr- and 8 lower-case hex), the only names the sweep removes.</summary>
     public static bool IsRunFolderName(string name) => NamePattern().IsMatch(name);
 
-    /// <summary>Makes the run's folder, owner-only; one left by an earlier run of the same id is emptied first.</summary>
-    public static void Create(string folder)
+    /// <summary>What follows a run folder's name for its owner marker, the file beside it: yr-&lt;hex&gt;.owner.</summary>
+    public const string MarkerSuffix = ".owner";
+
+    /// <summary>
+    /// How old a run folder with no readable owner marker must be before the sweep removes it (one made before markers
+    /// existed, or whose marker was lost). A younger one may belong to a live core that is writing its marker.
+    /// </summary>
+    public static readonly TimeSpan UnownedAge = TimeSpan.FromHours(24);
+
+    /// <summary>The owner marker beside <paramref name="folder"/> (never inside it: the run has read-write there).</summary>
+    public static string MarkerPath(string folder) => folder.TrimEnd('/', '\\') + MarkerSuffix;
+
+    /// <summary>
+    /// Makes the run's folder, owner-only; one left by an earlier run of the same id is emptied first. With
+    /// <paramref name="owner"/>, writes the owner marker beside it (owner-only) so another core's sweep keeps it.
+    /// </summary>
+    public static void Create(string folder, RunTempOwner? owner = null)
     {
         if (Directory.Exists(folder)) Remove(folder);
+        if (owner is not null) WriteMarker(MarkerPath(folder), owner);
         if (OperatingSystem.IsWindows()) Directory.CreateDirectory(folder);
         else Directory.CreateDirectory(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
-    /// <summary>Removes the run's folder and everything in it; never throws (a leftover is the next sweep's).</summary>
+    /// <summary>Removes the run's folder and everything in it, then its owner marker; never throws (a leftover is the next sweep's).</summary>
     public static bool Remove(string folder)
     {
         try
         {
             if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
-            return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             return false;
         }
+        RemoveMarker(MarkerPath(folder));
+        return true;
+    }
+
+    /// <summary>The owner a marker names; null when it is missing, a link, too long or not one this class writes.</summary>
+    public static RunTempOwner? ReadMarker(string markerPath)
+    {
+        try
+        {
+            var info = new FileInfo(markerPath);
+            if (!info.Exists || info.LinkTarget is not null || info.Length > 256) return null;
+            return RunTempOwner.Parse(File.ReadAllText(markerPath));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
-    /// At core start: removes every run folder (<see cref="IsRunFolderName"/>) in <paramref name="userTempDir"/> whose run
-    /// is gone (<paramref name="isLive"/> false for its name). Nothing else there is touched. Returns the names removed.
+    /// At core start: removes the run folders (<see cref="IsRunFolderName"/>) in <paramref name="userTempDir"/> that no live
+    /// run of any core uses, and only those. A folder is removed when its marker names <paramref name="self"/> (this very
+    /// core process) and its run is gone (<paramref name="isLive"/> false for its name); or its marker names another owner
+    /// that <paramref name="ownerAlive"/> says is gone (its pid not running, or running with another start time); or it has
+    /// no readable marker and was last written more than <see cref="UnownedAge"/> ago. A folder of another live core
+    /// (a second app instance of the same user) is never touched, nor one whose run <paramref name="isLive"/> knows.
+    /// A marker with no folder is removed. Links are never followed. Returns the folder names removed.
     /// </summary>
-    public static IReadOnlyList<string> Sweep(string userTempDir, Func<string, bool> isLive)
+    public static IReadOnlyList<string> Sweep(string userTempDir, Func<string, bool> isLive, RunTempOwner? self = null,
+        Func<RunTempOwner, bool>? ownerAlive = null, DateTime? nowUtc = null)
     {
+        ownerAlive ??= RunTempOwner.IsAlive;
+        var now = nowUtc ?? DateTime.UtcNow;
         var removed = new List<string>();
-        IEnumerable<string> dirs;
-        try { dirs = Directory.EnumerateDirectories(userTempDir, Prefix + "*").ToList(); }
+        List<string> entries;
+        try { entries = Directory.EnumerateFileSystemEntries(userTempDir, Prefix + "*").ToList(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return removed; }
-        foreach (var dir in dirs)
+        var names = entries.Select(Path.GetFileName).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var entry in entries)
         {
-            var name = Path.GetFileName(dir);
-            if (!IsRunFolderName(name) || isLive(name)) continue;
-            // A link is never followed out of the temp folder: only a real folder of that name is removed.
-            if (new DirectoryInfo(dir).LinkTarget is not null) continue;
-            if (Remove(dir)) removed.Add(name);
+            var name = Path.GetFileName(entry);
+            try
+            {
+                if (name.EndsWith(MarkerSuffix, StringComparison.Ordinal))
+                {
+                    // An orphan marker (its folder is gone): removed. A link of that name is removed itself, never followed.
+                    var folderName = name[..^MarkerSuffix.Length];
+                    if (IsRunFolderName(folderName) && !names.Contains(folderName) && !Directory.Exists(entry)) RemoveMarker(entry);
+                    continue;
+                }
+                if (!IsRunFolderName(name)) continue;
+                var dir = new DirectoryInfo(entry);
+                // Only a real folder of that name: a link is never followed out of the temp folder, a file is left alone.
+                if (!dir.Exists || dir.LinkTarget is not null || isLive(name)) continue;
+                if (!ShouldRemove(dir, ReadMarker(MarkerPath(entry)), self, ownerAlive, now)) continue;
+                if (Remove(entry)) removed.Add(name);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // One entry that cannot be read is left for the next sweep; the others are still looked at.
+            }
         }
         return removed;
+    }
+
+    private static bool ShouldRemove(DirectoryInfo dir, RunTempOwner? owner, RunTempOwner? self, Func<RunTempOwner, bool> ownerAlive, DateTime now)
+    {
+        if (owner is null) return now - dir.LastWriteTimeUtc > UnownedAge;
+        if (self is not null && owner.SameProcess(self)) return true; // this core's, and isLive said its run is gone
+        bool alive;
+        try { alive = ownerAlive(owner); }
+        catch (Exception) { alive = true; } // cannot tell: kept
+        return !alive;
+    }
+
+    private static void WriteMarker(string markerPath, RunTempOwner owner)
+    {
+        RemoveMarker(markerPath);
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using var stream = new FileStream(markerPath, options);
+        stream.Write(Encoding.UTF8.GetBytes(owner.Serialize()));
+    }
+
+    private static void RemoveMarker(string markerPath)
+    {
+        try
+        {
+            var info = new FileInfo(markerPath);
+            if (info.Exists || info.LinkTarget is not null) info.Delete();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>macOS: the person's per-user temp folder (confstr _CS_DARWIN_USER_TEMP_DIR, what `getconf DARWIN_USER_TEMP_DIR`
