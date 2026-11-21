@@ -19,7 +19,7 @@ public class RealSandboxDotnetBuildTests(ITestOutputHelper output)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private sealed class Probe(string powershell) : ILaunchProbe
+    private sealed class Probe(string powershell, string posix = "true") : ILaunchProbe
     {
         public IReadOnlyList<PolicyMember> ExtraMembers => [];
         public LaunchMember? Synthetic { get; } = new(0, "_dotnet", "probe", AgentCli.Claude);
@@ -28,7 +28,7 @@ public class RealSandboxDotnetBuildTests(ITestOutputHelper output)
         public JsonObject Rewrite(LaunchProbeContext context)
         {
             var request = (JsonObject)context.Request.DeepClone();
-            request["process"]!["commandLine"] = RealSandboxHost.Script(context.Layout.Os, "true", powershell);
+            request["process"]!["commandLine"] = RealSandboxHost.Script(context.Layout.Os, posix, powershell);
             return request;
         }
     }
@@ -118,5 +118,61 @@ public class RealSandboxDotnetBuildTests(ITestOutputHelper output)
         Assert.Equal("exit 0", o.GetValueOrDefault("build_m1"));
         Assert.Equal("exit 0", o.GetValueOrDefault("build_default"));
         Assert.False(o.ContainsKey("build_default_left"), "MSBuild workers were left behind");
+    }
+
+    /// <summary>
+    /// macOS (B119 Part A): in a member's real Seatbelt sandbox, TMPDIR is the run's own short folder, a .NET
+    /// NamedPipeServerStream (a Unix socket at $TMPDIR/CoreFxPipe_&lt;name&gt;) binds and a client connects, and a parallel
+    /// build's out-of-proc MSBuild node starts and finishes. After the run the folder is gone.
+    /// </summary>
+    [Fact]
+    public async Task APipeAndAnMSBuildNodeWorkInAMacMemberSandbox()
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("macOS Seatbelt");
+        if (Environment.GetEnvironmentVariable("YAWBLE_REAL_DOTNET") != "1") Assert.Skip("a real build in the sandbox (a few minutes): set YAWBLE_REAL_DOTNET=1");
+        RealSandboxHost.SkipUnlessAvailable();
+        await using var kit = GuardrailKit.Create(realHome: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), clis: Yawble.Core.Agents.CliDetectorRegistry.ForThisHost(), realGateway: true);
+        const string program = """
+            using System.IO.Pipes;
+            var name = "yp" + Environment.ProcessId;
+            try
+            {
+                using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                var wait = server.WaitForConnectionAsync();
+                using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut);
+                client.Connect(5000);
+                await wait;
+                client.WriteByte(42);
+                Console.WriteLine("@pipe=" + (server.ReadByte() == 42 ? "ok" : "no data"));
+            }
+            catch (Exception e) { Console.WriteLine("@pipe=" + e.GetType().Name + ": " + e.Message.Replace('\n', ' ')); }
+            """;
+        var script = string.Join("\n",
+        [
+            "cd \"$HOME\" || exit 1",
+            "echo \"@tmpdir=$TMPDIR\"",
+            "rm -rf b119 && mkdir b119 && cd b119 || exit 1",
+            "dotnet new sln -n Two >/dev/null 2>&1",
+            "dotnet new console -n P -o P >/dev/null 2>&1",
+            "dotnet new classlib -n A -o A >/dev/null 2>&1",
+            "dotnet sln add P/P.csproj A/A.csproj >/dev/null 2>&1",
+            "cat > P/Program.cs <<'EOF'\n" + program + "\nEOF",
+            "dotnet run --project P 2>&1 | grep '^@pipe=' || echo '@pipe=did not run'",
+            // -m:2 with node reuse off: MSBuild starts an out-of-proc node and talks to it over a pipe.
+            "dotnet build -m:2 -nodeReuse:false -nologo > build.out 2>&1; echo \"@build=exit $?\"",
+            "echo \"@build_tail=$(tail -c 400 build.out | tr '\\n' ' ')\"",
+        ]);
+        var outcome = await kit.Launcher(RealSandboxHost.Backend())
+            .RunAsync(new LaunchRequest("_dotnet", "probe", RunKind.Headless, "probe", null, Probe: new Probe("exit 1", script)), Ct);
+        var stdout = outcome.ProbeOutput?.Stdout ?? "";
+        output.WriteLine($"end {outcome.End} {outcome.Reason}\n{stdout}\nstderr: {outcome.ProbeOutput?.Stderr}");
+        RealSandbox.Report($"macOS pipe and MSBuild node in the sandbox: end {outcome.End}\n{stdout}");
+        var o = Lines(stdout);
+        var tmpdir = o.GetValueOrDefault("tmpdir") ?? "";
+        Assert.Matches("/yr-[0-9a-f]{8}$", tmpdir);
+        Assert.True(RunTempFolder.Fits(tmpdir), tmpdir);
+        Assert.Equal("ok", o.GetValueOrDefault("pipe"));
+        Assert.Equal("exit 0", o.GetValueOrDefault("build"));
+        Assert.False(Directory.Exists(tmpdir), "the run's temp folder is removed when the run ends");
     }
 }

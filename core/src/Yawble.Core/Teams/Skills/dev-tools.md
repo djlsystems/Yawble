@@ -45,6 +45,16 @@ finished. This holds for any repository and toolchain (`dotnet test`, `npm test`
   run .NET programs through the SDK instead (`dotnet run --project <project>`, `dotnet <path>\HelloApp.dll`), make
   tests run the program the same way, and tell the person the exe itself is blocked on this computer.
 
+## macOS
+
+- Your run may not open local ports unless the person turned on the team setting "Allow localhost (macOS)" (Team
+  settings > Network; off by default). Unix sockets and named pipes in your temp folder work either way.
+- So on macOS without that setting, make new .NET test projects xUnit v3 on Microsoft.Testing.Platform (they run
+  in-process and use a pipe), not classic VSTest (xunit 2.x + Microsoft.NET.Test.Sdk), which needs a local port.
+- If `dotnet test` fails with `SocketException (13): Permission denied` at `TcpListener.Start` (vstest's SocketServer),
+  that is the setting being off, not a fault in the project. Tell your Manager in one line: "dotnet test needs Allow
+  localhost (macOS): Team settings > Network". Do not guess at other causes or work around it.
+
 ## Network
 
 Only the model's own traffic and the team bus are open, plus any hosts the person allowed. Everything else is

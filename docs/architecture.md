@@ -127,7 +127,33 @@ native library.
   other member and team, the CLI's own config and credential folders, and on macOS `~/.ssh` and `~/Library/Keychains`.
 - **Request compiler.** A pure function emits a create-and-run request with explicit containment, an explicit
   environment, egress deny with the run's gateway as the only network proxy, UI off, clipboard none, and telemetry
-  off. On Windows it forbids DACL mutation; on macOS keychain access is off.
+  off. On Windows it forbids DACL mutation; on macOS keychain access is off, and the only extra Mach services a run
+  may reach are `com.apple.SecurityServer` and `com.apple.trustd.agent` (TLS certificate checks) and
+  `com.apple.system.opendirectoryd.libinfo` (user and group lookups). SecurityServer serves only keychains whose files
+  the run can read, and `~/Library/Keychains` is always denied (the invariants require it), so no login-keychain item
+  reaches a run; the data-protection keychain service stays closed.
+- **macOS run temp folder.** Each macOS run gets its own folder, `<DARWIN_USER_TEMP_DIR>yr-<8 hex>` (the hex is from
+  the SHA-256 of the run id). It is granted read-write to that run only, which also lets a Unix socket bind in it.
+  `TMPDIR` points at it and `TMPPREFIX` is `<folder>/zsh`; `CLAUDE_CODE_TMPDIR` stays the member's `tmp/`. The point is
+  length: a Unix socket path holds 104 bytes, and .NET puts a named pipe at `$TMPDIR/CoreFxPipe_<name>`. The member's
+  `tmp/` is too long for any pipe, while this folder leaves room for a 24-character name (MSBuild's `MSBuild<pid>`).
+  The launcher makes the folder before the run and removes it when the run ends, however it ends. At start the core
+  removes the `yr-*` folders that no live run owns, which covers a crash or a restart. The dotnet wrapper and the
+  MSBuild variables are unchanged.
+- **Allow localhost (macOS).** The request input has `AllowLocalhost`, set from the team's setting. The setting is off
+  by default and set per team; turning it on or off is in the audit log, and a Cloud Link Visitor cannot set it (the
+  core refuses the change).
+  - When it is off, the request is the same as without the setting: `network.ingress` `default` is deny and there is
+    no `hostLoopback` allow.
+  - When it is on, a macOS request has `network.ingress` `default` and `hostLoopback` both `allow`. The SDK only
+    accepts `hostLoopback` allow together with the ingress default allow: Seatbelt refuses `hostLoopback` allow while
+    the ingress default is deny. The Seatbelt profile then allows outbound to `localhost:*`, and inbound and bind on
+    any local address, not only loopback.
+  - So while it is on, a server an agent starts on `0.0.0.0` can be reached from other machines on the network unless
+    the macOS firewall blocks it. The person keeps the macOS firewall on; the setting's warning says so.
+  - Egress stays deny with no rules, and the gateway is still the only proxy: outbound traffic goes only through the
+    gateway.
+  - Windows and Linux ignore it, because their sandboxes give each run its own loopback.
 - **Invariants.** Every compiled request is checked before launch, so a forbidden option can never run. Golden files
   (`core/tests/Yawble.Core.Tests/Golden/`) hold the exact request per OS and CLI; regenerate them with
   `YAWBLE_UPDATE_GOLDEN=1` and review the diff.

@@ -429,6 +429,11 @@ export const WORKFLOW_EXTEND = 'bus.workflowExtend';
 /** B085: a team's "expire idle workflows after N days" setting ({ teamId, days? } -> { days }); default 3. */
 export const TEAM_WORKFLOW_EXPIRY = 'teams.workflowExpiry';
 export const WorkflowExpiryDefaultDays = 3;
+/** B119: a team's "Allow localhost (macOS)" ({ teamId, on? } -> { on }); off by default. Setting it is a full-access change. */
+export const TEAM_LOCALHOST = 'teams.localhost';
+export const TEAM_LOCALHOST_LABEL = 'Allow localhost (macOS)';
+/** The warning shown with the toggle, word for word (B119). */
+export const TEAM_LOCALHOST_WARNING = "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners. While it is on, a server an agent starts on `0.0.0.0` can be reached from other machines on your network unless the macOS firewall blocks it. Keep the macOS firewall on. Outbound traffic still goes only through the gateway.";
 /** The time a workflow's row shows: its recorded end once ended (an expired one: its last activity), else its last entry. */
 export function workflowTime(w: Pick<WorkflowSummary, 'state' | 'lastAt' | 'endedAt'>): string {
   return w.state !== 'open' && w.endedAt ? w.endedAt : w.lastAt;
