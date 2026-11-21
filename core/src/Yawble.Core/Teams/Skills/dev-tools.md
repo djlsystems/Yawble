@@ -48,19 +48,23 @@ finished. This holds for any repository and toolchain (`dotnet test`, `npm test`
 ## macOS
 
 - Your run may not open local ports unless the person turned on the team setting "Allow localhost (macOS)" (Team
-  settings > Network; off by default). Unix sockets and named pipes in your temp folder work either way.
-- `dotnet test` needs that setting, in either mode: classic VSTest (xunit 2.x + Microsoft.NET.Test.Sdk) opens a
-  local port, and on Microsoft.Testing.Platform `dotnet test` opens its pipe in `/tmp` (not your temp folder), which
-  the sandbox refuses.
-- So on macOS without that setting, make new .NET test projects xUnit v3 on Microsoft.Testing.Platform, build the
-  test project (`dotnet build <test project>`), then run its executable (`bin/Debug/<tfm>/<Project>`) or
+  settings > Network; off by default). A program's own Unix sockets and named pipes in your temp folder work either
+  way; that does not cover `dotnet test`'s pipe, which is in `/tmp` (below).
+- xUnit v3 / Microsoft.Testing.Platform (MTP) test projects: on macOS, always build the test project
+  (`dotnet build <test project>`), then run its executable (`bin/Debug/<tfm>/<Project>`) or
   `dotnet exec bin/Debug/<tfm>/<Project>.dll`. Filter with the runner's own options (xUnit v3: `-class`, `-method`,
-  `-namespace`, `-filter`), not `--filter`. The exit code is 0 only when every test passed.
-- If `dotnet test` fails with `SocketException (13): Permission denied` at `TcpListener.Start` (vstest's SocketServer),
-  or at `NamedPipeServerStream` (Microsoft.Testing.Platform's pipe, exit 134), that is the setting being off, not a
-  fault in the project. Tell your Manager in one line: "dotnet test needs Allow localhost (macOS): Team settings >
-  Network". Do not guess at other causes or work around it: `/tmp` stays closed, so do not ask for a folder grant on
-  `/tmp` or any path under it.
+  `-namespace`, `-filter`), not `--filter`. The exit code is 0 only when every test passed. `dotnet test` does not
+  work for them on macOS, with the setting on or off: it opens its pipe as a socket file at a fixed `/tmp` path, which
+  the sandbox refuses, and the setting opens only local ports.
+- Classic VSTest `dotnet test` (xunit 2.x + Microsoft.NET.Test.Sdk) opens a local port, so it works only with
+  "Allow localhost (macOS)" on. Make new .NET test projects xUnit v3 on Microsoft.Testing.Platform and run them as
+  above.
+- If `dotnet test` fails with `SocketException (13): Permission denied`, tell your Manager in one line. Classic
+  VSTest (at `TcpListener.Start`, vstest's SocketServer): "dotnet test needs Allow localhost (macOS): Team settings >
+  Network". xUnit v3 / MTP (at `NamedPipeServerStream`, exit 134): "MTP dotnet test cannot run on macOS here, with
+  Allow localhost (macOS) on or off; I ran the built test executable instead", and run it that way. Do not guess at
+  other causes or work around it: `/tmp` stays closed, so do not ask for a folder grant on `/tmp`, `/private/tmp` or
+  any path under them.
 
 ## Network
 
