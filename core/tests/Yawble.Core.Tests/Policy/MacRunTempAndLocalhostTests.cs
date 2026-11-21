@@ -206,6 +206,91 @@ public class MacRunTempAndLocalhostTests
         Assert.Contains(Problems(on, r => r["network"]!["ingress"]!["ports"] = new JsonArray(8080)), p => p.Contains("network.ingress.ports is never emitted"));
     }
 
+    // ---- Card 536: proof that Allow localhost is closed when off (SandboxRequestInvariants.MacLocalhostProblems).
+
+    private static List<string> LocalhostProblems(RunSpec run, Action<JsonObject> mutate)
+    {
+        var request = (JsonObject)Compile(run).Request.DeepClone();
+        mutate(request);
+        return [.. SandboxRequestInvariants.MacLocalhostProblems(request, run)];
+    }
+
+    [Theory]
+    [InlineData(CredentialMode.ClaudeSubscription, RunKind.Headless)]
+    [InlineData(CredentialMode.GrokLogin, RunKind.Headless)]
+    [InlineData(CredentialMode.GrokLogin, RunKind.Interactive)]
+    [InlineData(CredentialMode.GrokHostSignIn, RunKind.Headless)]
+    public void OffTheCompiledMacRequestHasNoIngressAllow(CredentialMode mode, RunKind kind)
+    {
+        var run = PolicyFixtures.Run(TargetOs.MacOS, mode, kind);
+        Assert.False(run.AllowLocalhost);
+        var request = Compile(run).Request;
+        Assert.True(JsonNode.DeepEquals(new JsonObject { ["default"] = "deny", ["hostLoopback"] = "deny" }, request["network"]!["ingress"]));
+        Assert.Empty(SandboxRequestInvariants.MacLocalhostProblems(request, run));
+        Assert.Empty(SandboxRequestInvariants.CheckRequest(request, run));
+    }
+
+    public static TheoryData<string> OffTampering => new() { "default-allow", "loopback-allow", "loopback-missing", "default-missing", "allow-rules", "rules", "both" };
+
+    private static void Tamper(JsonObject r, string how)
+    {
+        var ingress = r["network"]!["ingress"]!.AsObject();
+        switch (how)
+        {
+            case "default-allow": ingress["default"] = "allow"; break;
+            case "loopback-allow": ingress["hostLoopback"] = "allow"; break;
+            case "loopback-missing": ingress.Remove("hostLoopback"); break;
+            case "default-missing": ingress.Remove("default"); break;
+            case "allow-rules": ingress["allow"] = new JsonArray(new JsonObject { ["from"] = new JsonObject { ["cidr"] = "127.0.0.1/32" } }); break;
+            case "rules": ingress["rules"] = new JsonArray(new JsonObject { ["port"] = 8080, ["action"] = "allow" }); break;
+            case "both": ingress["default"] = "allow"; ingress["hostLoopback"] = "allow"; break;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(OffTampering))]
+    public void OffAnyIngressAllowIsRefused(string how)
+    {
+        Assert.NotEmpty(LocalhostProblems(Mac(), r => Tamper(r, how)));
+        // And the full check that the compiler runs on every request refuses it too.
+        Assert.Contains(Problems(Mac(), r => Tamper(r, how)), p => p.Contains("network.ingress"));
+    }
+
+    [Fact]
+    public void OffEachHalfIsNamed()
+    {
+        Assert.Contains(LocalhostProblems(Mac(), r => Tamper(r, "loopback-allow")), p => p.Contains("hostLoopback") && p.Contains("Allow localhost"));
+        Assert.Contains(LocalhostProblems(Mac(), r => Tamper(r, "default-allow")), p => p.Contains("ingress.default must be deny on MacOS"));
+        Assert.Contains(LocalhostProblems(Mac(), r => Tamper(r, "allow-rules")), p => p.Contains("network.ingress.allow: no ingress allow rule"));
+        Assert.Contains(Problems(Mac(), r => Tamper(r, "allow-rules")), p => p.Contains("ingress allow rules are never emitted"));
+    }
+
+    [Fact]
+    public void OnTheCompiledMacRequestIsExactlyTheSdksPair()
+    {
+        var on = Mac() with { AllowLocalhost = true };
+        var request = Compile(on).Request;
+        Assert.True(JsonNode.DeepEquals(new JsonObject { ["default"] = "allow", ["hostLoopback"] = "allow" }, request["network"]!["ingress"]));
+        Assert.True(JsonNode.DeepEquals(new JsonObject { ["default"] = "deny" }, request["network"]!["egress"]));
+        Assert.Empty(SandboxRequestInvariants.MacLocalhostProblems(request, on));
+        // The off check refuses the on request: the pair is exactly what the setting adds.
+        Assert.NotEmpty(SandboxRequestInvariants.MacLocalhostProblems(request, Mac()));
+    }
+
+    [Fact]
+    public void OnEgressStaysDenyAndTheGatewayStaysTheOnlyProxy()
+    {
+        var on = Mac() with { AllowLocalhost = true };
+        Assert.Contains(LocalhostProblems(on, r => r["network"]!["egress"]!["default"] = "allow"), p => p.Contains("keeps network.egress deny"));
+        Assert.Contains(LocalhostProblems(on, r => r["network"]!["egress"]!["allow"] = new JsonArray(new JsonObject { ["to"] = new JsonObject { ["cidr"] = "0.0.0.0/0" } })),
+            p => p.Contains("keeps network.egress deny"));
+        Assert.Contains(LocalhostProblems(on, r => r["network"]!["egress"]!["deny"] = new JsonArray()), p => p.Contains("keeps network.egress deny"));
+        Assert.Contains(LocalhostProblems(on, r => r["runtimeConfig"]!["networkProxy"] = "http://127.0.0.1:1"), p => p.Contains("gateway as the only proxy"));
+        Assert.Contains(LocalhostProblems(on, r => r["runtimeConfig"]!.AsObject().Remove("networkProxy")), p => p.Contains("gateway as the only proxy"));
+        Assert.Contains(LocalhostProblems(on, r => r["network"]!["ingress"]!["allow"] = new JsonArray()), p => p.Contains("exactly ingress.default and hostLoopback"));
+        Assert.Contains(LocalhostProblems(on, r => r["network"]!["ingress"]!["hostLoopback"] = "deny"), p => p.Contains("Allow localhost needs"));
+    }
+
     [Fact]
     public void LinuxNeverOpensTheLoopbackEvenWithAllowLocalhost() =>
         Assert.Contains(Problems(PolicyFixtures.Run(TargetOs.Linux, CredentialMode.ClaudeSubscription) with { AllowLocalhost = true },
