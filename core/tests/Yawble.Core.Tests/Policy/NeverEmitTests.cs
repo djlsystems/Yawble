@@ -269,7 +269,7 @@ public class NeverEmitTests
     public void TheHostGrokHomeIsAlwaysDeniedAndNeverGranted()
     {
         foreach (var os in Enum.GetValues<TargetOs>())
-            foreach (var mode in Enum.GetValues<CredentialMode>())
+            foreach (var mode in Enum.GetValues<CredentialMode>().Where(m => !(os == TargetOs.MacOS && m == CredentialMode.ClaudeHostSignIn)))
             {
                 var run = PolicyFixtures.Run(os, mode);
                 var r = SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, PolicyFixtures.Loosen, run).Request;

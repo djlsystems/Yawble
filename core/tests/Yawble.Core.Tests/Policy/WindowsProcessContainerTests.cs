@@ -24,6 +24,9 @@ public class WindowsProcessContainerTests
         return (SandboxRequestCompiler.Compile(PolicyFixtures.Global, PolicyFixtures.Override, PolicyFixtures.Loosen, run), run);
     }
 
+    /// <summary>The file-grant Claude mode, except on macOS, where Claude is gateway-held only (B118).</summary>
+    private static CredentialMode MacGatewayHeld(TargetOs os) => os == TargetOs.MacOS ? CredentialMode.ClaudeGatewaySignIn : CredentialMode.ClaudeHostSignIn;
+
     private static List<string> Strings(JsonNode? array) =>
         ((JsonArray?)array ?? []).Select(n => n!.GetValue<string>()).ToList();
 
@@ -82,7 +85,7 @@ public class WindowsProcessContainerTests
     [InlineData(TargetOs.MacOS, null)]
     public void ClaudeOnWindowsUsesItsPowerShellToolBecauseGitBashCannotStartInAProcessContainer(TargetOs os, string? expected)
     {
-        var (c, _) = Compile(os, CredentialMode.ClaudeHostSignIn);
+        var (c, _) = Compile(os, MacGatewayHeld(os));
         var env = Strings(c.Request["process"]!["env"]).Select(e => e.Split('=', 2)).ToDictionary(p => p[0], p => p[1]);
         Assert.Equal(expected, env.GetValueOrDefault("CLAUDE_CODE_USE_POWERSHELL_TOOL"));
         Assert.False(env.ContainsKey("CLAUDE_CODE_GIT_BASH_PATH"));
@@ -98,7 +101,7 @@ public class WindowsProcessContainerTests
     [InlineData(TargetOs.MacOS)]
     public void TheClaudeTrustSeedUsesTheProjectKeyClaudeWritesOnThisOs(TargetOs os)
     {
-        var (c, run) = Compile(os, CredentialMode.ClaudeHostSignIn);
+        var (c, run) = Compile(os, MacGatewayHeld(os));
         var seed = c.Seeds.Single(s => s.Path.EndsWith(".claude.json", StringComparison.Ordinal));
         var projects = JsonNode.Parse(seed.Content)!["projects"]!.AsObject();
         var key = Assert.Single(projects).Key;
