@@ -128,6 +128,52 @@ public class WindowsProcessContainerTests
         Assert.Empty(SandboxRequestInvariants.Check(c, run));
     }
 
+    /// <summary>macOS: the host's .NET SDK folder (HostTools.DetectMac) is on PATH before the system folders and readable.</summary>
+    [Fact]
+    public void OnMacOS_HostToolFoldersAreOnPathAndGrantedReadOnly()
+    {
+        var run = PolicyFixtures.Run(TargetOs.MacOS, CredentialMode.ClaudeGatewaySignIn);
+        run = run with { Layout = run.Layout with { HostToolFolders = ["/usr/local/share/dotnet"] } };
+        var c = SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, null, run);
+        var env = Strings(c.Request["process"]!["env"]).Select(e => e.Split('=', 2)).ToDictionary(p => p[0], p => p[1]);
+        var path = env["PATH"].Split(':');
+        Assert.Contains("/usr/local/share/dotnet", path);
+        Assert.True(Array.IndexOf(path, "/usr/local/share/dotnet") < Array.IndexOf(path, "/usr/bin"));
+        Assert.Contains("/usr/local/share/dotnet", Strings(c.Request["filesystem"]!["readonlyPaths"]));
+        Assert.Empty(SandboxRequestInvariants.Check(c, run));
+    }
+
+    [Fact]
+    public void OnMacOS_DotnetIsFoundBeyondLaunchdsPath_AtItsRealFolder()
+    {
+        // A Dock launch has launchd's PATH; /etc/paths.d and Homebrew's link lead to the installer's folder.
+        var files = new Dictionary<string, string?>
+        {
+            ["/opt/homebrew/bin/dotnet"] = "/usr/local/share/dotnet/dotnet",
+            ["/usr/local/share/dotnet/dotnet"] = null,
+        };
+        var found = Yawble.Core.Launch.HostTools.DetectMac("/Users/a/Library/Application Support/Yawble",
+            ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/share/dotnet"], "/Users/a",
+            files.ContainsKey, p => files.GetValueOrDefault(p));
+        Assert.Equal(["/usr/local/share/dotnet"], found);
+    }
+
+    [Theory]
+    [InlineData("/Users/a/Library/Application Support/Yawble/bin")]
+    [InlineData("/Users/a")]
+    [InlineData("/")]
+    public void OnMacOS_NoToolFolderIsTheAppsRootTheHomeOrTheRoot(string folder)
+    {
+        var program = (folder == "/" ? "" : folder) + "/dotnet";
+        var found = Yawble.Core.Launch.HostTools.DetectMac("/Users/a/Library/Application Support/Yawble", [folder], "/Users/a",
+            p => p == program, _ => null);
+        Assert.Empty(found);
+    }
+
+    [Fact]
+    public void OnMacOS_NoDotnetAnywhere_NoFolder() =>
+        Assert.Empty(Yawble.Core.Launch.HostTools.DetectMac("/Users/a/Yawble", ["/usr/bin", "/opt/homebrew/bin"], "/Users/a", _ => false, _ => null));
+
     // ---- The checker: the Windows processContainer section may hold only these values.
 
     private static void AssertCaught(Action<JsonObject> mutate, string expected)

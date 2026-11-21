@@ -331,6 +331,20 @@ public sealed class ToolAskTests : IDisposable
         Assert.Empty(_host.Runs);
     }
 
+    [Fact]
+    public async Task OffWindows_TheAskCarriesNoWingetIdAndNoWindowsScope()
+    {
+        // The card on a Mac showed "Microsoft.DotNet.SDK.10 · installs for the whole computer: Windows may ask for permission".
+        _host.IsWindows = false;
+        await Request(Priya, "dotnet-sdk-lts");
+        var item = (await _asks.DispatchAsync("tools.asks", null, Ct))!.AsArray().Single()!.AsObject();
+        Assert.Null(item["wingetId"]);
+        Assert.Null(item["scope"]);
+        var entry = (await _asks.DispatchAsync("tools.catalog", null, Ct))!.AsArray().First()!.AsObject();
+        Assert.Null(entry["wingetId"]);
+        Assert.Null(entry["scope"]);
+    }
+
     [Theory]
     [InlineData("NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=44\n", LinuxPackager.Dnf)]
     [InlineData("ID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\n", LinuxPackager.Dnf)]

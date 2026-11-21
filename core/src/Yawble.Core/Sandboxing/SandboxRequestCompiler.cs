@@ -275,8 +275,9 @@ public static partial class SandboxRequestCompiler
         }
         else
         {
-            var system = l.Os == TargetOs.MacOS ? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" : string.Join(':', Launch.HostTools.LinuxRunPath);
-            env["PATH"] = string.Join(':', [.. l.CliInstall.PathFolders, l.AppBinDir, system]);
+            var system = string.Join(':', l.Os == TargetOs.MacOS ? Launch.HostTools.MacRunPath : Launch.HostTools.LinuxRunPath);
+            // macOS: the host's .NET SDK folder (HostTools.DetectMac), granted read-only like the Windows tool folders.
+            env["PATH"] = string.Join(':', [.. l.CliInstall.PathFolders, .. l.HostToolFolders, l.AppBinDir, system]);
             env["TMPDIR"] = l.Tmp;
             env["LANG"] = "C.UTF-8";
             // Caches and config under the member's workspace.

@@ -243,7 +243,10 @@ public sealed class SystemToolHost(IGitHost git, string appDataRoot) : IToolHost
             return HostTools.Detect(appDataRoot).Select(d => Path.Combine(d, program + ".exe")).FirstOrDefault(File.Exists);
         // Linux: only the system folders a run's PATH has (HostTools.LinuxRunPath), which every sandbox reads: a program
         // the core's own PATH finds under the home folder is one a run cannot use (FoundOnlyInHome).
-        var dirs = OperatingSystem.IsLinux() ? HostTools.LinuxRunPath : CorePath();
+        // macOS: the folders a run gets (HostTools.DetectMac, then the system ones), not the core's PATH: started from the
+        // Dock that is launchd's /usr/bin:/bin:/usr/sbin:/sbin, and a Homebrew or installer .NET SDK was never found.
+        IEnumerable<string> dirs = OperatingSystem.IsLinux() ? HostTools.LinuxRunPath
+            : OperatingSystem.IsMacOS() ? [.. HostTools.Detect(appDataRoot), .. HostTools.MacRunPath] : CorePath();
         return dirs.Select(d => Path.Combine(d, program)).FirstOrDefault(File.Exists);
     }
 
@@ -464,8 +467,9 @@ public sealed class ToolAskService
     /// <summary>One catalog entry as the window reads it.</summary>
     public JsonObject ToJson(ToolEntry t) => new()
     {
-        ["name"] = t.Name, ["displayName"] = t.DisplayName, ["publisher"] = t.Publisher, ["wingetId"] = t.WingetId,
-        ["scope"] = t.UserScope ? "user" : "machine", ["program"] = t.Program,
+        // winget's package id and its install scope mean something only on Windows (the card said "Windows may ask" on a Mac).
+        ["name"] = t.Name, ["displayName"] = t.DisplayName, ["publisher"] = t.Publisher, ["wingetId"] = _host.IsWindows ? t.WingetId : null,
+        ["scope"] = _host.IsWindows ? t.UserScope ? "user" : "machine" : null, ["program"] = t.Program,
         ["command"] = CommandFor(t, _host.IsWindows, _host.IsWindows ? null : _host.LinuxInstall),
     };
 
@@ -479,8 +483,8 @@ public sealed class ToolAskService
         return new JsonObject
         {
             ["id"] = a.Id, ["at"] = a.At, ["teamId"] = a.TeamId, ["team"] = a.Team, ["member"] = a.Member, ["memberName"] = a.MemberName,
-            ["tool"] = a.Tool, ["displayName"] = t?.DisplayName ?? a.Tool, ["publisher"] = t?.Publisher, ["wingetId"] = t?.WingetId,
-            ["scope"] = t is null ? null : t.UserScope ? "user" : "machine",
+            ["tool"] = a.Tool, ["displayName"] = t?.DisplayName ?? a.Tool, ["publisher"] = t?.Publisher, ["wingetId"] = _host.IsWindows ? t?.WingetId : null,
+            ["scope"] = t is null || !_host.IsWindows ? null : t.UserScope ? "user" : "machine",
             ["reason"] = a.Reason, ["count"] = a.Count, ["lastSeen"] = a.LastSeen, ["workflow"] = a.Workflow,
             ["state"] = a.State, ["attempts"] = a.Attempts, ["error"] = a.Error,
             // The result code of the last Install or Check again (0042), beside error: failed, cancelled, notAuthorized,

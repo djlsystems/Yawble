@@ -261,10 +261,14 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     requests close and the Managers are told, as after an Install; not found, the item stays open and says so. It
     installs nothing, so a Cloud Link view may use it too.
 
-  On macOS the item shows the command to run yourself (`brew ...`); the app installs nothing. Each request, answer and
+  On macOS the item shows the command to run yourself (`brew ...`); the app installs nothing. The .NET SDK is found
+  where Terminal finds it, even when the app was started from the Dock: on the app's PATH, in the folders `/etc/paths`
+  and `/etc/paths.d` list (Homebrew's `/opt/homebrew/bin`, the installer's `/usr/local/share/dotnet`), and in those two
+  folders. Its real folder (after links, e.g. `/usr/local/share/dotnet`) is readable to every run and on its PATH, so
+  **Check again** and the runs agree on whether it is there. Each request, answer and
   result is in the **Approvals** log; the Concierge's status lists the open ones.
   The items show in the same **Needs you** strip above every view, and in the Board's **Needs You** lane when the Board
-  is open (its team and member filters apply). A machine-wide tool says "Windows may ask for permission". While
+  is open (its team and member filters apply). On Windows a machine-wide tool says "Windows may ask for permission". While
   winget runs the item says what it is doing (installing, then looking for the program) and its buttons wait; when the
   program is found the item goes and a line says the tool is installed. **Not now** takes an optional note for the
   agent. A remote view has no **Install** and says to install it in the Yawble window; it shows **Not now**, and on

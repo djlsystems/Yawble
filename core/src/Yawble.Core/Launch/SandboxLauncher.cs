@@ -43,10 +43,13 @@ public static class HostTools
     /// (Git for Windows: ...\Git\cmd, which runs without MSYS2; its sh-based parts cannot start in a ProcessContainer,
     /// microsoft/mxc#1061), the .NET SDK, Node.js and Python, as the person installed them. Never a folder inside the app's own
     /// root, never the person's home itself, and never WindowsApps (its python.exe is a Store alias, not Python).
-    /// Linux and macOS: none (the tools are in the system folders every sandbox reads).
+    /// macOS: see <see cref="DetectMac"/>. Linux: none (the tools are in the system folders every sandbox reads).
     /// </summary>
     public static IReadOnlyList<string> Detect(string appDataRoot, string? pathVariable = null, string? home = null)
     {
+        if (OperatingSystem.IsMacOS())
+            return DetectMac(appDataRoot, MacCandidateFolders(pathVariable), home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                File.Exists, RealPath);
         if (!OperatingSystem.IsWindows()) return [];
         var root = Path.GetFullPath(appDataRoot).TrimEnd('\\') + "\\";
         var profile = (home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)).TrimEnd('\\');
@@ -68,6 +71,75 @@ public static class HostTools
             if (dir is not null && !found.Contains(dir, StringComparer.OrdinalIgnoreCase)) found.Add(dir);
         }
         return found;
+    }
+
+    /// <summary>macOS: the system folders at the end of every run's PATH (SandboxRequestCompiler), which each sandbox reads.</summary>
+    public static IReadOnlyList<string> MacRunPath { get; } = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+
+    /// <summary>
+    /// macOS: the developer tools a member may run from where the person installed them, outside the system folders.
+    /// Only the .NET SDK: its install folder (sdk/, host/, shared/ beside the dotnet program) is the whole tool, so the
+    /// program's own folder is enough to grant. A Homebrew Node.js or Python needs more of its prefix than that.
+    /// </summary>
+    public static IReadOnlyList<string> MacTools { get; } = ["dotnet"];
+
+    /// <summary>Where Microsoft's installer and the dotnet-sdk cask put the SDK, and Homebrew's links on Apple silicon and Intel.</summary>
+    public static IReadOnlyList<string> MacKnownFolders { get; } = ["/usr/local/share/dotnet", "/opt/homebrew/bin", "/usr/local/bin"];
+
+    /// <summary>
+    /// macOS: for each of <see cref="MacTools"/>, the real folder of the first such program in <paramref name="folders"/>
+    /// (after links: /opt/homebrew/bin/dotnet is /usr/local/share/dotnet/dotnet). A run is granted that folder read-only
+    /// and has it on its PATH. The app started from the Dock has launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin), so the
+    /// folders come from the core's PATH, then /etc/paths and /etc/paths.d (what Terminal's PATH is made from), then the
+    /// known install folders. Never a folder inside the app's own root, the person's home itself or the root.
+    /// </summary>
+    public static IReadOnlyList<string> DetectMac(string appDataRoot, IEnumerable<string> folders, string home,
+        Func<string, bool> exists, Func<string, string?> realPath)
+    {
+        var root = appDataRoot.TrimEnd('/') + "/";
+        var profile = home.TrimEnd('/');
+        var dirs = folders.Select(d => d.Trim()).Where(d => d.StartsWith('/')).Select(d => d.Length > 1 ? d.TrimEnd('/') : d).Distinct(StringComparer.Ordinal).ToList();
+        var found = new List<string>();
+        foreach (var tool in MacTools)
+        {
+            foreach (var dir in dirs)
+            {
+                var program = dir + "/" + tool;
+                if (!exists(program)) continue;
+                var real = realPath(program) ?? program;
+                var folder = Path.GetDirectoryName(real)?.Replace('\\', '/');
+                if (string.IsNullOrEmpty(folder) || folder == "/" || folder == profile || (folder + "/").StartsWith(root, StringComparison.Ordinal)) continue;
+                if (!found.Contains(folder, StringComparer.Ordinal)) found.Add(folder);
+                break;
+            }
+        }
+        return found;
+    }
+
+    /// <summary>macOS: the core's PATH (or <paramref name="pathVariable"/>), /etc/paths, /etc/paths.d/*, then <see cref="MacKnownFolders"/>.</summary>
+    private static IEnumerable<string> MacCandidateFolders(string? pathVariable)
+    {
+        foreach (var d in (pathVariable ?? Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries)) yield return d;
+        foreach (var d in ReadLines("/etc/paths")) yield return d;
+        string[] files;
+        try { files = Directory.Exists("/etc/paths.d") ? Directory.GetFiles("/etc/paths.d").Order(StringComparer.Ordinal).ToArray() : []; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { files = []; }
+        foreach (var f in files)
+            foreach (var d in ReadLines(f)) yield return d;
+        foreach (var d in MacKnownFolders) yield return d;
+    }
+
+    private static IEnumerable<string> ReadLines(string file)
+    {
+        try { return File.Exists(file) ? File.ReadAllLines(file) : []; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    /// <summary>The path after every link, or null when it is no link or cannot be followed.</summary>
+    private static string? RealPath(string path)
+    {
+        try { return File.ResolveLinkTarget(path, returnFinalTarget: true)?.FullName; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>
