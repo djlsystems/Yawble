@@ -127,7 +127,11 @@ native library.
   other member and team, the CLI's own config and credential folders, and on macOS `~/.ssh` and `~/Library/Keychains`.
 - **Request compiler.** A pure function emits a create-and-run request with explicit containment, an explicit
   environment, egress deny with the run's gateway as the only network proxy, UI off, clipboard none, and telemetry
-  off. On Windows it forbids DACL mutation; on macOS keychain access is off.
+  off. On Windows it forbids DACL mutation; on macOS keychain access is off, and the only extra Mach services a run
+  may reach are `com.apple.SecurityServer` and `com.apple.trustd.agent` (TLS certificate checks) and
+  `com.apple.system.opendirectoryd.libinfo` (user and group lookups). SecurityServer serves only keychains whose files
+  the run can read, and `~/Library/Keychains` is always denied (the invariants require it), so no login-keychain item
+  reaches a run; the data-protection keychain service stays closed.
 - **macOS run temp folder.** Each macOS run gets its own folder, `<DARWIN_USER_TEMP_DIR>yr-<8 hex>` (the hex is from
   the SHA-256 of the run id). It is granted read-write to that run only, which also lets a Unix socket bind in it.
   `TMPDIR` points at it and `TMPPREFIX` is `<folder>/zsh`; `CLAUDE_CODE_TMPDIR` stays the member's `tmp/`. The point is

@@ -112,6 +112,20 @@ public static partial class SandboxRequestCompiler
     /// </summary>
     public const string DotnetShimFolder = "dotnet-shim";
 
+    /// <summary>
+    /// macOS: the Mach services a run may look up beyond the sandbox's defaults, each found needed on the Mac mini by
+    /// adding one at a time to the run's profile. com.apple.SecurityServer and com.apple.trustd.agent build TLS
+    /// certificate chains: without them every .NET HTTPS call failed "bad certificate format" (NuGet's restore) while
+    /// Apple's curl, with its own certificate file, got through. com.apple.system.opendirectoryd.libinfo resolves the
+    /// user's groups: without it .NET overflowed reading a file another user owns (the SDK's apphost: "CreateAppHost ...
+    /// OverflowException at IsMemberOfGroup"). The person chose to allow SecurityServer (2026-11-21): it serves only
+    /// keychains whose files the caller can read, and ~/Library/Keychains is always denied (RunLayout.ImplicitDenied,
+    /// required by the invariants): from a run "Claude Code-credentials" is not found and the login keychain lists no
+    /// entry. keychainAccess stays false and securityd's data-protection service (com.apple.securityd.xpc) stays closed.
+    /// </summary>
+    public static IReadOnlyList<string> MacMachLookups { get; } =
+        ["com.apple.SecurityServer", "com.apple.trustd.agent", "com.apple.system.opendirectoryd.libinfo"];
+
     public static CompiledRun Compile(
         GlobalPolicy global, PolicyPatch? overridePatch, PolicyPatch? loosen, RunSpec run,
         Func<string, string>? canonicalize = null, long? machineMemoryMb = null)
@@ -208,8 +222,13 @@ public static partial class SandboxRequestCompiler
         }
         if (os == TargetOs.MacOS)
         {
-            // Explicitly off: no login keychain from the sandbox (credential stores).
-            request["seatbelt"] = new JsonObject { ["keychainAccess"] = false };
+            // Explicitly off: no login keychain from the sandbox (credential stores). Only the Mach services certificate
+            // checks and group lookups need (MacMachLookups).
+            request["seatbelt"] = new JsonObject
+            {
+                ["keychainAccess"] = false,
+                ["extraMachLookups"] = new JsonArray(MacMachLookups.Select(n => (JsonNode?)n).ToArray()),
+            };
         }
         request["telemetry"] = new JsonObject { ["enabled"] = SandboxPin.TelemetryEnabled };
 
@@ -294,8 +313,10 @@ public static partial class SandboxRequestCompiler
         else
         {
             var system = string.Join(':', l.Os == TargetOs.MacOS ? Launch.HostTools.MacRunPath : Launch.HostTools.LinuxRunPath);
-            // macOS: the host's .NET SDK folder (HostTools.DetectMac), granted read-only like the Windows tool folders.
-            env["PATH"] = string.Join(':', [.. l.CliInstall.PathFolders, .. l.HostToolFolders, l.AppBinDir, system]);
+            // macOS: the app's dotnet wrapper first (DotnetShimFolder: MSBuild's worker sockets would go to /tmp, which the
+            // sandbox refuses), then the host's .NET SDK folder (HostTools.DetectMac), granted read-only like the Windows tool folders.
+            string[] shim = l.Os == TargetOs.MacOS ? [new PolicyPaths(l.Os, l.Home).Combine(l.AppBinDir, DotnetShimFolder)] : [];
+            env["PATH"] = string.Join(':', [.. shim, .. l.CliInstall.PathFolders, .. l.HostToolFolders, l.AppBinDir, system]);
             // macOS: the run's own short folder (RunTempFolder), so .NET's pipes ($TMPDIR/CoreFxPipe_<name>) fit in a
             // Unix socket's 104 bytes. Linux: the member's tmp. CLAUDE_CODE_TMPDIR stays the member's tmp (AgentPresets).
             var tmp = runTemp ?? l.Tmp;
@@ -324,8 +345,14 @@ public static partial class SandboxRequestCompiler
         // that made it (only \\.\pipe\LOCAL\ names work; microsoft/mxc#1706). MSBuild's worker nodes and its build
         // server and the compiler server talk over such pipes, so a parallel build fails ("Build FAILED", 0 errors) and
         // leaves idle workers that keep the agent's shell open. The dotnet wrapper first on PATH (DotnetShimFolder) builds
-        // with -m:1; these keep MSBuild from starting anything else that would wait on a pipe.
-        if (l.Os == TargetOs.Windows)
+        // with -m:1; these keep MSBuild from starting anything else that would wait on a pipe. macOS the same: MSBuild's
+        // and the compiler server's sockets are made in /tmp, which the sandbox refuses ("Permission denied" at bind).
+        // macOS: .NET opens dual-mode IPv6 sockets and reaches the gateway at 127.0.0.1 as ::ffff:127.0.0.1, which the
+        // sandbox profile's loopback rule does not match: NuGet's restore failed "NU1301 ... Permission denied
+        // (127.0.0.1:<port>)" while curl got through. Plain IPv4 sockets for every .NET program in the run (yawble-bridge
+        // connects that way itself).
+        if (l.Os == TargetOs.MacOS) env["DOTNET_SYSTEM_NET_DISABLEIPV6"] = "1";
+        if (l.Os is TargetOs.Windows or TargetOs.MacOS)
         {
             env["MSBUILDDISABLENODEREUSE"] = "1";
             env["MSBUILDUSESERVER"] = "0";
