@@ -32,8 +32,8 @@
       "NUGET_PACKAGES=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.nuget/packages",
       "PATH=/Applications/Yawble.app/Contents/Resources/bin/dotnet-shim:/Users/alice/.local/share/claude/versions:/Applications/Yawble.app/Contents/Resources/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
       "TERM=xterm-256color",
-      "TMPDIR=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp",
-      "TMPPREFIX=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp/zsh",
+      "TMPDIR=/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/yr-302aa610",
+      "TMPPREFIX=/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/yr-302aa610/zsh",
       "UseSharedCompilation=false",
       "XDG_CACHE_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.cache",
       "XDG_CONFIG_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.config",
@@ -53,7 +53,8 @@
     "readwritePaths": [
       "/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/repo",
       "/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home",
-      "/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp"
+      "/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp",
+      "/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/yr-302aa610"
     ],
     "deniedPaths": [
       "/Users/alice/Library/Application Support/Yawble/data",

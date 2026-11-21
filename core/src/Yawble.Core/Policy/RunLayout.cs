@@ -123,6 +123,13 @@ public sealed record RunLayout
     /// </summary>
     public IReadOnlyList<string> ResolverMasks { get; init; } = [];
 
+    /// <summary>
+    /// macOS: the person's per-user temp folder (DARWIN_USER_TEMP_DIR, canonical, e.g. /private/var/folders/xx/…/T/), under
+    /// which each run gets its own short folder (<see cref="Sandboxing.RunTempFolder"/>). Set by the launcher; required on
+    /// macOS, null elsewhere. Never granted itself.
+    /// </summary>
+    public string? UserTempDir { get; init; }
+
     /// <summary>The host's sign-in files whose access is read-write (none while the catalog says read-only).</summary>
     public IReadOnlyList<string> SignInReadwrite => CliInstall.SignInReadWrite;
 
