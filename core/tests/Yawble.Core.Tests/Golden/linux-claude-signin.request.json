@@ -9,6 +9,7 @@
       "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
       "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
       "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1",
+      "CLAUDE_CODE_TMPDIR=/home/alice/.local/share/yawble/teams/alpha/members/dev1/tmp",
       "CLAUDE_CONFIG_DIR=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.claude",
       "CLAUDE_SECURESTORAGE_CONFIG_DIR=/home/alice/.claude",
       "DISABLE_AUTOUPDATER=1",

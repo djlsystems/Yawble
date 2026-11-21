@@ -10,6 +10,7 @@
       "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
       "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1",
       "CLAUDE_CODE_OAUTH_TOKEN=golden-run-token-0123456789abcdefghijklmnopqrstuv",
+      "CLAUDE_CODE_TMPDIR=/home/alice/.local/share/yawble/teams/alpha/members/dev1/tmp",
       "CLAUDE_CONFIG_DIR=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.claude",
       "DISABLE_AUTOUPDATER=1",
       "DISABLE_INSTALLATION_CHECKS=1",
