@@ -110,8 +110,8 @@ if (!skipStage) {
   publish('bridge/src/Yawble.Run', 'bin');
   // yawble-companion (AssemblyName yawble-companion, Native AOT): the core names <install>/bin/yawble-companion in companion.status.
   publish('core/tools/Yawble.Companion', 'bin');
-  // Windows: the dotnet wrapper, first on the sandbox's PATH (builds in one MSBuild process; SandboxRequestCompiler.DotnetShimFolder).
-  if (os === 'win') publish('bridge/src/Yawble.DotnetShim', path.join('bin', 'dotnet-shim'));
+  // Windows and macOS: the dotnet wrapper, first on the sandbox's PATH (builds in one MSBuild process; SandboxRequestCompiler.DotnetShimFolder).
+  if (os === 'win' || os === 'osx') publish('bridge/src/Yawble.DotnetShim', path.join('bin', 'dotnet-shim'));
   // Native AOT leaves .dbg/.dSYM symbol files next to the binaries; they do not ship.
   for (const dir of [path.join(stage, 'bin'), path.join(stage, 'bin', 'dotnet-shim')].filter((d) => existsSync(d))) {
     for (const f of readdirSync(dir)) {

@@ -17,19 +17,24 @@
       "DISABLE_UPDATES=1",
       "DOTNET_CLI_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home",
       "DOTNET_CLI_TELEMETRY_OPTOUT=1",
+      "DOTNET_CLI_USE_MSBUILD_SERVER=0",
       "DOTNET_GENERATE_ASPNET_CERTIFICATE=false",
       "DOTNET_NOLOGO=1",
       "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1",
+      "DOTNET_SYSTEM_NET_DISABLEIPV6=1",
       "ENABLE_CLAUDEAI_MCP_SERVERS=false",
       "HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home",
       "IS_SANDBOX=1",
       "LANG=C.UTF-8",
+      "MSBUILDDISABLENODEREUSE=1",
+      "MSBUILDUSESERVER=0",
       "NODE_USE_ENV_PROXY=1",
       "NUGET_PACKAGES=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.nuget/packages",
-      "PATH=/Users/alice/.local/share/claude/versions:/Applications/Yawble.app/Contents/Resources/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+      "PATH=/Applications/Yawble.app/Contents/Resources/bin/dotnet-shim:/Users/alice/.local/share/claude/versions:/Applications/Yawble.app/Contents/Resources/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
       "TERM=xterm-256color",
-      "TMPDIR=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp",
-      "TMPPREFIX=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp/zsh",
+      "TMPDIR=/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/yr-302aa610",
+      "TMPPREFIX=/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/yr-302aa610/zsh",
+      "UseSharedCompilation=false",
       "XDG_CACHE_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.cache",
       "XDG_CONFIG_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.config",
       "XDG_DATA_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.local/share",
@@ -48,7 +53,8 @@
     "readwritePaths": [
       "/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/repo",
       "/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home",
-      "/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp"
+      "/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp",
+      "/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/yr-302aa610"
     ],
     "deniedPaths": [
       "/Users/alice/Library/Application Support/Yawble/data",
@@ -91,7 +97,12 @@
     "injection": false
   },
   "seatbelt": {
-    "keychainAccess": false
+    "keychainAccess": false,
+    "extraMachLookups": [
+      "com.apple.SecurityServer",
+      "com.apple.trustd.agent",
+      "com.apple.system.opendirectoryd.libinfo"
+    ]
   },
   "telemetry": {
     "enabled": false

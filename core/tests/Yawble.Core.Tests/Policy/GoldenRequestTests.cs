@@ -112,13 +112,18 @@ internal static class GoldenCases
         ["windows-claude-signin"] = (TargetOs.Windows, CredentialMode.ClaudeHostSignIn, RunKind.Headless, false, null),
         ["windows-grok-signin"] = (TargetOs.Windows, CredentialMode.GrokHostSignIn, RunKind.Headless, false, null),
         ["macos-grok-signin"] = (TargetOs.MacOS, CredentialMode.GrokHostSignIn, RunKind.Headless, false, null),
+        // The team's "Allow localhost (macOS)" on: the same run as macos-claude with the host's loopback open.
+        ["macos-claude-localhost"] = (TargetOs.MacOS, CredentialMode.ClaudeSubscription, RunKind.Headless, false, null),
     };
+
+    /// <summary>The cases compiled with the team's Allow localhost on (RunSpec.AllowLocalhost); every other case has it off.</summary>
+    public static readonly HashSet<string> AllowLocalhost = ["macos-claude-localhost"];
 
     public static CompiledRun Compile(string name)
     {
         var c = All[name];
         return SandboxRequestCompiler.Compile(PolicyFixtures.Global, PolicyFixtures.Override, c.Loosened ? PolicyFixtures.Loosen : null,
-            PolicyFixtures.Run(c.Os, c.Mode, c.Kind, c.Install));
+            PolicyFixtures.Run(c.Os, c.Mode, c.Kind, c.Install) with { AllowLocalhost = AllowLocalhost.Contains(name) });
     }
 
     public static string BuildDir => Path.Combine(AppContext.BaseDirectory, "Golden");

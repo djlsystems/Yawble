@@ -112,8 +112,19 @@ public static class SandboxRequestInvariants
             if (sb.ContainsKey("profileOverride")) Fail("seatbelt.profileOverride is never emitted (it drops all policy)");
             if (sb.ContainsKey("guiAccess")) Fail("seatbelt.guiAccess is never emitted");
             if (Bool(sb["keychainAccess"]) != false) Fail("seatbelt.keychainAccess must be false");
+            if (sb["extraMachLookups"] is { } lookups)
+            {
+                var names = lookups is JsonArray a ? a.Select(n => n?.GetValueKind() == System.Text.Json.JsonValueKind.String ? n.GetValue<string>() : null).ToList() : [null];
+                foreach (var n in names)
+                    if (n is null || !SandboxRequestCompiler.MacMachLookups.Contains(n, StringComparer.Ordinal))
+                        Fail($"seatbelt.extraMachLookups: {n ?? "(not a name)"} is not one of the certificate and group-lookup services");
+                // SecurityServer serves any keychain whose file the run can read: the login keychain's folder must be denied.
+                if (names.Contains("com.apple.SecurityServer")
+                    && !((request["filesystem"]?["deniedPaths"] as JsonArray)?.Select(x => Str(x) ?? "") ?? []).Any(d => new PolicyPaths(os, l.Home, canonicalize).Same(d, new PolicyPaths(os, l.Home).Combine(l.Home, "Library", "Keychains"))))
+                    Fail("seatbelt.extraMachLookups names com.apple.SecurityServer, so ~/Library/Keychains must be in deniedPaths");
+            }
             foreach (var key in sb.Select(p => p.Key))
-                if (key != "keychainAccess") Fail($"seatbelt.{key} is never emitted");
+                if (key is not ("keychainAccess" or "extraMachLookups")) Fail($"seatbelt.{key} is never emitted");
         }
         else if (os == TargetOs.MacOS) Fail("seatbelt.keychainAccess: false must be explicit on macOS");
         if (os == TargetOs.Windows)
@@ -132,11 +143,21 @@ public static class SandboxRequestInvariants
         {
             if (ingress != "allow" || loopback != "allow") Fail("Windows (unpackaged) needs ingress.default and hostLoopback allow with the proxy");
         }
+        else if (os == TargetOs.MacOS && run.AllowLocalhost)
+        {
+            // The team's "Allow localhost": the one loopback form Seatbelt takes (hostLoopback allow needs default allow).
+            if (ingress != "allow" || loopback != "allow") Fail("macOS with Allow localhost needs ingress.default and hostLoopback allow");
+        }
         else
         {
-            if (loopback != "deny") Fail($"network.ingress.hostLoopback: allow is never emitted on {os}");
-            if (ingress != "deny") Fail($"network.ingress.default must be deny on {os}");
+            if (loopback != "deny") Fail(os == TargetOs.MacOS
+                ? "network.ingress.hostLoopback: allow is emitted on macOS only with the team's Allow localhost"
+                : $"network.ingress.hostLoopback: allow is never emitted on {os}");
+            if (ingress != "deny") Fail($"network.ingress.default must be deny on {os}" + (os == TargetOs.MacOS ? " without the team's Allow localhost" : ""));
         }
+        if (net?["ingress"] is JsonObject ingressSection)
+            foreach (var key in ingressSection.Select(p => p.Key))
+                if (key is not ("default" or "hostLoopback")) Fail($"network.ingress.{key} is never emitted");
         if (Str(request["runtimeConfig"]?["networkProxy"]) != $"http://127.0.0.1:{run.GatewayPort}")
             Fail("runtimeConfig.networkProxy must be this run's gateway on 127.0.0.1");
 
@@ -262,8 +283,45 @@ public static class SandboxRequestInvariants
                     Fail($"grant '{g}' is a sign-in file; a macOS sandbox is never given one");
             }
             if (env.ContainsKey(SignInCatalog.ClaudeStoreVariable)) Fail($"env {SignInCatalog.ClaudeStoreVariable} is never set on macOS");
+            problems.AddRange(RunTempProblems(run, paths, ro, rw, env));
         }
         return problems;
+    }
+
+    /// <summary>
+    /// macOS: the run's own short temp folder (<see cref="RunTempFolder"/>) is under the per-user temp folder, named for this
+    /// run, short enough for a pipe, granted read-write, and what TMPDIR and TMPPREFIX point at. Nothing else in the per-user
+    /// temp folder is granted (not T/ itself, not another run's folder), nor any run folder anywhere but this run's.
+    /// </summary>
+    public static IEnumerable<string> RunTempProblems(RunSpec run, PolicyPaths paths, IReadOnlyList<string> ro, IReadOnlyList<string> rw,
+        IReadOnlyDictionary<string, string> env)
+    {
+        string R(string p) => paths.Resolve(p) ?? p;
+        if (run.Layout.UserTempDir is not { } userTempRaw || run.RunTemp is not { } runTempRaw)
+        {
+            yield return "a macOS run needs its own temp folder under DARWIN_USER_TEMP_DIR";
+            yield break;
+        }
+        var userTemp = R(userTempRaw);
+        var runTemp = R(runTempRaw);
+        var name = runTemp.TrimEnd('/').Split('/').Last();
+        if (!paths.IsWithin(runTemp, userTemp) || paths.Same(runTemp.TrimEnd('/'), userTemp.TrimEnd('/')))
+            yield return $"the run's temp folder '{runTemp}' is not under DARWIN_USER_TEMP_DIR '{userTemp}'";
+        if (name != RunTempFolder.Name(run.RunId) || !paths.Same(runTemp, paths.Combine(userTemp, name)))
+            yield return $"the run's temp folder '{runTemp}' is not named for this run ({RunTempFolder.Name(run.RunId)})";
+        if (!RunTempFolder.Fits(runTemp))
+            yield return $"the run's temp folder '{runTemp}' is too long: with \"{RunTempFolder.PipePrefix}\" and a {RunTempFolder.PipeNameBudget}-character pipe name it passes {RunTempFolder.SocketPathMax} bytes";
+        if (!rw.Any(g => paths.Same(g, runTemp))) yield return $"readwritePaths must contain the run's temp folder '{runTemp}'";
+        foreach (var g in ro.Concat(rw))
+        {
+            if (paths.Same(g, runTemp)) continue;
+            if (paths.IsWithin(g, userTemp) || paths.IsWithin(userTemp, g))
+                yield return $"grant '{g}' reaches the per-user temp folder; only this run's own folder there is granted";
+            else if (RunTempFolder.IsRunFolderName(g.TrimEnd('/').Split('/').Last()))
+                yield return $"grant '{g}' is another run's temp folder";
+        }
+        if (!paths.Same(env.GetValueOrDefault("TMPDIR") ?? "", runTemp)) yield return "env TMPDIR must be the run's own temp folder";
+        if (!paths.Same(env.GetValueOrDefault("TMPPREFIX") ?? "", paths.Combine(runTemp, "zsh"))) yield return "env TMPPREFIX must be <the run's temp folder>/zsh";
     }
 
     /// <summary>No credential variable except the placeholder; never two Claude tiers; Grok's rules.</summary>
