@@ -241,6 +241,8 @@ const config = {
     target: [{ target: 'dmg', arch: [archName] }, { target: 'zip', arch: [archName] }],
     artifactName: `${name}.\${ext}`,
     category: 'public.app-category.developer-tools',
+    // The Yawble mark at 512 px (electron-builder makes the .icns); shell/resources/icon.png is 256, too small for macOS.
+    icon: path.join(here, 'mac', 'icon.png'),
     ...(macSign
       ? {
           // The keychain's Developer ID Application identity (or the one YAWBLE_MAC_IDENTITY names). Every Mach-O in the
