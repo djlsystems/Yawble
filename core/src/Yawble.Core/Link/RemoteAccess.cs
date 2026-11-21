@@ -119,7 +119,8 @@ public static class RemoteAccess
             "updates.status",
             "code.list", "code.open", "code.read", "code.close", "code.download",
         ],
-        readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry"],
+        // B119: teams.localhost ("Allow localhost (macOS)") is read by any viewer and set only by a full one.
+        readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry", "teams.localhost"],
         changes:
         [
             "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",

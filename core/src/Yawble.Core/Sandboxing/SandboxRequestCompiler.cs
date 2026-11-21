@@ -36,6 +36,16 @@ public sealed record RunSpec
 
     /// <summary>The team's environment variables: added under the app's own (a name the app sets, or reserves, is skipped).</summary>
     public IReadOnlyDictionary<string, string>? TeamEnv { get; init; }
+
+    /// <summary>
+    /// The team's "Allow localhost (macOS)" setting (off by default). On macOS it opens the host's loopback to the run
+    /// (network.ingress hostLoopback and default allow: the only loopback form the sandbox's Seatbelt backend accepts).
+    /// Ignored on Windows and Linux, whose sandboxes give a run its own loopback.
+    /// </summary>
+    public bool AllowLocalhost { get; init; }
+
+    /// <summary>macOS: this run's own short temp folder (<see cref="RunTempFolder"/>); null elsewhere.</summary>
+    public string? RunTemp => Layout.Os == TargetOs.MacOS && Layout.UserTempDir is { } t ? RunTempFolder.PathFor(t, RunId) : null;
 }
 
 /// <summary>The compute limits that do not go into the request.</summary>
@@ -135,12 +145,16 @@ public static partial class SandboxRequestCompiler
         string R(string p) => paths.Resolve(p) ?? throw new ArgumentException($"not an absolute {os} path: {p}");
         List<string> Ordered(IEnumerable<string> items) => items.Select(R).Distinct(paths.Comparer).ToList();
 
-        var readwrite = Ordered(l.ImplicitReadwrite.Concat(l.SignInReadwrite).Concat(policy.Readwrite));
+        // macOS: the run's own short temp folder, read-write (which also lets a Unix socket bind in it).
+        var runTemp = run.RunTemp is { } t ? R(t) : null;
+        if (os == TargetOs.MacOS && runTemp is null)
+            throw new ArgumentException("a macOS run needs the per-user temp folder (DARWIN_USER_TEMP_DIR) for its own temp folder");
+        var readwrite = Ordered(l.ImplicitReadwrite.Concat(l.SignInReadwrite).Concat(runTemp is null ? [] : [runTemp]).Concat(policy.Readwrite));
         var readonlyPaths = Ordered(l.ImplicitReadonly.Concat(policy.Readonly))
             .Where(p => !readwrite.Any(rw => paths.Same(rw, p))).ToList();
         var denied = Ordered(l.ImplicitDenied.Concat(policy.Denied));
 
-        var env = BaseEnvironment(run);
+        var env = BaseEnvironment(run, runTemp);
         foreach (var (k, v) in AgentPresets.Environment(l, run.Credential, run.RunToken)) env[k] = v;
         // HOME is the canonical workspace, like cwd and the grants: an app data root reached through a symlink
         // (macOS temp folders, /var -> /private/var) must not give the sandbox a HOME outside its own grants.
@@ -178,7 +192,11 @@ public static partial class SandboxRequestCompiler
             ["egress"] = new JsonObject { ["default"] = "deny" },
             // Windows unpackaged accepts only the identity-less proxy: ingress allow + hostLoopback allow
             // (microsoft/mxc network_parser.rs:370-397; an accepted residual). Linux and macOS: both deny.
-            ["ingress"] = os == TargetOs.Windows
+            // macOS with the team's "Allow localhost": both allow. Seatbelt refuses hostLoopback allow under an ingress
+            // default of deny (its inbound half is the same rule), so this is the one loopback form it takes: it emits
+            // (allow network-outbound (remote ip "localhost:*")), (allow network-inbound (local ip)) and
+            // (allow network-bind (local ip)). Egress stays deny and the gateway stays the only proxy.
+            ["ingress"] = os == TargetOs.Windows || (os == TargetOs.MacOS && run.AllowLocalhost)
                 ? new JsonObject { ["default"] = "allow", ["hostLoopback"] = "allow" }
                 : new JsonObject { ["default"] = "deny", ["hostLoopback"] = "deny" },
         };
@@ -255,7 +273,7 @@ public static partial class SandboxRequestCompiler
         return [.. result];
     }
 
-    private static Dictionary<string, string> BaseEnvironment(RunSpec run)
+    private static Dictionary<string, string> BaseEnvironment(RunSpec run, string? runTemp)
     {
         var l = run.Layout;
         string J(params string[] parts) => AgentPresets.Join(l, l.Workspace, parts);
@@ -299,10 +317,13 @@ public static partial class SandboxRequestCompiler
             // sandbox refuses), then the host's .NET SDK folder (HostTools.DetectMac), granted read-only like the Windows tool folders.
             string[] shim = l.Os == TargetOs.MacOS ? [new PolicyPaths(l.Os, l.Home).Combine(l.AppBinDir, DotnetShimFolder)] : [];
             env["PATH"] = string.Join(':', [.. shim, .. l.CliInstall.PathFolders, .. l.HostToolFolders, l.AppBinDir, system]);
-            env["TMPDIR"] = l.Tmp;
+            // macOS: the run's own short folder (RunTempFolder), so .NET's pipes ($TMPDIR/CoreFxPipe_<name>) fit in a
+            // Unix socket's 104 bytes. Linux: the member's tmp. CLAUDE_CODE_TMPDIR stays the member's tmp (AgentPresets).
+            var tmp = runTemp ?? l.Tmp;
+            env["TMPDIR"] = tmp;
             // zsh (macOS's shell) writes here-documents under $TMPPREFIX, /tmp/zsh by default, which the sandbox refuses:
             // "can't create temp file for here document: operation not permitted", and `cat > f <<E` wrote an empty file.
-            env["TMPPREFIX"] = new PolicyPaths(l.Os, l.Home).Combine(l.Tmp, "zsh");
+            env["TMPPREFIX"] = new PolicyPaths(l.Os, l.Home).Combine(tmp, "zsh");
             env["LANG"] = "C.UTF-8";
             // Caches and config under the member's workspace.
             env["XDG_CONFIG_HOME"] = J(".config");

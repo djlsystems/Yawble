@@ -145,6 +145,35 @@ public class LauncherTests
 
     private static JsonElement Run(Message m) => JsonDocument.Parse(m.Payload).RootElement.GetProperty("run");
 
+    /// <summary>macOS (B119): the run's own temp folder exists while the run runs and is gone after, however it ended.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public async Task AMacRunsTempFolderLivesExactlyAsLongAsTheRun(int exitCode)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("macOS: the per-user temp folder");
+        await using var kit = await LaunchKit.StartAsync();
+        string? tmpdir = null;
+        var existed = false;
+        kit.Backend.Script = (req, p) =>
+        {
+            if (LaunchKit.IsFor(req.ToJsonString(), "dev1"))
+            {
+                tmpdir = LaunchKit.Env(req)["TMPDIR"];
+                existed = Directory.Exists(tmpdir) && !Directory.EnumerateFileSystemEntries(tmpdir).Any();
+                File.WriteAllText(Path.Combine(tmpdir, "CoreFxPipe_left"), "");
+            }
+            p.Exit(exitCode);
+            return Task.CompletedTask;
+        };
+        await kit.Bus.PersonTellAsync("alpha", "dev1", "build it", ct: Ct);
+        await kit.OutcomeAsync("dev1");
+        Assert.NotNull(tmpdir);
+        Assert.Matches("/yr-[0-9a-f]{8}$", tmpdir);
+        Assert.True(existed, "made, empty, before the run");
+        Assert.False(Directory.Exists(tmpdir), "removed when the run ended");
+    }
+
     [Fact]
     public async Task AClaudeMemberRunsHeadlessWithOnlyThePlaceholderAndTheSeed()
     {
