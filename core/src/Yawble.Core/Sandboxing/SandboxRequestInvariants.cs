@@ -112,8 +112,15 @@ public static class SandboxRequestInvariants
             if (sb.ContainsKey("profileOverride")) Fail("seatbelt.profileOverride is never emitted (it drops all policy)");
             if (sb.ContainsKey("guiAccess")) Fail("seatbelt.guiAccess is never emitted");
             if (Bool(sb["keychainAccess"]) != false) Fail("seatbelt.keychainAccess must be false");
+            if (sb["extraMachLookups"] is { } lookups)
+            {
+                var names = lookups is JsonArray a ? a.Select(n => n?.GetValueKind() == System.Text.Json.JsonValueKind.String ? n.GetValue<string>() : null).ToList() : [null];
+                foreach (var n in names)
+                    if (n is null || !SandboxRequestCompiler.MacMachLookups.Contains(n, StringComparer.Ordinal))
+                        Fail($"seatbelt.extraMachLookups: {n ?? "(not a name)"} is not one of the certificate and group-lookup services");
+            }
             foreach (var key in sb.Select(p => p.Key))
-                if (key != "keychainAccess") Fail($"seatbelt.{key} is never emitted");
+                if (key is not ("keychainAccess" or "extraMachLookups")) Fail($"seatbelt.{key} is never emitted");
         }
         else if (os == TargetOs.MacOS) Fail("seatbelt.keychainAccess: false must be explicit on macOS");
         if (os == TargetOs.Windows)

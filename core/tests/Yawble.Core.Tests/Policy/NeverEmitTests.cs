@@ -82,6 +82,25 @@ public class NeverEmitTests
     public void CatchesSeatbeltKeychainAccess() =>
         AssertCaught(TargetOs.MacOS, r => r["seatbelt"]!["keychainAccess"] = true, "keychainAccess");
 
+    [Theory]
+    [InlineData("com.apple.SecurityServer")]
+    [InlineData("com.apple.securityd")]
+    [InlineData("com.apple.pasteboard.1")]
+    public void CatchesAMachLookupBeyondTheCertificateAndGroupServices(string name) =>
+        AssertCaught(TargetOs.MacOS, r => r["seatbelt"]!["extraMachLookups"]!.AsArray().Add(name), "extraMachLookups");
+
+    [Fact]
+    public void AMacRunLooksUpOnlyTheCertificateAndGroupServices_AndReadsTheMdsFolder()
+    {
+        var run = PolicyFixtures.Run(TargetOs.MacOS, CredentialMode.ClaudeGatewaySignIn);
+        var c = SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, null, run);
+        Assert.Equal(SandboxRequestCompiler.MacMachLookups,
+            c.Request["seatbelt"]!["extraMachLookups"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.DoesNotContain("com.apple.SecurityServer", SandboxRequestCompiler.MacMachLookups);
+        Assert.Contains("/private/var/db/mds", c.Request["filesystem"]!["readonlyPaths"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Empty(SandboxRequestInvariants.Check(c, run));
+    }
+
     // ---- B118: macOS Claude is held by the gateway (it reads the login Keychain on the host); a Mac sandbox gets no sign-in.
 
     [Fact]

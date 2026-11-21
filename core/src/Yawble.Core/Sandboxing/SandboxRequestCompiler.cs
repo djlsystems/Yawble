@@ -102,6 +102,19 @@ public static partial class SandboxRequestCompiler
     /// </summary>
     public const string DotnetShimFolder = "dotnet-shim";
 
+    /// <summary>
+    /// macOS: the Mach services a run may look up beyond the sandbox's defaults. trustd and ocspd check TLS certificate
+    /// chains: without them every .NET HTTPS call failed "bad certificate format" (NuGet's restore, found on the Mac
+    /// mini) while Apple's curl, with its own certificate file, got through. opendirectoryd's membership service answers
+    /// getgroups: without it .NET overflowed reading a file another user owns (the SDK's apphost: "CreateAppHost ...
+    /// OverflowException at IsMemberOfGroup"). None hands out keychain items.
+    /// </summary>
+    public static IReadOnlyList<string> MacMachLookups { get; } =
+        ["com.apple.trustd", "com.apple.trustd.agent", "com.apple.ocspd", "com.apple.system.opendirectoryd.membership"];
+
+    /// <summary>macOS: the certificate module directory (CSSM's MDS database) a run reads, read-only, for TLS checks ("CSSM_ModuleLoad()" without it).</summary>
+    public const string MacMdsFolder = "/private/var/db/mds";
+
     public static CompiledRun Compile(
         GlobalPolicy global, PolicyPatch? overridePatch, PolicyPatch? loosen, RunSpec run,
         Func<string, string>? canonicalize = null, long? machineMemoryMb = null)
@@ -190,8 +203,14 @@ public static partial class SandboxRequestCompiler
         }
         if (os == TargetOs.MacOS)
         {
-            // Explicitly off: no login keychain from the sandbox (credential stores).
-            request["seatbelt"] = new JsonObject { ["keychainAccess"] = false };
+            // Explicitly off: no login keychain from the sandbox (credential stores). Only the Mach services certificate
+            // checks and group lookups need (MacMachLookups); never com.apple.SecurityServer or securityd, which hand out
+            // keychain items.
+            request["seatbelt"] = new JsonObject
+            {
+                ["keychainAccess"] = false,
+                ["extraMachLookups"] = new JsonArray(MacMachLookups.Select(n => (JsonNode?)n).ToArray()),
+            };
         }
         request["telemetry"] = new JsonObject { ["enabled"] = SandboxPin.TelemetryEnabled };
 

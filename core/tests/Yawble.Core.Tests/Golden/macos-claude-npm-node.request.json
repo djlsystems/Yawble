@@ -49,6 +49,7 @@
       "/Users/alice/.nvm/versions/node/v22.12.0/bin",
       "/Applications/Yawble.app/Contents/Resources/bin",
       "/Applications/Yawble.app/Contents/Resources/roles",
+      "/private/var/db/mds",
       "/Users/alice/src/reference"
     ],
     "readwritePaths": [
@@ -97,7 +98,13 @@
     "injection": false
   },
   "seatbelt": {
-    "keychainAccess": false
+    "keychainAccess": false,
+    "extraMachLookups": [
+      "com.apple.trustd",
+      "com.apple.trustd.agent",
+      "com.apple.ocspd",
+      "com.apple.system.opendirectoryd.membership"
+    ]
   },
   "telemetry": {
     "enabled": false
