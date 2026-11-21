@@ -9,7 +9,7 @@ import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remot
 // B119 Part B (card 534): Team settings > Network has "Allow localhost (macOS)" (teams.localhost, off by default) with the
 // warning word for word. A Visitor sees it read-only (the core refuses a Visitor's set anyway). Fakes only.
 
-const WARNING = "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners.";
+const WARNING = "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners. While it is on, a server an agent starts on `0.0.0.0` can be reached from other machines on your network unless the macOS firewall blocks it. Keep the macOS firewall on. Outbound traffic still goes only through the gateway.";
 const team = { id: 4, name: 'payments', members: 1, running: 0, queued: 0, repoPath: null } as unknown as TeamSummary;
 
 function fakeApi(localhost: { on: boolean } | null) {
@@ -62,7 +62,11 @@ describe('Team settings: Allow localhost (macOS) (B119)', () => {
     expect(toggle(w).checked).toBe(false);
     const warning = w.get('[data-test=team-localhost-warning]');
     expect(warning.text()).toBe(WARNING.replaceAll('`', ''));
-    expect(warning.get('code').text()).toBe('dotnet test');
+    expect(warning.findAll('code').map((c) => c.text())).toEqual(['dotnet test', '0.0.0.0']);
+    // Question 5497: the network exposure, the firewall and the gateway are said plainly.
+    expect(warning.text()).toContain('a server an agent starts on 0.0.0.0 can be reached from other machines on your network unless the macOS firewall blocks it');
+    expect(warning.text()).toContain('Keep the macOS firewall on.');
+    expect(warning.text()).toContain('Outbound traffic still goes only through the gateway.');
     expect(calls.find((c) => c.method === 'teams.localhost')!.params).toEqual({ teamId: 4 });
 
     toggle(w).checked = true;
