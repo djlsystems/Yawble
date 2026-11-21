@@ -76,7 +76,7 @@ describe('Settings > Skills: a team skill\'s versions and last writer (B100)', (
     await flushPromises();
     expect(confirm.mock.calls[0]![0]).toContain('Bring back version 1 of team_retros?');
     expect(calls.find((c) => c.method === 'skills.restore')!.params).toEqual({ id: 1 });
-    expect(w.get('[data-test=skill-view]').text()).toBe('- first lesson');
+    expect(w.get('[data-test=skill-view]').findAll('li').map((li) => li.text())).toEqual(['first lesson']); // rendered (card 529)
     expect(w.get('[data-test=skill-last-writer]').text()).toContain('you (restored version 1)');
     expect(w.get('[data-test=skill-saved]').text()).toContain('Restored version 1 of team_retros');
     w.unmount();
@@ -102,7 +102,9 @@ describe('Settings > Skills: a team skill\'s versions and last writer (B100)', (
     const { api } = fakeApi({ 'skills.list': () => [plain, { ...retros, teamId: 9, team: 'other' }, retros], 'skills.versions': () => versions });
     const w = mount(SkillsDialog, { props: { api, teams: [team], inline: true }, attachTo: document.body });
     await flushPromises();
-    expect(w.get('[data-test=skill-view]').text()).toBe(retros.body);
+    const view = w.get('[data-test=skill-view]'); // rendered markdown (card 529)
+    expect(view.get('h2').text()).toBe('Git');
+    expect(view.findAll('li').map((li) => li.text())).toEqual(['Fetch the team branch before merging (2026-11-18, workflow 12)', 'the person\'s own lesson']);
     expect(w.get('h3').text()).toBe('team_retros');
     expect(w.get('.pane .chip').text()).toBe('team payments');
     expect(skillLink.value).toBeNull();
