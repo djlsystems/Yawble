@@ -263,7 +263,8 @@ const config = {
           notarize: false,
         }),
   },
-  dmg: { artifactName: `${name}.\${ext}`, writeUpdateInfo: false },
+  // A Developer ID build signs the disk image too (notarized and stapled after the build, below).
+  dmg: { artifactName: `${name}.\${ext}`, writeUpdateInfo: false, sign: macSign },
   ...(macSign ? {} : { afterPack: path.join(here, 'mac-adhoc-sign.cjs') }),
   linux: {
     target: [{ target: 'tar.gz', arch: [archName] }],
@@ -297,6 +298,13 @@ if (macSign) {
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
   run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app]);
   run('xcrun', ['stapler', 'validate', app]);
+  // The disk image itself: notarized and stapled as well, so Gatekeeper accepts it before it is opened, even offline.
+  const dmg = installers.find((f) => f.endsWith('.dmg'));
+  if (!dmg) throw new Error('the Mac build wrote no .dmg');
+  run('xcrun', ['notarytool', 'submit', dmg, '--keychain-profile', process.env.YAWBLE_NOTARY_PROFILE, '--wait']);
+  run('xcrun', ['stapler', 'staple', dmg]);
+  run('xcrun', ['stapler', 'validate', dmg]);
+  run('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', '--verbose=2', dmg]);
   const { createHash } = await import('node:crypto');
   const sums = installers.map((f) => `${createHash('sha256').update(readFileSync(f)).digest('hex')}  ${path.basename(f)}`).join('\n') + '\n';
   writeFileSync(path.join(out, 'SHA256SUMS-mac'), sums);
