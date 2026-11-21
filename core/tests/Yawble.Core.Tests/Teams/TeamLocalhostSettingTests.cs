@@ -6,6 +6,7 @@ using Yawble.Core.Link;
 using Yawble.Core.Policy;
 using Yawble.Core.Provenance;
 using Yawble.Core.Sandboxing;
+using Yawble.Core.Skills;
 using Yawble.Core.Tests.Bus;
 using Yawble.Core.Tests.Launch;
 using Yawble.Core.Ui;
@@ -150,6 +151,19 @@ public class TeamLocalhostSettingTests
         await kit.Bus.PersonTellAsync("alpha", "dev2", "then with it on", ct: Ct);
         await kit.OutcomeAsync("dev2");
         Assert.True(Assert.Single(Of(specs, "dev2")).AllowLocalhost);
+    }
+
+    [Fact]
+    public void TheDevToolsSkill_SteersMacRunsToXunitV3_AndSaysWhereTheSettingIs()
+    {
+        var body = SkillCatalog.BuiltIns.Single(s => s.Name == "dev-tools").Body;
+        var text = string.Join(' ', body.Split((char[])['\n', ' '], StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("## macOS", body);
+        Assert.Contains("\"Allow localhost (macOS)\" (Team settings > Network; off by default)", text);
+        Assert.Contains("xUnit v3 on Microsoft.Testing.Platform", text);
+        Assert.Contains("`SocketException (13): Permission denied` at `TcpListener.Start`", text);
+        Assert.Contains("Tell your Manager in one line: \"dotnet test needs Allow localhost (macOS): Team settings > Network\". Do not guess", text);
+        Assert.DoesNotContain("mxc", body, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The run inputs whose clone is the member's (members/&lt;member&gt; in its path).</summary>

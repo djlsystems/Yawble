@@ -286,6 +286,17 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   a removed host is gone from the team's next runs (a member's own loosen block keeps what it has). Adding and removing
   are in the audit log. A host in a member's own loosen block stays there until it is removed from that member's
   policy.
+- **Allow localhost (macOS)** is a per-team setting on the team's **Network** tab, off by default. Its warning reads:
+  "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev
+  servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners."
+  - On, the team's macOS runs may open local ports and reach every service on the Mac's loopback. Off, they reach only
+    their own gateway there. It applies from each member's next run.
+  - Windows and Linux runs do not read it: their sandboxes give each run a loopback of its own.
+  - Turning it on or off is in the audit log. It is a full-access change: a Cloud Link Visitor sees it read-only, and
+    the core refuses a Visitor's change.
+  - Without it, the dev-tools skill steers agents on macOS to xUnit v3 / Microsoft.Testing.Platform test projects. When
+    a classic VSTest `dotnet test` fails at `TcpListener.Start` with Permission denied, the agent tells its Manager
+    where the setting is.
 - Floor rules nobody can loosen:
   - model vendors' API and sign-in hosts are never allowed hosts;
   - no IP addresses or wildcards;
