@@ -77,12 +77,20 @@ const filter = ref<SkillFilter>('all');
 const choices = computed(() => filterChoices(skills.value, filter.value));
 const visible = computed(() => filterSkills(skills.value, filter.value));
 const same = (a: Skill, b: Skill) => key(a) === key(b);
-watch(filter, () => {
-  if (editing.value) return;
-  const next = selectionAfterFilter(visible.value, selected.value, same);
-  if (next && selected.value && same(next, selected.value)) return;
+// The filter's rule for showing `current`: kept while the filter shows it, else the first shown (a phone: none).
+function selectUnderFilter(current: Skill | null) {
+  const next = selectionAfterFilter(visible.value, current, same);
+  if (next && current && same(next, current)) {
+    selected.value = current;
+    return;
+  }
   saved.value = null;
   selected.value = phone.value ? null : next;
+}
+// While editing the change waits: Cancel applies it (cancelEdit), Save shows the saved skill (keepVisible).
+watch(filter, () => {
+  if (editing.value) return;
+  selectUnderFilter(selected.value);
 });
 // A saved, restored or linked skill the filter would hide (Customize… of a built-in makes an all-teams one): show All.
 function keepVisible(s: Skill) {
@@ -92,12 +100,15 @@ function keepVisible(s: Skill) {
 // The skill's text, rendered with the app's markdown renderer (raw HTML off, links open in the browser; markdown.ts).
 const bodyHtml = computed(() => (selected.value ? renderMarkdown(selected.value.body) : ''));
 
-// Edit's Cancel goes back to the skill it was editing (rendered again); + New skill's Cancel to no skill.
+// Edit's Cancel goes back to the skill it was editing (rendered again); + New skill's Cancel to no skill. A filter
+// changed while editing hid that skill (card 531): Cancel follows the filter, as a filter change does.
 const editingFrom = ref<Skill | null>(null);
 function cancelEdit() {
+  const from = editingFrom.value;
   editing.value = false;
-  selected.value = editingFrom.value;
   editingFrom.value = null;
+  if (from) selectUnderFilter(from);
+  else selected.value = null;
 }
 
 function pick(s: Skill) {

@@ -122,6 +122,38 @@ describe('Settings > Skills: the origin filter', () => {
     expect(names(w)).toEqual(['release-notes']);
     w.unmount();
   });
+
+  // Card 531 (TesterWren's F1 on card 529): the filter's change waited while editing, and Cancel showed the hidden skill.
+  it('a filter changed while editing applies at Cancel: the pane shows a skill the list shows', async () => {
+    const { api } = fakeApi(() => [manager, retros]);
+    const w = mount(SkillsDialog, { props: { api, teams: [team], inline: true }, attachTo: document.body });
+    await flushPromises();
+    await w.get('[data-test=skill-team_retros]').trigger('click');
+    await w.get('[data-test=skill-edit]').trigger('click');
+    await w.get('[data-test=skills-filter-builtin]').trigger('click');
+    await flushPromises();
+    await w.get('[data-test=skill-cancel]').trigger('click');
+    await flushPromises();
+    expect(names(w)).toEqual(['manager']);
+    expect(w.get('[data-test=skills-filter-builtin]').attributes('aria-selected')).toBe('true');
+    expect(w.get('[data-test=skills-pane] h3').text()).toBe('manager');
+    w.unmount();
+  });
+
+  it('Cancel with the edited skill still shown by the filter goes back to it', async () => {
+    const { api } = fakeApi(() => [manager, retros]);
+    const w = mount(SkillsDialog, { props: { api, teams: [team], inline: true }, attachTo: document.body });
+    await flushPromises();
+    await w.get('[data-test=skill-team_retros]').trigger('click');
+    await w.get('[data-test=skill-edit]').trigger('click');
+    await w.get('[data-test=skills-filter-team]').trigger('click');
+    await flushPromises();
+    await w.get('[data-test=skill-cancel]').trigger('click');
+    await flushPromises();
+    expect(names(w)).toEqual(['team_retros']);
+    expect(w.get('[data-test=skills-pane] h3').text()).toBe('team_retros');
+    w.unmount();
+  });
 });
 
 const MD = '# Title\n\nSome text with `inline code` and a [link](https://example.com/docs).\n\n## Steps\n- one\n- two\n\n```sh\nnpm run build\n```\n\n<b>raw</b>';
