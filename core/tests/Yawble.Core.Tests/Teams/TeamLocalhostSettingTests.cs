@@ -166,6 +166,26 @@ public class TeamLocalhostSettingTests
         Assert.DoesNotContain("m" + "xc", body, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>B121 part B (card 542): with the setting off `dotnet test` fails in both modes on a Mac (VSTest's port,
+    /// MTP's pipe at a fixed /tmp path), so the skill says to build the test project and run its executable or dotnet exec
+    /// its dll with the runner's own filters, names the MTP pipe failure too, and keeps /tmp closed (no grant asked).</summary>
+    [Fact]
+    public void TheDevToolsSkill_OnMacWithTheSettingOff_RunsTheTestExe_AndKeepsTmpClosed()
+    {
+        var body = SkillCatalog.BuiltIns.Single(s => s.Name == "dev-tools").Body;
+        var mac = body[body.IndexOf("## macOS", StringComparison.Ordinal)..];
+        mac = mac[..mac.IndexOf("\n## ", 1, StringComparison.Ordinal)];
+        var text = string.Join(' ', mac.Split((char[])['\r', '\n', ' '], StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("`dotnet test` needs that setting, in either mode", text);
+        Assert.Contains("build the test project (`dotnet build <test project>`), then run its executable", text);
+        Assert.Contains("`dotnet exec bin/Debug/<tfm>/<Project>.dll`", text);
+        Assert.Contains("Filter with the runner's own options (xUnit v3: `-class`, `-method`, `-namespace`, `-filter`), not `--filter`", text);
+        Assert.Contains("at `NamedPipeServerStream` (Microsoft.Testing.Platform's pipe, exit 134)", text);
+        Assert.Contains("`/tmp` stays closed, so do not ask for a folder grant on `/tmp` or any path under it", text);
+        Assert.DoesNotContain("/tmp/MSBuild", text);
+        Assert.DoesNotContain("request_folder", text);
+    }
+
     /// <summary>The run inputs whose clone is the member's (members/&lt;member&gt; in its path).</summary>
     private static List<RunSpec> Of(List<RunSpec> specs, string member)
     {
