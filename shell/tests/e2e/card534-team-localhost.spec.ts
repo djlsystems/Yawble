@@ -14,7 +14,7 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
 const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B119');
-const WARNING = "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev servers, local databases). Needed for classic dotnet test (VSTest) and some other test runners.";
+const WARNING = "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev servers, local databases). Needed for classic dotnet test (VSTest) and some other test runners. While it is on, a server an agent starts on 0.0.0.0 can be reached from other machines on your network unless the macOS firewall blocks it. Keep the macOS firewall on. Outbound traffic still goes only through the gateway.";
 
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
 
@@ -63,7 +63,7 @@ test('off by default with the warning; turning it on sends teams.localhost { tea
   await expect(page.locator('[data-test=team-localhost]')).toContainText('Allow localhost (macOS)');
   await expect(toggle).not.toBeChecked();
   await expect(page.locator('[data-test=team-localhost-warning]')).toHaveText(WARNING);
-  await expect(page.locator('[data-test=team-localhost-warning] code')).toHaveText('dotnet test');
+  await expect(page.locator('[data-test=team-localhost-warning] code')).toHaveText(['dotnet test', '0.0.0.0']);
   await page.locator('[data-test=team-localhost]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(SHOTS, 'card534-team-localhost-off.png') });
 
