@@ -246,6 +246,23 @@ public static class SandboxRequestInvariants
                     var allowed = l.CliInstall.ReadOnlyFolders.Concat(l.CliInstall.SignInReadOnly).Concat(l.CliInstall.SignInReadWrite).Select(R);
                     if (!allowed.Any(a => paths.Same(a, g))) Fail($"grant '{g}' reaches into the CLI's config folder '{config}' and is not one of its install folders or sign-in files");
                 }
+        // macOS: no sign-in file and no part of a Keychain is ever granted (Claude's sign-in is held by the gateway, which
+        // reads the login Keychain on the host), and Claude's file-grant mode is never used.
+        if (os == TargetOs.MacOS)
+        {
+            if (run.Credential == CredentialMode.ClaudeHostSignIn) Fail("macOS never uses ClaudeHostSignIn: Claude's sign-in is held by the gateway");
+            var keychains = new[] { paths.Combine(l.Home, "Library", "Keychains"), "/Library/Keychains", "/System/Library/Keychains" };
+            foreach (var g in ro.Concat(rw))
+            {
+                var name = g.TrimEnd('/').Split('/').Last();
+                if (keychains.Any(k => paths.Overlaps(g, k) || paths.Overlaps(g, R(k))) || name.EndsWith(".keychain-db", StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith(".keychain", StringComparison.OrdinalIgnoreCase))
+                    Fail($"grant '{g}' reaches a Keychain; a macOS sandbox is never given one");
+                if (name is ".credentials.json")
+                    Fail($"grant '{g}' is a sign-in file; a macOS sandbox is never given one");
+            }
+            if (env.ContainsKey(SignInCatalog.ClaudeStoreVariable)) Fail($"env {SignInCatalog.ClaudeStoreVariable} is never set on macOS");
+        }
         return problems;
     }
 

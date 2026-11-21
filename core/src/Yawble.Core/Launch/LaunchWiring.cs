@@ -103,8 +103,8 @@ public sealed class LaunchWiring : IAsyncDisposable
             : null;
 
         // Claude's sign-in is held by the gateway: read from the person's own host sign-in at every request,
-        // renewed by the person's own claude on the host when it is about to expire.
-        var claudeHost = new ClaudeHostSession(ClaudeHostSession.DefaultCredentialsFile(env), () => Agents.HostCli.Path(clis, "claude"), log);
+        // renewed by the person's own claude on the host when it is about to expire (macOS: from the login Keychain).
+        var claudeHost = ClaudeHostSession.ForThisHost(env, () => Agents.HostCli.Path(clis, "claude"), log);
         var gatewayHost = new GatewayHost(new GatewayCredentials(credentials, personsGrok, keeper, claudeHost: claudeHost,
             codexHost: new CodexHostSession(CodexHostSession.DefaultAuthFile(env), () => Agents.HostCli.Path(clis, "codex"), log)), new GatewayLog(connectionString),
             new RunTokenRegistry());

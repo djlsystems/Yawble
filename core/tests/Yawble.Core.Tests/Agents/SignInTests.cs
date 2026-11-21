@@ -68,7 +68,7 @@ public class SignInTests
     public void TheDetectedClaudeSignInIsTheFileTheGatewayReads(bool withConfigDir)
     {
         // The gateway's path is built for this OS (Path.Combine, the real home), so the detection runs as this OS too;
-        // macOS is the Keychain (pending, above). Linux is what the Fedora host ran.
+        // macOS is the Keychain (below). Linux is what the Fedora host ran.
         Assert.SkipWhen(OperatingSystem.IsMacOS(), "Claude Code on macOS keeps its sign-in in the Keychain");
         var os = OperatingSystem.IsWindows() ? TargetOs.Windows : TargetOs.Linux;
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -83,15 +83,51 @@ public class SignInTests
         Assert.False(AgentPresets.IsHostSignIn(CredentialMode.ClaudeGatewaySignIn)); // no sign-in grant in this mode
     }
 
+    /// <summary>
+    /// B118: macOS Claude keeps its sign-in in the login Keychain item "Claude Code-credentials". Signed in = the item
+    /// exists; detection checks only that (no read of the secret, so no Keychain prompt), and nothing of it is a file to grant.
+    /// </summary>
     [Fact]
-    public void ClaudeOnMacOsIsPendingNotSilentlyMissing()
+    public void ClaudeOnMacOsIsSignedInWhenTheKeychainItemExists_CheckedWithoutReadingIt()
     {
-        // Even a fallback file on disk is not used: macOS Claude keeps its sign-in in the Keychain, which the app does not read.
+        var host = new FakeHost(TargetOs.MacOS, "/Users/alice");
+        host.Keychain.Set(ClaudeHostSession.KeychainService, "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-FAKE\"}}");
+        var s = SignInCatalog.Claude(host.Host());
+        Assert.Equal(SignInStatus.SignedIn, s.Status);
+        var entry = Assert.Single(s.Files);
+        Assert.Equal(("Claude Code-credentials", SignInAccess.HostStore, true), (entry.Path, entry.Access, entry.Present));
+        Assert.Empty(s.Environment); // no CLAUDE_SECURESTORAGE_CONFIG_DIR: nothing points a sandbox at it
+        Assert.Contains("login Keychain item \"Claude Code-credentials\"", s.Detail);
+        Assert.Contains("gateway", s.Detail);
+        Assert.DoesNotContain("sk-ant", s.Detail);
+        Assert.Equal(["Claude Code-credentials"], host.Keychain.Checks);
+        Assert.Empty(host.Keychain.Reads); // existence only
+        Assert.Empty(host.Reads);
+    }
+
+    [Fact]
+    public void ClaudeOnMacOsWithoutTheKeychainItemIsNotSignedIn_AndSaysHowToSignIn()
+    {
+        // A file on disk does not count: Claude Code on macOS keeps its sign-in in the Keychain.
         var host = new FakeHost(TargetOs.MacOS, "/Users/alice").File("/Users/alice/.claude/.credentials.json", "{}");
         var s = SignInCatalog.Claude(host.Host());
-        Assert.Equal(SignInStatus.Pending, s.Status);
-        Assert.Empty(s.Files);
-        Assert.Contains("Keychain", s.Detail);
+        Assert.Equal(SignInStatus.NotSignedIn, s.Status);
+        Assert.False(Assert.Single(s.Files).Present);
+        Assert.Contains("run 'claude' in your own terminal and sign in (/login)", s.Detail);
+        Assert.DoesNotContain("cannot run", s.Detail);
+        Assert.Empty(host.Keychain.Reads);
+    }
+
+    [Fact]
+    public void ClaudeOnMacOsDetectedOffAMac_NeverTouchesThisComputersStore()
+    {
+        // No fake given: off a Mac nothing real is looked up, so it reads as not signed in (on a Mac it would be the real Keychain).
+        Assert.SkipWhen(OperatingSystem.IsMacOS(), "on a Mac the default is the real login Keychain");
+        var fake = new FakeHost(TargetOs.MacOS, "/Users/alice");
+        var env = new HostEnvironment(TargetOs.MacOS, "/Users/alice", [], [], new Dictionary<string, string>());
+        var s = SignInCatalog.Claude(new DetectionHost(env, fake, fake));
+        Assert.Equal(SignInStatus.NotSignedIn, s.Status);
+        Assert.IsType<NoHostCredentialReader>(new DetectionHost(env, fake, fake).Keychain);
     }
 
     [Fact]
@@ -310,7 +346,7 @@ public class SignInTests
         var home = Path.Combine(root, "home");
         var auth = Path.Combine(home, ".grok", "auth.json"); // never created: grok is not signed in
         var clis = Clis(root, home,
-            claude: c => c with { SignIn = new CliSignIn(SignInStatus.Pending, SignInCatalog.MacClaudePending, [], new Dictionary<string, string>()) },
+            claude: c => c with { SignIn = new CliSignIn(SignInStatus.Pending, "The sandbox cannot use this CLI's sign-in on this OS (it is in the system keychain).", [], new Dictionary<string, string>()) },
             grok: g => g with { SignIn = FileSignIn(auth, "GROK_AUTH_PATH", auth) });
         await using var kit = await LaunchKit.StartAsync(db: db, clis: clis, credentials: new HostSignInModes());
         kit.Backend.Script = (_, p) => { p.Exit(0); return Task.CompletedTask; };
@@ -319,7 +355,7 @@ public class SignInTests
         var claude = await kit.OutcomeAsync("dev1");
         Assert.Equal(MessageTypes.Failed, claude.Type);
         Assert.Contains("cannot run here yet", claude.Payload);
-        Assert.Contains("Keychain", claude.Payload);
+        Assert.Contains("system keychain", claude.Payload);
         await kit.Bus.PersonTellAsync("alpha", "dev2", "hello", ct: Ct); // grok
         var grok = await kit.OutcomeAsync("dev2");
         Assert.Equal(MessageTypes.Failed, grok.Type);

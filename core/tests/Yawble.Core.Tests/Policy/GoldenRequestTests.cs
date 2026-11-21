@@ -105,7 +105,7 @@ internal static class GoldenCases
         ["windows-claude-interactive"] = (TargetOs.Windows, CredentialMode.ClaudeSubscription, RunKind.Interactive, false, null),
         ["macos-grok-interactive"] = (TargetOs.MacOS, CredentialMode.GrokLogin, RunKind.Interactive, false, null),
         // Host sign-in: the CLI's own sign-in on the host, the exact file granted read-only.
-        // macOS Claude has no case: its sign-in is in the Keychain, and the launcher refuses the run.
+        // macOS Claude has no case: its sign-in is in the login Keychain, held by the gateway (no grant; the invariants refuse one).
         ["linux-claude-signin"] = (TargetOs.Linux, CredentialMode.ClaudeHostSignIn, RunKind.Headless, false, null),
         ["linux-claude-npm-signin"] = (TargetOs.Linux, CredentialMode.ClaudeHostSignIn, RunKind.Headless, false, "npm"),
         ["linux-grok-signin"] = (TargetOs.Linux, CredentialMode.GrokHostSignIn, RunKind.Headless, false, null),

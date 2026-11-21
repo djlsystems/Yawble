@@ -38,6 +38,16 @@ public sealed partial class DetectionHost(HostEnvironment env, IHostFileSystem f
     public PolicyPaths Paths { get; } = new(env.Os, env.Home);
     public TargetOs Os => Env.Os;
     public string Home => Paths.Home;
+
+    /// <summary>
+    /// The host's credential store for presence checks (macOS: the login Keychain, where Claude Code keeps its sign-in).
+    /// Null: the real store of this computer when it is the OS detected, else none (tests give a fake).
+    /// </summary>
+    public Credentials.IHostCredentialReader? CredentialStore { get; init; }
+
+    /// <summary>The Keychain to check: <see cref="CredentialStore"/>, else this Mac's own (only when detecting macOS on a Mac).</summary>
+    public Credentials.IHostCredentialReader Keychain =>
+        CredentialStore ?? (Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? SignInCatalog.Store : new Credentials.NoHostCredentialReader());
     private char Sep => Os == TargetOs.Windows ? '\\' : '/';
 
     public static DetectionHost ForThisHost() => new(HostEnvironment.Current(), new RealHostFileSystem(), new RealCliProcessRunner());

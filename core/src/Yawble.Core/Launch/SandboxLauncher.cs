@@ -209,7 +209,10 @@ public sealed class SandboxLauncher(
         };
         // Codex's TUI requires an HTTPS ChatGPT backend, which the gateway's plain-HTTP
         // codex.yawble.internal is not: an interactive session keeps the host sign-in; headless runs stay gateway-held.
-        return mode == CredentialMode.CodexGatewaySignIn && kind == RunKind.Interactive ? CredentialMode.CodexHostSignIn : mode;
+        if (mode == CredentialMode.CodexGatewaySignIn && kind == RunKind.Interactive) return CredentialMode.CodexHostSignIn;
+        // macOS: Claude's sign-in is in the login Keychain, which no sandbox is given; only the gateway-held mode exists there.
+        if (mode == CredentialMode.ClaudeHostSignIn && host.Os == TargetOs.MacOS) return CredentialMode.ClaudeGatewaySignIn;
+        return mode;
     }
 
     /// <summary>

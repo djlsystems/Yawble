@@ -46,7 +46,8 @@ internal static class PolicyFixtures
         var sep = os == TargetOs.Windows ? '\\' : '/';
         string H(params string[] parts) => home + sep + string.Join(sep, parts);
         if (cli == AgentCli.Claude && os == TargetOs.MacOS)
-            return new CliSignIn(SignInStatus.Pending, SignInCatalog.MacClaudePending, [], new Dictionary<string, string>());
+            return new CliSignIn(SignInStatus.SignedIn, "signed in", [new CliSignInFile(Yawble.Core.Credentials.ClaudeHostSession.KeychainService, SignInAccess.HostStore, true, "Claude (macOS login Keychain)")],
+                new Dictionary<string, string>());
         if (cli == AgentCli.Codex)
             return new CliSignIn(SignInStatus.SignedIn, "signed in", [new CliSignInFile(H(".codex", "auth.json"), SignInAccess.CopyIn, true, "Codex")],
                 new Dictionary<string, string>());

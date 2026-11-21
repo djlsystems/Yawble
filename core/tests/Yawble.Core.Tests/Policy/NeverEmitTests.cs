@@ -18,7 +18,8 @@ public class NeverEmitTests
         foreach (var os in Enum.GetValues<TargetOs>())
             foreach (var mode in Enum.GetValues<CredentialMode>())
                 foreach (var kind in Enum.GetValues<RunKind>())
-                    data.Add(os, mode, kind);
+                    if (!(os == TargetOs.MacOS && mode == CredentialMode.ClaudeHostSignIn)) // macOS never offers it: refused below
+                        data.Add(os, mode, kind);
         return data;
     }
 
@@ -80,6 +81,55 @@ public class NeverEmitTests
     [Fact]
     public void CatchesSeatbeltKeychainAccess() =>
         AssertCaught(TargetOs.MacOS, r => r["seatbelt"]!["keychainAccess"] = true, "keychainAccess");
+
+    // ---- B118: macOS Claude is held by the gateway (it reads the login Keychain on the host); a Mac sandbox gets no sign-in.
+
+    [Fact]
+    public void AMacClaudeRunWithTheFileGrantModeIsRefused()
+    {
+        var run = PolicyFixtures.Run(TargetOs.MacOS, CredentialMode.ClaudeHostSignIn);
+        var e = Assert.Throws<InvalidOperationException>(() => SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, null, run));
+        Assert.Contains("macOS never uses ClaudeHostSignIn", e.Message);
+    }
+
+    [Theory]
+    [InlineData("/Users/alice/Library/Keychains")]
+    [InlineData("/Users/alice/Library/Keychains/login.keychain-db")]
+    [InlineData("/Library/Keychains")]
+    [InlineData("/Users/alice/Library")]
+    [InlineData("/Users/alice/.claude/.credentials.json")]
+    [InlineData("/Users/alice/src/reference/.credentials.json")]
+    [InlineData("/Users/alice/src/reference/backup.keychain-db")]
+    public void CatchesAKeychainOrSignInFileGrantOnAMac(string grant)
+    {
+        foreach (var mode in new[] { CredentialMode.ClaudeGatewaySignIn, CredentialMode.ClaudeSubscription, CredentialMode.GrokGatewaySignIn })
+        {
+            var (compiled, run) = Valid(TargetOs.MacOS, mode);
+            var request = (JsonObject)compiled.Request.DeepClone();
+            ((JsonArray)request["filesystem"]!["readonlyPaths"]!).Add(grant);
+            var problems = SandboxRequestInvariants.CheckRequest(request, run);
+            Assert.Contains(problems, p => p.Contains(grant, StringComparison.Ordinal) && (p.Contains("Keychain") || p.Contains("sign-in file") || p.Contains("implicitly denied")));
+        }
+    }
+
+    [Fact]
+    public void CatchesTheClaudeStoreVariableOnAMac() =>
+        AssertCaught(TargetOs.MacOS, r => Env(r).Add("CLAUDE_SECURESTORAGE_CONFIG_DIR=/Users/alice/.claude"), "never set on macOS", CredentialMode.ClaudeGatewaySignIn);
+
+    [Fact]
+    public void AMacClaudeGatewayRunCarriesNoCredentialPathOrSecret()
+    {
+        var (compiled, run) = Valid(TargetOs.MacOS, CredentialMode.ClaudeGatewaySignIn);
+        Assert.Empty(SandboxRequestInvariants.Check(compiled, run));
+        var text = compiled.RequestJson;
+        foreach (var never in new[] { ".credentials.json", "Claude Code-credentials", "keychain-db", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "sk-ant-" })
+            Assert.DoesNotContain(never, text);
+        var fs = compiled.Request["filesystem"]!;
+        var grants = ((JsonArray)fs["readonlyPaths"]!).Concat((JsonArray)fs["readwritePaths"]!).Select(n => n!.GetValue<string>()).ToList();
+        Assert.DoesNotContain(grants, g => g.Contains("Keychains", StringComparison.Ordinal) || g.Contains("/.claude", StringComparison.Ordinal) && !g.Contains("/members/"));
+        Assert.Contains("/Users/alice/Library/Keychains", ((JsonArray)fs["deniedPaths"]!).Select(n => n!.GetValue<string>()));
+        Assert.False(compiled.Request["seatbelt"]!["keychainAccess"]!.GetValue<bool>());
+    }
 
     [Theory]
     [InlineData(TargetOs.Linux)]

@@ -38,6 +38,9 @@ public sealed class FakeHost : IHostFileSystem, ICliProcessRunner
     public List<string> Reads { get; } = [];
     public List<CliProbeCommand> Probes { get; } = [];
 
+    /// <summary>The host's credential store (macOS: the login Keychain), fake: nothing real is ever looked up.</summary>
+    public Credentials.FakeKeychain Keychain { get; } = new();
+
     /// <summary>What "--version" answers, by the probed file name; default exit 0 with <see cref="VersionOutput"/>.</summary>
     public Func<CliProbeCommand, CliProbeResult>? Respond { get; set; }
 
@@ -89,7 +92,7 @@ public sealed class FakeHost : IHostFileSystem, ICliProcessRunner
     public DetectionHost Host()
     {
         var env = new HostEnvironment(Os, Home, PathDirs, Os == TargetOs.Windows ? [".COM", ".EXE", ".BAT", ".CMD"] : [], Vars);
-        return new DetectionHost(env, this, this);
+        return new DetectionHost(env, this, this) { CredentialStore = Keychain };
     }
 
     /// <summary>Follows links the way the OS does when a file is opened.</summary>

@@ -8,7 +8,8 @@ namespace Yawble.Core.Credentials;
 /// Reads an agent CLI's OWN sign-in from the host's credential store (the person signed in to that CLI in their own
 /// terminal; the app never asks for it). Only for CLIs whose sign-in lives there and that accept it another way inside
 /// the sandbox (Copilot's token as COPILOT_GITHUB_TOKEN): an AppContainer cannot read Credential Manager (measured:
-/// CredReadW returns ERROR_ACCESS_DENIED for every target inside a ProcessContainer). Values are never logged.
+/// CredReadW returns ERROR_ACCESS_DENIED for every target inside a ProcessContainer). On macOS, Claude Code's sign-in
+/// in the login Keychain, read by the gateway (<see cref="ClaudeHostSession"/>). Values are never logged.
 /// </summary>
 public interface IHostCredentialReader
 {
@@ -22,7 +23,29 @@ public interface IHostCredentialReader
 public static class HostCredentials
 {
     public static IHostCredentialReader ForThisHost() =>
-        OperatingSystem.IsWindows() ? new WindowsHostCredentialReader() : new NoHostCredentialReader();
+        OperatingSystem.IsWindows() ? new WindowsHostCredentialReader()
+        : OperatingSystem.IsMacOS() ? new MacHostCredentialReader()
+        : new NoHostCredentialReader();
+}
+
+/// <summary>
+/// macOS: a target is the SERVICE of a generic password in the login Keychain (Claude Code's "Claude Code-credentials").
+/// <see cref="Targets"/> takes an exact service name (no wildcard) and checks the item exists without reading its
+/// password, so it shows no prompt. <see cref="Read"/> reads the password of the item whose account is the user name
+/// (Claude Code's own), else of any account of that service; the first read makes macOS ask the person once.
+/// Through <see cref="MacKeychainStore"/>'s Keychain calls. NOT exercised off macOS; tests use a fake reader.
+/// </summary>
+[SupportedOSPlatform("macos")]
+public sealed class MacHostCredentialReader(Func<string>? userName = null) : IHostCredentialReader
+{
+    private readonly Func<string> _userName = userName ?? (() => Environment.UserName);
+
+    public IReadOnlyList<string> Targets(string filter) =>
+        filter.Length > 0 && !filter.EndsWith('*') && MacKeychainStore.ItemExists(filter, null) ? [filter] : [];
+
+    public string? Read(string target) =>
+        MacKeychainStore.ReadItem(target, _userName()) is { Length: > 0 } own ? own
+        : MacKeychainStore.ReadItem(target, null) is { Length: > 0 } any ? any : null;
 }
 
 public sealed class NoHostCredentialReader : IHostCredentialReader

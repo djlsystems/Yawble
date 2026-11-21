@@ -250,7 +250,8 @@ public class PolicyMergeTests
     [InlineData(TargetOs.MacOS)]
     public void ThePersonalFoldersReachTheCompiledDenyList(TargetOs os)
     {
-        var run = PolicyFixtures.Run(os, CredentialMode.ClaudeHostSignIn);
+        // macOS Claude is gateway-held only (B118); Linux and Windows keep the file-grant mode here.
+        var run = PolicyFixtures.Run(os, os == TargetOs.MacOS ? CredentialMode.ClaudeGatewaySignIn : CredentialMode.ClaudeHostSignIn);
         var compiled = SandboxRequestCompiler.Compile(GlobalPolicy.Default, null, null, run);
         var denied = ((System.Text.Json.Nodes.JsonArray)compiled.Request["filesystem"]!["deniedPaths"]!).Select(n => n!.GetValue<string>()).ToList();
         var home = PolicyFixtures.Machine(os).Home;
