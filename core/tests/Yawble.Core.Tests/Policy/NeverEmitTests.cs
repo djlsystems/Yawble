@@ -83,23 +83,31 @@ public class NeverEmitTests
         AssertCaught(TargetOs.MacOS, r => r["seatbelt"]!["keychainAccess"] = true, "keychainAccess");
 
     [Theory]
-    [InlineData("com.apple.SecurityServer")]
     [InlineData("com.apple.securityd")]
+    [InlineData("com.apple.securityd.xpc")]
     [InlineData("com.apple.pasteboard.1")]
     public void CatchesAMachLookupBeyondTheCertificateAndGroupServices(string name) =>
         AssertCaught(TargetOs.MacOS, r => r["seatbelt"]!["extraMachLookups"]!.AsArray().Add(name), "extraMachLookups");
 
     [Fact]
-    public void AMacRunLooksUpOnlyTheCertificateAndGroupServices_AndReadsTheMdsFolder()
+    public void AMacRunLooksUpOnlyTheCertificateAndGroupServices_AndTheLoginKeychainStaysDenied()
     {
         var run = PolicyFixtures.Run(TargetOs.MacOS, CredentialMode.ClaudeGatewaySignIn);
         var c = SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, null, run);
-        Assert.Equal(SandboxRequestCompiler.MacMachLookups,
+        Assert.Equal(["com.apple.SecurityServer", "com.apple.trustd.agent", "com.apple.system.opendirectoryd.libinfo"],
             c.Request["seatbelt"]!["extraMachLookups"]!.AsArray().Select(n => n!.GetValue<string>()));
-        Assert.DoesNotContain("com.apple.SecurityServer", SandboxRequestCompiler.MacMachLookups);
-        Assert.Contains("/private/var/db/mds", c.Request["filesystem"]!["readonlyPaths"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Contains(run.Layout.Home.TrimEnd('/') + "/Library/Keychains", c.Request["filesystem"]!["deniedPaths"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.False(c.Request["seatbelt"]!["keychainAccess"]!.GetValue<bool>());
         Assert.Empty(SandboxRequestInvariants.Check(c, run));
     }
+
+    [Fact]
+    public void CatchesSecurityServerWithoutTheLoginKeychainDenied() =>
+        AssertCaught(TargetOs.MacOS, r =>
+        {
+            var denied = r["filesystem"]!["deniedPaths"]!.AsArray();
+            foreach (var n in denied.Where(n => n!.GetValue<string>().EndsWith("/Library/Keychains", StringComparison.Ordinal)).ToList()) denied.Remove(n);
+        }, "~/Library/Keychains");
 
     // ---- B118: macOS Claude is held by the gateway (it reads the login Keychain on the host); a Mac sandbox gets no sign-in.
 

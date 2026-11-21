@@ -128,9 +128,10 @@ native library.
 - **Request compiler.** A pure function emits a create-and-run request with explicit containment, an explicit
   environment, egress deny with the run's gateway as the only network proxy, UI off, clipboard none, and telemetry
   off. On Windows it forbids DACL mutation; on macOS keychain access is off, and the only extra Mach services a run
-  may reach are the certificate checks (`com.apple.trustd`, `com.apple.trustd.agent`, `com.apple.ocspd`) and the
-  group-membership lookup (`com.apple.system.opendirectoryd.membership`), with `/private/var/db/mds` read-only, so
-  TLS and file-owner checks work; `com.apple.SecurityServer`, which hands out keychain items, stays closed.
+  may reach are `com.apple.SecurityServer` and `com.apple.trustd.agent` (TLS certificate checks) and
+  `com.apple.system.opendirectoryd.libinfo` (user and group lookups). SecurityServer serves only keychains whose files
+  the run can read, and `~/Library/Keychains` is always denied (the invariants require it), so no login-keychain item
+  reaches a run; the data-protection keychain service stays closed.
 - **Invariants.** Every compiled request is checked before launch, so a forbidden option can never run. Golden files
   (`core/tests/Yawble.Core.Tests/Golden/`) hold the exact request per OS and CLI; regenerate them with
   `YAWBLE_UPDATE_GOLDEN=1` and review the diff.

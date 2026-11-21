@@ -95,11 +95,9 @@ public sealed record RunLayout
     public string TeamDocumentsCandidate => new PolicyPaths(Os, Home).Combine(TeamRoot, Teams.TeamDocuments.Folder);
 
     /// <summary>Always read-only: exactly the CLI's install folders, the app's own helpers and the role text, and the
-    /// host's sign-in files for this CLI whose access is read-only (exact files, never their folder). macOS adds the
-    /// certificate module directory TLS checks read (Sandboxing.SandboxRequestCompiler.MacMdsFolder).</summary>
+    /// host's sign-in files for this CLI whose access is read-only (exact files, never their folder).</summary>
     public IReadOnlyList<string> ImplicitReadonly =>
-        [.. CliInstall.ReadOnlyFolders, .. HostToolFolders, AppBinDir, RoleTextDir, .. CliInstall.SignInReadOnly, .. (SharedRepo is null ? [] : new[] { SharedRepo }), .. ExtraSharedPaths, .. ReferencePaths,
-         .. (Os == TargetOs.MacOS ? new[] { Sandboxing.SandboxRequestCompiler.MacMdsFolder } : [])];
+        [.. CliInstall.ReadOnlyFolders, .. HostToolFolders, AppBinDir, RoleTextDir, .. CliInstall.SignInReadOnly, .. (SharedRepo is null ? [] : new[] { SharedRepo }), .. ExtraSharedPaths, .. ReferencePaths];
 
     /// <summary>The member's team folder (&lt;root&gt;/teams/&lt;team&gt;); never granted itself.</summary>
     public string TeamRoot { get; init; } = "";
