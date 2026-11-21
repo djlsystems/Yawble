@@ -164,8 +164,9 @@ public sealed record AgentCommandLines(CommandLineDescription Headless, CommandL
 /// <param name="Agent">The agent profile's name when it is a custom agent (recorded on the run); null = the built-in, named by its CLI.</param>
 /// <param name="Custom">The custom agent's argument changes; null for a built-in.</param>
 /// <param name="AgentModel">The custom agent's own default model; null for a built-in (its default is in agent_defaults).</param>
+/// <param name="AllowLocalhost">The team's "Allow localhost (macOS)" (0054, B119; off by default): given to the run's request input.</param>
 public sealed record LaunchMember(long Id, string Team, string Name, AgentCli Cli, IReadOnlyDictionary<string, string>? TeamEnv = null,
-    string? Model = null, string? Agent = null, ArgvCustomization? Custom = null, string? AgentModel = null);
+    string? Model = null, string? Agent = null, ArgvCustomization? Custom = null, string? AgentModel = null, bool AllowLocalhost = false);
 
 public interface IMemberDirectory
 {
@@ -190,7 +191,7 @@ public sealed class SqliteMemberDirectory(string connectionString, Agents.Profil
         using var c = new SqliteConnection(connectionString);
         c.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = $"SELECT m.id, t.name, m.name, m.cli, t.env, s.model FROM members m JOIN teams t ON t.id = m.team_id LEFT JOIN member_settings s ON s.member_id = m.id {where} ORDER BY m.id;";
+        cmd.CommandText = $"SELECT m.id, t.name, m.name, m.cli, t.env, s.model, t.allow_localhost FROM members m JOIN teams t ON t.id = m.team_id LEFT JOIN member_settings s ON s.member_id = m.id {where} ORDER BY m.id;";
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v);
         using var r = cmd.ExecuteReader();
         var list = new List<LaunchMember>();
@@ -199,7 +200,8 @@ public sealed class SqliteMemberDirectory(string connectionString, Agents.Profil
             // members.cli is a built-in's id or a custom agent's name: the custom one brings its argv changes and default model.
             var agent = Agents.Profiles.AgentResolvers.Resolve(_agents, r.GetString(3));
             list.Add(new LaunchMember(r.GetInt64(0), r.GetString(1), r.GetString(2), agent.Cli, Teams.TeamEnv.Parse(r.IsDBNull(4) ? null : r.GetString(4)),
-                r.IsDBNull(5) ? null : r.GetString(5), agent.RecordedAgent, agent.Argv, agent.Custom ? agent.DefaultModel : null));
+                r.IsDBNull(5) ? null : r.GetString(5), agent.RecordedAgent, agent.Argv, agent.Custom ? agent.DefaultModel : null,
+                AllowLocalhost: !r.IsDBNull(6) && r.GetInt64(6) != 0));
         }
         return list;
     }
@@ -321,6 +323,9 @@ public sealed class SandboxLauncher(
     }
 
     public RunRegistry Registry => registry;
+
+    /// <summary>Tests only: sees each run's input to the request compiler just before it is compiled.</summary>
+    internal Action<RunSpec>? Compiling { get; set; }
 
     /// <summary>The host facts every run's layout is built from (the guardrail check reports on the same layout).</summary>
     public LaunchHost Host => host;
@@ -509,7 +514,7 @@ public sealed class SandboxLauncher(
             SignInCopy? signInCopy = null;
             try
             {
-                compiled = SandboxRequestCompiler.Compile(policy, new RunSpec
+                var runSpec = new RunSpec
                 {
                     Layout = layout,
                     Credential = mode,
@@ -522,7 +527,11 @@ public sealed class SandboxLauncher(
                     RunToken = token,
                     GatewayPort = gateway.Port,
                     TeamEnv = member.TeamEnv,
-                }, host.Canonicalize);
+                    // B119: the team's "Allow localhost (macOS)"; the compiler uses it for macOS requests only.
+                    AllowLocalhost = member.AllowLocalhost,
+                };
+                Compiling?.Invoke(runSpec);
+                compiled = SandboxRequestCompiler.Compile(policy, runSpec, host.Canonicalize);
                 // What this run really ran with, for the run's record (and cost over time): agent, resolved model, CLI version, argv.
                 records.RanWith(runKey, member.Agent ?? cliName, resolvedModel.Model, resolvedModel.Source, cliInstall.Version,
                     Agents.RunArgv.ForRecord(compiled.Argv, request.Prompt, [token, .. layout.CliInstall.SecretEnvironment.Values, AgentPresets.CopilotPlaceholder(token)]));

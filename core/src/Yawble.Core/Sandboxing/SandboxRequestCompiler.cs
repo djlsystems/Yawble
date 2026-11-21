@@ -36,6 +36,9 @@ public sealed record RunSpec
 
     /// <summary>The team's environment variables: added under the app's own (a name the app sets, or reserves, is skipped).</summary>
     public IReadOnlyDictionary<string, string>? TeamEnv { get; init; }
+
+    /// <summary>The team's "Allow localhost (macOS)" (B119; off by default).</summary>
+    public bool AllowLocalhost { get; init; }
 }
 
 /// <summary>The compute limits that do not go into the request.</summary>
