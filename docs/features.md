@@ -300,9 +300,15 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Windows and Linux runs do not read it: their sandboxes give each run a loopback of its own.
   - Turning it on or off is in the audit log. It is a full-access change: a Cloud Link Visitor sees it read-only and
     cannot set it, and the core refuses a Visitor's change.
-  - Without it, the dev-tools skill steers agents on macOS to xUnit v3 / Microsoft.Testing.Platform test projects. When
-    a classic VSTest `dotnet test` fails at `TcpListener.Start` with Permission denied, the agent tells its Manager
-    where the setting is.
+  - Classic VSTest `dotnet test` needs a local port, so on macOS it works only with the setting on.
+  - xUnit v3 / Microsoft.Testing.Platform `dotnet test` does not work on macOS with the setting on or off: it opens
+    its pipe as a socket file at a fixed `/tmp` path, which the sandbox refuses, and the setting opens only local
+    ports. `/tmp` stays closed; there is no grant for it.
+  - So the dev-tools skill tells agents on macOS to make test projects xUnit v3 / Microsoft.Testing.Platform, build
+    the test project and run its executable (or `dotnet exec` its dll), filtering with the runner's own options. When
+    `dotnet test` fails with `SocketException (13)` Permission denied, the agent tells its Manager in one line where
+    the setting is, and for an xUnit v3 / Microsoft.Testing.Platform project also that its tests run as the
+    executable.
 - Floor rules nobody can loosen:
   - model vendors' API and sign-in hosts are never allowed hosts;
   - no IP addresses or wildcards;
