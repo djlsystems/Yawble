@@ -16,7 +16,7 @@ test.setTimeout(90_000);
 
 const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B100');
 const BODY = '## Building and testing\n- Run `npm run build` in shell before any e2e spec: specs load shell/out (2026-11-18, workflow 12)\n' +
-  '## Git\n- Fetch the team branch before merging a member\'s branch (2026-11-17, workflow 9)';
+  '## Git\n- Fetch the team branch before merging a member\'s branch (2026-11-17, workflow 9)\n\n```sh\nnpm run build\n```\nSee [the docs](https://example.com/docs).';
 const retros = { name: 'team_retros', description: 'Lessons from this team\'s earlier work, kept by the Manager\'s retrospectives.', roles: ['any'], body: BODY,
   kind: 'custom', teamId: 1, team: 'payments', id: 31, updatedAt: '2026-11-18T09:00:00Z' };
 const version = (n: number, body: string, workflow: number, at: string) =>
@@ -91,6 +91,15 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   await expect(view.locator('li')).toHaveCount(2);
   await expect(view.locator('li code')).toHaveText('npm run build');
   await expect(view).not.toContainText('## ');
+  await expect(view.locator('pre code')).toHaveText(/npm run build/);
+  await expect(view.locator('a')).toHaveAttribute('target', '_blank');
+  // Both themes (styles.css keys its variables on <html data-theme>): the person can compare the rendered text.
+  const theme = (t: string) => page.evaluate((v) => document.documentElement.setAttribute('data-theme', v), t);
+  await theme('light');
+  await page.screenshot({ path: path.join(SHOTS, 'card529-skill-markdown-light.png') });
+  await theme('dark');
+  await page.screenshot({ path: path.join(SHOTS, 'card529-skill-markdown-dark.png') });
+  await theme('light');
   await expect(page.locator('[data-test=skills-pane] h3')).toHaveText('team_retros');
   await expect(page.locator('[data-test=skill-last-writer]')).toContainText('Last written by the retro of workflow 12');
   await expect(page.locator('[data-test=skill-last-writer]')).toContainText('(version 2)');
