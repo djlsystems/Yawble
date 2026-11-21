@@ -29,4 +29,20 @@ public class DotnetShimTests
         var args = given.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(expected, string.Join(" ", Yawble.DotnetShim.Program.Rewrite(args)));
     }
+
+    [Fact]
+    public void OnMacOS_TheRealDotnetIsTheFirstOnPathThatIsNotTheWrapper()
+    {
+        var files = new HashSet<string> { "/app/bin/dotnet-shim/dotnet", "/usr/local/share/dotnet/dotnet" };
+        Assert.Equal("/usr/local/share/dotnet/dotnet", Yawble.DotnetShim.Program.RealDotnet(
+            "/app/bin/dotnet-shim:/usr/local/share/dotnet:/usr/bin", "/app/bin/dotnet-shim/dotnet", windows: false, files.Contains));
+    }
+
+    [Fact]
+    public void OnMacOS_WithoutDotnetOnPath_TheInstallersFolderIsTried()
+    {
+        var files = new HashSet<string> { "/usr/local/share/dotnet/dotnet" };
+        Assert.Equal("/usr/local/share/dotnet/dotnet", Yawble.DotnetShim.Program.RealDotnet("/usr/bin:/bin", "/app/bin/dotnet-shim/dotnet", windows: false, files.Contains));
+        Assert.Null(Yawble.DotnetShim.Program.RealDotnet("/usr/bin:/bin", "/app/bin/dotnet-shim/dotnet", windows: false, _ => false));
+    }
 }
