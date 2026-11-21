@@ -144,6 +144,7 @@ public class AuditClassificationTests
         "teams.create",
         "teams.delete",
         "teams.generateNames",
+        "teams.localhost",
         "teams.pause",
         "teams.push",
         "teams.removeApproval",

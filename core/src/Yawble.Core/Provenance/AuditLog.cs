@@ -43,6 +43,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         ["teams.push"] = "on", ["teams.syncToBase"] = "on",
         // B085: { teamId } reads the team's workflowExpiryDays, { teamId, days } sets it.
         ["teams.workflowExpiry"] = "days",
+        // B119: { teamId } reads "Allow localhost (macOS)", { teamId, on } sets it.
+        ["teams.localhost"] = "on",
     };
 
     /// <summary>A call that only reads: not audited. A get-or-set call reads when it carries no value to set.</summary>

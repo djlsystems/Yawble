@@ -80,6 +80,8 @@ public sealed class UiRpc(
                 "teams.push" => PushSetting(Long(p, "teamId"), p?["on"] is JsonValue pv && pv.TryGetValue<bool>(out var pon) ? pon : null),
                 // B085: { teamId } reads the team's workflowExpiryDays (default 3), { teamId, days: 1-365 } sets it; both return { days }.
                 "teams.workflowExpiry" => await WorkflowExpiryAsync(p, ct),
+                // B119: { teamId } reads "Allow localhost (macOS)" (off by default), { teamId, on } sets it; both return { on }.
+                "teams.localhost" => await LocalhostSettingAsync(p, ct),
                 "teams.env" => S(await bus.TeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
                 "teams.setEnv" => S(await bus.SetTeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), EnvEntries(p), ct)),
                 "teams.approvals" => S(await bus.TeamApprovalsAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
@@ -777,6 +779,21 @@ public sealed class UiRpc(
         var repos = bus.Repos ?? throw new RpcException("unavailable", "team repositories need the app's data folder");
         if (on is { } v) repos.SetPushesToOrigin(teamId, v);
         return new JsonObject { ["on"] = repos.PushesToOrigin(teamId), ["origin"] = repos.RepoOf(teamId)?.Path };
+    }
+
+    /// <summary>
+    /// teams.localhost (B119): reads, or sets with "on" (true or false; anything else is refused), the team's "Allow localhost
+    /// (macOS)". A set is audited and is a full-access change (RemoteAccess: refused for a Visitor).
+    /// </summary>
+    private async Task<JsonNode> LocalhostSettingAsync(JsonObject? p, CancellationToken ct)
+    {
+        bool? on = null;
+        if (p?["on"] is { } raw)
+        {
+            if (raw is not JsonValue v || !v.TryGetValue<bool>(out var b)) throw new RpcException("bad_request", "on must be true or false");
+            on = b;
+        }
+        return new JsonObject { ["on"] = await bus.TeamLocalhostAsync(await TeamNameOf(Long(p, "teamId"), ct), on, ct) };
     }
 
     /// <summary>

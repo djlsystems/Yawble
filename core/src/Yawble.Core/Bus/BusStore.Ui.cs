@@ -51,6 +51,11 @@ public sealed partial class BusStore
 
     public void SetTeamEnv(long teamId, string json) => Exec("UPDATE teams SET env = $e WHERE id = $id;", ("$e", json), ("$id", teamId));
 
+    /// <summary>"Allow localhost (macOS)" (0054, B119): off unless the person turned it on for this team.</summary>
+    public bool TeamAllowsLocalhost(long teamId) => Scalar<long?>("SELECT allow_localhost FROM teams WHERE id = $id;", ("$id", teamId)) is { } v && v != 0;
+
+    public void SetTeamAllowsLocalhost(long teamId, bool on) => Exec("UPDATE teams SET allow_localhost = $v WHERE id = $id;", ("$v", on ? 1 : 0), ("$id", teamId));
+
     /// <summary>A member's instructions that have not started: dropped, and its queue place with them. The count.</summary>
     public int DropWaiting(long memberId, string qualified)
     {
