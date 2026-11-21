@@ -103,17 +103,18 @@ public static partial class SandboxRequestCompiler
     public const string DotnetShimFolder = "dotnet-shim";
 
     /// <summary>
-    /// macOS: the Mach services a run may look up beyond the sandbox's defaults. trustd and ocspd check TLS certificate
-    /// chains: without them every .NET HTTPS call failed "bad certificate format" (NuGet's restore, found on the Mac
-    /// mini) while Apple's curl, with its own certificate file, got through. opendirectoryd's membership service answers
-    /// getgroups: without it .NET overflowed reading a file another user owns (the SDK's apphost: "CreateAppHost ...
-    /// OverflowException at IsMemberOfGroup"). None hands out keychain items.
+    /// macOS: the Mach services a run may look up beyond the sandbox's defaults, each found needed on the Mac mini by
+    /// adding one at a time to the run's profile. com.apple.SecurityServer and com.apple.trustd.agent build TLS
+    /// certificate chains: without them every .NET HTTPS call failed "bad certificate format" (NuGet's restore) while
+    /// Apple's curl, with its own certificate file, got through. com.apple.system.opendirectoryd.libinfo resolves the
+    /// user's groups: without it .NET overflowed reading a file another user owns (the SDK's apphost: "CreateAppHost ...
+    /// OverflowException at IsMemberOfGroup"). The person chose to allow SecurityServer (2026-11-21): it serves only
+    /// keychains whose files the caller can read, and ~/Library/Keychains is always denied (RunLayout.ImplicitDenied,
+    /// required by the invariants): from a run "Claude Code-credentials" is not found and the login keychain lists no
+    /// entry. keychainAccess stays false and securityd's data-protection service (com.apple.securityd.xpc) stays closed.
     /// </summary>
     public static IReadOnlyList<string> MacMachLookups { get; } =
-        ["com.apple.trustd", "com.apple.trustd.agent", "com.apple.ocspd", "com.apple.system.opendirectoryd.membership"];
-
-    /// <summary>macOS: the certificate module directory (CSSM's MDS database) a run reads, read-only, for TLS checks ("CSSM_ModuleLoad()" without it).</summary>
-    public const string MacMdsFolder = "/private/var/db/mds";
+        ["com.apple.SecurityServer", "com.apple.trustd.agent", "com.apple.system.opendirectoryd.libinfo"];
 
     public static CompiledRun Compile(
         GlobalPolicy global, PolicyPatch? overridePatch, PolicyPatch? loosen, RunSpec run,
@@ -204,8 +205,7 @@ public static partial class SandboxRequestCompiler
         if (os == TargetOs.MacOS)
         {
             // Explicitly off: no login keychain from the sandbox (credential stores). Only the Mach services certificate
-            // checks and group lookups need (MacMachLookups); never com.apple.SecurityServer or securityd, which hand out
-            // keychain items.
+            // checks and group lookups need (MacMachLookups).
             request["seatbelt"] = new JsonObject
             {
                 ["keychainAccess"] = false,

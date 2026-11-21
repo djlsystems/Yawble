@@ -54,7 +54,6 @@
       "/Users/alice/.grok/downloads",
       "/Applications/Yawble.app/Contents/Resources/bin",
       "/Applications/Yawble.app/Contents/Resources/roles",
-      "/private/var/db/mds",
       "/Users/alice/src/reference"
     ],
     "readwritePaths": [
@@ -109,10 +108,9 @@
   "seatbelt": {
     "keychainAccess": false,
     "extraMachLookups": [
-      "com.apple.trustd",
+      "com.apple.SecurityServer",
       "com.apple.trustd.agent",
-      "com.apple.ocspd",
-      "com.apple.system.opendirectoryd.membership"
+      "com.apple.system.opendirectoryd.libinfo"
     ]
   },
   "telemetry": {
