@@ -50,7 +50,7 @@ import { installTapTitles, usePhone } from './phone';
 import { pushEscape } from './escapeClose';
 import { findWorkflowTeam, parseRemoteHash } from './remoteHash';
 import { loadConciergeDefault, newChatAgent, savedConciergeAgent } from './conciergeDefault';
-import { isEmbed, startEmbedBridge, type EmbedNavState } from './embed';
+import { isEmbed, placeAllowed, startEmbedBridge, type EmbedNavState } from './embed';
 import { readOnly } from './remoteAccess';
 import EmbedRenameDialog from './components/EmbedRenameDialog.vue';
 
@@ -482,8 +482,11 @@ function command(id: string) {
 // the drawer already, and Settings is the gear in the top bar.
 const menuInDrawer = computed(() => phone.value && !!api.remote);
 const DRAWER_COMMANDS = ['theme:system', 'theme:light', 'theme:dark', 'terminal', 'checkUpdates', 'about', 'go:settings-agents'];
+// A read-only viewer (Visitor) is not offered Terminal: the core refuses every terminal call to one (embed.ts placeAllowed,
+// the same rule for the cloud's places).
 const drawerMenu = computed<MenuBarItem[]>(() => (menuInDrawer.value
-  ? menus.value.flatMap((m) => m.items).filter((i): i is MenuBarItem => !i.separator && DRAWER_COMMANDS.includes(i.id))
+  ? menus.value.flatMap((m) => m.items).filter((i): i is MenuBarItem => !i.separator && DRAWER_COMMANDS.includes(i.id)
+    && !(i.id === 'terminal' && !placeAllowed('terminal', readOnly.value)))
   : []));
 
 /** The window's own shortcuts (the menu's); typing in a field keeps its own Ctrl+Z/C/V/A. */
@@ -515,6 +518,7 @@ function askEmbedTitle(current: string): Promise<string | null> {
 const embedState = (): EmbedNavState => ({
   view: view.value, conversations: conversations.value, teams: teams.value, conversationId: conversationId.value, teamId: selected.value,
   slots: overview.value?.slots ?? null, readOnly: readOnly.value, removing: removingChat.value, openWorkflows: openWorkflows.value,
+  terminalOpen: terminalPane.open, settingsTab: prefTab.value,
 });
 if (embed) {
   let bridge: { dispose(): void } | null = null;
@@ -524,6 +528,9 @@ if (embed) {
       handlers: {
         newChat, go, openTeam: (id) => openTeam(id), openConversation, rename, remove,
         logs: () => go('logs'),
+        // B117: the drawer's Terminal and About Yawble, the same commands.
+        terminal: () => command('terminal'),
+        help: () => command('about'),
         newTeam: () => { dialog.value = 'newTeam'; },
       },
       dialogs: { askTitle: askEmbedTitle },

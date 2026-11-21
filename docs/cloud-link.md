@@ -97,13 +97,13 @@ desktop's side in `shell/src/renderer/src/embed.ts`):
 ```text
 CONTRACT (window.postMessage, both sides check event.origin === location.origin and event.source; anything else is ignored)
 Desktop to cloud: {type:'yawble.nav', version:1, nav} each time anything in it changes, and once on load. nav =
-  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs: the same ids/order as Sidebar.vue
+  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs: the same ids/order as Sidebar.vue; then Terminal (not for a Visitor) and Help
     teams:  [{id, name, dot:'idle'|'running'|'attention'|..., badge|null, active}],
     canNewTeam: bool,
     chats:  [{id, title, active, busy:'deleting'|null, actions:[{id, label, danger}]}],
     runSlots: string|null,           // the line under the sidebar today
     readOnly: bool }                 // a Visitor's view
-  icon is a short key: newChat, concierge, teams, backlog, workflows, kanban, documents, monitor, logs; the cloud draws its own icon for a key it knows.
+  icon is a short key: newChat, concierge, teams, backlog, workflows, kanban, documents, monitor, logs, terminal, help; the cloud draws its own icon for a key it knows.
 Cloud to desktop: {type:'yawble.navigate', to:{kind:'place', id} | {kind:'team', id} | {kind:'chat', id} | {kind:'newTeam'} | {kind:'chatAction', id, action}} does exactly what the same click in the desktop sidebar does (including the confirm dialogs for a chat's actions, drawn inside the frame).
 Cloud to desktop: {type:'yawble.theme', theme}.
 Desktop to cloud: {type:'yawble.ready', version:1} once it listens.
@@ -113,7 +113,11 @@ The values the desktop sends:
 
 - **Places**, in this order, as `id` / `icon`: `newChat` / `newChat`, `concierge` / `concierge`, `teams` / `teams`,
   `backlog` / `backlog`, `workflows` / `workflows`, `board` / `kanban` (label Kanban board), `documents` /
-  `documents`, `monitor` / `monitor`, `logs` / `logs`. Settings is not a place. `badge` is a number: Teams has the
+  `documents`, `monitor` / `monitor`, `logs` / `logs`, `terminal` / `terminal`, `help` / `help`. Terminal and Help are what a
+  phone's drawer has at its bottom: Terminal shows or hides the terminal pane, as the drawer's Terminal does, and is
+  `active` while the pane is shown; it is left out for a read-only viewer (Visitor), whose terminal calls the core
+  refuses. Help opens Settings at System (the version and the help links), as the drawer's About Yawble does, and is
+  `active` while that tab is shown. Settings itself is not a place. `badge` is a number: Teams has the
   number of teams, Workflows the number of open workflows; otherwise, or when it is 0, `null`. `active` is the screen
   shown now; New chat and Logs are never active. `disabled` is `false`.
 - **Teams**: `id` is the team's number. `dot` is `running`, `queued`, `paused` or `idle`, as the sidebar's dot; the
@@ -130,7 +134,7 @@ What the desktop does with the cloud's messages:
   and `{kind:'chatAction', id, action}` a chat's id, with `action` `rename` or `delete`.
 - Delete asks **Delete this chat?** in the frame first; Rename asks for the new title in the frame.
 - A message is ignored, as a missing or turned-off button would be, when the team or chat is not in the nav, when a
-  read-only viewer asks for New team or a chat's action, or when a Delete is asked while a chat is being deleted. A
+  read-only viewer asks for New team, a chat's action or Terminal, or when a Delete is asked while a chat is being deleted. A
   message with another `type`, an unknown `kind`, place, action or theme, or the wrong origin or source is ignored.
 - The desktop posts to its own origin only (`location.origin`) and takes messages only from its parent window.
   Opened outside a frame, it posts nothing and listens to nothing.

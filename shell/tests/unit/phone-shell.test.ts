@@ -213,7 +213,8 @@ describe('the shell on a phone: the drawer', () => {
     expect(more.attributes('aria-expanded')).toBe('true');
     expect((w.get('[data-test=drawer-menu-items]').element as HTMLElement).style.display).toBe('');
     const items = w.findAll('[data-test=drawer-menu-items] button').map((b) => b.attributes('data-test'));
-    expect(items).toEqual(['drawer-terminal', 'drawer-theme:system', 'drawer-theme:light', 'drawer-theme:dark', 'drawer-checkUpdates', 'drawer-about', 'drawer-go:settings-agents']);
+    // B117: no Terminal for a Visitor (the core refuses every terminal call to a read-only viewer).
+    expect(items).toEqual(['drawer-theme:system', 'drawer-theme:light', 'drawer-theme:dark', 'drawer-checkUpdates', 'drawer-about', 'drawer-go:settings-agents']);
     expect(w.get('[data-test="drawer-theme:system"]').attributes('aria-checked')).toBeDefined();
     // The read-only chip is on the page, outside the drawer, so it shows whether the drawer is open or not.
     const chip = document.querySelector('[data-test=remote-access-chip]');

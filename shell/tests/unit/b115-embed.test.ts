@@ -27,6 +27,7 @@ function api(calls: { method: string; params: unknown }[] = []): YawbleApi {
       switch (method) {
         case 'app.overview': return OVERVIEW as any;
         case 'concierge.list': return CHATS as any;
+        case 'app.version': return { version: '1.2.3', released: true, dirty: false, commit: 'abcdef0123456789', cloudVersion: null } as any;
         default: return [] as any;
       }
     },
@@ -142,6 +143,53 @@ describe('B115 embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
     ok!.click();
     await flushPromises();
     expect(calls.some((c) => c.method === 'concierge.delete' && (c.params as any).id === 'c1')).toBe(true);
+  });
+
+  it('B117: Terminal shows and hides the terminal pane, Help opens Settings at System; both light their place', async () => {
+    const { w, send, navs } = await page('?embed=1&theme=dark', { width: 375 });
+    const place = (id: string) => navs().at(-1)!.places.find((p: any) => p.id === id);
+    expect(place('terminal')).toMatchObject({ label: 'Terminal', icon: 'terminal', active: false });
+    expect(place('help')).toMatchObject({ label: 'Help', icon: 'help', active: false });
+    await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'terminal' } });
+    expect(w.find('[data-test=terminal-pane]').exists()).toBe(true);
+    expect(place('terminal')!.active).toBe(true);
+    await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'terminal' } });
+    expect(w.find('[data-test=terminal-pane]').exists()).toBe(false);
+    expect(place('terminal')!.active).toBe(false);
+    await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'help' } });
+    expect(w.find('[data-test=about]').exists()).toBe(true);
+    expect(place('help')!.active).toBe(true);
+    await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'monitor' } });
+    expect(place('help')!.active).toBe(false);
+  });
+
+  it('B117: a Visitor gets no Terminal place and a terminal message does nothing; the phone drawer leaves Terminal out too', async () => {
+    const { w, send, navs } = await page('?embed=1&theme=dark', { width: 375 });
+    const { applyRemoteAccess } = await import('../../src/renderer/src/remoteAccess');
+    applyRemoteAccess('read');
+    try {
+      await flushPromises();
+      const ids = navs().at(-1)!.places.map((p: any) => p.id);
+      expect(ids).not.toContain('terminal');
+      expect(ids).toContain('help');
+      await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'terminal' } });
+      expect(w.find('[data-test=terminal-pane]').exists()).toBe(false);
+    } finally { applyRemoteAccess('full'); }
+    await flushPromises();
+    expect(navs().at(-1)!.places.map((p: any) => p.id)).toContain('terminal');
+  });
+
+  it('B117: the phone drawer (not embedded) offers Terminal to full access and not to a Visitor', async () => {
+    const { w } = await page('', { width: 375 });
+    const { applyRemoteAccess } = await import('../../src/renderer/src/remoteAccess');
+    const items = () => w.findAll('[data-test=drawer-menu-items] button').map((b) => b.attributes('data-test'));
+    expect(items()).toContain('drawer-terminal');
+    applyRemoteAccess('read');
+    try {
+      await flushPromises();
+      expect(items()).not.toContain('drawer-terminal');
+      expect(items()).toContain('drawer-about');
+    } finally { applyRemoteAccess('full'); }
   });
 
   it('Rename asks for the title in the frame and renames through the sidebar\'s handler', async () => {
