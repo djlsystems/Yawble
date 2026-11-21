@@ -75,7 +75,9 @@ public abstract partial class AgentCliDetector
                 problems.AddRange(resolved.Problems);
                 continue;
             }
-            if (!isOnPath)
+            // Only the core's PATH was searched; on macOS/Linux the person's terminal PATH (login shell) decides the
+            // warning: a desktop launch's short PATH must not report ~/.local/bin as missing (B118).
+            if (!isOnPath && !(h.Parent(path) is { } folder && await h.OnPersonsPathAsync(folder, ct)))
                 problems.Add($"Found at {path}, but its folder is not on your PATH. The app runs it from there; your own terminal will not find '{Command}' until you add {h.Parent(path)} to PATH.");
             program = resolved;
             launcher = path;
