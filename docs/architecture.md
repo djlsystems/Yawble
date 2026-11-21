@@ -128,6 +128,20 @@ native library.
 - **Request compiler.** A pure function emits a create-and-run request with explicit containment, an explicit
   environment, egress deny with the run's gateway as the only network proxy, UI off, clipboard none, and telemetry
   off. On Windows it forbids DACL mutation; on macOS keychain access is off.
+- **macOS run temp folder.** Each macOS run gets its own folder, `<DARWIN_USER_TEMP_DIR>yr-<8 hex>` (the hex is from
+  the SHA-256 of the run id). It is granted read-write to that run only, which also lets a Unix socket bind in it.
+  `TMPDIR` points at it and `TMPPREFIX` is `<folder>/zsh`; `CLAUDE_CODE_TMPDIR` stays the member's `tmp/`. The point is
+  length: a Unix socket path holds 104 bytes, and .NET puts a named pipe at `$TMPDIR/CoreFxPipe_<name>`. The member's
+  `tmp/` is too long for any pipe, while this folder leaves room for a 24-character name (MSBuild's `MSBuild<pid>`).
+  The launcher makes the folder before the run and removes it when the run ends, however it ends. At start the core
+  removes the `yr-*` folders that no live run owns, which covers a crash or a restart. The dotnet wrapper and the
+  MSBuild variables are unchanged.
+- **Allow localhost (macOS).** The request input has `AllowLocalhost`, off by default and set from the team's
+  setting. When it is on, a macOS request has `network.ingress` `default` and `hostLoopback` both `allow`. That is the
+  only loopback form Seatbelt accepts: it refuses `hostLoopback` allow while the ingress default is deny. Seatbelt then
+  allows outbound to `localhost:*`, and inbound and bind on local addresses. Egress stays deny with no rules, and the
+  gateway is still the only proxy. When it is off, the request is the same as without the setting. Windows and Linux
+  ignore it, because their sandboxes give each run its own loopback.
 - **Invariants.** Every compiled request is checked before launch, so a forbidden option can never run. Golden files
   (`core/tests/Yawble.Core.Tests/Golden/`) hold the exact request per OS and CLI; regenerate them with
   `YAWBLE_UPDATE_GOLDEN=1` and review the diff.
