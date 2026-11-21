@@ -111,9 +111,18 @@ public sealed class LaunchWiring : IAsyncDisposable
         ISandboxBackend backend = OperatingSystem.IsWindows()
             ? new WxcExecBackend(Path.Combine(AppContext.BaseDirectory, "wxc-exec.exe"), Path.Combine(data, "requests"))
             : new NativeSandboxBackend();
+        // macOS: the per-user temp folder each run's own short folder goes in; what a crash or restart left there is
+        // removed now (no run of this core is live yet).
+        var userTemp = Sandboxing.RunTempFolder.DarwinUserTempDir() is { } t ? HostPathCanonicalizer.Canonicalize(t) : null;
+        if (userTemp is not null)
+        {
+            var swept = Sandboxing.RunTempFolder.Sweep(userTemp, name => registry.All().Any(r => Sandboxing.RunTempFolder.Name(r.RunKey) == name));
+            if (swept.Count > 0) log?.Invoke($"removed {swept.Count} leftover run temp folder(s) from {userTemp}");
+        }
         var host = new LaunchHost(TargetOsExtensions.Host, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             appRoot, Path.GetFullPath(install), clis, HostPathCanonicalizer.Canonicalize,
-            ToolFoldersNow: () => HostTools.Detect(appRoot)); // read at every run: a git installed while the app runs is on the next run's PATH
+            ToolFoldersNow: () => HostTools.Detect(appRoot), // read at every run: a git installed while the app runs is on the next run's PATH
+            UserTempDir: userTemp);
         // Paths are canonicalised (symlinks resolved) before they are compared or handed to the sandbox.
         var agentDefaults = new Agents.AgentDefaultsStore(connectionString);
         var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(connectionString),

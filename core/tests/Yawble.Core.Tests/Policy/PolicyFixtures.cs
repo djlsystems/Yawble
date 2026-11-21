@@ -28,11 +28,14 @@ internal static class PolicyFixtures
         _ => ("/home/alice", "/home/alice/.local/share/yawble", "/opt/yawble/resources", "linux-x64"),
     };
 
+    /// <summary>macOS: the fictional machine's per-user temp folder (DARWIN_USER_TEMP_DIR, canonical: 56 bytes + "/").</summary>
+    public const string MacUserTemp = "/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/";
+
     public static RunLayout Layout(TargetOs os, AgentCli cli, MemberRef? member = null, string? install = null, bool signIn = false)
     {
         var m = Machine(os);
         return RunLayout.Standard(os, m.Home, m.AppData, m.Install, member ?? Me, cli,
-            Cli(os, cli, install ?? DefaultInstall(cli), signIn), Everyone);
+            Cli(os, cli, install ?? DefaultInstall(cli), signIn), Everyone) with { UserTempDir = os == TargetOs.MacOS ? MacUserTemp : null };
     }
 
     /// <summary>
