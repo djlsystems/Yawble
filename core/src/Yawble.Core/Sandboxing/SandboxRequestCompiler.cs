@@ -279,6 +279,9 @@ public static partial class SandboxRequestCompiler
             // macOS: the host's .NET SDK folder (HostTools.DetectMac), granted read-only like the Windows tool folders.
             env["PATH"] = string.Join(':', [.. l.CliInstall.PathFolders, .. l.HostToolFolders, l.AppBinDir, system]);
             env["TMPDIR"] = l.Tmp;
+            // zsh (macOS's shell) writes here-documents under $TMPPREFIX, /tmp/zsh by default, which the sandbox refuses:
+            // "can't create temp file for here document: operation not permitted", and `cat > f <<E` wrote an empty file.
+            env["TMPPREFIX"] = new PolicyPaths(l.Os, l.Home).Combine(l.Tmp, "zsh");
             env["LANG"] = "C.UTF-8";
             // Caches and config under the member's workspace.
             env["XDG_CONFIG_HOME"] = J(".config");

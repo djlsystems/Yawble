@@ -29,6 +29,7 @@
       "PATH=/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin:/opt/yawble/resources/bin:/usr/local/bin:/usr/bin:/bin",
       "TERM=xterm-256color",
       "TMPDIR=/home/alice/.local/share/yawble/teams/alpha/members/dev1/tmp",
+      "TMPPREFIX=/home/alice/.local/share/yawble/teams/alpha/members/dev1/tmp/zsh",
       "XDG_CACHE_HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.cache",
       "XDG_CONFIG_HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.config",
       "XDG_DATA_HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.local/share",

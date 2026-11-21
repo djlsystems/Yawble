@@ -29,6 +29,7 @@
       "PATH=/Users/alice/.nvm/versions/node/v22.12.0/bin:/Users/alice/.nvm/versions/node/v22.12.0/lib/node_modules/@anthropic-ai/claude-code:/Applications/Yawble.app/Contents/Resources/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
       "TERM=xterm-256color",
       "TMPDIR=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp",
+      "TMPPREFIX=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/tmp/zsh",
       "XDG_CACHE_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.cache",
       "XDG_CONFIG_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.config",
       "XDG_DATA_HOME=/Users/alice/Library/Application Support/Yawble/teams/alpha/members/dev1/home/.local/share",
