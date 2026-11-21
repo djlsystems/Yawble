@@ -97,13 +97,14 @@ test('a Visitor sees it read-only: disabled, the warning shown, nothing sent', a
 
 test('on a phone (375): the toggle and the whole warning fit the sheet', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, 'full', 375);
-  await page.goto(`${ORIGIN}/remote.html`);
-  await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-  // The phone shell: open the team from the Teams page, then its Settings and the Network section.
-  await page.evaluate(() => { location.hash = '#/teams'; });
-  await page.locator('[data-test=team-open-payments]').first().click();
-  await page.locator('[data-test=open-manage]').first().click();
+  // The phone shell: the team's page, its Settings (through the ⋯ menu when not in the header), then the Network section.
+  await page.goto(`${ORIGIN}/remote.html#team=1`);
+  await expect(page.locator('[data-test=team-title]')).toBeVisible({ timeout: 30_000 });
+  const opener = page.locator('[data-test=open-manage]').first();
+  if (!(await opener.isVisible().catch(() => false))) await page.locator('[data-test=team-more]').click();
+  await opener.click();
   await page.locator('[data-test=manage-tab-network]').click();
+  await expect(page.locator('[data-test=manage-section-title]')).toHaveText('Network');
   const block = page.locator('[data-test=team-localhost]');
   await expect(block).toBeVisible();
   await expect(page.locator('[data-test=team-localhost-warning]')).toHaveText(WARNING);
