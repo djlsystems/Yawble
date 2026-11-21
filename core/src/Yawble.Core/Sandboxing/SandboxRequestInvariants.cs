@@ -143,21 +143,17 @@ public static class SandboxRequestInvariants
         {
             if (ingress != "allow" || loopback != "allow") Fail("Windows (unpackaged) needs ingress.default and hostLoopback allow with the proxy");
         }
-        else if (os == TargetOs.MacOS && run.AllowLocalhost)
-        {
-            // The team's "Allow localhost": the one loopback form Seatbelt takes (hostLoopback allow needs default allow).
-            if (ingress != "allow" || loopback != "allow") Fail("macOS with Allow localhost needs ingress.default and hostLoopback allow");
-        }
+        else if (os == TargetOs.MacOS)
+            problems.AddRange(MacLocalhostProblems(request, run));
         else
         {
-            if (loopback != "deny") Fail(os == TargetOs.MacOS
-                ? "network.ingress.hostLoopback: allow is emitted on macOS only with the team's Allow localhost"
-                : $"network.ingress.hostLoopback: allow is never emitted on {os}");
-            if (ingress != "deny") Fail($"network.ingress.default must be deny on {os}" + (os == TargetOs.MacOS ? " without the team's Allow localhost" : ""));
+            if (loopback != "deny") Fail($"network.ingress.hostLoopback: allow is never emitted on {os}");
+            if (ingress != "deny") Fail($"network.ingress.default must be deny on {os}");
         }
         if (net?["ingress"] is JsonObject ingressSection)
             foreach (var key in ingressSection.Select(p => p.Key))
-                if (key is not ("default" or "hostLoopback")) Fail($"network.ingress.{key} is never emitted");
+                if (key is "allow" or "rules") Fail($"network.ingress.{key}: ingress allow rules are never emitted");
+                else if (key is not ("default" or "hostLoopback")) Fail($"network.ingress.{key} is never emitted");
         if (Str(request["runtimeConfig"]?["networkProxy"]) != $"http://127.0.0.1:{run.GatewayPort}")
             Fail("runtimeConfig.networkProxy must be this run's gateway on 127.0.0.1");
 
@@ -322,6 +318,40 @@ public static class SandboxRequestInvariants
         }
         if (!paths.Same(env.GetValueOrDefault("TMPDIR") ?? "", runTemp)) yield return "env TMPDIR must be the run's own temp folder";
         if (!paths.Same(env.GetValueOrDefault("TMPPREFIX") ?? "", paths.Combine(runTemp, "zsh"))) yield return "env TMPPREFIX must be <the run's temp folder>/zsh";
+    }
+
+    /// <summary>
+    /// macOS, the team's "Allow localhost" (B119). Off (RunSpec.AllowLocalhost false, the default): the request has no ingress
+    /// allow at all - ingress.default is deny, hostLoopback is deny, and there are no ingress allow rules. On: exactly the
+    /// SDK's pair (ingress.default allow and hostLoopback allow, the one loopback form Seatbelt accepts) and nothing more;
+    /// egress stays deny with no rules and the run's gateway the only proxy.
+    /// </summary>
+    public static IEnumerable<string> MacLocalhostProblems(JsonObject request, RunSpec run)
+    {
+        static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+        var net = request["network"] as JsonObject;
+        var ingress = net?["ingress"] as JsonObject;
+        var ingressDefault = Str(ingress?["default"]);
+        var loopback = Str(ingress?["hostLoopback"]);
+        var rules = ingress?.Where(p => p.Key is "allow" or "rules").Select(p => p.Key).ToList() ?? [];
+        if (!run.AllowLocalhost)
+        {
+            if (loopback != "deny")
+                yield return "network.ingress.hostLoopback: allow is emitted on macOS only with the team's Allow localhost (it must be deny)";
+            if (ingressDefault != "deny")
+                yield return "network.ingress.default must be deny on MacOS without the team's Allow localhost";
+            foreach (var key in rules)
+                yield return $"network.ingress.{key}: no ingress allow rule is emitted on macOS without the team's Allow localhost";
+            yield break;
+        }
+        if (ingressDefault != "allow" || loopback != "allow")
+            yield return "macOS with Allow localhost needs ingress.default and hostLoopback allow";
+        if (ingress is not null && ingress.Any(p => p.Key is not ("default" or "hostLoopback")))
+            yield return "macOS with Allow localhost has exactly ingress.default and hostLoopback, nothing more in network.ingress";
+        if (Str(net?["egress"]?["default"]) != "deny" || net?["egress"]?["allow"] is not null || net?["egress"]?["deny"] is not null)
+            yield return "macOS with Allow localhost keeps network.egress deny with no rules";
+        if (Str(request["runtimeConfig"]?["networkProxy"]) != $"http://127.0.0.1:{run.GatewayPort}")
+            yield return "macOS with Allow localhost keeps this run's gateway as the only proxy";
     }
 
     /// <summary>No credential variable except the placeholder; never two Claude tiers; Grok's rules.</summary>
