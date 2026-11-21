@@ -85,7 +85,12 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
 
   await page.locator('[data-test=team-lessons-link]').click();
   await expect(page.locator('[data-test=team-general]')).toHaveCount(0); // the team's Settings closed
-  await expect(page.locator('[data-test=skill-view]')).toHaveText(BODY);
+  // Card 529: the text renders as markdown (two headings, a list item each, inline code), not the raw source.
+  const view = page.locator('[data-test=skill-view]');
+  await expect(view.locator('h2')).toHaveText(['Building and testing', 'Git']);
+  await expect(view.locator('li')).toHaveCount(2);
+  await expect(view.locator('li code')).toHaveText('npm run build');
+  await expect(view).not.toContainText('## ');
   await expect(page.locator('[data-test=skills-pane] h3')).toHaveText('team_retros');
   await expect(page.locator('[data-test=skill-last-writer]')).toContainText('Last written by the retro of workflow 12');
   await expect(page.locator('[data-test=skill-last-writer]')).toContainText('(version 2)');

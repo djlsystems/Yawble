@@ -10,6 +10,8 @@ import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { confirmDialog } from '../confirm';
+import { copyCodeFrom, renderMarkdown } from '../markdown';
+import { emptyFilterText, filterChoices, filterSkills, selectionAfterFilter, skillTag, type SkillFilter } from './skillsFilter';
 
 // Skills: what agents load with skills_list / skills_get. Built-in skills come with the app and
 // are read-only; a custom skill of the same name replaces one (in every team, or in one team only).
@@ -33,7 +35,7 @@ const roleChoices = [
 ];
 
 const key = (s: Skill) => `${s.kind}:${s.teamId ?? ''}:${s.name}`;
-const scope = (s: Skill) => (s.kind === 'builtin' ? 'built-in' : s.team ? `team ${s.team}` : 'all teams');
+const scope = (s: Skill) => skillTag(s);
 const replaced = computed(() => new Set(skills.value.filter((s) => s.kind === 'custom' && s.teamId === null).map((s) => s.name)));
 
 async function load() {
@@ -68,6 +70,36 @@ function backToList() {
   saved.value = null;
 }
 
+// Card 529: the origin filter above the list (All / Built-in / Team skills, and All teams while a person-added skill for
+// every team exists; skillsFilter.ts). A filter that hides the selected skill selects the first one it shows (on a phone,
+// where a selection opens the skill in place of the list, it only clears it); none shown: the pane says so.
+const filter = ref<SkillFilter>('all');
+const choices = computed(() => filterChoices(skills.value, filter.value));
+const visible = computed(() => filterSkills(skills.value, filter.value));
+const same = (a: Skill, b: Skill) => key(a) === key(b);
+watch(filter, () => {
+  if (editing.value) return;
+  const next = selectionAfterFilter(visible.value, selected.value, same);
+  if (next && selected.value && same(next, selected.value)) return;
+  saved.value = null;
+  selected.value = phone.value ? null : next;
+});
+// A saved, restored or linked skill the filter would hide (Customize… of a built-in makes an all-teams one): show All.
+function keepVisible(s: Skill) {
+  if (filterSkills([s], filter.value).length === 0) filter.value = 'all';
+}
+
+// The skill's text, rendered with the app's markdown renderer (raw HTML off, links open in the browser; markdown.ts).
+const bodyHtml = computed(() => (selected.value ? renderMarkdown(selected.value.body) : ''));
+
+// Edit's Cancel goes back to the skill it was editing (rendered again); + New skill's Cancel to no skill.
+const editingFrom = ref<Skill | null>(null);
+function cancelEdit() {
+  editing.value = false;
+  selected.value = editingFrom.value;
+  editingFrom.value = null;
+}
+
 function pick(s: Skill) {
   selected.value = s;
   editing.value = false;
@@ -76,6 +108,7 @@ function pick(s: Skill) {
 }
 
 function startNew(from?: Skill) {
+  editingFrom.value = from ?? null;
   Object.assign(form, from
     ? { name: from.name, description: from.description, roles: [...from.roles], body: from.body, teamId: from.kind === 'custom' ? from.teamId : null }
     : { name: '', description: '', roles: ['member'], body: '', teamId: null });
@@ -95,6 +128,8 @@ async function doSave() {
     await load();
     selected.value = skills.value.find((x) => key(x) === key(s)) ?? s;
     editing.value = false;
+    editingFrom.value = null;
+    keepVisible(selected.value);
     saved.value = `Saved ${s.name}. Agents get it at their next run.`;
   } catch (e) {
     error.value = errorText(e);
@@ -142,6 +177,7 @@ async function restore(v: SkillVersion) {
       const s = await api.call<Skill>(SKILLS_RESTORE, { id: v.id });
       await load();
       selected.value = skills.value.find((x) => key(x) === key(s)) ?? s;
+      keepVisible(selected.value);
       saved.value = `Restored version ${v.version} of ${s.name}. Agents get it at their next run.`;
     } catch (e) {
       error.value = errorText(e);
@@ -155,7 +191,9 @@ function followLink() {
   if (!link) return;
   const s = skills.value.find((x) => x.kind === 'custom' && x.teamId === link.teamId && x.name === link.name);
   skillLink.value = null;
-  if (s) pick(s);
+  if (!s) return;
+  keepVisible(s);
+  pick(s);
 }
 watch(skillLink, (l) => { if (l && loaded.value) followLink(); });
 
@@ -173,8 +211,13 @@ onMounted(load);
     <p v-if="error" class="error" data-test="skills-error">{{ error }}</p>
     <div class="layout" :class="{ fill: inline && fill, phone }" data-test="skills-layout" :data-phone-view="phone ? (detailOpen ? 'detail' : 'list') : undefined">
       <aside v-if="showList" class="list" data-test="skills-list">
+        <div v-if="loaded && skills.length > 0" class="filter" role="tablist" aria-label="Show skills" data-test="skills-filter">
+          <button v-for="c in choices" :key="c.id" type="button" role="tab" :class="{ on: filter === c.id }" :aria-selected="filter === c.id"
+            :data-test="`skills-filter-${c.id}`" @click="filter = c.id">{{ c.label }}</button>
+        </div>
         <LoadingNote v-if="!loaded" text="Loading skills…" />
-        <button v-for="s in skills" :key="key(s)" class="item" :class="{ on: selected && key(selected) === key(s) }"
+        <p v-else-if="skills.length > 0 && visible.length === 0" class="muted small" data-test="skills-filter-none">{{ emptyFilterText(filter) }}</p>
+        <button v-for="s in visible" :key="key(s)" class="item" :class="{ on: selected && key(selected) === key(s) }"
           :data-test="`skill-${s.name}`" @click="pick(s)">
           <strong>{{ s.name }}</strong>
           <span class="chip">{{ scope(s) }}</span>
@@ -204,7 +247,7 @@ onMounted(load);
           <label>Instructions (markdown)
             <textarea v-model="form.body" rows="16" class="mono" data-test="skill-body"></textarea></label>
           <div class="row"><span class="grow"></span>
-            <button :disabled="work.is('save')" @click="editing = false">Cancel</button>
+            <button :disabled="work.is('save')" data-test="skill-cancel" @click="cancelEdit">Cancel</button>
             <button class="primary" data-test="skill-save" :disabled="work.is('save')" :aria-busy="work.is('save')" @click="save"><BusyLabel :busy="work.is('save')" text="Saving…">Save skill</BusyLabel></button>
           </div>
         </template>
@@ -219,7 +262,8 @@ onMounted(load);
             The team's lessons: every run of team {{ selected.team }} gets this text in its prompt. The Manager rewrites it after each completed
             workflow's retrospective, starting from the text here, so your edits are kept.</p>
           <p v-if="lastWrite" class="muted small" data-test="skill-last-writer">Last written by {{ writerText(lastWrite) }}, {{ when(lastWrite.writtenAt) }} (version {{ lastWrite.version }}).</p>
-          <pre class="body" data-test="skill-view">{{ selected.body }}</pre>
+          <!-- eslint-disable-next-line vue/no-v-html : markdown-it with html disabled (markdown.ts) -->
+          <div class="body md" data-test="skill-view" @click="copyCodeFrom" v-html="bodyHtml"></div>
           <details v-if="versions.length > 0" class="versions" data-test="skill-versions">
             <summary>Versions ({{ versions.length }})</summary>
             <ul>
@@ -244,6 +288,7 @@ onMounted(load);
             </template>
           </div>
         </template>
+        <p v-else-if="loaded && skills.length > 0 && visible.length === 0" class="muted" data-test="skills-filter-empty">{{ emptyFilterText(filter) }}</p>
         <p v-else class="muted">Pick a skill to read it, or make a new one.</p>
       </section>
     </div>
@@ -265,6 +310,35 @@ onMounted(load);
 .pane h3 { margin: 0; font-size: 15px; }
 .body { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; max-height: 420px; overflow: auto; font-size: 12px; }
 textarea { width: 100%; font-size: 12px; }
+/* Card 529: the origin filter, a small segmented pill as the member pane's view toggle. */
+.filter { display: inline-flex; flex: none; align-self: flex-start; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin-bottom: 4px; }
+.filter button { border: 0; border-radius: 0; background: transparent; padding: 2px 12px; height: 26px; font-size: 12px; color: var(--ink-soft); }
+.filter button + button { border-left: 1px solid var(--line); }
+.filter button.on { background: var(--chip); color: var(--ink); font-weight: 600; }
+/* The skill's text as formatted markdown (as ChatMessage's), sized for the pane; both themes come from the variables. */
+.body.md { white-space: normal; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; padding: 10px 14px; }
+.md > :deep(:first-child) { margin-top: 0; }
+.md :deep(p) { margin: 0 0 8px; }
+.md :deep(ul), .md :deep(ol) { margin: 0 0 8px; padding-left: 22px; }
+.md :deep(li) { margin: 2px 0; }
+.md :deep(h1) { font-size: 16px; margin: 14px 0 6px; }
+.md :deep(h2) { font-size: 14.5px; margin: 14px 0 6px; }
+.md :deep(h3), .md :deep(h4), .md :deep(h5), .md :deep(h6) { font-size: 13px; margin: 12px 0 4px; }
+.md :deep(code) { background: var(--chip); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.md :deep(pre) { background: var(--code-block-bg); color: var(--code-block-ink); padding: 10px 12px; line-height: 1.45; border-radius: 8px; overflow: auto; margin: 0; white-space: pre; }
+.md :deep(pre code) { background: transparent; color: inherit; padding: 0; }
+.md :deep(.codeblock) { background: var(--code-block-bg); border-radius: 8px; margin: 0 0 8px; overflow: hidden; }
+.md :deep(.codeblock pre) { border-radius: 0; padding-top: 4px; }
+.md :deep(.codebar) { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 0 12px; color: var(--code-block-muted); font-size: 11px; }
+.md :deep(.copy) { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 0; color: var(--code-block-control); font-size: 11px; padding: 3px 7px; border-radius: 6px; cursor: pointer; }
+.md :deep(.copy:hover) { background: var(--code-block-hover); color: var(--code-block-ink); }
+.md :deep(.copy .i-done), .md :deep(.copy.copied .i-copy) { display: none; }
+.md :deep(.copy.copied .i-done) { display: inline-flex; color: var(--code-block-ok); }
+.md :deep(blockquote) { margin: 0 0 8px; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+.md :deep(table) { border-collapse: collapse; margin: 0 0 8px; }
+.md :deep(th), .md :deep(td) { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
+.md :deep(a) { color: var(--accent); }
+.md :deep(hr) { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .versions { margin: 0 0 10px; font-size: 12px; }
 .versions ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .versions li { border-top: 1px solid var(--line); padding-top: 4px; }
