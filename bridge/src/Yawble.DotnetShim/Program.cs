@@ -13,6 +13,9 @@ namespace Yawble.DotnetShim;
 /// Not covered (they reach pipes without passing a command line through here): `dotnet watch` (it starts the real
 /// dotnet itself), a full path to the real dotnet.exe, and other tools that use ordinary named pipes. The wrapper is
 /// needed only while microsoft/mxc#1706 stands; RealSandboxDotnetBuildTests' "ordinary pipes fail" check fails once it is fixed.
+/// macOS too: MSBuild puts its worker nodes' sockets in /tmp (NamedPipeUtil: macOS's temp folder is too long for a
+/// socket path), which the sandbox refuses ("SocketException (13): Permission denied" at bind), and the parent waits on
+/// workers that die at start: a restore hung. Granting /tmp would open every run's and the person's temp files to each other.
 /// </summary>
 public static partial class Program
 {
@@ -27,7 +30,7 @@ public static partial class Program
         var real = RealDotnet();
         if (real is null)
         {
-            Console.Error.WriteLine("dotnet: the .NET SDK was not found on PATH or in Program Files");
+            Console.Error.WriteLine("dotnet: the .NET SDK was not found on PATH or where its installer puts it");
             return 1;
         }
         var psi = new ProcessStartInfo(real) { UseShellExecute = false };
@@ -69,20 +72,39 @@ public static partial class Program
     [GeneratedRegex(@"^[-/](m|maxcpucount)(:\d*)?$", RegexOptions.IgnoreCase)]
     private static partial Regex MaxCpu();
 
-    /// <summary>The real dotnet: the first dotnet.exe on PATH that is not this wrapper, else Program Files.</summary>
-    internal static string? RealDotnet()
+    /// <summary>
+    /// The real dotnet: the first dotnet on PATH that is not this wrapper, else where the installer puts it (Program
+    /// Files on Windows; /usr/local/share/dotnet on macOS).
+    /// </summary>
+    internal static string? RealDotnet() =>
+        RealDotnet(Environment.GetEnvironmentVariable("PATH"), Environment.ProcessPath, OperatingSystem.IsWindows(), File.Exists);
+
+    internal static string? RealDotnet(string? pathVariable, string? processPath, bool windows, Func<string, bool> exists)
     {
-        var self = Path.GetFullPath(Environment.ProcessPath ?? "");
-        var selfDir = Path.GetDirectoryName(self) ?? "";
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        if (!windows)
+        {
+            // POSIX paths as text: a run's PATH holds only absolute folders.
+            var self = processPath ?? "";
+            var selfFolder = self.Contains('/') ? self[..self.LastIndexOf('/')] : "";
+            foreach (var dir in (pathVariable ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var folder = dir.Length > 1 ? dir.TrimEnd('/') : dir;
+                if (!folder.StartsWith('/') || folder == selfFolder) continue;
+                var candidate = folder + "/dotnet";
+                if (exists(candidate)) return candidate;
+            }
+            return exists("/usr/local/share/dotnet/dotnet") ? "/usr/local/share/dotnet/dotnet" : null;
+        }
+        var selfDir = Path.GetDirectoryName(Path.GetFullPath(processPath ?? "")) ?? "";
+        foreach (var dir in (pathVariable ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
             string candidate;
             try { candidate = Path.GetFullPath(Path.Combine(dir.Trim('"'), "dotnet.exe")); }
             catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
             if (string.Equals(Path.GetDirectoryName(candidate), selfDir, StringComparison.OrdinalIgnoreCase)) continue;
-            if (File.Exists(candidate)) return candidate;
+            if (exists(candidate)) return candidate;
         }
         var fallback = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", "dotnet.exe");
-        return File.Exists(fallback) ? fallback : null;
+        return exists(fallback) ? fallback : null;
     }
 }

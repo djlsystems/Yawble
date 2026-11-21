@@ -276,8 +276,10 @@ public static partial class SandboxRequestCompiler
         else
         {
             var system = string.Join(':', l.Os == TargetOs.MacOS ? Launch.HostTools.MacRunPath : Launch.HostTools.LinuxRunPath);
-            // macOS: the host's .NET SDK folder (HostTools.DetectMac), granted read-only like the Windows tool folders.
-            env["PATH"] = string.Join(':', [.. l.CliInstall.PathFolders, .. l.HostToolFolders, l.AppBinDir, system]);
+            // macOS: the app's dotnet wrapper first (DotnetShimFolder: MSBuild's worker sockets would go to /tmp, which the
+            // sandbox refuses), then the host's .NET SDK folder (HostTools.DetectMac), granted read-only like the Windows tool folders.
+            string[] shim = l.Os == TargetOs.MacOS ? [new PolicyPaths(l.Os, l.Home).Combine(l.AppBinDir, DotnetShimFolder)] : [];
+            env["PATH"] = string.Join(':', [.. shim, .. l.CliInstall.PathFolders, .. l.HostToolFolders, l.AppBinDir, system]);
             env["TMPDIR"] = l.Tmp;
             // zsh (macOS's shell) writes here-documents under $TMPPREFIX, /tmp/zsh by default, which the sandbox refuses:
             // "can't create temp file for here document: operation not permitted", and `cat > f <<E` wrote an empty file.
@@ -303,8 +305,9 @@ public static partial class SandboxRequestCompiler
         // that made it (only \\.\pipe\LOCAL\ names work; microsoft/mxc#1706). MSBuild's worker nodes and its build
         // server and the compiler server talk over such pipes, so a parallel build fails ("Build FAILED", 0 errors) and
         // leaves idle workers that keep the agent's shell open. The dotnet wrapper first on PATH (DotnetShimFolder) builds
-        // with -m:1; these keep MSBuild from starting anything else that would wait on a pipe.
-        if (l.Os == TargetOs.Windows)
+        // with -m:1; these keep MSBuild from starting anything else that would wait on a pipe. macOS the same: MSBuild's
+        // and the compiler server's sockets are made in /tmp, which the sandbox refuses ("Permission denied" at bind).
+        if (l.Os is TargetOs.Windows or TargetOs.MacOS)
         {
             env["MSBUILDDISABLENODEREUSE"] = "1";
             env["MSBUILDUSESERVER"] = "0";
