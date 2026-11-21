@@ -64,6 +64,38 @@ public class GoldenRequestTests
         Assert.Equal(GoldenCases.All.Keys.Order(), onDisk.Order());
     }
 
+    /// <summary>
+    /// Card 536 (B119): Allow localhost is closed when off. In the committed files, every macOS golden except
+    /// macos-claude-localhost has ingress deny and hostLoopback deny and no ingress rule; macos-claude-localhost has exactly the
+    /// SDK's pair, egress deny, and differs from its off twin macos-claude in network.ingress only.
+    /// </summary>
+    [Fact]
+    public void OnlyTheLocalhostGoldenOpensTheMacLoopback()
+    {
+        var macs = GoldenCases.All.Where(c => c.Value.Os == TargetOs.MacOS).Select(c => c.Key).ToList();
+        Assert.Contains("macos-claude-localhost", macs);
+        Assert.Equal(["macos-claude-localhost"], GoldenCases.AllowLocalhost.Order());
+        JsonObject Golden(string name) => JsonNode.Parse(GoldenCases.Read(name + ".request.json"))!.AsObject();
+        var closed = new JsonObject { ["default"] = "deny", ["hostLoopback"] = "deny" };
+        var open = new JsonObject { ["default"] = "allow", ["hostLoopback"] = "allow" };
+        foreach (var name in macs)
+        {
+            var request = Golden(name);
+            var c = GoldenCases.All[name];
+            var run = PolicyFixtures.Run(c.Os, c.Mode, c.Kind, c.Install) with { AllowLocalhost = GoldenCases.AllowLocalhost.Contains(name) };
+            Assert.True(JsonNode.DeepEquals(run.AllowLocalhost ? open : closed, request["network"]!["ingress"]),
+                $"{name}: network.ingress is {request["network"]!["ingress"]!.ToJsonString()}");
+            Assert.True(JsonNode.DeepEquals(new JsonObject { ["default"] = "deny" }, request["network"]!["egress"]), $"{name}: egress");
+            Assert.Empty(SandboxRequestInvariants.MacLocalhostProblems(request, run));
+            // The file read as an off run: only the localhost golden is refused.
+            Assert.Equal(run.AllowLocalhost, SandboxRequestInvariants.MacLocalhostProblems(request, run with { AllowLocalhost = false }).Any());
+        }
+        var on = Golden("macos-claude-localhost");
+        var off = Golden("macos-claude");
+        on["network"]!["ingress"] = closed.DeepClone();
+        Assert.True(JsonNode.DeepEquals(off, on), "macos-claude-localhost differs from macos-claude outside network.ingress");
+    }
+
     /// <summary>The control: the sandbox's parser must still reject a golden file with one forbidden change.</summary>
     [Fact]
     public void SandboxRejectsAGoldenFileWithAnUnknownField()
@@ -112,13 +144,18 @@ internal static class GoldenCases
         ["windows-claude-signin"] = (TargetOs.Windows, CredentialMode.ClaudeHostSignIn, RunKind.Headless, false, null),
         ["windows-grok-signin"] = (TargetOs.Windows, CredentialMode.GrokHostSignIn, RunKind.Headless, false, null),
         ["macos-grok-signin"] = (TargetOs.MacOS, CredentialMode.GrokHostSignIn, RunKind.Headless, false, null),
+        // The team's "Allow localhost (macOS)" on: the same run as macos-claude with the host's loopback open.
+        ["macos-claude-localhost"] = (TargetOs.MacOS, CredentialMode.ClaudeSubscription, RunKind.Headless, false, null),
     };
+
+    /// <summary>The cases compiled with the team's Allow localhost on (RunSpec.AllowLocalhost); every other case has it off.</summary>
+    public static readonly HashSet<string> AllowLocalhost = ["macos-claude-localhost"];
 
     public static CompiledRun Compile(string name)
     {
         var c = All[name];
         return SandboxRequestCompiler.Compile(PolicyFixtures.Global, PolicyFixtures.Override, c.Loosened ? PolicyFixtures.Loosen : null,
-            PolicyFixtures.Run(c.Os, c.Mode, c.Kind, c.Install));
+            PolicyFixtures.Run(c.Os, c.Mode, c.Kind, c.Install) with { AllowLocalhost = AllowLocalhost.Contains(name) });
     }
 
     public static string BuildDir => Path.Combine(AppContext.BaseDirectory, "Golden");

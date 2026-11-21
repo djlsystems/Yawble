@@ -190,6 +190,8 @@ const warningText = (workflow: number, question: number) => `#${workflow} will e
 /** B085: the expiry fixtures on or off, the workflows extended (id -> their new expiresAt), and each team's workflowExpiryDays. */
 const expiry = { on: false, extended: new Map<number, string>(), days: new Map<number, number>() };
 const expiryDays = (teamId: number) => expiry.days.get(teamId) ?? 3;
+/** B119: the teams whose "Allow localhost (macOS)" is on (off by default; a new fake core starts with none). */
+const localhostOn = new Set<number>();
 
 /** B104 (card 477): the Workflows page's rows (workflows.list / workflows.get, YAWBLE_TEAM_DOCS/B104/contract.md), across
  *  both teams: #10 running (B011, Ada on it), #12 waiting on you, #15 waiting for the lease, #16 idle (expires in 20 h),
@@ -306,6 +308,16 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
       expiry.days.set(Number(p.teamId), p.days);
     }
     return { days: expiryDays(Number(p?.teamId)) };
+  },
+  // B119: { teamId } reads "Allow localhost (macOS)", { teamId, on } sets it (a Visitor's set is refused, as the core does).
+  'teams.localhost': (p, access) => {
+    const id = Number(p?.teamId);
+    if (p?.on !== undefined) {
+      if (access === 'read') throw Object.assign(new Error('Read-only (Visitor): refused by the fake'), { code: 'remote_refused' });
+      if (typeof p.on !== 'boolean') throw Object.assign(new Error('on must be true or false'), { code: 'bad_request' });
+      if (p.on) localhostOn.add(id); else localhostOn.delete(id);
+    }
+    return { on: localhostOn.has(id) };
   },
   'teams.agents': (p) => agents[p?.teamId ?? p?.id ?? 1] ?? [],
   'teams.quiet': () => ({ quiet: false, working: ['DeveloperAda'], openWorkflows: [10] }),
@@ -591,6 +603,7 @@ export function createFakeCore() {
   const calls: string[] = [];
   let access: Access = 'full';
   let asks = true;
+  localhostOn.clear();
   return {
     unknown, calls,
     setAccess(a: Access) { access = a; },

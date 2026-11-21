@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, GitProvider, IntegrationInfo, McpServerInfo, RepoProviderInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
 import { TEAM_WORKFLOW_EXPIRY, TEAMS_SET_REPO, WorkflowExpiryDefaultDays, TEAM_RETROS, TEAMS_LESSONS, PERSON_WRITER } from '../../../shared/api';
+import { TEAM_LOCALHOST, TEAM_LOCALHOST_LABEL, TEAM_LOCALHOST_WARNING } from '../../../shared/api';
 import type { TeamLessons } from '../../../shared/api';
 import { openSkill } from '../skillLink';
 import RepoProviderFields from './RepoProviderFields.vue';
@@ -13,6 +14,7 @@ import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { usePhone } from '../phone';
+import { vChange } from '../remoteAccess';
 
 /**
  * A team's housekeeping: pause or resume it, its repositories, its environment variables, archive it, delete it. Archive and delete need
@@ -57,7 +59,7 @@ const work = useBusy();
 const busy = computed(() => work.any());
 const doing = (method: string) => work.is('act', method);
 // Each tab's data has had its first answer (an error is shown above and ends the loading state too).
-const ready = reactive({ expiry: false, quiet: false, push: false, sync: false, repos: false, approvals: false, env: false, ints: false, members: false });
+const ready = reactive({ localhost: false, expiry: false, quiet: false, push: false, sync: false, repos: false, approvals: false, env: false, ints: false, members: false });
 
 function act(method: string, params: Record<string, unknown> = {}, done?: (r: any) => void) {
   return work.run('act', async () => {
@@ -88,6 +90,14 @@ const sync = ref<{ on: boolean; note: string | null } | null>(null);
 async function loadSync() { try { sync.value = await api.call('teams.syncToBase', { teamId: props.team.id }); } catch { sync.value = null; } finally { ready.sync = true; } }
 const setSync = (on: boolean) => act('teams.syncToBase', { on }, (r) => { sync.value = r; });
 const baseName = computed(() => repos.value?.main?.baseBranch ?? 'the base branch');
+
+// ---- B119: "Allow localhost (macOS)" (off by default). An older core without it: the block is not shown. A Visitor sees it
+// read-only (v-change); the core refuses a Visitor's set anyway.
+const localhost = ref<{ on: boolean } | null>(null);
+async function loadLocalhost() { try { localhost.value = await api.call<{ on: boolean }>(TEAM_LOCALHOST, { teamId: props.team.id }); } catch { localhost.value = null; } finally { ready.localhost = true; } }
+const setLocalhost = (on: boolean) => act(TEAM_LOCALHOST, { on }, (r: { on: boolean }) => { localhost.value = r; });
+// The warning's `code` spans (the text is kept word for word in TEAM_LOCALHOST_WARNING).
+const localhostWarning = TEAM_LOCALHOST_WARNING.split('`').map((text, i) => ({ text, code: i % 2 === 1 }));
 
 // ---- B085: expire idle workflows after N days (workflowExpiryDays, default 3). An older core without it: the field is not shown.
 const expiry = ref<number | null>(null);
@@ -211,7 +221,7 @@ const doReset = () => act('teams.reset', { members: [...resetPick.value], ...res
   resetDone.value = `Done: ${r.done.join('; ') || 'nothing to clear'}.` + (r.left.length ? ` Not removed: ${r.left.join('; ')}.` : '');
 });
 
-onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
+onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadLocalhost(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
 </script>
 
 <template>
@@ -381,6 +391,16 @@ onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void
 
     <section v-else-if="tab === 'network'" class="pane" data-test="team-network">
       <div class="block"><TeamNetworkAllows :team-id="team.id" :api="api" @changed="emit('changed')" /></div>
+      <div v-if="!ready.localhost || localhost" class="block" data-test="team-localhost">
+        <h4>Localhost</h4>
+        <LoadingNote v-if="!ready.localhost" text="Loading…" />
+        <template v-else-if="localhost">
+          <label class="check"><input v-change type="checkbox" :checked="localhost.on" data-test="team-localhost-toggle" :disabled="busy"
+            @change="setLocalhost(($event.target as HTMLInputElement).checked)" />{{ TEAM_LOCALHOST_LABEL }}</label>
+          <p class="note small" data-test="team-localhost-warning"><template v-for="(s, i) in localhostWarning" :key="i"><code v-if="s.code">{{ s.text }}</code><template v-else>{{ s.text }}</template></template></p>
+          <p class="muted small">Off by default. It applies to this team's runs on macOS from their next run; Windows and Linux runs already have a loopback of their own.</p>
+        </template>
+      </div>
       <p class="muted small">Each member's own policy (its override and Loosen…) is in the member's settings, on its Policy tab, next to this list.</p>
     </section>
 
