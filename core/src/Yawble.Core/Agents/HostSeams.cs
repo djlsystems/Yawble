@@ -109,8 +109,10 @@ public sealed class RealHostFileSystem : IHostFileSystem
 /// Runs a probe with a throwaway HOME (and USERPROFILE/APPDATA/LOCALAPPDATA on Windows): "--version" must not
 /// touch the person's config, credentials or update state, and it shows the program runs without them.
 /// The whole process tree is killed at the timeout.
+/// <para>With <c>scratchHome: false</c> (the person's login shell, read for its PATH) the person's own HOME is kept:
+/// a login shell must read the person's own profile files to report the PATH their terminal has.</para>
 /// </summary>
-public sealed class RealCliProcessRunner : ICliProcessRunner
+public sealed class RealCliProcessRunner(bool scratchHome = true) : ICliProcessRunner
 {
     public async Task<CliProbeResult> RunAsync(CliProbeCommand command, CancellationToken ct)
     {
@@ -127,8 +129,8 @@ public sealed class RealCliProcessRunner : ICliProcessRunner
                 WorkingDirectory = scratch.FullName,
             };
             foreach (var a in command.Arguments) start.ArgumentList.Add(a);
-            start.Environment["HOME"] = scratch.FullName;
-            if (OperatingSystem.IsWindows())
+            if (scratchHome) start.Environment["HOME"] = scratch.FullName;
+            if (scratchHome && OperatingSystem.IsWindows())
             {
                 start.Environment["USERPROFILE"] = scratch.FullName;
                 start.Environment["APPDATA"] = Directory.CreateDirectory(Path.Combine(scratch.FullName, "AppData", "Roaming")).FullName;

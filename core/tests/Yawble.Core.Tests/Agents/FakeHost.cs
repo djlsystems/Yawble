@@ -86,10 +86,34 @@ public sealed class FakeHost : IHostFileSystem, ICliProcessRunner
         }
     }
 
+    /// <summary>The login shell's $SHELL on macOS/Linux (set unless <see cref="Vars"/> has SHELL); null: no $SHELL.</summary>
+    public string? Shell { get; set; } = "/bin/zsh";
+
+    /// <summary>What the login shell answers; default: exit 0 with <see cref="ShellPath"/> (or <see cref="PathDirs"/>) between the markers.</summary>
+    public Func<CliProbeCommand, CliProbeResult>? ShellRespond { get; set; }
+
+    /// <summary>The login shell's PATH; null: the same as the core's (<see cref="PathDirs"/>).</summary>
+    public List<string>? ShellPath { get; set; }
+
+    public List<CliProbeCommand> ShellRuns { get; } = [];
+
     public DetectionHost Host()
     {
-        var env = new HostEnvironment(Os, Home, PathDirs, Os == TargetOs.Windows ? [".COM", ".EXE", ".BAT", ".CMD"] : [], Vars);
-        return new DetectionHost(env, this, this);
+        var vars = new Dictionary<string, string>(Vars);
+        if (Os != TargetOs.Windows && Shell is not null) vars.TryAdd("SHELL", Shell);
+        var env = new HostEnvironment(Os, Home, PathDirs, Os == TargetOs.Windows ? [".COM", ".EXE", ".BAT", ".CMD"] : [], vars);
+        return new DetectionHost(env, this, this, new ShellRunner(this));
+    }
+
+    private sealed class ShellRunner(FakeHost f) : ICliProcessRunner
+    {
+        public Task<CliProbeResult> RunAsync(CliProbeCommand command, CancellationToken ct)
+        {
+            lock (f.ShellRuns) f.ShellRuns.Add(command);
+            var m = DetectionHost.LoginShellMarker;
+            return Task.FromResult(f.ShellRespond?.Invoke(command)
+                ?? new CliProbeResult(0, $"{m}{string.Join(':', f.ShellPath ?? f.PathDirs)}{m}", "", false));
+        }
     }
 
     /// <summary>Follows links the way the OS does when a file is opened.</summary>
