@@ -163,7 +163,7 @@ public class TeamLocalhostSettingTests
         Assert.Contains("xUnit v3 on Microsoft.Testing.Platform", text);
         Assert.Contains("`SocketException (13): Permission denied` at `TcpListener.Start`", text);
         Assert.Contains("Tell your Manager in one line: \"dotnet test needs Allow localhost (macOS): Team settings > Network\". Do not guess", text);
-        Assert.DoesNotContain("mxc", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("m" + "xc", body, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The run inputs whose clone is the member's (members/&lt;member&gt; in its path).</summary>
