@@ -713,7 +713,10 @@ masked in the log and never reaches an agent. See
   - **Cron**: 5 or 6 fields, with a timezone.
   - **Once**: at a set time.
   - **Folder**: when files in the team's documents or a folder on this computer change and settle. It can filter by
-    file pattern.
+    file pattern. **Fire on** chooses which changes wake the agent: **Added files** (the default for a new trigger),
+    **Added or changed** (a file added or changed in size), or **Any change** (added, removed or changed; folder
+    triggers made before this choice keep it). A change that does not match never fires, so an agent that moves the
+    files it was woken for out of the folder is not woken again. The instruction lists only the changes that fire.
   - **Event**: when an integration watch reports a new item.
 - Options: **Only when the agent is idle**, **Enabled**, **Run now**.
 - **Wake the Manager when a run ends**: only on a hand-back or failure (the default), every time, or never.
