@@ -23,3 +23,25 @@ Notes (not faults, nothing to fix for this card):
 - A process that is started and orphaned inside one 250 ms observe window is caught only through its group (if a recorded process leads that group) or at the final `Track` in `Reap` (if it is still a descendant then). A double-forked daemon that calls setsid within 250 ms could escape. The Mac mini check (section 5) covers the real hung-build case.
 - If `Supervise` throws, `EndTree` is not reached. The launcher's `finally` still removes the folder, but the tree is not reaped. This is the same as before the fix.
 - The card asks for "Launch and Tasks classes". The developer changed no Tasks file (host tasks keep `PosixSpawn`'s killpg), so only the Launch classes were run.
+
+## 2. Mutation check
+
+Each mutation was edited into the working tree, rebuilt, and run with `Yawble.Core.Tests.exe -class Yawble.Core.Tests.Launch.RunTreeTests`, then reverted with `git checkout -- <file>`. After the revert the rebuild ran 12 tests, 0 failed.
+
+| Mutation | Result |
+|---|---|
+| A: drop the SIGKILL escalation (both `SignalAll(alive, SIGKILL);` in `RunTree.Reap` removed) | 4 failed of 12: `AChildThatIgnoresSigtermIsSigkilledAfterTheGrace`, `AGrandchildInItsOwnGroupIsKilledEvenAfterItsParentEnded`, `AProcessInARecordedGroupIsKilledThoughItsParentWasNeverSeen`, `TheRunsTempFolderGoesOnlyAfterTheTreeIsGoneAndTheRunEndsAfterThat` |
+| B: remove the temp folder before the kill (`_treeGone?.Invoke()` moved ahead of `Reap` in `RunSupervisor.EndTree`) | 1 failed of 12: `TheRunsTempFolderGoesOnlyAfterTheTreeIsGoneAndTheRunEndsAfterThat` |
+
+Both regressions are caught.
+
+## 3. Changed classes and NameLeakTests
+
+Commit 2ecf6f4 merged; `core\tests\Yawble.Core.Tests\bin\Debug\net10.0\Yawble.Core.Tests.exe -class <name>`. Each class name was checked with `git grep "class <Name>"` first.
+
+| Class | Total | Failed | Skipped |
+|---|---|---|---|
+| Yawble.Core.Tests.Launch.RunTreeTests | 12 | 0 | 1 (`MacProcessTableListsThisProcess`, macOS only) |
+| Yawble.Core.Tests.Launch.RunSupervisorTests | 8 | 0 | 4 (OS-specific, skipped as before) |
+| Yawble.Core.Tests.Launch.LauncherTests | 19 | 0 | 2 |
+| Yawble.Core.Tests.NameLeakTests | 2 | 0 | 0 |
