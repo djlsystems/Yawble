@@ -42,7 +42,7 @@ public class StatusLineRestartTests
         Assert.Equal("polishing", cards["Ada"].StatusLine);
         Assert.Equal("blocked: no key", cards["Ben"].StatusLine);
         Assert.Equal("handed back: the fix", cards["Cy"].StatusLine);
-        Assert.Equal("needs decision: which db?", cards["Di"].StatusLine);
+        Assert.Equal("Waiting on you: which db?", cards["Di"].StatusLine);
         Assert.Equal("declared complete: all done", cards["Manager"].StatusLine);
         Assert.Null(cards["Ed"].StatusLine);
     }
