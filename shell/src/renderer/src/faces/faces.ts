@@ -107,7 +107,18 @@ export function initials(name: string): string {
  */
 export type MemberState = 'decision' | 'blocked' | 'failed' | 'running' | 'waiting' | 'stopped' | 'idle';
 
-export function memberStateOf(card: Pick<AgentCard, 'state' | 'attention'> & Partial<Pick<AgentCard, 'lastRunFailureClass' | 'decisionId'>>): MemberState {
+/**
+ * B126: a card's state in either shape the core sends: the wait state in `state` (card 565), or `state` queued / idle
+ * with `waitState` beside it (core 564). A waitState this build does not know reads as pending.
+ */
+export function cardState(card: Pick<AgentCard, 'state'> & Partial<Pick<AgentCard, 'waitState'>>): AgentCard['state'] {
+  if ((card.state === 'queued' || card.state === 'idle') && card.waitState)
+    return (['queued', 'waits-for-run', 'held', 'pending'] as const).find((s) => s === card.waitState) ?? 'pending';
+  return card.state;
+}
+
+export function memberStateOf(input: Pick<AgentCard, 'state' | 'attention'> & Partial<Pick<AgentCard, 'lastRunFailureClass' | 'decisionId' | 'waitState'>>): MemberState {
+  const card = { ...input, state: cardState(input) };
   // B123: an open decision (decisionId) waits on the person whatever else the card says.
   if (card.attention === 'decision' || card.decisionId != null) return 'decision';
   if (card.attention === 'blocked') return 'blocked';

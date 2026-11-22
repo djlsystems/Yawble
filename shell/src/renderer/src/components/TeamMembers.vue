@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AgentCard, YawbleApi } from '../../../shared/api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
-import { waitSays } from '../waiting';
+import { cardState, waitSays } from '../waiting';
 
 // A team's members on its tile in the Teams list: each one's avatar with its state ring and animation, as on the
 // team page. Hovering one shows its name, state and what it is doing. It sits inside the tile's open button (spans only).
@@ -19,7 +19,8 @@ async function load() {
   } catch { /* keeps what it showed; the text fallback until the first answer */ }
 }
 
-function tip(c: AgentCard): string {
+function tip(card: AgentCard): string {
+  const c = { ...card, state: cardState(card) }; // B126: the wait state in either shape
   const doing = c.statusLine?.split('\n').find((l) => l.trim() !== '')?.trim();
   const queued = c.state === 'queued' && c.queuePosition ? ` (#${c.queuePosition} in the queue)`
     : c.state === 'waits-for-run' || c.state === 'held' || c.state === 'pending' ? ` (${waitSays(c.state, c.waitsFor)})` : '';

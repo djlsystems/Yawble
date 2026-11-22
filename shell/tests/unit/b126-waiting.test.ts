@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentCard, WorkflowRow, WorkflowsListAnswer, YawbleApi } from '../../src/shared/api';
-import { waitSays, workerSays } from '../../src/renderer/src/waiting';
+import { cardState, waitSays, workerSays } from '../../src/renderer/src/waiting';
 import { statusTip } from '../../src/renderer/src/workflows/page';
 import { memberStateOf } from '../../src/renderer/src/faces/faces';
 import WorkflowsView from '../../src/renderer/src/workflows/WorkflowsView.vue';
@@ -97,5 +97,49 @@ describe('the member pane state line', () => {
     const text = stateText(card(over as Partial<AgentCard>));
     expect(text).toContain(line);
     if (over.state !== 'queued') expect(text).not.toContain('run slot');
+  });
+});
+
+// Card 571 (B126 shell follow-up): core 564 sends waitingFor slot only for a queued member, else waits-for-run, held or
+// pending; and agent cards may carry waitState + waitsFor beside a queued / idle state.
+describe('the row waitingFor alone (card 571)', () => {
+  const row = (waitingFor: WorkflowRow['waitingFor'], members: WorkflowRow['members'] = []) =>
+    ({ status: 'waiting', state: 'open', waitingFor, expiresAt: null, working: false, members }) as const;
+  it('slot keeps its words', () => expect(statusTip(row('slot'))).toBe('Waiting for a run slot'));
+  it('waits-for-run without a sender: another member\'s run', () => {
+    expect(statusTip(row('waits-for-run'))).toBe("Waiting for another member's run to end");
+  });
+  it('waits-for-run takes the sender from a waiting worker', () => {
+    // A running worker keeps the workers' own words out, so the row's waitingFor speaks, with the waiting worker's sender.
+    expect(statusTip(row('waits-for-run', [{ id: 1, name: 'Eve', state: 'running' }, { id: 2, name: 'Manager', state: 'waits-for-run', waitsFor: 'TesterBen' }])))
+      .toBe("Waiting for Tester Ben's run to end");
+  });
+  it('held: team paused', () => expect(statusTip(row('held'))).toBe('Waiting: team paused'));
+  it('pending: has work waiting', () => expect(statusTip(row('pending'))).toBe('Has work waiting'));
+});
+
+describe('an agent card with waitState beside state (card 571)', () => {
+  it.each([
+    [{ state: 'idle', waitState: 'waits-for-run' }, 'waits-for-run'],
+    [{ state: 'queued', waitState: 'held' }, 'held'],
+    [{ state: 'idle', waitState: 'pending' }, 'pending'],
+    [{ state: 'queued', waitState: 'queued' }, 'queued'],
+    [{ state: 'idle', waitState: 'something-new' }, 'pending'],
+    [{ state: 'idle', waitState: null }, 'idle'],
+    [{ state: 'running', waitState: 'pending' }, 'running'],
+    [{ state: 'held' }, 'held'],
+  ] as const)('%o reads as %s', (c, want) => {
+    expect(cardState(c as Pick<AgentCard, 'state' | 'waitState'>)).toBe(want);
+  });
+  it('rings waiting and says the wait on the member pane', () => {
+    expect(memberStateOf({ state: 'idle', waitState: 'pending' })).toBe('waiting');
+    const member = { id: 7, teamId: 1, team: 'payments', name: 'DeveloperMarlo', role: 'member', cli: 'claude', instructions: '', model: '', credential: 'default' } as const;
+    const card = {
+      member, state: 'idle', waitState: 'waits-for-run', waitsFor: 'TesterBen', queuePosition: null, queueLength: 0, queuedInstructions: 1, statusLine: null,
+      runId: null, runStartedAt: null, lastRunState: null, lastRunReason: null, net: 'model + bus', wallTimeout: '2 h', loosened: [], policyProblems: [],
+    } as unknown as AgentCard;
+    const w = mount(MemberPane, { props: { card } as any, global: { stubs: { TerminalScreen: true } } });
+    expect(w.get('[data-test=agent-state]').text()).toContain("waits for Tester Ben's run to end");
+    expect(w.get('[data-test=agent-state]').text()).not.toContain('run slot');
   });
 });

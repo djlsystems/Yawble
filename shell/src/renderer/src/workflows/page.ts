@@ -26,7 +26,16 @@ export const StatusLooks: Record<WorkflowRowStatus, StatusLook> = {
 export function statusLook(w: Pick<WorkflowRow, 'status' | 'state'>): StatusLook {
   return StatusLooks[w.status] ?? (w.state === 'open' ? StatusLooks.idle : StatusLooks.closed);
 }
-const WaitingFor: Record<string, string> = { slot: 'Waiting for a run slot', lease: 'Waiting for the heavy-work lease', wake: 'Waiting for a wake-up' };
+const WaitingFor: Record<string, string> = {
+  slot: 'Waiting for a run slot', lease: 'Waiting for the heavy-work lease', wake: 'Waiting for a wake-up',
+  // B126 (core 564): undelivered work that is in no run queue says what it waits for, in the waiting.ts words.
+  held: 'Waiting: team paused', pending: 'Has work waiting',
+};
+/** waits-for-run: the sender from the row's waiting worker when one names it, else "another member's run". */
+function waitsForRunSays(members: WorkflowRow['members'] | undefined): string {
+  const sender = (members ?? []).find((m) => m.state === 'waits-for-run' && m.waitsFor?.trim())?.waitsFor?.trim();
+  return `Waiting for ${sender ? `${displayName(sender)}'s` : "another member's"} run to end`;
+}
 /**
  * B126: a waiting row whose deliveries are not in the run queue waits for what its workers wait for ("Waiting: Developer
  * Ada waits for Tester Ben's run to end"), not for a run slot; null when a worker is queued or none says otherwise.
@@ -39,7 +48,8 @@ function workersWait(members: WorkflowRow['members'] | undefined): string | null
 /** The Status cell's tooltip: what it waits for, or the expiry countdown of an idle one. */
 export function statusTip(w: Pick<WorkflowRow, 'status' | 'state' | 'waitingFor' | 'expiresAt' | 'working'> & Partial<Pick<WorkflowRow, 'members'>>, now = Date.now()): string {
   const look = statusLook(w);
-  if (w.status === 'waiting') return (w.waitingFor !== 'lease' && w.waitingFor !== 'wake' ? workersWait(w.members) : null) ?? WaitingFor[w.waitingFor ?? ''] ?? 'Waiting';
+  if (w.status === 'waiting') return (w.waitingFor !== 'lease' && w.waitingFor !== 'wake' ? workersWait(w.members) : null)
+    ?? (w.waitingFor === 'waits-for-run' ? waitsForRunSays(w.members) : WaitingFor[w.waitingFor ?? ''] ?? 'Waiting');
   if (w.status === 'idle') {
     if (!w.expiresAt) return 'Open, nobody is working it';
     const left = Date.parse(w.expiresAt) - now;

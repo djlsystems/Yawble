@@ -1,5 +1,6 @@
 import type { WorkerWaitState } from '../../shared/api';
 import { displayName } from './faces/faces';
+export { cardState } from './faces/faces';
 
 // B126: what a member's not-started work waits for, in the same words on every screen (the Workflows page's Who column
 // and status tip, the member pane, the team tiles). Only "queued" is a wait for a run slot; the rest never were.

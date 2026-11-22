@@ -462,7 +462,8 @@ export interface WorkflowRow extends WorkflowSummary {
   ownerId: number | null;
   team: string; teamId: number;
   status: WorkflowRowStatus;
-  waitingFor: 'slot' | 'lease' | 'wake' | null;
+  /** B126: slot only while a member is in the run queue; else what the undelivered work waits for (WorkerWaitState words). */
+  waitingFor: 'slot' | 'lease' | 'wake' | 'waits-for-run' | 'held' | 'pending' | null;
   /** A run of it is active right now (the icon is animated), whatever the status. */
   working: boolean;
   item: WorkflowItem | null;
@@ -1012,7 +1013,9 @@ export interface AgentModelShown { name: string; source: 'member' | 'agent' | 'o
 export interface AgentCard {
   /** B126: besides running and idle, the WorkerWaitState of work not started (an older core sends only queued). */
   member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'idle' | WorkerWaitState; queuePosition: number | null; queueLength: number;
-  /** B126, state waits-for-run: the member whose run must end first. */
+  /** B126 (core 564 shape): why queued instructions have not started, next to a state of queued or idle (cardState reads either shape). */
+  waitState?: WorkerWaitState | null;
+  /** B126, waits-for-run: the member whose run must end first. */
   waitsFor?: string | null;
   queuedInstructions: number; statusLine: string | null; runId: number | null; runStartedAt: string | null;
   lastRunState: string | null; lastRunReason: string | null;
