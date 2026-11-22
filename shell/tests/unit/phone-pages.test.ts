@@ -181,7 +181,8 @@ const DesktopCss: Record<string, string> = {
   // B076 (card 365): the members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)
   // ending with the New member tile (.new-tile, its form .add); the old add row's rule went. Card 368: the pane clips
   // sideways only (overflow-x clip, y visible) so its ☰ menu draws past a short tile; the focused cell is raised.
-  'components/TeamView.vue': '5f8d83d315b69e96',
+  // B123 (card 547): the decision card's option notes (.choice, .choice .note) and its collapsed Details (.details).
+  'components/TeamView.vue': '9077bcd422d5c383',
   // B073 (card 465): the sync banner's "N commits behind" is a link (.count, as in the Git dialog) opening a list (.list).
   'components/TeamSyncBanner.vue': '72abffaf508279af',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
