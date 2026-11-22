@@ -63,15 +63,23 @@ public sealed class ProcessSecurityTool : ISecurityTool
             var stdout = process.StandardOutput.ReadToEndAsync();
             var stderr = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(timeout))
-            {
-                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-                try { process.WaitForExit(1000); } catch (InvalidOperationException) { }
-                return new SecurityToolResult(-1, "", timedOut: true);
-            }
+                return EndTimedOut(() => process.Kill(entireProcessTree: true), () => process.WaitForExit(1000));
             process.WaitForExit(); // the output streams are complete after this
             _ = stderr.Result;
             return new SecurityToolResult(process.ExitCode, stdout.Result);
         }
+    }
+
+    /// <summary>
+    /// The tool did not answer in time: kill its tree and wait a moment. Killing can fail (it already exited:
+    /// InvalidOperationException; a member of the tree cannot be ended: Win32Exception); the result is "timed out" either
+    /// way, never an exception. Tests pass fakes for both steps.
+    /// </summary>
+    internal static SecurityToolResult EndTimedOut(Action kill, Action waitBriefly)
+    {
+        try { kill(); } catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
+        try { waitBriefly(); } catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
+        return new SecurityToolResult(-1, "", timedOut: true);
     }
 }
 

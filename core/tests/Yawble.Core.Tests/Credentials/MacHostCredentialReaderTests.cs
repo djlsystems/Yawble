@@ -57,6 +57,24 @@ public class MacHostCredentialReaderTests
     private const string Service = "Claude Code-credentials";
 
     [Fact]
+    public void ATimedOutTool_WhoseKillThrows_IsTimedOut_NotAnException()
+    {
+        // Process.Kill(entireProcessTree: true) throws Win32Exception when a member of the tree cannot be ended, and
+        // InvalidOperationException when it already exited. Fakes for both steps: no process is started.
+        var steps = new List<string>();
+        foreach (Exception thrown in new Exception[] { new System.ComponentModel.Win32Exception(1, "fake: access denied"), new InvalidOperationException("fake: exited") })
+        {
+            var result = ProcessSecurityTool.EndTimedOut(
+                () => { steps.Add("kill"); throw thrown; },
+                () => { steps.Add("wait"); throw new System.ComponentModel.Win32Exception(1, "fake"); });
+            Assert.True(result.TimedOut);
+            Assert.Equal(-1, result.ExitCode);
+            Assert.Equal("", result.StandardOutput);
+        }
+        Assert.Equal(["kill", "wait", "kill", "wait"], steps);
+    }
+
+    [Fact]
     public void TheToolIsTheAbsolutePath_WithAFiveSecondTimeout()
     {
         Assert.Equal("/usr/bin/security", ProcessSecurityTool.Path);

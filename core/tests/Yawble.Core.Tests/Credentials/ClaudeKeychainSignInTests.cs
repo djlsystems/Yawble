@@ -298,24 +298,81 @@ public class ClaudeKeychainSignInTests
     {
         using var dir = new TempDb();
         var keychain = new FakeKeychain().Set(Service, FakeKeychain.ClaudeSignIn("sk-ant-oat01-REFUSED", DateTimeOffset.UtcNow.AddHours(4)));
-        var session = new ClaudeHostSession(DecoyFile(dir), () => "claude", keychain: keychain, runClaude: (_, _, _) => Task.CompletedTask);
+        var ran = new List<string>();
+        var session = new ClaudeHostSession(DecoyFile(dir), () => "claude", keychain: keychain, runClaude: (_, args, _) =>
+        {
+            lock (ran) ran.Add(string.Join(' ', args.Take(2)));
+            return Task.CompletedTask;
+        });
         Assert.Equal("sk-ant-oat01-REFUSED", (await session.CurrentAsync(Ct))!.AccessToken);
         var before = keychain.Reads.Count;
 
-        // The API answered 401: the gateway forces a renewal (RenewClaudeHostAsync). The person signed in again meanwhile.
+        // The API answered 401: the gateway forces a renewal (RenewClaudeHostAsync). The host's claude renewed its item
+        // by itself meanwhile: the different, fresh token IS the renewal, and claude is not run.
         keychain.Set(Service, FakeKeychain.ClaudeSignIn("sk-ant-oat01-AGAIN", DateTimeOffset.UtcNow.AddHours(8)));
-        await session.RefreshAsync(force: true, Ct);
+        Assert.True(await session.RefreshAsync(force: true, Ct));
+        Assert.Empty(ran);
         Assert.True(keychain.Reads.Count > before);
         Assert.Equal("sk-ant-oat01-AGAIN", (await session.CurrentAsync(Ct))!.AccessToken);
 
-        // A 401 whose renewal changes nothing keeps nothing: the next request reads the item again.
+        // A 401 whose renewal changes nothing is not renewed and keeps nothing: the next request reads the item again.
         var unchanged = new FakeKeychain().Set(Service, FakeKeychain.ClaudeSignIn("sk-ant-oat01-SAME", DateTimeOffset.UtcNow.AddHours(4)));
-        var s2 = new ClaudeHostSession(DecoyFile(dir), () => "claude", keychain: unchanged, runClaude: (_, _, _) => Task.CompletedTask);
+        var ran2 = new List<string>();
+        var s2 = new ClaudeHostSession(DecoyFile(dir), () => "claude", keychain: unchanged, runClaude: (_, args, _) =>
+        {
+            lock (ran2) ran2.Add(string.Join(' ', args.Take(2)));
+            return Task.CompletedTask;
+        });
         await s2.CurrentAsync(Ct);
-        await s2.RefreshAsync(force: true, Ct);
+        Assert.False(await s2.RefreshAsync(force: true, Ct));
+        Assert.Equal(["auth status", "-p Reply with the single word ok."], ran2);
         var afterRefresh = unchanged.Reads.Count;
         await s2.CurrentAsync(Ct);
         Assert.Equal(afterRefresh + 1, unchanged.Reads.Count);
+    }
+
+    [Fact]
+    public async Task ASlowRead_DoesNotReplaceANewerKeptToken()
+    {
+        using var dir = new TempDb();
+        var keychain = new SlowFirstReadKeychain(FakeKeychain.ClaudeSignIn("sk-ant-oat01-OLDER", DateTimeOffset.UtcNow.AddHours(4)));
+        var session = new ClaudeHostSession(DecoyFile(dir), () => null, keychain: keychain);
+
+        // The first read takes the older value and then stalls; a second read meanwhile gets the newer one and keeps it.
+        var slow = Task.Run(session.Read, Ct);
+        Assert.True(keychain.FirstReadTookItsValue.Wait(TimeSpan.FromSeconds(10), Ct));
+        keychain.Value = FakeKeychain.ClaudeSignIn("sk-ant-oat01-NEWER", DateTimeOffset.UtcNow.AddHours(8));
+        Assert.Equal("sk-ant-oat01-NEWER", session.Read()!.AccessToken);
+
+        // The slow read finishes last: it returns what it read, but the kept token stays the newer one.
+        keychain.ReleaseFirstRead.Set();
+        Assert.Equal("sk-ant-oat01-OLDER", (await slow)!.AccessToken);
+        var reads = keychain.Reads;
+        Assert.Equal("sk-ant-oat01-NEWER", (await session.CurrentAsync(Ct))!.AccessToken);
+        Assert.Equal(reads, keychain.Reads); // served from memory: no read
+    }
+
+    /// <summary>A Keychain stand-in whose first read takes the value, then waits to be released before it answers.</summary>
+    private sealed class SlowFirstReadKeychain(string value) : IHostCredentialReader
+    {
+        private int _reads;
+        public volatile string Value = value;
+        public ManualResetEventSlim FirstReadTookItsValue { get; } = new();
+        public ManualResetEventSlim ReleaseFirstRead { get; } = new();
+        public int Reads => Volatile.Read(ref _reads);
+
+        public IReadOnlyList<string> Targets(string filter) => [filter];
+
+        public string? Read(string target)
+        {
+            var value = Value;
+            if (Interlocked.Increment(ref _reads) == 1)
+            {
+                FirstReadTookItsValue.Set();
+                ReleaseFirstRead.Wait(TimeSpan.FromSeconds(10));
+            }
+            return value;
+        }
     }
 
     [Fact]
