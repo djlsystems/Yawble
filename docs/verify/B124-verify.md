@@ -48,3 +48,24 @@ Mutation B, the guard removed from the app store's `Delete`: deleted the line
 `NoCodePathCanWriteAnotherProgramsKeychainItem [FAIL]` (Assert.Contains: sub-string not found).
 
 After `git checkout --` of both files and a rebuild: the class passes, 14/14.
+
+## 3. Changed classes, NeverEmitTests, NameLeakTests: PASS
+
+Binary: `core\tests\Yawble.Core.Tests\bin\Debug\net10.0\Yawble.Core.Tests.exe`, built from `81338ca` with
+`dotnet build core/tests/Yawble.Core.Tests/Yawble.Core.Tests.csproj -p:EnableSourceControlManagerQueries=false -p:EnableSourceLink=false`.
+Each run as `Yawble.Core.Tests.exe -class "Yawble.Core.Tests.<class>"`:
+
+| Class | Total | Failed |
+|---|---|---|
+| Credentials.MacHostCredentialReaderTests | 14 | 0 |
+| Credentials.ClaudeKeychainSignInTests | 16 | 0 |
+| Agents.SignInTests | 24 | 0 |
+| Policy.NeverEmitTests | 130 | 0 |
+| NameLeakTests | 2 | 0 |
+| Guardrail.GuardrailCheckTests (extra) | 18 (5 skipped) | 1: `TheDecoyListensOnIPv4Loopback_WhereTheProbeConnects` |
+
+- NameLeakTests passed in full here, including the stray-output-file test Ines saw fail with "Filename too long".
+- The one GuardrailCheckTests failure is the sandbox's loopback denial Ines reported. Neither
+  `core/src/Yawble.Core/Guardrail` nor `core/tests/Yawble.Core.Tests/Guardrail` changed since base `d6756c0`
+  (`git diff d6756c0 HEAD --stat -- core/src/Yawble.Core/Guardrail core/tests/Yawble.Core.Tests/Guardrail` is empty), so it is the same
+  code and the same failure on base. Environmental, not caused by B124.
