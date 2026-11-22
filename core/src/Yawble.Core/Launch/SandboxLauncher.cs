@@ -269,9 +269,18 @@ public sealed class SandboxLauncher(
     TimeProvider? clock = null,
     SupervisorOptions? supervisorOptions = null,
     IRunTranscripts? transcripts = null,
-    Agents.AgentDefaultsStore? agentDefaults = null)
+    Agents.AgentDefaultsStore? agentDefaults = null,
+    Func<int, RunTree?>? runTrees = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
+    /// <summary>
+    /// B122: macOS has no PID namespace around a run, so the core follows and ends the run's processes itself
+    /// (<see cref="RunTree"/>). Linux (bwrap's PID namespace) and Windows (the sandbox's own containment) need none.
+    /// </summary>
+    private RunTree? TreeFor(int sandboxPid) =>
+        runTrees is not null ? runTrees(sandboxPid)
+        : host.Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? new RunTree(MacProcessTable.Instance, sandboxPid) : null;
 
     /// <summary>The model a member's run uses: member override > the agent's default > the CLI's own default.</summary>
     public Agents.ModelResolution ResolveModel(LaunchMember member) =>
@@ -636,8 +645,11 @@ public sealed class SandboxLauncher(
                     // waiting (FinalAnswer). Not for a probe (its script is not a CLI) nor an interactive session.
                     var answer = kind == RunKind.Headless && probe is null && FinalAnswer.Detects(member.Cli) ? new FinalAnswer(member.Cli, _clock) : null;
                     if (answer is not null) output.Data += answer.Write;
+                    // The run's temp folder goes only once its processes are gone (a live build holds sockets in it), and
+                    // before the run is reported done.
                     var supervisor = new RunSupervisor(process, wall, idle, activity, output, _clock, supervisorOptions, errors,
-                        answer is null ? null : () => answer.At);
+                        answer is null ? null : () => answer.At, TreeFor(process.Id),
+                        () => { if (runTemp is not null) RunTempFolder.Remove(runTemp); });
                     var live = new LiveRun(runKey, request.Bus?.RunId, member.Team, member.Name, kind, process, supervisor, output);
                     registry.Add(live);
                     SupervisedExit exit;
@@ -705,8 +717,10 @@ public sealed class SandboxLauncher(
         };
         if (exit.EndedAfterAnswer)
             reason = "the agent gave its final answer but did not exit (a leftover process kept it waiting), so its sandbox was ended";
-        if (exit.TreeSurvived)
-            reason = (reason is null ? "" : reason + "; ") + "the sandbox was not gone within 5 s of the kill, so its handle was freed";
+        if (exit.LeftBehind > 0)
+            reason = (reason is null ? "" : reason + "; ") + $"{exit.LeftBehind} of the run's processes were still running after SIGTERM and SIGKILL";
+        else if (exit.TreeSurvived)
+            reason =(reason is null ? "" : reason + "; ") + "the sandbox was not gone within 5 s of the kill, so its handle was freed";
         return reason;
     }
 

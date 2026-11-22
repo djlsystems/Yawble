@@ -11,8 +11,9 @@ import FolderAsks from './FolderAsks.vue';
 import TerminalApp from '../TerminalApp.vue';
 import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
 import { renderMarkdown } from '../markdown';
-import { splitReport } from '../reportFormat';
+import { memberReport, WaitingLabel } from '../reportFormat';
 import { leaseText } from '../heavyLease';
+import { cardState, waitSays } from '../waiting';
 import { outputHeight } from '../agentOutputHeight';
 import { errorText, resolveApi } from '../api';
 import { getMemberView, MemberViews, setMemberView, type MemberView } from '../memberPaneView';
@@ -40,11 +41,16 @@ const emit = defineEmits<{ code: []; settings: []; logs: []; stop: []; remove: [
 const m = computed(() => props.card.member);
 const face = computed(() => memberStateOf(props.card));
 const phone = useNarrow();
+// B126: the wait state in either shape (in `state`, or `waitState` beside a queued / idle `state`).
+const state = computed(() => cardState(props.card));
 // The details after the state's own word (the label says Running, Needs you, Idle...); what the agent said is the Report.
 const stateLine = computed(() => {
-  const c = props.card;
-  if (c.attention === 'decision') return 'a question is waiting for your answer';
-  if (c.state === 'queued') return `position ${c.queuePosition} of ${c.queueLength} for a global run slot · ${c.queuedInstructions} instruction${c.queuedInstructions === 1 ? '' : 's'}`;
+  const c = { ...props.card, state: state.value };
+  if (c.attention === 'decision' || c.decisionId != null) return 'a question is waiting for your answer';
+  const instructions = `${c.queuedInstructions} instruction${c.queuedInstructions === 1 ? '' : 's'}`;
+  if (c.state === 'queued') return `position ${c.queuePosition} of ${c.queueLength} for a global run slot · ${instructions}`;
+  // B126: work held for another run, a paused team or anything else is no place in the run queue.
+  if (c.state === 'waits-for-run' || c.state === 'held' || c.state === 'pending') return `${waitSays(c.state, c.waitsFor)} · ${instructions}`;
   if (c.state === 'running') return '';
   // B097: a run the person stopped (class "stopped", recorded failed) is no failure: it says who stopped it.
   if (c.lastRunState !== 'completed' && c.lastRunState !== 'interrupted' && isStoppedRun({ state: c.lastRunState, failureClass: c.lastRunFailureClass, attention: c.attention })) return 'last run stopped by you';
@@ -57,9 +63,21 @@ const lease = computed(() => leaseText(props.card));
 const moreWaiting = computed(() => (props.card.state === 'running' && props.card.queuedInstructions > 0 ? props.card.queuedInstructions : 0));
 const moreWaitingTitle = computed(() =>
   `${moreWaiting.value} instruction${moreWaiting.value === 1 ? '' : 's'} waiting; they run after this one (oldest workflow first)`);
-const said = computed(() => props.card.statusLine?.trim() || '');
-const report = computed(() => splitReport(said.value));
+// B123: while the member has an open decision its report is "Waiting on you" (memberReport), never an earlier
+// "Declared complete"; the chip and the Report link to the decision card on the team page.
+const report = computed(() => memberReport(props.card));
+const waiting = computed(() => report.value.kind === 'waiting');
+const said = computed(() => (waiting.value ? report.value.body : props.card.statusLine?.trim() || ''));
 const saidHtml = computed(() => (said.value ? renderMarkdown(report.value.body) : ''));
+/** The title's state word: "Waiting on you" while a decision is open (B123). */
+const stateLabel = computed(() => (waiting.value ? WaitingLabel : MemberStateLabel[face.value]));
+/** Scrolls the team page to the decision this member waits on (its card, or the first decision card). */
+function openDecision() {
+  const id = report.value.decisionId;
+  const el = (id != null ? document.querySelector(`[data-decision-seq="${id}"]`) : null) ?? document.querySelector('[data-test=decision]');
+  el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  (el?.querySelector('button:not([disabled])') as HTMLElement | null)?.focus?.();
+}
 // The core keeps what a member said only while it runs (and seeds it from the log at start); a member that has run
 // but shows nothing has not reported since then.
 const emptyText = computed(() => (props.card.lastRunState ? 'No report since the app started.' : 'Nothing said yet.'));
@@ -77,7 +95,8 @@ watch(view, (v) => { if (v !== 'terminal') termLive.value = false; });
 const remote = computed(() => !!resolveApi(props.api)?.remote);
 /** B111: the folder asks read through the same api; none in a view without one. */
 const folderApi = computed(() => resolveApi(props.api) as YawbleApi | undefined);
-const canOpen = computed(() => props.card.state === 'idle' && !termLive.value);
+// B126: work that waits but is not queued for a slot (held, pending, waits for a run) leaves the CLI free to open, as idle did.
+const canOpen = computed(() => state.value !== 'running' && state.value !== 'queued' && !termLive.value);
 const canStop = computed(() => props.card.state === 'running' || termLive.value);
 const opening = ref(false);
 const error = ref<string | null>(null);
@@ -126,15 +145,15 @@ defineExpose({ el: () => root.value });
 </script>
 
 <template>
-  <section ref="root" class="pane" :class="[card.state, `is-${face}`, `view-${view}`, { phone }]" :data-test="`agent-${m.name}`" :aria-label="displayName(m.name)">
+  <section ref="root" class="pane" :class="[state, `is-${face}`, `view-${view}`, { phone }]" :data-test="`agent-${m.name}`" :aria-label="displayName(m.name)">
     <div class="title" data-test="agent-title">
-      <MemberAvatar class="avatar" :team="m.team" :member="m.name" :state="face" :size="26" :title="MemberStateLabel[face]" />
+      <MemberAvatar class="avatar" :team="m.team" :member="m.name" :state="face" :size="26" :title="stateLabel" />
       <strong data-test="agent-name" :title="m.name">{{ displayName(m.name) }}</strong>
       <!-- The pills sit on their own row under the name, so the name gets the whole first row (the ☰ stays on it). -->
       <span class="pills" data-test="agent-pills">
         <span class="chip">{{ m.role }}</span>
         <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
-        <span class="label" data-test="agent-face-state">{{ MemberStateLabel[face] }}</span>
+        <span class="label" data-test="agent-face-state">{{ stateLabel }}</span>
         <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
       </span>
       <span ref="menuWrap" class="menu-wrap">
@@ -161,7 +180,8 @@ defineExpose({ el: () => root.value });
           @click="show(v)">{{ TabLabel[v] }}</button>
       </span>
       <div v-if="hasDetails" class="state" data-test="agent-state">
-        <span v-if="report.label" class="kind" :class="report.kind" data-test="agent-report-kind">{{ report.label }}</span>
+        <a v-if="waiting" href="#" class="kind waiting" data-test="agent-report-kind" title="Go to the decision" @click.prevent="openDecision">{{ report.label }}</a>
+        <span v-else-if="report.label" class="kind" :class="report.kind" data-test="agent-report-kind">{{ report.label }}</span>
         <!-- The network / timeout summary is in the member's settings (Policy tab); only what needs action stays here. -->
         <template v-if="stateLine">{{ stateLine }}</template>
         <template v-if="stateLine && lease"> · </template>
@@ -176,7 +196,11 @@ defineExpose({ el: () => root.value });
     <div class="body" :class="`body-${view}`" :style="phone ? undefined : { height: `${height}px` }" data-test="member-pane-body">
       <template v-if="view === 'report'">
         <!-- Agent-written markdown: renderMarkdown never lets raw HTML through. -->
-        <div v-if="said" class="output md scrolls" data-test="agent-output" :data-commit-team="m.team" v-html="saidHtml" />
+        <div v-if="waiting" class="output md scrolls" data-test="agent-output">
+          <p class="waiting-note"><a href="#" data-test="agent-open-decision" @click.prevent="openDecision">{{ WaitingLabel }}: answer the decision</a></p>
+          <div class="md" v-html="saidHtml" />
+        </div>
+        <div v-else-if="said" class="output md scrolls" data-test="agent-output" :data-commit-team="m.team" v-html="saidHtml" />
         <div v-else class="output md scrolls" data-test="agent-output">
           <p class="muted" data-test="agent-output-empty">{{ emptyText }}</p>
         </div>
@@ -254,6 +278,8 @@ defineExpose({ el: () => root.value });
 .kind.complete { --k: var(--ok); }
 .kind.blocked { --k: var(--state-blocked); }
 .kind.decision { --k: var(--state-decision); }
+.kind.waiting { --k: var(--state-decision); text-decoration: none; cursor: pointer; }
+.waiting-note { margin: 0 0 6px; font-weight: 600; }
 .body > .member-activity { flex: 1; min-width: 0; min-height: 0; }
 .member-terminal { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--term-line, var(--line)); border-radius: 6px; overflow: hidden; }
 .member-terminal > .term-window { flex: 1; min-height: 0; height: auto; }

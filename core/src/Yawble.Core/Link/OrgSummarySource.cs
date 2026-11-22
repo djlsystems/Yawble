@@ -38,7 +38,9 @@ public sealed class AppOrgSummarySource(
             teams.Add(new OrgTeam(t.Name, t.Paused, t.Archived, cards.Select(c => new OrgAgent(c.Member.Name, Role(c.Member), c.State,
                 // B097: a run the person stopped is reported as stopped, never as failed.
                 c.LastRunFailed, c.State == "running" ? Doing(t.Name, c) : null,
-                c.State == "running" ? ParseTime(c.RunStartedAt) : null, c.LastRunStopped)).ToList(), t.WorkflowExpiryDays));
+                c.State == "running" ? ParseTime(c.RunStartedAt) : null, c.LastRunStopped,
+                // B126: the card's state already says why work waits; waitsFor goes with waits-for-run only.
+                c.State == Bus.WaitStates.WaitsForRun ? c.WaitsFor : null)).ToList(), t.WorkflowExpiryDays));
 
             var decisions = await bus.OpenDecisionsAsync(t.Name, ct).ConfigureAwait(false);
             asks.AddRange(decisions.Select(d => new OrgAsk("decision", t.Name, Field(d, "question") ?? Field(d, "text") ?? "a decision")));

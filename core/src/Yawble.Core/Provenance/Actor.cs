@@ -28,7 +28,16 @@ public sealed record Actor(string Via, string? User)
     /// <summary>The person at this computer's window (the IPC sets it). See <see cref="App"/>: new local entry points must use it.</summary>
     public static Actor Window => new(App, LocalUser);
 
-    public static Actor CloudViewer(string user) => new(Cloud, user);
+    /// <summary>
+    /// For Via Cloud: the viewer's access as the site said (Link.RemoteAccess.Full or Read, a workgroup Visitor). RemoteAccess
+    /// already refuses a Visitor's change calls; this lets a read (bus.decisions, B123) say what the viewer may not do.
+    /// </summary>
+    public string Access { get; init; } = "full";
+
+    /// <summary>A read-only viewer (a workgroup Visitor, Link.RemoteAccess.Read).</summary>
+    public bool ReadOnly => Access == "read";
+
+    public static Actor CloudViewer(string user, string access = "full") => new(Cloud, user) { Access = access };
 
     /// <summary>A paired companion client (e.g. Claude Code) acting through the control endpoint, on behalf of the local account.</summary>
     public static Actor ExternalClient(string client) => new(External, LocalUser) { Client = client };

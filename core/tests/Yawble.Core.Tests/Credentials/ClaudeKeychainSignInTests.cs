@@ -50,7 +50,7 @@ public sealed class FakeKeychain : IHostCredentialReader
         lock (_items)
         {
             Reads.Add(target);
-            if (Throws) throw new CredentialStoreException("SecKeychainFindGenericPassword failed (OSStatus -128)");
+            if (Throws) throw new CredentialStoreException("the Keychain item could not be read: /usr/bin/security exited with code 51");
             return _items.GetValueOrDefault(target);
         }
     }
@@ -63,7 +63,9 @@ public sealed class FakeKeychain : IHostCredentialReader
 /// <summary>
 /// B118 Part A: on macOS the gateway reads Claude Code's own sign-in from the login Keychain item "Claude Code-credentials"
 /// (through the reader seam; a fake here), not from a file; renewal is still the host's own claude. The value is never
-/// logged. Fakes only: no real Keychain, `security` or `claude` is used.
+/// logged. B124: the item is read through /usr/bin/security (<see cref="MacHostCredentialReader"/>, a fake tool here) and the
+/// token is kept in memory: read again only near expiry, during a renewal or after a 401. Fakes only: no real Keychain,
+/// `security` or `claude` is used.
 /// </summary>
 public class ClaudeKeychainSignInTests
 {
@@ -233,6 +235,172 @@ public class ClaudeKeychainSignInTests
         else Assert.Equal(ClaudeHostSession.DefaultCredentialsFile(_ => null), session.Source);
     }
 
+    // ---- B124: the token is kept in memory; the item is read again only near expiry, during a renewal, or after a 401.
+
+    [Fact]
+    public async Task TwoRequestsInARow_ReadTheItemOnce()
+    {
+        using var dir = new TempDb();
+        var keychain = new FakeKeychain().Set(Service, FakeKeychain.ClaudeSignIn(FakeSecrets.SetupToken, DateTimeOffset.UtcNow.AddHours(4)));
+        var session = new ClaudeHostSession(DecoyFile(dir), () => null, keychain: keychain);
+
+        Assert.Equal(FakeSecrets.SetupToken, (await session.CurrentAsync(Ct))!.AccessToken);
+        Assert.Equal(FakeSecrets.SetupToken, (await session.CurrentAsync(Ct))!.AccessToken);
+        Assert.Single(keychain.Reads);
+    }
+
+    [Fact]
+    public async Task ThroughTheGateway_TwoModelRequestsRunTheSecurityToolOnce()
+    {
+        using var dir = new TempDb();
+        var tool = new FakeSecurityTool().Set(Service, FakeKeychain.ClaudeSignIn(FakeSecrets.SetupToken, DateTimeOffset.UtcNow.AddHours(4)));
+        var session = new ClaudeHostSession(DecoyFile(dir), () => null, keychain: new MacHostCredentialReader(tool));
+        await using var f = await GatewayFixture.StartAsync(claudeHost: session);
+        f.Upstream.ReleaseStream();
+        await using var gateway = f.StartRun(13, claudeFromHost: true);
+        using var http = ProxyClient.For(gateway);
+
+        for (var i = 0; i < 2; i++)
+        {
+            using var response = await http.SendAsync(Messages(gateway), Ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        Assert.Equal(2, f.Upstream.Requests.Count);
+        Assert.All(f.Upstream.Requests, r => Assert.Equal("Bearer " + FakeSecrets.SetupToken, r.Authorization));
+        Assert.Equal(1, tool.Reads);
+        Assert.All(tool.Calls, c => Assert.Equal(["find-generic-password", "-s", Service, "-w"], c));
+    }
+
+    [Fact]
+    public async Task NearExpiry_TheItemIsReadAgain()
+    {
+        using var dir = new TempDb();
+        var clock = new FakeClock(DateTimeOffset.UtcNow);
+        var keychain = new FakeKeychain().Set(Service, FakeKeychain.ClaudeSignIn("sk-ant-oat01-FIRST", clock.Now.AddMinutes(30)));
+        var session = new ClaudeHostSession(DecoyFile(dir), () => null, clock: clock, keychain: keychain);
+
+        Assert.Equal("sk-ant-oat01-FIRST", (await session.CurrentAsync(Ct))!.AccessToken);
+        clock.Advance(TimeSpan.FromMinutes(10));
+        Assert.Equal("sk-ant-oat01-FIRST", (await session.CurrentAsync(Ct))!.AccessToken);
+        Assert.Single(keychain.Reads); // 20 minutes left: kept
+
+        // The host's claude renewed its item meanwhile; within RenewMargin of the kept token's expiry it is read again.
+        keychain.Set(Service, FakeKeychain.ClaudeSignIn("sk-ant-oat01-SECOND", clock.Now.AddHours(8)));
+        clock.Advance(TimeSpan.FromMinutes(16)); // 4 minutes left
+        Assert.Equal("sk-ant-oat01-SECOND", (await session.CurrentAsync(Ct))!.AccessToken);
+        Assert.Equal(2, keychain.Reads.Count);
+        Assert.Equal("sk-ant-oat01-SECOND", (await session.CurrentAsync(Ct))!.AccessToken);
+        Assert.Equal(2, keychain.Reads.Count);
+    }
+
+    [Fact]
+    public async Task After401_TheItemIsReadAgain_EvenWhenTheRenewalDidNotRenew()
+    {
+        using var dir = new TempDb();
+        var keychain = new FakeKeychain().Set(Service, FakeKeychain.ClaudeSignIn("sk-ant-oat01-REFUSED", DateTimeOffset.UtcNow.AddHours(4)));
+        var ran = new List<string>();
+        var session = new ClaudeHostSession(DecoyFile(dir), () => "claude", keychain: keychain, runClaude: (_, args, _) =>
+        {
+            lock (ran) ran.Add(string.Join(' ', args.Take(2)));
+            return Task.CompletedTask;
+        });
+        Assert.Equal("sk-ant-oat01-REFUSED", (await session.CurrentAsync(Ct))!.AccessToken);
+        var before = keychain.Reads.Count;
+
+        // The API answered 401: the gateway forces a renewal (RenewClaudeHostAsync). The host's claude renewed its item
+        // by itself meanwhile: the different, fresh token IS the renewal, and claude is not run.
+        keychain.Set(Service, FakeKeychain.ClaudeSignIn("sk-ant-oat01-AGAIN", DateTimeOffset.UtcNow.AddHours(8)));
+        Assert.True(await session.RefreshAsync(force: true, Ct));
+        Assert.Empty(ran);
+        Assert.True(keychain.Reads.Count > before);
+        Assert.Equal("sk-ant-oat01-AGAIN", (await session.CurrentAsync(Ct))!.AccessToken);
+
+        // A 401 whose renewal changes nothing is not renewed and keeps nothing: the next request reads the item again.
+        var unchanged = new FakeKeychain().Set(Service, FakeKeychain.ClaudeSignIn("sk-ant-oat01-SAME", DateTimeOffset.UtcNow.AddHours(4)));
+        var ran2 = new List<string>();
+        var s2 = new ClaudeHostSession(DecoyFile(dir), () => "claude", keychain: unchanged, runClaude: (_, args, _) =>
+        {
+            lock (ran2) ran2.Add(string.Join(' ', args.Take(2)));
+            return Task.CompletedTask;
+        });
+        await s2.CurrentAsync(Ct);
+        Assert.False(await s2.RefreshAsync(force: true, Ct));
+        Assert.Equal(["auth status", "-p Reply with the single word ok."], ran2);
+        var afterRefresh = unchanged.Reads.Count;
+        await s2.CurrentAsync(Ct);
+        Assert.Equal(afterRefresh + 1, unchanged.Reads.Count);
+    }
+
+    [Fact]
+    public async Task ASlowRead_DoesNotReplaceANewerKeptToken()
+    {
+        using var dir = new TempDb();
+        var keychain = new SlowFirstReadKeychain(FakeKeychain.ClaudeSignIn("sk-ant-oat01-OLDER", DateTimeOffset.UtcNow.AddHours(4)));
+        var session = new ClaudeHostSession(DecoyFile(dir), () => null, keychain: keychain);
+
+        // The first read takes the older value and then stalls; a second read meanwhile gets the newer one and keeps it.
+        var slow = Task.Run(session.Read, Ct);
+        Assert.True(keychain.FirstReadTookItsValue.Wait(TimeSpan.FromSeconds(10), Ct));
+        keychain.Value = FakeKeychain.ClaudeSignIn("sk-ant-oat01-NEWER", DateTimeOffset.UtcNow.AddHours(8));
+        Assert.Equal("sk-ant-oat01-NEWER", session.Read()!.AccessToken);
+
+        // The slow read finishes last: it returns what it read, but the kept token stays the newer one.
+        keychain.ReleaseFirstRead.Set();
+        Assert.Equal("sk-ant-oat01-OLDER", (await slow)!.AccessToken);
+        var reads = keychain.Reads;
+        Assert.Equal("sk-ant-oat01-NEWER", (await session.CurrentAsync(Ct))!.AccessToken);
+        Assert.Equal(reads, keychain.Reads); // served from memory: no read
+    }
+
+    /// <summary>A Keychain stand-in whose first read takes the value, then waits to be released before it answers.</summary>
+    private sealed class SlowFirstReadKeychain(string value) : IHostCredentialReader
+    {
+        private int _reads;
+        public volatile string Value = value;
+        public ManualResetEventSlim FirstReadTookItsValue { get; } = new();
+        public ManualResetEventSlim ReleaseFirstRead { get; } = new();
+        public int Reads => Volatile.Read(ref _reads);
+
+        public IReadOnlyList<string> Targets(string filter) => [filter];
+
+        public string? Read(string target)
+        {
+            var value = Value;
+            if (Interlocked.Increment(ref _reads) == 1)
+            {
+                FirstReadTookItsValue.Set();
+                ReleaseFirstRead.Wait(TimeSpan.FromSeconds(10));
+            }
+            return value;
+        }
+    }
+
+    [Fact]
+    public async Task TheFileIsStillReadAtEveryRequest()
+    {
+        using var dir = new TempDb();
+        var file = DecoyFile(dir);
+        var session = new ClaudeHostSession(file, () => null);
+        Assert.Equal("sk-ant-oat01-FROMTHEFILE", (await session.CurrentAsync(Ct))!.AccessToken);
+        File.WriteAllText(file, FakeKeychain.ClaudeSignIn("sk-ant-oat01-NEWFILE", DateTimeOffset.UtcNow.AddHours(4)));
+        Assert.Equal("sk-ant-oat01-NEWFILE", (await session.CurrentAsync(Ct))!.AccessToken);
+    }
+
+    [Fact]
+    public void AnUnreadableItem_IsNoToken_AndTheLogGivesTheExitCodeOnly()
+    {
+        using var dir = new TempDb();
+        var log = new List<string>();
+        var tool = new FakeSecurityTool { Fails = (51, "sk-ant-oat01-ECHOEDONSTDOUT0123456789") };
+        var session = new ClaudeHostSession(DecoyFile(dir), () => null, log.Add, keychain: new MacHostCredentialReader(tool));
+        Assert.Null(session.Read());
+        Assert.Contains(log, l => l.Contains("exited with code 51"));
+        Assert.DoesNotContain(log, l => l.Contains("ECHOED"));
+        tool.Fails = null;
+        tool.TimesOut = true;
+        Assert.Null(session.Read());
+        Assert.Contains(log, l => l.Contains("did not answer within 5 s"));
+    }
     private static HttpRequestMessage Messages(RunGateway gateway)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, $"http://{Vhosts.Model}/v1/messages")

@@ -134,10 +134,15 @@ public class WorkflowsPageTests
         Assert.Equal(("needs-you", "Beta"), (S(Row(all, asking)["status"]), S(Row(all, asking)["team"])));
         Assert.NotNull(Row(all, asking)["question"]);
         Assert.Equal("stopped", S(Row(all, stopped)["status"]));
+        // B126: an undelivered delivery whose member is not in the run queue is pending, not "queued for a run slot".
         var q = Row(all, queued);
-        Assert.Equal(("waiting", "slot"), (S(q["status"]), S(q["waitingFor"])));
+        Assert.Equal(("waiting", "pending"), (S(q["status"]), S(q["waitingFor"])));
         var worker = Assert.Single(q["members"]!.AsArray())!;
-        Assert.Equal(("Bob", "queued"), (S(worker["name"]), S(worker["state"])));
+        Assert.Equal(("Bob", "pending", null), (S(worker["name"]), S(worker["state"]), S(worker["waitsFor"])));
+        rig.Store.Enqueue(rig.Store.MemberBySubscriber("Beta/Bob")!.Id); // in the run queue: queued for a slot
+        q = Row(await rig.List(), queued);
+        Assert.Equal(("waiting", "slot"), (S(q["status"]), S(q["waitingFor"])));
+        Assert.Equal("queued", S(Assert.Single(q["members"]!.AsArray())!["state"]));
         // No tokens, cost or usage anywhere.
         Assert.DoesNotContain("token", all.ToJsonString(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cost", all.ToJsonString(), StringComparison.OrdinalIgnoreCase);

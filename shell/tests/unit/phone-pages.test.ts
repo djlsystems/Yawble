@@ -181,14 +181,17 @@ const DesktopCss: Record<string, string> = {
   // B076 (card 365): the members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)
   // ending with the New member tile (.new-tile, its form .add); the old add row's rule went. Card 368: the pane clips
   // sideways only (overflow-x clip, y visible) so its ☰ menu draws past a short tile; the focused cell is raised.
-  'components/TeamView.vue': '5f8d83d315b69e96',
+  // B123 (card 547): the decision card's option notes (.choice, .choice .note) and its collapsed Details (.details).
+  'components/TeamView.vue': '9077bcd422d5c383',
   // B073 (card 465): the sync banner's "N commits behind" is a link (.count, as in the Git dialog) opening a list (.list).
   'components/TeamSyncBanner.vue': '72abffaf508279af',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
   // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the
   // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
   // Card 439 (B097): .is-stopped, a stopped run's neutral left edge and label colour.
-  'components/MemberPane.vue': '0029e96216d6abb0',
+  // B123 (card 547): the "Waiting on you" chip link (.kind.waiting) and the Report's note (.waiting-note). The pills
+  // row under the name (two-row title grid).
+  'components/MemberPane.vue': 'a11885e1a126729d',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   // The documents list's Modified column: a wider list and the size / modified cells.

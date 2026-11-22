@@ -97,7 +97,8 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                 "progress" => Sent(await run.ProgressAsync(Required(args, "status"), ct)),
                 "handback" => Sent(await run.HandbackAsync(Required(args, "delivered"), ct)),
                 "blocked" => Sent(await run.BlockedAsync(Required(args, "reason"), OptionalInt(args, "item"), ct)),
-                "needs_decision" => Sent(await run.NeedsDecisionAsync(Required(args, "question"), ct)),
+                "needs_decision" => Sent(await run.NeedsDecisionAsync(
+                    DecisionAsk.Parse(Optional(args, "question"), Optional(args, "summary"), args["options"], Optional(args, "details")), ct)),
                 "workflow_complete" => Sent(await run.WorkflowCompleteAsync(Required(args, "delivered"), ct)),
                 "status" => JsonSerializer.Serialize(await run.StatusAsync(ct), RpcJson),
                 "hiring" => JsonSerializer.Serialize(await run.HiringAsync(ct), RpcJson),
@@ -258,15 +259,11 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                 "(what ran and passed, what could not run and why) and anything left open"), true)),
         Tool("blocked", "Stop without finishing, and say why. With item, blocks only that numbered item of your batch.",
             ("reason", "string", ReportText("Why you stopped: the summary says what is in the way; then what you tried and what would unblock it"), true), ("item", "integer", "Optional: the batch item number.", false)),
-        Tool("needs_decision", "Ask the person a question. The answer arrives as a new instruction in this workflow. Then end your turn: " +
-                               "do not also call blocked for the same thing.",
-            ("question", "string", "The decision you need, in Markdown: the question first in one sentence, then any items or options as a " +
-                                   "list or table (one per line), then what to reply (e.g. approve, or what to change). The app shows it formatted, " +
-                                   "with Approve and answer buttons.", true)),
+        NeedsDecisionTool(),
         Tool("workflow_complete", "Declare the workflow done (its owner, or the Manager). Refused while other work in it is running or pending.",
             ("delivered", "string", ReportText("What was delivered: the summary names the branch and commit; then each item delivered, the tests " +
                 "and anything left open"), true)),
-        Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and queued instructions."),
+        Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and each member's waiting instructions with why they wait (waitState: queued for a slot, waits-for-run with waitsFor, held for a paused team, pending)."),
         Tool("hiring", "The Manager: the agent CLIs you may hire, and whether each can run on this computer now."),
         Tool("hire", "The Manager: add a member to your team. It starts idle; give it work with tell.",
             ("name", "string", "The job word alone, one word: 'Developer', 'Tester'. The app adds a first name from the person's list; the answer gives " +
@@ -316,6 +313,44 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     private static string ReportText(string what) =>
         what + ". Write Markdown: a one-sentence summary on the first line, then the details as short bullet lists or short paragraphs, " +
         "one item per line, with real line breaks between them (never one long paragraph).";
+
+    /// <summary>
+    /// B123: needs_decision with summary (one plain sentence), options (2-4 answers as buttons, one may carry an allowlisted
+    /// action the app applies when the person picks it), details (the findings, Markdown). question stays accepted.
+    /// </summary>
+    private static JsonObject NeedsDecisionTool()
+    {
+        var tool = Tool("needs_decision",
+            "Ask the person to decide something. Put the decision first in plain words (summary), the answers they can pick as options " +
+            "(each one a button), and your findings in details. Never number findings so they read as choices: the choices are the options. " +
+            "The answer arrives as a new instruction in this workflow. Then end your turn: do not also call blocked for the same thing.",
+            ("summary", "string", "The decision in one plain sentence a person reads first, e.g. 'Should the team's runs reach localhost on macOS?'.", false),
+            ("details", "string", "What you found and why it matters, in Markdown (lists, tables). Shown under the summary.", false),
+            ("question", "string", "Older form, still accepted: the whole decision as Markdown in one text. Prefer summary, options and details.", false));
+        tool["inputSchema"]!["properties"]!["options"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["description"] = $"{DecisionAsk.MinOptions} to {DecisionAsk.MaxOptions} answers the person can pick. label: the button (at most {DecisionAsk.MaxLabel} characters); " +
+                              "reply: the answer you get when it is picked; action (optional, at most one option): a change the app makes for the person " +
+                              $"when they pick it - only {string.Join(", ", DecisionActions.All)} (turns on the team's 'Allow localhost (macOS)'). " +
+                              "You never make that change yourself.",
+            ["minItems"] = DecisionAsk.MinOptions,
+            ["maxItems"] = DecisionAsk.MaxOptions,
+            ["items"] = new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JsonObject
+                {
+                    ["label"] = new JsonObject { ["type"] = "string", ["maxLength"] = DecisionAsk.MaxLabel },
+                    ["reply"] = new JsonObject { ["type"] = "string" },
+                    ["action"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(DecisionActions.All.Select(a => (JsonNode?)a).ToArray()) },
+                },
+                ["required"] = new JsonArray("label", "reply"),
+                ["additionalProperties"] = false,
+            },
+        };
+        return tool;
+    }
 
     private static JsonObject Tool(string name, string description, params (string Name, string Type, string Description, bool Required)[] parameters)
     {

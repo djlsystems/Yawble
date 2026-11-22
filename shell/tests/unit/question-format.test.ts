@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asksForApproval, questionMarkdown, questionOptions } from '../../src/renderer/src/questionFormat';
+import { asksForApproval, offersSkip, questionMarkdown, questionOptions } from '../../src/renderer/src/questionFormat';
 
 describe('a team question, formatted', () => {
   it('puts inline numbered items in a table, one per row, with the text around it kept', () => {
@@ -64,5 +64,45 @@ describe('a team question, formatted', () => {
       + '4. **Concierge:** it may only draft.\r\n\r\nReply "approve" to accept all four, or say which to change.';
     expect(questionOptions(q)).toEqual([]);
     expect(asksForApproval(q)).toBe(true);
+    expect(offersSkip(q)).toBe(false);
+  });
+
+  // B123: the Mac mini's "Manager needs a decision" card. Its numbered list is the Results (findings), followed by a
+  // separate closing question: the buttons were "1. Build" ... "5. Loopback to host port 9999".
+  const b123 = 'B119 part 2 verify: build, isolation and outbound checks behaved as expected, but `dotnet test` cannot run on macOS '
+    + 'in the sandbox: the test host fails at TcpListener.Start with SocketException (13) Permission denied.\n\n'
+    + 'Results:\n\n'
+    + '1. Build: succeeded (0 warnings, 0 errors).\n'
+    + '2. dotnet test (VSTest): failed, SocketException (13) Permission denied at TcpListener.Start.\n'
+    + '3. MTP variant (dotnet exec of the test dll): failed, NamedPipeServerStream aborted (exit 134).\n'
+    + '4. Isolation and outbound (writes outside the clone, api.nuget.org): blocked as expected.\n'
+    + '5. Loopback to host port 9999: refused.\n\n'
+    + 'Do you want to turn on **Allow localhost (macOS)** in Team settings > Network? It lets the run\'s own processes talk to '
+    + 'each other and to this Mac\'s localhost. Reply **approve** once it is on and I will have the test run repeated, or tell '
+    + 'me to skip it and close without the test run.';
+
+  it('B123: a findings list followed by a closing question gives no numbered buttons, but Approve and Skip', () => {
+    expect(questionOptions(b123)).toEqual([]);
+    expect(asksForApproval(b123)).toBe(true);
+    expect(offersSkip(b123)).toBe(true);
+  });
+
+  it('B123: the same findings with CRLF line ends, or inline "(1) ... (5)", are not options either', () => {
+    expect(questionOptions(b123.replace(/\n/g, '\r\n'))).toEqual([]);
+    const inline = 'Results: (1) Build: succeeded; (2) dotnet test: failed; (3) Loopback: refused. Do you want to turn on Allow localhost? '
+      + 'Reply approve, or tell me to skip it.';
+    expect(questionOptions(inline)).toEqual([]);
+    expect(offersSkip(inline)).toBe(true);
+  });
+
+  it('B123: a list of answers is still options when the question comes after it', () => {
+    const q = 'The tests cannot run here.\n\n1. **Allow localhost** for this team and re-run.\n2. **Skip the tests** and close.\n\nWhich do you want?';
+    expect(questionOptions(q).map((o) => o.label)).toEqual(['Allow localhost', 'Skip the tests']);
+  });
+
+  it('B123: Skip is offered only when the question offers to skip or decline', () => {
+    expect(offersSkip('Do you approve this plan?')).toBe(false);
+    expect(offersSkip('Reply approve to go on, or decline and I will stop.')).toBe(true);
+    expect(offersSkip('Which region should Cloud use? Or skip the deploy.')).toBe(false);
   });
 });

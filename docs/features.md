@@ -147,9 +147,10 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - The other CLIs: their own sign-in on this computer.
 - Credentials are kept in the OS credential store and used by the run's gateway, never inside the sandbox.
 - Claude Code on macOS keeps its sign-in in the login Keychain item "Claude Code-credentials". The app's gateway reads
-  it there for each model request; no sandbox gets the Keychain. Settings > Agents shows Claude Code as signed in when
-  that item exists. The first time the gateway reads it, macOS asks "yawble-core wants to use … Claude
-  Code-credentials": click **Always Allow**. The app is Developer ID–signed, so the choice holds across updates.
+  it there with macOS's own `security` tool, the same tool Claude Code uses to keep the item, so macOS shows no
+  Keychain prompt. The gateway keeps the token in memory and reads the item again only shortly before the token
+  expires or when the model API refuses it. No sandbox gets the Keychain, and the app never changes the item.
+  Settings > Agents shows Claude Code as signed in when that item exists.
 - **Settings > Agents** lists detected CLIs (**Detect again**), each with whether you are signed in to it on this
   computer (or how to sign in), and custom agents. A custom agent copies a built-in
   with its own name, default model and command-line arguments.
@@ -309,6 +310,22 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     `dotnet test` fails with `SocketException (13)` Permission denied, the agent tells its Manager in one line where
     the setting is, and for an xUnit v3 / Microsoft.Testing.Platform project also that its tests run as the
     executable.
+  - A decision can offer it as an answer (see Decisions below): the option "Allow localhost" turns it on for you
+    when you pick it, exactly as the Network tab does (the same rights and the same audit entry), and only on a Mac.
+- **Decisions** (`needs_decision`, B123): an agent asks you with a **summary** (the decision in one plain sentence),
+  2 to 4 **options** (each a button with a label of at most 40 characters and the reply it sends), and **details**
+  (its findings, in Markdown, under the summary). A question in one Markdown text (`question`) still works and is
+  shown as before.
+  - At most one option may carry an **action**, from a fixed list the app knows: today only `team.allowLocalhostMac`
+    (turn on the team's Allow localhost (macOS)). The agent only names it; nothing changes when it asks. When you
+    pick that option the app applies the action first, then sends the option's reply as your answer. Anything else
+    named as an action is refused and the question is not asked.
+  - An option whose action you cannot apply is shown disabled with the reason: a Cloud Link Visitor ("Only a
+    workgroup Member or an Owner can change this"), anything but the app or a cloud viewer ("Only the person can pick
+    this, in the app"), a computer that is not a Mac ("Only on macOS").
+  - While a member's question is open, its card and the team status say **Waiting on you** with a link to the
+    question, whatever it reported after asking (a hand-back, or the workflow declared complete). Once you answer it,
+    the card shows its last report again.
 - Floor rules nobody can loosen:
   - model vendors' API and sign-in hosts are never allowed hosts;
   - no IP addresses or wildcards;
@@ -378,8 +395,10 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     is active on it), **Stalled** (a run is active but shows no sign of work for 10 minutes or more: no tool call, no
     progress and no model request going out or answer streaming back; from its last sign of activity to its next
     one, or to the run's end), **Waiting on you** (an open question to you),
-    **Waiting for a slot** (queued for a run slot, or waiting for the heavy-work lease), **Waiting on a teammate**
-    (handed back, or its run ended, and it waits for the Manager or a tester), **Blocked** (blocked, or its run failed),
+    **Waiting for a slot** (its member is in the run queue for a run slot, or its run waits for the heavy-work lease),
+    **Waiting on a teammate** (handed back, or its run ended, and it waits for the Manager or a tester; or it has work
+    whose member is not in the run queue: busy in another workflow, its team paused, or a hand-back waiting for its
+    sender's run to end), **Blocked** (blocked, or its run failed),
     **Scheduled** (parked until the wake it asked for), **Not started** (planned, no member yet), **Idle** (open,
     nobody working it, nothing scheduled) and **Was done**.
   - A workflow's cards overlap, so they are not added up: each moment takes the highest category among its cards
@@ -696,7 +715,10 @@ masked in the log and never reaches an agent. See
   - **Cron**: 5 or 6 fields, with a timezone.
   - **Once**: at a set time.
   - **Folder**: when files in the team's documents or a folder on this computer change and settle. It can filter by
-    file pattern.
+    file pattern. **Fire on** chooses which changes wake the agent: **Added files** (the default for a new trigger),
+    **Added or changed** (a file added or changed in size), or **Any change** (added, removed or changed; folder
+    triggers made before this choice keep it). A change that does not match never fires, so an agent that moves the
+    files it was woken for out of the folder is not woken again. The instruction lists only the changes that fire.
   - **Event**: when an integration watch reports a new item.
 - Options: **Only when the agent is idle**, **Enabled**, **Run now**.
 - **Wake the Manager when a run ends**: only on a hand-back or failure (the default), every time, or never.

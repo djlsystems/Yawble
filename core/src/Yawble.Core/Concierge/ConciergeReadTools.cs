@@ -775,14 +775,14 @@ public sealed class ConciergeReadTools(
                ?? throw new ArgumentException($"there is no team '{name}'. Teams: {string.Join(", ", teams.Select(t => t.Name))}");
     }
 
+    /// <summary>A decision as the Concierge reads it: the summary (B123) or question, then the options' labels and replies.
+    /// An option with an action is answered by the person in the app (bus.answer optionIndex), never by the Concierge.</summary>
     private static string DecisionText(Message m)
     {
-        try
-        {
-            if (JsonNode.Parse(m.Payload) is JsonObject o && o["question"] is JsonValue v && v.TryGetValue<string>(out var s)) return s;
-        }
-        catch (JsonException) { }
-        return m.Payload;
+        var ask = Bus.DecisionAsk.Read(m.Payload);
+        if (ask.Options is not { Count: > 0 } options) return ask.Headline;
+        return ask.Headline + " Options: " + string.Join("; ", options.Select(o =>
+            $"\"{o.Label}\" (replies: {o.Reply}{(o.Action is null ? "" : "; changes a setting: the person picks this in the app")})"));
     }
 
     private static bool SecretKey(string key) =>

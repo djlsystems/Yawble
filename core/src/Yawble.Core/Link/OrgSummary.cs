@@ -12,10 +12,12 @@ public sealed record OrgComputer(string Name, string? Label, string Version, str
 /// <summary>An agent that is running now: who, its role, what it is doing (its card, or its workflow), since when.</summary>
 public sealed record OrgRunningAgent(string Member, string Role, string? Doing, DateTimeOffset? Since);
 
-/// <summary>One agent of a team, as the summary counts it: state running | queued | idle, whether its last run failed, and
-/// whether the person stopped its last run (B097: a stopped run is not a failure).</summary>
+/// <summary>One agent of a team, as the summary counts it: state running | idle | one of <see cref="Bus.WaitStates"/> (B126:
+/// queued, waits-for-run, held, pending; the agent card's state), whether its last run failed, and whether the person
+/// stopped its last run (B097: a stopped run is not a failure). <paramref name="WaitsFor"/>: with waits-for-run, the member
+/// whose run must end first.</summary>
 public sealed record OrgAgent(string Member, string Role, string State, bool LastRunFailed, string? Doing = null, DateTimeOffset? Since = null,
-    bool LastRunStopped = false);
+    bool LastRunStopped = false, string? WaitsFor = null);
 
 /// <summary>A team and its agents; <paramref name="WorkflowExpiryDays"/> is its setting (B085: an open workflow nobody works expires after it).</summary>
 public sealed record OrgTeam(string Name, bool Paused, bool Archived, IReadOnlyList<OrgAgent> Agents,
@@ -104,7 +106,10 @@ public static class OrgSummary
     private static JsonArray TeamsOf(IReadOnlyList<OrgTeam> teams) => new(teams.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Select(t =>
     {
         var running = t.Agents.Where(a => a.State == "running").ToList();
-        var idle = t.Agents.Where(a => a.State is not ("running" or "queued")).ToList();
+        // B126: an agent whose work has not started is in one of the wait states, never idle (an unknown state counts as pending).
+        var waiting = t.Agents.Where(a => a.State is not ("running" or "idle")).Select(a => (Agent: a, State: WaitStateOf(a.State))).ToList();
+        var idle = t.Agents.Where(a => a.State == "idle").ToList();
+        int Waiting(string state) => waiting.Count(w => w.State == state);
         return (JsonNode)new JsonObject
         {
             ["name"] = t.Name,
@@ -115,7 +120,11 @@ public static class OrgSummary
             {
                 ["total"] = t.Agents.Count,
                 ["running"] = running.Count,
-                ["queued"] = t.Agents.Count(a => a.State == "queued"),
+                // B126: queued is only the run queue (a run slot); the other work not started is counted by why it waits.
+                ["queued"] = Waiting(Bus.WaitStates.Queued),
+                ["waitsForRun"] = Waiting(Bus.WaitStates.WaitsForRun),
+                ["held"] = Waiting(Bus.WaitStates.Held),
+                ["pending"] = Waiting(Bus.WaitStates.Pending),
                 // An idle agent whose last run failed counts as errored, not idle.
                 ["idle"] = idle.Count(a => !a.LastRunFailed),
                 ["errored"] = idle.Count(a => a.LastRunFailed),
@@ -129,8 +138,17 @@ public static class OrgSummary
                 ["doing"] = a.Doing is null ? null : Title(a.Doing),
                 ["since"] = a.Since is { } s ? Time(s) : null,
             }).ToArray()),
+            // B126: who has work not started, and why; waitsFor (the sender whose run must end first) only with waits-for-run.
+            ["waiting"] = new JsonArray(waiting.Select(w => (JsonNode)new JsonObject
+            {
+                ["member"] = w.Agent.Member,
+                ["state"] = w.State,
+                ["waitsFor"] = w.State == Bus.WaitStates.WaitsForRun ? w.Agent.WaitsFor : null,
+            }).ToArray()),
         };
     }).ToArray());
+
+    private static string WaitStateOf(string state) => Bus.WaitStates.All.Contains(state) ? state : Bus.WaitStates.Pending;
 
     private static JsonArray WorkflowsOf(IReadOnlyList<OrgWorkflow> workflows, DateTimeOffset now) => new(workflows
         .Where(w => !Ended(w.State) || now - w.LastActivity <= EndedWorkflowsFor)

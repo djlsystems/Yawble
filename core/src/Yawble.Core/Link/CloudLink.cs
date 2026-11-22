@@ -538,7 +538,7 @@ public sealed class CloudLink : IAsyncDisposable
             {
                 parameters?.Parent?.AsObject().Remove("params");
                 // The call runs as this viewer: what it records says the cloud, and who.
-                using var acting = Provenance.Actor.Use(Provenance.Actor.CloudViewer(user));
+                using var acting = Provenance.Actor.Use(Provenance.Actor.CloudViewer(user, access));
                 var result = await _dispatch(method, parameters, ct).ConfigureAwait(false);
                 // The remote view learns its access from the app info it already asks for (the window never sees this field).
                 if (method == "core.getInfo" && result is JsonObject info) info["remoteAccess"] = access;

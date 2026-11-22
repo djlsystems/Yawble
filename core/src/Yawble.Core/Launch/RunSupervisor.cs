@@ -39,7 +39,9 @@ public sealed record SupervisedExit(
     TimeSpan Duration,
     TimeSpan? KillLatency,
     bool TreeSurvived,
-    bool EndedAfterAnswer = false);
+    bool EndedAfterAnswer = false,
+    int LeftBehind = 0,
+    int TreeSignalled = 0);
 
 public sealed class SupervisorOptions
 {
@@ -79,11 +81,17 @@ public sealed class RunSupervisor
     private readonly SupervisorOptions _options;
     private volatile bool _stopRequested;
     private readonly Func<DateTimeOffset?>? _answeredAt;
+    private readonly RunTree? _tree;
+    private readonly Action? _treeGone;
 
+    /// <param name="tree">macOS: the run's processes, followed while it runs and ended with it (<see cref="RunTree"/>).</param>
+    /// <param name="treeGone">Called once the tree is ended (or the wait for it is up), before the run is reported done: the run's temp folder is removed there.</param>
     public RunSupervisor(ISandboxProcess process, int wallTimeoutSec, int idleTimeoutSec, RunActivity activity,
         IRunOutput? output, TimeProvider? clock = null, SupervisorOptions? options = null, IRunOutput? errorOutput = null,
-        Func<DateTimeOffset?>? answeredAt = null)
+        Func<DateTimeOffset?>? answeredAt = null, RunTree? tree = null, Action? treeGone = null)
     {
+        _tree = tree;
+        _treeGone = treeGone;
         _answeredAt = answeredAt;
         _errorOutput = errorOutput;
         _process = process;
@@ -110,7 +118,7 @@ public sealed class RunSupervisor
         // stderr joins stdout (one terminal) unless the caller keeps it apart (a probe's result is its stdout).
         if (_process.Error is { } e) pumps.Add(Pump(e, _errorOutput ?? _output));
 
-        var exit = await Task.Factory.StartNew(() => Supervise(shutdown, started), CancellationToken.None,
+        var exit = await Task.Factory.StartNew(() => EndTree(Supervise(shutdown, started)), CancellationToken.None,
             TaskCreationOptions.LongRunning, TaskScheduler.Default).ConfigureAwait(false);
 
         try
@@ -124,11 +132,35 @@ public sealed class RunSupervisor
         return exit;
     }
 
+    /// <summary>
+    /// macOS: whatever the run started is ended before the run is reported done, however the CLI ended (its own exit
+    /// too: the sandbox there has no PID namespace that takes the rest down). Then <c>treeGone</c>.
+    /// </summary>
+    private SupervisedExit EndTree(SupervisedExit exit)
+    {
+        try
+        {
+            if (_tree?.Reap() is { } reaped)
+                exit = exit with
+                {
+                    TreeSurvived = exit.TreeSurvived || reaped.Survivors.Count > 0,
+                    LeftBehind = reaped.Survivors.Count,
+                    TreeSignalled = reaped.Signalled,
+                };
+        }
+        finally
+        {
+            _treeGone?.Invoke();
+        }
+        return exit;
+    }
+
     private SupervisedExit Supervise(CancellationToken shutdown, long started)
     {
         var deadline = _clock.GetUtcNow() + _wall;
         while (true)
         {
+            _tree?.Observe();
             var done = _process.TryWait();
             if (done is { } d)
             {
@@ -166,6 +198,7 @@ public sealed class RunSupervisor
         SandboxExit? exit = null;
         while (Stopwatch.GetElapsedTime(killAt) < _options.KillBound)
         {
+            _tree?.Observe();
             exit = _process.TryWait();
             if (exit is not null) break;
             Thread.Sleep(_options.Poll);

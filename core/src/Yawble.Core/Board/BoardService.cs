@@ -127,13 +127,13 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     private async Task<JsonNode> ListAsync(string? team, bool cleared, bool includeCleared, CancellationToken ct)
     {
         var teams = await bus.TeamsAsync(ct);
-        var running = new Dictionary<string, (string State, string? Attention, string? Lease, string? LeaseWhat, int? LeasePosition)>(StringComparer.OrdinalIgnoreCase);
+        var running = new Dictionary<string, (string State, string? Attention, string? Lease, string? LeaseWhat, int? LeasePosition, long? DecisionId)>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in teams.Where(t => team is null || string.Equals(t.Name, team, StringComparison.OrdinalIgnoreCase)))
         {
             var cards = await bus.AgentCardsAsync(t.Id, ct);
             var asking = (await bus.OpenDecisionsAsync(t.Name, ct)).Select(m => m.Source[(m.Source.IndexOf('/') + 1)..]).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var reports = await bus.LatestReportsAsync(t.Name, ct);
-            foreach (var c in cards) running[$"{t.Name}/{c.Member.Name}"] = (c.State, Ui.UiRpc.Attention(c, asking, reports), c.Lease, c.LeaseWhat, c.LeasePosition);
+            foreach (var c in cards) running[$"{t.Name}/{c.Member.Name}"] = (c.State, Ui.UiRpc.Attention(c, asking, reports), c.Lease, c.LeaseWhat, c.LeasePosition, c.DecisionId);
         }
         var list = new JsonArray();
         var open = new HashSet<long>();
@@ -152,7 +152,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
             node["time"] = TimeOf(card, live, now, runs);
             if (card.Member is { } who && running.TryGetValue($"{card.Team}/{who}", out var s))
             {
-                node["memberState"] = new JsonObject { ["state"] = s.State, ["attention"] = s.Attention };
+                node["memberState"] = new JsonObject { ["state"] = s.State, ["attention"] = s.Attention, ["decisionId"] = s.DecisionId };
                 // The heavy-work lease is the member's, for one run: it shows on the card that member is working on (its
                 // newest open card), not on its other cards.
                 if (s.Lease is "holding" or "waiting" && store.OpenCardOf(card.Team, who)?.Id == card.Id)
