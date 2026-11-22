@@ -132,7 +132,8 @@ public sealed class LaunchWiring : IAsyncDisposable
             // Each CLI's own sign-in on this host; the app's credential store is not a source for runs.
             new HostSignInModes(), new GatewayRunFactory(gatewayHost), backend,
             new RunRecordStore(connectionString), registry,
-            transcripts: new StoreTranscripts(new TranscriptStore(data, connectionString)), agentDefaults: agentDefaults);
+            transcripts: new StoreTranscripts(new TranscriptStore(data, connectionString)), agentDefaults: agentDefaults,
+            log: log);
         return new LaunchWiring(new SandboxAgentRunner(launcher), launcher, gatewayHost, keeper, null)
         {
             AgentDefaults = agentDefaults,

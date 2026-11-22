@@ -83,15 +83,25 @@ public sealed class RunSupervisor
     private readonly Func<DateTimeOffset?>? _answeredAt;
     private readonly RunTree? _tree;
     private readonly Action? _treeGone;
+    private readonly IRunFolderHolders? _holders;
+    private readonly string? _runFolder;
+    private readonly Action<string>? _log;
 
     /// <param name="tree">macOS: the run's processes, followed while it runs and ended with it (<see cref="RunTree"/>).</param>
     /// <param name="treeGone">Called once the tree is ended (or the wait for it is up), before the run is reported done: the run's temp folder is removed there.</param>
+    /// <param name="holders">macOS backstop (B127): after the tree is reaped, the processes still holding <paramref name="runFolder"/> are adopted into it and reaped too.</param>
+    /// <param name="runFolder">The run's yr-* temp folder the backstop looks under.</param>
+    /// <param name="log">The core log: one teardown line when a process outlived the reap or was found only by the backstop.</param>
     public RunSupervisor(ISandboxProcess process, int wallTimeoutSec, int idleTimeoutSec, RunActivity activity,
         IRunOutput? output, TimeProvider? clock = null, SupervisorOptions? options = null, IRunOutput? errorOutput = null,
-        Func<DateTimeOffset?>? answeredAt = null, RunTree? tree = null, Action? treeGone = null)
+        Func<DateTimeOffset?>? answeredAt = null, RunTree? tree = null, Action? treeGone = null,
+        IRunFolderHolders? holders = null, string? runFolder = null, Action<string>? log = null)
     {
         _tree = tree;
         _treeGone = treeGone;
+        _holders = holders;
+        _runFolder = runFolder;
+        _log = log;
         _answeredAt = answeredAt;
         _errorOutput = errorOutput;
         _process = process;
@@ -134,25 +144,68 @@ public sealed class RunSupervisor
 
     /// <summary>
     /// macOS: whatever the run started is ended before the run is reported done, however the CLI ended (its own exit
-    /// too: the sandbox there has no PID namespace that takes the rest down). Then <c>treeGone</c>.
+    /// too: the sandbox there has no PID namespace that takes the rest down). B127: then the backstop - whatever still
+    /// holds the run's folder (a build that left both the tree and its group) is adopted and reaped - and only then
+    /// <c>treeGone</c>. Anything that outlived the reap, or was found only by the backstop, makes the run's record say
+    /// TreeSurvived and gets one teardown line in the core log.
     /// </summary>
     private SupervisedExit EndTree(SupervisedExit exit)
     {
         try
         {
-            if (_tree?.Reap() is { } reaped)
+            if (_tree is { } tree)
+            {
+                var reaped = tree.Reap();
+                var signalled = reaped.Signalled;
+                var survivors = reaped.Survivors;
+                var fromTree = reaped.Survivors.ToHashSet();
+                List<int> fromFolder = [];
+                if (_holders is not null && !string.IsNullOrEmpty(_runFolder))
+                {
+                    var before = tree.Tracked.ToHashSet();
+                    IReadOnlyList<int> holding;
+                    try { holding = _holders.Under(_runFolder); }
+                    catch (Exception e) when (e is IOException or DllNotFoundException or EntryPointNotFoundException or UnauthorizedAccessException) { holding = []; }
+                    if (holding.Count > 0 && tree.Adopt(holding) > 0)
+                    {
+                        // What the backstop took on: tracked now, not before (a pid tracked before with another start time
+                        // is a new process).
+                        fromFolder = [.. tree.Tracked.Where(t => !before.Contains(t)).Select(t => t.Key).Order()];
+                        var again = tree.Reap();
+                        signalled += again.Signalled;
+                        survivors = again.Survivors;
+                    }
+                }
+                var survived = survivors.Count > 0 || fromFolder.Count > 0;
                 exit = exit with
                 {
-                    TreeSurvived = exit.TreeSurvived || reaped.Survivors.Count > 0,
-                    LeftBehind = reaped.Survivors.Count,
-                    TreeSignalled = reaped.Signalled,
+                    TreeSurvived = exit.TreeSurvived || survived,
+                    LeftBehind = survivors.Count,
+                    TreeSignalled = signalled,
                 };
+                if (survived) _log?.Invoke(TeardownLine(fromTree, fromFolder, survivors));
+            }
         }
         finally
         {
             _treeGone?.Invoke();
         }
         return exit;
+    }
+
+    /// <summary>
+    /// The core log's teardown line: every process that outlived the tree's own reap (found by the tree: its ppid or its
+    /// group) or was found only holding the run's folder, and whether it is still running.
+    /// </summary>
+    internal static string TeardownLine(IReadOnlySet<int> fromTree, IReadOnlyList<int> fromFolder, IReadOnlyList<int> survivors)
+    {
+        var alive = survivors.ToHashSet();
+        var parts = fromTree.Select(p => (Pid: p, How: "tree"))
+            .Concat(fromFolder.Where(p => !fromTree.Contains(p)).Select(p => (Pid: p, How: "run-folder")))
+            .Concat(survivors.Where(p => !fromTree.Contains(p) && !fromFolder.Contains(p)).Select(p => (Pid: p, How: "tree")))
+            .OrderBy(x => x.Pid)
+            .Select(x => $"{x.Pid} ({x.How}, {(alive.Contains(x.Pid) ? "still running after SIGKILL" : "reaped")})");
+        return $"run teardown: tree survived: {string.Join(", ", parts)}";
     }
 
     private SupervisedExit Supervise(CancellationToken shutdown, long started)

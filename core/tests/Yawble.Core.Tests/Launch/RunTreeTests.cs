@@ -395,6 +395,97 @@ public class RunTreeTests
         Assert.True(removed);
     }
 
+    private const string RunFolder = "/private/var/folders/xy/T/yr-0123abcd";
+
+    [Fact]
+    public async Task AProcessHoldingTheRunFolderOutsideTheTreeAndItsGroupIsReapedBeforeTheFolderGoesAndReported()
+    {
+        var table = new FakeProcessTable();
+        var p = new FakeProcess(RunKind.Headless);
+        var root = table.Add(p.Id, table.Self);
+        var tree = new RunTree(table, root, Fast);
+        // B127: a build launchd's from the start, in a group of its own, with MSBuild's temp files under yr-*.
+        var build = table.Add(p.Id + 7, 1, group: p.Id + 7, ignoresTerm: true);
+        var holders = new FakeRunFolderHolders(table, RunFolder, build);
+        bool? buildAliveAtRemoval = null;
+        var log = new List<string>();
+        var s = new RunSupervisor(p, 60, 0, new RunActivity(TimeProvider.System), null, tree: tree,
+            treeGone: () => buildAliveAtRemoval = table.IsAlive(build), holders: holders, runFolder: RunFolder, log: log.Add);
+        var run = s.RunAsync(Ct);
+        await Wait.UntilAsync(() => tree.Tracked.Count == 1, "the root to be recorded");
+        Assert.DoesNotContain(build, tree.Tracked.Keys);
+        table.End(root);
+        p.Exit(0);
+
+        var exit = await run;
+
+        Assert.Equal([RunFolder], holders.Asked);
+        Assert.False(buildAliveAtRemoval);
+        Assert.Contains(table.Log, e => e.Pid == build && e.Signal == RunTree.SIGKILL);
+        Assert.True(exit.TreeSurvived);
+        Assert.Equal(0, exit.LeftBehind);
+        Assert.Equal(1, exit.TreeSignalled);
+        var line = Assert.Single(log);
+        Assert.Equal($"run teardown: tree survived: {build} (run-folder, reaped)", line);
+    }
+
+    [Fact]
+    public async Task NothingHoldingTheRunFolderLeavesTreeSurvivedFalseAndLogsNothing()
+    {
+        var table = new FakeProcessTable();
+        var p = new FakeProcess(RunKind.Headless);
+        // The person's own shell, cd'd into the folder before the run: not the run's, never signalled.
+        var before = table.Add(p.Id + 9, 1, startedAt: 0);
+        var root = table.Add(p.Id, table.Self);
+        var child = table.Add(p.Id + 1, root);
+        var tree = new RunTree(table, root, Fast);
+        var holders = new FakeRunFolderHolders(table, RunFolder, before);
+        var removed = false;
+        var log = new List<string>();
+        var s = new RunSupervisor(p, 60, 0, new RunActivity(TimeProvider.System), null, tree: tree,
+            treeGone: () => removed = true, holders: holders, runFolder: RunFolder, log: log.Add);
+        var run = s.RunAsync(Ct);
+        await Wait.UntilAsync(() => tree.Tracked.Count == 2, "the tree to be recorded");
+        table.End(root);
+        p.Exit(0);
+
+        var exit = await run;
+
+        Assert.Equal([RunFolder], holders.Asked);
+        Assert.True(removed);
+        Assert.False(table.IsAlive(child));
+        Assert.True(table.IsAlive(before));
+        Assert.DoesNotContain(table.Log, e => e.Pid == before);
+        Assert.False(exit.TreeSurvived);
+        Assert.Equal(0, exit.LeftBehind);
+        Assert.Empty(log);
+    }
+
+    [Fact]
+    public async Task ARunFolderHolderThatOutlivesSigkillIsLeftBehindAndLoggedWithTheTreesSurvivor()
+    {
+        var table = new FakeProcessTable();
+        var p = new FakeProcess(RunKind.Headless);
+        var root = table.Add(p.Id, table.Self);
+        var stuck = table.Add(p.Id + 1, root, ignoresTerm: true, unkillable: true);
+        var tree = new RunTree(table, root, Fast);
+        var holder = table.Add(p.Id + 5, 1, group: p.Id + 5, ignoresTerm: true, unkillable: true);
+        var log = new List<string>();
+        var s = new RunSupervisor(p, 60, 0, new RunActivity(TimeProvider.System), null, tree: tree,
+            holders: new FakeRunFolderHolders(table, RunFolder, holder), runFolder: RunFolder, log: log.Add);
+        var run = s.RunAsync(Ct);
+        await Wait.UntilAsync(() => tree.Tracked.Count == 2, "the tree to be recorded");
+        table.End(root);
+        p.Exit(0);
+
+        var exit = await run;
+
+        Assert.True(exit.TreeSurvived);
+        Assert.Equal(2, exit.LeftBehind);
+        Assert.Equal($"run teardown: tree survived: {stuck} (tree, still running after SIGKILL), {holder} (run-folder, still running after SIGKILL)",
+            Assert.Single(log));
+    }
+
     [Fact]
     public async Task TheRunRecordSaysTreeSurvivedWhenAProcessOfTheRunOutlivedSigkill()
     {
@@ -429,6 +520,18 @@ public class RunTreeTests
         var self = table.List().Single(p => p.Pid == table.Self);
         Assert.Equal(table.SelfGroup, self.GroupId);
         Assert.True(self.StartedAt > 0);
+    }
+}
+
+/// <summary>The backstop with no OS behind it: the given pids hold the folder while they are alive in the table.</summary>
+internal sealed class FakeRunFolderHolders(FakeProcessTable table, string folder, params int[] holding) : IRunFolderHolders
+{
+    public List<string> Asked { get; } = [];
+
+    public IReadOnlyList<int> Under(string asked)
+    {
+        Asked.Add(asked);
+        return asked == folder ? [.. holding.Where(table.IsAlive)] : [];
     }
 }
 

@@ -270,7 +270,9 @@ public sealed class SandboxLauncher(
     SupervisorOptions? supervisorOptions = null,
     IRunTranscripts? transcripts = null,
     Agents.AgentDefaultsStore? agentDefaults = null,
-    Func<int, RunTree?>? runTrees = null)
+    Func<int, RunTree?>? runTrees = null,
+    IRunFolderHolders? runFolderHolders = null,
+    Action<string>? log = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
@@ -281,6 +283,13 @@ public sealed class SandboxLauncher(
     private RunTree? TreeFor(int sandboxPid) =>
         runTrees is not null ? runTrees(sandboxPid)
         : host.Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? new RunTree(MacProcessTable.Instance, sandboxPid) : null;
+
+    /// <summary>
+    /// B127 backstop: what still holds a run's temp folder after its tree is reaped is the run's too (a build that left
+    /// the tree and its group). The given one, else macOS's libproc walk where the launcher follows the real tree.
+    /// </summary>
+    private IRunFolderHolders? Holders =>
+        runFolderHolders ?? (runTrees is null && host.Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? MacRunFolderHolders.Instance : null);
 
     /// <summary>The model a member's run uses: member override > the agent's default > the CLI's own default.</summary>
     public Agents.ModelResolution ResolveModel(LaunchMember member) =>
@@ -649,7 +658,8 @@ public sealed class SandboxLauncher(
                     // before the run is reported done.
                     var supervisor = new RunSupervisor(process, wall, idle, activity, output, _clock, supervisorOptions, errors,
                         answer is null ? null : () => answer.At, TreeFor(process.Id),
-                        () => { if (runTemp is not null) RunTempFolder.Remove(runTemp); });
+                        () => { if (runTemp is not null) RunTempFolder.Remove(runTemp); },
+                        Holders, runTemp, log is null ? null : line => log($"{runKey}: {line}"));
                     var live = new LiveRun(runKey, request.Bus?.RunId, member.Team, member.Name, kind, process, supervisor, output);
                     registry.Add(live);
                     SupervisedExit exit;
