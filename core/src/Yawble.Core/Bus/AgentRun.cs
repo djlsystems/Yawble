@@ -25,7 +25,9 @@ public sealed record RunResult(bool Succeeded, string? Reason = null, string? Fa
 }
 
 /// <summary>Status of a member in its team, as the status tool reports it.</summary>
-public sealed record MemberStatus(string Name, string Role, string State, int? QueuePosition, int QueuedInstructions, string? StatusLine, string? HeavyLease = null);
+/// <param name="DecisionId">B123: the member's newest unanswered needs_decision (message seq); StatusLine then says "Waiting on you: ...".</param>
+public sealed record MemberStatus(string Name, string Role, string State, int? QueuePosition, int QueuedInstructions, string? StatusLine, string? HeavyLease = null,
+    long? DecisionId = null);
 
 /// <summary>One run's view of the bus: its batch, and the tools its agent may call.</summary>
 public sealed class RunContext
@@ -93,6 +95,12 @@ public sealed class RunContext
 
     public Task<Message> NeedsDecisionAsync(string question, CancellationToken ct = default) =>
         _engine.ReportAsync(this, MessageTypes.NeedsDecision, new { question }, ct, statusLine: "needs decision: " + question);
+
+    /// <summary>B123: a decision with a summary, 2-4 options and details (DecisionAsk); a question-only ask is stored as before.</summary>
+    public Task<Message> NeedsDecisionAsync(DecisionAsk ask, CancellationToken ct = default) =>
+        ask is { Summary: null, Options: null, Details: null }
+            ? NeedsDecisionAsync(ask.Question, ct)
+            : _engine.ReportAsync(this, MessageTypes.NeedsDecision, ask.ToPayload(), ct, statusLine: "needs decision: " + ask.Headline);
 
     public Task<Message> WorkflowCompleteAsync(string delivered, CancellationToken ct = default) =>
         _engine.WorkflowCompleteAsync(this, delivered, ct);

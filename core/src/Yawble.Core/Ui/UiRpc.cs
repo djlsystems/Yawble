@@ -34,6 +34,16 @@ public sealed class UiRpc(
     /// <summary>teams.agents' agentModel per card: the model the member's pill names and where the name comes from.</summary>
     public Agents.MemberModels? Models { get; set; }
 
+    /// <summary>
+    /// B123: the app's dispatcher as the current caller (RpcDispatcher.DispatchAsAsync), through which a decision option's
+    /// action is applied, so it is the same call Team settings makes and is audited as that call. Unset: this class's own
+    /// methods, unaudited (cores without an audit log).
+    /// </summary>
+    public Func<string, JsonObject?, CancellationToken, Task<JsonNode?>>? Dispatch { get; set; }
+
+    /// <summary>Whether this computer is a Mac: "Allow localhost (macOS)" applies only there (B119). Tests set it.</summary>
+    public Func<bool> IsMacOS { get; set; } = OperatingSystem.IsMacOS;
+
     /// <summary>The methods here, by prefix, and B085's workflowExtend under its contract name (also bus.workflowExtend).</summary>
     public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method is "workflowExtend";
 
@@ -103,7 +113,10 @@ public sealed class UiRpc(
 
                 "bus.tellManager" => await TellManagerAsync(Long(p, "teamId"), OptStr(p, "text") ?? "", ct, Attachments.Read(p)),
                 "bus.decisions" => await DecisionsAsync(Long(p, "teamId"), ct),
-                "bus.answer" => await AnswerAsync(Long(p, "teamId"), Long(p, "seq"), Str(p, "text"), ct, Attachments.Read(p)),
+                // B123: optionIndex (0-based, optional) picks one of the decision's options: its reply is the answer (text, when
+                // also given, follows it), and its action, if any, is applied first as Team settings would (teams.localhost).
+                "bus.answer" => await AnswerAsync(Long(p, "teamId"), Long(p, "seq"), OptionIndex(p) is not null ? OptStr(p, "text") ?? "" : Str(p, "text"),
+                    ct, Attachments.Read(p), OptionIndex(p)),
                 "bus.workflows" => S(await bus.WorkflowsAsync(await TeamNameOf(Long(p, "teamId"), ct), (int)(OptLong(p, "limit") ?? 30), ct)),
                 "bus.closeWorkflow" => S(await bus.CloseWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), OptStr(p, "reason"), ct)),
                 "bus.stopWorkflow" => new JsonObject { ["stopped"] = await bus.StopWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), ct) },
@@ -1115,36 +1128,129 @@ public sealed class UiRpc(
         var list = new JsonArray();
         foreach (var m in await bus.OpenDecisionsAsync(team.Name, ct))
         {
-            string? question = null;
-            try { question = JsonNode.Parse(m.Payload)?["question"]?.GetValue<string>(); } catch (JsonException) { }
-            list.Add(new JsonObject
+            var ask = DecisionAsk.Read(m.Payload);
+            var row = new JsonObject
             {
                 ["seq"] = m.Seq,
                 ["from"] = m.Source[(m.Source.IndexOf('/') + 1)..],
-                ["question"] = question ?? m.Payload,
+                ["question"] = ask.Question,
+                // B123: the decision in one plain sentence, the answers as buttons, the findings (Markdown). Null / absent
+                // for a question-only ask.
+                ["summary"] = ask.Summary,
+                ["details"] = ask.Details,
                 ["workflow"] = m.CorrelationId,
                 ["at"] = m.OccurredAt.ToString("O"),
                 ["expiresAt"] = warnings.TryGetValue(m.CorrelationId, out var warning) && warning.Question == m.Seq ? warning.ExpiresAt.ToString("O") : null,
                 ["expiryWarning"] = warning is not null && warning.Question == m.Seq ? warning.Text : null,
-            });
+            };
+            if (ask.Options is { } options) row["options"] = OptionsJson(options);
+            list.Add(row);
         }
         return list;
     }
 
-    /// <summary>The person's answer joins the asker's workflow: an instruction to the asker, caused by the question.</summary>
-    private async Task<JsonNode?> AnswerAsync(long teamId, long seq, string text, CancellationToken ct, IReadOnlyList<(string Name, byte[] Bytes)>? images = null)
+    /// <summary>
+    /// bus.decisions' options: [{ label, reply, action?, actionAvailable?, actionUnavailableReason? }]. An option with an
+    /// action says whether this caller may apply it and, when not, why in plain words (the shell disables its button).
+    /// </summary>
+    private JsonArray OptionsJson(IReadOnlyList<DecisionOption> options) => new(options.Select(o =>
+    {
+        var node = new JsonObject { ["label"] = o.Label, ["reply"] = o.Reply };
+        if (o.Action is { } action)
+        {
+            var reason = ActionUnavailable(action);
+            node["action"] = action;
+            node["actionAvailable"] = reason is null;
+            node["actionUnavailableReason"] = reason;
+        }
+        return (JsonNode?)node;
+    }).ToArray());
+
+    /// <summary>What a Visitor reads on an option whose action they cannot apply.</summary>
+    public const string VisitorActionReason = "Only a workgroup Member or an Owner can change this; you are a Visitor";
+
+    /// <summary>What a caller that is not the person (the Concierge, a companion, an agent, a trigger) reads.</summary>
+    public const string NotThePersonActionReason = "Only the person can pick this, in the app";
+
+    public const string MacOnlyActionReason = "Only on macOS: Allow localhost applies to runs on a Mac";
+
+    /// <summary>
+    /// Null when the current caller may apply a decision action here; otherwise why not. The rights are those of the call the
+    /// action makes (teams.localhost with on: a full-access change, RemoteAccess refuses it for a Visitor), and only the person
+    /// answers: the window (Via App) or a full cloud viewer. "Allow localhost (macOS)" applies only on a Mac.
+    /// </summary>
+    internal string? ActionUnavailable(string action)
+    {
+        var actor = Provenance.Actor.Current;
+        if (actor is { Via: Provenance.Actor.Cloud, ReadOnly: true }) return VisitorActionReason;
+        if (actor is not { Via: Provenance.Actor.App or Provenance.Actor.Cloud }) return NotThePersonActionReason;
+        return action switch
+        {
+            DecisionActions.AllowLocalhostMac => IsMacOS() ? null : MacOnlyActionReason,
+            _ => "The app does not know this action",
+        };
+    }
+
+    /// <summary>bus.answer's optionIndex: absent, or a whole number (anything else is refused).</summary>
+    private static int? OptionIndex(JsonObject? p) => p?["optionIndex"] switch
+    {
+        null => null,
+        JsonValue v when WholeNumber(v, out var l) && l is >= 0 and <= int.MaxValue => (int)l,
+        _ => throw new RpcException("bad_params", "optionIndex must be the option's number, from 0"),
+    };
+
+    /// <summary>
+    /// The person's answer joins the asker's workflow: an instruction to the asker, caused by the question. B123: with
+    /// <paramref name="optionIndex"/>, the answer is that option's reply (then <paramref name="text"/>, when given and
+    /// different); an option with an action applies it first through the app's dispatcher, the same call as Team settings
+    /// (teams.localhost on, audited as that call). A caller who may not apply it is refused and nothing is sent; an action
+    /// that fails sends nothing either.
+    /// </summary>
+    private async Task<JsonNode?> AnswerAsync(long teamId, long seq, string text, CancellationToken ct, IReadOnlyList<(string Name, byte[] Bytes)>? images = null,
+        int? optionIndex = null)
     {
         var team = (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId) ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
         var question = (await bus.OpenDecisionsAsync(team.Name, ct)).SingleOrDefault(m => m.Seq == seq)
             ?? throw new RpcException("no_such_decision", "that question is answered already or is not this team's");
         var asker = question.Source[(question.Source.IndexOf('/') + 1)..];
+        string? applied = null;
+        if (optionIndex is { } index)
+        {
+            var options = DecisionAsk.Read(question.Payload).Options;
+            if (options is null || index >= options.Count)
+                throw new RpcException("bad_params", options is null ? "this question has no options" : $"optionIndex must be 0 to {options.Count - 1}");
+            var option = options[index];
+            text = text.Trim().Length == 0 || text.Trim() == option.Reply ? option.Reply : option.Reply + "\n\n" + text.Trim();
+            if (option.Action is { } action)
+            {
+                if (ActionUnavailable(action) is { } reason) throw new RpcException("forbidden", reason);
+                await ApplyActionAsync(action, teamId, ct);
+                applied = action;
+            }
+        }
         if (images is { Count: > 0 })
         {
             var repos = bus.Repos ?? throw new RpcException("unavailable", "images need the app's data folder");
             text = Attachments.WithImages(text, Attachments.Save(Path.Combine(repos.TeamRoot(team.Name), Teams.TeamDocuments.Folder), images));
         }
         var message = await bus.PersonTellAsync(team.Name, asker, text.Trim(), seq, ct);
-        return new JsonObject { ["seq"] = message.Seq };
+        var result = new JsonObject { ["seq"] = message.Seq };
+        if (applied is not null) result["applied"] = applied;
+        return result;
+    }
+
+    /// <summary>A decision action, as the setting's own call (so its rights check and audit are the setting's).</summary>
+    private async Task ApplyActionAsync(string action, long teamId, CancellationToken ct)
+    {
+        var dispatch = Dispatch ?? ((m, p, c) => DispatchAsync(m, p, c));
+        switch (action)
+        {
+            case DecisionActions.AllowLocalhostMac:
+                await dispatch("teams.localhost", new JsonObject { ["teamId"] = teamId, ["on"] = true }, ct);
+                break;
+            default:
+                throw new RpcException("bad_params", $"the app does not know the action '{action}'");
+        }
     }
 
     // ---------------------------------------------------------------- policy

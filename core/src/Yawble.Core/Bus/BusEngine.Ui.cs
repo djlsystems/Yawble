@@ -15,12 +15,14 @@ public sealed record RunSlots(int Running, int Limit, int Queued);
 /// <summary>One agent card: the member, its state, queue position and the last run's outcome. Interactive: the
 /// member holds or waits for an interactive terminal session (not a headless run), so the pane's ✕ may end it.
 /// LastRunFailureClass: the last run's runs.failure_class (stopped, timeout, idle, interrupted, ...; null when it did not
-/// fail): a run the person stopped is recorded failed with class "stopped" and is shown as stopped, not failed (B097).</summary>
+/// fail): a run the person stopped is recorded failed with class "stopped" and is shown as stopped, not failed (B097).
+/// DecisionId (B123): the member's newest unanswered needs_decision (its message seq); while there is one, StatusLine is
+/// "Waiting on you: ..." (BusEngine.WaitingOnYou), not whatever the member reported after it.</summary>
 public sealed record AgentCard(
     MemberRow Member, string State, int? QueuePosition, int QueueLength, int QueuedInstructions, string? StatusLine,
     long? RunId, string? RunStartedAt, string? LastRunState, string? LastRunReason,
     string? Lease = null, string? LeaseWhat = null, int? LeasePosition = null,
-    bool Interactive = false, string? LastRunFailureClass = null)
+    bool Interactive = false, string? LastRunFailureClass = null, long? DecisionId = null)
 {
     /// <summary>The last run ended because the person (or the app on their behalf) stopped it: not a failure to flag.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -172,24 +174,28 @@ public sealed partial class BusEngine
             var unstarted = _store.Pending(started: false);
             var runs = _store.Runs();
             TidyLease(_store.Clock.GetUtcNow());
-            return _store.MemberRows(teamId).Select(m =>
+            var rows = _store.MemberRows(teamId);
+            // B123: a member with an open needs_decision shows "Waiting on you" (and the decision's id), whatever it said after.
+            var asking = rows.Count == 0 ? new Dictionary<string, Message>(StringComparer.OrdinalIgnoreCase) : OpenDecisionByMember(rows[0].Team);
+            return rows.Select(m =>
             {
                 var lease = LeaseOf(m.Id);
                 var active = _active.Values.FirstOrDefault(a => a.Context.Member.Id == m.Id);
                 var position = RunScheduler.PositionOf(queue, q => q.MemberId == m.Id);
                 var qualified = $"{m.Team}/{m.Name}";
                 var last = runs.Where(r => r.MemberId == m.Id).MaxBy(r => r.Id);
+                var decision = asking.GetValueOrDefault(qualified);
                 return new AgentCard(m,
                     // A live interactive session holds a slot: the card shows it running (and Stop ends it).
                     active is not null || _sessions.ContainsKey(m.Id) ? "running" : position is not null ? "queued" : "idle",
                     position, queue.Count,
                     unstarted.Count(p => string.Equals(p.Subscriber, qualified, StringComparison.OrdinalIgnoreCase)),
-                    _statusLines.GetValueOrDefault(m.Id),
+                    decision is not null ? WaitingLine(decision) : _statusLines.GetValueOrDefault(m.Id),
                     active?.Context.RunId,
                     active is null ? null : last?.StartedAt,
                     last?.State, last?.Reason,
                     lease?.State, lease?.What, lease?.Position,
-                    HasSession(m.Id), last?.FailureClass);
+                    HasSession(m.Id), last?.FailureClass, decision?.Seq);
             }).ToArray();
         }, ct);
 
