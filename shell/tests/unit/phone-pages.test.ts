@@ -188,7 +188,7 @@ const DesktopCss: Record<string, string> = {
   // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the
   // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
   // Card 439 (B097): .is-stopped, a stopped run's neutral left edge and label colour.
-  'components/MemberPane.vue': 'a6f21a2cbead0e25',
+  'components/MemberPane.vue': '0029e96216d6abb0',
   'components/MemberActivity.vue': '5b65b8b04e4b41c1',
   'components/DocumentsView.vue': '66dcab6b89792c38',
   // The documents list's Modified column: a wider list and the size / modified cells.

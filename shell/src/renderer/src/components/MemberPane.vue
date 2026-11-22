@@ -130,11 +130,13 @@ defineExpose({ el: () => root.value });
     <div class="title" data-test="agent-title">
       <MemberAvatar class="avatar" :team="m.team" :member="m.name" :state="face" :size="26" :title="MemberStateLabel[face]" />
       <strong data-test="agent-name" :title="m.name">{{ displayName(m.name) }}</strong>
-      <span class="chip">{{ m.role }}</span>
-      <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
-      <span class="label" data-test="agent-face-state">{{ MemberStateLabel[face] }}</span>
-      <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
-      <span class="spacer" />
+      <!-- The pills sit on their own row under the name, so the name gets the whole first row (the ☰ stays on it). -->
+      <span class="pills" data-test="agent-pills">
+        <span class="chip">{{ m.role }}</span>
+        <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
+        <span class="label" data-test="agent-face-state">{{ MemberStateLabel[face] }}</span>
+        <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
+      </span>
       <span ref="menuWrap" class="menu-wrap">
         <button ref="menuBtn" class="icon menu-button" :class="{ on: menuOpen }" title="Actions" :aria-label="`${displayName(m.name)}: actions`" aria-haspopup="menu" :aria-expanded="menuOpen"
           data-test="member-more" @click="menuOpen = !menuOpen"><Icon name="menu" :size="16" /></button>
@@ -202,11 +204,15 @@ defineExpose({ el: () => root.value });
    the cell: what the title bar holds shrinks and ellipsizes. Outside a grid (no set height) it is as tall as its rows. */
 .pane { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 4px 10px 4px;
   display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
-.title { display: flex; align-items: center; gap: 8px; height: 30px; white-space: nowrap; flex: none; min-width: 0; }
-.title > .avatar { flex: none; }
+/* Two rows: the avatar, the name and the ☰ on the first; the pills (role, CLI, state, more waiting) under the name. */
+.title { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 30px 20px; height: 54px;
+  grid-template-areas: "avatar name menu" ". pills pills"; column-gap: 8px; align-items: center; white-space: nowrap; flex: none; min-width: 0; }
+.title > .avatar { flex: none; grid-area: avatar; }
+.title > strong { grid-area: name; }
+.title > .menu-wrap { grid-area: menu; justify-self: end; }
 .title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.pills { grid-area: pills; display: flex; align-items: center; gap: 8px; min-width: 0; height: 20px; overflow: hidden; }
 .title strong, .title .chip, .title .label, .title .more { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.spacer { flex: 1; }
 .label { font-weight: 600; font-size: 12px; color: var(--card-state); }
 .more { font-size: 12px; color: var(--muted); }
 .menu-wrap { position: relative; display: inline-flex; flex: none; }
@@ -274,7 +280,7 @@ defineExpose({ el: () => root.value });
   /* Not a tile: a block as tall as its rows, the view at its own height (the page scrolls). */
   .pane { padding: 4px 8px 8px; display: block; height: auto; }
   .pane > .body { overflow: visible; }
-  .title { height: 44px; }
+  .title { grid-template-rows: 44px 20px; height: 68px; }
   .menu-button { height: 44px; min-width: 44px; }
   .menu button { min-height: 44px; font-size: 14px; }
   .tabs { flex-wrap: wrap; gap: 6px; }

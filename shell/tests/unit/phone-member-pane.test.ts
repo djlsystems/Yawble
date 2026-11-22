@@ -255,11 +255,12 @@ describe("a member's pane at 1280 px (B061)", () => {
     } finally { spy.mockRestore(); }
   });
 
-  it("is no taller than the card + activity row it replaces, at the default heights", () => {
+  it("is no taller than the card + activity row it replaces, plus the pills' own row, at the default heights", () => {
     // The old row was the card (AgentCard.vue at 8b39e07): 6 + 8 px padding, 2 px border, the 32 px title bar, the state line
     // (12.5 px x 1.5 + 4 px padding), 2 px above the output, and the output at the shared height; the Activity beside it was
     // 9rem (144 px) at least, less than the card.
-    const before = 6 + 8 + 2 + 32 + Math.ceil(12.5 * 1.5 + 4) + 2 + OUTPUT_DEFAULT;
+    // The pills (role, CLI, state) moved to their own 24 px row under the name so the name has the first row to itself.
+    const before = 6 + 8 + 2 + 32 + Math.ceil(12.5 * 1.5 + 4) + 2 + OUTPUT_DEFAULT + 24;
     const d = desktopRules('components/MemberPane.vue');
     const decl = (sel: string, prop: string) => d.filter((r) => r.sels.includes(sel)).map((r) => r.decls[prop]).filter(Boolean).pop();
     const [padTop, , padBottom] = decl('.pane', 'padding')!.split(/\s+/).map(px);
