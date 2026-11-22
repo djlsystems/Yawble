@@ -371,6 +371,38 @@ public class DecisionOptionsTests
         Assert.Empty(await rig.Decisions());
     }
 
+    // ------------------------------------------------------------------ card 548 (B123 verify)
+
+    [Fact]
+    public async Task TheShellsAnswer_TextEqualToTheReply_IsSentOnce_AndStillAppliesTheAction()
+    {
+        // The shell's option buttons send bus.answer { teamId, seq, text: reply, optionIndex }.
+        await using var rig = await Rig.StartAsync(LocalhostAsk());
+        await rig.TellAdaAsync("ask");
+        var question = Assert.Single(await rig.Decisions());
+        var result = (await rig.Call("bus.answer", new { teamId = rig.TeamId, seq = question.Seq, optionIndex = 0, text = "Allowed: run the tests again." }))!.AsObject();
+        Assert.Equal(DecisionActions.AllowLocalhostMac, result["applied"]!.GetValue<string>());
+        Assert.True(await rig.LocalhostOn());
+        Assert.Single(rig.LocalhostAudit());
+        using var store = rig.Db.OpenStore();
+        Assert.Equal("Allowed: run the tests again.", Payload.Field(store.Find(result["seq"]!.GetValue<long>())!, "text"));
+    }
+
+    [Fact]
+    public async Task ATextOnlyAnswer_AsTheConciergeSendsIt_NeverAppliesTheAction()
+    {
+        // The Concierge's answer tool sends { teamId, seq, text } and no optionIndex: even the action option's exact reply
+        // is only text, the setting stays off and nothing is audited.
+        await using var rig = await Rig.StartAsync(LocalhostAsk());
+        await rig.TellAdaAsync("ask");
+        var question = Assert.Single(await rig.Decisions());
+        var result = (await rig.Call("bus.answer", new { teamId = rig.TeamId, seq = question.Seq, text = "Allowed: run the tests again." },
+            new Actor(Actor.Concierge, "pat")))!.AsObject();
+        Assert.False(result.ContainsKey("applied"));
+        Assert.False(await rig.LocalhostOn());
+        Assert.Empty(rig.LocalhostAudit());
+    }
+
     // ------------------------------------------------------------------ Waiting on you
 
     [Fact]
