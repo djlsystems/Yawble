@@ -445,14 +445,25 @@ export const WORKFLOWS_GET = 'workflows.get';
 export type WorkflowRowStatus = 'running' | 'needs-you' | 'waiting' | 'idle' | 'stopped' | 'completed' | 'closed' | 'expired';
 /** The backlog item a workflow was dispatched from (archived: open it in the Backlog's archive). */
 export interface WorkflowItem { label: string; title: string; archived: boolean }
-/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits for a run slot. */
-export interface WorkflowMember { id: number; name: string; state: 'running' | 'lease' | 'queued' }
+/**
+ * B126: why a member's delivery has not started (the core's worker states). queued: in the run queue, waiting for a run
+ * slot (the only one that counts as Waiting for a slot on the timeline); waits-for-run: a hand-back held until the run
+ * that sent it ends (waitsFor: the sender's name); held: the team is paused or archived; pending: anything else.
+ */
+export type WorkerWaitState = 'queued' | 'waits-for-run' | 'held' | 'pending';
+/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits (WorkerWaitState). */
+export interface WorkflowMember {
+  id: number; name: string; state: 'running' | 'lease' | WorkerWaitState;
+  /** waits-for-run: the member whose run must end first. */
+  waitsFor?: string | null;
+}
 /** A workflows.list row: every WorkflowSummary field (title cleaned), plus the B104 fields. No tokens, no cost. */
 export interface WorkflowRow extends WorkflowSummary {
   ownerId: number | null;
   team: string; teamId: number;
   status: WorkflowRowStatus;
-  waitingFor: 'slot' | 'lease' | 'wake' | null;
+  /** B126: slot only while a member is in the run queue; else what the undelivered work waits for (WorkerWaitState words). */
+  waitingFor: 'slot' | 'lease' | 'wake' | 'waits-for-run' | 'held' | 'pending' | null;
   /** A run of it is active right now (the icon is animated), whatever the status. */
   working: boolean;
   item: WorkflowItem | null;
@@ -772,13 +783,17 @@ export interface TriggerSchedule {
   kind: 'every' | 'cron' | 'once' | 'folder' | 'event'; intervalSec: number | null; cron: string | null; timezone: string | null; fireAt: string | null;
 }
 export type WakeManager = 'always' | 'onHandbackOrFailure' | 'never';
+/** B125: which folder changes fire a folder trigger. A new trigger takes 'added'; one saved without it (an older core) is 'any'. */
+export type WatchFireOn = 'added' | 'added-or-changed' | 'any';
+export const WATCH_FIRE_ON_LABELS: Record<WatchFireOn, string> = { added: 'Added files', 'added-or-changed': 'Added or changed', any: 'Any change' };
+export const fireOnOf = (w: { fireOn?: WatchFireOn | null } | null | undefined): WatchFireOn => w?.fireOn ?? 'any';
 export interface Trigger {
   id: number; teamId: number; memberId: number; name: string; schedule: TriggerSchedule; instruction: string;
   onlyWhenIdle: boolean; enabled: boolean; nextDueAt: string | null; lastFiredAt: string | null;
   /** Whether the trigger's runs wake the Manager when they end (a hand-back always does). */
   wakeManager: WakeManager;
   /** A folder-change trigger's folder: the team's documents (path inside) or a folder on this computer. */
-  watch?: { root: 'documents' | 'host'; path: string; glob: string | null; quietSec: number } | null;
+  watch?: { root: 'documents' | 'host'; path: string; glob: string | null; quietSec: number; fireOn?: WatchFireOn | null } | null;
   /** An event trigger's event name pattern (web.pr, web.*). */
   eventName?: string | null;
   lastOutcome: 'fired' | 'skipped' | 'missed' | 'member-missing' | null; lastReason: string | null; lastSeq: number | null; missedCount: number;
@@ -996,7 +1011,12 @@ export interface MemberRow {
 export interface AgentModelShown { name: string; source: 'member' | 'agent' | 'observed' | 'cli' | string; at: string | null }
 
 export interface AgentCard {
-  member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'queued' | 'idle'; queuePosition: number | null; queueLength: number;
+  /** B126: besides running and idle, the WorkerWaitState of work not started (an older core sends only queued). */
+  member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'idle' | WorkerWaitState; queuePosition: number | null; queueLength: number;
+  /** B126 (core 564 shape): why queued instructions have not started, next to a state of queued or idle (cardState reads either shape). */
+  waitState?: WorkerWaitState | null;
+  /** B126, waits-for-run: the member whose run must end first. */
+  waitsFor?: string | null;
   queuedInstructions: number; statusLine: string | null; runId: number | null; runStartedAt: string | null;
   lastRunState: string | null; lastRunReason: string | null;
   /**

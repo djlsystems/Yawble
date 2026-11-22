@@ -77,7 +77,7 @@ const breakdown = computed(() => timeBar(w.value.time));
 
 // ---- the actions ----
 const canNudge = computed(() => w.value.state === 'open' && !w.value.working && !w.value.members.length);
-const canStop = computed(() => w.value.state === 'open' && (w.value.working || w.value.members.some((m) => m.state !== 'queued')));
+const canStop = computed(() => w.value.state === 'open' && (w.value.working || w.value.members.some((m) => m.state === 'running' || m.state === 'lease')));
 const canExtend = computed(() => w.value.state === 'open' && !!w.value.expiresAt);
 const canClose = computed(() => w.value.state === 'open');
 interface Action { id: 'nudge' | 'extend' | 'stop' | 'close'; method: string; ask: string; ok: string; danger?: boolean; doing: string }

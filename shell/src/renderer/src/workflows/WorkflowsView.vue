@@ -8,6 +8,7 @@ import LoadingNote from '../components/LoadingNote.vue';
 import Icon from '../components/Icon.vue';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName } from '../faces/faces';
+import { workerSays } from '../waiting';
 import { useNarrow } from '../narrowScreen';
 import { pushEscape } from '../escapeClose';
 import { readOnly } from '../remoteAccess';
@@ -188,7 +189,7 @@ const Lanes = [{ id: 'todo' as const, label: 'To Do' }, { id: 'in-progress' as c
 type Face = { name: string; state: 'running' | 'waiting' | 'idle'; says: string };
 function faces(w: WorkflowRow): Face[] {
   const out: Face[] = w.members.map((m) => ({ name: m.name, state: m.state === 'running' ? 'running' : 'waiting',
-    says: `${displayName(m.name)}: ${m.state === 'running' ? 'running' : m.state === 'lease' ? 'waiting for the heavy-work lease' : 'queued for a run slot'}` }));
+    says: `${displayName(m.name)}: ${workerSays(m)}` }));
   if (w.owner && !w.members.some((m) => m.name === w.owner)) out.push({ name: w.owner, state: 'idle', says: `${displayName(w.owner)}: owner` });
   return out;
 }

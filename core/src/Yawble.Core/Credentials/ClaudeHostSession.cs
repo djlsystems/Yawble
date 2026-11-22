@@ -32,6 +32,11 @@ public sealed class ClaudeHostSession
     private readonly SemaphoreSlim _refreshing = new(1, 1);
     private readonly Lock _keptLock = new();
     private ClaudeHostToken? _kept;
+    // Counts every change of _kept: a read keeps its token only if nothing was kept or dropped since it began, so a
+    // slow read never overwrites a newer token (or brings back one a 401 dropped).
+    private long _keptGeneration;
+    // The token CurrentAsync last handed out: the one a 401 refuses.
+    private ClaudeHostToken? _lastGiven;
     private readonly Func<string, IReadOnlyList<string>, CancellationToken, Task> _runClaude;
 
     /// <summary>Renew this long before the access token expires.</summary>
@@ -83,6 +88,8 @@ public sealed class ClaudeHostSession
     /// </summary>
     public ClaudeHostToken? Read()
     {
+        long generation;
+        lock (_keptLock) generation = _keptGeneration;
         try
         {
             if (_keychain is not null)
@@ -94,7 +101,7 @@ public sealed class ClaudeHostSession
                     using var fromKeychain = JsonDocument.Parse(json);
                     read = Parse(fromKeychain);
                 }
-                Keep(read);
+                KeepRead(read, generation);
                 return read;
             }
             using var stream = new FileStream(_credentialsFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -105,19 +112,38 @@ public sealed class ClaudeHostSession
         {
             // The reason is the app's own text (an exit code), never the value or the tool's stderr.
             _log?.Invoke($"claude sign-in: {e.Message}");
-            Keep(null);
+            KeepRead(null, generation);
             return null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
         {
-            if (_keychain is not null) Keep(null);
+            if (_keychain is not null) KeepRead(null, generation);
             return null;
         }
     }
 
-    private void Keep(ClaudeHostToken? token)
+    /// <summary>
+    /// Keeps what a read that began at <paramref name="generation"/> found, unless the kept token changed meanwhile
+    /// (another read kept a newer one, or a 401 dropped it): then the slower read's result is not kept.
+    /// </summary>
+    private void KeepRead(ClaudeHostToken? token, long generation)
     {
-        lock (_keptLock) _kept = token;
+        lock (_keptLock)
+        {
+            if (_keptGeneration != generation) return;
+            _kept = token;
+            _keptGeneration++;
+        }
+    }
+
+    /// <summary>Drops the kept token (a 401): every read in flight is not kept either.</summary>
+    private void Drop()
+    {
+        lock (_keptLock)
+        {
+            _kept = null;
+            _keptGeneration++;
+        }
     }
 
     /// <summary>
@@ -146,12 +172,18 @@ public sealed class ClaudeHostSession
     /// <summary>A token good for at least <see cref="RenewMargin"/>, renewing it through the host's claude when needed.</summary>
     public async Task<ClaudeHostToken?> CurrentAsync(CancellationToken ct = default)
     {
-        if (Kept() is { } kept) return kept;
+        if (Kept() is { } kept) return Given(kept);
         var token = Read();
-        if (token is not null && !token.ExpiresWithin(RenewMargin, _clock.GetUtcNow())) return token;
+        if (token is not null && !token.ExpiresWithin(RenewMargin, _clock.GetUtcNow())) return Given(token);
         await RefreshAsync(force: false, ct);
         token = Read();
-        return token is not null && !token.ExpiresWithin(TimeSpan.Zero, _clock.GetUtcNow()) ? token : null;
+        return token is not null && !token.ExpiresWithin(TimeSpan.Zero, _clock.GetUtcNow()) ? Given(token) : null;
+    }
+
+    private ClaudeHostToken Given(ClaudeHostToken token)
+    {
+        lock (_keptLock) _lastGiven = token;
+        return token;
     }
 
     /// <summary>
@@ -161,13 +193,23 @@ public sealed class ClaudeHostSession
     public async Task<bool> RefreshAsync(bool force, CancellationToken ct = default)
     {
         // A forced renewal (the API answered 401) drops the kept token: whatever happens next is read again.
-        if (force) Keep(null);
+        // The refused token is the one last handed out, remembered before it is dropped.
+        string? refused = null;
+        if (force)
+        {
+            lock (_keptLock) refused = (_lastGiven ?? _kept)?.AccessToken;
+            Drop();
+        }
         await _refreshing.WaitAsync(ct);
         try
         {
             // Another caller may have renewed it while this one waited.
             var now = Read();
-            if (!force && now is not null && !now.ExpiresWithin(RenewMargin, _clock.GetUtcNow())) return true;
+            var fresh = now is not null && !now.ExpiresWithin(RenewMargin, _clock.GetUtcNow());
+            if (!force && fresh) return true;
+            // After a 401: the host's claude (or the person) already put a different, fresh token there. That is the
+            // renewal; running claude again would spend quota for nothing.
+            if (force && fresh && refused is not null && now!.AccessToken != refused) return true;
             if (_claudeBinary() is not { } claude)
             {
                 _log?.Invoke("claude sign-in: cannot renew it, Claude Code is not installed on this computer");
@@ -183,7 +225,7 @@ public sealed class ClaudeHostSession
             var renewed = Renewed(start);
             _log?.Invoke(renewed ? "claude sign-in: renewed" : "claude sign-in: not renewed; the person may need to run 'claude' and sign in again");
             // Not renewed after a 401: keep nothing, so the next request reads the item again.
-            if (!renewed && force) Keep(null);
+            if (!renewed && force) Drop();
             return renewed;
         }
         finally
