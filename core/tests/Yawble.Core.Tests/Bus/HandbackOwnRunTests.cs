@@ -241,7 +241,7 @@ public class HandbackOwnRunTests
 
     // ---------------------------------------------------------------- the timeline's Waiting for a slot
 
-    private static DateTimeOffset At(string hhmm) => TimelineCalculatorTests.At(hhmm);
+    private static DateTimeOffset At(string hhmm) => Yawble.Core.Tests.Board.TimelineCalculatorTests.At(hhmm);
 
     private static long Share(TimeSummary t, string category) => t.Breakdown.FirstOrDefault(b => b.Category == category)?.Ms ?? 0;
 
