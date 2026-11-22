@@ -19,7 +19,8 @@ public sealed record RunSlots(int Running, int Limit, int Queued);
 /// DecisionId (B123): the member's newest unanswered needs_decision (its message seq); while there is one, StatusLine is
 /// "Waiting on you: ..." (BusEngine.WaitingOnYou), not whatever the member reported after it.
 /// WaitState / WaitsFor (B126): with QueuedInstructions, why they have not started (WaitStates: queued, waits-for-run with
-/// the sender's name, held, pending); null when none waits.</summary>
+/// the sender's name, held, pending); null when none waits. State (B126): running | idle | one of WaitStates: queued while
+/// the member is in the run queue, else its WaitState when work waits (waits-for-run, held, pending), else idle.</summary>
 public sealed record AgentCard(
     MemberRow Member, string State, int? QueuePosition, int QueueLength, int QueuedInstructions, string? StatusLine,
     long? RunId, string? RunStartedAt, string? LastRunState, string? LastRunReason,
@@ -193,7 +194,8 @@ public sealed partial class BusEngine
                 var (waitState, waitsFor) = mine.Count == 0 ? (null, null) : WaitOf(m.Id, m.TeamId, mine, queue, held);
                 return new AgentCard(m,
                     // A live interactive session holds a slot: the card shows it running (and Stop ends it).
-                    active is not null || _sessions.ContainsKey(m.Id) ? "running" : position is not null ? "queued" : "idle",
+                    // B126: work not started and not in the run queue says why (waits-for-run, held, pending), as WaitOf does.
+                    active is not null || _sessions.ContainsKey(m.Id) ? "running" : position is not null ? WaitStates.Queued : waitState ?? "idle",
                     position, queue.Count,
                     mine.Count,
                     decision is not null ? WaitingLine(decision) : _statusLines.GetValueOrDefault(m.Id),
