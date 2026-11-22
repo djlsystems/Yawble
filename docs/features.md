@@ -147,9 +147,10 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - The other CLIs: their own sign-in on this computer.
 - Credentials are kept in the OS credential store and used by the run's gateway, never inside the sandbox.
 - Claude Code on macOS keeps its sign-in in the login Keychain item "Claude Code-credentials". The app's gateway reads
-  it there for each model request; no sandbox gets the Keychain. Settings > Agents shows Claude Code as signed in when
-  that item exists. The first time the gateway reads it, macOS asks "yawble-core wants to use … Claude
-  Code-credentials": click **Always Allow**. The app is Developer ID–signed, so the choice holds across updates.
+  it there with macOS's own `security` tool, the same tool Claude Code uses to keep the item, so macOS shows no
+  Keychain prompt. The gateway keeps the token in memory and reads the item again only shortly before the token
+  expires or when the model API refuses it. No sandbox gets the Keychain, and the app never changes the item.
+  Settings > Agents shows Claude Code as signed in when that item exists.
 - **Settings > Agents** lists detected CLIs (**Detect again**), each with whether you are signed in to it on this
   computer (or how to sign in), and custom agents. A custom agent copies a built-in
   with its own name, default model and command-line arguments.

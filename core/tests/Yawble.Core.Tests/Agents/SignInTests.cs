@@ -105,6 +105,33 @@ public class SignInTests
         Assert.Empty(host.Reads);
     }
 
+    /// <summary>
+    /// B124: on a Mac the existence check is macOS's own tool, `/usr/bin/security find-generic-password -s
+    /// "Claude Code-credentials"` without -w: the password is never requested. Exit 44 is not signed in; another failure
+    /// (or a timeout) reads as not signed in too, without a throw. A fake tool here.
+    /// </summary>
+    [Fact]
+    public void ClaudeOnMacOsIsCheckedWithTheSecurityToolWithoutW()
+    {
+        var fake = new FakeHost(TargetOs.MacOS, "/Users/alice");
+        var env = new HostEnvironment(TargetOs.MacOS, "/Users/alice", [], [], new Dictionary<string, string>());
+        var tool = new Credentials.FakeSecurityTool().Set(ClaudeHostSession.KeychainService, "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-FAKE\"}}");
+        SignInStatus Status() => SignInCatalog.Claude(new DetectionHost(env, fake, fake) { CredentialStore = new MacHostCredentialReader(tool) }).Status;
+
+        Assert.Equal(SignInStatus.SignedIn, Status());
+        Assert.Equal(["find-generic-password", "-s", "Claude Code-credentials"], Assert.Single(tool.Calls));
+        Assert.Equal(0, tool.Reads);
+
+        Assert.Equal(SignInStatus.NotSignedIn, SignInCatalog.Claude(new DetectionHost(env, fake, fake)
+            { CredentialStore = new MacHostCredentialReader(new Credentials.FakeSecurityTool()) }).Status); // exit 44
+        tool.Fails = (51, "");
+        Assert.Equal(SignInStatus.NotSignedIn, Status());
+        tool.Fails = null;
+        tool.TimesOut = true;
+        Assert.Equal(SignInStatus.NotSignedIn, Status());
+        Assert.Equal(0, tool.Reads);
+    }
+
     [Fact]
     public void ClaudeOnMacOsWithoutTheKeychainItemIsNotSignedIn_AndSaysHowToSignIn()
     {
