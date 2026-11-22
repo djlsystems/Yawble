@@ -13,6 +13,7 @@ import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
 import { renderMarkdown } from '../markdown';
 import { memberReport, WaitingLabel } from '../reportFormat';
 import { leaseText } from '../heavyLease';
+import { waitSays } from '../waiting';
 import { outputHeight } from '../agentOutputHeight';
 import { errorText, resolveApi } from '../api';
 import { getMemberView, MemberViews, setMemberView, type MemberView } from '../memberPaneView';
@@ -44,7 +45,10 @@ const phone = useNarrow();
 const stateLine = computed(() => {
   const c = props.card;
   if (c.attention === 'decision' || c.decisionId != null) return 'a question is waiting for your answer';
-  if (c.state === 'queued') return `position ${c.queuePosition} of ${c.queueLength} for a global run slot · ${c.queuedInstructions} instruction${c.queuedInstructions === 1 ? '' : 's'}`;
+  const instructions = `${c.queuedInstructions} instruction${c.queuedInstructions === 1 ? '' : 's'}`;
+  if (c.state === 'queued') return `position ${c.queuePosition} of ${c.queueLength} for a global run slot · ${instructions}`;
+  // B126: work held for another run, a paused team or anything else is no place in the run queue.
+  if (c.state === 'waits-for-run' || c.state === 'held' || c.state === 'pending') return `${waitSays(c.state, c.waitsFor)} · ${instructions}`;
   if (c.state === 'running') return '';
   // B097: a run the person stopped (class "stopped", recorded failed) is no failure: it says who stopped it.
   if (c.lastRunState !== 'completed' && c.lastRunState !== 'interrupted' && isStoppedRun({ state: c.lastRunState, failureClass: c.lastRunFailureClass, attention: c.attention })) return 'last run stopped by you';
@@ -89,7 +93,8 @@ watch(view, (v) => { if (v !== 'terminal') termLive.value = false; });
 const remote = computed(() => !!resolveApi(props.api)?.remote);
 /** B111: the folder asks read through the same api; none in a view without one. */
 const folderApi = computed(() => resolveApi(props.api) as YawbleApi | undefined);
-const canOpen = computed(() => props.card.state === 'idle' && !termLive.value);
+// B126: work that waits but is not queued for a slot (held, pending, waits for a run) leaves the CLI free to open, as idle did.
+const canOpen = computed(() => props.card.state !== 'running' && props.card.state !== 'queued' && !termLive.value);
 const canStop = computed(() => props.card.state === 'running' || termLive.value);
 const opening = ref(false);
 const error = ref<string | null>(null);

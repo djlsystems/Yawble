@@ -1,6 +1,8 @@
 import { shallowRef } from 'vue';
 import { WORKFLOWS_LIST, type ItemTime, type WorkflowCounts, type WorkflowItem, type WorkflowRow, type WorkflowRowStatus, type WorkflowsListAnswer, type YawbleApi } from '../../../shared/api';
+import { displayName } from '../faces/faces';
 import { categoryLabel, categoryVar, shares } from '../timeline/time';
+import { waitSays } from '../waiting';
 
 // B104: the Workflows page's pure parts - the status looks, the text filter and its highlight, the chips, the default
 // order and the column sorts, the time bar, the summary line, the filters in the hash and in localStorage, and the
@@ -25,10 +27,19 @@ export function statusLook(w: Pick<WorkflowRow, 'status' | 'state'>): StatusLook
   return StatusLooks[w.status] ?? (w.state === 'open' ? StatusLooks.idle : StatusLooks.closed);
 }
 const WaitingFor: Record<string, string> = { slot: 'Waiting for a run slot', lease: 'Waiting for the heavy-work lease', wake: 'Waiting for a wake-up' };
+/**
+ * B126: a waiting row whose deliveries are not in the run queue waits for what its workers wait for ("Waiting: Developer
+ * Ada waits for Tester Ben's run to end"), not for a run slot; null when a worker is queued or none says otherwise.
+ */
+function workersWait(members: WorkflowRow['members'] | undefined): string | null {
+  const ws = members ?? [];
+  if (!ws.length || ws.some((m) => m.state === 'queued' || m.state === 'running' || m.state === 'lease')) return null;
+  return `Waiting: ${ws.map((m) => `${displayName(m.name)} ${waitSays(m.state, m.waitsFor)}`).join('; ')}`;
+}
 /** The Status cell's tooltip: what it waits for, or the expiry countdown of an idle one. */
-export function statusTip(w: Pick<WorkflowRow, 'status' | 'state' | 'waitingFor' | 'expiresAt' | 'working'>, now = Date.now()): string {
+export function statusTip(w: Pick<WorkflowRow, 'status' | 'state' | 'waitingFor' | 'expiresAt' | 'working'> & Partial<Pick<WorkflowRow, 'members'>>, now = Date.now()): string {
   const look = statusLook(w);
-  if (w.status === 'waiting') return WaitingFor[w.waitingFor ?? ''] ?? 'Waiting';
+  if (w.status === 'waiting') return (w.waitingFor !== 'lease' && w.waitingFor !== 'wake' ? workersWait(w.members) : null) ?? WaitingFor[w.waitingFor ?? ''] ?? 'Waiting';
   if (w.status === 'idle') {
     if (!w.expiresAt) return 'Open, nobody is working it';
     const left = Date.parse(w.expiresAt) - now;

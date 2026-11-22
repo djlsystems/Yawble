@@ -115,7 +115,8 @@ export function memberStateOf(card: Pick<AgentCard, 'state' | 'attention'> & Par
   const stopped = card.attention === 'stopped' || (card.attention === 'failed' && card.lastRunFailureClass === 'stopped');
   if (card.attention === 'failed' && !stopped) return 'failed';
   if (card.state === 'running') return 'running';
-  if (card.state === 'queued') return 'waiting';
+  // B126: work not started waits, whatever for (a run slot, the sender's run, a paused team, anything else).
+  if (card.state === 'queued' || card.state === 'waits-for-run' || card.state === 'held' || card.state === 'pending') return 'waiting';
   if (stopped) return 'stopped';
   return 'idle';
 }

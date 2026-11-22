@@ -445,8 +445,18 @@ export const WORKFLOWS_GET = 'workflows.get';
 export type WorkflowRowStatus = 'running' | 'needs-you' | 'waiting' | 'idle' | 'stopped' | 'completed' | 'closed' | 'expired';
 /** The backlog item a workflow was dispatched from (archived: open it in the Backlog's archive). */
 export interface WorkflowItem { label: string; title: string; archived: boolean }
-/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits for a run slot. */
-export interface WorkflowMember { id: number; name: string; state: 'running' | 'lease' | 'queued' }
+/**
+ * B126: why a member's delivery has not started (the core's worker states). queued: in the run queue, waiting for a run
+ * slot (the only one that counts as Waiting for a slot on the timeline); waits-for-run: a hand-back held until the run
+ * that sent it ends (waitsFor: the sender's name); held: the team is paused or archived; pending: anything else.
+ */
+export type WorkerWaitState = 'queued' | 'waits-for-run' | 'held' | 'pending';
+/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits (WorkerWaitState). */
+export interface WorkflowMember {
+  id: number; name: string; state: 'running' | 'lease' | WorkerWaitState;
+  /** waits-for-run: the member whose run must end first. */
+  waitsFor?: string | null;
+}
 /** A workflows.list row: every WorkflowSummary field (title cleaned), plus the B104 fields. No tokens, no cost. */
 export interface WorkflowRow extends WorkflowSummary {
   ownerId: number | null;
@@ -1000,7 +1010,10 @@ export interface MemberRow {
 export interface AgentModelShown { name: string; source: 'member' | 'agent' | 'observed' | 'cli' | string; at: string | null }
 
 export interface AgentCard {
-  member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'queued' | 'idle'; queuePosition: number | null; queueLength: number;
+  /** B126: besides running and idle, the WorkerWaitState of work not started (an older core sends only queued). */
+  member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'idle' | WorkerWaitState; queuePosition: number | null; queueLength: number;
+  /** B126, state waits-for-run: the member whose run must end first. */
+  waitsFor?: string | null;
   queuedInstructions: number; statusLine: string | null; runId: number | null; runStartedAt: string | null;
   lastRunState: string | null; lastRunReason: string | null;
   /**
