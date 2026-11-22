@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { createTheme, REMOTE_THEME_KEY, THEME_KEY, toggleLabel, type ThemeEnv } from '../../src/renderer/src/theme';
 import { TitleBars, TITLE_BAR, TITLE_BAR_DIMMED, overlayFor, type Overlay } from '../../src/main/title-bar';
-import { XTERM_PALETTES } from '../../src/renderer/src/terminalPane';
 
 // Fakes only: a stand-in for prefers-color-scheme that the test flips, and a Map for localStorage.
 function fakeOs(dark: boolean) {
@@ -380,8 +379,8 @@ describe('title-bar button (ThemeToggle.vue) and the View menu', () => {
   });
 });
 
-describe('terminals follow the theme live', () => {
-  it('TerminalView switches the xterm palette when the theme changes, without a new terminal', async () => {
+describe("the terminal screen keeps xterm's own colours", () => {
+  it('TerminalView sets no xterm theme, and a theme change does not touch it', async () => {
     vi.resetModules();
     localStorage.clear();
     vi.stubGlobal('matchMedia', fakeOs(false).matchMedia);
@@ -406,13 +405,13 @@ describe('terminals follow the theme live', () => {
     const w = mount(TerminalView, { props: { channel: 'member:1', api } });
     await flushPromises();
     expect(made).toHaveLength(1);
-    expect(made[0].options.theme).toEqual(XTERM_PALETTES.light);
+    expect(made[0].options.theme).toBeUndefined();
     theme.setMode('dark');
     await nextTick();
-    expect(made[0].options.theme).toEqual(XTERM_PALETTES.dark);
+    expect(made[0].options.theme).toBeUndefined();
     theme.setMode('light');
     await nextTick();
-    expect(made[0].options.theme).toEqual(XTERM_PALETTES.light);
+    expect(made[0].options.theme).toBeUndefined();
     expect(made).toHaveLength(1);
     w.unmount();
     vi.doUnmock('@xterm/xterm');

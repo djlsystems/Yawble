@@ -5,8 +5,6 @@ import { Terminal } from '@xterm/xterm';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { CoreEvent, YawbleApi, TerminalSessionInfo, TerminalSnapshot } from '../../../shared/api';
 import { resolveApi } from '../api';
-import { theme } from '../theme';
-import { xtermTheme } from '../terminalPane';
 import { terminalLinkHandler } from '../terminalLinks';
 
 // One terminal channel rendered with xterm.js: attach = replay the buffer, then stream pushes.
@@ -110,7 +108,7 @@ onMounted(async () => {
     fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
     fontSize: 13,
     scrollback: 5000,
-    theme: xtermTheme(theme.state.current),
+    // No theme: xterm's own defaults, whatever the window's theme (terminalPane.ts XTERM_SCREEN_BG).
     // Card 393: links ask through the window's own dialog, not xterm's default (the browser's confirm()).
     linkHandler: terminalLinkHandler,
   });
@@ -129,8 +127,6 @@ onMounted(async () => {
 });
 
 watch(() => props.channel, () => void attach());
-// The theme switched (title-bar button, View menu, the OS): the terminal follows at once, its output kept.
-watch(() => theme.state.current, (t) => { if (term) term.options.theme = xtermTheme(t); });
 watch(mirror, (t) => emit('text', t));
 
 onBeforeUnmount(() => {
@@ -154,7 +150,8 @@ defineExpose({
 </template>
 
 <style scoped>
-.terminal-view { position: relative; height: 100%; min-height: 120px; background: var(--term-bg); border-radius: 4px; padding: 4px; }
+/* The screen's own black (xterm's default, terminalPane.ts XTERM_SCREEN_BG), not the theme's: the padding matches it. */
+.terminal-view { position: relative; height: 100%; min-height: 120px; background: var(--term-screen); border-radius: 4px; padding: 4px; }
 .xterm-host { height: 100%; }
 .mirror { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); margin: 0; }
 </style>
