@@ -7,9 +7,13 @@ namespace Yawble.Core.Triggers;
 /// <param name="Root">documents (Path inside the team's documents) or host (Path an absolute folder).</param>
 /// <param name="Glob">File names to watch, e.g. *.pdf (null: every file).</param>
 /// <param name="QuietSec">How long a change must stay still before it fires.</param>
-public sealed record FolderWatch(string Root, string Path, string? Glob, int QuietSec)
+/// <param name="FireOn">Which settled changes fire it (B125, 0055): <see cref="Added"/>, <see cref="AddedOrChanged"/> or
+/// <see cref="AnyChange"/>. A new trigger defaults to added; one saved before 0055 reads as any.</param>
+public sealed record FolderWatch(string Root, string Path, string? Glob, int QuietSec, string FireOn = FolderWatch.AnyChange)
 {
     public const string Documents = "documents", Host = "host";
+    public const string Added = "added", AddedOrChanged = "added-or-changed", AnyChange = "any";
+    public static readonly IReadOnlyList<string> FireOnValues = [Added, AddedOrChanged, AnyChange];
     public const int DefaultPollSec = 30, DefaultQuietSec = 10, MaxFiles = 5000;
 }
 
@@ -17,6 +21,14 @@ public sealed record FolderWatch(string Root, string Path, string? Glob, int Qui
 public sealed record FolderChange(IReadOnlyList<string> Added, IReadOnlyList<string> Removed, IReadOnlyList<string> Changed)
 {
     public bool Any => Added.Count + Removed.Count + Changed.Count > 0;
+
+    /// <summary>Only the kinds of change that fire under <paramref name="fireOn"/> (unknown: any change).</summary>
+    public FolderChange Only(string? fireOn) => fireOn switch
+    {
+        FolderWatch.Added => new(Added, [], []),
+        FolderWatch.AddedOrChanged => new(Added, [], Changed),
+        _ => this,
+    };
 
     /// <summary>The change in a few lines for the member's instruction (at most 50 names in all).</summary>
     public string Describe(string where)
@@ -64,8 +76,11 @@ public static class FolderWatcher
 
     /// <summary>
     /// One look at the folder: the change to fire (when one has settled), and the watcher's new state to keep.
+    /// A settled change always becomes the new baseline; only the kinds <paramref name="fireOn"/> names fire (and are
+    /// listed), so a change that does not match fires nothing, now or later (a file moved out after an added-only fire).
     /// </summary>
-    public static (FolderChange? Fire, string State) Look(Dictionary<string, long> now, string? stateJson, DateTimeOffset at, int quietSec)
+    public static (FolderChange? Fire, string State) Look(Dictionary<string, long> now, string? stateJson, DateTimeOffset at, int quietSec,
+        string fireOn = FolderWatch.AnyChange)
     {
         var state = Read(stateJson);
         if (state.Baseline is null) return (null, Write(new State(now, null, null))); // the first look only remembers
@@ -74,7 +89,7 @@ public static class FolderWatcher
             return (null, Write(new State(state.Baseline, now, at))); // still moving: wait for it to settle
         if (at - state.PendingSince.Value < TimeSpan.FromSeconds(Math.Max(0, quietSec)))
             return (null, Write(state));
-        var change = Diff(state.Baseline, now);
+        var change = Diff(state.Baseline, now).Only(fireOn);
         return (change.Any ? change : null, Write(new State(now, null, null)));
     }
 

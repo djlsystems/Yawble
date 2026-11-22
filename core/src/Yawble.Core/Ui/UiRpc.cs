@@ -241,7 +241,9 @@ public sealed class UiRpc(
             preview ? "" : Str(p, "instruction"), Flag("onlyWhenIdle", true), Flag("enabled", true),
             OptStr(p, "wakeManager") ?? Triggers.WakeManagerPolicy.OnHandbackOrFailure,
             OptStr(p, "watchRoot") is { } root ? new Triggers.FolderWatch(root, OptStr(p, "watchPath") ?? "", OptStr(p, "watchGlob"),
-                (int)(OptLong("quietSec") ?? Triggers.FolderWatch.DefaultQuietSec)) : null,
+                (int)(OptLong("quietSec") ?? Triggers.FolderWatch.DefaultQuietSec),
+                // B125 "Fire on": absent on a new trigger means added files; absent on an edit keeps the trigger's own.
+                OptStr(p, "fireOn") ?? (OptLong("id") is null ? Triggers.FolderWatch.Added : "")) : null,
             OptStr(p, "eventName"));
     }
 
