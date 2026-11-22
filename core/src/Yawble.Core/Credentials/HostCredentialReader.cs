@@ -9,7 +9,8 @@ namespace Yawble.Core.Credentials;
 /// terminal; the app never asks for it). Only for CLIs whose sign-in lives there and that accept it another way inside
 /// the sandbox (Copilot's token as COPILOT_GITHUB_TOKEN): an AppContainer cannot read Credential Manager (measured:
 /// CredReadW returns ERROR_ACCESS_DENIED for every target inside a ProcessContainer). On macOS, Claude Code's sign-in
-/// in the login Keychain, read by the gateway (<see cref="ClaudeHostSession"/>). Values are never logged.
+/// in the login Keychain, read by the gateway (<see cref="ClaudeHostSession"/>) through macOS's <c>security</c> tool.
+/// Values are never logged.
 /// </summary>
 public interface IHostCredentialReader
 {
@@ -30,22 +31,80 @@ public static class HostCredentials
 
 /// <summary>
 /// macOS: a target is the SERVICE of a generic password in the login Keychain (Claude Code's "Claude Code-credentials").
-/// <see cref="Targets"/> takes an exact service name (no wildcard) and checks the item exists without reading its
-/// password, so it shows no prompt. <see cref="Read"/> reads the password of the item whose account is the user name
-/// (Claude Code's own), else of any account of that service; the first read makes macOS ask the person once.
-/// Through <see cref="MacKeychainStore"/>'s Keychain calls. NOT exercised off macOS; tests use a fake reader.
+/// Read through macOS's own tool, <c>/usr/bin/security find-generic-password -s &lt;service&gt; [-w]</c>, not the Security
+/// framework: Claude Code writes its item through that tool, and the item's access list always trusts it, so reading
+/// shows no Keychain prompt (a rewrite of the item by Claude Code's token refresh resets the list and dropped the app
+/// from it). <see cref="Targets"/> takes an exact service name (no wildcard) and runs the command without <c>-w</c>,
+/// so the password is not requested. <see cref="Read"/> adds <c>-w</c> and takes the password from stdout in memory.
+/// Exit 44 (errSecItemNotFound) is "absent"; any other failure, or no answer within <see cref="Timeout"/>, is
+/// "unreadable" and the reason gives the exit code only. This reader never writes, modifies or deletes the item.
 /// </summary>
-[SupportedOSPlatform("macos")]
-public sealed class MacHostCredentialReader(Func<string>? userName = null) : IHostCredentialReader
+public sealed class MacHostCredentialReader(ISecurityTool? tool = null) : IHostCredentialReader
 {
-    private readonly Func<string> _userName = userName ?? (() => Environment.UserName);
+    /// <summary>errSecItemNotFound, as <c>security</c> reports it in its exit code.</summary>
+    public const int ExitItemNotFound = 44;
 
-    public IReadOnlyList<string> Targets(string filter) =>
-        filter.Length > 0 && !filter.EndsWith('*') && MacKeychainStore.ItemExists(filter, null) ? [filter] : [];
+    /// <summary>How long one run of the tool may take before it is killed.</summary>
+    public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
-    public string? Read(string target) =>
-        MacKeychainStore.ReadItem(target, _userName()) is { Length: > 0 } own ? own
-        : MacKeychainStore.ReadItem(target, null) is { Length: > 0 } any ? any : null;
+    private readonly ISecurityTool _tool = tool ?? new ProcessSecurityTool();
+
+    /// <summary>The argv of the existence check (<paramref name="password"/> false) or the read.</summary>
+    public static IReadOnlyList<string> Arguments(string service, bool password) =>
+        password ? ["find-generic-password", "-s", service, "-w"] : ["find-generic-password", "-s", service];
+
+    public IReadOnlyList<string> Targets(string filter)
+    {
+        if (filter.Length == 0 || filter.EndsWith('*')) return [];
+        try
+        {
+            return _tool.Run(Arguments(filter, password: false), Timeout) is { TimedOut: false, ExitCode: 0 } ? [filter] : [];
+        }
+        catch (CredentialStoreException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>The password, trailing newline trimmed; null when the item is absent (exit 44).</summary>
+    /// <exception cref="CredentialStoreException">The tool failed or timed out; the message gives the exit code only.</exception>
+    public string? Read(string target)
+    {
+        var result = _tool.Run(Arguments(target, password: true), Timeout);
+        if (result.TimedOut)
+            throw new CredentialStoreException($"the Keychain item could not be read: {ProcessSecurityTool.Path} did not answer within {Timeout.TotalSeconds:0} s");
+        if (result.ExitCode == ExitItemNotFound) return null;
+        if (result.ExitCode != 0)
+            throw new CredentialStoreException($"the Keychain item could not be read: {ProcessSecurityTool.Path} exited with code {result.ExitCode}");
+        var value = result.StandardOutput.TrimEnd('\n', '\r');
+        return value.Length > 0 ? FromHex(value) ?? value : null;
+    }
+
+    /// <summary>
+    /// <c>security -w</c> prints a password that is not printable text as hex; Claude Code's JSON is text, so this is only
+    /// a fallback: an even-length all-hex value that decodes to UTF-8 starting with '{'.
+    /// </summary>
+    private static string? FromHex(string value)
+    {
+        if (value.Length % 2 != 0 || !value.All(Uri.IsHexDigit)) return null;
+        try
+        {
+            var bytes = Convert.FromHexString(value);
+            try
+            {
+                var text = new UTF8Encoding(false, true).GetString(bytes);
+                return text.StartsWith('{') ? text : null;
+            }
+            finally
+            {
+                Array.Clear(bytes);
+            }
+        }
+        catch (Exception e) when (e is FormatException or DecoderFallbackException)
+        {
+            return null;
+        }
+    }
 }
 
 public sealed class NoHostCredentialReader : IHostCredentialReader

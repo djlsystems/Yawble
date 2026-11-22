@@ -278,9 +278,14 @@ const manageTeam = ref<TeamSummary | null>(null);
 
 /** "Discuss with the Concierge" on a team's question: a new chat about that team, the question already in the box. */
 const conciergeDraft = ref<string | null>(null);
-function discuss(teamId: number, d: { from: string; question: string }) {
+function discuss(teamId: number, d: { from: string; question: string; summary?: string | null; options?: { label: string }[] | null; details?: string | null }) {
   const name = allTeams.value.find((t) => t.id === teamId)?.name ?? 'the team';
-  const quoted = d.question.trim().split('\n').map((l) => `> ${l}`).join('\n');
+  // B123: a decision with a summary quotes the ask, the answers offered and the details (not the old question text).
+  const text = d.summary?.trim()
+    ? [d.summary.trim(), d.options?.length ? `Answers offered: ${d.options.map((o) => `"${o.label}"`).join(', ')}.` : '', (d.details ?? '').trim()]
+      .filter(Boolean).join('\n\n')
+    : d.question.trim();
+  const quoted = text.split('\n').map((l) => `> ${l}`).join('\n');
   conciergeDraft.value = `${name}'s ${d.from} asks me:\n\n${quoted}\n\nHelp me decide. What should I answer?`;
   askAbout(teamId);
 }

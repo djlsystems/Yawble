@@ -158,6 +158,47 @@ public class NeverEmitTests
         Assert.False(compiled.Request["seatbelt"]!["keychainAccess"]!.GetValue<bool>());
     }
 
+    /// <summary>
+    /// B124: what /usr/bin/security prints for Claude Code's item (the sign-in JSON, or anything it echoes when it fails)
+    /// never reaches a log line, an error, an exception or a result's text, whatever the tool answers.
+    /// </summary>
+    [Fact]
+    public async Task TheKeychainValueReadWithTheSecurityToolIsNeverEmitted()
+    {
+        const string access = "sk-ant-oat01-NEVEREMITKEYCHAIN0123456789";
+        const string refresh = "sk-ant-ort01-NEVEREMITKEYCHAINREFRESH01";
+        var json = Yawble.Core.Tests.Credentials.FakeKeychain.ClaudeSignIn(access, DateTimeOffset.UtcNow.AddMinutes(2), refresh);
+        var service = Yawble.Core.Credentials.ClaudeHostSession.KeychainService;
+        var emitted = new List<string>();
+        void Log(string line) { lock (emitted) emitted.Add(line); }
+
+        var answers = new (int Exit, string Stdout, bool TimedOut)[] { (0, json + "\n", false), (44, "", false), (1, json, false), (51, access, false), (-1, json, true) };
+        foreach (var (exit, stdout, timedOut) in answers)
+        {
+            var tool = new Fixed(new Yawble.Core.Credentials.SecurityToolResult(exit, stdout, timedOut));
+            emitted.Add(tool.Result.ToString());
+            var reader = new Yawble.Core.Credentials.MacHostCredentialReader(tool);
+            try { reader.Read(service); } catch (Exception e) { emitted.Add(e.ToString()); }
+            emitted.AddRange(reader.Targets(service));
+            var session = new Yawble.Core.Credentials.ClaudeHostSession("/nonexistent/.credentials.json", () => "claude", Log,
+                runClaude: (_, _, _) => Task.CompletedTask, keychain: reader);
+            await session.CurrentAsync(TestContext.Current.CancellationToken);
+            await session.RefreshAsync(force: true, TestContext.Current.CancellationToken);
+            emitted.Add(session.Source);
+        }
+
+        Assert.NotEmpty(emitted);
+        foreach (var line in emitted)
+            foreach (var never in new[] { "NEVEREMITKEYCHAIN", "claudeAiOauth", "sk-ant-" })
+                Assert.DoesNotContain(never, line);
+    }
+
+    private sealed class Fixed(Yawble.Core.Credentials.SecurityToolResult result) : Yawble.Core.Credentials.ISecurityTool
+    {
+        public Yawble.Core.Credentials.SecurityToolResult Result => result;
+        public Yawble.Core.Credentials.SecurityToolResult Run(IReadOnlyList<string> arguments, TimeSpan timeout) => result;
+    }
+
     [Theory]
     [InlineData(TargetOs.Linux)]
     [InlineData(TargetOs.MacOS)]

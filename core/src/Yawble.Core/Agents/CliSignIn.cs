@@ -63,8 +63,8 @@ public static class SignInStatus
 /// ~/.claude.json (oauthAccount) is not needed for the sign-in.</item>
 /// <item>Claude Code (macOS): the sign-in is in the login Keychain ("Claude Code-credentials", account = the user
 /// name). The sandbox has no Keychain access (seatbelt keychainAccess false) and is granted nothing of it: the gateway
-/// reads the item on the host at each request (ClaudeGatewaySignIn, the only Claude sign-in mode on macOS). Detection
-/// checks only that the item exists.</item>
+/// reads the item on the host with /usr/bin/security and keeps the token in memory (ClaudeGatewaySignIn, the only Claude
+/// sign-in mode on macOS). Detection checks only that the item exists (security find-generic-password without -w).</item>
 /// <item>Grok (all OS): GROK_AUTH_PATH = ~/.grok/auth.json (or $GROK_HOME/auth.json). GROK_HOME stays the member's
 /// own. grok keeps auth.json.lock beside it; it is not granted.</item>
 /// </list>
@@ -93,8 +93,8 @@ public static class SignInCatalog
 
     public static CliSignIn Claude(DetectionHost h)
     {
-        // macOS: Claude Code keeps its sign-in in the login Keychain. Only the gateway uses it (it reads the item at each
-        // request, outside the sandbox); here only whether the item exists is checked, without reading the secret.
+        // macOS: Claude Code keeps its sign-in in the login Keychain. Only the gateway uses it (it reads the item with /usr/bin/security,
+        // outside the sandbox); here only whether the item exists is checked, without reading the secret.
         if (h.Os == TargetOs.MacOS)
         {
             var service = Credentials.ClaudeHostSession.KeychainService;

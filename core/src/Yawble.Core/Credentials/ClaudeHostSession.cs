@@ -13,8 +13,9 @@ public sealed record ClaudeHostToken(string AccessToken, DateTimeOffset? Expires
 /// <summary>
 /// The gateway's side of Claude's sign-in (the gateway holds it): the core reads the
 /// access token of the person's OWN Claude Code sign-in on the host (~/.claude/.credentials.json, written by the
-/// person's claude; on macOS the login Keychain item "Claude Code-credentials", which holds the same JSON) at every
-/// model request and puts it on the request. The sandbox gets only a run token, never the sign-in file, the Keychain
+/// person's claude; on macOS the login Keychain item "Claude Code-credentials", which holds the same JSON, read with
+/// macOS's `security` tool) and puts it on each model request. The file is read at every request; the Keychain item is
+/// kept in memory and read again only within <see cref="RenewMargin"/> of expiry, during a renewal, or after a 401. The sandbox gets only a run token, never the sign-in file, the Keychain
 /// or the token. The value is never logged. The app never asks for a token and never refreshes one itself: Anthropic's refresh
 /// tokens rotate, so the host's claude stays the ONLY refresher (two refreshers would sign the person out). When the
 /// access token is about to expire, <see cref="RefreshAsync"/> asks the host's claude to renew it the way it renews
@@ -29,6 +30,8 @@ public sealed class ClaudeHostSession
     private readonly Action<string>? _log;
     private readonly TimeProvider _clock;
     private readonly SemaphoreSlim _refreshing = new(1, 1);
+    private readonly Lock _keptLock = new();
+    private ClaudeHostToken? _kept;
     private readonly Func<string, IReadOnlyList<string>, CancellationToken, Task> _runClaude;
 
     /// <summary>Renew this long before the access token expires.</summary>
@@ -76,7 +79,7 @@ public sealed class ClaudeHostSession
 
     /// <summary>
     /// The current token, read fresh from the host's file (macOS: the login Keychain item); null when there is none (not
-    /// signed in, or unreadable).
+    /// signed in, or unreadable). On macOS the read also becomes the kept token (<see cref="CurrentAsync"/>).
     /// </summary>
     public ClaudeHostToken? Read()
     {
@@ -84,18 +87,49 @@ public sealed class ClaudeHostSession
         {
             if (_keychain is not null)
             {
-                if (_keychain.Read(KeychainService) is not { Length: > 0 } json) return null;
-                using var fromKeychain = JsonDocument.Parse(json);
-                return Parse(fromKeychain);
+                ClaudeHostToken? read;
+                if (_keychain.Read(KeychainService) is not { Length: > 0 } json) read = null;
+                else
+                {
+                    using var fromKeychain = JsonDocument.Parse(json);
+                    read = Parse(fromKeychain);
+                }
+                Keep(read);
+                return read;
             }
             using var stream = new FileStream(_credentialsFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             using var doc = JsonDocument.Parse(stream);
             return Parse(doc);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or CredentialStoreException)
+        catch (CredentialStoreException e)
         {
+            // The reason is the app's own text (an exit code), never the value or the tool's stderr.
+            _log?.Invoke($"claude sign-in: {e.Message}");
+            Keep(null);
             return null;
         }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+            if (_keychain is not null) Keep(null);
+            return null;
+        }
+    }
+
+    private void Keep(ClaudeHostToken? token)
+    {
+        lock (_keptLock) _kept = token;
+    }
+
+    /// <summary>
+    /// macOS: the token kept in memory from the last read of the Keychain item, while it is good for longer than
+    /// <see cref="RenewMargin"/>; null when there is none, it is near expiry, or it was dropped (a refresh, a 401).
+    /// Reading the item runs a process, so a model request does not read it while the kept token is good.
+    /// </summary>
+    private ClaudeHostToken? Kept()
+    {
+        if (_keychain is null) return null;
+        lock (_keptLock)
+            return _kept is { } t && !t.ExpiresWithin(RenewMargin, _clock.GetUtcNow()) ? t : null;
     }
 
     /// <summary>{"claudeAiOauth":{"accessToken":..., "expiresAt": ms}}: the same in the file and the Keychain item.</summary>
@@ -112,6 +146,7 @@ public sealed class ClaudeHostSession
     /// <summary>A token good for at least <see cref="RenewMargin"/>, renewing it through the host's claude when needed.</summary>
     public async Task<ClaudeHostToken?> CurrentAsync(CancellationToken ct = default)
     {
+        if (Kept() is { } kept) return kept;
         var token = Read();
         if (token is not null && !token.ExpiresWithin(RenewMargin, _clock.GetUtcNow())) return token;
         await RefreshAsync(force: false, ct);
@@ -125,6 +160,8 @@ public sealed class ClaudeHostSession
     /// </summary>
     public async Task<bool> RefreshAsync(bool force, CancellationToken ct = default)
     {
+        // A forced renewal (the API answered 401) drops the kept token: whatever happens next is read again.
+        if (force) Keep(null);
         await _refreshing.WaitAsync(ct);
         try
         {
@@ -145,6 +182,8 @@ public sealed class ClaudeHostSession
                  "--mcp-config", "{\"mcpServers\":{}}", "--settings", "{\"disableAllHooks\":true}"], ct);
             var renewed = Renewed(start);
             _log?.Invoke(renewed ? "claude sign-in: renewed" : "claude sign-in: not renewed; the person may need to run 'claude' and sign in again");
+            // Not renewed after a 401: keep nothing, so the next request reads the item again.
+            if (!renewed && force) Keep(null);
             return renewed;
         }
         finally

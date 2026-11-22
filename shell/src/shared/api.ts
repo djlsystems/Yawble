@@ -1011,12 +1011,35 @@ export interface AgentCard {
    * UiRpc.Attention). "stopped" (B097): the person stopped its last run; shown neutral, never as needing the person.
    */
   attention?: 'decision' | 'blocked' | 'failed' | 'stopped' | null;
+  /**
+   * B123: the open decision this member waits on (its Decision.seq), null when none. While set the tile says "Waiting on
+   * you" (status and report chip) and links to that decision card, not the last report.
+   */
+  decisionId?: number | null;
   net?: string; wallTimeout?: string; loosened?: string[]; policyProblems?: string[];
   /** The member has a working copy (clone) on this computer: its card offers the Code browser (teams.agents). */
   hasClone?: boolean;
 }
 
-export interface Decision { seq: number; from: string; question: string; workflow: number; at: string }
+/**
+ * B123: one answer the asker offers (needs_decision's options, 2 to 4): the button's label and the text sent as the
+ * answer. An option may carry an allowlisted app action (e.g. "team.allowLocalhostMac") that core applies when the person
+ * answers with it (bus.answer with optionIndex); actionAvailable false (a Visitor, not macOS) disables the button and
+ * actionUnavailableReason says why.
+ */
+export interface DecisionOption {
+  label: string; reply: string; action?: string | null;
+  actionAvailable?: boolean; actionUnavailableReason?: string | null;
+}
+
+/**
+ * An open needs_decision. B123: summary (the plain ask), options and details (Markdown findings) when the asker gave
+ * them; an older decision has only question. bus.answer takes { teamId, seq, text, optionIndex? } (0-based).
+ */
+export interface Decision {
+  seq: number; from: string; question: string; workflow: number; at: string;
+  summary?: string | null; options?: DecisionOption[] | null; details?: string | null;
+}
 
 export interface SecretStatus { connected: boolean; addedAt: string | null; expiresAt: string | null; lastUsedAt: string | null; renewSoon: boolean; problem: string | null }
 export interface GrokLoginStatus { signedIn: boolean; expiresAt: string | null; lastRefreshAt: string | null; problem: string | null }
