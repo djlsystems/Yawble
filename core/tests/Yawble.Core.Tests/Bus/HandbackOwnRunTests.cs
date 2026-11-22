@@ -115,6 +115,10 @@ public class HandbackOwnRunTests
         Assert.Equal((1, WaitStates.WaitsForRun, "Ada", "idle"), (status.QueuedInstructions, status.WaitState, status.WaitsFor, status.State));
         var card = (await engine.AgentCardsAsync((await engine.TeamsAsync(Ct)).Single().Id, Ct)).Single(c => c.Member.Name == "Manager");
         Assert.Equal((WaitStates.WaitsForRun, "Ada"), (card.WaitState, card.WaitsFor));
+        // Card 568: the card's own state says it too (the shell's team list and the cloud read state, not waitState).
+        Assert.Equal(WaitStates.WaitsForRun, card.State);
+        var wire = JsonSerializer.SerializeToNode(card, Yawble.Core.Ui.RpcDispatcher.Json)!; // teams.agents' row, as UiRpc sends it
+        Assert.Equal((WaitStates.WaitsForRun, "Ada"), (wire["state"]!.GetValue<string>(), wire["waitsFor"]!.GetValue<string>()));
 
         release.SetResult();
         await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "the bus to go quiet");
@@ -148,6 +152,8 @@ public class HandbackOwnRunTests
             Assert.Null((await Worker(engine, wf, "Manager"))!.WaitsFor);
             Assert.Equal(WaitStates.Held, (await engine.WorkflowRowAsync(wf, Ct))!.WaitingFor);
             Assert.Equal(WaitStates.Held, (await Status(engine, "Manager")).WaitState);
+            var held = await Card(engine, "Manager");
+            Assert.Equal((WaitStates.Held, (string?)null), (held.State, held.WaitsFor));
             Assert.Empty(ManagerRuns(runner));
         }
 
@@ -180,6 +186,8 @@ public class HandbackOwnRunTests
         Assert.Equal((BusEngine.WorkflowStatuses.Waiting, "slot"), (row.Status, row.WaitingFor));
         var status = await Status(engine, "Manager");
         Assert.Equal(("queued", 1, WaitStates.Queued), (status.State, status.QueuedInstructions, status.WaitState));
+        Assert.Equal(WaitStates.Queued, (await Card(engine, "Manager")).State);
+        Assert.Equal("running", (await Card(engine, "Ada")).State);
 
         // The timeline's live wait: a member in the run queue now is Waiting for a slot for that workflow.
         var live = await engine.LiveActivityAsync(Ct);
@@ -212,6 +220,7 @@ public class HandbackOwnRunTests
         Assert.Equal((BusEngine.WorkflowStatuses.Waiting, WaitStates.Pending), (row.Status, row.WaitingFor));
         var status = await Status(engine, "Ada");
         Assert.Equal(("running", 1, WaitStates.Pending), (status.State, status.QueuedInstructions, status.WaitState));
+        Assert.Equal("running", (await Card(engine, "Ada")).State); // running wins over its own work waiting
         Assert.DoesNotContain(await engine.LiveActivityAsync(Ct), a => a.QueuedSince is not null);
 
         release.SetResult();
@@ -225,7 +234,12 @@ public class HandbackOwnRunTests
         await using var engine = await Team(db, new ScriptedRunner());
         var ada = await Status(engine, "Ada");
         Assert.Equal((0, (string?)null, (string?)null), (ada.QueuedInstructions, ada.WaitState, ada.WaitsFor));
+        var card = await Card(engine, "Ada");
+        Assert.Equal(("idle", (string?)null), (card.State, card.WaitsFor));
     }
+
+    private static async Task<AgentCard> Card(BusEngine engine, string member) =>
+        (await engine.AgentCardsAsync((await engine.TeamsAsync(Ct)).Single().Id, Ct)).Single(c => c.Member.Name == member);
 
     [Theory]
     [InlineData(WaitStates.Queued, null, "queued for a run slot")]
