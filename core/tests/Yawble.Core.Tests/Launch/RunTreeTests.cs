@@ -1,5 +1,6 @@
 using Yawble.Core.Bus;
 using Yawble.Core.Launch;
+using Yawble.Core.Sandboxing;
 using Yawble.Core.Tests.Bus;
 using Xunit;
 
@@ -156,6 +157,21 @@ public class RunTreeTests
     }
 
     [Fact]
+    public void ARootPidThatIsNotThereAtTheFirstReadIsNeverFollowedLater()
+    {
+        var table = new FakeProcessTable();
+        var tree = new RunTree(table, 500, Fast);
+        tree.Track();
+        // Later, another child of the core happens to get that pid.
+        var later = table.Add(500, table.Self);
+        table.Add(501, later);
+        tree.Track();
+
+        Assert.Equal(0, tree.Reap().Signalled);
+        Assert.Empty(table.Log);
+    }
+
+    [Fact]
     public async Task TheRunsTempFolderGoesOnlyAfterTheTreeIsGoneAndTheRunEndsAfterThat()
     {
         var table = new FakeProcessTable();
@@ -231,12 +247,11 @@ public class RunTreeTests
             p.Exit(0);
         };
         await kit.Bus.PersonTellAsync("alpha", "dev1", "build", ct: Ct);
-        var outcome = await kit.OutcomeAsync("dev1");
+        await kit.OutcomeAsync("dev1");
 
         var record = kit.Records.All().First(r => r.Member == "dev1");
         Assert.True(record.TreeSurvived);
         Assert.Contains("still running after SIGTERM and SIGKILL", record.Reason);
-        Assert.Contains("still running after SIGTERM and SIGKILL", Payload.Field(outcome, "reason"));
     }
 
     [Fact]

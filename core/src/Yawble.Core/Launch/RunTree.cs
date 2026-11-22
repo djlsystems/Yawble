@@ -99,14 +99,15 @@ public sealed class RunTree
         {
             if (_disabled) return list;
             var byPid = list.GroupBy(p => p.Pid).ToDictionary(g => g.Key, g => g.First());
-            if (!_rootChecked && byPid.TryGetValue(_root, out var root))
+            if (!_rootChecked)
             {
                 _rootChecked = true;
-                // The sandbox's process is the core's own child. Anything else is not a pid this tree may follow.
-                if (root.ParentPid != _table.Self || !Allowed(root)) { _disabled = true; return list; }
+                // The sandbox's process is the core's own child, alive at the first read (just after the spawn). Anything
+                // else - gone already, or another process's - is not a pid this tree may follow: a later process that got
+                // the same pid is never taken for it.
+                if (!byPid.TryGetValue(_root, out var root) || root.ParentPid != _table.Self || !Allowed(root)) { _disabled = true; return list; }
                 _tracked[_root] = root.StartedAt;
             }
-            if (!_rootChecked) return list;
             var children = list.ToLookup(p => p.ParentPid);
             var frontier = new Queue<int>(_tracked.Keys.Where(pid => IsSame(byPid, pid)));
             var leaders = new HashSet<int>(frontier);
