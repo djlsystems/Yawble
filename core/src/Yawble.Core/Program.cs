@@ -423,6 +423,8 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
     updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks, orgSummary: orgSummary,
     folderAsks: folderAsks);
 dispatcherForLink = dispatcher;
+// B123: a decision option's action (Allow localhost) is applied as the setting's own call, audited as that call.
+ui.Dispatch = (method, p, ct) => dispatcher.DispatchAsAsync(Yawble.Core.Provenance.Actor.Current ?? Yawble.Core.Provenance.Actor.Window, method, p, ct);
 link.Start();
 
 // Not disposed: ProcessExit can still fire after Main returns. The first way out writes "core stopping: <reason>" to the core log.

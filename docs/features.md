@@ -310,6 +310,22 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     `dotnet test` fails with `SocketException (13)` Permission denied, the agent tells its Manager in one line where
     the setting is, and for an xUnit v3 / Microsoft.Testing.Platform project also that its tests run as the
     executable.
+  - A decision can offer it as an answer (see Decisions below): the option "Allow localhost" turns it on for you
+    when you pick it, exactly as the Network tab does (the same rights and the same audit entry), and only on a Mac.
+- **Decisions** (`needs_decision`, B123): an agent asks you with a **summary** (the decision in one plain sentence),
+  2 to 4 **options** (each a button with a label of at most 40 characters and the reply it sends), and **details**
+  (its findings, in Markdown, under the summary). A question in one Markdown text (`question`) still works and is
+  shown as before.
+  - At most one option may carry an **action**, from a fixed list the app knows: today only `team.allowLocalhostMac`
+    (turn on the team's Allow localhost (macOS)). The agent only names it; nothing changes when it asks. When you
+    pick that option the app applies the action first, then sends the option's reply as your answer. Anything else
+    named as an action is refused and the question is not asked.
+  - An option whose action you cannot apply is shown disabled with the reason: a Cloud Link Visitor ("Only a
+    workgroup Member or an Owner can change this"), anything but the app or a cloud viewer ("Only the person can pick
+    this, in the app"), a computer that is not a Mac ("Only on macOS").
+  - While a member's question is open, its card and the team status say **Waiting on you** with a link to the
+    question, whatever it reported after asking (a hand-back, or the workflow declared complete). Once you answer it,
+    the card shows its last report again.
 - Floor rules nobody can loosen:
   - model vendors' API and sign-in hosts are never allowed hosts;
   - no IP addresses or wildcards;
