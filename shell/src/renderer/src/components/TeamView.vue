@@ -136,10 +136,10 @@ const chooseOption = (d: Decision, o: { n: number; label: string; text: string }
   text: `Option ${o.n}: ${o.label}.${(answers.value[d.seq] ?? '').trim() ? ` ${answers.value[d.seq].trim()}` : ''}\n\n(You offered: ${o.text.replace(/\*\*/g, '')})`,
 }).then(() => { delete answers.value[d.seq]; }), `option-${o.n}`)();
 // B123: an option the asker gave (needs_decision options): its reply is the answer, with its index so core applies the
-// option's action (if any) first. Words typed in the box go along after the reply.
+// option's action (if any) first. Card 555: the text is only the words typed in the box; the core puts the option's
+// reply before them, once (sending the reply too made the agent read it twice).
 const answerWith = (d: Decision, b: DecisionButton) => busyFor(`decision-${d.seq}`, () => api.call('bus.answer', {
-  teamId: props.team.id, seq: d.seq, optionIndex: b.optionIndex,
-  text: `${b.reply}${(answers.value[d.seq] ?? '').trim() ? `\n\n${answers.value[d.seq].trim()}` : ''}`,
+  teamId: props.team.id, seq: d.seq, optionIndex: b.optionIndex, text: (answers.value[d.seq] ?? '').trim(),
 }).then(() => { delete answers.value[d.seq]; }), `option-${b.optionIndex}`)();
 const skipDecision = (d: Decision) => busyFor(`decision-${d.seq}`, () => api.call('bus.answer', { teamId: props.team.id, seq: d.seq, text: 'Skip it.' }), 'skip')();
 function clickButton(d: Decision, b: DecisionButton) {
