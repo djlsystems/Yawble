@@ -53,7 +53,7 @@ internal sealed class LaunchKit : IAsyncDisposable
     public static async Task<LaunchKit> StartAsync(int limit = 4, int idleSec = 60, int wallSec = 120, ICredentialModes? credentials = null,
         TempDb? db = null, IRunGatewayFactory? gateways = null, IRunTranscripts? transcripts = null, ISandboxBackend? realBackend = null,
         double speed = Speed, IReadOnlyList<string>? allowHosts = null, Func<IAgentRunner, LaunchHost, string, IAgentRunner>? wrapRunner = null,
-        ICliDetector? clis = null, Func<string, string?>? realPath = null)
+        ICliDetector? clis = null, Func<string, string?>? realPath = null, Func<int, RunTree?>? runTrees = null)
     {
         var ownsDb = db is null;
         db ??= new TempDb();
@@ -79,7 +79,10 @@ internal sealed class LaunchKit : IAsyncDisposable
         var defaults = new AgentDefaultsStore(db.ConnectionString);
         var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(db.ConnectionString), policies,
             credentials ?? new FakeCredentialModes(), gateways ?? fakeGateways, realBackend ?? backend, records, new RunRegistry(), clock,
-            transcripts: transcripts, agentDefaults: defaults);
+            transcripts: transcripts, agentDefaults: defaults,
+            // The scripted backend's pids are not real processes: never the real macOS process table behind them (a real
+            // backend keeps the launcher's own default).
+            runTrees: runTrees ?? (realBackend is null ? _ => null : null));
         // The app wraps the launcher's runner (TeamRepoRunner: the member's clone of the team repository).
         IAgentRunner runner = new SandboxAgentRunner(launcher);
         if (wrapRunner is not null) runner = wrapRunner(runner, host, db.ConnectionString);
