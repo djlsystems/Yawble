@@ -404,17 +404,37 @@ public sealed partial class BusEngine : IAsyncDisposable
         var queue = _store.Queue();
         var unstarted = _store.Pending(started: false);
         TidyLease(_store.Clock.GetUtcNow());
-        return _store.TeamMembers(teamId).Select(m =>
+        var members = _store.TeamMembers(teamId);
+        var asking = members.Count == 0 ? new Dictionary<string, Message>(StringComparer.OrdinalIgnoreCase) : OpenDecisionByMember(members[0].Team);
+        return members.Select(m =>
         {
             var position = RunScheduler.PositionOf(queue, q => q.MemberId == m.Id);
             var state = _active.Values.Any(a => a.Context.Member.Id == m.Id) ? "running"
                 : _sessions.ContainsKey(m.Id) ? "session" : position is not null ? "queued" : "idle";
             var waiting = unstarted.Count(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase));
+            var decision = asking.GetValueOrDefault(m.Qualified);
             return new MemberStatus(m.Name, m.Role == MemberRole.Manager ? "manager" : "member", state, position, waiting,
-                _statusLines.GetValueOrDefault(m.Id),
-                LeaseOf(m.Id) is { } l ? (l.State == "holding" ? $"holds the heavy-work lease for \"{l.What}\"" : $"waiting for the heavy-work lease (position {l.Position})") : null);
+                decision is not null ? WaitingLine(decision) : _statusLines.GetValueOrDefault(m.Id),
+                LeaseOf(m.Id) is { } l ? (l.State == "holding" ? $"holds the heavy-work lease for \"{l.What}\"" : $"waiting for the heavy-work lease (position {l.Position})") : null,
+                decision?.Seq);
         }).ToArray();
     }
+
+    /// <summary>B123: what a member's card and status say while a question of its waits on the person.</summary>
+    public const string WaitingOnYou = "Waiting on you";
+
+    /// <summary>"Waiting on you: " and the decision's summary (or its question).</summary>
+    internal static string WaitingLine(Message decision) => WaitingOnYou + ": " + DecisionAsk.Read(decision.Payload).Headline;
+
+    /// <summary>
+    /// B123: each member's newest unanswered needs_decision in a team, by qualified name (BusStore.OpenDecisions: in any of
+    /// its workflows). The status line is the member's last report in memory, so a workflow_complete or a hand-back after
+    /// the question (another workflow, or the Manager declaring) used to replace "needs decision" while the person still
+    /// owed the answer; the open question wins until it is answered.
+    /// </summary>
+    private Dictionary<string, Message> OpenDecisionByMember(string team) =>
+        _store.OpenDecisions(team).GroupBy(m => m.Source, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.MaxBy(m => m.Seq)!, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>True when nothing is running, queued, undelivered or unpumped. For tests and the UI's "idle".</summary>
     public Task<bool> IsQuiescentAsync(CancellationToken ct = default) =>
