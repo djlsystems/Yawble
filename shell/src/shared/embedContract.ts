@@ -7,15 +7,14 @@
 export const EMBED_VERSION = 1;
 
 /** The short icon keys: the cloud draws its own icon for a key it knows. */
-export type EmbedIcon = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'kanban' | 'documents' | 'monitor' | 'logs' | 'terminal' | 'help';
+export type EmbedIcon = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'kanban' | 'documents' | 'monitor' | 'logs';
 
 /**
- * The places, in Sidebar.vue's order: New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs;
- * then the two a phone's drawer has at its bottom (B117): Terminal (the drawer's Terminal: shows or hides the terminal pane;
- * active while it is shown) and Help (the drawer's About Yawble: Settings at System, with the version and the help links).
- * Terminal is not in the list for a read-only viewer (Visitor): the core refuses every terminal call to one.
+ * The places, in Sidebar.vue's order: New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs.
+ * No Terminal and no Help: an agent's terminal is in its pane on the team page (and its output is never sent up), and the
+ * version and help links are in Settings, which the cloud's own settings button opens.
  */
-export type EmbedPlaceId = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'board' | 'documents' | 'monitor' | 'logs' | 'terminal' | 'help';
+export type EmbedPlaceId = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'board' | 'documents' | 'monitor' | 'logs';
 
 export interface EmbedPlace {
   id: EmbedPlaceId;

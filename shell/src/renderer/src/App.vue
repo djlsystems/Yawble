@@ -23,7 +23,7 @@ import { discussRequest } from './conciergeDiscuss';
 import DocumentsView from './components/DocumentsView.vue';
 import MenuBar, { type Menu, type MenuItem as MenuBarItem } from './components/MenuBar.vue';
 import TerminalPane from './components/TerminalPane.vue';
-import { terminalPane, toggleTerminalPane } from './terminalPane';
+import { terminalPane } from './terminalPane';
 import { openMemberTerminal, registerTeamPage } from './memberTerminal';
 import BacklogView from './board/BacklogView.vue';
 // The Workflows page (B104) is loaded when first opened: the window's first paint does not wait for it.
@@ -50,7 +50,7 @@ import { installTapTitles, usePhone } from './phone';
 import { pushEscape } from './escapeClose';
 import { findWorkflowTeam, parseRemoteHash } from './remoteHash';
 import { loadConciergeDefault, newChatAgent, savedConciergeAgent } from './conciergeDefault';
-import { isEmbed, placeAllowed, startEmbedBridge, type EmbedNavState } from './embed';
+import { isEmbed, startEmbedBridge, type EmbedNavState } from './embed';
 import { readOnly } from './remoteAccess';
 import EmbedRenameDialog from './components/EmbedRenameDialog.vue';
 
@@ -428,7 +428,8 @@ const menus = computed<Menu[]>(() => [
     { id: 'selectAll', label: 'Select all', keys: `${mod}A` },
   ] }] : []),
   { label: 'View', items: [
-    { id: 'terminal', label: 'Terminal', keys: `${mod}\``, checked: terminalPane.open },
+    // No Terminal here: a member's terminal is in its pane on the team page, and Settings > Agents opens its Terminal /
+    // Test sessions in the right-hand pane itself (terminalPane.ts showChannelTerminal).
     // Embedded (B115): the cloud page has the sidebar and the theme, so neither is offered here.
     ...(embed ? [] : [
       { id: 'sidebar', label: 'Sidebar', keys: `${mod}B`, checked: !collapsed.value },
@@ -445,8 +446,9 @@ const menus = computed<Menu[]>(() => [
     ...(desktop ? [
       { separator: true } as const,
       { id: 'zoomIn', label: 'Zoom in', keys: `${mod}=` }, { id: 'zoomOut', label: 'Zoom out', keys: `${mod}-` }, { id: 'zoomReset', label: 'Actual size', keys: `${mod}0` },
+      // Developer tools is not on the menu; Ctrl+Shift+I / ⌥⌘I still opens them (shortcut below), for diagnosing.
       { separator: true } as const,
-      { id: 'reload', label: 'Reload', keys: `${mod}R` }, { id: 'devtools', label: 'Developer tools', keys: isMac ? '⌥⌘I' : 'Ctrl+Shift+I' },
+      { id: 'reload', label: 'Reload', keys: `${mod}R` },
     ] : []),
   ] },
   { label: 'Help', items: [
@@ -470,7 +472,6 @@ function command(id: string) {
     case 'newChat': newChat(); break;
     case 'newTeam': dialog.value = 'newTeam'; break;
     case 'settings': menu('general'); break;
-    case 'terminal': toggleTerminalPane(); break;
     case 'sidebar': if (phone.value) drawerOpen.value = !drawerOpen.value; else collapsed.value = !collapsed.value; break;
     case 'about': menu('system'); break;
     case 'checkUpdates': void updateBanner.value?.checkNow(); break;
@@ -483,15 +484,12 @@ function command(id: string) {
 }
 
 // A remote view on a phone has no menu bar (no room, and most of it is the desktop window's): what a viewer needs from
-// it (the theme, the terminal, Help) is at the bottom of the drawer instead. New chat, New team, Logs and the places are in
+// it (the theme and Help) is at the bottom of the drawer instead. New chat, New team, Logs and the places are in
 // the drawer already, and Settings is the gear in the top bar.
 const menuInDrawer = computed(() => phone.value && !!api.remote);
-const DRAWER_COMMANDS = ['theme:system', 'theme:light', 'theme:dark', 'terminal', 'checkUpdates', 'about', 'go:settings-agents'];
-// A read-only viewer (Visitor) is not offered Terminal: the core refuses every terminal call to one (embed.ts placeAllowed,
-// the same rule for the cloud's places).
+const DRAWER_COMMANDS = ['theme:system', 'theme:light', 'theme:dark', 'checkUpdates', 'about', 'go:settings-agents'];
 const drawerMenu = computed<MenuBarItem[]>(() => (menuInDrawer.value
-  ? menus.value.flatMap((m) => m.items).filter((i): i is MenuBarItem => !i.separator && DRAWER_COMMANDS.includes(i.id)
-    && !(i.id === 'terminal' && !placeAllowed('terminal', readOnly.value)))
+  ? menus.value.flatMap((m) => m.items).filter((i): i is MenuBarItem => !i.separator && DRAWER_COMMANDS.includes(i.id))
   : []));
 
 /** The window's own shortcuts (the menu's); typing in a field keeps its own Ctrl+Z/C/V/A. */
@@ -499,7 +497,7 @@ function shortcut(e: KeyboardEvent) {
   const m = isMac ? e.metaKey : e.ctrlKey;
   if (!m || e.altKey) return;
   const k = e.key.toLowerCase();
-  const map: Record<string, string> = { '`': 'terminal', b: 'sidebar', n: 'newChat', ',': 'settings', '=': 'zoomIn', '+': 'zoomIn', '-': 'zoomOut', '0': 'zoomReset', r: 'reload' };
+  const map: Record<string, string> = { b: 'sidebar', n: 'newChat', ',': 'settings', '=': 'zoomIn', '+': 'zoomIn', '-': 'zoomOut', '0': 'zoomReset', r: 'reload' };
   let id = e.shiftKey ? (k === 'i' ? 'devtools' : null) : map[k] ?? null;
   if (id && !desktop && ['zoomIn', 'zoomOut', 'zoomReset', 'reload', 'devtools'].includes(id)) id = null; // the browser's own
   if (!id) return;
@@ -523,7 +521,6 @@ function askEmbedTitle(current: string): Promise<string | null> {
 const embedState = (): EmbedNavState => ({
   view: view.value, conversations: conversations.value, teams: teams.value, conversationId: conversationId.value, teamId: selected.value,
   slots: overview.value?.slots ?? null, readOnly: readOnly.value, removing: removingChat.value, openWorkflows: openWorkflows.value,
-  terminalOpen: terminalPane.open, settingsTab: prefTab.value, menuBar: !menuInDrawer.value,
 });
 if (embed) {
   let bridge: { dispose(): void } | null = null;
@@ -533,9 +530,6 @@ if (embed) {
       handlers: {
         newChat, go, openTeam: (id) => openTeam(id), openConversation, rename, remove,
         logs: () => go('logs'),
-        // B117: the drawer's Terminal and About Yawble, the same commands.
-        terminal: () => command('terminal'),
-        help: () => command('about'),
         newTeam: () => { dialog.value = 'newTeam'; },
       },
       dialogs: { askTitle: askEmbedTitle },

@@ -110,7 +110,7 @@ test('embedded: yawble.ready, then yawble.nav once and again on every change', a
   expect(all[0]).toEqual({ type: 'yawble.ready', version: 1 });
   expect(all.filter((m) => m.type === 'yawble.ready')).toHaveLength(1);
   const nav = await lastNav(page);
-  expect(nav.places.map((p: any) => p.id)).toEqual(['newChat', 'concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'logs', 'terminal', 'help']);
+  expect(nav.places.map((p: any) => p.id)).toEqual(['newChat', 'concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'logs']);
   expect(nav.teams.map((t: any) => t.name)).toContain('payments');
   expect(nav.chats.map((c: any) => c.title)).toContain('Payments today');
   const before = (await got(page)).length;
@@ -119,20 +119,15 @@ test('embedded: yawble.ready, then yawble.nav once and again on every change', a
   expect((await got(page)).length).toBeGreaterThan(before);
 });
 
-test('B117 embedded at 375px: Terminal shows the terminal pane and Help opens Settings at System, as the drawer\'s items', async ({ browser }) => {
+test('embedded at 375px: no Terminal or Help place; a terminal or help message does nothing', async ({ browser }) => {
   const { page, frame, errors } = await openEmbedded(browser, 375, 740);
-  const place = async (id: string) => (await lastNav(page))?.places.find((p: any) => p.id === id) ?? null;
-  expect(await place('terminal')).toMatchObject({ label: 'Terminal', icon: 'terminal', active: false });
-  expect(await place('help')).toMatchObject({ label: 'Help', icon: 'help', active: false });
+  const ids = (await lastNav(page)).places.map((p: any) => p.id);
+  expect(ids).not.toContain('terminal');
+  expect(ids).not.toContain('help');
   await send(page, { type: 'yawble.navigate', to: { kind: 'place', id: 'terminal' } });
-  await expect(frame.locator('[data-test=terminal-pane]')).toBeVisible();
-  await expect.poll(async () => (await place('terminal'))?.active).toBe(true);
-  await send(page, { type: 'yawble.navigate', to: { kind: 'place', id: 'terminal' } });
-  await expect(frame.locator('[data-test=terminal-pane]')).toHaveCount(0);
   await send(page, { type: 'yawble.navigate', to: { kind: 'place', id: 'help' } });
-  await expect(frame.locator('[data-test=about]')).toBeVisible();
-  await expect.poll(async () => (await place('help'))?.active).toBe(true);
-  if (shots) await page.screenshot({ path: path.join(shots, 'b117-embed-help-375.png') });
+  await expect(frame.locator('[data-test=terminal-pane]')).toHaveCount(0);
+  await expect(frame.locator('[data-test=about]')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

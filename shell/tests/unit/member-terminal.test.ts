@@ -69,7 +69,6 @@ beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = '';
   focused.length = 0; scenes.length = 0;
   mt.setMemberTerminalFocus((team, member) => { focused.push([team, member]); });
-  mt.resetMemberTerminal();
   tp.terminalPane.open = false; tp.terminalPane.target = null;
 });
 afterEach(() => { mt.setMemberTerminalFocus(null); });
@@ -116,7 +115,7 @@ describe('member terminals open on the team page', () => {
     w.unmount();
   });
 
-  it('View > Terminal / Ctrl+` goes back to the member terminal opened last, on its team page, not the pane', async () => {
+  it('there is no View > Terminal and Ctrl+` does nothing: a member terminal opens from its pane, the Monitor or >_', async () => {
     const w = await app();
     await mt.openMemberTerminal(2, 5);
     await settle();
@@ -124,8 +123,7 @@ describe('member terminals open on the team page', () => {
     focused.length = 0;
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '`', ctrlKey: true }));
     await settle();
-    expect(focused.at(-1)).toEqual(['alpha', 'Kofi']);
-    expect(w.findComponent({ name: 'TeamView' }).props('team')).toMatchObject({ id: 2 });
+    expect(focused).toEqual([]);
     expect(tp.terminalPane.open).toBe(false);
     w.unmount();
   });
@@ -193,21 +191,11 @@ describe('the right-hand pane is for channel terminals only', () => {
     w.unmount();
   });
 
-  it('Ctrl+` toggles the pane while it holds a channel, even after a member terminal was opened', async () => {
-    const off = mt.registerTeamPage(() => {}, async (memberId, teamId) => ({ teamId: teamId ?? 2, team: 'alpha', member: `m${memberId}` }));
-    expect(await mt.openMemberTerminal(2, 4)).toBe(true);
-    off();
+  it('the pane has no toggle: it opens when a channel is shown and closeTerminalPane hides it', () => {
+    expect('toggleTerminalPane' in tp).toBe(false);
     tp.showChannelTerminal('agent-test:grok', 'Terminal · Grok · global policy');
-    focused.length = 0;
-    expect(tp.toggleTerminalPane()).toBe(false);
+    expect(tp.terminalPane.open).toBe(true);
+    tp.closeTerminalPane();
     expect(tp.terminalPane.open).toBe(false);
-    expect(tp.toggleTerminalPane()).toBe(false);
-    expect(tp.terminalPane.open).toBe(true);
-    expect(focused).toEqual([]);
-  });
-
-  it('with nothing to show and no member terminal opened, Ctrl+` opens the empty pane', () => {
-    expect(tp.toggleTerminalPane()).toBe(false);
-    expect(tp.terminalPane.open).toBe(true);
   });
 });

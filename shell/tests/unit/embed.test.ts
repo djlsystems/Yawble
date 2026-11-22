@@ -8,8 +8,8 @@ import type { ConversationSummary, TeamSummary } from '../../src/shared/api';
 import type { EmbedNav } from '../../src/shared/embedContract';
 import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
 import {
-  applyEmbedTheme, buildNav, dispatchNavigate, EMBED_PLACE_IDS, embedThemeFromQuery, HELP_SETTINGS_TAB, isEmbed, parseNavigate, parseTheme,
-  placeAllowed, runSlotsLine, startEmbedBridge, type EmbedHandlers, type EmbedNavState,
+  applyEmbedTheme, buildNav, dispatchNavigate, EMBED_PLACE_IDS, embedThemeFromQuery, isEmbed, parseNavigate, parseTheme,
+  runSlotsLine, startEmbedBridge, type EmbedHandlers, type EmbedNavState,
 } from '../../src/renderer/src/embed';
 import { REMOTE_THEME_KEY } from '../../src/renderer/src/theme';
 import { confirmState } from '../../src/renderer/src/confirm';
@@ -43,7 +43,7 @@ function fakeHandlers() {
   const rec = (name: string) => (...a: unknown[]) => { calls.push([name, ...a]); };
   const h: EmbedHandlers = {
     newChat: rec('newChat'), go: rec('go'), logs: rec('logs'), openTeam: rec('openTeam'), openConversation: rec('openConversation'),
-    newTeam: rec('newTeam'), rename: rec('rename'), remove: rec('remove'), terminal: rec('terminal'), help: rec('help'),
+    newTeam: rec('newTeam'), rename: rec('rename'), remove: rec('remove'),
   };
   return { h, calls };
 }
@@ -73,55 +73,28 @@ describe('buildNav: the sidebar as data', () => {
       ['newChat', 'New chat', 'newChat'], ['concierge', 'Concierge', 'concierge'], ['teams', 'Teams', 'teams'],
       ['backlog', 'Backlog', 'backlog'], ['workflows', 'Workflows', 'workflows'], ['board', 'Kanban board', 'kanban'],
       ['documents', 'Documents', 'documents'], ['monitor', 'Monitor', 'monitor'], ['logs', 'Logs', 'logs'],
-      ['terminal', 'Terminal', 'terminal'], ['help', 'Help', 'help'],
+
     ]);
     expect(EMBED_PLACE_IDS).toEqual(nav.places.map((p) => p.id));
     expect(nav.places.every((p) => p.disabled === false)).toBe(true);
   });
-  it('the same order and labels as Sidebar.vue draws (New chat, then the places nav), then Terminal and Help', () => {
+  it('the same order and labels as Sidebar.vue draws (New chat, then the places nav), and nothing more', () => {
     const w = mount(Sidebar, { props: { ...base(), remote: true } as any });
     const drawn = [w.get('[data-test=new-chat]').text(), ...w.findAll('nav.places button').map((b) => b.text().replace(/\d+$/, ''))];
-    expect([...drawn, 'Terminal', 'Help']).toEqual(buildNav(base()).places.map((p) => p.label));
+    expect(drawn).toEqual(buildNav(base()).places.map((p) => p.label));
     const ids = w.findAll('nav.places button').map((b) => b.attributes('data-test')!.replace(/^nav-/, ''));
-    expect(['newChat', ...ids, 'terminal', 'help']).toEqual(EMBED_PLACE_IDS);
+    expect(['newChat', ...ids]).toEqual(EMBED_PLACE_IDS);
   });
-  it('B117: Terminal and Help are the phone drawer\'s Terminal and About Yawble (App.vue DRAWER_COMMANDS)', () => {
-    const app = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
-    const drawer = /const DRAWER_COMMANDS = \[([^\]]*)\]/.exec(app)![1];
-    expect(drawer).toContain("'terminal'");
-    expect(drawer).toContain("'about'");
-    // App.vue's handlers run the drawer's own commands.
-    expect(app).toContain("terminal: () => command('terminal')");
-    expect(app).toContain("help: () => command('about')");
-    expect(app).toMatch(/case 'about': menu\('system'\)/);
-    expect(HELP_SETTINGS_TAB).toBe('system');
-  });
-  it('B117: Terminal is active while the terminal pane is shown, Help while Settings shows System', () => {
-    const active = (s: Partial<EmbedNavState>) => buildNav({ ...base(), ...s }).places.filter((p) => p.active).map((p) => p.id);
-    expect(active({ terminalOpen: true })).toEqual(['concierge', 'terminal']);
-    expect(active({ terminalOpen: false })).toEqual(['concierge']);
-    expect(active({ view: 'settings', settingsTab: 'system' })).toEqual(['help']);
-    expect(active({ view: 'settings', settingsTab: 'agents' })).toEqual([]);
-    expect(active({ view: 'monitor', settingsTab: 'system' })).toEqual(['monitor']);
-  });
-  it('with the menu bar drawn (wide), Terminal and Help are left out: the menu has them; on a phone they stay', () => {
-    const ids = (s: Partial<EmbedNavState>) => buildNav({ ...base(), ...s }).places.map((p) => p.id);
-    expect(ids({ menuBar: true })).not.toContain('terminal');
-    expect(ids({ menuBar: true })).not.toContain('help');
-    expect(ids({ menuBar: true })).toEqual(EMBED_PLACE_IDS.filter((id) => id !== 'terminal' && id !== 'help'));
-    expect(ids({ menuBar: false }).slice(-2)).toEqual(['terminal', 'help']);
-    // A read-only viewer on a phone still gets Help and never Terminal.
-    expect(ids({ menuBar: false, readOnly: true }).slice(-2)).toEqual(['logs', 'help']);
-    // App.vue passes the menu bar's own condition.
-    const app = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
-    expect(app).toContain('menuBar: !menuInDrawer.value');
-    expect(app).toContain('<MenuBar v-if="!menuInDrawer"');
-  });
-  it('B117: placeAllowed leaves only Terminal out, and only for a read-only viewer', () => {
-    for (const id of EMBED_PLACE_IDS) {
-      expect(placeAllowed(id, false), id).toBe(true);
-      expect(placeAllowed(id, true), id).toBe(id !== 'terminal');
+  it('no Terminal and no Help: an agent\'s terminal is in its pane on the team page, Help is in Settings', () => {
+    const states: Partial<EmbedNavState>[] = [{}, { readOnly: true }, { view: 'settings' }];
+    for (const st of states) {
+      const ids = buildNav({ ...base(), ...st }).places.map((p) => p.id as string);
+      expect(ids).not.toContain('terminal');
+      expect(ids).not.toContain('help');
     }
+    const app = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
+    expect(app).not.toContain("terminal: () => command('terminal')");
+    expect(app).not.toContain("help: () => command('about')");
   });
   it('badges: Teams counts the teams, Workflows the open ones; none when 0 or not known', () => {
     const nav = buildNav(base());
@@ -171,12 +144,12 @@ describe('buildNav: the sidebar as data', () => {
     const w = mount(Sidebar, { props: { ...base(), remote: true } as any });
     expect(w.get('[data-test=slots]').text()).toBe(runSlotsLine(base().slots));
   });
-  it('read-only: no New team, no chat actions and no Terminal; the other places, Help included, stay', () => {
+  it('read-only: no New team, no chat actions; every place stays', () => {
     const nav = buildNav({ ...base(), readOnly: true });
     expect(nav.readOnly).toBe(true);
     expect(nav.canNewTeam).toBe(false);
     expect(nav.chats.every((c) => c.actions.length === 0)).toBe(true);
-    expect(nav.places.map((p) => p.id)).toEqual(EMBED_PLACE_IDS.filter((id) => id !== 'terminal'));
+    expect(nav.places.map((p) => p.id)).toEqual(EMBED_PLACE_IDS);
     expect(buildNav(base()).canNewTeam).toBe(true);
     expect(buildNav(base()).readOnly).toBe(false);
   });
@@ -320,30 +293,10 @@ describe('navigate does what the same sidebar click does', () => {
     await dispatchNavigate({ kind: 'place', id: 'board' }, ro, h);
     expect(calls).toEqual([['go', 'board']]);
   });
-  it('B117: Terminal and Help parse, and run the drawer\'s Terminal and About Yawble commands', async () => {
-    expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'place', id: 'terminal' } })).toEqual({ kind: 'place', id: 'terminal' });
-    expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'place', id: 'help' } })).toEqual({ kind: 'place', id: 'help' });
-    expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'place', id: 'about' } })).toBeNull();
-    const { h, calls } = fakeHandlers();
-    await dispatchNavigate({ kind: 'place', id: 'terminal' }, s, h);
-    await dispatchNavigate({ kind: 'place', id: 'help' }, s, h);
-    expect(calls).toEqual([['terminal'], ['help']]);
-    // The drawer's buttons for the same items emit those commands (Sidebar.vue's menu at a phone's drawer bottom).
-    const w = mount(Sidebar, { props: { ...s, remote: true, drawer: true, open: true,
-      menu: [{ id: 'terminal', label: 'Terminal' }, { id: 'about', label: 'About Yawble' }] } as any });
-    await w.get('[data-test=drawer-terminal]').trigger('click');
-    await w.get('[data-test=drawer-about]').trigger('click');
-    expect(w.emitted('command')).toEqual([['terminal'], ['about']]);
-  });
-  it('B117: a read-only viewer\'s Terminal is ignored (not offered, as in the drawer); Help still opens', async () => {
-    const { h, calls } = fakeHandlers();
-    const ro = { ...s, readOnly: true };
-    await dispatchNavigate({ kind: 'place', id: 'terminal' }, ro, h);
-    expect(calls).toEqual([]);
-    await dispatchNavigate({ kind: 'place', id: 'help' }, ro, h);
-    expect(calls).toEqual([['help']]);
-    expect(buildNav(ro).places.some((p) => p.id === 'terminal')).toBe(false);
-    expect(buildNav(ro).places.some((p) => p.id === 'help')).toBe(true);
+  it('a navigate to terminal, help or about is not a place: it is ignored', () => {
+    for (const id of ['terminal', 'help', 'about']) {
+      expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'place', id } }), id).toBeNull();
+    }
   });
 });
 

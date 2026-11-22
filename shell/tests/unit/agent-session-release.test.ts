@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AgentsDialog from '../../src/renderer/src/components/AgentsDialog.vue';
 import TerminalPane from '../../src/renderer/src/components/TerminalPane.vue';
 import type { AgentTestSession, DetectedCli, YawbleApi } from '../../src/shared/api';
-import { showChannelTerminal, terminalPane, toggleTerminalPane } from '../../src/renderer/src/terminalPane';
+import { closeTerminalPane, showChannelTerminal, terminalPane } from '../../src/renderer/src/terminalPane';
 
 // An agent's Terminal / Test session is released when the person is done:
 // ✕ on the pane stops it, its tile shows it while it runs (Open / Stop), driven by agents.testSessions and the
@@ -79,12 +79,11 @@ describe('terminal pane: ✕ releases an agent session', () => {
     expect(terminalPane.open).toBe(false);
   });
 
-  it('Ctrl+` (toggle) only hides an agent session, and replacing the target does not stop it', () => {
+  it('hiding the pane does not stop an agent session, and replacing the target does not stop it', () => {
     const stop = vi.fn();
     showChannelTerminal('agent-test:claude', 'Terminal · Claude Code · global policy', stop);
-    toggleTerminalPane();
+    closeTerminalPane();
     expect(terminalPane.open).toBe(false);
-    toggleTerminalPane();
     showChannelTerminal('agent-test:grok', 'Terminal · Grok · global policy', vi.fn());
     expect(stop).not.toHaveBeenCalled();
     expect(terminalPane.target).toMatchObject({ channel: 'agent-test:grok' });

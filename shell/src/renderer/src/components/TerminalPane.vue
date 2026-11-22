@@ -54,7 +54,7 @@ async function stop() {
   try { await t.stop?.(); } finally { stopping.value = null; }
 }
 /** ✕: an agent's Terminal / Test session (agent-test:<cli>) is stopped, then the pane closes; another channel is only
- *  hidden. (Ctrl+` / View → Terminal only hides the pane, so a session can be hidden on purpose and shown again.) */
+ *  hidden. */
 async function close() {
   const t = terminalPane.target;
   if (stopping.value) return;

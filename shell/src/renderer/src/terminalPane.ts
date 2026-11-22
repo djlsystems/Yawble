@@ -1,9 +1,10 @@
 import { reactive, type InjectionKey } from 'vue';
-import { lastMemberTerminal, openMemberTerminal, openMemberTerminalById } from './memberTerminal';
+import { openMemberTerminalById } from './memberTerminal';
 
 /**
- * The main window's terminal pane (View → Terminal): one terminal at a time, on the right, for the terminals that are
- * no member's: Settings → Agents Terminal / Test sessions and other channels. A member's terminal is in its own pane on
+ * The main window's terminal pane: one terminal at a time, on the right, for the terminals that are no member's:
+ * Settings → Agents Terminal / Test sessions and other channels. It opens when one of them is shown and closes with its ✕;
+ * there is no menu item or shortcut for it. A member's terminal is in its own pane on
  * the team page (memberTerminal.ts), never here.
  */
 export type PaneTarget = { kind: 'channel'; channel: string; title: string; stop?: () => Promise<void> | void };
@@ -30,19 +31,7 @@ export function showChannelTerminal(channel: string, title: string, stop?: () =>
   terminalPane.open = true;
 }
 
-/**
- * View → Terminal / Ctrl+`: shows or hides the pane's channel terminal. With no channel terminal to show, it goes back to
- * the member terminal opened last, on its team page (returns true then); with neither, the empty pane says where to look.
- */
-export function toggleTerminalPane(): boolean {
-  if (!terminalPane.open && !terminalPane.target) {
-    const m = lastMemberTerminal();
-    if (m) { void openMemberTerminal(m.teamId, m.memberId); return true; }
-  }
-  terminalPane.open = !terminalPane.open;
-  return false;
-}
-/** Hides the pane. TerminalPane's ✕ also stops an agent session first; Ctrl+` / View → Terminal only hide it. */
+/** Hides the pane. TerminalPane's ✕ also stops an agent session first. */
 export function closeTerminalPane() { terminalPane.open = false; }
 
 /**
