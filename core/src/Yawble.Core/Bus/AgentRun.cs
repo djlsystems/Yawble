@@ -26,8 +26,11 @@ public sealed record RunResult(bool Succeeded, string? Reason = null, string? Fa
 
 /// <summary>Status of a member in its team, as the status tool reports it.</summary>
 /// <param name="DecisionId">B123: the member's newest unanswered needs_decision (message seq); StatusLine then says "Waiting on you: ...".</param>
+/// <param name="WaitState">B126: with QueuedInstructions, why they have not started (<see cref="WaitStates"/>: queued, waits-for-run,
+/// held, pending); null when none waits.</param>
+/// <param name="WaitsFor">B126: with waits-for-run, the member whose run must end first.</param>
 public sealed record MemberStatus(string Name, string Role, string State, int? QueuePosition, int QueuedInstructions, string? StatusLine, string? HeavyLease = null,
-    long? DecisionId = null);
+    long? DecisionId = null, string? WaitState = null, string? WaitsFor = null);
 
 /// <summary>One run's view of the bus: its batch, and the tools its agent may call.</summary>
 public sealed class RunContext
@@ -184,8 +187,12 @@ public sealed record RunActivitySpans(IReadOnlyList<ActivitySpan> Stalls, IReadO
     public static RunActivitySpans None { get; } = new([], []);
 }
 
-/// <summary>A run working now, and its quiet stretches so far (the board's live Stalled and Waiting-for-a-slot bands).</summary>
-public sealed record LiveRunActivity(string Team, string Member, long Workflow, RunActivitySpans Spans);
+/// <summary>
+/// A run working now, and its quiet stretches so far (the board's live Stalled and Waiting-for-a-slot bands). B126: or a
+/// member waiting in the run queue now for work in <paramref name="Workflow"/>: <paramref name="QueuedSince"/> is when it
+/// joined (no run row exists before admission), so that wait is Waiting for a slot live; its Spans are none.
+/// </summary>
+public sealed record LiveRunActivity(string Team, string Member, long Workflow, RunActivitySpans Spans, DateTimeOffset? QueuedSince = null);
 
 /// <summary>An item of a batch the member gave up on with blocked (item is null when it gave up the whole run).</summary>
 public sealed record BlockedItem(int? Item, string? Instruction, string Reason);
