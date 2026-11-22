@@ -263,7 +263,7 @@ public sealed partial class BusEngine
         foreach (var q in queue)
         {
             if (_store.Member(q.MemberId) is not { } m) continue;
-            var since = Board.BoardStore.Time(q.EnqueuedAt);
+            var since = Yawble.Core.Board.BoardStore.Time(q.EnqueuedAt);
             foreach (var w in unstarted.Where(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase) && Ripe(p))
                          .Select(p => p.Correlation).Distinct())
                 live.Add(new LiveRunActivity(m.Team, m.Name, w, RunActivitySpans.None, since));
