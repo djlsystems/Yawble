@@ -253,10 +253,61 @@ public sealed partial class BusEngine : IAsyncDisposable
         {
             var target = _store.Member(team, member) ?? throw new BusRefusal("no_such_member", $"'{team}' has no member named '{member}'");
             if (_store.Teams().FirstOrDefault(t => t.Id == target.TeamId) is { Archived: true } archived)
-                throw new BusRefusal("archived", $"'{archived.Name}' is archived, and an archived team does no work. Nothing was sent. Unarchive it first (it comes back paused), then resume it.");
+                throw ArchivedRefusal(archived.Name);
             if (causation is { } cause) CheckDepth(cause);
             return Publish(new NewMessage(MessageTypes.Instruction(target), BatchText.InstructionPayload(text, extra), MessageTypes.PersonSource, causation));
         }, ct);
+
+    /// <summary>The decisions an answer is being given to right now (card 555), guarded by the gate.</summary>
+    private readonly HashSet<long> _answering = [];
+
+    public const string AnsweredAlready = "that question is answered already or is not this team's";
+
+    /// <summary>
+    /// Card 555: the person's answer to <paramref name="team"/>'s open decision <paramref name="decision"/> (asked by
+    /// <paramref name="member"/>). Under the gate, every check that can refuse runs first (the member, an archived team, the
+    /// depth limit, the decision still open and not being answered by another call) and the decision is claimed; only then
+    /// <paramref name="beforePublish"/> runs (it may change the text, e.g. saved images, and applies a decision action), and
+    /// the answer is published under the gate after the same checks again. A second answer while the first is claimed is
+    /// refused as answered already, so an action is applied and a reply sent once. <paramref name="beforePublish"/> runs
+    /// outside the gate because an action is the setting's own call, which takes the gate itself.
+    /// </summary>
+    public async Task<Message> PersonAnswerAsync(string team, string member, string text, long decision,
+        Func<string, CancellationToken, Task<string>>? beforePublish = null, CancellationToken ct = default)
+    {
+        await WithGate(() =>
+        {
+            CheckAnswer(team, member, decision);
+            if (!_answering.Add(decision)) throw new BusRefusal("no_such_decision", AnsweredAlready);
+        }, ct);
+        try
+        {
+            if (beforePublish is not null) text = await beforePublish(text, ct);
+            return await WithGate(() =>
+            {
+                var target = CheckAnswer(team, member, decision);
+                return Publish(new NewMessage(MessageTypes.Instruction(target), BatchText.InstructionPayload(text.Trim(), null), MessageTypes.PersonSource, decision));
+            }, CancellationToken.None);
+        }
+        finally
+        {
+            await WithGate(() => { _answering.Remove(decision); }, CancellationToken.None);
+        }
+    }
+
+    private static BusRefusal ArchivedRefusal(string team) =>
+        new("archived", $"'{team}' is archived, and an archived team does no work. Nothing was sent. Unarchive it first (it comes back paused), then resume it.");
+
+    /// <summary>The refusals of an answer (under the gate): the member, an archived team, the depth limit, the decision still open.</summary>
+    private MemberRef CheckAnswer(string team, string member, long decision)
+    {
+        var target = _store.Member(team, member) ?? throw new BusRefusal("no_such_member", $"'{team}' has no member named '{member}'");
+        if (_store.Teams().FirstOrDefault(t => t.Id == target.TeamId) is { Archived: true } archived)
+            throw ArchivedRefusal(archived.Name);
+        CheckDepth(decision);
+        if (!_store.OpenDecisions(team).Any(m => m.Seq == decision)) throw new BusRefusal("no_such_decision", AnsweredAlready);
+        return target;
+    }
 
     // ------------------------------------------------------------------ the tools, identity from the run
 

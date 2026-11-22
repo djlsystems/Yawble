@@ -1202,40 +1202,42 @@ public sealed class UiRpc(
     /// <summary>
     /// The person's answer joins the asker's workflow: an instruction to the asker, caused by the question. B123: with
     /// <paramref name="optionIndex"/>, the answer is that option's reply (then <paramref name="text"/>, when given and
-    /// different); an option with an action applies it first through the app's dispatcher, the same call as Team settings
-    /// (teams.localhost on, audited as that call). A caller who may not apply it is refused and nothing is sent; an action
-    /// that fails sends nothing either.
+    /// different); an option with an action applies it through the app's dispatcher, the same call as Team settings
+    /// (teams.localhost on, audited as that call), only after every check that can refuse the answer has passed and the
+    /// decision is claimed (BusEngine.PersonAnswerAsync), so a refused or second answer changes nothing. A caller who may
+    /// not apply it is refused and nothing is sent; an action that fails sends nothing either.
     /// </summary>
     private async Task<JsonNode?> AnswerAsync(long teamId, long seq, string text, CancellationToken ct, IReadOnlyList<(string Name, byte[] Bytes)>? images = null,
         int? optionIndex = null)
     {
         var team = (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId) ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
         var question = (await bus.OpenDecisionsAsync(team.Name, ct)).SingleOrDefault(m => m.Seq == seq)
-            ?? throw new RpcException("no_such_decision", "that question is answered already or is not this team's");
+            ?? throw new RpcException("no_such_decision", BusEngine.AnsweredAlready);
         var asker = question.Source[(question.Source.IndexOf('/') + 1)..];
-        string? applied = null;
+        string? action = null;
         if (optionIndex is { } index)
         {
             var options = DecisionAsk.Read(question.Payload).Options;
             if (options is null || index >= options.Count)
                 throw new RpcException("bad_params", options is null ? "this question has no options" : $"optionIndex must be 0 to {options.Count - 1}");
             var option = options[index];
+            // The text is what the person typed besides the option (card 555: the shell sends only that); the reply comes first, once.
             text = text.Trim().Length == 0 || text.Trim() == option.Reply ? option.Reply : option.Reply + "\n\n" + text.Trim();
-            if (option.Action is { } action)
-            {
-                if (ActionUnavailable(action) is { } reason) throw new RpcException("forbidden", reason);
-                await ApplyActionAsync(action, teamId, ct);
-                applied = action;
-            }
+            action = option.Action;
+            if (action is not null && ActionUnavailable(action) is { } reason) throw new RpcException("forbidden", reason);
         }
-        if (images is { Count: > 0 })
+        var repos = images is { Count: > 0 } ? bus.Repos ?? throw new RpcException("unavailable", "images need the app's data folder") : null;
+        // Card 555: the bus checks the answer (archived team, depth, still open, not being answered by another call) and
+        // claims the decision before anything changes; the images are saved and the action applied only then, and the
+        // reply is published right after. A refusal anywhere before leaves the setting as it was.
+        var message = await bus.PersonAnswerAsync(team.Name, asker, text, seq, async (body, c) =>
         {
-            var repos = bus.Repos ?? throw new RpcException("unavailable", "images need the app's data folder");
-            text = Attachments.WithImages(text, Attachments.Save(Path.Combine(repos.TeamRoot(team.Name), Teams.TeamDocuments.Folder), images));
-        }
-        var message = await bus.PersonTellAsync(team.Name, asker, text.Trim(), seq, ct);
+            if (repos is not null) body = Attachments.WithImages(body, Attachments.Save(Path.Combine(repos.TeamRoot(team.Name), Teams.TeamDocuments.Folder), images!));
+            if (action is not null) await ApplyActionAsync(action, teamId, c);
+            return body;
+        }, ct);
         var result = new JsonObject { ["seq"] = message.Seq };
-        if (applied is not null) result["applied"] = applied;
+        if (action is not null) result["applied"] = action;
         return result;
     }
 

@@ -51,9 +51,9 @@ describe('card 548 check (3): the new decision card', () => {
     const details = card.get('[data-test=decision-details]');
     expect((details.element as HTMLDetailsElement).open).toBe(false);
     expect(details.text()).toContain('SocketException (13)');
-    // Skip sends its reply once, with its index.
+    // Skip sends its index and no text: the core sends its reply, once (card 555).
     await card.get('[data-test=decision-choice-1]').trigger('click');
     await flushPromises();
-    expect(calls.find((c) => c.method === 'bus.answer')?.params).toEqual({ teamId: 5, seq: 77, optionIndex: 1, text: 'Skip the tests.' });
+    expect(calls.find((c) => c.method === 'bus.answer')?.params).toEqual({ teamId: 5, seq: 77, optionIndex: 1, text: '' });
   });
 });

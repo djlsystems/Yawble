@@ -403,6 +403,102 @@ public class DecisionOptionsTests
         Assert.Empty(rig.LocalhostAudit());
     }
 
+    // ------------------------------------------------------------------ card 555 (B123 review fixes)
+
+    [Fact]
+    public async Task ARefusedAnswer_ToAnArchivedTeam_LeavesAllowLocalhostOff_AndSendsNothing()
+    {
+        await using var rig = await Rig.StartAsync(LocalhostAsk());
+        await rig.TellAdaAsync("ask");
+        var question = Assert.Single(await rig.Decisions());
+        await rig.Engine.ArchiveTeamAsync("Alpha", Ct);
+
+        var e = await Assert.ThrowsAsync<RpcException>(() => rig.Call("bus.answer", new { teamId = rig.TeamId, seq = question.Seq, optionIndex = 0 }));
+        Assert.Equal("archived", e.Code);
+        Assert.False(await rig.LocalhostOn());
+        Assert.Empty(rig.LocalhostAudit());
+        Assert.Single(await rig.Decisions()); // still open: nothing was sent
+    }
+
+    [Fact]
+    public async Task AnOptionWithTypedWords_ReachesTheAgent_AsTheReplyThenTheWords_Once()
+    {
+        // The shell sends only the typed words with optionIndex; the core puts the option's reply first, once.
+        await using var rig = await Rig.StartAsync(LocalhostAsk());
+        await rig.TellAdaAsync("ask");
+        var question = Assert.Single(await rig.Decisions());
+        var result = (await rig.Call("bus.answer", new { teamId = rig.TeamId, seq = question.Seq, optionIndex = 0, text = "  Then close the card.  " }))!.AsObject();
+        Assert.Equal(DecisionActions.AllowLocalhostMac, result["applied"]!.GetValue<string>());
+        await Wait.UntilAsync(() => rig.Engine.IsQuiescentAsync(Ct), "quiet");
+
+        const string expected = "Allowed: run the tests again.\n\nThen close the card.";
+        using var store = rig.Db.OpenStore();
+        Assert.Equal(expected, Payload.Field(store.Find(result["seq"]!.GetValue<long>())!, "text"));
+        var saw = Assert.Single(rig.AdaSaw, t => t.Contains("Then close the card."));
+        Assert.Equal(expected, saw);
+        Assert.Equal(1, saw.Split("Allowed: run the tests again.").Length - 1);
+    }
+
+    [Fact]
+    public async Task TwoConcurrentAnswers_OneAppliesAndSends_TheOtherIsRefusedAsAnsweredAlready()
+    {
+        await using var rig = await Rig.StartAsync(LocalhostAsk());
+        await rig.TellAdaAsync("ask");
+        var question = Assert.Single(await rig.Decisions());
+
+        // The first answer's action is held in the setting's call (a fake gate on the dispatcher) while the second arrives.
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var actions = 0;
+        var real = rig.Ui.Dispatch!;
+        rig.Ui.Dispatch = async (m, p, ct) =>
+        {
+            if (m == "teams.localhost" && Interlocked.Increment(ref actions) == 1)
+            {
+                entered.SetResult();
+                await release.Task;
+            }
+            return await real(m, p, ct);
+        };
+
+        var first = rig.Call("bus.answer", new { teamId = rig.TeamId, seq = question.Seq, optionIndex = 0 });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        Assert.Single(await rig.Decisions()); // still open while the first is applying: the second passes UiRpc's own look-up
+        var second = await Assert.ThrowsAsync<RpcException>(() => rig.Call("bus.answer", new { teamId = rig.TeamId, seq = question.Seq, optionIndex = 0 }));
+        Assert.Equal("no_such_decision", second.Code);
+        Assert.Equal(BusEngine.AnsweredAlready, second.Message);
+        release.SetResult();
+        var result = (await first)!.AsObject();
+
+        Assert.Equal(DecisionActions.AllowLocalhostMac, result["applied"]!.GetValue<string>());
+        Assert.Equal(1, actions);
+        Assert.True(await rig.LocalhostOn());
+        Assert.Single(rig.LocalhostAudit());
+        await Wait.UntilAsync(() => rig.Engine.IsQuiescentAsync(Ct), "quiet");
+        Assert.Empty(await rig.Decisions());
+        using var store = rig.Db.OpenStore();
+        Assert.Single(store.MessagesFrom(0, 1000), m => m.CausationSeq == question.Seq && m.Source == MessageTypes.PersonSource);
+        Assert.Single(rig.AdaSaw, t => t == "Allowed: run the tests again.");
+    }
+
+    [Fact]
+    public async Task AFailedAction_ReleasesTheDecision_SoItCanBeAnsweredAgain()
+    {
+        await using var rig = await Rig.StartAsync(LocalhostAsk());
+        await rig.TellAdaAsync("ask");
+        var question = Assert.Single(await rig.Decisions());
+        var real = rig.Ui.Dispatch!;
+        rig.Ui.Dispatch = (m, p, ct) => m == "teams.localhost" ? throw new RpcException("unavailable", "the setting could not be saved") : real(m, p, ct);
+        Assert.Equal("unavailable", (await Assert.ThrowsAsync<RpcException>(() =>
+            rig.Call("bus.answer", new { teamId = rig.TeamId, seq = question.Seq, optionIndex = 0 }))).Code);
+        Assert.Single(await rig.Decisions());
+
+        rig.Ui.Dispatch = real;
+        await rig.Call("bus.answer", new { teamId = rig.TeamId, seq = question.Seq, optionIndex = 0 });
+        Assert.True(await rig.LocalhostOn());
+        Assert.Empty(await rig.Decisions());
+    }
+
     // ------------------------------------------------------------------ Waiting on you
 
     [Fact]
