@@ -117,7 +117,7 @@ public class HandbackOwnRunTests
         Assert.Equal((WaitStates.WaitsForRun, "Ada"), (card.WaitState, card.WaitsFor));
         // Card 568: the card's own state says it too (the shell's team list and the cloud read state, not waitState).
         Assert.Equal(WaitStates.WaitsForRun, card.State);
-        var wire = JsonSerializer.SerializeToNode(card, Yawble.Core.Ui.RpcDispatcher.Json)!; // teams.agents' row, as UiRpc sends it
+        var wire = JsonSerializer.SerializeToNode(card, Yawble.Core.Ipc.RpcDispatcher.Json)!; // teams.agents' row, as UiRpc sends it
         Assert.Equal((WaitStates.WaitsForRun, "Ada"), (wire["state"]!.GetValue<string>(), wire["waitsFor"]!.GetValue<string>()));
 
         release.SetResult();
