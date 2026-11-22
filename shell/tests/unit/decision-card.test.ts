@@ -72,6 +72,17 @@ describe('decisionLayout (B123)', () => {
     expect(l.buttons.map((b) => b.kind)).toEqual(['approve', 'skip']);
   });
 
+  it('card 555: options without a summary are still the buttons, the asking paragraph first, the rest and details under Details', () => {
+    const l = decisionLayout({ question: 'Build passed, tests blocked.\n\nTurn on Allow localhost?', summary: null, details: 'VSTest needs a port.', options: newDecision().options });
+    expect(l.summary).toBe('Turn on Allow localhost?');
+    expect(l.buttons.map((b) => [b.kind, b.label, b.optionIndex])).toEqual([['option', 'Allow localhost & re-run tests', 0], ['option', 'Skip tests', 1]]);
+    expect(l.buttons[0]).toMatchObject({ action: 'team.allowLocalhostMac', disabled: false });
+    expect(l.details).toBe('Build passed, tests blocked.\n\nVSTest needs a port.');
+    expect(l.approval).toBe(false);
+    // A one-paragraph question with options and nothing else: the ask, the buttons, no Details.
+    expect(decisionLayout({ question: 'Turn on Allow localhost?', options: newDecision().options })).toMatchObject({ summary: 'Turn on Allow localhost?', details: '' });
+  });
+
   it('an old one-paragraph question keeps all of it as the ask and has no Details', () => {
     expect(decisionLayout({ question: 'Use Postgres?' })).toMatchObject({ summary: 'Use Postgres?', details: '', buttons: [] });
   });
@@ -104,14 +115,37 @@ describe('the decision card (B123)', () => {
     expect(details.get('summary').text()).toBe('Details');
   });
 
-  it('clicking an option answers with its reply and optionIndex', async () => {
+  it('clicking an option answers with its optionIndex and no text (the core sends its reply)', async () => {
     const { w, calls } = mountView(newDecision());
     await flushPromises();
     await w.get('[data-test=decision-choice-0]').trigger('click');
     await flushPromises();
-    expect(calls.find((c) => c.method === 'bus.answer')?.params).toEqual({
-      teamId: 3, seq: 41, optionIndex: 0, text: 'Allow localhost is on now. Repeat the test run.',
-    });
+    expect(calls.find((c) => c.method === 'bus.answer')?.params).toEqual({ teamId: 3, seq: 41, optionIndex: 0, text: '' });
+  });
+
+  it('card 555: an option with words typed sends only the typed words; the core puts the reply first, once', async () => {
+    const { w, calls } = mountView(newDecision());
+    await flushPromises();
+    await w.get('[data-test=decision-answer]').setValue('  Then close the card.  ');
+    await w.get('[data-test=decision-choice-1]').trigger('click');
+    await flushPromises();
+    const params = calls.find((c) => c.method === 'bus.answer')?.params;
+    expect(params).toEqual({ teamId: 3, seq: 41, optionIndex: 1, text: 'Then close the card.' });
+    expect(params.text).not.toContain('Skip the test run');
+  });
+
+  it('card 555: options without a summary show the asking paragraph, the option buttons and a collapsed Details', async () => {
+    const { w } = mountView({ ...newDecision(), summary: null, details: 'VSTest needs a port.', question: 'The tests could not run.\n\nTurn on Allow localhost for this team?' });
+    await flushPromises();
+    const card = w.get('[data-test=decision]');
+    expect(card.get('[data-test=decision-question]').text()).toBe('Turn on Allow localhost for this team?');
+    expect(card.get('[data-test=decision-choice-0]').text()).toBe('Allow localhost & re-run tests');
+    expect(card.get('[data-test=decision-choice-1]').text()).toBe('Skip tests');
+    expect(card.find('[data-test=decision-approve]').exists()).toBe(false);
+    const details = card.get('[data-test=decision-details]');
+    expect((details.element as HTMLDetailsElement).open).toBe(false);
+    expect(details.text()).toContain('The tests could not run.');
+    expect(details.text()).toContain('VSTest needs a port.');
   });
 
   it('an action core says is not available is a disabled button with the reason under it', async () => {

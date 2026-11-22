@@ -146,15 +146,26 @@ export const ActionNotes: Record<string, string> = {
 
 /**
  * The card for a decision. With the asker's summary: the summary, its options as buttons, details under Details (the
- * question itself when there are no details and it says more than the summary). An old decision (only question): its
+ * question itself when there are no details and it says more than the summary). Options without a summary: the
+ * question's asking paragraph first, the options as buttons, its other paragraphs and the details under Details. An old decision (only question): its
  * last paragraph that asks ("?") first, the rest under Details; buttons from its numbered options, else Approve (and
  * Skip when it offers to skip).
  */
 export function decisionLayout(d: { question: string; summary?: string | null; options?: { label: string; reply: string; action?: string | null; actionAvailable?: boolean; actionUnavailableReason?: string | null }[] | null; details?: string | null }): DecisionLayout {
   const question = (d.question ?? '').trim();
   const summary = (d.summary ?? '').trim();
-  if (summary) {
-    const details = (d.details ?? '').trim() || (question && question !== summary ? question : '');
+  const paras = question.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter(Boolean);
+  let ask = -1;
+  for (let i = paras.length - 1; i >= 0; i--) if (paras[i].includes('?')) { ask = i; break; }
+  const first = ask >= 0 ? paras[ask] : question;
+  const rest = ask >= 0 ? paras.filter((_, i) => i !== ask).join('\n\n') : '';
+  // Card 555: the asker's options are shown whenever they are given, with or without a summary (the core accepts a
+  // question with options and no summary); with no summary the question's asking paragraph comes first.
+  if (summary || (d.options ?? []).length) {
+    const given = (d.details ?? '').trim();
+    const details = summary
+      ? given || (question && question !== summary ? question : '')
+      : [rest, given].filter(Boolean).join('\n\n');
     const buttons: DecisionButton[] = (d.options ?? []).map((o, i) => ({
       kind: 'option', label: o.label, reply: o.reply, optionIndex: i,
       ...(o.action ? {
@@ -163,13 +174,8 @@ export function decisionLayout(d: { question: string; summary?: string | null; o
         disabledReason: o.actionAvailable === false ? (o.actionUnavailableReason ?? '').trim() || 'This action is not available here.' : undefined,
       } : {}),
     }));
-    return { summary, details, buttons, approval: false };
+    return { summary: summary || first, details, buttons, approval: false };
   }
-  const paras = question.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter(Boolean);
-  let ask = -1;
-  for (let i = paras.length - 1; i >= 0; i--) if (paras[i].includes('?')) { ask = i; break; }
-  const first = ask >= 0 ? paras[ask] : question;
-  const rest = ask >= 0 ? paras.filter((_, i) => i !== ask).join('\n\n') : '';
   const options = questionOptions(question);
   if (options.length) {
     return { summary: first, details: rest, approval: false,
