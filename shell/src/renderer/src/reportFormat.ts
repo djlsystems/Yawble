@@ -4,7 +4,7 @@
  * "one short sentence" and crammed everything in) gets its first sentence as its own paragraph, the summary; a report
  * that already has line breaks is left exactly as written.
  */
-export type ReportKind = 'handback' | 'complete' | 'blocked' | 'decision';
+export type ReportKind = 'handback' | 'complete' | 'blocked' | 'decision' | 'waiting';
 export interface Report { kind: ReportKind | null; label: string | null; body: string }
 
 const Prefixes: [string, ReportKind, string][] = [
@@ -12,6 +12,7 @@ const Prefixes: [string, ReportKind, string][] = [
   ['declared complete: ', 'complete', 'Declared complete'],
   ['blocked: ', 'blocked', 'Blocked'],
   ['needs decision: ', 'decision', 'Needs decision'],
+  ['waiting on you: ', 'waiting', 'Waiting on you'],
 ];
 
 export function splitReport(text: string): Report {
@@ -32,4 +33,21 @@ function summaryFirst(body: string): string {
     return body.slice(0, i) + '\n\n' + body.slice(i).trimStart();
   }
   return body;
+}
+
+/** The tile's report when the member waits on the person (B123). */
+export const WaitingLabel = 'Waiting on you';
+
+/**
+ * A member's report as its tile shows it (B123): while it has an open decision (decisionId, or attention "decision"),
+ * the chip says "Waiting on you" whatever it said before ("Declared complete" / "Nothing worth keeping" from an earlier
+ * workflow_complete is not its state any more); the body is its question's words when its last report was that
+ * question, else a line that points to the decision card. Otherwise splitReport.
+ */
+export function memberReport(card: { statusLine?: string | null; attention?: string | null; decisionId?: number | null }): Report & { decisionId: number | null } {
+  const said = splitReport(card.statusLine ?? '');
+  const waiting = card.decisionId != null || card.attention === 'decision';
+  if (!waiting) return { ...said, decisionId: null };
+  const body = said.kind === 'decision' || said.kind === 'waiting' ? said.body : 'A decision is waiting for your answer on the team page.';
+  return { kind: 'waiting', label: WaitingLabel, body, decisionId: card.decisionId ?? null };
 }

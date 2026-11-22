@@ -116,3 +116,67 @@ export function questionOptions(text: string): { n: number; label: string; text:
     return { n: x.n, label: words.length > 48 ? words.slice(0, 47) + '…' : words.replace(/\.$/, ''), text: x.text };
   });
 }
+
+/** What a decision card shows (B123), in order: the plain ask, the answer buttons, then a collapsed Details. */
+export interface DecisionButton {
+  /** The button's text. */
+  label: string;
+  /** Sent as the answer (the asker's reply, or for an old question the quick answer). */
+  reply: string;
+  /** The asker's option index (bus.answer optionIndex), for options from the payload; none for an old question's buttons. */
+  optionIndex?: number;
+  /** An old question's numbered option (the n it offered), or approve / skip. */
+  kind: 'option' | 'numbered' | 'approve' | 'skip';
+  n?: number;
+  /** The option's full text (tooltip) for a numbered option. */
+  text?: string;
+  /** The allowlisted app action the click applies, a note on what it allows, and why it is off when it cannot be used. */
+  action?: string | null;
+  actionNote?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
+export interface DecisionLayout { summary: string; details: string; buttons: DecisionButton[]; approval: boolean }
+
+/** The one-line note under an action option's button: what it changes. Unknown actions get no note. */
+export const ActionNotes: Record<string, string> = {
+  'team.allowLocalhostMac': 'Allows local connections between the run\'s own processes and to this Mac\'s localhost. Off by default.',
+};
+
+/**
+ * The card for a decision. With the asker's summary: the summary, its options as buttons, details under Details (the
+ * question itself when there are no details and it says more than the summary). An old decision (only question): its
+ * last paragraph that asks ("?") first, the rest under Details; buttons from its numbered options, else Approve (and
+ * Skip when it offers to skip).
+ */
+export function decisionLayout(d: { question: string; summary?: string | null; options?: { label: string; reply: string; action?: string | null; actionAvailable?: boolean; actionUnavailableReason?: string | null }[] | null; details?: string | null }): DecisionLayout {
+  const question = (d.question ?? '').trim();
+  const summary = (d.summary ?? '').trim();
+  if (summary) {
+    const details = (d.details ?? '').trim() || (question && question !== summary ? question : '');
+    const buttons: DecisionButton[] = (d.options ?? []).map((o, i) => ({
+      kind: 'option', label: o.label, reply: o.reply, optionIndex: i,
+      ...(o.action ? {
+        action: o.action, actionNote: ActionNotes[o.action],
+        disabled: o.actionAvailable === false,
+        disabledReason: o.actionAvailable === false ? (o.actionUnavailableReason ?? '').trim() || 'This action is not available here.' : undefined,
+      } : {}),
+    }));
+    return { summary, details, buttons, approval: false };
+  }
+  const paras = question.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter(Boolean);
+  let ask = -1;
+  for (let i = paras.length - 1; i >= 0; i--) if (paras[i].includes('?')) { ask = i; break; }
+  const first = ask >= 0 ? paras[ask] : question;
+  const rest = ask >= 0 ? paras.filter((_, i) => i !== ask).join('\n\n') : '';
+  const options = questionOptions(question);
+  if (options.length) {
+    return { summary: first, details: rest, approval: false,
+      buttons: options.map((o) => ({ kind: 'numbered', n: o.n, label: `${o.n}. ${o.label}`, text: o.text, reply: o.text })) };
+  }
+  const approval = asksForApproval(question);
+  const buttons: DecisionButton[] = approval ? [{ kind: 'approve', label: 'Approve', reply: 'Approved.' }] : [];
+  if (approval && offersSkip(question)) buttons.push({ kind: 'skip', label: 'Skip', reply: 'Skip it.' });
+  return { summary: first, details: rest, buttons, approval };
+}
