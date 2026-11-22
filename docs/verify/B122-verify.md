@@ -48,7 +48,25 @@ Commit 2ecf6f4 merged; `core\tests\Yawble.Core.Tests\bin\Debug\net10.0\Yawble.Co
 
 ## 4. Full core suite
 
-(running)
+Run on e8a38e9 (2ecf6f4 merged), Windows sandbox, heavy-work lease held. Build: `dotnet build core/tests/Yawble.Core.Tests/Yawble.Core.Tests.csproj -p:EnableSourceControlManagerQueries=false -p:EnableSourceLink=false` built with 0 errors. Run: `core\tests\Yawble.Core.Tests\bin\Debug\net10.0\Yawble.Core.Tests.exe` with no filter, output written to a file.
+
+**Total: 4286, Errors: 0, Failed: 209, Skipped: 118, Not Run: 0, Time: 672.7 s.**
+
+- 209 failures is inside the sandbox's environmental baseline of 200-305. The biggest groups are Concierge (ConciergeActionTests 31, ReadTools 7), Companion (Server 22, Service 6, Cli 3), the Teams git classes (TeamRepos, TeamSync, TeamBranch*, TeamGit*, TeamPublish and others), IpcServer/IpcEndpoint and CoreProcess. These are the known long-path, msys sh and loopback/pipe failures. Commit 2ecf6f4 touches none of these classes.
+- B122 classes: **no failure** in RunTreeTests, RunSupervisorTests or LauncherTests (no `Yawble.Core.Tests.Launch.*` test failed).
+- The one failure that uses the changed test seam is `Yawble.Core.Tests.Teams.LauncherTeamRepoTests.TheLauncherRunsInTheMembersCloneWithTheTeamPrompt` ("timed out waiting for: dev1's run to end", from `LaunchKit.OutcomeAsync`). It fails alone too (`-class Yawble.Core.Tests.Teams.LauncherTeamRepoTests`: 1 of 1 failed). It **fails the same way on base d6756c0** (separate worktree, same build flags, same message, 20.5 s). So it was already failing and B122 did not cause it.
+- New failures caused by B122: **none found**.
+
+## Verdict: PASS
+
+B122 (card 552, 2ecf6f4) does what the spec asks: the diff review passes (section 1), both mutations are caught (section 2), the changed Launch classes and NameLeakTests pass (section 3), and the full suite is at the environmental baseline with no new failure in RunTree, RunSupervisor or Launcher (section 4). The real macOS path (libproc, kill(2)) cannot run here and still needs the Mac mini checklist (section 5).
+
+Reproduce:
+1. `git fetch "$env:YAWBLE_TEAM_BUNDLE" members/yawble-engineering-team/testerwren; git checkout FETCH_HEAD`
+2. `dotnet build core/tests/Yawble.Core.Tests/Yawble.Core.Tests.csproj -p:EnableSourceControlManagerQueries=false -p:EnableSourceLink=false`
+3. `core\tests\Yawble.Core.Tests\bin\Debug\net10.0\Yawble.Core.Tests.exe -class Yawble.Core.Tests.Launch.RunTreeTests` (also RunSupervisorTests, LauncherTests, `Yawble.Core.Tests.NameLeakTests`): 0 failed.
+4. The full suite: the same exe with no filter (about 11 min). Expect about 209 environmental failures, none under `Yawble.Core.Tests.Launch`.
+5. The LauncherTeamRepoTests base check: `git worktree add --detach <dir> d6756c0`, build there, run `-class Yawble.Core.Tests.Teams.LauncherTeamRepoTests`. It also fails there.
 
 ## 5. Mac mini checklist (the real macOS path)
 
