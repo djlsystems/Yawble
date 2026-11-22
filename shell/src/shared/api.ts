@@ -772,13 +772,17 @@ export interface TriggerSchedule {
   kind: 'every' | 'cron' | 'once' | 'folder' | 'event'; intervalSec: number | null; cron: string | null; timezone: string | null; fireAt: string | null;
 }
 export type WakeManager = 'always' | 'onHandbackOrFailure' | 'never';
+/** B125: which folder changes fire a folder trigger. A new trigger takes 'added'; one saved without it (an older core) is 'any'. */
+export type WatchFireOn = 'added' | 'added-or-changed' | 'any';
+export const WATCH_FIRE_ON_LABELS: Record<WatchFireOn, string> = { added: 'Added files', 'added-or-changed': 'Added or changed', any: 'Any change' };
+export const fireOnOf = (w: { fireOn?: WatchFireOn | null } | null | undefined): WatchFireOn => w?.fireOn ?? 'any';
 export interface Trigger {
   id: number; teamId: number; memberId: number; name: string; schedule: TriggerSchedule; instruction: string;
   onlyWhenIdle: boolean; enabled: boolean; nextDueAt: string | null; lastFiredAt: string | null;
   /** Whether the trigger's runs wake the Manager when they end (a hand-back always does). */
   wakeManager: WakeManager;
   /** A folder-change trigger's folder: the team's documents (path inside) or a folder on this computer. */
-  watch?: { root: 'documents' | 'host'; path: string; glob: string | null; quietSec: number } | null;
+  watch?: { root: 'documents' | 'host'; path: string; glob: string | null; quietSec: number; fireOn?: WatchFireOn | null } | null;
   /** An event trigger's event name pattern (web.pr, web.*). */
   eventName?: string | null;
   lastOutcome: 'fired' | 'skipped' | 'missed' | 'member-missing' | null; lastReason: string | null; lastSeq: number | null; missedCount: number;
