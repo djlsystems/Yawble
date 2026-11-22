@@ -1059,7 +1059,8 @@ public sealed class UiRpc(
         node["waitingFor"] = r.WaitingFor;
         node["working"] = r.Working;
         node["item"] = r.Item is { } i ? new JsonObject { ["label"] = i.Label, ["title"] = i.Title, ["archived"] = i.Archived } : null;
-        node["members"] = new JsonArray([.. r.Members.Select(m => (JsonNode)new JsonObject { ["id"] = m.Id, ["name"] = m.Name, ["state"] = m.State })]);
+        // B126: state is running | lease | queued | waits-for-run | held | pending; waitsFor names the sender with waits-for-run.
+        node["members"] = new JsonArray([.. r.Members.Select(m => (JsonNode)new JsonObject { ["id"] = m.Id, ["name"] = m.Name, ["state"] = m.State, ["waitsFor"] = m.WaitsFor })]);
         return node;
     }
 

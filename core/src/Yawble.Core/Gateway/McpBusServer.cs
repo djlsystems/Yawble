@@ -263,7 +263,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         Tool("workflow_complete", "Declare the workflow done (its owner, or the Manager). Refused while other work in it is running or pending.",
             ("delivered", "string", ReportText("What was delivered: the summary names the branch and commit; then each item delivered, the tests " +
                 "and anything left open"), true)),
-        Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and queued instructions."),
+        Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and each member's waiting instructions with why they wait (waitState: queued for a slot, waits-for-run with waitsFor, held for a paused team, pending)."),
         Tool("hiring", "The Manager: the agent CLIs you may hire, and whether each can run on this computer now."),
         Tool("hire", "The Manager: add a member to your team. It starts idle; give it work with tell.",
             ("name", "string", "The job word alone, one word: 'Developer', 'Tester'. The app adds a first name from the person's list; the answer gives " +

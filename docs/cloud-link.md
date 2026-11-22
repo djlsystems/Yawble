@@ -186,8 +186,12 @@ still an agent's terminal window.
   "teams": [
     {
       "name": "web", "paused": false, "archived": false,
-      "agents": { "total": 4, "running": 1, "queued": 1, "idle": 1, "errored": 1, "stopped": 0 },
-      "running": [ { "member": "Manager", "role": "Manager", "doing": "card 7: plan the login page", "since": "2026-11-16T11:55:00Z" } ]
+      "agents": { "total": 5, "running": 1, "queued": 1, "waitsForRun": 1, "held": 0, "pending": 0, "idle": 1, "errored": 1, "stopped": 0 },
+      "running": [ { "member": "Manager", "role": "Manager", "doing": "card 7: plan the login page", "since": "2026-11-16T11:55:00Z" } ],
+      "waiting": [
+        { "member": "Ines", "state": "queued", "waitsFor": null },
+        { "member": "Wren", "state": "waits-for-run", "waitsFor": "Ines" }
+      ]
     }
   ],
   "workflows": [
@@ -218,11 +222,15 @@ still an agent's terminal window.
 
 - **computer**: the computer's name, `label` (its name on the cloud site; null when not attached), the Yawble version,
   the OS, when the core started and its uptime, the run slots in use and in total, and the runs waiting for a slot.
-- **teams**: every team, by name, paused or archived. `agents` counts its agents: `running`, `queued`, `idle`, and
+- **teams**: every team, by name, paused or archived. `agents` counts its agents: `running`; work not started, by why it waits (B126:
+  `queued` only in the run queue, for a run slot; `waitsForRun` a hand-back held until the run that sent it ends; `held`
+  the team is paused or archived; `pending` anything else); `idle`, and
   `errored` (idle, and its last run failed; not also counted as idle), and `stopped` (idle agents whose last run the
   person stopped: also counted in `idle`, never in `errored`; B097). `running` lists each running agent: member
   name, role (`Manager` or `Member`), what it is doing (its open card on the board, else its last status line) and
-  since when.
+  since when. `waiting` (B126) lists each agent with work not started: `member`, `state` (`queued` | `waits-for-run` |
+  `held` | `pending`, the agent card's state) and `waitsFor` (the member whose run must end first; only with
+  `waits-for-run`, else null).
 - **workflows**: every open workflow, and those that ended in the last 24 hours, newest activity first. `item` is the
   backlog item it came from (null when none). `cards` counts its cards on the board, done and in total. `owner` is
   the agent that owns it (its Manager). `state` is one of:
