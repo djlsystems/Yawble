@@ -172,6 +172,173 @@ public class RunTreeTests
     }
 
     [Fact]
+    public void AChildLeftInTheGroupOfALeaderThatEndedBeforeItWasSeenIsReaped()
+    {
+        var table = new FakeProcessTable();
+        // The sandbox's process leads its group; the first read records it (and its group) just after the spawn.
+        var root = table.Add(500, table.Self);
+        var tree = new RunTree(table, root, Fast);
+        tree.Track();
+        // Between two reads: it starts a build in its group and ends; launchd adopts the build.
+        var build = table.Add(501, root, group: 500, ignoresTerm: true);
+        table.End(root);
+        Assert.Equal(1, table.Get(build).ParentPid);
+
+        tree.Observe();
+        Assert.True(tree.Tracked.ContainsKey(build));
+        var result = tree.Reap();
+
+        Assert.Empty(result.Survivors);
+        Assert.False(table.IsAlive(build));
+        Assert.Contains(table.Log, e => e.Group && e.Pid == 500 && e.Signal == RunTree.SIGKILL);
+    }
+
+    [Fact]
+    public void ABuildBackgroundedByAShellThatWasSeenOnceAndThenEndedIsReaped()
+    {
+        // B127 on the Mac mini: the shell (its own group) runs `dotnet build &` and exits within a second.
+        var table = new FakeProcessTable();
+        var root = table.Add(500, table.Self);
+        var cli = table.Add(501, root);
+        var tree = new RunTree(table, root, Fast);
+        tree.Track();
+        var shell = table.Add(25720, cli, group: 25720);
+        tree.Observe();
+        Assert.True(tree.Tracked.ContainsKey(shell));
+        // Between two reads: the build starts under the shell, the shell exits, the build is launchd's.
+        var build = table.Add(25723, shell, group: 25720, ignoresTerm: true);
+        table.End(shell);
+        var sleep = table.Add(25735, build, group: 25720, ignoresTerm: true);
+        Assert.Equal(1, table.Get(build).ParentPid);
+
+        tree.Observe();
+        Assert.True(tree.Tracked.ContainsKey(build));
+        Assert.True(tree.Tracked.ContainsKey(sleep));
+        table.End(cli);
+        table.End(root);
+        var result = tree.Reap();
+
+        Assert.Empty(result.Survivors);
+        Assert.False(table.IsAlive(build));
+        Assert.False(table.IsAlive(sleep));
+        Assert.Contains(table.Log, e => e.Group && e.Pid == 25720 && e.Signal == RunTree.SIGTERM);
+    }
+
+    [Fact]
+    public void AGroupIdReusedByAProcessFromBeforeTheRunIsNeverSignalled()
+    {
+        var table = new FakeProcessTable();
+        var root = table.Add(500, table.Self);
+        var shell = table.Add(502, root, group: 502);
+        var build = table.Add(503, shell, group: 502, ignoresTerm: true);
+        var tree = new RunTree(table, root, Fast);
+        tree.Track();
+        table.End(shell);
+        // An unrelated process from before the run that has the same group id (and one with a ppid in the tree).
+        var old = table.Add(700, 1, group: 502, startedAt: 0);
+        var oldChild = table.Add(701, build, group: 701, startedAt: 0);
+        tree.Observe();
+
+        var result = tree.Reap();
+
+        Assert.Empty(result.Survivors);
+        Assert.False(table.IsAlive(build));
+        Assert.True(table.IsAlive(old));
+        Assert.True(table.IsAlive(oldChild));
+        Assert.False(tree.Tracked.ContainsKey(old));
+        Assert.DoesNotContain(table.Log, e => e.Pid is 700 or 701);
+        // Not as a group either: 502 still holds a process that is not the run's, so its members go one by one.
+        Assert.DoesNotContain(table.Log, e => e.Group && e.Pid == 502);
+        Assert.Contains(table.Log, e => !e.Group && e.Pid == build && e.Signal == RunTree.SIGKILL);
+    }
+
+    [Fact]
+    public void AGroupWhoseRecordedMembersAllEndedIsNotTheRunsWhenItsIdComesBack()
+    {
+        var table = new FakeProcessTable();
+        var root = table.Add(500, table.Self);
+        var shell = table.Add(502, root, group: 502);
+        var tree = new RunTree(table, root, Fast);
+        tree.Track();
+        table.End(shell);
+        tree.Observe();
+        // The pid 502 comes back as another program's group leader, and a member joins it.
+        var other = table.Add(502, 1, group: 502);
+        var member = table.Add(503, other, group: 502);
+
+        tree.Observe();
+        tree.Reap();
+
+        Assert.True(table.IsAlive(other));
+        Assert.True(table.IsAlive(member));
+        Assert.DoesNotContain(table.Log, e => e.Pid is 502 or 503);
+    }
+
+    [Fact]
+    public void AnAdoptedProcessWithAnUnrelatedParentAndGroupIsReaped()
+    {
+        var table = new FakeProcessTable();
+        var root = table.Add(500, table.Self);
+        var tree = new RunTree(table, root, Fast);
+        tree.Track();
+        // Found by the backstop (it holds a file under the run's folder): neither its ppid nor its pgid is the tree's.
+        var holder = table.Add(800, 1, group: 800, ignoresTerm: true);
+        var holderChild = table.Add(801, holder, group: 800, ignoresTerm: true);
+        tree.Observe();
+        Assert.False(tree.Tracked.ContainsKey(holder));
+
+        Assert.Equal(1, tree.Adopt([holder]));
+        Assert.Equal(0, tree.Adopt([holder]));
+        table.End(root);
+        var result = tree.Reap();
+
+        Assert.Empty(result.Survivors);
+        Assert.False(table.IsAlive(holder));
+        Assert.False(table.IsAlive(holderChild));
+        Assert.Contains(table.Log, e => e.Group && e.Pid == 800 && e.Signal == RunTree.SIGKILL);
+    }
+
+    [Fact]
+    public void AdoptIgnoresAProcessFromBeforeTheRunTheCoreAndPid1()
+    {
+        var table = new FakeProcessTable();
+        var root = table.Add(500, table.Self);
+        var tree = new RunTree(table, root, Fast);
+        tree.Track();
+        var old = table.Add(900, 1, group: 900, startedAt: 0);
+        table.Add(1, 0, group: 1, startedAt: 0);
+        table.Add(table.Self, 1, group: table.SelfGroup, startedAt: 0);
+        // A process of the run's age in the core's own group: taken alone, its group never.
+        var inCoreGroup = table.Add(901, 1, group: table.SelfGroup);
+
+        Assert.Equal(1, tree.Adopt([old, 1, table.Self, 0, 4242, inCoreGroup]));
+        Assert.False(tree.Tracked.ContainsKey(old));
+        Assert.False(tree.Tracked.ContainsKey(1));
+        Assert.False(tree.Tracked.ContainsKey(table.Self));
+        table.End(root);
+        tree.Reap();
+
+        Assert.True(table.IsAlive(old));
+        Assert.True(table.IsAlive(1));
+        Assert.True(table.IsAlive(table.Self));
+        Assert.False(table.IsAlive(inCoreGroup));
+        Assert.DoesNotContain(table.Log, e => e.Pid is 900 or 1 || e.Pid == table.Self || e.Group && e.Pid == table.SelfGroup);
+    }
+
+    [Fact]
+    public void AdoptOnATreeThatIsNotFollowedTakesNothing()
+    {
+        var table = new FakeProcessTable();
+        var notOurs = table.Add(500, 1);
+        var tree = new RunTree(table, notOurs, Fast);
+        var p = table.Add(800, 1);
+
+        Assert.Equal(0, tree.Adopt([p]));
+        Assert.Equal(0, tree.Reap().Signalled);
+        Assert.Empty(table.Log);
+    }
+
+    [Fact]
     public async Task TheRunsTempFolderGoesOnlyAfterTheTreeIsGoneAndTheRunEndsAfterThat()
     {
         var table = new FakeProcessTable();
@@ -289,12 +456,13 @@ internal sealed class FakeProcessTable : IProcessTable
     public int SelfGroup => 1000;
     public List<Entry> Log { get; } = [];
 
-    public int Add(int pid, int parent, int? group = null, bool ignoresTerm = false, bool unkillable = false)
+    /// <param name="startedAt">Its start time; by default one after the last process added (0: before any run).</param>
+    public int Add(int pid, int parent, int? group = null, bool ignoresTerm = false, bool unkillable = false, long? startedAt = null)
     {
         lock (_lock)
         {
             var g = group ?? (parent is 1 or 1000 ? pid : _procs.TryGetValue(parent, out var pp) ? pp.Info.GroupId : pid);
-            _procs[pid] = new Proc { Info = new ProcessEntry(pid, parent, g, ++_starts), IgnoresTerm = ignoresTerm, Unkillable = unkillable };
+            _procs[pid] = new Proc { Info = new ProcessEntry(pid, parent, g, startedAt ?? ++_starts), IgnoresTerm = ignoresTerm, Unkillable = unkillable };
             return pid;
         }
     }
