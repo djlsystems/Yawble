@@ -2,6 +2,7 @@
 import { vChange } from '../remoteAccess';
 import { teamState, teamStateLabel } from '../teamState';
 import wordmark from '../assets/yawble-logo-light.png';
+import wordmarkDark from '../assets/yawble-logo-dark.png';
 import mark from '../assets/yawble-mark.png';
 import { nextTick, ref } from 'vue';
 import type { ConversationSummary, RunSlots, TeamSummary } from '../../../shared/api';
@@ -92,7 +93,8 @@ function finishRename(id: string) {
   <aside v-else class="side" :class="{ drawer, open: drawer && open }" data-test="sidebar" :data-drawer="drawer ? (open ? 'open' : 'closed') : undefined"
     :inert="drawer && !open" :aria-hidden="drawer && !open ? 'true' : undefined" :aria-label="drawer ? 'Menu' : undefined">
     <div class="brand">
-      <img class="logo" :src="wordmark" alt="Yawble" />
+      <img class="logo on-light" :src="wordmark" alt="Yawble" data-test="sidebar-logo" />
+      <img class="logo on-dark" :src="wordmarkDark" alt="Yawble" data-test="sidebar-logo-dark" />
       <span class="grow" />
       <button class="ghost icon-btn" :title="drawer ? 'Close the menu' : 'Hide the sidebar'" :aria-label="drawer ? 'Close the menu' : undefined" data-test="sidebar-collapse"
         @click="emit('collapse')"><Icon :name="drawer ? 'close' : 'sidebar'" /></button>
@@ -191,6 +193,10 @@ function finishRename(id: string) {
 .side { background: var(--side); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 8px 8px 6px; }
 .brand { display: flex; align-items: center; gap: 8px; padding: 6px 6px 10px; }
 .logo { height: 26px; width: auto; flex: none; margin-left: 2px; }
+/* The wordmark's dark letters vanish on the dark sidebar: the dark theme shows the white-lettered one. */
+.logo.on-dark { display: none; }
+:root[data-theme="dark"] .logo.on-light { display: none; }
+:root[data-theme="dark"] .logo.on-dark { display: block; }
 .grow { flex: 1; }
 .item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: transparent; padding: 7px 10px; border-radius: 9px; color: var(--ink); font-size: 14px; }
 .item:hover:not(:disabled) { background: var(--hover); }
