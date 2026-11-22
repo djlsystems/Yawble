@@ -352,7 +352,8 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (string.IsNullOrWhiteSpace(delivered)) throw new BusRefusal("empty", "say what you delivered");
             _statusLines[run.Member.Id] = "handed back: " + delivered;
             run.HandedBack = true;
-            return Publish(new NewMessage(MessageTypes.Handback, JsonSerializer.Serialize(new { delivered }), run.Member.Qualified, run.Causation));
+            // B126: the run id ties the hand-back to the run that sent it (Ripe holds it only while that run is active).
+            return Publish(new NewMessage(MessageTypes.Handback, JsonSerializer.Serialize(new { delivered, runId = run.RunId }), run.Member.Qualified, run.Causation));
         }, ct);
 
     /// <summary>
@@ -454,6 +455,7 @@ public sealed partial class BusEngine : IAsyncDisposable
     {
         var queue = _store.Queue();
         var unstarted = _store.Pending(started: false);
+        var held = _store.HeldTeams();
         TidyLease(_store.Clock.GetUtcNow());
         var members = _store.TeamMembers(teamId);
         var asking = members.Count == 0 ? new Dictionary<string, Message>(StringComparer.OrdinalIgnoreCase) : OpenDecisionByMember(members[0].Team);
@@ -462,12 +464,13 @@ public sealed partial class BusEngine : IAsyncDisposable
             var position = RunScheduler.PositionOf(queue, q => q.MemberId == m.Id);
             var state = _active.Values.Any(a => a.Context.Member.Id == m.Id) ? "running"
                 : _sessions.ContainsKey(m.Id) ? "session" : position is not null ? "queued" : "idle";
-            var waiting = unstarted.Count(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase));
+            var mine = unstarted.Where(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase)).ToList();
+            var (waitState, waitsFor) = mine.Count == 0 ? (null, null) : WaitOf(m.Id, m.TeamId, mine, queue, held);
             var decision = asking.GetValueOrDefault(m.Qualified);
-            return new MemberStatus(m.Name, m.Role == MemberRole.Manager ? "manager" : "member", state, position, waiting,
+            return new MemberStatus(m.Name, m.Role == MemberRole.Manager ? "manager" : "member", state, position, mine.Count,
                 decision is not null ? WaitingLine(decision) : _statusLines.GetValueOrDefault(m.Id),
                 LeaseOf(m.Id) is { } l ? (l.State == "holding" ? $"holds the heavy-work lease for \"{l.What}\"" : $"waiting for the heavy-work lease (position {l.Position})") : null,
-                decision?.Seq);
+                decision?.Seq, waitState, waitsFor);
         }).ToArray();
     }
 
@@ -678,12 +681,24 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// A hand-back waits for the end of the run that sent it: the host fetches the member's branch back (and pushes)
     /// only after the run, so a Manager woken by the hand-back alone would find the work not yet in the shared view
     /// and spend a run learning to wait. Once the run ends, the hand-back and the run's ending row reach the Manager
-    /// together, in one run.
+    /// together, in one run. B126: only the run that SENT it holds it (its fetch-back is part of that run), not a later
+    /// run of the same member in another workflow.
     /// </summary>
-    private bool Ripe(BusStore.PendingRow row)
+    private bool Ripe(BusStore.PendingRow row) => HeldBy(row) is null;
+
+    /// <summary>
+    /// The active run a hand-back delivery waits for: the run that sent it, while it (and so its fetch-back) has not
+    /// ended. Null when the row is no hand-back or is ripe. The hand-back's payload names its run (runId, B126); one from
+    /// before carries none and waits for the sender's active run of the same causation (a run's causation is its first item).
+    /// After a restart nothing is active, so every unstarted hand-back is ripe (start-up fetched every branch back).
+    /// </summary>
+    private RunContext? HeldBy(BusStore.PendingRow row)
     {
-        if (_store.Find(row.Seq) is not { } m || m.Type != MessageTypes.Handback) return true;
-        return !_active.Values.Any(a => string.Equals(a.Context.Member.Qualified, m.Source, StringComparison.OrdinalIgnoreCase));
+        if (_store.Find(row.Seq) is not { } m || m.Type != MessageTypes.Handback) return null;
+        if (Payload(m)?["runId"] is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<long>(out var runId))
+            return _active.TryGetValue(runId, out var sender) ? sender.Context : null;
+        return _active.Values.Select(a => a.Context).FirstOrDefault(c =>
+            c.Causation == m.CausationSeq && string.Equals(c.Member.Qualified, m.Source, StringComparison.OrdinalIgnoreCase));
     }
 
     private void Admit(BusStore.QueueRow entry)

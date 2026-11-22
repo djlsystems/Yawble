@@ -395,8 +395,10 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     is active on it), **Stalled** (a run is active but shows no sign of work for 10 minutes or more: no tool call, no
     progress and no model request going out or answer streaming back; from its last sign of activity to its next
     one, or to the run's end), **Waiting on you** (an open question to you),
-    **Waiting for a slot** (queued for a run slot, or waiting for the heavy-work lease), **Waiting on a teammate**
-    (handed back, or its run ended, and it waits for the Manager or a tester), **Blocked** (blocked, or its run failed),
+    **Waiting for a slot** (its member is in the run queue for a run slot, or its run waits for the heavy-work lease),
+    **Waiting on a teammate** (handed back, or its run ended, and it waits for the Manager or a tester; or it has work
+    whose member is not in the run queue: busy in another workflow, its team paused, or a hand-back waiting for its
+    sender's run to end), **Blocked** (blocked, or its run failed),
     **Scheduled** (parked until the wake it asked for), **Not started** (planned, no member yet), **Idle** (open,
     nobody working it, nothing scheduled) and **Was done**.
   - A workflow's cards overlap, so they are not added up: each moment takes the highest category among its cards
@@ -713,7 +715,10 @@ masked in the log and never reaches an agent. See
   - **Cron**: 5 or 6 fields, with a timezone.
   - **Once**: at a set time.
   - **Folder**: when files in the team's documents or a folder on this computer change and settle. It can filter by
-    file pattern.
+    file pattern. **Fire on** chooses which changes wake the agent: **Added files** (the default for a new trigger),
+    **Added or changed** (a file added or changed in size), or **Any change** (added, removed or changed; folder
+    triggers made before this choice keep it). A change that does not match never fires, so an agent that moves the
+    files it was woken for out of the folder is not woken again. The instruction lists only the changes that fire.
   - **Event**: when an integration watch reports a new item.
 - Options: **Only when the agent is idle**, **Enabled**, **Run now**.
 - **Wake the Manager when a run ends**: only on a hand-back or failure (the default), every time, or never.

@@ -114,14 +114,15 @@ public sealed partial class BusEngine
             _store.RecordTriggerOutcome(row.Id, null, next, "skipped", folder is null ? "nothing to watch" : $"the folder {folder} is not there", null, row.MissedCount);
             return;
         }
-        var (change, state) = FolderWatcher.Look(FolderWatcher.Listing(folder, row.Watch!.Glob), _store.WatchState(row.Id), now, row.Watch.QuietSec);
+        var (change, state) = FolderWatcher.Look(FolderWatcher.Listing(folder, row.Watch!.Glob), _store.WatchState(row.Id), now, row.Watch.QuietSec, row.Watch.FireOn);
         if (change is null)
         {
             _store.SetWatch(row.Id, state, next);
             return;
         }
         var fire = Fire(row, now, change.Describe(row.Watch.Root == FolderWatch.Documents ? $"the team's documents{(row.Watch.Path.Length > 0 ? "/" + row.Watch.Path : "")}" : folder));
-        // Only a change that was told is taken as the new baseline: a skipped one (busy, paused) fires at the next look.
+        // Only a change that was told is taken as the new baseline: a skipped one (busy, paused) fires at the next look,
+        // with the same list (only the kinds the trigger fires on).
         if (fire.Outcome == "fired") _store.SetWatchState(row.Id, state);
         _store.RecordTriggerOutcome(row.Id, fire.Outcome == "fired" ? now : null, next, fire.Outcome, fire.Reason, fire.Seq, row.MissedCount);
     }
@@ -180,7 +181,13 @@ public sealed partial class BusEngine
                 throw new ArgumentException($"wakeManager must be one of {string.Join(", ", WakeManagerPolicy.All)}");
             var now = DateTimeOffset.UtcNow;
             if (TriggerScheduling.Validate(draft.Schedule, draft.Schedule.Kind == TriggerKinds.Once ? now : null) is { } why) throw new ArgumentException(why);
-            if (draft.Schedule.Kind == TriggerKinds.Folder) draft = draft with { Watch = CheckWatch(draft.Watch) };
+            if (draft.Schedule.Kind == TriggerKinds.Folder)
+            {
+                // No "Fire on" given (an empty value): an edit keeps the trigger's own, a new trigger fires on added files.
+                if (draft.Watch is { FireOn: null or "" } w)
+                    draft = draft with { Watch = w with { FireOn = draft.Id is { } eid && _store.Trigger(eid)?.Watch is { } old ? old.FireOn : FolderWatch.Added } };
+                draft = draft with { Watch = CheckWatch(draft.Watch) };
+            }
             else draft = draft with { Watch = null };
             if (draft.Schedule.Kind == TriggerKinds.Event)
             {
@@ -214,6 +221,7 @@ public sealed partial class BusEngine
             throw new ArgumentException("watch root is documents or host");
         }
         if (w.QuietSec is < 0 or > 3600) throw new ArgumentException("the quiet period is 0 to 3600 seconds");
+        if (!FolderWatch.FireOnValues.Contains(w.FireOn)) throw new ArgumentException($"fire on is one of {string.Join(", ", FolderWatch.FireOnValues)}");
         return w with { Path = path };
     }
 

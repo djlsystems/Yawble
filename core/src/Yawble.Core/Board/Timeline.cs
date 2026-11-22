@@ -122,7 +122,9 @@ public sealed record WorkflowTimeline(long Id, TimeSummary Time, IReadOnlyList<T
 /// <list type="bullet">
 /// <item>A card: created (planned) to the last time it entered Done, or now while it is not in Done. Its stored states
 ///   give the category; while a run of its member is active the time is Agent working, except the run's stalls (Stalled)
-///   and its waits for the heavy-work lease (Waiting for a slot); queued for a run slot is Waiting for a slot. Time in Done
+///   and its waits for the heavy-work lease (Waiting for a slot); a run in the run queue (queued to started, or still
+///   queued now: a live queue entry) is Waiting for a slot. A card with work for its member that is not in the run queue
+///   (busy elsewhere, team held, a hand-back waiting for its sender's run) is Waiting on a teammate (B126). Time in Done
 ///   before a reopen is Was done.</item>
 /// <item>A workflow: created (its first message) to its last end (completed, closed, expired: an expired one's last
 ///   activity), or now while open. Each moment takes the highest category of its cards not in Done and of its card-less
@@ -163,6 +165,10 @@ public static class TimelineCalculator
                 else if (In(c.Stalls, a)) category = TimeCategories.Stalled;
                 else if (runs.Any(r => Ms(r.Started) <= a && a < (r.Ended is { } e ? Ms(e) : last))) category = TimeCategories.AgentWorking;
                 else if (runs.Any(r => Ms(r.Queued) <= a && a < Ms(r.Started))) category = TimeCategories.WaitingForSlot;
+                // B126: a card with work for its member (stored queued) waits for a slot only while a run of it is in the
+                // run queue (the span above); otherwise its member is busy elsewhere, its team is held, or a hand-back
+                // waits for its sender's run: it waits on a teammate.
+                else if (category == TimeCategories.WaitingForSlot) category = TimeCategories.WaitingOnTeammate;
             }
             Add(segs, new Seg(category, done, a, b));
         }

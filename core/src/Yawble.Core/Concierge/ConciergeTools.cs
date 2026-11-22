@@ -290,7 +290,8 @@ public sealed class ConciergeTools(
         {
             sb.Append($"- {c.Member.Name} ({c.Member.Role}, {c.Member.Cli}): {c.State}");
             if (c.QueuePosition is { } q) sb.Append($", queued {q} of {c.QueueLength}");
-            if (c.QueuedInstructions > 0) sb.Append($", {c.QueuedInstructions} instruction(s) waiting");
+            if (c.QueuedInstructions > 0)
+                sb.Append($", {c.QueuedInstructions} instruction(s) waiting ({WaitStates.Text(c.WaitState ?? WaitStates.Pending, c.WaitsFor)})");
             if (c.StatusLine is { Length: > 0 } s) sb.Append($"; says: {s}");
             else if (c.LastRunState is { } last) sb.Append($"; last run {(c.LastRunStopped ? "stopped" : last)}{(c.LastRunReason is { } r ? $" ({r})" : "")}");
             sb.AppendLine();

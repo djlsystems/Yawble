@@ -71,7 +71,8 @@ public class TimelineStoreTests
         Assert.Equal(At("16:01"), BoardStore.Time(t.Time.CreatedAt));
         Assert.Equal(At("16:54"), BoardStore.Time(t.Time.StartedAt!));
         Assert.Equal(Min(53), Share(t.Time, C.NotStarted));
-        Assert.Equal(Min(6), Share(t.Time, C.WaitingForSlot));
+        Assert.Equal(Min(6), Share(t.Time, C.WaitingOnTeammate)); // B126: told, but no run in the run queue: not a slot wait
+        Assert.Equal(0, Share(t.Time, C.WaitingForSlot));
         Assert.Equal(Min(30), Share(t.Time, C.AgentWorking));
         Assert.Equal(Min(89), t.Time.OverallMs);
         Assert.Equal(("done", false, false), (t.Time.EndedHow, t.Time.Open, t.Time.Rebuilt));
@@ -147,9 +148,9 @@ public class TimelineStoreTests
         Assert.Equal(Min(8), Share(rebuilt.Time, C.Idle));
     }
 
-    /// <summary>Card 437 round 2: new work after a stop re-queues the card (Waiting for a slot again), live and rebuilt.</summary>
+    /// <summary>Card 437 round 2: new work after a stop re-queues the card, live and rebuilt. B126: with no run in the run queue that wait is Waiting on a teammate, not Waiting for a slot.</summary>
     [Fact]
-    public void NewWorkAfterAStop_IsWaitingForASlotAgain_LiveOrRebuilt()
+    public void NewWorkAfterAStop_WaitsAgain_LiveOrRebuilt()
     {
         var (db, store, p, _) = Rig(At("10:00"));
         using var __ = db;
@@ -163,7 +164,8 @@ public class TimelineStoreTests
         foreach (var t in new[] { TimeOf(store, card.Id, At("11:00")), Rebuilt() })
         {
             Assert.Equal(Min(30), Share(t.Time, C.Idle));            // 10:20 - 10:50, stopped
-            Assert.Equal(Min(15), Share(t.Time, C.WaitingForSlot));  // 10:00 - 10:05 and 10:50 - 11:00
+            Assert.Equal(Min(15), Share(t.Time, C.WaitingOnTeammate)); // 10:00 - 10:05 and 10:50 - 11:00
+            Assert.Equal(0, Share(t.Time, C.WaitingForSlot));
             Assert.Equal(0, Share(t.Time, C.Blocked));
         }
 
@@ -192,7 +194,8 @@ public class TimelineStoreTests
         }, "web/DeveloperAda", 8, At("11:20")));
         var t = TimeOf(store, store.Cards("web")[0].Id, At("11:20"));
         Assert.Equal(Min(30), Share(t.Time, C.Stalled)); // the run's own stall, not "from the last trail line" (10:01)
-        Assert.Equal(Min(1 + 20), Share(t.Time, C.WaitingForSlot)); // queued 10:00-10:01, and the lease wait 10:10-10:30
+        Assert.Equal(Min(20), Share(t.Time, C.WaitingForSlot)); // the lease wait 10:10-10:30
+        Assert.Equal(Min(1), Share(t.Time, C.WaitingOnTeammate)); // B126: told 10:00-10:01 with no run in the run queue
         Assert.Equal(Min(9 + 20), Share(t.Time, C.AgentWorking));
     }
 
@@ -265,7 +268,7 @@ public class TimelineStoreTests
         Assert.True(store.Card(card.Id)!.Rebuilt);
         Assert.All(store.Timeline(card.Id), l => Assert.True(l.Rebuilt));
         Assert.Equal(At("16:54"), BoardStore.Time(t.Time.StartedAt!));
-        Assert.Equal([C.NotStarted, C.WaitingForSlot, C.AgentWorking, C.Stalled, C.Blocked], t.Bands.Select(b => b.Category));
+        Assert.Equal([C.NotStarted, C.WaitingOnTeammate, C.AgentWorking, C.Stalled, C.Blocked], t.Bands.Select(b => b.Category)); // B126: no run queued
         Assert.Equal(Min(38), Share(t.Time, C.Stalled));
         Assert.Contains(t.Markers, m => m.Kind == TimeMarkers.WatchdogEnd && m.At == At("17:52"));
 
