@@ -28,7 +28,7 @@ import { closeCode, openCode } from '../codeDialog';
 import { gitRequest } from '../commitView';
 import TeamSyncBanner from './TeamSyncBanner.vue';
 import { renderMarkdown } from '../markdown';
-import { asksForApproval, questionMarkdown, questionOptions } from '../questionFormat';
+import { decisionLayout, questionMarkdown, type DecisionButton } from '../questionFormat';
 import { useImageAttachments } from '../imageAttachments';
 import { useNarrow } from '../narrowScreen';
 
@@ -135,8 +135,24 @@ const chooseOption = (d: Decision, o: { n: number; label: string; text: string }
   teamId: props.team.id, seq: d.seq,
   text: `Option ${o.n}: ${o.label}.${(answers.value[d.seq] ?? '').trim() ? ` ${answers.value[d.seq].trim()}` : ''}\n\n(You offered: ${o.text.replace(/\*\*/g, '')})`,
 }).then(() => { delete answers.value[d.seq]; }), `option-${o.n}`)();
+// B123: an option the asker gave (needs_decision options): its reply is the answer, with its index so core applies the
+// option's action (if any) first. Words typed in the box go along after the reply.
+const answerWith = (d: Decision, b: DecisionButton) => busyFor(`decision-${d.seq}`, () => api.call('bus.answer', {
+  teamId: props.team.id, seq: d.seq, optionIndex: b.optionIndex,
+  text: `${b.reply}${(answers.value[d.seq] ?? '').trim() ? `\n\n${answers.value[d.seq].trim()}` : ''}`,
+}).then(() => { delete answers.value[d.seq]; }), `option-${b.optionIndex}`)();
+const skipDecision = (d: Decision) => busyFor(`decision-${d.seq}`, () => api.call('bus.answer', { teamId: props.team.id, seq: d.seq, text: 'Skip it.' }), 'skip')();
+function clickButton(d: Decision, b: DecisionButton) {
+  if (b.kind === 'option') return answerWith(d, b);
+  if (b.kind === 'numbered') return chooseOption(d, { n: b.n!, label: b.label.replace(/^\d+\.\s*/, ''), text: b.text ?? b.reply });
+  if (b.kind === 'skip') return skipDecision(d);
+  return approveDecision(d);
+}
+const buttonKey = (b: DecisionButton) => (b.kind === 'option' ? `option-${b.optionIndex}` : b.kind === 'numbered' ? `option-${b.n}` : b.kind);
+const buttonTest = (b: DecisionButton) => (b.kind === 'option' ? `decision-choice-${b.optionIndex}` : b.kind === 'numbered' ? `decision-option-${b.n}` : `decision-${b.kind}`);
+const layout = (d: Decision) => decisionLayout(d);
 function startRemember(d: Decision) {
-  const first = d.question.split(/(?<=[.?!])\s/)[0].replace(/^(do you |can you |may i |shall i )/i, '').replace(/\?$/, '');
+  const first = (d.summary?.trim() || d.question).split(/(?<=[.?!])\s/)[0].replace(/^(do you |can you |may i |shall i )/i, '').replace(/\?$/, '');
   remembering.value[d.seq] = first.slice(0, 200);
 }
 const approveAlways = (d: Decision) => busyFor(`decision-${d.seq}`, async () => {
@@ -148,7 +164,7 @@ const approveAlways = (d: Decision) => busyFor(`decision-${d.seq}`, async () => 
   });
   delete remembering.value[d.seq];
 }, 'remember')();
-const rendered = (d: Decision) => renderMarkdown(questionMarkdown(d.question));
+const md = (text: string) => renderMarkdown(questionMarkdown(text));
 // An ask's remember choice: once, or always / ask (a choice saved on the row) scoped to this team or every team; declining may be "never".
 type Scope = 'team' | 'all';
 const askScope = ref<Record<number, Scope>>({});
@@ -333,18 +349,19 @@ defineExpose({ refresh, openWorkflows, openDocuments });
         </select>
       </div>
     </div>
-    <div v-for="d in decisions" :key="d.seq" class="decision" data-test="decision">
+    <!-- B123: header, the plain ask (summary), the answer buttons (+ Discuss), the free-text answer, then a collapsed
+         Details (the findings; for an old question everything but the paragraph that asks). -->
+    <div v-for="d in decisions" :key="d.seq" class="decision" data-test="decision" :data-decision-seq="d.seq">
       <p><strong>{{ d.from }} needs a decision</strong></p>
-      <div class="question md" data-test="decision-question" v-html="rendered(d)"></div>
+      <div class="question md" data-test="decision-question" v-html="md(layout(d).summary)"></div>
       <div class="row quick">
-        <template v-if="questionOptions(d.question).length">
-          <button v-for="o in questionOptions(d.question)" :key="o.n" class="primary" :title="o.text" v-change :data-test="`decision-option-${o.n}`"
-            :disabled="busy.is(`decision-${d.seq}`)" @click="chooseOption(d, o)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, `option-${o.n}`)" text="Answering…">{{ o.n }}. {{ o.label }}</BusyLabel></button>
-        </template>
-        <template v-else-if="asksForApproval(d.question)">
-          <button class="primary" v-change data-test="decision-approve" :disabled="busy.is(`decision-${d.seq}`)" @click="approveDecision(d)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, 'approve')" text="Approving…">Approve</BusyLabel></button>
-          <button v-change data-test="decision-always" title="Approve, and let the team go ahead with this kind of thing from now on without asking" @click="startRemember(d)">Always approve for this team…</button>
-        </template>
+        <span v-for="b in layout(d).buttons" :key="buttonKey(b)" class="choice">
+          <button :class="{ primary: b.kind !== 'skip' }" v-change :title="b.disabled ? b.disabledReason : b.text" :data-test="buttonTest(b)"
+            :disabled="b.disabled || busy.is(`decision-${d.seq}`)" @click="clickButton(d, b)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, buttonKey(b))" text="Answering…">{{ b.label }}</BusyLabel></button>
+          <small v-if="b.disabled" class="muted note" data-test="decision-choice-unavailable">{{ b.disabledReason }}</small>
+          <small v-else-if="b.actionNote" class="muted note" data-test="decision-choice-note">{{ b.actionNote }}</small>
+        </span>
+        <button v-if="layout(d).approval" v-change data-test="decision-always" title="Approve, and let the team go ahead with this kind of thing from now on without asking" @click="startRemember(d)">Always approve for this team…</button>
         <button data-test="decision-discuss" title="Talk it through with the Concierge first" @click="emit('discuss', d)">Discuss with the Concierge</button>
       </div>
       <div v-if="remembering[d.seq] !== undefined" class="row remember" data-test="decision-remember">
@@ -358,6 +375,10 @@ defineExpose({ refresh, openWorkflows, openDocuments });
         <input v-model="answers[d.seq]" class="grow" placeholder="Or answer in your own words…" data-test="decision-answer" @keydown.enter="(answers[d.seq] ?? '').trim() && answer(d)" />
         <button v-change data-test="decision-send" :disabled="!(answers[d.seq] ?? '').trim() || busy.is(`decision-${d.seq}`)" @click="answer(d)"><BusyLabel :busy="busy.is(`decision-${d.seq}`, 'answer')" text="Answering…">Answer</BusyLabel></button>
       </div>
+      <details v-if="layout(d).details" class="details" data-test="decision-details">
+        <summary>Details</summary>
+        <div class="question md" data-test="decision-details-body" v-html="md(layout(d).details)"></div>
+      </details>
     </div>
 
     <!-- The members (B076): equal tiles in a wrapping grid, like the Teams list; the 14px gaps right of and below each
@@ -441,7 +462,13 @@ h2 { font-size: 16px; margin: 0; }
 .question :deep(th), .question :deep(td) { border: 1px solid var(--line-soft); padding: 4px 8px; text-align: left; vertical-align: top; }
 .question :deep(th) { background: var(--warn-bg-soft); font-weight: 600; }
 .question :deep(td:first-child), .question :deep(th:first-child) { width: 28px; color: var(--muted); }
-.quick { gap: 6px; flex-wrap: wrap; }
+.quick { gap: 6px; flex-wrap: wrap; align-items: flex-start; }
+/* B123: an action option's one-line note (what it allows) or why it is off sits under its button. */
+.choice { display: inline-flex; flex-direction: column; gap: 2px; max-width: 320px; }
+.choice .note { font-size: 11.5px; line-height: 1.3; }
+.details { margin-top: 6px; font-size: 13px; }
+.details > summary { cursor: pointer; color: var(--ink-soft); }
+.details > .question { margin-top: 4px; }
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .thumb { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }

@@ -107,8 +107,9 @@ export function initials(name: string): string {
  */
 export type MemberState = 'decision' | 'blocked' | 'failed' | 'running' | 'waiting' | 'stopped' | 'idle';
 
-export function memberStateOf(card: Pick<AgentCard, 'state' | 'attention'> & Partial<Pick<AgentCard, 'lastRunFailureClass'>>): MemberState {
-  if (card.attention === 'decision') return 'decision';
+export function memberStateOf(card: Pick<AgentCard, 'state' | 'attention'> & Partial<Pick<AgentCard, 'lastRunFailureClass' | 'decisionId'>>): MemberState {
+  // B123: an open decision (decisionId) waits on the person whatever else the card says.
+  if (card.attention === 'decision' || card.decisionId != null) return 'decision';
   if (card.attention === 'blocked') return 'blocked';
   // A run the person stopped is recorded failed with class "stopped": it is stopped, whichever the core sent.
   const stopped = card.attention === 'stopped' || (card.attention === 'failed' && card.lastRunFailureClass === 'stopped');
