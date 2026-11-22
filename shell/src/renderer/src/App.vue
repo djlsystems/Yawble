@@ -523,7 +523,7 @@ function askEmbedTitle(current: string): Promise<string | null> {
 const embedState = (): EmbedNavState => ({
   view: view.value, conversations: conversations.value, teams: teams.value, conversationId: conversationId.value, teamId: selected.value,
   slots: overview.value?.slots ?? null, readOnly: readOnly.value, removing: removingChat.value, openWorkflows: openWorkflows.value,
-  terminalOpen: terminalPane.open, settingsTab: prefTab.value,
+  terminalOpen: terminalPane.open, settingsTab: prefTab.value, menuBar: !menuInDrawer.value,
 });
 if (embed) {
   let bridge: { dispose(): void } | null = null;

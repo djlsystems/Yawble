@@ -53,7 +53,15 @@ export interface EmbedNavState {
   terminalOpen?: boolean;
   /** Settings' tab (App.vue prefTab): Help is active while Settings shows System. */
   settingsTab?: string | null;
+  /**
+   * The menu bar is drawn (App.vue: not menuInDrawer, i.e. not a phone). It already has Terminal (View) and Help, so
+   * the nav leaves those two out; on a phone, with no menu bar, they are the drawer's and the nav keeps them.
+   */
+  menuBar?: boolean;
 }
+
+/** The two places that stand in for the menu bar on a phone (the drawer's bottom items). */
+const MENU_BAR_PLACES: readonly EmbedPlaceId[] = ['terminal', 'help'];
 
 // The order of the sidebar's places, then the two the phone's drawer has at its bottom (App.vue DRAWER_COMMANDS): the
 // drawer's Terminal and its About Yawble (Help). The drawer's theme items are the cloud's own; Check for updates and
@@ -106,7 +114,7 @@ export function buildNav(s: EmbedNavState): EmbedNav {
     return s.view === id;
   };
   return {
-    places: PLACES.filter((p) => placeAllowed(p.id, s.readOnly))
+    places: PLACES.filter((p) => placeAllowed(p.id, s.readOnly) && !(s.menuBar && MENU_BAR_PLACES.includes(p.id)))
       .map((p) => ({ ...p, badge: badgeOf(p.id), active: activeOf(p.id), disabled: false })),
     teams: s.teams.map((t) => ({
       id: t.id,

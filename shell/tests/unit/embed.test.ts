@@ -104,6 +104,19 @@ describe('buildNav: the sidebar as data', () => {
     expect(active({ view: 'settings', settingsTab: 'agents' })).toEqual([]);
     expect(active({ view: 'monitor', settingsTab: 'system' })).toEqual(['monitor']);
   });
+  it('with the menu bar drawn (wide), Terminal and Help are left out: the menu has them; on a phone they stay', () => {
+    const ids = (s: Partial<EmbedNavState>) => buildNav({ ...base(), ...s }).places.map((p) => p.id);
+    expect(ids({ menuBar: true })).not.toContain('terminal');
+    expect(ids({ menuBar: true })).not.toContain('help');
+    expect(ids({ menuBar: true })).toEqual(EMBED_PLACE_IDS.filter((id) => id !== 'terminal' && id !== 'help'));
+    expect(ids({ menuBar: false }).slice(-2)).toEqual(['terminal', 'help']);
+    // A read-only viewer on a phone still gets Help and never Terminal.
+    expect(ids({ menuBar: false, readOnly: true }).slice(-2)).toEqual(['logs', 'help']);
+    // App.vue passes the menu bar's own condition.
+    const app = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
+    expect(app).toContain('menuBar: !menuInDrawer.value');
+    expect(app).toContain('<MenuBar v-if="!menuInDrawer"');
+  });
   it('B117: placeAllowed leaves only Terminal out, and only for a read-only viewer', () => {
     for (const id of EMBED_PLACE_IDS) {
       expect(placeAllowed(id, false), id).toBe(true);
