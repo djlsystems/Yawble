@@ -116,7 +116,7 @@ public class SignInTests
         var fake = new FakeHost(TargetOs.MacOS, "/Users/alice");
         var env = new HostEnvironment(TargetOs.MacOS, "/Users/alice", [], [], new Dictionary<string, string>());
         var tool = new Credentials.FakeSecurityTool().Set(ClaudeHostSession.KeychainService, "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-FAKE\"}}");
-        SignInStatus Status() => SignInCatalog.Claude(new DetectionHost(env, fake, fake) { CredentialStore = new MacHostCredentialReader(tool) }).Status;
+        string Status() => SignInCatalog.Claude(new DetectionHost(env, fake, fake) { CredentialStore = new MacHostCredentialReader(tool) }).Status;
 
         Assert.Equal(SignInStatus.SignedIn, Status());
         Assert.Equal(["find-generic-password", "-s", "Claude Code-credentials"], Assert.Single(tool.Calls));
