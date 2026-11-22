@@ -69,3 +69,47 @@ Each run as `Yawble.Core.Tests.exe -class "Yawble.Core.Tests.<class>"`:
   `core/src/Yawble.Core/Guardrail` nor `core/tests/Yawble.Core.Tests/Guardrail` changed since base `d6756c0`
   (`git diff d6756c0 HEAD --stat -- core/src/Yawble.Core/Guardrail core/tests/Yawble.Core.Tests/Guardrail` is empty), so it is the same
   code and the same failure on base. Environmental, not caused by B124.
+
+## 4. Full core suite once, under the heavy-work lease: PASS (no new failures)
+
+`Yawble.Core.Tests.exe -longRunning 120 -xml %TEMP%\b124-full.xml` at `81338ca` (lease 16:27-16:40 UTC, released):
+**Total 4274, Failed 211, Skipped 117, Errors 0, 721 s.** 211 is inside the sandbox's 200-305 environmental baseline.
+
+- No failure in any B124 class: Credentials.*, Agents.SignInTests, Policy.NeverEmitTests, NameLeakTests all pass.
+- The failures are the sandbox's known kinds: git in the sandbox ("Filename too long", "Could not read from remote
+  repository", so TeamGit checks report "could not run"), loopback/named pipes (CompanionServer*, IpcServer*,
+  IpcEndpoint*, WebsiteHost*, GuardrailCheckTests' IPv4 decoy), and child processes (CoreProcessTests). Largest groups:
+  ConciergeActionTests 31, CompanionServerTests 22, TeamReposTests 11, TeamSyncTests 11, TeamBranchBlockingTests 9.
+- The five failing tests whose names contain "Credential" (TeamReposTests x2, TeamPublishTests x1,
+  ConciergeReadToolsTests x1, plus GuardrailCheckTests' decoy) are git-remote or loopback tests in code B124 did not touch.
+- ConciergeReadToolsTests (7) is not named in baseline-test-report.md; its failing tests are the TeamGit ones, failing on
+  git fetch in the sandbox. The only change since base in ConciergeReadTools.cs is B123's `DecisionText` (f3a6bee),
+  which these tests do not reach. Not B124.
+- No test hung: the only long-running report was `Bus.Card478B104VerifyTests.TheLimit_DefaultsTo200_IsClamped_AndNeverCutsAnOpenRow`
+  (over 5 min, then finished; it is not a B124 test).
+
+## 5. Mac mini checklist for the person (signed Mac build): owed
+
+The sandbox is Windows, so the real `/usr/bin/security` run and macOS's Keychain dialog cannot be checked here.
+On the Mac mini, with a Developer ID–signed build that contains `93f3093` + `2638622`:
+
+1. Make the old trust go away, so the test is fair: open **Keychain Access**, find the login item
+   **Claude Code-credentials**, **Get Info > Access Control**, and remove **yawble-core** from the list
+   (or wait until Claude Code has refreshed its token at least once since the update, which rewrites the item and resets the list).
+2. Quit and start Yawble. **Settings > Agents**: Claude Code shows as signed in ("the login Keychain item
+   "Claude Code-credentials"").
+3. Start a team and let agents run for a while, long enough to cross a Claude token refresh (the access token lives
+   about 8 hours; or sign in again in a terminal with `claude` mid-run to force a rewrite of the item).
+4. Throughout: **no** macOS dialog "yawble-core wants to use … Claude Code-credentials" appears, at start, during runs,
+   or after the refresh. Agents keep getting model answers after the refresh (no "not signed in" error).
+5. Open the run's **guardrail check** from a run: it still shows `credstore.keychain:Claude Code-credentials` as
+   **Blocked** (a run cannot find the item).
+6. Optional: in Keychain Access, the item's Access Control list was not changed by Yawble (it lists only what Claude
+   Code put there), and the app log has lines "claude sign-in: ..." but never a token value.
+
+If a dialog appears at step 4 or the check at step 5 is not Blocked, B124 fails on the Mac: report which step.
+
+
+## Verdict
+
+**PASS** on everything a Windows sandbox can check (sections 1-4). The real macOS behaviour (no Keychain dialog across a token refresh, guardrail still Blocked) is owed to the Mac mini checklist in section 5.
