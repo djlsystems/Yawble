@@ -166,13 +166,13 @@ stand-in CLIs and fake model servers. The tests that check the CLIs installed on
 
 `yawble-companion` (installed with the app in `resources/bin/`) lets another program on the same computer, such as Claude Code,
 see and work with your teams through the running app: as an MCP server (`yawble-companion mcp`) or as a CLI (`yawble-companion status`,
-`yawble tell <team> <instruction>`, `yawble help`). It talks only to the app on this computer, over a per-launch named
+`yawble-companion tell <team> <instruction>`, `yawble-companion help`). It talks only to the app on this computer, over a per-launch named
 pipe (Windows) or unix socket, and nothing of it is reachable over the Cloud Link.
 
 1. **Pair** once per program, with the app running:
 
    ```bash
-   "<install>\resources\bin\yawble.exe" pair --name claude-code --level act
+   "<install>\resources\bin\yawble-companion.exe" pair --name claude-code --level act
    ```
 
    The terminal and the Yawble window show the same 6-character code; approve in the window only when they match.
@@ -180,7 +180,7 @@ pipe (Windows) or unix socket, and nothing of it is reachable over the Cloud Lin
 2. **Add it to Claude Code.** Settings > Companion shows the exact command with a Copy button:
 
    ```bash
-   claude mcp add --scope user yawble -- "<install>\resources\bin\yawble.exe" mcp
+   claude mcp add --scope user yawble -- "<install>\resources\bin\yawble-companion.exe" mcp
    ```
 
 Levels are cumulative: `read` (status, activity, documents, backlog, board, git state), `act` (also tell a team,
