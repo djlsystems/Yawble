@@ -45,3 +45,21 @@ Commit 2ecf6f4 merged; `core\tests\Yawble.Core.Tests\bin\Debug\net10.0\Yawble.Co
 | Yawble.Core.Tests.Launch.RunSupervisorTests | 8 | 0 | 4 (OS-specific, skipped as before) |
 | Yawble.Core.Tests.Launch.LauncherTests | 19 | 0 | 2 |
 | Yawble.Core.Tests.NameLeakTests | 2 | 0 | 0 |
+
+## 4. Full core suite
+
+(running)
+
+## 5. Mac mini checklist (the real macOS path)
+
+Use a build of the core that contains 2ecf6f4, on the Mac mini, with any member.
+
+1. Give the member an instruction whose agent runs a build that hangs, for example: create a project whose build target runs `<Exec Command="sleep 600" />`, then run `dotnet build -m:4 -nodeReuse:false` and end your turn without waiting for it. Alternatively, have the agent start the build in the background (`dotnet build -m:4 -nodeReuse:false &`) and exit.
+2. While the run is live, note the run's `yr-*` folder (under `$(getconf DARWIN_USER_TEMP_DIR)`) and the build's pids: `ps -axo pid,ppid,pgid,etime,command | grep -E 'dotnet|MSBuild|sleep|zsh'`.
+3. End the run: let the CLI exit on its own (the B122 case), and repeat once with Stop from the app.
+4. 10 s after the run shows as done:
+   - `ps -axo pid,ppid,pgid,etime,command | grep -E 'dotnet|MSBuild|sleep|zsh'`: no process from the run may be left. That includes none with ppid 1 and none in the build's old pgid. The core's own processes and unrelated dotnet servers are not counted.
+   - `lsof +D "<the yr-* folder>"`: the folder must be gone ("No such file or directory"), or show no open files.
+5. Run record: `sqlite3 <core db> "select run_number, end, tree_survived, reason from run_records order by run_number desc limit 2;"` must show `tree_survived = 0` and no "still running after SIGTERM and SIGKILL" reason.
+6. Negative check (optional): make a process that cannot be killed, for example one stopped in uninterruptible I/O. This is hard to stage. If it can be staged, `tree_survived = 1` and the reason must name the count.
+7. Also check that the core itself and other members' runs kept running (the core's group is never signalled). Run `MacProcessTableListsThisProcess` (`-class Yawble.Core.Tests.Launch.RunTreeTests`): it must pass on macOS, not skip.
