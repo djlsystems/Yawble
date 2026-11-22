@@ -202,6 +202,7 @@ public sealed class RunGateway : IAsyncDisposable
         var credential = _spec.HostSignIn ? PassThrough : await CredentialForAsync(vhost);
         if (credential.Problem is not null)
         {
+            if (IsGrok(vhost)) _host.GrokSignIn.Refused(_host.Log.Now, credential.Problem, _host.Credentials.StoredGrokSession());
             Write(GatewayEventKinds.CredentialProblem, false, vhost, head.Method, pathAndQuery, 401, credential.Problem);
             await HttpWire.RespondJsonAsync(s, 401, "Unauthorized", Error(credential.Problem), keepAlive, ct);
             return keepAlive;
@@ -322,6 +323,7 @@ public sealed class RunGateway : IAsyncDisposable
             Write(GatewayEventKinds.Forward, false, vhost, head.Method, pathAndQuery, status,
                 credential.Header is null ? $"credential: {credential.Kind} <redacted>" : $"credential swapped: {credential.Kind} <redacted>");
             if (status == 401) UpstreamRefused(vhost, head.Method, pathAndQuery);
+            else if (status is >= 200 and < 300 && IsGrok(vhost)) _host.GrokSignIn.Succeeded();
             if (status == 429)
                 Write(GatewayEventKinds.RateLimited, false, vhost, head.Method, pathAndQuery, 429,
                     RetryAt(response, _host.Log.Now).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
@@ -428,6 +430,8 @@ public sealed class RunGateway : IAsyncDisposable
     /// <summary>An upstream 401: the card reason for the person, and for Grok a refresh by the keeper.</summary>
     private void UpstreamRefused(string vhost, string method, string target)
     {
+        // The session refused, read before a renewal below can replace it.
+        var refused = IsGrok(vhost) ? _host.Credentials.StoredGrokSession() : null;
         string reason;
         if (_spec.ClaudeFromHost && vhost.Equals(Vhosts.Model, StringComparison.OrdinalIgnoreCase))
         {
@@ -466,8 +470,12 @@ public sealed class RunGateway : IAsyncDisposable
             reason = "the Grok sign-in on this computer was refused by xAI: the app asked grok to renew it; if this repeats, run 'grok' in your own terminal and sign in";
             _ = _host.Credentials.RefreshGrokAsync(force: true);
         }
+        if (IsGrok(vhost)) _host.GrokSignIn.Refused(_host.Log.Now, reason, refused);
         Write(GatewayEventKinds.CredentialProblem, false, vhost, method, target, 401, reason);
     }
+
+    /// <summary>grok.yawble.internal: Grok's own sign-in (not the xAI API key vhost).</summary>
+    private static bool IsGrok(string vhost) => vhost.Equals(Vhosts.Grok, StringComparison.OrdinalIgnoreCase);
 
     private async Task BusAsync(Stream s, WireRequest head, string path, byte[] body, bool keepAlive, CancellationToken ct)
     {
