@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Nodes;
+using System.Globalization;
+using System.Text.Json.Nodes;
 using Xunit;
 using Yawble.Core.Bus;
 using Yawble.Core.Launch;
@@ -95,7 +96,7 @@ public class B131VerifyTests
         await r.Runner.WhenIdleAsync();
         var run = Assert.Single(r.Store.RecentRuns(r.Team, id, 10));
         Assert.True(run.Status == Yawble.Core.Scripts.Running.ScriptRunStatus.Succeeded, $"{run.Status}: {run.FailedStepId}: {run.Reason}");
-        Assert.Equal(trigger.Id.ToString(), run.Input!["triggerId"]!.GetValue<string>());
+        Assert.Equal(trigger.Id.ToString(CultureInfo.InvariantCulture), run.Input!["triggerId"]!.GetValue<string>());
         Assert.Equal("every", run.Input["kind"]!.GetValue<string>());
         Assert.NotNull(run.Input["firedAt"]);
         Assert.Equal(2, r.Actions.Calls.Count(c => c.Use == "sms"));
@@ -130,26 +131,28 @@ public class B131VerifyTests
         await r.Call("scripts.save", new JsonObject { ["document"] = JsonNode.Parse(ScriptSamples.InboxSmsAlert) });
         var beta = await r.Bus.CreateTeamAsync("Beta", ct: Ct);
         var ids = new[] { await Add(r, r.Team, "One", "A", "mail-a"), await Add(r, r.Team, "Two", "B", "mail-b"), await Add(r, beta, "One", "C", "mail-c") };
+        var triggers = new List<TriggerRow>();
+        foreach (var id in ids)
+            triggers.Add(await r.Bus.SaveTriggerAsync(new TriggerDraft(null, id, "poll", new TriggerSchedule(TriggerKinds.Every, 60, null, null, null), "Poll", true, true), Ct));
         r.Actions.Hold = true;
         try
         {
-            var runs = ids.Select(id => r.Runner.Start(id, "tell", null)).ToArray();
-            Assert.All(runs, x => Assert.True(x.Started, x.Reason));
+            foreach (var trigger in triggers) await r.Bus.RunTriggerNowAsync(trigger.Id, Ct);
             await Wait.UntilAsync(() => Volatile.Read(ref r.Actions.Held) == 3, "three real engine runs held in mail");
             var changed = JsonNode.Parse(ScriptSamples.InboxSmsAlert)!.AsObject(); changed["description"] = "version two";
             await r.Call("scripts.save", new JsonObject { ["document"] = changed });
             Assert.False(r.Runner.Start(ids[0], "tell", null).Started);
             r.Actions.Gate.TrySetResult(); await r.Runner.WhenIdleAsync();
-            foreach (var (id, run) in ids.Zip(runs))
+            var rows = ids.Select(id => Assert.Single(r.Store.RecentRuns(null, id, 10), row => row.Trigger.StartsWith("trigger:"))).ToArray();
+            foreach (var (id, row) in ids.Zip(rows))
             {
-                var row = r.Store.Run(run.RunId!.Value)!;
                 Assert.Equal((Yawble.Core.Scripts.Running.ScriptRunStatus.Succeeded, 1), (row.Status, row.Version));
                 Assert.Equal("2026-11-23T10:00:00Z", r.Store.State(id).Variables["lastSeen"]!.GetValue<string>());
                 Assert.True(File.Exists(Path.Combine(r.Runner.MemberFolder(id), "run.log")));
             }
             Assert.Equal(3, ids.Select(r.Runner.MemberFolder).Distinct().Count());
-            Assert.Equal(new[] { "A", "B", "C" }, runs.Select(x => r.Store.Run(x.RunId!.Value)!.Settings!["folder"]!.GetValue<string>()));
-            Assert.Equal(new[] { "mail-a", "mail-b", "mail-c" }, runs.Select(x => r.Store.Run(x.RunId!.Value)!.Bindings!["mail"]!.GetValue<string>()));
+            Assert.Equal(new[] { "A", "B", "C" }, rows.Select(x => x.Settings!["folder"]!.GetValue<string>()));
+            Assert.Equal(new[] { "mail-a", "mail-b", "mail-c" }, rows.Select(x => x.Bindings!["mail"]!.GetValue<string>()));
         }
         finally { r.Actions.Gate.TrySetResult(); }
     }
