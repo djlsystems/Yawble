@@ -553,7 +553,8 @@ export interface ConnectionField { key: string; label: string; secret: boolean; 
 /** 'website' is a login kept in the app window's own session: one non-secret field `site`, no secret.
  * 'oauth' is a browser sign-in with the person's own app: secrets access_token, refresh_token, client_secret (masked); shown in full:
  * client_id, authorize_endpoint, token_endpoint, granted_scopes (space-separated), expires_at and provider (when one was given). */
-export type ConnectionKind = 'secret' | 'oauth' | 'website';
+/** 'email': a mailbox over IMAP and SMTP (fields address, imapHost, imapPort, smtpHost, smtpPort, user; password secret). */
+export type ConnectionKind = 'secret' | 'oauth' | 'website' | 'email';
 export interface Connection {
   id: number; name: string; kind: ConnectionKind; fields: ConnectionField[];
   status: 'untested' | 'works' | 'needs_reconnect'; statusReason: string | null; testedAt: string | null; usedBy: string[];

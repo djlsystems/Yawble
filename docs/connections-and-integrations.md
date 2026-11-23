@@ -259,11 +259,39 @@ removal warns you, and those tasks then refuse to start until they are bound to 
 | **OAuth sign-in** | APIs | Your own OAuth app (its client ID, and a secret if it has one). The app finds the provider's sign-in and token addresses from its metadata or the API's spec, asks for the scopes the allowed actions need, and opens your browser. Register the redirect address `http://127.0.0.1/callback` (any port) in your app. |
 | **MCP OAuth** | Remote MCP servers ("The server signs me in") | The app finds the server's sign-in service, registers itself there, and opens your browser. |
 | **Website login** | Websites | You sign in once in a window of this app, then press **Done**. The session stays in that window on this computer. Agents use the site, never your password. |
+| **Email account** | Mailboxes (IMAP and SMTP) | The address, the IMAP and SMTP servers and ports, a user name and a password. See [Email accounts](#email-accounts). |
 
 OAuth sign-ins use PKCE and a random state, accept only `https` addresses (or `http` to this computer), and follow
 no redirects. Tokens are refreshed on this computer shortly before they expire. When a refresh is refused, the
 Connection is marked **needs reconnect** and you sign in again. Changing an OAuth app's client ID or addresses
 drops its old tokens.
+
+### Email accounts
+
+An **Email account** Connection signs in to one mailbox over IMAP and SMTP. Add one in
+**Settings > Integrations > Connections** with **+ Add connection**, then **Email account**.
+
+| Field | What it is |
+|---|---|
+| **Email address** | The mailbox's address, e.g. `name@example.com`. It is also the Connection's name when you give none. |
+| **IMAP server** and **Port** | Where mail is read, e.g. `imap.example.com` and `993`. |
+| **SMTP server** and **Port** | Where mail is sent, e.g. `smtp.example.com` and `465`. |
+| **User name** | The name to sign in with. Left empty, it is the email address. |
+| **Password** | Secret. It is kept in the operating system's credential store, like every Connection secret, and never in the database or a log. |
+
+- **Gmail** fills in `imap.gmail.com` port 993 and `smtp.gmail.com` port 465. Gmail needs a Google app password,
+  which needs 2-Step Verification on the Google account. The form says so beside the password.
+- Ports 993 (IMAP) and 465 (SMTP) use TLS from the start. Any other port must offer STARTTLS. Only a server on this
+  computer (`localhost`, `127.0.0.1`, `::1`) may be used without TLS. Server certificates are checked as the
+  operating system checks them.
+- **Test** signs in to IMAP and lists the folders, then signs in to SMTP and disconnects. It sends nothing. When both
+  sign-ins succeed, the status is **works** and says how many folders there are. When either fails (the password is
+  refused, a server cannot be reached, or no secure connection can be made), the status is **needs reconnect** and
+  says what failed.
+- Editing keeps the stored password when you leave the box empty. A new address, server, port or user name with no
+  new password makes the Connection **untested** again.
+- An email account cannot sign in a web API or an MCP server.
+- Over [Cloud Link](#over-cloud-link) an email account is not shown or changed, like every Connection.
 
 ## What agents see
 

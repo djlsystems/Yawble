@@ -21,6 +21,8 @@
     <PackageVersion Include="Cronos" Version="0.13.0" />
     <!-- YAML OpenAPI specs are read into a JSON tree (Integrations/OpenApiReader.cs). -->
     <PackageVersion Include="YamlDotNet" Version="16.3.0" />
+    <!-- Email Connections (IMAP and SMTP) and the Email integration: Email/MailKitClientFactory.cs. MIT; cross-platform. -->
+    <PackageVersion Include="MailKit" Version="5.0.0" />
   </ItemGroup>
 
   <ItemGroup Label="Test">

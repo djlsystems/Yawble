@@ -118,7 +118,7 @@ onBeforeUnmount(() => off?.());
     <p v-if="remote" class="muted" data-test="connections-remote">Connections are managed on the computer itself.</p>
     <template v-else>
       <p class="muted small">
-        The keys and tokens your APIs sign in with, and your website logins. They stay on this computer, are shown masked, and are never given to an agent.
+        The keys and tokens your APIs sign in with, your website logins, and your email accounts. They stay on this computer, are shown masked, and are never given to an agent.
       </p>
       <LoadingNote v-if="!loaded" text="Loading connections…" />
       <p v-if="error" class="error" data-test="connections-error">{{ error }}</p>
@@ -126,7 +126,7 @@ onBeforeUnmount(() => off?.());
       <div v-for="c in list" :key="c.id" class="card" :data-test="`connection-${c.id}`">
         <header class="row">
           <div class="grow">
-            <b>{{ c.name }}</b> <span class="muted small" data-test="connection-kind">{{ c.kind === 'website' ? 'Website login' : c.kind === 'oauth' ? 'OAuth sign-in' : 'API key or token' }}</span>
+            <b>{{ c.name }}</b> <span class="muted small" data-test="connection-kind">{{ c.kind === 'website' ? 'Website login' : c.kind === 'oauth' ? 'OAuth sign-in' : c.kind === 'email' ? 'Email account' : 'API key or token' }}</span>
             <div v-if="signingIn === c.id" class="small" data-test="connection-signin-note">A sign-in window is open. Sign in there, then press Done.</div>
             <div class="small mono" data-test="connection-fields">
               <span v-for="f in c.fields" :key="f.key" class="fld">{{ f.label }}: {{ f.shown ?? 'not set' }}</span>
