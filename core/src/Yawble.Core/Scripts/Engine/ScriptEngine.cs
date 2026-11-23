@@ -289,8 +289,8 @@ public sealed class ScriptEngine(TimeProvider? clock = null)
                 "switch" => Pick("on"),
                 "forEach" => Pick("items"),
                 "integration" => new JsonObject { ["use"] = step.Text("use"), ["action"] = step.Text("action"), ["args"] = ev.EvaluateValue(step["args"]) ?? new JsonObject() },
-                "file.writeAllText" or "file.appendLine" => Pick("path", "text"),
-                "file.readAllText" or "file.readLines" or "file.exists" or "file.delete" => Pick("path"),
+                ScriptStepTypes.FileWriteAllText or ScriptStepTypes.FileAppendLine => Pick("path", "text"),
+                ScriptStepTypes.FileReadAllText or ScriptStepTypes.FileReadLines or ScriptStepTypes.FileExists or ScriptStepTypes.FileDelete => Pick("path"),
                 "log" => Pick("text"),
                 "end" => step["outputs"] is { } o ? new JsonObject { ["outputs"] = ev.EvaluateValue(o) } : null,
                 _ => null,
@@ -334,34 +334,34 @@ public sealed class ScriptEngine(TimeProvider? clock = null)
                 }
                 case "integration":
                     return (await IntegrationAsync(step, (JsonObject)input!), next);
-                case "file.writeAllText" or "file.appendLine":
+                case ScriptStepTypes.FileWriteAllText or ScriptStepTypes.FileAppendLine:
                 {
                     var path = Text(input, "path");
                     var text = Text(input, "text");
                     var (target, real) = _files.ForWrite(path);
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                    if (step.Type == "file.writeAllText") await File.WriteAllTextAsync(target, text, _ct);
+                    if (step.Type == ScriptStepTypes.FileWriteAllText) await File.WriteAllTextAsync(target, text, _ct);
                     else await File.AppendAllTextAsync(target, text + "\n", _ct);
-                    if (_files.DryRun) await LogAsync($"would {(step.Type == "file.writeAllText" ? "write" : "append a line to")} {real} (dry run: {target})");
+                    if (_files.DryRun) await LogAsync($"would {(step.Type == ScriptStepTypes.FileWriteAllText ? "write" : "append a line to")} {real} (dry run: {target})");
                     return (new JsonObject { ["path"] = real }, next);
                 }
-                case "file.readAllText":
+                case ScriptStepTypes.FileReadAllText:
                 {
                     var file = _files.ForRead(Text(input, "path"));
                     if (!File.Exists(file)) throw new ScriptStepException($"'{Text(input, "path")}' does not exist");
                     var text = await File.ReadAllTextAsync(file, _ct);
                     return (Result(step, JsonValue.Create(text)), next);
                 }
-                case "file.readLines":
+                case ScriptStepTypes.FileReadLines:
                 {
                     var file = _files.ForRead(Text(input, "path"));
                     if (!File.Exists(file)) throw new ScriptStepException($"'{Text(input, "path")}' does not exist");
                     var lines = await File.ReadAllLinesAsync(file, _ct);
                     return (Result(step, new JsonArray(lines.Select(l => (JsonNode?)l).ToArray())), next);
                 }
-                case "file.exists":
+                case ScriptStepTypes.FileExists:
                     return (Result(step, JsonValue.Create(File.Exists(_files.ForRead(Text(input, "path"))))), next);
-                case "file.delete":
+                case ScriptStepTypes.FileDelete:
                 {
                     var path = Text(input, "path");
                     if (_files.DryRun)
