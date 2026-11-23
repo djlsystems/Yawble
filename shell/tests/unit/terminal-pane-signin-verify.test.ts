@@ -38,8 +38,8 @@ describe('B128 verify: Grok banner with the core\'s real detail', () => {
     for (const d of CORE_DETAILS) expect(await banner(d)).toContain(FIX);
   });
 
-  // FAULT (card 578): the fix text shows twice, once in the heading and again at the start of the detail.
-  it.fails('shows the fix text once', async () => {
+  // Was the fault on card 578 (the fix text twice); fixed by card 577 (TerminalPane drops the heading from the detail).
+  it('shows the fix text once', async () => {
     for (const d of CORE_DETAILS) expect((await banner(d)).split(FIX).length - 1).toBe(1);
   });
 });
