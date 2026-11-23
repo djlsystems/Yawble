@@ -29,7 +29,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
     Connections.ConnectionService? connections = null, Func<HttpMessageHandler>? httpHandler = null,
     Func<HttpMessageHandler>? apiCallHandler = null, Func<HttpMessageHandler>? mcpHandler = null,
     IBrowser? browser = null, Func<IRedirectReceiver>? redirect = null,
-    Func<IReadOnlyList<McpConfigSource>>? mcpSources = null, IWebsiteHost? websites = null)
+    Func<IReadOnlyList<McpConfigSource>>? mcpSources = null, IWebsiteHost? websites = null, Email.IMailClientFactory? mail = null)
 {
     /// <summary>The shared sign-ins (null in a host that has no credential store: the connection methods then say so).</summary>
     private Connections.ConnectionService Conns => connections ?? throw new RpcException("unavailable", "connections are not available here");

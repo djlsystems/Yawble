@@ -62,6 +62,8 @@ public sealed partial class IntegrationService
     private async Task<JsonNode> ConnectionSaveAsync(JsonObject? p, CancellationToken ct)
     {
         if (OptStr(p, "kind") == "website") return await WebsiteConnectionSaveAsync(p);
+        // an email account is saved as one, also when an edit does not say its kind
+        if (OptStr(p, "kind") == Email.EmailConnection.Kind || OptLong(p, "id") is { } mid && Conns.Get(mid) is { Kind: Email.EmailConnection.Kind }) return EmailConnectionSave(p);
         // a browser sign-in is edited as one: its tokens are the flow's (kept, or dropped when the app or the addresses change)
         if (OptLong(p, "id") is { } eid && Conns.Get(eid) is { Kind: "oauth" }) return await OAuthConnectionSaveAsync(eid, p, ct);
         if (OptStr(p, "kind") == "oauth") throw new ArgumentException("an OAuth sign-in is made by signing in: use Sign in");
@@ -230,6 +232,7 @@ public sealed partial class IntegrationService
             {
                 var picked = Conns.Get(cid) ?? throw new ArgumentException("no such connection");
                 if (picked.Kind == "website") throw new ArgumentException("that connection is a website login: it signs in a website, not a web API");
+                if (picked.Kind == Email.EmailConnection.Kind) throw new ArgumentException("that connection is an email account: it signs in to a mailbox, not a web API");
             }
         }
 
@@ -1103,6 +1106,7 @@ public sealed partial class IntegrationService
     {
         var view = Conns.Get(id) ?? throw new ArgumentException("no such connection");
         if (view.Kind == "website") return WebsiteConnectionTest(id);
+        if (view.Kind == Email.EmailConnection.Kind) return await EmailConnectionTestAsync(view, ct);
         if (view.Kind == "oauth" && await OAuthConnectionTestAsync(view, ct) is { } tested) return tested;
         const string Unclear = "unclear";
         var outcomes = new List<(string Status, string Reason)>();
