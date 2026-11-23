@@ -78,11 +78,19 @@ internal sealed class FakeEngine : IScriptRunEngine
     public string? FailAt { get; set; }
     public string? HoldAt { get; set; }
     public TaskCompletionSource Gate { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public TaskCompletionSource Holding { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource Holding { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _held;
+
+    /// <summary>How many runs are waiting at <see cref="HoldAt"/> now.</summary>
+    public int Held => Volatile.Read(ref _held);
+
+    /// <summary>Whether runs also keep lastSeen = &lt;folder setting&gt;:&lt;runs&gt; (the per-member state test).</summary>
+    public bool KeepsLastSeen { get; set; }
 
     public async Task<ScriptRunResult> RunAsync(ScriptRunRequest request, IScriptRunJournal journal, CancellationToken ct)
     {
         lock (Requests) Requests.Add(request);
+        var mine = request.Settings["folder"]?.GetValue<string>() ?? "";
         var json = JsonNode.Parse(FakeCheckerJson(request.Document)) as JsonObject ?? [];
         var steps = (json["steps"] as JsonArray ?? []).OfType<JsonObject>().Select(s => s["id"]!.GetValue<string>()).ToList();
         var start = request.ResumeFrom is { } cp && Seam.NextOf(cp) is { } next ? steps.IndexOf(next) : 0;
@@ -91,8 +99,10 @@ internal sealed class FakeEngine : IScriptRunEngine
             var id = steps[i];
             if (HoldAt == id)
             {
+                Interlocked.Increment(ref _held);
                 Holding.TrySetResult();
-                await Gate.Task.WaitAsync(ct);
+                try { await Gate.Task.WaitAsync(ct); }
+                finally { Interlocked.Decrement(ref _held); }
             }
             var at = DateTimeOffset.UtcNow;
             await journal.StepStartedAsync(id, "set", new JsonObject { ["step"] = id });
@@ -103,8 +113,16 @@ internal sealed class FakeEngine : IScriptRunEngine
         }
         var saved = (JsonObject)request.SavedVariables.DeepClone();
         saved["runs"] = (saved["runs"]?.GetValue<int>() ?? 0) + 1;
+        // What a poller keeps: its own lastSeen, and a line in its own data folder's run.log.
+        if (KeepsLastSeen) saved["lastSeen"] = $"{mine}:{saved["runs"]}";
+        Directory.CreateDirectory(request.DataFolder);
+        await File.AppendAllTextAsync(Path.Combine(request.DataFolder, "run.log"), $"{mine} {DocDescription(request.Document)}\n", ct);
         return Seam.Succeeded(saved, new JsonObject { ["ok"] = true });
     }
+
+    /// <summary>The document's description (the tests mark versions with it).</summary>
+    public static string DocDescription(ScriptDocument d) =>
+        (JsonNode.Parse(FakeCheckerJson(d)) as JsonObject)?["description"]?.GetValue<string>() ?? "";
 
     private static string FakeCheckerJson(ScriptDocument d) =>
         d.GetType().GetProperty("Json")?.GetValue(d) is JsonNode n ? n.ToJsonString() : JsonSerializer.Serialize(d);
@@ -124,14 +142,15 @@ internal sealed class FakeDecisions : IScriptDecisions
 internal static class Docs
 {
     /// <summary>A small clean script: three steps, a saved variable, one setting with a default.</summary>
-    public static string Clean(string id = "poller", string name = "Poller", JsonArray? refs = null, JsonArray? requires = null)
+    public static string Clean(string id = "poller", string name = "Poller", JsonArray? refs = null, JsonArray? requires = null,
+        string description = "Polls and logs.")
     {
         var o = new JsonObject
         {
             ["format"] = "yawble-script/1",
             ["id"] = id,
             ["name"] = name,
-            ["description"] = "Polls and logs.",
+            ["description"] = description,
             ["trigger"] = new JsonObject { ["accepts"] = new JsonArray("every", "cron", "once") },
             ["settings"] = new JsonArray(new JsonObject { ["name"] = "folder", ["type"] = "string", ["label"] = "Folder", ["default"] = "INBOX" }),
             ["requires"] = requires ?? [],

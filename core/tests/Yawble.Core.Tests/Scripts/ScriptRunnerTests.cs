@@ -153,7 +153,7 @@ public class ScriptRunnerTests
         var run = w.Store.RecentRuns(null, bot, 1).Single();
         Assert.Equal("tell", run.Trigger);
         Assert.Contains("run once please", run.Input!["text"]!.GetValue<string>());
-        Assert.Empty(w.Agents.Admitted); // never an agent CLI
+        Assert.DoesNotContain(w.Agents.Admitted, a => a.Member.Id == bot); // never an agent CLI (Ada's own runs may race in)
     }
 
     // ------------------------------------------------------------------ one at a time, saved variables, failures
@@ -183,6 +183,85 @@ public class ScriptRunnerTests
         await w.Runner.WhenIdleAsync();
         Assert.Equal([ScriptRunStatus.Skipped, ScriptRunStatus.Succeeded], w.Store.RecentRuns(null, bot, 10).Select(r => r.Status));
         Assert.Single(w.Engine.Requests);
+    }
+
+    [Fact]
+    public async Task TheSameScriptRunsAtOnceAsMembersOfTwoTeams_EachWithItsOwnState_AndASaveDuringTheRunsChangesNone()
+    {
+        await using var w = await WorldAsync(start: false);
+        var betaId = await w.Bus.CreateTeamAsync("Beta", ct: Ct);
+        async Task<long> Add(long team, string name, string folder, string binding)
+        {
+            var row = await w.Bus.AddScriptMemberAsync(team, name, Ct);
+            w.Store.SetScriptMember(row.Id, w.ScriptId, null, new JsonObject { ["folder"] = folder }, new JsonObject { ["mail"] = binding }, null);
+            return row.Id;
+        }
+        // The same script as a member of Alpha, a second member of Alpha, and a member (same name) of Beta.
+        var a1 = await Add(w.TeamId, "Poller", "A1", "alpha-mail");
+        var a2 = await Add(w.TeamId, "Poller2", "A2", "alpha-mail-2");
+        var b1 = await Add(betaId, "Poller", "B1", "beta-mail");
+        (long Id, long Team, string Folder, string Binding)[] members = [(a1, w.TeamId, "A1", "alpha-mail"), (a2, w.TeamId, "A2", "alpha-mail-2"), (b1, betaId, "B1", "beta-mail")];
+
+        // Phase 1: all three overlap at step b; none is skipped.
+        w.Engine.KeepsLastSeen = true;
+        w.Engine.HoldAt = "b";
+        var started = members.Select(m => w.Runner.Start(m.Id, "trigger:1", null)).ToList();
+        Assert.All(started, s => Assert.True(s.Started, s.Reason));
+        await Wait.UntilAsync(() => w.Engine.Held == 3, "all three runs going at once");
+        Assert.All(members, m => Assert.True(w.Runner.IsRunning(m.Id)));
+
+        // A save of a new version while they run, and a second fire at one member: only that member's fire is skipped.
+        Assert.Equal(2, w.Library.Save(Docs.Clean(description: "Version two.")).Version);
+        var again = w.Runner.Start(a1, "trigger:2", null);
+        Assert.False(again.Started);
+        Assert.Equal(3, w.Engine.Held);
+
+        w.Engine.Gate.SetResult();
+        await w.Runner.WhenIdleAsync();
+        foreach (var (m, s) in members.Zip(started))
+        {
+            var run = w.Store.Run(s.RunId!.Value)!;
+            Assert.Equal((ScriptRunStatus.Succeeded, m.Team, (long?)m.Id, 1), (run.Status, run.TeamId, run.MemberId, run.Version));
+            Assert.Equal(m.Folder, run.Settings!["folder"]!.GetValue<string>());
+            Assert.Equal(m.Binding, run.Bindings!["mail"]!.GetValue<string>());
+            Assert.Equal($"{m.Folder}:1", w.Store.State(m.Id).Variables["lastSeen"]!.GetValue<string>());
+            Assert.Equal([$"{m.Folder} Polls and logs."], File.ReadAllLines(Path.Combine(w.Runner.MemberFolder(m.Id), "run.log")));
+            var caller = w.Actions.Callers.Single(c => c.RunId == run.Id);
+            Assert.Equal((m.Team, (long?)m.Id, m.Binding), (caller.TeamId, caller.MemberId, caller.Bindings["mail"]));
+            Assert.Equal(ScriptRunStatus.Succeeded, w.Store.RecentRuns(null, m.Id, 10).Single(r => r.Id == run.Id).Status);
+        }
+        Assert.Equal(3, members.Select(m => w.Runner.MemberFolder(m.Id)).Distinct().Count());
+        Assert.All(w.Engine.Requests, r => Assert.Equal("Polls and logs.", FakeEngine.DocDescription(r.Document)));
+        Assert.Equal([ScriptRunStatus.Skipped, ScriptRunStatus.Succeeded], w.Store.RecentRuns(null, a1, 10).Select(r => r.Status));
+        Assert.Single(w.Store.RecentRuns(null, a2, 10));
+        Assert.Single(w.Store.RecentRuns(betaId, b1, 10));
+
+        // Phase 2: runs on version 2 are cut off by a restart, version 3 is saved meanwhile (and a2 is pinned to 1); the
+        // resumed runs use the version each started with, not the newest one nor the member's new pin.
+        w.Engine.HoldAt = "c";
+        w.Engine.Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        w.Engine.Holding = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cut = members.Select(m => w.Runner.Start(m.Id, "trigger:3", null).RunId!.Value).ToList();
+        await Wait.UntilAsync(() => w.Engine.Held == 3, "all three version 2 runs going");
+        await w.Runner.StopAsync();
+        Assert.Equal(3, w.Library.Save(Docs.Clean(description: "Version three.")).Version);
+        w.Store.SetScriptMember(a2, w.ScriptId, 1, new JsonObject { ["folder"] = "A2" }, new JsonObject { ["mail"] = "alpha-mail-2" }, null);
+        Assert.All(cut, id => Assert.Equal((ScriptRunStatus.Running, 2), (w.Store.Run(id)!.Status, w.Store.Run(id)!.Version)));
+
+        w.Engine.HoldAt = null;
+        var before = w.Engine.Requests.Count;
+        w.Runner = w.NewRunner();
+        Assert.Equal(cut.Order(), w.Runner.ResumeInterrupted().Order());
+        await w.Runner.WhenIdleAsync();
+        var resumed = w.Engine.Requests.Skip(before).ToList();
+        Assert.Equal(3, resumed.Count);
+        Assert.All(resumed, r => Assert.Equal("Version two.", FakeEngine.DocDescription(r.Document)));
+        foreach (var (m, id) in members.Zip(cut))
+        {
+            Assert.Equal((ScriptRunStatus.Succeeded, 2), (w.Store.Run(id)!.Status, w.Store.Run(id)!.Version));
+            Assert.Equal($"{m.Folder}:2", w.Store.State(m.Id).Variables["lastSeen"]!.GetValue<string>());
+            Assert.Equal([$"{m.Folder} Polls and logs.", $"{m.Folder} Version two."], File.ReadAllLines(Path.Combine(w.Runner.MemberFolder(m.Id), "run.log")));
+        }
     }
 
     [Fact]

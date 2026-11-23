@@ -51,6 +51,34 @@ public class ScriptsRpcTests
         : Docs.Clean())!.AsObject();
 
     [Fact]
+    public async Task TheDocumentsLayoutSection_SurvivesSaveGetExportAndImport_Unchanged()
+    {
+        await using var r = await RigAsync();
+        // Phase 3's editor keeps Vue Flow node positions in a top-level layout section the library does not interpret.
+        var layout = new JsonObject
+        {
+            ["nodes"] = new JsonObject
+            {
+                ["a"] = new JsonObject { ["x"] = 120.5, ["y"] = -40, ["collapsed"] = false },
+                ["c"] = new JsonObject { ["x"] = 0, ["y"] = 300, ["note"] = "end here", ["extra"] = new JsonArray(1, "two", null) },
+            },
+            ["viewport"] = new JsonObject { ["x"] = 10, ["y"] = 20, ["zoom"] = 0.75 },
+        };
+        var doc = Doc();
+        doc["layout"] = layout.DeepClone();
+        await r.CallAsync("scripts.save", new JsonObject { ["document"] = doc });
+
+        var get = (await r.CallAsync("scripts.get", new JsonObject { ["script"] = "poller" }))!.AsObject();
+        Assert.True(JsonNode.DeepEquals(layout, get["document"]!["layout"]));
+        Assert.True(JsonNode.DeepEquals(doc, get["document"]));
+
+        var export = (await r.CallAsync("scripts.export", new JsonObject { ["script"] = "poller" }))!.AsObject();
+        await r.CallAsync("scripts.import", new JsonObject { ["json"] = export["json"]!.GetValue<string>() });
+        var v2 = (await r.CallAsync("scripts.get", new JsonObject { ["script"] = "poller", ["version"] = 2 }))!.AsObject();
+        Assert.True(JsonNode.DeepEquals(layout, v2["document"]!["layout"]));
+    }
+
+    [Fact]
     public async Task TheLibraryMethods_SaveListGetCheckVersionsExportImport()
     {
         await using var r = await RigAsync();

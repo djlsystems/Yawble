@@ -729,7 +729,8 @@ masked in the log and never reaches an agent. See
   flowchart of steps. The script library is global: every script is available to every team.
 - Every save of a script is kept as a new version. A save is checked (references, types, reachable steps, the actions
   it requires); one that fails the check is kept as a **draft**, which no member runs. Scripts are exported and
-  imported as `.json` files.
+  imported as `.json` files. A document's top-level `layout` section (the editor's node positions) is kept unchanged
+  through save, get, export and import.
 - **Schemas** are named object types (a JSON Schema subset), also global and versioned. The built-in schemas
   (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, ApiResponse) are read-only. A schema save that
   removes or retypes a field a saved script uses is refused, listing each script, version and step it would break.
@@ -740,7 +741,11 @@ masked in the log and never reaches an agent. See
   FolderChange (the folder and the added, removed and changed files) or EventItem (the event and its item). An
   instruction told to a script member starts a run with its text. Agents' triggers are unchanged.
 - A script member runs one run at a time: a trigger that fires during a run is skipped and the skip is listed in its
-  runs. A trigger's run starts no team workflow and wakes no Manager.
+  runs. The limit is per member: the same script runs at the same time as members of different teams, or as two
+  members of one team. Each member has its own saved variables, data folder, settings, bindings and runs. A trigger's
+  run starts no team workflow and wakes no Manager.
+- A run uses the version of the script it started with, including when it resumes after a restart, even if the script
+  is saved again or the member's pinned version changes meanwhile.
 - A run has a timeout (a member setting, 10 minutes by default), a budget of 10,000 steps and a loop cap. Each step's
   input, output, status and times are kept (shortened, with secrets masked), with the run's log. A run cut off by the
   app closing resumes from its last completed step when the app starts again.
