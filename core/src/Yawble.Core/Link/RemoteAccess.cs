@@ -118,6 +118,8 @@ public static class RemoteAccess
             "org.summary", "org.summary.watch", "org.summary.unwatch",
             "updates.status",
             "code.list", "code.open", "code.read", "code.close", "code.download",
+            // B131: the script library, schemas, script runs and script members: reads (saving, importing, Test run and member changes are changes).
+            .. Ui.ScriptsRpc.Reads,
         ],
         // B119: teams.localhost ("Allow localhost (macOS)") is read by any viewer and set only by a full one.
         readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry", "teams.localhost"],
@@ -158,6 +160,7 @@ public static class RemoteAccess
             "tools.notNow", "tools.checkAgain",
             "folder.answer",
             "logs.prune", "logs.setRetention",
+            .. Ui.ScriptsRpc.Changes,
         ]);
 
     private static Dictionary<string, Kind> Table(string[] reads, string[] readsUnlessOn, string[] changes)

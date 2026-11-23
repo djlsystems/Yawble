@@ -44,7 +44,8 @@ public static class BusHost
     public static async Task<BusEngine> StartAsync(
         string connectionString, Func<string, string?> env, Action<string>? log, IAgentRunner? launcher, IAgentRunner? runner, Func<int>? maxConcurrentAgents,
         string? appDataRoot = null, Skills.SkillCatalog? skills = null,
-        Func<CancellationToken, Task<IReadOnlyList<AgentChoice>>>? availableAgents = null)
+        Func<CancellationToken, Task<IReadOnlyList<AgentChoice>>>? availableAgents = null,
+        Func<IAgentRunner, IAgentRunner>? wrapRunner = null)
     {
         var chosen = runner ?? env(RunnerVariable) switch
         {
@@ -60,6 +61,8 @@ public static class BusHost
             using (var store = new BusStore(connectionString)) await repos.FetchBackAllAsync(store.AllMembers());
             chosen = new Teams.TeamRepoRunner(chosen, repos, log);
         }
+        // B131: the outermost runner dispatches script members to the script engine (Launch.ScriptDispatchRunner).
+        if (wrapRunner is not null) chosen = wrapRunner(chosen);
         // ONE global run limit for every team, member run, Manager run and terminal session. Unless the
         // caller gives one, it is app.maxConcurrentAgents of the saved global policy, read at every admission.
         var engine = new BusEngine(new BusStore(connectionString), chosen, new BusOptions

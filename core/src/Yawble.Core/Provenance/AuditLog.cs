@@ -81,6 +81,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "workflows.list", "workflows.get",
         // Opening and closing the read-only Code view change nothing (a download is recorded).
         "code.open", "code.close",
+        // B131: a script or schema exported as a file, a script member and its saved state, and one script run in full.
+        "scripts.export", "schemas.export", "scripts.memberGet", "scripts.memberState", "scripts.run",
     };
 
     /// <summary>A call that only reads, by its name alone.</summary>
