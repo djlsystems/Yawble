@@ -90,7 +90,7 @@ public class ScriptRunnerTests
 
         var run = Assert.Single(w.Store.RecentRuns(w.TeamId, bot, 10));
         Assert.Equal((ScriptRunStatus.Succeeded, $"trigger:{t.Id}", false), (run.Status, run.Trigger, run.Test));
-        Assert.Equal(t.Id, run.Input!["triggerId"]!.GetValue<long>());
+        Assert.Equal(t.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), run.Input!["triggerId"]!.GetValue<string>()); // TriggerFired declares a string
         Assert.Equal("every", run.Input["kind"]!.GetValue<string>());
         Assert.NotNull(run.Input["firedAt"]);
         Assert.Equal(["a", "b", "c"], w.Store.Steps(run.Id).Select(s => s.StepId));

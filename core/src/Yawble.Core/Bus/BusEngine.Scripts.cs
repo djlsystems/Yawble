@@ -28,7 +28,7 @@ public sealed partial class BusEngine
         if (ScriptMembers is not { } scripts || !scripts.IsScriptMember(member.Id)) return null;
         payload ??= new JsonObject
         {
-            ["triggerId"] = row.Id,
+            ["triggerId"] = row.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), // TriggerFired declares it a string
             ["kind"] = row.Schedule.Kind,
             ["firedAt"] = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
         };

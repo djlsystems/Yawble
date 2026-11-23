@@ -169,6 +169,8 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
             Settings = settings,
             SavedVariables = [],
             Actions = _actions.For(caller),
+            Catalog = _actions.Catalog, // a dry run suppresses changing actions only with it
+            Schemas = _library,
             DataFolder = folder,
             AllowedFolders = [],
             DryRun = test.DryRun,
@@ -287,6 +289,8 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
             Settings = (JsonObject)(run.Settings ?? member.Settings).DeepClone(),
             SavedVariables = (JsonObject)_store.State(memberId).Variables.DeepClone(),
             Actions = _actions.For(caller),
+            Catalog = _actions.Catalog, // a dry run suppresses changing actions only with it
+            Schemas = _library,
             DataFolder = dataFolder,
             AllowedFolders = _grantedFolders(memberId).Select(path => new ScriptFolderGrant(path, CanWrite: true)).ToList(),
             DryRun = false,
