@@ -136,6 +136,27 @@ internal static class ScriptSamples
         }
         """;
 
+
+
+    /// <summary>The design example with a designer <c>layout</c> section and two members the format does not name.</summary>
+    public static string WithLayout() =>
+        InboxSmsAlert.TrimEnd().TrimEnd('}') + """
+          ,
+          "layout": {
+            "version": 1,
+            "viewport": { "x": -12.5, "y": 40, "zoom": 0.85 },
+            "nodes": {
+              "list": { "x": 0, "y": 0 },
+              "any": { "x": 0, "y": 120, "collapsed": false },
+              "each": { "x": 220.25, "y": 120, "note": "per message é" }
+            },
+            "edges": [ { "from": "any", "to": "each", "handle": "then", "points": [ [ 10, 20 ], [ 30, 40 ] ] } ]
+          },
+          "x-editor": { "lastOpenedBy": "someone", "tabs": [ "steps", "settings" ] },
+          "comment": "kept too"
+        }
+        """;
+
     public static JsonObject Email(string id, string subject, string from, string receivedAt) => new()
     {
         ["id"] = id,

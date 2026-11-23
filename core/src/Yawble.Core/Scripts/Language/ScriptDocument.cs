@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -39,7 +40,7 @@ public sealed class ScriptStep
 
     internal ScriptStep(JsonObject json)
     {
-        Json = json;
+        Json = ScriptDocument.Materialize(json);
         Id = (string?)json["id"] ?? "";
         Type = (string?)json["type"] ?? "";
     }
@@ -100,6 +101,22 @@ public sealed class ScriptDocument
     public required string Start { get; init; }
     public IReadOnlyList<ScriptStep> Steps { get; init; } = [];
 
+    /// <summary>
+    /// The top-level <c>layout</c> section (node positions for the designer), kept as given and never checked or run.
+    /// Treat it as read-only; <see cref="ToJson"/> writes a copy.
+    /// </summary>
+    public JsonObject? Layout { get; init; }
+
+    /// <summary>
+    /// Top-level members the format does not name (and a <c>layout</c> that is not an object), in document order, kept as
+    /// given so a save does not drop them; never checked or run. Treat them as read-only; <see cref="ToJson"/> writes copies.
+    /// </summary>
+    public IReadOnlyList<KeyValuePair<string, JsonNode?>> Extensions { get; init; } = [];
+
+    /// <summary>The top-level members this format reads; any other is kept in <see cref="Extensions"/>.</summary>
+    public static readonly IReadOnlyList<string> KnownMembers =
+        ["format", "id", "name", "description", "trigger", "input", "settings", "requires", "variables", "outputs", "start", "steps", "layout"];
+
     /// <summary>The step with this id (the first, when ids repeat; the checker reports that).</summary>
     public ScriptStep? Step(string? id) => id is null ? null : Steps.FirstOrDefault(s => s.Id == id);
 
@@ -134,12 +151,12 @@ public sealed class ScriptDocument
             Input = OptStr(o, "input", "the script"),
             Settings = Objects(o, "settings").Select((s, i) => new ScriptSetting(
                 Str(s, "name", $"settings[{i}]"), Str(s, "type", $"settings[{i}]"), OptStr(s, "label", $"settings[{i}]"),
-                s["default"]?.DeepClone(), OptStr(s, "description", $"settings[{i}]"))).ToList(),
+                Materialize(s["default"]?.DeepClone()), OptStr(s, "description", $"settings[{i}]"))).ToList(),
             Requires = Objects(o, "requires").Select((r, i) => new ScriptRequirement(
                 Str(r, "name", $"requires[{i}]"), Str(r, "kind", $"requires[{i}]"), Strings(r["actions"], $"requires[{i}].actions"))).ToList(),
             Variables = Objects(o, "variables").Select((v, i) => new ScriptVariable(
                 Str(v, "name", $"variables[{i}]"), Str(v, "type", $"variables[{i}]"), OptStr(v, "scope", $"variables[{i}]") ?? "run",
-                v["initial"]?.DeepClone())).ToList(),
+                Materialize(v["initial"]?.DeepClone()))).ToList(),
             Outputs = Objects(o, "outputs").Select((v, i) => new ScriptOutput(
                 Str(v, "name", $"outputs[{i}]"), Str(v, "type", $"outputs[{i}]"), OptStr(v, "description", $"outputs[{i}]"))).ToList(),
             Start = Str(o, "start", "the script"),
@@ -149,7 +166,29 @@ public sealed class ScriptDocument
                 Str(s, "type", $"steps[{i}]");
                 return new ScriptStep((JsonObject)s.DeepClone());
             }).ToList(),
+            Layout = o["layout"] is JsonObject layout ? Materialize((JsonObject)layout.DeepClone()) : null,
+            Extensions = o.Where(m => !KnownMembers.Contains(m.Key) || (m.Key == "layout" && m.Value is not JsonObject))
+                .Select(m => new KeyValuePair<string, JsonNode?>(m.Key, Materialize(m.Value?.DeepClone()))).ToList(),
         };
+    }
+
+    /// <summary>
+    /// Reads every object and array under <paramref name="node"/> once, so a node parsed lazily from JSON is fully built
+    /// before the document is shared: concurrent runs of one document then only read it.
+    /// </summary>
+    [return: NotNullIfNotNull(nameof(node))]
+    internal static T? Materialize<T>(T? node) where T : JsonNode
+    {
+        switch (node)
+        {
+            case JsonObject o:
+                foreach (var (_, child) in o) Materialize(child);
+                break;
+            case JsonArray a:
+                foreach (var child in a) Materialize(child);
+                break;
+        }
+        return node;
     }
 
     /// <summary>The document as JSON, properties in the order the format lists them.</summary>
@@ -186,6 +225,9 @@ public sealed class ScriptDocument
             }).ToArray());
         o["start"] = Start;
         o["steps"] = new JsonArray(Steps.Select(s => s.Json.DeepClone()).ToArray());
+        if (Layout is not null) o["layout"] = Layout.DeepClone();
+        foreach (var (name, value) in Extensions)
+            if (!o.ContainsKey(name)) o[name] = value?.DeepClone();
         return o;
     }
 
