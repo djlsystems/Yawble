@@ -26,7 +26,7 @@ public class ScriptRunnerTests
         public required ScriptRunner Runner { get; set; }
         public required FakeEngine Engine { get; init; }
         public required FakeDecisions Decisions { get; init; }
-        public required FakeCatalog Actions { get; init; }
+        public required FakeActionCatalog Actions { get; init; }
         public required ScriptedRunner Agents { get; init; }
         public long TeamId { get; init; }
         public long ScriptId { get; set; }
@@ -56,11 +56,11 @@ public class ScriptRunnerTests
         var bus = new BusEngine(db.OpenStore(), new ScriptDispatchRunner(agents, () => runner), new BusOptions { SafetyPoll = TimeSpan.FromMilliseconds(200) });
         var teamId = await bus.CreateTeamAsync("Alpha", ct: Ct);
         await bus.AddMemberAsync("Alpha", "Ada", ct: Ct);
-        var library = new ScriptLibrary(db.ConnectionString, () => new FakeCatalog(), FakeChecker.Check);
+        var library = new ScriptLibrary(db.ConnectionString, () => new FakeActionCatalog(), FakeChecker.Check);
         var store = new ScriptRunStore(db.ConnectionString);
         var engine = new FakeEngine();
         var decisions = new FakeDecisions();
-        var actions = new FakeCatalog();
+        var actions = new FakeActionCatalog();
         runner = new ScriptRunner(store, library, actions, engine, Path.Combine(db.Dir, "scripts")) { Decisions = decisions };
         bus.ScriptMembers = runner;
         var world = new World
@@ -94,7 +94,7 @@ public class ScriptRunnerTests
         Assert.Equal("every", run.Input["kind"]!.GetValue<string>());
         Assert.NotNull(run.Input["firedAt"]);
         Assert.Equal(["a", "b", "c"], w.Store.Steps(run.Id).Select(s => s.StepId));
-        Assert.Equal("INBOX", w.Engine.Requests.Single().Settings["folder"]!.GetValue<string>()); // the declared default
+        Assert.Equal("INBOX", w.Engine.Requests.Single().Settings!["folder"]!.GetValue<string>()); // the declared default
 
         using var store = w.Db.OpenStore();
         Assert.Equal(before, store.AllMessages().Count); // no instruction, no workflow, no Manager woken
@@ -277,7 +277,7 @@ public class ScriptRunnerTests
         Assert.Equal((ScriptRunStatus.Failed, "b"), (failed.Run.Status, failed.Run.FailedStepId));
         Assert.Contains("step b failed", failed.Run.Reason);
         Assert.Equal(1, w.Store.State(bot).Variables["runs"]!.GetValue<int>()); // untouched by the failed run
-        Assert.Equal(1, w.Engine.Requests[1].SavedVariables["runs"]!.GetValue<int>());
+        Assert.Equal(1, w.Engine.Requests[1].SavedVariables!["runs"]!.GetValue<int>());
 
         Assert.True(w.Store.ResetVariable(bot, "runs"));
         Assert.False(w.Store.ResetVariable(bot, "runs"));
@@ -418,8 +418,8 @@ public class ScriptRunnerTests
         var req = w.Engine.Requests.Single();
         Assert.True(req.DryRun);
         Assert.NotNull(req.DryRunFolder);
-        Assert.Equal("Sent", req.Settings["folder"]!.GetValue<string>());
-        Assert.Empty(req.SavedVariables);
+        Assert.Equal("Sent", req.Settings!["folder"]!.GetValue<string>());
+        Assert.Empty(req.SavedVariables!);
         Assert.False(w.Store.State(bot).Variables.ContainsKey("runs"));
 
         // A draft can be tried in a Test run.

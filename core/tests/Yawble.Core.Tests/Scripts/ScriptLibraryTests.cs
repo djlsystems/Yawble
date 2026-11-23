@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Xunit;
+using Yawble.Core.Scripts.Language;
 using Yawble.Core.Scripts.Library;
 using Yawble.Core.Storage;
 using Yawble.Core.Tests.Bus;
@@ -10,8 +11,8 @@ namespace Yawble.Core.Tests.Scripts;
 /// <summary>Card 584 (B131): migration 0056, the script library (save, draft, versions, export/import) and schemas (break refusal).</summary>
 public class ScriptLibraryTests
 {
-    private static ScriptLibrary Library(TempDb db, FakeCatalog? catalog = null) =>
-        new(db.ConnectionString, () => catalog ?? new FakeCatalog(), FakeChecker.Check);
+    private static ScriptLibrary Library(TempDb db, FakeActionCatalog? catalog = null) =>
+        new(db.ConnectionString, () => catalog ?? new FakeActionCatalog(), FakeChecker.Check);
 
     private static object? Scalar(TempDb db, string sql)
     {
@@ -85,7 +86,7 @@ public class ScriptLibraryTests
         var draft = lib.Save(Docs.Draft("needs-mail"));
         Assert.Null(lib.RunnableVersion(draft.Id));
         // Once the action exists (SC-2/SC-3 fill the catalog), the same document checks clean.
-        var withMail = Library(db, new FakeCatalog(("email", "teleport")));
+        var withMail = Library(db, new FakeActionCatalog(("email", "teleport")));
         Assert.True(withMail.Save(Docs.Draft("needs-mail")).Ok);
         Assert.Equal(2, withMail.RunnableVersion(draft.Id));
     }
@@ -173,7 +174,9 @@ public class ScriptLibraryTests
         var e = Assert.Throws<ScriptLibraryException>(() => lib.SaveSchema("EmailMessage", null, Thing));
         Assert.Equal("read_only", e.Code);
         var names = lib.Schemas().Select(s => s.Name).ToList();
-        Assert.Equal(["TriggerFired", "FolderChange", "EventItem", "EmailMessage", "EmailAddress", "ApiResponse"], names.Take(6));
+        // Built-ins first, in the engine's own order (BuiltInSchemas.Names), and every expected one is there.
+        Assert.Equal(BuiltInSchemas.Names, names.Take(BuiltInSchemas.Names.Count));
+        Assert.Subset(names.ToHashSet(), new HashSet<string> { "TriggerFired", "FolderChange", "EventItem", "EmailMessage", "EmailAddress", "ApiResponse" });
         Assert.True(lib.GetSchema("TriggerFired").BuiltIn);
         Assert.NotNull(lib.Find("FolderChange"));
     }

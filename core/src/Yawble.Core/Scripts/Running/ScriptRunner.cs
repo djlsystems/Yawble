@@ -5,6 +5,7 @@ using Yawble.Core.Bus;
 using Yawble.Core.Scripts.Engine;
 using Yawble.Core.Scripts.Language;
 using Yawble.Core.Scripts.Library;
+using EngineRunStatus = Yawble.Core.Scripts.Engine.ScriptRunStatus;
 
 namespace Yawble.Core.Scripts.Running;
 
@@ -208,8 +209,8 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
             ScriptRunCheckpoint? checkpoint = null;
             if (run.Checkpoint is { } cp)
             {
-                try { checkpoint = JsonSerializer.Deserialize<ScriptRunCheckpoint>(cp); }
-                catch (JsonException e) { _log?.Invoke($"script run {run.Id}: its checkpoint could not be read ({e.Message}); it starts again"); }
+                try { checkpoint = ScriptRunCheckpoint.FromJson(cp); }
+                catch (Exception e) when (e is JsonException or FormatException) { _log?.Invoke($"script run {run.Id}: its checkpoint could not be read ({e.Message}); it starts again"); }
             }
             _store.CloseOpenSteps(run.Id, ScriptRunStatus.Interrupted);
             _store.Log(run.Id, checkpoint is null ? "resumed after a restart, from the start" : "resumed after a restart, from the last completed step");
@@ -287,7 +288,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
             SavedVariables = (JsonObject)_store.State(memberId).Variables.DeepClone(),
             Actions = _actions.For(caller),
             DataFolder = dataFolder,
-            AllowedFolders = _grantedFolders(memberId),
+            AllowedFolders = _grantedFolders(memberId).Select(path => new ScriptFolderGrant(path, CanWrite: true)).ToList(),
             DryRun = false,
             DryRunFolder = null,
             Timeout = timeout,
@@ -349,13 +350,13 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            result = new ScriptRunResult("failed", journal.CurrentStep, $"timed out after {timeout.TotalMinutes:0} minutes", null, null);
+            result = new ScriptRunResult(EngineRunStatus.Failed, journal.CurrentStep, $"timed out after {timeout.TotalMinutes:0} minutes", null, null);
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
-            result = new ScriptRunResult("failed", journal.CurrentStep, e.Message, null, null);
+            result = new ScriptRunResult(EngineRunStatus.Failed, journal.CurrentStep, e.Message, null, null);
         }
-        var succeeded = string.Equals(result.Status.ToString(), ScriptRunStatus.Succeeded, StringComparison.OrdinalIgnoreCase);
+        var succeeded = result.Status == EngineRunStatus.Succeeded;
         var status = succeeded ? ScriptRunStatus.Succeeded : ScriptRunStatus.Failed;
         _store.CloseOpenSteps(runId, status);
         _store.Finish(runId, status, result.Outputs, succeeded ? null : result.FailedStepId, succeeded ? null : result.Reason);
@@ -433,7 +434,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         {
             store.StepCompleted(runId, rec.StepId, rec.Type, rec.Input, rec.Output, rec.Status, rec.StartedAt, rec.EndedAt);
             // Written before the next step starts: a restart resumes after this step.
-            store.SetCheckpoint(runId, JsonSerializer.Serialize(cp));
+            store.SetCheckpoint(runId, cp.ToJson());
             return Task.CompletedTask;
         }
 

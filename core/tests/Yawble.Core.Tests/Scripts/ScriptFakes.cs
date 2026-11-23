@@ -13,18 +13,17 @@ namespace Yawble.Core.Tests.Scripts;
 /// </summary>
 internal static class Seam
 {
-    public static ScriptRunCheckpoint Checkpoint(string? next) => new(next, new JsonObject { ["next"] = next });
+    public static ScriptRunCheckpoint Checkpoint(string? next) => new() { Next = next };
 
-    /// <summary>The step a checkpoint resumes at, read through its JSON (the only thing the store does with one).</summary>
-    public static string? NextOf(ScriptRunCheckpoint cp) =>
-        JsonNode.Parse(JsonSerializer.Serialize(cp)) is JsonObject o ? (o["NextStepId"] ?? o["nextStepId"])?.GetValue<string>() : null;
+    /// <summary>The step a checkpoint resumes at.</summary>
+    public static string? NextOf(ScriptRunCheckpoint cp) => cp.Next;
 
-    public static ScriptRunResult Succeeded(JsonObject? saved, JsonObject? outputs = null) => new("succeeded", null, null, outputs, saved);
+    public static ScriptRunResult Succeeded(JsonObject? saved, JsonObject? outputs = null) => new(Yawble.Core.Scripts.Engine.ScriptRunStatus.Succeeded, null, null, outputs, saved);
 
-    public static ScriptRunResult Failed(string? step, string reason) => new("failed", step, reason, null, null);
+    public static ScriptRunResult Failed(string? step, string reason) => new(Yawble.Core.Scripts.Engine.ScriptRunStatus.Failed, step, reason, null, null);
 }
 
-internal sealed class FakeCatalog(params (string Kind, string Action)[] actions) : IScriptActionCatalog, IScriptActionsProvider, IScriptActions
+internal sealed class FakeActionCatalog(params (string Kind, string Action)[] actions) : IScriptActionCatalog, IScriptActionsProvider, IScriptActions
 {
     public List<ScriptCaller> Callers { get; } = [];
     public bool HasAction(string kind, string action) => actions.Contains((kind, action));
@@ -59,12 +58,10 @@ internal static class FakeChecker
             .ToList();
         foreach (var x in refs)
             if (schemas.Find(x.Schema) is null) issues.Add(new ScriptCheckIssue(x.StepId, "unknown_schema", $"no schema {x.Schema}"));
-        return new ScriptCheckResult(issues.Count == 0, issues, refs);
+        return new ScriptCheckResult(issues, refs);
     };
 
-    /// <summary>The document's JSON: its Json property (stub) or its serialization (the real type).</summary>
-    private static string DocumentJson(ScriptDocument d) =>
-        d.GetType().GetProperty("Json")?.GetValue(d) is JsonNode n ? n.ToJsonString() : JsonSerializer.Serialize(d);
+    private static string DocumentJson(ScriptDocument d) => d.ToJsonString(indented: false);
 }
 
 /// <summary>
@@ -90,7 +87,7 @@ internal sealed class FakeEngine : IScriptRunEngine
     public async Task<ScriptRunResult> RunAsync(ScriptRunRequest request, IScriptRunJournal journal, CancellationToken ct)
     {
         lock (Requests) Requests.Add(request);
-        var mine = request.Settings["folder"]?.GetValue<string>() ?? "";
+        var mine = request.Settings?["folder"]?.GetValue<string>() ?? "";
         var json = JsonNode.Parse(FakeCheckerJson(request.Document)) as JsonObject ?? [];
         var steps = (json["steps"] as JsonArray ?? []).OfType<JsonObject>().Select(s => s["id"]!.GetValue<string>()).ToList();
         var start = request.ResumeFrom is { } cp && Seam.NextOf(cp) is { } next ? steps.IndexOf(next) : 0;
@@ -111,7 +108,7 @@ internal sealed class FakeEngine : IScriptRunEngine
                 Seam.Checkpoint(i + 1 < steps.Count ? steps[i + 1] : null));
             await journal.LogAsync($"did {id}");
         }
-        var saved = (JsonObject)request.SavedVariables.DeepClone();
+        var saved = (JsonObject?)request.SavedVariables?.DeepClone() ?? [];
         saved["runs"] = (saved["runs"]?.GetValue<int>() ?? 0) + 1;
         // What a poller keeps: its own lastSeen, and a line in its own data folder's run.log.
         if (KeepsLastSeen) saved["lastSeen"] = $"{mine}:{saved["runs"]}";
@@ -124,8 +121,7 @@ internal sealed class FakeEngine : IScriptRunEngine
     public static string DocDescription(ScriptDocument d) =>
         (JsonNode.Parse(FakeCheckerJson(d)) as JsonObject)?["description"]?.GetValue<string>() ?? "";
 
-    private static string FakeCheckerJson(ScriptDocument d) =>
-        d.GetType().GetProperty("Json")?.GetValue(d) is JsonNode n ? n.ToJsonString() : JsonSerializer.Serialize(d);
+    private static string FakeCheckerJson(ScriptDocument d) => d.ToJsonString(indented: false);
 }
 
 internal sealed class FakeDecisions : IScriptDecisions

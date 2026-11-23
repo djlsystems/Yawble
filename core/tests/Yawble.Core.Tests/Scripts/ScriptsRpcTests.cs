@@ -38,7 +38,7 @@ public class ScriptsRpcTests
         var db = new TempDb();
         var bus = new BusEngine(db.OpenStore(), new ScriptedRunner(), new BusOptions { SafetyPoll = TimeSpan.FromMilliseconds(200) });
         var teamId = await bus.CreateTeamAsync("Alpha", ct: Ct);
-        var catalog = new FakeCatalog(("email", "list"));
+        var catalog = new FakeActionCatalog(("email", "list"));
         var library = new ScriptLibrary(db.ConnectionString, () => catalog, FakeChecker.Check);
         var store = new ScriptRunStore(db.ConnectionString);
         var runner = new ScriptRunner(store, library, catalog, new FakeEngine(), Path.Combine(db.Dir, "scripts"));
