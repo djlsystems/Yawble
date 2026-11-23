@@ -19,9 +19,10 @@ public sealed record OrgRunningAgent(string Member, string Role, string? Doing, 
 public sealed record OrgAgent(string Member, string Role, string State, bool LastRunFailed, string? Doing = null, DateTimeOffset? Since = null,
     bool LastRunStopped = false, string? WaitsFor = null);
 
-/// <summary>A team and its agents; <paramref name="WorkflowExpiryDays"/> is its setting (B085: an open workflow nobody works expires after it).</summary>
+/// <summary>A team and its agents; <paramref name="WorkflowExpiryDays"/> is its setting (B085: an open workflow nobody works expires after it).
+/// <paramref name="WaitingOnYou"/> (B130): how many of its agents have an open needs_decision (TeamSummary.Waiting).</summary>
 public sealed record OrgTeam(string Name, bool Paused, bool Archived, IReadOnlyList<OrgAgent> Agents,
-    int WorkflowExpiryDays = Bus.BusEngine.DefaultWorkflowExpiryDays);
+    int WorkflowExpiryDays = Bus.BusEngine.DefaultWorkflowExpiryDays, int WaitingOnYou = 0);
 
 /// <summary>
 /// A workflow. <paramref name="State"/> is one of <see cref="OrgSummary.WorkflowStates"/>; <paramref name="Item"/> is the
@@ -130,6 +131,8 @@ public static class OrgSummary
                 ["errored"] = idle.Count(a => a.LastRunFailed),
                 // B097: an idle agent whose last run the person stopped: counted in idle (not errored), and said here.
                 ["stopped"] = idle.Count(a => a.LastRunStopped && !a.LastRunFailed),
+                // B130: agents with an open needs_decision (whatever their state above): the team waits on the person.
+                ["waitingOnYou"] = t.WaitingOnYou,
             },
             ["running"] = new JsonArray(running.Select(a => (JsonNode)new JsonObject
             {
