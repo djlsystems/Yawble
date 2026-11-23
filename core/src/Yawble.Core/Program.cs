@@ -146,10 +146,17 @@ await using var bus = await Yawble.Core.Bus.BusHost.StartAsync(
     wrapRunner: r => new Yawble.Core.Launch.ScriptDispatchRunner(r, () => scriptRunner));
 busForRunner = bus;
 // B131: the global script and schema libraries and the script runner (members' data folders under <data>/scripts). Runs the
-// old core left going resume from their last completed step. SC-2 replaces NoScriptActions with the integration actions.
-var scriptLibrary = new Yawble.Core.Scripts.Library.ScriptLibrary($"Data Source={dbPath}", () => Yawble.Core.Scripts.Running.NoScriptActions.Instance.Catalog);
+// old core left going resume from their last completed step. SC-2: a script's integration steps are the team's web API operations
+// (kind "api"), through IntegrationService, which is made further down: its calls wait for it (integrationsReady).
+var integrationsReady = new TaskCompletionSource<Yawble.Core.Integrations.IntegrationService>(TaskCreationOptions.RunContinuationsAsynchronously);
+var scriptActions = new Yawble.Core.Scripts.Actions.ScriptActionKinds(new Dictionary<string, Yawble.Core.Scripts.Running.IScriptActionsProvider>
+{
+    [Yawble.Core.Scripts.Actions.ApiScriptActionsProvider.Kind] = new Yawble.Core.Scripts.Actions.ApiScriptActionsProvider(
+        new Yawble.Core.Scripts.Actions.IntegrationScriptApi($"Data Source={dbPath}", integrationsReady.Task)),
+});
+var scriptLibrary = new Yawble.Core.Scripts.Library.ScriptLibrary($"Data Source={dbPath}", () => scriptActions.Catalog);
 var scriptRuns = new Yawble.Core.Scripts.Running.ScriptRunStore($"Data Source={dbPath}");
-scriptRunner = new Yawble.Core.Scripts.Running.ScriptRunner(scriptRuns, scriptLibrary, Yawble.Core.Scripts.Running.NoScriptActions.Instance,
+scriptRunner = new Yawble.Core.Scripts.Running.ScriptRunner(scriptRuns, scriptLibrary, scriptActions,
     Yawble.Core.Scripts.Running.SeamScriptEngine.Instance, Path.Combine(options.DataDir!, "scripts"),
     grantedFolders: memberId => policies.GetMember(memberId).Loosen.Filesystem?.Readwrite ?? [],
     log: line => Console.Error.WriteLine($"scripts: {line}"))
@@ -261,6 +268,7 @@ await using var integrations = new Yawble.Core.Integrations.IntegrationService($
     connections: connections, browser: new Yawble.Core.Integrations.ShellBrowser(), redirect: () => new Yawble.Core.Integrations.LoopbackRedirectReceiver(),
     websites: websiteHost);
 bus.Integrations = integrations;
+integrationsReady.TrySetResult(integrations); // script runs waiting on an integration step go on
 // Network asks: a host a run's gateway refused (or an agent's request_host) waits for the person in Needs you; their answer
 // changes the policy through the policy store, with each member's layout for its checks.
 var networkAsks = new Yawble.Core.Integrations.NetworkAskService($"Data Source={dbPath}",

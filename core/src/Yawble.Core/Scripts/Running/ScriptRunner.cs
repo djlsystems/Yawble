@@ -162,14 +162,15 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         var runId = _store.StartRun(test.TeamId, null, test.ScriptId, version.Version, "test", test.Input, settings, bindings, test.DryRun, test: true);
         var folder = Path.Combine(_dataRoot, "test", runId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         var caller = new ScriptCaller(test.TeamId, team, null, null, runId, StringMap(bindings), test.DryRun);
+        var actions = _actions.For(caller);
         var request = new ScriptRunRequest
         {
             Document = document,
             Input = test.Input?.DeepClone(),
             Settings = settings,
             SavedVariables = [],
-            Actions = _actions.For(caller),
-            Catalog = _actions.Catalog, // a dry run suppresses changing actions only with it
+            Actions = actions,
+            Catalog = Yawble.Core.Scripts.Actions.ScriptActionKinds.CatalogFor(actions, _actions), // the team's: a dry run suppresses changing actions only with it
             Schemas = _library,
             DataFolder = folder,
             AllowedFolders = [],
@@ -282,14 +283,15 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         var timeout = TimeSpan.FromMinutes(Math.Max(1, member.TimeoutMinutes));
         var dataFolder = MemberFolder(memberId);
         var caller = new ScriptCaller(member.TeamId, member.Team, memberId, member.Name, runId, StringMap(run.Bindings ?? member.Bindings), DryRun: false);
+        var actions = _actions.For(caller);
         var request = new ScriptRunRequest
         {
             Document = document,
             Input = run.Input?.DeepClone(),
             Settings = (JsonObject)(run.Settings ?? member.Settings).DeepClone(),
             SavedVariables = (JsonObject)_store.State(memberId).Variables.DeepClone(),
-            Actions = _actions.For(caller),
-            Catalog = _actions.Catalog, // a dry run suppresses changing actions only with it
+            Actions = actions,
+            Catalog = Yawble.Core.Scripts.Actions.ScriptActionKinds.CatalogFor(actions, _actions), // the team's: a dry run suppresses changing actions only with it
             Schemas = _library,
             DataFolder = dataFolder,
             AllowedFolders = _grantedFolders(memberId).Select(path => new ScriptFolderGrant(path, CanWrite: true)).ToList(),
