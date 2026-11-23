@@ -62,6 +62,9 @@ public sealed record ScriptRunRequest
 
     /// <summary>The last checkpoint of a run that was cut off; the run goes on from there.</summary>
     public ScriptRunCheckpoint? ResumeFrom { get; init; }
+
+    /// <summary>The clock for the timeout and date functions (tests fake it); null is the system clock.</summary>
+    public TimeProvider? Clock { get; init; }
 }
 
 public enum ScriptRunStatus

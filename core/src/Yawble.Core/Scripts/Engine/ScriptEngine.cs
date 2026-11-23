@@ -12,17 +12,17 @@ namespace Yawble.Core.Scripts.Engine;
 /// the timeout, the step budget or the loop cap fails the run with the step and the reason; saved variables come back
 /// only from a run that succeeded. A caller's cancellation (the app closing) throws, leaving the run to resume.
 /// </summary>
-public sealed class ScriptEngine(TimeProvider? clock = null)
+public static class ScriptEngine
 {
     public const string StartStepId = "start";
     private static readonly JsonSerializerOptions Compact = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
-
-    public async Task<ScriptRunResult> RunAsync(ScriptRunRequest request, IScriptRunJournal journal, CancellationToken ct)
+    /// <summary>Runs <paramref name="request"/>. Holds no state between calls: concurrent runs of one document are independent.</summary>
+    public static async Task<ScriptRunResult> RunAsync(ScriptRunRequest request, IScriptRunJournal journal, CancellationToken ct)
     {
-        using var timeout = new CancellationTokenSource(request.Timeout, _clock);
+        var clock = request.Clock ?? TimeProvider.System;
+        using var timeout = new CancellationTokenSource(request.Timeout, clock);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-        var run = new Run(this, request, journal, linked.Token, _clock.GetUtcNow());
+        var run = new Run(clock, request, journal, linked.Token, clock.GetUtcNow());
         try
         {
             return await run.ExecuteAsync();
@@ -35,7 +35,7 @@ public sealed class ScriptEngine(TimeProvider? clock = null)
 
     private sealed class Run : IScriptScope
     {
-        private readonly ScriptEngine _engine;
+        private readonly TimeProvider _clock;
         private readonly ScriptRunRequest _req;
         private readonly IScriptRunJournal _journal;
         private readonly CancellationToken _ct;
@@ -59,9 +59,9 @@ public sealed class ScriptEngine(TimeProvider? clock = null)
 
         public string? CurrentStep { get; private set; }
 
-        public Run(ScriptEngine engine, ScriptRunRequest req, IScriptRunJournal journal, CancellationToken ct, DateTimeOffset began)
+        public Run(TimeProvider clock, ScriptRunRequest req, IScriptRunJournal journal, CancellationToken ct, DateTimeOffset began)
         {
-            _engine = engine;
+            _clock = clock;
             _req = req;
             _journal = journal;
             _ct = ct;
@@ -73,7 +73,7 @@ public sealed class ScriptEngine(TimeProvider? clock = null)
 
         private ScriptSchema? Find(string name) => BuiltInSchemas.Find(name) ?? _req.Schemas?.Find(name);
 
-        private DateTimeOffset Now => _engine._clock.GetUtcNow();
+        private DateTimeOffset Now => _clock.GetUtcNow();
 
         public bool TryGetRoot(string name, out JsonNode? value)
         {
@@ -271,7 +271,7 @@ public sealed class ScriptEngine(TimeProvider? clock = null)
 
         // ---- steps ----------------------------------------------------------------------------------------------------
 
-        private ScriptEvaluator Evaluator() => new(this, _engine._clock);
+        private ScriptEvaluator Evaluator() => new(this, _clock);
 
         /// <summary>The step's input as the run view shows it: its evaluated values.</summary>
         private JsonNode? Input(ScriptStep step)
