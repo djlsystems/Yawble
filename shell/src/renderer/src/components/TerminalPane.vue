@@ -49,6 +49,16 @@ const signInCli = computed(() => {
   const cli = t.channel.slice(AGENT_SESSION_PREFIX.length);
   return SIGN_IN_CLIS.has(cli) ? cli : null;
 });
+// The core's detail (SignInCatalog) already begins with the heading the banner shows and may end "; then reopen this
+// dialog" (for the Settings > Agents tile). The pane re-checks by itself, so both are dropped here; the tile keeps them.
+const SIGN_IN_HEADING = /^\s*Not signed in: run `?grok`? in your own terminal and sign in\s*(?:\.\s*|$)/i;
+function paneDetail(detail: string | null | undefined): string | null {
+  if (!detail) return null;
+  let d = detail.replace(SIGN_IN_HEADING, '').trim();
+  d = d.replace(/[;,]?\s*then reopen this dialog\s*\.?\s*$/i, '').trim();
+  if (!d) return null;
+  return /[.!?]$/.test(d) ? d : `${d}.`;
+}
 const notSignedIn = ref<{ detail: string | null } | null>(null);
 let signInAsked = 0;
 let signInTimer: ReturnType<typeof setTimeout> | undefined;
@@ -61,7 +71,7 @@ async function checkSignIn() {
   try {
     const found = (await api.call<DetectedCli[]>('agents.detect')).find((c) => c.cliId === cli);
     if (asked !== signInAsked) return;
-    notSignedIn.value = found?.found && found.signIn?.status === 'not-signed-in' ? { detail: found.signIn.detail ?? null } : null;
+    notSignedIn.value = found?.found && found.signIn?.status === 'not-signed-in' ? { detail: paneDetail(found.signIn.detail) } : null;
   } catch {
     if (asked !== signInAsked) return;
     notSignedIn.value = null;

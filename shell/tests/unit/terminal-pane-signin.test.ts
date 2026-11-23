@@ -44,6 +44,36 @@ describe('terminal pane: Grok not signed in', () => {
     expect(w.get('[data-test=terminal-pane-signin-detail]').text()).toBe('No token in ~/.grok/auth.json.');
   });
 
+  it('drops the heading and "then reopen this dialog" from the core\'s detail, keeping the full stop', async () => {
+    const HEADING = 'Not signed in: run `grok` in your own terminal and sign in';
+    const cases: [string, string][] = [
+      [`${HEADING}. /home/alice/.grok/auth.json is missing; then reopen this dialog.`, '/home/alice/.grok/auth.json is missing.'],
+      [`${HEADING}. auth.json holds no sign-in, then reopen this dialog.`, 'auth.json holds no sign-in.'],
+      ["The app's last Grok request was refused.", "The app's last Grok request was refused."],
+    ];
+    for (const [detail, shown] of cases) {
+      const { api } = fakeApi(() => [grok('not-signed-in', detail)]);
+      showChannelTerminal('agent-test:grok', 'Terminal · Grok Build (xAI) · global policy');
+      const w = mount(TerminalPane, { props: { api }, ...stubs });
+      await flushPromises();
+      expect(w.get('[data-test=terminal-pane-signin-detail]').text()).toBe(shown);
+      expect(w.get('[data-test=terminal-pane-signin]').text()).not.toMatch(/reopen this dialog/);
+      w.unmount();
+    }
+  });
+
+  it('shows no detail line when the detail is just the heading', async () => {
+    for (const detail of ['Not signed in: run `grok` in your own terminal and sign in.', 'Not signed in: run `grok` in your own terminal and sign in']) {
+      const { api } = fakeApi(() => [grok('not-signed-in', detail)]);
+      showChannelTerminal('agent-test:grok', 'Terminal · Grok Build (xAI) · global policy');
+      const w = mount(TerminalPane, { props: { api }, ...stubs });
+      await flushPromises();
+      expect(w.get('[data-test=terminal-pane-signin]').text()).toContain('Not signed in: run grok in your own terminal and sign in');
+      expect(w.find('[data-test=terminal-pane-signin-detail]').exists()).toBe(false);
+      w.unmount();
+    }
+  });
+
   it('hides it when Grok is signed in', async () => {
     const { api } = fakeApi(() => [grok('signed-in', 'Signed in as you@example.com.')]);
     showChannelTerminal('agent-test:grok', 'Terminal · Grok Build (xAI) · global policy');
