@@ -125,6 +125,10 @@ describe('buildNav: the sidebar as data', () => {
     // Another screen: no team is active even with a teamId kept.
     expect(buildNav({ ...base(), view: 'board', teamId: 2 }).teams.some((t) => t.active)).toBe(false);
   });
+  it('B130: a team with an open decision has the waiting dot; running still wins', () => {
+    const nav = buildNav({ ...base(), teams: [team(1, 'asks', { waiting: 1 }), team(2, 'busy', { waiting: 1, running: 1 }), team(3, 'held', { waiting: 1, paused: true })] });
+    expect(nav.teams.map((t) => t.dot)).toEqual(['waiting', 'running', 'waiting']);
+  });
   it('the same dots as Sidebar.vue draws', () => {
     const w = mount(Sidebar, { props: { ...base(), remote: true } as any });
     expect(w.findAll('[data-test=team-item] .dot').map((d) => d.attributes('data-state'))).toEqual(buildNav(base()).teams.map((t) => t.dot));
