@@ -176,6 +176,7 @@ public sealed partial class IntegrationService
             {
                 ["type"] = AuthType(a.Auth), ["name"] = OptStr(a.Auth, "name"), ["description"] = OptStr(a.Auth, "description"),
                 ["chosen"] = a.Auth["chosen"] is JsonValue ch && ch.TryGetValue<bool>(out var chosen) && chosen,
+                [PathParamsKey] = a.Auth[PathParamsKey]?.DeepClone(),
             },
             ["signIn"] = SignInJson(a.Auth),
             ["oauth"] = a.Kind == "http" && AuthType(a.Auth) == "oauth2" ? OAuthApiJson(a) : null,
@@ -234,7 +235,13 @@ public sealed partial class IntegrationService
 
         var auth = existing?.Auth;
         if (p is not null && p.ContainsKey("auth"))
+        {
             auth = p["auth"] is JsonObject ao ? CleanAuth(ao) : null;
+            // the path parameters filled from the Connection stay as they were when the new sign-in does not say (the sign-in dialog does not)
+            if (auth is not null && p["auth"] is JsonObject sent && !sent.ContainsKey(PathParamsKey) && existing?.Auth?[PathParamsKey] is JsonObject kept)
+                auth[PathParamsKey] = kept.DeepClone();
+        }
+        CheckPathParams(auth, connectionId);
 
         var now = Now();
         var url = baseText ?? existing?.BaseUrl ?? "";
@@ -254,7 +261,64 @@ public sealed partial class IntegrationService
         var name = OptStr(a, "name")?.Trim();
         if (type is "header" or "query" && string.IsNullOrEmpty(name)) throw new ArgumentException($"say which {type} name carries the key");
         // chosen: the person said how it signs in (the spec did not), so the dialog keeps offering the choice
-        return new JsonObject { ["type"] = type, ["name"] = type is "header" or "query" ? name : null, ["description"] = OptStr(a, "description"), ["chosen"] = true };
+        var clean = new JsonObject { ["type"] = type, ["name"] = type is "header" or "query" ? name : null, ["description"] = OptStr(a, "description"), ["chosen"] = true };
+        if (CleanPathParams(a[PathParamsKey]) is { } pp) clean[PathParamsKey] = pp;
+        return clean;
+    }
+
+    /// <summary>
+    /// The auth key of the path parameters an API fills from its Connection: {"AccountSid": "username"} sends the Connection's (non-secret)
+    /// "username" field as the route's {AccountSid}, so the caller never gives it. A secret field is never eligible.
+    /// </summary>
+    internal const string PathParamsKey = "pathParams";
+
+    private static JsonObject? CleanPathParams(JsonNode? node)
+    {
+        if (node is null) return null;
+        const string Shape = "pathParams maps a path parameter's name to the key of a Connection field that is not secret, e.g. {\"AccountSid\": \"username\"}";
+        if (node is not JsonObject map) throw new ArgumentException(Shape);
+        var clean = new JsonObject();
+        foreach (var (param, value) in map)
+        {
+            var field = value is JsonValue v && v.TryGetValue<string>(out var s) ? s.Trim() : null;
+            if (param.Trim().Length is 0 or > 100 || param.IndexOfAny(['{', '}', '/']) >= 0 || field is not { Length: > 0 and <= 100 }) throw new ArgumentException(Shape);
+            clean[param.Trim()] = field;
+        }
+        return clean.Count == 0 ? null : clean;
+    }
+
+    /// <summary>Refuses a path parameter bound to a secret field of the API's Connection (a secret never goes into a URL).</summary>
+    private void CheckPathParams(JsonObject? auth, long? connectionId)
+    {
+        if (auth?[PathParamsKey] is not JsonObject map || connectionId is not { } cid || connections?.Get(cid) is not { } view) return;
+        foreach (var (param, value) in map)
+            if (value is JsonValue v && v.TryGetValue<string>(out var key) && view.Fields.FirstOrDefault(f => f.Key == key) is { Secret: true })
+                throw new ArgumentException($"'{key}' is a secret field of the connection '{view.Name}': a secret never fills a path parameter ({param})");
+    }
+
+    /// <summary>The path parameters (by their name in the route) the API's Connection fills, and the Connection's name.</summary>
+    private sealed record ConnectionFills(string Connection, IReadOnlyDictionary<string, string> Values)
+    {
+        public string? For(string wire) => Values.TryGetValue(wire, out var v) ? v : null;
+    }
+
+    /// <summary>
+    /// The values of the API's bound path parameters (auth.pathParams) from its Connection's fields that are not secret, or null when none.
+    /// A binding to a secret field, a missing field or an empty value fills nothing (the caller is then asked for the parameter).
+    /// </summary>
+    private ConnectionFills? PathFillsOf(ApiRecord api)
+    {
+        if (api.Auth?[PathParamsKey] is not JsonObject map || map.Count == 0) return null;
+        if (api.ConnectionId is not { } cid || connections?.Get(cid) is not { } view) return null;
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (param, node) in map)
+        {
+            if (node is not JsonValue v || !v.TryGetValue<string>(out var key)) continue;
+            if (view.Fields.FirstOrDefault(f => f.Key == key) is not { Secret: false, Shown: { Length: > 0 } value }) continue; // never a secret
+            if (value.IndexOfAny(['\r', '\n', '\0']) >= 0) continue;
+            values[param] = value;
+        }
+        return values.Count == 0 ? null : new ConnectionFills(view.Name, values);
     }
 
     private JsonNode ApiEnable(string name, bool? all, long? teamId, bool on)
@@ -367,8 +431,11 @@ public sealed partial class IntegrationService
     /// <summary>A request built from an agent's parameters, before the sign-in is added. Its URL is on the service URL's origin and under its path.</summary>
     private sealed record ApiRequest(HttpMethod Method, Uri Url, IReadOnlyList<(string Name, string Value)> Headers, string? JsonBody, IReadOnlyList<KeyValuePair<string, string>>? Form);
 
-    /// <summary>What a call returned: the agent's text, the record for the log, and the HTTP status and status line (null when nothing answered).</summary>
-    private sealed record ApiResult(string Text, CliOutput? Output, int? Status, string? Head);
+    /// <summary>
+    /// What a call returned: the agent's text, the record for the log, and the HTTP status and status line (null when nothing answered);
+    /// and, when something answered, its media type and its scrubbed (and cut) body on their own, as a script reads them.
+    /// </summary>
+    private sealed record ApiResult(string Text, CliOutput? Output, int? Status, string? Head, string? Media = null, string? Body = null);
 
     private List<ApiOp> ApiOps(long apiId)
     {
@@ -474,7 +541,8 @@ public sealed partial class IntegrationService
         var team = ApiRulesOf(api.Id, run.Member.TeamId);
         var global = ApiRulesOf(api.Id, null);
         if (action == "list") return ApiListText(api, ops, team, global, OptStr(prms, "filter"));
-        if (action == "describe") return ApiDescribeText(api, ops, OptStr(prms, "action"));
+        var fills = PathFillsOf(api);
+        if (action == "describe") return ApiDescribeText(api, ops, OptStr(prms, "action"), fills);
 
         var op = ops.FirstOrDefault(o => o.Id == action && !o.Gone);
         if (op is null) return $"refused: no action '{Clip(SecretScrubber.Scrub(action), 100)}'; use action list";
@@ -491,7 +559,7 @@ public sealed partial class IntegrationService
         }
         // checked before anyone is asked: a request that cannot be sent is refused now
         ApiRequest request;
-        try { request = PlanApiRequest(api, op, prms); }
+        try { request = PlanApiRequest(api, op, prms, fills); }
         catch (ArgumentException e) { return "refused: " + ApiScrub(e.Message, null); }
         var (sign, view, refusal, refusedFor) = await ResolveSignInAsync(api, op, ct);
         if (refusal is not null)
@@ -539,13 +607,16 @@ public sealed partial class IntegrationService
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
-    private static string ApiDescribeText(ApiRecord api, IReadOnlyList<ApiOp> ops, string? which)
+    private static string ApiDescribeText(ApiRecord api, IReadOnlyList<ApiOp> ops, string? which, ConnectionFills? fills = null)
     {
         if (which is null) return "describe needs params.action: the action id (action \"list\" shows them)";
         var op = ops.FirstOrDefault(o => o.Id == which.Trim() && !o.Gone);
         if (op is null) return $"refused: no action '{Clip(SecretScrubber.Scrub(which), 100)}'; use action list";
+        var filled = ConnectionFilledKeys(op, fills);
+        var form = OptStr(op.Params, "x-body") == "form" ? "; a form body's fields may also be given as params by name" : "";
         var text = $"{op.Id}: {op.Method} {op.Route}{(op.Summary.Length > 0 ? " — " + op.Summary : "")}\n" +
-            "params (a JSON schema: x-in says where each one goes, x-name its name in the request; the body goes in params.body):\n" + op.Params.ToJsonString(Indented);
+            (filled.Count > 0 ? $"filled from the connection: {string.Join(", ", filled)} (leave {(filled.Count == 1 ? "it" : "them")} out)\n" : "") +
+            $"params (a JSON schema: x-in says where each one goes, x-name its name in the request; the body goes in params.body{form}):\n" + op.Params.ToJsonString(Indented);
         return text.Length > CliRunner.MaxOutputChars ? text[..CliRunner.MaxOutputChars] + "\n(output cut at 64 KB)" : text;
     }
 
@@ -564,19 +635,31 @@ public sealed partial class IntegrationService
     /// Builds the request from the agent's parameters by the action's schema (x-in, x-name): path parameters are single percent-encoded
     /// segments (never a URL or "..": "/" becomes %2F), query and header parameters by their names, the body as JSON or a form. Unknown or
     /// missing parameters are refused. The URL must stay on the service URL's scheme, host and port, and under its path.
+    /// Path parameters the Connection fills (<paramref name="fills"/>) are taken from it: a caller's different value is refused. A form body's
+    /// fields may be given as parameters by name (a script's natural shape): they go into the body.
     /// </summary>
-    private static ApiRequest PlanApiRequest(ApiRecord api, ApiOp op, JsonObject prms)
+    private static ApiRequest PlanApiRequest(ApiRecord api, ApiOp op, JsonObject given, ConnectionFills? fills = null)
     {
         var service = HttpUrl(api.BaseUrl) ?? throw new ArgumentException($"{api.Name} has no service URL yet; ask the person to add it");
         if (service.UserInfo.Length > 0) throw new ArgumentException($"{api.Name}'s service URL holds a user name; ask the person to use a connection instead");
         var props = op.Params["properties"] as JsonObject ?? [];
+        var prms = (JsonObject)given.DeepClone();
+        if (fills is not null)
+            foreach (var (key, schema) in props)
+            {
+                if (ApiIn(schema) != "path" || fills.For(ApiWire(key, schema)) is not { } value) continue;
+                if (prms[key] is { } theirs && ApiSingle(key, theirs) != value)
+                    throw new ArgumentException($"'{key}' is filled from the connection '{fills.Connection}': leave it out");
+                prms[key] = value;
+            }
+        FoldFormFields(op, props, prms);
         foreach (var (key, _) in prms)
             if (!props.ContainsKey(key)) throw new ArgumentException($"{op.Id} has no parameter '{Clip(key, 60)}' (use action describe)");
         foreach (var req in (op.Params["required"] as JsonArray ?? []).Select(n => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null).OfType<string>())
             if (prms[req] is null) throw new ArgumentException($"'{req}' is required for {op.Id} (use action describe)");
 
-        static string? In(JsonNode? schema) => OptStr(schema as JsonObject, "x-in");
-        static string Wire(string key, JsonNode? schema) => OptStr(schema as JsonObject, "x-name") ?? key;
+        static string? In(JsonNode? schema) => ApiIn(schema);
+        static string Wire(string key, JsonNode? schema) => ApiWire(key, schema);
         var authHeader = AuthHeaderName(api.Auth);
         var authQuery = AuthType(api.Auth) == "query" ? OptStr(api.Auth, "name") : null;
 
@@ -638,6 +721,42 @@ public sealed partial class IntegrationService
             throw new ArgumentException($"that request would leave {api.Name}'s service URL");
         return new ApiRequest(new HttpMethod(op.Method), url, headers, json, form);
     }
+
+    private static string? ApiIn(JsonNode? schema) => OptStr(schema as JsonObject, "x-in");
+    private static string ApiWire(string key, JsonNode? schema) => OptStr(schema as JsonObject, "x-name") ?? key;
+
+    /// <summary>The form body's schema of a form operation (its fields under "properties"), or null.</summary>
+    private static JsonObject? FormBodySchema(ApiOp op) =>
+        OptStr(op.Params, "x-body") == "form" && op.Params["properties"] is JsonObject props && props["body"] is JsonObject b && ApiIn(b) is null ? b : null;
+
+    /// <summary>
+    /// Moves parameters that are not the operation's own but are fields of its form body into params.body (created when absent). A field
+    /// given both ways is refused. Field names match exactly; a name that is also a path, query or header parameter stays that parameter.
+    /// </summary>
+    private static void FoldFormFields(ApiOp op, JsonObject props, JsonObject prms)
+    {
+        if (FormBodySchema(op)?["properties"] is not JsonObject fields) return;
+        JsonObject? body = null;
+        foreach (var key in prms.Select(kv => kv.Key).ToList())
+        {
+            if (props.ContainsKey(key) || !fields.ContainsKey(key)) continue;
+            body ??= prms["body"] switch
+            {
+                null => new JsonObject(),
+                JsonObject b => b,
+                _ => throw new ArgumentException($"{op.Id}'s body is a form: give params.body as an object of fields, or the fields by name"),
+            };
+            if (body.ContainsKey(key)) throw new ArgumentException($"'{Clip(key, 60)}' is given twice: by name and in params.body");
+            var value = prms[key];
+            prms.Remove(key);
+            body[key] = value;
+        }
+        if (body is not null && prms["body"] is null) prms["body"] = body;
+    }
+
+    /// <summary>The operation's parameter keys its path takes from the Connection.</summary>
+    private static List<string> ConnectionFilledKeys(ApiOp op, ConnectionFills? fills) =>
+        fills is null ? [] : (op.Params["properties"] as JsonObject ?? []).Where(p => ApiIn(p.Value) == "path" && fills.For(ApiWire(p.Key, p.Value)) is not null).Select(p => p.Key).ToList();
 
     /// <summary>The one check every URL the app sends to must pass: the service URL's scheme, host and port, no user info, and its path or under it.</summary>
     private static bool WithinService(Uri url, Uri service)
@@ -868,7 +987,8 @@ public sealed partial class IntegrationService
                 connections?.MarkStatus(view.Id, "needs_reconnect", $"the service answered {head} at {Stamp()}");
                 sb.Append("\n\n").Append(NeedsReconnecting(view, api));
             }
-            return new ApiResult(sb.ToString(), new CliOutput(status, "", "", bytes.Length, watch.Elapsed, false, truncated), status, head);
+            return new ApiResult(sb.ToString(), new CliOutput(status, "", "", bytes.Length, watch.Elapsed, false, truncated), status, head,
+                media?.MediaType is { } mt ? ApiScrub(mt, sign) : "", body);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -931,7 +1051,7 @@ public sealed partial class IntegrationService
         try { prms = ask.Args.Count > 1 ? JsonNode.Parse(ask.Args[1]) as JsonObject ?? [] : []; }
         catch (JsonException) { return new ApiResult("refused: the request's parameters could not be read", null, null, null); }
         ApiRequest request;
-        try { request = PlanApiRequest(api, op, prms); }
+        try { request = PlanApiRequest(api, op, prms, PathFillsOf(api)); }
         catch (ArgumentException e) { return new ApiResult("refused: " + ApiScrub(e.Message, null), null, null, null); }
         var (sign, view, refusal, _) = await ResolveSignInAsync(api, op, ct);
         if (refusal is not null) return new ApiResult(refusal, null, null, null);
@@ -997,7 +1117,7 @@ public sealed partial class IntegrationService
                 .FirstOrDefault(o => !o.Gone && o.Method == "GET" && o.Class != CommandClass.Credential && (o.Params["required"] as JsonArray ?? []).Count == 0 && AllowedSomewhere(o));
             if (op is null) continue;
             ApiRequest request;
-            try { request = PlanApiRequest(api, op, []); }
+            try { request = PlanApiRequest(api, op, [], PathFillsOf(api with { ConnectionId = id })); }
             catch (ArgumentException e) { outcomes.Add((Unclear, Clip(e.Message, 200))); continue; }
             var (sign, _, refusal, _) = await ResolveSignInAsync(api with { ConnectionId = id }, op, ct);
             if (refusal is not null) { outcomes.Add((Unclear, Clip(refusal, 200))); continue; }
