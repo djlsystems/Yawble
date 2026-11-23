@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Yawble.Core.Scripts.Engine;
+using Yawble.Core.Scripts.Language;
 
 namespace Yawble.Core.Scripts.Running;
 
