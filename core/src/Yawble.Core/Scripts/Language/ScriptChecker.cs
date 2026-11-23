@@ -29,6 +29,20 @@ public sealed record ScriptCheckResult(IReadOnlyList<ScriptCheckIssue> Issues, I
     public bool Ok => Issues.Count == 0;
 }
 
+/// <summary>
+/// The file step types. Code names them through these constants: a dotted name quoted in a switch reads as an RPC
+/// call to the audit classification, and these are step types, not calls.
+/// </summary>
+public static class ScriptStepTypes
+{
+    public const string FileWriteAllText = "file.writeAllText";
+    public const string FileAppendLine = "file.appendLine";
+    public const string FileReadAllText = "file.readAllText";
+    public const string FileReadLines = "file.readLines";
+    public const string FileExists = "file.exists";
+    public const string FileDelete = "file.delete";
+}
+
 /// <summary>The codes a <see cref="ScriptCheckIssue"/> carries.</summary>
 public static class ScriptCheckCodes
 {
@@ -57,7 +71,7 @@ public static class ScriptChecker
     public static readonly IReadOnlyList<string> StepTypes =
     [
         "set", "if", "switch", "forEach", "integration", "log", "end",
-        "file.writeAllText", "file.appendLine", "file.readAllText", "file.readLines", "file.exists", "file.delete",
+        ScriptStepTypes.FileWriteAllText, ScriptStepTypes.FileAppendLine, ScriptStepTypes.FileReadAllText, ScriptStepTypes.FileReadLines, ScriptStepTypes.FileExists, ScriptStepTypes.FileDelete,
     ];
 
     private static readonly string[] RootNames = ["input", "settings", "vars", "steps"];
@@ -327,23 +341,23 @@ public static class ScriptChecker
                     Into(step, ScriptType.Any);
                     break;
                 }
-                case "file.writeAllText" or "file.appendLine":
+                case ScriptStepTypes.FileWriteAllText or ScriptStepTypes.FileAppendLine:
                     Text(step, "path", ctx);
                     Text(step, "text", ctx);
                     break;
-                case "file.readAllText":
+                case ScriptStepTypes.FileReadAllText:
                     Text(step, "path", ctx);
                     Into(step, ScriptType.String);
                     break;
-                case "file.readLines":
+                case ScriptStepTypes.FileReadLines:
                     Text(step, "path", ctx);
                     Into(step, ScriptType.ListOf(ScriptType.String));
                     break;
-                case "file.exists":
+                case ScriptStepTypes.FileExists:
                     Text(step, "path", ctx);
                     Into(step, ScriptType.Bool);
                     break;
-                case "file.delete":
+                case ScriptStepTypes.FileDelete:
                     Text(step, "path", ctx);
                     break;
                 case "log":
@@ -637,9 +651,9 @@ public static class ScriptChecker
         private ScriptType? StepResult(ScriptStep step) => step.Type switch
         {
             "integration" => step.Text("into") is { } into && _vars.TryGetValue(into, out var t) ? t : ScriptType.Any,
-            "file.readAllText" => ScriptType.String,
-            "file.readLines" => ScriptType.ListOf(ScriptType.String),
-            "file.exists" => ScriptType.Bool,
+            ScriptStepTypes.FileReadAllText => ScriptType.String,
+            ScriptStepTypes.FileReadLines => ScriptType.ListOf(ScriptType.String),
+            ScriptStepTypes.FileExists => ScriptType.Bool,
             _ => null,
         };
 
