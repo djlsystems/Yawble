@@ -416,7 +416,7 @@ await using var orgSummary = new Yawble.Core.Link.OrgSummaryService(
 link.ViewersChanged += orgSummary.ViewersPresent;
 orgSummary.Start();
 var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, runs, guardrail, ui, hostChecks,
-    scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: clis, agentTests: agentTests, link: link, concierge: concierge, board: board,
+    scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: new Yawble.Core.Agents.GatewaySignInOverlay(clis, launch.GrokSignIn), agentTests: agentTests, link: link, concierge: concierge, board: board,
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
     code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService, logTail),

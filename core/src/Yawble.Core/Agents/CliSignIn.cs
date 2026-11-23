@@ -121,14 +121,55 @@ public static class SignInCatalog
             "claude", how, gatewayHeld: true);
     }
 
-    public static CliSignIn Grok(DetectionHost h)
+    /// <summary>
+    /// Grok's tile when it is not signed in (auth.json missing, empty, `{}`, no token, or the gateway's last Grok request
+    /// refused): the start of <see cref="CliSignIn.Detail"/>, so the Grok Terminal can show the same words.
+    /// </summary>
+    public const string GrokNotSignedIn = "Not signed in: run `grok` in your own terminal and sign in";
+
+    /// <summary>auth.json is read at most this far (a real one is well under 4 KB).</summary>
+    public const int GrokAuthReadLimit = 256 * 1024;
+
+    /// <summary>
+    /// Grok: ~/.grok/auth.json (or $GROK_HOME/auth.json). Signed in only when the file holds a usable token (B128): grok
+    /// leaves `{}` behind when xAI refuses its refresh, so a file that exists says nothing. The file is read here for
+    /// that alone; no value from it is kept or shown.
+    /// </summary>
+    public static CliSignIn Grok(DetectionHost h) => Grok(h, DateTimeOffset.UtcNow);
+
+    public static CliSignIn Grok(DetectionHost h, DateTimeOffset now)
     {
         var dir = h.FromVar("GROK_HOME") ?? h.Combine(h.Home, ".grok");
         var file = h.Combine(dir, "auth.json");
-        return Make([new CliSignInFile(file, GrokAuthAccess, h.Fs.FileExists(file), "Grok's sign-in (auth.json)")],
-            new Dictionary<string, string> { [GrokAuthVariable] = file },
-            "grok", "run 'grok login' in your own terminal", gatewayHeld: true);
+        var present = h.Fs.FileExists(file);
+        var entry = new CliSignInFile(file, GrokAuthAccess, present, "Grok's sign-in (auth.json)");
+        var env = new Dictionary<string, string> { [GrokAuthVariable] = file };
+        var state = present ? Credentials.GrokHome.Inspect(GrokAuthText(h, file), now) : Credentials.GrokAuthState.Missing;
+        if (state == Credentials.GrokAuthState.Usable)
+            return Make([entry], env, "grok", "", gatewayHeld: true);
+        var why = state switch
+        {
+            Credentials.GrokAuthState.Missing => $"{file} is missing",
+            Credentials.GrokAuthState.Unreadable => $"{file} is empty or not a sign-in grok can read",
+            Credentials.GrokAuthState.Expired => $"the sign-in in {file} has expired and cannot be renewed",
+            _ => $"{file} holds no sign-in (grok clears it when xAI refuses to renew it)",
+        };
+        return new CliSignIn(SignInStatus.NotSignedIn, $"{GrokNotSignedIn}. {Capital(why)}; then reopen this dialog.", [entry], env);
     }
+
+    /// <summary>The gateway's last Grok request was refused (<see cref="Gateway.GrokSignInWatch"/>): the tile says so, with the same fix.</summary>
+    public static CliSignIn GrokRefused(CliSignIn signIn, Gateway.GrokRefusal refusal) =>
+        signIn with
+        {
+            Status = SignInStatus.NotSignedIn,
+            Detail = $"{GrokNotSignedIn}. The app's last Grok request "
+                     + $"({refusal.At.ToLocalTime():yyyy-MM-dd HH:mm}) was refused: {refusal.Reason}.",
+        };
+
+    private static string? GrokAuthText(DetectionHost h, string file) =>
+        h.Fs.ReadHead(file, GrokAuthReadLimit) is { } bytes ? System.Text.Encoding.UTF8.GetString(bytes) : "";
+
+    private static string Capital(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
     /// <summary>The host's credential store, for the CLIs that keep their sign-in there (tests replace it).</summary>
     public static Credentials.IHostCredentialReader Store { get; set; } = Credentials.HostCredentials.ForThisHost();
