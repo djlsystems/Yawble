@@ -28,7 +28,7 @@ export interface EmbedPlace {
 }
 
 /** A team's dot, as the sidebar draws it. The cloud draws a value it does not know as idle. */
-export type EmbedTeamDot = 'idle' | 'running' | 'queued' | 'paused' | 'attention';
+export type EmbedTeamDot = 'idle' | 'running' | 'waiting' | 'queued' | 'paused' | 'attention';
 
 export interface EmbedTeam {
   id: number;

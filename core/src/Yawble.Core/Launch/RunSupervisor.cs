@@ -160,6 +160,7 @@ public sealed class RunSupervisor
                 var survivors = reaped.Survivors;
                 var fromTree = reaped.Survivors.ToHashSet();
                 List<int> fromFolder = [];
+                List<int> fromGroup = [];
                 if (_holders is not null && !string.IsNullOrEmpty(_runFolder))
                 {
                     var before = tree.Tracked.ToHashSet();
@@ -170,10 +171,16 @@ public sealed class RunSupervisor
                     {
                         // What the backstop took on: tracked now, not before (a pid tracked before with another start time
                         // is a new process).
-                        fromFolder = [.. tree.Tracked.Where(t => !before.Contains(t)).Select(t => t.Key).Order()];
+                        var adopted = tree.Tracked.Where(t => !before.Contains(t)).ToHashSet();
+                        fromFolder = [.. adopted.Select(t => t.Key).Order()];
                         var again = tree.Reap();
                         signalled += again.Signalled;
                         survivors = again.Survivors;
+                        // B129: what the second reap found through the adopted ones' groups or ppids (tracked after the
+                        // adoption) or signalled besides them; never one the first reap already reported.
+                        var newlyTracked = tree.Tracked.Where(t => !before.Contains(t) && !adopted.Contains(t)).Select(t => t.Key);
+                        fromGroup = [.. newlyTracked.Concat(again.SignalledPids)
+                            .Where(p => !fromTree.Contains(p) && !fromFolder.Contains(p)).Distinct().Order()];
                     }
                 }
                 var survived = survivors.Count > 0 || fromFolder.Count > 0;
@@ -183,7 +190,7 @@ public sealed class RunSupervisor
                     LeftBehind = survivors.Count,
                     TreeSignalled = signalled,
                 };
-                if (survived) _log?.Invoke(TeardownLine(fromTree, fromFolder, survivors));
+                if (survived) _log?.Invoke(TeardownLine(fromTree, fromFolder, fromGroup, survivors));
             }
         }
         finally
@@ -194,15 +201,18 @@ public sealed class RunSupervisor
     }
 
     /// <summary>
-    /// The core log's teardown line: every process that outlived the tree's own reap (found by the tree: its ppid or its
-    /// group) or was found only holding the run's folder, and whether it is still running.
+    /// The core log's teardown line: every process that outlived the tree's own reap (<c>tree</c>: found by its ppid or
+    /// its group), was found only holding the run's folder (<c>run-folder</c>), or was found by the reap after that
+    /// through the recorded group or ppid of what the backstop took on (<c>group</c>), and whether it is still running.
     /// </summary>
-    internal static string TeardownLine(IReadOnlySet<int> fromTree, IReadOnlyList<int> fromFolder, IReadOnlyList<int> survivors)
+    internal static string TeardownLine(IReadOnlySet<int> fromTree, IReadOnlyList<int> fromFolder, IReadOnlyList<int> fromGroup,
+        IReadOnlyList<int> survivors)
     {
         var alive = survivors.ToHashSet();
         var parts = fromTree.Select(p => (Pid: p, How: "tree"))
             .Concat(fromFolder.Where(p => !fromTree.Contains(p)).Select(p => (Pid: p, How: "run-folder")))
-            .Concat(survivors.Where(p => !fromTree.Contains(p) && !fromFolder.Contains(p)).Select(p => (Pid: p, How: "tree")))
+            .Concat(fromGroup.Where(p => !fromTree.Contains(p) && !fromFolder.Contains(p)).Select(p => (Pid: p, How: "group")))
+            .Concat(survivors.Where(p => !fromTree.Contains(p) && !fromFolder.Contains(p) && !fromGroup.Contains(p)).Select(p => (Pid: p, How: "tree")))
             .OrderBy(x => x.Pid)
             .Select(x => $"{x.Pid} ({x.How}, {(alive.Contains(x.Pid) ? "still running after SIGKILL" : "reaped")})");
         return $"run teardown: tree survived: {string.Join(", ", parts)}";
