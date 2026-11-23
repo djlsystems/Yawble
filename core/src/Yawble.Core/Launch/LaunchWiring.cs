@@ -29,6 +29,9 @@ public sealed class LaunchWiring : IAsyncDisposable
     private readonly GrokKeeper? _keeper;
 
     /// <summary>Where every run's gateway reports a host refused for not being on the allowlist (the network asks); set once the ask store is up.</summary>
+    /// <summary>The gateway's latest Grok sign-in outcome (the Agents tile, B128); null when the launcher is off.</summary>
+    public GrokSignInWatch? GrokSignIn => _gatewayHost?.GrokSignIn;
+
     public Gateway.IHostRefusals? HostRefusals
     {
         get => _gatewayHost?.Refusals;
@@ -132,7 +135,8 @@ public sealed class LaunchWiring : IAsyncDisposable
             // Each CLI's own sign-in on this host; the app's credential store is not a source for runs.
             new HostSignInModes(), new GatewayRunFactory(gatewayHost), backend,
             new RunRecordStore(connectionString), registry,
-            transcripts: new StoreTranscripts(new TranscriptStore(data, connectionString)), agentDefaults: agentDefaults);
+            transcripts: new StoreTranscripts(new TranscriptStore(data, connectionString)), agentDefaults: agentDefaults,
+            log: log);
         return new LaunchWiring(new SandboxAgentRunner(launcher), launcher, gatewayHost, keeper, null)
         {
             AgentDefaults = agentDefaults,

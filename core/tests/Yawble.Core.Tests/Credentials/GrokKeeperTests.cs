@@ -188,6 +188,144 @@ public class GrokKeeperTests
         Assert.Equal("grok-session-2", second.Headers.GetValues("x-fake-accepted").Single());
     }
 
+    // ------------------------------------------------------------------ B128: a refresh run never leaves grok signed out
+    // A fake runner (GrokKeeperOptions.RunGrok) stands in for grok on every OS: it records the arguments and rewrites
+    // auth.json the way grok would. No real grok runs and no real ~/.grok is touched.
+
+    private static GrokKeeper FakeKeeper(GrokHome home, List<string> calls, Func<IReadOnlyList<string>, string?> rewrite) =>
+        new(home, new GrokKeeperOptions
+        {
+            GrokBinary = "fake-grok",
+            RunGrok = args =>
+            {
+                calls.Add(string.Join(' ', args));
+                if (rewrite(args) is { } text) File.WriteAllText(home.AuthFile, text);
+                return Task.FromResult("exited 0");
+            },
+        });
+
+    private static bool IsPrompt(IReadOnlyList<string> args) => args.Contains("-p");
+
+    private static string Entry(string access, string? refresh, DateTimeOffset expires)
+    {
+        var entry = new System.Text.Json.Nodes.JsonObject { ["access_token"] = access, ["expires_at"] = expires.ToUnixTimeSeconds() };
+        if (refresh is not null) entry["refresh_token"] = refresh;
+        return new System.Text.Json.Nodes.JsonObject { ["https://auth.x.ai::0"] = entry }.ToJsonString();
+    }
+
+    [Fact]
+    public async Task APromptRunThatLeavesAuthJsonEmpty_GetsItPutBack()
+    {
+        // What was seen on 2026-11-22: `grok models` exit 0 (no change), then `grok -p` exit 1 and auth.json was `{}`.
+        using var db = new TempDb();
+        var home = GrokHome.InDataDir(Path.Combine(db.Dir, "data")).EnsureCreated();
+        FakeSecrets.WriteGrokAuth(home, FakeSecrets.GrokSession1, DateTimeOffset.UtcNow.AddSeconds(-5)); // expired, refresh token
+        var before = File.ReadAllBytes(home.AuthFile);
+        var calls = new List<string>();
+        await using var keeper = FakeKeeper(home, calls, args => IsPrompt(args) ? "{}" : null);
+
+        var result = await keeper.RefreshAsync();
+
+        Assert.Equal(["models", "--no-auto-update -p Reply with OK. --max-turns 1"], calls);
+        Assert.Equal(1, keeper.Restores);
+        Assert.Equal(before, File.ReadAllBytes(home.AuthFile)); // byte for byte as it was
+        Assert.Equal(FakeSecrets.GrokSession1, home.ReadSession()!.AccessToken);
+        Assert.False(File.Exists(home.AuthFile + ".yawble-restore"));
+        Assert.False(result.Valid); // still expired: the person is told to sign in again, but is not signed out
+        Assert.DoesNotContain(FakeSecrets.GrokSession1, result.ToString());
+    }
+
+    [Fact]
+    public async Task AModelsRunThatLeavesAuthJsonEmpty_GetsItPutBack_AndThePromptIsNotRun()
+    {
+        using var db = new TempDb();
+        var home = GrokHome.InDataDir(Path.Combine(db.Dir, "data")).EnsureCreated();
+        FakeSecrets.WriteGrokAuth(home, FakeSecrets.GrokSession1, DateTimeOffset.UtcNow.AddMinutes(2));
+        var calls = new List<string>();
+        await using var keeper = FakeKeeper(home, calls, args => args[0] == "models" ? "" : null);
+
+        await keeper.RefreshAsync();
+
+        Assert.Equal(["models"], calls); // the same refusal would clear it again
+        Assert.Equal(1, keeper.Restores);
+        Assert.Equal(FakeSecrets.GrokSession1, home.ReadSession()!.AccessToken);
+    }
+
+    [Fact]
+    public async Task WithoutARefreshToken_TheOneTurnPromptIsNeverRun()
+    {
+        using var db = new TempDb();
+        var home = GrokHome.InDataDir(Path.Combine(db.Dir, "data")).EnsureCreated();
+        File.WriteAllText(home.AuthFile, Entry(FakeSecrets.GrokSession1, null, DateTimeOffset.UtcNow.AddSeconds(-5)));
+        var calls = new List<string>();
+        await using var keeper = FakeKeeper(home, calls, _ => null);
+
+        var result = await keeper.RefreshAsync(force: true);
+
+        Assert.Equal(["models"], calls);
+        Assert.Equal(1, keeper.Runs);
+        Assert.Equal(0, keeper.Restores);
+        Assert.False(result.Valid);
+        Assert.Equal(FakeSecrets.GrokSession1, home.ReadSession()!.AccessToken); // left as it was
+    }
+
+    [Fact]
+    public async Task ARunThatRenewsTheSession_IsKept_AndNothingIsPutBack()
+    {
+        using var db = new TempDb();
+        var home = GrokHome.InDataDir(Path.Combine(db.Dir, "data")).EnsureCreated();
+        FakeSecrets.WriteGrokAuth(home, FakeSecrets.GrokSession1, DateTimeOffset.UtcNow.AddSeconds(-5));
+        var renewed = Entry(FakeSecrets.GrokSession2, "FAKE-r2", DateTimeOffset.UtcNow.AddHours(2));
+        var calls = new List<string>();
+        await using var keeper = FakeKeeper(home, calls, args => IsPrompt(args) ? renewed : null);
+
+        var result = await keeper.RefreshAsync();
+
+        Assert.True(result.Valid);
+        Assert.True(result.Changed);
+        Assert.Equal(0, keeper.Restores);
+        Assert.Equal(FakeSecrets.GrokSession2, home.ReadSession()!.AccessToken);
+    }
+
+    [Fact]
+    public async Task Gateway_RemembersTheLastGrok401_AndASuccessClearsIt()
+    {
+        await using var f = await GatewayFixture.StartAsync(keeper: new GrokKeeperOptions { GrokBinary = "fake-grok", RunGrok = _ => Task.FromResult("exited 1") });
+        f.Clock.Now = DateTimeOffset.UtcNow;
+        FakeSecrets.WriteGrokAuth(f.GrokHome, FakeSecrets.GrokSession1, f.Clock.Now.AddHours(1));
+        await using var gateway = f.StartRun(24);
+        using var http = ProxyClient.For(gateway);
+        async Task<HttpStatusCode> Ask()
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{Vhosts.Grok}/v1/models");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gateway.Token.Value);
+            using var resp = await http.SendAsync(req, Ct);
+            return resp.StatusCode;
+        }
+        var watch = f.Host.GrokSignIn;
+        Assert.Null(watch.Current(f.GrokHome.ReadSession()));
+
+        f.Upstream.RefuseAll = true; // xAI refuses the session
+        Assert.Equal(HttpStatusCode.Unauthorized, await Ask());
+        var refusal = watch.Current(f.GrokHome.ReadSession());
+        Assert.NotNull(refusal);
+        Assert.Contains(GrokRefusedWording, refusal.Reason);
+        Assert.DoesNotContain(FakeSecrets.GrokSession1, refusal.ToString());
+
+        f.Upstream.RefuseAll = false;
+        Assert.Equal(HttpStatusCode.OK, await Ask());
+        Assert.Null(watch.Current(f.GrokHome.ReadSession()));
+
+        // The gateway's own 401 (auth.json holds no session): remembered too, tied to "no session".
+        File.WriteAllText(f.GrokHome.AuthFile, "{}");
+        Assert.Equal(HttpStatusCode.Unauthorized, await Ask());
+        Assert.Equal("Grok is not signed in on this computer, or its sign-in could not be renewed: run 'grok' in your own terminal and sign in",
+            watch.Current(null)!.Reason);
+        // ...and not shown once auth.json holds a session again (the person signed in).
+        FakeSecrets.WriteGrokAuth(f.GrokHome, FakeSecrets.GrokSession2, f.Clock.Now.AddHours(1));
+        Assert.Null(watch.Current(f.GrokHome.ReadSession()));
+    }
+
     /// <summary>The card reason RunGateway writes for an upstream 401 on Grok's own sign-in (UpstreamRefused).</summary>
     private const string GrokRefusedWording = "the app asked grok to renew it";
 

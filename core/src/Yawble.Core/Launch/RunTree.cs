@@ -47,9 +47,11 @@ public sealed record RunTreeResult(int Signalled, IReadOnlyList<int> Survivors);
 /// its whole namespace down), so a process the agent CLI started - its shell wrapper, a build under it - is reparented to
 /// launchd when the CLI ends, and lives on in a group or session of its own. While the run is live this reads the
 /// process list (throttled) and records every descendant of the sandbox's process by ppid, with its start time, so one
-/// that has since been reparented, or left the group, is still known; members of a group led by a recorded process are
-/// recorded too. At the end <see cref="Reap"/> SIGTERMs them all (and their groups), waits a grace, SIGKILLs what is
-/// left and reports whatever still runs. Never the core itself, its own group, pid 1 or a pid reused by another process.
+/// that has since been reparented, or left the group, is still known. The group of every recorded process is recorded
+/// too (B127) and stays the run's while one of its recorded members lives, its leader alive or not: its other members
+/// are recorded as they show up. At the end <see cref="Reap"/> SIGTERMs them all (and their groups), waits a grace,
+/// SIGKILLs what is left and reports whatever still runs. Never the core itself, its own group, pid 1, or a process
+/// that started before the run (a pid or group id reused by another process).
 /// </summary>
 public sealed class RunTree
 {
@@ -60,7 +62,9 @@ public sealed class RunTree
     private readonly int _root;
     private readonly RunTreeOptions _options;
     private readonly Dictionary<int, long> _tracked = [];
+    private readonly HashSet<int> _groups = [];
     private readonly Lock _lock = new();
+    private long _runStart = long.MinValue;
     private long _lastObserved;
     private bool _rootChecked;
     private bool _disabled;
@@ -105,88 +109,149 @@ public sealed class RunTree
                 // The sandbox's process is the core's own child, alive at the first read (just after the spawn). Anything
                 // else - gone already, or another process's - is not a pid this tree may follow: a later process that got
                 // the same pid is never taken for it.
-                if (!byPid.TryGetValue(_root, out var root) || root.ParentPid != _table.Self || !Allowed(root)) { _disabled = true; return list; }
-                _tracked[_root] = root.StartedAt;
+                if (!byPid.TryGetValue(_root, out var root) || root.ParentPid != _table.Self) { _disabled = true; return list; }
+                // The run's start: nothing that started before it is ever the run's (a reused pid or pgid).
+                _runStart = root.StartedAt;
+                if (!Allowed(root)) { _disabled = true; return list; }
+                Record(root);
             }
             var children = list.ToLookup(p => p.ParentPid);
             var frontier = new Queue<int>(_tracked.Keys.Where(pid => IsSame(byPid, pid)));
-            var leaders = new HashSet<int>(frontier);
-            while (frontier.Count > 0)
+            while (true)
             {
-                foreach (var child in children[frontier.Dequeue()])
+                while (frontier.Count > 0)
                 {
-                    if (!Allowed(child) || _tracked.TryGetValue(child.Pid, out var s) && s == child.StartedAt) continue;
-                    _tracked[child.Pid] = child.StartedAt;
-                    leaders.Add(child.Pid);
-                    frontier.Enqueue(child.Pid);
+                    foreach (var child in children[frontier.Dequeue()])
+                    {
+                        if (!Allowed(child) || IsSame(byPid, child.Pid)) continue;
+                        Record(child);
+                        frontier.Enqueue(child.Pid);
+                    }
                 }
+                // A process in a recorded group whose parent ended before it was seen, even when the group's leader has
+                // ended too (B127: the shell backgrounds the build and exits; the build is launchd's, in the shell's group).
+                foreach (var p in list)
+                {
+                    if (!_groups.Contains(p.GroupId) || !Allowed(p) || IsSame(byPid, p.Pid)) continue;
+                    Record(p);
+                    frontier.Enqueue(p.Pid);
+                }
+                if (frontier.Count == 0) break;
             }
-            // A process in a group a recorded process leads, whose parent ended before it was seen.
-            foreach (var p in list)
-            {
-                if (p.GroupId == _table.SelfGroup || !leaders.Contains(p.GroupId) || !Allowed(p)) continue;
-                if (_tracked.TryGetValue(p.Pid, out var s) && s == p.StartedAt) continue;
-                _tracked[p.Pid] = p.StartedAt;
-            }
+            Prune(list, byPid);
             return list;
         }
     }
 
     /// <summary>
-    /// The run is over: SIGTERM every recorded process still alive (and each group one of them leads), wait up to the
-    /// grace, SIGKILL what is left, wait for it to go. Blocking; returns once the tree is gone or the wait is up.
+    /// The backstop (B127): processes found to be the run's some other way (they hold its folder) are tracked too, and
+    /// their groups recorded, so the next <see cref="Reap"/> ends them. The same guard as the tree's own: only a process
+    /// that started at or after the run, never the core, its group or pid 1. Returns how many it took on.
+    /// </summary>
+    public int Adopt(IEnumerable<int> pids)
+    {
+        var wanted = pids.ToHashSet();
+        if (wanted.Count == 0) return 0;
+        var list = Track();
+        lock (_lock)
+        {
+            if (_disabled || !_rootChecked) return 0;
+            var byPid = list.GroupBy(p => p.Pid).ToDictionary(g => g.Key, g => g.First());
+            var adopted = 0;
+            foreach (var pid in wanted)
+            {
+                if (!byPid.TryGetValue(pid, out var p) || !Allowed(p)) continue;
+                if (!IsSame(byPid, pid)) adopted++;
+                Record(p);
+            }
+            return adopted;
+        }
+    }
+
+    // Caller holds _lock.
+    private void Record(ProcessEntry p)
+    {
+        _tracked[p.Pid] = p.StartedAt;
+        if (GroupAllowed(p.GroupId)) _groups.Add(p.GroupId);
+    }
+
+    // A recorded group stays the run's while one of its recorded members lives; once none does, a later group with
+    // that id (its leader's pid reused) is not the run's. Caller holds _lock.
+    private void Prune(IReadOnlyList<ProcessEntry> list, Dictionary<int, ProcessEntry> byPid)
+    {
+        var live = list.Where(p => IsSame(byPid, p.Pid)).Select(p => p.GroupId).ToHashSet();
+        _groups.RemoveWhere(g => !live.Contains(g));
+    }
+
+    /// <summary>
+    /// The run is over: SIGTERM every recorded process still alive (and each recorded group, its leader alive or not),
+    /// wait up to the grace, SIGKILL what is left, wait for it to go. Blocking; returns once the tree is gone or the wait
+    /// is up.
     /// </summary>
     public RunTreeResult Reap()
     {
-        var alive = Alive(Track());
+        var list = Track();
+        var alive = Alive(list);
         if (alive.Count == 0) return new RunTreeResult(0, []);
         var signalled = new HashSet<int>(alive.Select(p => p.Pid));
-        SignalAll(alive, SIGTERM);
+        SignalAll(alive, list, SIGTERM);
 
         var termAt = Stopwatch.GetTimestamp();
         while (alive.Count > 0 && Stopwatch.GetElapsedTime(termAt) < _options.Grace)
         {
             Thread.Sleep(_options.Poll);
-            alive = Alive(Track());
+            list = Track();
+            alive = Alive(list);
             // One that started during the grace gets its SIGTERM too.
             var fresh = alive.Where(p => signalled.Add(p.Pid)).ToList();
-            if (fresh.Count > 0) SignalAll(fresh, SIGTERM);
+            if (fresh.Count > 0) SignalAll(fresh, list, SIGTERM);
         }
         if (alive.Count == 0) return new RunTreeResult(signalled.Count, []);
 
-        SignalAll(alive, SIGKILL);
+        SignalAll(alive, list, SIGKILL);
         var killAt = Stopwatch.GetTimestamp();
         while (true)
         {
             Thread.Sleep(_options.Poll);
-            alive = Alive(Track());
+            list = Track();
+            alive = Alive(list);
             foreach (var p in alive) signalled.Add(p.Pid);
             if (alive.Count == 0 || Stopwatch.GetElapsedTime(killAt) >= _options.KillWait) break;
             // Started between the list and the kill: it goes too.
-            SignalAll(alive, SIGKILL);
+            SignalAll(alive, list, SIGKILL);
         }
         return new RunTreeResult(signalled.Count, [.. alive.Select(p => p.Pid).Order()]);
     }
 
-    private void SignalAll(IReadOnlyList<ProcessEntry> procs, int signal)
+    private void SignalAll(IReadOnlyList<ProcessEntry> procs, IReadOnlyList<ProcessEntry> list, int signal)
     {
-        foreach (var p in procs)
+        HashSet<int> groups;
+        lock (_lock)
         {
-            // Its group first (a whole build under the shell), unless it is the core's own.
-            if (p.GroupId == p.Pid && p.GroupId != _table.SelfGroup) _table.SignalGroup(p.GroupId, signal);
-            _table.Signal(p.Pid, signal);
+            // A recorded group as a whole (a build under a shell that may have ended), but only when every live member
+            // is the run's own: a group id reused by a process from before the run is never signalled.
+            var mine = procs.Select(p => p.Pid).ToHashSet();
+            groups = [.. procs.Select(p => p.GroupId).Where(g => _groups.Contains(g) && GroupAllowed(g)
+                && list.Where(x => x.GroupId == g).All(x => mine.Contains(x.Pid) || IsTrackedAlive(x)))];
         }
+        foreach (var g in groups) _table.SignalGroup(g, signal);
+        foreach (var p in procs) _table.Signal(p.Pid, signal);
     }
 
     private List<ProcessEntry> Alive(IReadOnlyList<ProcessEntry> list)
     {
-        lock (_lock) return [.. list.Where(p => _tracked.TryGetValue(p.Pid, out var s) && s == p.StartedAt && Allowed(p))];
+        lock (_lock) return [.. list.Where(IsTrackedAlive)];
     }
 
+    // Caller holds _lock.
+    private bool IsTrackedAlive(ProcessEntry p) => _tracked.TryGetValue(p.Pid, out var s) && s == p.StartedAt && Allowed(p);
     private bool IsSame(Dictionary<int, ProcessEntry> byPid, int pid) =>
         byPid.TryGetValue(pid, out var p) && _tracked.TryGetValue(pid, out var s) && s == p.StartedAt;
 
-    private bool Allowed(ProcessEntry p) => p.Pid > 1 && p.Pid != _table.Self;
+    // Never pid 0/1, the core itself, or a process that started before the run (its pid or group id reused).
+    private bool Allowed(ProcessEntry p) => p.Pid > 1 && p.Pid != _table.Self && p.StartedAt >= _runStart;
+
+    private bool GroupAllowed(int pgid) => pgid > 1 && pgid != _table.SelfGroup && pgid != _table.Self;
 }
 
 /// <summary>macOS's process list (libproc: proc_listallpids, proc_pidinfo PROC_PIDTBSDINFO) and kill(2).</summary>
