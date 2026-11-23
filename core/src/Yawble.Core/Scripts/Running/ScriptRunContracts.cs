@@ -55,10 +55,10 @@ public interface IScriptDecisions
 /// <summary>The structured trigger payloads a script member gets as its run's input (design section 6).</summary>
 public static class ScriptPayloads
 {
-    /// <summary>every / cron / once: TriggerFired { triggerId, kind, firedAt }.</summary>
+    /// <summary>every / cron / once: TriggerFired { triggerId (a string, as the built-in schema declares), kind, firedAt }.</summary>
     public static JsonObject TriggerFired(long triggerId, string kind, DateTimeOffset firedAt) => new()
     {
-        ["triggerId"] = triggerId,
+        ["triggerId"] = triggerId.ToString(System.Globalization.CultureInfo.InvariantCulture), // TriggerFired declares it a string
         ["kind"] = kind,
         ["firedAt"] = firedAt.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
     };
