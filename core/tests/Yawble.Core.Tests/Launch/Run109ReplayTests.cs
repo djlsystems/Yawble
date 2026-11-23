@@ -75,8 +75,10 @@ public class Run109ReplayTests
         Assert.Equal(0, exit.LeftBehind);
         Assert.Contains(table.Log, e => e.Group && e.Pid == 25720 && e.Signal == RunTree.SIGKILL);
         var line = Assert.Single(log);
-        Assert.StartsWith("run teardown: tree survived: ", line);
-        Assert.Contains($"{exec} (run-folder, reaped)", line);
+        // B129: the second reap's killpg on group 25720 ends the build, the wrapper and the sleep too; the line names
+        // them all, not only the process the backstop found holding the folder.
+        Assert.Equal($"run teardown: tree survived: {build} (group, reaped), {wrapper} (group, reaped), "
+            + $"{exec} (run-folder, reaped), {sleep} (group, reaped)", line);
         TestContext.Current.SendDiagnosticMessage($"stop={stop}: {line}; signalled {exit.TreeSignalled}");
     }
 }

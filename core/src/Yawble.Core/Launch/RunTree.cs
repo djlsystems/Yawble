@@ -39,8 +39,14 @@ public sealed class RunTreeOptions
     public TimeSpan Poll { get; init; } = TimeSpan.FromMilliseconds(50);
 }
 
-/// <summary>What the end of the run did to the tree: how many processes it signalled, and which outlived SIGKILL.</summary>
-public sealed record RunTreeResult(int Signalled, IReadOnlyList<int> Survivors);
+/// <summary>
+/// What the end of the run did to the tree: how many processes it signalled, and which outlived SIGKILL.
+/// <c>SignalledPids</c> (B129): the pids it signalled, in order (<c>Signalled</c> is their count).
+/// </summary>
+public sealed record RunTreeResult(int Signalled, IReadOnlyList<int> Survivors)
+{
+    public IReadOnlyList<int> SignalledPids { get; init; } = [];
+}
 
 /// <summary>
 /// macOS (B122): every process a run started, and their end. The sandbox there has no PID namespace (Linux's bwrap takes
@@ -206,7 +212,7 @@ public sealed class RunTree
             var fresh = alive.Where(p => signalled.Add(p.Pid)).ToList();
             if (fresh.Count > 0) SignalAll(fresh, list, SIGTERM);
         }
-        if (alive.Count == 0) return new RunTreeResult(signalled.Count, []);
+        if (alive.Count == 0) return new RunTreeResult(signalled.Count, []) { SignalledPids = [.. signalled.Order()] };
 
         SignalAll(alive, list, SIGKILL);
         var killAt = Stopwatch.GetTimestamp();
@@ -220,7 +226,7 @@ public sealed class RunTree
             // Started between the list and the kill: it goes too.
             SignalAll(alive, list, SIGKILL);
         }
-        return new RunTreeResult(signalled.Count, [.. alive.Select(p => p.Pid).Order()]);
+        return new RunTreeResult(signalled.Count, [.. alive.Select(p => p.Pid).Order()]) { SignalledPids = [.. signalled.Order()] };
     }
 
     private void SignalAll(IReadOnlyList<ProcessEntry> procs, IReadOnlyList<ProcessEntry> list, int signal)
