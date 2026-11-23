@@ -40,7 +40,7 @@ public sealed class AppOrgSummarySource(
                 c.LastRunFailed, c.State == "running" ? Doing(t.Name, c) : null,
                 c.State == "running" ? ParseTime(c.RunStartedAt) : null, c.LastRunStopped,
                 // B126: the card's state already says why work waits; waitsFor goes with waits-for-run only.
-                c.State == Bus.WaitStates.WaitsForRun ? c.WaitsFor : null)).ToList(), t.WorkflowExpiryDays));
+                c.State == Bus.WaitStates.WaitsForRun ? c.WaitsFor : null)).ToList(), t.WorkflowExpiryDays, t.Waiting));
 
             var decisions = await bus.OpenDecisionsAsync(t.Name, ct).ConfigureAwait(false);
             asks.AddRange(decisions.Select(d => new OrgAsk("decision", t.Name, Field(d, "question") ?? Field(d, "text") ?? "a decision")));

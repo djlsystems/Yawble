@@ -217,6 +217,7 @@ h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4
 .tpill.queued { border: 1px dashed var(--state-waiting); color: var(--state-waiting); line-height: 14px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dot-off); flex: none; }
 .dot.busy { background: var(--state-running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-running) 15%, transparent); animation: dot-pulse 1.6s ease-in-out infinite; }
+.dot[data-state=waiting] { background: var(--state-decision); }
 .dot[data-state=queued] { background: var(--state-waiting); }
 .dot[data-state=paused] { background: var(--state-blocked); }
 @keyframes dot-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--state-running) 5%, transparent); } }

@@ -368,7 +368,11 @@ export interface AgentTestSession { cli: string; agent: string; kind: 'terminal'
 /** The push when one starts or ends (agents.testChanged; never over the Cloud Link). */
 export const AGENT_TEST_CHANGED = 'agents.testChanged';
 
-export interface TeamSummary { id: number; name: string; repoPath: string | null; members: number; running: number; queued: number; paused?: boolean; archived?: boolean }
+export interface TeamSummary {
+  id: number; name: string; repoPath: string | null; members: number; running: number; queued: number; paused?: boolean; archived?: boolean;
+  /** B130: how many of its members have an open needs_decision (older cores: absent, read as 0). */
+  waiting?: number;
+}
 /** Whether a team may be archived or deleted (teams.quiet): what is still working, and its open workflows. */
 export interface TeamQuiet { quiet: boolean; working: string[]; openWorkflows: number[] }
 /** A team's workflow (bus.workflows): one piece of work and everything it led to. */
