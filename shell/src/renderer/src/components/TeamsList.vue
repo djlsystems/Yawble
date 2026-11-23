@@ -179,9 +179,10 @@ watch(phone, () => void fit());
 /* A team's state: the outline says it at a glance, the chip says it in words; running breathes. */
 .team-card { --team-state: var(--state-idle); }
 .team-card.is-running { --team-state: var(--state-running); border-color: var(--team-state); animation: team-breathe 2.4s ease-in-out infinite; }
+.team-card.is-waiting { --team-state: var(--state-decision); border-color: var(--team-state); }
 .team-card.is-queued { --team-state: var(--state-waiting); border-color: var(--team-state); border-style: dashed; }
 .team-card.is-paused { --team-state: var(--state-blocked); border-color: var(--team-state); }
-.team-card.is-running:hover, .team-card.is-queued:hover, .team-card.is-paused:hover { border-color: var(--team-state); }
+.team-card.is-running:hover, .team-card.is-waiting:hover, .team-card.is-queued:hover, .team-card.is-paused:hover { border-color: var(--team-state); }
 .card-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-title > :not(.card-name) { flex: none; }
 @keyframes team-breathe {
