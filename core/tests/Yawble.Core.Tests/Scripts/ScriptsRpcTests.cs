@@ -54,7 +54,7 @@ public class ScriptsRpcTests
     public async Task TheDocumentsLayoutSection_SurvivesSaveGetExportAndImport_Unchanged()
     {
         await using var r = await RigAsync();
-        // Phase 3's editor keeps Vue Flow node positions in a top-level layout section the library does not interpret.
+        // The script editor keeps Vue Flow node positions in a top-level layout section the library does not interpret.
         var layout = new JsonObject
         {
             ["nodes"] = new JsonObject

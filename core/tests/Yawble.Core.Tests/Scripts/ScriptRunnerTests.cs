@@ -202,7 +202,7 @@ public class ScriptRunnerTests
         var b1 = await Add(betaId, "Poller", "B1", "beta-mail");
         (long Id, long Team, string Folder, string Binding)[] members = [(a1, w.TeamId, "A1", "alpha-mail"), (a2, w.TeamId, "A2", "alpha-mail-2"), (b1, betaId, "B1", "beta-mail")];
 
-        // Phase 1: all three overlap at step b; none is skipped.
+        // First: all three overlap at step b; none is skipped.
         w.Engine.KeepsLastSeen = true;
         w.Engine.HoldAt = "b";
         var started = members.Select(m => w.Runner.Start(m.Id, "trigger:1", null)).ToList();
@@ -236,7 +236,7 @@ public class ScriptRunnerTests
         Assert.Single(w.Store.RecentRuns(null, a2, 10));
         Assert.Single(w.Store.RecentRuns(betaId, b1, 10));
 
-        // Phase 2: runs on version 2 are cut off by a restart, version 3 is saved meanwhile (and a2 is pinned to 1); the
+        // Then: runs on version 2 are cut off by a restart, version 3 is saved meanwhile (and a2 is pinned to 1); the
         // resumed runs use the version each started with, not the newest one nor the member's new pin.
         w.Engine.HoldAt = "c";
         w.Engine.Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
