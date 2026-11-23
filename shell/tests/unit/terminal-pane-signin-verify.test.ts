@@ -1,0 +1,45 @@
+// @vitest-environment happy-dom
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import TerminalPane from '../../src/renderer/src/components/TerminalPane.vue';
+import type { DetectedCli, YawbleApi } from '../../src/shared/api';
+import { showChannelTerminal, terminalPane } from '../../src/renderer/src/terminalPane';
+
+// Card 578 (B128 verify): the Grok Terminal banner fed the detail strings the core really sends
+// (SignInCatalog.Grok / GrokRefused in core/src/Yawble.Core/Agents/CliSignIn.cs). Those details already begin with
+// SignInCatalog.GrokNotSignedIn, so the heading plus the detail show the fix text twice. That is the fault reported on
+// card 578. The repeat is pinned with it.fails: the test fails today, so it.fails passes. Once the fault is fixed the test
+// passes, it.fails then fails, and `.fails` must be removed.
+const FIX = 'Not signed in: run grok in your own terminal and sign in';
+const CORE_DETAILS = [
+  'Not signed in: run `grok` in your own terminal and sign in. /home/alice/.grok/auth.json holds no sign-in (grok clears it when xAI refuses to renew it); then reopen this dialog.',
+  'Not signed in: run `grok` in your own terminal and sign in. /home/alice/.grok/auth.json is missing; then reopen this dialog.',
+  "Not signed in: run `grok` in your own terminal and sign in. The app's last Grok request (2026-11-22 15:00) was refused: the Grok sign-in on this computer was refused by xAI.",
+];
+
+const base: DetectedCli = {
+  cliId: 'grok', found: true, launcherPath: '/usr/bin/grok', executablePath: '/opt/grok/grok', version: '1.0.0',
+  installKind: 'native', readOnlyFolders: [], configFolders: [], problems: [], installHelp: 'install it',
+};
+const stubs = { global: { stubs: { TerminalScreen: true, TerminalApp: true, TerminalView: true } } };
+enableAutoUnmount(afterEach);
+beforeEach(() => { terminalPane.open = false; terminalPane.target = null; });
+
+async function banner(detail: string) {
+  const api = { call: async () => [{ ...base, signIn: { status: 'not-signed-in', detail } }], onEvent: () => () => {} } as unknown as YawbleApi;
+  showChannelTerminal('agent-test:grok', 'Terminal · Grok Build (xAI) · global policy');
+  const w = mount(TerminalPane, { props: { api }, ...stubs });
+  await flushPromises();
+  return w.get('[data-test=terminal-pane-signin]').text().replace(/`/g, '');
+}
+
+describe('B128 verify: Grok banner with the core\'s real detail', () => {
+  it('shows the banner for each real detail', async () => {
+    for (const d of CORE_DETAILS) expect(await banner(d)).toContain(FIX);
+  });
+
+  // FAULT (card 578): the fix text shows twice, once in the heading and again at the start of the detail.
+  it.fails('shows the fix text once', async () => {
+    for (const d of CORE_DETAILS) expect((await banner(d)).split(FIX).length - 1).toBe(1);
+  });
+});
