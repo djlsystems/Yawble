@@ -212,4 +212,10 @@ public static class BuiltInSchemas
     public static ScriptSchema? Find(string name) => All.FirstOrDefault(s => s.Name == name);
 
     public static bool IsBuiltIn(string name) => Find(name) is not null;
+
+    /// <summary>The built-in schemas' names, in the order of <see cref="All"/>.</summary>
+    public static readonly IReadOnlyList<string> Names = All.Select(s => s.Name).ToArray();
+
+    /// <summary>A lookup over only the built-in schemas.</summary>
+    public static readonly IScriptSchemaLookup Lookup = new ScriptSchemaSet(All);
 }

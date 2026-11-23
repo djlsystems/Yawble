@@ -21,11 +21,12 @@ public sealed class ScriptEngineTests : IDisposable
         Document = doc,
         Actions = actions ?? new FakeActions(),
         DataFolder = Data,
+        Clock = _clock,
         Input = JsonNode.Parse("""{ "triggerId": "t1", "kind": "once", "firedAt": "2026-11-23T17:59:00Z" }"""),
     };
 
     private Task<ScriptRunResult> Run(ScriptRunRequest request) =>
-        new ScriptEngine(_clock).RunAsync(request, _journal, TestContext.Current.CancellationToken);
+        ScriptEngine.RunAsync(request with { Clock = _clock }, _journal, TestContext.Current.CancellationToken);
 
     private Task<ScriptRunResult> Run(ScriptDocument doc, IScriptActions? actions = null) => Run(Request(doc, actions));
 
@@ -362,8 +363,7 @@ public sealed class ScriptEngineTests : IDisposable
     {
         var actions = new FakeActions { Before = (_, ct) => Task.Delay(Timeout.Infinite, ct) }.On("api", "GET /items", _ => null);
         var doc = ScriptSamples.Script("""[ { "id": "a", "type": "integration", "use": "api", "action": "GET /items", "next": null } ]""", requires: Requires);
-        var engine = new ScriptEngine();
-        var r = await engine.RunAsync(Request(doc, actions) with { Timeout = TimeSpan.FromMilliseconds(200) }, _journal, TestContext.Current.CancellationToken);
+        var r = await ScriptEngine.RunAsync(Request(doc, actions) with { Timeout = TimeSpan.FromMilliseconds(200), Clock = null }, _journal, TestContext.Current.CancellationToken);
         Assert.Equal("a", r.FailedStepId);
         Assert.StartsWith("the run timed out", r.Reason);
     }
@@ -376,7 +376,7 @@ public sealed class ScriptEngineTests : IDisposable
             .On("api", "GET /items", _ => null);
         var doc = ScriptSamples.Script("""[ { "id": "a", "type": "integration", "use": "api", "action": "GET /items", "next": null } ]""", requires: Requires);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            new ScriptEngine(_clock).RunAsync(Request(doc, actions), _journal, cts.Token));
+            ScriptEngine.RunAsync(Request(doc, actions), _journal, cts.Token));
         Assert.Equal("a", _journal.LastCheckpoint.Next);
     }
 
@@ -494,12 +494,12 @@ public sealed class ScriptEngineTests : IDisposable
         var first = new RecordingJournal { CancelAfterCompleted = 5, Cancel = cts };
         var actions = new FakeActions().On("api", "POST /items", Send);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            new ScriptEngine(_clock).RunAsync(Request(doc, actions) with { Settings = settings }, first, cts.Token));
+            ScriptEngine.RunAsync(Request(doc, actions) with { Settings = settings }, first, cts.Token));
         Assert.Equal(["+1", "+2"], sends);
 
         var checkpoint = first.LastCheckpoint;
         Assert.Equal("count", checkpoint.Next);
-        var resumed = await new ScriptEngine(_clock).RunAsync(
+        var resumed = await ScriptEngine.RunAsync(
             Request(doc, actions) with { Settings = settings, ResumeFrom = checkpoint }, _journal, TestContext.Current.CancellationToken);
 
         Succeeded(resumed);
@@ -525,7 +525,7 @@ public sealed class ScriptEngineTests : IDisposable
 
         fail = false;
         var journal = new RecordingJournal();
-        var r2 = await new ScriptEngine(_clock).RunAsync(Request(doc, actions) with { ResumeFrom = _journal.LastCheckpoint }, journal, TestContext.Current.CancellationToken);
+        var r2 = await ScriptEngine.RunAsync(Request(doc, actions) with { ResumeFrom = _journal.LastCheckpoint }, journal, TestContext.Current.CancellationToken);
         Succeeded(r2);
         Assert.Equal(["up"], r2.Log);
         Assert.Equal(["b", "c"], journal.Started.Select(s => s.StepId));
@@ -536,7 +536,7 @@ public sealed class ScriptEngineTests : IDisposable
     {
         var doc = ScriptSamples.Script("""[ { "id": "a", "type": "end", "outputs": { "x": 1 } } ]""");
         Succeeded(await Run(doc));
-        var again = await new ScriptEngine(_clock).RunAsync(Request(doc) with { ResumeFrom = _journal.LastCheckpoint }, new RecordingJournal(), TestContext.Current.CancellationToken);
+        var again = await ScriptEngine.RunAsync(Request(doc) with { ResumeFrom = _journal.LastCheckpoint }, new RecordingJournal(), TestContext.Current.CancellationToken);
         Succeeded(again);
         Assert.Equal(1, (long?)again.Outputs!["x"]);
     }

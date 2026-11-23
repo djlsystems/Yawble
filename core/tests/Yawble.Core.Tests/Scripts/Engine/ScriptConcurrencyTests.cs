@@ -98,12 +98,11 @@ public sealed class ScriptConcurrencyTests : IDisposable
 
         var aData = _temp.Sub("team-a-member");
         var bData = _temp.Sub("team-b-member");
-        var engine = new ScriptEngine(); // one engine for both runs, as the app holds one
         var aJournal = new RecordingJournal();
         var bJournal = new RecordingJournal();
 
-        var aRun = Task.Run(() => engine.RunAsync(Request(doc, a, aData, aSettings, null), aJournal, ct), ct);
-        var bRun = Task.Run(() => engine.RunAsync(Request(doc, b, bData, bSettings, bSaved), bJournal, ct), ct);
+        var aRun = Task.Run(() => ScriptEngine.RunAsync(Request(doc, a, aData, aSettings, null), aJournal, ct), ct);
+        var bRun = Task.Run(() => ScriptEngine.RunAsync(Request(doc, b, bData, bSettings, bSaved), bJournal, ct), ct);
         var results = await Task.WhenAll(aRun, bRun);
         var (ra, rb) = (results[0], results[1]);
 
@@ -168,7 +167,6 @@ public sealed class ScriptConcurrencyTests : IDisposable
             extra: """ "outputs": [ { "name": "total", "type": "int" }, { "name": "name", "type": "string" } ], "layout": { "nodes": { "a": { "x": 1 } } }, """);
         var before = doc.ToJsonString();
         var ct = TestContext.Current.CancellationToken;
-        var engine = new ScriptEngine();
 
         const int runs = 16;
         var tasks = Enumerable.Range(0, runs).Select(i => Task.Run(async () =>
@@ -176,7 +174,7 @@ public sealed class ScriptConcurrencyTests : IDisposable
             var data = _temp.Sub($"m{i}");
             var items = new JsonArray(Enumerable.Range(1, i + 1).Select(n => (JsonNode)JsonValue.Create(n)).ToArray());
             var settings = i % 4 == 0 ? new JsonObject { ["name"] = $"m{i}" } : new JsonObject { ["name"] = $"m{i}", ["items"] = items };
-            var r = await engine.RunAsync(new ScriptRunRequest
+            var r = await ScriptEngine.RunAsync(new ScriptRunRequest
             {
                 Document = doc,
                 Actions = new FakeActions(),

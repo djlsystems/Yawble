@@ -49,13 +49,14 @@ public sealed class InboxSmsAlertExampleTests : IDisposable
         Actions = actions,
         Catalog = FakeCatalog.MailAndSms(),
         DataFolder = Data,
+        Clock = _clock,
         Input = JsonNode.Parse("""{ "triggerId": "every-5m", "kind": "every", "firedAt": "2026-11-23T18:00:00Z" }"""),
         Settings = JsonNode.Parse("""{ "recipients": ["+15551230001", "+15551230002"], "fromNumber": "+15559990000" }""")!.AsObject(),
         SavedVariables = saved,
     };
 
     private Task<ScriptRunResult> Run(ScriptRunRequest request, IScriptRunJournal? journal = null) =>
-        new ScriptEngine(_clock).RunAsync(request, journal ?? new RecordingJournal(), TestContext.Current.CancellationToken);
+        ScriptEngine.RunAsync(request with { Clock = _clock }, journal ?? new RecordingJournal(), TestContext.Current.CancellationToken);
 
     [Fact]
     public async Task ItChecksClean_ThenTextsEveryNewEmailToEveryRecipient_AndMovesLastSeen()
