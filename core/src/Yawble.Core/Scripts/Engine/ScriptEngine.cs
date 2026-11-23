@@ -196,7 +196,7 @@ public sealed class ScriptEngine(TimeProvider? clock = null)
             {
                 var now = Now;
                 _last = Snapshot();
-                await _journal.StepCompletedAsync(new ScriptStepRecord(StartStepId, StartStepId, _req.Input, null, "failed", started, now, e.Message), _last);
+                await _journal.StepCompletedAsync(new ScriptStepRecord(StartStepId, StartStepId, _req.Input?.DeepClone(), null, "failed", started, now, e.Message), _last);
                 await LogAsync($"run failed at the start: {e.Message}");
                 return new ScriptRunResult(ScriptRunStatus.Failed, StartStepId, e.Message, null, null) { Log = _log.ToList() };
             }

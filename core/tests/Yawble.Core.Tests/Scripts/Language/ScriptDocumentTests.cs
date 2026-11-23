@@ -257,3 +257,76 @@ public sealed class JsonSchemaValidatorTests
         Assert.NotEmpty(BuiltInSchemas.ApiResponse.Validate(JsonNode.Parse("""{ "status": "ok" }""")));
     }
 }
+
+/// <summary>The designer's <c>layout</c> section and other top-level members the format does not name.</summary>
+public sealed class ScriptDocumentLayoutTests
+{
+
+    [Fact]
+    public void Layout_AndUnknownTopLevelMembers_SurviveParseThenToJson()
+    {
+        var text = ScriptSamples.WithLayout();
+        var original = JsonNode.Parse(text)!.AsObject();
+        var doc = ScriptDocument.Parse(text);
+
+        Assert.NotNull(doc.Layout);
+        Assert.Equal(original["layout"]!.ToJsonString(), doc.Layout!.ToJsonString());
+        Assert.Equal(["x-editor", "comment"], doc.Extensions.Select(e => e.Key));
+
+        var saved = doc.ToJson();
+        // The layout section is written exactly as given (same members, order, numbers and text).
+        Assert.Equal(original["layout"]!.ToJsonString(), saved["layout"]!.ToJsonString());
+        Assert.Equal(original["x-editor"]!.ToJsonString(), saved["x-editor"]!.ToJsonString());
+        Assert.Equal("kept too", (string?)saved["comment"]);
+        // And again through text: a second save is the same as the first.
+        var again = ScriptDocument.Parse(doc.ToJsonString());
+        Assert.Equal(doc.ToJsonString(), again.ToJsonString());
+        Assert.Equal(original["layout"]!.ToJsonString(), again.ToJson()["layout"]!.ToJsonString());
+        // The whole document still equals what was given, member for member.
+        foreach (var (name, value) in original)
+            Assert.True(JsonNode.DeepEquals(value, saved[name]), $"'{name}' changed on save");
+    }
+
+    [Fact]
+    public void ToJson_WritesCopies_SoChangingTheSavedJsonLeavesTheDocument()
+    {
+        var doc = ScriptDocument.Parse(ScriptSamples.WithLayout());
+        var before = doc.ToJsonString();
+
+        var saved = doc.ToJson();
+        saved["layout"]!["nodes"]!["list"]!["x"] = 999;
+        saved["x-editor"]!["tabs"]!.AsArray().Add("more");
+
+        Assert.Equal(before, doc.ToJsonString());
+    }
+
+    [Fact]
+    public void ALayoutThatIsNotAnObject_IsKeptAsAnUnknownMember()
+    {
+        var text = ScriptSamples.InboxSmsAlert.TrimEnd().TrimEnd('}') + """, "layout": [1, 2] }""";
+        var doc = ScriptDocument.Parse(text);
+
+        Assert.Null(doc.Layout);
+        Assert.Equal("[1,2]", doc.ToJson()["layout"]!.ToJsonString());
+    }
+
+    [Fact]
+    public void ADocumentWithoutLayout_SavesWithoutOne()
+    {
+        var doc = ScriptDocument.Parse(ScriptSamples.InboxSmsAlert);
+        Assert.Null(doc.Layout);
+        Assert.Empty(doc.Extensions);
+        Assert.False(doc.ToJson().ContainsKey("layout"));
+    }
+
+    [Fact]
+    public void TheCheckerIgnoresLayoutAndUnknownMembers()
+    {
+        var plain = ScriptChecker.Check(ScriptDocument.Parse(ScriptSamples.InboxSmsAlert), ScriptSchemaSet.Empty, FakeCatalog.MailAndSms());
+        var withLayout = ScriptChecker.Check(ScriptDocument.Parse(ScriptSamples.WithLayout()), ScriptSchemaSet.Empty, FakeCatalog.MailAndSms());
+
+        Assert.True(withLayout.Ok, string.Join("; ", withLayout.Issues.Select(i => i.Message)));
+        Assert.Equal(plain.Issues, withLayout.Issues);
+        Assert.Equal(plain.SchemaReferences, withLayout.SchemaReferences);
+    }
+}
