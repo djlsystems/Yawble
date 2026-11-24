@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Xunit;
 using Yawble.Core.Bus;
@@ -118,8 +118,8 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
             Schemas = BuiltInSchemas.Lookup,
             DataFolder = _temp.Sub("data"),
             DryRun = dryRun,
-            // the old message's receivedAt (09:00 plus its UID 1 as the tie-break), as an earlier poll saved it
-            SavedVariables = saved ?? new JsonObject { ["lastSeen"] = "2026-11-20T09:00:00.0000001Z" },
+            // the old message's receivedAt: since is exclusive, so a plain time filter from there leaves it out
+            SavedVariables = saved ?? new JsonObject { ["lastSeen"] = "2026-11-20T09:00:00Z" },
             Input = JsonNode.Parse("""{ "triggerId": "t1", "kind": "once", "firedAt": "2026-11-23T17:59:00Z" }"""),
         }, new RecordingJournal(), Ct);
     }
@@ -211,6 +211,20 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
             EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["max"] = "ten" })).Message);
         Assert.Contains("'folder' is empty", Assert.Throws<ScriptActionException>(() =>
             EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = " " })).Message);
+        Assert.Contains("give after or since, not both", Assert.Throws<ScriptActionException>(() =>
+            EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["after"] = "31:1", ["since"] = "2026-11-20T09:00:00Z" })).Message);
+        Assert.Contains("expected string", Assert.Throws<ScriptActionException>(() =>
+            EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["after"] = 5 })).Message);
+        // null is no cursor: a first poll's unset saved variable
+        EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["after"] = null, ["since"] = "2026-11-20T09:00:00Z" });
+    }
+
+    [Fact]
+    public void TheSchemasNameTheCursor()
+    {
+        var args = EmailActions.Find("list")!.Signature.Args["properties"]!.AsObject();
+        Assert.Equal("""["string","null"]""", args["after"]!["type"]!.ToJsonString());
+        Assert.Equal("string", (string?)BuiltInSchemas.EmailMessage.Schema["properties"]!["cursor"]!["type"]);
     }
 
     // ------------------------------------------------------------------ runs
@@ -230,7 +244,7 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
         Assert.True(_b.Seen);
         Assert.False(_a.Seen);
         Assert.False(_old.Seen);
-        Assert.Equal("2026-11-20T09:20:00.0000003Z", (string?)r.SavedVariables!["lastSeen"]);
+        Assert.Equal("2026-11-20T09:20:00Z", (string?)r.SavedVariables!["lastSeen"]);
 
         var calls = Calls();
         Assert.Equal(3, calls.Count);
@@ -239,32 +253,108 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
         Assert.Contains("script run 42", calls[0].Args);
     }
 
-    /// <summary>B133: the documented poll (list since lastSeen, max 1; save the newest receivedAt when there was one), run after run.</summary>
+    /// <summary>
+    /// B133: the documented poll: list after the saved cursor (none the first run), max 1; when there was a message, read it, file it and save
+    /// the last message's cursor. Run after run, the cursor goes from run to run as a string in a saved variable.
+    /// </summary>
     private const string PollSteps = """
         [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
-            "args": { "folder": "INBOX", "since": "{vars.lastSeen}", "unreadOnly": true, "max": 1 }, "into": "msgs", "next": "b" },
+            "args": { "folder": "INBOX", "after": "{vars.lastCursor}", "unreadOnly": true, "max": 1 }, "into": "msgs", "next": "b" },
           { "id": "b", "type": "if", "when": { "left": "{count(vars.msgs)}", "op": "gt", "right": 0 }, "then": "c", "else": "e" },
-          { "id": "c", "type": "set", "var": "lastSeen", "value": "{max(vars.msgs, 'receivedAt')}", "next": "e" },
+          { "id": "c", "type": "set", "var": "last", "value": "{last(vars.msgs)}", "next": "d" },
+          { "id": "d", "type": "integration", "use": "mail", "action": "markRead", "args": { "id": "{vars.last.id}", "folder": "INBOX" }, "next": "f" },
+          { "id": "f", "type": "integration", "use": "mail", "action": "move", "args": { "id": "{vars.last.id}", "folder": "Archive" }, "next": "g" },
+          { "id": "g", "type": "set", "var": "lastCursor", "value": "{vars.last.cursor}", "next": "e" },
           { "id": "e", "type": "end", "outputs": { "count": "{count(vars.msgs)}", "subjects": "{vars.msgs}" } } ]
         """;
 
-    [Fact]
-    public async Task AScriptPollingWithMaxOneGetsEveryMessageOnceEvenInTheSameSecond()
+    private const string PollVariables = """
+        [ { "name": "msgs", "type": "list<EmailMessage>" }, { "name": "last", "type": "EmailMessage" },
+          { "name": "lastCursor", "type": "string", "scope": "saved" } ]
+        """;
+
+    private ulong _gm = 1_789_000_000_000_000_000;
+
+    /// <summary>Makes the fake server Gmail: X-GM-EXT-1, All Mail, and X-GM-MSGIDs that fall as mail arrives (they need not follow arrival order).</summary>
+    private void MakeGmail()
     {
+        _mail.Imap.Capabilities.Add("X-GM-EXT-1");
+        _mail.Imap.Folders.Add(new FakeFolder(EmailMailbox.GmailAllMail, @"\All"));
+        foreach (var e in _mail.Imap.Folder("INBOX").Entries()) Gmail(e.Message);
+    }
+
+    private void Gmail(FakeMessage m)
+    {
+        _gm -= 7_000_000_000_013;
+        m.GmailMessageId = m.GmailThreadId = _gm;
+        _mail.Imap.Folder(EmailMailbox.GmailAllMail).Put(m);
+    }
+
+    private FakeMessage PutAny(bool gmail, int minutes, string subject)
+    {
+        var m = Put(minutes, subject);
+        if (gmail) Gmail(m);
+        return m;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AScriptPollingAfterItsSavedCursorGetsEveryMessageOnceAcrossRuns(bool gmail)
+    {
+        if (gmail) MakeGmail();
         // besides the three of InitializeAsync (09:00, 09:10, 09:20): two more in the 09:10 second, one of them read
-        Put(10, "Same second");
-        Put(10, "Read already").Flags.Add(@"\Seen");
-        var saved = new JsonObject(); // a first run: no lastSeen yet
+        PutAny(gmail, 10, "Same second");
+        PutAny(gmail, 10, "Read already").Flags.Add(@"\Seen");
+        var saved = new JsonObject(); // a first run: no cursor yet
         var got = new List<string>();
-        for (var run = 0; run < 8; run++)
+        var cursors = new List<string>();
+        for (var run = 0; run < 9; run++)
         {
-            if (run == 3) Put(20, "Late, in the 09:20 second"); // arrives after three runs, a later UID in a second not yet passed
-            var r = await Run(Doc(PollSteps), saved: saved);
+            if (run == 3) PutAny(gmail, 20, "Late, in the 09:20 second");
+            if (run == 4) PutAny(gmail, -60, "Appended with an old date");
+            var r = await Run(Doc(PollSteps, PollVariables), saved: saved);
             Assert.True(r.Status == ScriptRunStatus.Succeeded, $"run {run} failed at {r.FailedStepId}: {r.Reason}");
             got.AddRange(r.Outputs!["subjects"]!.AsArray().Select(m => (string)m!["subject"]!));
+            if (r.SavedVariables!["lastCursor"] is JsonValue v) cursors.Add(v.GetValue<string>());
             saved = r.SavedVariables!.DeepClone().AsObject();
         }
-        Assert.Equal(["Old news", "Quote request", "Same second", "Follow up", "Late, in the 09:20 second"], got);
+        Assert.Equal(["Old news", "Quote request", "Follow up", "Same second", "Late, in the 09:20 second", "Appended with an old date"], got);
+        Assert.Equal(["31:1", "31:2", "31:3", "31:4", "31:6", "31:7"], cursors.Distinct());
+        Assert.DoesNotContain(_mail.Imap.Folder("INBOX").Entries(), e => !e.Message.Seen);
+        Assert.Equal(6, _mail.Imap.Folder("Archive").Entries().Count());
+    }
+
+    [Fact]
+    public async Task AfterAndSinceTogetherFailTheStepAsAnArgumentError()
+    {
+        const string steps = """
+            [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
+                "args": { "folder": "INBOX", "after": "31:1", "since": "2026-11-20T09:00:00Z" }, "into": "msgs", "next": null } ]
+            """;
+        var r = await Run(Doc(steps));
+        Assert.Equal(ScriptRunStatus.Failed, r.Status);
+        Assert.Equal("a", r.FailedStepId);
+        Assert.Contains("mail list: give after or since, not both", r.Reason);
+        Assert.Equal(0, _mail.Imap.Connections); // refused before the mailbox is opened
+    }
+
+    [Fact]
+    public async Task ARenumberedFolderFailsThePollAndKeepsTheSavedCursor()
+    {
+        var first = await Run(Doc(PollSteps, PollVariables), saved: new JsonObject());
+        Assert.Equal(ScriptRunStatus.Succeeded, first.Status);
+        Assert.Equal("31:1", (string?)first.SavedVariables!["lastCursor"]);
+        _mail.Imap.Folder("INBOX").UidValidity = 32;
+        var r = await Run(Doc(PollSteps, PollVariables), saved: first.SavedVariables!.DeepClone().AsObject());
+        Assert.Equal(ScriptRunStatus.Failed, r.Status);
+        Assert.Equal("a", r.FailedStepId);
+        Assert.Contains("mail list: the cursor '31:1' is from an earlier numbering of INBOX (its UIDVALIDITY was 31, it is now 32)", r.Reason);
+        Assert.False(_a.Seen);
+
+        var bad = await Run(Doc(PollSteps, PollVariables), saved: new JsonObject { ["lastCursor"] = "2026-11-20T09:00:00Z" });
+        Assert.Equal(ScriptRunStatus.Failed, bad.Status);
+        Assert.Contains("is not a cursor", bad.Reason);
     }
 
     [Fact]

@@ -54,7 +54,8 @@ public static class FakeImapMailbox
     /// <summary>Adds a message to the folder with the next UID; the same <see cref="FakeMessage"/> may go in several (Gmail labels).</summary>
     public static FakeEntry Put(this FakeFolder f, FakeMessage m)
     {
-        var uid = f.Messages.OfType<FakeEntry>().Select(e => e.Uid).DefaultIfEmpty(0u).Max() + 1;
+        var uid = Math.Max(f.UidNext, f.Messages.OfType<FakeEntry>().Select(e => e.Uid).DefaultIfEmpty(0u).Max() + 1);
+        f.UidNext = uid + 1;
         var entry = new FakeEntry(uid, m);
         f.Messages.Add(entry);
         return entry;
@@ -81,7 +82,7 @@ public static class FakeImapMailbox
         await c.WriteLineAsync($"* {entries.Count} EXISTS", ct);
         await c.WriteLineAsync("* 0 RECENT", ct);
         await c.WriteLineAsync($"* OK [UIDVALIDITY {f.UidValidity}] UIDs valid", ct);
-        await c.WriteLineAsync($"* OK [UIDNEXT {entries.Select(e => e.Uid).DefaultIfEmpty(0u).Max() + 1}] next", ct);
+        await c.WriteLineAsync($"* OK [UIDNEXT {Math.Max(f.UidNext, entries.Select(e => e.Uid).DefaultIfEmpty(0u).Max() + 1)}] next", ct);
         await c.WriteLineAsync($"{cmd.Tag} OK [{(readOnly ? "READ-ONLY" : "READ-WRITE")}] {cmd.Name} completed", ct);
     }
 

@@ -219,6 +219,9 @@ public sealed class FakeFolder(string name, params string[] flags)
     public List<string> Flags { get; } = [.. flags];
     public List<object> Messages { get; } = [];
     public uint UidValidity { get; set; } = 1;
+
+    /// <summary>The lowest UID the next message may get (UIDNEXT): UIDs only grow, as on a real server, even after the highest one leaves.</summary>
+    public uint UidNext { get; set; } = 1;
 }
 
 /// <summary>An IMAP command as parsed: its tag, its name (upper case; "UID FETCH" is "UID" with "FETCH" first in <see cref="Args"/>) and its arguments (quotes and literals resolved).</summary>
