@@ -112,7 +112,7 @@ public static class LogSources
             new("run_records", "started_at", 365, "how each run before the cutoff ended. The agent's last run and the Settings > Agents run history lose those runs.")),
 
         new("tools", "Tool calls", "Accountability",
-            "Each tool call an agent or a script member made through an integration: the program, its arguments (for a web API or Email, the argument names and only the values that are not message content), the rule that decided, how it ended (a program's exit code, a web API's HTTP status), how long it took, how much it returned, how it was made and in which workflow. A script member's routine email list calls are one row per member per hour, unless one failed.",
+            "Each tool call an agent or a script member made through an integration: the program, its action and arguments (the argument names and only the values that are not message content; a phone number to its last 4 digits), the rule that decided, how it ended (a program's exit code, a web API's HTTP status), how long it took, how much it returned, how it was made and in which workflow. A script member's routine email list calls are one row per member per hour, unless one failed.",
             "integration_calls t", "t.id", "t.at",
             [
                 new("at", "Time", "t.at", "time"),

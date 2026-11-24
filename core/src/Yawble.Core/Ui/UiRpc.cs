@@ -269,7 +269,7 @@ public sealed class UiRpc(
     {
         var teams = await bus.TeamsAsync(ct);
         var needsYou = 0;
-        var newest = new List<NeedsYouItem>(); // the OS notification names the newest thing waiting and its team
+        var newest = new List<NeedsYouItem>(); // B143: the OS notification names the newest thing waiting and its team
         foreach (var t in teams)
         {
             var open = await bus.OpenDecisionsAsync(t.Name, ct);
