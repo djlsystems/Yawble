@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Xunit;
 using Yawble.Core.Bus;
 using Yawble.Core.Ipc;
+using Yawble.Core.Launch;
 using Yawble.Core.Link;
 using Yawble.Core.Scripts.Library;
 using Yawble.Core.Scripts.Running;
@@ -98,6 +99,22 @@ public class B134ScriptsRpcTests
         Assert.DoesNotContain("scripts.delete", ScriptsRpc.Reads);
         Assert.Equal(RemoteAccess.ReadOnlyRefusal, RemoteAccess.Refusal("scripts.delete", new JsonObject { ["script"] = "poller" }, allowHostTerminals: false, RemoteAccess.Read));
         Assert.Null(RemoteAccess.Refusal("scripts.delete", new JsonObject { ["script"] = "poller" }, allowHostTerminals: false, RemoteAccess.Full));
+    }
+
+    [Fact]
+    public async Task TeamsAgents_SaysWhichMembersAreScriptMembers()
+    {
+        await using var r = await RigAsync();
+        await r.CallAsync("scripts.save", new JsonObject { ["document"] = Doc() });
+        await AddMemberAsync(r);
+        var home = OperatingSystem.IsWindows() ? @"C:\Users\pat" : "/home/pat";
+        var terminals = new TerminalHub(new AppEvents());
+        var ui = new UiRpc(r.Bus, new Yawble.Core.Policy.PolicyStore(r.Db.ConnectionString), new MemberLayouts(Path.Combine(r.Db.Dir, "data"), r.Db.Dir, home),
+            new FakeModelCredentials(), new FakeHostTerminals(terminals, TimeSpan.FromMilliseconds(5)), new FakeInteractiveSessions(terminals, r.Bus), terminals, 16_384) { Scripts = r.Rpc };
+        var cards = (await ui.DispatchAsync("teams.agents", new JsonObject { ["teamId"] = r.TeamId }, Ct))!.AsArray();
+        var kinds = cards.ToDictionary(c => c!["member"]!["name"]!.GetValue<string>(), c => c!["kind"]!.GetValue<string>());
+        Assert.Equal("script", kinds["Poller"]);
+        Assert.Equal("agent", kinds["Manager"]);
     }
 
     [Fact]
