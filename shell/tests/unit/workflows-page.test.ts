@@ -32,11 +32,11 @@ function row(p: Partial<WorkflowRow> & Pick<WorkflowRow, 'id' | 'status'>): Work
 }
 const rows: WorkflowRow[] = [
   row({ id: 10, status: 'completed', title: 'Refund model', endedAt: iso(60), lastAt: iso(60) }),
-  row({ id: 11, status: 'running', title: 'Partial refunds', item: { label: 'B096', title: 'Partial refunds', archived: false }, members: [{ id: 2, name: 'DeveloperAda', state: 'running' }],
+  row({ id: 11, status: 'running', title: 'Partial refunds', item: { label: 'B006', title: 'Partial refunds', archived: false }, members: [{ id: 2, name: 'DeveloperAda', state: 'running' }],
     time: time(5_400_000, true, [['agent-working', 3_600_000], ['stalled', 600_000], ['idle', 1_200_000]]) }),
   row({ id: 12, status: 'needs-you', title: 'Refund limits', question: 3, lastAt: iso(50) }),
   row({ id: 13, status: 'idle', title: 'Old export', team: 'billing', teamId: 2, expiresAt: new Date(NOW + 5 * 3_600_000).toISOString(), lastAt: iso(500),
-    item: { label: 'B050', title: 'Old export', archived: true } }),
+    item: { label: 'B005', title: 'Old export', archived: true } }),
   row({ id: 14, status: 'closed', title: 'Abandoned idea', endedAt: iso(10), lastAt: iso(10) }),
 ];
 const counts: WorkflowCounts = { all: 5, open: 3, needsYou: 1, done: 1, closed: 1, running: 1, waiting: 0, idle: 1, stopped: 0, completed: 1, expired: 0, completedToday: 1 };
@@ -103,7 +103,7 @@ describe('the pure parts (page.ts)', () => {
   });
 
   it('text: every word must match one field (id, title, item, team, member); the matches are highlighted', () => {
-    expect(rows.filter((w) => matchesText(w, 'b096 ada')).map((w) => w.id)).toEqual([11]);
+    expect(rows.filter((w) => matchesText(w, 'b006 ada')).map((w) => w.id)).toEqual([11]);
     expect(rows.filter((w) => matchesText(w, '#13')).map((w) => w.id)).toEqual([13]);
     expect(rows.filter((w) => matchesText(w, 'billing')).map((w) => w.id)).toEqual([13]);
     expect(rows.filter((w) => matchesText(w, 'refund nothing')).map((w) => w.id)).toEqual([]);
@@ -135,9 +135,9 @@ describe('the pure parts (page.ts)', () => {
   });
 
   it('the hash keeps the filters and the selection, never with keys the remote hash reads', () => {
-    const f = { teamId: 3, q: 'b096 ada', chip: 'needs-you' as const, sort: { key: 'last' as const, desc: true } };
+    const f = { teamId: 3, q: 'b006 ada', chip: 'needs-you' as const, sort: { key: 'last' as const, desc: true } };
     const h = formatHash(f, 12);
-    expect(h).toBe('#workflows?t=3&q=b096+ada&s=needs-you&o=last.desc&sel=12');
+    expect(h).toBe('#workflows?t=3&q=b006+ada&s=needs-you&o=last.desc&sel=12');
     expect(h).not.toMatch(/[?&](team|workflow)=/);
     expect(parseHash(h)).toEqual({ ...f, selected: 12 });
     expect(formatHash(DefaultFilters, null)).toBe('#workflows');
@@ -282,9 +282,9 @@ describe('the Workflows page', () => {
   it('the item link opens the Backlog at the item (an archived one in the archive); "—" without one', async () => {
     const w = await page();
     await w.get('[data-wf="11"] [data-test=workflow-item-link]').trigger('click');
-    expect(backlogRequest.value).toMatchObject({ label: 'B096', archived: false });
+    expect(backlogRequest.value).toMatchObject({ label: 'B006', archived: false });
     await w.get('[data-wf="13"] [data-test=workflow-item-link]').trigger('click');
-    expect(backlogRequest.value).toMatchObject({ label: 'B050', archived: true });
+    expect(backlogRequest.value).toMatchObject({ label: 'B005', archived: true });
     expect(w.find('[data-wf="12"] [data-test=workflow-item-none]').text()).toBe('—');
     w.unmount();
   });
@@ -294,7 +294,7 @@ describe('the Workflows page', () => {
     f.backlog = false;
     const w = await page(f);
     expect(w.find('[data-wf="11"] [data-test=workflow-item-link]').exists()).toBe(false);
-    expect(w.get('[data-wf="11"] [data-test=workflow-item-text]').text()).toBe('B096');
+    expect(w.get('[data-wf="11"] [data-test=workflow-item-text]').text()).toBe('B006');
     await w.get('[data-wf="11"]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test=workflow-pane-spec]').exists()).toBe(false);
@@ -421,7 +421,7 @@ describe('the Workflows page', () => {
     await flushPromisesFake();
     for (const c of ['needs-you', 'done', 'closed', 'all', 'open']) { await w.get(`[data-test=workflows-chip-${c}]`).trigger('click'); await flushPromisesFake(); }
     await w.get('[data-test=workflows-team-filter]').setValue('2');
-    await w.get('[data-test=workflows-search]').setValue('  b096 ada ');
+    await w.get('[data-test=workflows-search]').setValue('  b006 ada ');
     vi.advanceTimersByTime(250);
     await flushPromisesFake();
     await w.get('[data-test=workflows-team-filter]').setValue('');
@@ -438,7 +438,7 @@ describe('the Workflows page', () => {
       if ('teamId' in p) expect(typeof p.teamId).toBe('number');
       if ('q' in p) expect(p.q).toBe(p.q.trim());
     }
-    expect(lists.some((p) => p.teamId === 2 && p.q === 'b096 ada')).toBe(true);
+    expect(lists.some((p) => p.teamId === 2 && p.q === 'b006 ada')).toBe(true);
     expect(f.calls.filter((c) => c.method === 'workflows.get').map((c) => c.params)).toEqual([{ workflow: 11 }]);
     w.unmount();
   });
