@@ -219,7 +219,7 @@ describe('LogsDialog', () => {
     w.unmount();
   });
 
-  it('B143_ALogWithLevels_ShowsItsLevelColumnAndTheLevelFilter_DebugHiddenUntilAsked', async () => {
+  it('ALogWithLevels_ShowsItsLevelColumnAndTheLevelFilter_DebugHiddenUntilAsked', async () => {
     // As the core offers Diagnostics now (FileLogs.Diagnostics, LogService.Sources): a Fields column and levels.
     const diagnostics: LogSourceInfo = {
       id: 'diagnostics', title: 'Diagnostics', group: 'Diagnostics', about: 'What the app itself reported.',

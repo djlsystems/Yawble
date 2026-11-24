@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-// B143 (card 613): the OS notification "N things waiting for you" names the newest item and its team (app.overview newest).
+// The OS notification "N things waiting for you" names the newest item and its team (app.overview newest).
 vi.mock('electron', () => ({ app: {}, Menu: {}, nativeImage: {}, Tray: class {} }));
 const { needsYouToast } = await import('../../src/main/background');
 

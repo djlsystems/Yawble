@@ -248,7 +248,7 @@ public class ScriptCallTests
         Assert.DoesNotContain(AuthToken, call.Args);
     }
 
-    [Fact] // card 613 (B143 part 4): the Tool calls log keeps the argument names, the phone numbers' last 4 digits and no message content
+    [Fact] // the Tool calls log keeps the argument names, the phone numbers' last 4 digits and no message content
     public async Task TheCallLog_KeepsArgumentNames_NotTheMessage_AndPhonesToTheirLast4Digits()
     {
         await using var r = await Rig.Make();
