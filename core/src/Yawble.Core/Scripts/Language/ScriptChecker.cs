@@ -14,6 +14,22 @@ public interface IScriptActionCatalog
     bool IsChanging(string kind, string action);
 }
 
+/// <summary>
+/// A catalog that also knows its actions' arguments and results (the built-in kinds, such as email). The check then refuses an argument the
+/// action does not take, a missing required one or one of the wrong type, and types the step's result (its <c>into</c> and <c>steps.&lt;id&gt;</c>).
+/// </summary>
+public interface IScriptActionSignatures
+{
+    /// <summary>The action's signature, or null when this catalog does not describe it (then any args are accepted and the result is any).</summary>
+    ScriptActionSignature? Signature(string kind, string action);
+}
+
+/// <summary>
+/// An action's arguments as a JSON Schema object (<c>properties</c>, <c>required</c>; no other argument is accepted) and its result as a
+/// script type (<c>list&lt;EmailMessage&gt;</c>, <c>EmailMessage</c>).
+/// </summary>
+public sealed record ScriptActionSignature(JsonObject Args, string Result);
+
 /// <summary>One problem the check found: the step it is in (null for the script's declarations), a code and a message.</summary>
 public sealed record ScriptCheckIssue(string? StepId, string Code, string Message);
 
@@ -60,6 +76,8 @@ public static class ScriptCheckCodes
     public const string BadExpression = "bad-expression";
     public const string UnknownReference = "unknown-reference";
     public const string TypeMismatch = "type-mismatch";
+    /// <summary>An integration step passes an argument its action does not take (a catalog that knows the action's signature).</summary>
+    public const string UnknownArgument = "unknown-argument";
 }
 
 /// <summary>
@@ -338,7 +356,9 @@ public static class ScriptChecker
                         else if (action is not null && !req.Actions.Contains(action))
                             Issue(step.Id, ScriptCheckCodes.UnknownAction, $"action '{action}' is not listed in requires '{use}'");
                     }
-                    Into(step, ScriptType.Any);
+                    var signature = SignatureOf(step);
+                    if (signature is not null) Arguments(step, action!, signature, ctx);
+                    Into(step, signature is null ? ScriptType.Any : ResultType(signature));
                     break;
                 }
                 case ScriptStepTypes.FileWriteAllText or ScriptStepTypes.FileAppendLine:
@@ -392,6 +412,40 @@ public static class ScriptChecker
             var type = ValueType(step[property], ctx);
             if (type.Kind is ScriptTypeKind.List or ScriptTypeKind.Object)
                 Issue(step.Id, ScriptCheckCodes.TypeMismatch, $"'{property}' is {type}, not text");
+        }
+
+        /// <summary>The integration step's action signature, when its requirement's kind is described by the catalog.</summary>
+        private ScriptActionSignature? SignatureOf(ScriptStep step)
+        {
+            if (catalog is not IScriptActionSignatures sigs || step.Text("use") is not { } use || step.Text("action") is not { } action) return null;
+            var req = doc.Requires.FirstOrDefault(r => r.Name == use);
+            return req is null || !req.Actions.Contains(action) ? null : sigs.Signature(req.Kind, action);
+        }
+
+        private ScriptType ResultType(ScriptActionSignature signature) => ScriptType.Parse(signature.Result, Find, out _) ?? ScriptType.Any;
+
+        /// <summary>The step's args against the action's: no unknown one, every required one, each of its type.</summary>
+        private void Arguments(ScriptStep step, string action, ScriptActionSignature signature, ImmutableList<string> ctx)
+        {
+            var args = step["args"] as JsonObject ?? [];
+            var props = signature.Args["properties"] as JsonObject ?? [];
+            var required = (signature.Args["required"] as JsonArray)?.Select(r => (string?)r).OfType<string>() ?? [];
+            foreach (var r in required.Where(r => !args.ContainsKey(r)))
+                Issue(step.Id, ScriptCheckCodes.MissingField, $"{action} needs the argument '{r}'");
+            foreach (var (name, value) in args)
+            {
+                if (props[name] is not JsonObject schema)
+                {
+                    Issue(step.Id, ScriptCheckCodes.UnknownArgument,
+                        $"{action} has no argument '{name}' (it takes {(props.Count == 0 ? "none" : string.Join(", ", props.Select(p => p.Key)))})");
+                    continue;
+                }
+                var type = ScriptType.FromJsonSchema(schema, Find);
+                var given = ValueType(value, ctx);
+                if (!ScriptType.IsAssignable(type, given))
+                    Issue(step.Id, ScriptCheckCodes.TypeMismatch, $"{action}'s argument '{name}' is {type}, not {given}");
+                else LiteralFits(value, type, step.Id, $"{action}'s argument '{name}'");
+            }
         }
 
         private void Into(ScriptStep step, ScriptType result)
@@ -650,7 +704,8 @@ public static class ScriptChecker
 
         private ScriptType? StepResult(ScriptStep step) => step.Type switch
         {
-            "integration" => step.Text("into") is { } into && _vars.TryGetValue(into, out var t) ? t : ScriptType.Any,
+            "integration" => SignatureOf(step) is { } sig ? ResultType(sig)
+                : step.Text("into") is { } into && _vars.TryGetValue(into, out var t) ? t : ScriptType.Any,
             ScriptStepTypes.FileReadAllText => ScriptType.String,
             ScriptStepTypes.FileReadLines => ScriptType.ListOf(ScriptType.String),
             ScriptStepTypes.FileExists => ScriptType.Bool,

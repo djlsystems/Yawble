@@ -6,7 +6,7 @@ using Yawble.Core.Scripts.Running;
 namespace Yawble.Core.Scripts.Actions;
 
 /// <summary>
-/// The script engine's integration actions by kind ("api" now; SC-3 adds "email" beside it): the catalog and a run's calls go to the provider
+/// The script engine's integration actions by kind ("api" and "email"): the catalog and a run's calls go to the provider
 /// of the requirement's kind. A kind no provider serves has no actions, and its calls fail the step.
 /// </summary>
 public sealed class ScriptActionKinds : IScriptActionsProvider
@@ -27,7 +27,7 @@ public sealed class ScriptActionKinds : IScriptActionsProvider
     public static IScriptActionCatalog CatalogFor(IScriptActions actions, IScriptActionsProvider provider) =>
         actions as IScriptActionCatalog ?? provider.Catalog;
 
-    private sealed class RoutedCatalog(Func<string, IScriptActionCatalog?> of) : IScriptActionCatalog
+    private sealed class RoutedCatalog(Func<string, IScriptActionCatalog?> of) : IScriptActionCatalog, IScriptActionSignatures
     {
         private readonly Dictionary<string, IScriptActionCatalog?> _read = new(StringComparer.Ordinal);
 
@@ -43,9 +43,11 @@ public sealed class ScriptActionKinds : IScriptActionsProvider
         public bool HasAction(string kind, string action) => Of(kind)?.HasAction(kind, action) ?? false;
 
         public bool IsChanging(string kind, string action) => Of(kind)?.IsChanging(kind, action) ?? true;
+
+        public ScriptActionSignature? Signature(string kind, string action) => (Of(kind) as IScriptActionSignatures)?.Signature(kind, action);
     }
 
-    private sealed class RoutedActions : IScriptActions, IScriptActionCatalog
+    private sealed class RoutedActions : IScriptActions, IScriptActionCatalog, IScriptActionSignatures
     {
         private readonly IReadOnlyDictionary<string, IScriptActionsProvider> _kinds;
         private readonly Dictionary<string, IScriptActions> _actions = new(StringComparer.Ordinal);
@@ -72,6 +74,8 @@ public sealed class ScriptActionKinds : IScriptActionsProvider
         public bool HasAction(string kind, string action) => _catalog.HasAction(kind, action);
 
         public bool IsChanging(string kind, string action) => _catalog.IsChanging(kind, action);
+
+        public ScriptActionSignature? Signature(string kind, string action) => _catalog.Signature(kind, action);
 
         public Task<JsonNode?> InvokeAsync(ScriptActionCall call, CancellationToken ct) =>
             (Of(call.Kind) ?? throw new ScriptActionException($"{call.Use}: no '{call.Kind}' integration is available to scripts")).InvokeAsync(call, ct);

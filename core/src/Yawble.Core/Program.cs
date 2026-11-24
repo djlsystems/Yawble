@@ -153,6 +153,9 @@ var scriptActions = new Yawble.Core.Scripts.Actions.ScriptActionKinds(new Dictio
 {
     [Yawble.Core.Scripts.Actions.ApiScriptActionsProvider.Kind] = new Yawble.Core.Scripts.Actions.ApiScriptActionsProvider(
         new Yawble.Core.Scripts.Actions.IntegrationScriptApi($"Data Source={dbPath}", integrationsReady.Task)),
+    // SC-3: the built-in Email integration's read actions (kind "email")
+    [Yawble.Core.Scripts.Actions.EmailActions.Kind] = new Yawble.Core.Scripts.Actions.EmailScriptActionsProvider(
+        new Yawble.Core.Scripts.Actions.IntegrationScriptEmail(integrationsReady.Task)),
 });
 var scriptLibrary = new Yawble.Core.Scripts.Library.ScriptLibrary($"Data Source={dbPath}", () => scriptActions.Catalog);
 var scriptRuns = new Yawble.Core.Scripts.Running.ScriptRunStore($"Data Source={dbPath}");

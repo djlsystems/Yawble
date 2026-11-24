@@ -23,6 +23,7 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
 | MCP server, remote | A server at an `https` address | Called from this computer | One tool per server tool, named `server__tool` |
 | API | A web service described by an OpenAPI spec | Called from this computer, with a Connection's secret | One tool per API, named `api_<name>` |
 | Website | A site agents use in a browser window of this app | In the app's window on this computer | One tool per site, named `web_<name>` |
+| Email | A mailbox, signed in with an [Email account](#email-accounts) Connection | Read over IMAP from this computer | Nothing: scripts use it (see [Email](#email)) |
 
 ### CLIs
 
@@ -90,6 +91,83 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
 - Agents get six actions: `open`, `read` and `screenshot` (allowed by default), and `click`, `fill` and `submit`
   (off by default).
 - Agents stay on the site. Pages outside it are never opened.
+
+### Email
+
+The built-in **Email** integration is one mailbox (an [Email account](#email-accounts) Connection) that a team's
+scripts can read. It is offered to teams like the other integrations: to every team, or to some. A script member
+binds its `requires` entry of kind `email` to one of the Email integrations its team has.
+
+- Setting up: `integrations.emailSave { id?, name, connectionId }` names it and picks the email account (only an
+  email account); `integrations.emailEnable { name, all?, teamId?, on? }` offers it; `integrations.emailList` lists
+  them (`{ id, name, kind: "email", connectionId, connection, enabledAll, teamIds }`); `integrations.emailRemove { name }`
+  removes it and keeps the Connection. The Connection's **Used by** shows `Email: <name>`.
+- A call from a team the integration is not turned on for fails the step with
+  `refused: <name> is not turned on for <team>`. With its Connection removed: `refused: <name> has no email account`.
+- Every call is logged in the call history as `email:<name>`, with the script member as the caller, the action and its
+  arguments. Message content is never logged. The password stays in the credential store; it is never in the
+  database, a log, a result or a step failure.
+- Reading never marks a message read: folders are opened read-only (`EXAMINE`), and bodies are fetched with
+  `BODY.PEEK`. Only `markRead` and `move` change the mailbox, and a dry run does neither (it logs `would markRead on <use>`).
+- There is no delete action. `move` refuses a server that offers neither `MOVE` nor `UIDPLUS`, because there it could
+  only move by expunging the whole folder.
+- Sending (`send`, `reply`) and the send policy (recipient allowlist, caps, levels) come in phase 2.
+
+#### Email actions for scripts
+
+A script lists the actions under a requirement of kind `email`, and an `integration` step calls one by its plain
+name (`"action": "list"`, not `email.list`):
+
+```json
+"requires": [ { "name": "mail", "kind": "email", "actions": ["list", "get", "markRead"] } ],
+"steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
+             "args": { "folder": "INBOX", "since": "{vars.lastSeen}", "unreadOnly": true }, "into": "msgs", "next": "b" } ]
+```
+
+| Action | Arguments (JSON types; `?` is optional and may be `null`) | Result | Changes the mailbox |
+|---|---|---|---|
+| `list` | `folder`: string; `since?`: string, ISO-8601 date-time; `unreadOnly?`: boolean; `max?`: integer | `list<EmailMessage>` | no |
+| `get` | `id`: string; `folder?`: string | `EmailMessage`, with `body` | no |
+| `search` | `folder`: string; `query`: string | `list<EmailMessage>` | no |
+| `thread` | `threadId`: string | `list<EmailMessage>` | no |
+| `markRead` | `id`: string; `folder?`: string | `EmailMessage` (as it is now) | yes |
+| `move` | `id`: string; `folder`: string (the folder to move it to) | `EmailMessage` (in its new place) | yes |
+
+- Every list is **oldest first** (by `receivedAt`) and has at most 200 messages, the newest.
+- `list`: `since` is **exclusive**: only messages received after it, so saving the last `receivedAt` you saw as
+  `lastSeen` never gives a message twice. `max` keeps the newest `max` of those, still oldest first.
+- `get`, `markRead`: `folder` is a hint where to look. Without it the id is enough.
+- `search`: on Gmail the query is Gmail's own search syntax (`X-GM-RAW`, e.g. `from:lee is:unread`); elsewhere it is
+  IMAP `SEARCH TEXT` (the words anywhere in the message).
+- `thread`: on Gmail every message with that `X-GM-THRID`, across All Mail (Sent included). Elsewhere the messages in
+  the inbox and the Sent folder whose Message-ID, In-Reply-To or References carry the thread's id.
+- `move`: on Gmail a label move: the folder's label is added and the inbox label taken off (moving to `INBOX` only
+  adds the inbox label); the id stays. Elsewhere IMAP `MOVE`; the result's `id` and `folder` are the new ones.
+- The script check knows these arguments: an argument the action does not take, a missing required one, or one of the
+  wrong type is an issue (`unknown-argument`, `missing-field`, `type-mismatch`), and the step's result is typed (its
+  `into` variable and `steps.<id>`). The same check runs again when the step runs, on the evaluated arguments.
+- A failure fails the step with its reason: `mail list: the mailbox has no folder named 'Nowhere'`,
+  `mail get: no message with id 31:9 in the mailbox (...)`, `mail list: the IMAP server at <host>:<port> refused the user name or password`.
+
+**EmailMessage** (the built-in schema):
+
+| Field | JSON type | What it is |
+|---|---|---|
+| `id` | string | Stable across runs and reconnects. Gmail: the `X-GM-MSGID` in decimal (`"1789000000000000001"`). Otherwise `"UIDVALIDITY:UID"` of its folder (`"31:2"`). |
+| `threadId` | string | Gmail: the `X-GM-THRID` in decimal. Otherwise the thread's first Message-ID (References, else In-Reply-To, else its own), else `id`. |
+| `messageId` | string or null | The Message-ID header, without `<` and `>`. |
+| `folder` | string | The folder it was read from (`INBOX`; for a Gmail `get`, `[Gmail]/All Mail`). |
+| `from` | EmailAddress | The sender. |
+| `to` | array of EmailAddress | The To recipients. |
+| `cc` | array of EmailAddress | The Cc recipients. |
+| `subject` | string | The subject line (`""` when none). |
+| `receivedAt` | string | When the server received it (its INTERNALDATE), ISO-8601 in UTC: `"2026-11-20T09:10:00Z"`. |
+| `snippet` | string | The first 500 characters of the plain text, runs of white space as one space. |
+| `hasAttachments` | boolean | Whether it has attachments. |
+| `unread` | boolean | Whether it is unread (no `\Seen` flag). |
+| `body` | string | `get` only: the whole plain text. An HTML-only message's text is converted from its HTML. |
+
+**EmailAddress**: `{ name: string or null, address: string }`.
 
 ### Watches
 
