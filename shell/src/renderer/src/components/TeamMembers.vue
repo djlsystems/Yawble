@@ -4,6 +4,7 @@ import type { AgentCard, YawbleApi } from '../../../shared/api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
 import { cardState, waitSays } from '../waiting';
+import { hireRoleOf } from '../agentModels';
 
 // A team's members on its tile in the Teams list: each one's avatar with its state ring and animation, as on the
 // team page. Hovering one shows its name, state and what it is doing. It sits inside the tile's open button (spans only).
@@ -25,7 +26,9 @@ function tip(card: AgentCard): string {
   const queued = c.state === 'queued' && c.queuePosition ? ` (#${c.queuePosition} in the queue)`
     : c.state === 'waits-for-run' || c.state === 'held' || c.state === 'pending' ? ` (${waitSays(c.state, c.waitsFor)})` : '';
   const line = doing ? `\n${doing.length > 160 ? `${doing.slice(0, 159)}…` : doing}` : '';
-  return `${displayName(c.member.name)} · ${c.member.role}\n${MemberStateLabel[memberStateOf(c)]}${queued}${line}`;
+  const role = hireRoleOf(c.member);
+  const kind = c.member.role === 'manager' ? 'manager' : 'member';
+  return `${displayName(c.member.name)} · ${kind}${role ? ` · ${role}` : ''}\n${MemberStateLabel[memberStateOf(c)]}${queued}${line}`;
 }
 
 onMounted(() => { void load(); timer = setInterval(load, Math.max(5000, props.pollMs ?? 5000)); });
@@ -36,7 +39,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
   <span class="tm" data-test="team-members">
     <span v-if="!cards || !cards.length" class="muted small tm-text" data-test="team-members-text">{{ fallback }}</span>
     <MemberAvatar v-for="c in cards ?? []" :key="c.member.id" class="tm-face" :team="c.member.team" :member="c.member.name"
-      :state="memberStateOf(c)" :size="24" :title="tip(c)" :data-state="memberStateOf(c)" data-test="team-member" />
+      :state="memberStateOf(c)" :size="24" :title="tip(c)" :data-state="memberStateOf(c)" :data-role="hireRoleOf(c.member) ?? undefined" data-test="team-member" />
   </span>
 </template>
 

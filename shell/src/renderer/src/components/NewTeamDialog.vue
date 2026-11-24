@@ -1,43 +1,51 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import type { AgentModelList, AgentProfileRow, TeamDefaultMember, TeamDefaults, YawbleApi } from '../../../shared/api';
+import type { HireRow, RoleRow, TeamDefaultMember, TeamDefaults, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { type AgentCliId } from '../agentClis';
 import { useAgentOptions } from '../agentOptions';
 import Modal from './Modal.vue';
 import BusyLabel from './BusyLabel.vue';
 import AgentModelPicker from './AgentModelPicker.vue';
-import { modelOptions, type ModelOption } from '../modelOptions';
+import HireListEditor from './HireListEditor.vue';
+import { useAgentModels } from '../agentModels';
 
 // Team creation: the repository, the Manager and the members, each with its agent CLI. It starts from the saved
 // defaults (Settings > Teams, teams.defaults): the Manager's name and agent, the rows ticked "On new teams" in the
-// member list, and the other rows offered as one-click "+ <name>" buttons under it. Everything stays editable.
+// member list, and the other rows offered as one-click "+ <name>" buttons under it, and the default hire list (who the
+// Manager may hire). Each member row may take a role, which fills its agent and model. Everything stays editable.
 const props = defineProps<{ api?: YawbleApi }>();
 const emit = defineEmits<{ close: []; created: [teamId: number] }>();
 const api = resolveApi(props.api);
 const agentOptions = useAgentOptions(api);
 
 const form = reactive({ name: '', source: 'folder' as 'folder' | 'url', repoPath: '', repoUrl: '', managerName: 'Manager', managerCli: 'claude' as AgentCliId, managerModel: '' });
-/** model '' = the agent's default model (Settings > Agents). */
-const members = reactive<{ name: string; cli: AgentCliId; model: string }[]>([]);
+/** model '' = the agent's default model (Settings > Agents); role '' = none. */
+const members = reactive<{ name: string; cli: AgentCliId; model: string; role: string }[]>([]);
 
 // ---- models: each row picks one of its agent's models (each with its "from" hint), its default, or types one (Custom…)
-const profiles = ref<AgentProfileRow[]>([]);
-const modelLists = reactive<Record<string, ModelOption[]>>({});
-const profileOf = (cli: string) => profiles.value.find((r) => r.name === cli);
-const baseOf = (cli: string) => profileOf(cli)?.baseCli ?? cli;
-const defaultLabel = (cli: string) => { const d = profileOf(cli)?.defaultModel; return d ? `default (${d})` : 'default'; };
-const modelsOf = (cli: string) => modelLists[baseOf(cli)] ?? [];
-async function loadModels(cli: string) {
-  const base = baseOf(cli);
-  if (modelLists[base]) return;
-  modelLists[base] = [];
-  try { modelLists[base] = modelOptions(await api.call<AgentModelList>('agents.models', { cli: base })); } catch { /* the default only */ }
-}
+const models = useAgentModels(api);
+const { defaultLabel, modelsOf, loadModels } = models;
+// ---- B147: roles (each row's role picker fills its agent and model) and who the Manager may hire, from the defaults.
+// An older core without roles: no picker; without a default hire list: the section starts empty (any agent).
+const roles = ref<RoleRow[]>([]);
+const hireList = reactive<HireRow[]>([]);
 onMounted(async () => {
-  try { profiles.value = await api.call<AgentProfileRow[]>('agentProfiles.list'); } catch { /* built-ins by name */ }
+  try { roles.value = await api.call<RoleRow[]>('roles.list'); } catch { /* no roles: no picker */ }
+});
+onMounted(async () => {
+  await models.loadProfiles();
   await loadModels(form.managerCli);
 });
+/** A role picked on a row: its agent and model come from the role's suggestion, and a blank name takes the role word. */
+function roleChanged(row: { name: string; cli: AgentCliId; model: string; role: string }) {
+  const r = roles.value.find((x) => x.name === row.role);
+  if (!r) return;
+  row.cli = r.agent as AgentCliId;
+  row.model = r.model ?? '';
+  if (!row.name.trim()) row.name = r.name;
+  void loadModels(row.cli);
+}
 /** A new agent for a row: its model goes back to that agent's default. */
 function agentChanged(row: { cli: string; model: string }) { row.model = ''; void loadModels(row.cli); }
 function managerAgentChanged() { form.managerModel = ''; void loadModels(form.managerCli); }
@@ -55,13 +63,14 @@ onMounted(async () => {
   if (d.manager?.name && form.managerName === 'Manager') form.managerName = d.manager.name;
   if (d.manager?.cli) { if (form.managerCli === 'claude') form.managerCli = d.manager.cli as AgentCliId; memberCli.value = d.manager.cli as AgentCliId; }
   const rows = (d.members ?? []).filter((m) => m.name?.trim());
-  members.push(...rows.filter((m) => m.onNewTeams).map((m) => ({ name: m.name, cli: m.cli as AgentCliId, model: '' })));
+  members.push(...rows.filter((m) => m.onNewTeams).map((m) => ({ name: m.name, cli: m.cli as AgentCliId, model: '', role: '' })));
+  hireList.push(...(d.hireList ?? []).map((h) => ({ role: h.role, agent: h.agent, model: h.model ?? null, max: h.max || 1 })));
   for (const c of new Set([form.managerCli, ...members.map((m) => m.cli)])) void loadModels(c);
   offered.value = rows.filter((m) => !m.onNewTeams);
 });
 
 function offer(m: TeamDefaultMember & { i: number }) {
-  members.push({ name: m.name, cli: m.cli as AgentCliId, model: '' });
+  members.push({ name: m.name, cli: m.cli as AgentCliId, model: '', role: '' });
   void loadModels(m.cli);
   added.value = new Set([...added.value, m.i]);
 }
@@ -83,7 +92,8 @@ async function create() {
       repoPath: form.source === 'folder' ? form.repoPath.trim() || null : null,
       repoUrl: form.source === 'url' ? form.repoUrl.trim() || null : null,
       managerCli: form.managerCli, ...(form.managerModel ? { managerModel: form.managerModel } : {}),
-      members: members.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), cli: m.cli, ...(m.model ? { model: m.model } : {}) })),
+      members: members.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), cli: m.cli, ...(m.model ? { model: m.model } : {}), ...(m.role ? { role: m.role } : {}) })),
+      hireList: hireList.map((h) => ({ role: h.role, agent: h.agent, model: h.model ?? null, max: h.max })),
     });
     emit('created', r.teamId);
   } catch (e) {
@@ -122,6 +132,10 @@ async function create() {
     <div v-for="(m, i) in members" :key="i" class="agent row">
       <input v-model="m.name" placeholder="member name" :data-test="`member-name-${i}`" />
       <span class="chip">member</span>
+      <select v-if="roles.length" v-model="m.role" :aria-label="`Member ${i + 1} role`" :data-test="`member-role-${i}`" @change="roleChanged(m)">
+        <option value="">no role</option>
+        <option v-for="r in roles" :key="r.name" :value="r.name">{{ r.name }}</option>
+      </select>
       <select v-model="m.cli" :data-test="`member-cli-${i}`" @change="agentChanged(m)"><option v-for="c in agentOptions" :key="c.id" :value="c.id">{{ c.label }}</option></select>
       <AgentModelPicker :key="`member-${i}-${m.cli}`" v-model="m.model" class="model" :test-id="`member-model-${i}`" :models="modelsOf(m.cli)"
         :default-label="defaultLabel(m.cli)" :note="false" />
@@ -131,7 +145,11 @@ async function create() {
     <div v-if="offers.length" class="row offers" data-test="member-offers">
       <button v-for="m in offers" :key="m.i" type="button" class="offer" :data-test="`member-offer-${m.i}`" @click="offer(m)">+ {{ m.name }}</button>
     </div>
-    <button data-test="add-member-row" @click="members.push({ name: '', cli: memberCli, model: '' }); void loadModels(memberCli)">+ Add member</button>
+    <button data-test="add-member-row" @click="members.push({ name: '', cli: memberCli, model: '', role: '' }); void loadModels(memberCli)">+ Add member</button>
+    <h3>Who the Manager may hire</h3>
+    <p class="muted small">The roles the Manager may hire later, each on its agent and model. It starts from Settings &gt; Teams; the team's
+      Settings change it later, on the Hiring tab.</p>
+    <HireListEditor :rows="hireList" :roles="roles" :agents="agentOptions" :models="models" test-id="new-hire" />
     <div class="row actions"><span class="grow"></span>
       <button class="primary" data-test="create-team" :disabled="busy || !form.name.trim()" :aria-busy="busy" @click="create"><BusyLabel :busy="busy" text="Creating…">Create team</BusyLabel></button></div>
   </Modal>

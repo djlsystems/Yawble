@@ -293,7 +293,21 @@ export interface TeamDefaults {
   countries: { code: string; label: string }[];
   /** How many names on the list a member of some team already has. */
   usedCount: number;
+  /** B147: the hire list new teams start with (absent from an older core). */
+  hireList?: HireRow[];
 }
+
+/** B147, roles.list: a role of the catalog (Settings > Teams > Roles). name is one word, also the name word on hire;
+ *  job becomes the hire's standing instructions; agent and model are the suggestion (model null: the agent's default). */
+export interface RoleRow { name: string; job: string; agent: string; model: string | null }
+
+/** B147: a row of a hire list (who the Manager may hire): a role, its agent and model (null: the agent's default), up to max members (1-8). */
+export interface HireRow { role: string; agent: string; model: string | null; max: number }
+
+/** B147, teams.hireList: a team's rows with the role's job, how many places are used and by which members. */
+export interface TeamHireRow extends HireRow { job: string; used: number; holders: number[] }
+
+export const HIRE_MAX = 8;
 
 /** teams.setDefaults: what was saved, and the member-name lines that were not (with why). */
 export interface TeamDefaultsSaved { saved: unknown; rejected: { line: string; reason: string }[] }
@@ -1027,6 +1041,8 @@ export interface DeletePreview {
 export interface MemberRow {
   id: number; teamId: number; team: string; name: string; role: 'manager' | 'member'; cli: 'claude' | 'grok' | 'codex' | 'copilot' | 'antigravity';
   instructions: string; model: string; credential: string;
+  /** B147: the role from the team's hire list the member was hired as (Developer, Tester...); null or absent when none. */
+  hireRole?: string | null;
 }
 
 /** teams.agents' agentModel: the model a member runs and where its name comes from: set on the member, the agent's default,
