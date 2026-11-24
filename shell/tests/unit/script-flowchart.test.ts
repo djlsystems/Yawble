@@ -286,6 +286,23 @@ describe('the Flowchart tab', () => {
     expect(stepOf(w, 'mark')!.next).toBeNull();
   });
 
+  it('asks which switch branch to connect and preserves the other branches', async () => {
+    const doc: ScriptDocument = { start: 'pick', steps: [
+      { id: 'pick', type: 'switch', on: 'mode', cases: { quiet: 'a', loud: 'a' }, default: 'a' },
+      { id: 'a', type: 'log', text: 'a', next: 'b' }, { id: 'b', type: 'end' },
+    ] };
+    const w = await editor(fakeApi({ doc }).api);
+    canvas(w).vm.$emit('connect', { source: 'pick', target: 'b' });
+    await flushPromises();
+    const ask = w.get('[data-test=flow-branch-ask]');
+    expect(ask.findAll('[data-test=flow-branch]').map((b) => b.attributes('data-branch'))).toEqual(['case:quiet', 'case:loud', 'default']);
+    expect(stepOf(w, 'pick')!.cases).toEqual({ quiet: 'a', loud: 'a' });
+    await ask.get('[data-test=flow-branch][data-branch="case:loud"]').trigger('click');
+    await flushPromises();
+    expect(stepOf(w, 'pick')!.cases).toEqual({ quiet: 'a', loud: 'b' });
+    expect(stepOf(w, 'pick')!.default).toBe('a');
+  });
+
   it('deletes a connection; deleting a step asks first, and the check after it shows the refs left behind', async () => {
     const f = fakeApi({ recheck: (doc) => ({ ok: false, schemaReferences: [], issues: doc.steps!.some((s) => s.id === 'keep') ? [] : [
       { stepId: 'each', code: 'unknown_step', message: 'then goes to keep, which is not a step' },
