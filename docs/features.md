@@ -591,7 +591,9 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
     hour, across that member's runs. Every other row's Times is 1.
   - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
-  - **Work history**: **Team messages** and **Board history**.
+  - **Work history**: **Team messages**, **Board history** and **Script runs**. A Script runs row's **Script run**
+    opens that run's view (each step with its input, output and status, the run's log and its files); **← Script runs**
+    goes back to the log.
   - **Diagnostics**: what the app itself reported (`<data>/logs/`). Each entry has a time, where it came from (core or
     shell), its message, a **Level** and **Fields**:
     - The levels are error, warning, info and debug. The core gives each of its lines its level; an older line and a
@@ -629,6 +631,10 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
 - Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs page, `logs.query` over the Cloud Link and the live tail all use the
   same redaction, so a row reads the same everywhere.
+- **Tool calls** keeps, for every integration (web APIs, websites, Email, MCP servers and CLIs such as gh and az), the
+  action, the argument names and only the argument values that are not message content: a body, message, subject or
+  title (or a CLI's `--body`, `--title`, `-m`...) keeps only its length, a long or multi-line value keeps only its
+  length, and a phone number keeps only its last 4 digits (`...0001`). Rows written before this are not rewritten.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
 - A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
   this computer by level (warnings, errors and workflow events by default, everything but debug with `all`, or
