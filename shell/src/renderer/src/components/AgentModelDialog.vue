@@ -9,7 +9,7 @@ import AgentModelPicker from './AgentModelPicker.vue';
 import { modelOptions, type ModelOption } from '../modelOptions';
 
 // An agent's default model. A built-in's is saved with agentProfiles.setDefaultModel; a custom agent's with
-// agentProfiles.update (its arguments unchanged). The list is agents.models' (it runs no CLI), each model with where it comes from.
+// agentProfiles.update (its arguments unchanged). The list is agents.models' (the core may run the CLI's own model listing, cached 5 minutes), each model with where it comes from.
 const props = defineProps<{ api?: YawbleApi; agent: AgentProfileRow; title: string }>();
 const emit = defineEmits<{ close: []; saved: [string] }>();
 const api = resolveApi(props.api);

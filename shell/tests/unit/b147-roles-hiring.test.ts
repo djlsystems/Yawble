@@ -36,7 +36,7 @@ const ROLES: RoleRow[] = [
   { name: 'Tester', job: 'Builds the branches and checks them end to end.', agent: 'codex', model: null },
   { name: 'Reviewer', job: 'Reviews a branch for correctness.', agent: 'claude', model: 'sonnet' },
 ];
-const models: Answer = (p) => ({ models: p.cli === 'claude' ? ['opus', 'sonnet', 'haiku'] : ['gpt-5.5', 'gpt-5.5-mini'], source: 'app' });
+const models: Answer = (p) => ({ models: p.cli === 'claude' ? ['opus', 'sonnet', 'haiku'] : ['gpt-5.5', 'gpt-5.5-mini'], source: 'builtin' });
 
 const defaults = (over: Partial<TeamDefaults> = {}): TeamDefaults => ({
   manager: { name: 'Manager', cli: 'claude' }, members: [], memberNames: ['Amara'], country: 'en-US',

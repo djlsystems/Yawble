@@ -371,7 +371,7 @@ export interface ArgGroup { tokens: string[]; locked: boolean; tail: boolean; re
 /** One model of agents.models and where the app found it; fromLabel is the hint shown beside it ("your Codex settings"). */
 export interface AgentModelItem { model: string; from: 'cli' | 'settings' | 'runs' | 'builtin' | string; fromLabel: string }
 /** agents.models: the models (no CLI is run for it); items, when the core sends them, says where each comes from. */
-export interface AgentModelList { models: string[]; source: 'app' | string; items?: AgentModelItem[] }
+export interface AgentModelList { models: string[]; source: 'cli' | 'settings' | 'runs' | 'builtin' | string; items?: AgentModelItem[] }
 export interface AgentVersionStatus { cli: string; detected: string | null; lastRun: string | null; changed: boolean }
 /** agentProfiles.list: every agent one can choose (built-ins with their default model, then the custom ones). */
 export interface AgentProfileRow {

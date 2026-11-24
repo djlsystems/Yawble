@@ -299,7 +299,7 @@ describe('New Team dialog defaults', () => {
         { id: 1, name: 'claude', baseCli: 'claude', custom: false, defaultModel: 'opus', argsBefore: [], argsAfter: [], removedArgs: [] },
         { id: 2, name: 'codex', baseCli: 'codex', custom: false, defaultModel: 'gpt-5.5', argsBefore: [], argsAfter: [], removedArgs: [] },
       ],
-      'agents.models': (p: any) => ({ models: p.cli === 'claude' ? ['opus', 'sonnet', 'haiku'] : ['gpt-5.5', 'gpt-5.5-mini'], source: 'app' }),
+      'agents.models': (p: any) => ({ models: p.cli === 'claude' ? ['opus', 'sonnet', 'haiku'] : ['gpt-5.5', 'gpt-5.5-mini'], source: 'builtin' }),
     });
     await w.find('[data-test=team-name]').setValue('alpha');
     const opts = (t: string) => Array.from(q<HTMLSelectElement>(t)!.options).map((o) => o.text);

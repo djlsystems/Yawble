@@ -33,7 +33,7 @@ function fakeApi(answers: Record<string, Answer>) {
 
 const withItems = (cli: string): AgentModelList => cli === 'codex'
   ? {
-    models: ['gpt-6.1-sol', 'gpt-5.5', 'gpt-5.5-mini'], source: 'app',
+    models: ['gpt-6.1-sol', 'gpt-5.5', 'gpt-5.5-mini'], source: 'settings',
     items: [
       { model: 'gpt-6.1-sol', from: 'settings', fromLabel: 'your Codex settings' },
       { model: 'gpt-5.5', from: 'cli', fromLabel: 'the CLI' },
@@ -41,14 +41,14 @@ const withItems = (cli: string): AgentModelList => cli === 'codex'
     ],
   }
   : {
-    models: ['opus', 'sonnet', 'haiku-run'], source: 'app',
+    models: ['opus', 'sonnet', 'haiku-run'], source: 'cli',
     items: [
       { model: 'opus', from: 'cli', fromLabel: 'the CLI' },
       { model: 'sonnet', from: 'builtin', fromLabel: 'built-in' },
       { model: 'haiku-run', from: 'runs', fromLabel: 'your runs' },
     ],
   };
-const noItems = (cli: string): AgentModelList => ({ models: cli === 'codex' ? ['gpt-5.5', 'gpt-5.5-mini'] : ['opus', 'sonnet'], source: 'app' });
+const noItems = (cli: string): AgentModelList => ({ models: cli === 'codex' ? ['gpt-5.5', 'gpt-5.5-mini'] : ['opus', 'sonnet'], source: 'builtin' });
 
 const builtin = (name: string, defaultModel = '') => ({ id: 0, name, baseCli: name, custom: false, defaultModel, argsBefore: [], argsAfter: [], removedArgs: [] });
 const lines = { cli: 'codex', agent: 'codex', model: { model: '', source: 'cli', label: "The CLI's default" }, headless: { argv: ['codex'], env: [] }, interactive: { argv: ['codex'], env: [] } };
@@ -75,7 +75,7 @@ describe('the options of a model picker', () => {
   it('items give each model its from hint; no items: the models, no hint', () => {
     expect(modelOptions(withItems('codex')).map(modelOptionText)).toEqual(['gpt-6.1-sol · from your Codex settings', 'gpt-5.5 · from the CLI', 'gpt-5.5-mini · built-in']);
     expect(modelOptions(noItems('codex')).map(modelOptionText)).toEqual(['gpt-5.5', 'gpt-5.5-mini']);
-    expect(modelOptions({ models: ['a'], source: 'app', items: [] }).map(modelOptionText)).toEqual(['a']);
+    expect(modelOptions({ models: ['a'], source: 'builtin', items: [] }).map(modelOptionText)).toEqual(['a']);
     expect(modelOptions(null)).toEqual([]);
   });
 });
@@ -213,6 +213,12 @@ describe('New team: the Manager and member rows', () => {
 
 describe('the member pill', () => {
   it('a model from the CLI\'s own settings says so', () => {
-    expect(agentPillTitle('codex', { name: 'gpt-6.1-sol', source: 'settings', at: null })).toBe("codex/gpt-6.1-sol\nSet in the CLI's own settings");
+    expect(agentPillTitle('codex', { name: 'gpt-6.1-sol', source: 'settings', at: null })).toBe("codex/gpt-6.1-sol\nFrom your Codex settings");
+  });
+
+  it('names the CLI without its maker for each agent', () => {
+    expect(agentPillTitle('claude', { name: 'opus', source: 'settings', at: null })).toBe('claude/opus\nFrom your Claude Code settings');
+    expect(agentPillTitle('grok', { name: 'grok-4', source: 'settings', at: null })).toBe('grok/grok-4\nFrom your Grok settings');
+    expect(agentPillTitle('mycli', { name: 'm1', source: 'settings', at: null })).toBe('mycli/m1\nFrom your mycli settings');
   });
 });
