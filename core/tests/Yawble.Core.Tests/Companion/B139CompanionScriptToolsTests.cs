@@ -146,6 +146,68 @@ public sealed class B139CompanionScriptToolsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task InvalidTargetsAreRefusedWithoutWrites()
+    {
+        var cc = Client(CompanionLevel.Destructive);
+        var agent = Trigger();
+        agent["member"] = "Ada";
+        var agentResult = await _service.CallAsync(cc, ScriptTools.ScriptTriggerSet, agent, Ct);
+        Assert.True(agentResult.IsError, agentResult.Text);
+        foreach (var (team, integration, action) in new[]
+        {
+            ("Alpha", "sms", "GetToken"), ("Alpha", "sms", "Teleport"), ("Gamma", "sms", "CreateMessage")
+        })
+        {
+            var args = new JsonObject { ["team"] = team, ["integration"] = integration, ["action"] = action };
+            var result = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, args, Ct);
+            Assert.True(result.IsError, result.Text);
+        }
+        Assert.Equal(0, _r.Count("triggers.save") + _r.Count("integrations.saveChecklist"));
+        Assert.Empty(_r.Rules());
+        Assert.Equal(0, _service.PendingCount);
+    }
+
+    [Fact]
+    public async Task ApprovedActionAllowsLiveScriptCallOnlyForThatTeam()
+    {
+        var cc = Client(CompanionLevel.Destructive);
+        var request = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, Allow(), Ct);
+        Assert.Equal(ActionState.Done, (await Decide(request.RequestId!, approve: true)).State);
+        var sent = 0;
+        _r.Http.Add(B139Rig.Host + "/messages", req =>
+        {
+            sent++;
+            return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                { Content = new System.Net.Http.StringContent("{}", System.Text.Encoding.UTF8, "application/json") };
+        });
+        var args = new JsonObject { ["body"] = new JsonObject { ["to"] = "placeholder" } };
+        var result = await _r.Svc.CallForScriptAsync(new Yawble.Core.Integrations.ScriptCaller("Alpha", "Poller", "run-live", DryRun: false), "sms", "CreateMessage", args, Ct);
+        Assert.True(result.Sent);
+        Assert.Equal(1, sent);
+        var refused = await Assert.ThrowsAsync<Yawble.Core.Integrations.ScriptApiRefusedException>(() =>
+            _r.Svc.CallForScriptAsync(new Yawble.Core.Integrations.ScriptCaller("Beta", "Someone", "run-beta", DryRun: false), "sms", "CreateMessage", args, Ct));
+        Assert.Contains("needs approval", refused.Message);
+        Assert.Equal(1, sent);
+    }
+
+    [Fact]
+    public async Task DistinctActionsForOneTeamRemainSeparateRequests()
+    {
+        var cc = Client(CompanionLevel.Destructive);
+        var first = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, Allow(), Ct);
+        var secondArgs = Allow();
+        secondArgs["action"] = "ListMessages";
+        var second = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, secondArgs, Ct);
+        Assert.NotNull(first.RequestId);
+        Assert.NotNull(second.RequestId);
+        Assert.NotEqual(first.RequestId, second.RequestId);
+        Assert.Contains("pending", await RequestStatus(cc, first.RequestId!));
+        Assert.Contains("pending", await RequestStatus(cc, second.RequestId!));
+        Assert.Equal(2, _service.PendingCount);
+        Assert.Empty(_r.Rules());
+    }
+
+    [Fact]
     public async Task BothAreAbsentBelowTheDestructiveLevel()
     {
         Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf(ScriptTools.ScriptTriggerSet, Trigger()));
