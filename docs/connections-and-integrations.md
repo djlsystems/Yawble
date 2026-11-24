@@ -121,12 +121,12 @@ name (`"action": "list"`, not `email.list`):
 ```json
 "requires": [ { "name": "mail", "kind": "email", "actions": ["list", "get", "markRead"] } ],
 "steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
-             "args": { "folder": "INBOX", "after": "{vars.lastCursor}", "unreadOnly": true }, "into": "msgs", "next": "b" } ]
+             "args": { "folder": "INBOX", "after": "{vars.lastId}", "since": "2026-11-20T00:00:00Z", "unreadOnly": true }, "into": "res", "next": "b" } ]
 ```
 
 | Action | Arguments (JSON types; `?` is optional and may be `null`) | Result | Changes the mailbox |
 |---|---|---|---|
-| `list` | `folder`: string; `after?`: string, a `cursor`; `since?`: string, ISO-8601 date-time (not with `after`); `unreadOnly?`: boolean; `max?`: integer | `list<EmailMessage>` | no |
+| `list` | `folder`: string; `since?`: string (ISO-8601); `unreadOnly?`: bool; `max?`: int; `after?`: string (an `id` from an earlier `list` result) | `EmailList`: `{ messages: list<EmailMessage>, cursorReset: bool }` | no |
 | `get` | `id`: string; `folder?`: string | `EmailMessage`, with `body` | no |
 | `search` | `folder`: string; `query`: string | `list<EmailMessage>` | no |
 | `thread` | `threadId`: string | `list<EmailMessage>` | no |
@@ -134,73 +134,81 @@ name (`"action": "list"`, not `email.list`):
 | `move` | `id`: string; `folder`: string (the folder to move it to) | `EmailMessage` (in its new place) | yes |
 
 - `search` and `thread` give at most 200 messages, the newest, oldest first (by `receivedAt`, then the folder's UID).
-- `list` picks its messages in one of three ways. In each, `unreadOnly` keeps only unread ones, and `list` returns
-  the **first** `max` of them in its order (default and limit 200):
-  - **`after`** (for polling): a `cursor` from an earlier `list` of the same folder. Only messages that arrived in the
-    folder after that message (IMAP `UID SEARCH UID n+1:*`), in **arrival order** (the folder's UID order). Dates
-    play no part, so messages that share a second, or that arrive with an old date, are all returned in turn.
-  - **`since`** (a time filter, not for polling): only messages whose `receivedAt` is **later** than `since`
-    (exclusive). Ordered by `receivedAt`, then UID. `receivedAt` is whole seconds, so `since` set to a message's
-    `receivedAt` also leaves out the other messages of that second.
-  - **neither**: the whole folder, in arrival order (UID order), the same order `after` walks in.
-  - `after` and `since` together fail the step: `mail list: give after or since, not both (poll with after)`.
-- **Polling without missing or repeating a message:** poll with `after`, never with `since`. After each `list`,
-  if the result is **not empty**, save the **last** message's `cursor` (`{last(vars.msgs)}`, then its `cursor`) in a
-  saved `string` variable, and pass it back unchanged as `after` on the next run. When the result is empty, keep the
-  cursor you have. The first run has no cursor (`null`) and starts from the folder's first message. This gets every
-  message exactly once in arrival order, however small `max` is (even 1), when several messages share a second, and
-  when mail arrives between polls:
+- `list`: `unreadOnly` keeps only unread messages, and `list` returns the **first** `max` of them in its order
+  (default and limit 200). `cursorReset` is always present; it is `false` unless `after` no longer applied (below).
+  - **With `after`**, while the folder's UIDVALIDITY is the one in that `id`: only the messages with a higher UID than
+    that message (IMAP `UID SEARCH UID n+1:*`), ordered by UID ascending (arrival order), the first `max` of them.
+    `unreadOnly` still applies. `since`, if given too, is ignored. Dates play no part, so messages that share a second,
+    or that arrive with an old date, are all returned in turn.
+  - **With `after` of another UIDVALIDITY** (the server renumbered the folder; rare, e.g. after the folder was
+    rebuilt): the `id` no longer applies, and `cursorReset` is `true`. With `since`, the result is the plain `since`
+    list (below). Without `since`, it starts from now: no messages.
+  - **Without `after`**: `since` is a plain time filter for first runs and searches, with no exactly-once promise. It
+    is **exclusive**: only messages whose `receivedAt` is **later** than `since`. Without `since`, the whole folder.
+    The oldest `max` come first, ordered by (INTERNALDATE, UID). `receivedAt` is whole seconds, so `since` set to a
+    message's `receivedAt` also leaves out the other messages of that second.
+  - A malformed `after` fails the step as an argument error: `mail list: after '...' is not a message id (...)`.
+- **The poll pattern:** `list { folder, after: vars.lastId, since: <first-run time> }`. After each `list`, if
+  `messages` is **not empty**, save the `id` of the **last** message returned (the newest) in a saved `string`
+  variable and pass it as `after` on the next run. When `messages` is empty, keep the id you have. The first run has no
+  id (`null`), so `since` picks where it starts. On `cursorReset` the script keeps going from what it got: it saves the
+  last id of those messages as usual. This gets every message exactly once in arrival order, however small `max` is
+  (even 1), when several messages share a second, and when mail arrives between polls. Marking a polled message read
+  or moving it out of the folder does not disturb the saved id.
 
   ```json
-  "variables": [ { "name": "msgs", "type": "list<EmailMessage>" }, { "name": "last", "type": "EmailMessage" },
-                 { "name": "lastCursor", "type": "string", "scope": "saved" } ],
+  "variables": [ { "name": "res", "type": "EmailList" }, { "name": "last", "type": "EmailMessage" },
+                 { "name": "lastId", "type": "string", "scope": "saved" } ],
   "steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
-               "args": { "folder": "INBOX", "after": "{vars.lastCursor}", "unreadOnly": true, "max": 20 }, "into": "msgs", "next": "b" },
-             { "id": "b", "type": "if", "when": { "left": "{count(vars.msgs)}", "op": "gt", "right": 0 }, "then": "c", "else": "z" },
-             { "id": "c", "type": "set", "var": "last", "value": "{last(vars.msgs)}", "next": "d" },
-             { "id": "d", "type": "set", "var": "lastCursor", "value": "{vars.last.cursor}", "next": "z" },
+               "args": { "folder": "INBOX", "after": "{vars.lastId}", "since": "2026-11-20T00:00:00Z", "unreadOnly": true, "max": 20 },
+               "into": "res", "next": "b" },
+             { "id": "b", "type": "if", "when": { "left": "{count(vars.res.messages)}", "op": "gt", "right": 0 }, "then": "c", "else": "z" },
+             { "id": "c", "type": "set", "var": "last", "value": "{last(vars.res.messages)}", "next": "d" },
+             { "id": "d", "type": "set", "var": "lastId", "value": "{vars.last.id}", "next": "z" },
              { "id": "z", "type": "end" } ]
   ```
 
-  Marking a polled message read or moving it out of the folder does not disturb the cursor.
-- A `cursor` is **opaque**: keep it as the string you got. It is valid only for the folder it came from (the
-  message's `folder`). Today it is the folder's UIDVALIDITY and the message's UID, `"31:7"`, also on Gmail, where a
-  label has UIDs too; do not build or compare cursors yourself.
-- Limits of polling with `after`, stated plainly:
-  - A message moved out of the folder and back (or copied in again) gets a new UID there, so it is returned again.
-  - If the server renumbers the folder (a new UIDVALIDITY; rare, e.g. after the folder was rebuilt), the cursor no
-    longer says which messages are new. The step then fails with `mail list: the cursor '31:7' is from an earlier
-    numbering of INBOX (its UIDVALIDITY was 31, it is now 32): ...; start the poll again without after`. It never
-    silently starts over. A malformed `after` fails the same way (`... is not a cursor ...`).
-  - With `unreadOnly`, a message read in another mail program before the poll is not returned, and is not returned
-    later either: the cursor moves past it with the next unread one.
-- `get`, `markRead`: `folder` is a hint where to look. Without it the id is enough.
+- An `id` is **opaque**: keep it as the string you got; do not build or compare ids yourself. It is **per folder**:
+  it names the message in the folder (or Gmail label) it was read from, its `folder`, and is **stable while the
+  message stays in that folder or label**. A message moved to another folder has another id there, and one moved out
+  and back gets a new id (a new UID), so a poll returns it again. Today an id is `"UIDVALIDITY:UID"` of its folder
+  (`"31:7"`); on Gmail `"gm:<X-GM-MSGID>:<UIDVALIDITY>:<UID>"` (`"gm:1789000000000000001:600:7"`).
+- `get`, `markRead`: `folder` is a hint where to look. Without it the id is enough. On Gmail they find the message by
+  the `X-GM-MSGID` in the id: in the `folder` given (the result keeps that folder's id), else in All Mail (the result's
+  `folder` is `[Gmail]/All Mail` and its `id` is the All Mail one). Any id of the same Gmail message works.
 - `search`: on Gmail the query is Gmail's own search syntax (`X-GM-RAW`, e.g. `from:lee is:unread`); elsewhere it is
   IMAP `SEARCH TEXT` (the words anywhere in the message).
-- `thread`: on Gmail every message with that `X-GM-THRID`, across All Mail (Sent included). Elsewhere the messages in
-  the inbox and the Sent folder whose Message-ID, In-Reply-To or References carry the thread's id.
+- `thread`: on Gmail every message with that `X-GM-THRID`, across All Mail (Sent included); their ids are All Mail's.
+  Elsewhere the messages in the inbox and the Sent folder whose Message-ID, In-Reply-To or References carry the thread's id.
 - `move`: on Gmail a label move: the folder's label is added and the inbox label taken off (moving to `INBOX` only
-  adds the inbox label); the id stays. Elsewhere IMAP `MOVE`; the result's `id` and `folder` are the new ones.
+  adds the inbox label), found by the `X-GM-MSGID`. Elsewhere IMAP `MOVE`. Either way the result's `id` and `folder`
+  are the new ones (on Gmail the same `X-GM-MSGID` with the new label's UIDVALIDITY and UID).
 - The script check knows these arguments: an argument the action does not take, a missing required one, or one of the
   wrong type is an issue (`unknown-argument`, `missing-field`, `type-mismatch`), and the step's result is typed (its
   `into` variable and `steps.<id>`). The same check runs again when the step runs, on the evaluated arguments.
 - A failure fails the step with its reason: `mail list: the mailbox has no folder named 'Nowhere'`,
   `mail get: no message with id 31:9 in the mailbox (...)`, `mail list: the IMAP server at <host>:<port> refused the user name or password`.
 
+**EmailList** (the built-in schema, `list`'s result):
+
+| Field | JSON type | What it is |
+|---|---|---|
+| `messages` | array of EmailMessage | The messages, in the list's order (by UID with `after`, else by `receivedAt`, then UID); the last is the newest. |
+| `cursorReset` | boolean | Always present. `true` when `after` no longer applied (the folder's UIDVALIDITY changed): `messages` is then the `since` list, or empty without `since`. Otherwise `false`. |
+
 **EmailMessage** (the built-in schema):
 
 | Field | JSON type | What it is |
 |---|---|---|
-| `id` | string | Stable across runs and reconnects. Gmail: the `X-GM-MSGID` in decimal (`"1789000000000000001"`). Otherwise `"UIDVALIDITY:UID"` of its folder (`"31:2"`). |
+| `id` | string | Opaque, per folder: stable while the message stays in that folder or label; `list`'s `after`. `"UIDVALIDITY:UID"` of its folder (`"31:2"`); Gmail `"gm:<X-GM-MSGID>:<UIDVALIDITY>:<UID>"`. |
 | `threadId` | string | Gmail: the `X-GM-THRID` in decimal. Otherwise the thread's first Message-ID (References, else In-Reply-To, else its own), else `id`. |
 | `messageId` | string or null | The Message-ID header, without `<` and `>`. |
-| `folder` | string | The folder it was read from (`INBOX`; for a Gmail `get`, `[Gmail]/All Mail`). |
+| `folder` | string | The folder it was read from (`INBOX`; for a Gmail `get` without `folder`, `[Gmail]/All Mail`). |
 | `from` | EmailAddress | The sender. |
 | `to` | array of EmailAddress | The To recipients. |
 | `cc` | array of EmailAddress | The Cc recipients. |
 | `subject` | string | The subject line (`""` when none). |
-| `cursor` | string | Opaque: the message's place in its `folder`, for `list`'s `after` (see polling above). Valid only for that folder. |
-| `receivedAt` | string | When the server received it (its INTERNALDATE), ISO-8601 in UTC, whole seconds: `"2026-11-20T09:10:00Z"`. Not unique (messages can share a second) and not arrival order: do not poll with it. |
+| `receivedAt` | string | The server's INTERNALDATE: a UTC ISO-8601 string in whole seconds, e.g. `"2026-11-20T09:10:00Z"`. |
 | `snippet` | string | The first 500 characters of the plain text, runs of white space as one space. |
 | `hasAttachments` | boolean | Whether it has attachments. |
 | `unread` | boolean | Whether it is unread (no `\Seen` flag). |

@@ -732,7 +732,7 @@ masked in the log and never reaches an agent. See
   imported as `.json` files. A document's top-level `layout` section (the editor's node positions) is kept unchanged
   through save, get, export and import.
 - **Schemas** are named object types (a JSON Schema subset), also global and versioned. The built-in schemas
-  (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, ApiResponse) are read-only. A schema save that
+  (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse) are read-only. A schema save that
   removes or retypes a field a saved script uses is refused, listing each script, version and step it would break.
 - A **script member** is a team member whose runs are the core's script engine, never an agent CLI. It runs a pinned
   version of its script or the newest version that passes its check, with its own settings, and binds each
