@@ -596,8 +596,8 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
     shell), its message, a **Level** and **Fields**:
     - The levels are error, warning, info and debug. The core gives each of its lines its level; an older line and a
       line the app writes without one (on standard error) get theirs from what they say.
-    - Debug is for routine lines: a run admitted, the heavy-work lease held or released (passing the 30-minute limit is
-      still said), each clone fetched at start-up, a Grok session check that changed nothing, a trigger that fired a
+    - Debug is for routine lines: a run admitted, the heavy-work lease held, queued for, handed on or released (a holder
+      passing the 30-minute limit is a warning), each clone fetched at start-up, a Grok session check that changed nothing, a trigger that fired a
       script member (with the script run it started), the daily prune, and the one line per push to origin (every
       branch it pushed). They are hidden unless the Level filter asks for them.
     - Fields are `key=value` pairs with the ids the line is about: `level`, `area` (`teams`, `bus`, `lease`, `grok`,
