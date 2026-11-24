@@ -81,7 +81,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     public static bool IsModelVhost(string? vhost) => vhost is not null && Vhosts.ProductionUpstreams.ContainsKey(vhost);
 
     /// <summary>
-    /// B143: refusals a CLI makes on its own, every run, that say nothing (its telemetry and suggestion calls): the Codex
+    /// Refusals a CLI makes on its own, every run, that say nothing (its telemetry and suggestion calls): the Codex
     /// analytics-events and plugins/suggested paths refused (403), and /backend-api/ps/mcp answered 401. Matched on the
     /// path (query apart).
     /// </summary>
@@ -108,7 +108,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
 
     public void Write(GatewayEvent e)
     {
-        // B143: a routine refusal is counted on the member's row for it from the last hour (any of its runs), not a row each.
+        // A routine refusal is counted on the member's row for it from the last hour (any of its runs), not a row each.
         if (RoutineKey(e) is { } routine)
         {
             lock (_lock)

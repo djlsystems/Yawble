@@ -28,7 +28,7 @@ const team = ref(props.member ? props.member.slice(0, props.member.indexOf('/'))
 const member = ref(props.member ?? '');
 /** All activity only (B101): the app's own rows (backlog, settings, triggers, link, backups...), no team or member. */
 const app = ref(false);
-/** The Level filter (a source with levels, the Diagnostics log): '' every level but debug, 'all', or one level. */
+/** The Level filter (a source with levels: All activity, Diagnostics): '' every level but debug, 'all', or one level. */
 const level = ref('');
 const filters = reactive<Record<string, string>>({});
 const values = reactive<Record<string, string[]>>({});

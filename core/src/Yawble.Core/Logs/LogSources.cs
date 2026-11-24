@@ -22,12 +22,13 @@ public sealed record LogPrune(string Table, string TimeColumn, int? DefaultDays,
 /// A log in the database. <paramref name="From"/> is its FROM clause with the alias t; <paramref name="TeamWhere"/> and
 /// <paramref name="MemberWhere"/> are predicates over the parameters @team, @teamId, @member ("Team/Name"), @name and
 /// @memberId. <paramref name="Prune"/> null: kept, because <paramref name="KeptBecause"/>. <paramref name="AppWhere"/>: the
-/// rows about no team and no member (the app filter, B101); null: the source has none to offer.
+/// rows about no team and no member (the app filter, B101); null: the source has none to offer. <paramref name="LevelSql"/>:
+/// each row's level (<see cref="LogLevels"/>), for the Level filter and the rows' "level"; null: the source has no levels.
 /// </summary>
 public sealed record LogSource(
     string Id, string Title, string Group, string About, string From, string RowId, string Time,
     IReadOnlyList<LogColumn> Columns, string? TeamWhere, string? MemberWhere, LogPrune? Prune, string? KeptBecause = null,
-    string? AppWhere = null);
+    string? AppWhere = null, string? LevelSql = null);
 
 /// <summary>Every log the app keeps in its database, and the combined view of a member's activity across them.</summary>
 public static class LogSources
@@ -54,7 +55,9 @@ public static class LogSources
             ],
             IsTeamOf("t.member"), "t.member = @member", null,
             "it is read from the other logs; prune each of them instead",
-            AppWhere: $"t.member = '{Provenance.AuditLog.AppKey}'"),
+            AppWhere: $"t.member = '{Provenance.AuditLog.AppKey}'",
+            // The level logs.tail gives the same entry (LogLevels.OfActivity).
+            LevelSql: "yawble_log_level(t.source, t.event, t.details)"),
 
         new("audit", "Audit", "Accountability",
             "Every change made from the window, a Cloud Link viewer, the Concierge or a paired program: who, how, which call, what it was about, and whether it worked. Never a key, a token or a message.",
@@ -395,9 +398,14 @@ public static class LogSources
 
     /// <summary>
     /// The SQL functions <see cref="ActivityFrom"/> calls, added to each connection that reads it:
-    /// yawble_audit_who(target, method, joined member, joined team), <see cref="Provenance.AuditLog.WhoOf"/>.
+    /// yawble_audit_who(target, method, joined member, joined team), <see cref="Provenance.AuditLog.WhoOf"/>; and
+    /// yawble_log_level(source, event, details), <see cref="LogLevels.OfActivity"/>.
     /// </summary>
-    public static void AddFunctions(Microsoft.Data.Sqlite.SqliteConnection c) =>
+    public static void AddFunctions(Microsoft.Data.Sqlite.SqliteConnection c)
+    {
         c.CreateFunction<string?, string?, string?, string?, string?>("yawble_audit_who",
             (target, method, member, team) => Provenance.AuditLog.WhoOf(target, method, member, team), isDeterministic: true);
+        c.CreateFunction<string?, string?, string?, string>("yawble_log_level",
+            (source, ev, details) => LogLevels.OfActivity(source, ev, details), isDeterministic: true);
+    }
 }
