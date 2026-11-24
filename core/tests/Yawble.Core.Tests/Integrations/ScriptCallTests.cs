@@ -390,4 +390,57 @@ public class ScriptCallTests
 
         Assert.Throws<ScriptApiRefusedException>(() => r.Svc.ListScriptOperations("Beta", "sms"));
     }
+
+    [Fact]
+    public async Task PathParams_SavedAlone_KeepTheSpecSignIn_AndTheListNamesThePathParameters()
+    {
+        await using var r = await Rig.Make(bindAccountSid: false);
+        var before = (await r.Rpc("integrations.apiList"))!.AsArray().Single(a => a!["name"]!.GetValue<string>() == "sms")!;
+        Assert.Equal(["AccountSid", "Sid"], before["pathParamNames"]!.AsArray().Select(n => n!.GetValue<string>()));
+        var chosenBefore = before["auth"]!["chosen"]!.GetValue<bool>();
+
+        await r.Rpc("integrations.apiSave", new JsonObject { ["name"] = "sms", ["pathParams"] = new JsonObject { ["AccountSid"] = "username" } });
+        var listed = (await r.Rpc("integrations.apiList"))!.AsArray().Single(a => a!["name"]!.GetValue<string>() == "sms")!;
+        Assert.Equal("username", listed["auth"]!["pathParams"]!["AccountSid"]!.GetValue<string>());
+        Assert.Equal("basic", listed["auth"]!["type"]!.GetValue<string>());
+        Assert.Equal(chosenBefore, listed["auth"]!["chosen"]!.GetValue<bool>());
+        Assert.Equal(201, (await r.Script("CreateMessage", new JsonObject { ["To"] = "+1555" })).Status);
+        Assert.Equal(Messages, Assert.Single(r.Sent).Url);
+
+        var e = await Assert.ThrowsAnyAsync<Exception>(() => r.Rpc("integrations.apiSave", new JsonObject { ["name"] = "sms", ["pathParams"] = new JsonObject { ["AccountSid"] = "password" } }));
+        Assert.Contains("secret", e.Message);
+
+        await r.Rpc("integrations.apiSave", new JsonObject { ["name"] = "sms", ["pathParams"] = null });
+        listed = (await r.Rpc("integrations.apiList"))!.AsArray().Single(a => a!["name"]!.GetValue<string>() == "sms")!;
+        Assert.Null(listed["auth"]!["pathParams"]);
+    }
+
+    [Fact]
+    public async Task Peek_ReadsTheSpecAtTheAddress_WithoutSavingAnything()
+    {
+        await using var r = await Rig.Make();
+        var p = (await r.Rpc("integrations.apiPeek", new JsonObject { ["url"] = Host + "/openapi.json" }))!;
+        Assert.True(p["found"]!.GetValue<bool>());
+        Assert.Equal(Host + "/openapi.json", p["specUrl"]!.GetValue<string>());
+        Assert.Equal(Host, p["serviceUrl"]!.GetValue<string>());
+        Assert.Equal("SMS", p["name"]!.GetValue<string>());
+        Assert.Equal(4, p["actions"]!.GetValue<int>());
+        Assert.Equal("basic", p["signIn"]!.GetValue<string>());
+
+        var none = (await r.Rpc("integrations.apiPeek", new JsonObject { ["url"] = "https://api.nothing.example/v1" }))!;
+        Assert.False(none["found"]!.GetValue<bool>());
+        Assert.Equal("https://api.nothing.example/v1", none["serviceUrl"]!.GetValue<string>());
+        Assert.Equal("nothing.example", none["name"]!.GetValue<string>());
+        Assert.Single((await r.Rpc("integrations.apiList"))!.AsArray());
+    }
+
+    [Theory]
+    [InlineData("Twilio - Api", "https://api.twilio.com", "Twilio")]
+    [InlineData("Swagger Petstore", "https://petstore.example", "Swagger Petstore")]
+    [InlineData("GitHub v3 REST API", "https://api.github.com", "GitHub v3 REST")]
+    [InlineData(null, "https://api.stripe.com", "stripe.com")]
+    [InlineData("   ", "https://www.example.org", "example.org")]
+    [InlineData("API", "https://api.example.org", "API")]
+    public void SuggestedName_IsTheTitleWithoutATrailingApi_OrTheHost(string? title, string host, string expected) =>
+        Assert.Equal(expected, IntegrationService.SuggestApiName(title, new Uri(host)));
 }

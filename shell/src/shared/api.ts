@@ -570,13 +570,20 @@ export interface ApiRow {
   name: string; baseUrl: string; docsUrl: string | null; specUrl: string | null; title: string | null;
   connection: { id: number; name: string; status: Connection['status']; statusReason?: string | null } | null;
   /** chosen: the person said how it signs in (the spec did not). */
-  auth: { type: 'bearer' | 'header' | 'query' | 'basic' | string; name: string | null; description: string | null; chosen?: boolean } | null;
+  /** pathParams: a path parameter (its name in the route) filled from a Connection field that is not secret, e.g. { AccountSid: 'username' }. */
+  auth: { type: 'bearer' | 'header' | 'query' | 'basic' | string; name: string | null; description: string | null; chosen?: boolean; pathParams?: Record<string, string> | null } | null;
+  /** The path parameters (names in the route) the API's operations take; null for a website. */
+  pathParamNames?: string[] | null;
   signIn: { label: string; description: string | null; fields: { key: string; label: string; secret: boolean }[] } | null;
   /** An OAuth 2 API (auth.type 'oauth2'): the spec's addresses (null when it gave none usable, or only an OpenID address), the scopes the
    * allowed and ask-first actions need, and those its Connection was not granted (non-empty: "Sign in again to allow the new actions"). */
   oauth?: { authorizeUrl: string | null; tokenUrl: string | null; openIdConnectUrl?: string | null; neededScopes: string[]; missingScopes: string[] } | null;
   status: string | null; all: boolean; teams: number[]; counts: DiscoverChecklistData['counts'] | null;
 }
+/** integrations.apiPeek { url }: what Add API fills in from one address (nothing is saved). */
+export type ApiPeekResult =
+  | { found: true; specUrl: string; title: string | null; serviceUrl: string | null; name: string; actions: number; signIn: string | null }
+  | { found: false; reason: string; serviceUrl: string; name: string };
 /** integrations.oauthDiscover { provider }: the provider's addresses and offered scopes from its metadata, or found: false (use Advanced). */
 export type OAuthDiscoverResult =
   | { found: true; issuer: string; authorizeUrl: string; tokenUrl: string; scopes: string[] }

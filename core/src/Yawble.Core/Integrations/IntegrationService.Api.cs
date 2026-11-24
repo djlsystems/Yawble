@@ -37,6 +37,7 @@ public sealed partial class IntegrationService
         "integrations.oauthDiscover" => await OAuthDiscoverAsync(p, ct),
         "integrations.oauthSignIn" => await OAuthSignInAsync(p, ct),
         "integrations.apiSave" => ApiSave(p),
+        "integrations.apiPeek" => await ApiPeekAsync(OptStr(p, "url"), ct),
         "integrations.apiDeleteRule" => ApiDeleteRule(OptLong(p, "id") ?? throw new RpcException("bad_params", "which rule?")),
         "integrations.apiEnable" => ApiEnable(Str(p, "name"), p?["all"]?.GetValue<bool>(), OptLong(p, "teamId"), p?["on"]?.GetValue<bool>() ?? true),
         "integrations.apiRemove" => await ApiRemoveAsync(Str(p, "name"), p?["removeConnection"] is JsonValue r && r.TryGetValue<bool>(out var rc) && rc),
@@ -181,6 +182,7 @@ public sealed partial class IntegrationService
                 [PathParamsKey] = a.Auth[PathParamsKey]?.DeepClone(),
             },
             ["signIn"] = SignInJson(a.Auth),
+            ["pathParamNames"] = a.Kind == "http" ? new JsonArray(ApiPathParamNames(a.Id).Select(n => (JsonNode?)n).ToArray()) : null,
             ["oauth"] = a.Kind == "http" && AuthType(a.Auth) == "oauth2" ? OAuthApiJson(a) : null,
             ["status"] = a.Status, ["all"] = a.EnabledAll, ["teams"] = new JsonArray(ApiTeamsOf(a.Id).Select(t => (JsonNode?)t).ToArray()),
             ["counts"] = a.Runs == 0 ? null : CountsJson(() => Discover.GetApiChecklist(a.Name, null)),
@@ -243,6 +245,17 @@ public sealed partial class IntegrationService
             // the path parameters filled from the Connection stay as they were when the new sign-in does not say (the sign-in dialog does not)
             if (auth is not null && p["auth"] is JsonObject sent && !sent.ContainsKey(PathParamsKey) && existing?.Auth?[PathParamsKey] is JsonObject kept)
                 auth[PathParamsKey] = kept.DeepClone();
+        }
+        // pathParams alone: which path parameters the Connection fills, leaving the rest of the sign-in as it is
+        if (p is not null && p.ContainsKey(PathParamsKey))
+        {
+            var pp = CleanPathParams(p[PathParamsKey]);
+            if (pp is not null && auth is null) throw new ArgumentException("this API has no sign-in, so its connection fills no path parameters");
+            if (auth is not null)
+            {
+                auth = auth.DeepClone().AsObject();
+                if (pp is null) auth.Remove(PathParamsKey); else auth[PathParamsKey] = pp;
+            }
         }
         CheckPathParams(auth, connectionId);
 
@@ -353,6 +366,63 @@ public sealed partial class IntegrationService
         if (a.Kind == "website") await ForgetWebsiteAsync(PublicWebsitePartition(a.Id), pagesOf: a.Id + ":");
         return new JsonObject { ["ok"] = true, ["soleConnection"] = sole, ["connectionRemoved"] = removeConnection && sole is not null };
     }
+
+    // ------------------------------------------------------------------ Look up (Add API)
+
+    /// <summary>
+    /// What the Add API dialog fills in from one address: the OpenAPI spec there (or found from it), with the service address the spec
+    /// names and a name from its title. Saves nothing. Not a spec: the address is taken as the service address, named after its host.
+    /// </summary>
+    private async Task<JsonNode> ApiPeekAsync(string? text, CancellationToken ct)
+    {
+        var url = HttpUrl(text?.Trim()) ?? throw new ArgumentException("paste a full web address starting with https://");
+        try
+        {
+            using var handler = NewSpecHandler();
+            var (specText, specUrl) = await new SpecFinder(handler).FindAsync(url, url, ct);
+            var spec = OpenApiReader.Read(specText, specUrl);
+            var server = HttpUrl(spec.ServerUrl)?.AbsoluteUri.TrimEnd('/');
+            return new JsonObject
+            {
+                ["found"] = true, ["specUrl"] = specUrl.AbsoluteUri, ["title"] = spec.Title, ["serviceUrl"] = server,
+                ["name"] = SuggestApiName(spec.Title, server is null ? url : new Uri(server)), ["actions"] = spec.Actions.Count, ["signIn"] = spec.Auth?.Type,
+            };
+        }
+        catch (ArgumentException e)
+        {
+            return new JsonObject
+            {
+                ["found"] = false, ["reason"] = e.Message, ["serviceUrl"] = url.GetLeftPart(UriPartial.Path).TrimEnd('/'), ["name"] = SuggestApiName(null, url),
+            };
+        }
+    }
+
+    /// <summary>
+    /// A short name for an API: its spec's title without a trailing "API" ("Twilio - Api" is Twilio), or else its host without
+    /// "api." or "www." in front. Letters, digits, spaces, dots and dashes only; at most 40 characters.
+    /// </summary>
+    internal static string SuggestApiName(string? title, Uri host)
+    {
+        static string Clean(string t)
+        {
+            var kept = new string(t.Select(c => char.IsLetterOrDigit(c) || c is ' ' or '.' or '-' ? c : ' ').ToArray());
+            var words = kept.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+            while (words.Count > 1 && (words[^1] is "-" || words[^1].Equals("api", StringComparison.OrdinalIgnoreCase))) words.RemoveAt(words.Count - 1);
+            var joined = string.Join(' ', words).Trim(' ', '-', '.');
+            return joined.Length > 40 ? joined[..40].TrimEnd(' ', '-', '.') : joined;
+        }
+        if (title is { Length: > 0 } && Clean(title) is { Length: > 0 } fromTitle) return fromTitle;
+        var h = host.Host;
+        foreach (var prefix in new[] { "api.", "www." })
+            if (h.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && h.Length > prefix.Length) h = h[prefix.Length..];
+        return Clean(h) is { Length: > 0 } fromHost ? fromHost : host.Host;
+    }
+
+    /// <summary>The names (as in the route) of the path parameters the API's current operations take, sorted.</summary>
+    private List<string> ApiPathParamNames(long apiId) =>
+        ApiOps(apiId).Where(o => !o.Gone)
+            .SelectMany(o => (o.Params["properties"] as JsonObject ?? []).Where(p => ApiIn(p.Value) == "path").Select(p => ApiWire(p.Key, p.Value)))
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
 
     // ------------------------------------------------------------------ Discover
 
