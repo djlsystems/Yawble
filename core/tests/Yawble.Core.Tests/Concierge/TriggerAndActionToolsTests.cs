@@ -10,15 +10,15 @@ namespace Yawble.Core.Tests.Concierge;
 
 /// <summary>
 /// Card 634 (B139): script_trigger_set and integration_action_allow through the Concierge's dispatcher, onto the real triggers.save,
-/// scripts.* and the API rule editor's save (<see cref="B139Rig"/>). Turning a script member's trigger on, and allowing an API action, need
+/// scripts.* and the API rule editor's save (<see cref="TriggerAndActionRig"/>). Turning a script member's trigger on, and allowing an API action, need
 /// the person's yes in a later turn (ConciergeActions.ConfirmAsync); turning one off and an action already allowed need none.
 /// </summary>
-public sealed class B139ScriptToolsTests : IAsyncLifetime
+public sealed class TriggerAndActionToolsTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-    private B139Rig _r = null!;
+    private TriggerAndActionRig _r = null!;
 
-    public async ValueTask InitializeAsync() => _r = await B139Rig.StartAsync();
+    public async ValueTask InitializeAsync() => _r = await TriggerAndActionRig.StartAsync();
 
     public async ValueTask DisposeAsync() => await _r.DisposeAsync();
 

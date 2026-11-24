@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Concierge;
 /// call and answer; the approvals (script_member_add and a script's first live run need the person's yes in a later turn,
 /// building, checking and dry runs none); over the Cloud Link a member add and a live run are refused while a dry run passes.
 /// </summary>
-public sealed class B135ScriptToolsTests : IAsyncLifetime
+public sealed class ScriptToolsTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -102,7 +102,7 @@ public sealed class B135ScriptToolsTests : IAsyncLifetime
         var names = JsonNode.Parse(reply.Json!)!["result"]!["tools"]!.AsArray().Select(t => t!["name"]!.GetValue<string>()).ToList();
         string[] expected = ["schemas_list", "schema_get", "schema_save", "scripts_list", "script_get", "script_save", "script_check",
             "script_test_run", "script_runs", "script_run", "script_member_add",
-            // B139 (card 634): B139ScriptToolsTests covers these two.
+            // B139 (card 634): TriggerAndActionToolsTests covers these two.
             "script_trigger_set", "integration_action_allow"];
         foreach (var n in expected)
         {

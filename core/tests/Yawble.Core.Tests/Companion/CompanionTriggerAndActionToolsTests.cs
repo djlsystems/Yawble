@@ -14,20 +14,20 @@ namespace Yawble.Core.Tests.Companion;
 /// Card 634 (B139): script_trigger_set and integration_action_allow for a paired companion client, at the destructive level like
 /// script_member_add. A call that needs the person's yes becomes a request whose plan names the details; Approve in the window runs the
 /// stored call once (a second Approve runs nothing), Deny writes nothing. Turning a trigger off runs at once. The real pieces of
-/// <see cref="B139Rig"/>; no credentials.
+/// <see cref="TriggerAndActionRig"/>; no credentials.
 /// </summary>
 public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private B139Rig _r = null!;
+    private TriggerAndActionRig _r = null!;
     private CompanionClientStore _clients = null!;
     private AuditLog _audit = null!;
     private CompanionService _service = null!;
 
     public async ValueTask InitializeAsync()
     {
-        _r = await B139Rig.StartAsync();
+        _r = await TriggerAndActionRig.StartAsync();
         _clients = new CompanionClientStore(_r.F.Db.ConnectionString);
         _audit = new AuditLog(_r.F.Db.ConnectionString);
         _service = new CompanionService(_r.Bus, new ConciergeStore(_r.F.Db.ConnectionString), _r.Route, (_, _) => null, _clients, _audit, new AppEvents());
@@ -174,7 +174,7 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
         var request = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, Allow(), Ct);
         Assert.Equal(ActionState.Done, (await Decide(request.RequestId!, approve: true)).State);
         var sent = 0;
-        _r.Http.Add(B139Rig.Host + "/messages", req =>
+        _r.Http.Add(TriggerAndActionRig.Host + "/messages", req =>
         {
             sent++;
             return new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)

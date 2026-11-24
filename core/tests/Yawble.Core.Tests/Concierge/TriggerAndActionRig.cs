@@ -24,7 +24,7 @@ namespace Yawble.Core.Tests.Concierge;
 /// Teams Alpha (agent Ada, script members Poller and Other), Beta and Gamma; sms is turned on for Alpha and Beta, not Gamma.
 /// sms: CreateMessage (POST /messages), ListMessages (GET /messages), GetToken (GET /tokens, a sign-in action: the floor).
 /// </summary>
-internal sealed class B139Rig : IAsyncDisposable
+internal sealed class TriggerAndActionRig : IAsyncDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     public const string Host = "https://api.sms.example";
@@ -58,9 +58,9 @@ internal sealed class B139Rig : IAsyncDisposable
     /// <summary>Every call the tools made onto the app's methods, in order.</summary>
     public readonly List<(string Method, JsonObject Params)> Calls = [];
 
-    public static async Task<B139Rig> StartAsync()
+    public static async Task<TriggerAndActionRig> StartAsync()
     {
-        var r = new B139Rig();
+        var r = new TriggerAndActionRig();
         r.Http.Add(Host + "/openapi.json", Spec);
         r.Bus = new BusEngine(r.F.Db.OpenStore(), new ScriptedRunner(), new BusOptions { SafetyPoll = TimeSpan.FromMilliseconds(100), IdleOffer = false });
         r.Svc = new IntegrationService(r.F.Db.ConnectionString, r.Bus, connections: new ConnectionService(new MemoryCredentialStore(), r.F.Db.ConnectionString),
