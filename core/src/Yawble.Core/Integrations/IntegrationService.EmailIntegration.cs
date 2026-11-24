@@ -152,7 +152,7 @@ public sealed partial class IntegrationService
     /// for the caller's team, and its email Connection be there with its password. Logs the call (the action and its arguments, never message
     /// content) with the script member as the caller, then opens a signed-in IMAP session and runs <paramref name="work"/> on its mailbox.
     /// Refusals throw <see cref="ScriptApiRefusedException"/>; a mail failure throws <see cref="MailException"/>; a bad argument
-    /// <see cref="ArgumentException"/>. The send actions (phase 2) will check the integration's send policy here, before opening SMTP.
+    /// <see cref="ArgumentException"/>. There is no send or delete action.
     /// </summary>
     public async Task<T> UseEmailForScriptAsync<T>(ScriptCaller caller, string integration, string action, JsonObject args,
         Func<EmailMailbox, Task<T>> work, CancellationToken ct)

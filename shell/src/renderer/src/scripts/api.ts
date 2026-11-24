@@ -250,7 +250,7 @@ export const BLANK_SCRIPT: ScriptDocument = {
 };
 
 /**
- * The "Inbox SMS alert" template (scripts-design.md sections 3 and 12, on the pinned email and api contracts): each new email's subject
+ * The "Inbox SMS alert" template (on the pinned email and api contracts): each new email's subject
  * texted to a list of phones. The same document as the example in the Concierge's scripts skill: the api action is the operation's id,
  * email list returns EmailList, and the poll saves the last message's id (docs/connections-and-integrations.md, the poll pattern).
  */

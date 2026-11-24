@@ -233,7 +233,7 @@ describe('the Scripts dialog', () => {
     expect(w.get('[data-test=outline-step][data-step=list]').text()).toContain('start');
     // Versions come from scripts.versions; picking one loads it.
     expect(w.findAll('[data-test=editor-version] option').map((o) => o.text())).toEqual(['3', '2', '1 (draft)']);
-    // The flowchart has its own tab, kept for phase 3.
+    // The flowchart has its own tab, a placeholder.
     await w.get('[data-test=editor-tab-flowchart]').trigger('click');
     expect(w.find('[data-test=editor-flowchart]').exists()).toBe(true);
   });

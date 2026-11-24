@@ -14,7 +14,7 @@ public sealed record EmailAddress(string? Name, string Address)
 }
 
 /// <summary>
-/// One message as a script sees it (the built-in schema EmailMessage, scripts-design.md section 9). <see cref="Id"/> is opaque to scripts and is
+/// One message as a script sees it (the built-in schema EmailMessage). <see cref="Id"/> is opaque to scripts and is
 /// list's polling cursor (<see cref="EmailMessageId"/>): it carries <see cref="Folder"/>'s UIDVALIDITY and the message's UID there, "UIDVALIDITY:UID",
 /// on Gmail "gm:X-GM-MSGID:UIDVALIDITY:UID"; it is stable while the message stays in that folder or label. <see cref="ThreadId"/>: Gmail's
 /// X-GM-THRID in decimal, otherwise the thread's first Message-ID (References, else In-Reply-To, else its own), else <see cref="Id"/>.

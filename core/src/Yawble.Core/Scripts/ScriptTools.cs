@@ -6,7 +6,7 @@ using Yawble.Core.Bus;
 
 namespace Yawble.Core.Scripts;
 
-/// <summary>What a script tool needs from the person before it runs (B135, scripts-design.md section 10).</summary>
+/// <summary>What a script tool needs from the person before it runs.</summary>
 public enum ScriptToolApproval
 {
     /// <summary>Never: reading, building, checking and dry runs.</summary>

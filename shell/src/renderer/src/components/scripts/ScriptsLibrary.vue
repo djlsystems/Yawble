@@ -34,7 +34,7 @@ function newScript(doc: ScriptDocument) {
   newOpen.value = false;
   editing.value = { script: null, initial: JSON.parse(JSON.stringify(doc)) as ScriptDocument, n: ++n };
 }
-/** New > Ask the Concierge (scripts-design.md section 11): a new Concierge chat with a first message ready to finish. */
+/** New > Ask the Concierge: a new Concierge chat with a first message ready to finish. */
 function askConcierge() {
   newOpen.value = false;
   discussWithConcierge(null, ASK_CONCIERGE_PROMPT);

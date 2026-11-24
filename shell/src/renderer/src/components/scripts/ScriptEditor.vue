@@ -10,9 +10,9 @@ import JsonEditor from './JsonEditor.vue';
 import ScriptOutline from './ScriptOutline.vue';
 import ScriptTestRun from './ScriptTestRun.vue';
 
-// The script editor (B134, MVP): the JSON with highlighting, the check's problems by step (a click jumps to the step),
-// the outline beside it, Versions, Save and Test run. Phase 3's flowchart designer takes the Flowchart tab (the
-// `flowchart` slot); the JSON stays the source of truth.
+// The script editor: the JSON with highlighting, the check's problems by step (a click jumps to the step),
+// the outline beside it, Versions, Save and Test run. The Flowchart tab is a placeholder (the `flowchart` slot);
+// the JSON is the source of truth.
 const props = defineProps<{
   api: YawbleApi; teams: readonly TeamSummary[];
   /** The script opened (null: a new one, from `initial`). */

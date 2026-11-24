@@ -111,7 +111,7 @@ binds its `requires` entry of kind `email` to one of the Email integrations its 
   `BODY.PEEK`. Only `markRead` and `move` change the mailbox, and a dry run does neither (it logs `would markRead on <use>`).
 - There is no delete action. `move` refuses a server that offers neither `MOVE` nor `UIDPLUS`, because there it could
   only move by expunging the whole folder.
-- Sending (`send`, `reply`) and the send policy (recipient allowlist, caps, levels) come in phase 2.
+- The Email integration has no send, reply or delete action.
 
 #### Email actions for scripts
 

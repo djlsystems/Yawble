@@ -71,7 +71,7 @@ export interface TestRunResult {
   outputs: Record<string, unknown> | null; steps: Step[]; log: string[];
 }
 
-// ---- the script document (scripts-design.md section 3), as far as the Scripts place reads it
+// ---- the script document, as far as the Scripts place reads it
 
 export interface ScriptSetting { name: string; type: string; label?: string; default?: unknown }
 export interface ScriptRequire { name: string; kind: string; actions?: string[] }

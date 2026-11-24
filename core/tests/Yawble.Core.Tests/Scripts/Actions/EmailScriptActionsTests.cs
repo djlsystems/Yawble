@@ -146,7 +146,7 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
         var catalog = _kinds.Catalog;
         foreach (var a in new[] { "list", "get", "search", "thread", "markRead", "move" }) Assert.True(catalog.HasAction("email", a), a);
         Assert.False(catalog.HasAction("email", "delete"));
-        Assert.False(catalog.HasAction("email", "send")); // phase 2
+        Assert.False(catalog.HasAction("email", "send"));
         Assert.False(catalog.IsChanging("email", "list"));
         Assert.False(catalog.IsChanging("email", "thread"));
         Assert.True(catalog.IsChanging("email", "markRead"));

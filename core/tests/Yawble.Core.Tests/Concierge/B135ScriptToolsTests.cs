@@ -119,7 +119,6 @@ public sealed class B135ScriptToolsTests : IAsyncLifetime
         Assert.Equal(["script", "team"], testRun["inputSchema"]!["required"]!.AsArray().Select(r => r!.GetValue<string>()));
         Assert.NotNull(testRun["inputSchema"]!["properties"]!["dry_run"]);
         Assert.NotNull(testRun["inputSchema"]!["properties"]!["confirm"]);
-        Assert.DoesNotContain(names, n => n.Contains("mxc", StringComparison.OrdinalIgnoreCase));
     }
 
     // ------------------------------------------------------------------ each tool

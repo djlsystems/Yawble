@@ -6,8 +6,8 @@ using MimeKit;
 namespace Yawble.Core.Email;
 
 /// <summary>
-/// The Email integration's read actions over one signed-in IMAP session (list, get, search, thread, markRead, move; scripts-design.md
-/// section 9). Reads open folders read-only (EXAMINE), so reading never marks a message read; markRead and move open the folder read-write.
+/// The Email integration's read actions over one signed-in IMAP session (list, get, search, thread, markRead, move;
+/// pinned in docs/connections-and-integrations.md). Reads open folders read-only (EXAMINE), so reading never marks a message read; markRead and move open the folder read-write.
 /// Never deletes: there is no delete action, and move refuses a server that could only move by COPY then EXPUNGE without UIDPLUS.
 /// A bad argument (no such folder, a malformed or unknown id) throws <see cref="ArgumentException"/>; the server failing throws
 /// <see cref="MailException"/>. No message text, password or address is written to a log here.

@@ -6,7 +6,7 @@ import RunsTab from './RunsTab.vue';
 import SchemasTab from './SchemasTab.vue';
 import ScriptsLibrary from './ScriptsLibrary.vue';
 
-// The Scripts place (B134, scripts-design.md section 11): three tabs, Scripts (the library and the editor), Schemas
+// The Scripts place: three tabs, Scripts (the library and the editor), Schemas
 // and Runs. `page`: drawn as the app's Scripts place (inline, filling it), as Logs is; otherwise a dialog.
 const props = defineProps<{ api: YawbleApi; teams: readonly TeamSummary[]; page?: boolean; tab?: 'scripts' | 'schemas' | 'runs' }>();
 const emit = defineEmits<{ close: [] }>();

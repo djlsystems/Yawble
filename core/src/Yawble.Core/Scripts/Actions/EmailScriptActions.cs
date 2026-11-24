@@ -11,7 +11,7 @@ using RunCaller = Yawble.Core.Scripts.Running.ScriptCaller;
 
 namespace Yawble.Core.Scripts.Actions;
 
-/// <summary>What an Email action does to the mailbox: reads it, changes it (a dry run does not perform these), or sends mail (phase 2: under the send policy).</summary>
+/// <summary>What an Email action does to the mailbox: reads it, changes it (a dry run does not perform these), or sends mail (no action has this class).</summary>
 public enum EmailActionClass
 {
     Read,
@@ -23,8 +23,8 @@ public enum EmailActionClass
 public sealed record EmailActionSpec(string Name, EmailActionClass Class, ScriptActionSignature Signature);
 
 /// <summary>
-/// The Email integration's actions for scripts (kind "email", scripts-design.md section 9), pinned in docs/connections-and-integrations.md.
-/// Phase 2 adds send and reply here as <see cref="EmailActionClass.Send"/>; there is no delete action.
+/// The Email integration's actions for scripts (kind "email"), pinned in docs/connections-and-integrations.md.
+/// There is no send, reply or delete action.
 /// </summary>
 public static class EmailActions
 {
