@@ -1,4 +1,4 @@
--- 0053 folder asks (B111): an agent asked for read or read-write access to a folder on this computer (request_folder),
+-- 0053 folder asks: an agent asked for read or read-write access to a folder on this computer (request_folder),
 -- and the person decides in Needs you. Append-only: never edit this file once shipped; change the schema in a later step.
 --
 -- One open ask per (member, path, access): a repeat while it waits returns the same ask. member_id is the member the

@@ -7,7 +7,7 @@ namespace Yawble.Core.Teams;
 public sealed record CommitAuthor(string Name, string Email);
 
 /// <summary>
-/// B073: one commit of a list (newest first everywhere). <see cref="NotPushed"/> is THE local-only flag: no origin
+/// One commit of a list (newest first everywhere). <see cref="NotPushed"/> is THE local-only flag: no origin
 /// remote-tracking ref has it, as of the last fetch (always true when the repository has no origin), computed only by
 /// <see cref="GitPreviews.NotPushedAsync"/>. <see cref="Date"/>: the author date, strict ISO 8601.
 /// </summary>
@@ -47,7 +47,7 @@ public sealed record DeletePreview(
     bool Truncated, string Lost, string Text, bool HasOrigin, BranchPush? Push);
 
 /// <summary>
-/// B073: the commit lists and the Merge / Delete previews, read with plain git in the repository (never a member's clone).
+/// The commit lists and the Merge / Delete previews, read with plain git in the repository (never a member's clone).
 /// One implementation for the Git dialog's calls (TeamRepos) and the Concierge's tools (ConciergeGit, ConciergeReadTools),
 /// so both show the same text. Reads only: <c>git merge-tree --write-tree</c> writes objects, never a ref or a file.
 /// </summary>

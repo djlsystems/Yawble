@@ -7,7 +7,7 @@ namespace Yawble.Core.Triggers;
 /// <param name="Root">documents (Path inside the team's documents) or host (Path an absolute folder).</param>
 /// <param name="Glob">File names to watch, e.g. *.pdf (null: every file).</param>
 /// <param name="QuietSec">How long a change must stay still before it fires.</param>
-/// <param name="FireOn">Which settled changes fire it (B125, 0055): <see cref="Added"/>, <see cref="AddedOrChanged"/> or
+/// <param name="FireOn">Which settled changes fire it (migration 0055): <see cref="Added"/>, <see cref="AddedOrChanged"/> or
 /// <see cref="AnyChange"/>. A new trigger defaults to added; one saved before 0055 reads as any.</param>
 public sealed record FolderWatch(string Root, string Path, string? Glob, int QuietSec, string FireOn = FolderWatch.AnyChange)
 {

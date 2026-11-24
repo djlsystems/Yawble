@@ -1,4 +1,4 @@
--- 0047 time accounting (B086): every card's state changes with their time and category, so a card and a workflow can
+-- 0047 time accounting: every card's state changes with their time and category, so a card and a workflow can
 -- say how long they took (created -> last done) and where that time went (Board/Timeline.cs computes it).
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 

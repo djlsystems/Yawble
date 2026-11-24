@@ -1,4 +1,4 @@
--- 0056 scripts (B131, SC-1): the global script and schema libraries, script members, their saved state, and script runs.
+-- 0056 scripts: the global script and schema libraries, script members, their saved state, and script runs.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --
 -- scripts: one row per script, keyed by the document's own id (script_key, e.g. inbox-sms-alert). Every save keeps a new

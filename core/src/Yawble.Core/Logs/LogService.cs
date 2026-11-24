@@ -8,7 +8,7 @@ namespace Yawble.Core.Logs;
 /// What the Logs dialog asks for. <paramref name="Member"/> is "Team/Name". <paramref name="From"/> and
 /// <paramref name="To"/> are ISO times (inclusive, compared as text). <paramref name="AsOf"/>: the time the first page
 /// was read, so later pages are of the same list while new entries arrive. <paramref name="App"/>: only the rows about no
-/// team and no member (the activity log's "app" rows, B101); a source without such rows has none.
+/// team and no member (the activity log's "app" rows); a source without such rows has none.
 /// <paramref name="Level"/> (a source with levels: All activity and the Diagnostics log): null or "default" every level but debug; "all"
 /// every level; "error", "warning", "info" or "debug" that level only.
 /// </summary>
@@ -324,7 +324,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             string? Str(int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture);
             var source = Str(2) ?? "";
             var key = Str(3);
-            // "Team/Name", "Team/<Team>" (about a team) or "/app" (about the app: no team, member "app"); B101.
+            // "Team/Name", "Team/<Team>" (about a team) or "/app" (about the app: no team, member "app").
             var slash = key?.IndexOf('/') ?? -1;
             var (team, member) = slash >= 0 ? (slash > 0 ? key![..slash] : null, key![(slash + 1)..]) : ((string?)null, (string?)null);
             var ev = Str(4);

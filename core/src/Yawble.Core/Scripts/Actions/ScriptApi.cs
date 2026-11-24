@@ -5,7 +5,7 @@ using Yawble.Core.Integrations;
 namespace Yawble.Core.Scripts.Actions;
 
 /// <summary>
-/// What the script engine's API actions need from the integrations (card 586's entry points): a script's call, and the operations a team's
+/// What the script engine's API actions need from the integrations: a script's call, and the operations a team's
 /// scripts may call. <see cref="IntegrationScriptApi"/> is the real one; tests fake it.
 /// </summary>
 public interface IScriptApi

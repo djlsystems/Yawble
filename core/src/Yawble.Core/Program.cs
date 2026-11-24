@@ -145,10 +145,10 @@ await using var bus = await Yawble.Core.Bus.BusHost.StartAsync(
     appDataRoot: Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!),
     skills: skillCatalog,
     availableAgents: ct => Yawble.Core.Agents.AgentReadiness.ChoicesAsync(clis, ct),
-    // B131: script members' runs go to the script engine, agents' to the launcher as before.
+    // Script members' runs go to the script engine, agents' to the launcher as before.
     wrapRunner: r => new Yawble.Core.Launch.ScriptDispatchRunner(r, () => scriptRunner));
 busForRunner = bus;
-// B131: the global script and schema libraries and the script runner (members' data folders under <data>/scripts). Runs the
+// The global script and schema libraries and the script runner (members' data folders under <data>/scripts). Runs the
 // old core left going resume from their last completed step. SC-2: a script's integration steps are the team's web API operations
 // (kind "api"), through IntegrationService, which is made further down: its calls wait for it (integrationsReady).
 var integrationsReady = new TaskCompletionSource<Yawble.Core.Integrations.IntegrationService>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -212,7 +212,7 @@ var ui = new Yawble.Core.Ui.UiRpc(bus, policies, layouts,
     skillCatalog,
     // The Monitor's step feed: what the members do, read from their runs' transcripts.
     new Yawble.Core.Monitor.StepFeed($"Data Source={dbPath}"),
-    // The Monitor's code events (B079): commits, merges and pushes the host recorded in the team repositories.
+    // The Monitor's code events: commits, merges and pushes the host recorded in the team repositories.
     new Yawble.Core.Monitor.CodeEvents($"Data Source={dbPath}"));
 ui.Scripts = new Yawble.Core.Ui.ScriptsRpc(bus, scriptLibrary, scriptRuns, scriptRunner);
 // The guardrail check (runs a battery of escape attempts in a sandbox under a member's effective policy).
@@ -260,7 +260,7 @@ var concierge = new Yawble.Core.Concierge.ConciergeService(
 // (The saved default agent, Settings > Concierge, comes first when it still resolves: ConciergeService.DefaultAgentAsync.)
 // Settings > Teams' Generate: one headless run of the Concierge's default agent with no Yawble tools.
 bus.NameGenerator = concierge.GenerateNamesAsync;
-// B085: a workflow that waits on the person's answer and will expire tomorrow is posted once as a Concierge Update.
+// A workflow that waits on the person's answer and will expire tomorrow is posted once as a Concierge Update.
 bus.ExpiryWarned = w => concierge.PostAppUpdate(w.TeamId, w.Team, w.Text, "expiring");
 // The Cloud Link (optional): a remote viewer's calls go through this same dispatcher, after RemoteAccess.
 RpcDispatcher? dispatcherForLink = null;
@@ -300,7 +300,7 @@ var toolAsks = new Yawble.Core.Integrations.ToolAskService($"Data Source={dbPath
 toolAsks.Changed = () => events.Publish(Yawble.Core.Integrations.ToolAskService.ChangedEvent, null);
 toolAsks.Progress = e => events.Publish(Yawble.Core.Integrations.ToolAskService.ProgressEvent, e);
 bus.ToolAsks = toolAsks;
-// Folder asks (B111): a folder an agent asked to read or write (request_folder) waits for the person in Needs you; an
+// Folder asks: a folder an agent asked to read or write (request_folder) waits for the person in Needs you; an
 // approval writes the member's loosen block through the policy store, as policy.saveLoosen does.
 var folderAsks = new Yawble.Core.Integrations.FolderAskService($"Data Source={dbPath}", policies,
     async (memberId, ct) =>
@@ -356,7 +356,7 @@ if (bus.Repos is { } taskRepos)
 var board = new Yawble.Core.Board.BoardService(new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), bus,
     line => Console.Error.WriteLine($"board: {line}"));
 bus.Board = board;
-// B100: workflow_digest reads the runs' transcripts.
+// workflow_digest reads the runs' transcripts.
 var digestTranscripts = new Yawble.Core.Transcripts.TranscriptStore(options.DataDir!, $"Data Source={dbPath}");
 bus.TranscriptOf = digestTranscripts.Read;
 board.Changed = () => events.Publish(Yawble.Core.Board.BoardService.ChangedEvent, null); // clear done / restore: open boards refresh
@@ -445,7 +445,7 @@ var agentInfoRpc = launch.Launcher is null ? null : new Yawble.Core.Agents.Agent
 // The read-only code browser of members' clones (watched while a member runs or a Code dialog is open on it).
 await using var codeBrowser = new Yawble.CodeBrowser.CodeBrowserService(new Yawble.Core.Code.CodeHost(bus, runs, events, policies));
 codeBrowser.Start();
-// The cloud org dashboard (B048): org.summary from what the app already tracks (never tokens, cost or usage), pushed as
+// The cloud org dashboard: org.summary from what the app already tracks (never tokens, cost or usage), pushed as
 // org.summaryChanged while a viewer watches; a Cloud Link viewer who leaves is unwatched.
 await using var orgSummary = new Yawble.Core.Link.OrgSummaryService(
     new Yawble.Core.Link.AppOrgSummarySource(bus, new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), integrations, networkAsks, toolAsks, logService,
@@ -461,7 +461,7 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
     updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks, orgSummary: orgSummary,
     folderAsks: folderAsks);
 dispatcherForLink = dispatcher;
-// B123: a decision option's action (Allow localhost) is applied as the setting's own call, audited as that call.
+// A decision option's action (Allow localhost) is applied as the setting's own call, audited as that call.
 ui.Dispatch = (method, p, ct) => dispatcher.DispatchAsAsync(Yawble.Core.Provenance.Actor.Current ?? Yawble.Core.Provenance.Actor.Window, method, p, ct);
 link.Start();
 
