@@ -49,7 +49,7 @@ public sealed record LogTailFilter(bool All = false, string? Team = null, string
             if (e.Member is not null)
                 return string.Equals(e.Team, team, StringComparison.OrdinalIgnoreCase) && string.Equals(e.Member, name, StringComparison.OrdinalIgnoreCase);
             // A log that names members in passing (the Diagnostics log) matches the way logs.query matches it.
-            // Its name and its team both named: a bare name would match a namesake in another team (B143).
+            // Its name and its team both named: a bare name would match a namesake in another team.
             return e.MemberInText && e.Text is { } said && said.Contains(name, StringComparison.OrdinalIgnoreCase)
                 && said.Contains(team, StringComparison.OrdinalIgnoreCase);
         }
@@ -110,6 +110,13 @@ public static partial class LogLevels
         type is not null && type != Bus.MessageTypes.Progress
         && (type.StartsWith("workflow.", StringComparison.Ordinal) || type.StartsWith("agent.", StringComparison.Ordinal)
             || type.StartsWith("instruction ", StringComparison.Ordinal));
+
+    /// <summary>
+    /// The level of an All activity entry, the same in logs.query and logs.tail: a team message by its type alone, any
+    /// other by its event and text.
+    /// </summary>
+    public static string OfActivity(string? source, string? ev, string? text) =>
+        source == "Messages" ? OfMessage(ev) : Of(ev, text);
 
     /// <summary>The level of an entry by its event and text.</summary>
     public static string Of(string? ev, string? text)

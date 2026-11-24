@@ -269,7 +269,7 @@ public sealed class UiRpc(
     {
         var teams = await bus.TeamsAsync(ct);
         var needsYou = 0;
-        var newest = new List<NeedsYouItem>(); // B143: the OS notification names the newest thing waiting and its team
+        var newest = new List<NeedsYouItem>(); // the OS notification names the newest thing waiting and its team
         foreach (var t in teams)
         {
             var open = await bus.OpenDecisionsAsync(t.Name, ct);
@@ -356,7 +356,30 @@ public sealed class UiRpc(
             catch (ArgumentException e) { throw new RpcException("clone_failed", e.Message); }
         }
         var teamId = await bus.CreatePlannedTeamAsync(name, plan, repoPath, ct);
+        await SetNewTeamModelsAsync(teamId, plan, p, ct);
         return new JsonObject { ["teamId"] = teamId };
+    }
+
+    /// <summary>
+    /// The models chosen in the New team dialog: managerModel, and members[i].model for the i-th member row (the plan keeps
+    /// the rows' order; a job word alone got a first name added, so the row is found by its planned name). A blank model
+    /// leaves the agent's default. Set like Member settings does (members.update), so the change log records it.
+    /// </summary>
+    private async Task SetNewTeamModelsAsync(long teamId, NewTeamPlan plan, JsonObject? p, CancellationToken ct)
+    {
+        static string Key(string n) { try { return Teams.MemberNames.IdFor(n); } catch (ArgumentException) { return n.Trim(); } }
+        var wanted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (p?["members"] is JsonArray given)
+            for (var i = 0; i < given.Count && i < plan.Members.Count; i++)
+                if (OptStr(given[i] as JsonObject, "model")?.Trim() is { Length: > 0 } model) wanted[Key(plan.Members[i].Name)] = model;
+        var managerModel = OptStr(p, "managerModel")?.Trim();
+        if (wanted.Count == 0 && string.IsNullOrEmpty(managerModel)) return;
+        foreach (var row in (await bus.AllMemberRowsAsync(ct)).Where(r => r.TeamId == teamId))
+        {
+            var model = row.Role == "manager" ? managerModel : wanted.GetValueOrDefault(Key(row.Name));
+            if (!string.IsNullOrEmpty(model) && model != row.Model)
+                await bus.UpdateMemberAsync(row.Id, row.Cli, row.Instructions, model, row.Credential, ct);
+        }
     }
 
     /// <summary>teams.setDefaults {manager?: {name, cli}, members?: [{name, cli, onNewTeams}], memberNamesText?, country?} -> {saved, rejected}.</summary>

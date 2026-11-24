@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue';
 import type { LogColumn, LogPage, LogPrunePreview, LogSourceInfo, LogWho, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import Modal from './Modal.vue';
 import BusyLabel from './BusyLabel.vue';
 import LoadingNote from './LoadingNote.vue';
 import { useNarrow } from '../narrowScreen';
+import { scriptsApi } from '../scripts/api';
+import type { RunDetail } from '../scripts/types';
+// Loaded when a run is opened: the run view brings the flowchart library with it.
+const ScriptRunView = defineAsyncComponent(() => import('./scripts/ScriptRunView.vue').then((m) => m.default));
 
 /**
  * Logs: every log the app keeps, one at a time, as a table. The source is chosen from a list; the team, the member,
@@ -28,7 +32,7 @@ const team = ref(props.member ? props.member.slice(0, props.member.indexOf('/'))
 const member = ref(props.member ?? '');
 /** All activity only (B101): the app's own rows (backlog, settings, triggers, link, backups...), no team or member. */
 const app = ref(false);
-/** The Level filter (a source with levels, the Diagnostics log): '' every level but debug, 'all', or one level. */
+/** The Level filter (a source with levels: All activity, Diagnostics): '' every level but debug, 'all', or one level. */
 const level = ref('');
 const filters = reactive<Record<string, string>>({});
 const values = reactive<Record<string, string[]>>({});
@@ -239,6 +243,24 @@ function when(iso: string): string {
 
 function memberLabel(key: string) { return key.slice(key.indexOf('/') + 1); }
 
+// ------------------------------------------------------------------ a script run's view (Script runs)
+
+/** The Script runs log: its 'run' column is the script run's id, which opens that run's view. */
+const runLinks = computed(() => sourceId.value === 'scripts' && columns.value.some((c) => c.key === 'run'));
+function runIdOf(row: LogPage['rows'][number], c: LogColumn): number | null {
+  if (!runLinks.value || c.key !== 'run') return null;
+  const id = Number(row[c.key]);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+const runView = ref<RunDetail | null>(null);
+const runError = ref<string | null>(null);
+async function openRun(id: number) {
+  runError.value = null;
+  try { runView.value = await scriptsApi(props.api).run(id); }
+  catch (e) { runError.value = errorText(e); }
+}
+watch(sourceId, () => { runView.value = null; runError.value = null; });
+
 // ------------------------------------------------------------------ prune and retention (this computer only)
 
 const ages = [7, 14, 30, 90, 180, 365];
@@ -420,7 +442,12 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
         <template v-if="total !== null">{{ total.toLocaleString() }} {{ total === 1 ? 'entry' : 'entries' }}<template v-if="rows.length < total">, {{ rows.length.toLocaleString() }} shown</template></template>
       </p>
 
-      <div ref="scroller" class="scroll" data-test="logs-scroll" @scroll.passive="onScroll">
+      <p v-if="runError" class="error small" data-test="logs-run-error">{{ runError }}</p>
+      <section v-if="runView" class="run" data-test="logs-run">
+        <div class="row"><button type="button" class="ghost" data-test="logs-run-back" @click="runView = null">← Script runs</button></div>
+        <ScriptRunView :run="runView" :api="api" />
+      </section>
+      <div v-show="!runView" ref="scroller" class="scroll" data-test="logs-scroll" @scroll.passive="onScroll">
         <div :id="phoneToolsId" class="phone-tools" data-test="logs-phone-tools"></div>
         <template v-if="phone">
           <ol class="cards" data-test="logs-cards">
@@ -431,7 +458,11 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
                 <template v-for="c in columns" :key="c.key">
                   <template v-if="open === String(r._id) || cell(r, c)">
                     <dt>{{ c.label }}</dt>
-                    <dd :class="c.kind">{{ open === String(r._id) ? (r[c.key] ?? '') : cell(r, c) }}</dd>
+                    <dd :class="c.kind">
+                      <button v-if="runIdOf(r, c)" type="button" class="link" :data-test="`logs-run-link-${runIdOf(r, c)}`" :aria-label="`Open script run ${runIdOf(r, c)}`"
+                        @click.stop="openRun(runIdOf(r, c)!)" @keydown.enter.stop>{{ cell(r, c) }}</button>
+                      <template v-else>{{ open === String(r._id) ? (r[c.key] ?? '') : cell(r, c) }}</template>
+                    </dd>
                   </template>
                 </template>
               </dl>
@@ -451,7 +482,11 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
           <tbody>
             <template v-for="r in rows" :key="String(r._id)">
               <tr class="entry" :class="{ open: open === String(r._id) }" data-test="logs-row" @click="open = open === String(r._id) ? null : String(r._id)">
-                <td v-for="c in columns" :key="c.key" :class="c.kind" :title="r[c.key] === null ? '' : String(r[c.key])">{{ cell(r, c) }}</td>
+                <td v-for="c in columns" :key="c.key" :class="c.kind" :title="r[c.key] === null ? '' : String(r[c.key])">
+                  <button v-if="runIdOf(r, c)" type="button" class="link" :data-test="`logs-run-link-${runIdOf(r, c)}`" :aria-label="`Open script run ${runIdOf(r, c)}`"
+                    @click.stop="openRun(runIdOf(r, c)!)">{{ cell(r, c) }}</button>
+                  <template v-else>{{ cell(r, c) }}</template>
+                </td>
               </tr>
               <tr v-if="open === String(r._id)" class="detail" data-test="logs-detail">
                 <td :colspan="columns.length">
@@ -483,6 +518,8 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 .bar button.on { background: var(--hover); }
 /* Prune… and Retention… are the bar's own buttons at desktop width (the wrapper takes no box); on a phone, the ⋯ menu. */
 .actions { display: contents; }
+.run { flex: 1 1 0; min-height: 0; overflow: auto; }
+button.link { background: none; border: 0; padding: 0; color: var(--accent, inherit); text-decoration: underline; cursor: pointer; font: inherit; }
 .filters label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
 .filters select { max-width: 220px; }
 .about { margin: 0; }

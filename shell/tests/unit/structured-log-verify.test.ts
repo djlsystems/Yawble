@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import LogsDialog from '../../src/renderer/src/components/LogsDialog.vue';
 import type { LogSourceInfo, YawbleApi } from '../../src/shared/api';
 
-// Card 615 (B143 verify): the shell against core-shaped answers. The Tool calls columns and the Diagnostics source are
+// Structured logs end to end: the shell against core-shaped answers. The Tool calls columns and the Diagnostics source are
 // as core/src/Yawble.Core/Logs/LogSources.cs and FileLogs.cs give them; the Level values are the ones LogRpc.QueryLevel
 // accepts; app.overview newest is as UiRpc builds it (kind question|approval|host|tool|folder, title cut at 120 + "…").
 vi.mock('electron', () => ({ app: {}, Menu: {}, nativeImage: {}, Tray: class {} }));
@@ -52,7 +52,7 @@ const queries = (calls: { method: string; params: any }[]) => calls.filter((c) =
 
 afterEach(() => { document.body.innerHTML = ''; });
 
-describe('B143 verify: Logs', () => {
+describe('Structured logs: Logs', () => {
   it('the Tool calls view shows the core columns, Exit/HTTP among them, and no Level filter', async () => {
     const { api } = fakeApi();
     const w = mount(LogsDialog, { props: { api, source: 'tools' }, attachTo: document.body });
@@ -82,7 +82,7 @@ describe('B143 verify: Logs', () => {
   });
 });
 
-describe('B143 verify: the needs-you notification with app.overview newest as the core builds it', () => {
+describe('Structured logs: the needs-you notification with app.overview newest as the core builds it', () => {
   it('names the newest item and its team for each kind the core sends', () => {
     const at = '2026-11-24T10:00:00.0000000+00:00';
     expect(needsYouToast(4, { kind: 'question', title: 'Merge the release branch?', team: 'Yawble Engineering Team', at }))
