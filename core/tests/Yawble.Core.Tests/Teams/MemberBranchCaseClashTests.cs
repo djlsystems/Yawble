@@ -11,7 +11,7 @@ namespace Yawble.Core.Tests.Teams;
 /// clone the move only records the new name, and the B020 check after it (ignoring case) gives the plain refusal that says
 /// what moved. Temporary repositories only; nothing here reaches local transport.
 /// </summary>
-public class B027VerifyTeamsGapTests
+public class MemberBranchCaseClashTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

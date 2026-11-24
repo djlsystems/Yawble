@@ -10,7 +10,7 @@ namespace Yawble.Core.Tests.Teams;
 /// shell/src/shared/api.ts TidyPlan / TidyBranch / TidyClass declare it: the same field names, the same seven classes,
 /// optional fields left out when absent, and no local path in the answer. No git needed.
 /// </summary>
-public sealed class Card363TidyContractTests
+public sealed class TidyContractTests
 {
     // shell/src/shared/api.ts (card 362): TidyClass and TidyBranch's keys.
     private static readonly string[] ShellClasses = ["merged", "contained", "working", "moved", "own-work", "origin-only", "scratch"];

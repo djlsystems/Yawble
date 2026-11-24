@@ -20,7 +20,7 @@ namespace Yawble.Core.Tests.Teams;
 /// Card 420 (verify B096): gap checks over the real UiRpc, BoardService, McpBusServer hire and ConciergeService. No real
 /// agent CLI runs: the hires run in a ScriptedRunner, the Concierge's launcher is a fake that fails to start.
 /// </summary>
-public class Card420B096VerifyTests
+public class NameDefaultsVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

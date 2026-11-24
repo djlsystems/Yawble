@@ -9,7 +9,7 @@ namespace Yawble.Core.Tests.Teams;
 /// and TeamRepos.HostView (TeamRepos.Hosts.cs:96-99); connections-and-integrations.md's pull-requests bullet against
 /// RepoHost.PullRequestsUnavailable; UiRpc.cs's WebLinkAsync comment names git.webLink.
 /// </summary>
-public class Card457B075DocsVsCodeTests
+public class RepoProviderDocsVsCodeTests
 {
     private const string Sha = "0123456789abcdef0123456789abcdef01234567";
 

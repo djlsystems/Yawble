@@ -22,7 +22,7 @@ namespace Yawble.Core.Tests.Teams;
 /// counts; Sync's incoming commits; the one not-pushed flag; the deleted branch's commit still opening in the commit view;
 /// the Concierge's text equal to the dialog's; the RPC shapes through the real dispatcher.
 /// </summary>
-public class B073PreviewTests
+public class MergeDeletePreviewTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

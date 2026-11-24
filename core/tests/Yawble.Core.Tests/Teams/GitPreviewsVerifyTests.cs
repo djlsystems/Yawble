@@ -10,7 +10,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 466 (B073 verify, TesterKofi): what B073PreviewTests (card 463) does not cover, on fixture repositories (base
+/// Card 466 (B073 verify, TesterKofi): what MergeDeletePreviewTests (card 463) does not cover, on fixture repositories (base
 /// trunk; origin, where there is one, a bare folder whose remote-tracking refs are set as a fetch leaves them):
 ///  - fast-forward from origin's base when the local one is only behind it: the preview, git.status's count and range,
 ///    and git.commitRange all name the same commits;
@@ -24,7 +24,7 @@ namespace Yawble.Core.Tests.Teams;
 ///  - Sync (fast-forward of the team branch): incoming is the team-behind range shown before.
 /// With CARD466_FIXTURE_OUT set, the real core's JSON (as UiRpc sends it) is written there (shell/tests/unit/fixtures/card466).
 /// </summary>
-public class Card466PreviewVerifyTests
+public class GitPreviewsVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

@@ -12,7 +12,7 @@ namespace Yawble.Core.Tests.Teams;
 /// without .git; GitLab's nested groups; every Azure DevOps form; a local folder is plain git), the web links of each
 /// kind per provider, the person's override and link pattern, and pull requests routed to the right CLI (fakes only).
 /// </summary>
-public sealed class Card446RepoProviderTests
+public sealed class RepoProviderTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

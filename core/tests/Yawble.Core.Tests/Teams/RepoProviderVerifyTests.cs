@@ -16,7 +16,7 @@ namespace Yawble.Core.Tests.Teams;
 /// as the contract and docs state them, and the UI RPC contract (teams.setRepo clears with "" too, "MAIN", an extra on
 /// Bitbucket, an unpushed commit, unknown repository) through the window's dispatcher.
 /// </summary>
-public sealed class Card448B075VerifyTests : IAsyncLifetime
+public sealed class RepoProviderVerifyTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private const string Sha = "0123456789abcdef0123456789abcdef01234567";

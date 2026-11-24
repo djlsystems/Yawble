@@ -23,7 +23,7 @@ namespace Yawble.Core.Tests.Teams;
 /// With CARD445_FIXTURE_OUT set, the real core's JSON for each case is written there (shell/tests/unit/fixtures/card445)
 /// for the shell's card445 test to render.
 /// </summary>
-public class Card445CommitViewVerifyTests
+public class CommitViewVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
