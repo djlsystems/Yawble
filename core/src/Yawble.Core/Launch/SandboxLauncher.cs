@@ -272,7 +272,8 @@ public sealed class SandboxLauncher(
     Agents.AgentDefaultsStore? agentDefaults = null,
     Func<int, RunTree?>? runTrees = null,
     IRunFolderHolders? runFolderHolders = null,
-    Action<string>? log = null)
+    Action<string>? log = null,
+    Agents.ICliModelSettings? cliSettings = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
@@ -291,9 +292,13 @@ public sealed class SandboxLauncher(
     private IRunFolderHolders? Holders =>
         runFolderHolders ?? (runTrees is null && host.Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? MacRunFolderHolders.Instance : null);
 
-    /// <summary>The model a member's run uses: member override > the agent's default > the CLI's own default.</summary>
+    /// <summary>
+    /// The model a member's run uses: member override > the agent's default > the model the person's own CLI settings name
+    /// (~/.codex/config.toml's model and the like: the member's sandbox home has its own settings without it, so it is
+    /// passed on the command line) > the CLI's own default.
+    /// </summary>
     public Agents.ModelResolution ResolveModel(LaunchMember member) =>
-        Agents.AgentModels.Resolve(member.Model, member.Agent is not null ? member.AgentModel : agentDefaults?.Get(member.Cli));
+        Agents.AgentModels.Resolve(member.Model, member.Agent is not null ? member.AgentModel : agentDefaults?.Get(member.Cli), member.Cli, cliSettings);
 
     /// <summary>The credential mode a run of this CLI and kind uses (the one place it is decided; Describe uses it too).</summary>
     private CredentialMode ModeFor(AgentCli cli, RunKind kind, CredentialMode? configured)

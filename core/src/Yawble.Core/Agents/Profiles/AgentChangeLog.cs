@@ -16,7 +16,10 @@ public sealed record AgentSetting(string Agent, string Model);
 /// The append-only log of every change of agent or model, so cost can be priced by what a run used at the time. One row per
 /// change; rows are never edited or deleted (triggers refuse it). Local only: nothing here goes over the Cloud Link.
 /// </summary>
-public sealed class AgentChangeLog(string connectionString, TimeProvider? clock = null, Func<string, string, string>? resolveModel = null)
+/// <param name="settingsModel">For an agent whose model resolves to none: the model the person's own CLI settings name for its CLI
+/// (~/.codex/config.toml's model and the like) and the note saying so ("model from your Codex settings"); null when they name none.</param>
+public sealed class AgentChangeLog(string connectionString, TimeProvider? clock = null, Func<string, string, string>? resolveModel = null,
+    Func<string, (string Model, string Note)?>? settingsModel = null)
 {
     public const string KindMemberAgent = "member-agent", KindManagerAgent = "manager-agent", KindConciergeAgent = "concierge-agent",
         KindAgentDefaultModel = "agent-default-model", KindCustomAgentArgs = "custom-agent-args";
@@ -42,23 +45,35 @@ public sealed class AgentChangeLog(string connectionString, TimeProvider? clock 
     public AgentChange? RecordSubjectChange(string kind, string subject, AgentSetting from, AgentSetting to, string how, Actor? actor = null)
     {
         if (string.Equals(from.Agent, to.Agent, StringComparison.OrdinalIgnoreCase) && from.Model == to.Model) return null;
-        return Append(kind, subject, from.Agent, to.Agent, from.Model, to.Model, Resolve(to.Agent, to.Model), how, actor, null);
+        var (effective, note) = Resolve(to.Agent, to.Model);
+        return Append(kind, subject, from.Agent, to.Agent, from.Model, to.Model, effective, how, actor, note);
     }
 
     /// <summary>An agent's default model changed (which changes every subject following it): one row for the agent.</summary>
-    public AgentChange? RecordDefaultModelChange(string agent, string fromModel, string toModel, string how, Actor? actor = null) =>
-        fromModel == toModel ? null
-            : Append(KindAgentDefaultModel, AgentSubject(agent), agent, agent, fromModel, toModel, string.IsNullOrEmpty(toModel) ? CliDefault : toModel, how, actor, null);
+    public AgentChange? RecordDefaultModelChange(string agent, string fromModel, string toModel, string how, Actor? actor = null)
+    {
+        if (fromModel == toModel) return null;
+        var (effective, note) = string.IsNullOrEmpty(toModel) ? FromSettings(agent) : (toModel, null);
+        return Append(KindAgentDefaultModel, AgentSubject(agent), agent, agent, fromModel, toModel, effective, how, actor, note);
+    }
 
     /// <summary>A custom agent's arguments changed: one row, the detail says which lists.</summary>
-    public AgentChange RecordArgsChange(string agent, string model, string detail, string how, Actor? actor = null) =>
-        Append(KindCustomAgentArgs, AgentSubject(agent), agent, agent, model, model, Resolve(agent, model), how, actor, detail);
+    public AgentChange RecordArgsChange(string agent, string model, string detail, string how, Actor? actor = null)
+    {
+        var (effective, note) = Resolve(agent, model);
+        return Append(KindCustomAgentArgs, AgentSubject(agent), agent, agent, model, model, effective, how, actor, note is null ? detail : $"{detail}; {note}");
+    }
 
-    private string Resolve(string agent, string model)
+    /// <summary>The model a change leaves in effect, and where it came from when it is the CLI settings' (null otherwise).</summary>
+    private (string Effective, string? Note) Resolve(string agent, string model)
     {
         var resolved = resolveModel?.Invoke(agent, model) ?? model;
-        return string.IsNullOrEmpty(resolved) ? CliDefault : resolved;
+        return string.IsNullOrEmpty(resolved) ? FromSettings(agent) : (resolved, null);
     }
+
+    /// <summary>No model named: the CLI settings' model with its note, else <see cref="CliDefault"/>.</summary>
+    private (string Effective, string? Note) FromSettings(string agent) =>
+        settingsModel?.Invoke(agent) is { } s && !string.IsNullOrEmpty(s.Model) ? (s.Model, s.Note) : (CliDefault, null);
 
     private AgentChange Append(string kind, string subject, string? fromAgent, string? toAgent, string? fromModel, string? toModel,
         string effective, string how, Actor? actor, string? detail)
