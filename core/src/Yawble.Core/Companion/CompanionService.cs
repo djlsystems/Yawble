@@ -130,7 +130,9 @@ public sealed partial class CompanionService(
     private sealed record Prepared(string? Immediate, string Plan, string? ListKey, string? Bound);
 
     /// <summary>The arguments that name what a call acts on (its team, repository and branch, or its item, and the name it acts on).</summary>
-    private static readonly string[] TargetArguments = ["branch", "item", "card", "name", "member", "pr", "fix", "workflow", "backup", "task", "script", "id"];
+    private static readonly string[] TargetArguments = ["branch", "item", "card", "name", "member", "pr", "fix", "workflow", "backup", "task", "script", "id",
+        // B139: integration_action_allow's own target, so allowing two actions are two requests, not one replacing the other.
+        "integration", "action"];
 
     /// <summary>A call's target: the team (any case), the repository (default main) and the identifying arguments.</summary>
     private static string TargetOf(string tool, JsonObject args)

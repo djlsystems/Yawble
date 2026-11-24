@@ -234,7 +234,8 @@ public sealed class UiRpc(
 
     // ---------------------------------------------------------------- triggers
 
-    private static TriggerDraft TriggerDraftOf(JsonObject? p, bool preview = false)
+    /// <summary>triggers.save's parameters as a draft (also read by the script_trigger_set tool, B139, so both read one shape).</summary>
+    internal static TriggerDraft TriggerDraftOf(JsonObject? p, bool preview = false)
     {
         long? OptLong(string name) => p?[name] is JsonValue v && v.TryGetValue<long>(out var l) ? l : null;
         bool Flag(string name, bool fallback) => p?[name] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : fallback;
