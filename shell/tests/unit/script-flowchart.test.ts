@@ -122,9 +122,9 @@ describe('the Flowchart tab', () => {
     expect(label('each->then')).toBe('done');
     expect(w.get('[data-test=vf-edge][data-id="each->body"]').classes()).toContain('dashed');
     expect(w.get('[data-test=vf-edge][data-id="__start->start"]').attributes('data-target')).toBe('list');
-    // The controls and the minimap are on the canvas; the palette and the editing tools are there for an editor.
+    // The controls and the minimap's toggle are on the canvas; the palette and the editing tools are there for an editor.
     expect(w.find('[data-test=vf-controls]').exists()).toBe(true);
-    expect(w.find('[data-test=vf-minimap]').exists()).toBe(true);
+    expect(w.find('[data-test=flow-minimap-toggle]').exists()).toBe(true);
     expect(w.find('[data-test=flow-palette]').exists()).toBe(true);
     expect(canvas(w).props('nodesDraggable')).toBe(true);
   });
@@ -147,6 +147,8 @@ describe('the Flowchart tab', () => {
     const panel = w.get('[data-test=flow-panel]');
     expect(panel.attributes('data-node')).toBe('mark');
     expect(panel.get('[data-test=flow-panel-problem]').text()).toBe('vars.last has no field idd');
+    expect(panel.get('[data-test=flow-panel-tab-design]').attributes('aria-selected')).toBe('true');
+    await panel.get('[data-test=flow-panel-tab-json]').trigger('click');
     const area = panel.get('[data-test=flow-panel-json]');
     expect(JSON.parse((area.element as HTMLTextAreaElement).value)).toEqual(INBOX_SMS_ALERT.steps!.find((s) => s.id === 'mark'));
     await area.setValue(pretty({ id: 'mark', type: 'set', var: 'lastId', value: '{vars.last.uid}', next: 'log' }));
@@ -346,6 +348,7 @@ describe('the Flowchart tab', () => {
     // Pan and zoom: the controls are still there.
     expect(w.find('[data-test=vf-controls]').exists()).toBe(true);
     await pick(w, 'mark');
+    await w.get('[data-test=flow-panel-tab-json]').trigger('click');
     const area = w.get('[data-test=flow-panel-json]');
     expect(area.attributes('readonly')).toBeDefined();
     expect(w.find('[data-test=flow-panel-delete]').exists()).toBe(false);
