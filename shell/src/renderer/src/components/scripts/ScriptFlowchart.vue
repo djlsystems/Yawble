@@ -49,13 +49,20 @@ const edges = computed<Edge<FlowEdge>[]>(() => graph.value.edges.map((e) => ({
 })));
 
 // ---- undo and redo
-const history = createHistory(text.value);
+let history = createHistory(text.value);
 const tick = ref(0);
 let written = text.value;
 const canUndo = computed(() => tick.value >= 0 && history.canUndo);
 const canRedo = computed(() => tick.value >= 0 && history.canRedo);
-// The text changed elsewhere (the JSON view, a version loaded): it is a step of its own in the history.
-watch(text, (t) => { if (t !== written) { written = t; history.push(t); tick.value++; } });
+// The text changed elsewhere (the JSON view, a version loaded): it is a step of its own in the history. The first text
+// arriving into an empty editor (the script loading while this tab is already open) is the starting point, not an edit.
+watch(text, (t) => {
+  if (t === written) return;
+  const first = written.trim() === '';
+  written = t;
+  if (first) history = createHistory(t); else history.push(t);
+  tick.value++;
+});
 
 function write(next: ScriptDocument) {
   const t = pretty(next);

@@ -35,7 +35,7 @@ const loading = ref(!!props.script);
 const busy = ref<null | 'save' | 'check'>(null);
 const error = ref<string | null>(null);
 const savedNote = ref<string | null>(null);
-const tab = ref<'json' | 'flowchart' | 'test'>('json');
+const tab = ref<'json' | 'flowchart' | 'test'>('flowchart');
 const editor = ref<InstanceType<typeof JsonEditor> | null>(null);
 
 const parseProblem = computed(() => jsonProblem(text.value));
@@ -151,8 +151,8 @@ function pickVersion(e: Event) {
       <span v-if="dirty" class="chip" data-test="editor-dirty">not saved</span>
       <span class="grow" />
       <div class="tabs" role="tablist">
-        <button type="button" role="tab" :aria-selected="tab === 'json'" :class="{ on: tab === 'json' }" data-test="editor-tab-json" @click="tab = 'json'">JSON</button>
         <button type="button" role="tab" :aria-selected="tab === 'flowchart'" :class="{ on: tab === 'flowchart' }" data-test="editor-tab-flowchart" @click="tab = 'flowchart'">Flowchart</button>
+        <button type="button" role="tab" :aria-selected="tab === 'json'" :class="{ on: tab === 'json' }" data-test="editor-tab-json" @click="tab = 'json'">JSON</button>
         <button type="button" role="tab" :aria-selected="tab === 'test'" :class="{ on: tab === 'test' }" data-test="editor-tab-test" :disabled="!current"
           :title="current ? 'Try the script on a sample input' : 'Save the script first'" @click="tab = 'test'">Test run</button>
       </div>
