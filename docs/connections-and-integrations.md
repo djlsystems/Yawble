@@ -152,9 +152,16 @@ name (`"action": "list"`, not `email.list`):
   `messages` is **not empty**, save the `id` of the **last** message returned (the newest) in a saved `string`
   variable and pass it as `after` on the next run. When `messages` is empty, keep the id you have. The first run has no
   id (`null`), so `since` picks where it starts. On `cursorReset` the script keeps going from what it got: it saves the
-  last id of those messages as usual. This gets every message exactly once in arrival order, however small `max` is
-  (even 1), when several messages share a second, and when mail arrives between polls. Marking a polled message read
-  or moving it out of the folder does not disturb the saved id.
+  last id of those messages as usual. **Once the script has a saved id** (every `list` with an `after` that applies),
+  this gets every message exactly once in arrival order, however small `max` is (even 1), when several messages share
+  a second, and when mail arrives between polls. Marking a polled message read or moving it out of the folder does not
+  disturb the saved id.
+  - **The limit:** the first run (no saved id) and a `cursorReset` run use the `since` list, which is ordered by date,
+    not by UID. If that result is cut by `max`, a message with an earlier UID but a later date than the last one
+    returned can be skipped: the next run's `after` starts above the saved message's UID. For example, UID 1 dated
+    10:02 and UID 2 dated 10:01, both after `since`, `max` 1: the first run returns UID 2 and saves its id, and UID 1
+    is never returned. To avoid it, make the first run's `max` large enough to take everything after `since` (the
+    limit is 200), or accept the gap.
 
   ```json
   "variables": [ { "name": "res", "type": "EmailList" }, { "name": "last", "type": "EmailMessage" },
