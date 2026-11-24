@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B016 gap test (card 77): the Git dialog fed git.status as the core really sends it.
+// The Git dialog fed git.status as the core really sends it.
 import { flushPromises, mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import GitDialog from '../../src/renderer/src/components/GitDialog.vue';
@@ -22,10 +22,10 @@ function fakeApi(status: TeamGitStatus) {
 
 const team = { id: 3, name: 'ops', repoPath: null, members: 2, running: 0, queued: 0 };
 
-describe('git dialog (B016 gaps)', () => {
-  // Card 75: git.status lists a LOCAL old-style members/<name> branch once. In members only while a member is still
+describe('git dialog on git.status as the core sends it', () => {
+  // git.status lists a LOCAL old-style members/<name> branch once. In members only while a member is still
   // recorded on it (not moved yet); otherwise in oldBranches only (TeamBranchGapTests.GitStatus_ListsAnOldStyleBranchOnce_...).
-  // This is Ada after the move: members/ops/ada is Ada's, members/ada is old. It was shown twice before (card 77).
+  // This is Ada after the move: members/ops/ada is Ada's, members/ada is old. It must be shown once, not twice.
   it('a local old-style branch nobody is on, which git.status lists only in oldBranches, is shown once, as old', async () => {
     const status: TeamGitStatus = {
       repoPath: 'C:\\work\\service', managed: false, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: null,

@@ -43,9 +43,9 @@ const logsFor = ref<string | null>(null);
 const agentOptions = useAgentOptions(api);
 /** Each member's activity, beside its card: the Monitor's lines for that member. */
 const activity = useTeamActivity(api, () => props.team.name, () => props.pollMs);
-/** A phone (B037): the members stacked, each one's Activity under its card, no resize handles (nothing to drag). */
+/** A phone: the members stacked, each one's Activity under its card, no resize handles (nothing to drag). */
 const phone = useNarrow();
-/** On a phone (B054): the actions behind ⋯ (open or not), the Tell box's short placeholder (it fits at 375 px), and how
+/** On a phone: the actions behind ⋯ (open or not), the Tell box's short placeholder (it fits at 375 px), and how
  * many of a member's latest activity lines show (the rest are in its Logs): the page is the one scroller. */
 const moreOpen = ref(false);
 const TellShort = 'Tell the Manager…';
@@ -65,7 +65,7 @@ const showTriggers = ref(false);
 /** A script member's Triggers pill with one trigger opens the dialog on it. */
 const triggerToEdit = ref<number | null>(null);
 const showGit = ref(false);
-// B072: the Commit view's Compare with main / Show its branch open this team's Git dialog (at the commit's branch).
+// The Commit view's Compare with main / Show its branch open this team's Git dialog (at the commit's branch).
 const gitBranch = ref<string | null>(null);
 watch(gitRequest, (r) => {
   if (!r || r.team !== props.team.name) return;
@@ -76,7 +76,7 @@ watch(gitRequest, (r) => {
 const showWorkflows = ref(false);
 const showManage = ref(false);
 const showDocs = ref(false);
-/** B134: the Add form's CLI choice also offers a script member (its own form: script, version, settings, bindings). */
+/** The Add form's CLI choice also offers a script member (its own form: script, version, settings, bindings). */
 const ScriptMemberChoice = 'script' as const;
 const newAgent = ref({ name: '', cli: 'claude' as AgentCliId | typeof ScriptMemberChoice });
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -141,8 +141,8 @@ const chooseOption = (d: Decision, o: { n: number; label: string; text: string }
   teamId: props.team.id, seq: d.seq,
   text: `Option ${o.n}: ${o.label}.${(answers.value[d.seq] ?? '').trim() ? ` ${answers.value[d.seq].trim()}` : ''}\n\n(You offered: ${o.text.replace(/\*\*/g, '')})`,
 }).then(() => { delete answers.value[d.seq]; }), `option-${o.n}`)();
-// B123: an option the asker gave (needs_decision options): its reply is the answer, with its index so core applies the
-// option's action (if any) first. Card 555: the text is only the words typed in the box; the core puts the option's
+// An option the asker gave (needs_decision options): its reply is the answer, with its index so core applies the
+// option's action (if any) first. The text is only the words typed in the box; the core puts the option's
 // reply before them, once (sending the reply too made the agent read it twice).
 const answerWith = (d: Decision, b: DecisionButton) => busyFor(`decision-${d.seq}`, () => api.call('bus.answer', {
   teamId: props.team.id, seq: d.seq, optionIndex: b.optionIndex, text: (answers.value[d.seq] ?? '').trim(),
@@ -180,7 +180,7 @@ const approve = (a: IntegrationAsk, remember: 'once' | 'always' | 'ask', scope: 
 const decline = (a: IntegrationAsk, remember?: 'never', scope?: Scope) => busyFor(`ask-${a.id}`, () => api.call('integrations.decline',
   { id: a.id, note: declineNote.value[a.id] || undefined, ...(remember ? { remember, scope: scope ?? 'team' } : {}) }), remember ?? 'decline')();
 const declineTask = (a: IntegrationAsk, note: string) => busyFor(`ask-${a.id}`, () => api.call('integrations.decline', { id: a.id, note: note || undefined }), 'decline')();
-// The "New member" tile (B076), last in the grid: its + opens the add form in the tile; Add closes it once the member is
+// The "New member" tile, last in the grid: its + opens the add form in the tile; Add closes it once the member is
 // there (a refused add keeps the form and what was typed, the error shows above), Cancel or Escape closes it.
 const adding = ref(false);
 const addName = ref<HTMLInputElement | null>(null);
@@ -208,7 +208,7 @@ function scriptAdded() {
   emit('changed');
 }
 
-// The member grid (B076): equal tiles that wrap, the shared size (memberTileSize.ts) as --tile-w / --tile-h, never
+// The member grid: equal tiles that wrap, the shared size (memberTileSize.ts) as --tile-w / --tile-h, never
 // wider than the grid (measured, so a drag starts from the width the tiles really have).
 const grid = ref<HTMLElement | null>(null);
 const gridStyle = computed(() => ({ '--tile-w': `${memberRenderedWidth.value}px`, '--tile-h': `${memberTileSize.value.h}px` }));
@@ -251,7 +251,7 @@ watch(() => props.team.id, () => {
   told.value = null; loaded.value = false; error.value = null; refreshError.value = null; cards.value = []; decisions.value = []; asks.value = [];
   void refresh();
 });
-// A phone (B064): the page opens with every member on Activity, so leaving it (or its team) closes that team's terminal.
+// A phone: the page opens with every member on Activity, so leaving it (or its team) closes that team's terminal.
 watch(() => props.team.name, (_now, before) => closePhoneTerminals(before));
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer);
@@ -266,7 +266,7 @@ const workflowFocus = ref<number | null>(null);
 /** Opens the team's workflows, with one of them selected when given (a workflow clicked on the Monitor). */
 function openWorkflows(workflow?: number) { workflowFocus.value = workflow ?? null; showWorkflows.value = true; }
 
-/** Opens the team's documents (on a phone the drawer's Documents item does, card 316: the header has no button for it). */
+/** Opens the team's documents (on a phone the drawer's Documents item does: the header has no button for it). */
 function openDocuments() { showDocs.value = true; }
 
 defineExpose({ refresh, openWorkflows, openDocuments });
@@ -284,8 +284,8 @@ defineExpose({ refresh, openWorkflows, openDocuments });
         <span class="kpi" :class="{ live: team.running > 0 }" data-test="kpi-running"><span class="sep"> · </span><b>{{ team.running }}</b> running</span>
         <span class="kpi" data-test="kpi-queued"><span class="sep"> · </span><b>{{ team.queued }}</b> queued</span>
       </div>
-      <!-- A phone (B054): the title and the actions are one row, the actions behind ⋯. Documents and Workflows are in the
-           ⋯ menu first (card 331) and in the drawer, under the team's name (App.vue, Sidebar.vue; card 316). Every item
+      <!-- A phone: the title and the actions are one row, the actions behind ⋯. Documents and Workflows are in the
+           ⋯ menu first and in the drawer, under the team's name (App.vue, Sidebar.vue). Every item
            has an icon of the same size, as the drawer has. -->
       <div v-if="phone" class="actions phone-actions" data-test="team-phone-actions">
         <span class="more-wrap">
@@ -313,7 +313,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
       This team is paused: what it is told waits and runs when you resume it.
       <button class="primary" v-change data-test="team-resume-banner" :disabled="busy.is('resume')" :aria-busy="busy.is('resume')" @click="resume"><BusyLabel :busy="busy.is('resume')" text="Resuming…">Resume</BusyLabel></button>
     </p>
-    <!-- A phone (card 282): the "commits behind" bar goes under Tell the Manager, so Tell stays the first row. -->
+    <!-- A phone: the "commits behind" bar goes under Tell the Manager, so Tell stays the first row. -->
     <TeamSyncBanner v-if="!phone" :key="team.id" :api="api" :team="team" />
     <TriggersDialog v-if="showTriggers" :api="api" :team="team" :agents="cards" :edit-id="triggerToEdit" @close="showTriggers = false; triggerToEdit = null" />
     <GitDialog v-if="showGit" :api="api" :team="team" :focus-branch="gitBranch" @close="showGit = false; gitBranch = null" />
@@ -363,7 +363,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
         </select>
       </div>
     </div>
-    <!-- B123: header, the plain ask (summary), the answer buttons (+ Discuss), the free-text answer, then a collapsed
+    <!-- Header, the plain ask (summary), the answer buttons (+ Discuss), the free-text answer, then a collapsed
          Details (the findings; for an old question everything but the paragraph that asks). -->
     <div v-for="d in decisions" :key="d.seq" class="decision" data-test="decision" :data-decision-seq="d.seq">
       <p><strong>{{ d.from }} needs a decision</strong></p>
@@ -395,7 +395,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
       </details>
     </div>
 
-    <!-- The members (B076): equal tiles in a wrapping grid, like the Teams list; the 14px gaps right of and below each
+    <!-- The members: equal tiles in a wrapping grid, like the Teams list; the 14px gaps right of and below each
          tile are the width and height handles for every tile (memberTileSize.ts). The last tile is New member. A phone:
          one full-width tile per row, as tall as its content, no handles. -->
     <div ref="grid" class="member-grid" :style="phone ? undefined : gridStyle" data-test="member-grid">
@@ -450,14 +450,14 @@ h2 { font-size: 16px; margin: 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .actions button { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .team > * { margin-bottom: 10px; }
-/* B076: the members are equal tiles that wrap, like the Teams list's .team-grid: columns the shared width (or the whole
+/* The members are equal tiles that wrap, like the Teams list's .team-grid: columns the shared width (or the whole
    row when narrower), rows the shared height; the handles live in the 14px gaps right of and below each cell. */
 .member-grid { display: grid; grid-template-columns: repeat(auto-fill, min(var(--tile-w), 100%)); grid-auto-rows: var(--tile-h); justify-content: start; gap: 14px; margin-bottom: 14px; }
 .member-cell { position: relative; min-width: 0; min-height: 0; }
-/* The pane fills its tile; its view takes what the title and tabs leave (MemberPane scrolls it inside, card 366), not the
+/* The pane fills its tile; its view takes what the title and tabs leave (MemberPane scrolls it inside), not the
    old shared output height (the body's inline height, which only the removed gap handles set). The desktop only: on a
    phone the pane keeps its own height.
-   Card 368: the pane clips sideways only, so its ☰ menu (absolute, under the title) draws in full over the tile's
+   The pane clips sideways only, so its ☰ menu (absolute, under the title) draws in full over the tile's
    bottom edge at a short tile; the view never spills down because it scrolls inside (flex 1 1 0, min-height 0). The
    cell being used (its ☰ button was clicked, so it holds focus) sits above the tiles after it (next row, handles). */
 @media (min-width: 760px) {
@@ -482,7 +482,7 @@ h2 { font-size: 16px; margin: 0; }
 .question :deep(th) { background: var(--warn-bg-soft); font-weight: 600; }
 .question :deep(td:first-child), .question :deep(th:first-child) { width: 28px; color: var(--muted); }
 .quick { gap: 6px; flex-wrap: wrap; align-items: flex-start; }
-/* B123: an action option's one-line note (what it allows) or why it is off sits under its button. */
+/* An action option's one-line note (what it allows) or why it is off sits under its button. */
 .choice { display: inline-flex; flex-direction: column; gap: 2px; max-width: 320px; }
 .choice .note { font-size: 11.5px; line-height: 1.3; }
 .details { margin-top: 6px; font-size: 13px; }
@@ -499,9 +499,9 @@ h2 { font-size: 16px; margin: 0; }
 .muted { color: var(--muted); }
 .paused { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 10px; justify-content: space-between; margin: 0 0 10px; }
 .small { font-size: 12px; }
-/* Card 342: the Tell buttons draw monochrome line icons (currentColor), not emoji iOS paints in colour. */
+/* The Tell buttons draw monochrome line icons (currentColor), not emoji iOS paints in colour. */
 .tell .ticon { display: inline-block; vertical-align: middle; flex: none; }
-/* Card 342 (card 344): on the desktop the 20 px icons take the room the 14 px emoji took, so the 29 px buttons, their widths,
+/* On the desktop the 20 px icons take the room the 14 px emoji took, so the 29 px buttons, their widths,
    the box and everything below stay put (phone-remote's 1280 px guard). -6 px top / -2 px bottom keeps them out of the line
    height and lifts them the 2 px vertical-align: middle leaves them below the button's centre; 6 px of width overlaps the
    10 px padding (both sides on Attach, the right on Send, so the plane stays after "Tell Manager "). The phone's 44 px
@@ -510,19 +510,19 @@ h2 { font-size: 16px; margin: 0; }
   .tell .ticon { margin: -6px -3px -2px; }
   .tell [data-test=tell-send] .ticon { margin: -6px -6px -2px 0; }
 }
-/* A phone (B037): one column of member panes (each stacked, MemberPane); the actions, Tell and the asks wrap; tap targets 44 px. */
+/* A phone: one column of member panes (each stacked, MemberPane); the actions, Tell and the asks wrap; tap targets 44 px. */
 @media (max-width: 759.98px) {
-  /* B076: one full-width tile per row, as tall as its content, the New member tile last; no handles (the template). */
+  /* One full-width tile per row, as tall as its content, the New member tile last; no handles (the template). */
   .member-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 16px; }
   .new-tile { min-height: 64px; overflow: visible; }
   .new-open { min-height: 64px; }
   .add-buttons button { flex: 1 1 0; }
   .team > * { margin-bottom: 6px; }
-  /* The header (B054): one 44 px row, the title (cut with …) and the icon actions; it scrolls away with the page. */
+  /* The header: one 44 px row, the title (cut with …) and the icon actions; it scrolls away with the page. */
   .teamhead { flex-direction: row; align-items: center; gap: 4px; height: 44px; }
   .titleline { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow: hidden; gap: 6px; }
   .titleline h2 { flex: 0 1 auto; min-width: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Card 282: the name gets the room. "Team " is left out on screen (the top bar names the team too; the title still reads
+  /* The name gets the room. "Team " is left out on screen (the top bar names the team too; the title still reads
      "Team X"), every count chip is hidden (the state chip already says Running), and the state chip gives way first. */
   .titleline .kpi { display: none; }
   .title-prefix { display: none; }
@@ -530,7 +530,7 @@ h2 { font-size: 16px; margin: 0; }
   .phone-actions { flex: none; flex-wrap: nowrap; gap: 2px; }
   .hbtn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; box-sizing: border-box; }
   .more-wrap { position: relative; display: inline-flex; }
-  /* Card 331: the menu opens from the ⋯ at the right edge, leftward, and stays on screen (never wider than the screen,
+  /* The menu opens from the ⋯ at the right edge, leftward, and stays on screen (never wider than the screen,
      scrolls if taller than it); it sits above the member panes (their grips and menus are z-index 1-5). */
   .menu { position: absolute; right: 0; top: 100%; z-index: 20; display: flex; flex-direction: column; min-width: 190px; padding: 4px;
     max-width: calc(100vw - 16px); max-height: calc(100dvh - 120px); overflow-y: auto; box-sizing: border-box;
@@ -540,7 +540,7 @@ h2 { font-size: 16px; margin: 0; }
   .menu button:hover { background: var(--hover); }
   .actions button, .row button, .row input, .row select, .paused button { min-height: 44px; box-sizing: border-box; }
   .row { flex-wrap: wrap; }
-  /* Tell the Manager (B054): one row, the box beside the two 44 px icon buttons (its short placeholder fits at 375 px). */
+  /* Tell the Manager: one row, the box beside the two 44 px icon buttons (its short placeholder fits at 375 px). */
   .tell { flex-wrap: nowrap; gap: 6px; min-height: 44px; }
   .tell input.grow { flex: 1 1 0; min-width: 0; }
   .tell button { flex: none; min-width: 44px; padding: 0 10px; }

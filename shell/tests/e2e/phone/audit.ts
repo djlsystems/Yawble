@@ -1,4 +1,4 @@
-// B037 verify: what a phone screen is checked for. Run in the page: horizontal overflow (the page wider than the window),
+// What a phone screen is checked for. Run in the page: horizontal overflow (the page wider than the window),
 // controls that are visible but off the screen's left or right edge, and controls smaller than 44 x 44 px.
 import type { Page } from '@playwright/test';
 

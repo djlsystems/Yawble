@@ -4,10 +4,10 @@ import { displayName } from '../faces/faces';
 import { categoryLabel, categoryVar, shares } from '../timeline/time';
 import { waitSays } from '../waiting';
 
-// B104: the Workflows page's pure parts - the status looks, the text filter and its highlight, the chips, the default
+// The Workflows page's pure parts - the status looks, the text filter and its highlight, the chips, the default
 // order and the column sorts, the time bar, the summary line, the filters in the hash and in localStorage, and the
 // requests other screens make to open the page (or the Backlog at an item). The core (workflows.list / workflows.get,
-// YAWBLE_TEAM_DOCS/B104/contract.md) does the reading; nothing here calls it.
+// its contract in the team's documents) does the reading; nothing here calls it.
 
 // ---- the Status column ----
 export interface StatusLook { status: WorkflowRowStatus; label: string; icon: string; tone: string; open: boolean }
@@ -28,7 +28,7 @@ export function statusLook(w: Pick<WorkflowRow, 'status' | 'state'>): StatusLook
 }
 const WaitingFor: Record<string, string> = {
   slot: 'Waiting for a run slot', lease: 'Waiting for the heavy-work lease', wake: 'Waiting for a wake-up',
-  // B126 (core 564): undelivered work that is in no run queue says what it waits for, in the waiting.ts words.
+  // Undelivered work that is in no run queue says what it waits for, in the waiting.ts words.
   held: 'Waiting: team paused', pending: 'Has work waiting',
 };
 /** waits-for-run: the sender from the row's waiting worker when one names it, else "another member's run". */
@@ -37,7 +37,7 @@ function waitsForRunSays(members: WorkflowRow['members'] | undefined): string {
   return `Waiting for ${sender ? `${displayName(sender)}'s` : "another member's"} run to end`;
 }
 /**
- * B126: a waiting row whose deliveries are not in the run queue waits for what its workers wait for ("Waiting: Developer
+ * A waiting row whose deliveries are not in the run queue waits for what its workers wait for ("Waiting: Developer
  * Ada waits for Tester Ben's run to end"), not for a run slot; null when a worker is queued or none says otherwise.
  */
 function workersWait(members: WorkflowRow['members'] | undefined): string | null {
@@ -225,7 +225,7 @@ export function saveFilters(f: Filters, store: Pick<Storage, 'setItem'> | null =
 }
 function safeStorage(): Storage | null { try { return localStorage; } catch { return null; } }
 
-// ---- B098 on the other screens: the backlog item of each workflow (bus.workflows does not carry it) ----
+// ---- On the other screens: the backlog item of each workflow (bus.workflows does not carry it) ----
 export interface ItemsOf { items: Map<number, WorkflowItem>; backlog: boolean }
 /**
  * The items of a team's workflows (or every team's), by workflow id, from one workflows.list; null when the core has no

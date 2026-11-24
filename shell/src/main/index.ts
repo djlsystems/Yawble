@@ -388,7 +388,7 @@ app.whenReady().then(async () => {
       : await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
-  // B110: Member settings > Policy warns before granting a folder that is not there. Only looks (stat), never creates.
+  // Member settings > Policy warns before granting a folder that is not there. Only looks (stat), never creates.
   ipcMain.handle(Channels.folderExists, (_e, p: unknown) => {
     if (typeof p !== 'string' || p.length > 4096) return false;
     const full = p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;

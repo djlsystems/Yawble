@@ -17,7 +17,7 @@ import { useBusy } from '../busy';
 import { useHostProblems } from '../hostChecks';
 
 // ⚙ Settings: General (CLI preset, model, credential, instructions) and Policy, and Guardrails (the guardrail check
-// under this agent's effective policy; the card's 🛡 opens it directly). Policy (B110), top to bottom: Folder access (the
+// under this agent's effective policy; the card's 🛡 opens it directly). Policy, top to bottom: Folder access (the
 // effective folders with their sources; Add folder is a confirmed loosening), the Effective policy per field (rows a save
 // changed are highlighted), "Advanced: tighten this member (override)" (collapsed; inherit toggles), and Loosen… for hosts
 // and limits. Each save says what it changed or "Nothing changed"; unsaved boxes say so, and closing asks "Discard?".
@@ -39,7 +39,7 @@ const busy = computed(() => work.any());
 const general = reactive({ cli: 'claude', model: '', credential: 'default', instructions: '' });
 const rows = reactive<Record<string, { inherit: boolean; text: string }>>({});
 const loosenText = reactive<Record<string, string>>({});
-// The Loosen… boxes: hosts and compute. Folders are added in the Folder access block (B110: one place to type a path).
+// The Loosen… boxes: hosts and compute. Folders are added in the Folder access block (one place to type a path).
 const LOOSEN_FIELDS = POLICY_FIELDS.filter((f) => f.loosen && !f.path.startsWith('filesystem.'));
 /** "Advanced: tighten this member (override)": open when the member has an override. */
 const advancedOpen = ref(false);
@@ -131,7 +131,7 @@ const loosenFieldDirty = (v: MemberPolicyView, f: FieldDef) => (loosenText[f.pat
 
 /**
  * Shows a view the core answered. `saved` names the section the save came from, whose boxes take the saved values; the
- * other sections keep what the person typed and did not save yet (B110: no edit is silently dropped).
+ * other sections keep what the person typed and did not save yet (no edit is silently dropped).
  */
 function applyView(v: MemberPolicyView, saved: 'all' | 'override' | 'loosen' | 'folders' = 'all') {
   const old = view.value;
@@ -146,7 +146,7 @@ function applyView(v: MemberPolicyView, saved: 'all' | 'override' | 'loosen' | '
   if (saved === 'all') advancedOpen.value = canon(v.override) !== canon({});
 }
 
-// B110: the save model. What is typed and not saved, per section; closing with any of it asks "Discard?".
+// The save model. What is typed and not saved, per section; closing with any of it asks "Discard?".
 const overrideDirty = computed(() => !!view.value && POLICY_FIELDS.some((f) => rowDirty(view.value!, f)));
 const loosenDirty = computed(() => !!view.value && LOOSEN_FIELDS.some((f) => loosenFieldDirty(view.value!, f)));
 // The Folder access block's typed path and pending confirm live here, not in the block: the Policy tab is v-if, and a

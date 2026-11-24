@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B057 item 3 (card 275): the chat composer on a phone (below 760 px wide), as measured on an iPhone SE: 375 x 521 in
+// The chat composer on a phone (below 760 px wide), as measured on an iPhone SE: 375 x 521 in
 // portrait and 667 x 263 in landscape. Concierge and team chats share this layout (ConciergeView + Composer). Idle, the
 // composer is one row (the pickers' button, the text, Attach, Send) of at most ~70 px; the team and agent pickers fold
 // out behind that one button, each on its own full-width row at 16 px and 44 px; the note under the box folds out with
@@ -177,7 +177,7 @@ describe.each(Phones)('a chat on a phone, $name', ({ width, height, portrait }) 
     expect(composer).toBeLessThanOrEqual(70);
     if (portrait) expect(messages / height).toBeGreaterThanOrEqual(0.5);
     else expect(dockH).toBeLessThanOrEqual(72);
-    // Before B057 the landscape thread had 69 px; now it has the frame less the top bar and the one-row dock.
+    // The landscape thread once had 69 px; now it has the frame less the top bar and the one-row dock.
     expect(messages).toBeGreaterThan(portrait ? 300 : 120);
   });
 
@@ -187,7 +187,7 @@ describe.each(Phones)('a chat on a phone, $name', ({ width, height, portrait }) 
     await composer.get('[data-test=composer-pickers-toggle]').trigger('click');
     expect(composer.get('[data-test=composer-pickers-toggle]').attributes('aria-expanded')).toBe('true');
     const panel = composer.get('[data-test=composer-pickers]');
-    // One row each in portrait; side by side in landscape (B057 F1: the 263 px frame has no room for two rows).
+    // One row each in portrait; side by side in landscape (the 263 px frame has no room for two rows).
     expect(css(panel.element).flexDirection).toBe(portrait ? 'column' : 'row');
     for (const sel of ['[data-test=composer-team]', '[data-test=composer-agent]']) {
       const select = panel.get(sel).element;
@@ -231,7 +231,7 @@ describe.each(Phones)('a chat on a phone, $name', ({ width, height, portrait }) 
   });
 });
 
-// B057 F1 (TesterKofi, card 276): at 667 x 263 a chat with a watch and the pickers open pushed the text row (pickers'
+// At 667 x 263 a chat with a watch and the pickers open used to push the text row (pickers'
 // button, text, Attach, Send) below the screen. Now the watch row folds away while the pickers are open, the pickers sit
 // side by side and their panel is capped (it scrolls), so the text row's bottom stays within the frame.
 describe('a chat with a watch on a phone in landscape, 667 x 263', () => {

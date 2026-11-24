@@ -3,7 +3,7 @@ import { WaitingLabel } from './reportFormat';
 
 /**
  * What a team is doing, for its card and its sidebar dot. One order everywhere: running > waiting > paused > queued > idle.
- * B130: waiting is a member with an open needs_decision (the core's TeamSummary.waiting; an older core leaves it out: 0).
+ * Waiting is a member with an open needs_decision (the core's TeamSummary.waiting; an older core leaves it out: 0).
  */
 export type TeamState = 'running' | 'waiting' | 'queued' | 'paused' | 'idle';
 

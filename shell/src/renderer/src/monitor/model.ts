@@ -17,16 +17,16 @@ import { CodeMap, codeEventKey, shortSha, type CodeEvent } from './codemap';
  * bursts larger, a push pulses off the edge of the wall.
  */
 
-/** stopped (B097): a run the person stopped - a neutral step, never a failure and never "needs you". */
+/** stopped: a run the person stopped - a neutral step, never a failure and never "needs you". */
 export type FeedKind = 'instruction' | 'completed' | 'failed' | 'stopped' | 'handback' | 'progress' | 'blocked' | 'decision' | 'done';
 
 export interface FeedRow {
   seq: number; kind: FeedKind; team: string; member: string | null; from: string; text: string | null; workflow: number; at: string;
-  /** B097: a failed run's class (a run the person stopped may come as kind "failed" with class "stopped"). */
+  /** A failed run's class (a run the person stopped may come as kind "failed" with class "stopped"). */
   failureClass?: string | null;
 }
 
-/** B097: a row's kind as the Monitor shows it: a "failed" row whose class is "stopped" is a stopped run. */
+/** A row's kind as the Monitor shows it: a "failed" row whose class is "stopped" is a stopped run. */
 export function feedKindOf(row: Pick<FeedRow, 'kind'> & { failureClass?: string | null }): FeedKind {
   return row.kind === 'failed' && row.failureClass === 'stopped' ? 'stopped' : row.kind;
 }
@@ -43,7 +43,7 @@ export type Effect =
   | { kind: 'comet'; from: string; to: string; color: Tone; label: string | null; at: number; card?: number | null; mark?: 'check' | 'cross' }
   /**
    * Something waiting for the person flies from its member (or team) to the You node at the wall's edge, and the node
-   * pulses as it lands. id: its need-you item's id (B088): one item flies (and sounds) once.
+   * pulses as it lands. id: its need-you item's id: one item flies (and sounds) once.
    */
   | { kind: 'you'; from: string; color: Tone; label: string | null; at: number; id?: string }
   /** A workflow node leaves: completed (a green flash, drifting away) or closed (a cross, fading). key: its node. */
@@ -75,7 +75,7 @@ const GatherFilesMs = 90_000;
 
 export const memberKey = (team: string, member: string) => `m:${team.toLowerCase()}/${member.toLowerCase()}`;
 export const teamKey = (team: string) => `t:${team.toLowerCase()}`;
-/** A workflow node's key (B080): one per open workflow. */
+/** A workflow node's key: one per open workflow. */
 export const workflowKey = (team: string, id: number) => `wf:${team.toLowerCase()}/${id}`;
 
 /** A command a member is running (a 'run' step), until its next step; exit when the feed knew it. */
@@ -109,12 +109,12 @@ const CodeVerbs: Record<CodeEvent['kind'], { verb: string; tone: Tone }> = {
 export const ActivityKeep = 80;
 
 /**
- * One thing waiting for the person (B088): a member's open question, a network ask, a tool ask, a blocked member or a
+ * One thing waiting for the person: a member's open question, a network ask, a tool ask, a blocked member or a
  * failed one. The header's "N need you" and the You node both count needYouItems(), so they always agree; each thing
  * is one item (a member asking a question and also asking for a host is two).
  */
 export type NeedYouKind = 'question' | 'network' | 'tool' | 'folder' | 'blocked' | 'failed';
-/** What the view hands setAsks: a network, tool or folder ask (B111). */
+/** What the view hands setAsks: a network, tool or folder ask. */
 export type AskKind = 'network' | 'tool' | 'folder';
 export interface NeedYouItem { id: string; kind: NeedYouKind; team: string; member: string | null; label: string | null }
 /** The order the kinds are listed in (the You node's breakdown, the item list). */
@@ -243,7 +243,7 @@ export class MonitorModel {
   }
 
   /**
-   * Everything waiting for the person, each thing once (B088): members whose question is open, the network and tool
+   * Everything waiting for the person, each thing once: members whose question is open, the network and tool
    * asks, blocked and failed members. Its length is the header's "N need you" and the You node's count.
    */
   needYouItems(): NeedYouItem[] {
@@ -264,7 +264,7 @@ export class MonitorModel {
   }
 
   /**
-   * Fires the need-you items that are new (B088): each one flies to the You node, which pulses as it lands, and sounds
+   * Fires the need-you items that are new: each one flies to the You node, which pulses as it lands, and sounds
    * (sound.ts), once per id - a later poll, a change event or a feed row for the same item fires nothing. An item that
    * leaves the list is forgotten, so the same thing waiting again later is new. play false: the items are taken as
    * already there (the Monitor's start), counted but not flown. Returns the list.
@@ -289,7 +289,7 @@ export class MonitorModel {
 
   /** Applies a feed row: an effect for the scene and a line for the activity list. */
   apply(input: FeedRow, now: number, live = true): void {
-    // A run the person stopped may come as kind "failed" with class "stopped": it plays as stopped (B097).
+    // A run the person stopped may come as kind "failed" with class "stopped": it plays as stopped.
     const kind = feedKindOf(input);
     const row = kind === input.kind ? input : { ...input, kind };
     const v = verbs[row.kind];
@@ -343,7 +343,7 @@ export class MonitorModel {
         back('cross', 'fail', 'failed');
         break;
       case 'stopped':
-        // B097: the person stopped it - a small neutral burst and a word; no cross carried home, no sound, no need-you.
+        // The person stopped it - a small neutral burst and a word; no cross carried home, no sound, no need-you.
         this.effects.push({ kind: 'burst', node: target, color: 'stopped', big: false, at: now });
         this.effects.push({ kind: 'float', node: target, color: 'stopped', text: 'stopped', at: now });
         break;

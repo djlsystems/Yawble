@@ -135,7 +135,7 @@ describe('theme mode (theme.ts)', () => {
     expect(t.state.current).toBe('dark');
   });
 
-  // Card 145 (tester): a storage event must never write to storage, or two windows would echo each other.
+  // A storage event must never write to storage, or two windows would echo each other.
   it('never writes to storage while following storage events (own key, key null, other key, remote key)', () => {
     for (const key of [THEME_KEY, REMOTE_THEME_KEY]) {
       const s = fakeStorage();

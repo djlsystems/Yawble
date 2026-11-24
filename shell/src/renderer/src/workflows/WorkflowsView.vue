@@ -24,9 +24,9 @@ import {
 } from './page';
 
 /**
- * B104: THE WORKFLOWS PAGE - every team's workflows in one table, like the Backlog page: what runs, what waits on the
- * person, how long things took, and the way to the spec, the board and the Timeline. Read with workflows.list (core
- * card 476, YAWBLE_TEAM_DOCS/B104/contract.md); the core filters by team, text and state and counts the chips, and the
+ * THE WORKFLOWS PAGE - every team's workflows in one table, like the Backlog page: what runs, what waits on the
+ * person, how long things took, and the way to the spec, the board and the Timeline. Read with workflows.list (the
+ * core's workflows contract); the core filters by team, text and state and counts the chips, and the
  * page applies the same filters to what it has while an answer is on its way, so typing filters at once. The filters
  * are remembered (localStorage) and kept in the hash (#workflows?t=3&q=..&s=open&sel=12), so a link opens it filtered.
  * No tokens or cost anywhere (cost metrics are on hold).
@@ -378,7 +378,7 @@ mark { background: color-mix(in srgb, var(--pill-yellow-bg) 85%, transparent); c
 .empty-art path { stroke-dasharray: 3 3; }
 /* The card panel beside the page, as on the board; on a phone it takes the page. */
 .wf-place.phone.card-open > .wf-main { display: none; }
-/* A phone (B037): the rows wrap (no table columns), an opened workflow takes the page (Back returns to the list). */
+/* A phone: the rows wrap (no table columns), an opened workflow takes the page (Back returns to the list). */
 @media (max-width: 759.98px) {
   .wf-main { padding: 4px 10px 16px; }
   .wrap { min-height: 0; margin-top: 4px; display: block; }

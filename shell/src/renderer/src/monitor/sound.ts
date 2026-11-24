@@ -33,7 +33,7 @@ export function soundOf(e: Effect): SoundKind | null {
     case 'merge': return e.big ? 'landed' : 'merge';
     case 'push': return 'push';
     case 'comet': return e.color === 'handback' ? 'handback' : null;
-    // Needs you sounds for each new need-you item (B088: question, network or tool ask, blocked, failed), once per id.
+    // Needs you sounds for each new need-you item (a question, network or tool ask, blocked, failed), once per id.
     case 'you': return 'needsYou';
     case 'burst':
       if (e.color === 'fail' || e.color === 'blocked') return 'failed';

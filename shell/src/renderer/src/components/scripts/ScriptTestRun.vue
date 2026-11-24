@@ -11,7 +11,7 @@ import type { ScriptDocument, TestRunResult } from '../../scripts/types';
 import BusyLabel from '../BusyLabel.vue';
 import ScriptRunView from './ScriptRunView.vue';
 
-// Test run (B134): a team, the script's settings as a form, one binding per requires entry (over the team's
+// Test run: a team, the script's settings as a form, one binding per requires entry (over the team's
 // integrations), and an input (a fake TriggerFired now, or a sample). Dry run is on by default; the first live run of a
 // script asks first, and the answer is remembered per script key. Calls scripts.testRun and shows the run view. doc is
 // the document of ersion (the one that runs), so the form, the bindings and the fake input match what the RPC runs.

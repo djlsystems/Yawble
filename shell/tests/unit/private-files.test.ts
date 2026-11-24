@@ -1,4 +1,4 @@
-// B031 (card 147, finding 8a): what the shell writes in the data folder (its log, shell-settings.json,
+// What the shell writes in the data folder (its log, shell-settings.json,
 // window-state.json, theme.json) is created private: folders 0700, files 0600, so it does not wait for the core's
 // Secure at the next start. node:fs is mocked (the real calls still run, in a temp folder), so the modes passed are
 // checked on Windows too, where Node ignores them.

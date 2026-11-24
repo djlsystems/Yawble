@@ -1,4 +1,4 @@
-// Card 355: the renderer asks through confirmDialog (confirm.ts), not window.confirm. A test that only needs an answer
+// The renderer asks through confirmDialog (confirm.ts), not window.confirm. A test that only needs an answer
 // installs one here: every question is answered at once with `answer(message)`, and the stub records the messages as
 // a vi.fn's calls (as the window.confirm spies did). Undo with the returned stop(), or stopConfirmStubs() in afterEach.
 import { watch } from 'vue';

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defineComponent, h, nextTick, ref, withDirectives } from 'vue';
 import { applyRemoteAccess, READ_ONLY_TITLE, vChange } from '../../src/renderer/src/remoteAccess';
 
-// B025 re-verify (card 159): the tester's break tests for the finding 1 fix (card 157). Fakes only: a tiny screen with
+// Break tests for the fix that keeps a button's own :disabled when access changes. Fakes only: a tiny screen with
 // one v-change button whose own :disabled and :title the test drives.
 
 afterEach(() => applyRemoteAccess('full'));

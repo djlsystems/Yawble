@@ -18,7 +18,7 @@ import { openWorkflowsPage, type BacklogRequest } from '../workflows/page';
  * "declared"; only the person marks it implemented. Every dispatch is kept with its workflow, cards and usage.
  */
 // teamsLoading: the app's first overview (the teams to dispatch to) has not arrived yet.
-// focus (B104): open with this item selected (an Item link on the Workflows page; an archived one in the archive).
+// focus: open with this item selected (an Item link on the Workflows page; an archived one in the archive).
 const props = defineProps<{ teams: TeamSummary[]; teamsLoading?: boolean; api?: YawbleApi; pollMs?: number; focus?: BacklogRequest | null }>();
 const emit = defineEmits<{ openTeam: [id: number]; board: [teamId: number | null] }>();
 const api = resolveApi(props.api);
@@ -77,7 +77,7 @@ function switchTab(t: 'live' | 'archived') {
   void load();
 }
 
-// ---- opened at an item (B104: an Item link): its tab, then the item selected once the list has it ----
+// ---- opened at an item (an Item link): its tab, then the item selected once the list has it ----
 const pendingFocus = ref<{ label: string; archived: boolean; other: boolean } | null>(null);
 function focusItem() {
   const f = pendingFocus.value;
@@ -131,7 +131,7 @@ function sortBy(key: SortKey) { sort.value = { key, desc: sort.value.key === key
 const arrow = (key: SortKey) => (sort.value.key === key ? (sort.value.desc ? ' ▾' : ' ▴') : '');
 const canDrag = computed(() => tab.value === 'live' && sort.value.key === 'pos' && !sort.value.desc && !search.value.trim() && !teamFilter.value);
 
-// ---- a phone (B037): the rows wrap (no table columns), sorting is a select, a row's actions are in its ⋯ menu, and an
+// ---- a phone: the rows wrap (no table columns), sorting is a select, a row's actions are in its ⋯ menu, and an
 // opened item takes the page (Back returns to the list).
 const phone = useNarrow();
 const menuFor = ref<number | null>(null);
@@ -140,7 +140,7 @@ const sortKeys = computed<{ key: SortKey; label: string }[]>(() => [
   tab.value === 'archived' ? { key: 'archived', label: 'Archived' } : { key: 'updated', label: 'Modified' },
 ]);
 function pickSort(key: SortKey) { sort.value = { key, desc: false }; }
-// The phone's fold (B054): closed at first; its button counts what is set in it (search, team, a sort other than priority).
+// The phone's fold: closed at first; its button counts what is set in it (search, team, a sort other than priority).
 const toolsOpen = ref(false);
 const toolsSet = computed(() => (search.value.trim() ? 1 : 0) + (teamFilter.value ? 1 : 0) + (sort.value.key !== 'pos' || sort.value.desc ? 1 : 0));
 
@@ -274,7 +274,7 @@ const teamLinks = computed(() => {
 <template>
   <section class="backlog-place fill" :class="{ phone }" data-test="backlog-view">
     <div class="wrap fill">
-      <!-- A phone (B054): one compact row (the tabs, the search-and-sort fold and + Add item), scrolling away with the
+      <!-- A phone: one compact row (the tabs, the search-and-sort fold and + Add item), scrolling away with the
            list; the search, team filter, sort and Upload document are in the fold, closed at first. -->
       <template v-if="phone">
         <header class="phead" data-test="backlog-phone-head">
@@ -570,11 +570,11 @@ const teamLinks = computed(() => {
 .phone-sort { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 13px; }
 .phone-sort label { display: flex; align-items: center; gap: 6px; flex: 1; }
 .phone-sort select { flex: 1; font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; }
-/* A phone (B037): one column; each row wraps (number, id, status and its ⋯ menu on top, the title under them, then
+/* A phone: one column; each row wraps (number, id, status and its ⋯ menu on top, the title under them, then
    the team and when); an opened item takes the page; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .backlog-place { padding: 4px 10px 16px; }
-  /* One scroller (B054): the page; the header row, the fold, the list and an opened item scroll with it, nothing pinned. */
+  /* One scroller: the page; the header row, the fold, the list and an opened item scroll with it, nothing pinned. */
   .backlog-place.fill { display: block; }
   .wrap.fill { display: block; min-height: 0; margin: 4px auto 0; }
   .wrap.fill > .split { grid-template-rows: auto; }

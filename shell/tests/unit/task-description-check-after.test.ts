@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B066 (card 359): a host task's optional "Description" and "What to check after" fields: saved, edited, cleared, shown on the row.
+// A host task's optional "Description" and "What to check after" fields: saved, edited, cleared, shown on the row.
 import { flushPromises, mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import TasksPanel from '../../src/renderer/src/components/TasksPanel.vue';
@@ -44,7 +44,7 @@ function setup(tasks: HostTaskInfo[]) {
 const lastSave = (calls: { method: string; params: any }[]) => calls.filter((c) => c.method === 'tasks.save').at(-1)!.params.def;
 const valueOf = (w: ReturnType<typeof mount>, sel: string) => (w.find(sel).element as HTMLInputElement).value;
 
-describe('host task description and check-after (B066)', () => {
+describe('host task description and check-after', () => {
   it('a new task saves both fields, trimmed and on one line', async () => {
     const { api, calls } = setup([]);
     const w = mount(TasksPanel, { props: { api, teams } });

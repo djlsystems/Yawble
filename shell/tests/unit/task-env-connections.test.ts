@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B023 (card 113): "Environment from a Connection" in the host task editor, and the in-use note in Connections.
+// "Environment from a Connection" in the host task editor, and the in-use note in Connections.
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stopConfirmStubs, stubConfirm } from './confirm-stub';

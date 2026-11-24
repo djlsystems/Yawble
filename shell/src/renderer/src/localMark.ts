@@ -1,8 +1,8 @@
 import type { BranchPush } from '../../shared/api';
 
-// B073 (card 465): the one "not pushed" mark, for every branch and commit the app shows that origin does not have (the
+// The one "not pushed" mark, for every branch and commit the app shows that origin does not have (the
 // Git dialog's branches, the commit lists, the Tidy panel, the Commit view). LocalMark.vue renders it; whereLines uses the
-// long text. The core computes the flag in one place (CommitRow.notPushed, BranchPush; contract B073). Without an origin
+// long text. The core computes the flag in one place (CommitRow.notPushed, BranchPush). Without an origin
 // every commit is local: the list says so once (LOCAL_MARK.noOrigin) instead of marking each row.
 
 export const LOCAL_MARK = {

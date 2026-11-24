@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B029 verify (card 142): the theme switch as the whole window uses it. App.vue mounted with a fake API and a faked
+// The theme switch as the whole window uses it. App.vue mounted with a fake API and a faked
 // prefers-color-scheme: the toggle sits right of the Cloud Link icon, one click flips <html data-theme> and is kept,
 // View > Theme drives the same state (and "Use system setting" follows the OS again), and a remote view shows the
 // toggle without the Cloud Link icon and keeps its own choice. Fakes only.
@@ -54,8 +54,8 @@ async function menu(w: Awaited<ReturnType<typeof page>>['w'], id: string) {
 }
 
 // Each test imports App.vue afresh (vi.resetModules): its whole module graph, cold, which under the full suite's load ran
-// past vitest's default 5 s (card 477). The tests themselves take milliseconds once it is loaded.
-describe('B029 theme switch in the window (App.vue)', { timeout: 30_000 }, () => {
+// past vitest's default 5 s. The tests themselves take milliseconds once it is loaded.
+describe('the theme switch in the window (App.vue)', { timeout: 30_000 }, () => {
   beforeEach(() => { vi.resetModules(); localStorage.clear(); sessionStorage.clear(); html().removeAttribute('data-theme'); });
   afterEach(() => { document.body.innerHTML = ''; delete (window as any).yawble; vi.unstubAllGlobals(); });
 
@@ -129,7 +129,7 @@ describe('B029 theme switch in the window (App.vue)', { timeout: 30_000 }, () =>
   });
 });
 
-describe('B029 toggle looks like the Cloud Link icon', () => {
+describe('the theme toggle looks like the Cloud Link icon', () => {
   it('same padding, radius, colour and hover as .cloud-ind', () => {
     const src = (rel: string) => readFileSync(resolve(__dirname, '../../src/renderer/src', rel), 'utf8');
     const rule = (text: string, sel: string) => new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`).exec(text)?.[1] ?? '';

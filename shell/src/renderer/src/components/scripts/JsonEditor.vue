@@ -2,7 +2,7 @@
 import { computed, nextTick, ref } from 'vue';
 import { jsonTokens, lineOf } from '../../scripts/api';
 
-// A light JSON editor (B134): a plain textarea over a highlighted copy of the same text, so typing, undo and the
+// A light JSON editor: a plain textarea over a highlighted copy of the same text, so typing, undo and the
 // clipboard are the browser's own. No editor library: the shell has none. Colours come from the theme variables.
 const props = defineProps<{ modelValue: string; readonly?: boolean; label?: string }>();
 const emit = defineEmits<{ 'update:modelValue': [v: string] }>();

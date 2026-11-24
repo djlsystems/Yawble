@@ -27,7 +27,7 @@ import { useNarrow } from '../narrowScreen';
 // The terminal here is never interactive: it shows the member's runs (and mirrors a session opened elsewhere) with no
 // input. Open interactive CLI opens the agent's own terminal window, where the session runs; the remote view has no
 // such window, so it has no Open interactive CLI.
-// A phone stacks it the same way; its terminal is the whole screen with one header row (B057).
+// A phone stacks it the same way; its terminal is the whole screen with one header row.
 /** pending: Stop or Remove was clicked and the core has not answered yet (that menu item is held). */
 const props = withDefaults(defineProps<{
   card: AgentCard; pending?: 'stop' | 'remove' | null; api?: YawbleApi; pollMs?: number;
@@ -41,7 +41,7 @@ const emit = defineEmits<{ code: []; settings: []; logs: []; stop: []; remove: [
 const m = computed(() => props.card.member);
 const face = computed(() => memberStateOf(props.card));
 const phone = useNarrow();
-// B126: the wait state in either shape (in `state`, or `waitState` beside a queued / idle `state`).
+// The wait state in either shape (in `state`, or `waitState` beside a queued / idle `state`).
 const state = computed(() => cardState(props.card));
 // The details after the state's own word (the label says Running, Needs you, Idle...); what the agent said is the Report.
 const stateLine = computed(() => {
@@ -49,10 +49,10 @@ const stateLine = computed(() => {
   if (c.attention === 'decision' || c.decisionId != null) return 'a question is waiting for your answer';
   const instructions = `${c.queuedInstructions} instruction${c.queuedInstructions === 1 ? '' : 's'}`;
   if (c.state === 'queued') return `position ${c.queuePosition} of ${c.queueLength} for a global run slot · ${instructions}`;
-  // B126: work held for another run, a paused team or anything else is no place in the run queue.
+  // Work held for another run, a paused team or anything else is no place in the run queue.
   if (c.state === 'waits-for-run' || c.state === 'held' || c.state === 'pending') return `${waitSays(c.state, c.waitsFor)} · ${instructions}`;
   if (c.state === 'running') return '';
-  // B097: a run the person stopped (class "stopped", recorded failed) is no failure: it says who stopped it.
+  // A run the person stopped (class "stopped", recorded failed) is no failure: it says who stopped it.
   if (c.lastRunState !== 'completed' && c.lastRunState !== 'interrupted' && isStoppedRun({ state: c.lastRunState, failureClass: c.lastRunFailureClass, attention: c.attention })) return 'last run stopped by you';
   if (c.lastRunState === 'failed' || c.lastRunState === 'interrupted') return `last run ${c.lastRunState}: ${c.lastRunReason ?? ''}`;
   if (c.lastRunState === 'completed') return 'last run completed';
@@ -63,13 +63,13 @@ const lease = computed(() => leaseText(props.card));
 const moreWaiting = computed(() => (props.card.state === 'running' && props.card.queuedInstructions > 0 ? props.card.queuedInstructions : 0));
 const moreWaitingTitle = computed(() =>
   `${moreWaiting.value} instruction${moreWaiting.value === 1 ? '' : 's'} waiting; they run after this one (oldest workflow first)`);
-// B123: while the member has an open decision its report is "Waiting on you" (memberReport), never an earlier
+// While the member has an open decision its report is "Waiting on you" (memberReport), never an earlier
 // "Declared complete"; the chip and the Report link to the decision card on the team page.
 const report = computed(() => memberReport(props.card));
 const waiting = computed(() => report.value.kind === 'waiting');
 const said = computed(() => (waiting.value ? report.value.body : props.card.statusLine?.trim() || ''));
 const saidHtml = computed(() => (said.value ? renderMarkdown(report.value.body) : ''));
-/** The title's state word: "Waiting on you" while a decision is open (B123). */
+/** The title's state word: "Waiting on you" while a decision is open. */
 const stateLabel = computed(() => (waiting.value ? WaitingLabel : MemberStateLabel[face.value]));
 /** Scrolls the team page to the decision this member waits on (its card, or the first decision card). */
 function openDecision() {
@@ -84,7 +84,7 @@ const emptyText = computed(() => (props.card.lastRunState ? 'No report since the
 const hasDetails = computed(() => !!(report.value.label || stateLine.value || lease.value || props.card.policyProblems?.length));
 
 // Report, Activity or Terminal, per member (shared with the entry points: the Monitor, the palette, the remote view).
-// A phone (B064, card 310) has its own choice: one member's terminal at a time, none when the page opens (memberPaneView.ts).
+// A phone has its own choice: one member's terminal at a time, none when the page opens (memberPaneView.ts).
 const view = computed<MemberView>(() => getMemberView(m.value.team, m.value.name, phone.value));
 const show = (v: MemberView) => setMemberView(m.value.team, m.value.name, v, phone.value);
 const TabLabel: Record<MemberView, string> = { report: 'Report', activity: 'Activity', terminal: 'Terminal' };
@@ -93,9 +93,9 @@ const TabLabel: Record<MemberView, string> = { report: 'Report', activity: 'Acti
 const termLive = ref(false);
 watch(view, (v) => { if (v !== 'terminal') termLive.value = false; });
 const remote = computed(() => !!resolveApi(props.api)?.remote);
-/** B111: the folder asks read through the same api; none in a view without one. */
+/** The folder asks read through the same api; none in a view without one. */
 const folderApi = computed(() => resolveApi(props.api) as YawbleApi | undefined);
-// B126: work that waits but is not queued for a slot (held, pending, waits for a run) leaves the CLI free to open, as idle did.
+// Work that waits but is not queued for a slot (held, pending, waits for a run) leaves the CLI free to open, as idle did.
 const canOpen = computed(() => state.value !== 'running' && state.value !== 'queued' && !termLive.value);
 const canStop = computed(() => props.card.state === 'running' || termLive.value);
 const opening = ref(false);
@@ -126,10 +126,10 @@ watch(menuOpen, (open) => {
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', onDocDown, true); document.removeEventListener('keydown', onKey); });
 const menuBtn = ref<HTMLButtonElement | null>(null);
 // A pick hands the focus back to the ⋯ button before the menu (v-if) goes: the item clicked is removed from the page,
-// and a confirm it opens (Remove agent, card 355) returns the focus to where it was, the ⋯ button, not <body>.
+// and a confirm it opens (Remove agent) returns the focus to where it was, the ⋯ button, not <body>.
 function pick(f: () => void) { menuBtn.value?.focus(); menuOpen.value = false; f(); }
 
-// A phone (B057, card 307): the member's terminal is the whole screen over the page with one 44 px header row - the
+// A phone: the member's terminal is the whole screen over the page with one 44 px header row - the
 // title, a ⋯ holding the terminal's state line and Stop, and ✕ (back to the Report) - and the terminal fills the rest.
 // The terminal puts its bar there (PaneHeaderKey).
 const termFull = computed(() => phone.value && view.value === 'terminal');
@@ -190,7 +190,7 @@ defineExpose({ el: () => root.value });
       </div>
       <span v-if="error" class="error small" data-test="member-pane-error">{{ error }}</span>
     </div>
-    <!-- B111: this member's folder asks (a folder outside its clone), answered here as in Needs you. -->
+    <!-- This member's folder asks (a folder outside its clone), answered here as in Needs you. -->
     <FolderAsks v-if="folderApi" style="flex: none; margin: 2px 0 4px" :api="folderApi" :poll-ms="pollMs" :team="m.team" :member="m.name" />
 
     <div class="body" :class="`body-${view}`" :style="phone ? undefined : { height: `${height}px` }" data-test="member-pane-body">
@@ -223,7 +223,7 @@ defineExpose({ el: () => root.value });
 </template>
 
 <style scoped>
-/* A tile in the team page's grid (B076, card 366): the pane fills its cell (the grid sets the height) as a column - the
+/* A tile in the team page's grid: the pane fills its cell (the grid sets the height) as a column - the
    title bar and the tabs at their own height, the view taking the rest and scrolling inside it - and never wider than
    the cell: what the title bar holds shrinks and ellipsizes. Outside a grid (no set height) it is as tall as its rows. */
 .pane { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 4px 10px 4px;
@@ -300,7 +300,7 @@ defineExpose({ el: () => root.value });
 .is-blocked { --card-state: var(--state-blocked); border-left-color: var(--state-blocked); }
 .is-failed { --card-state: var(--state-failed); border-left-color: var(--state-failed); }
 .is-stopped { --card-state: var(--state-stopped); border-left-color: var(--state-stopped); }
-/* A phone (B061): stacked - the title (☰ a 44 px target), the tabs (44 px) with the details under them, then the
+/* A phone: stacked - the title (☰ a 44 px target), the tabs (44 px) with the details under them, then the
    chosen view at its own height (the page is the one scroller); the terminal is the whole screen over the page. */
 @media (max-width: 759.98px) {
   /* Not a tile: a block as tall as its rows, the view at its own height (the page scrolls). */
@@ -315,7 +315,7 @@ defineExpose({ el: () => root.value });
   .body { height: auto; }
   .output { flex: none; height: auto; overflow-y: visible; }
   .body-terminal { height: auto; }
-  /* The member's terminal (B057, card 307): the whole screen, one 44 px header row, the terminal filling the rest and
+  /* The member's terminal: the whole screen, one 44 px header row, the terminal filling the rest and
      never past the bottom (dvh: what the browser really shows). */
   .member-terminal.full { position: fixed; inset: 0; z-index: 9; width: auto; min-width: 0; max-width: none; height: 100dvh;
     border: 0; border-radius: 0; overflow: hidden; background: var(--term-bg); }

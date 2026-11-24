@@ -10,7 +10,7 @@ import type { ScriptDocument, ScriptSummary } from '../../scripts/types';
 import LoadingNote from '../LoadingNote.vue';
 import ScriptEditor from './ScriptEditor.vue';
 
-// The Scripts tab (B134): the library (scripts.list) with each script's version, draft state and the teams that use it;
+// The Scripts tab: the library (scripts.list) with each script's version, draft state and the teams that use it;
 // New (blank or a template), Import and Export of the .json, Delete for a script nobody uses (scripts.delete), and the
 // editor for one script. A Visitor reads only: New, Import and Delete are not shown.
 const props = defineProps<{ api: YawbleApi; teams: readonly TeamSummary[] }>();

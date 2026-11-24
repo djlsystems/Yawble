@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { YawbleApi } from '../../src/shared/api';
 
-// B061 (card 287): every entry that opens a MEMBER's terminal opens the team page with that member's pane on Terminal
+// Every entry that opens a MEMBER's terminal opens the team page with that member's pane on Terminal
 // (focusMemberTerminal(team, member), memberPaneView.ts), never the right-hand terminal pane, which keeps the channel
 // terminals (Settings > Agents sessions). A fake focusMemberTerminal and a scripted core only.
 
@@ -48,7 +48,7 @@ function api(): YawbleApi {
         case 'monitor.steps': return { end: 0, pending: false, steps: [] } as any;
         // The real member pane on Terminal (the memberPaneView test) attaches its terminal and reads its banner:
         // TerminalScreen atob()s the replay (empty is valid base64) and TerminalApp reads banner.loosened.length.
-        // Without these the default [] reply raises 2 unhandled rejections (B061 verify F4).
+        // Without these the default [] reply raises 2 unhandled rejections.
         case 'terminal.attach': return { channel: p.channel, replay: '', end: 0, session: null } as any;
         case 'terminal.banner': return {
           memberId: p.memberId, channel: `member:${p.memberId}`, title: `m${p.memberId}`, state: 'idle', runId: null, queuePosition: null, queueLength: 0,

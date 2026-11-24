@@ -35,8 +35,8 @@ export function showChannelTerminal(channel: string, title: string, stop?: () =>
 export function closeTerminalPane() { terminalPane.open = false; }
 
 /**
- * The pane's one header row on a phone (B057): TerminalPane (a channel terminal) and MemberPane (a member's terminal,
- * card 307) provide where the shown terminal puts its Formatted / Raw
+ * The pane's one header row on a phone: TerminalPane (a channel terminal) and MemberPane (a member's terminal,
+ * its terminal tab) provide where the shown terminal puts its Formatted / Raw
  * tabs (`tabs`, in the header) and its bar's actions (`more`, the header's ⋯ menu), as element ids; `on` is false at
  * desktop width, and then each stays where it is. Outside the pane nothing is provided and nothing moves.
  */

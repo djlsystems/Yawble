@@ -105,7 +105,7 @@ export function createTheme(env: ThemeEnv): ThemeController {
 }
 
 /**
- * The page's theme set-up: the desktop window's own, or a remote view's (its own key). B115: the remote view embedded in
+ * The page's theme set-up: the desktop window's own, or a remote view's (its own key). The remote view embedded in
  * the cloud page (?embed=1, embed.ts) has no storage at all: the viewer's kept yawble.remoteTheme is neither read nor
  * written, nor followed from another tab; it starts at the cloud's ?theme=light|dark (else the OS) and the cloud's
  * yawble.theme messages set it after (App.vue, through setMode, which keeps nothing without storage).

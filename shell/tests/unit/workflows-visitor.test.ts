@@ -5,7 +5,7 @@ import type { TeamSummary, YawbleApi } from '../../src/shared/api';
 import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
 import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remoteAccess';
 
-// B063 (card 305): in a read-only (Visitor) view the workflows dialog's change buttons - Nudge, Stop runs, Close and
+// In a read-only (Visitor) view the workflows dialog's change buttons - Nudge, Stop runs, Close and
 // the confirm (Nudge / Close it) - are disabled with the read-only title (v-change); with full access they work as
 // before, and their own busy-disabled state still applies. Fakes only.
 
@@ -32,7 +32,7 @@ const btn = (w: Awaited<ReturnType<typeof open>>, t: string) => w.get(`[data-tes
 
 afterEach(() => { applyRemoteAccess('full'); document.body.innerHTML = ''; });
 
-describe('workflows dialog for a Visitor (card 305)', () => {
+describe('workflows dialog for a Visitor', () => {
   it('Nudge, Stop runs and Close are disabled with the read-only title; a click calls nothing', async () => {
     applyRemoteAccess('read');
     const calls: string[] = [];
