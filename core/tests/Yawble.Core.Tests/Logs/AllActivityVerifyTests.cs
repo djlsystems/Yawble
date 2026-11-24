@@ -20,7 +20,7 @@ namespace Yawble.Core.Tests.Logs;
 /// org.summary's problems survive a flood of audit rows in the hour; logs.tail and logs.query take app over the wire and
 /// refuse a bad value with bad_params; the per-source Audit view keeps its columns. Test-only.
 /// </summary>
-public sealed class Card442B101VerifyTests : IAsyncDisposable
+public sealed class AllActivityVerifyTests : IAsyncDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly Actor Pat = new(Actor.App, "pat");

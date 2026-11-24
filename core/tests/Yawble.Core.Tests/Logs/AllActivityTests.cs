@@ -18,7 +18,7 @@ namespace Yawble.Core.Tests.Logs;
 /// written, so a row about a team or member deleted since still reads; per-member actions by their own id (a trigger's
 /// Run now) carry their member. logs.tail delivers the same rows. Over a real migrated database; every row is made up here.
 /// </summary>
-public sealed class Card438AllActivityTests : IDisposable
+public sealed class AllActivityTests : IDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 18, 12, 0, 0, TimeSpan.Zero);
     private readonly TempDb _db = new();
@@ -33,7 +33,7 @@ public sealed class Card438AllActivityTests : IDisposable
         public void Advance(TimeSpan by) => _now += by;
     }
 
-    public Card438AllActivityTests()
+    public AllActivityTests()
     {
         _logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
         _audit = new AuditLog(_db.ConnectionString, _clock);
