@@ -362,6 +362,8 @@ public sealed class UiRpc(
             var node = S(card)!.AsObject();
             node["attention"] = Attention(card, asking, reports);
             node["hasClone"] = Code.CodeHost.HasClone(bus.Repos, card.Member);
+            // B134: a script member's tile is the script's (scripts.memberGet), not an agent's.
+            node["kind"] = bus.ScriptMembers?.IsScriptMember(card.Member.Id) == true ? "script" : "agent";
             if (Models is { } models) node["agentModel"] = Agents.MemberModels.Json(models.For(card.Member));
             try
             {

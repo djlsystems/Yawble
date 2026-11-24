@@ -1044,6 +1044,8 @@ export interface AgentCard {
   net?: string; wallTimeout?: string; loosened?: string[]; policyProblems?: string[];
   /** The member has a working copy (clone) on this computer: its card offers the Code browser (teams.agents). */
   hasClone?: boolean;
+  /** B134: 'script' for a script member (its tile reads scripts.memberGet); absent from an older core: an agent. */
+  kind?: 'agent' | 'script';
 }
 
 /**
