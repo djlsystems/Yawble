@@ -141,7 +141,14 @@ function onScriptStep(id: string) { selected.value = id; selectedEdge.value = nu
 // ---- the minimap: folded away by default on a small pane
 const canvasEl = ref<HTMLElement | null>(null);
 const showMap = ref(false);
-onMounted(() => { showMap.value = (canvasEl.value?.clientWidth ?? 0) >= MINIMAP_MIN_WIDTH; });
+// Decided once, when the canvas first appears: it may come after mount (the editor opens on the Flowchart before the
+// script has loaded), and the person's own toggle wins from then on.
+let mapDecided = false;
+watch(canvasEl, (el) => {
+  if (!el || mapDecided) return;
+  mapDecided = true;
+  showMap.value = el.clientWidth >= MINIMAP_MIN_WIDTH;
+}, { immediate: true });
 
 // ---- edits
 function onDragStop(e: NodeDragEvent) {
