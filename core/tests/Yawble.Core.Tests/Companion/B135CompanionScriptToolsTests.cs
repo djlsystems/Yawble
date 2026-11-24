@@ -320,13 +320,12 @@ public sealed class B135CompanionScriptToolsTests : IAsyncLifetime
         var act = CompanionTools.Definitions(CompanionLevel.Act);
         var destructive = CompanionTools.Definitions(CompanionLevel.Destructive);
 
-        Assert.Equal(11, ScriptTools.Names.Count);
+        Assert.Equal(13, ScriptTools.Names.Count); // the 11 of B135 and B139's script_trigger_set and integration_action_allow (B139CompanionScriptToolsTests)
         Assert.All(ScriptTools.Names, n => Assert.Contains(n, Names(destructive)));
         Assert.Contains(ScriptTools.ScriptCheck, Names(read));
         Assert.DoesNotContain(ScriptTools.ScriptSave, Names(read));
         Assert.Contains(ScriptTools.ScriptTestRun, Names(act));
         Assert.DoesNotContain(ScriptTools.ScriptMemberAdd, Names(act));
-        Assert.DoesNotContain("script_trigger", string.Join(',', Names(destructive)));
 
         foreach (var defs in new[] { act, destructive })
         foreach (var def in defs.Where(d => ScriptTools.Handles(d!["name"]!.GetValue<string>())))

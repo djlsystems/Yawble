@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Yawble.Core.Bus;
+using Yawble.Core.Ipc;
 
 namespace Yawble.Core.Scripts;
 
@@ -17,6 +18,12 @@ public enum ScriptToolApproval
 
     /// <summary>The person's yes for the first live (dry_run false) run of a script on a team; dry runs and later live runs need none.</summary>
     FirstLiveRun,
+
+    /// <summary>
+    /// The person's yes whenever a script member's trigger ends up enabled and that is new: a new enabled trigger, an off one turned on, or an
+    /// enabled one whose schedule changes (B139). Turning a trigger off, or saving one off, needs none.
+    /// </summary>
+    EnabledTrigger,
 }
 
 /// <summary>One script tool: its name, whether it changes something, whether only the person at this computer may use it
@@ -38,7 +45,12 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
 {
     public const string SchemasList = "schemas_list", SchemaGet = "schema_get", SchemaSave = "schema_save",
         ScriptsList = "scripts_list", ScriptGet = "script_get", ScriptSave = "script_save", ScriptCheck = "script_check",
-        ScriptTestRun = "script_test_run", ScriptRuns = "script_runs", ScriptRun = "script_run", ScriptMemberAdd = "script_member_add";
+        ScriptTestRun = "script_test_run", ScriptRuns = "script_runs", ScriptRun = "script_run", ScriptMemberAdd = "script_member_add",
+        ScriptTriggerSet = "script_trigger_set", IntegrationActionAllow = "integration_action_allow";
+
+    /// <summary>The schedule fields script_trigger_set takes: triggers.save's own names (UiRpc.TriggerDraftOf).</summary>
+    public static readonly IReadOnlyList<string> ScheduleFields =
+        ["kind", "intervalSec", "cron", "timezone", "fireAt", "eventName", "watchRoot", "watchPath", "watchGlob", "quietSec", "fireOn"];
 
     /// <summary>Every script tool with its class.</summary>
     public static readonly IReadOnlyList<ScriptToolInfo> All =
@@ -54,6 +66,9 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
         new(ScriptRuns, false, false, ScriptToolApproval.None),
         new(ScriptRun, false, false, ScriptToolApproval.None),
         new(ScriptMemberAdd, true, true, ScriptToolApproval.PersonsYes),
+        // B139. triggers.save is a change a full Cloud Link viewer may make (Link/RemoteAccess.cs), so this is not local only; its yes is still asked.
+        new(ScriptTriggerSet, true, false, ScriptToolApproval.EnabledTrigger),
+        new(IntegrationActionAllow, true, true, ScriptToolApproval.PersonsYes),
     ];
 
     /// <summary>The tools' names.</summary>
@@ -115,11 +130,55 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
             P("version", "integer", "Pin this clean version (default: the latest clean one, following new versions).", false),
             P("settings", "object", "Setting values by name.", false),
             P("bindings", "object", "Each requires name of the script mapped to one of the team's integrations by name.", false), Confirm()),
+        Tool(ScriptTriggerSet, "Give a script member a trigger, or change one of its triggers (with id): each fire runs the member's script with the fire's " +
+                               "details as input. Only for script members (not agents). Turning a trigger on (a new enabled trigger, an off one turned on, or " +
+                               "an enabled one whose schedule changes) needs the person's yes (the first call shows when it fires and which script runs, and " +
+                               "returns a token). Turning one off, or saving it with enabled false, needs none.",
+            P("team", "string", "The team's name.", true), P("member", "string", "The script member's name.", true),
+            P("name", "string", "The trigger's name.", true), ScheduleParam(),
+            P("enabled", "boolean", "Default true: the trigger fires. false saves it off.", false),
+            P("id", "integer", "Change this trigger (one of this member's); without it a new trigger is made.", false),
+            P("only_when_idle", "boolean", "Skip a fire while the member is busy (default: the trigger's own, true for a new one).", false), Confirm()),
+        Tool(IntegrationActionAllow, "Allow one action of an API integration for a team: one team rule for exactly that operation id, as the person's rule " +
+                                     "editor writes it. A script's call of it then no longer stops with \"needs approval\" (the team's agents may call it " +
+                                     "without asking too). Always needs the person's yes (the first call shows the API, the action's method, route and " +
+                                     "summary, and returns a token); only for the person at this computer. Not for Email integrations (their actions are not gated by rules).",
+            P("team", "string", "The team's name.", true), P("integration", "string", "The API integration's name (\"name\" or \"api:name\").", true),
+            P("action", "string", "The action's operation id (scripts.catalog / script_get list them).", true), Confirm()),
     ];
 
+    /// <summary>script_trigger_set's schedule: triggers.save's fields, by kind.</summary>
+    private static Param ScheduleParam()
+    {
+        static JsonObject F(string type, string description) => new() { ["type"] = type, ["description"] = description };
+        var properties = new JsonObject
+        {
+            ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("every", "cron", "once", "event", "folder"), ["description"] = "When it fires." },
+            ["intervalSec"] = F("integer", "every: seconds between fires (at least 10). folder: how often the folder is looked at (default 30)."),
+            ["cron"] = F("string", "cron: 5 fields, minute hour day month weekday (e.g. \"0 9 * * 1-5\")."),
+            ["timezone"] = F("string", "cron: an IANA or Windows timezone id (e.g. \"Europe/London\")."),
+            ["fireAt"] = F("string", "once: when (ISO 8601, in the future). every / cron: an optional start."),
+            ["eventName"] = F("string", "event: the event's name (letters, digits, . _ - and * for any), e.g. web.pr."),
+            ["watchRoot"] = F("string", "folder: \"documents\" (the team's documents) or \"host\" (a full path on this computer)."),
+            ["watchPath"] = F("string", "folder: the folder inside the team's documents, or its full path for host."),
+            ["watchGlob"] = F("string", "folder: only files matching this pattern (e.g. *.csv)."),
+            ["quietSec"] = F("integer", "folder: how long a change must stay still before it fires (0 to 3600, default 10)."),
+            ["fireOn"] = F("string", "folder: added (default for a new trigger), added-or-changed or any."),
+        };
+        return new Param("schedule", new JsonObject
+        {
+            ["type"] = "object",
+            ["description"] = "When it fires, in triggers.save's fields: kind and the fields that kind takes.",
+            ["properties"] = properties,
+            ["required"] = new JsonArray("kind"),
+            ["additionalProperties"] = false,
+        }, true);
+    }
+
     /// <summary>
-    /// What the person must say yes to before this call runs, or null when it runs without (everything but a member add and a
-    /// script's first live run on a team). Reads only.
+    /// What the person must say yes to before this call runs, or null when it runs without (everything but a member add, a
+    /// script's first live run on a team, a script member's trigger turned on (B139) and an API action not yet allowed (B139)).
+    /// Reads only; a call that would be refused (an agent member, an unknown API) throws its refusal here, before any yes is asked.
     /// </summary>
     public async Task<ScriptToolYes?> YesNeededAsync(string name, JsonObject args, CancellationToken ct)
     {
@@ -151,6 +210,21 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
                            $"through the bound integrations (not a dry run).\nInput: {input}\nSettings: {settings.ToJsonString()}\nBindings: {bindings.ToJsonString()}";
                 return new ScriptToolYes(plan, string.Join('\n', name, team.Id, key, version, input, settings.ToJsonString(), bindings.ToJsonString()));
             }
+            case ScriptToolApproval.EnabledTrigger when name == ScriptTriggerSet:
+            {
+                var t = await TriggerPlanAsync(args, ct);
+                return t.NeedsYes ? new ScriptToolYes(t.Plan, t.Key) : null;
+            }
+            case ScriptToolApproval.PersonsYes when name == IntegrationActionAllow:
+            {
+                var op = await ActionToAllowAsync(args, ct);
+                if (op.Decision == Integrations.Decisions.Allow) return null; // already allowed: answered without a yes
+                var plan = $"Allow the action {op.Action} of the API {op.Api} for team {op.Team}: {op.Method.ToUpperInvariant()} {op.Route}" +
+                           (op.Summary.Trim().Length > 0 ? $" ({op.Summary.Trim()})" : "") + ".\n" +
+                           $"Now it is \"{op.Decision}\" for {op.Team}. One team rule is added (as the rule editor in Settings > Integrations writes it): " +
+                           $"{op.Team}'s scripts, and its agents, may then call {op.Action} without asking each time. Other teams keep their own rules.";
+                return new ScriptToolYes(plan, string.Join('\n', name, op.TeamId, op.Api, op.Action, op.Method, op.Route, op.Decision));
+            }
             default:
                 return null;
         }
@@ -173,6 +247,8 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
         ScriptRuns => await RunsAsync(args, ct),
         ScriptRun => Json(await ui("scripts.run", new JsonObject { ["id"] = Long(args, "id") ?? throw new ArgumentException("'id' is required") }, ct)),
         ScriptMemberAdd => await MemberAddAsync(args, ct),
+        ScriptTriggerSet => await TriggerSetAsync(args, ct),
+        IntegrationActionAllow => await ActionAllowAsync(args, ct),
         _ => throw new ArgumentException($"unknown tool: {name}"),
     };
 
@@ -246,6 +322,170 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
                "Give it a trigger (or tell it) to run it; turning a trigger on is the person's choice.";
     }
 
+    // ------------------------------------------------------------------ B139: a script member's trigger
+
+    /// <summary>
+    /// What a script_trigger_set call would save: the triggers.save parameters, the draft they read as, the trigger it changes (with id),
+    /// whether it needs the person's yes, the plan and the key the yes is bound to. Refuses (nothing saved) an unknown member, an agent member
+    /// and an id that is not one of this member's triggers.
+    /// </summary>
+    private sealed record TriggerPlan(TeamSummary Team, string Member, JsonObject Save, TriggerDraft Draft, TriggerRow? Existing, bool NeedsYes, string When, string Plan, string Key);
+
+    private async Task<TriggerPlan> TriggerPlanAsync(JsonObject args, CancellationToken ct)
+    {
+        var team = await TeamAsync(Required(args, "team"), ct);
+        var memberName = Required(args, "member").Trim();
+        var card = (await bus.AgentCardsAsync(team.Id, ct)).FirstOrDefault(c => string.Equals(c.Member.Name, memberName, StringComparison.OrdinalIgnoreCase))
+                   ?? throw new ArgumentException($"refused: {team.Name} has no member '{memberName}'. Nothing was saved.");
+        var member = card.Member.Name;
+        JsonObject script;
+        try
+        {
+            script = await ui("scripts.memberGet", new JsonObject { ["memberId"] = card.Member.Id }, ct) as JsonObject
+                     ?? throw new ArgumentException($"refused: {team.Name}/{member} is not a script member. Nothing was saved.");
+        }
+        catch (RpcException e) when (e.Code == "not_found")
+        {
+            throw new ArgumentException($"refused: {team.Name}/{member} is an agent member, not a script member: script_trigger_set is for script members only " +
+                                        "(an agent's triggers are set in the app's Triggers dialog). Nothing was saved.");
+        }
+
+        var id = Long(args, "id");
+        TriggerRow? existing = null;
+        if (id is { } tid)
+        {
+            existing = (await bus.TriggersAsync(team.Id, ct)).FirstOrDefault(t => t.Id == tid);
+            if (existing is null || existing.MemberId != card.Member.Id)
+                throw new ArgumentException($"refused: trigger {tid} is not one of {team.Name}/{member}'s triggers. Nothing was saved.");
+        }
+
+        var schedule = Obj(args, "schedule") ?? throw new ArgumentException("'schedule' is required: an object with kind and the fields that kind takes");
+        var save = new JsonObject();
+        foreach (var (field, value) in schedule)
+        {
+            if (!ScheduleFields.Contains(field))
+                throw new ArgumentException($"'schedule' has no field '{field}'. Its fields: {string.Join(", ", ScheduleFields)}");
+            if (value is null) continue;
+            save[field] = field is "intervalSec" or "quietSec"
+                ? Long(schedule, field) ?? throw new ArgumentException($"schedule.{field} must be a whole number")
+                : value is JsonValue v && v.TryGetValue<string>(out var s) ? s : throw new ArgumentException($"schedule.{field} must be text");
+        }
+        if (id is { } saveId) save["id"] = saveId;
+        save["memberId"] = card.Member.Id;
+        save["name"] = Required(args, "name").Trim();
+        save["instruction"] = ""; // a script member is told nothing: its fire's details are its run's input
+        save["enabled"] = Flag(args, "enabled") ?? true;
+        save["onlyWhenIdle"] = Flag(args, "only_when_idle") ?? existing?.OnlyWhenIdle ?? true;
+        if (existing is not null) save["wakeManager"] = existing.WakeManager;
+
+        TriggerDraft draft;
+        try { draft = Ui.UiRpc.TriggerDraftOf(save); }
+        catch (FormatException) { throw new ArgumentException("schedule.fireAt is not a time: give it in ISO 8601, e.g. 2026-12-01T09:00:00Z"); }
+
+        var scheduleKey = ScheduleKey(draft.Schedule, draft.EventName, draft.Watch, existing?.Watch);
+        var needsYes = draft.Enabled && (existing is null || !existing.Enabled
+                                         || scheduleKey != ScheduleKey(existing.Schedule, existing.EventName, existing.Watch, existing.Watch));
+        var key = Str(script, "script") ?? "?";
+        var runs = script["version"] is JsonValue pinned
+            ? $"the script {key} version {pinned} (pinned)"
+            : $"the script {key}, the latest clean version (now {script["runsVersion"]?.ToString() ?? "none"}; it follows new ones)";
+        var when = When(draft);
+        var what = existing is null ? "a new trigger" : !existing.Enabled ? $"trigger {existing.Id}, now off" : $"trigger {existing.Id}, its schedule changes";
+        var plan = $"Turn on the trigger \"{draft.Name.Trim()}\" of script member {member} of team {team.Name} ({what}): it fires {when}.\n" +
+                   $"Each fire runs {runs}, with the fire's details as its input: its steps really send and write through the team's integrations.";
+        var bound = string.Join('\n', ScriptTriggerSet, team.Id, card.Member.Id, draft.Name.Trim().ToLowerInvariant(), scheduleKey, draft.Enabled, id,
+            key, script["version"]?.ToJsonString(), script["runsVersion"]?.ToJsonString());
+        return new TriggerPlan(team, member, save, draft, existing, needsYes, when, plan, bound);
+    }
+
+    private async Task<string> TriggerSetAsync(JsonObject args, CancellationToken ct)
+    {
+        var t = await TriggerPlanAsync(args, ct);
+        var saved = await ui("triggers.save", t.Save, ct) as JsonObject;
+        var id = saved?["id"]?.ToString() ?? t.Existing?.Id.ToString(CultureInfo.InvariantCulture) ?? "?";
+        return t.Draft.Enabled
+            ? $"ok: saved trigger {id} \"{t.Draft.Name.Trim()}\" of script member {t.Team.Name}/{t.Member}: on, it fires {t.When}."
+            : $"ok: saved trigger {id} \"{t.Draft.Name.Trim()}\" of script member {t.Team.Name}/{t.Member}: off, it does not fire until it is turned on.";
+    }
+
+    /// <summary>A schedule as compared for "its schedule changes": only the fields its kind reads, trimmed as the bus stores them.</summary>
+    private static string ScheduleKey(Triggers.TriggerSchedule s, string? eventName, Triggers.FolderWatch? watch, Triggers.FolderWatch? before)
+    {
+        var at = s.FireAt?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+        return s.Kind switch
+        {
+            Triggers.TriggerKinds.Every => $"every|{s.IntervalSec}|{at}",
+            Triggers.TriggerKinds.Cron => $"cron|{s.Cron?.Trim()}|{s.Timezone?.Trim()}|{at}",
+            Triggers.TriggerKinds.Once => $"once|{at}",
+            Triggers.TriggerKinds.Event => $"event|{eventName?.Trim()}",
+            Triggers.TriggerKinds.Folder => $"folder|{s.IntervalSec}|{watch?.Root}|{FolderPath(watch)}|{watch?.Glob}|{watch?.QuietSec}|" +
+                                            (watch?.FireOn is { Length: > 0 } on ? on : before?.FireOn ?? Triggers.FolderWatch.Added),
+            _ => s.Kind,
+        };
+
+        static string? FolderPath(Triggers.FolderWatch? w) =>
+            w is null ? null : w.Root == Triggers.FolderWatch.Documents ? (w.Path ?? "").Trim().Replace('\\', '/').Trim('/') : (w.Path ?? "").Trim();
+    }
+
+    /// <summary>When a trigger fires, in plain words: "every 15 minutes", the cron text, the time of a once, the event or the folder.</summary>
+    private static string When(TriggerDraft d)
+    {
+        var s = d.Schedule;
+        var start = s.FireAt is { } from ? $", starting {from.UtcDateTime:yyyy-MM-dd HH:mm} UTC" : "";
+        return s.Kind switch
+        {
+            Triggers.TriggerKinds.Every => $"every {Interval(s.IntervalSec ?? 0)}{start}",
+            Triggers.TriggerKinds.Cron => $"on the cron schedule \"{s.Cron?.Trim()}\" ({s.Timezone?.Trim()}){start}",
+            Triggers.TriggerKinds.Once => s.FireAt is { } at ? $"once, at {at.UtcDateTime:yyyy-MM-dd HH:mm} UTC" : "once",
+            Triggers.TriggerKinds.Event => $"whenever the event {d.EventName?.Trim()} is published",
+            Triggers.TriggerKinds.Folder => d.Watch is { } w
+                ? $"when files are {(w.FireOn is Triggers.FolderWatch.AddedOrChanged ? "added or changed" : w.FireOn is Triggers.FolderWatch.AnyChange ? "added, changed or removed" : "added")} in " +
+                  (w.Root == Triggers.FolderWatch.Documents ? $"the team's documents{(w.Path.Trim().Length > 0 ? "/" + w.Path.Trim().Replace('\\', '/').Trim('/') : "")}" : $"the folder {w.Path.Trim()} on this computer") +
+                  (w.Glob is { Length: > 0 } g ? $" matching {g}" : "") + $" (looked at every {Interval(s.IntervalSec ?? Triggers.FolderWatch.DefaultPollSec)})"
+                : "when its folder changes",
+            _ => s.Kind,
+        };
+    }
+
+    private static string Interval(int seconds) => seconds switch
+    {
+        > 0 when seconds % 86400 == 0 => Plural(seconds / 86400, "day"),
+        > 0 when seconds % 3600 == 0 => Plural(seconds / 3600, "hour"),
+        > 0 when seconds % 60 == 0 => Plural(seconds / 60, "minute"),
+        _ => Plural(seconds, "second"),
+    };
+
+    private static string Plural(int n, string unit) => n == 1 ? unit : $"{n} {unit}s";
+
+    // ------------------------------------------------------------------ B139: allowing an API action
+
+    /// <summary>The API action a call names, checked (unknown API, not on for the team, unknown or gone action, a sign-in action: refused, nothing written).</summary>
+    private async Task<Integrations.ScriptActionToAllow> ActionToAllowAsync(JsonObject args, CancellationToken ct)
+    {
+        var team = await TeamAsync(Required(args, "team"), ct);
+        var svc = bus.Integrations ?? throw new ArgumentException("refused: the integrations are not available here. Nothing was changed.");
+        try { return svc.ActionToAllowForScripts(team.Name, Required(args, "integration"), Required(args, "action")); }
+        catch (Integrations.ScriptApiRefusedException e) { throw new ArgumentException(e.Message + ". Nothing was changed."); }
+    }
+
+    private async Task<string> ActionAllowAsync(JsonObject args, CancellationToken ct)
+    {
+        var op = await ActionToAllowAsync(args, ct);
+        if (op.Decision == Integrations.Decisions.Allow)
+            return $"already allowed: {op.Api}'s {op.Action} is already allowed for {op.Team}; nothing was changed.";
+        // The rule editor's own save (Settings > Integrations, the API's checklist for this team): one team choice and the rule it owns.
+        await ui("integrations.saveChecklist", new JsonObject
+        {
+            ["name"] = op.Api, ["kind"] = "api", ["teamId"] = op.TeamId,
+            ["choices"] = new JsonArray(new JsonObject { ["path"] = op.Action, ["state"] = Integrations.RowStates.Allow }),
+        }, ct);
+        var now = (await ActionToAllowAsync(args, ct)).Decision;
+        if (now != Integrations.Decisions.Allow)
+            throw new ArgumentException($"refused: the rule was saved but {op.Api}'s {op.Action} is still \"{now}\" for {op.Team}");
+        return $"ok: allowed {op.Api}'s {op.Action} ({op.Method.ToUpperInvariant()} {op.Route}) for {op.Team}: one team rule. " +
+               "A script's call of it no longer needs approval.";
+    }
+
     // ------------------------------------------------------------------ text
 
     private static string SchemasText(JsonArray list) => list.Count == 0 ? "There are no schemas." : string.Join('\n', list.OfType<JsonObject>().Select(s =>
@@ -311,6 +551,15 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
         JsonValue v when v.TryGetValue<bool>(out var b) => b,
         JsonValue v when v.TryGetValue<string>(out var s) && bool.TryParse(s, out var c) => c,
         _ => true,
+    };
+
+    /// <summary>A flag given as a JSON boolean or as text ("true" / "false"); null when absent.</summary>
+    private static bool? Flag(JsonObject args, string name) => args[name] switch
+    {
+        null => null,
+        JsonValue v when v.TryGetValue<bool>(out var b) => b,
+        JsonValue v when v.TryGetValue<string>(out var s) && bool.TryParse(s, out var c) => c,
+        _ => throw new ArgumentException($"'{name}' must be true or false"),
     };
 
     private static string Required(JsonObject args, string name) => Optional(args, name) ?? throw new ArgumentException($"'{name}' is required");
