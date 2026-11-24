@@ -52,7 +52,7 @@ function maxChanged(row: HireRow) {
         <option v-for="c in agents" :key="c.id" :value="c.id">{{ c.label }}</option>
         <option v-if="!agents.some((o) => o.id === r.agent)" :value="r.agent">{{ r.agent }}</option>
       </select>
-      <AgentModelPicker :key="`${i}-${r.agent}`" :model-value="r.model ?? ''" class="model" :test-id="`${testId}-model-${i}`" :models="models.modelsOf(r.agent)"
+      <AgentModelPicker :key="`${i}-${r.agent}-${models.modelsOf(r.agent).length}`" :model-value="r.model ?? ''" class="model" :test-id="`${testId}-model-${i}`" :models="models.modelsOf(r.agent)"
         :default-label="models.defaultLabel(r.agent)" :note="false" :class="{ off: readOnly }" @update:model-value="setModel(r, $event)" />
       <label class="inline">at most
         <input v-model.number="r.max" type="number" min="1" :max="HIRE_MAX" step="1" class="max" :aria-label="`Row ${i + 1} at most`"

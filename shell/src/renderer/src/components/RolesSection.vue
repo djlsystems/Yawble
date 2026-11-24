@@ -72,7 +72,7 @@ const remove = (r: RoleRow) => run('roles.remove', { name: r.name });
             <option v-if="!agents.some((o) => o.id === draft.agent)" :value="draft.agent">{{ draft.agent }}</option>
           </select></label>
         <label>Suggested model
-          <AgentModelPicker :key="draft.agent" v-model="draft.model" test-id="role-model" :models="models.modelsOf(draft.agent)"
+          <AgentModelPicker :key="`${draft.agent}-${models.modelsOf(draft.agent).length}`" v-model="draft.model" test-id="role-model" :models="models.modelsOf(draft.agent)"
             :default-label="models.defaultLabel(draft.agent)" :note="false" @incomplete="incomplete = $event" /></label>
       </div>
       <div class="row">

@@ -147,8 +147,8 @@ async function create() {
     </div>
     <button data-test="add-member-row" @click="members.push({ name: '', cli: memberCli, model: '', role: '' }); void loadModels(memberCli)">+ Add member</button>
     <h3>Who the Manager may hire</h3>
-    <p class="muted small">The roles the Manager may hire later, each on its agent and model. It starts from Settings &gt; Teams; the team's
-      Settings change it later, on the Hiring tab.</p>
+    <p class="muted small">The roles the Manager may hire, each on its agent and model. It starts from Settings &gt; Teams; the team's
+      Settings have it too, on the Hiring tab.</p>
     <HireListEditor :rows="hireList" :roles="roles" :agents="agentOptions" :models="models" test-id="new-hire" />
     <div class="row actions"><span class="grow"></span>
       <button class="primary" data-test="create-team" :disabled="busy || !form.name.trim()" :aria-busy="busy" @click="create"><BusyLabel :busy="busy" text="Creating…">Create team</BusyLabel></button></div>
