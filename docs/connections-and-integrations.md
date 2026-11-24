@@ -95,8 +95,9 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
 ### Email
 
 The built-in **Email** integration is one mailbox (an [Email account](#email-accounts) Connection) that a team's
-scripts can read. It is offered to teams like the other integrations: to every team, or to some. A script member
-binds its `requires` entry of kind `email` to one of the Email integrations its team has.
+scripts can read. It is offered to teams like the other integrations: to every team, or to some. A script's step names
+it by its name (`"use": "Support inbox"`); a script member uses it when it is turned on for the member's team, or
+another Email integration turned on for that team when the member overrides it (see [Scripts](features.md#scripts)).
 
 - Setting up: `integrations.emailSave { id?, name, connectionId }` names it and picks the email account (only an
   email account); `integrations.emailEnable { name, all?, teamId?, on? }` offers it; `integrations.emailList` lists
@@ -118,12 +119,13 @@ binds its `requires` entry of kind `email` to one of the Email integrations its 
 
 #### Email actions for scripts
 
-A script lists the actions under a requirement of kind `email`, and an `integration` step calls one by its plain
-name (`"action": "list"`, not `email.list`):
+An `integration` step names the Email integration in `use` and calls an action by its plain name (`"action": "list"`,
+not `email.list`). The script's `requires` entry for it (kind `email`, the actions its steps call) is derived from the
+steps when the script is saved or checked:
 
 ```json
-"requires": [ { "name": "mail", "kind": "email", "actions": ["list", "get", "markRead"] } ],
-"steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
+"requires": [ { "name": "Support inbox", "kind": "email", "actions": ["list"] } ],
+"steps": [ { "id": "a", "type": "integration", "use": "Support inbox", "action": "list",
              "args": { "folder": "INBOX", "after": "{vars.lastId}", "since": "2026-11-20T00:00:00Z", "unreadOnly": true }, "into": "res", "next": "b" } ]
 ```
 

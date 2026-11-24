@@ -44,7 +44,8 @@ export const START_ID = '__start';
 export const END_ID = '__end';
 
 /** The size dagre lays nodes out with. */
-export const NODE_SIZE = { width: 220, height: 72 } as const;
+export const NODE_SIZE = { width: 220, height: 88 } as const;
+const LAYOUT = { nodesep: 40, ranksep: 60 } as const;
 
 export type Branch = { kind: 'next' | 'then' | 'else' | 'default' | 'body' } | { kind: 'case'; value: string };
 
@@ -235,7 +236,7 @@ export function docToGraph(
 /** Top-left positions from dagre, top to bottom. */
 export function autoLayout(nodes: FlowNode[], edges: FlowEdge[]): Record<string, { x: number; y: number }> {
   const g = new dagre.graphlib.Graph({ multigraph: true });
-  g.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 60 });
+  g.setGraph({ rankdir: 'TB', ...LAYOUT });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of nodes) g.setNode(n.id, { width: NODE_SIZE.width, height: NODE_SIZE.height });
   const ids = new Set(nodes.map((n) => n.id));
@@ -245,6 +246,14 @@ export function autoLayout(nodes: FlowNode[], edges: FlowEdge[]): Record<string,
   for (const n of nodes) {
     const p = g.node(n.id);
     out[n.id] = { x: Math.round(p.x - NODE_SIZE.width / 2), y: Math.round(p.y - NODE_SIZE.height / 2) };
+  }
+  // The end node goes below everything else: under its steps when some go to it, else under the start node.
+  if (out[END_ID]) {
+    const others = nodes.filter((n) => n.id !== END_ID).map((n) => out[n.id]!);
+    const bottom = others.length ? Math.max(...others.map((p) => p.y)) : 0;
+    const into = edges.filter((e) => e.target === END_ID && out[e.source]);
+    const x = into.length ? Math.round(into.reduce((sum, e) => sum + out[e.source]!.x, 0) / into.length) : out[START_ID]?.x ?? out[END_ID].x;
+    out[END_ID] = { x, y: bottom + NODE_SIZE.height + LAYOUT.ranksep };
   }
   return out;
 }

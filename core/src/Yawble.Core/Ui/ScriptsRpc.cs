@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Yawble.Core.Bus;
 using Yawble.Core.Ipc;
+using Yawble.Core.Scripts.Language;
 using Yawble.Core.Scripts.Library;
 using Yawble.Core.Scripts.Running;
 
@@ -17,8 +18,8 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
     public static readonly string[] Reads =
     [
         "scripts.list", "scripts.get", "scripts.check", "scripts.versions", "scripts.export", "scripts.runs", "scripts.run",
-        "scripts.memberGet", "scripts.memberState", "scripts.memberFiles",
-        "schemas.list", "schemas.get", "schemas.check", "schemas.versions", "schemas.export",
+        "scripts.memberGet", "scripts.memberState", "scripts.memberFiles", "scripts.catalog", "scripts.useRealNames",
+        "schemas.list", "schemas.get", "schemas.check", "schemas.versions", "schemas.export", "schemas.usage",
     ];
 
     public static readonly string[] Changes =
@@ -45,6 +46,8 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
                 "scripts.export" => File(library.Export(ScriptOf(p), OptInt(p, "version"))),
                 "scripts.import" => Saved(library.Import(Str(p, "json"))),
                 "scripts.delete" => Deleted(ScriptOf(p)),
+                "scripts.catalog" => Catalog(OptLong(p, "teamId")),
+                "scripts.useRealNames" => RealNames(p),
 
                 "schemas.list" => new JsonArray(library.Schemas().Select(s => (JsonNode?)new JsonObject
                     { ["name"] = s.Name, ["description"] = s.Description, ["latestVersion"] = s.LatestVersion, ["builtIn"] = s.BuiltIn, ["updatedAt"] = s.UpdatedAt }).ToArray()),
@@ -55,6 +58,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
                     { ["version"] = v.Version, ["createdAt"] = v.CreatedAt }).ToArray()),
                 "schemas.export" => File(library.ExportSchema(Str(p, "name"), OptInt(p, "version"))),
                 "schemas.import" => SchemaSaved(library.ImportSchema(Str(p, "json"))),
+                "schemas.usage" => Usage(Str(p, "name")),
 
                 "scripts.testRun" => TestRun(await runner.TestRunAsync(new ScriptTestRun(ScriptOf(p), OptInt(p, "version"), p?["input"]?.DeepClone(),
                     OptObject(p, "settings"), OptObject(p, "bindings"), Long(p, "teamId"), p?["dryRun"] is JsonValue d && d.TryGetValue<bool>(out var dry) ? dry : true), ct)),
@@ -101,7 +105,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
         var settings = OptObject(p, "settings") ?? [];
         var bindings = OptObject(p, "bindings") ?? [];
         var timeout = OptInt(p, "timeoutMinutes");
-        CheckMember(scriptId, version, settings, bindings, timeout);
+        CheckMember(scriptId, version, settings, bindings, timeout, teamId);
         var row = await bus.AddScriptMemberAsync(teamId, Str(p, "name"), ct);
         try
         {
@@ -122,22 +126,132 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
         var settings = p is not null && p.ContainsKey("settings") ? OptObject(p, "settings") ?? [] : member.Settings;
         var bindings = p is not null && p.ContainsKey("bindings") ? OptObject(p, "bindings") ?? [] : member.Bindings;
         var timeout = p is not null && p.ContainsKey("timeoutMinutes") ? OptInt(p, "timeoutMinutes") : member.TimeoutMinutes;
-        CheckMember(member.ScriptId, version, settings, bindings, timeout);
+        CheckMember(member.ScriptId, version, settings, bindings, timeout, member.TeamId);
         store.SetScriptMember(member.MemberId, member.ScriptId, version, settings, bindings, timeout);
         return Member(store.Member(member.MemberId)!);
     }
 
-    /// <summary>A member runs only a version that passes its check; its settings and bindings must fit the script.</summary>
-    private void CheckMember(long scriptId, int? version, JsonObject settings, JsonObject bindings, int? timeout)
+    /// <summary>
+    /// A member runs only a version that passes its check; its settings and bindings must fit the script, and each integration it uses (the
+    /// one the steps name, or the member's override) must be turned on for its team (an override also of the same kind).
+    /// </summary>
+    private void CheckMember(long scriptId, int? version, JsonObject settings, JsonObject bindings, int? timeout, long teamId)
     {
         if (timeout is < 1 or > 24 * 60) throw new RpcException("bad_script", "timeoutMinutes is 1 to 1440");
         var runs = version ?? library.RunnableVersion(scriptId)
             ?? throw new ScriptRunRefused("not_runnable", $"the script {library.Get(scriptId).Key} has no version that passes its check (only drafts)");
         var row = library.Get(scriptId, runs);
         if (!row.Ok) throw new ScriptRunRefused("not_runnable", $"version {runs} of {row.Key} is a draft: it does not pass its check");
-        var problems = ScriptSettings.Problems(row.Document, settings, bindings);
+        var team = store.TeamName(teamId) ?? $"team {teamId}";
+        var problems = ScriptSettings.Problems(row.Document, settings, bindings, teamId, team, library.Integrations);
         if (problems.Count > 0) throw new RpcException("bad_script", string.Join("\n", problems));
     }
+
+    // ------------------------------------------------------------------ the designer's catalog
+
+    /// <summary>
+    /// What a script can call and use: each of the person's integrations with its actions (Email: the fixed actions with their typed
+    /// parameters; an API: its allowed and ask operations), turned on for the team or not (null without a team), and every function of the
+    /// expression language.
+    /// </summary>
+    private JsonObject Catalog(long? teamId)
+    {
+        var integrations = new JsonArray();
+        foreach (var i in library.Integrations.Integrations())
+        {
+            var actions = i.Kind == Scripts.Actions.EmailActions.Kind ? EmailCatalogActions() : ApiCatalogActions(i.Name, teamId);
+            integrations.Add(new JsonObject
+            {
+                ["name"] = i.Name, ["kind"] = i.Kind, ["enabledForTeam"] = teamId is { } t ? i.IsOnFor(t) : null, ["actions"] = actions,
+            });
+        }
+        return new JsonObject
+        {
+            ["integrations"] = integrations,
+            ["functions"] = new JsonArray(ScriptFunctions.All.Select(f => (JsonNode?)new JsonObject
+                { ["name"] = f.Name, ["signature"] = f.Signature, ["description"] = f.Description }).ToArray()),
+        };
+    }
+
+    private static JsonArray EmailCatalogActions() => new(Scripts.Actions.EmailActions.All.Select(a =>
+    {
+        var props = a.Signature.Args["properties"] as JsonObject ?? [];
+        var required = (a.Signature.Args["required"] as JsonArray ?? []).Select(r => (string?)r).ToHashSet();
+        var parameters = new JsonArray(props.Select(pr => (JsonNode?)Param(pr.Key,
+            Scripts.Language.ScriptType.FromJsonSchema(pr.Value, BuiltInFind).ToString(), required.Contains(pr.Key),
+            pr.Value?["description"] is JsonValue d && d.TryGetValue<string>(out var text) ? text : null)).ToArray());
+        return (JsonNode?)new JsonObject
+        {
+            ["name"] = a.Name, ["description"] = EmailActionText(a.Name), ["params"] = parameters, ["result"] = a.Signature.Result,
+        };
+    }).ToArray());
+
+    private static Scripts.Language.ScriptSchema? BuiltInFind(string name) => Scripts.Language.BuiltInSchemas.Find(name);
+
+    private static string EmailActionText(string action) => action switch
+    {
+        "list" => "Lists a folder's messages (for polling: after the last id you saved).",
+        "get" => "Reads one message by its id.",
+        "search" => "Searches a folder.",
+        "thread" => "Reads a conversation's messages.",
+        "markRead" => "Marks a message read (a change: a dry run does not do it).",
+        "move" => "Moves a message to another folder (a change: a dry run does not do it).",
+        _ => "",
+    };
+
+    private JsonArray ApiCatalogActions(string api, long? teamId) => new(library.Integrations.ApiOperations(api, teamId).Select(o =>
+    {
+        var action = new JsonObject
+        {
+            ["name"] = o.Action,
+            ["description"] = o.Summary.Length > 0 ? o.Summary : $"{o.Method} {o.Route}",
+            ["params"] = new JsonArray(o.Parameters.Select(x => (JsonNode?)Param(x.Name, ApiType(x.Type), x.Required, x.Description)).ToArray()),
+            ["result"] = "ApiResponse",
+        };
+        if (o.Decision == "ask") action["ask"] = true;
+        return (JsonNode?)action;
+    }).ToArray());
+
+    /// <summary>An API parameter's JSON type as a script type.</summary>
+    private static string ApiType(string? jsonType) => jsonType switch
+    {
+        "integer" => "int",
+        "number" => "float",
+        "boolean" => "bool",
+        "array" => "list<any>",
+        "object" => "object",
+        _ => "string",
+    };
+
+    private static JsonObject Param(string name, string type, bool required, string? description)
+    {
+        var o = new JsonObject { ["name"] = name, ["type"] = type, ["required"] = required };
+        if (!string.IsNullOrWhiteSpace(description)) o["description"] = description;
+        return o;
+    }
+
+    private JsonObject RealNames(JsonObject? p)
+    {
+        var bindings = OptObject(p, "bindings")?.Where(kv => kv.Value is JsonValue v && v.TryGetValue<string>(out _))
+            .ToDictionary(kv => kv.Key, kv => kv.Value!.GetValue<string>(), StringComparer.Ordinal);
+        var (document, renamed, unresolved) = library.UseRealNames(DocumentText(p, "document"), bindings);
+        var map = new JsonObject();
+        foreach (var (alias, real) in renamed) map[alias] = real;
+        return new JsonObject
+        {
+            ["document"] = document, ["renamed"] = map, ["unresolved"] = new JsonArray(unresolved.Select(u => (JsonNode?)u).ToArray()),
+        };
+    }
+
+    private JsonObject Usage(string name) => new()
+    {
+        ["scripts"] = new JsonArray(library.SchemaUsage(name).Select(u => (JsonNode?)new JsonObject
+        {
+            ["id"] = u.Id, ["name"] = u.Name, ["version"] = u.Version,
+            ["variables"] = new JsonArray(u.Variables.Select(v => (JsonNode?)v).ToArray()),
+            ["steps"] = new JsonArray(u.Steps.Select(s => (JsonNode?)s).ToArray()),
+        }).ToArray()),
+    };
 
     private ScriptMemberRow MemberOf(JsonObject? p) =>
         store.Member(Long(p, "memberId")) ?? throw new RpcException("not_found", "that member is not a script member");
@@ -146,6 +260,10 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
     {
         var state = store.State(m.MemberId);
         var last = store.RecentRuns(null, m.MemberId, 1).FirstOrDefault();
+        var runsVersion = m.Version ?? library.RunnableVersion(m.ScriptId);
+        var document = library.Get(m.ScriptId, runsVersion).Document;
+        var integrations = new JsonArray(ScriptSettings.MemberIntegrations(document, m.Bindings, library.Integrations).Select(i => (JsonNode?)new JsonObject
+            { ["name"] = i.Name, ["kind"] = i.Kind, ["uses"] = i.Uses, ["overridden"] = i.Overridden }).ToArray());
         return new JsonObject
         {
             ["memberId"] = m.MemberId,
@@ -155,9 +273,10 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
             ["scriptId"] = m.ScriptId,
             ["script"] = library.Get(m.ScriptId).Key,
             ["version"] = m.Version,
-            ["runsVersion"] = m.Version ?? library.RunnableVersion(m.ScriptId),
+            ["runsVersion"] = runsVersion,
             ["settings"] = m.Settings.DeepClone(),
             ["bindings"] = m.Bindings.DeepClone(),
+            ["integrations"] = integrations,
             ["timeoutMinutes"] = m.TimeoutMinutes,
             ["consecutiveFailures"] = state.ConsecutiveFailures,
             ["running"] = runner.IsRunning(m.MemberId),
