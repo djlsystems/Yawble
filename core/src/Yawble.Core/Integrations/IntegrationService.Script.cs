@@ -46,6 +46,12 @@ public sealed record ScriptOperation(string Action, string Method, string Route,
     IReadOnlyList<ScriptOperationParameter> Parameters, string? BodyMediaType);
 
 /// <summary>
+/// An API operation a team's scripts could be allowed to call (B139): the API's name, the action id, its HTTP method, route and summary, the
+/// team, and the team's decision on it now ("allow", "ask" or "deny").
+/// </summary>
+public sealed record ScriptActionToAllow(string Api, string Action, string Method, string Route, string Summary, long TeamId, string Team, string Decision);
+
+/// <summary>
 /// A script member's calls of an API integration (SC-2): the same rules as an agent's (the API turned on for the team, the action decided by
 /// <see cref="ApiDecide"/>), the same sign-in (<see cref="ResolveSignInAsync"/>, <see cref="SendApiAsync"/>) and the same integration_calls
 /// log, with the script member as the caller (via "script", the script run's id in the args). No agent RunContext: an "ask" is refused, never
@@ -185,6 +191,26 @@ public sealed partial class IntegrationService
             JsonArray a => a.Select(n => n is JsonValue v && v.TryGetValue<string>(out var t) ? t : null).FirstOrDefault(t => t is not null and not "null"),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// B139 (integration_action_allow): the operation <paramref name="action"/> of the API <paramref name="integration"/> ("name" or "api:name")
+    /// that <paramref name="team"/> would be allowed, with the team's decision on it now ("allow", "ask" or "deny"). Reads only. Throws
+    /// <see cref="ScriptApiRefusedException"/> when the team or the API is unknown, the API is not turned on for the team, the action is unknown
+    /// or gone, or it is a sign-in (floor) action that is never allowed.
+    /// </summary>
+    public ScriptActionToAllow ActionToAllowForScripts(string team, string integration, string action)
+    {
+        var (teamId, teamName) = ScriptTeam(team);
+        var api = ScriptApi(teamId, teamName, integration);
+        var id = action?.Trim() ?? "";
+        var op = ApiOps(api.Id).FirstOrDefault(o => o.Id == id);
+        if (op is null) throw new ScriptApiRefusedException($"refused: {api.Name} has no action '{Clip(SecretScrubber.Scrub(id), 100)}'");
+        if (op.Gone) throw new ScriptApiRefusedException($"refused: {api.Name}'s {op.Id} is gone: its spec no longer lists it");
+        if (op.Class == CommandClass.Credential)
+            throw new ScriptApiRefusedException($"refused: {api.Name}'s {op.Id} reveals or changes a sign-in: it is never allowed (the sign-in floor)");
+        var decision = ApiDecide(op, ApiRulesOf(api.Id, teamId), ApiRulesOf(api.Id, null)).Decision;
+        return new ScriptActionToAllow(api.Name, op.Id, op.Method, op.Route, op.Summary, teamId, teamName, decision);
     }
 
     /// <summary>The team by its name (any case): its id and name as stored.</summary>

@@ -13,4 +13,14 @@ describe('a page whose file cannot be loaded', () => {
     expect(w.get('[data-test=page-load-failed]').text()).toContain('This page could not be loaded.');
     expect(w.find('[data-test=page-load-reload]').exists()).toBe(true);
   });
+
+  it('Reload uses the desktop window Reload command, as Ctrl+R does', async () => {
+    const commands: string[] = [];
+    (window as any).yawble = { windowCommand: (c: string) => commands.push(c), call: async () => ({}), onEvent: () => () => {} };
+    try {
+      const w = mount(PageLoadFailed);
+      await w.get('[data-test=page-load-reload]').trigger('click');
+      expect(commands).toEqual(['reload']);
+    } finally { delete (window as any).yawble; }
+  });
 });

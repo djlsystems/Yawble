@@ -101,14 +101,16 @@ public sealed class B135ScriptToolsTests : IAsyncLifetime
         var reply = await Tools().HandleAsync(body, Ct);
         var names = JsonNode.Parse(reply.Json!)!["result"]!["tools"]!.AsArray().Select(t => t!["name"]!.GetValue<string>()).ToList();
         string[] expected = ["schemas_list", "schema_get", "schema_save", "scripts_list", "script_get", "script_save", "script_check",
-            "script_test_run", "script_runs", "script_run", "script_member_add"];
+            "script_test_run", "script_runs", "script_run", "script_member_add",
+            // B139 (card 634): B139ScriptToolsTests covers these two.
+            "script_trigger_set", "integration_action_allow"];
         foreach (var n in expected)
         {
             Assert.Contains(n, names);
             Assert.Contains(n, ConciergeTools.ToolNames);
         }
         Assert.Equal(expected, ScriptTools.Names);
-        Assert.Equal(["schema_save", "script_save", "script_test_run", "script_member_add"], ScriptTools.Acting);
+        Assert.Equal(["schema_save", "script_save", "script_test_run", "script_member_add", "script_trigger_set", "integration_action_allow"], ScriptTools.Acting);
         foreach (var n in ScriptTools.Acting) Assert.Contains(n, ConciergeTools.Acting);
         Assert.Contains("script_member_add", ConciergeTools.LocalOnly);
         Assert.DoesNotContain("script_test_run", ConciergeTools.LocalOnly); // a dry run stays allowed; a live one is refused by its args
