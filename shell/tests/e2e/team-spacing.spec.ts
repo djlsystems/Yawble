@@ -548,7 +548,7 @@ async function hubsOnScreen(page: Page, f: Frame, n: number) {
 // The default spacing at 2 and 3 teams.
 
 for (const theme of ['dark', 'light'] as const) for (const w of [1280, 375]) for (const n of [2, 3]) {
-  test(`403 spacing ${theme} ${w} ${n} teams: close, no overlap, no empty middle; hub distances`, async ({ browser }) => {
+  test(`spacing ${theme} ${w} ${n} teams: close, no overlap, no empty middle; hub distances`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, { w, theme, teams: n });
     const f = await settle(page, n);
     const m = measure(f, n, await labelWidthMap(page, f));
@@ -581,7 +581,7 @@ for (const theme of ['dark', 'light'] as const) for (const w of [1280, 375]) for
 // =====================================================================================================================
 // The Team spacing setting.
 
-test('403 setting: the cog shows Team spacing (0.25-3, step 0.05, default 1); it moves the teams live; Auto fit / Fit refit; kept; Reset; clamped', async ({ browser }) => {
+test('the spacing setting: the cog shows Team spacing (0.25-3, step 0.05, default 1); it moves the teams live; Auto fit / Fit refit; kept; Reset; clamped', async ({ browser }) => {
   const r: Record<string, any> = {};
   const { page, ctx, errors } = await open(browser, { w: 1280, theme: 'dark', teams: 3 });
   let f = await settle(page, 3);
@@ -668,7 +668,7 @@ test('403 setting: the cog shows Team spacing (0.25-3, step 0.05, default 1); it
 });
 
 for (const [stored, want] of [['{"spacing":9}', '3'], ['{"spacing":0.01}', '0.25'], ['{"spacing":"abc"}', '1'], ['{"spacing":1.234}', '1.25'], ['{"spacing":-2}', '0.25'], ['not json', '1']] as const) {
-  test(`403 clamp: stored ${stored} reads as ${want}`, async ({ browser }) => {
+  test(`the spacing setting: clamp: stored ${stored} reads as ${want}`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, { w: 1280, teams: 2, layout: stored });
     await openCog(page);
     const v = await page.locator('[data-test=monitor-layout-spacing]').inputValue();
@@ -679,7 +679,7 @@ for (const [stored, want] of [['{"spacing":9}', '3'], ['{"spacing":0.01}', '0.25
   });
 }
 
-test('403 setting at 375 light: the phone cog shows Team spacing and moves the teams', async ({ browser }) => {
+test('the spacing setting at 375 light: the phone cog shows Team spacing and moves the teams', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, { w: 375, theme: 'light', teams: 3 });
   let f = await settle(page, 3);
   const a = measure(f, 3);
@@ -703,7 +703,7 @@ test('403 setting at 375 light: the phone cog shows Team spacing and moves the t
 // No panel; the node labels.
 
 for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'open'], ['dark', 375, 'open'], ['light', 375, 'open'], ['dark', 1280, 'collapsed'], ['light', 1280, 'collapsed']] as const) {
-  test(`405 labels ${theme} ${w} activity ${activity}: no panel, "#id title" as the rule, >= 8 px, overlaps, hover / click / drag`, async ({ browser }) => {
+  test(`labels ${theme} ${w} activity ${activity}: no panel, "#id title" as the rule, >= 8 px, overlaps, hover / click / drag`, async ({ browser }) => {
     const r: Record<string, any> = {};
     const tag = `${theme}-${w}${activity === 'collapsed' ? '-noactivity' : ''}`;
     results.nodes[`labels-${tag}`] = r;
@@ -800,7 +800,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
   });
 }
 
-test('405 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels stay >= 8 px', async ({ browser }) => {
+test('labels: 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels stay >= 8 px', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, { w: 375, theme: 'dark', teams: 3 });
   let f = await settle(page, 3);
   const r: Record<string, any> = {};
@@ -833,7 +833,7 @@ test('405 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels stay 
   await ctx.close();
 });
 
-test('405 1280 wide zoomed out (Activity hidden, wall over 760): titles stay (only a phone wall drops to "#id")', async ({ browser }) => {
+test('labels: 1280 wide zoomed out (Activity hidden, wall over 760): titles stay (only a phone wall drops to "#id")', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, { w: 1280, teams: 3, activity: 'collapsed' });
   await settle(page, 3);
   const box = await canvasBox(page);
@@ -880,7 +880,7 @@ test('405 1280 wide zoomed out (Activity hidden, wall over 760): titles stay (on
   await ctx.close();
 });
 
-test('405 focus: the other teams\' labels dim; the focused team\'s stay full', async ({ browser }) => {
+test('labels: focus: the other teams\' labels dim; the focused team\'s stay full', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, { w: 1280, teams: 3 });
   let f = await settle(page, 3);
   const before = wfLabels(f).map((l) => l.alpha);
@@ -917,7 +917,7 @@ test('405 focus: the other teams\' labels dim; the focused team\'s stay full', a
   await ctx.close();
 });
 
-test('405 reduced motion: the labels and nodes do not animate (no turning arc, still labels)', async ({ browser }) => {
+test('labels: reduced motion: the labels and nodes do not animate (no turning arc, still labels)', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, { w: 1280, teams: 3, reduced: true });
   await settle(page, 3);
   await page.waitForTimeout(1500);
@@ -939,7 +939,7 @@ test('405 reduced motion: the labels and nodes do not animate (no turning arc, s
   await ctx.close();
 });
 
-test('405 a workflow that completes flashes green and leaves, one closed fades; both show in Activity', async ({ browser }) => {
+test('labels: a workflow that completes flashes green and leaves, one closed fades; both show in Activity', async ({ browser }) => {
   const { page, ctx, feed, errors } = await open(browser, { w: 1280, teams: 2 });
   await settle(page, 2);
   const done = wfsOf(0)[1]!, closed = wfsOf(1)[2]!;
