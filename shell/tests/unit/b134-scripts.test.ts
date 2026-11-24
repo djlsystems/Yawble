@@ -10,6 +10,7 @@ import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
 import ScriptsDialog from '../../src/renderer/src/components/scripts/ScriptsDialog.vue';
 import ScriptRunView from '../../src/renderer/src/components/scripts/ScriptRunView.vue';
 import ScriptTestRun from '../../src/renderer/src/components/scripts/ScriptTestRun.vue';
+import { ASK_CONCIERGE_PROMPT, discussRequest } from '../../src/renderer/src/conciergeDiscuss';
 import { confirmState } from '../../src/renderer/src/confirm';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
 import { buildNav } from '../../src/renderer/src/embed';
@@ -188,7 +189,7 @@ describe('the Scripts dialog', () => {
     const f = fakeApi();
     const w = await dialog(f.api);
     await w.get('[data-test=scripts-new]').trigger('click');
-    expect(w.findAll('[data-test=scripts-new-menu] button').map((b) => b.text())).toEqual(['Blank', 'Inbox SMS alert']);
+    expect(w.findAll('[data-test=scripts-new-menu] button').map((b) => b.text())).toEqual(['Blank', 'Inbox SMS alert', 'Ask the Concierge']);
     await w.get('[data-test=scripts-new-inbox-sms-alert]').trigger('click');
     await flushPromises();
     const area = w.get('[data-test=json-text]').element as HTMLTextAreaElement;
@@ -235,6 +236,76 @@ describe('the Scripts dialog', () => {
     // The flowchart has its own tab, kept for phase 3.
     await w.get('[data-test=editor-tab-flowchart]').trigger('click');
     expect(w.find('[data-test=editor-flowchart]').exists()).toBe(true);
+  });
+
+  it('New > Ask the Concierge opens a new Concierge chat (the discuss path) with a first message ready; no editor', async () => {
+    const f = fakeApi();
+    const w = await dialog(f.api);
+    const before = discussRequest.value?.seq ?? 0;
+    await w.get('[data-test=scripts-new]').trigger('click');
+    await w.get('[data-test=scripts-new-concierge]').trigger('click');
+    expect(discussRequest.value).toMatchObject({ teamId: null, text: ASK_CONCIERGE_PROMPT });
+    expect(discussRequest.value!.seq).toBeGreaterThan(before);
+    expect(ASK_CONCIERGE_PROMPT).toMatch(/^Help me build a script that/);
+    expect(w.find('[data-test=scripts-new-menu]').exists()).toBe(false);
+    expect(w.find('[data-test=script-editor]').exists()).toBe(false);
+    expect(f.of('scripts.save')).toHaveLength(0);
+  });
+
+  it('Test run with unsaved edits uses the saved version\'s document: its settings and bindings in the form and in the RPC', async () => {
+    const f = fakeApi();
+    const w = await dialog(f.api);
+    await rowOf(w, 'inbox-sms-alert').get('[data-test=script-open]').trigger('click');
+    await flushPromises();
+    // Unsaved: fromNumber renamed to sender, a new setting and a new requires entry.
+    const edited = JSON.parse(JSON.stringify(INBOX_SMS_ALERT));
+    edited.settings = edited.settings.map((s: any) => (s.name === 'fromNumber' ? { ...s, name: 'sender' } : s));
+    edited.settings.push({ name: 'extra', type: 'string', label: 'Unsaved setting' });
+    edited.requires.push({ name: 'files', kind: 'api', actions: ['Get'] });
+    await w.get('[data-test=json-text]').setValue(pretty(edited));
+    expect(w.find('[data-test=editor-dirty]').exists()).toBe(true);
+    await w.get('[data-test=editor-tab-test]').trigger('click');
+    await flushPromises();
+    expect(w.get('.test .warn').text()).toContain('version 3 as saved');
+    const names = (sel: string) => w.findAll(`[data-test^=${sel}-]`).map((x) => x.attributes('data-test'));
+    expect(names('test-setting')).toEqual(['test-setting-recipients', 'test-setting-fromNumber', 'test-setting-folder', 'test-setting-since']);
+    expect(names('test-binding')).toEqual(['test-binding-mail', 'test-binding-sms']);
+    await w.get('[data-test=test-setting-recipients] textarea').setValue('+15550000001');
+    await w.get('[data-test=test-setting-fromNumber] input').setValue('+15550000000');
+    await w.get('[data-test=script-test-run]').trigger('submit');
+    await flushPromises();
+    const p = f.of('scripts.testRun')[0]!.params;
+    expect(p.version).toBe(3);
+    expect(Object.keys(p.settings).sort()).toEqual(['folder', 'fromNumber', 'recipients', 'since']);
+    expect(p.settings).toMatchObject({ recipients: ['+15550000001'], fromNumber: '+15550000000' });
+    expect(p.bindings).toEqual({ mail: 'Support mail', sms: 'Twilio' });
+  });
+
+  it('after a Save, Test run follows the newly saved document (its new setting and requires entry)', async () => {
+    const f = fakeApi();
+    const w = await dialog(f.api);
+    await rowOf(w, 'inbox-sms-alert').get('[data-test=script-open]').trigger('click');
+    await flushPromises();
+    await w.get('[data-test=editor-tab-test]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=test-setting-extra]').exists()).toBe(false);
+    const edited = JSON.parse(JSON.stringify(INBOX_SMS_ALERT));
+    edited.settings.push({ name: 'extra', type: 'string', label: 'Saved setting', default: 'x' });
+    edited.requires.push({ name: 'files', kind: 'api', actions: ['Get'] });
+    await w.get('[data-test=editor-tab-json]').trigger('click');
+    await w.get('[data-test=json-text]').setValue(pretty(edited));
+    await w.get('[data-test=editor-save]').trigger('click');
+    await flushPromises();
+    await w.get('[data-test=editor-tab-test]').trigger('click');
+    await flushPromises();
+    expect(w.find('.test .warn').exists()).toBe(false);
+    expect(w.find('[data-test=test-setting-extra]').exists()).toBe(true);
+    expect(w.find('[data-test=test-binding-files]').exists()).toBe(true);
+    await w.get('[data-test=script-test-run]').trigger('submit');
+    await flushPromises();
+    const p = f.of('scripts.testRun')[0]!.params;
+    expect(p.version).toBe(4);
+    expect(p.bindings).toMatchObject({ mail: 'Support mail', sms: 'Twilio' });
   });
 
   it('a JSON that does not parse is not saved and says why', async () => {

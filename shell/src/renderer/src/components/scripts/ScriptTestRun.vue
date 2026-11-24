@@ -13,7 +13,8 @@ import ScriptRunView from './ScriptRunView.vue';
 
 // Test run (B134): a team, the script's settings as a form, one binding per requires entry (over the team's
 // integrations), and an input (a fake TriggerFired now, or a sample). Dry run is on by default; the first live run of a
-// script asks first, and the answer is remembered per script key. Calls scripts.testRun and shows the run view.
+// script asks first, and the answer is remembered per script key. Calls scripts.testRun and shows the run view. doc is
+// the document of ersion (the one that runs), so the form, the bindings and the fake input match what the RPC runs.
 const props = defineProps<{ api: YawbleApi; script: { id: number; key: string }; version?: number; doc: ScriptDocument | null; teams: readonly TeamSummary[] }>();
 const emit = defineEmits<{ ran: [r: TestRunResult] }>();
 const s = scriptsApi(props.api);
@@ -27,13 +28,18 @@ watch(settings, (list) => {
 }, { immediate: true });
 const bindings = reactive<Record<string, string>>({});
 const choices = ref<BindingChoice[]>([]);
-watch(teamId, async (id) => {
-  choices.value = id === null ? [] : await teamBindingChoices(props.api, id);
+function fillBindings() {
   for (const r of requires.value) {
     const of = choicesFor(r.kind);
     if (!of.some((c) => c.name === bindings[r.name])) bindings[r.name] = of.length === 1 ? of[0]!.name : '';
   }
+}
+watch(teamId, async (id) => {
+  choices.value = id === null ? [] : await teamBindingChoices(props.api, id);
+  fillBindings();
 }, { immediate: true });
+// A save (or another version picked) changes the document that runs: its new requires entries get a binding too.
+watch(requires, fillBindings);
 /** The team's integrations of the entry's kind; all of them when none is of that kind (the core checks the binding). */
 function choicesFor(kind: string): BindingChoice[] {
   const same = choices.value.filter((c) => c.kind === kind);

@@ -39,6 +39,8 @@ const editor = ref<InstanceType<typeof JsonEditor> | null>(null);
 const parseProblem = computed(() => jsonProblem(text.value));
 const doc = computed<ScriptDocument | null>(() => (parseProblem.value ? null : (JSON.parse(text.value) as ScriptDocument)));
 const dirty = computed(() => text.value !== savedText.value);
+/** The saved version's document (the one Test run runs): its settings, requires and trigger shape the test form, never the unsaved buffer. */
+const savedDoc = computed<ScriptDocument | null>(() => (jsonProblem(savedText.value) ? null : (JSON.parse(savedText.value) as ScriptDocument)));
 const issueSteps = computed(() => (check.value?.issues ?? []).map((i) => i.stepId).filter((x): x is string => !!x));
 /** The problems grouped by step, the document's own (stepId null) first. */
 const grouped = computed(() => {
@@ -164,7 +166,7 @@ function pickVersion(e: Event) {
     </div>
     <div v-if="tab === 'test' && current" class="test">
       <p v-if="dirty" class="warn small">The test runs version {{ version }} as saved, not the changes above.</p>
-      <ScriptTestRun :api="api" :script="current" :version="version ?? undefined" :doc="doc" :teams="teams" />
+      <ScriptTestRun :api="api" :script="current" :version="version ?? undefined" :doc="savedDoc" :teams="teams" />
     </div>
   </div>
 </template>

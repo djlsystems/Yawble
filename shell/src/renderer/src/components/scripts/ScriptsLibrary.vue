@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import type { TeamSummary, YawbleApi } from '../../../../shared/api';
 import { errorCode, errorText } from '../../api';
+import { ASK_CONCIERGE_PROMPT, discussWithConcierge } from '../../conciergeDiscuss';
 import { confirmDialog } from '../../confirm';
 import { readOnly } from '../../remoteAccess';
 import { scriptsApi, TEMPLATES } from '../../scripts/api';
@@ -32,6 +33,11 @@ function open(x: ScriptSummary) { editing.value = { script: { id: x.id, key: x.k
 function newScript(doc: ScriptDocument) {
   newOpen.value = false;
   editing.value = { script: null, initial: JSON.parse(JSON.stringify(doc)) as ScriptDocument, n: ++n };
+}
+/** New > Ask the Concierge (scripts-design.md section 11): a new Concierge chat with a first message ready to finish. */
+function askConcierge() {
+  newOpen.value = false;
+  discussWithConcierge(null, ASK_CONCIERGE_PROMPT);
 }
 function closeEditor() { editing.value = null; void refresh(); }
 
@@ -90,6 +96,7 @@ const usedBy = (x: ScriptSummary) => x.usedBy.map((u) => `${u.team} / ${u.member
           <button type="button" class="primary" data-test="scripts-new" :aria-expanded="newOpen" @click="newOpen = !newOpen">New</button>
           <div v-if="newOpen" class="menu" role="menu" data-test="scripts-new-menu">
             <button v-for="t in TEMPLATES" :key="t.id" type="button" role="menuitem" :data-test="`scripts-new-${t.id}`" @click="newScript(t.doc)">{{ t.label }}</button>
+            <button type="button" role="menuitem" data-test="scripts-new-concierge" @click="askConcierge">Ask the Concierge</button>
           </div>
         </div>
         <button type="button" data-test="scripts-import" @click="fileInput?.click()">Import…</button>
