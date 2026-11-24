@@ -33,7 +33,11 @@ public sealed partial class BusEngine
             ["firedAt"] = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
         };
         var fire = scripts.FireScript(member, TriggerSourcePrefix + row.Id, payload);
-        Log($"trigger {row.Id} ({row.Name}) {fire.Outcome} script member {member.Qualified}{(fire.Reason is { } r ? ": " + r : "")}");
+        // B143: routine, at debug, with the script run it started (or recorded as skipped).
+        Logs.Diag.Debug("scripts", $"trigger {row.Id} ({row.Name}) {fire.Outcome} script member {member.Qualified}"
+            + (fire.ScriptRunId is { } id ? $" (script run {id})" : "") + (fire.Reason is { } r ? ": " + r : ""),
+            ("team", member.Team), ("member", member.Qualified), ("trigger", row.Id), ("schedule", row.Schedule.Kind),
+            ("scriptRun", fire.ScriptRunId), ("status", fire.Outcome));
         return fire;
     }
 

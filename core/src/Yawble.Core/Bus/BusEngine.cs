@@ -272,8 +272,10 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// refused as answered already, so an action is applied and a reply sent once. <paramref name="beforePublish"/> runs
     /// outside the gate because an action is the setting's own call, which takes the gate itself.
     /// </summary>
+    /// <remarks>B142 (card 620): <paramref name="action"/> is the picked option's action; for
+    /// <see cref="DecisionActions.CloseOverFail"/> the answer records the person's yes (<c>closeOverFail</c>, from the question).</remarks>
     public async Task<Message> PersonAnswerAsync(string team, string member, string text, long decision,
-        Func<string, CancellationToken, Task<string>>? beforePublish = null, CancellationToken ct = default)
+        Func<string, CancellationToken, Task<string>>? beforePublish = null, CancellationToken ct = default, string? action = null)
     {
         await WithGate(() =>
         {
@@ -286,13 +288,23 @@ public sealed partial class BusEngine : IAsyncDisposable
             return await WithGate(() =>
             {
                 var target = CheckAnswer(team, member, decision);
-                return Publish(new NewMessage(MessageTypes.Instruction(target), BatchText.InstructionPayload(text.Trim(), null), MessageTypes.PersonSource, decision));
+                return Publish(new NewMessage(MessageTypes.Instruction(target), BatchText.InstructionPayload(text.Trim(), YesOf(action, decision)), MessageTypes.PersonSource, decision));
             }, CancellationToken.None);
         }
         finally
         {
             await WithGate(() => { _answering.Remove(decision); }, CancellationToken.None);
         }
+    }
+
+    /// <summary>B142: the person's yes to close over a FAIL, recorded on the answer; null for any other answer.</summary>
+    private System.Text.Json.Nodes.JsonObject? YesOf(string? action, long decision)
+    {
+        if (action != DecisionActions.CloseOverFail || _store.Find(decision) is not { } question
+            || DecisionAsk.Read(question.Payload).Close is not { } close) return null;
+        var yes = close.ToJson();
+        yes["decision"] = decision;
+        return new System.Text.Json.Nodes.JsonObject { ["closeOverFail"] = yes };
     }
 
     private static BusRefusal ArchivedRefusal(string team) =>
@@ -433,6 +445,12 @@ public sealed partial class BusEngine : IAsyncDisposable
             {
                 throw new BusRefusal("busy", "workflow completion refused because work is still in flight under this workflow: " + string.Join("; ", busy));
             }
+            // B142 (card 620): never over a tester's FAIL, unless the person said yes to closing over it.
+            var fails = TesterVerdicts.Outstanding(_store.Workflow(correlation), run.Member.Team, TestersOf(run.Member.TeamId));
+            var open = fails.Where(f => f.Yes is null).ToList();
+            if (open.Count != 0) throw TesterVerdicts.Refusal(open);
+            var closedOverFail = fails.Count == 0 ? null
+                : fails.Select(f => new FailClosure(f.Card, f.Tester, f.FailLine, f.Yes!.Kind, f.Yes.Reason)).ToList();
             _statusLines[run.Member.Id] = "declared complete: " + delivered;
             var conflict = check is { Clean: false } ? check : null;
             if (conflict is not null) delivered += $"\n\nNot ready to land: {conflict.Text}.";
@@ -441,8 +459,32 @@ public sealed partial class BusEngine : IAsyncDisposable
                 {
                     delivered, declaredBy = run.Member.Qualified, onBehalfOf = onBehalf ? owner.Qualified : null,
                     mergeConflict = conflict is null ? null : new { into = conflict.BaseBranch, files = conflict.Files },
+                    closedOverFail = closedOverFail?.Select(c => new { card = c.Card, tester = c.Tester, failLine = c.FailLine, kind = c.Kind, reason = c.Reason }),
                 }),
                 run.Member.Qualified, run.Causation));
+        }, ct);
+
+    /// <summary>B142: the team's testers by name, by the rule BoardProjector.TestersOf uses (Board.TesterRule.IsTester).</summary>
+    private IReadOnlySet<string> TestersOf(long teamId) =>
+        _store.MemberRows(teamId).Where(Yawble.Core.Board.TesterRule.IsTester).Select(m => m.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// B142 (card 620): a needs_decision tied to a tester's FAIL (<see cref="DecisionAsk.Close"/>). Refused unless the card's
+    /// latest tester verdict in this workflow is a FAIL; otherwise stored like any decision.
+    /// </summary>
+    internal Task<Message> AskCloseOverFailAsync(RunContext run, DecisionAsk ask, CancellationToken ct) =>
+        WithGate(() =>
+        {
+            EnsureActive(run);
+            var close = ask.Close!;
+            var fails = TesterVerdicts.Outstanding(_store.Workflow(run.Correlation), run.Member.Team, TestersOf(run.Member.TeamId));
+            if (!fails.Any(f => f.Card == close.Card))
+            {
+                throw new BusRefusal("no_fail",
+                    $"card {close.Card} has no tester FAIL outstanding in this workflow, so there is nothing to close over; ask without card and kind");
+            }
+            _statusLines[run.Member.Id] = "needs decision: " + ask.Headline;
+            return Publish(new NewMessage(MessageTypes.NeedsDecision, ask.ToPayload().ToJsonString(), run.Member.Qualified, run.Causation));
         }, ct);
 
     internal Task<IReadOnlyList<MemberStatus>> TeamStatusAsync(long teamId, CancellationToken ct) =>
@@ -737,7 +779,9 @@ public sealed partial class BusEngine : IAsyncDisposable
         });
         _active[runId] = new ActiveRun(context, cancel, task);
         started.SetResult();
-        Log($"run {runId} admitted: {member!.Qualified}, {items.Length} item(s), workflow {context.Correlation}");
+        // B143: routine, at debug.
+        Logs.Diag.Debug("bus", $"run {runId} admitted: {member!.Qualified}, {items.Length} item(s), workflow {context.Correlation}",
+            ("team", member.Team), ("member", member.Qualified), ("run", runId), ("workflow", context.Correlation), ("items", items.Length));
     }
 
     private async Task ExecuteAsync(RunContext run, CancellationTokenSource cancel)

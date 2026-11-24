@@ -91,7 +91,7 @@ public static class FileLogs
     public static readonly FileLogSource Diagnostics = new(
         "diagnostics", "Diagnostics", "Diagnostics",
         "What the app itself reported while it ran, from its core and its window (From: core or shell): start-up and shutdown, cloning and syncing, background work, and errors. For finding out why something went wrong.",
-        [new("at", "Time", "", "time"), new("origin", "From", "", Filter: true), new("text", "Message", "")],
+        [new("at", "Time", "", "time"), new("origin", "From", "", Filter: true), new("text", "Message", ""), new("fields", "Fields", "")],
         dataDir =>
         {
             var folder = Path.Combine(dataDir, DiagnosticsFolder);
@@ -129,17 +129,36 @@ public sealed class DiagnosticLog(string dataDir, string origin, TimeProvider? c
     /// <summary>logs.tail: each line written is also offered to the open tails (none open: nothing more is done).</summary>
     public LogTail? Tail { get; set; }
 
-    public void Write(string text)
+    /// <summary>An untagged line (what the core writes on standard error): three columns, its level read from its text.</summary>
+    public void Write(string text) => Append(text, null, LogLevels.Info, null, null, untagged: true);
+
+    /// <summary>
+    /// A structured line: its level and area from the caller, its <paramref name="fields"/> (team, member, workflow, run,
+    /// script, step, action, integration, status, ms, attempt...) in a fourth column of key=value pairs
+    /// (<see cref="DiagFields"/>), the level and area first.
+    /// </summary>
+    public void Write(string level, string area, string text, IReadOnlyList<(string Key, object? Value)>? fields = null)
+    {
+        var column = DiagFields.Format(level, area, fields);
+        var (team, member) = DiagFields.TeamMember(fields);
+        Append(text, column, LogLevels.Normal(level), team, member, untagged: false);
+    }
+
+    private void Append(string text, string? fieldsColumn, string level, string? team, string? member, bool untagged)
     {
         var now = _clock.GetUtcNow();
         var at = now.ToString("O", CultureInfo.InvariantCulture);
         var sb = new StringBuilder();
         var tail = Tail is { Count: > 0 } open ? open : null;
-        foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+        foreach (var raw in text.Replace("\r\n", "\n").Split('\n'))
         {
-            if (line.Trim().Length == 0) continue;
-            sb.Append(at).Append('\t').Append(origin).Append('\t').Append(line.Replace('\t', ' ')).Append('\n');
-            tail?.Write(new LogTailEntry(at, FileLogs.Diagnostics.Id, LogLevels.Of(null, line), null, null, origin, line.Replace('\t', ' '), MemberInText: true));
+            if (raw.Trim().Length == 0) continue;
+            var line = raw.Replace('\t', ' ');
+            sb.Append(at).Append('\t').Append(origin).Append('\t').Append(line);
+            if (fieldsColumn is not null) sb.Append('\t').Append(fieldsColumn);
+            sb.Append('\n');
+            tail?.Write(new LogTailEntry(at, FileLogs.Diagnostics.Id, untagged ? LogLevels.Of(null, line) : level, team, member, origin, line,
+                MemberInText: untagged));
         }
         if (sb.Length == 0) return;
         lock (_lock)

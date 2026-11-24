@@ -79,8 +79,8 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
     {
         var fire = Start(member.Id, source, payload);
         return fire.Started
-            ? new TriggerFire("fired", null, null)
-            : new TriggerFire("skipped", null, fire.Reason);
+            ? new TriggerFire("fired", null, null, fire.RunId)
+            : new TriggerFire("skipped", null, fire.Reason, fire.RunId);
     }
 
     /// <summary>A start in the background (a trigger's fire, Run now).</summary>
@@ -92,13 +92,13 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             release();
-            _log?.Invoke($"script member {memberId}: could not start a run: {e.Message}");
+            Warn(memberId, null, trigger, e, "could not start a run");
             return new ScriptFireOutcome(false, null, e.Message);
         }
         var task = Task.Run(async () =>
         {
             try { await ExecuteMemberRunAsync(memberId, runId, null, _stopping.Token); }
-            catch (Exception e) { _log?.Invoke($"script run {runId}: {e.Message}"); }
+            catch (Exception e) { Warn(memberId, runId, trigger, e, "the run stopped with an error"); }
             finally { release(); }
         });
         Track(runId, task);
@@ -220,7 +220,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
             var task = Task.Run(async () =>
             {
                 try { await ExecuteMemberRunAsync(memberId, run.Id, new Resume(run, checkpoint), _stopping.Token); }
-                catch (Exception e) { _log?.Invoke($"script run {run.Id}: {e.Message}"); }
+                catch (Exception e) { Warn(memberId, run.Id, run.Trigger, e, "the resumed run stopped with an error"); }
                 finally { release(); }
             });
             Track(run.Id, task);
@@ -329,7 +329,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
-            _log?.Invoke($"{member.Qualified}: could not open the failure decision: {e.Message}");
+            Warn(member.MemberId, runId, null, e, "could not open the failure decision");
         }
     }
 
@@ -366,7 +366,59 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         var status = succeeded ? ScriptRunStatus.Succeeded : ScriptRunStatus.Failed;
         _store.CloseOpenSteps(runId, status);
         _store.Finish(runId, status, result.Outputs, succeeded ? null : result.FailedStepId, succeeded ? null : result.Reason);
+        if (!succeeded) LogFailedRun(runId, result.FailedStepId, journal);
         return new EngineEnd(succeeded, result.Reason, succeeded ? result.SavedVariables : null);
+    }
+
+    /// <summary>
+    /// B143: the one warning line for a failed run, from its finished row (the reason as the store scrubbed it): the script
+    /// run, the member (qualified), the script key@version, the trigger, the failed step's id and type, the integration and
+    /// action it called, and the duration. Never the step's input or output (they may carry message content). Never throws.
+    /// </summary>
+    private void LogFailedRun(long runId, string? failedStepId, StoreJournal journal)
+    {
+        try
+        {
+            var run = _store.Run(runId);
+            if (run is null) return;
+            var qualified = run.Member is { } name ? $"{run.Team}/{name}" : null;
+            var step = failedStepId ?? journal.CurrentStep;
+            var called = step is null ? null : journal.Called(step);
+            var integration = called?.Use is { } use && run.Bindings?[use] is JsonValue bound && bound.TryGetValue<string>(out var boundName) ? boundName : called?.Use;
+            long? ms = DateTimeOffset.TryParse(run.StartedAt, out var started) && DateTimeOffset.TryParse(run.EndedAt, out var ended)
+                ? (long)(ended - started).TotalMilliseconds : null;
+            var text = $"script run {runId} failed" + (qualified is not null ? $": {qualified}" : run.Test ? ": a Test run" : "")
+                + $", {run.Script}@{run.Version}, started by {run.Trigger}"
+                + (step is not null ? $", at step {step}" + (called?.Type is { } t ? $" ({t})" : "") : "")
+                + (run.Reason is { } r ? ": " + r : "");
+            Logs.Diag.Warning("scripts", text,
+                ("team", run.Team), ("member", qualified), ("scriptRun", runId), ("script", $"{run.Script}@{run.Version}"), ("trigger", run.Trigger),
+                ("step", step), ("stepType", called?.Type), ("integration", integration), ("action", called?.Action),
+                ("reason", run.Reason), ("ms", ms), ("status", run.Status));
+        }
+        catch (Exception e) when (e is not OutOfMemoryException) { /* the run is recorded; its log line is not the caller's problem */ }
+    }
+
+    /// <summary>A run that could not start or stopped with an error: member qualified name, trigger, script key and the exception type.</summary>
+    private void Warn(long memberId, long? runId, string? trigger, Exception e, string what)
+    {
+        string? qualified = null, team = null, script = null;
+        try
+        {
+            if (_store.Member(memberId) is { } m)
+            {
+                qualified = m.Qualified;
+                team = m.Team;
+                script = _library.Get(m.ScriptId).Key;
+            }
+        }
+        catch (Exception) { /* the line is written with what is known */ }
+        var reason = Connections.SecretScrubber.Scrub(e.Message);
+        var text = $"script member {qualified ?? memberId.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+            + (runId is { } id ? $", script run {id}" : "") + $": {what} ({e.GetType().Name}): {reason}";
+        Logs.Diag.Warning("scripts", text, ("team", team), ("member", qualified), ("scriptRun", runId), ("script", script), ("trigger", trigger),
+            ("exception", e.GetType().Name), ("reason", reason));
+        _log?.Invoke(text);
     }
 
     // ------------------------------------------------------------------ plumbing
@@ -424,18 +476,26 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
     /// <summary>The engine's journal over the store: each step's row, its checkpoint on the run, and the run's log.</summary>
     private sealed class StoreJournal(ScriptRunStore store, long runId) : IScriptRunJournal
     {
+        private readonly Dictionary<string, StepCall> _calls = new(StringComparer.Ordinal);
+
         public string? CurrentStep { get; private set; }
+
+        /// <summary>The last start of a step: its type, and for an integration step the requirement and action (never its args).</summary>
+        public StepCall? Called(string stepId) => _calls.GetValueOrDefault(stepId);
 
         public Task StepStartedAsync(string stepId, string type, JsonNode? input)
         {
             CurrentStep = stepId;
+            _calls[stepId] = new StepCall(type, Text(input, "use"), Text(input, "action"));
             store.StepStarted(runId, stepId, type, input);
             return Task.CompletedTask;
         }
 
         public Task StepCompletedAsync(ScriptStepRecord rec, ScriptRunCheckpoint cp)
         {
-            store.StepCompleted(runId, rec.StepId, rec.Type, rec.Input, rec.Output, rec.Status, rec.StartedAt, rec.EndedAt);
+            // A failed step has no output: its row keeps the reason instead ({ "error": ... }, scrubbed by the store).
+            var output = rec.Output ?? (rec.Error is { } error ? new JsonObject { ["error"] = error } : null);
+            store.StepCompleted(runId, rec.StepId, rec.Type, rec.Input, output, rec.Status, rec.StartedAt, rec.EndedAt);
             // Written before the next step starts: a restart resumes after this step.
             store.SetCheckpoint(runId, cp.ToJson());
             return Task.CompletedTask;
@@ -446,5 +506,10 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
             store.Log(runId, line);
             return Task.CompletedTask;
         }
+
+        private static string? Text(JsonNode? input, string key) =>
+            input is JsonObject o && o[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
     }
+
+    private sealed record StepCall(string Type, string? Use, string? Action);
 }

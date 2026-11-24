@@ -2,8 +2,8 @@ using Yawble.Core.Triggers;
 
 namespace Yawble.Core.Bus;
 
-/// <summary>What one trigger fire did.</summary>
-public sealed record TriggerFire(string Outcome, long? Seq, string? Reason);
+/// <summary>What one trigger fire did. <paramref name="ScriptRunId"/>: the script run a script member's fire started, or recorded as skipped.</summary>
+public sealed record TriggerFire(string Outcome, long? Seq, string? Reason, long? ScriptRunId = null);
 
 /// <summary>
 /// Triggers and wakes. The pump loop sweeps them at most every
@@ -43,7 +43,11 @@ public sealed partial class BusEngine
     private void SweepTriggers(DateTimeOffset now)
     {
         try { ResumeRateLimited(now); }
-        catch (Exception ex) { Log($"automatic resume sweep failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logs.Diag.Warning("triggers", $"automatic resume sweep failed: {ex.GetType().Name}: {ex.Message}",
+                ("check", "resuming rate-limited runs"), ("exception", ex.GetType().Name));
+        }
         foreach (var row in _store.DueTriggers(now))
         {
             try
@@ -52,7 +56,10 @@ public sealed partial class BusEngine
             }
             catch (Exception ex)
             {
-                Log($"trigger {row.Id} ({row.Name}) failed: {ex.Message}");
+                var member = MemberOrNull(row.MemberId);
+                Logs.Diag.Warning("triggers", $"trigger {row.Id} ({row.Name}) failed: {ex.GetType().Name}: {ex.Message}",
+                    ("team", member?.Team ?? TeamNameOrNull(row.TeamId)), ("member", member?.Qualified), ("trigger", row.Id),
+                    ("schedule", row.Schedule.Kind), ("exception", ex.GetType().Name));
             }
         }
         foreach (var wake in _store.DueWakes(now))
@@ -72,9 +79,25 @@ public sealed partial class BusEngine
             }
             catch (Exception ex)
             {
-                Log($"wake {wake.Id} failed: {ex.Message}");
+                var member = MemberOrNull(wake.MemberId);
+                Logs.Diag.Warning("triggers", $"wake {wake.Id} failed: {ex.GetType().Name}: {ex.Message}",
+                    ("team", member?.Team), ("member", member?.Qualified), ("wake", wake.Id), ("schedule", "wake"),
+                    ("causation", wake.CausationSeq),("exception", ex.GetType().Name));
             }
         }
+    }
+
+    /// <summary>A member for a failure's log line; null when it is gone or cannot be read (the line is written anyway).</summary>
+    private MemberRef? MemberOrNull(long memberId)
+    {
+        try { return _store.Member(memberId); }
+        catch (Exception) { return null; }
+    }
+
+    private string? TeamNameOrNull(long teamId)
+    {
+        try { return _store.Teams().FirstOrDefault(t => t.Id == teamId)?.Name; }
+        catch (Exception) { return null; }
     }
 
     private void FireDue(TriggerRow row, DateTimeOffset now)

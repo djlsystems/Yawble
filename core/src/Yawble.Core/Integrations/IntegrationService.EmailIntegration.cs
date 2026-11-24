@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Yawble.Core.Connections;
@@ -150,7 +151,7 @@ public sealed partial class IntegrationService
     /// <summary>
     /// Runs one Email action for a script: the integration <paramref name="integration"/> ("name" or "email:name") must exist and be turned on
     /// for the caller's team, and its email Connection be there with its password. Logs the call (the action and its arguments, never message
-    /// content) with the script member as the caller, then opens a signed-in IMAP session and runs <paramref name="work"/> on its mailbox.
+    /// content) with the script member as the caller after it opened a signed-in IMAP session and ran <paramref name="work"/> on its mailbox.
     /// Refusals throw <see cref="ScriptApiRefusedException"/>; a mail failure throws <see cref="MailException"/>; a bad argument
     /// <see cref="ArgumentException"/>. There is no send or delete action.
     /// </summary>
@@ -170,10 +171,115 @@ public sealed partial class IntegrationService
         catch (ArgumentException e) { throw new ScriptApiRefusedException("refused: " + e.Message); }
 
         var member = caller.Member.Contains('/', StringComparison.Ordinal) ? caller.Member : $"{teamName}/{caller.Member}";
-        string[] callArgs = [action, SecretScrubber.Scrub((args ?? []).ToJsonString()), $"script run {Clip(caller.ScriptRunId, 100)}"];
-        Insert(EmailIntegrationPrefix + email.Name, teamName, member, null, callArgs, Decisions.Allow, null, null, new Provenance.Actor(ScriptVia, null));
+        var integrationName = EmailIntegrationPrefix + email.Name;
+        var host = account.Settings.ImapHost;
 
-        await using var session = await MailClients.OpenImapAsync(account, ct);
-        return await work(new EmailMailbox(session));
+        // B143: the Tool-call row is written after the work, so a sign-in failure or a timeout says so: how long it took, how many messages
+        // came back (never their content), the host, and the mail error. Exit 0 when the work succeeded, 1 when it failed.
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        string? failure = null;
+        int? messages = null;
+        try
+        {
+            await using var session = await MailClients.OpenImapAsync(account, ct);
+            var result = await work(new EmailMailbox(session));
+            messages = MessageCount(result);
+            return result;
+        }
+        catch (Exception e)
+        {
+            failure = e is OperationCanceledException ? "cancelled (the run stopped or timed out)" : e.Message.Length > 0 ? e.Message : e.GetType().Name;
+            throw;
+        }
+        finally
+        {
+            watch.Stop();
+            try { LogEmailCall(integrationName, teamName, member, action, args ?? [], caller.ScriptRunId, host, messages, failure, watch.Elapsed); }
+            catch (SqliteException) { /* the call log is best effort here: the work's own outcome stands */ }
+        }
+    }
+
+    /// <summary>How many messages an Email action's result holds: a list's messages, a list of messages, or one message; null when unknown.</summary>
+    private static int? MessageCount(object? result) => result switch
+    {
+        JsonArray a => a.Count,
+        JsonObject o when o["messages"] is JsonArray list => list.Count,
+        JsonObject => 1,
+        _ => null,
+    };
+
+    /// <summary>
+    /// One Email action's Tool-call row: args [action, argument names and plain values, "script run N", "host H", "N messages" or "failed: why"].
+    /// A script member's routine list (it succeeded) is folded into the member's list row of this hour when there is one: its args then say
+    /// "N calls", the messages they returned in all and the first and last script run, and its duration is the sum. A failure is always its own row.
+    /// </summary>
+    private void LogEmailCall(string integration, string team, string member, string action, JsonObject args, string scriptRunId, string host,
+        int? messages, string? failure, TimeSpan duration)
+    {
+        var who = new Provenance.Actor(ScriptVia, null);
+        var run = Clip(scriptRunId, 100);
+        var hostText = "host " + Clip(SecretScrubber.Scrub(host ?? ""), 200);
+        var argsText = SecretScrubber.Scrub(args.ToJsonString());
+        var ms = (long)duration.TotalMilliseconds;
+        string Outcome(int? count) => count is { } n ? $"{n} message{(n == 1 ? "" : "s")}" : "done";
+        if (failure is null && action == Scripts.Actions.EmailActions.List)
+        {
+            var now = _clock.GetUtcNow();
+            var hourStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            using var c = Open();
+            using var tx = c.BeginTransaction();
+            using (var find = c.CreateCommand())
+            {
+                find.Transaction = tx;
+                find.CommandText = """
+                    SELECT id, args, duration_ms FROM integration_calls
+                    WHERE integration = $i AND member = $m AND via = $via AND exit_code = 0 AND at >= $hour AND json_extract(args, '$[0]') = $list
+                    ORDER BY id DESC LIMIT 1;
+                    """;
+                find.Parameters.AddWithValue("$i", integration);
+                find.Parameters.AddWithValue("$m", member);
+                find.Parameters.AddWithValue("$via", ScriptVia);
+                find.Parameters.AddWithValue("$hour", hourStart);
+                find.Parameters.AddWithValue("$list", Scripts.Actions.EmailActions.List);
+                using var r = find.ExecuteReader();
+                if (r.Read())
+                {
+                    var id = r.GetInt64(0);
+                    var earlier = EmailRowFacts(r.GetString(1));
+                    var total = r.IsDBNull(2) ? ms : r.GetInt64(2) + ms;
+                    r.Close();
+                    var calls = earlier.Calls + 1;
+                    var sum = (earlier.Messages ?? 0) + (messages ?? 0);
+                    var runs = earlier.FirstRun is { } first && first != run ? $"script runs {first} to {run}" : $"script run {run}";
+                    string[] folded = [action, argsText, runs, hostText, Outcome(sum), $"{calls} calls this hour"];
+                    Exec(c, tx, "UPDATE integration_calls SET args = $a, duration_ms = $ms WHERE id = $id;",
+                        ("$a", CliRunner.Redact(JsonSerializer.Serialize(CallArgsRedaction.ForLog(integration, folded)))), ("$ms", total), ("$id", id));
+                    tx.Commit();
+                    return;
+                }
+            }
+            tx.Commit();
+        }
+        string[] callArgs = [action, argsText, $"script run {run}", hostText, failure is null ? Outcome(messages) : "failed: " + Clip(SecretScrubber.Scrub(failure), 500)];
+        Insert(integration, team, member, null, callArgs, Decisions.Allow, null, new CliOutput(failure is null ? 0 : 1, "", "", 0, duration, false, false), who);
+    }
+
+    /// <summary>What a folded list row already says: its calls (1 when not folded yet), messages and first script run.</summary>
+    private static (int Calls, int? Messages, string? FirstRun) EmailRowFacts(string argsJson)
+    {
+        List<string>? parts;
+        try { parts = JsonSerializer.Deserialize<List<string>>(argsJson); }
+        catch (JsonException) { parts = null; }
+        if (parts is null) return (1, null, null);
+        var calls = 1;
+        int? messages = null;
+        string? firstRun = null;
+        foreach (var p in parts)
+        {
+            if (System.Text.RegularExpressions.Regex.Match(p, @"^(\d+) calls this hour$") is { Success: true } mc) calls = int.Parse(mc.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            else if (System.Text.RegularExpressions.Regex.Match(p, @"^(\d+) messages?$") is { Success: true } mm) messages = int.Parse(mm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            else if (System.Text.RegularExpressions.Regex.Match(p, @"^script runs? (\S+)") is { Success: true } mr) firstRun = mr.Groups[1].Value;
+        }
+        return (calls, messages, firstRun);
     }
 }
