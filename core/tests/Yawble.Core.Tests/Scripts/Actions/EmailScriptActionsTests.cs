@@ -31,18 +31,18 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
     private const string Requires = """[ { "name": "mail", "kind": "email", "actions": ["list", "get", "search", "thread", "markRead", "move"] } ]""";
 
     private const string Variables = """
-        [ { "name": "msgs", "type": "list<EmailMessage>" }, { "name": "one", "type": "EmailMessage" },
+        [ { "name": "res", "type": "EmailList" }, { "name": "msgs", "type": "list<EmailMessage>" }, { "name": "one", "type": "EmailMessage" },
           { "name": "lastSeen", "type": "datetime", "scope": "saved" } ]
         """;
 
     /// <summary>List the unread since lastSeen, get the newest, mark it read.</summary>
     private const string ReadSteps = """
         [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
-            "args": { "folder": "INBOX", "since": "{vars.lastSeen}", "unreadOnly": true, "max": 10 }, "into": "msgs", "next": "b" },
-          { "id": "b", "type": "integration", "use": "mail", "action": "get", "args": { "id": "{vars.msgs[1].id}" }, "into": "one", "next": "c" },
+            "args": { "folder": "INBOX", "since": "{vars.lastSeen}", "unreadOnly": true, "max": 10 }, "into": "res", "next": "b" },
+          { "id": "b", "type": "integration", "use": "mail", "action": "get", "args": { "id": "{vars.res.messages[1].id}" }, "into": "one", "next": "c" },
           { "id": "c", "type": "integration", "use": "mail", "action": "markRead", "args": { "id": "{vars.one.id}" }, "next": "d" },
           { "id": "d", "type": "set", "var": "lastSeen", "value": "{vars.one.receivedAt}", "next": "e" },
-          { "id": "e", "type": "end", "outputs": { "first": "{vars.msgs[0].subject}", "subject": "{vars.one.subject}", "body": "{vars.one.body}",
+          { "id": "e", "type": "end", "outputs": { "first": "{vars.res.messages[0].subject}", "reset": "{vars.res.cursorReset}", "subject": "{vars.one.subject}", "body": "{vars.one.body}",
               "unread": "{steps.c.unread}", "from": "{vars.one.from.address}" } } ]
         """;
 
@@ -152,7 +152,9 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
         Assert.True(catalog.IsChanging("email", "markRead"));
         Assert.True(catalog.IsChanging("email", "move"));
         var sigs = Assert.IsAssignableFrom<IScriptActionSignatures>(catalog);
-        Assert.Equal("list<EmailMessage>", sigs.Signature("email", "list")!.Result);
+        Assert.Equal("EmailList", sigs.Signature("email", "list")!.Result);
+        Assert.Equal("list<EmailMessage>", sigs.Signature("email", "search")!.Result);
+        Assert.Equal("list<EmailMessage>", sigs.Signature("email", "thread")!.Result);
         Assert.Equal("EmailMessage", sigs.Signature("email", "get")!.Result);
         Assert.Equal(["folder"], sigs.Signature("email", "list")!.Args["required"]!.AsArray().Select(n => (string?)n));
         Assert.Null(sigs.Signature("api", "list"));
@@ -184,7 +186,7 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
     [Fact]
     public void TheCheckTypesTheResult()
     {
-        // list gives list<EmailMessage>: into an EmailMessage variable is a mismatch, and a field it does not have is unknown
+        // list gives EmailList: into an EmailMessage variable is a mismatch, and a field it does not have is unknown
         var into = """[ { "id": "a", "type": "integration", "use": "mail", "action": "list", "args": { "folder": "INBOX" }, "into": "one", "next": null } ]""";
         Assert.Contains(ScriptChecker.Check(Doc(into), BuiltInSchemas.Lookup, _kinds.Catalog).Issues, i => i.Code == ScriptCheckCodes.TypeMismatch);
         var field = """
@@ -211,20 +213,33 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
             EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["max"] = "ten" })).Message);
         Assert.Contains("'folder' is empty", Assert.Throws<ScriptActionException>(() =>
             EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = " " })).Message);
-        Assert.Contains("give after or since, not both", Assert.Throws<ScriptActionException>(() =>
-            EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["after"] = "31:1", ["since"] = "2026-11-20T09:00:00Z" })).Message);
+        // after and since together: the documented poll (since is for the first run and for when after no longer applies)
+        EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["after"] = "31:1", ["since"] = "2026-11-20T09:00:00Z" });
         Assert.Contains("expected string", Assert.Throws<ScriptActionException>(() =>
             EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["after"] = 5 })).Message);
-        // null is no cursor: a first poll's unset saved variable
+        // null is no after: a first poll's unset saved variable
         EmailScriptActions.CheckArgs("mail", list, new JsonObject { ["folder"] = "INBOX", ["after"] = null, ["since"] = "2026-11-20T09:00:00Z" });
     }
 
     [Fact]
-    public void TheSchemasNameTheCursor()
+    public void TheSchemasPinListsArgsAndResult()
     {
         var args = EmailActions.Find("list")!.Signature.Args["properties"]!.AsObject();
+        Assert.Equal(["folder", "since", "unreadOnly", "max", "after"], args.Select(p => p.Key));
+        Assert.Equal("\"string\"", args["folder"]!["type"]!.ToJsonString());
+        Assert.Equal("""["string","null"]""", args["since"]!["type"]!.ToJsonString());
+        Assert.Equal("date-time", (string?)args["since"]!["format"]);
+        Assert.Equal("""["boolean","null"]""", args["unreadOnly"]!["type"]!.ToJsonString());
+        Assert.Equal("""["integer","null"]""", args["max"]!["type"]!.ToJsonString());
         Assert.Equal("""["string","null"]""", args["after"]!["type"]!.ToJsonString());
-        Assert.Equal("string", (string?)BuiltInSchemas.EmailMessage.Schema["properties"]!["cursor"]!["type"]);
+        // no cursor field: the id is the cursor
+        Assert.False(BuiltInSchemas.EmailMessage.Schema["properties"]!.AsObject().ContainsKey("cursor"));
+        Assert.Equal("string", (string?)BuiltInSchemas.EmailMessage.Schema["properties"]!["id"]!["type"]);
+        var result = BuiltInSchemas.EmailList.Schema;
+        Assert.Equal("array", (string?)result["properties"]!["messages"]!["type"]);
+        Assert.Equal("EmailMessage", (string?)result["properties"]!["messages"]!["items"]!["$ref"]);
+        Assert.Equal("boolean", (string?)result["properties"]!["cursorReset"]!["type"]);
+        Assert.Equal(["messages", "cursorReset"], result["required"]!.AsArray().Select(n => (string?)n));
     }
 
     // ------------------------------------------------------------------ runs
@@ -237,6 +252,7 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
         Assert.True(r.Status == ScriptRunStatus.Succeeded, $"failed at {r.FailedStepId}: {r.Reason}");
         // since lastSeen (the old message's receivedAt) is exclusive: the old one is not listed again
         Assert.Equal("Quote request", (string?)r.Outputs!["first"]);
+        Assert.Equal("false", r.Outputs["reset"]!.ToString());
         Assert.Equal("Follow up", (string?)r.Outputs["subject"]);
         Assert.Equal("Body of Follow up.", (string?)r.Outputs["body"]);
         Assert.Equal("lee@example.test", (string?)r.Outputs["from"]);
@@ -254,23 +270,24 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// B133: the documented poll: list after the saved cursor (none the first run), max 1; when there was a message, read it, file it and save
-    /// the last message's cursor. Run after run, the cursor goes from run to run as a string in a saved variable.
+    /// B133: the documented poll: list after the saved id, since the first-run time (it applies only when there is no id yet, or the id no longer
+    /// applies), max 1; when there was a message, read it, file it and save the id of the last (newest) message. Run after run, the id goes from
+    /// run to run as a string in a saved variable; on cursorReset the script just goes on from what it got.
     /// </summary>
     private const string PollSteps = """
         [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
-            "args": { "folder": "INBOX", "after": "{vars.lastCursor}", "unreadOnly": true, "max": 1 }, "into": "msgs", "next": "b" },
-          { "id": "b", "type": "if", "when": { "left": "{count(vars.msgs)}", "op": "gt", "right": 0 }, "then": "c", "else": "e" },
-          { "id": "c", "type": "set", "var": "last", "value": "{last(vars.msgs)}", "next": "d" },
+            "args": { "folder": "INBOX", "after": "{vars.lastId}", "since": "2026-11-20T08:00:00Z", "unreadOnly": true, "max": 1 }, "into": "res", "next": "b" },
+          { "id": "b", "type": "if", "when": { "left": "{count(vars.res.messages)}", "op": "gt", "right": 0 }, "then": "c", "else": "e" },
+          { "id": "c", "type": "set", "var": "last", "value": "{last(vars.res.messages)}", "next": "d" },
           { "id": "d", "type": "integration", "use": "mail", "action": "markRead", "args": { "id": "{vars.last.id}", "folder": "INBOX" }, "next": "f" },
           { "id": "f", "type": "integration", "use": "mail", "action": "move", "args": { "id": "{vars.last.id}", "folder": "Archive" }, "next": "g" },
-          { "id": "g", "type": "set", "var": "lastCursor", "value": "{vars.last.cursor}", "next": "e" },
-          { "id": "e", "type": "end", "outputs": { "count": "{count(vars.msgs)}", "subjects": "{vars.msgs}" } } ]
+          { "id": "g", "type": "set", "var": "lastId", "value": "{vars.last.id}", "next": "e" },
+          { "id": "e", "type": "end", "outputs": { "count": "{count(vars.res.messages)}", "subjects": "{vars.res.messages}", "reset": "{vars.res.cursorReset}" } } ]
         """;
 
     private const string PollVariables = """
-        [ { "name": "msgs", "type": "list<EmailMessage>" }, { "name": "last", "type": "EmailMessage" },
-          { "name": "lastCursor", "type": "string", "scope": "saved" } ]
+        [ { "name": "res", "type": "EmailList" }, { "name": "last", "type": "EmailMessage" },
+          { "name": "lastId", "type": "string", "scope": "saved" } ]
         """;
 
     private ulong _gm = 1_789_000_000_000_000_000;
@@ -300,15 +317,15 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task AScriptPollingAfterItsSavedCursorGetsEveryMessageOnceAcrossRuns(bool gmail)
+    public async Task AScriptPollingAfterItsSavedIdGetsEveryMessageOnceAcrossRuns(bool gmail)
     {
         if (gmail) MakeGmail();
         // besides the three of InitializeAsync (09:00, 09:10, 09:20): two more in the 09:10 second, one of them read
         PutAny(gmail, 10, "Same second");
         PutAny(gmail, 10, "Read already").Flags.Add(@"\Seen");
-        var saved = new JsonObject(); // a first run: no cursor yet
+        var saved = new JsonObject(); // a first run: no id yet
         var got = new List<string>();
-        var cursors = new List<string>();
+        var ids = new List<string>();
         for (var run = 0; run < 9; run++)
         {
             if (run == 3) PutAny(gmail, 20, "Late, in the 09:20 second");
@@ -316,45 +333,58 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
             var r = await Run(Doc(PollSteps, PollVariables), saved: saved);
             Assert.True(r.Status == ScriptRunStatus.Succeeded, $"run {run} failed at {r.FailedStepId}: {r.Reason}");
             got.AddRange(r.Outputs!["subjects"]!.AsArray().Select(m => (string)m!["subject"]!));
-            if (r.SavedVariables!["lastCursor"] is JsonValue v) cursors.Add(v.GetValue<string>());
+            Assert.Equal("false", r.Outputs["reset"]!.ToString());
+            if (r.SavedVariables!["lastId"] is JsonValue v) ids.Add(v.GetValue<string>());
             saved = r.SavedVariables!.DeepClone().AsObject();
         }
         Assert.Equal(["Old news", "Quote request", "Follow up", "Same second", "Late, in the 09:20 second", "Appended with an old date"], got);
-        Assert.Equal(["31:1", "31:2", "31:3", "31:4", "31:6", "31:7"], cursors.Distinct());
+        // the id carries INBOX's UIDVALIDITY and the UID there; on Gmail after the X-GM-MSGID
+        Assert.Equal(["31:1", "31:2", "31:3", "31:4", "31:6", "31:7"], ids.Distinct().Select(id => string.Join(':', id.Split(':')[^2..])));
+        Assert.All(ids, id => Assert.Equal(gmail, id.StartsWith("gm:", StringComparison.Ordinal)));
         Assert.DoesNotContain(_mail.Imap.Folder("INBOX").Entries(), e => !e.Message.Seen);
         Assert.Equal(6, _mail.Imap.Folder("Archive").Entries().Count());
     }
 
-    [Fact]
-    public async Task AfterAndSinceTogetherFailTheStepAsAnArgumentError()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ARenumberedFolderResetsTheCursorAndThePollGoesOn(bool gmail)
     {
-        const string steps = """
-            [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
-                "args": { "folder": "INBOX", "after": "31:1", "since": "2026-11-20T09:00:00Z" }, "into": "msgs", "next": null } ]
+        if (gmail) MakeGmail();
+        var first = await Run(Doc(PollSteps, PollVariables), saved: new JsonObject());
+        Assert.Equal(ScriptRunStatus.Succeeded, first.Status);
+        Assert.EndsWith("31:1", (string?)first.SavedVariables!["lastId"]);
+        _mail.Imap.Folder("INBOX").Renumber(32); // the server rebuilt INBOX: the saved id no longer applies
+
+        // with since in the poll: the since list (the unread ones, oldest first), cursorReset true, and the script saves the new id
+        var r = await Run(Doc(PollSteps, PollVariables), saved: first.SavedVariables!.DeepClone().AsObject());
+        Assert.True(r.Status == ScriptRunStatus.Succeeded, $"failed at {r.FailedStepId}: {r.Reason}");
+        Assert.Equal("true", r.Outputs!["reset"]!.ToString());
+        Assert.Equal(["Quote request"], r.Outputs["subjects"]!.AsArray().Select(m => (string)m!["subject"]!));
+        Assert.EndsWith("32:1", (string?)r.SavedVariables!["lastId"]);
+        var next = await Run(Doc(PollSteps, PollVariables), saved: r.SavedVariables!.DeepClone().AsObject());
+        Assert.Equal("false", next.Outputs!["reset"]!.ToString());
+        Assert.Equal(["Follow up"], next.Outputs["subjects"]!.AsArray().Select(m => (string)m!["subject"]!));
+
+        // without since: from now, nothing, cursorReset true
+        const string noSince = """
+            [ { "id": "a", "type": "integration", "use": "mail", "action": "list", "args": { "folder": "INBOX", "after": "{vars.lastId}" }, "into": "res", "next": "e" },
+              { "id": "e", "type": "end", "outputs": { "count": "{count(vars.res.messages)}", "reset": "{vars.res.cursorReset}" } } ]
             """;
-        var r = await Run(Doc(steps));
-        Assert.Equal(ScriptRunStatus.Failed, r.Status);
-        Assert.Equal("a", r.FailedStepId);
-        Assert.Contains("mail list: give after or since, not both", r.Reason);
-        Assert.Equal(0, _mail.Imap.Connections); // refused before the mailbox is opened
+        var stale = await Run(Doc(noSince, PollVariables), saved: first.SavedVariables!.DeepClone().AsObject());
+        Assert.True(stale.Status == ScriptRunStatus.Succeeded, $"failed at {stale.FailedStepId}: {stale.Reason}");
+        Assert.Equal("0", stale.Outputs!["count"]!.ToString());
+        Assert.Equal("true", stale.Outputs["reset"]!.ToString());
     }
 
     [Fact]
-    public async Task ARenumberedFolderFailsThePollAndKeepsTheSavedCursor()
+    public async Task AMalformedAfterFailsTheStepAsAnArgumentError()
     {
-        var first = await Run(Doc(PollSteps, PollVariables), saved: new JsonObject());
-        Assert.Equal(ScriptRunStatus.Succeeded, first.Status);
-        Assert.Equal("31:1", (string?)first.SavedVariables!["lastCursor"]);
-        _mail.Imap.Folder("INBOX").UidValidity = 32;
-        var r = await Run(Doc(PollSteps, PollVariables), saved: first.SavedVariables!.DeepClone().AsObject());
-        Assert.Equal(ScriptRunStatus.Failed, r.Status);
-        Assert.Equal("a", r.FailedStepId);
-        Assert.Contains("mail list: the cursor '31:1' is from an earlier numbering of INBOX (its UIDVALIDITY was 31, it is now 32)", r.Reason);
-        Assert.False(_a.Seen);
-
-        var bad = await Run(Doc(PollSteps, PollVariables), saved: new JsonObject { ["lastCursor"] = "2026-11-20T09:00:00Z" });
+        var bad = await Run(Doc(PollSteps, PollVariables), saved: new JsonObject { ["lastId"] = "2026-11-20T09:00:00Z" });
         Assert.Equal(ScriptRunStatus.Failed, bad.Status);
-        Assert.Contains("is not a cursor", bad.Reason);
+        Assert.Equal("a", bad.FailedStepId);
+        Assert.Contains("mail list: after '2026-11-20T09:00:00Z' is not a message id", bad.Reason);
+        Assert.False(_old.Seen);
     }
 
     [Fact]
