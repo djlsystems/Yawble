@@ -98,7 +98,8 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                 "handback" => Sent(await run.HandbackAsync(Required(args, "delivered"), ct)),
                 "blocked" => Sent(await run.BlockedAsync(Required(args, "reason"), OptionalInt(args, "item"), ct)),
                 "needs_decision" => Sent(await run.NeedsDecisionAsync(
-                    DecisionAsk.Parse(Optional(args, "question"), Optional(args, "summary"), args["options"], Optional(args, "details")), ct)),
+                    DecisionAsk.Parse(Optional(args, "question"), Optional(args, "summary"), args["options"], Optional(args, "details"),
+                        OptionalLong(args, "card"), Optional(args, "kind"), Optional(args, "reason")), ct)),
                 "workflow_complete" => Sent(await run.WorkflowCompleteAsync(Required(args, "delivered"), ct)),
                 "status" => JsonSerializer.Serialize(await run.StatusAsync(ct), RpcJson),
                 "hiring" => JsonSerializer.Serialize(await run.HiringAsync(ct), RpcJson),
@@ -263,7 +264,8 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         Tool("blocked", "Stop without finishing, and say why. With item, blocks only that numbered item of your batch.",
             ("reason", "string", ReportText("Why you stopped: the summary says what is in the way; then what you tried and what would unblock it"), true), ("item", "integer", "Optional: the batch item number.", false)),
         NeedsDecisionTool(),
-        Tool("workflow_complete", "Declare the workflow done (its owner, or the Manager). Refused while other work in it is running or pending.",
+        Tool("workflow_complete", "Declare the workflow done (its owner, or the Manager). Refused while other work in it is running or pending, " +
+            "and while a card's latest tester hand-back is a FAIL unless the person said yes to closing over it (needs_decision with card and kind).",
             ("delivered", "string", ReportText("What was delivered: the summary names the branch and commit; then each item delivered, the tests " +
                 "and anything left open"), true)),
         Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and each member's waiting instructions with why they wait (waitState: queued for a slot, waits-for-run with waitsFor, held for a paused team, pending)."),
@@ -329,13 +331,19 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
             "The answer arrives as a new instruction in this workflow. Then end your turn: do not also call blocked for the same thing.",
             ("summary", "string", "The decision in one plain sentence a person reads first, e.g. 'Should the team's runs reach localhost on macOS?'.", false),
             ("details", "string", "What you found and why it matters, in Markdown (lists, tables). Shown under the summary.", false),
-            ("question", "string", "Older form, still accepted: the whole decision as Markdown in one text. Prefer summary, options and details.", false));
+            ("question", "string", "Older form, still accepted: the whole decision as Markdown in one text. Prefer summary, options and details.", false),
+            ("card", "integer", "Only to close the workflow over a tester's FAIL: the card the tester failed. Then give kind, and the yes option carries action " +
+                                DecisionActions.CloseOverFail + " (with no options the app gives a yes and a no). workflow_complete goes through once the person picks the yes.", false),
+            ("kind", "string", "With card: accept-fail (accept the FAIL as it is and close) or wont-do (the card will not be done; needs a reason).", false),
+            ("reason", "string", "With card: why. Required for wont-do; for accept-fail, why the FAIL can be accepted.", false));
+        tool["inputSchema"]!["properties"]!["kind"]!["enum"] = new JsonArray("accept-fail", "wont-do");
         tool["inputSchema"]!["properties"]!["options"] = new JsonObject
         {
             ["type"] = "array",
             ["description"] = $"{DecisionAsk.MinOptions} to {DecisionAsk.MaxOptions} answers the person can pick. label: the button (at most {DecisionAsk.MaxLabel} characters); " +
                               "reply: the answer you get when it is picked; action (optional, at most one option): a change the app makes for the person " +
-                              $"when they pick it - only {string.Join(", ", DecisionActions.All)} (turns on the team's 'Allow localhost (macOS)'). " +
+                              $"when they pick it - only {DecisionActions.AllowLocalhostMac} (turns on the team's 'Allow localhost (macOS)') or, with card and kind, " +
+                              $"{DecisionActions.CloseOverFail} (the person's yes to closing over the tester's FAIL). " +
                               "You never make that change yourself.",
             ["minItems"] = DecisionAsk.MinOptions,
             ["maxItems"] = DecisionAsk.MaxOptions,

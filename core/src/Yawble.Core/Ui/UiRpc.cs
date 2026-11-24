@@ -1230,6 +1230,7 @@ public sealed class UiRpc(
         return action switch
         {
             DecisionActions.AllowLocalhostMac => IsMacOS() ? null : MacOnlyActionReason,
+            DecisionActions.CloseOverFail => null, // B142: the person's yes; the bus records it on the answer
             _ => "The app does not know this action",
         };
     }
@@ -1278,7 +1279,7 @@ public sealed class UiRpc(
             if (repos is not null) body = Attachments.WithImages(body, Attachments.Save(Path.Combine(repos.TeamRoot(team.Name), Teams.TeamDocuments.Folder), images!));
             if (action is not null) await ApplyActionAsync(action, teamId, c);
             return body;
-        }, ct);
+        }, ct, action);
         var result = new JsonObject { ["seq"] = message.Seq };
         if (action is not null) result["applied"] = action;
         return result;
@@ -1293,6 +1294,8 @@ public sealed class UiRpc(
             case DecisionActions.AllowLocalhostMac:
                 await dispatch("teams.localhost", new JsonObject { ["teamId"] = teamId, ["on"] = true }, ct);
                 break;
+            case DecisionActions.CloseOverFail:
+                break; // B142: no setting changes; BusEngine.PersonAnswerAsync records the yes on the answer
             default:
                 throw new RpcException("bad_params", $"the app does not know the action '{action}'");
         }
