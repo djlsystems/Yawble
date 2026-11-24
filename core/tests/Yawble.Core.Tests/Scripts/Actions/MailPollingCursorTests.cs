@@ -8,7 +8,7 @@ namespace Yawble.Core.Tests.Scripts.Actions;
 /// B133: polling a folder with list's after (the id of the last message an earlier list gave) gets every message once, on the plain IMAP fake
 /// and the Gmail fake; a renumbered folder (another UIDVALIDITY) resets the cursor instead of failing.
 /// </summary>
-public class B133VerifyTests
+public class MailPollingCursorTests
 {
     private const string Address = "reader@example.test";
     private const string Password = "test-password";

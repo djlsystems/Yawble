@@ -22,7 +22,7 @@ namespace Yawble.Core.Tests.Scripts.Actions;
 /// IntegrationService, against an in-process messaging API shaped like Twilio's Messages endpoint (FakeHttp: no network, no OS
 /// credential store, placeholder credentials).
 /// </summary>
-public sealed class B132VerifyTests : IAsyncLifetime
+public sealed class ApiIntegrationStepVerifyTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private const string AccountId = "AC_TEST_ACCOUNT";
