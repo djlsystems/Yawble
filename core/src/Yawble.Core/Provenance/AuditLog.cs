@@ -24,7 +24,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "getGlobal", "getMember", "version",
         // The screens' polls and lookups: what is waiting, the Monitor's steps, workflows, settings shown, catalogs.
         "asks", "steps", "workflows", "item", "connectionAttention", "connections", "versionStatus", "models", "repos",
-        "mcpList", "apiList", "emailList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
+        "mcpList", "apiList", "apiPeek", "emailList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
         "history", "check", "commandLine", "testSessions", "actionStatus", "backups", "doctor", "keepDaily", "restoreStatus",
         "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who", "catalog",
         // The team's network allow list as shown (its Remove, policy.removeTeamHost, is audited).

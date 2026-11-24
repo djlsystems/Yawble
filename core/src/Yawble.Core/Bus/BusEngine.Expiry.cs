@@ -116,7 +116,11 @@ public sealed partial class BusEngine
         if (wall < _nextExpirySweep) return;
         _nextExpirySweep = wall + ExpirySweepInterval;
         try { SweepExpiry(_store.Clock.GetUtcNow()); }
-        catch (Exception ex) { Log($"workflow expiry sweep failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logs.Diag.Warning("bus", $"workflow expiry sweep failed: {ex.GetType().Name}: {ex.Message}",
+                ("check", "workflow expiry sweep"), ("exception", ex.GetType().Name));
+        }
     }
 
     private int SweepExpiry(DateTimeOffset now)

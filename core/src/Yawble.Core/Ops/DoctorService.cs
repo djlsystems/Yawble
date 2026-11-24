@@ -74,6 +74,7 @@ public sealed class DoctorService(
             Guard("logs", "Logs", Logs),
         };
         Volatile.Write(ref _lastFails, list.Count(c => c.Status == DoctorStatus.Fail));
+        Volatile.Write(ref _running, null);
         return list;
     }
 
@@ -82,8 +83,14 @@ public sealed class DoctorService(
     /// <summary>How many checks failed the last time the list was run (0 before the first run): the app's "Needs You" count.</summary>
     public int LastFailCount => Volatile.Read(ref _lastFails);
 
-    private static DoctorCheck Guard(string id, string title, Func<DoctorCheck> check)
+    private string? _running;
+
+    /// <summary>The id of the check running now ("database", "git"...), or null between runs: what a failed run names.</summary>
+    public string? RunningCheck => Volatile.Read(ref _running);
+
+    private DoctorCheck Guard(string id, string title, Func<DoctorCheck> check)
     {
+        Volatile.Write(ref _running, id);
         try { return check(); }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -91,8 +98,9 @@ public sealed class DoctorService(
         }
     }
 
-    private static async Task<DoctorCheck> GuardAsync(string id, string title, Func<CancellationToken, Task<DoctorCheck>> check, CancellationToken ct)
+    private async Task<DoctorCheck> GuardAsync(string id, string title, Func<CancellationToken, Task<DoctorCheck>> check, CancellationToken ct)
     {
+        Volatile.Write(ref _running, id);
         try { return await check(ct).ConfigureAwait(false); }
         catch (Exception e) when (e is not OperationCanceledException)
         {

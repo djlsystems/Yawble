@@ -207,6 +207,52 @@ public sealed class ScriptRealNamesTests : IAsyncDisposable
         Assert.Empty(_store.Member(member)!.Bindings);
     }
 
+    [Fact]
+    public async Task MemberAddAndMemberUpdate_RefuseAnOverrideNamingNoIntegration_WithTheReason()
+    {
+        await InitAsync();
+        await Call("scripts.save", new JsonObject { ["document"] = RealNamed() });
+
+        var add = await Assert.ThrowsAsync<RpcException>(() => AddMemberAsync(_alpha, "Watcher", new JsonObject { [Support] = "Nowhere" }));
+        Assert.Equal("bad_script", add.Code);
+        Assert.Contains($"'{Support}' cannot be replaced by 'Nowhere': there is no integration of that name", add.Message);
+
+        var member = await AddMemberAsync(_alpha, "Watcher");
+        var update = await Assert.ThrowsAsync<RpcException>(() => Call("scripts.memberUpdate",
+            new JsonObject { ["memberId"] = member, ["bindings"] = new JsonObject { [Support] = "Nowhere" } }));
+        Assert.Equal("bad_script", update.Code);
+        Assert.Contains($"'{Support}' cannot be replaced by 'Nowhere': there is no integration of that name", update.Message);
+        Assert.Empty(_store.Member(member)!.Bindings);
+    }
+
+    [Fact]
+    public async Task MemberAddAndMemberUpdate_RefuseARealNameWithNoOverrideThatIsNoIntegration_WithTheReason()
+    {
+        await InitAsync();
+        // v1 names the real inbox; v2 names one the person has none of (as after the integration was deleted or renamed), still in
+        // its requires, so it checks and saves.
+        var v1 = (await Call("scripts.save", new JsonObject { ["document"] = RealNamed() }))!.AsObject();
+        Assert.True(v1["ok"]!.GetValue<bool>(), v1["check"]!.ToJsonString());
+        var gone = RealNamed(mail: "No such inbox");
+        gone["requires"] = JsonNode.Parse($$"""
+            [ { "name": "No such inbox", "kind": "email", "actions": ["list"] },
+              { "name": "{{Twilio}}", "kind": "api", "actions": ["CreateMessage"] } ]
+            """);
+        var v2 = (await Call("scripts.save", new JsonObject { ["document"] = gone }))!.AsObject();
+        Assert.True(v2["ok"]!.GetValue<bool>(), v2["check"]!.ToJsonString());
+        Assert.Equal(2, v2["version"]!.GetValue<int>());
+
+        var add = await Assert.ThrowsAsync<RpcException>(() => AddMemberAsync(_alpha, "Watcher", version: 2));
+        Assert.Equal("bad_script", add.Code);
+        Assert.Contains("'No such inbox' needs a binding to one of the team's integrations", add.Message);
+
+        var member = await AddMemberAsync(_alpha, "Watcher", version: 1);
+        var update = await Assert.ThrowsAsync<RpcException>(() => Call("scripts.memberUpdate", new JsonObject { ["memberId"] = member, ["version"] = 2 }));
+        Assert.Equal("bad_script", update.Code);
+        Assert.Contains("'No such inbox' needs a binding to one of the team's integrations", update.Message);
+        Assert.Equal(1, _store.Member(member)!.Version);
+    }
+
     // ------------------------------------------------------------------ the alias form
 
     [Fact]

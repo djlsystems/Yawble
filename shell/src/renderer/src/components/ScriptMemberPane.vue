@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { AgentCard, Trigger, YawbleApi } from '../../../shared/api';
+import type { AgentCard, TeamSummary, Trigger, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi, when } from '../api';
 import { readOnly, vChange } from '../remoteAccess';
 import { useBusy } from '../busy';
 import BusyLabel from './BusyLabel.vue';
 import ScriptMemberIntegrations from './ScriptMemberIntegrations.vue';
+import ScriptEditor from './scripts/ScriptEditor.vue';
 import { scriptAtVersion, scriptsApi, shortValue, type ScriptMember, type ScriptMemberFile, type ScriptMemberState, type ScriptRun } from '../scriptMembers';
 
 // B134 (card 598): a script member's tile on the team page: its name, script@version (on latest: the version it runs),
@@ -69,6 +70,14 @@ function reset(name: string) {
   });
 }
 
+// Edit script: the script editor on this member's script, opened from the member, so the designer shows the member's
+// overrides ("Real name → Other") and Use real names resolves through its bindings. Save makes a new version of the
+// script, as the library does; the member's pin and bindings stay as they are. A Visitor gets the editor read-only.
+const editing = ref(false);
+const editTeams = computed<TeamSummary[]>(() => (member.value
+  ? [{ id: member.value.teamId, name: member.value.team, repoPath: null, members: 0, running: 0, queued: 0 }] : []));
+function closeEditor() { editing.value = false; void refresh(); }
+
 const statusLabel: Record<string, string> = { running: 'Running', succeeded: 'Succeeded', failed: 'Failed', skipped: 'Skipped', interrupted: 'Interrupted' };
 const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.slice(8)}` : t);
 </script>
@@ -80,6 +89,9 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
       <span class="chip" data-test="script-member-kind">script</span>
       <button v-if="active.length" class="chip trig" data-test="script-member-triggers" :title="pillTitle"
         @click="emit('triggers', mine.length === 1 ? mine[0]!.id : null)"><span class="dot" aria-hidden="true" />{{ active.length === 1 ? 'trigger on' : `${active.length} triggers on` }}</button>
+      <button v-if="member" type="button" class="small-btn edit" data-test="script-member-edit"
+        :title="readOnly ? `Open ${member.script} (read-only)` : `Edit ${member.script}: the designer shows this member's integrations`"
+        @click="editing = true">{{ readOnly ? 'Open script' : 'Edit script' }}</button>
       <button v-if="card.member.role === 'member'" v-change class="danger small-btn" data-test="script-member-remove" :disabled="running || !!pending"
         :aria-busy="pending === 'remove'" @click="emit('remove')">{{ pending === 'remove' ? 'Removing…' : 'Remove' }}</button>
     </div>
@@ -121,6 +133,12 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
       </ul>
       <p v-else class="muted small" data-test="script-member-no-variables">None saved.</p>
     </div>
+    <Teleport to="body">
+      <div v-if="editing && member" class="editor-sheet" role="dialog" :aria-label="`${member.script} for ${card.member.name}`" data-test="script-member-editor">
+        <ScriptEditor :api="api" :teams="editTeams" :script="{ id: member.scriptId, key: member.script }" :member-id="member.memberId"
+          :back-label="`← ${card.member.name}`" @close="closeEditor" @saved="refresh" />
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -131,6 +149,9 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
 .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
 .title .small-btn { margin-left: auto; }
+.title .edit ~ .small-btn { margin-left: 0; }
+.editor-sheet { position: fixed; inset: 0; z-index: 50; background: var(--surface); padding: 12px 16px; overflow: auto; box-sizing: border-box;
+  display: flex; flex-direction: column; }
 .trig { border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; background: var(--chip); color: var(--ok); font: inherit; font-size: 11.5px; }
 .trig:hover { text-decoration: underline; }
 .trig .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: trig-pulse 1.6s ease-in-out infinite; }

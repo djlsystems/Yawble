@@ -353,7 +353,8 @@ public sealed class ConciergeService
                 }
                 catch (Exception e) when (e is not OperationCanceledException)
                 {
-                    Console.Error.WriteLine($"concierge: watching failed this time: {e.Message}");
+                    Logs.Diag.Warning("concierge", $"concierge: watching failed this time: {e.GetType().Name}: {e.Message}",
+                        ("check", "watches and due review turns"), ("exception", e.GetType().Name));
                 }
             }
             while (await timer.WaitForNextTickAsync(ct));

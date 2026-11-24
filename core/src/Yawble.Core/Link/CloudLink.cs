@@ -334,6 +334,7 @@ public sealed class CloudLink : IAsyncDisposable
     private async Task ConnectLoopAsync(CancellationToken ct)
     {
         var delay = TimeSpan.FromSeconds(1);
+        var attempt = 0; // B143: connections made by this loop, said when one ends
         while (!ct.IsCancellationRequested)
         {
             LinkSettings? s;
@@ -370,8 +371,9 @@ public sealed class CloudLink : IAsyncDisposable
                 continue;
             }
             delay = TimeSpan.FromSeconds(1);
+            attempt++;
             SetState("connected", null);
-            await ServeAsync(ws, s, ct).ConfigureAwait(false);
+            await ServeAsync(ws, s, ct, attempt, delay).ConfigureAwait(false);
             lock (_lock) { _viewers = []; _cloudVersion = null; }
             _sessionAccess.Clear();
             if (ct.IsCancellationRequested) return;
@@ -380,8 +382,9 @@ public sealed class CloudLink : IAsyncDisposable
         }
     }
 
-    private async Task ServeAsync(ClientWebSocket ws, LinkSettings s, CancellationToken ct)
+    private async Task ServeAsync(ClientWebSocket ws, LinkSettings s, CancellationToken ct, int attempt = 1, TimeSpan? reconnectDelay = null)
     {
+        var connected = System.Diagnostics.Stopwatch.StartNew();
         var sendLock = new SemaphoreSlim(1, 1);
         var watching = 0;
         async Task Send(JsonObject message)
@@ -457,7 +460,12 @@ public sealed class CloudLink : IAsyncDisposable
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or JsonException or IOException)
         {
-            _log?.Invoke($"Cloud Link: connection ended: {e.Message}");
+            // B143: the exception, how long the connection lasted, which connection it was and when the next is tried.
+            var delay = reconnectDelay ?? TimeSpan.FromSeconds(1);
+            var level = e is OperationCanceledException && ct.IsCancellationRequested ? Logs.LogLevels.Info : Logs.LogLevels.Warning;
+            Logs.Diag.Write(level, "link", $"Cloud Link: connection ended ({e.GetType().Name}) after {connected.Elapsed.TotalSeconds:0}s: {e.Message}",
+                ("exception", e.GetType().Name), ("ms", (long)connected.Elapsed.TotalMilliseconds), ("attempt", attempt),
+                ("delay_ms", ct.IsCancellationRequested ? null : (long)delay.TotalMilliseconds));
         }
         finally
         {
