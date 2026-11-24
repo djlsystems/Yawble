@@ -45,9 +45,9 @@ public static class EmailActions
         new(List, EmailActionClass.Read, Sig("""
             { "type": "object", "properties": {
                 "folder": { "type": "string", "description": "The folder, e.g. INBOX." },
-                "since": { "type": ["string", "null"], "format": "date-time", "description": "Only messages received after this (exclusive)." },
+                "since": { "type": ["string", "null"], "format": "date-time", "description": "Only messages after this receivedAt (exclusive): pass the last receivedAt you got to get each message once." },
                 "unreadOnly": { "type": ["boolean", "null"], "description": "Only unread messages." },
-                "max": { "type": ["integer", "null"], "description": "Keep the newest this many (at most 200)." } },
+                "max": { "type": ["integer", "null"], "description": "Return the oldest this many of those (at most 200); the rest come on the next poll." } },
               "required": ["folder"] }
             """, "list<EmailMessage>")),
         new(Get, EmailActionClass.Read, Sig("""

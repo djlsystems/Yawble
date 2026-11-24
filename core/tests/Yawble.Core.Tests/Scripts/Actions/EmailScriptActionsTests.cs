@@ -118,7 +118,8 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
             Schemas = BuiltInSchemas.Lookup,
             DataFolder = _temp.Sub("data"),
             DryRun = dryRun,
-            SavedVariables = saved ?? new JsonObject { ["lastSeen"] = "2026-11-20T09:00:00Z" },
+            // the old message's receivedAt (09:00 plus its UID 1 as the tie-break), as an earlier poll saved it
+            SavedVariables = saved ?? new JsonObject { ["lastSeen"] = "2026-11-20T09:00:00.0000001Z" },
             Input = JsonNode.Parse("""{ "triggerId": "t1", "kind": "once", "firedAt": "2026-11-23T17:59:00Z" }"""),
         }, new RecordingJournal(), Ct);
     }
@@ -220,7 +221,7 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
         var r = await Run(Doc(ReadSteps));
 
         Assert.True(r.Status == ScriptRunStatus.Succeeded, $"failed at {r.FailedStepId}: {r.Reason}");
-        // since lastSeen (09:00, the old message's time) is exclusive: the old one is not listed again
+        // since lastSeen (the old message's receivedAt) is exclusive: the old one is not listed again
         Assert.Equal("Quote request", (string?)r.Outputs!["first"]);
         Assert.Equal("Follow up", (string?)r.Outputs["subject"]);
         Assert.Equal("Body of Follow up.", (string?)r.Outputs["body"]);
@@ -229,13 +230,41 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
         Assert.True(_b.Seen);
         Assert.False(_a.Seen);
         Assert.False(_old.Seen);
-        Assert.Equal("2026-11-20T09:20:00Z", (string?)r.SavedVariables!["lastSeen"]);
+        Assert.Equal("2026-11-20T09:20:00.0000003Z", (string?)r.SavedVariables!["lastSeen"]);
 
         var calls = Calls();
         Assert.Equal(3, calls.Count);
         Assert.All(calls, c => Assert.Equal(("email:Sales inbox", "Alpha/Reader", "script"), (c.Integration, c.Member, c.Via)));
         Assert.Contains("\"list\"", calls[0].Args);
         Assert.Contains("script run 42", calls[0].Args);
+    }
+
+    /// <summary>B133: the documented poll (list since lastSeen, max 1; save the newest receivedAt when there was one), run after run.</summary>
+    private const string PollSteps = """
+        [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
+            "args": { "folder": "INBOX", "since": "{vars.lastSeen}", "unreadOnly": true, "max": 1 }, "into": "msgs", "next": "b" },
+          { "id": "b", "type": "if", "when": { "left": "{count(vars.msgs)}", "op": "gt", "right": 0 }, "then": "c", "else": "e" },
+          { "id": "c", "type": "set", "var": "lastSeen", "value": "{max(vars.msgs, 'receivedAt')}", "next": "e" },
+          { "id": "e", "type": "end", "outputs": { "count": "{count(vars.msgs)}", "subjects": "{vars.msgs}" } } ]
+        """;
+
+    [Fact]
+    public async Task AScriptPollingWithMaxOneGetsEveryMessageOnceEvenInTheSameSecond()
+    {
+        // besides the three of InitializeAsync (09:00, 09:10, 09:20): two more in the 09:10 second, one of them read
+        Put(10, "Same second");
+        Put(10, "Read already").Flags.Add(@"\Seen");
+        var saved = new JsonObject(); // a first run: no lastSeen yet
+        var got = new List<string>();
+        for (var run = 0; run < 8; run++)
+        {
+            if (run == 3) Put(20, "Late, in the 09:20 second"); // arrives after three runs, a later UID in a second not yet passed
+            var r = await Run(Doc(PollSteps), saved: saved);
+            Assert.True(r.Status == ScriptRunStatus.Succeeded, $"run {run} failed at {r.FailedStepId}: {r.Reason}");
+            got.AddRange(r.Outputs!["subjects"]!.AsArray().Select(m => (string)m!["subject"]!));
+            saved = r.SavedVariables!.DeepClone().AsObject();
+        }
+        Assert.Equal(["Old news", "Quote request", "Same second", "Follow up", "Late, in the 09:20 second"], got);
     }
 
     [Fact]

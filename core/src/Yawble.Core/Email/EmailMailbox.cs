@@ -14,7 +14,7 @@ namespace Yawble.Core.Email;
 /// </summary>
 public sealed class EmailMailbox(IImapSession session)
 {
-    /// <summary>The most messages one list, search or thread returns (the newest, oldest first).</summary>
+    /// <summary>The most messages one list, search or thread returns, oldest first (list: the oldest after since; search and thread: the newest).</summary>
     public const int MaxMessages = 200;
 
     /// <summary>Gmail's All Mail by name, when the server does not mark a folder \All.</summary>
@@ -30,9 +30,11 @@ public sealed class EmailMailbox(IImapSession session)
     // ------------------------------------------------------------------ the actions
 
     /// <summary>
-    /// The messages of <paramref name="folder"/>, oldest first: only those received after <paramref name="since"/> (exclusive, so a saved
-    /// lastSeen never repeats a message), only unread ones with <paramref name="unreadOnly"/>, and of those the newest <paramref name="max"/>
-    /// (at most <see cref="MaxMessages"/>).
+    /// The messages of <paramref name="folder"/>, oldest first by <see cref="EmailMessage.ReceivedAt"/>: only those after <paramref name="since"/>
+    /// (exclusive), only unread ones with <paramref name="unreadOnly"/>, and of those the OLDEST <paramref name="max"/> (at most
+    /// <see cref="MaxMessages"/>). No <paramref name="since"/> starts from the folder's oldest message. Every message's receivedAt in a folder is
+    /// distinct (the INTERNALDATE's second plus a per-message tie-break, see <see cref="Received"/>), so a script that saves the last receivedAt
+    /// it got and passes it back as since pages forward through the folder and gets every message exactly once, however small max is.
     /// </summary>
     public async Task<IReadOnlyList<EmailMessage>> ListAsync(string folder, DateTimeOffset? since, bool unreadOnly, int? max, CancellationToken ct)
     {
@@ -42,12 +44,13 @@ public sealed class EmailMailbox(IImapSession session)
         if (since is { } s) query = query.And(SearchQuery.DeliveredAfter(s.UtcDateTime.Date.AddDays(-1)));
         var uids = await Guard("search", () => f.SearchAsync(query, ct));
         var picked = (await SummariesAsync(f, uids, ct))
-            .Where(m => since is not { } after || Received(m) > after)
+            .Where(m => since is not { } after || Received(m) > after.ToUniversalTime())
             .Where(m => !unreadOnly || !Seen(m))
             .OrderBy(Received).ThenBy(m => m.UniqueId.Id)
             .ToList();
         var keep = Math.Clamp(max ?? MaxMessages, 0, MaxMessages);
-        if (picked.Count > keep) picked = picked.GetRange(picked.Count - keep, keep);
+        // the oldest: whatever is left over comes after the last one returned, so the next poll from its receivedAt gets it
+        if (picked.Count > keep) picked = picked.GetRange(0, keep);
         return await MessagesAsync(f, picked, withBody: false, ct);
     }
 
@@ -240,7 +243,22 @@ public sealed class EmailMailbox(IImapSession session)
 
     // ------------------------------------------------------------------ fetching
 
-    private static DateTimeOffset Received(IMessageSummary m) => (m.InternalDate ?? DateTimeOffset.MinValue).ToUniversalTime();
+    /// <summary>The tie-break's range: the 100 ns ticks of one second.</summary>
+    public const ulong TieBreakModulus = (ulong)TimeSpan.TicksPerSecond;
+
+    /// <summary>
+    /// A message's receivedAt: its INTERNALDATE (IMAP gives whole seconds) in UTC, plus a tie-break of the message's own key (Gmail's X-GM-MSGID,
+    /// else its UID) modulo ten million, in 100 ns ticks. The tie-break never changes while the message stays where it is, and two messages of
+    /// the same second differ unless their keys are a multiple of ten million apart; so receivedAt alone is an exact cursor for list's since.
+    /// </summary>
+    private DateTimeOffset Received(IMessageSummary m)
+    {
+        var at = (m.InternalDate ?? DateTimeOffset.MinValue).ToUniversalTime();
+        var second = at.AddTicks(-(at.UtcTicks % TimeSpan.TicksPerSecond));
+        var key = IsGmail && m.GMailMessageId is { } gid ? gid : m.UniqueId.Id;
+        var tie = (long)(key % TieBreakModulus);
+        return second.UtcTicks > DateTimeOffset.MaxValue.UtcTicks - tie ? second : second.AddTicks(tie);
+    }
 
     private static bool Seen(IMessageSummary m) => m.Flags is { } f && f.HasFlag(MessageFlags.Seen);
 

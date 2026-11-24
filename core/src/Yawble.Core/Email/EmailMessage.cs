@@ -17,7 +17,7 @@ public sealed record EmailAddress(string? Name, string Address)
 /// One message as a script sees it (the built-in schema EmailMessage, scripts-design.md section 9). <see cref="Id"/> is stable across sessions:
 /// Gmail's X-GM-MSGID in decimal, otherwise "UIDVALIDITY:UID" of <see cref="Folder"/>. <see cref="ThreadId"/>: Gmail's X-GM-THRID in decimal,
 /// otherwise the thread's first Message-ID (References, else In-Reply-To, else its own), else <see cref="Id"/>. <see cref="ReceivedAt"/> is
-/// the server's INTERNALDATE in UTC. <see cref="Snippet"/> is the first 500 characters of the plain text, its white space collapsed.
+/// the server's INTERNALDATE in UTC plus a sub-second tie-break from the message's own key, so it is distinct within a folder (EmailMailbox.Received). <see cref="Snippet"/> is the first 500 characters of the plain text, its white space collapsed.
 /// <see cref="Body"/> is set by get only (the whole plain text; an HTML-only message's text converted from its HTML).
 /// </summary>
 public sealed record EmailMessage(
@@ -26,8 +26,11 @@ public sealed record EmailMessage(
 {
     public const int SnippetLength = 500;
 
-    /// <summary>receivedAt as written: ISO-8601 UTC, to the second ("2026-11-23T09:15:00Z").</summary>
-    public static string Instant(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+    /// <summary>
+    /// receivedAt as written: ISO-8601 UTC with the sub-second tie-break to 100 ns, trailing zeros dropped ("2026-11-23T09:15:00.0000042Z"), so
+    /// that the written value, passed back as list's since, is exactly the message's place in the folder's order.
+    /// </summary>
+    public static string Instant(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture);
 
     /// <summary>The JSON a script gets. body is present only when it was fetched (get).</summary>
     public JsonObject ToJson()

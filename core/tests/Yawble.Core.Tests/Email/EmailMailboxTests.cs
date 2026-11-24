@@ -61,7 +61,7 @@ public class EmailMailboxTests
         Assert.Equal(new EmailAddress("Lee Client", "lee@example.test"), first.From);
         Assert.Equal([new EmailAddress(null, Me), new EmailAddress("Ann", "ann@example.test")], first.To);
         Assert.Equal([new EmailAddress(null, "boss@example.test")], first.Cc);
-        Assert.Equal(T0.AddMinutes(10), first.ReceivedAt);
+        Assert.Equal(T0.AddMinutes(10).AddTicks(2), first.ReceivedAt); // INTERNALDATE plus the tie-break: UID 2 in 100 ns ticks
         Assert.Equal("Hello there.", first.Snippet);
         Assert.False(first.Unread);
         Assert.True(list[1].Unread);
@@ -71,7 +71,7 @@ public class EmailMailboxTests
         Assert.Equal(first.MessageId, first.ThreadId); // no Gmail: the thread's first Message-ID, here its own
 
         var json = first.ToJson();
-        Assert.Equal("2026-11-20T09:10:00Z", json["receivedAt"]!.GetValue<string>());
+        Assert.Equal("2026-11-20T09:10:00.0000002Z", json["receivedAt"]!.GetValue<string>());
         Assert.False(json.ContainsKey("body"));
         Assert.Empty(Yawble.Core.Scripts.Language.BuiltInSchemas.EmailMessage.Validate(json));
     }
@@ -94,7 +94,7 @@ public class EmailMailboxTests
     }
 
     [Fact]
-    public async Task ListUnreadOnlyAndMaxKeepTheNewestStillOldestFirst()
+    public async Task ListUnreadOnlyAndMaxKeepTheOldestStillOldestFirst()
     {
         await using var mail = Server();
         for (var i = 0; i < 6; i++) Add(mail, i, "M" + i, seen: i % 2 == 0);
@@ -102,11 +102,63 @@ public class EmailMailboxTests
         Assert.Equal(["M1", "M3", "M5"], unread.Select(m => m.Subject));
         Assert.All(unread, m => Assert.True(m.Unread));
 
-        var newest = await With(mail, m => m.ListAsync("INBOX", null, false, 2, Ct));
-        Assert.Equal(["M4", "M5"], newest.Select(m => m.Subject));
-        var newestUnread = await With(mail, m => m.ListAsync("INBOX", null, true, 2, Ct));
-        Assert.Equal(["M3", "M5"], newestUnread.Select(m => m.Subject));
+        var oldest = await With(mail, m => m.ListAsync("INBOX", null, false, 2, Ct));
+        Assert.Equal(["M0", "M1"], oldest.Select(m => m.Subject));
+        var oldestUnread = await With(mail, m => m.ListAsync("INBOX", null, true, 2, Ct));
+        Assert.Equal(["M1", "M3"], oldestUnread.Select(m => m.Subject));
+        var afterM1 = await With(mail, m => m.ListAsync("INBOX", oldest[1].ReceivedAt, false, 2, Ct));
+        Assert.Equal(["M2", "M3"], afterM1.Select(m => m.Subject));
         Assert.Empty(await With(mail, m => m.ListAsync("INBOX", null, false, 0, Ct)));
+    }
+
+    /// <summary>
+    /// B133: a script polling with max 1 and its saved lastSeen gets every message exactly once, older unread ones first and messages that share a
+    /// second included, also when new mail (some in an already-seen second) arrives between polls.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PollingWithMaxOneFromTheSavedReceivedAtGetsEveryMessageOnce(bool gmail)
+    {
+        await using var mail = Server(gmail);
+        ulong gm = 1789000000000000000;
+        // A and B share a second, C is later; D comes later but in A's second (a server's INTERNALDATE need not grow with the UID)
+        Add(mail, 0, "A", gmId: gmail ? ++gm : 0);
+        Add(mail, 0, "B", gmId: gmail ? ++gm : 0);
+        Add(mail, 5, "C", gmId: gmail ? ++gm : 0);
+        Add(mail, 5, "read", seen: true, gmId: gmail ? ++gm : 0);
+
+        var got = new List<string>();
+        string? lastSeen = null;
+        for (var poll = 0; poll < 10; poll++)
+        {
+            if (poll == 2) Add(mail, 10, "E", gmId: gmail ? ++gm : 0); // arrives after two polls
+            if (poll == 3) Add(mail, 5, "D", gmId: gmail ? ++gm : 0); // a later UID in C's second, not yet past the cursor
+            var since = lastSeen is null ? (DateTimeOffset?)null : DateTimeOffset.Parse(lastSeen, System.Globalization.CultureInfo.InvariantCulture);
+            var batch = await With(mail, m => m.ListAsync("INBOX", since, true, 1, Ct));
+            Assert.True(batch.Count <= 1);
+            if (batch.Count == 0) continue;
+            got.Add(batch[0].Subject);
+            lastSeen = batch[0].ToJson()["receivedAt"]!.GetValue<string>(); // what a script saves: the written string
+        }
+        Assert.Equal(["A", "B", "C", "D", "E"], got);
+    }
+
+    [Fact]
+    public async Task MessagesOfTheSameSecondHaveDistinctReceivedAtThatSortsThem()
+    {
+        await using var mail = Server();
+        for (var i = 0; i < 4; i++) Add(mail, 0, "S" + i);
+        var all = await With(mail, m => m.ListAsync("INBOX", null, false, null, Ct));
+        Assert.Equal(["S0", "S1", "S2", "S3"], all.Select(m => m.Subject));
+        Assert.Equal(4, all.Select(m => m.ReceivedAt).Distinct().Count());
+        Assert.All(all, m => Assert.Equal(T0, m.ReceivedAt.AddTicks(-(m.ReceivedAt.UtcTicks % TimeSpan.TicksPerSecond))));
+        // a since in the middle of the second: exactly those after it
+        var rest = await With(mail, m => m.ListAsync("INBOX", all[1].ReceivedAt, false, null, Ct));
+        Assert.Equal(["S2", "S3"], rest.Select(m => m.Subject));
+        // a whole-second since (e.g. a lastSeen set to "now") is before every message of that second: the tie-break puts them after it
+        var fromSecond = await With(mail, m => m.ListAsync("INBOX", T0, false, null, Ct));
+        Assert.Equal(["S0", "S1", "S2", "S3"], fromSecond.Select(m => m.Subject));
     }
 
     [Fact]

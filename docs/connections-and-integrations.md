@@ -133,9 +133,30 @@ name (`"action": "list"`, not `email.list`):
 | `markRead` | `id`: string; `folder?`: string | `EmailMessage` (as it is now) | yes |
 | `move` | `id`: string; `folder`: string (the folder to move it to) | `EmailMessage` (in its new place) | yes |
 
-- Every list is **oldest first** (by `receivedAt`) and has at most 200 messages, the newest.
-- `list`: `since` is **exclusive**: only messages received after it, so saving the last `receivedAt` you saw as
-  `lastSeen` never gives a message twice. `max` keeps the newest `max` of those, still oldest first.
+- Every list is **oldest first** (by `receivedAt`, then the folder's UID). `search` and `thread` give at most 200
+  messages, the newest.
+- `list` pages **forward** through the folder. The exact rules:
+  - `since` is **exclusive**: only messages whose `receivedAt` is later than it.
+  - `unreadOnly` then keeps only unread ones.
+  - Of those, `list` returns the **oldest** `max` (default and limit 200). Whatever is left over is later than the
+    last message returned, so the next poll gets it.
+  - Without `since` it starts from the folder's oldest message. To start "from now", set `lastSeen` to the current time
+    the first time the script runs.
+  - Every message's `receivedAt` in a folder is **distinct**. It is the server's INTERNALDATE (whole seconds) plus a
+    sub-second tie-break taken from the message's own key (Gmail's `X-GM-MSGID`, otherwise its UID, modulo ten
+    million, in 100 ns steps): `"2026-11-20T09:10:00.0000042Z"`. Two messages that arrive in the same second still get
+    different values. The value never changes while the message stays in its folder.
+- **Polling without missing or repeating a message:** after each `list`, save the **last** message's `receivedAt`
+  (the newest one in the result, `{max(vars.msgs, 'receivedAt')}`) as `lastSeen`, and pass it as `since` on the next
+  run. Save it only when the result is not empty, and save the exact string you got: rounding it to the second, or
+  using the time the script ran, can skip or repeat messages. This works however small `max` is (even 1) and when
+  several messages share a second: each poll takes the oldest ones after the cursor, and the cursor moves past
+  exactly those.
+- Limits of the cursor: a message that lands in the folder with an INTERNALDATE older than `lastSeen` (copied or moved
+  in from another folder with its original date, or appended with an old date) is not seen by a poll from that
+  cursor. Two messages of the same second whose keys are a multiple of ten million apart share a `receivedAt`; if
+  `max` splits exactly them, the second one is missed. With `unreadOnly`, a message read in another mail program
+  before the poll is not returned, and is not returned later either.
 - `get`, `markRead`: `folder` is a hint where to look. Without it the id is enough.
 - `search`: on Gmail the query is Gmail's own search syntax (`X-GM-RAW`, e.g. `from:lee is:unread`); elsewhere it is
   IMAP `SEARCH TEXT` (the words anywhere in the message).
@@ -161,7 +182,7 @@ name (`"action": "list"`, not `email.list`):
 | `to` | array of EmailAddress | The To recipients. |
 | `cc` | array of EmailAddress | The Cc recipients. |
 | `subject` | string | The subject line (`""` when none). |
-| `receivedAt` | string | When the server received it (its INTERNALDATE), ISO-8601 in UTC: `"2026-11-20T09:10:00Z"`. |
+| `receivedAt` | string | When the server received it (its INTERNALDATE) plus the sub-second tie-break above, ISO-8601 in UTC: `"2026-11-20T09:10:00.0000042Z"`. Distinct within a folder; use it as `list`'s `since`. |
 | `snippet` | string | The first 500 characters of the plain text, runs of white space as one space. |
 | `hasAttachments` | boolean | Whether it has attachments. |
 | `unread` | boolean | Whether it is unread (no `\Seen` flag). |
