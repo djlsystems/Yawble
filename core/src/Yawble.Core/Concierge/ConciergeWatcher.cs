@@ -105,7 +105,9 @@ public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimePr
         return m.Type switch
         {
             MessageTypes.WorkflowCompleted =>
-                ("done", $"**{team}** finished: {Clip(Str(p, "delivered") ?? "the work is declared complete")}"),
+                // B142: a workflow the person let close over a tester's FAIL says so.
+                ("done", $"**{team}** finished{(Board.ClosedOverFail.Read(p).Count > 0 ? ", " + Board.ClosedOverFail.ConciergeWords : "")}: " +
+                         Clip(Str(p, "delivered") ?? "the work is declared complete")),
             MessageTypes.WorkflowExpired =>
                 ("expired", $"**{team}**'s workflow #{m.CorrelationId} expired: {Clip(Str(p, "detail") ?? "nothing happened in it for too long")}. Telling the team something in it reopens it."),
             MessageTypes.NeedsDecision =>
