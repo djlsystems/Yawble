@@ -53,7 +53,7 @@ describe('opening agent settings runs nothing on the host', () => {
     await flushPromises();
     await panel.get('[data-test=agent-cli-grok] [data-test=tile-model]').trigger('click');
     await flushPromises();
-    expect(panel.text()).toContain("the app's list");
+    expect(panel.text()).toContain('Custom… takes any other model name');
     await panel.get('[data-test=model-dialog-pick]').setValue('grok-4');
     await panel.get('[data-test=model-dialog-save]').trigger('click'); // a save reloads the list
     await flushPromises();

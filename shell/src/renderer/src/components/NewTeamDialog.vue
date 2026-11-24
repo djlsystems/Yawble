@@ -6,6 +6,8 @@ import { type AgentCliId } from '../agentClis';
 import { useAgentOptions } from '../agentOptions';
 import Modal from './Modal.vue';
 import BusyLabel from './BusyLabel.vue';
+import AgentModelPicker from './AgentModelPicker.vue';
+import { modelOptions, type ModelOption } from '../modelOptions';
 
 // Team creation: the repository, the Manager and the members, each with its agent CLI. It starts from the saved
 // defaults (Settings > Teams, teams.defaults): the Manager's name and agent, the rows ticked "On new teams" in the
@@ -19,9 +21,9 @@ const form = reactive({ name: '', source: 'folder' as 'folder' | 'url', repoPath
 /** model '' = the agent's default model (Settings > Agents). */
 const members = reactive<{ name: string; cli: AgentCliId; model: string }[]>([]);
 
-// ---- models: each row picks one of its agent's models, or its default
+// ---- models: each row picks one of its agent's models (each with its "from" hint), its default, or types one (Custom…)
 const profiles = ref<AgentProfileRow[]>([]);
-const modelLists = reactive<Record<string, string[]>>({});
+const modelLists = reactive<Record<string, ModelOption[]>>({});
 const profileOf = (cli: string) => profiles.value.find((r) => r.name === cli);
 const baseOf = (cli: string) => profileOf(cli)?.baseCli ?? cli;
 const defaultLabel = (cli: string) => { const d = profileOf(cli)?.defaultModel; return d ? `default (${d})` : 'default'; };
@@ -30,7 +32,7 @@ async function loadModels(cli: string) {
   const base = baseOf(cli);
   if (modelLists[base]) return;
   modelLists[base] = [];
-  try { modelLists[base] = (await api.call<AgentModelList>('agents.models', { cli: base })).models; } catch { /* the default only */ }
+  try { modelLists[base] = modelOptions(await api.call<AgentModelList>('agents.models', { cli: base })); } catch { /* the default only */ }
 }
 onMounted(async () => {
   try { profiles.value = await api.call<AgentProfileRow[]>('agentProfiles.list'); } catch { /* built-ins by name */ }
@@ -114,19 +116,15 @@ async function create() {
       <input v-model="form.managerName" data-test="manager-name" />
       <span class="chip">manager</span>
       <select v-model="form.managerCli" data-test="manager-cli" @change="managerAgentChanged"><option v-for="c in agentOptions" :key="c.id" :value="c.id">{{ c.label }}</option></select>
-      <select v-model="form.managerModel" class="model" data-test="manager-model" title="The model this agent runs">
-        <option value="">{{ defaultLabel(form.managerCli) }}</option>
-        <option v-for="x in modelsOf(form.managerCli)" :key="x" :value="x">{{ x }}</option>
-      </select>
+      <AgentModelPicker :key="`manager-${form.managerCli}`" v-model="form.managerModel" class="model" test-id="manager-model" :models="modelsOf(form.managerCli)"
+        :default-label="defaultLabel(form.managerCli)" :note="false" />
     </div>
     <div v-for="(m, i) in members" :key="i" class="agent row">
       <input v-model="m.name" placeholder="member name" :data-test="`member-name-${i}`" />
       <span class="chip">member</span>
       <select v-model="m.cli" :data-test="`member-cli-${i}`" @change="agentChanged(m)"><option v-for="c in agentOptions" :key="c.id" :value="c.id">{{ c.label }}</option></select>
-      <select v-model="m.model" class="model" :data-test="`member-model-${i}`" title="The model this agent runs">
-        <option value="">{{ defaultLabel(m.cli) }}</option>
-        <option v-for="x in modelsOf(m.cli)" :key="x" :value="x">{{ x }}</option>
-      </select>
+      <AgentModelPicker :key="`member-${i}-${m.cli}`" v-model="m.model" class="model" :test-id="`member-model-${i}`" :models="modelsOf(m.cli)"
+        :default-label="defaultLabel(m.cli)" :note="false" />
       <button class="icon danger" title="Remove" @click="members.splice(i, 1)">✕</button>
     </div>
     <p v-if="members.length === 0" class="muted small" data-test="hire-hint">No members yet: the Manager hires its own team when you give it work. You can also add some now.</p>
@@ -145,7 +143,8 @@ label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color:
 h3 { font-size: 13px; margin: 8px 0 6px; }
 .agent { margin-bottom: 6px; }
 .agent input { width: 200px; }
-.agent select.model { min-width: 150px; }
+.agent .model :deep(select) { min-width: 150px; }
+.agent .model :deep(input) { width: 150px; }
 .actions { margin-top: 14px; }
 .sources { gap: 16px; margin: 4px 0; }
 .offers { gap: 6px; flex-wrap: wrap; margin: 2px 0 8px; }

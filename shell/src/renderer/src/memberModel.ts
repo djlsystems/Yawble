@@ -14,6 +14,7 @@ export function agentPillTitle(agent: string, m: AgentModelShown | null | undefi
   switch (m.source) {
     case 'member': return `${text}\nModel set on this member`;
     case 'agent': return `${text}\nThe agent's default model`;
+    case 'settings': return `${text}\nSet in the CLI's own settings`;
     case 'observed': return `${text}\nThe CLI's default; its last run used ${m.name}${m.at ? ` (${ago(m.at)})` : ''}`;
     default: return `${text}\nThe CLI's default model (not run yet)`;
   }
