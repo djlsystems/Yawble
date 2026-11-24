@@ -453,4 +453,16 @@ public class EmailConnectionTests
         Assert.Equal(10L, Scalar("SELECT id FROM connections WHERE name = 'mail';")); // 9 was used once: never again
         Assert.Equal(0L, Scalar("SELECT count(*) FROM pragma_foreign_key_check;"));
     }
+
+    [Fact]
+    public void AGoogleAppPasswordPastedWithSpacesSignsInWithoutThem_AndOtherPasswordsAreUsedAsGiven()
+    {
+        var gmail = EmailConnection.Settings("a@example.com", "imap.gmail.com", 993, "smtp.gmail.com", 465, null);
+        var other = EmailConnection.Settings("a@example.com", "mail.example.com", 993, "mail.example.com", 465, null);
+        Assert.Equal("abcdefghijklmnop", EmailConnection.SignInPassword(gmail, "abcd efgh ijkl mnop"));
+        Assert.Equal("abcdefghijklmnop", EmailConnection.SignInPassword(gmail, " abcd efgh ijkl mnop "));
+        Assert.Equal("abcdefghijklmnop", EmailConnection.SignInPassword(gmail, "abcdefghijklmnop"));
+        Assert.Equal("my pass word", EmailConnection.SignInPassword(gmail, "my pass word"));
+        Assert.Equal("abcd efgh ijkl mnop", EmailConnection.SignInPassword(other, "abcd efgh ijkl mnop"));
+    }
 }

@@ -116,7 +116,7 @@ public sealed partial class IntegrationService
         var settings = EmailConnection.Settings(view);
         if (!Conns.Secrets(connectionId).TryGetValue(EmailConnection.PasswordKey, out var password))
             throw new ArgumentException($"'{view.Name}' has no password on this computer; edit it and enter the password again");
-        return new EmailAccount(settings, password);
+        return new EmailAccount(settings, EmailConnection.SignInPassword(settings, password));
     }
 
     /// <summary>A signed-in IMAP session for an email Connection (the Email integration's read actions). Throws <see cref="MailException"/> or <see cref="ArgumentException"/>.</summary>

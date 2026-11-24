@@ -6,6 +6,7 @@ import { errorText, resolveApi } from '../api';
 import ConnectionDialog from './ConnectionDialog.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import Icon from './Icon.vue';
 
 /**
  * Connections: the sign-ins (API keys and tokens) that APIs share, kept on this computer. Values are shown masked, never in full.
@@ -131,7 +132,7 @@ onBeforeUnmount(() => off?.());
             <div class="small mono" data-test="connection-fields">
               <span v-for="f in c.fields" :key="f.key" class="fld">{{ f.label }}: {{ f.shown ?? 'not set' }}</span>
             </div>
-            <div class="small" :class="c.status === 'works' ? 'ok' : c.status === 'needs_reconnect' ? 'bad' : 'muted'" data-test="connection-status">{{ statusText(c) }}</div>
+            <div class="small status" :class="c.status === 'works' ? 'ok' : c.status === 'needs_reconnect' ? 'bad' : 'muted'" data-test="connection-status"><Icon v-if="!checking.has(c.id) && c.status !== 'untested'" :name="c.status === 'works' ? 'check' : 'alert'" :size="14" class="status-icon" />{{ statusText(c) }}</div>
             <div v-if="serverBound(c)" class="muted small" :data-test="`connection-mcp-note-${c.id}`">Sign in again from Settings → Integrations → MCP servers (Sign in).</div>
             <div class="small" data-test="connection-usedby">
               <template v-if="c.usedBy.length">Used by {{ c.usedBy.join(', ') }}</template>
@@ -160,7 +161,8 @@ onBeforeUnmount(() => off?.());
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
 .fld { margin-right: 12px; }
-.ok { color: var(--ok); } .bad { color: var(--bad); }
+.ok { color: var(--ok); } .status.ok { font-weight: 600; }
+.status { display: flex; align-items: flex-start; gap: 4px; } .status-icon { flex: none; margin-top: 1px; } .bad { color: var(--bad); }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .muted { color: var(--muted); font-weight: 400; } .small { font-size: 12px; }
 .link { border: 0; background: transparent; color: var(--accent); }

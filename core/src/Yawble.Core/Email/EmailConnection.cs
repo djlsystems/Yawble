@@ -84,6 +84,18 @@ public static class EmailConnection
         new(PasswordKey, "Password", true, null),
     ];
 
+    /// <summary>
+    /// The password to sign in with. A Google app password is shown as four groups of four letters (abcd efgh ijkl mnop) and is
+    /// often pasted that way; for a Gmail server those spaces are dropped. Any other password is used exactly as given.
+    /// </summary>
+    public static string SignInPassword(EmailSettings s, string password)
+    {
+        var gmail = s.ImapHost.EndsWith("gmail.com", StringComparison.OrdinalIgnoreCase) || s.SmtpHost.EndsWith("gmail.com", StringComparison.OrdinalIgnoreCase);
+        if (!gmail) return password;
+        var joined = string.Concat(password.Where(c => !char.IsWhiteSpace(c)));
+        return joined.Length == 16 && joined.All(char.IsAsciiLetter) ? joined : password;
+    }
+
     /// <summary>The settings a saved email Connection holds. Throws <see cref="ArgumentException"/> when it is not one, or its fields no longer check.</summary>
     public static EmailSettings Settings(ConnectionView view)
     {
