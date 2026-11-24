@@ -83,6 +83,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "code.open", "code.close",
         // B131: a script or schema exported as a file, a script member and its saved state, and one script run in full.
         "scripts.export", "schemas.export", "scripts.memberGet", "scripts.memberState", "scripts.memberFiles", "scripts.run",
+        // The designer's action catalog, a document rewritten to real integration names (nothing saved) and where a schema is used.
+        "scripts.catalog", "scripts.useRealNames", "schemas.usage",
     };
 
     /// <summary>A call that only reads, by its name alone.</summary>

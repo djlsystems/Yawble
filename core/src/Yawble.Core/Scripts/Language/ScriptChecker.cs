@@ -352,7 +352,8 @@ public static class ScriptChecker
                     if (use is not null)
                     {
                         var req = doc.Requires.FirstOrDefault(r => r.Name == use);
-                        if (req is null) Issue(step.Id, ScriptCheckCodes.UnknownRequirement, $"'{use}' is not in requires");
+                        if (req is null) Issue(step.Id, ScriptCheckCodes.UnknownRequirement,
+                            $"'{use}' is not in requires: name an integration as Settings > Integrations shows it, or list '{use}' in requires with its kind");
                         else if (action is not null && !req.Actions.Contains(action))
                             Issue(step.Id, ScriptCheckCodes.UnknownAction, $"action '{action}' is not listed in requires '{use}'");
                     }
