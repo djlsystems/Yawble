@@ -148,7 +148,7 @@ public class LauncherTests
 
     private static JsonElement Run(Message m) => JsonDocument.Parse(m.Payload).RootElement.GetProperty("run");
 
-    /// <summary>macOS (B119): the run's own temp folder exists while the run runs and is gone after, however it ended.</summary>
+    /// <summary>macOS: the run's own temp folder exists while the run runs and is gone after, however it ended.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(3)]

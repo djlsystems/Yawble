@@ -4,7 +4,7 @@ using System.Text;
 namespace Yawble.Core.Launch;
 
 /// <summary>
-/// B127 backstop: the processes that still hold a run folder (their working directory, or a file they have open, is in
+/// The backstop: the processes that still hold a run folder (their working directory, or a file they have open, is in
 /// it). A process that left the run's tree and group - reparented to launchd, a group of its own - is still found by the
 /// files it holds, e.g. MSBuild's temp files under yr-*. Only finds them: the caller adopts them into the run's tree
 /// (which applies its own start-time guard) and reaps.

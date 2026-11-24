@@ -18,7 +18,7 @@ using ScriptRunStatus = Yawble.Core.Scripts.Engine.ScriptRunStatus;
 namespace Yawble.Core.Tests.Scripts.Actions;
 
 /// <summary>
-/// Card 590 (SC-3): the built-in Email integration's actions from a script, through the real script engine, the email script actions and the
+/// The built-in Email integration's actions from a script, through the real script engine, the email script actions and the
 /// real IntegrationService, against the fake IMAP server (no real server, no OS credential store, placeholder credentials only).
 /// </summary>
 public sealed class EmailScriptActionsTests : IAsyncLifetime
@@ -270,7 +270,7 @@ public sealed class EmailScriptActionsTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// B133: the documented poll: list after the saved id, since the first-run time (it applies only when there is no id yet, or the id no longer
+    /// The documented poll: list after the saved id, since the first-run time (it applies only when there is no id yet, or the id no longer
     /// applies), max 1; when there was a message, read it, file it and save the id of the last (newest) message. Run after run, the id goes from
     /// run to run as a string in a saved variable; on cursorReset the script just goes on from what it got.
     /// </summary>

@@ -11,7 +11,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Merged "now allowed" notices (B018 part 3, card 184): allows told to one team's Manager within the notice window
+/// Merged "now allowed" notices: allows told to one team's Manager within the notice window
 /// (5 s) become one wake listing every host; allows further apart are told apart. Fakes only: a temporary database,
 /// a fake clock whose timers fire only when the test moves it, and a recording tell.
 /// </summary>

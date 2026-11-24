@@ -12,7 +12,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// B012 end-to-end checks the developers' NetworkAskTests leave open (card 62): more addresses and private names that
+/// End-to-end checks of network asks that the developers' NetworkAskTests leave open: more addresses and private names that
 /// never become asks (by the filter and through a run's gateway), a policy refusal that leaves the ask waiting and tells
 /// no one, the window's push on an answer, and "Allow everywhere" for a member whose override narrows the host list.
 /// Fakes only: a temporary database, a fake clock, a recording tell, a fake policy; no network and no system program.
@@ -221,7 +221,7 @@ public sealed class NetworkAskGapTests : IDisposable
 
         await asks.AnswerAsync(Assert.Single(asks.Asks()).Id, NetworkAskChoices.Team, null, Ct);
 
-        // B014: the team's list (added after the override's narrowing), not the members' loosen blocks
+        // The team's list (added after the override's narrowing), not the members' loosen blocks
         Assert.Contains("pypi.org", _policies.Effective(_priya, _layout).Policy.AllowHosts);
         Assert.Contains("pypi.org", _policies.Effective(omar, _layout).Policy.AllowHosts);
         Assert.Null(_policies.GetMember(_priya).Loosen.Network);

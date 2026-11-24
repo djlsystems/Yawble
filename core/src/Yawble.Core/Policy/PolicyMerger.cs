@@ -47,7 +47,7 @@ public static class PolicyMerger
 
         // ---- network.allowHosts: intersection with global; loosen may add; vendor hosts never.
         // "*.domain" needs no check of its own here: every host path (global, override, loosen, team) goes through
-        // FloorRules.HostProblem, which validates domain allows (B018), and the final filter below drops any it refuses.
+        // FloorRules.HostProblem, which validates domain allows, and the final filter below drops any it refuses.
         var hosts = new List<string>(global.Network.AllowHosts);
         if (overridePatch.Network?.AllowHosts is { } oHosts)
         {

@@ -11,9 +11,9 @@ using ManualClock = Yawble.Core.Tests.Board.TimelineCalculatorTests.ManualClock;
 namespace Yawble.Core.Tests.Launch;
 
 /// <summary>
-/// Stalled (B086) means the agent showed no sign of work for 10 minutes. A model request going out or streaming back
+/// Stalled means the agent showed no sign of work for 10 minutes. A model request going out or streaming back
 /// is a sign of work: a run that talks to the model without calling the bus is working, not stalled. Seen 2026-11-18:
-/// DeveloperMarlo's card 446 showed 15 minutes Stalled while his run made model requests every few seconds. The idle
+/// one of DeveloperMarlo's cards showed 15 minutes Stalled while his run made model requests every few seconds. The idle
 /// watchdog still waits for a bus call.
 /// </summary>
 public class RunActivityStallTests

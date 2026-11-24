@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Guardrail;
 
 /// <summary>
-/// B035 verify (card 162): the real yawble-guardcheck probe's "unix" attempts, outside any sandbox. A live socket in a
+/// The tester's checks of the real yawble-guardcheck probe's "unix" attempts, outside any sandbox. A live socket in a
 /// visible folder is what the old code gave a sandbox (systemd-resolved's folder bound read-only, no mask): the probe
 /// must say ALLOWED there, or net.dns-varlink could never catch the escape. An empty folder (what a mask leaves) and a
 /// missing folder must say BLOCKED. No real system program: the test's own socket in its own temp folder.

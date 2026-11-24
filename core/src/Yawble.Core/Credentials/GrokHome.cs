@@ -68,7 +68,7 @@ public sealed class GrokHome
     /// True for the person's OWN Grok home on this computer (GROK_HOME, else ~/.grok), which the person's grok signed in
     /// to outside the app. The app only reads it and lets the person's own grok renew it; it never creates, widens or
     /// deletes anything in it. The one write: the keeper puts auth.json back as it was when its own grok run left it
-    /// with no token (<see cref="RestoreAuth"/>, B128).
+    /// with no token (<see cref="RestoreAuth"/>).
     /// </summary>
     public bool PersonsOwn { get; private init; }
 

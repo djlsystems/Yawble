@@ -46,7 +46,7 @@ public sealed class LogRpc(LogService logs, LogTail? tail = null)
     /// <summary>
     /// logs.tail {level: "default"|"all"|"debug", team?, member?, app?}: pushes each new entry that passes as "logs.tailEntry"
     /// {tail, entry} until logs.untail or the viewer leaves (<see cref="LogTail"/>). Returns the tail's id and its filter.
-    /// app true: only the activity log's entries about no team and no member (team null, member "app"; B101).
+    /// app true: only the activity log's entries about no team and no member (team null, member "app").
     /// </summary>
     private JsonNode StartTail(JsonObject? p)
     {
@@ -121,7 +121,7 @@ public sealed class LogRpc(LogService logs, LogTail? tail = null)
         throw new ArgumentException("level is \"default\" (every level but debug), \"all\", \"error\", \"warning\", \"info\" or \"debug\"");
     }
 
-    /// <summary>A true/false parameter (B101's app filter); absent is false.</summary>
+    /// <summary>A true/false parameter (the app filter); absent is false.</summary>
     private static bool Bool(JsonObject? p, string key) => p?[key] switch
     {
         null => false,

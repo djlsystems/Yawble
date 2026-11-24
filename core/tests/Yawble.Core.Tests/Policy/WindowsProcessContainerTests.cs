@@ -24,7 +24,7 @@ public class WindowsProcessContainerTests
         return (SandboxRequestCompiler.Compile(PolicyFixtures.Global, PolicyFixtures.Override, PolicyFixtures.Loosen, run), run);
     }
 
-    /// <summary>The file-grant Claude mode, except on macOS, where Claude is gateway-held only (B118).</summary>
+    /// <summary>The file-grant Claude mode, except on macOS, where Claude is gateway-held only.</summary>
     private static CredentialMode MacGatewayHeld(TargetOs os) => os == TargetOs.MacOS ? CredentialMode.ClaudeGatewaySignIn : CredentialMode.ClaudeHostSignIn;
 
     private static List<string> Strings(JsonNode? array) =>

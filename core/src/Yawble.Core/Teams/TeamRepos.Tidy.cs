@@ -6,7 +6,7 @@ namespace Yawble.Core.Teams;
 public sealed record TidyCommit(string Sha, string Subject);
 
 /// <summary>
-/// One branch of the tidy plan (B067), in exactly one <see cref="Class"/> (<see cref="TidyClasses"/>). <c>Where</c>: <c>local</c> (the
+/// One branch of the tidy plan, in exactly one <see cref="Class"/> (<see cref="TidyClasses"/>). <c>Where</c>: <c>local</c> (the
 /// team repository), <c>origin</c> (as of the last fetch), <c>clone:&lt;member&gt;</c>.
 /// </summary>
 public sealed record TidyBranch(string Name, IReadOnlyList<string> Where, string Class)
@@ -67,7 +67,7 @@ public sealed class TeamGitRefusal(string code, string message) : InvalidOperati
 }
 
 /// <summary>
-/// B067: tidy branches. One read-only plan of every branch of a team's repositories (the team repository, origin as of the
+/// Tidy branches. One read-only plan of every branch of a team's repositories (the team repository, origin as of the
 /// last fetch, every member clone), each in one class; and the realign of a member branch whose clone was reset or
 /// rebased (the one forced update the app makes, always with the person's yes, never while the member runs, its old
 /// commit recorded). Clones are read as everywhere else: their branches are fetched into a scratch repository of the
@@ -83,7 +83,7 @@ public sealed partial class TeamRepos
     /// <summary>Where a realign fetches the clone's commit first (the host's own namespace, never in the bundle; removed after).</summary>
     public const string RealignStagingPrefix = "refs/sandbox/realign/";
 
-    /// <summary>The tidy plan of the team's main repository and every writable extra one (B067 item 1). Changes nothing.</summary>
+    /// <summary>The tidy plan of the team's main repository and every writable extra one. Changes nothing.</summary>
     public async Task<TeamGitTidyPlan> GitTidyPlanAsync(long teamId, string team, CancellationToken ct = default)
     {
         var repos = new List<(string Name, TeamRepo Repo)>();
@@ -291,7 +291,7 @@ public sealed partial class TeamRepos
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* a temp folder; the OS cleans it */ }
     }
 
-    // ------------------------------------------------------------------ realign (B067 item 3)
+    // ------------------------------------------------------------------ realign
 
     /// <summary>
     /// Sets the team repository's (and origin's) copy of <paramref name="member"/>'s branch to what the member's clone has: the

@@ -71,7 +71,7 @@ public sealed class UiRpcTests : IAsyncLifetime
     [Fact]
     public async Task TeamsWorkflowExpiry_ReadsWithTeamId_SetsWithDays_AndRefusesOutsideOneTo365()
     {
-        // B085 (card 388/389): the shell's get-or-set, like teams.push; the default is 3.
+        // teams.workflowExpiry is the shell's get-or-set, like teams.push; the default is 3.
         var teamId = await CreateMixedTeam();
         Assert.Equal(3, (await Call("teams.workflowExpiry", new { teamId }))!["days"]!.GetValue<int>());
         Assert.Equal(7, (await Call("teams.workflowExpiry", new { teamId, days = 7 }))!["days"]!.GetValue<int>());

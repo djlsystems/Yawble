@@ -169,7 +169,7 @@ public sealed record AgentCommandLines(CommandLineDescription Headless, CommandL
 /// <param name="Agent">The agent profile's name when it is a custom agent (recorded on the run); null = the built-in, named by its CLI.</param>
 /// <param name="Custom">The custom agent's argument changes; null for a built-in.</param>
 /// <param name="AgentModel">The custom agent's own default model; null for a built-in (its default is in agent_defaults).</param>
-/// <param name="AllowLocalhost">The team's "Allow localhost (macOS)" (0054, B119; off by default): given to the run's request input.</param>
+/// <param name="AllowLocalhost">The team's "Allow localhost (macOS)" (0054; off by default): given to the run's request input.</param>
 public sealed record LaunchMember(long Id, string Team, string Name, AgentCli Cli, IReadOnlyDictionary<string, string>? TeamEnv = null,
     string? Model = null, string? Agent = null, ArgvCustomization? Custom = null, string? AgentModel = null, bool AllowLocalhost = false);
 
@@ -277,7 +277,7 @@ public sealed class SandboxLauncher(
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
     /// <summary>
-    /// B122: macOS has no PID namespace around a run, so the core follows and ends the run's processes itself
+    /// macOS has no PID namespace around a run, so the core follows and ends the run's processes itself
     /// (<see cref="RunTree"/>). Linux (bwrap's PID namespace) and Windows (the sandbox's own containment) need none.
     /// </summary>
     private RunTree? TreeFor(int sandboxPid) =>
@@ -285,7 +285,7 @@ public sealed class SandboxLauncher(
         : host.Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? new RunTree(MacProcessTable.Instance, sandboxPid) : null;
 
     /// <summary>
-    /// B127 backstop: what still holds a run's temp folder after its tree is reaped is the run's too (a build that left
+    /// The backstop: what still holds a run's temp folder after its tree is reaped is the run's too (a build that left
     /// the tree and its group). The given one, else macOS's libproc walk where the launcher follows the real tree.
     /// </summary>
     private IRunFolderHolders? Holders =>
@@ -562,7 +562,7 @@ public sealed class SandboxLauncher(
                         RunToken = token,
                         GatewayPort = gateway.Port,
                         TeamEnv = member.TeamEnv,
-                        // B119: the team's "Allow localhost (macOS)"; the compiler uses it for macOS requests only.
+                        // The team's "Allow localhost (macOS)"; the compiler uses it for macOS requests only.
                         AllowLocalhost = member.AllowLocalhost,
                     };
                     Compiling?.Invoke(spec);

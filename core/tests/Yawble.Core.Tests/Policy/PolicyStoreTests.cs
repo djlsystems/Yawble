@@ -100,7 +100,7 @@ public sealed class PolicyStoreTests : IDisposable
         Assert.Equal(3, calls);
     }
 
-    // ------------------------------------------------------------------ B021 (card 87): AddTeamHost in one transaction
+    // ------------------------------------------------------------------ AddTeamHost in one transaction
 
     private const string NoHostsOverride = """{"network":{"allowHosts":[]}}""";
 
@@ -178,7 +178,7 @@ public sealed class PolicyStoreTests : IDisposable
         var (team, ada, ben) = SeedTeam();
         // The concurrent change, forced through the fake dry run: while the add is checking Ben's run (his policy read and
         // accepted, the row not yet written), another connection narrows Ben's network to nothing - which his check
-        // refuses. Before B021 the add then wrote the row anyway: a row Ben's check refuses.
+        // refuses. Without one transaction the add then wrote the row anyway: a row Ben's check refuses.
         var calls = 0;
         var store = new PolicyStore(cs, (g, o, l, layout) =>
         {
@@ -218,7 +218,7 @@ public sealed class PolicyStoreTests : IDisposable
         Assert.Equal(["pypi.org"], always.TeamHosts(team).Select(h => h.Host));
     }
 
-    // ------------------------------------------------------------------ B022 (card 127): the team's members are what was checked
+    // ------------------------------------------------------------------ the team's members are what was checked
 
     [Fact]
     public void AddTeamHost_AMemberHiredAfterTheSnapshot_WritesNothingAgainstTheOldList_AndTheirRefusalStopsTheAdd()

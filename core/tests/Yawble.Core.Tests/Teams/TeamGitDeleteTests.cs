@@ -110,7 +110,7 @@ public class TeamGitDeleteTests
         await f.Repos.UseExistingRepoAsync(ada.TeamId, "Alpha", picked, Ct);
         Assert.Empty((await f.Repos.GitStatusAsync(ada.TeamId, "Alpha", Ct)).OldBranches);
 
-        // Ada before B016: on members/ada, her work fetched back and pushed there.
+        // Ada, old-style: on members/ada, her work fetched back and pushed there.
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
         Assert.Equal(0, AgentGit.Run(checkout.ClonePath, checkout.Workspace, "branch", "-m", "members/ada").ExitCode);
         SetRowBranch(f, ada.Id, "members/ada");

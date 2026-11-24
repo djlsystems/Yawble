@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Bus;
 
-/// <summary>B130: a team whose member has an open needs_decision counts it in TeamSummary.Waiting (the team pill's
+/// <summary>A team whose member has an open needs_decision counts it in TeamSummary.Waiting (the team pill's
 /// "Waiting on you"), by the same rule as the member card's DecisionId; the person's answer brings it back to 0.</summary>
 public class TeamWaitingTests
 {

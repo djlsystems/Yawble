@@ -11,14 +11,14 @@ public sealed record BranchSyncResult(string Outcome, string BaseBranch, string?
 {
     public static BranchSyncResult Off(string baseBranch) => new("off", baseBranch, null, 0, [], [], null);
 
-    /// <summary>B073: the commits the team branch received from the base, newest first (empty when nothing came in).</summary>
+    /// <summary>The commits the team branch received from the base, newest first (empty when nothing came in).</summary>
     public IReadOnlyList<CommitRow> Incoming { get; init; } = [];
 
     public int IncomingCount { get; init; }
 
     public bool IncomingTruncated { get; init; }
 
-    /// <summary>B073: the from/to of <see cref="Incoming"/>: the team branch before, and the base it was brought to.</summary>
+    /// <summary>The from/to of <see cref="Incoming"/>: the team branch before, and the base it was brought to.</summary>
     public CommitRangeRef? IncomingRange { get; init; }
 }
 
@@ -172,7 +172,7 @@ public sealed partial class TeamRepos
         if (moved.Count > 0) _log?.Invoke($"team {team}: brought {string.Join(", ", moved)} up to {baseName} at {Short(target)}");
         var result = new BranchSyncResult(moved.Count > 0 ? "synced" : "in-step", baseName, target, 0, moved, [], Joined(null));
         if (teamBefore is null || !moved.Contains(teamBranch)) return result;
-        // B073: what came in to the team branch: the base's commits it did not have before.
+        // What came in to the team branch: the base's commits it did not have before.
         var incoming = await Previews.ListAsync(path, target, [teamBefore], GitPreviews.DefaultLimit, ct);
         return result with
         {

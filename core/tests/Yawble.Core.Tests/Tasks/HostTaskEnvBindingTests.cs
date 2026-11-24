@@ -13,7 +13,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Tasks;
 
 /// <summary>
-/// B023: a host task's environment variable from a Connection (GH_TOKEN for a release script). Fakes only: an in-memory credential store,
+/// A host task's environment variable from a Connection (GH_TOKEN for a release script). Fakes only: an in-memory credential store,
 /// the temp checkout and script of <see cref="TaskFixture"/>; no real gh and no network.
 /// </summary>
 public class HostTaskEnvBindingTests
@@ -116,7 +116,7 @@ public class HostTaskEnvBindingTests
         string H(HostTaskDef d) => TaskPinning.Definition(f.TeamId, d, p.ProgramResolved!).Hash;
         var withBinding = plain with { EnvFromConnections = [Bind(id) with { ConnectionName = ConnName }] };
 
-        Assert.DoesNotContain("env_from_connections", TaskPinning.Definition(f.TeamId, plain, p.ProgramResolved!).Json); // tasks from before B023: same hash
+        Assert.DoesNotContain("env_from_connections", TaskPinning.Definition(f.TeamId, plain, p.ProgramResolved!).Json); // tasks from before Connection variables: same hash
         Assert.NotEqual(H(plain), H(withBinding)); // adding
         Assert.NotEqual(H(withBinding), H(plain with { EnvFromConnections = [Bind(other) with { ConnectionName = ConnName }] })); // re-pointing the Connection
         Assert.NotEqual(H(withBinding), H(plain with { EnvFromConnections = [Bind(id, field: "other") with { ConnectionName = ConnName }] })); // another field

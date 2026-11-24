@@ -134,7 +134,7 @@ public class AuditClassificationTests
         "skills.delete",
         "skills.restore",
         "skills.save",
-        // B131: the script library, schemas, Test run and script members.
+        // The script library, schemas, Test run and script members.
         "schemas.import", "schemas.save", "scripts.delete", "scripts.import", "scripts.memberAdd", "scripts.memberResetVariable", "scripts.memberUpdate",
         "scripts.save", "scripts.testRun",
         "tasks.approve",

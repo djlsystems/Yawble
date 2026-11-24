@@ -349,7 +349,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
     }
 
     /// <summary>
-    /// A team repository's provider for pull requests (B075): the person's override, else detected from its origin; with
+    /// A team repository's provider for pull requests: the person's override, else detected from its origin; with
     /// the origin (null: none) and the repository's name ("main" or an extra's).
     /// </summary>
     private async Task<(Teams.RepoProviderKind Kind, string? Origin, string Name)> PullRequestProviderOfAsync(long teamId, string? repo, string? path, CancellationToken ct)
@@ -406,7 +406,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         }).ToList();
         if (OffersPullRequests(teamId, enabled))
         {
-            // The built-ins (B075): the team branch as a pull request on the repository's provider, through that provider's CLI and
+            // The built-ins: the team branch as a pull request on the repository's provider, through that provider's CLI and
             // under its rules (pr_open asks by default, pr_status runs).
             tools.Add(Tool("pr_open", "Open a pull request (a merge request on GitLab) from your team's branch into the repository's base branch, with your delivery as its description, " +
                 "on the repository's provider: GitHub through gh, GitLab through glab, Azure DevOps through az repos. Bitbucket, Gitea and a repository with no provider have none from here: it says so. " +
@@ -472,7 +472,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         if (tool is "pr_open" or "pr_status")
         {
             var baseBranch = repoBase ?? throw new ArgumentException("your team has no repository here");
-            // The repository's provider (the person's override, else its origin's) picks the pull request provider (B075,
+            // The repository's provider (the person's override, else its origin's) picks the pull request provider (
             // Teams/PullRequestProviders.cs) and so the CLI: gh, glab or az repos. Others have none from here, and nothing runs.
             var (kind, origin, name) = await PullRequestProviderOfAsync(run.Member.TeamId, repoName, repoPath, ct);
             if (Teams.RepoHost.PullRequestsUnavailable(name, origin, kind) is { } why) throw new ArgumentException(why);

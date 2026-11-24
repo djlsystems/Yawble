@@ -6,8 +6,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Policy;
 
 /// <summary>
-/// B119: a macOS run's own short temp folder (Part A) and the host loopback only with the team's Allow localhost
-/// (Part B, the request side). The compiler's output and the invariants that re-check it.
+/// A macOS run's own short temp folder and the host loopback only with the team's Allow localhost
+/// (the request side). The compiler's output and the invariants that re-check it.
 /// </summary>
 public class MacRunTempAndLocalhostTests
 {
@@ -206,7 +206,7 @@ public class MacRunTempAndLocalhostTests
         Assert.Contains(Problems(on, r => r["network"]!["ingress"]!["ports"] = new JsonArray(8080)), p => p.Contains("network.ingress.ports is never emitted"));
     }
 
-    // ---- Card 536: proof that Allow localhost is closed when off (SandboxRequestInvariants.MacLocalhostProblems).
+    // ---- Proof that Allow localhost is closed when off (SandboxRequestInvariants.MacLocalhostProblems).
 
     private static List<string> LocalhostProblems(RunSpec run, Action<JsonObject> mutate)
     {

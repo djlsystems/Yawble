@@ -1,4 +1,4 @@
--- 0048 a card's run the person stopped (B097, card 437): the card's status can be 'stopped' (Board/BoardProjector.cs,
+-- 0048 a card's run the person stopped: the card's status can be 'stopped' (Board/BoardProjector.cs,
 -- Lanes.Stopped). SQLite cannot change a CHECK in place, so board_cards is rebuilt with the same columns, rows, ids and
 -- indexes. The migrator runs with foreign_keys ON inside a transaction (the pragma cannot be turned off there), so
 -- dropping the old table cascades into board_trail: the trail is kept aside first and put back with its own ids.

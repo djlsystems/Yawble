@@ -373,7 +373,7 @@ public class FoundInUseTests
     public async Task ABuiltInsRowNeverLoosensTheFloorOnTheRealArguments()
     {
         await using var rig = await Rig.Make(withRepos: true);
-        await rig.Repos!.EnsureTeamRepoAsync(rig.Alpha, "Alpha", Ct); Yawble.Core.Tests.Teams.AgentGit.Host(rig.Repos.RepoOf(rig.Alpha)!.Path, "remote", "add", "origin", "https://github.com/acme/app.git"); // on GitHub: gh's built-ins (B075)
+        await rig.Repos!.EnsureTeamRepoAsync(rig.Alpha, "Alpha", Ct); Yawble.Core.Tests.Teams.AgentGit.Host(rig.Repos.RepoOf(rig.Alpha)!.Path, "remote", "add", "origin", "https://github.com/acme/app.git"); // on GitHub: gh's built-ins
         await rig.AddFakeCli("gh"); // a fake gh: nothing here may reach GitHub
         rig.Integrations.Discover.GetChecklist("gh", null); // the built-in rows
         rig.Integrations.Discover.SaveChoices("gh", null, [new RowChoice("pr_open", RowStates.Allow)]);
@@ -393,7 +393,7 @@ public class FoundInUseTests
     public async Task APrOpenAsk_IsRememberedUnderItsBuiltInRow()
     {
         await using var rig = await Rig.Make(withRepos: true);
-        await rig.Repos!.EnsureTeamRepoAsync(rig.Alpha, "Alpha", Ct); Yawble.Core.Tests.Teams.AgentGit.Host(rig.Repos.RepoOf(rig.Alpha)!.Path, "remote", "add", "origin", "https://github.com/acme/app.git"); // on GitHub: gh's built-ins (B075)
+        await rig.Repos!.EnsureTeamRepoAsync(rig.Alpha, "Alpha", Ct); Yawble.Core.Tests.Teams.AgentGit.Host(rig.Repos.RepoOf(rig.Alpha)!.Path, "remote", "add", "origin", "https://github.com/acme/app.git"); // on GitHub: gh's built-ins
         await rig.AddFakeCli("gh"); // a fake gh: nothing here may reach GitHub
         rig.Integrations.Discover.GetChecklist("gh", null); // the built-in rows
         Assert.StartsWith("asked:", await rig.CallAs("Alpha", "Ada", "pr_open", new { title = "Greeting", body = "Says hi.", reason = "done" }));

@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// B027 (card 170): no way around the tester rule. Declaring the workflow complete (item 1), a developer's move (item 2)
+/// No way around the tester rule. Declaring the workflow complete (item 1), a developer's move (item 2)
 /// and someone else's hand-back (item 3) do not put an untested tester's card in Done; only the tester's own hand-back
 /// or finished run after the card's latest assignment counts as tested (item 4); and who is a tester (item 5).
 /// Fakes only: the projector fed hand-made messages, and the scripted runner's bus.
@@ -40,8 +40,8 @@ public class BoardTesterRuleTests
     {
         var (db, store, p) = Board("TesterWren");
         using var _ = db;
-        var verify = store.AddCard("payments", null, "B027", "Verify the fix", "spec", "queued", Lanes.Todo, 20);
-        var fix = store.AddCard("payments", null, "B027", "Fix it", "spec", "queued", Lanes.Todo, 20);
+        var verify = store.AddCard("payments", null, "B002", "Verify the fix", "spec", "queued", Lanes.Todo, 20);
+        var fix = store.AddCard("payments", null, "B002", "Fix it", "spec", "queued", Lanes.Todo, 20);
         p.Apply(Claim("TesterWren", verify.Id, 20));
         p.Apply(Claim("DeveloperPriya", fix.Id, 20));
         p.Apply(M(MessageTypes.Handback, new { delivered = "fixed" }, "payments/DeveloperPriya", 20));
@@ -139,7 +139,7 @@ public class BoardTesterRuleTests
         Assert.Equal(Lanes.Done, store.Card(card.Id)!.Lane);
     }
 
-    /// <summary>Card 170: a tester's run that ended without handing back (stopped, or cut off after its final answer:
+    /// <summary>A tester's run that ended without handing back (stopped, or cut off after its final answer:
     /// completed with exit -1) is not a test; workflow_complete leaves the card out. One that handed back is.</summary>
     [Theory]
     [InlineData("""{"reason":"ok","handedBack":false}""")]
@@ -185,9 +185,9 @@ public class BoardTesterRuleTests
     [InlineData("moved", "x", false)]
     [InlineData("handed back", "x", true)]
     [InlineData("run ended", TesterRule.RanAndHandedBack, true)]
-    [InlineData("run ended", "run ended (no hand-back)", false)]          // card 170: a run that did not hand back
+    [InlineData("run ended", "run ended (no hand-back)", false)]          // a run that did not hand back
     [InlineData("run ended", "run ended (no hand-back, exit -1)", false)] // nor one that was cut off
-    [InlineData("run ended", "run ended", false)]                         // nor an entry from before card 170
+    [InlineData("run ended", "run ended", false)]                         // nor the plain entry older builds wrote
     public void Item4_OnlyAHandBackOrAFinishedRunCounts(string kind, string text, bool counts)
     {
         var (db, store, _) = Board();

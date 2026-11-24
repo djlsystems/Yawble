@@ -5,8 +5,8 @@ using Yawble.Core.Scheduling;
 namespace Yawble.Core.Bus;
 
 /// <summary>One team in the team list: its running and queued counts.</summary>
-/// <param name="WorkflowExpiryDays">The team's workflowExpiryDays (B085): an open workflow nobody works expires after this many days.</param>
-/// <param name="Waiting">B130: how many of the team's members have an open needs_decision (the rule the agent cards use,
+/// <param name="WorkflowExpiryDays">The team's workflowExpiryDays: an open workflow nobody works expires after this many days.</param>
+/// <param name="Waiting">How many of the team's members have an open needs_decision (the rule the agent cards use,
 /// OpenDecisionByMember). The team pill says "Waiting on you" while it is above 0 and nothing runs.</param>
 public sealed record TeamSummary(long Id, string Name, string? RepoPath, int Members, int Running, int Queued, bool Paused = false, bool Archived = false,
     int WorkflowExpiryDays = BusEngine.DefaultWorkflowExpiryDays, int Waiting = 0);
@@ -17,11 +17,11 @@ public sealed record RunSlots(int Running, int Limit, int Queued);
 /// <summary>One agent card: the member, its state, queue position and the last run's outcome. Interactive: the
 /// member holds or waits for an interactive terminal session (not a headless run), so the pane's ✕ may end it.
 /// LastRunFailureClass: the last run's runs.failure_class (stopped, timeout, idle, interrupted, ...; null when it did not
-/// fail): a run the person stopped is recorded failed with class "stopped" and is shown as stopped, not failed (B097).
-/// DecisionId (B123): the member's newest unanswered needs_decision (its message seq); while there is one, StatusLine is
+/// fail): a run the person stopped is recorded failed with class "stopped" and is shown as stopped, not failed.
+/// DecisionId: the member's newest unanswered needs_decision (its message seq); while there is one, StatusLine is
 /// "Waiting on you: ..." (BusEngine.WaitingOnYou), not whatever the member reported after it.
-/// WaitState / WaitsFor (B126): with QueuedInstructions, why they have not started (WaitStates: queued, waits-for-run with
-/// the sender's name, held, pending); null when none waits. State (B126): running | idle | one of WaitStates: queued while
+/// WaitState / WaitsFor: with QueuedInstructions, why they have not started (WaitStates: queued, waits-for-run with
+/// the sender's name, held, pending); null when none waits. State: running | idle | one of WaitStates: queued while
 /// the member is in the run queue, else its WaitState when work waits (waits-for-run, held, pending), else idle.</summary>
 public sealed record AgentCard(
     MemberRow Member, string State, int? QueuePosition, int QueueLength, int QueuedInstructions, string? StatusLine,
@@ -164,7 +164,7 @@ public sealed partial class BusEngine
             {
                 var mine = members.Where(m => m.TeamId == t.Id).ToList();
                 var ids = mine.Select(m => m.Id).ToHashSet();
-                // B130: the member cards' rule (B123): a member with an open needs_decision waits on the person.
+                // The member cards' rule: a member with an open needs_decision waits on the person.
                 var asking = mine.Count == 0 ? null : OpenDecisionByMember(t.Name);
                 var waiting = asking is null ? 0 : mine.Count(m => asking.ContainsKey($"{m.Team}/{m.Name}"));
                 return new TeamSummary(t.Id, t.Name, t.RepoPath, ids.Count,
@@ -186,7 +186,7 @@ public sealed partial class BusEngine
             var held = _store.HeldTeams();
             TidyLease(_store.Clock.GetUtcNow());
             var rows = _store.MemberRows(teamId);
-            // B123: a member with an open needs_decision shows "Waiting on you" (and the decision's id), whatever it said after.
+            // A member with an open needs_decision shows "Waiting on you" (and the decision's id), whatever it said after.
             var asking = rows.Count == 0 ? new Dictionary<string, Message>(StringComparer.OrdinalIgnoreCase) : OpenDecisionByMember(rows[0].Team);
             return rows.Select(m =>
             {
@@ -200,7 +200,7 @@ public sealed partial class BusEngine
                 var (waitState, waitsFor) = mine.Count == 0 ? (null, null) : WaitOf(m.Id, m.TeamId, mine, queue, held);
                 return new AgentCard(m,
                     // A live interactive session holds a slot: the card shows it running (and Stop ends it).
-                    // B126: work not started and not in the run queue says why (waits-for-run, held, pending), as WaitOf does.
+                    // Work not started and not in the run queue says why (waits-for-run, held, pending), as WaitOf does.
                     active is not null || _sessions.ContainsKey(m.Id) ? "running" : position is not null ? WaitStates.Queued : waitState ?? "idle",
                     position, queue.Count,
                     mine.Count,
@@ -249,17 +249,17 @@ public sealed partial class BusEngine
     public Task<IReadOnlyList<Message>> RecentTeamMessagesAsync(string team, int limit, CancellationToken ct = default) =>
         WithGate(() => _store.RecentTeamMessages(team, limit), ct);
 
-    /// <summary>One workflow's messages, oldest first (the board's timeline of a workflow, B086).</summary>
+    /// <summary>One workflow's messages, oldest first (the board's timeline of a workflow).</summary>
     public Task<IReadOnlyList<Message>> WorkflowThreadAsync(long correlation, CancellationToken ct = default) =>
         WithGate(() => _store.Workflow(correlation), ct);
 
-    /// <summary>The runs working now and their quiet stretches so far (B086: live Stalled and Waiting-for-a-slot time).</summary>
+    /// <summary>The runs working now and their quiet stretches so far (live Stalled and Waiting-for-a-slot time).</summary>
     public Task<IReadOnlyList<LiveRunActivity>> LiveActivityAsync(CancellationToken ct = default) =>
         WithGate(() => LiveActivity(_store.Clock.GetUtcNow()), ct);
 
     /// <summary>Under the gate.</summary>
-    /// <remarks>B106: every active run, with its lease waits from the lease's own queue (not only a run with an idle clock).
-    /// B126: and every member in the run queue, once per workflow of its ripe undelivered work, since it joined.</remarks>
+    /// <remarks>Every active run, with its lease waits from the lease's own queue (not only a run with an idle clock).
+    /// And every member in the run queue, once per workflow of its ripe undelivered work, since it joined.</remarks>
     private IReadOnlyList<LiveRunActivity> LiveActivity(DateTimeOffset now)
     {
         List<LiveRunActivity> live = [.. _active.Values.Select(a => (a.Context, Spans: ActivityOf(a.Context, now)))

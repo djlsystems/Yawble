@@ -1,4 +1,4 @@
--- 0044 a host task may say what it is for and how to check its result (B066).
+-- 0044 a host task may say what it is for and how to check its result.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --
 -- description: free text, what the task does (the Concierge picks a task by it: "deploys the cloud service").

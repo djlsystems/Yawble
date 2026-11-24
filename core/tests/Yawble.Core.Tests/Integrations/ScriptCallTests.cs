@@ -13,7 +13,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Card 586 (B132, SC-2): a script member's API call (<see cref="IntegrationService.CallForScriptAsync"/>), form-encoded bodies (script and agent
+/// A script member's API call (<see cref="IntegrationService.CallForScriptAsync"/>), form-encoded bodies (script and agent
 /// paths), path parameters filled from the Connection, and the catalog the script adapter reads (<see cref="IntegrationService.ListScriptOperations"/>).
 /// A messaging API shaped like Twilio's Messages endpoint, served by FakeHttp: no network, no OS credential store.
 /// </summary>

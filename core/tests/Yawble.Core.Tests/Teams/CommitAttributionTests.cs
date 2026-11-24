@@ -34,7 +34,7 @@ public class CommitAttributionTests
     [InlineData("Co-Authored-By: Cody Bot <cody@example.com>")]
     [InlineData("Co-Authored-By: Claude Code <claude@example.com>")]
     [InlineData("Co-Authored-By: claude[bot] <209825114+claude[bot]@users.noreply.github.com>")]
-    // Claude is caught on the bare word (spec, card 134 item 3), so a person named Claude is caught too: accepted.
+    // Claude is caught on the bare word (as the rule says), so a person named Claude is caught too: accepted.
     [InlineData("Co-Authored-By: Claude <claude@example.com>")]
     [InlineData("Co-Authored-By: Claude Dupont <claude.dupont@example.fr>")]
     [InlineData("Claude-Session: 0f3c9a2e-1b2c")]
@@ -71,10 +71,10 @@ public class CommitAttributionTests
     }
 
     [Fact]
-    public void TheB028CommitBodyItself_DescribesTheTrailers_ButCarriesNone()
+    public void TheAttributionCommitBodyItself_DescribesTheTrailers_ButCarriesNone()
     {
         const string body = """
-            B028: refuse fetching back commits that carry AI attribution lines
+            B002: refuse fetching back commits that carry AI attribution lines
 
             - CommitAttribution: finds Co-Authored-By naming an AI vendor, model or
               tool, Claude-Session: and "Generated with ..." naming one; a human

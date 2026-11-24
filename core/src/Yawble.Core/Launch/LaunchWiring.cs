@@ -29,7 +29,7 @@ public sealed class LaunchWiring : IAsyncDisposable
     private readonly GrokKeeper? _keeper;
 
     /// <summary>Where every run's gateway reports a host refused for not being on the allowlist (the network asks); set once the ask store is up.</summary>
-    /// <summary>The gateway's latest Grok sign-in outcome (the Agents tile, B128); null when the launcher is off.</summary>
+    /// <summary>The gateway's latest Grok sign-in outcome (the Agents tile); null when the launcher is off.</summary>
     public GrokSignInWatch? GrokSignIn => _gatewayHost?.GrokSignIn;
 
     public Gateway.IHostRefusals? HostRefusals
@@ -162,7 +162,7 @@ public sealed class LaunchWiring : IAsyncDisposable
     }
 }
 
-/// <summary>B131: what runs a script member's bus run (a tell to it): the script runner.</summary>
+/// <summary>What runs a script member's bus run (a tell to it): the script runner.</summary>
 public interface IScriptMemberRuns
 {
     bool IsScriptMember(long memberId);
@@ -170,7 +170,7 @@ public interface IScriptMemberRuns
 }
 
 /// <summary>
-/// B131: the bus's runner, dispatching by member kind: a script member's run goes to the script engine (through
+/// The bus's runner, dispatching by member kind: a script member's run goes to the script engine (through
 /// <see cref="IScriptMemberRuns"/>), an agent's to the runner it always had (the sandbox launcher, wrapped as before),
 /// unchanged. With no script runner set every run is an agent's.
 /// </summary>

@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.AgentCommands;
 
-/// <summary>macOS's per-run short temp folder (B119 Part A): its name, the sun_path length rule, making, removing and the sweep.</summary>
+/// <summary>macOS's per-run short temp folder: its name, the sun_path length rule, making, removing and the sweep.</summary>
 public class RunTempFolderTests
 {
     [Fact]
@@ -57,7 +57,7 @@ public class RunTempFolderTests
         Assert.True(RunTempFolder.Remove(folder)); // already gone: nothing to do
     }
 
-    // B120: two app instances of one Mac user share DARWIN_USER_TEMP_DIR; each core's folders carry its owner marker.
+    // Two app instances of one Mac user share DARWIN_USER_TEMP_DIR; each core's folders carry its owner marker.
     private static readonly RunTempOwner CoreA = new(RunTempOwner.HashDataDir("/Users/alice/Library/Application Support/Yawble"), 4101, 638_000_000_000_000_000);
     private static readonly RunTempOwner CoreB = new(RunTempOwner.HashDataDir("/Users/alice/src/yawble/dev-data"), 4202, 638_000_000_100_000_000);
 

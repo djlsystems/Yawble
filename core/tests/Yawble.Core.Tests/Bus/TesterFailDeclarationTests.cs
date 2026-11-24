@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// B142 (card 620), next to TeamWorkflowTests' declaration rules: workflow_complete is refused (tester_fail) while a card's
+/// Next to TeamWorkflowTests' declaration rules: workflow_complete is refused (tester_fail) while a card's
 /// latest tester hand-back in the workflow starts with FAIL. A later PASS clears it; so does the person's yes to a
 /// needs_decision tied to the card (card, kind accept-fail or wont-do), and the declaration then lists the card in
 /// closedOverFail. Fake runners only.
@@ -14,7 +14,7 @@ public class TesterFailDeclarationTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private const string FailLine = "FAIL: card 610 the Save button does nothing";
+    private const string FailLine = "FAIL: card 61 the Save button does nothing";
 
     /// <summary>One declaration try: "ok" with the WorkflowCompleted message, or the refusal.</summary>
     private sealed record Outcome(string Code, string Text, Message? Declared);
@@ -38,7 +38,7 @@ public class TesterFailDeclarationTests
         public async Task<Outcome?> TryDeclare(RunContext run, CancellationToken ct)
         {
             Outcome o;
-            try { o = new Outcome("ok", "", await run.WorkflowCompleteAsync("card 610 delivered", ct)); }
+            try { o = new Outcome("ok", "", await run.WorkflowCompleteAsync("card 61 delivered", ct)); }
             catch (BusRefusal r) when (r.Code == "busy") { return null; }
             catch (BusRefusal r) { o = new Outcome(r.Code, r.Message, null); }
             lock (Outcomes) Outcomes.Add(o);
@@ -68,29 +68,29 @@ public class TesterFailDeclarationTests
         rig.Runner.On("Alpha/TesterGary", async (run, ct) =>
         {
             var n = Interlocked.Increment(ref garyRuns);
-            await run.HandbackAsync(n == 1 ? FailLine + "\n\n- clicked Save, nothing stored" : "PASS: card 610 verified, Save stores the row", ct);
+            await run.HandbackAsync(n == 1 ? FailLine + "\n\n- clicked Save, nothing stored" : "PASS: card 61 verified, Save stores the row", ct);
             return RunResult.Ok;
         });
         rig.Runner.On("Alpha/Manager", async (run, ct) =>
         {
-            if (IsRoot(run)) { await run.TellAsync("TesterGary", "verify card 610", 610, ct); return RunResult.Ok; }
+            if (IsRoot(run)) { await run.TellAsync("TesterGary", "verify card 61", 61, ct); return RunResult.Ok; }
             if (await rig.TryDeclare(run, ct) is { Code: "tester_fail" } && rig.Count("tester_fail") == 1)
-                await run.TellAsync("TesterGary", "fixed: verify card 610 again", 610, ct);
+                await run.TellAsync("TesterGary", "fixed: verify card 61 again", 61, ct);
             return RunResult.Ok;
         });
         await rig.StartAsync("TesterGary");
-        var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 610", ct: Ct);
+        var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 61", ct: Ct);
         using var reader = rig.Db.OpenStore();
         await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "the declaration after the PASS");
 
         Outcome refused;
         lock (rig.Outcomes) refused = rig.Outcomes.First(o => o.Code != "ok");
         Assert.Equal("tester_fail", refused.Code);
-        Assert.Contains("card 610", refused.Text);
+        Assert.Contains("card 61", refused.Text);
         Assert.Contains($"TesterGary handed back \"{FailLine}\"", refused.Text); // the first line, quoted
         Assert.DoesNotContain("nothing stored", refused.Text);
-        Assert.Contains("have the tester verify card 610 again", refused.Text);
-        Assert.Contains("needs_decision, card 610 and kind accept-fail", refused.Text);
+        Assert.Contains("have the tester verify card 61 again", refused.Text);
+        Assert.Contains("needs_decision, card 61 and kind accept-fail", refused.Text);
         Assert.Contains("accept and close?", refused.Text);
         Assert.Contains("won't-do", refused.Text);
         Assert.Contains("also needs the person's yes", refused.Text);
@@ -103,28 +103,28 @@ public class TesterFailDeclarationTests
     {
         await using var rig = new Rig();
         string? noFail = null;
-        rig.Runner.On("Alpha/TesterGary", async (run, ct) => { await run.HandbackAsync("  **fail**: card 610 the Save button does nothing", ct); return RunResult.Ok; });
+        rig.Runner.On("Alpha/TesterGary", async (run, ct) => { await run.HandbackAsync("  **fail**: card 61 the Save button does nothing", ct); return RunResult.Ok; });
         rig.Runner.On("Alpha/Manager", async (run, ct) =>
         {
-            if (IsRoot(run)) { await run.TellAsync("TesterGary", "verify card 610", 610, ct); return RunResult.Ok; }
+            if (IsRoot(run)) { await run.TellAsync("TesterGary", "verify card 61", 61, ct); return RunResult.Ok; }
             if (await rig.TryDeclare(run, ct) is { Code: "tester_fail" } && rig.Count("tester_fail") == 1)
             {
-                try { await run.NeedsDecisionAsync(DecisionAsk.Parse(null, "Accept card 611?", null, null, 611, "accept-fail", "x"), ct); }
+                try { await run.NeedsDecisionAsync(DecisionAsk.Parse(null, "Accept card 62?", null, null, 62, "accept-fail", "x"), ct); }
                 catch (BusRefusal r) { noFail = r.Code; }
                 await run.NeedsDecisionAsync(DecisionAsk.Parse(null,
-                    "Gary failed card 610 on the Save button; I think the criterion is too strict because Save is out of scope: accept and close?",
-                    null, "Save lands in card 612.", 610, "accept-fail", "Save is out of scope for card 610"), ct);
+                    "Gary failed card 61 on the Save button; I think the criterion is too strict because Save is out of scope: accept and close?",
+                    null, "Save lands in card 63.", 61, "accept-fail", "Save is out of scope for card 61"), ct);
             }
             return RunResult.Ok;
         });
         await rig.StartAsync("TesterGary");
-        var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 610", ct: Ct);
+        var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 61", ct: Ct);
         IReadOnlyList<Message> open = [];
         await Wait.UntilAsync(async () => (open = await rig.Engine.OpenDecisionsAsync("Alpha", Ct)).Count == 1, "the Manager's question");
 
         Assert.Equal("no_fail", noFail); // a card with no FAIL has nothing to close over
         var ask = DecisionAsk.Read(open[0].Payload);
-        Assert.Equal(new CloseOverFail(610, CloseOverFail.Accepted, "Save is out of scope for card 610"), ask.Close);
+        Assert.Equal(new CloseOverFail(61, CloseOverFail.Accepted, "Save is out of scope for card 61"), ask.Close);
         Assert.Equal(DecisionActions.CloseOverFail, ask.Options![0].Action); // the app's yes, the no has no action
         Assert.Null(ask.Options[1].Action);
 
@@ -135,40 +135,40 @@ public class TesterFailDeclarationTests
         var answer = reader.Workflow(root.Seq).Single(m => m.Source == MessageTypes.PersonSource && m.CausationSeq == open[0].Seq);
         Assert.Equal(open[0].Seq, JsonNode.Parse(answer.Payload)!["closeOverFail"]!["decision"]!.GetValue<long>());
         var closed = Assert.Single(ClosedOverFail(rig.Declared().Declared!)!)!.AsObject();
-        Assert.Equal(610, closed["card"]!.GetValue<long>());
+        Assert.Equal(61, closed["card"]!.GetValue<long>());
         Assert.Equal("Alpha/TesterGary", closed["tester"]!.GetValue<string>());
-        Assert.Equal("**fail**: card 610 the Save button does nothing", closed["failLine"]!.GetValue<string>());
+        Assert.Equal("**fail**: card 61 the Save button does nothing", closed["failLine"]!.GetValue<string>());
         Assert.Equal("accepted", closed["kind"]!.GetValue<string>());
-        Assert.Equal("Save is out of scope for card 610", closed["reason"]!.GetValue<string>());
+        Assert.Equal("Save is out of scope for card 61", closed["reason"]!.GetValue<string>());
     }
 
     [Fact]
     public async Task WontDoNeedsAYes()
     {
         // A won't-do needs a reason, and kind goes with card; the close action needs a card.
-        Assert.Equal("bad_decision", Assert.Throws<BusRefusal>(() => DecisionAsk.Parse(null, "Drop card 610?", null, null, 610, "wont-do", null)).Code);
+        Assert.Equal("bad_decision", Assert.Throws<BusRefusal>(() => DecisionAsk.Parse(null, "Drop card 61?", null, null, 61, "wont-do", null)).Code);
         Assert.Equal("bad_decision", Assert.Throws<BusRefusal>(() => DecisionAsk.Parse(null, "Drop it?", null, null, null, "wont-do", "x")).Code);
-        Assert.Equal("bad_decision", Assert.Throws<BusRefusal>(() => DecisionAsk.Parse(null, "Drop card 610?", null, null, 610, "maybe", "x")).Code);
+        Assert.Equal("bad_decision", Assert.Throws<BusRefusal>(() => DecisionAsk.Parse(null, "Drop card 61?", null, null, 61, "maybe", "x")).Code);
         var yesWithoutCard = new JsonArray(
             new JsonObject { ["label"] = "Yes", ["reply"] = "yes", ["action"] = DecisionActions.CloseOverFail },
             new JsonObject { ["label"] = "No", ["reply"] = "no" });
         Assert.Equal("bad_decision", Assert.Throws<BusRefusal>(() => DecisionAsk.Parse(null, "Close?", yesWithoutCard, null)).Code);
         var noYes = new JsonArray(new JsonObject { ["label"] = "A", ["reply"] = "a" }, new JsonObject { ["label"] = "B", ["reply"] = "b" });
-        Assert.Equal("bad_decision", Assert.Throws<BusRefusal>(() => DecisionAsk.Parse(null, "Close?", noYes, null, 610, "wont-do", "x")).Code);
+        Assert.Equal("bad_decision", Assert.Throws<BusRefusal>(() => DecisionAsk.Parse(null, "Close?", noYes, null, 61, "wont-do", "x")).Code);
 
         await using var rig = new Rig();
         rig.Runner.On("Alpha/TesterGary", async (run, ct) => { await run.HandbackAsync(FailLine, ct); return RunResult.Ok; });
         rig.Runner.On("Alpha/Manager", async (run, ct) =>
         {
-            if (IsRoot(run)) { await run.TellAsync("TesterGary", "verify card 610", 610, ct); return RunResult.Ok; }
+            if (IsRoot(run)) { await run.TellAsync("TesterGary", "verify card 61", 61, ct); return RunResult.Ok; }
             // Every refusal: ask for the won't-do (again, after a "no").
             if (await rig.TryDeclare(run, ct) is { Code: "tester_fail" })
-                await run.NeedsDecisionAsync(DecisionAsk.Parse(null, "Card 610 is won't-do: the Save button moves to card 612. Agree?",
-                    null, null, 610, "wont-do", "Save moves to card 612"), ct);
+                await run.NeedsDecisionAsync(DecisionAsk.Parse(null, "Card 61 is won't-do: the Save button moves to card 63. Agree?",
+                    null, null, 61, "wont-do", "Save moves to card 63"), ct);
             return RunResult.Ok;
         });
         await rig.StartAsync("TesterGary");
-        var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 610", ct: Ct);
+        var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 61", ct: Ct);
         IReadOnlyList<Message> open = [];
         await Wait.UntilAsync(async () => (open = await rig.Engine.OpenDecisionsAsync("Alpha", Ct)).Count == 1, "the won't-do question");
         var first = DecisionAsk.Read(open[0].Payload);
@@ -183,7 +183,7 @@ public class TesterFailDeclarationTests
         Assert.False(reader.WorkflowDeclared(root.Seq));
 
         // Text alone (as the Concierge answers) is not the yes either: only the picked yes option is.
-        await rig.Engine.PersonAnswerAsync("Alpha", "Manager", "Yes: card 610 is won't-do. Close the workflow.", open[0].Seq, ct: Ct);
+        await rig.Engine.PersonAnswerAsync("Alpha", "Manager", "Yes: card 61 is won't-do. Close the workflow.", open[0].Seq, ct: Ct);
         var secondSeq = open[0].Seq;
         await Wait.UntilAsync(async () => (open = await rig.Engine.OpenDecisionsAsync("Alpha", Ct)).Count == 1 && open[0].Seq != secondSeq, "the third question");
         Assert.Equal(3, rig.Count("tester_fail"));
@@ -192,7 +192,7 @@ public class TesterFailDeclarationTests
         await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "the declaration after the yes");
         var closed = Assert.Single(ClosedOverFail(rig.Declared().Declared!)!)!.AsObject();
         Assert.Equal("wont-do", closed["kind"]!.GetValue<string>());
-        Assert.Equal("Save moves to card 612", closed["reason"]!.GetValue<string>());
+        Assert.Equal("Save moves to card 63", closed["reason"]!.GetValue<string>());
         Assert.Equal(FailLine, closed["failLine"]!.GetValue<string>());
     }
 
@@ -205,7 +205,7 @@ public class TesterFailDeclarationTests
         {
             if (IsRoot(run))
             {
-                await run.TellAsync("Ada", "build card 610", 610, ct);       // a developer's FAIL on a card is no tester verdict
+                await run.TellAsync("Ada", "build card 61", 61, ct);       // a developer's FAIL on a card is no tester verdict
                 await run.TellAsync("TesterGary", "look around", ct);         // a tester's FAIL with no card belongs to no card
                 return RunResult.Ok;
             }
@@ -213,7 +213,7 @@ public class TesterFailDeclarationTests
             return RunResult.Ok;
         });
         await rig.StartAsync("Ada", "TesterGary");
-        var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 610", ct: Ct);
+        var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 61", ct: Ct);
         using var reader = rig.Db.OpenStore();
         await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "the declaration");
 
@@ -224,13 +224,13 @@ public class TesterFailDeclarationTests
     [Theory]
     [InlineData("PASS: all good", "PASS")]
     [InlineData("  pass - all good", "PASS")]
-    [InlineData("Passed: card 610", "PASS")]
+    [InlineData("Passed: card 61", "PASS")]
     [InlineData("FAIL", "FAIL")]
-    [InlineData("**FAIL**: card 610", "FAIL")]
-    [InlineData("## Failed on card 610", "FAIL")]
+    [InlineData("**FAIL**: card 61", "FAIL")]
+    [InlineData("## Failed on card 61", "FAIL")]
     [InlineData("Passing the work back", null)]
     [InlineData("Failure analysis", null)]
-    [InlineData("Card 610: FAIL", null)]
+    [InlineData("Card 61: FAIL", null)]
     [InlineData("", null)]
     public void TheVerdictIsHowTheHandBackStarts(string delivered, string? verdict) => Assert.Equal(verdict, TesterVerdicts.Of(delivered));
 }

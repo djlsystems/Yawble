@@ -46,7 +46,7 @@ public sealed record ScriptOperation(string Action, string Method, string Route,
     IReadOnlyList<ScriptOperationParameter> Parameters, string? BodyMediaType);
 
 /// <summary>
-/// An API operation a team's scripts could be allowed to call (B139): the API's name, the action id, its HTTP method, route and summary, the
+/// An API operation a team's scripts could be allowed to call: the API's name, the action id, its HTTP method, route and summary, the
 /// team, and the team's decision on it now ("allow", "ask" or "deny").
 /// </summary>
 public sealed record ScriptActionToAllow(string Api, string Action, string Method, string Route, string Summary, long TeamId, string Team, string Decision);
@@ -194,7 +194,7 @@ public sealed partial class IntegrationService
     }
 
     /// <summary>
-    /// B139 (integration_action_allow): the operation <paramref name="action"/> of the API <paramref name="integration"/> ("name" or "api:name")
+    /// integration_action_allow: the operation <paramref name="action"/> of the API <paramref name="integration"/> ("name" or "api:name")
     /// that <paramref name="team"/> would be allowed, with the team's decision on it now ("allow", "ask" or "deny"). Reads only. Throws
     /// <see cref="ScriptApiRefusedException"/> when the team or the API is unknown, the API is not turned on for the team, the action is unknown
     /// or gone, or it is a sign-in (floor) action that is never allowed.

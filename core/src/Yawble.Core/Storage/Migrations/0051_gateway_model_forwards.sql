@@ -1,7 +1,7 @@
--- 0051 gateway log (B103): successful model requests are no longer one row each in gateway_events.
+-- 0051 gateway log: successful model requests are no longer one row each in gateway_events.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --
--- From B103 the gateway (GatewayLog.Write) writes a 2xx forward to a model vhost only the first time per run and vhost,
+-- The gateway (GatewayLog.Write) writes a 2xx forward to a model vhost only the first time per run and vhost,
 -- and again for the first one after each credential-problem or rate-limited event on that vhost in that run (the success
 -- GatewayVerdicts.From reads as the problem having cleared); the model requests themselves are counted in usage_events.
 -- This deletes the rows written before that rule by the same rule: kind 'forward', a 2xx status, to a model vhost (the

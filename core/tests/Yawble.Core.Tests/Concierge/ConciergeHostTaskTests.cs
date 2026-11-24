@@ -15,7 +15,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Concierge;
 
 /// <summary>
-/// B066: the Concierge (and the companion) list, run and check a team's host tasks. A run is asked for exactly as an agent's
+/// The Concierge (and the companion) list, run and check a team's host tasks. A run is asked for exactly as an agent's
 /// (the person's Run once / Always, pinned to the files); it is refused on review turns and over the Cloud Link like
 /// workflow_close; its end is one Update in the chat it was asked from.
 /// </summary>
