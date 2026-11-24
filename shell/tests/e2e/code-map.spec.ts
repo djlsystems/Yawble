@@ -9,7 +9,7 @@
 // "+N" and "+N folders" are texts; a commit is a filled #fde047 dot (4.2 and more); a merge a #fbbf24 ring off the hub,
 // a landing #34d399 rings (width 3), a push a #38bdf8 arc of 1.4 rad. Hovering a node gives the DOM tip.
 //
-//   npx playwright test card372-code-map --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card372-code-map --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots and the frame times go to $YAWBLE_TEAM_DOCS/b079-code-map (else test-results/b079-code-map).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';

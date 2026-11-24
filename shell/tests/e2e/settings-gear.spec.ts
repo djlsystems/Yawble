@@ -8,7 +8,7 @@
 // has no Settings item and its run-slots line is still at its bottom; a click opens Settings. Ctrl+, still opens it.
 // Screenshots go to $YAWBLE_TEAM_DOCS/B115/.
 //
-//   npx playwright test b115-settings-gear      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test b115-settings-gear      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { createFakeCore } from './phone/fake-core';

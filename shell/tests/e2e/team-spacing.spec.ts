@@ -12,7 +12,7 @@
 //                        hub, checked by count: each team must get exactly its own 6 folders + 24 files).
 //   empty middle       - the distance from the hubs' centroid to the nearest drawn thing.
 //
-//   npx playwright test card403-team-spacing --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card403-team-spacing --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots and results go to $YAWBLE_TEAM_DOCS/b089-team-spacing and b090-workflow-nodes.
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';

@@ -6,7 +6,7 @@
 // Headless Chrome against the phone-remote fake core (remote.html, tests/e2e/phone); agents.detect answers with the
 // core's own macOS texts (Agents/CliSignIn.cs, SignInCatalog.Claude). 1280x800 and 375x812, light and dark.
 //
-//   $env:PW_CHANNEL='chrome'; npx playwright test card522-mac-claude-signin --workers=1   (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   $env:PW_CHANNEL='chrome'; npx playwright test card522-mac-claude-signin --workers=1   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B118 (else test-results/B118).
 import { expect, test, type Browser } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

@@ -12,7 +12,7 @@
 //  - 1280x800: the Settings tab row and the Modal Close (Settings and Triggers dialogs) have the same boxes and styles as
 //    main BASE_COMMIT (before cards 328 and 346); both screenshots are saved (kept from card 329).
 //
-//   npx playwright test card347-team-settings-gaps   (B037_SKIP_BUILD=1 reuses out/b037/renderer and renderer-base)
+//   npx playwright test card347-team-settings-gaps   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer and renderer-base)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -52,7 +52,7 @@ test.beforeAll(async () => {
   for (const k of Object.keys(OVERRIDES)) { saved[k] = (answers as any)[k]; (answers as any)[k] = OVERRIDES[k]; }
   mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
-  if (!(process.env.B037_SKIP_BUILD === '1' && existsSync(path.join(baseBuiltDir, 'remote.html')))) { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
+  if (!(process.env.E2E_SKIP_BUILD === '1' && existsSync(path.join(baseBuiltDir, 'remote.html')))) { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
 });
 test.afterAll(() => { for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete (answers as any)[k]; else (answers as any)[k] = saved[k]; } });
 

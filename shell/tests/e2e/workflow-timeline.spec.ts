@@ -4,7 +4,7 @@
 // At 375 px the timeline's axis scrolls inside the dialog and the page never scrolls sideways. Screenshots go to
 // $YAWBLE_TEAM_DOCS/B086 when that is set.
 //
-//   npx playwright test card430-timeline      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card430-timeline      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import path from 'node:path';
 import { type Access } from './phone/fake-core';

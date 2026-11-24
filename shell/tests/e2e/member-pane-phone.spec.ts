@@ -8,7 +8,7 @@
 // ⋯ opens the state line and Stop (never Open interactive CLI: the terminal in a pane is never interactive), ✕ goes
 // back to the Report.
 //
-//   npx playwright test member-pane-phone      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test member-pane-phone      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';

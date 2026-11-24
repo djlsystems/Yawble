@@ -6,7 +6,7 @@
 //  - the board: a hand-back in a card's trail names two commits; one opens, the other says it is gone and why.
 //  - 390 x 844 (a phone): the same view as a sheet, nothing scrolls sideways but the diff itself; with members' code
 //    hidden from cloud viewers the files are listed and no diff opens.
-//   npx playwright test card444-commit-view      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card444-commit-view      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B072 (else test-results/B072).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';

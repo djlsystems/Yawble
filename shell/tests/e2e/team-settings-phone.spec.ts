@@ -4,7 +4,7 @@
 // a tap opens that section alone under a Back + title head; Back returns to the list. Nothing is wider than the screen.
 // The sheet's Close keeps its 44 px tap target (card 328). At 1280x800 the tab row is as before.
 //
-//   npx playwright test team-settings-phone      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test team-settings-phone      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';

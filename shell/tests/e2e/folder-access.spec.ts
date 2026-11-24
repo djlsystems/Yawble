@@ -9,7 +9,7 @@
 //  - A relative path is warned about before Confirm.
 //  - Text typed and not saved: "Unsaved changes", and closing asks "Discard?" (Cancel keeps the dialog, Discard closes it).
 //
-//   npx playwright test card492-folder-access --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card492-folder-access --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B110 (else test-results/B110).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

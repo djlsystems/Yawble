@@ -3,7 +3,7 @@
 // of workflow 12" with a link; the link opens Settings > Skills at payments' team_retros, which says who last wrote it
 // and lists its versions newest first; Restore on version 1 (after the confirm) sends skills.restore { id: 1 }.
 //
-//   npx playwright test card468-lessons      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card468-lessons      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B100 (else test-results/B100).
 import { expect, test, type Browser } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

@@ -16,7 +16,7 @@
 //   the You node      - in screen space at (w - 46, max(120, h / 2)), r 24, "You", its count and "NEEDS YOU".
 //   comets            - heads are #38bdf8 (tell) arcs of r 3.2, labels "#card", hand-backs "#card ✓" / "#card ✗".
 //
-//   npx playwright test card375-monitor --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card375-monitor --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots and the results go to $YAWBLE_TEAM_DOCS/b080-monitor (else test-results/b080-monitor).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

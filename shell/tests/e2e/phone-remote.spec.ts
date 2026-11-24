@@ -6,8 +6,8 @@
 // visualViewport), the Visitor chip, the dark Monitor and its forces panel, the 759 / 760 px edges, rotation, and at
 // 1280 px the desktop layout compared with main's at BASE_COMMIT (tests/e2e/phone/server.ts; one line to bump).
 //
-//   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B037-screens (else test-results/B037-screens); the audit to test-results/b037-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
+//   npx playwright test phone-remote            (E2E_SKIP_BUILD=1 reuses out/e2e/renderer*; the base tree is out/e2e/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
+// Screenshots go to $YAWBLE_TEAM_DOCS/B037-screens (else test-results/B037-screens); the audit to test-results/phone-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -19,14 +19,14 @@ test.setTimeout(60_000);
 
 const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B037-screens');
 // One line per audit (each worker appends; Playwright empties test-results at the start of a run).
-const RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'b037-audit.ndjson');
+const RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'phone-audit.ndjson');
 const results = { push(r: { screen: string; size: string; audit: Audit }) { mkdirSync(path.dirname(RESULTS), { recursive: true }); appendFileSync(RESULTS, JSON.stringify(r) + '\n'); } };
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
   mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
-  if (process.env.B037_NO_BASE !== '1') { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
+  if (process.env.E2E_NO_BASE !== '1') { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
 });
 
 type Size = { w: number; h: number };
@@ -582,7 +582,7 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
 });
 
 test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}`, () => {
-  test.skip(process.env.B037_NO_BASE === '1', 'no base build');
+  test.skip(process.env.E2E_NO_BASE === '1', 'no base build');
   // B054 verify (card 270): also the pages B054 changes past their landing screen - a team's page, a team's documents
   // folder, and the Settings sections (Skills with a skill picked, Guardrails, Integrations, System).
   const tap = (sel: string) => async (p: Page) => { await p.locator(sel).first().click(); await p.waitForTimeout(500); };
@@ -687,7 +687,7 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
 // where the first content row starts (px from the top of the frame, the browser window; ~120 px is the portrait target,
 // on screen in landscape), no nested vertical scrollers, no sideways scroll, every field 16 px / 44 px, the Settings
 // back control after scrolling Guardrails to its bottom, and a picked skill in view. "before" is the base team branch
-// (B037_BASE_DIR, e.g. 8b39e07), "after" this branch; only "after" is asserted, "before" is measured and recorded.
+// (E2E_BASE_DIR, e.g. 8b39e07), "after" this branch; only "after" is asserted, "before" is measured and recorded.
 const SE: Size[] = [{ w: 375, h: 501 }, { w: 667, h: 263 }];
 type B054 = { first: { sel: string; top: number; bottom: number } | null; rows: Record<string, { top: number; bottom: number } | null>; topBar: number;
   scrollers: string[]; inputs: { what: string; font: number; h: number }[]; overflow: boolean; sw: number };
@@ -722,7 +722,7 @@ function measure(page: Page, first: string[], rows: Record<string, string> = {})
 for (const size of SE) {
   const portrait = size.h > size.w;
   test.describe(`B054 iPhone SE ${tag(size)} (${portrait ? 'portrait' : 'landscape'})`, () => {
-    const builds = [['after', builtDir], ...(process.env.B037_NO_BASE === '1' ? [] : [['before', baseBuiltDir]])] as const;
+    const builds = [['after', builtDir], ...(process.env.E2E_NO_BASE === '1' ? [] : [['before', baseBuiltDir]])] as const;
     for (const [which, dir] of builds) {
       test(`${which}: Backlog, Team, Documents and every Settings section`, async ({ browser }) => {
         test.setTimeout(240_000);

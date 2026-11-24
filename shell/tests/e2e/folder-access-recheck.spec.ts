@@ -5,7 +5,7 @@
 //    round trip saves what it showed.
 //  - A folder typed with ".." is listed once; Remove takes it out (stored loosen back to empty).
 //
-//   npx playwright test card493-b110-recheck --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card493-b110-recheck --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B110/verify (else test-results/B110/verify).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

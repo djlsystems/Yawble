@@ -5,7 +5,7 @@
 // run; the page never scrolls sideways. A Visitor (read-only) sees the card with its answers held. Screenshots go to
 // $YAWBLE_TEAM_DOCS/b111/. Card 507: the Manager's ask for a member says so ("payments / Manager asks, for DeveloperAda, ...").
 //
-//   npx playwright test card497-folder-asks      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card497-folder-asks      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';

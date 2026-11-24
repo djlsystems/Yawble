@@ -4,7 +4,7 @@
 // in their buttons (44 px tall on the phone, B037), the row stays on one line (B054), the phone's Send is the plane only (aria-label
 // "Tell Manager"), the desktop's is "Tell Manager" + plane, and "Sending…" shows while bus.tellManager is held.
 //
-//   npx playwright test tell-icons      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test tell-icons      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/card344-tell-icons (else test-results/card344-tell-icons).
 import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';

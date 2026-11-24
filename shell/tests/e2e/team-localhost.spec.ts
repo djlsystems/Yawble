@@ -2,7 +2,7 @@
 // word; turning it on sends teams.localhost { teamId, on: true } and it reads back on. A Visitor sees it read-only (the
 // toggle is disabled and nothing is sent). Headless Chrome against the phone-remote fake core (remote.html, tests/e2e/phone).
 //
-//   $env:PW_CHANNEL='chrome'; npx playwright test card534-team-localhost      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   $env:PW_CHANNEL='chrome'; npx playwright test card534-team-localhost      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B119 (else test-results/B119).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

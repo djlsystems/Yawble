@@ -9,7 +9,7 @@
 // the page asks for no text inflation in landscape (text-size-adjust: 100%). tests/unit/rotate-viewport.test.ts checks
 // the same in the sources.
 //
-//   npx playwright test rotate      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test rotate      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { devices, expect, test, type Page } from './fixtures';
 import { PHONE_BREAKPOINT } from '../../../src/renderer/src/phone';
 import { buildRenderer, builtDir, fakeRemote } from './server';

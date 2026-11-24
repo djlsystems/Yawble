@@ -8,7 +8,7 @@
 //  - A non-http(s) link (file:, javascript:) neither asks nor opens.
 // DeveloperAda's pane is on Terminal and its session is interactive (so the pane shows the xterm, not the transcript).
 //
-//   npx playwright test card394-terminal-links   (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card394-terminal-links   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';

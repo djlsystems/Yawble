@@ -6,7 +6,7 @@
 // viewer's kept yawble.remoteTheme is neither read nor written. The remote view without embed=1 keeps its sidebar and
 // theme switch. No cloud, no real core, no agent. Screenshots go to $YAWBLE_TEAM_DOCS/B115/.
 //
-//   npx playwright test b115-embed --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test b115-embed --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type FrameLocator, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { ORIGIN, buildRenderer, ensureDir, fakeRemote } from './phone/server';

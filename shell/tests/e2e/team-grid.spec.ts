@@ -6,7 +6,7 @@
 // (validation, Adding…, a refused add keeps the form, Cancel). A Visitor's New member is disabled. A phone (375 px): one
 // full-width tile per row, no handles, New member last.
 //
-//   npx playwright test card367-team-grid      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card367-team-grid      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/b076-team-grid (else test-results/b076-team-grid).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

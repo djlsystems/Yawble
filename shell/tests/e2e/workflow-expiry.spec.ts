@@ -6,7 +6,7 @@
 // answer to question 3' with Extend; Team settings shows 'Expire idle workflows after 3 days' and saves 5 as
 // teams.workflowExpiry { teamId, days: 5 }. A Visitor's Extend is disabled.
 //
-//   npx playwright test card390-workflow-expiry      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card390-workflow-expiry      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B085 (else test-results/B085).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

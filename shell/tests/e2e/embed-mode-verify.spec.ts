@@ -10,7 +10,7 @@
 //  - a parent on ANOTHER origin: the frame posts nothing it can read, and its navigate / theme messages are ignored;
 //  - File > Settings (the menu entry) opens Settings, plain and embedded, and an embedded phone offers no drawer menu.
 //
-//   npx playwright test card519-b115-verify --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card519-b115-verify --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { answers } from './phone/fake-core';

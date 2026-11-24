@@ -6,7 +6,7 @@
 //    each commit "work of its own" / "already in main", and after the delete its last commit still opens; Sync now and
 //    Bring main current list what came in.
 //  - 390 x 844 (a phone): the counts' list and the merge preview do not scroll sideways.
-//   npx playwright test card465-git-previews      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card465-git-previews      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B073 (else test-results/B073).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';

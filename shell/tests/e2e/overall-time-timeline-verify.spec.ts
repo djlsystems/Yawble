@@ -9,7 +9,7 @@
 // - at 375 the axis scrolls inside the dialog and the page never scrolls sideways;
 // - no tokens or cost anywhere in the dialog.
 //
-//   npx playwright test card431-b086-verify      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card431-b086-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B086 (else test-results/B086).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';

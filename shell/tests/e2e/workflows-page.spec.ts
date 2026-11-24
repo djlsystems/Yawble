@@ -4,7 +4,7 @@
 // the table, the chips, a row's pane with its spec, cards, activity and time; on a phone the pane takes the page and
 // Back returns to the list; the page never scrolls sideways. Screenshots go to $YAWBLE_TEAM_DOCS/B104/screenshots.
 //
-//   npx playwright test card477-workflows      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card477-workflows      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';

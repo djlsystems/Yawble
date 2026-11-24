@@ -2,7 +2,7 @@
 // (h1-h3, bullet and numbered lists, inline code, a code block, a link, a blockquote, raw HTML that must stay text) and an
 // all-teams skill so the filter pill shows its four choices. Headless Chrome against the phone-remote fake core.
 //
-//   npx playwright test card530-skill-shots      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card530-skill-shots      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B100/card530-*.png (else test-results/B100).
 import { expect, test } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

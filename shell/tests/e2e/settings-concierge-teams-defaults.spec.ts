@@ -9,7 +9,7 @@
 //  - Visitor (read-only): both tabs shown, nothing can be changed, Generate and Save are disabled.
 //  - New Team dialog: starts from teams.defaults (ticked rows in the list, others as "+ <name>").
 //
-//   npx playwright test card420-settings-b096 --workers=1      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card420-settings-b096 --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/B096 (else test-results/B096).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';

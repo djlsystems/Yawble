@@ -4,7 +4,7 @@
 // a dispatched item with its spec, an archived item, an expired workflow). At 1280, 1440 and 375 px, light and dark,
 // with full access and as a Visitor (read-only). Screenshots go to $YAWBLE_TEAM_DOCS/B104/verify.
 //
-//   npx playwright test card478-workflows-verify      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card478-workflows-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';

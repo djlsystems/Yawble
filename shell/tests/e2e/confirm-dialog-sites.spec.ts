@@ -16,7 +16,7 @@
 // "Also delete the connection" follow-up on desktop), MCP server remove (+ follow-up on desktop), connection remove
 // (desktop), Discover scope switch with unsaved changes, IntegrationDialog Close with unsaved changes.
 //
-//   npx playwright test card356-confirm-sites-gaps   (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test card356-confirm-sites-gaps   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 //   screenshots: $YAWBLE_TEAM_DOCS/C-B070-screens (or test-results/C-B070-screens)
 import { expect, test, type Browser, type Locator, type Page } from './phone/fixtures';
 import path from 'node:path';

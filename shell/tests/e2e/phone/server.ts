@@ -1,4 +1,4 @@
-// B037 verify: remote.html, built once by Vite from the renderer's source into out/b037/renderer, and the fake
+// B037 verify: remote.html, built once by Vite from the renderer's source into out/e2e/renderer, and the fake
 // core behind the page's "rpc" socket. Nothing listens on a port: this sandbox refuses loopback sockets (to the browser
 // and to node), so the page is loaded from a made-up origin, http://yawble-remote.test/, whose requests Playwright
 // fulfils from the built files, and its WebSocket is answered by Playwright's routeWebSocket from the fake core. No real
@@ -11,7 +11,7 @@ import { createFakeCore } from './fake-core';
 
 /**
  * The main commit the 1280 px desktop layout is compared with (phone-remote.spec.ts). To move the base, change this
- * one line: the next run extracts that commit's shell into out/b037/main and rebuilds out/b037/renderer-base.
+ * one line: the next run extracts that commit's shell into out/e2e/main and rebuilds out/e2e/renderer-base.
  * Was b726212 (cards 169-276), then f3a3c3d (cards 294-312, nav order be4a82a and the rest of main up to it); 43048e1 since
  * card 313 (the Sidebar team counts as pills), 52485c5 since B065 (the Documents list's Modified column, 31f02d0).
  */
@@ -20,14 +20,14 @@ export const BASE_COMMIT = '52485c5';
 export const ORIGIN = 'http://yawble-remote.test';
 const shellDir = path.resolve(__dirname, '..', '..', '..');
 // Under out/ (ignored): Playwright empties test-results at the start of each run.
-export const builtDir = path.join(shellDir, 'out', 'b037', 'renderer');
-const baseTreeDir = path.join(shellDir, 'out', 'b037', 'main');
+export const builtDir = path.join(shellDir, 'out', 'e2e', 'renderer');
+const baseTreeDir = path.join(shellDir, 'out', 'e2e', 'main');
 /**
  * The base's shell for the 1280 px comparison: main BASE_COMMIT, extracted with `git archive BASE_COMMIT shell code-browser`
- * (extractBaseTree). B037_BASE_DIR picks another base tree instead (its shell/ and its built renderer/); then nothing is extracted.
+ * (extractBaseTree). E2E_BASE_DIR picks another base tree instead (its shell/ and its built renderer/); then nothing is extracted.
  */
-export const baseShellDir = process.env.B037_BASE_DIR ? path.resolve(process.env.B037_BASE_DIR, 'shell') : path.join(baseTreeDir, 'shell');
-export const baseBuiltDir = process.env.B037_BASE_DIR ? path.resolve(process.env.B037_BASE_DIR, 'renderer') : path.join(shellDir, 'out', 'b037', 'renderer-base');
+export const baseShellDir = process.env.E2E_BASE_DIR ? path.resolve(process.env.E2E_BASE_DIR, 'shell') : path.join(baseTreeDir, 'shell');
+export const baseBuiltDir = process.env.E2E_BASE_DIR ? path.resolve(process.env.E2E_BASE_DIR, 'renderer') : path.join(shellDir, 'out', 'e2e', 'renderer-base');
 
 /**
  * mkdirSync(dir, { recursive: true }) that survives another worker making the same folder at the same moment. On Windows
@@ -48,13 +48,13 @@ export function ensureDir(dir: string, tries = 5) {
 }
 
 /**
- * Extracts BASE_COMMIT's shell/ and code-browser/ into out/b037/main (`git archive BASE_COMMIT shell code-browser`),
- * unless out/b037/main/.commit already names it. A new tree drops the old base build, so it is built again even with
- * B037_SKIP_BUILD=1. The tree sits under shell/, so its imports (vue, highlight.js, ...) resolve from shell/node_modules.
+ * Extracts BASE_COMMIT's shell/ and code-browser/ into out/e2e/main (`git archive BASE_COMMIT shell code-browser`),
+ * unless out/e2e/main/.commit already names it. A new tree drops the old base build, so it is built again even with
+ * E2E_SKIP_BUILD=1. The tree sits under shell/, so its imports (vue, highlight.js, ...) resolve from shell/node_modules.
  */
 export function extractBaseTree() {
-  if (process.env.B037_BASE_DIR) return;
-  // Under the base build's lock: a worker never empties out/b037/main or renderer-base while another extracts or builds it.
+  if (process.env.E2E_BASE_DIR) return;
+  // Under the base build's lock: a worker never empties out/e2e/main or renderer-base while another extracts or builds it.
   const lock = lockPath(baseBuiltDir);
   while (!tryLock(lock)) sleepSync(LOCK_POLL_MS);
   try { extractBaseTreeLocked(); } finally { unlock(lock); }
@@ -68,7 +68,7 @@ function extractBaseTreeLocked() {
   rmSync(baseTreeDir, { recursive: true, force: true });
   rmSync(baseBuiltDir, { recursive: true, force: true });
   mkdirSync(baseTreeDir, { recursive: true });
-  const tar = path.join(shellDir, 'out', 'b037', 'main.tar');
+  const tar = path.join(shellDir, 'out', 'e2e', 'main.tar');
   execFileSync('git', ['archive', '--format=tar', '-o', tar, BASE_COMMIT, 'shell', 'code-browser'], { cwd: repo });
   execFileSync('tar', ['-xf', tar, '-C', baseTreeDir]);
   rmSync(tar, { force: true });
@@ -76,12 +76,12 @@ function extractBaseTreeLocked() {
 }
 
 /**
- * The run this build belongs to: B037_RUN_ID, set once per run by tests/e2e/global-setup.ts (it reaches every worker),
+ * The run this build belongs to: E2E_RUN_ID, set once per run by tests/e2e/global-setup.ts (it reaches every worker),
  * or the runner's pid (the workers' parent) when the specs run without that setup.
  */
-const runId = () => process.env.B037_RUN_ID || String(process.ppid);
+const runId = () => process.env.E2E_RUN_ID || String(process.ppid);
 
-// A cross-process lock per output folder (card 391): a directory beside it (out/b037/renderer.lock), made with mkdir
+// A cross-process lock per output folder (card 391): a directory beside it (out/e2e/renderer.lock), made with mkdir
 // (atomic; EEXIST when taken) and holding the owner's pid. A lock whose owner has gone (a worker killed mid-build) is broken.
 const LOCK_POLL_MS = 500;
 const LOCK_STALE_MS = 20 * 60_000;
@@ -115,7 +115,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function sleepSync(ms: number) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
 
 /**
- * Builds a renderer (index.html and remote.html) once per run of the test runner, or never with B037_SKIP_BUILD=1 when
+ * Builds a renderer (index.html and remote.html) once per run of the test runner, or never with E2E_SKIP_BUILD=1 when
  * a build is there. Safe from any number of workers (card 391): the first takes the folder's lock and builds; the others
  * wait for it, then find the run's mark (.built-by = runId()) and reuse the build, so no worker empties a folder another
  * is serving from. A worker restarted after a failure finds the mark too.
@@ -129,10 +129,10 @@ export async function buildRenderer(from = shellDir, out = builtDir) {
 async function buildRendererLocked(from: string, out: string) {
   const mark = path.join(out, '.built-by');
   if (existsSync(path.join(out, 'remote.html'))) {
-    if (process.env.B037_SKIP_BUILD === '1') return;
+    if (process.env.E2E_SKIP_BUILD === '1') return;
     if (existsSync(mark) && readFileSync(mark, 'utf8') === runId()) return;
   }
-  console.log(`[b037] building ${path.relative(shellDir, out) || out} (worker pid ${process.pid})`);
+  console.log(`[e2e] building ${path.relative(shellDir, out) || out} (worker pid ${process.pid})`);
   const { build } = await import('vite');
   if (from === shellDir) {
     await build({ configFile: path.join(from, 'vite.config.mts'), logLevel: 'error', build: { outDir: out, emptyOutDir: true } });
