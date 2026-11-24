@@ -1,8 +1,9 @@
 namespace Yawble.Core.Bus;
 
-/// <summary>A member as the UI lists it: the bus row plus its 0006 settings.</summary>
+/// <summary>A member as the UI lists it: the bus row plus its 0006 settings. <paramref name="Role"/> is manager or member;
+/// <paramref name="HireRole"/> is the catalog role it was hired as (0059), null when hired without one.</summary>
 public sealed record MemberRow(
-    long Id, long TeamId, string Team, string Name, string Role, string Cli, string Instructions, string Model, string Credential);
+    long Id, long TeamId, string Team, string Name, string Role, string Cli, string Instructions, string Model, string Credential, string? HireRole = null);
 
 public sealed record TeamRow(long Id, string Name, string? RepoPath, string CreatedAt, string? PausedAt = null, string? ArchivedAt = null, int? WorkflowExpiryDays = null)
 {
@@ -84,7 +85,7 @@ public sealed partial class BusStore
     {
         using var cmd = Command(
             """
-            SELECT m.id, m.team_id, t.name, m.name, m.role, m.cli, m.instructions, coalesce(s.model, ''), coalesce(s.credential, 'default')
+            SELECT m.id, m.team_id, t.name, m.name, m.role, m.cli, m.instructions, coalesce(s.model, ''), coalesce(s.credential, 'default'), m.hire_role
             FROM members m JOIN teams t ON t.id = m.team_id LEFT JOIN member_settings s ON s.member_id = m.id
             WHERE ($team IS NULL OR m.team_id = $team) AND ($id IS NULL OR m.id = $id)
             ORDER BY m.team_id, CASE m.role WHEN 'manager' THEN 0 ELSE 1 END, m.id;
@@ -94,7 +95,7 @@ public sealed partial class BusStore
         while (r.Read())
         {
             list.Add(new MemberRow(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetString(3), r.GetString(4), r.GetString(5),
-                r.GetString(6), r.GetString(7), r.GetString(8)));
+                r.GetString(6), r.GetString(7), r.GetString(8), r.IsDBNull(9) ? null : r.GetString(9)));
         }
         return list;
     }

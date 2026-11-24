@@ -129,8 +129,15 @@ public sealed class RunContext
     public Task<MemberRow> HireAsync(string name, string? cli, string? instructions, CancellationToken ct = default) =>
         _engine.HireAsync(this, name, cli, instructions, ct);
 
+    /// <summary>The Manager hires as a role: required when the team has a hire list, whose row gives the agent, model and job.</summary>
+    public Task<MemberRow> HireAsync(string? name, string? cli, string? instructions, string? role, CancellationToken ct = default) =>
+        _engine.HireAsync(this, name, cli, instructions, ct, role);
+
     /// <summary>The agent CLIs the Manager may hire, and whether each can run on this computer now.</summary>
     public Task<IReadOnlyList<AgentChoice>> HiringAsync(CancellationToken ct = default) => _engine.HiringAsync(ct);
+
+    /// <summary>The team's hire list (with each row's agent readiness) and every agent's readiness.</summary>
+    public Task<HiringOffer> HiringOfferAsync(CancellationToken ct = default) => _engine.HiringOfferAsync(this, ct);
 
     /// <summary>The skills offered to this member (skills_list), and one of them by name (skills_get).</summary>
     public IReadOnlyList<Skills.Skill> Skills() => _engine.SkillsFor(Member);

@@ -33,6 +33,26 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   Concierge's default agent once, with no Yawble tools and in a folder deleted afterwards, for 100 popular first names
   of the chosen **Country** (default United States). Its names replace the text, unsaved until **Save**. The country is
   saved with the list.
+- **Roles** (Settings > Teams > Roles) is the role catalog. A role has a name (one word, which is also the name word a
+  member of it gets), a short job description (the member's standing instructions), a suggested agent and a suggested
+  model. It starts with Developer, Tester, Reviewer, Researcher, Architect and Writer. You add, edit and remove roles;
+  renaming one renames it in every hire list and on every member hired as it. Removing a role that a team's hire list
+  (or the default hire list) uses is refused, and the message names those teams.
+- A team's **hire list** (Team settings > Hiring, and "Who the Manager may hire" on New team) says who its Manager may
+  hire: rows of a role, an agent (built-in or custom) and a model (the agent's default, or a picked one). A new team
+  starts from the default hire list in Settings > Teams. The list is a hard limit:
+  - The Manager's `hire` names a role from the list; the name is optional (the role word, with a first name added). The
+    member runs with the row's agent and model and gets the role's job. A role not on the list, or a different CLI or
+    job, is refused with the reason; the refusal for a role names the roles on the list.
+  - The Manager's `hiring` tool lists the rows (role, description, agent, model) and whether each agent can run on this
+    computer now.
+  - An empty hire list means any agent and free job text, as for teams made before hire lists.
+  - There is no count per role: the Manager hires as many members of a role as it has independent cards for, within
+    the computer's run slots.
+  - The member's tile shows its role, and the agent change log records the role with the hire.
+- On **New team**, each member row has a role picker beside its agent and model. Choosing a role fills in the role's
+  agent and model, and both stay editable; a row with a role and no name is named for the role, and the member gets the
+  role's job.
 - **Member settings** has General (CLI, model, credential, instructions) and Policy (see
   [Sandbox and policy](#sandbox-and-policy)).
 - Team **Settings** has the tabs General, Members, Repositories, Environment and Integrations:

@@ -101,9 +101,9 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                     DecisionAsk.Parse(Optional(args, "question"), Optional(args, "summary"), args["options"], Optional(args, "details"),
                         OptionalLong(args, "card"), Optional(args, "kind"), Optional(args, "reason")), ct)),
                 "workflow_complete" => Sent(await run.WorkflowCompleteAsync(Required(args, "delivered"), ct)),
-                "status" => JsonSerializer.Serialize(await run.StatusAsync(ct), RpcJson),
-                "hiring" => JsonSerializer.Serialize(await run.HiringAsync(ct), RpcJson),
-                "hire" => Hired(await run.HireAsync(Required(args, "name"), Optional(args, "cli"), Optional(args, "job"), ct)),
+                "status" => await StatusTextAsync(ct),
+                "hiring" => HiringText(await run.HiringOfferAsync(ct)),
+                "hire" => Hired(await run.HireAsync(Optional(args, "name"), Optional(args, "cli"), Optional(args, "job"), Optional(args, "role"), ct)),
                 "skills_get" => run.Skill(Required(args, "name")).Body,
                 "wake_me" => Woken(await run.WakeMeAsync(OptionalInt(args, "minutes") ?? throw new RpcError(-32602, "wake_me needs minutes"), Required(args, "note"), ct)),
                 "skills_list" => string.Join(Environment.NewLine, run.Skills().Select(x => $"{x.Name} - {x.Description}")),
@@ -161,8 +161,30 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     private static string? Optional(JsonObject args, string name) =>
         args[name] is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s : null;
 
+    /// <summary>status: the roster, then the computer's run slots (how many members can run at once: the limit on parallel work).</summary>
+    private async Task<string> StatusTextAsync(CancellationToken ct)
+    {
+        var roster = JsonSerializer.Serialize(await run.StatusAsync(ct), RpcJson);
+        var slots = await run.Engine.RunSlotsAsync(ct);
+        return roster + Environment.NewLine + $"Run slots: {slots.Running} in use of {slots.Limit} on this computer; {slots.Queued} run(s) queued for a slot.";
+    }
+
+    /// <summary>
+    /// hiring: with a hire list, its rows (role, description, agent, model, and whether the agent can run now) and the rule;
+    /// without one, every agent and whether it can run now, as before.
+    /// </summary>
+    private static string HiringText(HiringOffer offer) =>
+        offer.HireList.Count == 0
+            ? JsonSerializer.Serialize(offer.Agents, RpcJson)
+            : JsonSerializer.Serialize(new
+            {
+                hireList = offer.HireList,
+                rule = "Hire only these roles: hire with role (and name only to give a first name). The agent, model and job are the row's; " +
+                       "a different cli or job is refused. Hire only rows whose agent is ready.",
+            }, RpcJson);
+
     private static string Hired(MemberRow m) =>
-        $"ok: hired {m.Name} ({m.Cli}) into team {m.Team}. Address it as '{m.Name}' every time (tell, its branch {Teams.TeamRepos.BranchFor(m.Team, m.Name)}). Its clone and branch are made at its first run. Give it work with tell.";
+        $"ok: hired {m.Name} ({m.Cli}{(m.Model.Length > 0 ? ", " + m.Model : "")}){(m.HireRole is { } role ? " as " + role : "")} into team {m.Team}. Address it as '{m.Name}' every time (tell, its branch {Teams.TeamRepos.BranchFor(m.Team, m.Name)}). Its clone and branch are made at its first run. Give it work with tell.";
 
     private static async Task<string> RepoText(RunContext run, CancellationToken ct)
     {
@@ -268,13 +290,16 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
             "and while a card's latest tester hand-back is a FAIL unless the person said yes to closing over it (needs_decision with card and kind).",
             ("delivered", "string", ReportText("What was delivered: the summary names the branch and commit; then each item delivered, the tests " +
                 "and anything left open"), true)),
-        Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and each member's waiting instructions with why they wait (waitState: queued for a slot, waits-for-run with waitsFor, held for a paused team, pending)."),
-        Tool("hiring", "The Manager: the agent CLIs you may hire, and whether each can run on this computer now."),
+        Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and each member's waiting instructions with why they wait (waitState: queued for a slot, waits-for-run with waitsFor, held for a paused team, pending); then the computer's run slots in use and their limit."),
+        Tool("hiring", "The Manager: who you may hire. With a hire list: its roles (role, description, agent, model) and whether each agent can run on this computer now; " +
+                       "without one: the agent CLIs and whether each can run now."),
         Tool("hire", "The Manager: add a member to your team. It starts idle; give it work with tell.",
-            ("name", "string", "The job word alone, one word: 'Developer', 'Tester'. The app adds a first name from the person's list; the answer gives " +
-                "the id to address it by ('DeveloperPriya'). Only when a refusal asks for one: the job, a space, then a first name as the refusal says.", true),
-            ("cli", "string", "Which agent CLI runs it (see hiring). Default: your own.", false),
-            ("job", "string", "Its standing job on the team, e.g. 'Developer: writes the code' or 'Tester: builds and tests'.", false)),
+            ("role", "string", "The role to hire, one of the hire list's (see hiring); required when the team has a hire list. " +
+                "Its row gives the agent, model and job.", false),
+            ("name", "string", "The job word alone, one word: 'Developer', 'Tester' (default: the role). The app adds a first name from the person's list; the answer gives " +
+                "the id to address it by ('DeveloperPriya'). Only when a refusal asks for one: the job, a space, then a first name as the refusal says.", false),
+            ("cli", "string", "Which agent CLI runs it (see hiring). Default: your own, or the hire list row's.", false),
+            ("job", "string", "Its standing job on the team, e.g. 'Developer: writes the code' or 'Tester: builds and tests'. With a hire list: leave it out.", false)),
         Tool("skills_get", "Load a skill: your role text (manager or member) or any skill skills_list offers you.",
             ("name", "string", "The skill's name, e.g. manager, member, team-git.", true)),
         Tool("skills_list", "The skills offered to you: name and one line each. Load one with skills_get."),

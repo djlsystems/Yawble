@@ -79,6 +79,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "git.commitRange", "git.mergePreview", "git.mergeDiff", "git.deletePreview",
         // B104: the Workflows page's list of every team's workflows, and one workflow in full.
         "workflows.list", "workflows.get",
+        // A team's hire list as Team settings > Hiring shows it (teams.setHireList is audited).
+        "teams.hireList",
         // Opening and closing the read-only Code view change nothing (a download is recorded).
         "code.open", "code.close",
         // B131: a script or schema exported as a file, a script member and its saved state, and one script run in full.

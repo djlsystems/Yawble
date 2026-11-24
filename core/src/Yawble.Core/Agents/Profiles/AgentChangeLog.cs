@@ -41,13 +41,18 @@ public sealed class AgentChangeLog(string connectionString, TimeProvider? clock 
     /// <summary>
     /// A member's, Manager's or Concierge's agent or model changed. Writes exactly one row, with the model resolved through the
     /// agent defaults; writes none when nothing changed. <paramref name="kind"/> is one of the three Kind...Agent constants.
+    /// <paramref name="detail"/> goes first in the row's detail (a hire's role: "role Developer").
     /// </summary>
-    public AgentChange? RecordSubjectChange(string kind, string subject, AgentSetting from, AgentSetting to, string how, Actor? actor = null)
+    public AgentChange? RecordSubjectChange(string kind, string subject, AgentSetting from, AgentSetting to, string how, Actor? actor = null, string? detail = null)
     {
         if (string.Equals(from.Agent, to.Agent, StringComparison.OrdinalIgnoreCase) && from.Model == to.Model) return null;
         var (effective, note) = Resolve(to.Agent, to.Model);
-        return Append(kind, subject, from.Agent, to.Agent, from.Model, to.Model, effective, how, actor, note);
+        return Append(kind, subject, from.Agent, to.Agent, from.Model, to.Model, effective, how, actor,
+            detail is null ? note : note is null ? detail : $"{detail}; {note}");
     }
+
+    /// <summary>The detail a hire's first row carries for its role.</summary>
+    public static string RoleDetail(string role) => $"role {role}";
 
     /// <summary>An agent's default model changed (which changes every subject following it): one row for the agent.</summary>
     public AgentChange? RecordDefaultModelChange(string agent, string fromModel, string toModel, string how, Actor? actor = null)
