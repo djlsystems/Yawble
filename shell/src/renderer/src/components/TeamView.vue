@@ -9,6 +9,8 @@ import { errorText, resolveApi } from '../api';
 import { type AgentCliId } from '../agentClis';
 import { useAgentOptions } from '../agentOptions';
 import MemberPane from './MemberPane.vue';
+import ScriptMemberPane from './ScriptMemberPane.vue';
+import ScriptMemberAdd from './ScriptMemberAdd.vue';
 import { useTeamActivity } from '../monitor/teamActivity';
 import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
@@ -72,7 +74,9 @@ watch(gitRequest, (r) => {
 const showWorkflows = ref(false);
 const showManage = ref(false);
 const showDocs = ref(false);
-const newAgent = ref({ name: '', cli: 'claude' as AgentCliId });
+/** B134: the Add form's CLI choice also offers a script member (its own form: script, version, settings, bindings). */
+const ScriptMemberChoice = 'script' as const;
+const newAgent = ref({ name: '', cli: 'claude' as AgentCliId | typeof ScriptMemberChoice });
 let timer: ReturnType<typeof setInterval> | null = null;
 
 // The first answer for this team has arrived (later polls keep what is shown: no loading flash).
@@ -188,11 +192,19 @@ function cancelAdd() {
   newAgent.value = { name: '', cli: 'claude' };
 }
 const addAgent = busyFor('add-agent', async () => {
+  if (newAgent.value.cli === ScriptMemberChoice) return; // the script member form adds it
   await api.call('members.add', { teamId: props.team.id, name: newAgent.value.name.trim(), cli: newAgent.value.cli });
   newAgent.value = { name: '', cli: 'claude' };
   adding.value = false;
 });
-const canAdd = computed(() => !!newAgent.value.name.trim() && !busy.is('add-agent'));
+const canAdd = computed(() => newAgent.value.cli !== ScriptMemberChoice && !!newAgent.value.name.trim() && !busy.is('add-agent'));
+/** A script member was added by its form (scripts.memberAdd): close the form and show it. */
+function scriptAdded() {
+  newAgent.value = { name: '', cli: 'claude' };
+  adding.value = false;
+  void refresh();
+  emit('changed');
+}
 
 // The member grid (B076): equal tiles that wrap, the shared size (memberTileSize.ts) as --tile-w / --tile-h, never
 // wider than the grid (measured, so a drag starts from the width the tiles really have).
@@ -386,7 +398,9 @@ defineExpose({ refresh, openWorkflows, openDocuments });
          one full-width tile per row, as tall as its content, no handles. -->
     <div ref="grid" class="member-grid" :style="phone ? undefined : gridStyle" data-test="member-grid">
       <div v-for="c in cards" :key="c.member.id" class="member-cell" data-test="member-cell">
-        <MemberPane :ref="(p) => setPaneRef(c.member.name, p)" :card="c" :api="api" :poll-ms="pollMs"
+        <ScriptMemberPane v-if="c.kind === 'script'" :card="c" :api="api" :poll-ms="pollMs"
+          :pending="busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null" @remove="remove(c)" />
+        <MemberPane v-else :ref="(p) => setPaneRef(c.member.name, p)" :card="c" :api="api" :poll-ms="pollMs"
           :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
           :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" :activity-limit="phone ? PhoneActivityRows : undefined"
           @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
@@ -402,9 +416,11 @@ defineExpose({ refresh, openWorkflows, openDocuments });
               <input ref="addName" v-model="newAgent.name" placeholder="e.g. Developer Priya" title="Named for the job, a space, then a first name. Its id is the name without the space (DeveloperPriya)." maxlength="60" data-test="add-agent-name" />
             </label>
             <label>CLI
-              <select v-model="newAgent.cli" data-test="add-agent-cli"><option v-for="o in agentOptions" :key="o.id" :value="o.id">{{ o.label }}</option></select>
+              <select v-model="newAgent.cli" data-test="add-agent-cli"><option v-for="o in agentOptions" :key="o.id" :value="o.id">{{ o.label }}</option>
+                <option :value="ScriptMemberChoice" data-test="add-agent-cli-script">Script member</option></select>
             </label>
-            <div class="add-buttons">
+            <ScriptMemberAdd v-if="newAgent.cli === ScriptMemberChoice" :api="api" :team-id="team.id" :name="newAgent.name" @added="scriptAdded" @cancel="cancelAdd" />
+            <div v-else class="add-buttons">
               <button type="submit" class="primary" v-change data-test="add-agent" :disabled="!canAdd" :aria-busy="busy.is('add-agent')"><BusyLabel :busy="busy.is('add-agent')" text="Adding…">Add</BusyLabel></button>
               <button type="button" data-test="add-agent-cancel" :disabled="busy.is('add-agent')" @click="cancelAdd">Cancel</button>
             </div>
