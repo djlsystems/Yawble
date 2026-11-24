@@ -160,7 +160,9 @@ var scriptActions = new Yawble.Core.Scripts.Actions.ScriptActionKinds(new Dictio
     [Yawble.Core.Scripts.Actions.EmailActions.Kind] = new Yawble.Core.Scripts.Actions.EmailScriptActionsProvider(
         new Yawble.Core.Scripts.Actions.IntegrationScriptEmail(integrationsReady.Task)),
 });
-var scriptLibrary = new Yawble.Core.Scripts.Library.ScriptLibrary($"Data Source={dbPath}", () => scriptActions.Catalog);
+// A script's steps name the person's integrations (Email integrations, web APIs) by their real names: the directory reads them.
+var scriptLibrary = new Yawble.Core.Scripts.Library.ScriptLibrary($"Data Source={dbPath}", () => scriptActions.Catalog,
+    integrations: new Yawble.Core.Scripts.Library.IntegrationScriptDirectory($"Data Source={dbPath}", integrationsReady.Task));
 var scriptRuns = new Yawble.Core.Scripts.Running.ScriptRunStore($"Data Source={dbPath}");
 scriptRunner = new Yawble.Core.Scripts.Running.ScriptRunner(scriptRuns, scriptLibrary, scriptActions,
     Yawble.Core.Scripts.Running.SeamScriptEngine.Instance, Path.Combine(options.DataDir!, "scripts"),

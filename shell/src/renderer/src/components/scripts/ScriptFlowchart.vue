@@ -6,22 +6,28 @@ import { MiniMap } from '@vue-flow/minimap';
 import '@vue-flow/core/dist/style.css';
 import '@vue-flow/controls/dist/style.css';
 import '@vue-flow/minimap/dist/style.css';
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { confirmDialog } from '../../confirm';
 import { jsonProblem, pretty } from '../../scripts/api';
+import {
+  ioInText, ioOutText, stepIO, withDerivedRequires, type DesignContext, type MemberIntegration, type ScriptCatalog, type SchemaFields,
+} from '../../scripts/catalog';
 import {
   addStep, branchesOf, clearLayout, connect, createHistory, docToGraph, END_ID, moveNode, NODE_SIZE, removeEdge, removeStep,
   replaceStep, START_ID, type Branch, type FlowEdge, type FlowNode,
 } from '../../scripts/flowchart';
-import type { CheckIssue, ScriptDocument, ScriptStep } from '../../scripts/types';
+import type { CheckIssue, ScriptDocument, ScriptStep, ScriptVariable } from '../../scripts/types';
 import FlowPalette from './FlowPalette.vue';
 import FlowStepPanel from './FlowStepPanel.vue';
+import ScriptPane from './ScriptPane.vue';
 
 // The flowchart designer over the script's JSON text (v-model): one node per step plus start and end, edges for
 // next / then / else / cases / default / body. Every edit goes through the pure functions in scripts/flowchart.ts
 // and writes the whole document back as text, so the JSON view and the flowchart are one document. Node positions
 // live in the document's `layout` section; without one, dagre lays it out. Undo and redo cover the texts written
 // here (toolbar, Ctrl+Z, Ctrl+Y). Read-only (a Visitor, or a run's view): pan, zoom and select only.
+// The right pane is the selected step's form (Design) and JSON; with no step selected it is the Script pane. Each
+// node shows its typed in and out. An edit that changes an integration step's use or action derives requires again.
 const text = defineModel<string>({ required: true });
 const selected = defineModel<string | null>('selected', { default: null });
 const props = defineProps<{
@@ -29,17 +35,42 @@ const props = defineProps<{
   readonly?: boolean;
   /** A run's view: the steps it took, and the one it failed at. */
   run?: { taken: string[]; failed: string | null };
+  /** The integrations and functions (scripts.catalog). */
+  catalog?: ScriptCatalog | null;
+  /** The schemas' fields, by name. */
+  schemas?: SchemaFields;
+  /** Opened from a member: its bindings and the integrations it uses. */
+  bindings?: Record<string, string>;
+  integrations?: MemberIntegration[] | null;
 }>();
 const emit = defineEmits<{ edited: [] }>();
 
+/** Panes narrower than this start with the minimap folded away. */
+const MINIMAP_MIN_WIDTH = 640;
+
 const doc = computed<ScriptDocument | null>(() => (jsonProblem(text.value) ? null : (JSON.parse(text.value) as ScriptDocument)));
+const ctx = computed<DesignContext | null>(() => (doc.value
+  ? { doc: doc.value, catalog: props.catalog ?? null, schemas: props.schemas ?? {}, bindings: props.bindings }
+  : null));
 const graph = computed(() => (doc.value ? docToGraph(doc.value, { issues: props.issues ?? [], run: props.run }) : { nodes: [], edges: [] }));
 const byId = computed(() => new Map(graph.value.nodes.map((n) => [n.id, n])));
 /** The connection picked on the canvas (Delete removes it). */
 const selectedEdge = ref<string | null>(null);
 
-const nodes = computed<Node<FlowNode>[]>(() => graph.value.nodes.map((n) => ({
-  id: n.id, type: 'step', position: n.position, data: n, deletable: false,
+/** Each step's in and out, as the nodes show them. */
+const ios = computed(() => {
+  const out = new Map<string, { in: string; out: string }>();
+  if (!ctx.value) return out;
+  for (const s of doc.value?.steps ?? []) {
+    if (!s || typeof s !== 'object' || out.has(s.id)) continue;
+    const io = stepIO(ctx.value, s);
+    out.set(s.id, { in: ioInText(io), out: ioOutText(io) });
+  }
+  return out;
+});
+
+const nodes = computed<Node<FlowNode & { io: { in: string; out: string } | null }>[]>(() => graph.value.nodes.map((n) => ({
+  id: n.id, type: 'step', position: n.position, data: { ...n, io: ios.value.get(n.id) ?? null }, deletable: false,
   draggable: !props.readonly, connectable: !props.readonly,
   width: NODE_SIZE.width, height: NODE_SIZE.height,
 })));
@@ -64,7 +95,8 @@ watch(text, (t) => {
   tick.value++;
 });
 
-function write(next: ScriptDocument) {
+function write(edited: ScriptDocument) {
+  const next = withDerivedRequires(doc.value, edited, props.catalog);
   const t = pretty(next);
   if (t === text.value) return;
   written = t;
@@ -89,14 +121,34 @@ const selectedStep = computed<ScriptStep | null>(() => doc.value?.steps?.find((s
 
 function onNodeClick(e: NodeMouseEvent) { selected.value = e.node.id; selectedEdge.value = null; }
 function onEdgeClick(e: EdgeMouseEvent) { selectedEdge.value = e.edge.id; selected.value = null; }
-function onPaneClick() { selectedEdge.value = null; }
+/** A click on the empty canvas: nothing selected, so the Script pane shows. */
+function onPaneClick() { selectedEdge.value = null; selected.value = null; }
 
-function onPanelChange(s: ScriptStep) {
+/** The Script pane shows when no step is selected (or the start node is). */
+const showScriptPane = computed(() => !selected.value || selected.value === START_ID || !selectedNode.value);
+
+function onPanelChange(s: ScriptStep, variable?: ScriptVariable) {
   if (!doc.value || props.readonly || !selected.value) return;
   const from = selected.value;
-  write(replaceStep(doc.value, from, s));
+  let next = replaceStep(doc.value, from, s);
+  if (variable) next = { ...next, variables: [...(Array.isArray(next.variables) ? next.variables : []), variable] };
+  write(next);
   if (s.id !== from) selected.value = s.id;
 }
+function onScriptChange(next: ScriptDocument) { if (!props.readonly) write(next); }
+function onScriptStep(id: string) { selected.value = id; selectedEdge.value = null; }
+
+// ---- the minimap: folded away by default on a small pane
+const canvasEl = ref<HTMLElement | null>(null);
+const showMap = ref(false);
+// Decided once, when the canvas first appears: it may come after mount (the editor opens on the Flowchart before the
+// script has loaded), and the person's own toggle wins from then on.
+let mapDecided = false;
+watch(canvasEl, (el) => {
+  if (!el || mapDecided) return;
+  mapDecided = true;
+  showMap.value = el.clientWidth >= MINIMAP_MIN_WIDTH;
+}, { immediate: true });
 
 // ---- edits
 function onDragStop(e: NodeDragEvent) {
@@ -186,7 +238,7 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
     <p v-if="!doc" class="muted" data-test="flow-no-doc">Fix the JSON to see the flowchart.</p>
     <div v-else class="area">
       <FlowPalette v-if="!readonly" @add="onAdd" />
-      <div class="canvas" data-test="flow-canvas">
+      <div ref="canvasEl" class="canvas" data-test="flow-canvas">
         <VueFlow :nodes="nodes" :edges="edges" :nodes-draggable="!readonly" :nodes-connectable="!readonly" :edges-updatable="false"
           :delete-key-code="null" :min-zoom="0.2" :max-zoom="2" fit-view-on-init
           @node-click="onNodeClick" @edge-click="onEdgeClick" @pane-click="onPaneClick" @node-drag-stop="onDragStop" @connect="onConnect">
@@ -197,6 +249,8 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
               <div class="inner">
                 <span class="title"><code>{{ data.title }}</code><span v-if="data.stepType" class="type">{{ data.stepType }}</span></span>
                 <span v-if="data.detail" class="detail" data-test="flow-node-detail">{{ data.detail }}</span>
+                <span v-if="data.io?.in" class="io" data-test="flow-node-in" :title="`in: ${data.io.in}`">in {{ data.io.in }}</span>
+                <span v-if="data.io?.out" class="io" data-test="flow-node-out" :title="`out: ${data.io.out}`">out {{ data.io.out }}</span>
               </div>
               <span v-if="data.problems.length" class="badge" data-test="flow-node-badge" :aria-label="`${data.problems.length} problems`">⚠ {{ data.problems.length }}</span>
               <Handle v-if="data.kind !== 'end'" type="source" :position="Position.Bottom" />
@@ -204,8 +258,10 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
           </template>
           <Background :gap="18" />
           <Controls :show-interactive="false" />
-          <MiniMap pannable zoomable />
+          <MiniMap v-if="showMap" pannable zoomable />
         </VueFlow>
+        <button type="button" class="mini map-toggle" :aria-pressed="showMap" data-test="flow-minimap-toggle"
+          :title="showMap ? 'Hide the map' : 'Show a map of the whole chart'" @click="showMap = !showMap">{{ showMap ? 'Hide map' : 'Map' }}</button>
         <div v-if="pending" class="ask" role="dialog" aria-label="Which branch" data-test="flow-branch-ask">
           <p>From <code>{{ titleOf(pending.source) }}</code> to <code>{{ titleOf(pending.target) }}</code>: which branch?</p>
           <div class="row">
@@ -215,8 +271,11 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
           </div>
         </div>
       </div>
-      <FlowStepPanel v-if="selectedNode" :key="selectedNode.id" :node="selectedNode" :step="selectedStep" :readonly="!!readonly"
-        @change="onPanelChange" @remove="deleteNode" @close="selected = null" />
+      <aside v-if="showScriptPane && ctx" class="side" data-test="flow-script-side">
+        <ScriptPane :ctx="ctx" :readonly="!!readonly" :integrations="integrations" @change="onScriptChange" @step="onScriptStep" />
+      </aside>
+      <FlowStepPanel v-else-if="selectedNode && ctx" :key="selectedNode.id" :node="selectedNode" :step="selectedStep" :readonly="!!readonly"
+        :ctx="ctx" :integrations="integrations" @change="onPanelChange" @remove="deleteNode" @close="selected = null" />
     </div>
   </div>
 </template>
@@ -229,7 +288,11 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
 .area { display: flex; gap: 10px; min-height: 460px; flex: 1 1 0; }
 .canvas { position: relative; flex: 1 1 0; min-width: 0; min-height: 460px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); overflow: hidden; }
 
-.node { position: relative; width: 220px; height: 72px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+.side { width: 320px; flex: 0 0 auto; border-left: 1px solid var(--line-soft); padding-left: 10px; min-height: 0; overflow: auto; }
+.map-toggle { position: absolute; right: 8px; bottom: 8px; z-index: 6; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; }
+.canvas :deep(.vue-flow__minimap) { bottom: 30px; }
+.node .io { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-family: ui-monospace, monospace; opacity: .85; }
+.node { position: relative; width: 220px; height: 88px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
   padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--pill-neutral-bg); color: var(--pill-neutral-ink); font-size: 12px; }
 .node .inner { display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 100%; min-width: 0; text-align: center; position: relative; }
 .node .title { display: inline-flex; gap: 6px; align-items: baseline; max-width: 100%; }

@@ -762,9 +762,28 @@ masked in the log and never reaches an agent. See
 - **Schemas** are named object types (a JSON Schema subset), also global and versioned. The built-in schemas
   (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse) are read-only. A schema save that
   removes or retypes a field a saved script uses is refused, listing each script, version and step it would break.
+- The **Schemas** tab shows each schema as a tree of its fields: type, required, description, enum values, and the
+  schemas a field refers to (as an item of a list too). A built-in schema is read-only. Your own schema has a
+  **Design** tab (add, remove and reorder fields; each field's name, type (a native type, `list<…>` or another schema),
+  required, description and enum values) and a **JSON** tab; both edit one schema, checked when it is saved. **Used in**
+  lists the scripts whose latest version uses the schema, with the variables typed with it and the steps that read it.
+- A script's `integration` steps name the person's integrations as Settings > Integrations shows them: an Email
+  integration's name (`"use": "Support inbox"`) or a web API's name (`"use": "Twilio"`). The script's `requires` (each
+  integration it uses, its kind and the actions its steps call) is derived from the steps on every save and check; a
+  `requires` that does not match the steps is replaced and reported as a warning, never as a reason for a draft.
 - A **script member** is a team member whose runs are the core's script engine, never an agent CLI. It runs a pinned
-  version of its script or the newest version that passes its check, with its own settings, and binds each
-  integration the script requires to one of the team's integrations.
+  version of its script or the newest version that passes its check, with its own settings. It uses the integrations
+  the script names, and each must be turned on for its team; the same integration serves every team it is turned on
+  for. Adding or changing a member whose script uses an integration that is not turned on for its team is refused
+  with the reason.
+- **Per-member override**: a member may use another integration of the same kind in place of one the script names
+  ("Support inbox → Other inbox"), for example a different mailbox for each team. The override is kept in the member's
+  bindings (`{ "Support inbox": "Other inbox" }`), shown on the member's tile and in its settings, and used by every run
+  of that member. An override to an integration of another kind, or to one not turned on for the member's team, is
+  refused with the reason.
+- Scripts written before real names name each integration by an alias in `requires` (`mail`, `sms`), and each of their
+  members binds every alias to a real integration. They check and run as they always have. **Use real names** in the
+  editor (`scripts.useRealNames`) rewrites such a script to the real names, taken from a member's bindings.
 - Every trigger kind starts a script member's run, with a structured input: TriggerFired (every, cron, once),
   FolderChange (the folder and the added, removed and changed files) or EventItem (the event and its item). An
   instruction told to a script member starts a run with its text. Agents' triggers are unchanged.

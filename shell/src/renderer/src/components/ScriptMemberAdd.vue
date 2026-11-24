@@ -5,14 +5,15 @@ import { errorText } from '../api';
 import { vChange } from '../remoteAccess';
 import BusyLabel from './BusyLabel.vue';
 import {
-  bindableIntegrations, enumOptions, label, scriptsApi, settingInput, settingText, settingValue,
-  type ScriptRequire, type ScriptSettingDecl, type ScriptSummary, type ScriptVersionInfo,
+  bindableIntegrations, bindingsFrom, enumOptions, isRealName, knownIntegrations, label, overrideChoices, scriptsApi, settingInput, settingText,
+  settingValue, type KnownIntegration, type ScriptRequire, type ScriptSettingDecl, type ScriptSummary, type ScriptVersionInfo,
 } from '../scriptMembers';
 
 // B134 (card 598): Add member as "Script member": the script (a runnable one), its version (latest, or a pinned clean
-// version), a settings form made from the script's own settings (types and defaults from its document), and one binding
-// per requires entry over the team's integrations. Add calls scripts.memberAdd; a refusal (bad_script, not_runnable)
-// shows its reason and keeps what was filled in.
+// version), a settings form made from the script's own settings (types and defaults from its document), and its
+// integrations: one the script names by its real name is used as it is ("Use <name>") or replaced by another of the
+// team's of the same kind; an alias the script names needs one of the team's integrations. Add calls scripts.memberAdd; a
+// refusal (bad_script, not_runnable) shows its reason and keeps what was filled in.
 const props = defineProps<{ api: YawbleApi; teamId: number; name: string }>();
 const emit = defineEmits<{ added: [memberId: number]; cancel: [] }>();
 const rpc = scriptsApi(props.api);
@@ -29,6 +30,9 @@ const values = ref<Record<string, any>>({});
 const bindings = ref<Record<string, string>>({});
 /** Per requires name: the team's integrations of its kind (null: the kind is not listed, the name is typed). */
 const choices = ref<Record<string, string[] | null>>({});
+/** Every integration by name: a requires name among them is a real name (no binding needed). */
+const known = ref<KnownIntegration[]>([]);
+const real = (name: string) => isRealName(known.value, name);
 const error = ref<string | null>(null);
 const loading = ref(false);
 const adding = ref(false);
@@ -71,16 +75,21 @@ async function loadDocument() {
   values.value = Object.fromEntries(settings.value.map((d) => [d.name, before[d.name] ?? settingText(d, d.default)]));
   const bound = bindings.value;
   bindings.value = Object.fromEntries(requires.value.map((r) => [r.name, bound[r.name] ?? '']));
-  const lists = await Promise.all(requires.value.map((r) => bindableIntegrations(props.api, props.teamId, r.kind).catch(() => null)));
-  choices.value = Object.fromEntries(requires.value.map((r, i) => [r.name, lists[i]]));
+  const [lists, all] = await Promise.all([
+    Promise.all(requires.value.map((r) => bindableIntegrations(props.api, props.teamId, r.kind).catch(() => null))),
+    knownIntegrations(props.api).catch(() => [] as KnownIntegration[]),
+  ]);
+  known.value = all;
+  choices.value = Object.fromEntries(requires.value.map((r, i) => [r.name,
+    real(r.name) ? overrideChoices((lists[i] ?? []).map((n) => ({ name: n, kind: r.kind })), { name: r.name, kind: r.kind as 'email' | 'api' }) : lists[i]]));
   for (const r of requires.value) {
     const list = choices.value[r.name];
-    if (list && list.length === 1 && !bindings.value[r.name]) bindings.value[r.name] = list[0];
+    if (!real(r.name) && list && list.length === 1 && !bindings.value[r.name]) bindings.value[r.name] = list[0];
   }
 }
 
 const canAdd = computed(() => !!props.name.trim() && chosen.value !== null && !loading.value && !adding.value
-  && requires.value.every((r) => !!bindings.value[r.name]?.trim()));
+  && requires.value.every((r) => real(r.name) || !!bindings.value[r.name]?.trim()));
 
 async function add() {
   if (!canAdd.value || !chosen.value) return;
@@ -101,7 +110,7 @@ async function add() {
       teamId: props.teamId, name: props.name.trim(), script: chosen.value.id,
       ...(version.value ? { version: Number(version.value) } : {}),
       settings: out,
-      bindings: Object.fromEntries(Object.entries(bindings.value).map(([k, v]) => [k, v.trim()])),
+      bindings: bindingsFrom(bindings.value, real),
     });
     emit('added', m.memberId);
   } catch (e) {
@@ -151,7 +160,11 @@ const settingId = (name: string) => `script-setting-${name}`;
       <fieldset v-if="requires.length" class="group" data-test="script-member-bindings">
         <legend>Integrations</legend>
         <label v-for="r in requires" :key="r.name" :data-test="`script-binding-${r.name}`">{{ r.name }} <span class="muted">({{ r.kind }})</span>
-          <select v-if="choices[r.name]" v-model="bindings[r.name]">
+          <select v-if="real(r.name)" v-model="bindings[r.name]" data-test="script-binding-override">
+            <option value="">Use {{ r.name }}</option>
+            <option v-for="n in choices[r.name] ?? []" :key="n" :value="n">Use {{ n }} instead</option>
+          </select>
+          <select v-else-if="choices[r.name]" v-model="bindings[r.name]">
             <option value="" disabled>{{ choices[r.name]!.length ? 'Choose one of the team\'s integrations' : 'None offered to this team' }}</option>
             <option v-for="n in choices[r.name]!" :key="n" :value="n">{{ n }}</option>
           </select>
