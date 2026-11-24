@@ -7,14 +7,14 @@
 export const EMBED_VERSION = 1;
 
 /** The short icon keys: the cloud draws its own icon for a key it knows. */
-export type EmbedIcon = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'kanban' | 'documents' | 'monitor' | 'logs';
+export type EmbedIcon = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'kanban' | 'documents' | 'monitor' | 'scripts' | 'logs';
 
 /**
- * The places, in Sidebar.vue's order: New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs.
+ * The places, in Sidebar.vue's order: New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Scripts, Logs.
  * No Terminal and no Help: an agent's terminal is in its pane on the team page (and its output is never sent up), and the
  * version and help links are in Settings, which the cloud's own settings button opens.
  */
-export type EmbedPlaceId = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'board' | 'documents' | 'monitor' | 'logs';
+export type EmbedPlaceId = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'board' | 'documents' | 'monitor' | 'scripts' | 'logs';
 
 export interface EmbedPlace {
   id: EmbedPlaceId;

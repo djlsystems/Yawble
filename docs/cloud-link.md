@@ -97,13 +97,13 @@ desktop's side in `shell/src/renderer/src/embed.ts`):
 ```text
 CONTRACT (window.postMessage, both sides check event.origin === location.origin and event.source; anything else is ignored)
 Desktop to cloud: {type:'yawble.nav', version:1, nav} each time anything in it changes, and once on load. nav =
-  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs: the same ids/order as Sidebar.vue
+  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Scripts, Logs: the same ids/order as Sidebar.vue
     teams:  [{id, name, dot:'idle'|'running'|'waiting'|'queued'|'paused'|'attention', badge|null, active}],
     canNewTeam: bool,
     chats:  [{id, title, active, busy:'deleting'|null, actions:[{id, label, danger}]}],
     runSlots: string|null,           // the line under the sidebar today
     readOnly: bool }                 // a Visitor's view
-  icon is a short key: newChat, concierge, teams, backlog, workflows, kanban, documents, monitor, logs; the cloud draws its own icon for a key it knows.
+  icon is a short key: newChat, concierge, teams, backlog, workflows, kanban, documents, monitor, scripts, logs; the cloud draws its own icon for a key it knows.
 Cloud to desktop: {type:'yawble.navigate', to:{kind:'place', id} | {kind:'team', id} | {kind:'chat', id} | {kind:'newTeam'} | {kind:'chatAction', id, action}} does exactly what the same click in the desktop sidebar does (including the confirm dialogs for a chat's actions, drawn inside the frame).
 Cloud to desktop: {type:'yawble.theme', theme}.
 Desktop to cloud: {type:'yawble.ready', version:1} once it listens.
@@ -113,7 +113,7 @@ The values the desktop sends:
 
 - **Places**, in this order, as `id` / `icon`: `newChat` / `newChat`, `concierge` / `concierge`, `teams` / `teams`,
   `backlog` / `backlog`, `workflows` / `workflows`, `board` / `kanban` (label Kanban board), `documents` /
-  `documents`, `monitor` / `monitor`, `logs` / `logs`. There is no Terminal and no Help place: an agent's terminal is in
+  `documents`, `monitor` / `monitor`, `scripts` / `scripts` (B134: the Scripts dialog; a Visitor reads the scripts, schemas and runs, and is not offered save, import, delete, schema save or test run), `logs` / `logs`. There is no Terminal and no Help place: an agent's terminal is in
   its pane on the team page, and the version and help links are in Settings, which the cloud's own settings button
   opens. Settings itself is not a place. `badge` is a number: Teams has the
   number of teams, Workflows the number of open workflows; otherwise, or when it is 0, `null`. `active` is the screen
