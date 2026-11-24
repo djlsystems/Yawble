@@ -20,7 +20,7 @@ public sealed record ScriptApiResult(int Status, string ContentType, string Body
 {
     public bool Sent { get; init; } = true;
 
-    /// <summary>B143: the request that was sent (method, route template, host) and how long the app waited for an answer; null when unknown.</summary>
+    /// <summary>the request that was sent (method, route template, host) and how long the app waited for an answer; null when unknown.</summary>
     public string? Method { get; init; }
     public string? Route { get; init; }
     public string? Host { get; init; }

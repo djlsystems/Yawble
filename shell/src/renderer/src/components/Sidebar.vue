@@ -4,7 +4,7 @@ import { teamState, teamStateLabel } from '../teamState';
 import wordmark from '../assets/yawble-logo-light.png';
 import wordmarkDark from '../assets/yawble-logo-dark.png';
 import mark from '../assets/yawble-mark.png';
-import { nextTick, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import type { ConversationSummary, RunSlots, TeamSummary } from '../../../shared/api';
 import Icon from './Icon.vue';
 import LoadingNote from './LoadingNote.vue';
@@ -19,7 +19,7 @@ import type { MenuItem as MenuBarItem } from './MenuBar.vue';
 export type View = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'scripts' | 'logs' | 'settings';
 export type MenuItem = 'agents' | 'skills' | 'globalPolicy' | 'integrations' | 'system' | 'link';
 
-defineProps<{
+const props = defineProps<{
   view: View;
   conversations: ConversationSummary[];
   teams: TeamSummary[];
@@ -45,6 +45,9 @@ defineProps<{
   /** B104: how many workflows are open across the teams (the Workflows badge); null: not known. */
   openWorkflows?: number | null;
 }>();
+/** Any team with work running now: the Teams and Workflows badges turn green and pulse until every team is idle. */
+const runningTeams = computed(() => props.teams.filter((t) => (t.running ?? 0) > 0).length);
+const anyRunning = computed(() => runningTeams.value > 0);
 const emit = defineEmits<{
   newChat: []; openConversation: [id: string]; openTeam: [id: number]; go: [view: View]; logs: [];
   teamDocuments: []; teamWorkflows: [];
@@ -85,8 +88,8 @@ function finishRename(id: string) {
       <button v-for="p in railPlaces" :key="p.view" class="rail-btn" :class="{ on: view === p.view }" :title="p.label" :data-test="`rail-${p.view}`"
         @click="emit('go', p.view)">
         <Icon :name="p.icon" />
-        <span v-if="p.view === 'teams' && slots?.running" class="rail-badge" title="agents running">{{ slots.running }}</span>
-        <span v-else-if="p.view === 'workflows' && openWorkflows" class="rail-badge" data-test="rail-workflows-count" :title="`${openWorkflows} open`">{{ openWorkflows }}</span>
+        <span v-if="p.view === 'teams' && slots?.running" class="rail-badge live" title="agents running">{{ slots.running }}</span>
+        <span v-else-if="p.view === 'workflows' && openWorkflows" class="rail-badge" :class="{ live: anyRunning }" data-test="rail-workflows-count" :title="`${openWorkflows} open`">{{ openWorkflows }}</span>
       </button>
       <button class="rail-btn" :class="{ on: view === 'logs' }" title="Logs" data-test="rail-logs" @click="emit('logs')"><Icon name="logs" /></button>
     </nav>
@@ -112,9 +115,9 @@ function finishRename(id: string) {
 
     <nav class="places">
       <button class="item" :class="{ on: view === 'concierge' }" data-test="nav-concierge" @click="emit('go', 'concierge')"><Icon name="spark" />Concierge</button>
-      <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="teams.length" class="badge" data-test="nav-teams-count" :title="`${teams.length} team${teams.length === 1 ? '' : 's'}`">{{ teams.length }}</span></button>
+      <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="teams.length" class="badge" :class="{ live: anyRunning }" data-test="nav-teams-count" :title="`${teams.length} team${teams.length === 1 ? '' : 's'}${anyRunning ? `, ${runningTeams} running` : ', all idle'}`">{{ teams.length }}</span></button>
       <button class="item" :class="{ on: view === 'backlog' }" data-test="nav-backlog" @click="emit('go', 'backlog')"><Icon name="backlog" />Backlog</button>
-      <button class="item" :class="{ on: view === 'workflows' }" data-test="nav-workflows" @click="emit('go', 'workflows')"><Icon name="workflow" />Workflows<span v-if="openWorkflows" class="badge" data-test="nav-workflows-count" :title="`${openWorkflows} open workflow${openWorkflows === 1 ? '' : 's'}`">{{ openWorkflows }}</span></button>
+      <button class="item" :class="{ on: view === 'workflows' }" data-test="nav-workflows" @click="emit('go', 'workflows')"><Icon name="workflow" />Workflows<span v-if="openWorkflows" class="badge" :class="{ live: anyRunning }" data-test="nav-workflows-count" :title="`${openWorkflows} open workflow${openWorkflows === 1 ? '' : 's'}${anyRunning ? ', work running' : ', nothing running'}`">{{ openWorkflows }}</span></button>
       <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Kanban board</button>
       <button class="item" :class="{ on: view === 'documents' }" data-test="nav-documents" @click="emit('go', 'documents')"><Icon name="docs" />Documents</button>
       <button class="item" :class="{ on: view === 'monitor' }" data-test="nav-monitor" @click="emit('go', 'monitor')"><Icon name="monitor" />Monitor</button>
@@ -207,6 +210,10 @@ function finishRename(id: string) {
 .item.new { font-weight: 500; }
 .places { margin: 4px 0 6px; }
 .soon { margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: var(--chip); padding: 1px 6px; border-radius: 6px; }
+/* Teams and Workflows: green and pulsing while any team has work running; the usual blue when every team is idle. */
+.badge.live, .rail-badge.live { background: var(--ok); animation: badge-live 1.6s ease-in-out infinite; }
+@keyframes badge-live { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .badge.live, .rail-badge.live { animation: none; } }
 .badge { margin-left: auto; font-size: 11px; background: var(--brand); color: var(--on-accent); border-radius: 9px; padding: 0 7px; }
 .lists { flex: 1; overflow: auto; min-height: min(96px, 100%); }
 h3 { font-size: 12px; font-weight: 500; color: var(--muted); margin: 14px 10px 4px; }

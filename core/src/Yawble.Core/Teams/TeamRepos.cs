@@ -596,7 +596,7 @@ public sealed partial class TeamRepos
             FetchResult Fail(string e, string status = "failed")
             {
                 recordError(e);
-                // B143: a warning with its ids (a merge conflict among them: it said nothing to the level regex).
+                // A warning with its ids (a merge conflict among them: it said nothing to the level regex).
                 Logs.Diag.Warning("teams", $"{member.Qualified}: {e}", ("team", member.Team), ("member", member.Qualified), ("branch", branch),
                     ("repo", repoPath), ("status", status));
                 return new FetchResult(false, null, e);
@@ -679,7 +679,7 @@ public sealed partial class TeamRepos
         if (current is null || await IsAncestorAsync(repoPath, current, sha, ct)) next = sha;
         else if (await IsAncestorAsync(repoPath, sha, current, ct))
         {
-            // B143: at debug; the start-up summary counts it, and a line is written only when the clone's state changes.
+            // At debug; the start-up summary counts it, and a line is written only when the clone's state changes.
             Logs.Diag.Debug("teams", $"{member.Qualified}: the clone's {branch} ({Short(sha)}) is behind the team repository's ({Short(current)}); left as it is",
                 ("team", member.Team), ("member", member.Qualified), ("branch", branch), ("sha", Short(sha)), ("current", Short(current)));
             return (null, true);
@@ -689,7 +689,7 @@ public sealed partial class TeamRepos
             var (tree, files) = await MergeTreeAsync(repoPath, current, sha, ct);
             if (tree is null)
             {
-                // B143: a merge conflict is a warning (Fail writes it, status conflict); the work waits at the staging ref.
+                // A merge conflict is a warning (Fail writes it, status conflict); the work waits at the staging ref.
                 return (ParkedNote(member.Name, branch, files), false);
             }
             next = await Git.RunAsync(repoPath, ct, "-c", "user.name=" + ManagedIdentityName, "-c", "user.email=" + ManagedIdentityEmail,
@@ -813,7 +813,7 @@ public sealed partial class TeamRepos
     /// <summary>A clone's branch is level with (or ahead of) the host repository's, or behind it (left as it is).</summary>
     public const string CloneCurrent = "current", CloneBehind = "behind";
 
-    /// <summary>B143: the state each clone branch was last seen in (member id, host repository, branch), this process.</summary>
+    /// <summary>The state each clone branch was last seen in (member id, host repository, branch), this process.</summary>
     private readonly ConcurrentDictionary<string, string> _cloneStates = new(StringComparer.Ordinal);
 
     /// <summary>The start-up fetch-back's counts while it runs (one summary line at its end), else null.</summary>
@@ -988,7 +988,7 @@ public sealed partial class TeamRepos
                     rejection ??= output;
                     continue;
                 }
-                // B143: which branch, git's exit code and the remote (its URL redacted).
+                // which branch, git's exit code and the remote (its URL redacted).
                 Logs.Diag.Warning("teams", $"team {member.Team}: push of {unpublished[i]} to origin failed (exit {run.ExitCode}): {output}",
                     ("team", member.Team), ("branch", unpublished[i]), ("status", run.ExitCode), ("remote", PersonGitPush.Redact(origin.Stdout)),
                     ("repo", repo.Path));

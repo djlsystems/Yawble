@@ -9,7 +9,7 @@ namespace Yawble.Core.Logs;
 /// <paramref name="To"/> are ISO times (inclusive, compared as text). <paramref name="AsOf"/>: the time the first page
 /// was read, so later pages are of the same list while new entries arrive. <paramref name="App"/>: only the rows about no
 /// team and no member (the activity log's "app" rows, B101); a source without such rows has none.
-/// <paramref name="Level"/> (a source with levels, the Diagnostics log): null or "default" every level but debug; "all"
+/// <paramref name="Level"/> (a source with levels: All activity and the Diagnostics log): null or "default" every level but debug; "all"
 /// every level; "error", "warning", "info" or "debug" that level only.
 /// </summary>
 public sealed record LogQuery(
@@ -41,7 +41,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         foreach (var s in LogSources.All)
         {
             list.Add(Describe(s.Id, s.Title, s.Group, s.About, s.Columns, s.Prune is not null, s.Prune?.Loss, s.KeptBecause, s.Prune?.DefaultDays,
-                team: s.TeamWhere is not null, member: s.MemberWhere is not null, app: s.AppWhere is not null, levels: false));
+                team: s.TeamWhere is not null, member: s.MemberWhere is not null, app: s.AppWhere is not null, levels: s.LevelSql is not null));
         }
         foreach (var f in FileLogs.All)
             list.Add(Describe(f.Id, f.Title, f.Group, f.About, f.Columns, true, f.Loss, null, f.DefaultDays, f.MemberInText, f.MemberInText, false, levels: f.Columns.Any(c => c.Key == "fields")));
@@ -90,6 +90,8 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         var sort = s.Columns.FirstOrDefault(col => col.Key == q.Sort) ?? s.Columns[0];
         var dir = q.Descending ? "DESC" : "ASC";
         var select = string.Join(", ", s.Columns.Select(col => $"{col.Sql} AS \"{col.Key}\""));
+        // A source with levels also gives each row's level, after its columns.
+        if (s.LevelSql is not null) select += $", {s.LevelSql} AS level";
         cmd.CommandText = $"SELECT {s.RowId} AS _id, {select} FROM {s.From} WHERE {where} ORDER BY {sort.Sql} {dir}, {s.RowId} {dir} LIMIT @limit OFFSET @offset;";
         cmd.Parameters.AddWithValue("@limit", limit + 1);
         cmd.Parameters.AddWithValue("@offset", offset);
@@ -102,6 +104,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
                 if (rows.Count == limit) { more = true; break; }
                 var row = new JsonObject { ["_id"] = Value(r, 0)?.ToString() };
                 for (var i = 0; i < s.Columns.Count; i++) row[s.Columns[i].Key] = Value(r, i + 1);
+                if (s.LevelSql is not null) row["level"] = Value(r, s.Columns.Count + 1);
                 rows.Add(LogRedaction.Row(row));
             }
         }
@@ -139,6 +142,17 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             else parts.Add($"({s.TeamWhere})");
         }
         if (q.App) parts.Add(s.AppWhere is null ? "0" : $"({s.AppWhere})");
+        // Levels (a source with a level): debug is left out unless asked for ("debug" or "all"); a level picks that one.
+        if (s.LevelSql is not null)
+        {
+            var wanted = q.Level?.Trim().ToLowerInvariant();
+            if (wanted is null or "" or "default") parts.Add($"{s.LevelSql} <> '{LogLevels.Debug}'");
+            else if (wanted != "all")
+            {
+                parts.Add($"{s.LevelSql} = @level");
+                cmd.Parameters.AddWithValue("@level", LogLevels.Normal(wanted));
+            }
+        }
         if (!string.IsNullOrWhiteSpace(q.From)) { parts.Add($"{s.Time} >= @from"); cmd.Parameters.AddWithValue("@from", q.From); }
         if (!string.IsNullOrWhiteSpace(q.To)) { parts.Add($"{s.Time} <= @to"); cmd.Parameters.AddWithValue("@to", q.To); }
         var n = 0;
@@ -316,7 +330,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             var ev = Str(4);
             var text = Str(5);
             var message = source == "Messages";
-            var level = message ? LogLevels.OfMessage(ev) : LogLevels.Of(ev, text);
+            var level = LogLevels.OfActivity(source, ev, text);
             list.Add((Str(0) ?? "", new LogTailEntry(Str(1) ?? "", source, level, team, member, ev, text, message && LogLevels.IsWorkflowEvent(ev))));
         }
         return list;
@@ -481,7 +495,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         }
         var orphans = ForgetMissingTranscripts();
         if (orphans > 0) done["transcripts"] = done.GetValueOrDefault("transcripts") + orphans;
-        // B143: one line per sweep, at debug (routine).
+        // One line per sweep, at debug (routine).
         if (done.Count > 0)
             Diag.Debug("logs", "Logs: pruned " + string.Join(", ", done.Select(d => $"{d.Value} {d.Key} entr{(d.Value == 1 ? "y" : "ies")}")) + " past their retention",
                 [.. done.Select(d => (d.Key, (object?)d.Value))]);
