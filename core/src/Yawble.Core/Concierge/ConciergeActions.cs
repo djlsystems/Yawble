@@ -67,6 +67,16 @@ public sealed class ConfirmationBook(TimeProvider? clock = null)
             .Select(p => new IssuedConfirmation(p.Key, p.Value.Tool, p.Value.Plan)).ToList();
     }
 
+    /// <summary>
+    /// The key a pending token was issued for (what its list was worked out from), or null for an unknown or expired one. Two
+    /// tokens of one tool with the same key are for the same list: the companion compares them to tell whether a plan changed.
+    /// </summary>
+    public string? KeyOf(string token) =>
+        _pending.TryGetValue(token, out var p) && p.Expires > _clock.GetUtcNow() ? p.Key : null;
+
+    /// <summary>Drops a token nobody will redeem (the companion keeps a list's key, not its token, while the person decides).</summary>
+    public void Withdraw(string token) => _pending.TryRemove(token, out _);
+
     public Outcome Redeem(ConciergeTurn turn, string tool, string key, string token)
     {
         if (!_pending.TryGetValue(token, out var p)) return Outcome.Unknown;

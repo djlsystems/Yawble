@@ -786,6 +786,12 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 
 - It pairs once per program, with a code you approve in the window.
 - Access levels: `read`, `act` and `destructive`. Destructive calls wait for your approval in the window.
+- An approval request stays pending until you approve or deny it, however long that takes. The window shows when each
+  one was asked. When you approve, Yawble works the plan out again: the same plan runs, and a plan that changed becomes a
+  new request with the new plan, so a late approval never runs an outdated plan.
+- A request also ends when the program cancels it (`request_cancel`), when the program asks again for the same tool and
+  target (the newer request replaces the older one), after 7 days undecided (expired), or when the app restarts:
+  requests are kept in memory only.
 - It talks only to the running app on this computer. Nothing of it is reachable over Cloud Link.
 - Paired programs are listed and revoked in Settings > Companion.
 - Setup is in the [README](../README.md).
