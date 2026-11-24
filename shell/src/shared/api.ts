@@ -582,6 +582,8 @@ export interface ApiRow {
   oauth?: { authorizeUrl: string | null; tokenUrl: string | null; openIdConnectUrl?: string | null; neededScopes: string[]; missingScopes: string[] } | null;
   status: string | null; all: boolean; teams: number[]; counts: DiscoverChecklistData['counts'] | null;
 }
+/** integrations.emailList: a mailbox (an email account Connection) that scripts on the teams it is turned on for can read. */
+export interface EmailIntegration { id: number; name: string; kind: 'email'; connectionId: number | null; connection: unknown; enabledAll: boolean; teamIds: number[] }
 /** integrations.apiPeek { url }: what Add API fills in from one address (nothing is saved). */
 export type ApiPeekResult =
   | { found: true; specUrl: string; title: string | null; serviceUrl: string | null; name: string; actions: number; signIn: string | null }

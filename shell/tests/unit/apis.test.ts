@@ -673,4 +673,30 @@ describe('Add API: look up one address, and path parameters from the sign-in', (
     expect(calls.find((c) => c.method === 'integrations.apiSave')!.params).toEqual({ name: 'Twilio', pathParams: { AccountSid: 'username' } });
     expect((w.find('[data-test=api-path-common-check-AccountSid]').element as HTMLInputElement).checked).toBe(true);
   });
+  it('ConnectionsPanel_EmailAccount_TurnedOnForATeam_MakesItsMailboxThenOffersIt', async () => {
+    let mailboxes: any[] = [];
+    const mail = conn({ id: 11, name: 'Support inbox', kind: 'email', usedBy: [], fields: [{ key: 'address', label: 'Email address', secret: false, shown: 'help@example.test', set: true }] });
+    const { api, calls } = fakeApi({
+      'integrations.connections': () => [mail, conn()],
+      'integrations.emailList': () => mailboxes,
+      'integrations.emailSave': (p) => { const m = { id: 1, name: p.name, kind: 'email', connectionId: p.connectionId, connection: null, enabledAll: false, teamIds: [] as number[] }; mailboxes = [m]; return m; },
+      'integrations.emailEnable': (p) => { const m = mailboxes[0]; m.teamIds = p.on ? [...m.teamIds, p.teamId] : m.teamIds.filter((t: number) => t !== p.teamId); return { ok: true }; },
+    });
+    const w = mount(ConnectionsPanel, { props: { api, teams } });
+    await flushPromises();
+    expect(w.find('[data-test=connection-mailbox-7]').exists()).toBe(false);
+    const box = w.find('[data-test=connection-mailbox-11-team-3]');
+    expect((box.element as HTMLInputElement).checked).toBe(false);
+    await box.setValue(true);
+    await flushPromises();
+    expect(calls.filter((c) => c.method.startsWith('integrations.email') && c.method !== 'integrations.emailList').map((c) => [c.method, c.params])).toEqual([
+      ['integrations.emailSave', { name: 'Support inbox', connectionId: 11 }],
+      ['integrations.emailEnable', { name: 'Support inbox', teamId: 3, on: true }],
+    ]);
+    expect((w.find('[data-test=connection-mailbox-11-team-3]').element as HTMLInputElement).checked).toBe(true);
+    await w.find('[data-test=connection-mailbox-11-team-3]').setValue(false);
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'integrations.emailSave')).toHaveLength(1);
+    expect(calls.filter((c) => c.method === 'integrations.emailEnable').at(-1)!.params).toEqual({ name: 'Support inbox', teamId: 3, on: false });
+  });
 });
