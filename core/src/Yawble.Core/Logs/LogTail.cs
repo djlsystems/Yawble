@@ -49,7 +49,9 @@ public sealed record LogTailFilter(bool All = false, string? Team = null, string
             if (e.Member is not null)
                 return string.Equals(e.Team, team, StringComparison.OrdinalIgnoreCase) && string.Equals(e.Member, name, StringComparison.OrdinalIgnoreCase);
             // A log that names members in passing (the Diagnostics log) matches the way logs.query matches it.
-            return e.MemberInText && e.Text?.Contains(name, StringComparison.OrdinalIgnoreCase) == true;
+            // Its name and its team both named: a bare name would match a namesake in another team (B143).
+            return e.MemberInText && e.Text is { } said && said.Contains(name, StringComparison.OrdinalIgnoreCase)
+                && said.Contains(team, StringComparison.OrdinalIgnoreCase);
         }
         if (Team is { } t)
         {

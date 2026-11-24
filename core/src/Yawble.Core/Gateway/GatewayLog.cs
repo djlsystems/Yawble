@@ -101,7 +101,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
         var target = e.Target ?? "";
         var q = target.IndexOf('?');
         var path = (q < 0 ? target : target[..q]).TrimEnd('/');
-        if (!RoutinePaths.Any(r => path.EndsWith(r, StringComparison.OrdinalIgnoreCase))) return null;
+        if (!RoutinePaths.Any(r => path.Contains(r, StringComparison.OrdinalIgnoreCase))) return null;
         return ((e.Member ?? "").ToLowerInvariant(), e.Kind, (e.Vhost ?? "").ToLowerInvariant(), (e.Method ?? "").ToUpperInvariant(),
             path.ToLowerInvariant(), e.Status.Value);
     }

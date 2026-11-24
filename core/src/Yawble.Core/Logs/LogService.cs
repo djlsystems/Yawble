@@ -232,8 +232,10 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             if (!string.Equals(t, team, StringComparison.OrdinalIgnoreCase)) return false;
             return name is null || string.Equals(m, name, StringComparison.OrdinalIgnoreCase);
         }
-        var said = name ?? team;
-        return e.Any(v => v?.Contains(said, StringComparison.OrdinalIgnoreCase) == true);
+        // A member by its name and its team both named ("Alpha/Ines", "team Alpha: Ines ..."): its bare name would match a
+        // namesake in another team.
+        bool Says(string s) => e.Any(v => v?.Contains(s, StringComparison.OrdinalIgnoreCase) == true);
+        return Says(team) && (name is null || Says(name));
     }
 
     private JsonObject QueryFile(FileLogSource f, LogQuery q, string asOf, int offset, int limit)

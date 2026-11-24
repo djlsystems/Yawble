@@ -174,7 +174,7 @@ public static class DiagFields
     private static (string? Team, string? Member) Split(string? team, string? member)
     {
         if (member is { } m && m.IndexOf('/') is var slash and > 0 && slash < m.Length - 1)
-            return (team ?? m[..slash], m[(slash + 1)..]);
+            return (m[..slash], m[(slash + 1)..]); // the qualified name says the team
         return (string.IsNullOrWhiteSpace(team) ? null : team, string.IsNullOrWhiteSpace(member) ? null : member);
     }
 
