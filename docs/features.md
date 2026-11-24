@@ -578,15 +578,35 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
     (for `connect-denied`, the host and port it asked for). A host's plain-http and HTTPS refusals stay two rows. Its
     **Times** column says how many times, and in **All activity** the row's detail ends in ` (Nx)` when it counts
     more than one (` (5x)` for five). Refused paths are not folded into one row: the first few of each in a minute are
-    written, and the rest are counted in one more row written at the next such refusal after the minute. Every other
-    row's Times is 1.
+    written, and the rest are counted in one more row written at the next such refusal after the minute. The
+    refusals an agent CLI makes on its own in every run (the Codex `analytics-events` and `plugins/suggested` paths
+    refused with 403, and `/backend-api/ps/mcp` answered 401) are counted on one row per member, path and status for an
+    hour, across that member's runs. Every other row's Times is 1.
   - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
   - **Work history**: **Team messages** and **Board history**.
-  - **Diagnostics**: what the app itself reported (`<data>/logs/`).
+  - **Diagnostics**: what the app itself reported (`<data>/logs/`). Each entry has a time, where it came from (core or
+    shell), its message, a **Level** and **Fields**:
+    - The levels are error, warning, info and debug. The core gives each of its lines its level; an older line and a
+      line the app writes without one (on standard error) get theirs from what they say.
+    - Debug is for routine lines: a run admitted, the heavy-work lease held or released (passing the 30-minute limit is
+      still said), each clone fetched at start-up, a Grok session check that changed nothing, the daily prune, a push to
+      origin. They are hidden unless the Level filter asks for them.
+    - Fields are `key=value` pairs with the ids the line is about: `level`, `area` (`teams`, `bus`, `lease`, `grok`,
+      `logs`, `link`, `doctor`...) and, where known, `team`, `member`, `workflow`, `run`, `script`, `step`, `action`,
+      `integration`, `status`, `ms` and `attempt`. A value with a space in it is in double quotes.
+    - At start-up one line says how many clones were fetched and how many were behind ("start-up fetch-back: fetched 23
+      clones, 7 behind"). After that, a clone gets a line only when its state changes. A branch whose work does not merge
+      cleanly is a warning. A failed push names the branch, git's exit code and the remote. A failed periodic check
+      names the check and the error. When the Cloud Link connection ends, the line gives the exception, how long the
+      connection lasted, which connection it was and the delay before the next one.
 - Filters: team, member, each log's own columns, a date range, and free text across every column. The Member filter
   picks a member (that member's entries only), a team as a whole (its members' entries and the team's own), or, in All
-  activity, `app` (the app's own entries only); picking one clears the others. Every column sorts either way. Pages load as the table scrolls; a row opens to show every field.
+  activity, `app` (the app's own entries only); picking one clears the others. In Diagnostics the team and member
+  filters read a line's `team` and `member` fields, so a member is not matched by a namesake in another team. A line
+  without fields matches when it names both the member and its team. Diagnostics also has a **Level** filter: every level
+  but debug (the default), one level, or all of them, debug included (`logs.query` `level`: `default`, `error`,
+  `warning`, `info`, `debug` or `all`). Every column sorts either way. Pages load as the table scrolls; a row opens to show every field.
 - **Prune…** deletes a log's entries older than a chosen age, or all of them. It first says how many entries and files
   go, their date range, and what is lost, and deletes only after **Delete**. Approvals still waiting for an answer are
   never pruned, and an answered one is kept by when it was answered. Pruning Approvals also removes answered host tool
@@ -601,7 +621,8 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
   same redaction, so a row reads the same everywhere.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
 - A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
-  this computer by level (warnings, errors and workflow events by default, or everything), team and member, and
+  this computer by level (warnings, errors and workflow events by default, everything but debug with `all`, or
+  everything with `debug`), team and member, and
   redacted as above. It stops when the viewer stops it or disconnects.
 
 ## Repositories and git
