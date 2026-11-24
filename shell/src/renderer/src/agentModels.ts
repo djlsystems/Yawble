@@ -26,9 +26,8 @@ export function useAgentModels(api: YawbleApi) {
   return { profiles, defaultLabel, modelsOf, loadModels, loadProfiles };
 }
 
-/** The role a member was hired as (B147): hireRole, or a role word other than manager/member; null when none. */
-export function hireRoleOf(m: Pick<MemberRow, 'role'> & { hireRole?: string | null }): string | null {
-  if (m.hireRole && m.hireRole.trim()) return m.hireRole.trim();
-  const r = m.role as string | null | undefined;
-  return r && r !== 'manager' && r !== 'member' ? r : null;
+/** The role a member was hired as (B147): member.hireRole from teams.agents; null when none. member.role stays
+ *  'manager' | 'member' and is never read as a hire role. */
+export function hireRoleOf(m: { hireRole?: string | null }): string | null {
+  return m.hireRole && m.hireRole.trim() ? m.hireRole.trim() : null;
 }

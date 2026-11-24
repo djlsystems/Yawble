@@ -314,6 +314,26 @@ describe('Team settings > Hiring', () => {
       rows: [{ role: 'Developer', agent: 'claude', model: null }, { role: 'Tester', agent: 'codex', model: null }],
     });
     expect(w.find('[data-test=team-hire-saved]').exists()).toBe(true);
+    expect(JSON.stringify(f.of('teams.setHireList')[0].params)).not.toContain('max');
+    expect(w.findAll('[data-test=team-hire] input[type=number]')).toHaveLength(0);
+    expect(w.get('[data-test=team-hiring]').text()).not.toContain('at most');
+  });
+
+  it('shows how many hold a role as "N hired", a count and not a limit', async () => {
+    const f = api([
+      { role: 'Developer', job: ROLES[0].job, agent: 'claude', model: 'opus', used: 2, holders: [5, 6] },
+      { role: 'Tester', job: '', agent: 'codex', model: null, used: 0, holders: [] },
+    ]);
+    const w = await openHiring(f.api);
+    expect(w.get('[data-test=team-hire-used-0]').text()).toBe('2 hired');
+    expect(w.find('[data-test=team-hire-used-1]').exists()).toBe(false);
+    expect(w.get('[data-test=team-hiring]').text()).not.toContain('of max');
+    await w.get('[data-test=team-hire-save]').trigger('click');
+    await flushPromises();
+    // used and holders are not sent back.
+    expect(f.of('teams.setHireList')[0].params.rows).toEqual([
+      { role: 'Developer', agent: 'claude', model: 'opus' }, { role: 'Tester', agent: 'codex', model: null },
+    ]);
   });
 
   it('offers custom agents in a row\'s agent picker', async () => {
@@ -345,11 +365,12 @@ describe('Team settings > Hiring', () => {
 });
 
 describe('the role on a member\'s tile', () => {
-  it('hireRoleOf reads hireRole, or a role word other than manager and member', () => {
-    expect(hireRoleOf({ role: 'member', hireRole: 'Developer' })).toBe('Developer');
-    expect(hireRoleOf({ role: 'member', hireRole: null })).toBeNull();
-    expect(hireRoleOf({ role: 'manager' })).toBeNull();
-    expect(hireRoleOf({ role: 'Tester' as any })).toBe('Tester');
+  it('hireRoleOf reads only hireRole, never member.role', () => {
+    expect(hireRoleOf({ hireRole: 'Developer' })).toBe('Developer');
+    expect(hireRoleOf({ hireRole: ' Tester ' })).toBe('Tester');
+    expect(hireRoleOf({ hireRole: null })).toBeNull();
+    expect(hireRoleOf({ hireRole: '' })).toBeNull();
+    expect(hireRoleOf({ role: 'Tester', hireRole: null } as any)).toBeNull(); // no fallback to role
   });
 
   it('the Teams list tile names the member\'s role', async () => {

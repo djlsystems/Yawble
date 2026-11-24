@@ -7,11 +7,12 @@ import AgentModelPicker from './AgentModelPicker.vue';
 // A hire list (who the Manager may hire): rows of a role, its agent (built-in or custom) and its model (the agent's
 // default or a picked one). Picking a role fills the agent and model from the role's suggestion; both stay editable.
 // An empty list lets the Manager hire any agent with a job it writes. Used by Settings > Teams (the default list),
-// Team settings > Hiring and the New team dialog. It changes `rows` in place.
+// Team settings > Hiring and the New team dialog. It changes `rows` in place. `used` (Team settings, from
+// teams.hireList): how many members hold each role, shown as "2 hired" - a count, never a limit.
 const props = withDefaults(defineProps<{
   rows: HireRow[]; roles: RoleRow[]; agents: { id: string; label: string }[]; models: ReturnType<typeof useAgentModels>;
-  testId: string; readOnly?: boolean;
-}>(), { readOnly: false });
+  testId: string; readOnly?: boolean; used?: Record<string, number>;
+}>(), { readOnly: false, used: () => ({}) });
 const emit = defineEmits<{ changed: [] }>();
 
 const roleOf = (name: string) => props.roles.find((r) => r.name === name);
@@ -49,6 +50,7 @@ function setModel(row: HireRow, m: string) { row.model = m || null; emit('change
       </select>
       <AgentModelPicker :key="`${i}-${r.agent}-${models.modelsOf(r.agent).length}`" :model-value="r.model ?? ''" class="model" :test-id="`${testId}-model-${i}`" :models="models.modelsOf(r.agent)"
         :default-label="models.defaultLabel(r.agent)" :note="false" :class="{ off: readOnly }" @update:model-value="setModel(r, $event)" />
+      <span v-if="used[r.role]" class="muted small" :data-test="`${testId}-used-${i}`">{{ used[r.role] }} hired</span>
       <button v-if="!readOnly" type="button" class="icon danger" title="Remove" :aria-label="`Remove row ${i + 1}`" :data-test="`${testId}-remove-${i}`" @click="remove(i)">✕</button>
     </div>
     <button v-if="!readOnly" type="button" :data-test="`${testId}-add`" :disabled="!roles.length" @click="add">+ Add a role</button>

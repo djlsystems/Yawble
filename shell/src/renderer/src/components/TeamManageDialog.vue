@@ -85,8 +85,10 @@ const roles = ref<RoleRow[]>([]);
 const hireRows = reactive<HireRow[]>([]);
 const hireMissing = ref(false);
 const hireSaved = ref(false);
+const hireUsed = ref<Record<string, number>>({});
 function applyHire(list: TeamHireRow[]) {
   hireRows.splice(0, hireRows.length, ...list.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })));
+  hireUsed.value = Object.fromEntries(list.map((r) => [r.role, r.used ?? 0]));
 }
 async function loadHiring() {
   try { applyHire(await api.call<TeamHireRow[]>('teams.hireList', { teamId: props.team.id, team: props.team.id })); hireMissing.value = false; }
@@ -307,7 +309,7 @@ onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLesson
       <LoadingNote v-if="!ready.hiring" text="Loading the hire list…" />
       <p v-else-if="hireMissing" class="muted small" data-test="team-hiring-missing">This version of the app's core keeps no hire list: the Manager may hire any agent.</p>
       <template v-else>
-        <HireListEditor :rows="hireRows" :roles="roles" :agents="agentOptions" :models="models" test-id="team-hire" @changed="hireSaved = false" />
+        <HireListEditor :rows="hireRows" :roles="roles" :agents="agentOptions" :models="models" :used="hireUsed" test-id="team-hire" @changed="hireSaved = false" />
         <div class="buttons"><span class="grow" />
           <span v-if="hireSaved" class="ok" data-test="team-hire-saved">Saved: the Manager hires from this list from now on.</span>
           <button v-change class="primary" data-test="team-hire-save" :disabled="busy" @click="saveHiring"><BusyLabel :busy="doing('teams.setHireList')" text="Saving…">Save</BusyLabel></button></div>
