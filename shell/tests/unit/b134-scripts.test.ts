@@ -192,6 +192,10 @@ describe('the Scripts dialog', () => {
     expect(w.findAll('[data-test=scripts-new-menu] button').map((b) => b.text())).toEqual(['Blank', 'Inbox SMS alert', 'Ask the Concierge']);
     await w.get('[data-test=scripts-new-inbox-sms-alert]').trigger('click');
     await flushPromises();
+    // The editor opens on the Flowchart, its first tab; JSON comes next.
+    expect(w.findAll('[data-test^=editor-tab-]').map((t) => t.text())).toEqual(['Flowchart', 'JSON', 'Test run']);
+    expect(w.get('[data-test=editor-tab-flowchart]').attributes('aria-selected')).toBe('true');
+    await w.get('[data-test=editor-tab-json]').trigger('click');
     const area = w.get('[data-test=json-text]').element as HTMLTextAreaElement;
     expect(JSON.parse(area.value)).toEqual(INBOX_SMS_ALERT);
     // Highlighted: the keys and strings get their own classes.
