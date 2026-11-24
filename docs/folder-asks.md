@@ -1,4 +1,4 @@
-# Folder asks (B111)
+# Folder asks
 
 An agent that needs a folder outside its sandbox (a data folder to read, an output folder to write) asks the person
 with the bus tool `request_folder`. The person approves or denies it in Needs you. An approval writes the path into the
@@ -101,7 +101,7 @@ reload `folder.asks` / `app.overview`.
 
 `folderAsks`: the number of waiting folder asks, also added into `needsYou` (as `networkAsks` and `toolAsks`).
 
-## Card text (for the shell, card 497)
+## Card text (what the shell shows)
 
 "`<Team> / <Member> asks read-write on <path> - <reason>`" (read-only: "asks read-only on"), whether the folder
 exists (`exists`), Approve / Deny; for a read-write ask Approve also offers Read-only. When `askedBy` is not `member`,

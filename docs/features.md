@@ -110,7 +110,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     Closed and expired move every card to Done, a waiting one too; completed leaves a card waiting on a person where
     it is. Telling the card's member something in the workflow makes the card live again.
 - **Skills** (Settings > Skills) are instructions agents load through the app, offered to chosen roles and teams.
-- **How a team learns** (B100). Agents keep no memory between runs, so a team keeps its lessons in one place: its
+- **How a team learns**. Agents keep no memory between runs, so a team keeps its lessons in one place: its
   **team_retros** skill, a team-scoped skill (offered to every role) with a short list of lessons, each
   "- <lesson> (<date>, workflow <id>)", under a few headings (Building and testing, Git, Working with the person ...).
   - After a workflow completes, the Manager looks back on it (a retrospective) and keeps at most a few lessons a later run
@@ -312,7 +312,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     executable.
   - A decision can offer it as an answer (see Decisions below): the option "Allow localhost" turns it on for you
     when you pick it, exactly as the Network tab does (the same rights and the same audit entry), and only on a Mac.
-- **Decisions** (`needs_decision`, B123): an agent asks you with a **summary** (the decision in one plain sentence),
+- **Decisions** (`needs_decision`): an agent asks you with a **summary** (the decision in one plain sentence),
   2 to 4 **options** (each a button with a label of at most 40 characters and the reply it sends), and **details**
   (its findings, in Markdown, under the summary). A question in one Markdown text (`question`) still works and is
   shown as before.
@@ -320,7 +320,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     (turn on the team's Allow localhost (macOS)) and `workflow.closeOverFail` (below). The agent only names it; nothing changes when it asks. When you
     pick that option the app applies the action first, then sends the option's reply as your answer. Anything else
     named as an action is refused and the question is not asked.
-  - **Closing over a tester's FAIL** (B142): `workflow_complete` is refused (`tester_fail`) while a card's latest
+  - **Closing over a tester's FAIL**: `workflow_complete` is refused (`tester_fail`) while a card's latest
     tester hand-back in the workflow starts with FAIL (a later PASS clears it). The refusal names the card, quotes the
     FAIL line and gives the ways forward: fix it and have the tester verify again; or ask you with `needs_decision`
     plus `card`, `kind` (`accept-fail`, or `wont-do` with a `reason`) and `reason`. The yes option carries
@@ -497,7 +497,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots.
 - **Workflow nodes**: each open workflow is a small node tied by dashed lines to the members working it (to its team
   while nobody is on it). It flashes green and drifts away when it completes, fades with a cross when it is closed,
-  and shows a "!" while it is blocked. Under it, its number and title ("#3848 B081 Remote UI: xterm's…"), cut to
+  and shows a "!" while it is blocked. Under it, its number and title ("#3848 Remote UI: xterm's link…"), cut to
   30 characters, with a backlog workflow's "Backlog item " left out; hover it for the whole title, click it to open the
   workflow. The label is never smaller than 8 px on screen and dims with its team. When the window is phone-wide
   (under 760 px) and the wall is zoomed out, it shows only "#3848". A desktop window always shows the title, even
