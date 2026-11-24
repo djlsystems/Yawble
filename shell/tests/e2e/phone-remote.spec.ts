@@ -646,7 +646,7 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
       const added = Object.keys(branch.out).filter((k) => !(k.replace(/#\d+$/, '#1') in base.out));
       if (added.length) console.log(`${name} @1280: hooks new in B037 (not compared): ${added.join(', ')}`);
       // B076 (card 367): the add row under the members went on purpose; its fields are in the New member tile (a
-      // .member-cell, measured with the members, card367-team-grid.spec.ts checks it).
+      // .member-cell, measured with the members, team-grid.spec.ts checks it).
       const goneInB076 = new Set(['add-agent-name#1', 'add-agent-cli#1', 'add-agent#1']);
       // B080 (card 374): the Monitor's density and sound controls sit right of the cog in the camera row, so the row's
       // right-aligned controls move left together - one shared x shift, same y and size, nothing else.
@@ -691,7 +691,7 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
 const SE: Size[] = [{ w: 375, h: 501 }, { w: 667, h: 263 }];
 type B054 = { first: { sel: string; top: number; bottom: number } | null; rows: Record<string, { top: number; bottom: number } | null>; topBar: number;
   scrollers: string[]; inputs: { what: string; font: number; h: number }[]; overflow: boolean; sw: number };
-const B054_RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'b054-measure.ndjson');
+const B054_RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'phone-page-measure.ndjson');
 
 /** Measures the screen: the first visible match of `first` (in order), the named rows, the inner vertical scrollers, the fields. */
 function measure(page: Page, first: string[], rows: Record<string, string> = {}): Promise<B054> {

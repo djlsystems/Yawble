@@ -1,4 +1,4 @@
-// Card 519 (B115 verify), TesterKofi: what b115-embed.spec.ts and b115-settings-gear.spec.ts leave out, in headless
+// Card 519 (B115 verify), TesterKofi: what embed-mode.spec.ts and settings-gear.spec.ts leave out, in headless
 // Chrome against the FAKE core of phone-remote.spec.ts (no cloud, no real core, no agent). A test parent page on the
 // same origin frames remote.html?embed=1&theme=..., as the cloud page will.
 //  - embedded at 1280 and 375 in light and dark (?theme=light too, not only dark), screenshots to $YAWBLE_TEAM_DOCS/B115;

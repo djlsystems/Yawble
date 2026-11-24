@@ -1,10 +1,10 @@
-// B054 verify (card 270): prints test-results/b054-measure.ndjson (written by phone-remote.spec.ts's B054 block), one
+// B054 verify (card 270): prints test-results/phone-page-measure.ndjson (written by phone-remote.spec.ts's B054 block), one
 // line per page, size and build: px from the top of the window of the first content row and the named rows, the inner
-// vertical scrollers, sideways scroll, and every field under 16 px / 44 px.   node tests/e2e/phone/summary-b054.mjs
+// vertical scrollers, sideways scroll, and every field under 16 px / 44 px.   node tests/e2e/phone/summary-measure.mjs
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const file = path.resolve(import.meta.dirname, '..', '..', '..', 'test-results', 'b054-measure.ndjson');
+const file = path.resolve(import.meta.dirname, '..', '..', '..', 'test-results', 'phone-page-measure.ndjson');
 const rows = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 rows.sort((a, b) => (a.size + a.screen + a.which).localeCompare(b.size + b.screen + b.which));
 const span = (v) => (v ? `${v.top}-${v.bottom}` : '-');
