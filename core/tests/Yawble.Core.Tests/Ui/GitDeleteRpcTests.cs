@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
-/// Card 75: git.deleteBranches and git.status's oldBranches through the real dispatcher, as the Git dialog calls them:
+/// git.deleteBranches and git.status's oldBranches through the real dispatcher, as the Git dialog calls them:
 /// the shapes ({plan, token, empty}, {result}), error code "stale", and oldBranches always present. Local repositories only.
 /// </summary>
 public sealed class GitDeleteRpcTests : IAsyncLifetime

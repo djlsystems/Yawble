@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 75: the Git dialog's Delete (git.deleteBranches over ConciergeGit.PlanDeleteAsync, plan then confirm with the
+/// The Git dialog's Delete (git.deleteBranches over ConciergeGit.PlanDeleteAsync, plan then confirm with the
 /// plan's token) and git.status's oldBranches (old-style members/&lt;member&gt; branches here and/or on origin). Local
 /// repositories and bare origins in temp folders only, no network.
 /// </summary>
