@@ -73,7 +73,7 @@ const style = computed(() => ({
   border: var(--ring-width) solid var(--avatar-ring);
   animation: avatar-throb 0.69s ease-in-out infinite alternate;
 }
-/* STOPPED (B097): the person stopped its last run - a still, solid neutral ring; no throb, nothing waits on the person. */
+/* STOPPED: the person stopped its last run - a still, solid neutral ring; no throb, nothing waits on the person. */
 .member-avatar.is-stopped .ring { border: 2px solid var(--avatar-ring); }
 .member-avatar.is-stopped .face { box-shadow: none; }
 /* IDLE: a thin line. */

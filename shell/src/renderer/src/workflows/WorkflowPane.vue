@@ -18,11 +18,11 @@ import WorkflowStatusIcon from './WorkflowStatusIcon.vue';
 import { statusLook, statusTip, timeBar } from './page';
 
 /**
- * B104: the Workflows page's inline pane, like the Backlog's item pane: the workflow's header (status, #id, the clean
+ * The Workflows page's inline pane, like the Backlog's item pane: the workflow's header (status, #id, the clean
  * title, the item link, its team), the item's spec (collapsed, Show all), its cards by lane (each opens in the board's
- * card panel), its last messages newest first (commit IDs link as B072/B074), its time, and the actions the Workflows
+ * card panel), its last messages newest first (commit IDs link as in the rest of the app), its time, and the actions the Workflows
  * dialog has - Nudge, Extend, Stop, Close - each asked first in the app's own confirm dialog, none for a Visitor.
- * Read with workflows.get (YAWBLE_TEAM_DOCS/B104/contract.md) when opened and on every poll.
+ * Read with workflows.get (the core's workflows contract) when opened and on every poll.
  */
 const props = defineProps<{ row: WorkflowRow; api: YawbleApi; pollMs?: number; readOnly?: boolean; phone?: boolean }>();
 const emit = defineEmits<{ close: []; card: [id: number]; openTeam: [teamId: number]; board: [teamId: number]; changed: [] }>();

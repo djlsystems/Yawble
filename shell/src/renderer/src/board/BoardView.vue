@@ -118,13 +118,13 @@ let off: (() => void) | null = null;
 const networkAsks = ref(0);
 /** Tool asks shown in Needs You (ToolAsks loads and answers them; the lane's count adds them). */
 const toolAsks = ref(0);
-/** Folder asks shown in Needs You (B111; FolderAsks loads and answers them; the lane's count adds them). */
+/** Folder asks shown in Needs You (FolderAsks loads and answers them; the lane's count adds them). */
 const folderAsks = ref(0);
-/** Workflows that wait on the person and will expire within a day (B085), shown in Needs You with Extend. */
+/** Workflows that wait on the person and will expire within a day, shown in Needs You with Extend. */
 const expiryAsks = ref(0);
 
 function clear() { team.value = ''; member.value = ''; search.value = ''; }
-/** B104: the Workflows page, filtered to the team the board shows (all teams when it shows every team). */
+/** The Workflows page, filtered to the team the board shows (all teams when it shows every team). */
 function openWorkflows() { openWorkflowsPage({ teamId: board.value?.teams.find((t) => t.name === team.value)?.id ?? null }); }
 
 /** The global run limit, shown with In Progress's count ("3 of 8"); its number opens a small dialog to change it. */
@@ -138,7 +138,7 @@ async function loadLimit() {
 /** A lane's count: its cards shown, and in Needs You what else needs the person. */
 const laneCount = (id: string) => inLane(shown.value, id).length + (id === 'blocked' ? reconnect.value.length + networkAsks.value + toolAsks.value + folderAsks.value + expiryAsks.value : 0);
 
-// A phone (B037): one lane at a time, chosen with the lane tabs (each with its count) or by swiping left or right.
+// A phone: one lane at a time, chosen with the lane tabs (each with its count) or by swiping left or right.
 // The other lanes stay mounted (hidden), so Needs You's asks keep counting.
 const phone = useNarrow();
 const lane = ref<string>('todo');
@@ -272,7 +272,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
 @media (prefers-reduced-motion: reduce) { .card-move, .card-enter-active, .card-leave-active { transition: none; } }
 .page-title { margin: 0 0 8px; font-size: 22px; }
 .lane-tabs { display: none; }
-/* A phone (B037): one column, one lane at a time under the lane tabs (swiped left or right), the card's panel over
+/* A phone: one column, one lane at a time under the lane tabs (swiped left or right), the card's panel over
    the whole board, tap targets 44 px. */
 @media (max-width: 759.98px) {
   .board-main { padding: 4px 10px 10px; }

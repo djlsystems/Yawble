@@ -14,7 +14,7 @@ import { usePhone } from '../phone';
  * companion is managed only at this computer.
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number }>();
-// A phone (B037; a narrow desktop window, as this is never shown remotely): full-width cards, Approve and Deny stacked.
+// A phone (here a narrow desktop window, as this is never shown remotely): full-width cards, Approve and Deny stacked.
 const phone = usePhone();
 
 const pairings = ref<CompanionPairing[]>([]);

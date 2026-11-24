@@ -9,7 +9,7 @@ import { reactive, readonly } from 'vue';
  * page takes when it shows that team (it scrolls the pane into view and clears the request with takeMemberFocus).
  * Opening the team page itself is the caller's part.
  *
- * A phone (B064, card 310) keeps its own, unstored choice: at most one member's terminal is open (it is the whole screen),
+ * A phone keeps its own, unstored choice: at most one member's terminal is open (it is the whole screen),
  * so opening one there sets every other member's terminal back to the Report, and the team page opens with no terminal
  * open (TeamView forgets its team's phone terminal when it closes). The remembered choice above applies at desktop widths only;
  * a phone neither reads nor changes it.
@@ -75,7 +75,7 @@ export function takeMemberFocus(team: string): MemberFocus | null {
   return f;
 }
 
-/** The team page closed (B064): on a phone its team's members are all on the Report the next time it opens. */
+/** The team page closed: on a phone its team's members are all on the Report the next time it opens. */
 export function closePhoneTerminals(team: string) {
   if (state.phoneOpen?.team === team) state.phoneOpen = null;
   for (const k of Object.keys(state.phoneViews)) if (k.startsWith(`${team}/`)) delete state.phoneViews[k];

@@ -4,7 +4,7 @@ import type { ItemTime } from '../../../shared/api';
 import { formatShort } from '../timeline/time';
 import { timeBar } from './page';
 
-/** B104: a thin stacked bar of where a workflow's time went, in the Timeline dialog's category colours; hover names them. */
+/** A thin stacked bar of where a workflow's time went, in the Timeline dialog's category colours; hover names them. */
 const props = defineProps<{ time: ItemTime | null | undefined }>();
 const segs = computed(() => timeBar(props.time));
 const says = computed(() => segs.value.map((s) => `${s.label} ${formatShort(s.ms)} (${s.pct}%)`).join(' · '));

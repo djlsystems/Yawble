@@ -1,6 +1,6 @@
 import { shallowRef } from 'vue';
 
-// The window's own confirm dialog in place of window.confirm (card 355, as the cloud web app's dialog.js, card 349): the
+// The window's own confirm dialog in place of window.confirm (as the cloud web app's dialog.js does): the
 // remote view runs in a browser, and a browser dialog on iPad Safari/Chrome carries "Suppress dialogs", after which
 // confirm() answers false for good. One <ConfirmDialog> (mounted once in App.vue) shows what is asked here; a call site
 // reads `if (!(await confirmDialog({ message, okLabel: 'Delete', danger: true }))) return;`. Desktop and remote alike.

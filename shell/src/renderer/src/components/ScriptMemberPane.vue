@@ -9,7 +9,7 @@ import ScriptMemberIntegrations from './ScriptMemberIntegrations.vue';
 import ScriptEditor from './scripts/ScriptEditor.vue';
 import { scriptAtVersion, scriptsApi, shortValue, type ScriptMember, type ScriptMemberFile, type ScriptMemberState, type ScriptRun } from '../scriptMembers';
 
-// B134 (card 598): a script member's tile on the team page: its name, script@version (on latest: the version it runs),
+// A script member's tile on the team page: its name, script@version (on latest: the version it runs),
 // the last run's status and time and the next scheduled trigger; under it the last runs (scripts.runs) and the saved
 // variables (scripts.memberState), each with a Reset (scripts.memberResetVariable) that a Visitor does not get. Its
 // integrations show what it uses for each one the script names, and Change sets or clears an override.

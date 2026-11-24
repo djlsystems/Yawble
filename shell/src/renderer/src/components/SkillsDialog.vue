@@ -51,7 +51,7 @@ async function load() {
   }
 }
 
-// A phone (B054): the list and the skill are two views, list → skill → back, in one scroll level (the page's). A picked
+// A phone: the list and the skill are two views, list → skill → back, in one scroll level (the page's). A picked
 // skill (or the editor) replaces the list, scrolled into view under the sticky Settings bar.
 const phone = usePhone();
 const detailOpen = computed(() => editing.value || selected.value !== null);
@@ -70,7 +70,7 @@ function backToList() {
   saved.value = null;
 }
 
-// Card 529: the origin filter above the list (All / Built-in / Team skills, and All teams while a person-added skill for
+// The origin filter above the list (All / Built-in / Team skills, and All teams while a person-added skill for
 // every team exists; skillsFilter.ts). A filter that hides the selected skill selects the first one it shows (on a phone,
 // where a selection opens the skill in place of the list, it only clears it); none shown: the pane says so.
 const filter = ref<SkillFilter>('all');
@@ -101,7 +101,7 @@ function keepVisible(s: Skill) {
 const bodyHtml = computed(() => (selected.value ? renderMarkdown(selected.value.body) : ''));
 
 // Edit's Cancel goes back to the skill it was editing (rendered again); + New skill's Cancel to no skill. A filter
-// changed while editing hid that skill (card 531): Cancel follows the filter, as a filter change does.
+// changed while editing hid that skill: Cancel follows the filter, as a filter change does.
 const editingFrom = ref<Skill | null>(null);
 function cancelEdit() {
   const from = editingFrom.value;
@@ -162,7 +162,7 @@ async function doRemove(s: Skill) {
   }
 }
 
-// B100: a team skill's kept versions (the team's team_retros: each Manager's retro and each of the person's edits), with
+// A team skill's kept versions (the team's team_retros: each Manager's retro and each of the person's edits), with
 // who last wrote it and Restore. A skill without versions (an ordinary one, an older core) shows none of this.
 const versions = ref<SkillVersion[]>([]);
 const versionsFor = ref<string | null>(null);
@@ -321,7 +321,7 @@ onMounted(load);
 .pane h3 { margin: 0; font-size: 15px; }
 .body { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; max-height: 420px; overflow: auto; font-size: 12px; }
 textarea { width: 100%; font-size: 12px; }
-/* Card 529: the origin filter, a small segmented pill as the member pane's view toggle. */
+/* The origin filter, a small segmented pill as the member pane's view toggle. */
 .filter { display: inline-flex; flex: none; align-self: flex-start; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; margin-bottom: 4px; }
 .filter button { border: 0; border-radius: 0; background: transparent; padding: 2px 12px; height: 26px; font-size: 12px; color: var(--ink-soft); }
 .filter button + button { border-left: 1px solid var(--line); }
@@ -370,7 +370,7 @@ textarea { width: 100%; font-size: 12px; }
   .layout.fill > .pane { display: block; overflow: visible; }
   .layout.fill > .pane > .body { max-height: 420px; }
 }
-/* A phone (B054): the list or the skill, one at a time, in the page's flow; nothing inside scrolls on its own. */
+/* A phone: the list or the skill, one at a time, in the page's flow; nothing inside scrolls on its own. */
 .layout.phone { display: block; min-height: 0; }
 .layout.phone > .list { max-height: none; overflow: visible; }
 .layout.phone > .pane { overflow: visible; scroll-margin-top: 56px; }

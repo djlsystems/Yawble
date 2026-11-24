@@ -47,7 +47,7 @@ function defOf(f: Form): HostTaskDef {
       .map((b) => ({ name: b.name.trim(), connectionId: b.connectionId as number, field: b.field, connectionName: b.connectionName })),
     ...optionalText(f) };
 }
-/** Description and "What to check after" (B066): one line each, trimmed, and left out when empty so an empty field stays empty. */
+/** Description and "What to check after": one line each, trimmed, and left out when empty so an empty field stays empty. */
 const oneLine = (s: string) => s.replace(/\s*\r?\n\s*/g, ' ').trim();
 function optionalText(f: Form): Pick<HostTaskDef, 'description' | 'checkAfter'> {
   const description = oneLine(f.description), checkAfter = oneLine(f.checkAfter);

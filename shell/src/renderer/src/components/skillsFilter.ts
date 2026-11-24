@@ -1,6 +1,6 @@
 import type { Skill } from '../../../shared/api';
 
-// Settings > Skills' origin filter (card 529). A skill's origin is what its tag says (SkillsDialog's scope()):
+// Settings > Skills' origin filter. A skill's origin is what its tag says (SkillsDialog's scope()):
 //   builtin  - comes with the app ("built-in")
 //   team     - a custom skill for one team only ("team <name>"), e.g. that team's team_retros
 //   allTeams - a custom skill the person added for every team ("all teams"; it may replace a built-in of the same name)

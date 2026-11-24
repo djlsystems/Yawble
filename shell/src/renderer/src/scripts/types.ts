@@ -1,4 +1,4 @@
-// B134 (SC-4): the script library's RPC shapes, word for word from the team's scripts-rpc.md (B131 / SC-1). The core
+// The script library's RPC shapes, word for word from the team's scripts-rpc.md. The core
 // owns them (UiRpc, scripts.* and schemas.*); this file only names them for the Scripts place.
 
 /** One problem the check found; stepId null: the document as a whole (settings, requires, variables). */
