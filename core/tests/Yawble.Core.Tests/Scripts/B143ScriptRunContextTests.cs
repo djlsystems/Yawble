@@ -140,6 +140,63 @@ public class B143ScriptRunContextTests
     }
 
     [Fact]
+    public async Task AFailedRun_WritesOneWarningLine_WithEveryField()
+    {
+        await using var r = await new Rig().InitAsync();
+        var bot = await r.MemberAsync();
+        r.Actions.SmsFailure = "twilio CreateMessage (POST /2010-04-01/Accounts/{AccountSid}/Messages.json): HTTP 401: token=sk_live_abcdefghijklmnop1234 refused";
+        var input = ScriptPayloads.TriggerFired(7, "every", DateTimeOffset.Parse("2026-11-24T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        var entries = new List<DiagEntry>();
+        var owner = new object(); // the connection's token is a known secret, as Connections registers it
+        Yawble.Core.Connections.SecretScrubber.Set(owner, 1, ["sk_live_abcdefghijklmnop1234"]);
+
+        ScriptRunOutcome outcome;
+        try
+        {
+            using (Diag.Capture(e => { lock (entries) entries.Add(e); }))
+                outcome = await r.Runner.RunMemberAsync(bot, "trigger:7", input, Ct);
+        }
+        finally { Yawble.Core.Connections.SecretScrubber.Forget(owner, 1); }
+
+        Assert.Equal(RunStatus.Failed, outcome.Run.Status);
+        var line = Assert.Single(entries, e => e.Level == LogLevels.Warning && e.Area == "scripts");
+        var step = outcome.Run.FailedStepId!;
+        Assert.Equal(outcome.Run.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), line.Field("scriptRun"));
+        Assert.Equal("Alpha/Poller", line.Field("member"));
+        Assert.Equal("Alpha", line.Field("team"));
+        Assert.Equal("inbox-sms-alert@1", line.Field("script"));
+        Assert.Equal("trigger:7", line.Field("trigger"));
+        Assert.Equal(step, line.Field("step"));
+        Assert.Equal("integration", line.Field("stepType"));
+        Assert.Equal("twilio", line.Field("integration")); // the member's binding of the script's "sms"
+        Assert.False(string.IsNullOrEmpty(line.Field("action")));
+        Assert.Contains("HTTP 401", line.Field("reason"));
+        Assert.DoesNotContain("sk_live_abcdefghijklmnop1234", line.Field("reason")); // scrubbed as the store keeps it
+        Assert.True(long.TryParse(line.Field("ms"), out var ms) && ms >= 0, line.Field("ms"));
+        Assert.Equal("failed", line.Field("status"));
+        Assert.Contains($"script run {outcome.Run.Id} failed: Alpha/Poller, inbox-sms-alert@1, started by trigger:7, at step {step} (integration)", line.Text);
+        // never message content: the SMS text carries the email's subject and sender
+        Assert.DoesNotContain("Order", DiagFields.Echo(line.Level, line.Area, line.Text, line.Fields));
+        Assert.DoesNotContain("shop@example.com", DiagFields.Echo(line.Level, line.Area, line.Text, line.Fields));
+    }
+
+    [Fact]
+    public async Task ASucceededRun_WritesNoWarning()
+    {
+        await using var r = await new Rig().InitAsync();
+        var bot = await r.MemberAsync();
+        var input = ScriptPayloads.TriggerFired(7, "every", DateTimeOffset.Parse("2026-11-24T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        var entries = new List<DiagEntry>();
+
+        ScriptRunOutcome outcome;
+        using (Diag.Capture(e => { lock (entries) entries.Add(e); }))
+            outcome = await r.Runner.RunMemberAsync(bot, "trigger:7", input, Ct);
+
+        Assert.Equal(RunStatus.Succeeded, outcome.Run.Status);
+        Assert.DoesNotContain(entries, e => e.Level == LogLevels.Warning);
+    }
+
+    [Fact]
     public void TheToolCallsLog_ShowsTheStoredColumns_AndExitIsExitOrHttp()
     {
         var tools = LogSources.Find("tools")!;
