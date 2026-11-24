@@ -183,7 +183,8 @@ public sealed partial class BusEngine
                         _leaseQueue.Add(new LeaseHold(run, step, now, NewLeaseUse(run, step, now)));
                         place = _leaseQueue.Count - 1;
                         run.IdleClock?.Hold();
-                        Log($"lease: {run.Member.Qualified} queued for \"{step}\" at position {place + 1}");
+                        Logs.Diag.Debug("lease", $"lease: {run.Member.Qualified} queued for \"{step}\" at position {place + 1}",
+                            ("team", run.Member.Team), ("member", run.Member.Qualified), ("run", run.RunId), ("step", step));
                         LeaseChanged?.Invoke();
                     }
                     return $"queued, position {place + 1}; {HoldersText(now)}. Keep working on something else, or check with lease status every " +
@@ -242,7 +243,9 @@ public sealed partial class BusEngine
                 var after = _leaseQueue.Count > 0 ? "and went to the next in line" : "and was released";
                 _leaseNotices[h.Run.RunId] = $"Your heavy-work lease for \"{h.What}\" passed its {LeaseLimit.TotalMinutes:0}-minute limit {after}. " +
                                              "Take it again with lease acquire before any more heavy work.";
-                Log($"lease: {h.Run.Member.Qualified} passed the {LeaseLimit.TotalMinutes:0}-minute limit");
+                // Not routine: a holder that kept the lease past its limit is said, as a warning.
+                Logs.Diag.Warning("lease", $"lease: {h.Run.Member.Qualified} passed the {LeaseLimit.TotalMinutes:0}-minute limit",
+                    ("team", h.Run.Member.Team), ("member", h.Run.Member.Qualified), ("run", h.Run.RunId), ("step", h.What));
             }
         }
         var limit = HeavyAtOnce;
@@ -254,7 +257,8 @@ public sealed partial class BusEngine
             next.Use.GrantedAt = now;
             next.Run.IdleClock?.Resume(); // a full idle window from now
             _leaseNotices[next.Run.RunId] = $"You now hold the heavy-work lease for \"{next.What}\"; run it, then release.";
-            Log($"lease: handed to {next.Run.Member.Qualified} for \"{next.What}\"");
+            Logs.Diag.Debug("lease", $"lease: handed to {next.Run.Member.Qualified} for \"{next.What}\"",
+                ("team", next.Run.Member.Team), ("member", next.Run.Member.Qualified), ("run", next.Run.RunId), ("step", next.What));
             changed = true;
         }
         if (changed) LeaseChanged?.Invoke();

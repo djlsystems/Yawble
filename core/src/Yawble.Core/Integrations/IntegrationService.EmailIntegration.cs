@@ -174,7 +174,7 @@ public sealed partial class IntegrationService
         var integrationName = EmailIntegrationPrefix + email.Name;
         var host = account.Settings.ImapHost;
 
-        // B143: the Tool-call row is written after the work, so a sign-in failure or a timeout says so: how long it took, how many messages
+        // the Tool-call row is written after the work, so a sign-in failure or a timeout says so: how long it took, how many messages
         // came back (never their content), the host, and the mail error. Exit 0 when the work succeeded, 1 when it failed.
         var watch = System.Diagnostics.Stopwatch.StartNew();
         string? failure = null;

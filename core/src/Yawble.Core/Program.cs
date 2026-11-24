@@ -431,7 +431,7 @@ _ = Task.Run(async () =>
         try { await doctorService.RunAsync(CancellationToken.None); }
         catch (Exception e)
         {
-            // B143: which check was running, the exception and its message.
+            // which check was running, the exception and its message.
             Yawble.Core.Logs.Diag.Error("doctor", $"doctor: the periodic check failed: {e.GetType().Name}: {e.Message}",
                 ("check", doctorService.RunningCheck), ("exception", e.GetType().Name));
         }

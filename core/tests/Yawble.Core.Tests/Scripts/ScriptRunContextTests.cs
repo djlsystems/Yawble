@@ -18,11 +18,11 @@ using RunStatus = Yawble.Core.Scripts.Running.ScriptRunStatus;
 namespace Yawble.Core.Tests.Scripts;
 
 /// <summary>
-/// Card 613 (B143 part A): a script run says what failed. A trigger's fire carries the script run id; a failed step's row keeps its reason; an
+/// A script run says what failed. A trigger's fire carries the script run id; a failed step's row keeps its reason; an
 /// API call's failure names the integration, action, method, route and (for no answer) the host and the wait; the Runs log shows a script run's
 /// script, trigger, failed step and script run id, and the Script runs log lists the runs. Through the real script engine, fakes for the actions.
 /// </summary>
-public class B143ScriptRunContextTests
+public class ScriptRunContextTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
