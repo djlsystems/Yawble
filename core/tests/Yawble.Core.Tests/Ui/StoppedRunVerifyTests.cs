@@ -68,7 +68,7 @@ public class StoppedRunVerifyTests
     /// <summary>
     /// What the board view gets for the stopped member's card (board.list): the member state says "stopped", the card is
     /// not in Needs You and its status is not "failed". This pins the core's side of the seam the window reads
-    /// (cards.ts cardStopped); see shell tests/unit/card441-b097-verify.test.ts for what the window then shows.
+    /// (cards.ts cardStopped); the shell's stopped-run tests check what the window then shows.
     /// </summary>
     [Fact]
     public async Task TheBoardNode_ForAStoppedRun_HasMemberAttentionStopped_AndIsNotFailedOrNeedsYou()

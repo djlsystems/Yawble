@@ -13,15 +13,15 @@ namespace Yawble.Core.Tests.Teams;
 ///  - the where facts behind the wording: team branch only, member branch only, pushed while not in main;
 ///  - a merge nobody can name: intoBranch / fromBranch are JSON null (the shell must not print "null"), made absent;
 ///  - F1: a merge made on main with git's default message ("Merge branch 'x'", git leaves out "into main") is into main
-///    even when the team branch also has it (round 1 found "team/alpha"; fixed in f669165, checked in card 460);
+///    even when the team branch also has it (round 1 found "team/alpha"; fixed in f669165 and checked again);
 ///  - F2 (core side of a shell wording fault): a commit on a branch that is neither the team's nor a member's (the
 ///    person's own feature branch) has where.branches empty and where.otherBranches ["feature/x"] (round 2), so the view
 ///    can tell it from a deleted branch's commit (both empty);
 ///  - the core reads the team's repository, never an agent's clone (a commit only in Ada's clone is "not found");
 ///  - a file name with spaces and non-ASCII, deleted, opens its diff;
 ///  - M1: a branch whose name is 4+ hex digits is not read as a commit ID (round 1 found it was; fixed in f669165).
-/// With CARD445_FIXTURE_OUT set, the real core's JSON for each case is written there (shell/tests/unit/fixtures/card445)
-/// for the shell's card445 test to render.
+/// With COMMIT_VIEW_FIXTURE_OUT set, the real core's JSON for each case is written there (shell/tests/unit/fixtures/commit-view)
+/// for the shell's commit view test to render.
 /// </summary>
 public class CommitViewVerifyTests
 {
@@ -95,10 +95,10 @@ public class CommitViewVerifyTests
 
     private static Task<CommitInfo> Show(Rig r, string sha) => r.F.Repos.GitCommitShowAsync(r.TeamId, "Alpha", sha, Ct);
 
-    /// <summary>Writes the real core's JSON for the shell's card445 test, when CARD445_FIXTURE_OUT names a folder.</summary>
+    /// <summary>Writes the real core's JSON for the shell's commit view test, when COMMIT_VIEW_FIXTURE_OUT names a folder.</summary>
     private static void Emit(string name, JsonObject json)
     {
-        var dir = Environment.GetEnvironmentVariable("CARD445_FIXTURE_OUT");
+        var dir = Environment.GetEnvironmentVariable("COMMIT_VIEW_FIXTURE_OUT");
         if (string.IsNullOrEmpty(dir)) return;
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, name + ".json"), json.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");

@@ -13,12 +13,13 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// Card 478 (B104 verify, TesterKofi): workflows.list / workflows.get through the REAL dispatcher (UiRpc over
+/// The tester's checks of the Workflows page: workflows.list / workflows.get through the REAL dispatcher (UiRpc over
 /// RpcDispatcher) on a STARTED engine whose runs are a scripted fake runner (never a real agent CLI), so the live states
 /// the developer's tests could not reach are real: a run that is on it (running), a run waiting in the heavy-work lease
 /// queue (waiting / lease), a delivery waiting for a run slot (waiting / slot), a question with a run still on it
-/// (needs-you, working). Checked against the contract (YAWBLE_TEAM_DOCS/B104/contract.md) and backlog B104.
-/// With CARD478_FIXTURE_OUT set, the answers are written there as JSON for the shell's card478 verify test.
+/// (needs-you, working). Checked against the Workflows page's contract.
+/// With WORKFLOWS_FIXTURE_OUT set, the answers are written there as JSON (shell/tests/unit/fixtures/workflows) for the
+/// shell's Workflows page test to render.
 /// </summary>
 public class WorkflowsLiveStatesVerifyTests
 {
@@ -95,7 +96,7 @@ public class WorkflowsLiveStatesVerifyTests
 
     private static void Fixture(string name, JsonNode node)
     {
-        var dir = Environment.GetEnvironmentVariable("CARD478_FIXTURE_OUT");
+        var dir = Environment.GetEnvironmentVariable("WORKFLOWS_FIXTURE_OUT");
         if (string.IsNullOrWhiteSpace(dir)) return;
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, name + ".json"), node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
@@ -209,7 +210,7 @@ public class WorkflowsLiveStatesVerifyTests
         var benPage = await rig.List(new { q = "ben", state = "all" });
         // One early run answered a second workflow here (not reproduced since): say which, if it happens again.
         if (Ids(benPage).Count != 1) foreach (var x in benPage["workflows"]!.AsArray())
-            Console.WriteLine($"CARD478 q=ben extra:{x!.ToJsonString()} ROOT {rig.Store.Workflow(x["id"]!.GetValue<long>())[0].Type} {rig.Store.Workflow(x["id"]!.GetValue<long>())[0].Payload}");
+            Console.WriteLine($"WORKFLOWS q=ben extra:{x!.ToJsonString()} ROOT {rig.Store.Workflow(x["id"]!.GetValue<long>())[0].Type} {rig.Store.Workflow(x["id"]!.GetValue<long>())[0].Payload}");
         Assert.Equal([lead], Ids(await rig.List(new { q = "ben" })));
         Assert.Equal([lead], Ids(await rig.List(new { q = lead.ToString(System.Globalization.CultureInfo.InvariantCulture), state = "open" })));
 

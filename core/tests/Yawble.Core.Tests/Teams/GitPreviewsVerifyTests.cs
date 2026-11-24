@@ -10,7 +10,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 466 (B073 verify, TesterKofi): what MergeDeletePreviewTests (card 463) does not cover, on fixture repositories (base
+/// The tester's checks of the merge, delete and Sync previews: what MergeDeletePreviewTests does not cover, on fixture repositories (base
 /// trunk; origin, where there is one, a bare folder whose remote-tracking refs are set as a fetch leaves them):
 ///  - fast-forward from origin's base when the local one is only behind it: the preview, git.status's count and range,
 ///    and git.commitRange all name the same commits;
@@ -22,7 +22,7 @@ namespace Yawble.Core.Tests.Teams;
 ///    commit still opens with where.deletedFrom; the Concierge lists each branch's preview text;
 ///  - every count opens exactly its commits, and each row's notPushed is the commit view's !where.pushed;
 ///  - Sync (fast-forward of the team branch): incoming is the team-behind range shown before.
-/// With CARD466_FIXTURE_OUT set, the real core's JSON (as UiRpc sends it) is written there (shell/tests/unit/fixtures/card466).
+/// With GIT_PREVIEWS_FIXTURE_OUT set, the real core's JSON (as UiRpc sends it) is written there (shell/tests/unit/fixtures/git-previews).
 /// </summary>
 public class GitPreviewsVerifyTests
 {
@@ -89,7 +89,7 @@ public class GitPreviewsVerifyTests
 
     private static void Emit(string name, JsonObject json)
     {
-        var dir = Environment.GetEnvironmentVariable("CARD466_FIXTURE_OUT");
+        var dir = Environment.GetEnvironmentVariable("GIT_PREVIEWS_FIXTURE_OUT");
         if (string.IsNullOrEmpty(dir)) return;
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, name + ".json"), json.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");

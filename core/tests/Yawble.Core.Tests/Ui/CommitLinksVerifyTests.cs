@@ -15,8 +15,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
-/// Card 472 (B074 verify, TesterKofi): git.commitsResolve through the real dispatcher on two teams' real repositories,
-/// for what CommitsResolveTests / CommitsResolveRpcTests (card 470) do not cover:
+/// The tester's checks of commit links: git.commitsResolve through the real dispatcher on two teams' real repositories,
+/// for what CommitsResolveTests / CommitsResolveRpcTests do not cover:
 ///  - two teams sharing a commit (the same short ID in two teams), and main + writable extra in one team;
 ///  - two commits of ONE repository sharing a 7-digit prefix (made with fast-import), and the 8-digit IDs telling them apart;
 ///  - a branch named like another commit's prefix, a branch/tag named like hex, a blob, a tree and an annotated tag
@@ -24,8 +24,8 @@ namespace Yawble.Core.Tests.Ui;
 ///  - pushed agrees with the Commit view's where.pushed for every match (origin on a non-main branch too);
 ///  - the cost: the same git processes per repository for 1 ID and for 200 full IDs (the command line holds them);
 ///  - an extra repository whose folder is gone: an error entry, the other repositories still answer.
-/// With CARD472_FIXTURE_OUT set, the real answers (as the dispatcher returns them) are written there for the shell's
-/// verify test (shell/tests/unit/fixtures/card472).
+/// With COMMIT_LINKS_FIXTURE_OUT set, the real answers (as the dispatcher returns them) are written there for the shell's
+/// commit links test (shell/tests/unit/fixtures/commit-links).
 /// </summary>
 public sealed class CommitLinksVerifyTests : IAsyncLifetime
 {
@@ -99,7 +99,7 @@ public sealed class CommitLinksVerifyTests : IAsyncLifetime
 
     private static void Fixture(string name, JsonNode json)
     {
-        var dir = Environment.GetEnvironmentVariable("CARD472_FIXTURE_OUT");
+        var dir = Environment.GetEnvironmentVariable("COMMIT_LINKS_FIXTURE_OUT");
         if (string.IsNullOrEmpty(dir)) return;
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, name + ".json"), json.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
