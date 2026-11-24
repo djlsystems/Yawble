@@ -35,6 +35,18 @@ public sealed partial class NameLeakTests
     private static partial Regex History();
 
     /// <summary>
+    /// Backlog labels as the product itself writes them, which are product data and not history: a label that is a whole
+    /// quoted string ("B001" or 'B001', the quote right next to it on both sides, as in "label": "B001"), and the
+    /// product's phrase "Backlog item B001". They are taken out of a line before <see cref="History"/> looks at it; any
+    /// other B-number in the same line is still flagged. Paths are not exempted.
+    /// </summary>
+    [GeneratedRegex(@"([""'])B\d{3}\1|\bBacklog item B\d{3}(?!\d)")]
+    private static partial Regex ProductLabels();
+
+    /// <summary>Whether a line carries project history, once the product's own backlog labels are taken out.</summary>
+    private static bool HasHistory(string line) => History().IsMatch(ProductLabels().Replace(line, " "));
+
+    /// <summary>
     /// Files from elsewhere, kept as they come, whose lines are not checked for project history (the vendor's name still
     /// is): the public suffix list, whose GUIDs ("…-a08b-4241-b536-…") read as B-numbers.
     /// </summary>
@@ -106,6 +118,24 @@ public sealed partial class NameLeakTests
         finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 
+    /// <summary>
+    /// A backlog label as the product writes it (a whole quoted string, or "Backlog item B001") is product data and is not
+    /// flagged; a B-number anywhere else in the line, or not quoted on both sides, still is.
+    /// </summary>
+    [Theory]
+    [InlineData("\"label\": \"B001\",", false)]
+    [InlineData("{ label: 'B118', title: 'x' }", false)]
+    [InlineData("\"id\": \"B048\"", false)]
+    [InlineData("Backlog item B001 is dispatched", false)]
+    [InlineData("\"Backlog item B118 is dispatched\"", false)]
+    [InlineData("fixed in B118", true)]
+    [InlineData("\"label\": \"B001\", // fixed in B118", true)]
+    [InlineData("\"B118 fixed\"", true)]
+    [InlineData("\"B1180\" and B118", true)]
+    [InlineData("backlog B118", true)]
+    public void AProductBacklogLabel_IsNotHistory_ButOtherBNumbersStillAre(string line, bool flagged) =>
+        Assert.Equal(flagged, HasHistory(line));
+
     private static List<string> Scan(string root) => Scan(root, RepositoryFiles(root));
 
     private static List<string> Scan(string root, IEnumerable<string> files)
@@ -122,7 +152,7 @@ public sealed partial class NameLeakTests
             {
                 var line = lines[i];
                 if (Vendor().IsMatch(VendorNames().Replace(line, ""))) problems.Add($"{file}:{i + 1}: {Trim(line)}");
-                else if (!ThirdParty.Contains(file) && History().IsMatch(line)) problems.Add($"{file}:{i + 1}: {Trim(line)}");
+                else if (!ThirdParty.Contains(file) && HasHistory(line)) problems.Add($"{file}:{i + 1}: {Trim(line)}");
             }
         }
         return problems;
