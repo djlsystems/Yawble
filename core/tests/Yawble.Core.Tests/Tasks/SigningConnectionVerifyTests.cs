@@ -10,7 +10,7 @@ namespace Yawble.Core.Tests.Tasks;
 /// the old YAWBLE_SIGNING_DLIB / YAWBLE_SIGNTOOL bound the same way are still refused. Fakes only: the in-memory credential store
 /// of <see cref="TaskFixture"/>; nothing runs, no signtool.
 /// </summary>
-public class Card488SigningConnectionVerifyTests
+public class SigningConnectionVerifyTests
 {
     private const string Dlib = @"D:\tools\signing\Azure.CodeSigning.Dlib.dll";
     private const string Signtool = @"D:\tools\sdk\x64\signtool.exe";

@@ -8,7 +8,7 @@ namespace Yawble.Core.Tests.Tasks;
 /// release host task, from the app's environment or from a Connection; the old YAWBLE_ names stay refused (HostTaskRules is unchanged).
 /// Pure validation: no task runs.
 /// </summary>
-public class Card486SigningEnvNameTests
+public class SigningEnvNameTests
 {
     private static HostTaskDef Release(IEnumerable<string>? envNames = null, IEnumerable<EnvBinding>? bindings = null) =>
         HostTaskDef.Make("release", "pwsh", ["-NoProfile", "-File", "scripts/release.ps1"], timeoutSeconds: 3600,
