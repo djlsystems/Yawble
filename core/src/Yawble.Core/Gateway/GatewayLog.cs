@@ -66,7 +66,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     private readonly Dictionary<(long, string), long> _hostDenied = [];
 
     /// <summary>
-    /// The run's connect-denied row per CONNECT authority (host:port, gateway_events.id), which a repeat counts on (B105).
+    /// The run's connect-denied row per CONNECT authority (host:port, gateway_events.id), which a repeat counts on.
     /// Its own map, so a host's plain-http (host-denied) and https (connect-denied) refusals stay separate rows.
     /// </summary>
     private readonly Dictionary<(long, string), long> _connectDenied = [];

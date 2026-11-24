@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 namespace Yawble.Core.Bus;
 
 /// <summary>
-/// B142 (card 620): what the person said yes to, so the workflow may be declared complete over a tester's FAIL on a card.
+/// What the person said yes to, so the workflow may be declared complete over a tester's FAIL on a card.
 /// <see cref="Kind"/> is <see cref="Accepted"/> (the FAIL is accepted as is) or <see cref="WontDo"/> (the card will not be
 /// done). Stored on the needs_decision as <c>closeOverFail: { card, kind, reason }</c> and, when the person picks the yes
 /// option, on the answer as <c>closeOverFail: { card, kind, reason, decision }</c>.
@@ -37,7 +37,7 @@ public sealed record FailClosure(long Card, string Tester, string FailLine, stri
 public sealed record OutstandingFail(long Card, string Tester, string FailLine, long FailSeq, CloseOverFail? Yes);
 
 /// <summary>
-/// B142 (card 620): the testers' verdicts in a workflow, read from their hand-backs.
+/// The testers' verdicts in a workflow, read from their hand-backs.
 /// <list type="bullet">
 /// <item>A hand-back's verdict is how it starts: PASS or FAIL (any case, after trimming and any leading Markdown such as
 ///   <c>**</c> or <c>#</c>; PASSED / FAILED count too). Anything else has no verdict.</item>

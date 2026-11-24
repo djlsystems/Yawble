@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 namespace Yawble.Core.Bus;
 
 /// <summary>
-/// Script members (B131) as the bus sees them: a trigger aimed at one is handed to the script runner with its structured
+/// Script members as the bus sees them: a trigger aimed at one is handed to the script runner with its structured
 /// payload instead of being told as a new workflow (no workflow per fire, no Manager woken); agents' triggers are unchanged.
 /// </summary>
 public interface IScriptMemberHost

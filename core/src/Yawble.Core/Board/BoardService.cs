@@ -42,10 +42,10 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     public static bool Handles(string method) =>
         method.StartsWith("board.", StringComparison.Ordinal) || method.StartsWith("backlog.", StringComparison.Ordinal) || method == "timeline.get";
 
-    /// <summary>B086: the cards' and workflows' times (the bus asks it for its workflow items).</summary>
+    /// <summary>The cards' and workflows' times (the bus asks it for its workflow items).</summary>
     public BoardTimeline Timeline { get; } = new(store);
 
-    /// <summary>The board's store (B104: the Workflows page reads cards, items and times of many workflows at once).</summary>
+    /// <summary>The board's store (the Workflows page reads cards, items and times of many workflows at once).</summary>
     public BoardStore Store => store;
 
     /// <summary>Reads the bus into the cards until stopped.</summary>
@@ -143,7 +143,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         foreach (var card in store.Cards(team).Where(c => includeCleared || (c.ClearedAt is not null) == cleared))
         {
             // A member running right now is working on its newest open card, though no message has said so yet. Only a
-            // queued card: a "stopped" one (B097) stays stopped until new work re-queues it.
+            // queued card: a "stopped" one stays stopped until new work re-queues it.
             var shown = card;
             if (card.Member is { } m && running.TryGetValue($"{card.Team}/{m}", out var state) && state.State == "running"
                 && card.Status == "queued" && open.Add(card.Id) && store.OpenCardOf(card.Team, m)?.Id == card.Id)
@@ -200,7 +200,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         return node;
     }
 
-    /// <summary>A card's time (B086), with the runs of its workflow read once per list.</summary>
+    /// <summary>A card's time, with the runs of its workflow read once per list.</summary>
     private JsonObject TimeOf(CardRow card, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now, Dictionary<long, IReadOnlyList<RunSpan>> runs)
     {
         IReadOnlyList<RunSpan> mine = [];
@@ -210,7 +210,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
 
     /// <summary>
     /// timeline.get { card } | { workflow }: the time, a row of bands per card (one for a card), the workflow's summary
-    /// row (one category per moment) and the markers (B086).
+    /// row (one category per moment) and the markers.
     /// </summary>
     private async Task<JsonNode> TimelineAsync(long? cardId, long? workflow, CancellationToken ct)
     {
@@ -454,7 +454,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
                 var lane = OptStr(args, "lane") ?? throw new BusRefusal("bad_params", "move needs a lane: todo, in-progress, blocked or done");
                 if (!Lanes.IsLane(lane)) throw new BusRefusal("bad_params", "lane is todo, in-progress, blocked or done");
                 var note = OptStr(args, "note");
-                // B019 / B027 item 2: anyone but the tester itself (the Manager, a developer) closing a tester's card the
+                // Anyone but the tester itself (the Manager, a developer) closing a tester's card the
                 // tester has not tested says why, on the card.
                 var untested = lane == Lanes.Done && card.Lane != Lanes.Done
                     ? await UntestedTesterAsync(run.Member.TeamId, card, ct) : null;

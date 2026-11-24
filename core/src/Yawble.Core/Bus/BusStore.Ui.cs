@@ -51,7 +51,7 @@ public sealed partial class BusStore
 
     public void SetTeamEnv(long teamId, string json) => Exec("UPDATE teams SET env = $e WHERE id = $id;", ("$e", json), ("$id", teamId));
 
-    /// <summary>"Allow localhost (macOS)" (0054, B119): off unless the person turned it on for this team.</summary>
+    /// <summary>"Allow localhost (macOS)" (0054): off unless the person turned it on for this team.</summary>
     public bool TeamAllowsLocalhost(long teamId) => Scalar<long?>("SELECT allow_localhost FROM teams WHERE id = $id;", ("$id", teamId)) is { } v && v != 0;
 
     public void SetTeamAllowsLocalhost(long teamId, bool on) => Exec("UPDATE teams SET allow_localhost = $v WHERE id = $id;", ("$v", on ? 1 : 0), ("$id", teamId));
@@ -122,7 +122,7 @@ public sealed partial class BusStore
     public int DeleteMember(MemberRef member)
     {
         var closed = Integrations.NetworkAskService.CloseForRemovedMember(_connection, _tx, member.Id, member.TeamId, member.Qualified, Now());
-        // Its waiting folder asks (B111) close too; the count returned stays the network asks'.
+        // Its waiting folder asks close too; the count returned stays the network asks'.
         Integrations.FolderAskService.CloseForRemovedMember(_connection, _tx, member.Id, Now());
         Exec("DELETE FROM subscriptions WHERE subscriber = $s;", ("$s", member.Qualified));
         Exec("DELETE FROM cursors WHERE subscriber = $s;", ("$s", member.Qualified));

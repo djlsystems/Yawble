@@ -89,7 +89,7 @@ public sealed class RunSupervisor
 
     /// <param name="tree">macOS: the run's processes, followed while it runs and ended with it (<see cref="RunTree"/>).</param>
     /// <param name="treeGone">Called once the tree is ended (or the wait for it is up), before the run is reported done: the run's temp folder is removed there.</param>
-    /// <param name="holders">macOS backstop (B127): after the tree is reaped, the processes still holding <paramref name="runFolder"/> are adopted into it and reaped too.</param>
+    /// <param name="holders">macOS backstop: after the tree is reaped, the processes still holding <paramref name="runFolder"/> are adopted into it and reaped too.</param>
     /// <param name="runFolder">The run's yr-* temp folder the backstop looks under.</param>
     /// <param name="log">The core log: one teardown line when a process outlived the reap or was found only by the backstop.</param>
     public RunSupervisor(ISandboxProcess process, int wallTimeoutSec, int idleTimeoutSec, RunActivity activity,
@@ -144,7 +144,7 @@ public sealed class RunSupervisor
 
     /// <summary>
     /// macOS: whatever the run started is ended before the run is reported done, however the CLI ended (its own exit
-    /// too: the sandbox there has no PID namespace that takes the rest down). B127: then the backstop - whatever still
+    /// too: the sandbox there has no PID namespace that takes the rest down). Then the backstop - whatever still
     /// holds the run's folder (a build that left both the tree and its group) is adopted and reaped - and only then
     /// <c>treeGone</c>. Anything that outlived the reap, or was found only by the backstop, makes the run's record say
     /// TreeSurvived and gets one teardown line in the core log.
@@ -176,7 +176,7 @@ public sealed class RunSupervisor
                         var again = tree.Reap();
                         signalled += again.Signalled;
                         survivors = again.Survivors;
-                        // B129: what the second reap found through the adopted ones' groups or ppids (tracked after the
+                        // What the second reap found through the adopted ones' groups or ppids (tracked after the
                         // adoption) or signalled besides them; never one the first reap already reported.
                         var newlyTracked = tree.Tracked.Where(t => !before.Contains(t) && !adopted.Contains(t)).Select(t => t.Key);
                         fromGroup = [.. newlyTracked.Concat(again.SignalledPids)

@@ -73,7 +73,7 @@ public sealed class ConciergeReadTools(
 
     // ------------------------------------------------------------------------------------------------ skills
 
-    /// <summary>The skills offered to the Concierge: the built-ins that name it, and the person's global ones that do (B135).</summary>
+    /// <summary>The skills offered to the Concierge: the built-ins that name it, and the person's global ones that do.</summary>
     private IReadOnlyList<Skills.Skill> ConciergeSkills() => connectionString is null
         ? Skills.SkillCatalog.BuiltInsForConcierge()
         : new Skills.SkillCatalog(connectionString).OfferedToConcierge();
@@ -233,7 +233,7 @@ public sealed class ConciergeReadTools(
         sb.AppendLine($"Team {S(o, "team")}{(S(o, "member") is { Length: > 0 } m ? $", member {m}" : "")}; lane {S(o, "lane")}, status {S(o, "status")}" +
                       $"{(S(o, "item") is { Length: > 0 } item ? $"; from backlog {item}" : "")}{(S(o, "workflow") is { Length: > 0 } w ? $"; workflow {w}" : "")}");
         sb.AppendLine($"Created {S(o, "createdAt")}, updated {S(o, "updatedAt")}");
-        // B086: its overall time (created to its last Done) and where that time went, as the board shows it.
+        // Its overall time (created to its last Done) and where that time went, as the board shows it.
         if (o["time"] is JsonObject time)
         {
             var overall = time["overallMs"] is JsonValue ms && ms.TryGetValue<long>(out var n) ? n : 0;
@@ -292,7 +292,7 @@ public sealed class ConciergeReadTools(
         sb.AppendLine(toolLines.Count == 0 ? "Tool requests (tools agents asked the person to install): none."
             : $"Tool requests waiting for the person ({toolLines.Count}; Install is in Needs you in the app's window on this computer, not from here or the Cloud Link):");
         foreach (var l in toolLines) sb.AppendLine(l);
-        // Folders agents asked to read or write (B111): answered in Needs you, in the window or over the Cloud Link.
+        // Folders agents asked to read or write: answered in Needs you, in the window or over the Cloud Link.
         var folderLines = bus.FolderAsks?.PendingLines() ?? [];
         sb.AppendLine(folderLines.Count == 0 ? "Folder requests (folders agents asked to read or write): none."
             : $"Folder requests waiting for the person ({folderLines.Count}; they are answered in Needs you, in the window or over the Cloud Link, not from here):");
@@ -518,7 +518,7 @@ public sealed class ConciergeReadTools(
         (TidyClasses.Scratch, "scratch: only in a member's clone (the member's to delete; the app never changes a clone)"),
     ];
 
-    /// <summary>git_merge_preview (B073): the Git dialog's git.mergePreview text, built by the same function.</summary>
+    /// <summary>git_merge_preview: the Git dialog's git.mergePreview text, built by the same function.</summary>
     private async Task<string> MergePreviewAsync(string team, string? repo, CancellationToken ct)
     {
         var repos = bus.Repos ?? throw new ArgumentException("this app has no team repositories, so there is nothing to merge");
@@ -533,7 +533,7 @@ public sealed class ConciergeReadTools(
         }
     }
 
-    /// <summary>git_tidy_plan (B067): <see cref="TeamRepos.GitTidyPlanAsync"/> for the team (or every team), as text.</summary>
+    /// <summary>git_tidy_plan: <see cref="TeamRepos.GitTidyPlanAsync"/> for the team (or every team), as text.</summary>
     private async Task<string> TidyPlanAsync(string? team, CancellationToken ct)
     {
         var repos = bus.Repos ?? throw new ArgumentException("this app has no team repositories, so there is nothing to tidy");
@@ -612,7 +612,7 @@ public sealed class ConciergeReadTools(
         var compare = originBase ?? baseSha;
         var compareName = originBase is not null ? $"origin/{t.BaseBranch}" : t.BaseBranch;
 
-        // Pull requests are a hosting service's, not git's (B075): read for GitHub (gh), GitLab (glab) and Azure DevOps (az repos).
+        // Pull requests are a hosting service's, not git's: read for GitHub (gh), GitLab (glab) and Azure DevOps (az repos).
         var host = Yawble.Core.Teams.RepoHost.HostOf(origin);
         var provider = bus.Repos?.HostSettingOf(t.Team, t.Repo)?.Provider ?? Yawble.Core.Teams.RepoProviders.Detect(origin);
         var supported = Yawble.Core.Teams.PullRequestProviders.Supports(provider);
@@ -803,7 +803,7 @@ public sealed class ConciergeReadTools(
                ?? throw new ArgumentException($"there is no team '{name}'. Teams: {string.Join(", ", teams.Select(t => t.Name))}");
     }
 
-    /// <summary>A decision as the Concierge reads it: the summary (B123) or question, then the options' labels and replies.
+    /// <summary>A decision as the Concierge reads it: the summary or question, then the options' labels and replies.
     /// An option with an action is answered by the person in the app (bus.answer optionIndex), never by the Concierge.</summary>
     private static string DecisionText(Message m)
     {

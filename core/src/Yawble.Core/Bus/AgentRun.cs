@@ -25,10 +25,10 @@ public sealed record RunResult(bool Succeeded, string? Reason = null, string? Fa
 }
 
 /// <summary>Status of a member in its team, as the status tool reports it.</summary>
-/// <param name="DecisionId">B123: the member's newest unanswered needs_decision (message seq); StatusLine then says "Waiting on you: ...".</param>
-/// <param name="WaitState">B126: with QueuedInstructions, why they have not started (<see cref="WaitStates"/>: queued, waits-for-run,
+/// <param name="DecisionId">The member's newest unanswered needs_decision (message seq); StatusLine then says "Waiting on you: ...".</param>
+/// <param name="WaitState">With QueuedInstructions, why they have not started (<see cref="WaitStates"/>: queued, waits-for-run,
 /// held, pending); null when none waits.</param>
-/// <param name="WaitsFor">B126: with waits-for-run, the member whose run must end first.</param>
+/// <param name="WaitsFor">With waits-for-run, the member whose run must end first.</param>
 public sealed record MemberStatus(string Name, string Role, string State, int? QueuePosition, int QueuedInstructions, string? StatusLine, string? HeavyLease = null,
     long? DecisionId = null, string? WaitState = null, string? WaitsFor = null);
 
@@ -99,9 +99,9 @@ public sealed class RunContext
     public Task<Message> NeedsDecisionAsync(string question, CancellationToken ct = default) =>
         _engine.ReportAsync(this, MessageTypes.NeedsDecision, new { question }, ct, statusLine: "needs decision: " + question);
 
-    /// <summary>B123: a decision with a summary, 2-4 options and details (DecisionAsk); a question-only ask is stored as before.</summary>
+    /// <summary>A decision with a summary, 2-4 options and details (DecisionAsk); a question-only ask is stored as before.</summary>
     public Task<Message> NeedsDecisionAsync(DecisionAsk ask, CancellationToken ct = default) =>
-        ask.Close is not null ? _engine.AskCloseOverFailAsync(this, ask, ct) // B142: tied to a tester's FAIL
+        ask.Close is not null ? _engine.AskCloseOverFailAsync(this, ask, ct) // tied to a tester's FAIL
         : ask is { Summary: null, Options: null, Details: null }
             ? NeedsDecisionAsync(ask.Question, ct)
             : _engine.ReportAsync(this, MessageTypes.NeedsDecision, ask.ToPayload(), ct, statusLine: "needs decision: " + ask.Headline);
@@ -138,7 +138,7 @@ public sealed class RunContext
     public Skills.Skill Skill(string name) => _engine.SkillForRun(this, name);
 
     /// <summary>
-    /// B100: the team's lessons (its team_retros skill) for the run's prompt, null when there are none. Reading them
+    /// The team's lessons (its team_retros skill) for the run's prompt, null when there are none. Reading them
     /// records the version this run saw: team_retros_write is refused once the text changed since (a person's edit).
     /// </summary>
     public string? Lessons() => _engine.LessonsFor(this);
@@ -169,7 +169,7 @@ public interface IRunIdleClock
     void Resume();
 
     /// <summary>
-    /// The run's quiet stretches so far, as of <paramref name="now"/> (B086): each gap of no activity of at least
+    /// The run's quiet stretches so far, as of <paramref name="now"/>: each gap of no activity of at least
     /// <see cref="RunActivitySpans.StallAfter"/> (from the last sign of activity to the next one, or to now), and each wait
     /// in the lease's queue. None for a clock that does not keep them.
     /// </summary>
@@ -182,14 +182,14 @@ public sealed record ActivitySpan(DateTimeOffset Start, DateTimeOffset End);
 /// <summary>A run's stalls (no activity for at least <see cref="StallAfter"/>) and its waits for the heavy-work lease.</summary>
 public sealed record RunActivitySpans(IReadOnlyList<ActivitySpan> Stalls, IReadOnlyList<ActivitySpan> Holds)
 {
-    /// <summary>How long a run may show no sign of activity before that time counts as Stalled (B086).</summary>
+    /// <summary>How long a run may show no sign of activity before that time counts as Stalled.</summary>
     public static readonly TimeSpan StallAfter = TimeSpan.FromMinutes(10);
 
     public static RunActivitySpans None { get; } = new([], []);
 }
 
 /// <summary>
-/// A run working now, and its quiet stretches so far (the board's live Stalled and Waiting-for-a-slot bands). B126: or a
+/// A run working now, and its quiet stretches so far (the board's live Stalled and Waiting-for-a-slot bands). Or a
 /// member waiting in the run queue now for work in <paramref name="Workflow"/>: <paramref name="QueuedSince"/> is when it
 /// joined (no run row exists before admission), so that wait is Waiting for a slot live; its Spans are none.
 /// </summary>

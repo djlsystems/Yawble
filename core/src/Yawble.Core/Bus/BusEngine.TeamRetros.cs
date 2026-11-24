@@ -3,7 +3,7 @@ using Yawble.Core.Skills;
 namespace Yawble.Core.Bus;
 
 /// <summary>
-/// B100: a team's lessons (its team_retros skill). Every run of the team reads them in its prompt; the Manager alone
+/// A team's lessons (its team_retros skill). Every run of the team reads them in its prompt; the Manager alone
 /// writes them, for its own team only, with team_retros_write. A write that would replace a text the run has not read
 /// (the person edited it in Settings meanwhile) is refused, so the person's edit is never lost.
 /// </summary>

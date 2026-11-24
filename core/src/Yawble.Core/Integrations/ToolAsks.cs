@@ -9,7 +9,7 @@ using Yawble.Core.Teams;
 namespace Yawble.Core.Integrations;
 
 /// <summary>
-/// One developer tool the app can install for the person (B013). Agents name it (<see cref="Name"/>); everything else
+/// One developer tool the app can install for the person. Agents name it (<see cref="Name"/>); everything else
 /// is the app's own: an agent never supplies a winget id, a command or an argument.
 /// </summary>
 /// <param name="Name">What request_tool takes, e.g. "dotnet-sdk-10".</param>
@@ -297,13 +297,13 @@ public sealed record ToolAskRow(long Id, string At, long TeamId, string Team, st
 }
 
 /// <summary>
-/// Host tool asks (B013): an agent's request_tool names a tool from <see cref="ToolCatalog"/>; the person is asked once
+/// Host tool asks: an agent's request_tool names a tool from <see cref="ToolCatalog"/>; the person is asked once
 /// per (team, package) in Needs you: catalog names that install the same winget package are one tool for the ask and Not now. Install runs exactly the catalog's winget command in the app's process (the person, in
 /// the window on this computer, only: never over the Cloud Link, from the companion, by an agent or the Concierge); the
 /// program is looked for again afterwards, and when it is found every open ask for the tool closes and each team's
 /// Manager is told to retry. A failed install leaves the ask open with winget's message (Try again). Not now: the team is
 /// not asked about that tool again for 24 hours. On Linux, with pkexec, a graphical session and a recognised distribution,
-/// Install runs "pkexec &lt;package manager&gt; ..." instead (B017); Check again (tools.checkAgain) looks for the program again
+/// Install runs "pkexec &lt;package manager&gt; ..." instead; Check again (tools.checkAgain) looks for the program again
 /// after the person installed it themselves. Each ask, answer and result is in the Approvals log (tool_ask_events).
 /// The network asks' plumbing is shared: the same tell (as the person, in the ask's workflow), the same Needs you count
 /// and Concierge status, the same Approvals log.

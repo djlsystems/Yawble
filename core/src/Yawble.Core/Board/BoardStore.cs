@@ -228,7 +228,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         tx.Commit();
     }
 
-    /// <summary>The runs of a workflow (B086): who, queued, started, ended (null while running; an interrupted one ends where it started).</summary>
+    /// <summary>The runs of a workflow: who, queued, started, ended (null while running; an interrupted one ends where it started).</summary>
     public IReadOnlyList<RunSpan> RunsOf(long workflow) =>
         Query(
             "SELECT m.name, r.queued_at, r.started_at, r.ended_at, r.state FROM runs r JOIN members m ON m.id = r.member_id WHERE r.correlation_id = $w ORDER BY r.id;",
@@ -248,7 +248,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
     // ---------------------------------------------------------------- a card's end (0045)
 
     /// <summary>
-    /// Its workflow ended (B085): every card of it not ended yet records the end's time and how it ended (completed, closed
+    /// Its workflow ended: every card of it not ended yet records the end's time and how it ended (completed, closed
     /// or expired). Returns how many were ended.
     /// </summary>
     public int EndCardsOf(long workflow, string how, string at) =>
@@ -425,7 +425,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     private long _queries;
 
-    /// <summary>How many statements this store has run (tests count a read's queries: B104's no-N+1 check).</summary>
+    /// <summary>How many statements this store has run (tests count a read's queries: the no-N+1 check).</summary>
     public long Queries => Interlocked.Read(ref _queries);
 
     private SqliteCommand Command(SqliteConnection c, string sql, (string, object)[] args)

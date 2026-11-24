@@ -4,16 +4,16 @@ using System.Text.Json.Nodes;
 namespace Yawble.Core.Bus;
 
 /// <summary>
-/// B123: the actions an option of a needs_decision may carry. Fixed in the core: an agent can only name one, never apply
+/// The actions an option of a needs_decision may carry. Fixed in the core: an agent can only name one, never apply
 /// it; the core applies it when the person answers with that option (UiRpc bus.answer, optionIndex).
 /// </summary>
 public static class DecisionActions
 {
-    /// <summary>Turns on the team's "Allow localhost (macOS)" (teams.localhost, B119), as Team settings > Network does.</summary>
+    /// <summary>Turns on the team's "Allow localhost (macOS)" (teams.localhost), as Team settings > Network does.</summary>
     public const string AllowLocalhostMac = "team.allowLocalhostMac";
 
     /// <summary>
-    /// B142 (card 620): the person says yes to closing the workflow over a tester's FAIL on the decision's card (accepted,
+    /// The person says yes to closing the workflow over a tester's FAIL on the decision's card (accepted,
     /// or won't-do). Only on a decision with <c>card</c> and <c>kind</c>; the app changes no setting, the bus records the
     /// yes on the answer (<c>closeOverFail</c>) and workflow_complete then goes through, listing the card in closedOverFail.
     /// </summary>
@@ -28,7 +28,7 @@ public static class DecisionActions
 public sealed record DecisionOption(string Label, string Reply, string? Action = null);
 
 /// <summary>
-/// B123: what a needs_decision asks, as stored in its message payload:
+/// What a needs_decision asks, as stored in its message payload:
 /// <c>{ question, summary?, options?: [{ label, reply, action? }], details? }</c>. A call with only question is stored as
 /// before (<c>{ question }</c>). A call with a summary and no question stores the summary as the question too, so every
 /// reader of "question" keeps working.
@@ -47,7 +47,7 @@ public sealed record DecisionAsk(string Question, string? Summary = null, IReadO
     /// <paramref name="options"/> may be the array itself or a string holding it as JSON (some CLIs send arrays as text).
     /// </summary>
     /// <remarks>
-    /// B142 (card 620): with <paramref name="card"/>, the decision asks the person to close the workflow over that card's
+    /// With <paramref name="card"/>, the decision asks the person to close the workflow over that card's
     /// tester FAIL: <paramref name="kind"/> is required (accept-fail or wont-do), and a won't-do needs a
     /// <paramref name="reason"/>. Exactly one option must then carry the action workflow.closeOverFail (the yes); with no
     /// options the core gives two (the yes, and "fix it first"). The action is refused on a decision without a card.
@@ -124,7 +124,7 @@ public sealed record DecisionAsk(string Question, string? Summary = null, IReadO
 
     private static string? Trimmed(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
-    /// <summary>The payload stored: only the fields given (a question-only ask is <c>{"question": ...}</c>, as before B123).</summary>
+    /// <summary>The payload stored: only the fields given (a question-only ask is <c>{"question": ...}</c>, as before options were added).</summary>
     public JsonObject ToPayload()
     {
         var o = new JsonObject { ["question"] = Question };

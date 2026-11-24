@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace Yawble.Core.Bus;
 
-/// <summary>The backlog item a workflow was dispatched as (B104). <paramref name="Spec"/>: its body (workflows.get only).</summary>
+/// <summary>The backlog item a workflow was dispatched as. <paramref name="Spec"/>: its body (workflows.get only).</summary>
 public sealed record WorkflowItemRef(long Id, string Label, string Title, bool Archived, string Spec);
 
 /// <summary>
@@ -15,7 +15,7 @@ public sealed record WorkflowItemRef(long Id, string Label, string Title, bool A
 public sealed record WorkflowWorker(long Id, string Name, string State, string? WaitsFor = null);
 
 /// <summary>
-/// B126: why a member's undelivered work has not started (the Workflows page's members, team status, the timeline).
+/// Why a member's undelivered work has not started (the Workflows page's members, team status, the timeline).
 /// Only <see cref="Queued"/> is a wait for a run slot.
 /// </summary>
 public static class WaitStates
@@ -45,7 +45,7 @@ public static class WaitStates
 }
 
 /// <summary>
-/// One row of the Workflows page (B104, contract B104/contract.md): the team's WorkflowSummary with its clean title, plus
+/// One row of the Workflows page: the team's WorkflowSummary with its clean title, plus
 /// its team, the Status column's word, who works it now and the backlog item it came from.
 /// </summary>
 public sealed record WorkflowRow(WorkflowSummary Summary, string Team, long TeamId, long? OwnerId, string Status, string? WaitingFor,
@@ -55,7 +55,7 @@ public sealed record WorkflowRow(WorkflowSummary Summary, string Team, long Team
 public sealed record WorkflowsPage(IReadOnlyList<WorkflowRow> Rows, IReadOnlyDictionary<string, int> Counts, bool Truncated, DateTimeOffset Now);
 
 /// <summary>
-/// B104, the Workflows page: every team's workflows in one list. Read in a fixed number of statements however many
+/// The Workflows page: every team's workflows in one list. Read in a fixed number of statements however many
 /// workflows there are (the heads of all of them in one, then the threads, wakes, expiry rows, items and times of the
 /// ones shown in one each): no per-workflow query.
 /// </summary>
@@ -63,7 +63,7 @@ public sealed partial class BusEngine
 {
     public const int DefaultPageLimit = 200, MaxPageLimit = 1000;
 
-    /// <summary>The Status column's words (contract B104).</summary>
+    /// <summary>The Status column's words.</summary>
     public static class WorkflowStatuses
     {
         public const string Running = "running", NeedsYou = "needs-you", Waiting = "waiting", Idle = "idle", Stopped = "stopped",
@@ -282,7 +282,7 @@ public sealed partial class BusEngine
         }
     }
 
-    /// <summary>Each workflow's backlog item: its newest dispatch (backlog_dispatches), else the root message's payload item (B098).</summary>
+    /// <summary>Each workflow's backlog item: its newest dispatch (backlog_dispatches), else the root message's payload item.</summary>
     private Dictionary<long, WorkflowItemRef> ItemsOf(IReadOnlyList<WorkflowHead> heads)
     {
         var result = new Dictionary<long, WorkflowItemRef>();
@@ -328,7 +328,7 @@ public sealed partial class BusEngine
     }
 
     /// <summary>
-    /// B126: why a member's undelivered work (<paramref name="rows"/>: its pending deliveries, in one workflow or all) has
+    /// Why a member's undelivered work (<paramref name="rows"/>: its pending deliveries, in one workflow or all) has
     /// not started. Its team paused or archived: held. Every unstarted row a hand-back still held for the run that sent it:
     /// waits-for-run, with that sender's name. In the run queue: queued (the only wait for a run slot). Else pending.
     /// Under the gate.
@@ -354,7 +354,7 @@ public sealed partial class BusEngine
             : WaitStates.Pending;
     }
 
-    /// <summary>The newest run end in the thread was a run the person stopped (B097: failed with class stopped).</summary>
+    /// <summary>The newest run end in the thread was a run the person stopped (failed with class stopped).</summary>
     private static bool LastRunStopped(IReadOnlyList<Message> thread) =>
         thread.LastOrDefault(m => m.Type is MessageTypes.Completed or MessageTypes.Failed) is { Type: MessageTypes.Failed } f
         && Text(f, "failureClass") == FailureClasses.Stopped;
