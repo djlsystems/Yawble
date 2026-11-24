@@ -25,8 +25,8 @@ const team = (id: number, name: string, members = [member('Manager', 'idle', 'ma
 
 describe('cards on the comets', () => {
   it('reads the card number from an instruction', () => {
-    expect(cardOf('Card 373 (B080, Monitor scene). Read the card')).toBe(373);
-    expect(cardOf('[card 373] Addition to card 373')).toBe(373);
+    expect(cardOf('Card 4373 (Monitor scene). Read the card')).toBe(4373);
+    expect(cardOf('[card 4373] Addition to card 4373')).toBe(4373);
     expect(cardOf('Fix card #12 please')).toBe(12);
     expect(cardOf('Add a README')).toBeNull();
     expect(cardOf('discard 5 lines')).toBeNull(); // "card" inside a word is not a card
@@ -35,11 +35,11 @@ describe('cards on the comets', () => {
 
   it('a Manager instruction carries its card number; the hand-back returns along the same line with a check', () => {
     const m = new MonitorModel();
-    m.apply(row(1, 'instruction', 'DeveloperPriya', 'Manager', 'Card 373 (B080): the scene'), 0);
+    m.apply(row(1, 'instruction', 'DeveloperPriya', 'Manager', 'Card 4373: the scene'), 0);
     m.apply(row(2, 'handback', 'DeveloperPriya', 'DeveloperPriya', 'done'), 10);
     const [out, back] = m.effects as Extract<Effect, { kind: 'comet' }>[];
-    expect(out).toMatchObject({ kind: 'comet', from: memberKey('payments', 'Manager'), to: memberKey('payments', 'DeveloperPriya'), label: '#373', card: 373 });
-    expect(back).toMatchObject({ kind: 'comet', from: memberKey('payments', 'DeveloperPriya'), to: memberKey('payments', 'Manager'), mark: 'check', card: 373, label: '#373 ✓' });
+    expect(out).toMatchObject({ kind: 'comet', from: memberKey('payments', 'Manager'), to: memberKey('payments', 'DeveloperPriya'), label: '#4373', card: 4373 });
+    expect(back).toMatchObject({ kind: 'comet', from: memberKey('payments', 'DeveloperPriya'), to: memberKey('payments', 'Manager'), mark: 'check', card: 4373, label: '#4373 ✓' });
   });
 
   it('a failed or blocked run comes home with a cross', () => {
@@ -393,7 +393,7 @@ describe('the scene', () => {
 });
 
 describe('no WORKFLOWS panel; the workflow nodes say "#id title"', () => {
-  const title = "Backlog item B081 Remote UI: xterm's link handler asks through confirmDialog";
+  const title = "Backlog item B008 Remote UI: xterm's link handler asks through confirmDialog";
   type Inner = { nodes: Map<string, { kind: string; x?: number; y?: number }>; cam: { k: number }; toScreen: (x: number, y: number) => [number, number] };
   function wall(w = 1280, h = 800) {
     const made = makeScene(w, h);
@@ -422,7 +422,7 @@ describe('no WORKFLOWS panel; the workflow nodes say "#id title"', () => {
   it('labels a node with its id and its title, clipped, "Backlog item " dropped; the text drawn is that label', () => {
     const { scene, ctx } = wall();
     const label = scene.workflowNodes().find((n) => n.id === 3848)!.label;
-    expect(label.startsWith('#3848 B081 Remote UI')).toBe(true);
+    expect(label.startsWith('#3848 B008 Remote UI')).toBe(true);
     expect(label).not.toContain('Backlog item');
     expect(label.endsWith('…')).toBe(true);
     expect(label.length).toBeLessThanOrEqual(32);
@@ -461,13 +461,13 @@ describe('no WORKFLOWS panel; the workflow nodes say "#id title"', () => {
     S.cam.k = 0.4;
     expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe('#3848');
     S.cam.k = 1.2;
-    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label.startsWith('#3848 B081')).toBe(true);
+    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label.startsWith('#3848 B008')).toBe(true);
   });
 
   it('a desktop window whose wall is narrow (Activity open) still shows the title zoomed out', () => {
     const { scene, S } = wall(660, 700); // 1280 x 800 with the sidebar and Activity open
     S.cam.k = 0.4;
-    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe("#3848 B081 Remote UI: xterm's…");
+    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe("#3848 B008 Remote UI: xterm's…");
   });
 
   it('draws the label at least 8 px on screen, dimmed when another team is focused', () => {
