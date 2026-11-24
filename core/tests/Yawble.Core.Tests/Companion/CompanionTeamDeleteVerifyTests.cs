@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Companion;
 /// CompanionServiceTests cannot clone a local bare repository in a sandbox). The lists are the Concierge's team_delete and
 /// team_archive, whose keys move without git: deleting team alpha and making it again gives it a new id.
 /// </summary>
-public class B141VerifyTests : IDisposable
+public class CompanionTeamDeleteVerifyTests : IDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private readonly string _root = Directory.CreateTempSubdirectory("yawble-b141-").FullName;

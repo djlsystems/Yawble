@@ -16,7 +16,7 @@ namespace Yawble.Core.Tests.Companion;
 /// stored call once (a second Approve runs nothing), Deny writes nothing. Turning a trigger off runs at once. The real pieces of
 /// <see cref="B139Rig"/>; no credentials.
 /// </summary>
-public sealed class B139CompanionScriptToolsTests : IAsyncLifetime
+public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

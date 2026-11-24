@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Companion;
 /// window approves (checked with request_status, bound to the call's key: a changed call is a new request); a later live
 /// run, a save, a check and a dry run run at once. A fake scripts.* RPC; no credentials.
 /// </summary>
-public sealed class B135CompanionScriptToolsTests : IAsyncLifetime
+public sealed class CompanionScriptToolsTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -320,7 +320,7 @@ public sealed class B135CompanionScriptToolsTests : IAsyncLifetime
         var act = CompanionTools.Definitions(CompanionLevel.Act);
         var destructive = CompanionTools.Definitions(CompanionLevel.Destructive);
 
-        Assert.Equal(13, ScriptTools.Names.Count); // the 11 of B135 and B139's script_trigger_set and integration_action_allow (B139CompanionScriptToolsTests)
+        Assert.Equal(13, ScriptTools.Names.Count); // the 11 of B135 and B139's script_trigger_set and integration_action_allow (CompanionTriggerAndActionToolsTests)
         Assert.All(ScriptTools.Names, n => Assert.Contains(n, Names(destructive)));
         Assert.Contains(ScriptTools.ScriptCheck, Names(read));
         Assert.DoesNotContain(ScriptTools.ScriptSave, Names(read));
