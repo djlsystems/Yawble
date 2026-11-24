@@ -21,7 +21,7 @@ namespace Yawble.Core.Tests.Bus;
 /// workflows.get (the pane's cards), workflows.list (the Workflows page's time bar) and timeline.get (the board's
 /// timeline, card and workflow rows). One fake clock for the bus and the board; the runs are scripted fakes (no idle clock).
 /// </summary>
-public class Card495B106VerifyTests
+public class LeaseWaitTimelineVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly TimeSpan Min = TimeSpan.FromMinutes(1);

@@ -20,7 +20,7 @@ namespace Yawble.Core.Tests.Bus;
 /// (needs-you, working). Checked against the contract (YAWBLE_TEAM_DOCS/B104/contract.md) and backlog B104.
 /// With CARD478_FIXTURE_OUT set, the answers are written there as JSON for the shell's card478 verify test.
 /// </summary>
-public class Card478B104VerifyTests
+public class WorkflowsLiveStatesVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

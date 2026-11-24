@@ -8,7 +8,7 @@ namespace Yawble.Core.Tests.Bus;
 /// that takes the heavy-work lease. The Manager's delivery starts right after the first run ends; nobody is "queued"
 /// unless the run queue has them. Fake runners only.
 /// </summary>
-public class B126VerifyReplayTests
+public class LeaseAfterHandBackReplayTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

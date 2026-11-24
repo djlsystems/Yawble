@@ -22,7 +22,7 @@ namespace Yawble.Core.Tests.Bus;
 /// text only as the Concierge actor, and the board is a real BoardService reading the bus. Strings are core/src's own
 /// (TesterVerdicts.Refusal, Board.ClosedOverFail).
 /// </summary>
-public class B142VerifyTests
+public class ClosedOverFailBusVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

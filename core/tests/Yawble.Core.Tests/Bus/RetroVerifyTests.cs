@@ -14,7 +14,7 @@ namespace Yawble.Core.Tests.Bus;
 /// team_retros; what Team settings then says), an expired workflow gets no retro, and the digest's masking on the bus path.
 /// Fakes only: scripted runs, a manual clock, no agent CLI.
 /// </summary>
-public class Card469B100VerifyTests
+public class RetroVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

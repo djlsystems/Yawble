@@ -14,7 +14,7 @@ namespace Yawble.Core.Tests.Bus;
 /// keys), bus.workflowExtend's reply and already_ended, the expiry warning on the list item and on bus.decisions,
 /// teams.workflowExpiry's edge values and AuditLog's get-or-set. Test-only.
 /// </summary>
-public class Card390ExpiryContractTests
+public class WorkflowExpiryContractTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);

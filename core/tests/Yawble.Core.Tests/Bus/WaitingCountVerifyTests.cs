@@ -13,7 +13,7 @@ namespace Yawble.Core.Tests.Bus;
 /// and goes down as the person answers each; teams.list carries it as camelCase "waiting"; org.summary carries it as
 /// teams[].agents.waitingOnYou (0 when nobody asks). Other teams stay 0.
 /// </summary>
-public class B130VerifyTests
+public class WaitingCountVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
