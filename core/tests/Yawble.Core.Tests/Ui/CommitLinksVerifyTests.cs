@@ -16,7 +16,7 @@ namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
 /// Card 472 (B074 verify, TesterKofi): git.commitsResolve through the real dispatcher on two teams' real repositories,
-/// for what CommitsResolveTests / Card470CommitsResolveRpcTests (card 470) do not cover:
+/// for what CommitsResolveTests / CommitsResolveRpcTests (card 470) do not cover:
 ///  - two teams sharing a commit (the same short ID in two teams), and main + writable extra in one team;
 ///  - two commits of ONE repository sharing a 7-digit prefix (made with fast-import), and the 8-digit IDs telling them apart;
 ///  - a branch named like another commit's prefix, a branch/tag named like hex, a blob, a tree and an annotated tag
@@ -27,7 +27,7 @@ namespace Yawble.Core.Tests.Ui;
 /// With CARD472_FIXTURE_OUT set, the real answers (as the dispatcher returns them) are written there for the shell's
 /// verify test (shell/tests/unit/fixtures/card472).
 /// </summary>
-public sealed class Card472CommitsResolveVerifyTests : IAsyncLifetime
+public sealed class CommitLinksVerifyTests : IAsyncLifetime
 {
     private readonly TempDb _db = new();
     private BusEngine _bus = null!;

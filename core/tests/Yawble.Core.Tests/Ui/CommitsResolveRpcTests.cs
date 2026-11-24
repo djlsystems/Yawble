@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Ui;
 /// name, and for every team), its bad_params, and that a read-only viewer (Visitor) may call it remotely and the audit
 /// log counts it as a read.
 /// </summary>
-public sealed class Card470CommitsResolveRpcTests : IAsyncLifetime
+public sealed class CommitsResolveRpcTests : IAsyncLifetime
 {
     private readonly TempDb _db = new();
     private BusEngine _bus = null!;

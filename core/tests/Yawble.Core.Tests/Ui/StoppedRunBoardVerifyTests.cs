@@ -19,7 +19,7 @@ namespace Yawble.Core.Tests.Ui;
 /// - Done and louder statuses keep theirs (Lanes.StopKeeps);
 /// - migration 0048 on a real 0047-era database with data (an upgrade, not a re-run over the new schema).
 /// </summary>
-public class Card441B097Round2VerifyTests
+public class StoppedRunBoardVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-11-18T12:00:00Z");

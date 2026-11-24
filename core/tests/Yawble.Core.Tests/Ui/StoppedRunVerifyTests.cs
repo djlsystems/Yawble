@@ -15,7 +15,7 @@ namespace Yawble.Core.Tests.Ui;
 /// person stopped. Card 437's own tests build the messages by hand; these read the engine's own agent.failed message
 /// through the feed row (UiRpc.MonitorRow), the Concierge watch and the board's card node (board.list).
 /// </summary>
-public class Card441B097VerifyTests
+public class StoppedRunVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
