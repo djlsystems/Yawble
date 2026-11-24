@@ -122,6 +122,6 @@ public sealed partial class IntegrationService
     /// <summary>A signed-in IMAP session for an email Connection (the Email integration's read actions). Throws <see cref="MailException"/> or <see cref="ArgumentException"/>.</summary>
     internal Task<IImapSession> OpenEmailImapAsync(long connectionId, CancellationToken ct) => MailClients.OpenImapAsync(EmailAccountOf(connectionId), ct);
 
-    /// <summary>An authenticated SMTP session for an email Connection (send, a later phase). Throws <see cref="MailException"/> or <see cref="ArgumentException"/>.</summary>
+    /// <summary>An authenticated SMTP session for an email Connection (it sends nothing). Throws <see cref="MailException"/> or <see cref="ArgumentException"/>.</summary>
     internal Task<ISmtpSession> OpenEmailSmtpAsync(long connectionId, CancellationToken ct) => MailClients.OpenSmtpAsync(EmailAccountOf(connectionId), ct);
 }

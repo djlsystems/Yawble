@@ -61,7 +61,7 @@ model. You build scripts for the person with your script tools; the person sees 
   must be given.
 - `requires`: each integration by a name the steps `use`, its `kind` and every action the steps call. Each member
   binds the name to one of its team's integrations. A script never names a Connection.
-  - kind `email`, actions `list get search thread markRead move` (sending comes later).
+  - kind `email`, actions `list get search thread markRead move` (there is no send action).
   - kind `api`: the operation's id as the API's checklist shows it (e.g. `CreateMessage`), one the team allows or
     asks for.
 - `variables`: `run` variables live for one run; `saved` ones are kept for the member and written back only when a

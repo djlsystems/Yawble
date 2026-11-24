@@ -64,7 +64,7 @@ public interface IImapSession : IAsyncDisposable
     Task<IReadOnlyList<string>> ListFoldersAsync(CancellationToken ct);
 }
 
-/// <summary>An authenticated SMTP session. A later send action goes through <see cref="Client"/>; nothing sends today. Disposing quits.</summary>
+/// <summary>An authenticated SMTP session; the Connection test opens one to check the sign-in and nothing sends mail. Disposing quits.</summary>
 public interface ISmtpSession : IAsyncDisposable
 {
     ISmtpClient Client { get; }

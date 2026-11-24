@@ -161,7 +161,7 @@ function pickVersion(e: Event) {
     </div>
     <div v-if="tab === 'flowchart'" class="flowchart" data-test="editor-flowchart">
       <slot name="flowchart" :doc="doc">
-        <p class="muted">The flowchart designer comes in a later version. Edit the JSON for now; the outline shows its steps.</p>
+        <p class="muted">Edit the script as JSON; the outline shows its steps.</p>
       </slot>
     </div>
     <div v-if="tab === 'test' && current" class="test">

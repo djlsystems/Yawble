@@ -14,7 +14,7 @@ public sealed record EmailSettings(string Address, string ImapHost, int ImapPort
 public sealed record EmailPreset(string Id, string Label, string ImapHost, int ImapPort, string SmtpHost, int SmtpPort, string Note);
 
 /// <summary>
-/// The Connection kind "email": a mailbox the app signs in to over IMAP (reading) and SMTP (sending, a later phase). Its fields are
+/// The Connection kind "email": a mailbox the app signs in to over IMAP (reading) and SMTP (checked when the Connection is tested; nothing sends mail). Its fields are
 /// <see cref="AddressKey"/>, <see cref="ImapHostKey"/>, <see cref="ImapPortKey"/>, <see cref="SmtpHostKey"/>, <see cref="SmtpPortKey"/> and
 /// <see cref="UserKey"/> (kept in the row) and <see cref="PasswordKey"/> (secret: only in the credential store, like every Connection secret).
 /// </summary>

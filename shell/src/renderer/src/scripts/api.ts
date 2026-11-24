@@ -195,7 +195,7 @@ export function showValue(v: unknown): string {
 
 // ---- the test run
 
-/** A TriggerFired payload for now (built-in schema: triggerId string, kind every|cron|once, firedAt date-time). */
+/** A TriggerFired payload fired at `now` (built-in schema: triggerId string, kind every|cron|once, firedAt date-time). */
 export function fakeTriggerFired(doc: ScriptDocument | null, now: Date = new Date()): { triggerId: string; kind: string; firedAt: string } {
   const accepts = Array.isArray(doc?.trigger?.accepts) ? doc!.trigger!.accepts! : [];
   const kind = accepts.find((a) => a === 'every' || a === 'cron' || a === 'once') ?? 'once';

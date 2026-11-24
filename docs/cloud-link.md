@@ -260,7 +260,7 @@ still an agent's terminal window.
   refused network calls, and the app's own diagnostics lines that report an error or a warning. Each has its source,
   team and member (null when the entry names none), time, `level` (`warning` or `error`) and a one-line message.
 
-Times are UTC, ISO 8601. A later version adds fields; it changes `summaryVersion` only when a field changes meaning
+Times are UTC, ISO 8601. New fields may be added; `summaryVersion` changes only when a field changes meaning
 or goes away.
 
 ### `org.summary.watch`, `org.summary.unwatch` and `org.summaryChanged`
