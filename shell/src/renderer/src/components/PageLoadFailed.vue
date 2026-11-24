@@ -1,7 +1,14 @@
 <script setup lang="ts">
 // Shown in place of a page whose file could not be loaded, most often because the app was rebuilt or updated while
 // this window stayed open (the old file is gone). Reloading the window loads the current one.
-const reload = () => location.reload();
+import { resolveApi } from '../api';
+
+// The desktop window reloads through its own Reload command (what Ctrl+R does); a page in a browser reloads itself.
+const api = resolveApi(undefined);
+function reload() {
+  if (typeof api?.windowCommand === 'function') api.windowCommand('reload');
+  else location.reload();
+}
 </script>
 
 <template>
