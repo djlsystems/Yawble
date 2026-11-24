@@ -89,7 +89,7 @@ describe('commit IDs in the app', () => {
     expect(commitParts('Merged c62216a and 7c63337 into main.').filter((p) => p.sha).map((p) => p.sha)).toEqual(['c62216a', '7c63337']);
     expect(commitParts('see https://x.dev/commit/c62216a').some((p) => p.sha)).toBe(false);
     expect(commitParts('file abc1234def.ts or src/c62216a').some((p) => p.sha)).toBe(false);
-    expect(commitParts('B072 card 444 on 2026-11-18').some((p) => p.sha)).toBe(false);
+    expect(commitParts('B008 card 4444 on 2026-11-18').some((p) => p.sha)).toBe(false);
     expect(commitParts('CAFE1234 in capitals').some((p) => p.sha)).toBe(false);
     const parts = commitParts('at c62216a.');
     expect(parts.map((p) => p.text).join('')).toBe('at c62216a.');
