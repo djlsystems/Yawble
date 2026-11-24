@@ -36,7 +36,7 @@ defineExpose({ size: () => view.value?.size() ?? null, focus: () => view.value?.
 
 <template>
   <div class="screen-wrap" :class="{ 'in-pane': inHeader }">
-    <!-- In the main window's pane on a phone (B057) the tabs sit in the pane's one header row; anywhere else, here. -->
+    <!-- In the main window's pane on a phone the tabs sit in the pane's one header row; anywhere else, here. -->
     <Teleport v-if="!formattedOnly" defer :key="inHeader ? 'header' : 'here'" :to="inHeader ? `#${pane!.tabs}` : 'body'" :disabled="!inHeader">
     <div class="modes" :class="{ 'in-header': inHeader }" role="tablist" data-test="terminal-modes">
       <button role="tab" :class="{ on: shown === 'formatted' }" :disabled="interactive" data-test="terminal-mode-formatted"
@@ -60,7 +60,7 @@ defineExpose({ size: () => view.value?.size() ?? null, focus: () => view.value?.
 .layer { flex: 1; min-height: 0; position: relative; }
 /* Hidden but laid out, so xterm keeps its size and keeps receiving output. */
 .layer.hidden { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
-/* A phone (B057): the screen takes what the pane leaves it (no 160 px floor pushing xterm past the bottom); in the
+/* A phone: the screen takes what the pane leaves it (no 160 px floor pushing xterm past the bottom); in the
    pane's header the tabs are part of its one row. */
 @media (max-width: 759.98px) {
   .screen-wrap.in-pane { min-height: 0; }

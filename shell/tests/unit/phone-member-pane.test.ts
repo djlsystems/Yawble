@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B061 (card 286): a member's pane on a phone (375x501 portrait, 667x263 landscape): stacked - the title (with its ☰ menu
+// A member's pane on a phone (375x501 portrait, 667x263 landscape): stacked - the title (with its ☰ menu
 // holding every action), the tabs (Report | Activity | Terminal), then the chosen view full width; 44 px tap targets; the
 // terminal's transcript at least 60% of the visible height and on screen. At 1280 px: one frame, one view at the shared
 // height, no taller than the card + activity row it replaces.
@@ -91,7 +91,7 @@ const paneOf = (w: VueWrapper, name: string) => w.get(`[data-test=agent-${name}]
 
 for (const frame of [Portrait, Landscape]) {
   const at = `${frame.width}x${frame.height}`;
-  describe(`a member's pane on a phone at ${at} (B061)`, () => {
+  describe(`a member's pane on a phone at ${at}`, () => {
     const st = [phoneRules('components/MemberPane.vue'), desktopRules('components/MemberPane.vue')];
 
     it('is stacked: title, tabs, then the chosen view (the Report first), full width, with no resize handles', async () => {
@@ -126,7 +126,7 @@ for (const frame of [Portrait, Landscape]) {
       expect(title.find('[data-test=member-more-menu]').exists()).toBe(false);
     });
 
-    // Card 307: B057's phone terminal followed it here - the whole screen, one 44 px header row (the full checks are in
+    // The phone's full-screen terminal is used here too - the whole screen, one 44 px header row (the full checks are in
     // phone-sheets.test.ts, with the real cascade).
     it("the terminal is the whole screen with one header row: its transcript is at least 60% of the visible height", async () => {
       const w = await teamPage(frame.width);
@@ -163,13 +163,13 @@ for (const frame of [Portrait, Landscape]) {
   });
 }
 
-// B064 (card 310): on a phone the terminal is the whole screen, so one member's at a time; the page opens with none open
+// On a phone the terminal is the whole screen, so one member's at a time; the page opens with none open
 // (each member on its Report).
 const terminals = (w: VueWrapper) => w.findAll('[data-test=member-terminal]');
 /** The members whose terminal is open, in page order. */
 const openOn = (w: VueWrapper) => w.findAll('section.pane').filter((p) => p.find('[data-test=member-terminal]').exists())
   .map((p) => p.attributes('data-test')!.replace(/^agent-/, ''));
-describe('member terminals on a phone at 375x521 (B064)', () => {
+describe('member terminals on a phone at 375x521: one open at a time', () => {
   it('opening Terminal on one member and then another: only the second is open, the first is back on the Report', async () => {
     const w = await teamPage(375);
     await paneOf(w, 'Manager').get('[data-test=member-view-terminal]').trigger('click');
@@ -208,7 +208,7 @@ describe('member terminals on a phone at 375x521 (B064)', () => {
   });
 });
 
-describe('member terminals at 1280 px (B064: unchanged)', () => {
+describe('member terminals at 1280 px: unchanged', () => {
   it('two members remembered on Terminal: both restored, both open in their panes', async () => {
     setMemberView('payments', 'Manager', 'terminal');
     setMemberView('payments', 'DeveloperAda', 'terminal');
@@ -218,7 +218,7 @@ describe('member terminals at 1280 px (B064: unchanged)', () => {
   });
 });
 
-describe("a member's pane at 1280 px (B061)", () => {
+describe("a member's pane at 1280 px: one frame, one view", () => {
   it('one frame, one view at the shared height, the tabs, and every action in the ☰ menu', async () => {
     const w = await teamPage(Desktop);
     const p = paneOf(w, 'DeveloperAda');

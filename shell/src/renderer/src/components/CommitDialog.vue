@@ -5,7 +5,7 @@ import { closeCommit, commitTarget } from '../commitView';
 import Modal from './Modal.vue';
 import CommitView from './CommitView.vue';
 
-// B072: the Commit view's dialog, mounted once (App.vue); commitTarget says which commit, and a new one replaces it (its
+// The Commit view's dialog, mounted once (App.vue); commitTarget says which commit, and a new one replaces it (its
 // key), so only one is ever open. Escape and the backdrop close it (Modal).
 const props = defineProps<{ api?: YawbleApi }>();
 const api = resolveApi(props.api);

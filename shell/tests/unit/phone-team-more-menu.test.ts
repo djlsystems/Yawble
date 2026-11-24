@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 331: on a phone the team page's ⋯ menu lists Documents, Workflows, Triggers, Git and Settings, in that order,
+// On a phone the team page's ⋯ menu lists Documents, Workflows, Triggers, Git and Settings, in that order,
 // each with an icon of the same size (no emoji); Documents and Workflows open their dialogs and close the menu. The
 // menu stays on screen at 375 px and sits above the member panes. The desktop header is unchanged.
 // A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
@@ -48,7 +48,7 @@ async function mountTeam() {
 const dialogTitles = () => [...document.querySelectorAll('[role=dialog]')].map((d) => d.getAttribute('aria-label'));
 const items = (w: VueWrapper) => w.findAll('[data-test=team-more-menu] [role=menuitem]');
 
-describe('the team ⋯ menu on a phone (card 331)', () => {
+describe('the team ⋯ menu on a phone', () => {
   it('lists Documents, Workflows, Triggers, Git and Settings in that order, each with a drawn icon of one size and no emoji', async () => {
     const w = await mountTeam();
     await w.get('[data-test=team-more]').trigger('click');

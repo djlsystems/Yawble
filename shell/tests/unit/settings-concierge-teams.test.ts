@@ -7,7 +7,7 @@ import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remot
 import { newChatAgent, savedConciergeAgent } from '../../src/renderer/src/conciergeDefault';
 import type { TeamDefaults, YawbleApi } from '../../src/shared/api';
 
-// B096: Settings > Concierge (the default agent) and Settings > Teams (New Team defaults, the member-name list and
+// Settings > Concierge (the default agent) and Settings > Teams (New Team defaults, the member-name list and
 // Generate), and the New Team dialog starting from those defaults. A scripted fake core: no agent, no network.
 type Answer = (params: any) => unknown;
 function fakeApi(answers: Record<string, Answer>) {
@@ -79,7 +79,7 @@ describe('Settings > Concierge', () => {
     await flushPromises();
     expect(f.of('concierge.setDefaults').at(-1)!.params).toEqual({ defaultAgent: 'codex' });
     expect(w.find('[data-test=concierge-defaults-saved]').exists()).toBe(true);
-    // Card 419 F1: the window's next new chat starts on it without reading concierge.defaults again.
+    // The window's next new chat starts on it without reading concierge.defaults again.
     expect(savedConciergeAgent.value).toBe('codex');
     expect(newChatAgent([{ id: 'claude', ready: true }, { id: 'codex', ready: true }], savedConciergeAgent.value)).toBe('codex');
     await select.setValue('');

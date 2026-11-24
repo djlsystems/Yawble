@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import MemberSettingsDialog from '../../src/renderer/src/components/MemberSettingsDialog.vue';
 import type { TeamHost, YawbleApi } from '../../src/shared/api';
 
-// B014 test (card 73): the team's network allows next to the member policy (member settings, Policy tab).
+// The team's network allows next to the member policy (member settings, Policy tab).
 // A fake API only: no core, no network. Calls the test does not care about answer an empty object.
 function fakeApi(answers: Record<string, (params: any) => unknown>) {
   const calls: { method: string; params: any }[] = [];

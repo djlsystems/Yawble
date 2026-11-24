@@ -53,7 +53,7 @@ export function asksForApproval(text: string): boolean {
 
 /**
  * Whether a question that asks for approval also offers to skip or decline instead ("Reply approve ... or tell me to
- * skip it"): then the card shows a Skip button beside Approve (B123).
+ * skip it"): then the card shows a Skip button beside Approve.
  */
 export function offersSkip(text: string): boolean {
   return asksForApproval(text) && /\b(skip|decline|close (it )?without|leave it)\b/i.test(text ?? '');
@@ -102,7 +102,7 @@ export function questionOptions(text: string): { n: number; label: string; text:
     });
   }
   if (items.length < 2 || items.length > 6 || items.some((x, i) => x.n !== i + 1)) return [];
-  // B123: a list is the options only when it comes after the choosing sentence (the paragraph that leads into it asks),
+  // A list is the options only when it comes after the choosing sentence (the paragraph that leads into it asks),
   // or its items are themselves answers (actions, not results). A findings list ("Results: 1. Build: succeeded ...")
   // followed by a separate closing question is not a choice, however that question is worded.
   if (!choosingRe.test(leadIn(t.slice(0, items[0].at))) && !itemsAreAnswers(items)) return [];
@@ -117,7 +117,7 @@ export function questionOptions(text: string): { n: number; label: string; text:
   });
 }
 
-/** What a decision card shows (B123), in order: the plain ask, the answer buttons, then a collapsed Details. */
+/** What a decision card shows, in order: the plain ask, the answer buttons, then a collapsed Details. */
 export interface DecisionButton {
   /** The button's text. */
   label: string;
@@ -159,7 +159,7 @@ export function decisionLayout(d: { question: string; summary?: string | null; o
   for (let i = paras.length - 1; i >= 0; i--) if (paras[i].includes('?')) { ask = i; break; }
   const first = ask >= 0 ? paras[ask] : question;
   const rest = ask >= 0 ? paras.filter((_, i) => i !== ask).join('\n\n') : '';
-  // Card 555: the asker's options are shown whenever they are given, with or without a summary (the core accepts a
+  // The asker's options are shown whenever they are given, with or without a summary (the core accepts a
   // question with options and no summary); with no summary the question's asking paragraph comes first.
   if (summary || (d.options ?? []).length) {
     const given = (d.details ?? '').trim();

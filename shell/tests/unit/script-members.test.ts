@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B134 (card 598): script members on the team page. Add member as "Script member" (the script, its version, a settings
+// Script members on the team page. Add member as "Script member" (the script, its version, a settings
 // form made from the script's settings, one binding per requires entry), the tile (script@version, last run, next
 // trigger) and the pane (last runs, saved variables with a Reset each), and a Visitor's read-only view. Fakes only.
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';

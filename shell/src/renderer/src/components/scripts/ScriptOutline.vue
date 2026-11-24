@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { buildOutline } from '../../scripts/api';
 import type { ScriptDocument } from '../../scripts/types';
 
-// The script's outline beside its JSON (B134): settings, requires, variables and the steps, each step with where it
+// The script's outline beside its JSON: settings, requires, variables and the steps, each step with where it
 // goes next (next, then / else, the cases, a loop's body). Read-only; a step's name jumps to it in the JSON.
 const props = defineProps<{ doc: ScriptDocument | null; issueSteps?: readonly string[] }>();
 const emit = defineEmits<{ step: [id: string] }>();

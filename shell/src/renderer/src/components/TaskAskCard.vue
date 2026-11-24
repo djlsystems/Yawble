@@ -15,7 +15,7 @@ import type { IntegrationAsk } from '../../../shared/api';
 defineProps<{ ask: IntegrationAsk; busy?: boolean; pending?: 'once' | 'always' | 'decline' | null }>();
 const emit = defineEmits<{ (e: 'once'): void; (e: 'always'): void; (e: 'decline', note: string): void }>();
 const note = ref('');
-// A phone (B037): the card takes the full width and the note and its buttons stack, each a full-width tap target.
+// A phone: the card takes the full width and the note and its buttons stack, each a full-width tap target.
 const phone = usePhone();
 const short = (s: string | null | undefined) => (s ?? '').slice(0, 8);
 </script>

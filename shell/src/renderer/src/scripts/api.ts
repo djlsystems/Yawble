@@ -4,7 +4,7 @@ import type {
   ScriptSaveResult, ScriptStep, ScriptSummary, ScriptVersion, ScriptVersionRow, Step, TestRunParams, TestRunResult,
 } from './types';
 
-// B134 (SC-4): typed wrappers over the core's scripts.* and schemas.* methods (team docs scripts-rpc.md), and the pure
+// Typed wrappers over the core's scripts.* and schemas.* methods (team docs scripts-rpc.md), and the pure
 // helpers the Scripts place draws with (highlighting, the outline, the jump to a step, the files a run wrote).
 
 type Ref = number | string;

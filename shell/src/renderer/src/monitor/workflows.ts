@@ -27,7 +27,7 @@ export const WorkflowIconPath: Record<WorkflowIcon, string> = {
 export type WorkflowTone = 'done' | 'start' | 'handback' | 'inkDim';
 export interface WorkflowLook { status: WorkflowStatus; tone: WorkflowTone; icon: WorkflowIcon; label: string }
 
-/** The five states in the legend's order (expired, B085: closed by the app after the team's idle days). */
+/** The five states in the legend's order (expired: closed by the app after the team's idle days). */
 export const WorkflowLooks: readonly WorkflowLook[] = [
   { status: 'completed', tone: 'done', icon: 'check', label: 'Completed' },
   { status: 'working', tone: 'start', icon: 'flow', label: 'Being worked' },
@@ -59,7 +59,7 @@ export function workflowLabel(w: Pick<WorkflowSummary, 'id' | 'title'>, max = 28
   return `#${w.id} ${t.length <= max ? t : t.slice(0, max - 1) + '…'}`;
 }
 
-// ---------- the workflow nodes (B080) ----------
+// ---------- the workflow nodes ----------
 
 /**
  * Every open workflow is also a node on the wall, tied by lines to the members working it (its busy list), or to its
@@ -80,7 +80,7 @@ export const NodeIdOnlyZoom = 0.6;
  * A workflow node's label: "#3848 B081 Remote UI: xterm's…", the title's "Backlog item " dropped (a backlog
  * workflow is titled "Backlog item B081 ..."), cut to `max` characters in all. Only "#id" on a phone zoomed out:
  * `phone` is the window being phone-wide (narrowScreen.ts), not the wall's canvas, which is as narrow on a 1280 px
- * desktop with the sidebar and Activity open (card 409).
+ * desktop with the sidebar and Activity open.
  */
 export function workflowNodeLabel(w: Pick<WorkflowSummary, 'id' | 'title'>, opts: { zoom?: number; phone?: boolean; max?: number } = {}): string {
   const { zoom = 1, phone = false, max = NodeLabelMax } = opts;
@@ -112,7 +112,7 @@ function overlaps(a: LabelBox, b: LabelBox): boolean {
 }
 
 /**
- * Where each workflow node's label goes so that none covers another (card 409). The nodes go in rank order (the lower
+ * Where each workflow node's label goes so that none covers another. The nodes go in rank order (the lower
  * the rank the first: the brighter and newer ones); each takes the first of these that is clear of the labels placed
  * before it, of every workflow node's square and of the obstacles (the members' discs and names, and the other teams'
  * code maps, so a label does not run into the next cluster): its full label centred

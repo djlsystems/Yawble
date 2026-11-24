@@ -29,7 +29,7 @@ function fakeApi(answers: Record<string, (params: any) => unknown>, remote = fal
 }
 
 afterEach(() => { stopConfirmStubs(); });
-/** Answers the in-page confirm (card 355) the same every time and records what it was asked. */
+/** Answers the in-page confirm the same every time and records what it was asked. */
 function answerConfirm(answer: boolean) {
   return stubConfirm(() => answer);
 }

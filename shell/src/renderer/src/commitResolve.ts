@@ -2,8 +2,8 @@ import { shallowRef } from 'vue';
 import { GIT_COMMITS_RESOLVE, GIT_COMMITS_RESOLVE_MAX, type CommitMatch, type CommitsResolved, type YawbleApi } from '../../shared/api';
 import { LOCAL_MARK } from './localMark';
 
-// B074: a commit-shaped ID in text (commitView.ts isCommitId) is a link only once the core confirms it is a commit
-// (git.commitsResolve, contract B074). Until then, and for good when it is not one, it is plain text.
+// A commit-shaped ID in text (commitView.ts isCommitId) is a link only once the core confirms it is a commit
+// (git.commitsResolve). Until then, and for good when it is not one, it is plain text.
 //
 // Two ways in, one batch: rendered markdown (markdown.ts) marks each candidate as <span data-commit-id>, and the
 // document's observer (installCommitResolve, App.vue) collects every candidate a render pass adds; CommitText.vue (plain
@@ -83,7 +83,7 @@ export async function flush(): Promise<void> {
 
 const listeners = new Set<() => void>();
 
-/** The commits one ID names in a git.commitsResolve answer (contract B074: results [{id, valid, matches}]); an ID the
+/** The commits one ID names in a git.commitsResolve answer (results [{id, valid, matches}]); an ID the
  * answer leaves out, or a malformed entry, counts as no commit. */
 export function answerMatches(answer: CommitsResolved | null | undefined, id: string): CommitMatch[] {
   const rows = Array.isArray(answer?.results) ? answer!.results : [];

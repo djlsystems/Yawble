@@ -7,7 +7,7 @@ import {
   emptyFilterText, filterChoices, filterSkills, selectionAfterFilter, skillOrigin, skillTag,
 } from '../../src/renderer/src/components/skillsFilter';
 
-// Card 529: Settings > Skills' origin filter (All / Built-in / Team skills) and the skill's text as rendered markdown.
+// Settings > Skills' origin filter (All / Built-in / Team skills) and the skill's text as rendered markdown.
 
 const sk = (o: Partial<Skill>): Skill => ({
   name: 'x', description: 'd', roles: ['member'], body: 'b', kind: 'builtin', teamId: null, team: null, id: null, updatedAt: null, ...o,
@@ -123,7 +123,7 @@ describe('Settings > Skills: the origin filter', () => {
     w.unmount();
   });
 
-  // Card 531 (TesterWren's F1 on card 529): the filter's change waited while editing, and Cancel showed the hidden skill.
+  // The filter's change waited while editing, and Cancel showed the hidden skill.
   it('a filter changed while editing applies at Cancel: the pane shows a skill the list shows', async () => {
     const { api } = fakeApi(() => [manager, retros]);
     const w = mount(SkillsDialog, { props: { api, teams: [team], inline: true }, attachTo: document.body });

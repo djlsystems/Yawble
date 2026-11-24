@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 393: a terminal link asks through confirmDialog (confirm.ts), never the browser's confirm(), and opens only
+// A terminal link asks through confirmDialog (confirm.ts), never the browser's confirm(), and opens only
 // http/https addresses, through the app's external-link path (window.open(url, '_blank')).
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -44,7 +44,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('terminal links (card 393)', () => {
+describe('terminal links', () => {
   it('asks through confirmDialog with the URL, and opens it on OK', async () => {
     const asked = stubConfirm(() => true);
     const open = vi.fn();

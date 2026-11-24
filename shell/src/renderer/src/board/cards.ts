@@ -19,7 +19,7 @@ export const StatusColor: Record<CardStatus, string> = {
 export const StoppedReason = 'stopped by the person';
 
 /**
- * B097: the card's run was stopped by the person, not failed. The core sets the card's own status to "stopped" (lane
+ * The card's run was stopped by the person, not failed. The core sets the card's own status to "stopped" (lane
  * In Progress / To Do, never Needs you). The member's attention alone never decides it: that would also mark the
  * member's older cards. Fallback for cards recorded before that change: status "failed" and the member's state says
  * stopped (attention "stopped", or class "stopped").
@@ -31,16 +31,16 @@ export function cardStopped(card: Pick<BoardCard, 'status' | 'memberState'>): bo
   return m.attention === 'stopped' || (m.attention === 'failed' && m.lastRunFailureClass === 'stopped');
 }
 
-/** The neutral look of a stopped run (B097): the member state's own colour, never the failure red. */
+/** The neutral look of a stopped run: the member state's own colour, never the failure red. */
 export const StoppedLook = { label: 'Stopped', color: 'var(--state-stopped)' } as const;
 
-/** How a card's status reads and its colour: a stopped run reads "Stopped" in the neutral colour (B097). */
+/** How a card's status reads and its colour: a stopped run reads "Stopped" in the neutral colour. */
 export function cardStatusLook(card: Pick<BoardCard, 'status' | 'memberState'>): { label: string; color: string; stopped: boolean } {
   if (cardStopped(card)) return { ...StoppedLook, stopped: true };
   return { label: StatusLabel[card.status], color: StatusColor[card.status], stopped: false };
 }
 
-/** A trail line's kind as shown: the core's "failed" line for a run the person stopped reads "stopped" (B097). */
+/** A trail line's kind as shown: the core's "failed" line for a run the person stopped reads "stopped". */
 export function trailKind(t: { kind: string; text: string }): string {
   return t.kind === 'failed' && t.text.trim().toLowerCase() === StoppedReason ? 'stopped' : t.kind;
 }

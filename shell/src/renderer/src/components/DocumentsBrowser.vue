@@ -114,10 +114,10 @@ async function doUpload(files: FileList | null) {
   await load();
 }
 
-// A phone (B037): the list first; a file opened takes the browser's whole area, and Back returns to the list.
+// A phone: the list first; a file opened takes the browser's whole area, and Back returns to the list.
 const phone = useNarrow();
 const fileShown = computed(() => !!open.value || !!opening.value);
-/** On a phone (B054) the breadcrumb is one row: below the team's top folder it shows "…" (the folder above) and the
+/** On a phone the breadcrumb is one row: below the team's top folder it shows "…" (the folder above) and the
  * folder you are in; the + menu holds New file, New folder, Upload and Open folder. */
 const shownCrumbs = computed<{ label: string; path: string; title?: string }[]>(() => {
   const all = crumbs.value;
@@ -152,7 +152,7 @@ onMounted(() => void load(''));
         </template>
       </nav>
       <span class="grow" />
-      <!-- A phone (B054): the breadcrumb and one + menu (New file, New folder, Upload, Open folder) share one row. -->
+      <!-- A phone: the breadcrumb and one + menu (New file, New folder, Upload, Open folder) share one row. -->
       <span v-if="phone" class="more-wrap">
         <button class="hbtn" data-test="docs-add" title="New file, folder or upload" aria-label="New file, folder or upload" aria-haspopup="menu" :aria-expanded="addOpen"
           :disabled="busy || acting" :aria-busy="doing('upload')" @click="addOpen = !addOpen"><BusyLabel :busy="doing('upload')"><Icon name="plus" :size="18" /></BusyLabel></button>
@@ -273,14 +273,14 @@ onMounted(() => void load(''));
 .small { font-size: 12px; }
 .error { color: var(--bad); }
 .back { align-self: flex-start; border: 0; background: transparent; color: var(--accent); padding: 0 4px; margin-bottom: 6px; min-height: 44px; font-size: 14px; }
-/* A phone (B037): one column, the list or the opened file (with Back), each the browser's full height; tap targets 44 px. */
+/* A phone: one column, the list or the opened file (with Back), each the browser's full height; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .split { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .files, .viewer { max-height: none; }
   .viewer { border: 0; padding: 0; }
   .browser:not(.fill) .viewer { min-height: 60vh; }
   .bar button, .naming button, .naming input, .vh button { min-height: 44px; box-sizing: border-box; }
-  /* One row (B054): the breadcrumb (the folder you are in cut with …) and the + menu; it scrolls away with the page. */
+  /* One row: the breadcrumb (the folder you are in cut with …) and the + menu; it scrolls away with the page. */
   .bar { flex-wrap: nowrap; height: 44px; gap: 4px; }
   .crumbs { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; overflow: hidden; }
   .crumbs a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; box-sizing: border-box; padding: 0 4px; white-space: nowrap; flex: none; }
@@ -292,7 +292,7 @@ onMounted(() => void load(''));
     background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px var(--shadow); }
   .menu button { text-align: left; border: 0; background: transparent; padding: 0 10px; font-size: 13px; }
   .menu button:hover { background: var(--hover); }
-  /* One scroller (B054): the list and an opened file at their own height; the page (or the sheet) scrolls. */
+  /* One scroller: the list and an opened file at their own height; the page (or the sheet) scrolls. */
   .browser.fill { height: auto; display: block; }
   .files, .browser.fill .files { overflow: visible; }
   .viewer, .browser.fill .viewer { overflow: visible; display: block; }

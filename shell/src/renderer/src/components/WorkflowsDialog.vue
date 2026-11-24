@@ -18,8 +18,8 @@ import { openWorkflowsPage, workflowItems, type ItemsOf } from '../workflows/pag
 
 /**
  * A team's workflows, newest activity first: open ones (and who is working them, or that nobody is), completed,
- * closed and expired ones (B085: closed by the app after the team's idle days; their time is their last activity, endedAt). On an open one the person can nudge it (its Manager is told to pick it up), stop what runs in it, or
- * close it (v-change: disabled in a read-only Visitor view, card 305; the core refuses them anyway). Everything is also on the bus, so the Board and the Monitor follow.
+ * closed and expired ones (expired: closed by the app after the team's idle days; their time is their last activity, endedAt). On an open one the person can nudge it (its Manager is told to pick it up), stop what runs in it, or
+ * close it (v-change: disabled in a read-only Visitor view; the core refuses them anyway). Everything is also on the bus, so the Board and the Monitor follow.
  */
 // focus: a workflow to show selected when the list opens (a workflow clicked on the Monitor).
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number; focus?: number | null }>();
@@ -51,7 +51,7 @@ async function load() {
   } catch (e) { error.value = errorText(e); }
 }
 
-// B098 (B104): each workflow's backlog item as a link (workflows.list carries it); asked again only when a workflow it
+// Each workflow's backlog item as a link (workflows.list carries it); asked again only when a workflow it
 // has not looked up appears.
 const items = ref<ItemsOf | null>(null);
 const looked = new Set<number>();
@@ -84,7 +84,7 @@ const confirmAct = () => {
   void run(a.id, a.kind === 'nudge' ? 'bus.nudgeWorkflow' : 'bus.closeWorkflow', a.kind === 'nudge' ? { note: a.text || undefined } : { reason: a.text || undefined });
 };
 
-// Expired (B085): the app closed it after the team's idle days; distinct from completed and from closed by a person.
+// Expired: the app closed it after the team's idle days; distinct from completed and from closed by a person.
 const stateLabel = (w: WorkflowSummary) => w.state === 'open' ? (w.undeclared ? 'Nobody is working it' : 'Open')
   : w.state === 'completed' ? 'Completed' : w.state === 'expired' ? 'Expired' : 'Closed';
 

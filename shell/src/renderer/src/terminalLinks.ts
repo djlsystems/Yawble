@@ -1,7 +1,7 @@
 import type { ILinkHandler } from '@xterm/xterm';
 import { confirmDialog } from './confirm';
 
-// Card 393: a terminal link (OSC 8) asks through the window's own confirm dialog (confirm.ts), never xterm's default
+// A terminal link (OSC 8) asks through the window's own confirm dialog (confirm.ts), never xterm's default
 // handler, which calls the browser's confirm(): on iPad Safari with "Suppress dialogs" that answers false for good, so
 // links in the remote view would never open. On OK the link opens the way the app opens any external link:
 // window.open(url, '_blank'), which on the desktop reaches the main process's window-open handler (shell.openExternal,

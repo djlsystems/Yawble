@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B067 (card 362): the Git dialog's "Tidy…": git.tidyPlan grouped by class, merged and contained pre-selected, one yes
+// The Git dialog's "Tidy…": git.tidyPlan grouped by class, merged and contained pre-selected, one yes
 // deletes through git.deleteBranches (plan, then token), Realign shows old -> new and asks yes (refusal shown), and after
 // each action the plan is read again and what was kept is listed with why.
 import { flushPromises, mount } from '@vue/test-utils';
@@ -227,7 +227,7 @@ describe('TidyPanel', () => {
     expect(w.find('[data-test=tidy-realign-shas]').text()).toBe('5bbb6ba450 → f00dbeef00');
   });
 
-  // B084 (card 396): a coded failure is a plain error, even when its text says "runs" or "running".
+  // A coded failure is a plain error, even when its text says "runs" or "running".
   async function realignError(code: string, message: string) {
     const { api } = fakeApi({ 'git.tidyPlan': () => plan(), 'git.branchRealign': () => { throw coreError(code, message); } });
     const w = mount(TidyPanel, { props: { api, team, mainName: 'payments' } });
@@ -242,7 +242,7 @@ describe('TidyPanel', () => {
     ['git_failed', 'git update-ref failed: hook runs refused the update (exit 1)'],
     ['bad_params', 'member is required; the realign runs on one member branch'],
     ['no_such_member', 'No member Marlo in payments; was the member running elsewhere?'],
-    // B094 (card 427): a failed push or clone is a git failure, not the core saying no.
+    // A failed push or clone is a git failure, not the core saying no.
     ['push_failed', 'git push origin members/payments/marlo failed: remote rejected (a hook runs on the server)'],
     ['clone', 'git clone of payments failed: could not read from the remote repository'],
   ])('Realign answered %s: the error is shown plain, not as "Refused:"', async (code, message) => {

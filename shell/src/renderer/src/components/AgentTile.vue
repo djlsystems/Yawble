@@ -107,7 +107,7 @@ h3 { margin: 0; font-size: 14px; }
 .small { font-size: 12px; }
 .faint { opacity: 0.6; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }
-/* A phone (B037): the buttons wrap onto their own rows at 44 px; a custom agent is not indented. */
+/* A phone: the buttons wrap onto their own rows at 44 px; a custom agent is not indented. */
 @media (max-width: 759.98px) {
   .tile.custom { margin-left: 0; }
   .grow { flex-basis: 100%; height: 0; }

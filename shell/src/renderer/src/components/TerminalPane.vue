@@ -28,7 +28,7 @@ const closeTitle = computed(() => {
   return t && isAgentSession(t.channel) ? 'Stop this session and close the terminal' : 'Close';
 });
 watch(() => terminalPane.target, () => { session.value = null; sawLive.value = false; finished.value = false; });
-// A phone (B057): the pane is the whole screen with one header row - the title, the shown terminal's Formatted / Raw
+// A phone: the pane is the whole screen with one header row - the title, the shown terminal's Formatted / Raw
 // tabs, a ⋯ for the rest (the session's Stop) and ✕ - and the terminal fills the rest.
 const phone = usePhone();
 const uid = useId();
@@ -37,7 +37,7 @@ provide(PaneHeaderKey, slots);
 const moreOpen = ref(false);
 const hasMore = computed(() => !!terminalPane.target?.stop);
 watch(() => terminalPane.target, () => { moreOpen.value = false; });
-// B128: Grok's Terminal / Test session (agent-test:grok) while Grok is not signed in shows why above the screen, so
+// Grok's Terminal / Test session (agent-test:grok) while Grok is not signed in shows why above the screen, so
 // grok's own "No models are available" is not the only clue. The status is the Settings > Agents tile's (agents.detect,
 // DetectedCli.signIn); it is asked again when the target changes, when the window gets focus and every few seconds
 // while it reads not signed in, and the line goes away as soon as it reads anything else. A failed ask shows nothing.
@@ -157,7 +157,7 @@ async function close() {
 .signin .detail { font-size: 12px; opacity: .85; }
 .empty { color: var(--term-muted); padding: 16px; font-size: 13px; }
 .empty code { background: var(--term-btn-on); padding: 0 4px; border-radius: 3px; }
-/* A phone (B057): the whole screen over the page (no side pane crushing the team column), one 44 px header row, the
+/* A phone: the whole screen over the page (no side pane crushing the team column), one 44 px header row, the
    terminal filling the rest and never past the bottom (dvh: what the browser really shows). */
 @media (max-width: 759.98px) {
   .pane.phone { position: fixed; inset: 0; z-index: 9; width: auto; min-width: 0; max-width: none; height: 100dvh; border-left: 0; overflow: hidden; }

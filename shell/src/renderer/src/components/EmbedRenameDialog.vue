@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// B115: a chat's Rename asked by the cloud page around the embedded remote view (embed.ts, chatAction rename). The
+// A chat's Rename asked by the cloud page around the embedded remote view (embed.ts, chatAction rename). The
 // sidebar renames in its row; embedded there is no sidebar, so the new title is asked here. Enter or Rename = the trimmed
 // title, Escape, Cancel or a click on the backdrop = cancel (null).
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';

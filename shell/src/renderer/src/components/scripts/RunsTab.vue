@@ -7,7 +7,7 @@ import type { Run, RunDetail } from '../../scripts/types';
 import LoadingNote from '../LoadingNote.vue';
 import ScriptRunView from './ScriptRunView.vue';
 
-// The Runs tab (B134): every script run across the teams (scripts.runs with no teamId), newest first: team, member,
+// The Runs tab: every script run across the teams (scripts.runs with no teamId), newest first: team, member,
 // script@version, trigger, status and start. A row opens its run view (scripts.run).
 const props = defineProps<{ api: YawbleApi }>();
 const s = scriptsApi(props.api);

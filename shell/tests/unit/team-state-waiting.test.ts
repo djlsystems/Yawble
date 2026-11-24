@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B130: a team whose member has an open needs_decision says "Waiting on you" (the member card's words), not Idle.
+// A team whose member has an open needs_decision says "Waiting on you" (the member card's words), not Idle.
 import { flushPromises, mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import App from '../../src/renderer/src/App.vue';

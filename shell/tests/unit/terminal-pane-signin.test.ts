@@ -5,7 +5,7 @@ import TerminalPane from '../../src/renderer/src/components/TerminalPane.vue';
 import type { DetectedCli, YawbleApi } from '../../src/shared/api';
 import { showChannelTerminal, terminalPane } from '../../src/renderer/src/terminalPane';
 
-// B128 (card 577): Grok's Terminal pane says "Not signed in" (with the detail) while the Settings > Agents tile's sign-in
+// Grok's Terminal pane says "Not signed in" (with the detail) while the Settings > Agents tile's sign-in
 // status (agents.detect, DetectedCli.signIn) reads not signed in, and hides it when it reads signed in. A fake API only.
 function fakeApi(detect: () => DetectedCli[] | Promise<DetectedCli[]>) {
   const calls: string[] = [];

@@ -113,7 +113,7 @@ The values the desktop sends:
 
 - **Places**, in this order, as `id` / `icon`: `newChat` / `newChat`, `concierge` / `concierge`, `teams` / `teams`,
   `backlog` / `backlog`, `workflows` / `workflows`, `board` / `kanban` (label Kanban board), `documents` /
-  `documents`, `monitor` / `monitor`, `scripts` / `scripts` (B134: the Scripts dialog; a Visitor reads the scripts, schemas and runs, and is not offered save, import, delete, schema save or test run), `logs` / `logs`. There is no Terminal and no Help place: an agent's terminal is in
+  `documents`, `monitor` / `monitor`, `scripts` / `scripts` (the Scripts dialog; a Visitor reads the scripts, schemas and runs, and is not offered save, import, delete, schema save or test run), `logs` / `logs`. There is no Terminal and no Help place: an agent's terminal is in
   its pane on the team page, and the version and help links are in Settings, which the cloud's own settings button
   opens. Settings itself is not a place. `badge` is a number: Teams has the
   number of teams, Workflows the number of open workflows; otherwise, or when it is 0, `null`. `active` is the screen
@@ -220,15 +220,15 @@ still an agent's terminal window.
 
 - **computer**: the computer's name, `label` (its name on the cloud site; null when not attached), the Yawble version,
   the OS, when the core started and its uptime, the run slots in use and in total, and the runs waiting for a slot.
-- **teams**: every team, by name, paused or archived. `agents` counts its agents: `running`; work not started, by why it waits (B126:
-  `queued` only in the run queue, for a run slot; `waitsForRun` a hand-back held until the run that sent it ends; `held`
+- **teams**: every team, by name, paused or archived. `agents` counts its agents: `running`; work not started, by why it waits
+  (`queued` only in the run queue, for a run slot; `waitsForRun` a hand-back held until the run that sent it ends; `held`
   the team is paused or archived; `pending` anything else); `idle`, and
   `errored` (idle, and its last run failed; not also counted as idle), and `stopped` (idle agents whose last run the
-  person stopped: also counted in `idle`, never in `errored`; B097). `waitingOnYou` (B130) counts the agents with an
+  person stopped: also counted in `idle`, never in `errored`). `waitingOnYou` counts the agents with an
   open `needs_decision` for the person, whatever their state (older cores leave it out: read absent as 0). `running`
   lists each running agent: member
   name, role (`Manager` or `Member`), what it is doing (its open card on the board, else its last status line) and
-  since when. `waiting` (B126) lists each agent with work not started: `member`, `state` (`queued` | `waits-for-run` |
+  since when. `waiting` lists each agent with work not started: `member`, `state` (`queued` | `waits-for-run` |
   `held` | `pending`, the agent card's state) and `waitsFor` (the member whose run must end first; only with
   `waits-for-run`, else null).
 - **workflows**: every open workflow, and those that ended in the last 24 hours, newest activity first. `item` is the
@@ -248,7 +248,7 @@ still an agent's terminal window.
   `completed` and `closed` are the ended states. Every other state, `failed` included, is open, so the workflow is
   listed however long ago its last activity was.
 
-  `time` (B086) is the workflow's overall time and where it went, the same object as on the `bus.workflows` item:
+  `time` is the workflow's overall time and where it went, the same object as on the `bus.workflows` item:
   `createdAt`, `startedAt`, `endedAt` and `endedHow` (null while open), `open`, `overallMs`, `rebuilt` (from history,
   for workflows from before time accounting) and `breakdown` (`[{ "category", "ms" }]`, whose ms add up to `overallMs`).
   It is null when the app has no board. The timeline itself is `timeline.get { "workflow": id }` (or `{ "card": id }`),
@@ -298,7 +298,7 @@ The event carries the sections that changed, each in full:
   new log entries, as they are written, to this viewer. `default` sends warning and error entries and workflow events;
   `all` sends every level but debug; `debug` sends debug entries (the Diagnostics log's routine lines) too. `team` and `member` narrow it to one team or one member; `app: true` to the entries about
   no team and no member.
-- The activity log carries every audit entry (B101). An entry about a member has its `team` and `member`; one about a
+- The activity log carries every audit entry. An entry about a member has its `team` and `member`; one about a
   whole team has `member: "<Team>"` (the team's name in angle brackets) and its `team`; one about the app itself
   (backlog, settings, the link, backups...) has `team: null, member: "app"`. A member filter takes that member's own
   entries only; a team filter takes its members' entries and its `<Team>` entries. `logs.query {source: "activity"}`

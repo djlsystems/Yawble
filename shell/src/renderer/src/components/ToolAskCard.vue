@@ -23,7 +23,7 @@ import { usePhone } from '../phone';
  */
 const props = defineProps<{ ask: ToolAsk; api: YawbleApi }>();
 const emit = defineEmits<{ installed: [r: ToolInstallResult]; answered: [r: ToolInstallResult | ToolNotNowResult] }>();
-// A phone (B037): the card takes the full width and its buttons stack, each a full-width tap target.
+// A phone: the card takes the full width and its buttons stack, each a full-width tap target.
 const phone = usePhone();
 
 const name = computed(() => props.ask.displayName || props.ask.tool);

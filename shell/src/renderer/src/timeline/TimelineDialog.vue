@@ -10,7 +10,7 @@ import {
   formatShort, isoMs, liveOverallMs, markerLabel, placeBreakLabels, shares, TimeCategories, timelineTarget, useNow, type TimelineTarget,
 } from './time';
 
-// B086: the one Timeline dialog (mounted once in App.vue, like the Code dialog), opened by clicking an overall time on a
+// The one Timeline dialog (mounted once in App.vue, like the Code dialog), opened by clicking an overall time on a
 // card or a workflow row (time.ts openTimeline). It asks the core for timeline.get { card } | { workflow } and shows:
 // the overall time created -> ended (or open) and how it ended; the planned / started line; the breakdown, each
 // category's time and share, adding up; a "rebuilt from history" note; and the timeline itself - one row per card (a
@@ -292,7 +292,7 @@ h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-soft);
 .lane.summary .track { height: 22px; }
 .lane.summary { padding-bottom: 6px; border-bottom: 1px dashed var(--line); }
 /* .band and .mk keep their own sizes at phone width: min-width / min-height opt them out of styles.css's 44 px touch
-   minimum for buttons (card 433, F1); the track and the marker row are the tap targets' size there. */
+   minimum for buttons; the track and the marker row are the tap targets' size there. */
 .band { position: absolute; top: 0; bottom: 0; min-width: 2px; min-height: 0; padding: 0; border: 0; border-radius: 2px; background: var(--c); cursor: pointer; }
 .band:hover, .band:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; z-index: 1; }
 .marks { position: absolute; inset: 0; pointer-events: none; }

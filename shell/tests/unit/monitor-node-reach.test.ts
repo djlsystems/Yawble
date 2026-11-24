@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mapBeatsWorkflow, MinHitPx, nearestNodeAt } from '../../src/renderer/src/monitor/scene';
 
 /**
- * Card 398 (B087): a map node's tap reach has a floor of MinHitPx screen px at any zoom, so at the 375 px wall's zoom of
+ * A map node's tap reach has a floor of MinHitPx screen px at any zoom, so at the 375 px wall's zoom of
  * about 0.2 a team hub (14 world units, about 3 screen px) can still be tapped; the nearest node in reach wins.
  */
 type N = { key: string; kind: string; r: number; x: number; y: number };
@@ -11,7 +11,7 @@ const member: N = { key: 'member:payments/developerines', kind: 'member', r: 12,
 /** The world distance that is `px` screen px at zoom k. */
 const px = (p: number, k: number) => p / k;
 
-describe('nearestNodeAt (card 398)', () => {
+describe('nearestNodeAt', () => {
   it('is a 22 screen px floor', () => expect(MinHitPx).toBe(22));
 
   it('at zoom 0.2: a tap 15 screen px from the hub hits it; 30 screen px does not', () => {
@@ -55,7 +55,7 @@ describe('nearestNodeAt (card 398)', () => {
   });
 });
 
-describe('mapBeatsWorkflow (card 411, F4)', () => {
+describe('mapBeatsWorkflow', () => {
   const wf = { r: 10, x: 0, y: 0 };
   it('a workflow square under its map folder still takes the hover and the click on the square', () => {
     // The folder a few world px off the square's middle: a point on the square goes to the workflow, even nearer the folder.
