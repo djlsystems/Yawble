@@ -1,6 +1,6 @@
-import type { ApiRow, Connection, YawbleApi } from '../../../shared/api';
+import type { ApiRow, YawbleApi } from '../../../shared/api';
 import type {
-  Check, ExportResult, Run, RunDetail, SchemaSaveResult, SchemaSummary, SchemaVersion, ScriptDeleteResult, ScriptDocument,
+  Check, ExportResult, Run, RunDetail, SchemaSaveResult, SchemaSummary, SchemaUsage, SchemaVersion, ScriptDeleteResult, ScriptDocument,
   ScriptSaveResult, ScriptStep, ScriptSummary, ScriptVersion, ScriptVersionRow, Step, TestRunParams, TestRunResult,
 } from './types';
 
@@ -25,24 +25,38 @@ export const scriptsApi = (api: YawbleApi) => ({
   schema: (name: string, version?: number) => api.call<SchemaVersion>('schemas.get', version === undefined ? { name } : { name, version }),
   schemaSave: (name: string, schema: Record<string, unknown> | string, description?: string) =>
     api.call<SchemaSaveResult>('schemas.save', description === undefined ? { name, schema } : { name, description, schema }),
+  /** Where a schema is used: each script's latest version, with the variables typed with it and the steps that read it. */
+  schemaUsage: (name: string) => api.call<SchemaUsage>('schemas.usage', { name }),
+  /**
+   * What a script can call: the person's integrations with their actions and typed params, and the expression functions.
+   * The result is the designer's ScriptCatalog (its type lives with the designer: pass it as T).
+   */
+  catalog: <T = unknown>(teamId?: number) => api.call<T>('scripts.catalog', teamId === undefined ? {} : { teamId }),
+  /** An alias document rewritten to real integration names (nothing saved); T is the designer's UseRealNamesResult. */
+  useRealNames: <T = unknown>(document: ScriptDocument | string, bindings?: Record<string, string>) =>
+    api.call<T>('scripts.useRealNames', bindings === undefined ? { document } : { document, bindings }),
 });
 export type ScriptsApi = ReturnType<typeof scriptsApi>;
 
 /** An integration a requires entry can be bound to: its name (what bindings carry) and its kind (api, email). */
 export interface BindingChoice { name: string; kind: string }
 
+/** An Email integration as integrations.emailList gives it. */
+interface EmailIntegrationRow { name: string; enabledAll: boolean; teamIds: number[] }
+
 /**
- * The integrations of a team a script's requires can be bound to: the web APIs offered to the team (kind api) and the
- * email accounts (kind email, by their Connection's name). Either list failing leaves the other.
+ * The integrations turned on for a team that a script's step can use, or a member can use in place of one: the web APIs
+ * (kind api) and the Email integrations (kind email), by the names Settings > Integrations shows. Either list failing
+ * leaves the other.
  */
 export async function teamBindingChoices(api: YawbleApi, teamId: number): Promise<BindingChoice[]> {
-  const [apis, conns] = await Promise.all([
+  const [apis, emails] = await Promise.all([
     api.call<ApiRow[]>('integrations.apiList', {}).catch(() => [] as ApiRow[]),
-    api.call<Connection[]>('integrations.connections', {}).catch(() => [] as Connection[]),
+    api.call<EmailIntegrationRow[]>('integrations.emailList', {}).catch(() => [] as EmailIntegrationRow[]),
   ]);
   return [
-    ...(apis ?? []).filter((a) => a.kind === 'http' && (a.all || a.teams.includes(teamId))).map((a) => ({ name: a.name, kind: 'api' })),
-    ...(conns ?? []).filter((c) => (c.kind as string) === 'email').map((c) => ({ name: c.name, kind: 'email' })),
+    ...(Array.isArray(apis) ? apis : []).filter((a) => a.kind === 'http' && (a.all || a.teams.includes(teamId))).map((a) => ({ name: a.name, kind: 'api' })),
+    ...(Array.isArray(emails) ? emails : []).filter((e) => e.enabledAll || (e.teamIds ?? []).includes(teamId)).map((e) => ({ name: e.name, kind: 'email' })),
   ];
 }
 
@@ -250,9 +264,10 @@ export const BLANK_SCRIPT: ScriptDocument = {
 };
 
 /**
- * The "Inbox SMS alert" template (on the pinned email and api contracts): each new email's subject
- * texted to a list of phones. The same document as the example in the Concierge's scripts skill: the api action is the operation's id,
- * email list returns EmailList, and the poll saves the last message's id (docs/connections-and-integrations.md, the poll pattern).
+ * The "Inbox SMS alert" template: each new email's subject texted to a list of phones. Its steps name the integrations as
+ * Settings > Integrations shows them ("Support inbox", an Email integration, and "Twilio", a web API); a member whose
+ * integrations have other names replaces each in its settings. The api action is the operation's id, email list returns
+ * EmailList, and the poll saves the last message's id (docs/connections-and-integrations.md, the poll pattern).
  */
 export const INBOX_SMS_ALERT: ScriptDocument = {
   format: 'yawble-script/1',
@@ -267,8 +282,8 @@ export const INBOX_SMS_ALERT: ScriptDocument = {
     { name: 'since', type: 'datetime', label: 'First run: mail received after', default: '2026-11-20T00:00:00Z' },
   ],
   requires: [
-    { name: 'mail', kind: 'email', actions: ['list'] },
-    { name: 'sms', kind: 'api', actions: ['CreateMessage'] },
+    { name: 'Support inbox', kind: 'email', actions: ['list'] },
+    { name: 'Twilio', kind: 'api', actions: ['CreateMessage'] },
   ],
   variables: [
     { name: 'lastId', type: 'string', scope: 'saved' },
@@ -278,13 +293,13 @@ export const INBOX_SMS_ALERT: ScriptDocument = {
   ],
   start: 'list',
   steps: [
-    { id: 'list', type: 'integration', use: 'mail', action: 'list',
+    { id: 'list', type: 'integration', use: 'Support inbox', action: 'list',
       args: { folder: '{settings.folder}', after: '{vars.lastId}', since: '{settings.since}', max: 200 }, into: 'res', next: 'any' },
     { id: 'any', type: 'if', when: { left: '{count(vars.res.messages)}', op: 'gt', right: 0 }, then: 'each', else: 'done' },
     { id: 'each', type: 'forEach', items: '{vars.res.messages}', as: 'm', body: 'note', then: 'keep' },
     { id: 'note', type: 'file.appendLine', path: 'run.log', text: '{now()} email: {m.subject} ({m.from.address}), received {m.receivedAt}', next: 'phones' },
     { id: 'phones', type: 'forEach', items: '{settings.recipients}', as: 'to', body: 'text', then: null },
-    { id: 'text', type: 'integration', use: 'sms', action: 'CreateMessage',
+    { id: 'text', type: 'integration', use: 'Twilio', action: 'CreateMessage',
       args: { To: '{to}', From: '{settings.fromNumber}', Body: 'New email: {m.subject} ({m.from.address})' }, next: 'count' },
     { id: 'count', type: 'set', var: 'sent', value: '{vars.sent + 1}', next: null },
     { id: 'keep', type: 'set', var: 'last', value: '{last(vars.res.messages)}', next: 'mark' },

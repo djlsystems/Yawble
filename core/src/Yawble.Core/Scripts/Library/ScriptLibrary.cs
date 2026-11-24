@@ -67,12 +67,18 @@ public sealed class ScriptLibrary : IScriptSchemaLookup
     private readonly IReadOnlyList<string> _builtInNames;
     private readonly TimeProvider _clock;
 
+    /// <summary>The person's integrations: a step's <c>use</c> names one of them, and its requires entry is derived from it.</summary>
+    public IScriptIntegrationDirectory Integrations { get; }
+
     /// <param name="catalog">The action catalog a script's requires are checked against (read at every check: SC-2/SC-3 fill it).</param>
     /// <param name="check">Null: <see cref="ScriptChecker.Check"/>.</param>
     /// <param name="builtIns">Null: <see cref="BuiltInSchemas.Lookup"/>; <paramref name="builtInNames"/> null: <see cref="BuiltInSchemas.Names"/>.</param>
+    /// <param name="integrations">Null: none (every name a step uses must then be in the document's requires).</param>
     public ScriptLibrary(string connectionString, Func<IScriptActionCatalog> catalog, ScriptCheck? check = null,
-        IScriptSchemaLookup? builtIns = null, IReadOnlyList<string>? builtInNames = null, TimeProvider? clock = null)
+        IScriptSchemaLookup? builtIns = null, IReadOnlyList<string>? builtInNames = null, TimeProvider? clock = null,
+        IScriptIntegrationDirectory? integrations = null)
     {
+        Integrations = integrations ?? NoScriptIntegrations.Instance;
         _connectionString = connectionString;
         _catalog = catalog;
         _check = check ?? ScriptChecker.Check;
@@ -256,9 +262,10 @@ public sealed class ScriptLibrary : IScriptSchemaLookup
         {
             try
             {
+                var warnings = DeriveRequires(json);
                 var doc = ScriptDocument.Parse(json.ToJsonString());
                 var result = _check(doc, this, _catalog());
-                check = CheckJson(result.Ok, result.Issues, result.SchemaReferences);
+                check = CheckJson(result.Ok, result.Issues, result.SchemaReferences, warnings);
             }
             catch (Exception e) when (e is not OutOfMemoryException and not ScriptLibraryException)
             {
@@ -268,12 +275,71 @@ public sealed class ScriptLibrary : IScriptSchemaLookup
         return (json, key, name.Trim(), description.Trim(), check);
     }
 
-    public static JsonObject CheckJson(bool ok, IEnumerable<ScriptCheckIssue> issues, IEnumerable<ScriptSchemaReference> references) => new()
+    /// <summary>The check's JSON: ok, issues, schemaReferences, and warnings (they never make a version a draft).</summary>
+    public static JsonObject CheckJson(bool ok, IEnumerable<ScriptCheckIssue> issues, IEnumerable<ScriptSchemaReference> references,
+        IEnumerable<ScriptCheckIssue>? warnings = null) => new()
     {
         ["ok"] = ok,
-        ["issues"] = new JsonArray(issues.Select(i => (JsonNode?)new JsonObject { ["stepId"] = i.StepId, ["code"] = i.Code, ["message"] = i.Message }).ToArray()),
+        ["issues"] = Issues(issues),
         ["schemaReferences"] = new JsonArray(references.Select(x => (JsonNode?)new JsonObject { ["schema"] = x.Schema, ["fieldPath"] = x.FieldPath, ["stepId"] = x.StepId }).ToArray()),
+        ["warnings"] = Issues(warnings ?? []),
     };
+
+    private static JsonArray Issues(IEnumerable<ScriptCheckIssue> issues) =>
+        new(issues.Select(i => (JsonNode?)new JsonObject { ["stepId"] = i.StepId, ["code"] = i.Code, ["message"] = i.Message }).ToArray());
+
+    /// <summary>The warning code of a document whose requires did not match its steps (the derived one replaced it).</summary>
+    public const string StaleRequires = "stale-requires";
+
+    /// <summary>
+    /// Replaces the document's requires with the one its steps give (<see cref="ScriptRequires.Derive"/>): one entry per integration the
+    /// steps use, its kind and the actions they call. A requires that differed is a warning, never an issue.
+    /// </summary>
+    private List<ScriptCheckIssue> DeriveRequires(JsonObject json)
+    {
+        if (json["steps"] is not JsonArray) return [];
+        var derived = ScriptRequires.Derive(json, Integrations);
+        if (!derived.Stale) return [];
+        var before = json["requires"] is JsonArray old ? Describe(old) : "none";
+        json["requires"] = derived.Requires;
+        return [new ScriptCheckIssue(null, StaleRequires,
+            $"requires did not match the steps ({before}); it is now what the steps use: {Describe(derived.Requires)}")];
+
+        static string Describe(JsonArray requires) => requires.Count == 0 ? "none" : string.Join("; ", requires.OfType<JsonObject>().Select(r =>
+            $"{r["name"]} ({r["kind"]}: {string.Join(", ", (r["actions"] as JsonArray ?? []).Select(a => a?.ToString()))})"));
+    }
+
+    /// <summary>
+    /// The document with its aliases replaced by real integration names: each requires name that is not an integration becomes the one
+    /// <paramref name="bindings"/> binds it to (or stays, listed in Unresolved, when there is none), in requires and in every step's use;
+    /// requires is then derived again. Renamed maps each alias to its real name.
+    /// </summary>
+    public (JsonObject Document, IReadOnlyDictionary<string, string> Renamed, IReadOnlyList<string> Unresolved) UseRealNames(string documentText,
+        IReadOnlyDictionary<string, string>? bindings)
+    {
+        JsonObject json;
+        try { json = JsonNode.Parse(documentText) as JsonObject ?? throw new ScriptLibraryException("bad_script", "a script document is a JSON object"); }
+        catch (JsonException e) { throw new ScriptLibraryException("bad_script", "the script is not JSON: " + e.Message); }
+        var renamed = new Dictionary<string, string>(StringComparer.Ordinal);
+        var unresolved = new List<string>();
+        var uses = (json["steps"] as JsonArray ?? []).OfType<JsonObject>()
+            .Where(s => Text(s, "type") == "integration").Select(s => Text(s, "use")).OfType<string>();
+        var names = (json["requires"] as JsonArray ?? []).OfType<JsonObject>().Select(r => Text(r, "name")).OfType<string>()
+            .Concat(uses).Distinct(StringComparer.Ordinal).ToList();
+        foreach (var name in names)
+        {
+            if (Integrations.Find(name) is not null) continue;
+            var target = bindings is not null && bindings.TryGetValue(name, out var b) && !string.IsNullOrWhiteSpace(b) ? Integrations.Find(b)?.Name ?? b.Trim() : null;
+            if (target is null) { unresolved.Add(name); continue; }
+            renamed[name] = target;
+        }
+        foreach (var r in (json["requires"] as JsonArray ?? []).OfType<JsonObject>())
+            if (Text(r, "name") is { } n && renamed.TryGetValue(n, out var real)) r["name"] = real;
+        foreach (var s in (json["steps"] as JsonArray ?? []).OfType<JsonObject>())
+            if (Text(s, "type") == "integration" && Text(s, "use") is { } u && renamed.TryGetValue(u, out var real)) s["use"] = real;
+        if (json["steps"] is JsonArray) json["requires"] = ScriptRequires.Derive(json, Integrations).Requires;
+        return (json, renamed, unresolved);
+    }
 
     // ------------------------------------------------------------------ schemas
 
@@ -303,22 +369,47 @@ public sealed class ScriptLibrary : IScriptSchemaLookup
         {
             var builtIn = _builtIns.Find(_builtInNames.First(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase)))
                 ?? throw new ScriptLibraryException("not_found", $"there is no schema '{name}'");
-            return new SchemaVersionRow(builtIn.Name, "built-in", 1, true, SchemaJsonOf(builtIn), null);
+            var description = builtIn.Schema["description"] is JsonValue d && d.TryGetValue<string>(out var text) ? text : "built-in";
+            return new SchemaVersionRow(builtIn.Name, description, 1, true, (JsonObject)builtIn.Schema.DeepClone(), null);
         }
         return StoredSchema(name, version) ?? throw new ScriptLibraryException("not_found",
             version is null ? $"there is no schema '{name}'" : $"schema '{name}' has no version {version}");
     }
 
-    /// <summary>A built-in schema's JSON: its Json property when it has one (read by reflection, so the seam stays small).</summary>
-    private static JsonObject SchemaJsonOf(ScriptSchema schema)
+    /// <summary>A script that uses a schema: the variables typed with it and the steps that read its fields (its latest version).</summary>
+    public sealed record SchemaUse(long Id, string Name, int Version, IReadOnlyList<string> Variables, IReadOnlyList<string> Steps);
+
+    /// <summary>
+    /// The scripts whose latest version uses the schema <paramref name="name"/>: each variable whose type names it (also in list&lt;...&gt;)
+    /// and each step its check found reading it. A built-in or a saved schema; a name that is neither is not_found.
+    /// </summary>
+    public IReadOnlyList<SchemaUse> SchemaUsage(string name)
     {
-        var prop = schema.GetType().GetProperty("Json") ?? schema.GetType().GetProperty("Document");
-        return prop?.GetValue(schema) switch
+        var n = (name ?? "").Trim();
+        if (!IsBuiltIn(n) && StoredSchema(n, null) is null) throw new ScriptLibraryException("not_found", $"there is no schema '{n}'");
+        if (IsBuiltIn(n)) n = _builtInNames.First(b => string.Equals(b, n, StringComparison.OrdinalIgnoreCase));
+        var typeName = new Regex($@"(?<![A-Za-z0-9_]){Regex.Escape(n)}(?![A-Za-z0-9_])", RegexOptions.CultureInvariant);
+        var list = new List<SchemaUse>();
+        using var c = Open();
+        using var cmd = Cmd(c, """
+            SELECT s.id, v.name, v.version, v.document, v.check_result FROM script_versions v JOIN scripts s ON s.id = v.script_id
+            WHERE v.version = s.latest_version ORDER BY v.name COLLATE NOCASE, s.id;
+            """);
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
         {
-            JsonObject o => (JsonObject)o.DeepClone(),
-            string s when JsonNode.Parse(s) is JsonObject o => o,
-            _ => new JsonObject { ["type"] = "object" },
-        };
+            var doc = JsonNode.Parse(r.GetString(3)) as JsonObject;
+            var check = JsonNode.Parse(r.GetString(4)) as JsonObject;
+            var variables = (doc?["variables"] as JsonArray ?? []).OfType<JsonObject>()
+                .Where(v => Text(v, "type") is { } t && typeName.IsMatch(t)).Select(v => Text(v, "name")).OfType<string>().Distinct().ToList();
+            var steps = (check?["schemaReferences"] as JsonArray ?? []).OfType<JsonObject>()
+                .Where(x => string.Equals(x["schema"]?.GetValue<string>(), n, StringComparison.Ordinal))
+                .Select(x => x["stepId"] is JsonValue sv && sv.TryGetValue<string>(out var id) ? id : null).OfType<string>().Distinct().ToList();
+            var usedByDeclaration = (check?["schemaReferences"] as JsonArray ?? []).OfType<JsonObject>()
+                .Any(x => string.Equals(x["schema"]?.GetValue<string>(), n, StringComparison.Ordinal));
+            if (variables.Count > 0 || steps.Count > 0 || usedByDeclaration) list.Add(new SchemaUse(r.GetInt64(0), r.GetString(1), r.GetInt32(2), variables, steps));
+        }
+        return list;
     }
 
     private SchemaVersionRow? StoredSchema(string name, int? version)

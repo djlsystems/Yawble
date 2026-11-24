@@ -111,7 +111,7 @@ describe('the Flowchart tab', () => {
     expect(node(w, 'any').classes()).toContain('diamond');
     expect(node(w, 'any').get('[data-test=flow-node-detail]').text()).toBe('{count(vars.res.messages)} gt 0');
     expect(node(w, 'list').attributes('data-kind')).toBe('integration');
-    expect(node(w, 'list').get('[data-test=flow-node-detail]').text()).toBe('mail.list');
+    expect(node(w, 'list').get('[data-test=flow-node-detail]').text()).toBe('Support inbox.list');
     expect(node(w, 'each').get('[data-test=flow-node-detail]').text()).toBe('{vars.res.messages} as m');
     expect(node(w, 'note').attributes('data-kind')).toBe('file');
     expect(node(w, 'count').attributes('data-kind')).toBe('set');
@@ -173,7 +173,7 @@ describe('the Flowchart tab', () => {
     await w.get('[data-test=json-text]').setValue(pretty(edited));
     await w.get('[data-test=editor-tab-flowchart]').trigger('click');
     await flushPromises();
-    expect(node(w, 'list').get('[data-test=flow-node-detail]').text()).toBe('mail.search');
+    expect(node(w, 'list').get('[data-test=flow-node-detail]').text()).toBe('Support inbox.search');
   });
 
   it('the palette adds a step of the chosen type with a unique id and opens it', async () => {

@@ -27,6 +27,13 @@ const summary = (key: string, extra: Partial<ScriptSummary> = {}): ScriptSummary
   id: key === 'inbox-sms-alert' ? 1 : 2, key, name: key === 'inbox-sms-alert' ? 'Inbox SMS alert' : 'Daily note', description: `About ${key}`,
   latestVersion: 3, runnableVersion: 2, draft: false, updatedAt: at, usedBy: [], ...extra,
 });
+/** The template in the alias form (requires names each member binds), as older scripts and the live InboxWatcher are: it keeps working. */
+const ALIAS: any = ((d: any) => {
+  const map: Record<string, string> = { 'Support inbox': 'mail', Twilio: 'sms' };
+  d.requires = d.requires.map((r: any) => ({ ...r, name: map[r.name] ?? r.name }));
+  d.steps = d.steps.map((s: any) => (typeof s.use === 'string' ? { ...s, use: map[s.use] ?? s.use } : s));
+  return d;
+})(JSON.parse(JSON.stringify(INBOX_SMS_ALERT)));
 const coded = (code: string, message: string, data?: unknown) => Object.assign(new Error(message), { code, data });
 
 interface Call { method: string; params: any }
@@ -37,7 +44,7 @@ function fakeApi(over: Record<string, (p: any) => unknown> = {}) {
       summary('inbox-sms-alert', { usedBy: [{ teamId: 1, team: 'Support', memberId: 9, member: 'InboxWatcher', version: null }] }),
       summary('daily-note', { draft: true, latestVersion: 1, runnableVersion: null }),
     ],
-    'scripts.get': (p) => ({ id: 1, key: String(p.script), name: 'Inbox SMS alert', description: '', version: p.version ?? 3, ok: true, document: INBOX_SMS_ALERT, check: { ok: true, issues: [], schemaReferences: [] }, createdAt: at }),
+    'scripts.get': (p) => ({ id: 1, key: String(p.script), name: 'Inbox SMS alert', description: '', version: p.version ?? 3, ok: true, document: ALIAS, check: { ok: true, issues: [], schemaReferences: [] }, createdAt: at }),
     'scripts.versions': () => [{ version: 3, ok: true, createdAt: at }, { version: 2, ok: true, createdAt: at }, { version: 1, ok: false, createdAt: at }],
     'scripts.save': () => ({ id: 1, key: 'inbox-sms-alert', version: 4, ok: false, draft: true, check: { ok: false, schemaReferences: [], issues: [
       { stepId: 'text', code: 'unknown_ref', message: 'm.subjekt is not a field of EmailMessage' },
@@ -60,6 +67,7 @@ function fakeApi(over: Record<string, (p: any) => unknown> = {}) {
     'schemas.save': () => { throw coded('schema_breaks', 'Breaks inbox-sms-alert v3 step text (m.category)', { breaks: [{ scriptId: 1, script: 'inbox-sms-alert', version: 3, stepId: 'text', fieldPath: 'category' }] }); },
     'integrations.apiList': () => [{ kind: 'http', name: 'Twilio', all: false, teams: [1] }, { kind: 'http', name: 'Elsewhere', all: false, teams: [2] }],
     'integrations.connections': () => [{ id: 5, name: 'Support mail', kind: 'email' }],
+    'integrations.emailList': () => [{ id: 3, name: 'Support mail', kind: 'email', enabledAll: false, teamIds: [1] }, { id: 4, name: 'Ops mail', kind: 'email', enabledAll: false, teamIds: [2] }],
     ...over,
   };
   const api = {
@@ -258,7 +266,7 @@ describe('the Scripts dialog', () => {
     await rowOf(w, 'inbox-sms-alert').get('[data-test=script-open]').trigger('click');
     await flushPromises();
     // Unsaved: fromNumber renamed to sender, a new setting and a new requires entry.
-    const edited = JSON.parse(JSON.stringify(INBOX_SMS_ALERT));
+    const edited = JSON.parse(JSON.stringify(ALIAS));
     edited.settings = edited.settings.map((s: any) => (s.name === 'fromNumber' ? { ...s, name: 'sender' } : s));
     edited.settings.push({ name: 'extra', type: 'string', label: 'Unsaved setting' });
     edited.requires.push({ name: 'files', kind: 'api', actions: ['Get'] });
@@ -289,7 +297,7 @@ describe('the Scripts dialog', () => {
     await w.get('[data-test=editor-tab-test]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test=test-setting-extra]').exists()).toBe(false);
-    const edited = JSON.parse(JSON.stringify(INBOX_SMS_ALERT));
+    const edited = JSON.parse(JSON.stringify(ALIAS));
     edited.settings.push({ name: 'extra', type: 'string', label: 'Saved setting', default: 'x' });
     edited.requires.push({ name: 'files', kind: 'api', actions: ['Get'] });
     await w.get('[data-test=editor-tab-json]').trigger('click');
@@ -328,9 +336,11 @@ describe('the Scripts dialog', () => {
     await flushPromises();
     expect(w.find('[data-test=schema-readonly]').exists()).toBe(true);
     expect(w.find('[data-test=schema-save]').exists()).toBe(false);
+    await w.get('[data-test=schema-view-json]').trigger('click');
     expect(w.get('[data-test=json-text]').attributes('readonly')).toBeDefined();
     await w.get('[data-test=schema-row][data-name=Triage]').trigger('click');
     await flushPromises();
+    await w.get('[data-test=schema-view-json]').trigger('click');
     expect(w.get('[data-test=json-text]').attributes('readonly')).toBeUndefined();
     await w.get('[data-test=schema-save]').trigger('click');
     await flushPromises();
@@ -354,7 +364,7 @@ describe('the Scripts dialog', () => {
 });
 
 describe('the test run', () => {
-  const mountForm = (api: YawbleApi) => mount(ScriptTestRun, { props: { api, script: { id: 1, key: 'inbox-sms-alert' }, version: 3, doc: INBOX_SMS_ALERT, teams }, attachTo: document.body });
+  const mountForm = (api: YawbleApi) => mount(ScriptTestRun, { props: { api, script: { id: 1, key: 'inbox-sms-alert' }, version: 3, doc: ALIAS, teams }, attachTo: document.body });
 
   it('the form: team, settings from the script (defaults filled), a binding per requires entry over the team\'s integrations, dry run on', async () => {
     const f = fakeApi();
@@ -475,6 +485,7 @@ describe('a Visitor (read-only)', () => {
     await w.get('[data-test=schema-row][data-name=Triage]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test=schema-save]').exists()).toBe(false);
+    await w.get('[data-test=schema-view-json]').trigger('click');
     expect(w.get('[data-test=json-text]').attributes('readonly')).toBeDefined();
     await w.get('[data-test=scripts-tab-runs]').trigger('click');
     await flushPromises();
@@ -517,7 +528,7 @@ describe('the helpers', () => {
 it('card 605 independent saved version reproduction', async () => {
  const f = fakeApi(); const w = await dialog(f.api);
  await rowOf(w, 'inbox-sms-alert').get('[data-test=script-open]').trigger('click'); await flushPromises();
- const d: any = JSON.parse(JSON.stringify(INBOX_SMS_ALERT));
+ const d: any = JSON.parse(JSON.stringify(ALIAS));
  d.settings = d.settings.filter((s: any) => s.name !== 'folder');
  d.settings.push({ name: 'fresh', type: 'string', default: 'new-value' });
  d.requires.push({ name: 'extraMail', kind: 'email', actions: ['list'] }); d.trigger.accepts = ['cron'];
