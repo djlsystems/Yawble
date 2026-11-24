@@ -221,6 +221,17 @@ public sealed class B139ScriptToolsTests : IAsyncLifetime
     // ------------------------------------------------------------------ integration_action_allow
 
     [Fact]
+    public async Task ActionAllow_ChangedActionVoidsAndConsumesTheYes_WithoutWritingARule()
+    {
+        var token = Token(await Ok(ScriptTools.IntegrationActionAllow, Allow()));
+        Assert.NotEmpty(token);
+        Assert.StartsWith("NOT DONE. THE LIST CHANGED", await Ok(ScriptTools.IntegrationActionAllow, With(Allow("ListMessages"), "confirm", token)));
+        Assert.StartsWith("NOT DONE. That confirmation is unknown", await Ok(ScriptTools.IntegrationActionAllow, With(Allow(), "confirm", token)));
+        Assert.Empty(_r.Rules());
+        Assert.Equal(0, _r.Count("integrations.saveChecklist"));
+    }
+
+    [Fact]
     public async Task AllowingAnAction_IsAsked_AndRefusedWithoutTheYes()
     {
         Assert.Equal("ask", await _r.CatalogDecision(_r.Alpha, "CreateMessage"));
