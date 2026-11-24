@@ -84,7 +84,8 @@ public sealed partial class BusEngine
         var manager = m.Role == "manager";
         changes.RecordSubjectChange(manager ? Agents.Profiles.AgentChangeLog.KindManagerAgent : Agents.Profiles.AgentChangeLog.KindMemberAgent,
             manager ? Agents.Profiles.AgentChangeLog.ManagerSubject(m.Team) : Agents.Profiles.AgentChangeLog.MemberSubject(m.Team, m.Name),
-            new Agents.Profiles.AgentSetting("", ""), new Agents.Profiles.AgentSetting(m.Cli, m.Model), how, actor);
+            new Agents.Profiles.AgentSetting("", ""), new Agents.Profiles.AgentSetting(m.Cli, m.Model), how, actor,
+            m.HireRole is { } role ? Agents.Profiles.AgentChangeLog.RoleDetail(role) : null);
     }
 
     private Task<MemberRow> AddMemberCoreAsync(long teamId, string name, string cli, CancellationToken ct) =>
@@ -300,19 +301,21 @@ public sealed partial class BusEngine
     /// <summary>
     /// The Manager hires a member into its own team: a new agent with its name, CLI and standing
     /// instructions (its job on the team). The name must be free in the team and usable as a folder name; the CLI is
-    /// the Manager's own when none is given. Only a Manager may hire, and only into its own team.
+    /// the Manager's own when none is given. Only a Manager may hire, and only into its own team. When the team has a hire
+    /// list, <paramref name="role"/> must be one of its roles and the agent, model and job are that row's (HireTerms).
     /// </summary>
-    internal async Task<MemberRow> HireAsync(RunContext run, string name, string? cli, string? instructions, CancellationToken ct)
+    internal async Task<MemberRow> HireAsync(RunContext run, string? name, string? cli, string? instructions, CancellationToken ct, string? role = null)
     {
-        var row = await HireCoreAsync(run, name, cli, instructions, ct);
+        var row = await HireCoreAsync(run, name, cli, instructions, role, ct);
         LogFirstAgent(row, Agents.Profiles.AgentChangeLog.HowManagerHire, new Provenance.Actor(Provenance.Actor.Agent, run.Member.Qualified));
         return row;
     }
 
-    private Task<MemberRow> HireCoreAsync(RunContext run, string name, string? cli, string? instructions, CancellationToken ct) =>
+    private Task<MemberRow> HireCoreAsync(RunContext run, string? asked, string? askedCli, string? askedJob, string? role, CancellationToken ct) =>
         WithGate(() => _store.InTransaction(() =>
         {
             if (run.Member.Role != MemberRole.Manager) throw new BusRefusal("not_allowed", "only the Manager hires members");
+            var (name, cli, instructions, model, hireRole) = HireTerms(run.Member.TeamId, asked, askedCli, askedJob, role);
             // The job word alone gets a first name from the person's list; a full name must have an unused first name.
             var (label, given) = HireName(name);
             string trimmed;
@@ -329,8 +332,9 @@ public sealed partial class BusEngine
             var own = _store.MemberRows(memberId: run.Member.Id).Single().Cli;
             var chosen = CheckCli(string.IsNullOrWhiteSpace(cli) ? own : cli.Trim());
             var m = AddMember(run.Member.TeamId, trimmed, MemberRole.Member, chosen, given);
-            if (!string.IsNullOrWhiteSpace(instructions)) _store.UpdateMember(m.Id, chosen, instructions.Trim(), "", "default");
-            Log($"{run.Member.Qualified} hired {m.Qualified} ({chosen})");
+            if (!string.IsNullOrWhiteSpace(instructions) || model.Length > 0) _store.UpdateMember(m.Id, chosen, (instructions ?? "").Trim(), model, "default");
+            if (hireRole is not null) _store.SetHireRole(m.Id, hireRole);
+            Log($"{run.Member.Qualified} hired {m.Qualified} ({chosen}{(hireRole is null ? "" : ", " + hireRole)})");
             return _store.MemberRows(memberId: m.Id).Single();
         }), ct);
 
