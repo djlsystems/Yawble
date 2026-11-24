@@ -41,7 +41,7 @@ const models: Answer = (p) => ({ models: p.cli === 'claude' ? ['opus', 'sonnet',
 const defaults = (over: Partial<TeamDefaults> = {}): TeamDefaults => ({
   manager: { name: 'Manager', cli: 'claude' }, members: [], memberNames: ['Amara'], country: 'en-US',
   countries: [{ code: 'en-US', label: 'United States (US English)' }], usedCount: 0,
-  hireList: [{ role: 'Developer', agent: 'claude', model: 'opus', max: 2 }],
+  hireList: [{ role: 'Developer', agent: 'claude', model: 'opus' }],
   ...over,
 });
 
@@ -154,7 +154,7 @@ describe('Settings > Teams: the default hire list', () => {
     await flushPromises();
     expect(val(w, 'default-hire-role-0')).toBe('Developer');
     expect(val(w, 'default-hire-model-0')).toBe('opus');
-    expect(val(w, 'default-hire-max-0')).toBe('2');
+    expect(w.find('[data-test=default-hire-max-0]').exists()).toBe(false); // no count per role
     await w.get('[data-test=default-hire-add]').trigger('click');
     await flushPromises();
     // The first role not on the list yet, with its suggested agent and model.
@@ -163,8 +163,8 @@ describe('Settings > Teams: the default hire list', () => {
     await w.get('[data-test=team-defaults-save]').trigger('click');
     await flushPromises();
     expect(f.of('teams.setDefaults')[0].params.hireList).toEqual([
-      { role: 'Developer', agent: 'claude', model: 'opus', max: 2 },
-      { role: 'Tester', agent: 'codex', model: null, max: 1 },
+      { role: 'Developer', agent: 'claude', model: 'opus' },
+      { role: 'Tester', agent: 'codex', model: null },
     ]);
   });
 
@@ -227,22 +227,19 @@ describe('New team: role picker and who the Manager may hire', () => {
     const { w, of } = await dialog();
     expect(w.text()).toContain('Who the Manager may hire');
     expect(val(w, 'new-hire-role-0')).toBe('Developer');
-    expect(val(w, 'new-hire-max-0')).toBe('2');
+    expect(w.find('[data-test=new-hire-max-0]').exists()).toBe(false);
     await w.get('[data-test=new-hire-add]').trigger('click');
     await flushPromises();
     await w.get('[data-test=new-hire-role-1]').setValue('Reviewer');
     await flushPromises();
     expect(val(w, 'new-hire-agent-1')).toBe('claude');
     expect(val(w, 'new-hire-model-1')).toBe('sonnet');
-    await w.get('[data-test=new-hire-max-1]').setValue('12');
-    await w.get('[data-test=new-hire-max-1]').trigger('change');
-    expect(val(w, 'new-hire-max-1')).toBe('8');
     await w.get('[data-test=team-name]').setValue('alpha');
     await w.get('[data-test=create-team]').trigger('click');
     await flushPromises();
     expect(of('teams.create')[0].params.hireList).toEqual([
-      { role: 'Developer', agent: 'claude', model: 'opus', max: 2 },
-      { role: 'Reviewer', agent: 'claude', model: 'sonnet', max: 8 },
+      { role: 'Developer', agent: 'claude', model: 'opus' },
+      { role: 'Reviewer', agent: 'claude', model: 'sonnet' },
     ]);
     expect(of('teams.create')[0].params.members).toEqual([]);
   });
@@ -281,7 +278,7 @@ describe('Team settings > Hiring', () => {
       'agentProfiles.list': () => [], 'agents.models': models, 'roles.list': () => ROLES,
       'teams.hireList': () => { if (!rows) throw new Error('unknown method teams.hireList'); return rows; },
       'teams.setHireList': (p) => {
-        rows = p.rows.map((r: HireRow) => ({ ...r, job: ROLES.find((x) => x.name === r.role)?.job ?? '', used: r.role === 'Developer' ? 1 : 0, holders: r.role === 'Developer' ? [7] : [] }));
+        rows = p.rows.map((r: HireRow) => ({ ...r, job: ROLES.find((x) => x.name === r.role)?.job ?? '' }));
         return {};
       },
     });
@@ -295,15 +292,17 @@ describe('Team settings > Hiring', () => {
     return w;
   }
 
-  it('shows the rows with how many are hired, changes them, and Save sends teams.setHireList', async () => {
-    const f = api([{ role: 'Developer', job: ROLES[0].job, agent: 'claude', model: 'opus', max: 3, used: 2, holders: [7, 8] }]);
+  it('shows the rows (no count per role), changes them, and Save sends teams.setHireList', async () => {
+    const f = api([{ role: 'Developer', job: ROLES[0].job, agent: 'claude', model: 'opus' }]);
     const w = await openHiring(f.api);
     expect(w.get('[data-test=manage-tab-hiring]').text()).toBe('Hiring');
     expect(f.of('teams.hireList')[0].params).toMatchObject({ teamId: 4, team: 4 });
     expect(val(w, 'team-hire-role-0')).toBe('Developer');
     expect(val(w, 'team-hire-agent-0')).toBe('claude');
     expect(val(w, 'team-hire-model-0')).toBe('opus');
-    expect(w.get('[data-test=team-hire-used-0]').text()).toBe('2 of 3 hired');
+    expect(w.find('[data-test=team-hire-max-0]').exists()).toBe(false);
+    expect(w.find('[data-test=team-hire-used-0]').exists()).toBe(false);
+    expect(w.get('[data-test=team-hiring]').text()).not.toContain('hired');
     await w.get('[data-test=team-hire-model-0]').setValue(''); // back to the agent's default
     await w.get('[data-test=team-hire-add]').trigger('click');
     await flushPromises();
@@ -312,10 +311,9 @@ describe('Team settings > Hiring', () => {
     await flushPromises();
     expect(f.of('teams.setHireList')[0].params).toEqual({
       teamId: 4, team: 4,
-      rows: [{ role: 'Developer', agent: 'claude', model: null, max: 3 }, { role: 'Tester', agent: 'codex', model: null, max: 1 }],
+      rows: [{ role: 'Developer', agent: 'claude', model: null }, { role: 'Tester', agent: 'codex', model: null }],
     });
     expect(w.find('[data-test=team-hire-saved]').exists()).toBe(true);
-    expect(w.get('[data-test=team-hire-used-0]').text()).toBe('1 of 3 hired');
   });
 
   it('offers custom agents in a row\'s agent picker', async () => {
@@ -330,7 +328,7 @@ describe('Team settings > Hiring', () => {
   });
 
   it('an empty list explains that the Manager may hire any agent; removing the last row saves an empty list', async () => {
-    const f = api([{ role: 'Tester', job: '', agent: 'codex', model: null, max: 1, used: 0, holders: [] }]);
+    const f = api([{ role: 'Tester', job: '', agent: 'codex', model: null }]);
     const w = await openHiring(f.api);
     await w.get('[data-test=team-hire-remove-0]').trigger('click');
     expect(w.get('[data-test=team-hire-empty]').text()).toContain('the Manager may hire any agent');

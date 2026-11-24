@@ -301,13 +301,11 @@ export interface TeamDefaults {
  *  job becomes the hire's standing instructions; agent and model are the suggestion (model null: the agent's default). */
 export interface RoleRow { name: string; job: string; agent: string; model: string | null }
 
-/** B147: a row of a hire list (who the Manager may hire): a role, its agent and model (null: the agent's default), up to max members (1-8). */
-export interface HireRow { role: string; agent: string; model: string | null; max: number }
+/** B147: a row of a hire list (who the Manager may hire): a role, its agent and model (null: the agent's default). */
+export interface HireRow { role: string; agent: string; model: string | null }
 
-/** B147, teams.hireList: a team's rows with the role's job, how many places are used and by which members. */
-export interface TeamHireRow extends HireRow { job: string; used: number; holders: number[] }
-
-export const HIRE_MAX = 8;
+/** B147, teams.hireList: a team's rows with the role's job. */
+export interface TeamHireRow extends HireRow { job: string }
 
 /** teams.setDefaults: what was saved, and the member-name lines that were not (with why). */
 export interface TeamDefaultsSaved { saved: unknown; rejected: { line: string; reason: string }[] }

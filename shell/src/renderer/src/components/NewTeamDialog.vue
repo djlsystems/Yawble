@@ -64,7 +64,7 @@ onMounted(async () => {
   if (d.manager?.cli) { if (form.managerCli === 'claude') form.managerCli = d.manager.cli as AgentCliId; memberCli.value = d.manager.cli as AgentCliId; }
   const rows = (d.members ?? []).filter((m) => m.name?.trim());
   members.push(...rows.filter((m) => m.onNewTeams).map((m) => ({ name: m.name, cli: m.cli as AgentCliId, model: '', role: '' })));
-  hireList.push(...(d.hireList ?? []).map((h) => ({ role: h.role, agent: h.agent, model: h.model ?? null, max: h.max || 1 })));
+  hireList.push(...(d.hireList ?? []).map((h) => ({ role: h.role, agent: h.agent, model: h.model ?? null })));
   for (const c of new Set([form.managerCli, ...members.map((m) => m.cli)])) void loadModels(c);
   offered.value = rows.filter((m) => !m.onNewTeams);
 });
@@ -93,7 +93,7 @@ async function create() {
       repoUrl: form.source === 'url' ? form.repoUrl.trim() || null : null,
       managerCli: form.managerCli, ...(form.managerModel ? { managerModel: form.managerModel } : {}),
       members: members.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), cli: m.cli, ...(m.model ? { model: m.model } : {}), ...(m.role ? { role: m.role } : {}) })),
-      hireList: hireList.map((h) => ({ role: h.role, agent: h.agent, model: h.model ?? null, max: h.max })),
+      hireList: hireList.map((h) => ({ role: h.role, agent: h.agent, model: h.model ?? null })),
     });
     emit('created', r.teamId);
   } catch (e) {

@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue';
-import { HIRE_MAX, type HireRow, type RoleRow } from '../../../shared/api';
+import type { HireRow, RoleRow } from '../../../shared/api';
 import type { useAgentModels } from '../agentModels';
 import AgentModelPicker from './AgentModelPicker.vue';
 
-// A hire list (who the Manager may hire): rows of a role, its agent (built-in or custom), its model (the agent's default
-// or a picked one) and how many members of it at most. Picking a role fills the agent and model from the role's
-// suggestion; both stay editable. An empty list lets the Manager hire any agent with a job it writes. Used by
-// Settings > Teams (the default list), Team settings > Hiring and the New team dialog. It changes `rows` in place.
+// A hire list (who the Manager may hire): rows of a role, its agent (built-in or custom) and its model (the agent's
+// default or a picked one). Picking a role fills the agent and model from the role's suggestion; both stay editable.
+// An empty list lets the Manager hire any agent with a job it writes. Used by Settings > Teams (the default list),
+// Team settings > Hiring and the New team dialog. It changes `rows` in place.
 const props = withDefaults(defineProps<{
   rows: HireRow[]; roles: RoleRow[]; agents: { id: string; label: string }[]; models: ReturnType<typeof useAgentModels>;
-  testId: string; readOnly?: boolean; usage?: Record<string, { used: number; holders: number[] }>;
-}>(), { readOnly: false, usage: undefined });
+  testId: string; readOnly?: boolean;
+}>(), { readOnly: false });
 const emit = defineEmits<{ changed: [] }>();
 
 const roleOf = (name: string) => props.roles.find((r) => r.name === name);
@@ -21,7 +21,7 @@ watch(() => props.rows.map((r) => r.agent), (clis) => { for (const c of new Set(
 function add() {
   const r = free.value[0] ?? props.roles[0];
   if (!r) return;
-  props.rows.push({ role: r.name, agent: r.agent, model: r.model ?? null, max: 1 });
+  props.rows.push({ role: r.name, agent: r.agent, model: r.model ?? null });
   emit('changed');
 }
 function remove(i: number) { props.rows.splice(i, 1); emit('changed'); }
@@ -32,11 +32,6 @@ function roleChanged(row: HireRow) {
 }
 function agentChanged(row: HireRow) { row.model = null; emit('changed'); }
 function setModel(row: HireRow, m: string) { row.model = m || null; emit('changed'); }
-function maxChanged(row: HireRow) {
-  const n = Math.round(Number(row.max));
-  row.max = Number.isFinite(n) ? Math.min(HIRE_MAX, Math.max(1, n)) : 1;
-  emit('changed');
-}
 </script>
 
 <template>
@@ -54,10 +49,6 @@ function maxChanged(row: HireRow) {
       </select>
       <AgentModelPicker :key="`${i}-${r.agent}-${models.modelsOf(r.agent).length}`" :model-value="r.model ?? ''" class="model" :test-id="`${testId}-model-${i}`" :models="models.modelsOf(r.agent)"
         :default-label="models.defaultLabel(r.agent)" :note="false" :class="{ off: readOnly }" @update:model-value="setModel(r, $event)" />
-      <label class="inline">at most
-        <input v-model.number="r.max" type="number" min="1" :max="HIRE_MAX" step="1" class="max" :aria-label="`Row ${i + 1} at most`"
-          :data-test="`${testId}-max-${i}`" :disabled="readOnly" @change="maxChanged(r)" /></label>
-      <span v-if="usage" class="muted small" :data-test="`${testId}-used-${i}`">{{ usage[r.role]?.used ?? 0 }} of {{ r.max }} hired</span>
       <button v-if="!readOnly" type="button" class="icon danger" title="Remove" :aria-label="`Remove row ${i + 1}`" :data-test="`${testId}-remove-${i}`" @click="remove(i)">✕</button>
     </div>
     <button v-if="!readOnly" type="button" :data-test="`${testId}-add`" :disabled="!roles.length" @click="add">+ Add a role</button>
@@ -70,8 +61,6 @@ function maxChanged(row: HireRow) {
 .hire { margin-bottom: 6px; }
 .small { font-size: 12px; }
 .muted { color: var(--muted); }
-.inline { display: inline-flex; flex-direction: row; gap: 6px; align-items: center; font-size: 12.5px; }
-.max { width: 56px; }
 .model :deep(select) { min-width: 140px; }
 .model :deep(input) { width: 140px; }
 .off { pointer-events: none; opacity: .7; }

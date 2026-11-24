@@ -60,7 +60,7 @@ function apply(d: TeamDefaults) {
   country.value = d.country || countries.value[0]?.code || 'en-US';
   usedCount.value = d.usedCount ?? 0;
   hasHireList.value = Array.isArray(d.hireList);
-  hireList.splice(0, hireList.length, ...(d.hireList ?? []).map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null, max: r.max || 1 })));
+  hireList.splice(0, hireList.length, ...(d.hireList ?? []).map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })));
 }
 
 async function load() {
@@ -95,7 +95,7 @@ async function save() {
       members: members.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), cli: m.cli, onNewTeams: m.onNewTeams })),
       memberNamesText: namesText.value,
       country: country.value,
-      ...(hasHireList.value ? { hireList: hireList.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null, max: r.max })) } : {}),
+      ...(hasHireList.value ? { hireList: hireList.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })) } : {}),
     });
     rejected.value = r?.rejected ?? [];
     saved.value = true;

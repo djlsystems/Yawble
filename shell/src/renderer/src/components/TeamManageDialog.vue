@@ -77,25 +77,23 @@ function act(method: string, params: Record<string, unknown> = {}, done?: (r: an
   }, method);
 }
 
-// ---- B147: who the Manager may hire (teams.hireList, teams.setHireList): rows of a role, its agent, model and how many
-// at most, from the role catalog (roles.list). An empty list lets the Manager hire any agent. An older core: a note.
+// ---- B147: who the Manager may hire (teams.hireList, teams.setHireList): rows of a role, its agent and model, from the
+// role catalog (roles.list). An empty list lets the Manager hire any agent. An older core: a note.
 const agentOptions = useAgentOptions(api);
 const models = useAgentModels(api);
 const roles = ref<RoleRow[]>([]);
 const hireRows = reactive<HireRow[]>([]);
-const hireUsage = ref<Record<string, { used: number; holders: number[] }>>({});
 const hireMissing = ref(false);
 const hireSaved = ref(false);
 function applyHire(list: TeamHireRow[]) {
-  hireRows.splice(0, hireRows.length, ...list.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null, max: r.max || 1 })));
-  hireUsage.value = Object.fromEntries(list.map((r) => [r.role, { used: r.used ?? 0, holders: r.holders ?? [] }]));
+  hireRows.splice(0, hireRows.length, ...list.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })));
 }
 async function loadHiring() {
   try { applyHire(await api.call<TeamHireRow[]>('teams.hireList', { teamId: props.team.id, team: props.team.id })); hireMissing.value = false; }
   catch { hireMissing.value = true; } finally { ready.hiring = true; }
   try { roles.value = await api.call<RoleRow[]>('roles.list'); } catch { roles.value = []; }
 }
-const saveHiring = () => act('teams.setHireList', { team: props.team.id, rows: hireRows.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null, max: r.max })) }, () => {
+const saveHiring = () => act('teams.setHireList', { team: props.team.id, rows: hireRows.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })) }, () => {
   hireSaved.value = true;
   void loadHiring();
 });
@@ -304,12 +302,12 @@ onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLesson
     </section>
 
     <section v-else-if="tab === 'hiring'" class="pane" data-test="team-hiring">
-      <p class="muted">Who the Manager may hire: each row is a role, the agent and model a member of it runs on, and how many members of it
-        at most. The Manager can hire only these; a hire gets the role's job as its standing instructions.</p>
+      <p class="muted">Who the Manager may hire: each row is a role and the agent and model a member of it runs on.
+        The Manager can hire only these; a hire gets the role's job as its standing instructions.</p>
       <LoadingNote v-if="!ready.hiring" text="Loading the hire list…" />
       <p v-else-if="hireMissing" class="muted small" data-test="team-hiring-missing">This version of the app's core keeps no hire list: the Manager may hire any agent.</p>
       <template v-else>
-        <HireListEditor :rows="hireRows" :roles="roles" :agents="agentOptions" :models="models" :usage="hireUsage" test-id="team-hire" @changed="hireSaved = false" />
+        <HireListEditor :rows="hireRows" :roles="roles" :agents="agentOptions" :models="models" test-id="team-hire" @changed="hireSaved = false" />
         <div class="buttons"><span class="grow" />
           <span v-if="hireSaved" class="ok" data-test="team-hire-saved">Saved: the Manager hires from this list from now on.</span>
           <button v-change class="primary" data-test="team-hire-save" :disabled="busy" @click="saveHiring"><BusyLabel :busy="doing('teams.setHireList')" text="Saving…">Save</BusyLabel></button></div>
