@@ -4,8 +4,9 @@ using Yawble.Core.Scripts.Library;
 namespace Yawble.Core.Scripts.Running;
 
 /// <summary>
-/// A script member's settings and bindings against what its script declares (design section 7): settings are the
-/// document's "settings" (name, type, default), bindings map each "requires" name to one of the team's integrations.
+/// A script member's settings and bindings against what its script declares: settings are the document's "settings"
+/// (name, type, default). A "requires" name is an integration's real name (the member uses it; a binding of it to another
+/// integration of the same kind is an override) or an alias, which a binding maps to one of the team's integrations.
 /// </summary>
 public static class ScriptSettings
 {

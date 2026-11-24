@@ -5,8 +5,8 @@ using Yawble.Core.Scripts.Language;
 namespace Yawble.Core.Scripts.Running;
 
 /// <summary>
-/// Who a script run's integration calls are for: the team, the member (null for a Test run), the run, and the member's
-/// bindings (each requires name to one of the team's integrations). SC-2's IntegrationService.CallForScriptAsync takes it.
+/// Who a script run's integration calls are for: the team, the member (null for a Test run), the run, and the bindings the
+/// calls go through: each requires name to the integration that runs (itself for a real name with no override).
 /// </summary>
 public sealed record ScriptCaller(long TeamId, string Team, long? MemberId, string? Member, long RunId, IReadOnlyDictionary<string, string> Bindings, bool DryRun);
 
