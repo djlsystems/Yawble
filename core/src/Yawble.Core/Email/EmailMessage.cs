@@ -14,15 +14,15 @@ public sealed record EmailAddress(string? Name, string Address)
 }
 
 /// <summary>
-/// One message as a script sees it (the built-in schema EmailMessage, scripts-design.md section 9). <see cref="Id"/> is stable across sessions:
-/// Gmail's X-GM-MSGID in decimal, otherwise "UIDVALIDITY:UID" of <see cref="Folder"/>. <see cref="ThreadId"/>: Gmail's X-GM-THRID in decimal,
-/// otherwise the thread's first Message-ID (References, else In-Reply-To, else its own), else <see cref="Id"/>. <see cref="Cursor"/> is the
-/// message's place in <see cref="Folder"/> (<see cref="EmailCursor"/>: UIDVALIDITY and UID, opaque to scripts), list's after. <see cref="ReceivedAt"/>
-/// is the server's INTERNALDATE in UTC, whole seconds. <see cref="Snippet"/> is the first 500 characters of the plain text, its white space collapsed.
-/// <see cref="Body"/> is set by get only (the whole plain text; an HTML-only message's text converted from its HTML).
+/// One message as a script sees it (the built-in schema EmailMessage, scripts-design.md section 9). <see cref="Id"/> is opaque to scripts and is
+/// list's polling cursor (<see cref="EmailMessageId"/>): it carries <see cref="Folder"/>'s UIDVALIDITY and the message's UID there, "UIDVALIDITY:UID",
+/// on Gmail "gm:X-GM-MSGID:UIDVALIDITY:UID"; it is stable while the message stays in that folder or label. <see cref="ThreadId"/>: Gmail's
+/// X-GM-THRID in decimal, otherwise the thread's first Message-ID (References, else In-Reply-To, else its own), else <see cref="Id"/>.
+/// <see cref="ReceivedAt"/> is the server's INTERNALDATE in UTC, whole seconds. <see cref="Snippet"/> is the first 500 characters of the plain
+/// text, its white space collapsed. <see cref="Body"/> is set by get only (the whole plain text; an HTML-only message's text converted from its HTML).
 /// </summary>
 public sealed record EmailMessage(
-    string Id, string ThreadId, string? MessageId, string Folder, string Cursor, EmailAddress From, IReadOnlyList<EmailAddress> To, IReadOnlyList<EmailAddress> Cc,
+    string Id, string ThreadId, string? MessageId, string Folder, EmailAddress From, IReadOnlyList<EmailAddress> To, IReadOnlyList<EmailAddress> Cc,
     string Subject, DateTimeOffset ReceivedAt, string Snippet, bool HasAttachments, bool Unread, string? Body = null)
 {
     public const int SnippetLength = 500;
@@ -35,7 +35,7 @@ public sealed record EmailMessage(
     {
         var o = new JsonObject
         {
-            ["id"] = Id, ["threadId"] = ThreadId, ["messageId"] = MessageId, ["folder"] = Folder, ["cursor"] = Cursor, ["from"] = From.ToJson(),
+            ["id"] = Id, ["threadId"] = ThreadId, ["messageId"] = MessageId, ["folder"] = Folder, ["from"] = From.ToJson(),
             ["to"] = new JsonArray(To.Select(a => (JsonNode)a.ToJson()).ToArray()),
             ["cc"] = new JsonArray(Cc.Select(a => (JsonNode)a.ToJson()).ToArray()),
             ["subject"] = Subject, ["receivedAt"] = Instant(ReceivedAt), ["snippet"] = Snippet,
@@ -76,65 +76,79 @@ public sealed record EmailMessage(
         ?? (string.IsNullOrWhiteSpace(message.MessageId) ? null : message.MessageId);
 
     /// <summary>Builds the message from what the server said about it and its MIME content.</summary>
-    public static EmailMessage Build(string id, string? gmailThreadId, string folder, string cursor, DateTimeOffset receivedAt, bool unread, MimeMessage message, bool withBody)
+    public static EmailMessage Build(string id, string? gmailThreadId, string folder, DateTimeOffset receivedAt, bool unread, MimeMessage message, bool withBody)
     {
         var text = PlainText(message);
         var from = Addresses(message.From).FirstOrDefault() ?? (message.Sender is { } sender ? new EmailAddress(string.IsNullOrWhiteSpace(sender.Name) ? null : sender.Name, sender.Address ?? "") : null)
             ?? new EmailAddress(null, "");
         return new EmailMessage(
-            id, gmailThreadId ?? RootMessageId(message) ?? id, string.IsNullOrWhiteSpace(message.MessageId) ? null : message.MessageId, folder, cursor,
+            id, gmailThreadId ?? RootMessageId(message) ?? id, string.IsNullOrWhiteSpace(message.MessageId) ? null : message.MessageId, folder,
             from, Addresses(message.To), Addresses(message.Cc), message.Subject ?? "", receivedAt.ToUniversalTime(), SnippetOf(text),
             message.Attachments.Any(), unread, withBody ? text : null);
     }
 }
 
-/// <summary>
-/// A message's place in one folder, list's after: the folder's UIDVALIDITY and the message's UID there, written "UIDVALIDITY:UID". Gmail labels have
-/// UIDs too, so it is the same on Gmail. Scripts treat it as opaque; it is valid only for the folder it came from.
-/// </summary>
-public readonly record struct EmailCursor(uint UidValidity, uint Uid)
+
+/// <summary>The result of list (the built-in schema EmailList): the messages, and whether the after it was given no longer applied.</summary>
+public sealed record EmailList(IReadOnlyList<EmailMessage> Messages, bool CursorReset)
 {
-    public static string Of(uint uidValidity, uint uid) => new EmailCursor(uidValidity, uid).ToString();
-
-    public override string ToString() =>
-        UidValidity.ToString(CultureInfo.InvariantCulture) + ":" + Uid.ToString(CultureInfo.InvariantCulture);
-
-    /// <summary>Parses a cursor; a malformed one throws <see cref="ArgumentException"/>.</summary>
-    public static EmailCursor Parse(string? cursor)
+    public JsonObject ToJson() => new()
     {
-        var s = (cursor ?? "").Trim();
-        var colon = s.IndexOf(':');
-        if (colon > 0
-            && uint.TryParse(s[..colon], NumberStyles.None, CultureInfo.InvariantCulture, out var v)
-            && uint.TryParse(s[(colon + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var u) && v > 0 && u > 0)
-            return new(v, u);
-        throw new ArgumentException($"after '{EmailMessageId.Clip(s)}' is not a cursor (pass back a message's cursor from list, unchanged)");
-    }
+        ["messages"] = new JsonArray(Messages.Select(m => (JsonNode)m.ToJson()).ToArray()),
+        ["cursorReset"] = CursorReset,
+    };
 }
 
-/// <summary>A message id as the Email integration writes it: Gmail's X-GM-MSGID, or a folder's UIDVALIDITY and the UID.</summary>
+/// <summary>
+/// A message id as the Email integration writes it, opaque to scripts: the folder's UIDVALIDITY and the message's UID there, "UIDVALIDITY:UID";
+/// on Gmail with its X-GM-MSGID first, "gm:X-GM-MSGID:UIDVALIDITY:UID" (get, markRead, move and thread find a Gmail message by the X-GM-MSGID).
+/// The UIDVALIDITY and UID are what make it list's after.
+/// </summary>
 public readonly record struct EmailMessageId(ulong? GmailId, uint UidValidity, uint Uid)
 {
-    public static string Gmail(ulong id) => id.ToString(CultureInfo.InvariantCulture);
+    public const string GmailPrefix = "gm:";
+
+    public static string Gmail(ulong id, uint uidValidity, uint uid) =>
+        GmailPrefix + id.ToString(CultureInfo.InvariantCulture) + ":" + Imap(uidValidity, uid);
 
     public static string Imap(uint uidValidity, uint uid) =>
         uidValidity.ToString(CultureInfo.InvariantCulture) + ":" + uid.ToString(CultureInfo.InvariantCulture);
 
+    public override string ToString() => GmailId is { } g ? Gmail(g, UidValidity, Uid) : Imap(UidValidity, Uid);
+
     /// <summary>Parses an id for this kind of server; a malformed one throws <see cref="ArgumentException"/>.</summary>
-    public static EmailMessageId Parse(string? id, bool gmail)
+    public static EmailMessageId Parse(string? id, bool gmail) =>
+        TryParse(id, gmail, out var parsed) ? parsed
+        : throw new ArgumentException($"'{Clip((id ?? "").Trim())}' is not a message id of this mailbox ({(gmail ? "gm:MSGID:UIDVALIDITY:UID" : "UIDVALIDITY:UID")})");
+
+    /// <summary>Parses list's after (an id from an earlier list); a malformed one throws <see cref="ArgumentException"/>.</summary>
+    public static EmailMessageId ParseAfter(string? after, bool gmail) =>
+        TryParse(after, gmail, out var parsed) ? parsed
+        : throw new ArgumentException($"after '{Clip((after ?? "").Trim())}' is not a message id (pass back the id of a message from list, unchanged)");
+
+    public static bool TryParse(string? id, bool gmail, out EmailMessageId parsed)
     {
+        parsed = default;
         var s = (id ?? "").Trim();
+        ulong? g = null;
         if (gmail)
         {
-            if (ulong.TryParse(s, NumberStyles.None, CultureInfo.InvariantCulture, out var g) && g > 0) return new(g, 0, 0);
-            throw new ArgumentException($"'{Clip(s)}' is not a message id of this mailbox (a Gmail id is a number)");
+            if (!s.StartsWith(GmailPrefix, StringComparison.Ordinal)) return false;
+            s = s[GmailPrefix.Length..];
+            var c = s.IndexOf(':');
+            if (c <= 0 || !ulong.TryParse(s[..c], NumberStyles.None, CultureInfo.InvariantCulture, out var msgid) || msgid == 0) return false;
+            g = msgid;
+            s = s[(c + 1)..];
         }
         var colon = s.IndexOf(':');
         if (colon > 0
             && uint.TryParse(s[..colon], NumberStyles.None, CultureInfo.InvariantCulture, out var v)
             && uint.TryParse(s[(colon + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var u) && v > 0 && u > 0)
-            return new(null, v, u);
-        throw new ArgumentException($"'{Clip(s)}' is not a message id of this mailbox (UIDVALIDITY:UID)");
+        {
+            parsed = new(g, v, u);
+            return true;
+        }
+        return false;
     }
 
     internal static string Clip(string s)

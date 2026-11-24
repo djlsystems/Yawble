@@ -222,6 +222,20 @@ public sealed class FakeFolder(string name, params string[] flags)
 
     /// <summary>The lowest UID the next message may get (UIDNEXT): UIDs only grow, as on a real server, even after the highest one leaves.</summary>
     public uint UidNext { get; set; } = 1;
+
+    /// <summary>
+    /// What a server does when it rebuilds the folder: a new UIDVALIDITY (the old one plus one, or <paramref name="uidValidity"/>) and every
+    /// message numbered again from UID 1 in its order. Earlier ids of the folder no longer apply.
+    /// </summary>
+    public void Renumber(uint? uidValidity = null)
+    {
+        UidValidity = uidValidity ?? UidValidity + 1;
+        var entries = Messages.OfType<FakeEntry>().OrderBy(e => e.Uid).ToList();
+        Messages.RemoveAll(m => m is FakeEntry);
+        uint uid = 0;
+        foreach (var e in entries) Messages.Add(new FakeEntry(++uid, e.Message));
+        UidNext = uid + 1;
+    }
 }
 
 /// <summary>An IMAP command as parsed: its tag, its name (upper case; "UID FETCH" is "UID" with "FETCH" first in <see cref="Args"/>) and its arguments (quotes and literals resolved).</summary>

@@ -45,12 +45,12 @@ public static class EmailActions
         new(List, EmailActionClass.Read, Sig("""
             { "type": "object", "properties": {
                 "folder": { "type": "string", "description": "The folder, e.g. INBOX." },
-                "after": { "type": ["string", "null"], "description": "For polling: a cursor from an earlier list of this folder; only messages that came after it, in arrival order. Not with since." },
-                "since": { "type": ["string", "null"], "format": "date-time", "description": "A time filter: only messages received later than this (exclusive), by date. Not for polling: use after." },
+                "since": { "type": ["string", "null"], "format": "date-time", "description": "ISO-8601. Without after (or when after no longer applies): a plain time filter, only messages received later than this (exclusive), the oldest first. Ignored while after applies." },
                 "unreadOnly": { "type": ["boolean", "null"], "description": "Only unread messages." },
-                "max": { "type": ["integer", "null"], "description": "Return the first this many of those (at most 200); with after, the rest come on the next poll." } },
+                "max": { "type": ["integer", "null"], "description": "Return the first this many (at most 200); with after, the rest come on the next poll." },
+                "after": { "type": ["string", "null"], "description": "For polling: the id of a message from an earlier list of this folder; only messages that arrived after it, in arrival (UID) order. If the folder was renumbered (UIDVALIDITY changed) it no longer applies: cursorReset is true and the list is the since list, or empty without since." } },
               "required": ["folder"] }
-            """, "list<EmailMessage>")),
+            """, "EmailList")),
         new(Get, EmailActionClass.Read, Sig("""
             { "type": "object", "properties": {
                 "id": { "type": "string", "description": "The message's id." },
@@ -161,7 +161,7 @@ public sealed class EmailScriptActions(IScriptEmail email, RunCaller caller) : I
 
     private static async Task<JsonNode?> RunAsync(EmailMailbox m, string action, JsonObject a, CancellationToken ct) => action switch
     {
-        EmailActions.List => Many(await m.ListAsync(Text(a, "folder")!, Instant(a, "since"), Bool(a, "unreadOnly") ?? false, Int(a, "max"), Text(a, "after"), ct)),
+        EmailActions.List => (await m.ListAsync(Text(a, "folder")!, Instant(a, "since"), Bool(a, "unreadOnly") ?? false, Int(a, "max"), Text(a, "after"), ct)).ToJson(),
         EmailActions.Get => (await m.GetAsync(Text(a, "id")!, Text(a, "folder"), ct)).ToJson(),
         EmailActions.Search => Many(await m.SearchAsync(Text(a, "folder")!, Text(a, "query")!, ct)),
         EmailActions.Thread => Many(await m.ThreadAsync(Text(a, "threadId")!, ct)),
@@ -185,8 +185,6 @@ public sealed class EmailScriptActions(IScriptEmail email, RunCaller caller) : I
             if (value is JsonValue v && v.GetValueKind() == JsonValueKind.String && v.GetValue<string>().Trim().Length == 0 && Required(spec, key))
                 throw new ScriptActionException($"{use} {spec.Name}: '{key}' is empty");
         if (Int(args, "max") is < 0) throw new ScriptActionException($"{use} {spec.Name}: max cannot be negative");
-        if (spec.Name == EmailActions.List && Text(args, "after") is not null && Text(args, "since") is not null)
-            throw new ScriptActionException($"{use} {spec.Name}: give after or since, not both (poll with after)");
     }
 
     private static bool Required(EmailActionSpec spec, string key) =>

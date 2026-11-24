@@ -29,53 +29,58 @@ public sealed class EmailMailbox(IImapSession session)
 
     // ------------------------------------------------------------------ the actions
 
-    /// <summary><see cref="ListAsync(string, DateTimeOffset?, bool, int?, string?, CancellationToken)"/> without a cursor.</summary>
-    public Task<IReadOnlyList<EmailMessage>> ListAsync(string folder, DateTimeOffset? since, bool unreadOnly, int? max, CancellationToken ct) =>
+    /// <summary><see cref="ListAsync(string, DateTimeOffset?, bool, int?, string?, CancellationToken)"/> without after.</summary>
+    public Task<EmailList> ListAsync(string folder, DateTimeOffset? since, bool unreadOnly, int? max, CancellationToken ct) =>
         ListAsync(folder, since, unreadOnly, max, after: null, ct);
 
     /// <summary>
     /// The messages of <paramref name="folder"/>: only unread ones with <paramref name="unreadOnly"/>, and of those the FIRST <paramref name="max"/>
-    /// (at most <see cref="MaxMessages"/>) in the list's order. Three ways to pick where it starts:
+    /// (at most <see cref="MaxMessages"/>) in the list's order.
     /// <list type="bullet">
-    /// <item><paramref name="after"/>, a message's <see cref="EmailMessage.Cursor"/> from this folder: the messages with a higher UID, in UID order.
-    /// UIDs only grow as mail arrives in a folder, so a script that saves the last message's cursor and passes it back as after gets every message
-    /// exactly once, whatever max is and whatever the dates. A cursor of another UIDVALIDITY (the folder was renumbered) or a malformed one is an
-    /// <see cref="ArgumentException"/>: never a silent restart.</item>
-    /// <item><paramref name="since"/>: a plain time filter, receivedAt strictly later than since (exclusive), ordered by (INTERNALDATE, UID).
-    /// receivedAt is whole seconds, so since = a message's receivedAt also leaves out the others of that second: polling uses after.</item>
-    /// <item>neither: the whole folder, in UID order (the order after walks in), so the first poll of a cursor walk is this.</item>
+    /// <item><paramref name="after"/>, the <see cref="EmailMessage.Id"/> of a message from an earlier list of this folder, while the folder's
+    /// UIDVALIDITY is still the one in it: the messages with a higher UID (UID SEARCH UID n+1:*), in UID order; <paramref name="since"/> is ignored.
+    /// UIDs only grow as mail arrives in a folder, so a script that saves the last message's id and passes it back as after gets every message
+    /// exactly once, whatever max is and whatever the dates.</item>
+    /// <item>after of another UIDVALIDITY (the server renumbered the folder): it no longer applies, <see cref="EmailList.CursorReset"/> is true, and
+    /// the list is the plain since list when since is given, else empty (it starts from now).</item>
+    /// <item>no after: <paramref name="since"/> is a plain time filter, receivedAt strictly later than since (exclusive), and no since is the whole
+    /// folder; ordered by (INTERNALDATE, UID), the oldest first. No exactly-once promise: first runs and searches.</item>
     /// </list>
-    /// after and since together are an <see cref="ArgumentException"/>.
+    /// A malformed after is an <see cref="ArgumentException"/>.
     /// </summary>
-    public async Task<IReadOnlyList<EmailMessage>> ListAsync(string folder, DateTimeOffset? since, bool unreadOnly, int? max, string? after, CancellationToken ct)
+    public async Task<EmailList> ListAsync(string folder, DateTimeOffset? since, bool unreadOnly, int? max, string? after, CancellationToken ct)
     {
-        if (after is not null && since is not null) throw new ArgumentException("give after or since, not both (poll with after)");
-        var cursor = after is null ? (EmailCursor?)null : EmailCursor.Parse(after);
+        var cursor = after is null ? (EmailMessageId?)null : EmailMessageId.ParseAfter(after, IsGmail);
         var f = await OpenAsync(folder, FolderAccess.ReadOnly, ct);
         var keep = Math.Clamp(max ?? MaxMessages, 0, MaxMessages);
-        SearchQuery query = unreadOnly ? SearchQuery.NotSeen : SearchQuery.All;
 
         if (cursor is { } c)
         {
             if (c.UidValidity != f.UidValidity)
-                throw new ArgumentException($"the cursor '{c}' is from an earlier numbering of {f.FullName} (its UIDVALIDITY was {c.UidValidity}, it is now {f.UidValidity}): "
-                    + "the server renumbered the folder, so this poll cannot tell which messages are new; start the poll again without after");
-            if (c.Uid == uint.MaxValue || keep == 0) return [];
+                return new(since is null ? [] : await SinceAsync(f, since, unreadOnly, keep, ct), CursorReset: true);
+            if (c.Uid == uint.MaxValue || keep == 0) return new([], false);
             // UID SEARCH UID n+1:*; a server answers n+1:* with its last message even when that is n or lower (RFC 3501's * rule), so filter here too
             var range = SearchQuery.Uids(new UniqueIdRange(f.UidValidity, c.Uid + 1, uint.MaxValue));
             var found = await Guard("search", () => f.SearchAsync(unreadOnly ? SearchQuery.NotSeen.And(range) : range, ct));
             var next = found.Where(u => u.Id > c.Uid).Distinct().OrderBy(u => u.Id).Take(keep).ToList();
             var summaries = (await SummariesAsync(f, next, ct)).Where(m => !unreadOnly || !Seen(m)).OrderBy(m => m.UniqueId.Id).ToList();
-            return await MessagesAsync(f, summaries, withBody: false, ct);
+            return new(await MessagesAsync(f, summaries, withBody: false, ct), false);
         }
+        return new(await SinceAsync(f, since, unreadOnly, keep, ct), false);
+    }
 
+    /// <summary>The plain list: receivedAt later than since (exclusive; none: all), the oldest <paramref name="keep"/> by (INTERNALDATE, UID).</summary>
+    private async Task<IReadOnlyList<EmailMessage>> SinceAsync(IMailFolder f, DateTimeOffset? since, bool unreadOnly, int keep, CancellationToken ct)
+    {
+        if (keep == 0) return [];
+        SearchQuery query = unreadOnly ? SearchQuery.NotSeen : SearchQuery.All;
         // SINCE is by date only, in the server's time zone: ask from the day before, then compare the exact INTERNALDATE here
         if (since is { } s) query = query.And(SearchQuery.DeliveredAfter(s.UtcDateTime.Date.AddDays(-1)));
         var uids = await Guard("search", () => f.SearchAsync(query, ct));
-        var filtered = (await SummariesAsync(f, uids, ct))
+        var picked = (await SummariesAsync(f, uids, ct))
             .Where(m => since is not { } from || Received(m) > from.ToUniversalTime())
-            .Where(m => !unreadOnly || !Seen(m));
-        var picked = (since is null ? filtered.OrderBy(m => m.UniqueId.Id) : filtered.OrderBy(Received).ThenBy(m => m.UniqueId.Id)).Take(keep).ToList();
+            .Where(m => !unreadOnly || !Seen(m))
+            .OrderBy(Received).ThenBy(m => m.UniqueId.Id).Take(keep).ToList();
         return await MessagesAsync(f, picked, withBody: false, ct);
     }
 
@@ -163,8 +168,14 @@ public sealed class EmailMailbox(IImapSession session)
                 await Guard("move", () => all.StoreAsync(uid, new StoreLabelsRequest(StoreAction.Add, [target]) { Silent = true }, ct));
                 await Guard("move", () => all.StoreAsync(uid, new StoreLabelsRequest(StoreAction.Remove, [GmailInboxLabel]) { Silent = true }, ct));
             }
-            var moved = await OneAsync(all, uid, id, withBody: false, ct);
-            return moved with { Folder = toInbox ? "INBOX" : target };
+            // the id names its place in the label it is in now: the label's UIDVALIDITY and its UID there, found by its X-GM-MSGID
+            var gid = EmailMessageId.Parse(id, gmail: true).GmailId!.Value;
+            var label = toInbox ? Client.Inbox : await FolderAsync(target, ct);
+            await Guard("open " + label.FullName, () => label.OpenAsync(FolderAccess.ReadOnly, ct));
+            var there = await Guard("search", () => label.SearchAsync(SearchQuery.GMailMessageId(gid), ct));
+            if (there.Count > 0) return (await OneAsync(label, there[0], id, withBody: false, ct)) with { Folder = toInbox ? "INBOX" : target };
+            await Guard("open " + all.FullName, () => all.OpenAsync(FolderAccess.ReadOnly, ct));
+            return (await OneAsync(all, uid, id, withBody: false, ct)) with { Folder = toInbox ? "INBOX" : target };
         }
 
         var caps = Client.Capabilities;
@@ -240,6 +251,14 @@ public sealed class EmailMailbox(IImapSession session)
         var parsed = EmailMessageId.Parse(id, IsGmail);
         if (parsed.GmailId is { } gid)
         {
+            // by the X-GM-MSGID: in the folder (label) given, where the id stays the caller's, else All Mail
+            if (!string.IsNullOrWhiteSpace(hint))
+            {
+                var h = await FolderAsync(hint, ct);
+                await Guard("open " + h.FullName, () => h.OpenAsync(access, ct));
+                var inHint = await Guard("search", () => h.SearchAsync(SearchQuery.GMailMessageId(gid), ct));
+                if (inHint.Count > 0) return (h, inHint[0]);
+            }
             var all = await AllMailAsync(ct);
             await Guard("open " + all.FullName, () => all.OpenAsync(access, ct));
             var hits = await Guard("search", () => all.SearchAsync(SearchQuery.GMailMessageId(gid), ct));
@@ -268,7 +287,7 @@ public sealed class EmailMailbox(IImapSession session)
 
     // ------------------------------------------------------------------ fetching
 
-    /// <summary>A message's receivedAt: its INTERNALDATE in UTC, whole seconds (what IMAP gives). Not unique: list's after is the cursor.</summary>
+    /// <summary>A message's receivedAt: its INTERNALDATE in UTC, whole seconds (what IMAP gives). Not unique: list's after (an id) is the cursor.</summary>
     private static DateTimeOffset Received(IMessageSummary m)
     {
         var at = (m.InternalDate ?? DateTimeOffset.MinValue).ToUniversalTime();
@@ -317,11 +336,11 @@ public sealed class EmailMailbox(IImapSession session)
         string? thread = null;
         if (IsGmail && s.GMailMessageId is { } gid)
         {
-            id = EmailMessageId.Gmail(gid);
-            if (s.GMailThreadId is { } tid) thread = EmailMessageId.Gmail(tid);
+            id = EmailMessageId.Gmail(gid, f.UidValidity, s.UniqueId.Id);
+            if (s.GMailThreadId is { } tid) thread = tid.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         else id = EmailMessageId.Imap(f.UidValidity, s.UniqueId.Id);
-        return EmailMessage.Build(id, thread, f.FullName, EmailCursor.Of(f.UidValidity, s.UniqueId.Id), Received(s), !Seen(s), mime, withBody);
+        return EmailMessage.Build(id, thread, f.FullName, Received(s), !Seen(s), mime, withBody);
     }
 
     // ------------------------------------------------------------------ failures
