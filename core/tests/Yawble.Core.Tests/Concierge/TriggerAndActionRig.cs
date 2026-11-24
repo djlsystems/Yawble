@@ -18,7 +18,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Concierge;
 
 /// <summary>
-/// Card 634 (B139): the real pieces behind script_trigger_set and integration_action_allow, with fakes only at the edges. A real bus,
+/// The real pieces behind script_trigger_set and integration_action_allow, with fakes only at the edges. A real bus,
 /// the real triggers.* (UiRpc), the real scripts.* (ScriptsRpc over a library whose directory is the real IntegrationService), and the
 /// real IntegrationService with the API "sms" read from a spec FakeHttp serves (no network, no sign-in, placeholder names only).
 /// Teams Alpha (agent Ada, script members Poller and Other), Beta and Gamma; sms is turned on for Alpha and Beta, not Gamma.

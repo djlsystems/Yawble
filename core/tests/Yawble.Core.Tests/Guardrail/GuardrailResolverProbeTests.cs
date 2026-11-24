@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Guardrail;
 
 /// <summary>
-/// B035: the guardrail check connects to the host resolver's own sockets from inside (systemd-resolved's varlink first),
+/// The guardrail check connects to the host resolver's own sockets from inside (systemd-resolved's varlink first),
 /// around the name-service switch, and each must be BLOCKED. Scripted sandbox: no real sandbox, no socket.
 /// </summary>
 public class GuardrailResolverProbeTests
@@ -57,7 +57,7 @@ public class GuardrailResolverProbeTests
             return;
         }
         Assert.Contains(("net.dns-varlink", LinuxResolverMasks.ResolvedVarlinkSocket), unix);
-        // The resolver's sockets, then the user's session bus (B038).
+        // The resolver's sockets, then the user's session bus.
         Assert.Equal(LinuxResolverMasks.Sockets.Select(s => s.Id).Append(GuardrailCheck.UserBusProbe), unix.Select(u => u.Id));
         foreach (var (id, _) in LinuxResolverMasks.Sockets)
         {

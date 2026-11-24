@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Companion;
 
 /// <summary>
-/// Card 634 (B139): script_trigger_set and integration_action_allow for a paired companion client, at the destructive level like
+/// script_trigger_set and integration_action_allow for a paired companion client, at the destructive level like
 /// script_member_add. A call that needs the person's yes becomes a request whose plan names the details; Approve in the window runs the
 /// stored call once (a second Approve runs nothing), Deny writes nothing. Turning a trigger off runs at once. The real pieces of
 /// <see cref="TriggerAndActionRig"/>; no credentials.

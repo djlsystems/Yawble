@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Agents;
 
 /// <summary>
-/// B118 Part B: a desktop launch on macOS/Linux gives the core a short PATH without ~/.local/bin, so the "not on your
+/// A desktop launch on macOS/Linux gives the core a short PATH without ~/.local/bin, so the "not on your
 /// PATH" warning is judged against the person's login-shell PATH, read once per detection through a fake shell (no
 /// real shell ever runs here). A shell that cannot be read gives no warning rather than a false one. Windows unchanged.
 /// </summary>

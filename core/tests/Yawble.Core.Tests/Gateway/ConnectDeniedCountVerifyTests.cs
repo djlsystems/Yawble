@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Gateway;
 
 /// <summary>
-/// Card 505 (B105 verify), the tester's own checks of bf65f72 (card 504): a CONNECT refused again in a run is counted on
+/// The tester's own checks of bf65f72 (the CONNECT refusal count): a CONNECT refused again in a run is counted on
 /// that run's first row for the authority (host:port); other hosts, ports and runs are new rows; a host's http and https
 /// refusals stay apart; path-denied keeps its 5-per-minute window; a connect-denied with no run is a plain row; the
 /// Network source's Times column and All activity's " (Nx)" show the count; docs/features.md says so. Temp databases,
@@ -115,7 +115,7 @@ public class ConnectDeniedCountVerifyTests
         var rows = log.Read(50);
         Assert.Equal(4, Assert.Single(rows, e => e.Kind == GatewayEventKinds.ConnectDenied).Count);
         Assert.Equal(4, rows.Count(e => e.Kind == GatewayEventKinds.ConnectAllowed));
-        Assert.Single(rows, e => e.Kind == GatewayEventKinds.Forward && e.Status == 200); // B103 thinning unchanged
+        Assert.Single(rows, e => e.Kind == GatewayEventKinds.Forward && e.Status == 200); // the successful-forward thinning unchanged
         Assert.Equal(4, rows.Count(e => e.Kind == GatewayEventKinds.Forward && e.Status == 500));
         Assert.All(rows.Where(e => e.Kind != GatewayEventKinds.ConnectDenied), e => Assert.Equal(1, e.Count));
     }

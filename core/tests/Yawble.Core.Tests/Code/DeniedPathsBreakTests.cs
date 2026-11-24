@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Code;
 
 /// <summary>
-/// B031 item 1, tester's attempts to get past the code browser's deny list through links: dangling links, a missing tail
+/// The tester's attempts to get past the code browser's deny list through links: dangling links, a missing tail
 /// under a linked parent on either side, a file link, a loop on either side, a canonicaliser that returns null or throws,
 /// and the whole code browser (SafeTree) on a clone reached through a linked parent. Every failure must deny.
 /// Skips where links cannot be made.

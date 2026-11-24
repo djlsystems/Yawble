@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Concierge;
 
 /// <summary>
-/// Card 634 (B139): script_trigger_set and integration_action_allow through the Concierge's dispatcher, onto the real triggers.save,
+/// script_trigger_set and integration_action_allow through the Concierge's dispatcher, onto the real triggers.save,
 /// scripts.* and the API rule editor's save (<see cref="TriggerAndActionRig"/>). Turning a script member's trigger on, and allowing an API action, need
 /// the person's yes in a later turn (ConciergeActions.ConfirmAsync); turning one off and an action already allowed need none.
 /// </summary>

@@ -10,7 +10,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Agents;
 
 /// <summary>
-/// Card 578 (B128 verify): the Settings > Agents Grok tile as agents.detect gives it (SignInCatalog.Grok under the
+/// The tester's checks of the Grok sign-in: the Settings > Agents Grok tile as agents.detect gives it (SignInCatalog.Grok under the
 /// GatewaySignInOverlay) end to end with a real RunGateway, a fake upstream, a temp Grok home and a fake grok runner
 /// (GrokKeeperOptions.RunGrok). No real grok runs and no real ~/.grok is read: the tile's FakeHost path maps to the temp
 /// home's auth.json.

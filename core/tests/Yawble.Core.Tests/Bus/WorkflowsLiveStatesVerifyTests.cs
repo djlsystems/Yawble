@@ -240,7 +240,7 @@ public class WorkflowsLiveStatesVerifyTests
         await Wait.UntilAsync(async () => !Row(await rig.List(), lead)["working"]!.GetValue<bool>(), "runs ended");
     }
 
-    /// <summary>The time object (B086) on every row: breakdown in the contract's categories, adding up to overallMs exactly.</summary>
+    /// <summary>The time object on every row: breakdown in the contract's categories, adding up to overallMs exactly.</summary>
     [Fact]
     public async Task EveryRowsTime_BreakdownAddsUpToOverall_InTheContractsCategories()
     {
@@ -474,6 +474,6 @@ public class WorkflowsLiveStatesVerifyTests
         var page = await rig.Call("workflows.list", new { state = "open", limit = 1 });
         rpcWatch.Stop();
         Assert.Equal(334, Ids(page).Count); // every open one past limit 1
-        TestContext.Current.SendDiagnosticMessage($"card 478: 1,000 workflows: list {bigList} queries ({watch.ElapsedMilliseconds} ms engine, {rpcWatch.ElapsedMilliseconds} ms rpc open-only), get {bigGet} queries");
+        TestContext.Current.SendDiagnosticMessage($"1,000 workflows: list {bigList} queries ({watch.ElapsedMilliseconds} ms engine, {rpcWatch.ElapsedMilliseconds} ms rpc open-only), get {bigGet} queries");
     }
 }

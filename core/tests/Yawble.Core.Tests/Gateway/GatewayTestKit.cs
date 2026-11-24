@@ -319,7 +319,7 @@ internal sealed class GatewayFixture : IAsyncDisposable
     {
         // A real sandbox (the tests gated on RealSandbox.SkipUnlessAvailable) reaches the gateway over slirp4netns, i.e. on
         // a real 127.0.0.1 port: an in-memory listener's port is bound by nothing, so the sandbox's connection was refused
-        // (Errno 111, B035). Those tests run real loopback without the opt-in variable.
+        // (Errno 111). Those tests run real loopback without the opt-in variable.
         realLoopback |= realSandbox;
         // A real-loopback fixture binds ports: only for tests gated on SkipUnlessRealLoopback (or on a real sandbox).
         if (realLoopback && !realSandbox && !RealLoopbackEnabled)

@@ -8,7 +8,7 @@ using C = Yawble.Core.Board.TimeCategories;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// Card 431 (verify B086), the tester's own checks beside the developer's: seeded random workflows whose cards overlap
+/// The tester's own checks of the timeline beside the developer's: seeded random workflows whose cards overlap
 /// (the priority merge is the highest open card per moment and everything adds up exactly, to the millisecond), a
 /// Visitor may read timeline.get, and no token or cost field is on the wire. Fixed times only.
 /// </summary>

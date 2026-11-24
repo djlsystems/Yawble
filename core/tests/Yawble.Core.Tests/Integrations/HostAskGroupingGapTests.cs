@@ -14,7 +14,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// B018 verify (card 185, TesterWren): gaps found while checking DeveloperMarlo's and DeveloperInes's delivery. Fakes
+/// TesterWren's gap tests: gaps found while checking DeveloperMarlo's and DeveloperInes's delivery. Fakes
 /// only: a temporary database, fake timers and a recording tell; no real network, no real program.
 /// </summary>
 public sealed class HostAskGroupingGapTests : IDisposable
@@ -209,7 +209,7 @@ public sealed class HostAskGroupingGapTests : IDisposable
     }
 
     /// <summary>
-    /// B018 finding F1, fixed by B039 (card 227): Deny on a grouped item of three hosts tells the member once, and that
+    /// A gap found here, since fixed: Deny on a grouped item of three hosts tells the member once, and that
     /// one message names every host. Each host is still denied with its own 24-hour quiet, and nothing is written.
     /// </summary>
     [Fact]
@@ -266,7 +266,7 @@ public sealed class HostAskGroupingGapTests : IDisposable
                      "Do not try another site or a way around it: carry on without it, or hand back blocked on api.nuget.org.", told.Text);
     }
 
-    // ------------------------------------------------------------------ B039 verify (card 228, TesterKofi): gaps
+    // ------------------------------------------------------------------ TesterKofi's re-check of that fix: gaps
 
     [Fact]
     public async Task TwoMembersGroupedDeny_EachHostIsQuietOnlyForItsOwnMember()

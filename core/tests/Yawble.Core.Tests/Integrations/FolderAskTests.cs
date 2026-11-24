@@ -15,7 +15,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// B111 folder asks (card 496): request_folder raises an ask the person answers in Needs you; an approval writes the
+/// Folder asks: request_folder raises an ask the person answers in Needs you; an approval writes the
 /// member's loosen block through the policy store and its effective policy has the folder; read narrows; deny changes
 /// nothing and tells the asker; a repeat reuses the open ask; a Manager may ask for its own team's member only; each
 /// refusal is said at once with no ask. Fakes only: a temporary database, a fixed fictional Windows machine

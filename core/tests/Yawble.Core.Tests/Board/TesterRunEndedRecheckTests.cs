@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// Card 172 re-check of B027 item 4 ("not a crashed run") after card 170's fix: a tester's "run ended" counts only when
+/// A re-check of BoardTesterRuleTests' item 4 ("not a crashed run") after its fix: a tester's "run ended" counts only when
 /// that run handed back. Gap tests beside BoardTesterRuleTests / BoardTesterDoneGapTests. Fakes only: the projector fed
 /// hand-made messages shaped like BusEngine's agent.completed payload.
 /// </summary>

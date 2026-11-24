@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// Card 469 (B100 verify): the tester's checks of 467 (dcbbb75) and 468 (f85133f) merged. The gaps the developers' own
+/// The tester's checks of the retro work (dcbbb75 and f85133f) merged. The gaps the developers' own
 /// tests leave: the two cards working together (a retro run reads its lessons in its prompt, reads the digest and writes
 /// team_retros; what Team settings then says), an expired workflow gets no retro, and the digest's masking on the bus path.
 /// Fakes only: scripted runs, a manual clock, no agent CLI.
@@ -35,7 +35,7 @@ public class RetroVerifyTests
     private static Message[] Retros(BusStore store) => [.. store.AllMessages().Where(m => BusStore.RetroOf(m) is not null)];
 
     /// <summary>
-    /// The whole B100 loop with both cards: two pieces of work, Ada blocked once (her reason carries a token), the Manager
+    /// The whole retro loop with both cards: two pieces of work, Ada blocked once (her reason carries a token), the Manager
     /// completes; the retro run gets the lessons in its prompt, reads the digest (no token in it) and writes team_retros.
     /// The version and Team settings' line ("by the retro of workflow &lt;id&gt;") must name the completed workflow, the one the
     /// retro was for, not the retro item's own workflow (spec section 4: "Lessons: n, last updated &lt;date&gt; by the retro of
@@ -124,7 +124,7 @@ public class RetroVerifyTests
                 $"team_retros version says workflow {lessons.Workflow} (the retro item's own workflow is {retroWorkflow}); " +
                 $"the completed workflow the retro was for is {root.Seq}");
 
-            // Card 481: Settings > Skills' version history (shell versionWriter: "the retro of workflow <id>") reads the
+            // Settings > Skills' version history (shell versionWriter: "the retro of workflow <id>") reads the
             // same version row, so it names the completed workflow too, and the retro item's own workflow appears nowhere.
             var version = Assert.Single(skills.Versions(team, TeamRetros.Name));
             Assert.Equal("Manager", version.Writer);

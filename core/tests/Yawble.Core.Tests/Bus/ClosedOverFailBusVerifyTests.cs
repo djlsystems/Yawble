@@ -16,7 +16,7 @@ using ClosedOverFailText = Yawble.Core.Board.ClosedOverFail;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// Card 622 (B142 verify), end to end on a real BusEngine with fake runners: the Manager works only through the MCP bus
+/// The tester's checks of closing over a FAIL, end to end on a real BusEngine with fake runners: the Manager works only through the MCP bus
 /// tools (tell with card, needs_decision with card/kind/reason, workflow_complete, workflow_show, workflow_digest), the
 /// person answers through the window's bus.answer (optionIndex) on a real UiRpc, the Concierge's answer is bus.answer with
 /// text only as the Concierge actor, and the board is a real BoardService reading the bus. Strings are core/src's own
@@ -62,8 +62,8 @@ public class ClosedOverFailBusVerifyTests
             TeamId = (await Engine.TeamsAsync(Ct)).Single().Id;
             Board = new BoardStore(Db.ConnectionString);
             BoardSvc = new BoardService(Board, Engine);
-            Build = Board.AddCard("Alpha", null, "B142", "Build the Save button", "spec", "queued", Lanes.Todo, null).Id;
-            Verify = Board.AddCard("Alpha", null, "B142", "Verify the Save button", "spec", "queued", Lanes.Todo, null).Id;
+            Build = Board.AddCard("Alpha", null, "B004", "Build the Save button", "spec", "queued", Lanes.Todo, null).Id;
+            Verify = Board.AddCard("Alpha", null, "B004", "Verify the Save button", "spec", "queued", Lanes.Todo, null).Id;
         }
 
         public static async Task<string> Tool(RunContext run, string tool, object args, CancellationToken ct)
@@ -269,7 +269,7 @@ public class ClosedOverFailBusVerifyTests
     {
         await using var rig = new Rig();
         string? noReason = null;
-        const string Reason = "Save moves to card 700";
+        const string Reason = "Save moves to card 70";
         rig.Runner.On("Alpha/Ada", async (run, ct) => { await run.HandbackAsync("done: the Save button is built", ct); return RunResult.Ok; });
         rig.Runner.On("Alpha/TesterGary", async (run, ct) => { Interlocked.Increment(ref rig.TesterRuns); await run.HandbackAsync(Fail1, ct); return RunResult.Ok; });
         rig.Runner.On("Alpha/Manager", async (run, ct) =>
@@ -280,7 +280,7 @@ public class ClosedOverFailBusVerifyTests
             if (t is null) { rig.NewTesterVerdictReset(); return RunResult.Ok; }
             if (!t.StartsWith("ERROR: refused (tester_fail)", StringComparison.Ordinal)) return RunResult.Ok;
             noReason ??= await Rig.Tool(run, "needs_decision", new { summary = $"Card {rig.Verify} is won't-do?", card = rig.Verify, kind = "wont-do" }, ct);
-            await Rig.Tool(run, "needs_decision", new { summary = $"Card {rig.Verify} is won't-do: Save moves to card 700. Agree?", card = rig.Verify, kind = "wont-do", reason = Reason }, ct);
+            await Rig.Tool(run, "needs_decision", new { summary = $"Card {rig.Verify} is won't-do: Save moves to card 70. Agree?", card = rig.Verify, kind = "wont-do", reason = Reason }, ct);
             return RunResult.Ok;
         });
         await Ship(rig);

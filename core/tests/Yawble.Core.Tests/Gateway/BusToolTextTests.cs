@@ -33,7 +33,7 @@ public class BusToolTextTests
     [Fact]
     public void ProgressStaysOneShortLine() => Assert.Contains("One short line", Param("progress", "status"));
 
-    /// <summary>B142 (card 620): needs_decision ties a question to a tester's FAIL (card, kind, reason); workflow_complete says it is refused over one.</summary>
+    /// <summary>needs_decision ties a question to a tester's FAIL (card, kind, reason); workflow_complete says it is refused over one.</summary>
     [Fact]
     public void NeedsDecisionTakesCardKindAndReason_AndWorkflowCompleteSaysAFailIsRefused()
     {

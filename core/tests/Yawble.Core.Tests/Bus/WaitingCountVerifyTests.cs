@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// Card 582 (B130 verify): TeamSummary.Waiting counts the team's members with an open needs_decision, over a real bus,
+/// The tester's checks: TeamSummary.Waiting counts the team's members with an open needs_decision, over a real bus,
 /// and goes down as the person answers each; teams.list carries it as camelCase "waiting"; org.summary carries it as
 /// teams[].agents.waitingOnYou (0 when nobody asks). Other teams stay 0.
 /// </summary>

@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Email;
 
-/// <summary>The Email integration's read actions (card 590) on <see cref="EmailMailbox"/> against the fake IMAP server, Gmail extensions off and on.</summary>
+/// <summary>The Email integration's read actions on <see cref="EmailMailbox"/> against the fake IMAP server, Gmail extensions off and on.</summary>
 public class EmailMailboxTests
 {
     private const string Pw = "test-password";
@@ -132,7 +132,7 @@ public class EmailMailboxTests
         Assert.Empty(await List(mail, null, false, 0, oldest[1].Id));
     }
 
-    // ------------------------------------------------------------------ list after an id (B133)
+    // ------------------------------------------------------------------ list after an id
 
     /// <summary>
     /// Polls like the documented script: list after the saved id (none the first time), saving the last message's id only when there is one.

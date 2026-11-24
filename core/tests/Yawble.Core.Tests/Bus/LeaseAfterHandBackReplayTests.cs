@@ -4,7 +4,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// Card 566 (B126 verify) replay: Ada hands back in workflow 1, its run ends, Ada at once starts a run in workflow 2
+/// The tester's replay: Ada hands back in workflow 1, its run ends, Ada at once starts a run in workflow 2
 /// that takes the heavy-work lease. The Manager's delivery starts right after the first run ends; nobody is "queued"
 /// unless the run queue has them. Fake runners only.
 /// </summary>

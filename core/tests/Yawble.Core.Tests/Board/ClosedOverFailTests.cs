@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// B142 (card 621): a workflow the person let close over a tester's FAIL (WorkflowCompleted payload closedOverFail).
+/// A workflow the person let close over a tester's FAIL (WorkflowCompleted payload closedOverFail).
 /// The board puts each listed card in Done with the board's line, the tester rule notwithstanding; the digest and
 /// workflow_show say the same line; the Concierge's workflow watch says "closed over a FAIL (accepted)". Without the field
 /// nothing changes. Fakes only: hand-made messages.
@@ -45,7 +45,7 @@ public class ClosedOverFailTests
     {
         var (db, store, p) = Board("TesterWren");
         using var _ = db;
-        var verify = store.AddCard("payments", null, "B142", "Verify the fix", "spec", "queued", Lanes.Todo, 40);
+        var verify = store.AddCard("payments", null, "B004", "Verify the fix", "spec", "queued", Lanes.Todo, 40);
         p.Apply(Claim("TesterWren", verify.Id, 40));
         p.Apply(M(MessageTypes.Blocked, new { reason = "FAIL: login still 500s" }, "payments/TesterWren", 40));
         // The tester's card was re-told (so untested since) and its status is loud: both would leave it out of Done.
@@ -67,7 +67,7 @@ public class ClosedOverFailTests
     {
         var (db, store, p) = Board("TesterWren");
         using var _ = db;
-        var verify = store.AddCard("payments", null, "B142", "Verify export", "spec", "queued", Lanes.Todo, 41);
+        var verify = store.AddCard("payments", null, "B004", "Verify export", "spec", "queued", Lanes.Todo, 41);
         p.Apply(Claim("TesterWren", verify.Id, 41));
 
         p.Apply(M(MessageTypes.WorkflowCompleted,
@@ -84,8 +84,8 @@ public class ClosedOverFailTests
     {
         var (db, store, p) = Board("TesterWren");
         using var _ = db;
-        var verify = store.AddCard("payments", null, "B142", "Verify", "spec", "queued", Lanes.Todo, 42);
-        var fix = store.AddCard("payments", null, "B142", "Fix", "spec", "queued", Lanes.Todo, 42);
+        var verify = store.AddCard("payments", null, "B004", "Verify", "spec", "queued", Lanes.Todo, 42);
+        var fix = store.AddCard("payments", null, "B004", "Fix", "spec", "queued", Lanes.Todo, 42);
         p.Apply(Claim("TesterWren", verify.Id, 42));
         p.Apply(Claim("DeveloperPriya", fix.Id, 42));
         p.Apply(M(MessageTypes.Handback, new { delivered = "fixed" }, "payments/DeveloperPriya", 42));

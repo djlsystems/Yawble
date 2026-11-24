@@ -14,9 +14,9 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// Card 495 (B106 verify, TesterKofi): card 478's O1 scenario re-run against the fix. Web's Manager holds the heavy-work
-/// lease and tells Ben "Card 1: build the page"; Ben's run asks for the lease and waits in its queue (in card 478's
-/// get-running.json, Ben's card 4 counted that wait as agent-working). Cy, told by the person in her own workflow, queues
+/// TesterKofi's check of the lease wait: WorkflowsLiveStatesVerifyTests' O1 scenario re-run against the fix. Web's
+/// Manager holds the heavy-work lease and tells Ben "Card 1: build the page"; Ben's run asks for the lease and waits in
+/// its queue (in WorkflowsLiveStatesVerifyTests' get-running.json, Ben's card 4 counted that wait as agent-working). Cy, told by the person in her own workflow, queues
 /// behind him. Everything is read the way the shell reads it, through the REAL dispatcher (UiRpc over RpcDispatcher):
 /// workflows.get (the pane's cards), workflows.list (the Workflows page's time bar) and timeline.get (the board's
 /// timeline, card and workflow rows). One fake clock for the bus and the board; the runs are scripted fakes (no idle clock).

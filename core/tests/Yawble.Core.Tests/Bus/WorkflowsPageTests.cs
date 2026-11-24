@@ -12,8 +12,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// B104 (card 476): workflows.list and workflows.get, the Workflows page's reads across every team (contract
-/// B104/contract.md). Fakes only: a temp database, a fake clock, a scripted runner that is never started (each
+/// workflows.list and workflows.get, the Workflows page's reads across every team (the Workflows page's
+/// contract). Fakes only: a temp database, a fake clock, a scripted runner that is never started (each
 /// workflow's messages are written straight to the log), the real board store and the real UiRpc over RpcDispatcher.
 /// </summary>
 public class WorkflowsPageTests
@@ -127,14 +127,14 @@ public class WorkflowsPageTests
         Assert.Null(r["item"]);         // started by a tell, not the backlog
         Assert.Empty(r["members"]!.AsArray());
         Assert.False(r["working"]!.GetValue<bool>());
-        Assert.NotNull(r["time"]);      // B086's time object from the board
+        Assert.NotNull(r["time"]);      // the time object from the board
         Assert.Equal("completed", S(Row(all, done)["status"]));
         Assert.Equal("closed", S(Row(all, closed)["status"]));
         Assert.Equal("expired", S(Row(all, expired)["status"]));
         Assert.Equal(("needs-you", "Beta"), (S(Row(all, asking)["status"]), S(Row(all, asking)["team"])));
         Assert.NotNull(Row(all, asking)["question"]);
         Assert.Equal("stopped", S(Row(all, stopped)["status"]));
-        // B126: an undelivered delivery whose member is not in the run queue is pending, not "queued for a run slot".
+        // An undelivered delivery whose member is not in the run queue is pending, not "queued for a run slot".
         var q = Row(all, queued);
         Assert.Equal(("waiting", "pending"), (S(q["status"]), S(q["waitingFor"])));
         var worker = Assert.Single(q["members"]!.AsArray())!;
@@ -188,7 +188,7 @@ public class WorkflowsPageTests
         rig.Board.SaveItem(old with { ArchivedAt = rig.Board.Now() });
         var fromPayload = rig.Tell("Alpha", "Manager", "Backlog item B002 is dispatched to your team. It is a SPEC...", item: old.Label);
         var told = rig.Tell("Alpha", "Ada", "Just a quick question");
-        var gone = rig.Tell("Alpha", "Ada", "Names an item that is no more", item: "B999");
+        var gone = rig.Tell("Alpha", "Ada", "Names an item that is no more", item: "B009");
 
         var page = await rig.List();
         var d = Row(page, dispatched);

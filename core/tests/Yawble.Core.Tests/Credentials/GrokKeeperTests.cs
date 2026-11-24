@@ -188,7 +188,7 @@ public class GrokKeeperTests
         Assert.Equal("grok-session-2", second.Headers.GetValues("x-fake-accepted").Single());
     }
 
-    // ------------------------------------------------------------------ B128: a refresh run never leaves grok signed out
+    // ------------------------------------------------------------------ a refresh run never leaves grok signed out
     // A fake runner (GrokKeeperOptions.RunGrok) stands in for grok on every OS: it records the arguments and rewrites
     // auth.json the way grok would. No real grok runs and no real ~/.grok is touched.
 

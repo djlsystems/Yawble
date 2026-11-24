@@ -15,7 +15,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Card 498 (verify B111, Marlo 79d45d7/afb7205 + Ines 74dfd22): folder asks through the real bus, UiRpc and RpcDispatcher
+/// The tester's checks (Marlo 79d45d7/afb7205 + Ines 74dfd22): folder asks through the real bus, UiRpc and RpcDispatcher
 /// (the window's path), filling what FolderAskTests leaves open: request_folder answers at once with nobody answering;
 /// a repeat pushes no second change; folder.* reaches FolderAskService through RpcDispatcher, not UiRpc.Prefixes;
 /// app.overview counts the ask in needsYou; an approval is what Member settings > Policy (policy.getMember) shows and

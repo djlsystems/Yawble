@@ -16,7 +16,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Gateway;
 
 /// <summary>
-/// Card 464 (B103 verify), the tester's own checks of 447bb5f (GatewayLog thinning, host-denied count, 0050, Network
+/// The tester's own checks of 447bb5f (GatewayLog thinning, host-denied count, 0050, Network
 /// Times column and " (Nx)") and 9d32165 (0051, docs/features.md Logs > Network). Fake upstream, fake secrets, temp
 /// databases only.
 /// </summary>
@@ -198,7 +198,7 @@ public class NetworkLogThinningVerifyTests
     }
 
     /// <summary>
-    /// Card 504 (B105): a CONNECT refusal (https to a host off the allowlist, kind connect-denied) refused again in the
+    /// A CONNECT refusal (https to a host off the allowlist, kind connect-denied) refused again in the
     /// run is counted on its first row, as host-denied is (it was five rows, each count 1, under the repeat window).
     /// </summary>
     [Fact]
@@ -255,7 +255,7 @@ public class NetworkLogThinningVerifyTests
         var cs = $"Data Source={Path.Combine(dir, "old.db")};Pooling=False";
         try
         {
-            // The database as a build before B103 left it: every migration up to 0049, applied the migrator's way.
+            // The database as a build before the log thinning left it: every migration up to 0049, applied the migrator's way.
             using (var c = new SqliteConnection(cs))
             {
                 c.Open();
@@ -280,7 +280,7 @@ public class NetworkLogThinningVerifyTests
                 for (var i = 0; i < 9; i++) gone.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 200));
                 kept.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 401));
                 kept.Add(Row(c, 1, GatewayEventKinds.CredentialProblem, Vhosts.Model, 401));
-                kept.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 200)); // the success after the problem (card 475)
+                kept.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 200)); // the success after the problem
                 for (var i = 0; i < 9; i++) gone.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Model, 200));
                 kept.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Grok, 200));
                 gone.Add(Row(c, 1, GatewayEventKinds.Forward, Vhosts.Grok, 200));
@@ -321,8 +321,8 @@ public class NetworkLogThinningVerifyTests
     }
 
     /// <summary>
-    /// Card 475: on an existing database 0051 keeps the first success after each credential problem / rate limit, so a
-    /// run written before B103 whose problem was cleared by a success still reads as cleared (it read as rejected with
+    /// On an existing database 0051 keeps the first success after each credential problem / rate limit, so a
+    /// run written before the log thinning whose problem was cleared by a success still reads as cleared (it read as rejected with
     /// 9d32165's 0051).
     /// </summary>
     [Fact]
@@ -362,7 +362,7 @@ public class NetworkLogThinningVerifyTests
     }
 
     /// <summary>
-    /// 0051 against the live rule: random pre-B103 logs (every event a row) through the migration give exactly the rows
+    /// 0051 against the live rule: random logs from before the thinning (every event a row) through the migration give exactly the rows
     /// GatewayLog.Write keeps for the same events. Runs, mixed-case model vhosts, non-model vhosts, non-2xx forwards,
     /// credential problems and rate limits on either vhost, and rows with no run.
     /// </summary>
@@ -441,7 +441,7 @@ public class NetworkLogThinningVerifyTests
 
     /// <summary>
     /// The check's own guard on the events as the old log stored them (every one) vs as the thinned log stores them.
-    /// Card 474: the text names the vhosts and no number, so it is the same either way (it was "forwarded 12 request(s)"
+    /// The text names the vhosts and no number, so it is the same either way (it was "forwarded 12 request(s)"
     /// vs "forwarded 1 request(s)" before).
     /// </summary>
     [Fact]
@@ -499,7 +499,7 @@ public class NetworkLogThinningVerifyTests
         foreach (var vhost in Vhosts.ProductionUpstreams.Keys) Assert.Contains($"`{vhost.Split('.')[0]}`", text);
         Assert.Contains("`.yawble.internal`", text);
         Assert.Contains("counted in **Model usage**", text);
-        // Card 475, then card 504 (B105): host-denied and connect-denied fold into one row; the Times column and " (Nx)" are described.
+        // Host-denied and connect-denied fold into one row; the Times column and " (Nx)" are described.
         Assert.Contains("A plain-http request to a host that is not allowed (`host-denied`)", text);
         Assert.Contains("(`connect-denied`), refused again in the same run, are both counted on one row", text);
         Assert.Contains("A host's plain-http and HTTPS refusals stay two rows", text);
@@ -515,12 +515,12 @@ public class NetworkLogThinningVerifyTests
         Assert.Equal("Times", Assert.Single(LogSources.Find("gateway")!.Columns, c => c.Key == "count").Label);
         Assert.Equal(TimeSpan.FromMinutes(1), GatewayLog.RepeatWindow);
 
-        // Card 474: the app's own description of the Network source no longer says every model request is a row.
+        // The app's own description of the Network source no longer says every model request is a row.
         var about = LogSources.Find("gateway")!.About;
         Assert.DoesNotContain("every model request it forwarded", about);
         Assert.Contains("its first model request to each model API", about);
         Assert.Contains("every one that failed", about);
-        Assert.Contains("a host refused again, over plain http or https, is counted on one row", about); // card 504 (B105)
+        Assert.Contains("a host refused again, over plain http or https, is counted on one row", about);
         Assert.Contains("rate limits", about);
         // Observed (nit, not asserted as a fault): it does not mention the success kept after each problem, which the doc does.
         Assert.DoesNotContain("after", about);

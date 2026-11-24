@@ -15,7 +15,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Concierge;
 
 /// <summary>
-/// Card 360 (verify B066, cards 358 + 359): gaps the developers' ConciergeHostTaskTests leave. host_task_list's approval and
+/// Gaps the developers' ConciergeHostTaskTests leave. host_task_list's approval and
 /// state lines as they change (Always, a changed script, a waiting request, the last run); the real Read-Host / PromptForChoice /
 /// ReadKey / pause end at once with stdin closed; the Update goes only to the chat that asked; a timed-out, a stopped and a
 /// refused-at-start run end as failed / blocked Updates; host_task_status by team and task while it runs; Save of a

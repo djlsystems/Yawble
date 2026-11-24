@@ -12,7 +12,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Companion;
 
 /// <summary>
-/// Card 601 Part 2 (B135): the script tools offered to a paired companion client. Reads at read, saves and dry runs at act,
+/// The script tools offered to a paired companion client. Reads at read, saves and dry runs at act,
 /// a member add and a live run at destructive; a member add and a script's first live run on a team become requests the
 /// window approves (checked with request_status, bound to the call's key: a changed call is a new request); a later live
 /// run, a save, a check and a dry run run at once. A fake scripts.* RPC; no credentials.
@@ -229,7 +229,7 @@ public sealed class CompanionScriptToolsTests : IAsyncLifetime
         Assert.NotNull(b.RequestId);
         Assert.NotEqual(a.RequestId, b.RequestId);
         Assert.Contains("\"subject\":\"other\"", b.Text);
-        // The same tool and target (the script on the team): the newer request replaces the older one (B141).
+        // The same tool and target (the script on the team): the newer request replaces the older one.
         Assert.Equal(1, _service.PendingCount);
         var old = _service.Status(cc, a.RequestId!)!;
         Assert.Equal(ActionState.Changed, old.State);
@@ -320,7 +320,7 @@ public sealed class CompanionScriptToolsTests : IAsyncLifetime
         var act = CompanionTools.Definitions(CompanionLevel.Act);
         var destructive = CompanionTools.Definitions(CompanionLevel.Destructive);
 
-        Assert.Equal(13, ScriptTools.Names.Count); // the 11 of B135 and B139's script_trigger_set and integration_action_allow (CompanionTriggerAndActionToolsTests)
+        Assert.Equal(13, ScriptTools.Names.Count); // the first 11, then script_trigger_set and integration_action_allow (CompanionTriggerAndActionToolsTests)
         Assert.All(ScriptTools.Names, n => Assert.Contains(n, Names(destructive)));
         Assert.Contains(ScriptTools.ScriptCheck, Names(read));
         Assert.DoesNotContain(ScriptTools.ScriptSave, Names(read));

@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// Card 390 (B085 verify), gap tests: the agreed B085 contract as the shell reads it, over the real UiRpc dispatcher (the
+/// Gap tests of workflow expiry: the agreed contract as the shell reads it, over the real UiRpc dispatcher (the
 /// JSON on the wire, not the C# records) with a fake clock. bus.workflows' item keys (the shell fake-core serves the same
 /// keys), bus.workflowExtend's reply and already_ended, the expiry warning on the list item and on bus.decisions,
 /// teams.workflowExpiry's edge values and AuditLog's get-or-set. Test-only.
@@ -19,7 +19,7 @@ public class WorkflowExpiryContractTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
-    /// <summary>The keys of a bus.workflows item: the shell's WorkflowSummary plus expiryWarning (the contract), and B086's time.</summary>
+    /// <summary>The keys of a bus.workflows item: the shell's WorkflowSummary plus expiryWarning (the contract), and the board's time.</summary>
     public static readonly string[] WorkflowItemKeys =
     [
         "id", "title", "owner", "state", "undeclared", "busy", "ending", "startedAt", "lastAt", "messages",

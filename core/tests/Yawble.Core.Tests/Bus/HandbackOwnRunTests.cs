@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// B126: a hand-back waits only for the run that sent it (not the sender's next run in another workflow), and the
+/// A hand-back waits only for the run that sent it (not the sender's next run in another workflow), and the
 /// undelivered work's real waiting states: queued (run queue) | waits-for-run (waitsFor: the sender) | held | pending,
 /// on the Workflows page's members, in team status and the agent cards, the companion's text and the timeline (only a
 /// real run-queue wait is Waiting for a slot). Fake runners only.
@@ -115,7 +115,7 @@ public class HandbackOwnRunTests
         Assert.Equal((1, WaitStates.WaitsForRun, "Ada", "idle"), (status.QueuedInstructions, status.WaitState, status.WaitsFor, status.State));
         var card = (await engine.AgentCardsAsync((await engine.TeamsAsync(Ct)).Single().Id, Ct)).Single(c => c.Member.Name == "Manager");
         Assert.Equal((WaitStates.WaitsForRun, "Ada"), (card.WaitState, card.WaitsFor));
-        // Card 568: the card's own state says it too (the shell's team list and the cloud read state, not waitState).
+        // The card's own state says it too (the shell's team list and the cloud read state, not waitState).
         Assert.Equal(WaitStates.WaitsForRun, card.State);
         var wire = JsonSerializer.SerializeToNode(card, Yawble.Core.Ipc.RpcDispatcher.Json)!; // teams.agents' row, as UiRpc sends it
         Assert.Equal((WaitStates.WaitsForRun, "Ada"), (wire["state"]!.GetValue<string>(), wire["waitsFor"]!.GetValue<string>()));

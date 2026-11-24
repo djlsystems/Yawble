@@ -13,7 +13,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Companion;
 
 /// <summary>
-/// Card 619 (B141 verify), the tester's own checks: a real CompanionService on a manual clock, with no git (the git-backed
+/// The tester's own checks of team delete: a real CompanionService on a manual clock, with no git (the git-backed
 /// CompanionServiceTests cannot clone a local bare repository in a sandbox). The lists are the Concierge's team_delete and
 /// team_archive, whose keys move without git: deleting team alpha and making it again gives it a new id.
 /// </summary>

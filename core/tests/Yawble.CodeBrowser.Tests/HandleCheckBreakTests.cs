@@ -4,7 +4,7 @@ using Xunit;
 namespace Yawble.CodeBrowser.Tests;
 
 /// <summary>
-/// Tester's break tests for B034 (card 166): the handle checks driven through the seams (HandlePath, LinkCount,
+/// Tester's break tests: the handle checks driven through the seams (HandlePath, LinkCount,
 /// AfterEnumerate) with fake final paths and link counts, plus a check that every refusal closes what it opened.
 /// They run on Windows (the Windows handle path) and, through the same seams, on macOS / Linux (the POSIX path);
 /// on this Windows machine the POSIX path is compiled but not run.

@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// Card 172 (verify B027 items 1-4): gap tests beside BoardTesterRuleTests. Fakes only: the projector fed hand-made messages.
+/// Gap tests beside BoardTesterRuleTests (its items 1-4). Fakes only: the projector fed hand-made messages.
 /// <list type="bullet">
 /// <item>Items 1 + 3 together: a tester's card re-told to a developer, the developer hands back, then the workflow is
 ///   declared complete: the card stays out of Done.</item>

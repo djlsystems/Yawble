@@ -17,7 +17,7 @@ using ScriptCaller = Yawble.Core.Integrations.ScriptCaller;
 namespace Yawble.Core.Tests.Concierge;
 
 /// <summary>
-/// Card 601 (B135, SC-5): the built-in "scripts" skill is offered to the Concierge (skills_list / skills_get, through its MCP tools), never to a
+/// The built-in "scripts" skill is offered to the Concierge (skills_list / skills_get, through its MCP tools), never to a
 /// team's agents; it names every step type, function, condition operator, built-in schema and email action the engine has; and its example
 /// script checks clean with the real checker and the real email and api catalogs. Fakes only: a temp database, no mailbox, no API.
 /// </summary>
@@ -137,7 +137,7 @@ public sealed class ConciergeScriptsSkillTests : IDisposable
         Assert.Contains(ScriptDocument.CurrentFormat, body);
     }
 
-    /// <summary>Card 635 (B139): the skill teaches the two tools that turn a script on, by their exact names and fields, and their approvals.</summary>
+    /// <summary>The skill teaches the two tools that turn a script on, by their exact names and fields, and their approvals.</summary>
     [Fact]
     public void TheSkillTeachesTheTriggerAndActionAllowTools()
     {
