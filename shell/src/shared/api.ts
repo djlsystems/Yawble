@@ -261,7 +261,8 @@ export type CompanionLevel = 'read' | 'act' | 'destructive';
 export interface CompanionClientInfo { name: string; level: CompanionLevel; pairedAt: string; pairedBy: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface CompanionPairing { id: string; name: string; level: CompanionLevel; code: string; expires: string }
 /** A destructive call waiting for the person: `plan` is agent-influenced text, always shown as plain text. */
-export interface CompanionAction { id: string; client: string; tool: string; plan: string; expires: string; state: 'pending' | 'running' }
+/** A companion request waiting for the person. B141: `asked` is when it was made (ISO UTC, like `expires`; an older core leaves it out). */
+export interface CompanionAction { id: string; client: string; tool: string; plan: string; expires: string; asked?: string; state: 'pending' | 'running' }
 export interface CompanionList { clients: CompanionClientInfo[]; pairings: CompanionPairing[]; actions: CompanionAction[] }
 /** companion.decideAction and companion.actionStatus (a read only): running for an approval just made (the run goes on in the core; companion.changed says when it ends),
  *  else how the request ended (changed: the list moved on, nextId is the new request). */
