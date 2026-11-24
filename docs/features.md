@@ -60,7 +60,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     and at the right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
     Stop and Remove.
   - The agent chip reads agent/model, e.g. `claude/claude-opus-5-5`: the model set on the member, else the agent's
-    default model, else (the CLI picks its own) the model the member's last run used most, as the provider reported
+    default model, else the model your own CLI settings name (see Agent CLIs, Models), else (the CLI picks its own)
+    the model the member's last run used most, as the provider reported
     it; before a first run it reads `claude/default`. Its tooltip says which of these it is.
   - A row of tabs, **Report | Activity | Terminal**, with the run's details beside them (how its last run ended, its
     queue position, policy problems).
@@ -154,6 +155,23 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - **Settings > Agents** lists detected CLIs (**Detect again**), each with whether you are signed in to it on this
   computer (or how to sign in), and custom agents. A custom agent copies a built-in
   with its own name, default model and command-line arguments.
+- **Models.** The model pickers list, in this order and each model once, with where each one comes from:
+  - **the CLI**: the CLI's own list, where it gives one without a prompt or a sign-in. Grok: what the app's last
+    `grok models` printed (the run that keeps your Grok sign-in fresh; it is never run just for the list) and the
+    models cache grok keeps in its folder. Codex: the models cache Codex keeps in `~/.codex` (`models_cache.json`).
+    GitHub Copilot: the `--model` choices of `copilot --help`, run with a throwaway home and a time limit.
+    Antigravity and Claude Code give no list.
+  - **your settings**: the model your own CLI settings name: the top-level `model` in `~/.codex/config.toml` (or
+    `$CODEX_HOME`), `model` or `default_model` in `~/.grok/config.toml`, `model` in `~/.copilot/settings.json` or
+    `config.json`, in `~/.gemini/antigravity-cli/settings.json` and in `~/.claude/settings.json`.
+  - **your runs**: the models this CLI's runs used over the last 90 days, as the providers reported them.
+  - **built-in**: the list the app carries.
+  The app only reads these files; it never writes them. A source that fails or times out adds nothing and the others
+  stand. A CLI's list is kept for a few minutes. You can still type any other model name.
+- A member with no model of its own and an agent with no default model run with the model your CLI settings name
+  ("Your Codex settings (gpt-6.1-sol)"), passed on the command line, since a member's own CLI folder has no such
+  setting. With none there either, the CLI picks its own default. The agent change log notes when the model in effect
+  comes from your settings.
 - **Terminal** opens an agent's own interface in the window. **Test** runs it with a diagnostic prompt that checks
   its version, folders and access.
 
