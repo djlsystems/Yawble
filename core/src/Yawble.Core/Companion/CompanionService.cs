@@ -6,6 +6,7 @@ using Yawble.Core.Bus;
 using Yawble.Core.Concierge;
 using Yawble.Core.Ipc;
 using Yawble.Core.Provenance;
+using Yawble.Core.Scripts;
 
 namespace Yawble.Core.Companion;
 
@@ -63,6 +64,8 @@ public sealed partial class CompanionService(
     private const string CodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    /// <summary>B135: the script and schema tools, onto the app's scripts.* / schemas.* calls.</summary>
+    private readonly ScriptTools _scripts = new(bus, route);
     private readonly ConfirmationBook _book = new(clock);
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Pairing> _pairings = [];
@@ -181,7 +184,8 @@ public sealed partial class CompanionService(
         using var acting = Actor.Use(actor);
         try
         {
-            var result = needs == CompanionLevel.Destructive ? await RequestAsync(client, tool, args, ct) : await ReadOrActAsync(client, tool, args, ct);
+            var result = ScriptTools.Handles(tool) ? await ScriptCallAsync(client, tool, args, needs.Value, ct)
+                : needs == CompanionLevel.Destructive ? await RequestAsync(client, tool, args, ct) : await ReadOrActAsync(client, tool, args, ct);
             return result with { Text = needs == CompanionLevel.Destructive ? RequestSafe(result.Text) : ClientSafe(result.Text) };
         }
         catch (Exception e) when (e is ArgumentException or RpcException or BusRefusal)
@@ -227,8 +231,25 @@ public sealed partial class CompanionService(
         return new CompanionResult(text, isError);
     }
 
+    /// <summary>
+    /// A script tool (B135). A call the person must say yes to (adding a script member, a script's first live run on a team)
+    /// becomes a request with the plan <see cref="ScriptTools.YesNeededAsync"/> gives, bound to its key: approved, it runs
+    /// only if the same call still means the same thing, else it is a new request. Every other call runs now (a dry run, a
+    /// later live run, a build or a check); acts and live runs are audited.
+    /// </summary>
+    private async Task<CompanionResult> ScriptCallAsync(CompanionClient client, string tool, JsonObject args, CompanionLevel needs, CancellationToken ct)
+    {
+        args.Remove("confirm"); // a client never supplies a yes
+        if (ScriptTools.ApprovalOf(tool) != ScriptToolApproval.None && await _scripts.YesNeededAsync(tool, args, ct) is { } yes)
+            return await RequestAsync(client, tool, args, ct, yes);
+        var text = await _scripts.CallAsync(tool, args, ct);
+        if (needs != CompanionLevel.Read) audit.Record(Actor.ExternalClient(client.Name), "companion." + tool, SafeParams(args), "ok");
+        return new CompanionResult(text, false);
+    }
+
     /// <summary>A destructive call: never run now. The exact plan becomes a request the window approves or denies.</summary>
-    private async Task<CompanionResult> RequestAsync(CompanionClient client, string tool, JsonObject args, CancellationToken ct)
+    /// <param name="yes">For a script tool: the plan and key its call needs a yes for.</param>
+    private async Task<CompanionResult> RequestAsync(CompanionClient client, string tool, JsonObject args, CancellationToken ct, ScriptToolYes? yes = null)
     {
         var name = client.Name;
         args.Remove("confirm"); // a client never supplies a yes
@@ -245,7 +266,7 @@ public sealed partial class CompanionService(
         var id = NewId("r");
         var conversation = $"external:{name}:{id}";
         var expires = Now + ActionLife;
-        var prepared = await PrepareAsync(name, tool, args, conversation, ct);
+        var prepared = yes is not null ? new Prepared(null, yes.Plan, null, yes.Key) : await PrepareAsync(name, tool, args, conversation, ct);
         if (prepared.Immediate is { } immediate) return new CompanionResult(immediate, false);
         var request = new Request(id, client.Id, name, tool, args, RequestSafe(prepared.Plan), prepared.Token, prepared.Bound, conversation, expires);
         lock (_gate)
@@ -261,6 +282,16 @@ public sealed partial class CompanionService(
         Changed();
         return new CompanionResult($"NOT DONE: waiting for the person's approval in the Yawble window (request {id}): {request.Plan}", false, id);
     }
+
+    /// <summary>
+    /// For an approved script request: the new request when the same call now needs a yes to something else (the script's
+    /// runnable version moved, the team's name points elsewhere); null when it still means what was shown, or needs no yes now
+    /// (a live run happened since, so this is no longer the first).
+    /// </summary>
+    private async Task<Request?> ScriptChangedAsync(Request r, CancellationToken ct) =>
+        await _scripts.YesNeededAsync(r.Tool, r.Args, ct) is { } yes && yes.Key != r.Bound
+            ? new Request(NewId("r"), r.ClientId, r.Client, r.Tool, r.Args.DeepClone().AsObject(), RequestSafe(yes.Plan), null, yes.Key, r.Conversation, Now + ActionLife)
+            : null;
 
     /// <summary>Under the gate: a client may have at most <see cref="MaxPendingPerClient"/> requests waiting.</summary>
     private void RefuseOverCap(long clientId)
@@ -446,7 +477,14 @@ public sealed partial class CompanionService(
         {
             using (Actor.Use(actor))
             {
-                if (ShaBound.Contains(r.Tool) && await BoundNowAsync(r, ct) != r.Bound)
+                if (ScriptTools.Handles(r.Tool) && await ScriptChangedAsync(r, ct) is { } changed)
+                {
+                    // What was shown is not what the call would do now: approving the old plan must not run it. Shown again instead.
+                    next = changed;
+                    state = ActionState.Changed;
+                    reallyChanged = true;
+                }
+                else if (ShaBound.Contains(r.Tool) && await BoundNowAsync(r, ct) != r.Bound)
                 {
                     // What was shown moved since: approving the old plan must not act on the new commit. Shown again instead.
                     var prepared = await PrepareAsync(r.Client, r.Tool, r.Args, r.Conversation, ct);
@@ -557,6 +595,7 @@ public sealed partial class CompanionService(
 
     private async Task<(string Text, bool IsError)> ExecuteAsync(Request r, ConciergeTurn turn, Actor actor, CancellationToken ct)
     {
+        if (ScriptTools.Handles(r.Tool)) return (await _scripts.CallAsync(r.Tool, r.Args.DeepClone().AsObject(), ct), false);
         switch (r.Tool)
         {
             case "git_merge_team":

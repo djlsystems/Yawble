@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Yawble.Core.Concierge;
+using Yawble.Core.Scripts;
 
 namespace Yawble.Core.Companion;
 
@@ -16,19 +17,22 @@ public static class CompanionTools
         "team_list", "team_status", "team_activity", "team_workflows", "documents_list", "documents_read", "team_repos",
         "backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "integrations_status", "usage", "doctor",
         "backups_list", "request_status", "host_task_list", "host_task_status",
+        ScriptTools.SchemasList, ScriptTools.SchemaGet, ScriptTools.ScriptsList, ScriptTools.ScriptGet, ScriptTools.ScriptCheck, ScriptTools.ScriptRuns, ScriptTools.ScriptRun,
     ];
 
     public static readonly IReadOnlyList<string> Act =
     [
         "tell", "answer", "team_pause", "team_resume", "workflow_nudge", "backlog_add", "backlog_edit", "backlog_ready", "backlog_dispatch",
         "backlog_archive", "backlog_restore", "board_move", "board_comment", "team_unarchive", "team_agent_change",
+        // script_test_run here is a dry run; a live run (dry_run false) needs the destructive level (LevelOf).
+        ScriptTools.SchemaSave, ScriptTools.ScriptSave, ScriptTools.ScriptTestRun,
     ];
 
     public static readonly IReadOnlyList<string> Destructive =
     [
         "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
         "team_archive", "team_delete", "team_env_set", "doctor_fix", "team_create", "team_repo_add", "team_repo_remove", "workflow_close",
-        "backup_now", "git_merge_team", "backup_restore", "host_task_run",
+        "backup_now", "git_merge_team", "backup_restore", "host_task_run", ScriptTools.ScriptMemberAdd,
     ];
 
     /// <summary>The destructive tools whose own first call shows the exact list and issues a token (ConciergeActions' confirm flow).</summary>
@@ -51,6 +55,8 @@ public static class CompanionTools
     public static CompanionLevel? LevelOf(string tool, JsonObject args)
     {
         if (tool == "backlog_dispatch" && NewTeam(args)) return CompanionLevel.Destructive;
+        // A live script run really sends and writes through the team's integrations (B135); a dry run is an act.
+        if (ScriptTools.IsLiveRun(tool, args)) return CompanionLevel.Destructive;
         if (Read.Contains(tool)) return CompanionLevel.Read;
         if (Act.Contains(tool)) return CompanionLevel.Act;
         if (Destructive.Contains(tool)) return CompanionLevel.Destructive;
@@ -95,11 +101,18 @@ public static class CompanionTools
                 if (level < CompanionLevel.Destructive) foreach (var p in NewTeamParameters) Drop(schema, p);
                 else copy["description"] = copy["description"]!.GetValue<string>() + " With new_team, this " + ApprovalNote;
             }
+            if (name == ScriptTools.ScriptTestRun)
+            {
+                // The Concierge's sentence about a token and a yes in chat goes; the window approves a first live run here.
+                copy["description"] = WithoutYesSentences(copy["description"]!.GetValue<string>()) +
+                    (level >= CompanionLevel.Destructive
+                        ? " A live run (dry_run false) really sends and writes through the bound integrations; the first live run of a script on a team " + ApprovalNote
+                        : " This client may only dry-run (a live run needs the destructive level).");
+            }
             if (Destructive.Contains(name))
             {
                 // The Concierge's wording about tokens and a yes in chat does not apply here (the window approves): those sentences go.
-                var description = string.Join(' ', System.Text.RegularExpressions.Regex.Split(copy["description"]!.GetValue<string>(), @"(?<=\.)\s+")
-                    .Where(sentence => !System.Text.RegularExpressions.Regex.IsMatch(sentence, @"(?i)token|confirm|\byes\b"))).Trim();
+                var description = WithoutYesSentences(copy["description"]!.GetValue<string>());
                 // An external client has no chat for the Update at a host task run's end: it checks host_task_status instead.
                 if (name == ConciergeHostTasks.RunTool)
                     description = string.Join(' ', System.Text.RegularExpressions.Regex.Split(description, @"(?<=\.)\s+")
@@ -110,6 +123,11 @@ public static class CompanionTools
         }
         return list;
     }
+
+    /// <summary>A description without its sentences about a token, confirm or a yes (the window approves here).</summary>
+    private static string WithoutYesSentences(string description) =>
+        string.Join(' ', System.Text.RegularExpressions.Regex.Split(description, @"(?<=\.)\s+")
+            .Where(sentence => !System.Text.RegularExpressions.Regex.IsMatch(sentence, @"(?i)token|confirm|\byes\b"))).Trim();
 
     private static void Drop(JsonObject? schema, string parameter)
     {
