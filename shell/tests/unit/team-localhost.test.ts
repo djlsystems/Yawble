@@ -6,7 +6,7 @@ import { TEAM_LOCALHOST, TEAM_LOCALHOST_LABEL, TEAM_LOCALHOST_WARNING } from '..
 import TeamManageDialog from '../../src/renderer/src/components/TeamManageDialog.vue';
 import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remoteAccess';
 
-// B119 Part B (card 534): Team settings > Network has "Allow localhost (macOS)" (teams.localhost, off by default) with the
+// Team settings > Network has "Allow localhost (macOS)" (teams.localhost, off by default) with the
 // warning word for word. A Visitor sees it read-only (the core refuses a Visitor's set anyway). Fakes only.
 
 const WARNING = "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners. While it is on, a server an agent starts on `0.0.0.0` can be reached from other machines on your network unless the macOS firewall blocks it. Keep the macOS firewall on. Outbound traffic still goes only through the gateway.";
@@ -44,7 +44,7 @@ async function openNetwork(api: YawbleApi) {
 
 const toggle = (w: Awaited<ReturnType<typeof openNetwork>>) => w.get('[data-test=team-localhost-toggle]').element as HTMLInputElement;
 
-describe('Team settings: Allow localhost (macOS) (B119)', () => {
+describe('Team settings: Allow localhost (macOS)', () => {
   afterEach(() => applyRemoteAccess('full'));
 
   it('keeps the warning word for word', () => {

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 355: the window's own confirm (confirm.ts + ConfirmDialog.vue) in place of window.confirm, which in the remote
+// The window's own confirm (confirm.ts + ConfirmDialog.vue) in place of window.confirm, which in the remote
 // view (iPad Safari) brings "Suppress dialogs". OK / Enter -> true; Cancel / Escape / the backdrop -> false; the keys
 // are taken by a document capture listener added on open and removed on close; Tab stays inside; the focus goes back
 // to the opener; Escape never also closes the dialog under it (escapeClose.ts).

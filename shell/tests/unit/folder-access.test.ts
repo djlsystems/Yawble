@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B110 (card 492): Member settings > Policy: the Folder access block (add -> confirm -> shown with its source, remove ->
+// Member settings > Policy: the Folder access block (add -> confirm -> shown with its source, remove ->
 // confirm -> gone), one save model ("Unsaved changes", "Discard?" on close), honest results ("Nothing changed"), the changed
 // Effective rows highlighted, the Override table under "Advanced", and the missing / relative path warnings.
 // Against a small stateful FAKE core (policy.getMember / previewLoosen / saveLoosen / saveOverride); no real program runs.
@@ -85,7 +85,7 @@ const rowsOf = (w: any, list: string) => w.findAll(`[data-test=folders-${list}] 
 
 afterEach(() => { confirmState.value?.resolve(false); });
 
-describe('B110 Folder access', () => {
+describe('Folder access', () => {
   it('a typed path and a pending confirm survive a switch to General and back; closing still asks', async () => {
     const core = fakeCore();
     const w = await open(core.api);
@@ -228,7 +228,7 @@ describe('B110 Folder access', () => {
   });
 });
 
-describe('B110 one save model and honest results', () => {
+describe('one save model and honest results', () => {
   it('Save override with no change says "Nothing changed" (never "Override saved"); a real change says what changed', async () => {
     const core = fakeCore();
     const w = await open(core.api);
@@ -308,7 +308,7 @@ describe('B110 one save model and honest results', () => {
   });
 });
 
-describe('B110 helpers', () => {
+describe('folder access helpers', () => {
   it('samePath / isAbsolutePath', () => {
     expect(samePath('C:\\Work\\', 'c:/work')).toBe(true);
     expect(samePath('~/src', '/home/pat/src')).toBe(true);

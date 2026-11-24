@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-// Card 466 (B073 verify, TesterKofi): the Git dialog fed the REAL core's answers. tests/unit/fixtures/git-previews/*.json were
-// written by core Card466PreviewVerifyTests (GIT_PREVIEWS_FIXTURE_OUT set) from fixture repositories (base trunk), serialized as
+// The Git dialog fed the REAL core's answers. tests/unit/fixtures/git-previews/*.json were
+// written by the core's git previews verify tests (GIT_PREVIEWS_FIXTURE_OUT set) from fixture repositories (base trunk), serialized as
 // UiRpc sends them. Checks: the shapes are api.ts's; every count asks for the exact pair git.status gave and shows that
 // many rows, each opening the Commit view; the merge and delete previews show the core's words; Merge is offered only when
 // the core says it merges; Sync and Merge list what came in; the deleted branch's commit opens as "it was on X". Faults
-// found are pinned as F-tests (see YAWBLE_TEAM_DOCS\B073\verify.md); flip them when fixed.
+// found are pinned as F-tests; flip them when fixed.
 import { flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -50,7 +50,7 @@ async function dialog(answers: Record<string, (params: any) => unknown>) {
 const keys = (o: object) => Object.keys(o).sort();
 const ROW = ['author', 'date', 'isMerge', 'notPushed', 'sha', 'shortSha', 'subject'];
 
-describe('card 466: the real core\'s shapes are api.ts\'s', () => {
+describe('git previews: the real core\'s shapes are api.ts\'s', () => {
   it('CommitRow, CommitRange, MergePreview, DeletePreview, status ranges/push, sync incoming, merge commits', () => {
     const range = real<CommitRange>('range-team-ahead');
     expect(keys(range)).toEqual(['commits', 'count', 'from', 'fromSha', 'hasOrigin', 'to', 'toSha', 'truncated']);
@@ -87,7 +87,7 @@ describe('card 466: the real core\'s shapes are api.ts\'s', () => {
   });
 });
 
-describe('card 466: every count opens exactly its commits', () => {
+describe('git previews: every count opens exactly its commits', () => {
   it('each count link sends git.status\'s pair; the list has as many rows as the count; a row opens the Commit view', async () => {
     const s = real<TeamGitStatus>('status-counts');
     const ben = real<CommitRange>('range-member-ben');
@@ -146,7 +146,7 @@ describe('card 466: every count opens exactly its commits', () => {
   });
 });
 
-describe('card 466: the merge preview shows the core\'s words', () => {
+describe('git previews: the merge preview shows the core\'s words', () => {
   async function openPreview(p: MergePreview, status: TeamGitStatus = real('status-ff-origin')) {
     const d = await dialog({ 'git.status': () => status, 'git.mergePreview': () => p });
     await d.w.find('[data-test=git-merge]').trigger('click');
@@ -237,7 +237,7 @@ describe('card 466: the merge preview shows the core\'s words', () => {
   });
 });
 
-describe('card 466: the delete preview shows the core\'s words', () => {
+describe('git previews: the delete preview shows the core\'s words', () => {
   const del = (p: any) => (p.confirm ? { result: `deleted ${p.branches.join(', ')}` } : { plan: `Delete ${p.branches[0]}.`, token: 't1', empty: false });
 
   async function openDelete(preview: DeletePreview, branch = 'members/alpha/ben') {
@@ -298,7 +298,7 @@ describe('card 466: the delete preview shows the core\'s words', () => {
   });
 });
 
-describe('card 466: Sync lists what came in', () => {
+describe('git previews: Sync lists what came in', () => {
   it('the core\'s incoming: the commits the team-behind count listed before, each opening the Commit view', async () => {
     const before = real<TeamGitStatus>('status-before-sync');
     const listed = real<CommitRange>('range-team-behind');

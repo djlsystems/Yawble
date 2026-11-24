@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 619 (B141 verify): the pending list with companion.list entries shaped exactly as the core sends them
+// The pending list with companion.list entries shaped exactly as the core sends them
 // (CompanionService.ListForWindow: id, client, tool, plan, asked, expires, state; times in .NET "O" format,
 // e.g. "2026-11-24T09:00:00.0000000+00:00", not JavaScript's toISOString()).
 import { flushPromises, mount } from '@vue/test-utils';
@@ -35,7 +35,7 @@ const coreAction = (id: string, askedMs: number, tool = 'team_delete') => ({
   asked: coreIso(askedMs), expires: coreIso(askedMs + 7 * DAY), state: 'pending',
 });
 
-describe('B141 verify: the pending list with core-shaped requests', () => {
+describe('the pending list with core-shaped requests', () => {
   it('ReadsTheCoresTimeFormat', () => {
     const now = Date.parse('2026-11-24T12:00:00Z');
     expect(coreIso(now)).toBe('2026-11-24T12:00:00.0000000+00:00');

@@ -1,4 +1,4 @@
-// Card 367 (verify B076, cards 365 + 366): the team page's members as a grid of equal tiles, in headless Chrome against
+// The team page's members as a grid of equal tiles, in headless Chrome against
 // the phone-remote fake core (remote.html, tests/e2e/phone). At 1280 px: two tiles per row by default with New member
 // last; the w / h handles resize every tile together and the size is kept in yawble.memberTiles across a reload (apart
 // from the Teams list's size); each MemberPane fills its tile, its view scrolling inside; at the narrowest tile the title
@@ -6,8 +6,8 @@
 // (validation, Adding…, a refused add keeps the form, Cancel). A Visitor's New member is disabled. A phone (375 px): one
 // full-width tile per row, no handles, New member last.
 //
-//   npx playwright test card367-team-grid      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/b076-team-grid (else test-results/b076-team-grid).
+//   npx playwright test team-grid      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/team-grid (else test-results/team-grid).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -17,7 +17,7 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'b076-team-grid');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'team-grid');
 
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
 
@@ -38,7 +38,7 @@ async function open(browser: Browser, o: Opts = {}) {
   await ctx.addInitScript(([t, tiles]) => {
     try {
       localStorage.setItem('yawble.remoteTheme', t as string);
-      if (tiles && !sessionStorage.getItem('card367-seeded')) { localStorage.setItem('yawble.memberTiles', JSON.stringify(tiles)); sessionStorage.setItem('card367-seeded', '1'); }
+      if (tiles && !sessionStorage.getItem('team-grid-seeded')) { localStorage.setItem('yawble.memberTiles', JSON.stringify(tiles)); sessionStorage.setItem('team-grid-seeded', '1'); }
     } catch { /* none */ }
   }, [theme, o.tiles ?? null] as const);
   await ctx.route(`${ORIGIN}/**`, async (route) => {
@@ -208,7 +208,7 @@ for (const theme of ['light', 'dark'] as const) {
         if (p.contentTaller) expect.soft(p.scrolls, `${where}: taller content scrolls inside`).toBeGreaterThan(0);
       }
       if (tiles.w === 280) {
-        // At the narrowest tile at least one title chip is actually cut (with …) - the case card 366 is for.
+        // At the narrowest tile at least one title chip is actually cut (with …) - the case the ellipsis is for.
         expect.soft(m.some((p) => p.chips.some((c) => c.cut && c.te === 'ellipsis')), `${theme}: a chip ellipsized at 280 (${JSON.stringify(m.map((p) => p.chips))})`).toBe(true);
       }
       {
@@ -344,13 +344,13 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
-// Card 369 (re-verify the card 368 fix): at the smallest tile (280x200) the open ☰ menu is on top of every grip / tile it
+// The menu over the grips: at the smallest tile (280x200) the open ☰ menu is on top of every grip / tile it
 // overlaps (elementFromPoint: its own tile's h grip in the gap), and - moved straight down into the tile below by a
 // test-only transform, since the real menu only reaches the 14 px gap - above the next row's tile; with the menu closed nothing of a pane shows outside its tile (the
 // gap just below / right of each tile is only its own grips). 1280 (three per row) and 900 (two per row, so a member tile
 // with its grips sits right under the first tile).
 for (const theme of ['light', 'dark'] as const) {
-  test(`card 369 ${theme}: 280x200 menu on top of the gap grips and (pushed) the next row; panes stay inside their tiles`, async ({ browser }) => {
+  test(`smallest tile ${theme}: 280x200 menu on top of the gap grips and (pushed) the next row; panes stay inside their tiles`, async ({ browser }) => {
     for (const vw of [1280, 900]) {
       const { page, ctx, errors } = await open(browser, { w: vw, theme, tiles: { w: 280, h: 200 } });
       const where = `${theme} ${vw}`;
@@ -378,7 +378,7 @@ for (const theme of ['light', 'dark'] as const) {
         const menu = cell.locator('[data-test=member-more-menu]');
         await expect(menu).toBeVisible();
         await page.waitForTimeout(150);
-        await page.screenshot({ path: path.join(SHOTS, `card369-${vw}-280x200-menu${i}-${theme}.png`) });
+        await page.screenshot({ path: path.join(SHOTS, `menu-over-grips-${vw}-280x200-menu${i}-${theme}.png`) });
         const o = await menu.evaluate((el, idx) => {
           const m = el.getBoundingClientRect();
           const own = el.closest('.member-cell')!;
@@ -398,7 +398,7 @@ for (const theme of ['light', 'dark'] as const) {
           }
           return { idx, menuB: Math.round(m.bottom), cellB: Math.round(cellR.bottom), hits, handles: hits.filter((h) => h.what.startsWith('member-tile-handle')).length };
         }, i);
-        console.log(`card369 ${where} tile ${i}: ${JSON.stringify(o)}`);
+        console.log(`menu-over-grips ${where} tile ${i}: ${JSON.stringify(o)}`);
         // As it is, the menu reaches only into the 14 px gap (TesterBen's: bottom 372 vs tile 366, next row at 380);
         // where it passes its tile it must cover the grips there.
         if (o.menuB > o.cellB) expect.soft(o.hits.length, `${where} tile ${i}: the menu overlaps a grip past its tile (${JSON.stringify(o)})`).toBeGreaterThan(0);
@@ -431,7 +431,7 @@ for (const theme of ['light', 'dark'] as const) {
           (el as HTMLElement).style.transform = '';
           return { below: below.getAttribute('data-test') + (below.classList.contains('new-cell') ? ' (New member)' : ''), hits };
         });
-        console.log(`card369 ${where} tile ${i} probe: ${JSON.stringify(probe)}`);
+        console.log(`menu-over-grips ${where} tile ${i} probe: ${JSON.stringify(probe)}`);
         if (probe) {
           expect.soft(probe.hits.length, `${where} tile ${i}: the moved menu overlaps the tile below`).toBeGreaterThan(0);
           expect.soft(probe.hits.filter((h) => !h.ok), `${where} tile ${i}: the moved menu is on top of the tile below and its grips (${JSON.stringify(probe)})`).toEqual([]);

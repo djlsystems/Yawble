@@ -1,12 +1,12 @@
-// Card 493 (B110 verify) re-check of 9d7d0af, TesterKofi: Member settings > Policy > Folder access in headless Chrome
+// Folder access re-check: Member settings > Policy > Folder access in headless Chrome
 // against the phone-remote FAKE core (remote.html), the policy RPCs faked here with a merge that folds "." / ".." as
 // PolicyPaths.Resolve does. No real program runs.
 //  - A typed path, read-only mode and a pending confirm survive General and back; Close asks "Discard?"; Confirm after the
 //    round trip saves what it showed.
 //  - A folder typed with ".." is listed once; Remove takes it out (stored loosen back to empty).
 //
-//   npx playwright test card493-b110-recheck --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B110/verify (else test-results/B110/verify).
+//   npx playwright test folder-access-recheck --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/folder-access/verify (else test-results/folder-access/verify).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,7 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(150_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B110', 'verify');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'folder-access', 'verify');
 
 /** PolicyPaths.Resolve on Windows, lexically: "/" -> "\", drive upper case, "." and ".." folded, never above C:\. */
 function resolve(raw: string): string {
@@ -120,7 +120,7 @@ test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recurs
 
 const RUNS = [{ name: '1280-light', size: { width: 1280, height: 800 }, theme: 'light' as const }, { name: '375-dark', size: { width: 375, height: 812 }, theme: 'dark' as const }];
 for (const { name, size, theme } of RUNS) {
-  test(`card493 re-check: tab round trip and ".." at ${name}`, async ({ browser }) => {
+  test(`folder access re-check: tab round trip and ".." at ${name}`, async ({ browser }) => {
     const { page, ctx, errors, sent, state } = await open(browser, size, theme);
     await openPolicy(page);
 

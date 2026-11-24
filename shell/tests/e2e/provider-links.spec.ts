@@ -1,5 +1,5 @@
-// Card 448 (verify B075): the Git dialog's "Open on …" links and Team settings > Repositories' provider fields in a real
-// browser (headless Chrome) against the FAKE core, answering on the final contract (card 446/447):
+// The Git dialog's "Open on …" links and Team settings > Repositories' provider fields in a real
+// browser (headless Chrome) against the FAKE core, answering on the core's contract:
 //   git.webLink {teamId, team, repo?, kind, commit?|branch?|file?|from?+to?|pr?} -> { url | null }
 //   teams.repos main / extras + provider (the override, null when detecting), providerDetected, linkPattern, prSupported, prUnavailable
 //   teams.setRepo {teamId, name?, provider|null, linkPattern|null} -> the entry
@@ -9,7 +9,7 @@
 //  - The Bitbucket extra tab: its links are asked with repo; the PR line is the core's "not supported" text.
 //  - Settings: detected GitLab shown; Provider none + a link pattern saved through teams.setRepo; the Git dialog then
 //    says "Open in the browser" and uses the pattern's urls; "As detected" + blank clears (provider null, linkPattern null).
-//   npx playwright test card448-provider-links     (CARD448_SKIP_BUILD=1 reuses out/card448/renderer)
+//   npx playwright test provider-links     (PROVIDER_LINKS_SKIP_BUILD=1 reuses out/provider-links/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { answers } from './phone/fake-core';
@@ -18,7 +18,7 @@ import { buildRenderer, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const BUILT = path.resolve(__dirname, '..', '..', 'out', 'card448', 'renderer');
+const BUILT = path.resolve(__dirname, '..', '..', 'out', 'provider-links', 'renderer');
 const BASE = '1111111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const TEAM = '2222222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const ADA = '3333333333cccccccccccccccccccccccccccccc';
@@ -100,7 +100,7 @@ const saved: Record<string, unknown> = {};
 test.beforeAll(async () => {
   test.setTimeout(600_000);
   for (const k of Object.keys(OVERRIDES)) { saved[k] = (answers as any)[k]; (answers as any)[k] = OVERRIDES[k]; }
-  if (!process.env.CARD448_SKIP_BUILD) await buildRenderer(undefined, BUILT);
+  if (!process.env.PROVIDER_LINKS_SKIP_BUILD) await buildRenderer(undefined, BUILT);
 });
 test.afterAll(() => { for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete (answers as any)[k]; else (answers as any)[k] = saved[k]; } });
 test.beforeEach(() => reset());

@@ -1,4 +1,4 @@
-// Card 356 (verify card 355): gap tests for the in-page confirm (confirm.ts / ConfirmDialog.vue) at every former
+// Gap tests for the in-page confirm (confirm.ts / ConfirmDialog.vue) at every former
 // window.confirm site, in headless Chrome against the FAKE core of phone-remote.spec.ts (remote.html built by Vite).
 // Sizes: phone 390x844 and iPad 1024x1366 (the remote view), and 1280x800 "desktop": the same build with
 // window.yawble.remote forced to false, which is what the desktop renderer has (Electron preload, no `remote`): only
@@ -16,8 +16,8 @@
 // "Also delete the connection" follow-up on desktop), MCP server remove (+ follow-up on desktop), connection remove
 // (desktop), Discover scope switch with unsaved changes, IntegrationDialog Close with unsaved changes.
 //
-//   npx playwright test card356-confirm-sites-gaps   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-//   screenshots: $YAWBLE_TEAM_DOCS/C-B070-screens (or test-results/C-B070-screens)
+//   npx playwright test confirm-dialog-sites   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   screenshots: $YAWBLE_TEAM_DOCS/confirm-dialog-screens (or test-results/confirm-dialog-screens)
 import { expect, test, type Browser, type Locator, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -27,7 +27,7 @@ import { buildRenderer, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(180_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'C-B070-screens');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'confirm-dialog-screens');
 
 const iso = (min: number) => new Date(Date.now() + min * 60_000).toISOString();
 const trigger = (id: number, name: string) => ({
@@ -144,7 +144,7 @@ async function openFromTeam(page: Page, id: string) {
 }
 async function openSettings(page: Page, section: 'open-skills' | 'open-integrations') {
   await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-  // B115: Settings is the gear at the top right (the desktop window, the remote view and the phone top bar).
+  // Settings is the gear at the top right (the desktop window, the remote view and the phone top bar).
   await page.getByTestId('settings-gear').click();
   await expect(page.locator('[data-test=settings]')).toBeVisible();
   await page.locator(`[data-test=settings] [data-test=${section}]`).first().click();

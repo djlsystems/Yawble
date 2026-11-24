@@ -1,4 +1,4 @@
-// Card 363 (verify B067, cards 361 + 362): gap tests for the Git dialog's "Tidy…" against a plan shaped exactly like the
+// Gap tests for the Git dialog's "Tidy…" against a plan shaped exactly like the
 // CORE's git.tidyPlan answer (UiRpc.TidyPlanJson: repo "main", baseBranch, notes, proof on every class, commits on moved
 // and origin-only rows) instead of fake-core's own plan. The fixture is the card's fixture team: a cherry-picked member
 // branch, a member clone reset to main (moved), a scratch/ branch, a merged branch, an origin-only branch, a working one.
@@ -6,7 +6,7 @@
 //  - a moved row shows the commits a realign drops (the core sends them), and the plan's notes are shown
 //  - deleting a contained branch sends no unmergedOk; the main repository goes as "main" or no repo
 //  - 1280 x 800 and 390 x 844: nothing scrolls sideways
-//   npx playwright test card363-tidy-gaps     (screenshots: $YAWBLE_TEAM_DOCS/B067/card363-*.png)
+//   npx playwright test git-tidy-core-plan     (screenshots: $YAWBLE_TEAM_DOCS/git-tidy/core-plan-*.png)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -17,9 +17,9 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
 const OUT = path.resolve(__dirname, '..', '..', 'test-results');
-const SHOTS = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'B067') : OUT;
-const BUILT = path.resolve(__dirname, '..', '..', 'out', 'card363', 'renderer');
-const shot = (page: Page, name: string) => { mkdirSync(SHOTS, { recursive: true }); return page.screenshot({ path: path.join(SHOTS, `card363-${name}.png`), fullPage: true }); };
+const SHOTS = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'git-tidy') : OUT;
+const BUILT = path.resolve(__dirname, '..', '..', 'out', 'git-tidy-core-plan', 'renderer');
+const shot = (page: Page, name: string) => { mkdirSync(SHOTS, { recursive: true }); return page.screenshot({ path: path.join(SHOTS, `core-plan-${name}.png`), fullPage: true }); };
 
 const TEAM_SHA = '5bbb6ba450df8fe26f82ff2d9171b7d234fd2db1';
 const CLONE_SHA = 'e0f2a18c0ffee1234567890abcdef0123456789a';
@@ -49,7 +49,7 @@ const saved: Record<string, (typeof answers)[string]> = {};
 const seen: { method: string; p: any }[] = [];
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  if (!process.env.CARD363_SKIP_BUILD) await buildRenderer(undefined, BUILT);
+  if (!process.env.GIT_TIDY_CORE_PLAN_SKIP_BUILD) await buildRenderer(undefined, BUILT);
 });
 test.beforeEach(() => {
   seen.length = 0;
@@ -221,7 +221,7 @@ test('F2: a stale refusal shows "Refused: <reason>", re-reads the plan and binds
   expect(plans, 'the plan is read again after "stale"').toBeGreaterThan(before);
   await expect(tidy.locator('[data-test=tidy-realign-shas]'), 'the confirm reshows the new commits').toHaveText('6666666666 → 7777777777');
   await tidy.locator('[data-test=tidy-realign-confirm]').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'card363-realign-stale-1280.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'core-plan-realign-stale-1280.png') });
   await tidy.locator('[data-test=tidy-realign-yes]').click();
   await expect(tidy.locator('[data-test=tidy-done]')).toContainText('Realigned members/fixture/developermarlo');
   const calls = seen.filter((s) => s.method === 'git.branchRealign');
@@ -255,7 +255,7 @@ test('F3: the Realign confirm lists the commits it drops and the core proof', as
   await expect(box.locator('[data-test=tidy-realign-commits]')).toContainText('aa11bb22cc Retry the upload three times');
   await expect(box.locator('[data-test=tidy-realign-proof]')).toContainText('nothing is lost by realigning it (git cherry main: - aa11bb22cc)');
   await box.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'card363-realign-confirm-box-1280.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'core-plan-realign-confirm-box-1280.png') });
   await ctx.close();
 });
 
@@ -274,7 +274,7 @@ test('F3: origin-only and own-work rows list their commits under "Commits not in
   await expect(own).toContainText('Commits not in main:');
   await expect(own.locator('[data-test=tidy-commits]')).toContainText('8888888888 Half-done export');
   await own.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'card363-own-work-origin-only-1280.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'core-plan-own-work-origin-only-1280.png') });
   await ctx.close();
 });
 

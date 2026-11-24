@@ -1,4 +1,4 @@
-// B037 verify: remote.html, built once by Vite from the renderer's source into out/e2e/renderer, and the fake
+// Remote.html, built once by Vite from the renderer's source into out/e2e/renderer, and the fake
 // core behind the page's "rpc" socket. Nothing listens on a port: this sandbox refuses loopback sockets (to the browser
 // and to node), so the page is loaded from a made-up origin, http://yawble-remote.test/, whose requests Playwright
 // fulfils from the built files, and its WebSocket is answered by Playwright's routeWebSocket from the fake core. No real
@@ -12,8 +12,8 @@ import { createFakeCore } from './fake-core';
 /**
  * The main commit the 1280 px desktop layout is compared with (phone-remote.spec.ts). To move the base, change this
  * one line: the next run extracts that commit's shell into out/e2e/main and rebuilds out/e2e/renderer-base.
- * Was b726212 (cards 169-276), then f3a3c3d (cards 294-312, nav order be4a82a and the rest of main up to it); 43048e1 since
- * card 313 (the Sidebar team counts as pills), 52485c5 since B065 (the Documents list's Modified column, 31f02d0).
+ * Moved forward each time the desktop layout changed on purpose (the nav order, the Sidebar team counts as pills, the
+ * Documents list's Modified column).
  */
 export const BASE_COMMIT = '52485c5';
 
@@ -32,7 +32,7 @@ export const baseBuiltDir = process.env.E2E_BASE_DIR ? path.resolve(process.env.
 /**
  * mkdirSync(dir, { recursive: true }) that survives another worker making the same folder at the same moment. On Windows
  * two workers' beforeAll racing on one new folder can get EPERM (or EEXIST/EBUSY) from the loser even though the folder
- * now exists (card 500: card403's beforeAll with 2 workers). So such an error counts as done once the folder is there;
+ * now exists (seen with two workers in team-spacing.spec.ts's beforeAll). So such an error counts as done once the folder is there;
  * otherwise it is tried again a few times, then thrown.
  */
 export function ensureDir(dir: string, tries = 5) {
@@ -81,7 +81,7 @@ function extractBaseTreeLocked() {
  */
 const runId = () => process.env.E2E_RUN_ID || String(process.ppid);
 
-// A cross-process lock per output folder (card 391): a directory beside it (out/e2e/renderer.lock), made with mkdir
+// A cross-process lock per output folder: a directory beside it (out/e2e/renderer.lock), made with mkdir
 // (atomic; EEXIST when taken) and holding the owner's pid. A lock whose owner has gone (a worker killed mid-build) is broken.
 const LOCK_POLL_MS = 500;
 const LOCK_STALE_MS = 20 * 60_000;
@@ -116,7 +116,7 @@ function sleepSync(ms: number) { Atomics.wait(new Int32Array(new SharedArrayBuff
 
 /**
  * Builds a renderer (index.html and remote.html) once per run of the test runner, or never with E2E_SKIP_BUILD=1 when
- * a build is there. Safe from any number of workers (card 391): the first takes the folder's lock and builds; the others
+ * a build is there. Safe from any number of workers: the first takes the folder's lock and builds; the others
  * wait for it, then find the run's mark (.built-by = runId()) and reuse the build, so no worker empties a folder another
  * is serving from. A worker restarted after a failure finds the mark too.
  */
@@ -141,7 +141,7 @@ async function buildRendererLocked(from: string, out: string) {
   }
   // The base's tree: its vite.config.mts is not loadable from under test-results, so the same settings inline (the
   // shell's vite.config.mts at BASE_COMMIT: root, base, the Vue plugin, the Code browser alias, dedupe, the build-version
-  // define (as with no scripts/ folder: 0.0.0+dev.unknown), the two pages; unchanged from b726212 to f3a3c3d and to 43048e1).
+  // define (as with no scripts/ folder: 0.0.0+dev.unknown), the two pages; the same at every base commit used so far).
   // Check them again when BASE_COMMIT moves: `git diff <old> <new> -- shell/vite.config.mts`.
   const vue = (await import('@vitejs/plugin-vue')).default;
   const renderer = path.join(from, 'src', 'renderer');

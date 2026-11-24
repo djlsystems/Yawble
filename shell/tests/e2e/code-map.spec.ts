@@ -1,6 +1,6 @@
-// Card 372 (verify B079, cards 370 + 371): the Monitor's lasting code map, end to end, in headless Chrome against the
+// The Monitor's lasting code map, end to end, in headless Chrome against the
 // phone-remote fake core (remote.html, tests/e2e/phone). The fake serves monitor.messages, monitor.steps and
-// monitor.codeEvents (the core's wire shape: CodeEvent.ToJson, card 370) from a feed the test grows while the page polls.
+// monitor.codeEvents (the core's wire shape: CodeEvent.ToJson) from a feed the test grows while the page polls.
 //
 // The wall is a canvas, so the spec reads what the scene draws: an init script wraps the monitor canvas's 2D context
 // and keeps the last frames' arcs, paths and texts (world coordinates and the transform). A file node is a filled arc of
@@ -9,8 +9,8 @@
 // "+N" and "+N folders" are texts; a commit is a filled #fde047 dot (4.2 and more); a merge a #fbbf24 ring off the hub,
 // a landing #34d399 rings (width 3), a push a #38bdf8 arc of 1.4 rad. Hovering a node gives the DOM tip.
 //
-//   npx playwright test card372-code-map --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots and the frame times go to $YAWBLE_TEAM_DOCS/b079-code-map (else test-results/b079-code-map).
+//   npx playwright test code-map --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots and the frame times go to $YAWBLE_TEAM_DOCS/code-map (else test-results/code-map).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'b079-code-map');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'code-map');
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
 
 const TEAM = 'payments';
@@ -306,7 +306,7 @@ function seedWorkflow(feed: Feed, msAgo = 120_000, wf = 10) {
 }
 
 const result: Record<string, unknown> = {};
-test.afterAll(() => { writeFileSync(path.join(SHOTS, 'card372-results.json'), JSON.stringify(result, null, 2)); });
+test.afterAll(() => { writeFileSync(path.join(SHOTS, 'code-map-results.json'), JSON.stringify(result, null, 2)); });
 
 // ---------------------------------------------------------------------------------------------------------------------
 

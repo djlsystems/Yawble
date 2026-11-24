@@ -1,12 +1,12 @@
-// B115 Part B (card 518, step 2): the remote view embedded in the cloud page, in headless Chrome against the FAKE core
+// The remote view embedded in the cloud page, in headless Chrome against the FAKE core
 // of phone-remote.spec.ts. A test parent page on the same origin frames remote.html?embed=1&theme=dark, as the cloud page
 // will: it records what the frame posts (yawble.ready, yawble.nav) and sends yawble.navigate and yawble.theme back. At
 // 1280x800 and 375x740: no sidebar, drawer, menu button or theme switch in the frame, the gear kept, the screens the
 // frame's full width; the screens follow the parent's navigate messages and its theme messages set data-theme; the
 // viewer's kept yawble.remoteTheme is neither read nor written. The remote view without embed=1 keeps its sidebar and
-// theme switch. No cloud, no real core, no agent. Screenshots go to $YAWBLE_TEAM_DOCS/B115/.
+// theme switch. No cloud, no real core, no agent. Screenshots go to $YAWBLE_TEAM_DOCS/embed-mode/.
 //
-//   npx playwright test b115-embed --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test embed-mode --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type FrameLocator, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { ORIGIN, buildRenderer, ensureDir, fakeRemote } from './phone/server';
@@ -14,7 +14,7 @@ import { ORIGIN, buildRenderer, ensureDir, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
-const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'B115') : null;
+const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'embed-mode') : null;
 
 test.beforeAll(async () => { test.setTimeout(600_000); if (shots) ensureDir(shots); await buildRenderer(); });
 
@@ -99,7 +99,7 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
     // The gear still opens Settings.
     await frame.getByTestId('settings-gear').click();
     await expect(frame.locator('[data-test=settings]')).toBeVisible();
-    if (shots) await page.screenshot({ path: path.join(shots, `b115-embed-${w}.png`) });
+    if (shots) await page.screenshot({ path: path.join(shots, `embed-${w}.png`) });
     expect(errors).toEqual([]);
   });
 }

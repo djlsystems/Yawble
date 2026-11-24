@@ -1,4 +1,4 @@
-// Card 434 (TesterWren, verify B086 F3 after card 433): placeBreakLabels never puts a break label over the start / end
+// placeBreakLabels never puts a break label over the start / end
 // labels or over an earlier break label, keeps it on the axis, and hides it only when there is no room.
 import { describe, expect, it } from 'vitest';
 import { placeBreakLabels, TickGapPx } from '../../src/renderer/src/timeline/time';
@@ -9,7 +9,7 @@ function rng(seed: number) {
   return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32; };
 }
 
-describe('card 434: placeBreakLabels', () => {
+describe('placeBreakLabels', () => {
   it('2000 seeded random axes: every shown label clears the start and end labels and the label before it', () => {
     const r = rng(434);
     for (let n = 0; n < 2000; n++) {

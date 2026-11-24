@@ -51,7 +51,7 @@ describe('memberPaneView', () => {
     expect(memberFocus()!.seq).toBeGreaterThan(first!.seq);
   });
 
-  // B064 (card 310): a phone's own, unstored choice - one terminal at a time, closed when its team page closes.
+  // A phone's own, unstored choice - one terminal at a time, closed when its team page closes.
   it('on a phone: one terminal at a time, apart from the remembered (desktop) choice, not stored', () => {
     setMemberView('payments', 'DeveloperMarlo', 'terminal');
     expect(getMemberView('payments', 'DeveloperMarlo', true)).toBe('report');

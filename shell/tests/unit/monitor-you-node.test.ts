@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { onYouNode, youNodeAt, YouR, type KeepOut } from '../../src/renderer/src/monitor/rhythm';
 
-// Card 416 (B093 part 2): the You node stays inside the wall and clear of the Legend button (a phone's controls row
+// The You node stays inside the wall and clear of the Legend button (a phone's controls row
 // along the bottom, the desktop's button at the bottom left) whatever the wall's height.
 
-/** A phone's controls row as the real page measures it (card 417): bottom 8px, left/right 8px, 48 px tall. */
+/** A phone's controls row as the real page measures it: bottom 8px, left/right 8px, 48 px tall. */
 const phoneRow = (w: number, h: number): KeepOut => ({ left: 8, top: h - 56, right: w - 8, bottom: h - 8 });
 /** The phone's Legend button, 78 x 48 at the row's right end. */
 const phoneLegend = (w: number, h: number): KeepOut => ({ left: w - 8 - 78, top: h - 56, right: w - 8, bottom: h - 8 });
@@ -22,7 +22,7 @@ function inside(n: { x: number; y: number; r: number }, w: number, h: number): b
   return n.x - n.r >= 0 && n.x + n.r <= w && n.y - n.r >= 0 && n.y + n.r <= h;
 }
 
-describe('the You node on a short wall (card 416)', () => {
+describe('the You node on a short wall', () => {
   it('a normal wall keeps its place: right edge, half way down', () => {
     expect(youNodeAt(1280, 800, [desktopLegend(800)])).toEqual({ x: 1280 - YouR - 22, y: 400, r: YouR });
     expect(youNodeAt(375, 500, [phoneRow(375, 500)])).toEqual({ x: 375 - YouR - 22, y: 250, r: YouR });
@@ -89,7 +89,7 @@ describe('the You node on a short wall (card 416)', () => {
     expect(inside(n, 375, 110)).toBe(true);
   });
 
-  // Card 416 round 2 (card 417's fault): under ~114.5 px no spot clears the row with the margins; the node used to go
+  // Under ~114.5 px no spot clears the row with the margins; the node used to go
   // back to its old place, on Legend. 375x546 gives 113 px, 375x530 103 px.
   for (const h of [113, 110, 103, 100]) {
     it(`a ${h} px phone wall with the real row and Legend: inside, clear of Legend, its centre on the wall`, () => {

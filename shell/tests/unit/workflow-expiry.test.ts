@@ -12,9 +12,9 @@ import { MonitorModel, workflowKey } from '../../src/renderer/src/monitor/model'
 import { expiresSoon, expiryWarningText, until } from '../../src/renderer/src/workflowExpiry';
 import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remoteAccess';
 
-// B085 (card 389): an expired workflow reads "expired" (not completed, not closed) with its time from endedAt; an open
+// An expired workflow reads "expired" (not completed, not closed) with its time from endedAt; an open
 // one that waits on the person's answer and expires within a day is in Needs you with Extend (bus.workflowExtend);
-// Team settings edits workflowExpiryDays (teams.workflowExpiry). Against the contract of card 388; fakes only.
+// Team settings edits workflowExpiryDays (teams.workflowExpiry). Against the core's contract; fakes only.
 
 const hours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
 const team = { id: 1, name: 'payments' } as TeamSummary;
@@ -41,7 +41,7 @@ function fakeApi(answers: Record<string, (p: any) => unknown>) {
 
 afterEach(() => { applyRemoteAccess('full'); document.body.innerHTML = ''; });
 
-describe('the "expired" state (B085)', () => {
+describe('the "expired" state', () => {
   it('the monitor looks give expired its own status, label and icon, distinct from completed and closed', () => {
     expect(workflowLook(expired).status).toBe('expired');
     expect(workflowLook(expired).label).toBe('Expired');
@@ -87,7 +87,7 @@ describe('the "expired" state (B085)', () => {
     w.unmount();
   });
 
-  it('a workflow node (B080) that expires leaves with an "expired" wfdone effect, not "closed"', () => {
+  it('a workflow node on the Monitor that expires leaves with an "expired" wfdone effect, not "closed"', () => {
     const open = { ...expired, state: 'open' as const, endedAt: null, expiredAt: null };
     expect(workflowEnds([open, { ...closed, state: 'open' }], [expired, closed])).toEqual([{ id: 9, status: 'expired' }, { id: 7, status: 'closed' }]);
     const m = new MonitorModel();
@@ -98,7 +98,7 @@ describe('the "expired" state (B085)', () => {
   });
 });
 
-describe('Extend (B085)', () => {
+describe('Extend', () => {
   it('the Needs-you item reads "#12 will expire tomorrow; it waits on your answer to question 3" and Extend calls bus.workflowExtend', async () => {
     let list = [expiring, expired];
     const { api, calls } = fakeApi({
@@ -187,7 +187,7 @@ describe('Extend (B085)', () => {
   });
 });
 
-describe('the team setting "Expire idle workflows after N days" (B085)', () => {
+describe('the team setting "Expire idle workflows after N days"', () => {
   const answers = (days: { v: number }) => ({
     'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
     'teams.push': () => ({ on: false, origin: null }), 'teams.approvals': () => [], 'teams.syncToBase': () => ({ on: true, note: null, baseBranch: 'main', behind: null }),

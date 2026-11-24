@@ -1,11 +1,11 @@
-// Card 497 (B111): folder asks in a real browser (headless Chrome), on remote.html against the FAKE core of
+// Folder asks in a real browser (headless Chrome), on remote.html against the FAKE core of
 // phone-remote.spec.ts with one read-write folder ask pending (setFolderAsks). At 1280 and 375 px, light and dark: the
 // Needs-you banner shows the card (team / member, read-write, the path, the reason, the folder exists) with Approve,
 // Approve read-only and Deny; Approve read-only sends folder.answer read and the banner says it applies from the next
 // run; the page never scrolls sideways. A Visitor (read-only) sees the card with its answers held. Screenshots go to
-// $YAWBLE_TEAM_DOCS/b111/. Card 507: the Manager's ask for a member says so ("payments / Manager asks, for DeveloperAda, ...").
+// $YAWBLE_TEAM_DOCS/folder-asks/. The Manager's ask for a member says so ("payments / Manager asks, for DeveloperAda, ...").
 //
-//   npx playwright test card497-folder-asks      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test folder-asks      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -17,7 +17,7 @@ test.setTimeout(60_000);
 
 test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
-const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'b111') : null;
+const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'folder-asks') : null;
 if (shots) mkdirSync(shots, { recursive: true });
 
 async function open(browser: Browser, access: Access, w: number, h: number, theme: 'light' | 'dark', manager = false) {
@@ -53,20 +53,20 @@ for (const [w, h, theme] of [[1280, 800, 'light'], [1280, 800, 'dark'], [375, 74
       expect(b.top).toBeGreaterThan(a.top);
       expect(Math.abs(a.width - b.width)).toBeLessThan(2);
     }
-    if (shots) await card.screenshot({ path: path.join(shots, `b111-folder-ask-${w}-${theme}.png`) });
-    if (shots) await page.screenshot({ path: path.join(shots, `b111-needs-you-${w}-${theme}.png`) });
+    if (shots) await card.screenshot({ path: path.join(shots, `folder-ask-${w}-${theme}.png`) });
+    if (shots) await page.screenshot({ path: path.join(shots, `needs-you-${w}-${theme}.png`) });
 
     await card.locator('[data-test=folder-ask-read]').click();
     await expect(page.locator('[data-test=folder-ask-answered]')).toContainText('Approved read-only for TesterBen on Z:\\smokesessions: applies from its next run.');
     await expect(page.locator('[data-test=folder-ask]')).toHaveCount(0);
     expect(s.core.folderAnswers().get(21)).toBe('read');
-    if (shots) await page.locator('[data-test=folder-asks]').screenshot({ path: path.join(shots, `b111-answered-${w}-${theme}.png`) });
+    if (shots) await page.locator('[data-test=folder-asks]').screenshot({ path: path.join(shots, `answered-${w}-${theme}.png`) });
     expect(errors).toEqual([]);
     await ctx.close();
   });
 }
 
-// Card 507: the Manager asked for DeveloperAda (askedBy is not member): the card says so, next to the member's own ask.
+// The Manager asked for DeveloperAda (askedBy is not member): the card says so, next to the member's own ask.
 for (const [w, h, theme] of [[1280, 800, 'light'], [1280, 800, 'dark'], [375, 740, 'light'], [375, 740, 'dark']] as const) {
   test(`at ${w}px (${theme}): the Manager's folder ask for a member says the Manager asks, Deny tells the Manager`, async ({ browser }) => {
     const { s, page, ctx, errors } = await open(browser, 'full', w, h, theme, true);
@@ -80,7 +80,7 @@ for (const [w, h, theme] of [[1280, 800, 'light'], [1280, 800, 'dark'], [375, 74
     await expect(card.locator('[data-test=folder-ask-asked-by]')).toHaveAttribute('data-asked-by', 'Manager');
     await expect(card.locator('.buttons button')).toHaveText(['Approve', 'Deny']);
     expect(await noSideScroll(page), 'the page never scrolls sideways').toBe(true);
-    if (shots) await card.screenshot({ path: path.join(shots, `b111-manager-ask-${w}-${theme}.png`) });
+    if (shots) await card.screenshot({ path: path.join(shots, `manager-ask-${w}-${theme}.png`) });
 
     await card.locator('[data-test=folder-ask-deny]').click();
     await expect(page.locator('[data-test=folder-ask-answered]')).toContainText('Denied DeveloperAda read-only on Z:\\shared\\fixtures; the Manager is told.');
@@ -96,7 +96,7 @@ test('a Visitor (read-only) sees the ask with its answers held, and sends nothin
   await expect(card.locator('[data-test=folder-ask-head]')).toContainText('asks read-write on Z:\\smokesessions');
   for (const b of await card.locator('.buttons button').all()) await expect(b).toBeDisabled();
   expect(s.core.folderAnswers().size).toBe(0);
-  if (shots) await card.screenshot({ path: path.join(shots, 'b111-folder-ask-visitor-375-light.png') });
+  if (shots) await card.screenshot({ path: path.join(shots, 'folder-ask-visitor-375-light.png') });
   expect(errors).toEqual([]);
   await ctx.close();
 });

@@ -1,13 +1,13 @@
-// Card 444 (B072, shell): the Commit view in a real browser (headless Chrome) on remote.html against the FAKE core
-// (tests/e2e/phone/fake-core.ts answers git.commitShow and git.commitDiff to the card's contract).
+// The Commit view in a real browser (headless Chrome) on remote.html against the FAKE core
+// (tests/e2e/phone/fake-core.ts answers git.commitShow and git.commitDiff in the core's shapes).
 //  - 1280 x 800: the Git dialog's member-branch commit opens the Commit view over it: what, where (team branch only, not
 //    pushed), files (renamed, added, binary); a file's diff side by side and inline; the binary file's summary line;
 //    Show its branch opens the Git dialog at that branch's row.
 //  - the board: a hand-back in a card's trail names two commits; one opens, the other says it is gone and why.
 //  - 390 x 844 (a phone): the same view as a sheet, nothing scrolls sideways but the diff itself; with members' code
 //    hidden from cloud viewers the files are listed and no diff opens.
-//   npx playwright test card444-commit-view      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B072 (else test-results/B072).
+//   npx playwright test commit-view      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/commit-view (else test-results/commit-view).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -16,8 +16,8 @@ import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B072');
-const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, `card444-${name}.png`) });
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'commit-view');
+const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, `commit-view-${name}.png`) });
 const ADA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
 
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
@@ -104,7 +104,7 @@ test('1280 x 800: a member branch commit from the Git dialog: what, where, files
   await ctx.close();
 });
 
-// B074 (card 471): an ID is a link only once git.commitsResolve confirms it; the gone one is not a commit any more, so it
+// Commit links: an ID is a link only once git.commitsResolve confirms it; the gone one is not a commit any more, so it
 // stays text (the Commit view's gone state is still reached from a commit the app lists, and is unit-tested).
 test('1280 x 800: a confirmed commit ID in a card\'s trail opens the view; a gone one stays text', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, 1280, 800, '');

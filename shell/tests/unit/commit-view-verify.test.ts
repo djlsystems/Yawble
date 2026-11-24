@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-// Card 445 (B072 verify, TesterKofi): the Commit view fed the REAL core's answers. tests/unit/fixtures/commit-view/*.json
-// are git.commitShow results the core wrote from a fixture repository (core Card445CommitViewVerifyTests with
+// The Commit view fed the REAL core's answers. tests/unit/fixtures/commit-view/*.json
+// are git.commitShow results the core wrote from a fixture repository (the core's commit view verify test with
 // COMMIT_VIEW_FIXTURE_OUT set), so these check the shell against the core's actual contract, not a hand-made fake:
 // not found is only {found, goneReason, sha}; merge.intoBranch/fromBranch null; made missing; where.branches with the
-// team branch first and never main; codeShown false; a diff refused with remote_refused. Plus the faults round 1 found,
-// flipped in round 2 (card 460) after the fixes (core f669165, shell 7ec603b): F1 a merge made on main now reads
+// team branch first and never main; codeShown false; a diff refused with remote_refused. Plus two faults found and
+// fixed: F1 a merge made on main now reads
 // "into main" (was "into team/alpha"); F2 a commit only on feature/x now reads "On feature/x (not a team or member
 // branch)" (was "a branch that held it was deleted"), from where.otherBranches.
 import { flushPromises, mount } from '@vue/test-utils';
@@ -53,7 +53,7 @@ const whereTexts = (w: any) => w.findAll('[data-test=commit-where] li').map((l: 
 const ALL = ['in-main-not-pushed', 'in-main-pushed', 'team-branch-only', 'team-branch-only-pushed', 'member-branch-only', 'merge-unnamed',
   'f1-merge-on-main', 'f2-own-branch', 'deleted-branch', 'not-found'];
 
-describe('card 445: the real core\'s answers', () => {
+describe('the Commit view on the real core\'s answers', () => {
   it.each(ALL)('%s renders without "null" or "undefined"', async (name) => {
     const { w } = await view(real(name));
     expect(w.find('[data-test=commit-error]').exists()).toBe(false);
@@ -106,7 +106,7 @@ describe('card 445: the real core\'s answers', () => {
     expect(w.find('[data-test=commit-branch]').attributes('disabled')).toBeDefined();
   });
 
-  it('F1 (core, fixed in card 458): a merge made on main with git\'s default message reads "into main"', async () => {
+  it('F1 (fixed in core): a merge made on main with git\'s default message reads "into main"', async () => {
     const c = real('f1-merge-on-main') as CommitFound;
     expect(c.title).toBe("Merge branch 'feature/login'");
     expect(c.merge?.intoBranch).toBe('main');
@@ -154,7 +154,7 @@ describe('card 445: the real core\'s answers', () => {
   });
 });
 
-describe('card 445: the Cloud Link with members\' code hidden', () => {
+describe('the Commit view over the Cloud Link with members\' code hidden', () => {
   it('codeShown false (as the core shapes it): files listed, nothing opens, no commitDiff call', async () => {
     const answer = { ...(real('team-branch-only') as CommitFound), codeShown: false };
     const { w, calls } = await view(answer, () => { throw new Error('must not be called'); });
@@ -175,7 +175,7 @@ describe('card 445: the Cloud Link with members\' code hidden', () => {
   });
 });
 
-describe('card 445: wording helpers on edge shapes', () => {
+describe('the Commit view\'s wording helpers on edge shapes', () => {
   const base = real('team-branch-only') as CommitFound;
   it('mergeLine: into known, from unknown; from a member', () => {
     expect(mergeLine({ ...base, isMerge: true, merge: { intoBranch: 'team/alpha', fromBranch: null, commitCount: 2 } } as any))

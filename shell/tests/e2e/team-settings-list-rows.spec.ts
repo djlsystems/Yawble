@@ -1,6 +1,6 @@
-// Card 347 (verify card 346): gap tests for team Settings on a phone (a list of sections, one section under a sticky
+// Team Settings on a phone (a list of sections, one section under a sticky
 // Back + title) and the phone sheet's Close, in headless Chrome against the FAKE core of phone-remote.spec.ts.
-// Replaces card329-team-settings-gaps (the sideways-scrolling tab row it tested is gone).
+// (The sideways-scrolling tab row an older spec tested is gone.)
 //  - 360x740 and 390x844: the list's eight rows are one line, >= 44 px, full width, label not cut; every section opens
 //    alone under the head with its title; in the list and in every section nothing in the dialog is wider than the
 //    screen, neither the page nor the sheet's body scrolls sideways (long env names/values, long repository paths).
@@ -8,11 +8,11 @@
 //    sheet (and is what a tap hits) while a long section scrolls; Back still works after the scroll; the next section
 //    starts at its top.
 //  - Other phone sheets built on Modal (Settings, Triggers, Git, Documents, Workflows, Logs): Close is 44x44, shown, an
-//    18 px glyph inside its box, the title is not clipped, and Close closes the sheet (kept from card 329).
+//    18 px glyph inside its box, the title is not clipped, and Close closes the sheet.
 //  - 1280x800: the Settings tab row and the Modal Close (Settings and Triggers dialogs) have the same boxes and styles as
-//    main BASE_COMMIT (before cards 328 and 346); both screenshots are saved (kept from card 329).
+//    main BASE_COMMIT (before the phone list of sections); both screenshots are saved.
 //
-//   npx playwright test card347-team-settings-gaps   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer and renderer-base)
+//   npx playwright test team-settings-list-rows   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer and renderer-base)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -277,7 +277,7 @@ test(`desktop 1280x800: Settings tab row and Modal Close as on main ${BASE_COMMI
     for (const id of ['open-manage', 'open-triggers']) {
       await openFromTeam(page, id);
       await shot(page, `desktop-1280-${id}-${which}.png`);
-      // The Team settings dialog's height follows its General tab's content (B085 added the "Idle workflows" card:
+      // The Team settings dialog's height follows its General tab's content (the "Idle workflows" card made it
       // 316 -> 469 px), so for open-manage the dialog box is left, top and width only. Everything else is unchanged.
       out[id] = await page.evaluate((anyHeight) => {
         const box = (e: Element | null, withHeight = true) => { if (!e) return null; const r = e.getBoundingClientRect(); return (withHeight ? [r.left, r.top, r.width, r.height] : [r.left, r.top, r.width]).map((n) => Math.round(n * 10) / 10).join(','); };

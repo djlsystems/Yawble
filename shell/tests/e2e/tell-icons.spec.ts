@@ -1,11 +1,11 @@
-// Card 344 (verify card 342): the Tell the Manager row's Attach and Send buttons draw monochrome SVG line icons, not
+// The Tell the Manager row's Attach and Send buttons draw monochrome SVG line icons, not
 // emoji. In headless Chrome against the phone-remote fake core (tests/e2e/phone), at 375 px and 1280 px, light and dark:
 // both icons are aria-hidden 20 px svgs stroked in the button's own text colour (so they follow the theme), centred
-// in their buttons (44 px tall on the phone, B037), the row stays on one line (B054), the phone's Send is the plane only (aria-label
+// in their buttons (44 px tall on the phone), the row stays on one line, the phone's Send is the plane only (aria-label
 // "Tell Manager"), the desktop's is "Tell Manager" + plane, and "Sending…" shows while bus.tellManager is held.
 //
 //   npx playwright test tell-icons      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/card344-tell-icons (else test-results/card344-tell-icons).
+// Screenshots go to $YAWBLE_TEAM_DOCS/tell-icons (else test-results/tell-icons).
 import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -16,7 +16,7 @@ import { existsSync } from 'node:fs';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'card344-tell-icons');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'tell-icons');
 
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
 
@@ -108,7 +108,7 @@ for (const [w, h] of [[375, 812], [1280, 800]] as const) {
         if (phone) expect.soft(b.bh, `${name}: button >= 44 px tall`).toBeGreaterThanOrEqual(44);
         expect.soft(Math.abs(b.scy! - b.bcy), `${name}: icon centred vertically (svg ${b.scy} vs button ${b.bcy})`).toBeLessThanOrEqual(1.5);
       }
-      // One line (B054): every visible child of the row shares the same band.
+      // One line: every visible child of the row shares the same band.
       const tops = m.kids.map((k) => k.top);
       expect.soft(Math.max(...tops) - Math.min(...tops), `row on one line: ${JSON.stringify(m.kids)}`).toBeLessThanOrEqual(4);
       expect.soft(m.sw, 'no sideways scroll').toBeLessThanOrEqual(m.iw);
@@ -124,7 +124,7 @@ for (const [w, h] of [[375, 812], [1280, 800]] as const) {
 
       // Busy: hold bus.tellManager and look at the button.
       hold(true);
-      await page.locator('[data-test=tell-text]').fill('Card 344 busy check');
+      await page.locator('[data-test=tell-text]').fill('busy check');
       await page.locator('[data-test=tell-send]').click();
       await expect(page.locator('[data-test=tell-send]')).toContainText('Sending…');
       await expect(page.locator('[data-test=tell-send]')).toHaveAttribute('aria-busy', 'true');

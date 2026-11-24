@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Card 360 (verify B066, cards 358 + 359): how a host task request from the Concierge or a companion client shows to the person.
-// Card 358 records the requester as "_concierge/<conversationId>" (a 32-hex Guid, ConciergeService) or "_companion/<client>"
+// How a host task request from the Concierge or a companion client shows to the person.
+// The core records the requester as "_concierge/<conversationId>" (a 32-hex Guid, ConciergeService) or "_companion/<client>"
 // (ConciergeHostTasks.Requester). The request card on the team's page (TaskAskCard), the task row's "asked by" and the
 // run records (TasksPanel) must say who asked in words, never the raw conversation id or the "_concierge/" key.
 // Also: the core refuses a description or check-after over 1000 characters (HostTaskRules.MaxTextLength); the panel says so.
@@ -48,7 +48,7 @@ const info = (lastRun: TaskRun): HostTaskInfo => ({
   lastRun, updatedAt: '2026-11-17T10:00:00Z', updatedBy: 'me',
 } as HostTaskInfo);
 
-describe('card 360: who asked for a host task, in words', () => {
+describe('who asked for a host task, in words', () => {
   it('a Concierge request card names the Concierge, not the conversation id', () => {
     const text = mount(TaskAskCard, { props: { ask: ask(concierge) } }).text();
     expect(text).toContain('Concierge');
@@ -84,7 +84,7 @@ describe('card 360: who asked for a host task, in words', () => {
   });
 });
 
-describe('card 360: a description over the core limit', () => {
+describe('a host task description over the core limit', () => {
   it("the core's refusal of a 1001-character description is shown and nothing is saved", async () => {
     let saves = 0;
     const api = fakeApi({

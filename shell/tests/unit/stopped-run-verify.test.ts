@@ -11,9 +11,9 @@ import { feedKindOf, MonitorModel, type FeedRow } from '../../src/renderer/src/m
 import type { BoardCard, YawbleApi } from '../../src/shared/api';
 
 /**
- * Card 441 (B097 verify, TesterKofi): the window fed exactly what the core (card 437, 742c73e) sends, not the shapes the
- * window's own tests assumed. The core's side is pinned in core Ui/Card441B097VerifyTests.cs:
- * - board.list for a stopped run: round 1 the card KEPT its status ("running" / "queued"); round 2 (b864021) its status is
+ * The window fed exactly what the core sends, not the shapes the
+ * window's own tests assumed. The core's side is pinned in the core's stopped-run verify tests:
+ * - board.list for a stopped run: at first the card KEPT its status ("running" / "queued"); now its status is
  *   "stopped" in the lane it had; memberState is { state: 'idle', attention: 'stopped' } (no lastRunFailureClass); the trail line kind is "stopped".
  * - the feed row: kind "stopped", failureClass "stopped"; a timeout: kind "failed", failureClass "timeout".
  */
@@ -21,7 +21,7 @@ import type { BoardCard, YawbleApi } from '../../src/shared/api';
 const mounted: { unmount(): void }[] = [];
 afterEach(() => { while (mounted.length) mounted.pop()!.unmount(); });
 
-// The board node as the core sends it after a stop (BoardService.ListAsync + BoardProjector, B097).
+// The board node as the core sends it after a stop (BoardService.ListAsync + BoardProjector).
 const coreStoppedCard = (status: BoardCard['status'], lane: string): BoardCard => ({
   id: 41, team: 'Alpha', teamId: 1, member: 'stop', item: 'B097', title: 'job stop', body: '', status, lane,
   placed: false, awaitingManager: false, workflow: 5, createdAt: '2026-11-18T12:00:00Z', updatedAt: '2026-11-18T12:02:00Z', trailCount: 3,
@@ -37,9 +37,9 @@ describe('the board card for a run the person stopped, as the core sends it', ()
     expect(trailKind({ kind: 'stopped', text: 'stopped by the person' })).toBe('stopped');
   });
 
-  // Round 1 (742c73e + 96ddd99) fed status "running" / "queued" here, as the core then sent, and FAILED. Round 2
-  // (core b864021): the core sends the card's own status "stopped", keeping its lane (In Progress after a progress line,
-  // To Do before one; core Card441B097Round2VerifyTests pins that). Changed: the fed status is now 'stopped'.
+  // This first fed status "running" / "queued", as the core then sent, and FAILED. Now
+  // the core sends the card's own status "stopped", keeping its lane (In Progress after a progress line,
+  // To Do before one; the core's stopped-run verify tests pin that). The fed status is 'stopped'.
   it.each([['stopped', 'in-progress'], ['stopped', 'todo']] as const)('status %s (lane %s) from the core: the run line reads Stopped', (status, lane) => {
     const card = coreStoppedCard(status, lane);
     expect(cardStatusLook(card)).toMatchObject({ label: 'Stopped', stopped: true });

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Card 478 (B104 verify, TesterKofi): the Workflows page fed the REAL core's answers.
-// tests/unit/fixtures/workflows/*.json were written by core Card478B104VerifyTests with WORKFLOWS_FIXTURE_OUT set: a started
+// The Workflows page fed the REAL core's answers.
+// tests/unit/fixtures/workflows/*.json were written by the core's workflows verify test with WORKFLOWS_FIXTURE_OUT set: a started
 // engine with a scripted fake runner (never a real agent CLI) where Web's Manager runs holding the heavy-work lease and
 // has told Ben (whose run waits for the lease), Cy waits for the lease in his own workflow, Cloud's Dee asked a question
 // with her run still on, Eve waits for a run slot; plus a dispatched item (completed, with its spec), an archived item
@@ -237,7 +237,7 @@ describe('the text filter on the real rows (spec: "over id, title, item label, t
   });
 
   // F1 (shell, minor): the item label is one of the filter's fields, but its match is not highlighted (the Item cell is
-  // ItemLink, which had no highlight). Pinned with .fails until card 477's fix; ItemLink now takes the filter (q).
+  // ItemLink, which had no highlight). ItemLink now takes the filter (q).
   it('F1: the matched item label is highlighted in the Item column', async () => {
     const w = await page();
     await w.find('[data-test=workflows-chip-all]').trigger('click');
@@ -246,7 +246,7 @@ describe('the text filter on the real rows (spec: "over id, title, item label, t
     expect(rowOf(w, n('dispatched')).find('td.itm mark').exists()).toBe(true);
   });
 
-  // Card 477 fix: the highlight keeps the link (it still opens the Backlog at the item) and covers the archived and
+  // The highlight keeps the link (it still opens the Backlog at the item) and covers the archived and
   // plain-label (no backlog read) cases; a partial match marks only its part.
   it('F1: the highlighted label is still the link; archived items too; only the matched part is marked', async () => {
     const w = await page();
@@ -306,8 +306,8 @@ describe('the pure rules on the real rows', () => {
   });
 });
 
-// Card 478 re-check (TesterKofi, on Ines 0b5f41e): what her own tests did not cover.
-describe('card 478 re-check: F1 stays on the Workflows table; O2 the defaults', () => {
+// What the Workflows page's own tests did not cover.
+describe('the filter re-check: F1 stays on the Workflows table; O2 the defaults', () => {
   it('F1: with the filter on, the pane\'s item link (another ItemLink user) is not marked while the row is', async () => {
     const w = await page();
     await w.find('[data-test=workflows-chip-all]').trigger('click');

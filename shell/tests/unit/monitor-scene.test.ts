@@ -8,7 +8,7 @@ import { readStep, type StepKind, type StepRow } from '../../src/renderer/src/mo
 import type { WorkflowSummary } from '../../src/shared/api';
 
 /**
- * B080 (card 373): the scene's workflow nodes, work rhythm, You node, card-numbered comets, density, focus and reduced
+ * The scene's workflow nodes, work rhythm, You node, card-numbered comets, density, focus and reduced
  * motion, with a fake model (MonitorModel fed by hand) and, for the scene itself, a canvas whose 2D context is a stub.
  */
 
@@ -23,7 +23,7 @@ const member = (name: string, state: TeamSnapshot['members'][number]['state'] = 
 const team = (id: number, name: string, members = [member('Manager', 'idle', 'manager'), member('DeveloperPriya'), member('TesterWren')]): TeamSnapshot =>
   ({ id, name, members });
 
-describe('cards on the comets (B080 item 4)', () => {
+describe('cards on the comets', () => {
   it('reads the card number from an instruction', () => {
     expect(cardOf('Card 373 (B080, Monitor scene). Read the card')).toBe(373);
     expect(cardOf('[card 373] Addition to card 373')).toBe(373);
@@ -66,7 +66,7 @@ describe('cards on the comets (B080 item 4)', () => {
   });
 });
 
-describe('the You node (B080 item 3)', () => {
+describe('the You node', () => {
   it('a question flies to it; it counts open questions and asks until they are answered', () => {
     const m = new MonitorModel();
     m.reconcile([team(1, 'payments', [member('Manager', 'idle', 'manager'), member('DeveloperPriya', 'decision')])], 0);
@@ -98,7 +98,7 @@ describe('the You node (B080 item 3)', () => {
   });
 });
 
-describe('the workflow nodes (B080 item 1)', () => {
+describe('the workflow nodes', () => {
   it('each open workflow is a node; completed and closed ones are not; the busy list says who works it', () => {
     const list = [wf(1, 'completed'), wf(2, 'open', ['DeveloperPriya is running']), wf(3, 'closed'), wf(4, 'open')];
     expect(openWorkflows(list).map((w) => w.id)).toEqual([4, 2]);
@@ -132,7 +132,7 @@ describe('the workflow nodes (B080 item 1)', () => {
   });
 });
 
-describe('the work rhythm (B080 item 2)', () => {
+describe('the work rhythm', () => {
   it('pulses faster with more steps, not at all when quiet', () => {
     expect(pulsePeriodMs(0)).toBeNull();
     const slow = pulsePeriodMs(2)!, busy = pulsePeriodMs(30)!, frantic = pulsePeriodMs(1000)!;
@@ -194,7 +194,7 @@ describe('the work rhythm (B080 item 2)', () => {
   });
 });
 
-describe('density and focus (B080 item 5)', () => {
+describe('density and focus', () => {
   const steps = (node: string, n: number, at0 = 0): Effect[] => Array.from({ length: n }, (_, i) => ({ kind: 'step', node, step: 'read', caption: null, at: at0 + i }));
   const comet = (i: number, from = memberKey('a', 'manager'), to = memberKey('a', 'dev')): Effect => ({ kind: 'comet', from, to, color: 'tell', label: null, at: i });
 
@@ -282,7 +282,7 @@ const frame = (scene: MonitorScene, now: number) => (scene as unknown as { frame
 beforeEach(() => { vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {}); });
 afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
-describe('the scene (B080)', () => {
+describe('the scene', () => {
   it('draws a node per open workflow, tied to the members working it or to its hub', () => {
     const { scene } = makeScene();
     const m = new MonitorModel();
@@ -392,7 +392,7 @@ describe('the scene (B080)', () => {
   });
 });
 
-describe('no WORKFLOWS panel; the workflow nodes say "#id title" (B090)', () => {
+describe('no WORKFLOWS panel; the workflow nodes say "#id title"', () => {
   const title = "Backlog item B081 Remote UI: xterm's link handler asks through confirmDialog";
   type Inner = { nodes: Map<string, { kind: string; x?: number; y?: number }>; cam: { k: number }; toScreen: (x: number, y: number) => [number, number] };
   function wall(w = 1280, h = 800) {
@@ -464,7 +464,7 @@ describe('no WORKFLOWS panel; the workflow nodes say "#id title" (B090)', () => 
     expect(scene.workflowNodes().find((n) => n.id === 3848)!.label.startsWith('#3848 B081')).toBe(true);
   });
 
-  it('a desktop window whose wall is narrow (Activity open) still shows the title zoomed out (card 409)', () => {
+  it('a desktop window whose wall is narrow (Activity open) still shows the title zoomed out', () => {
     const { scene, S } = wall(660, 700); // 1280 x 800 with the sidebar and Activity open
     S.cam.k = 0.4;
     expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe("#3848 B081 Remote UI: xterm's…");

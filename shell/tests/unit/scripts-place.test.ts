@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B134 (SC-4, card 597): the Scripts place. The nav entry, the Scripts dialog's three tabs, the editor's check problems
+// The Scripts place. The nav entry, the Scripts dialog's three tabs, the editor's check problems
 // and the jump to a step, the outline, Delete only for an unused script (scripts.delete, faked: DeveloperNoah's core
 // card adds it), schemas (built-ins read-only, schema_breaks), the test-run form (dry run by default, the first live run
 // asks once per script), the run view, and a Visitor's read-only view. Fakes only: no core; placeholder values only.
@@ -529,7 +529,7 @@ describe('the helpers', () => {
       { files: ['C:/data/a.txt', 'b.txt'] })).toEqual(['C:/data/a.txt', 'b.txt']);
   });
 });
-it('card 605 independent saved version reproduction', async () => {
+it('a saved version reproduces independently of later edits', async () => {
  const f = fakeApi(); const w = await dialog(f.api);
  await rowOf(w, 'inbox-sms-alert').get('[data-test=script-open]').trigger('click'); await flushPromises();
  const d: any = JSON.parse(JSON.stringify(ALIAS));

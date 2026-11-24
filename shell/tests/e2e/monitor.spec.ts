@@ -1,11 +1,11 @@
-// Card 375 (verify B080, cards 373 + 374, with card 371's code map): the livelier Monitor end to end, in headless Chrome
+// The livelier Monitor (with its code map) end to end, in headless Chrome
 // against the phone-remote fake core (remote.html, tests/e2e/phone). The fake serves monitor.messages, monitor.steps
 // (with StepRow.exit when the test gives one), monitor.codeEvents and bus.workflows from a feed the test changes while
 // the page polls, and patches teams.agents with the attention the test sets (a member that needs the person).
 //
-// The wall is a canvas, so the spec reads what the scene draws (the card 372 recorder): an init script wraps the
+// The wall is a canvas, so the spec reads what the scene draws (the code-map spec's recorder): an init script wraps the
 // monitor canvas's 2D context and keeps the last frames' arcs, paths and texts with their transform and alpha. What
-// the scene draws for B080 (scene.ts, rhythm.ts):
+// the scene draws (scene.ts, rhythm.ts):
 //   a workflow node   - a rounded square (moveTo x-r+4, y-r; r 10) filled rgba(7, 11, 20, 0.95), stroked in its tone
 //                       (working #22d3ee, waiting #fbbf24, blocked #fb923c, width 2.2), "#id" under it; dashed lines
 //                       to the members working it (to its hub while nobody is); completed: a #34d399 flash ring and the
@@ -16,8 +16,8 @@
 //   the You node      - in screen space at (w - 46, max(120, h / 2)), r 24, "You", its count and "NEEDS YOU".
 //   comets            - heads are #38bdf8 (tell) arcs of r 3.2, labels "#card", hand-backs "#card ✓" / "#card ✗".
 //
-//   npx playwright test card375-monitor --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots and the results go to $YAWBLE_TEAM_DOCS/b080-monitor (else test-results/b080-monitor).
+//   npx playwright test monitor --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots and the results go to $YAWBLE_TEAM_DOCS/monitor (else test-results/monitor).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -27,7 +27,7 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(150_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'b080-monitor');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'monitor');
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(path.join(SHOTS, 'screens'), { recursive: true }); await buildRenderer(); });
 
 const TEAM = 'payments';
@@ -100,7 +100,7 @@ class Feed {
       return this.events.filter((e) => Date.parse(e.at) >= since && (!p?.team || e.team.toLowerCase() === String(p.team).toLowerCase()));
     }
     if (method === 'bus.workflows') return JSON.parse(JSON.stringify(this.wfs.get(p?.teamId) ?? []));
-    // Card 387 (F2): the waiting network and tool asks, when the test sets them (else the fake core answers).
+    // The waiting network and tool asks, when the test sets them (else the fake core answers).
     if (method === 'network.asks' && this.netAsks) return JSON.parse(JSON.stringify(this.netAsks));
     if (method === 'tools.asks' && this.toolAsks) return JSON.parse(JSON.stringify(this.toolAsks));
     return undefined;
@@ -159,7 +159,7 @@ function recorder() {
     AC.prototype.createOscillator = function (this: any, ...a: any[]) { w.__osc++; return orig.apply(this, a); };
     (window as any).AudioContext = class extends AC { constructor(...a: any[]) { super(...a); w.__audio++; } };
   }
-  // Card 401 (B088): each oscillator started, with its frequency (a needs-you tone starts at 660 Hz, then 880).
+  // Each oscillator started, with its frequency (a needs-you tone starts at 660 Hz, then 880).
   w.__tones = [];
   const ON = (window as any).OscillatorNode;
   if (ON) {
@@ -228,12 +228,12 @@ function wfBoxes(f: Frame) {
 }
 /**
  * A workflow node by its "#id" label: the square drawn last before the label (scene drawWorkflowNode draws the square, its
- * icon, then its label). Card 500: the label is not always 13 under the centre - placeWorkflowLabels moves a label above or
+ * icon, then its label). The label is not always 13 under the centre - placeWorkflowLabels moves a label above or
  * beside its node when the place under it is taken (by #11's or #12's label, as the graph drifts), so finding the square by
  * the label's place missed about half the runs of 1b.
  */
 function wfNode(f: Frame, id: number) {
-  // B090: the label is "#id title" (or "#id" on a phone's wall zoomed out).
+  // The label is "#id title" (or "#id" on a phone's wall zoomed out).
   const at = f.ops.findIndex((o) => o.op === 'text' && (o.text === `#${id}` || o.text!.startsWith(`#${id} `)) && (o.style === C.inkDim || o.style === C.blocked));
   if (at < 0) return null;
   const box = wfBoxes(f).filter((b) => b.at < at).at(-1);
@@ -422,9 +422,9 @@ async function open(browser: Browser, o: OpenOpts = {}) {
 async function shot(page: Page, name: string) { await page.screenshot({ path: path.join(SHOTS, 'screens', `${name}.png`) }); }
 
 const result: Record<string, unknown> = {};
-// Merged into what is there (card 387): a --grep group run keeps the other groups' results instead of leaving only its own.
+// Merged into what is there: a --grep group run keeps the other groups' results instead of leaving only its own.
 test.afterAll(() => {
-  const file = path.join(SHOTS, 'card375-results.json');
+  const file = path.join(SHOTS, 'monitor-results.json');
   let old: Record<string, unknown> = {};
   try { old = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
   writeFileSync(file, JSON.stringify({ ...old, ...result }, null, 2));
@@ -633,7 +633,7 @@ test('2 rhythm: the pulse follows the step rate, a command ring fills then burst
 test('3 You node: a question flies in, it glows with the count; a click opens Needs you and picks nothing', async ({ browser }) => {
   const feed = new Feed();
   seed(feed);
-  // No network or tool asks here (card 387: since F2's fix they count too; test 3b checks them).
+  // No network or tool asks here (they count too; test 3b checks them).
   const { page, ctx, errors } = await open(browser, { feed, asks: false });
   await until(page, (x) => !!youNode(x), Boolean);
   await page.waitForTimeout(1500);
@@ -683,7 +683,7 @@ test('3 You node: a question flies in, it glows with the count; a click opens Ne
   await ctx.close();
 });
 
-// Card 387 (F2's fix, card 386): the view reads network.asks / tools.asks and hands them to live.setAsks.
+// The view reads network.asks / tools.asks and hands them to live.setAsks.
 test('3b You node: pending network and tool asks are counted (waiting at open: no flight); one added later flies in; a decided one leaves', async ({ browser }) => {
   const feed = new Feed();
   seed(feed);
@@ -761,21 +761,21 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
-// 3c. Card 401 (verify B088, card 400): one need-you list. The header's "N need you" and the You node count the same
+// 3c. One need-you list. The header's "N need you" and the You node count the same
 // items (questions, network and tool asks, blocked and failed members; a member with a question and a network ask is 2);
 // the You node's hover (tap on a phone) lists them; each new item flies in once (its head: a screen-space disc of r 3.4
 // in its tone), the node's arrival ring opens once, and the needs-you tone (an oscillator at 660 Hz) sounds once.
 
-const SHOTS88 = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'b088-monitor');
-const result88: Record<string, unknown> = {};
+const NEED_YOU_SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'monitor-need-you');
+const needYouResult: Record<string, unknown> = {};
 test.afterAll(() => {
-  mkdirSync(SHOTS88, { recursive: true });
-  const file = path.join(SHOTS88, 'b088-results.json');
+  mkdirSync(NEED_YOU_SHOTS, { recursive: true });
+  const file = path.join(NEED_YOU_SHOTS, 'need-you-results.json');
   let old: Record<string, unknown> = {};
   try { old = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
-  if (Object.keys(result88).length) writeFileSync(file, JSON.stringify({ ...old, ...result88 }, null, 2));
+  if (Object.keys(needYouResult).length) writeFileSync(file, JSON.stringify({ ...old, ...needYouResult }, null, 2));
 });
-async function shot88(page: Page, name: string) { mkdirSync(path.join(SHOTS88, 'screens'), { recursive: true }); await page.screenshot({ path: path.join(SHOTS88, 'screens', `${name}.png`) }); }
+async function needYouShot(page: Page, name: string) { mkdirSync(path.join(NEED_YOU_SHOTS, 'screens'), { recursive: true }); await page.screenshot({ path: path.join(NEED_YOU_SHOTS, 'screens', `${name}.png`) }); }
 
 const FLY = [C.decision, C.blocked, C.fail];
 /** The heads of the flights to the You node this frame, by colour. */
@@ -858,7 +858,7 @@ for (const W of [1280, 375]) {
             await page.waitForTimeout(200);
             const y = youNode(await lastFrame(page));
             console.log('TAP you at', you.x.toFixed(1), you.y.toFixed(1), 'node now', y?.x.toFixed(1), y?.y.toFixed(1), 'tip', await page.locator('[data-test=monitor-you-tip]').count(), 'board', await page.locator('[data-test=board]').count(), 'hit', await page.evaluate((q) => (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.dataset?.test ?? (document.elementFromPoint(q.x, q.y) as HTMLElement | null)?.className, { x: b.x + you.x, y: b.y + you.y }));
-            await shot88(page, `${tag}-dbg-tap-${Date.now() % 100000}`);
+            await needYouShot(page, `${tag}-dbg-tap-${Date.now() % 100000}`);
           }
         }
       } else { await page.mouse.move(b.x + you.x, b.y + you.y); }
@@ -914,13 +914,13 @@ for (const W of [1280, 375]) {
     expect(r.atOpen.soundOn).toBe('on');
     r.atOpen.tip = await tip();
     expect(r.atOpen.tip.summary).toBe('1 question, 1 blocked');
-    if (process.env.DBG_YOU) { console.log('AFTER TIP board', await page.locator('[data-test=board]').count(), 'tip', await page.locator('[data-test=monitor-you-tip]').count()); await shot88(page, `${tag}-dbg-after-tip`); }
+    if (process.env.DBG_YOU) { console.log('AFTER TIP board', await page.locator('[data-test=board]').count(), 'tip', await page.locator('[data-test=monitor-you-tip]').count()); await needYouShot(page, `${tag}-dbg-after-tip`); }
     r.atOpen.untip = await untip();
-    if (process.env.DBG_YOU) { console.log('AFTER UNTIP', JSON.stringify(r.atOpen.untip), 'board', await page.locator('[data-test=board]').count()); await shot88(page, `${tag}-dbg-after-untip`); }
+    if (process.env.DBG_YOU) { console.log('AFTER UNTIP', JSON.stringify(r.atOpen.untip), 'board', await page.locator('[data-test=board]').count()); await needYouShot(page, `${tag}-dbg-after-untip`); }
     expect(r.atOpen.untip.tipAfter, 'a tap elsewhere / leaving hides the tip').toBe(0);
     // Both resolve: 0, nothing flies.
     await step('open items resolve', () => { feed.attn.delete('2/DeveloperCleo'); feed.attn.delete(`1/${BEN}`); }, 0, { flights: 0, tones: 0 }, 1500);
-    await shot88(page, `${tag}-01-nothing`);
+    await needYouShot(page, `${tag}-01-nothing`);
 
     // Only blocked / failed (attention only, no feed rows): each flies in once in its tone, one tone each.
     let s = await step('Ada failed', () => feed.attn.set(`1/${ADA}`, 'failed'), 1, { flights: 1, tones: 1 });
@@ -932,7 +932,7 @@ for (const W of [1280, 375]) {
     expect(r.onlyBlockedFailed.kinds).toEqual(['blocked', 'failed']);
     expect(r.onlyBlockedFailed.items[0]).toContain(`${TEAM2} / Developer Cleo`);
     expect(r.onlyBlockedFailed.items[1]).toContain(`${TEAM} / Developer Ada`);
-    await shot88(page, `${tag}-02-blocked-failed-tip`);
+    await needYouShot(page, `${tag}-02-blocked-failed-tip`);
     await untip();
     // Repeated polls fire nothing new.
     await step('polls only (blocked / failed)', () => {}, 2, { flights: 0, tones: 0 }, 3000);
@@ -945,7 +945,7 @@ for (const W of [1280, 375]) {
     r.onlyQuestions = await tip();
     expect(r.onlyQuestions.summary).toBe('2 questions');
     expect(r.onlyQuestions.kinds).toEqual(['question', 'question']);
-    await shot88(page, `${tag}-03-questions-tip`);
+    await needYouShot(page, `${tag}-03-questions-tip`);
     await untip();
     await step('questions resolve', () => { feed.attn.delete(`1/${BEN}`); feed.attn.delete('2/Manager'); }, 0, { flights: 0, tones: 0 }, 1500);
 
@@ -958,7 +958,7 @@ for (const W of [1280, 375]) {
     expect(r.onlyAsks.items[0]).toContain(`${TEAM} / Developer Ada`);
     expect(r.onlyAsks.items[0]).toContain('api.nuget.org');
     expect(r.onlyAsks.items[1]).toContain('.NET SDK 10');
-    await shot88(page, `${tag}-04-asks-tip`);
+    await needYouShot(page, `${tag}-04-asks-tip`);
     await untip();
 
     // A mix: Ada now has a question too (her network ask stays: 2 for her), Ben blocked, Cleo failed. 1 + 1 + 1 + 1 + 1 = 5.
@@ -970,7 +970,7 @@ for (const W of [1280, 375]) {
     expect(r.mix.kinds).toEqual(['question', 'network', 'tool', 'blocked', 'failed']);
     expect(r.mix.items.filter((t: string) => t.includes(`${TEAM} / Developer Ada`)).length, 'Ada: a question and a network ask, 2 lines').toBe(2);
     expect(r.mix.more).toBeNull();
-    await shot88(page, `${tag}-05-mix-tip`);
+    await needYouShot(page, `${tag}-05-mix-tip`);
     await untip();
     await step('polls only (mix)', () => {}, 5, { flights: 0, tones: 0 }, 3000);
 
@@ -981,7 +981,7 @@ for (const W of [1280, 375]) {
     await step('Ben unblocked', () => feed.attn.delete(`1/${BEN}`), 1, { flights: 0, tones: 0 }, 1200);
     // A resolved item that returns is new again.
     await step('Ben blocked again (returns)', () => feed.attn.set(`1/${BEN}`, 'blocked'), 2, { flights: 1, tones: 1 });
-    await shot88(page, `${tag}-06-resolved-and-returned`);
+    await needYouShot(page, `${tag}-06-resolved-and-returned`);
 
     // More than ten: 11 network asks on distinct hosts (13 in all): ten lines, then "+3 more".
     await step('11 network asks at once', () => {
@@ -992,20 +992,20 @@ for (const W of [1280, 375]) {
     expect(r.many.items.length).toBe(10);
     expect(r.many.more?.trim()).toBe('+3 more');
     expect(r.many.summary).toBe('11 network asks, 1 blocked, 1 failed');
-    await shot88(page, `${tag}-07-more-than-ten`);
+    await needYouShot(page, `${tag}-07-more-than-ten`);
 
-    // The wall changes size (card 408): a shorter window, then the panel shown again (hover / tap) follows the You node;
+    // The wall changes size: a shorter window, then the panel shown again (hover / tap) follows the You node;
     // then a taller window: desktop re-hovers, on the phone the tapped panel stays open through the resize and follows.
     const H0 = page.viewportSize()!.height;
     await untip();
-    // 375 x 640: the 12 asks' banners leave a wall of about 110 px; since card 416 the You node stays on it, clear of the
+    // 375 x 640: the 12 asks' banners leave a wall of about 110 px; the You node stays on it, clear of the
     // controls row with Legend, so the tap below reaches it (before, at y 120, it sat under Legend, out of reach).
     await page.setViewportSize({ width: W, height: phone ? 640 : 600 });
     await page.waitForTimeout(1200);
     let yn = youNode(await lastFrame(page));
     if (yn) you = { x: yn.x, y: yn.y };
     r.resized = await tip();
-    await shot88(page, `${tag}-08-after-resize-tip`);
+    await needYouShot(page, `${tag}-08-after-resize-tip`);
     if (!phone) await unhover(page);
     await page.setViewportSize({ width: W, height: H0 });
     await page.waitForTimeout(1200);
@@ -1014,7 +1014,7 @@ for (const W of [1280, 375]) {
     const stayedOpen = (await page.locator('[data-test=monitor-you-tip]').count()) > 0;
     if (phone) expect.soft(stayedOpen, 'the tapped panel stays open through the resize').toBe(true);
     r.grown = { ...(await tip()), stayedOpen };
-    await shot88(page, `${tag}-09-after-grow-tip`);
+    await needYouShot(page, `${tag}-09-after-grow-tip`);
     if (!phone) await unhover(page);
 
     // Opening Needs you: a desktop click on the You node; a phone tap shows the panel with its button, which opens it.
@@ -1030,15 +1030,15 @@ for (const W of [1280, 375]) {
     await expect(page.locator('[data-test=board]')).toBeVisible({ timeout: 5000 });
     r.opened = 'board';
     r.mismatches = mismatches;
-    result88[tag] = r;
-    console.log(`B088-${tag}`, JSON.stringify(r));
+    needYouResult[tag] = r;
+    console.log(`need-you-${tag}`, JSON.stringify(r));
     expect(mismatches).toEqual([]);
     expect(errors).toEqual([]);
     await ctx.close();
   });
 }
 
-// Card 416 (B093 part 2): at 375 x 640 with 12 asks the banners leave a short wall (about 110 px with 3c's members
+// At 375 x 640 with 12 asks the banners leave a short wall (about 110 px with 3c's members
 // blocked and failed too, 169 px with the asks alone; 600, 580 and 556 make it 145, 133 and 119); the You node stays on it, clear of the
 // controls row with Legend, and a tap on it opens its panel (whose button opens Needs you).
 for (const H of [640, 600, 580, 556, 546, 530])
@@ -1061,15 +1061,15 @@ test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, 
     wallH: Math.round(cb.height), node: { x: f.x, y: f.y }, count: you?.count ?? null,
     legend: { x: Math.round(lb.x - cb.x), y: Math.round(lb.y - cb.y), w: Math.round(lb.width), h: Math.round(lb.height) },
   };
-  console.log('CARD416-AT', H, JSON.stringify({ ...r, controls: { y: Math.round(rb.y - cb.y), h: Math.round(rb.height) } }));
-  await shot(page, `card417-you-375x${H}-before-tap`);
+  console.log('short-wall-at', H, JSON.stringify({ ...r, controls: { y: Math.round(rb.y - cb.y), h: Math.round(rb.height) } }));
+  await shot(page, `you-375x${H}-before-tap`);
   // Short enough that the old place (y 120) lay on the controls row (its top 52 px above the wall's bottom).
   expect(cb.height, 'the 12 asks leave a short wall').toBeLessThan(120 + 24 + 52);
   expect(f.y - 24, 'the node is inside the wall (top)').toBeGreaterThanOrEqual(0);
   expect(f.y + 24, 'the node is inside the wall (bottom)').toBeLessThanOrEqual(cb.height);
   expect(f.x + 24).toBeLessThanOrEqual(cb.width);
   expect.soft(clear(lb), 'the node is clear of the Legend button').toBe(true);
-  // Card 417 round 2: a 48 px node can clear the controls row only if the wall is at least node height + the row's
+  // A 48 px node can clear the controls row only if the wall is at least node height + the row's
   // distance from the wall's bottom (~48 + 56 = 104 px). Below that no placement can, so there the node must instead
   // keep its centre off the row (with inside the wall, clear of Legend and the tap, checked above and below).
   const rowFromBottom = cb.y + cb.height - rb.y;
@@ -1089,12 +1089,12 @@ test(`3d You node on a short phone wall (375 x ${H}, 12 asks): inside the wall, 
   await expect(page.locator('[data-test=monitor-you-tip]')).toBeVisible({ timeout: 4000 });
   r.summary = await page.locator('[data-test=monitor-you-summary]').innerText();
   expect(r.summary).toBe('12 network asks');
-  await shot(page, `card416-you-375x${H}-12-asks`);
+  await shot(page, `you-375x${H}-12-asks`);
   // The panel's button opens Needs you.
   await page.locator('[data-test=monitor-you-open]').click();
   await expect(page.locator('[data-test=board]')).toBeVisible({ timeout: 5000 });
-  result[`3d-card416-${H}`] = r;
-  console.log('CARD416', JSON.stringify(r));
+  result[`3d-short-wall-${H}`] = r;
+  console.log('short-wall', JSON.stringify(r));
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -1197,7 +1197,7 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: 'a'.repeat(40), message: 'Refund commit', files: [{ path: 'src/refund/f0.ts', status: 'M' }] });
   feed.event({ kind: 'commit', team: TEAM2, member: 'DeveloperCleo', sha: 'b'.repeat(40), message: 'Cart commit', files: [{ path: 'web/cart/c0.ts', status: 'M' }] });
   feed.event({ kind: 'merge-team', team: TEAM2, member: null, sha: 'c'.repeat(40), message: 'Merge', files: [] });
-  // Card 77 (card 387): focused, the zoom passes 0.5 and payments' own workflow #10 is labelled "#10", so "#10" matched it.
+  // Card 77: focused, the zoom passes 0.5 and payments' own workflow #10 is labelled "#10", so "#10" matched it.
   feed.row('instruction', 'DeveloperCleo', 'Manager', 20, 0, 'Card 77: other team comet', TEAM2);
   await page.waitForTimeout(3500);
   const fs = await frames(page);
@@ -1283,7 +1283,7 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
     const callsBefore = feed.calls.length;
     const pushedAt = Date.now();
     for (let i = 0; i < 10; i++) feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: (++shaN).toString(16).padStart(40, '0'), message: `c${shaN}`, files: [{ path: `src/area1/file${i}.ts`, status: 'M' }] });
-    // Card 387 (test 6's flake): sampled for 8 s, keeping when the dots first show and what the old 3 s window saw.
+    // Against test 6's flake: sampled for 8 s, keeping when the dots first show and what the old 3 s window saw.
     const trace: { ms: number; dots: number }[] = [];
     while (Date.now() - pushedAt < 8000) {
       let best = 0;
@@ -1314,7 +1314,7 @@ test('6 density: calm / normal / lively cap the step icons, the comets, the map 
   expect(r.normal.paymentsCommitDots).toBe(8);
   expect(r.lively.paymentsCommitDots).toBe(8);
   expect(r.lively.stored).toBe('lively');
-  // Card 387: the dots show 2.4-3.0 s after the commits (a 1.2 s poll, then their entry); the old 3 s window missed one
+  // The dots show 2.4-3.0 s after the commits (a 1.2 s poll, then their entry); the old 3 s window missed one
   // at 3033 ms. Sampled for 8 s now; they must still show within 6 s.
   for (const level of ['calm', 'normal', 'lively'] as const) expect(r[level].firstCommitDotMs, `${level}: commit dots within 6 s`).toBeLessThanOrEqual(6000);
   expect(errors).toEqual([]);
@@ -1482,7 +1482,7 @@ for (const theme of ['light', 'dark'] as const)
     });
   }
 
-// Card 399 (B087, card 398's 22 px reach floor): at 1280 each hub and member still answers for itself, and of two close
+// With the 22 px reach floor, at 1280 each hub and member still answers for itself, and of two close
 // nodes a point nearer one never names the other. The hover tip is read: hover and a click both go through nodeAt.
 for (const theme of ['light', 'dark'] as const)
   test(`9d node picks ${theme} 1280: hubs and members hit their own node; a close neighbour does not steal`, async ({ browser }) => {
@@ -1548,7 +1548,7 @@ for (const w of [1280, 375])
     await ctx.close();
   });
 
-test('9c remote view as a Visitor (read access) at 375 and 1280: the B080 wall draws with monitor.* reads only', async ({ browser }) => {
+test('9c remote view as a Visitor (read access) at 375 and 1280: the wall draws with monitor.* reads only', async ({ browser }) => {
   for (const w of [1280, 375]) {
     const feed = busyFeed();
     const { page, ctx, errors } = await open(browser, { feed, w, access: 'read' });

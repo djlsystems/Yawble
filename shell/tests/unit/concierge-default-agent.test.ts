@@ -5,9 +5,9 @@ import App from '../../src/renderer/src/App.vue';
 import { savedConciergeAgent } from '../../src/renderer/src/conciergeDefault';
 import type { Conversation, YawbleApi } from '../../src/shared/api';
 
-// Card 420 (verify B096): a new Concierge chat in the window should start on the saved default agent
+// A new Concierge chat in the window should start on the saved default agent
 // (Settings > Concierge, concierge.defaults). The core applies the saved default only when concierge.send has no cli;
-// the window always sends one, so the window reads the saved default itself (card 419 fix round). A scripted fake
+// the window always sends one, so the window reads the saved default itself. A scripted fake
 // core: no agent runs. `ready`: the agents signed in; `noDefaults`: an older core without concierge.defaults.
 function fakeCore(defaultAgent: string | null, ready: string[] = ['claude', 'grok'], noDefaults = false) {
   const calls: { method: string; params: any }[] = [];
@@ -58,13 +58,13 @@ async function sentCli(core: ReturnType<typeof fakeCore>) {
   return send!.params.cli;
 }
 
-describe('card 420: a new chat and the saved Concierge default agent', () => {
+describe('a new chat and the saved Concierge default agent', () => {
   beforeEach(() => {
     try { localStorage.clear(); } catch { /* none */ }
     savedConciergeAgent.value = null;
   });
 
-  // F1 (fixed, card 419 fix round): the window used to send the first ready agent whatever was saved.
+  // F1 (fixed): the window used to send the first ready agent whatever was saved.
   it('F1: with "grok" saved and claude ready first, a new chat is sent on grok', async () => {
     const core = fakeCore('grok');
     const cli = await sentCli(core);

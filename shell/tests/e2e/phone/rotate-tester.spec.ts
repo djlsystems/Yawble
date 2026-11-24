@@ -1,4 +1,4 @@
-// Card 335 (verify card 334, TesterKofi): rotations rotate.spec.ts does not cover, in WebKit on the remote view.
+// Rotations rotate.spec.ts does not cover, in WebKit on the remote view.
 //  - back and forth twice (portrait -> landscape -> portrait -> landscape -> portrait) on a phone and an iPad;
 //  - a rotation with a modal / phone sheet open (#workflow=10, the workflows dialog);
 //  - a rotation with the phone drawer open.

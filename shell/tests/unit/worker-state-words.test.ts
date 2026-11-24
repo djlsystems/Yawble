@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Card 565 (B126 shell): the real waiting state, not always "queued for a run slot". The core's worker states
-// (card 564): queued | waits-for-run (waitsFor: the sender) | held | pending, on workflows.list members and teams.agents.
+// The real waiting state, not always "queued for a run slot". The core's worker states
+//: queued | waits-for-run (waitsFor: the sender) | held | pending, on workflows.list members and teams.agents.
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -100,9 +100,9 @@ describe('the member pane state line', () => {
   });
 });
 
-// Card 571 (B126 shell follow-up): core 564 sends waitingFor slot only for a queued member, else waits-for-run, held or
+// Core 564 sends waitingFor slot only for a queued member, else waits-for-run, held or
 // pending; and agent cards may carry waitState + waitsFor beside a queued / idle state.
-describe('the row waitingFor alone (card 571)', () => {
+describe('the row waitingFor alone', () => {
   const row = (waitingFor: WorkflowRow['waitingFor'], members: WorkflowRow['members'] = []) =>
     ({ status: 'waiting', state: 'open', waitingFor, expiresAt: null, working: false, members }) as const;
   it('slot keeps its words', () => expect(statusTip(row('slot'))).toBe('Waiting for a run slot'));
@@ -118,7 +118,7 @@ describe('the row waitingFor alone (card 571)', () => {
   it('pending: has work waiting', () => expect(statusTip(row('pending'))).toBe('Has work waiting'));
 });
 
-describe('an agent card with waitState beside state (card 571)', () => {
+describe('an agent card with waitState beside state', () => {
   it.each([
     [{ state: 'idle', waitState: 'waits-for-run' }, 'waits-for-run'],
     [{ state: 'queued', waitState: 'held' }, 'held'],

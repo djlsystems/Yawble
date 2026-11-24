@@ -1,14 +1,14 @@
-// Card 390 (B085 verify), gap tests: the phone-remote fake core (tests/e2e/phone/fake-core.ts) against the real UiRpc's
-// B085 shapes, as core's Card390ExpiryContractTests reads them over the wire (same key list). All plain `it`: the
-// four `it.fails` that pinned F1-F4 became plain `it` once card 389 fixed the fake. Test-only.
+// The phone-remote fake core (tests/e2e/phone/fake-core.ts) against the real UiRpc's
+// workflow expiry shapes, as the core's expiry contract test reads them over the wire (same key list). The
+// faults F1-F4 are fixed in the fake, so every test is a plain `it`. Test-only.
 import { describe, expect, it } from 'vitest';
 import { createFakeCore } from '../e2e/phone/fake-core';
 import { WORKFLOW_EXTEND, TEAM_WORKFLOW_EXPIRY } from '../../src/shared/api';
 
-/** bus.workflows item keys from core (Card390ExpiryContractTests.WorkflowItemKeys). */
+/** bus.workflows item keys from core (the expiry contract test's WorkflowItemKeys). */
 const ItemKeys = ['id', 'title', 'owner', 'state', 'undeclared', 'busy', 'ending', 'startedAt', 'lastAt', 'messages',
   'endedAt', 'expiredAt', 'expiresAt', 'expiryWarning', 'question',
-  // B086 (card 429's wire contract): the workflow item's time.
+  // The workflow item's time.
   'time'].sort();
 
 function core(access: 'full' | 'read' = 'full') {
@@ -21,7 +21,7 @@ function core(access: 'full' | 'read' = 'full') {
   return { c, call };
 }
 
-describe('card 390: the fake core serves the real UiRpc B085 shapes', () => {
+describe('the fake core serves the real UiRpc workflow expiry shapes', () => {
   it('bus.workflows lists an expiring open #12 on question 3 and an expired #9 with endedAt before expiredAt', () => {
     const { call } = core();
     const list = call('bus.workflows', { teamId: 1, limit: 50 }).result as any[];
@@ -82,7 +82,7 @@ describe('card 390: the fake core serves the real UiRpc B085 shapes', () => {
     expect((call('teams.list').result as any[]).find((t) => t.id === 1).workflowExpiryDays).toBe(9);
   });
 
-  // Card 390 re-verify: the values behind F1 and F3, not only the keys.
+  // The values behind F1 and F3, not only the keys.
   it('F1: expiryWarning is the core\'s WarningText on the warned #12, null on #10 and #9, and null again after Extend', () => {
     const { call } = core();
     const list = () => call('bus.workflows', { teamId: 1 }).result as any[];

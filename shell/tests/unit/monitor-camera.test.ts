@@ -6,8 +6,8 @@ import type { StepRow } from '../../src/renderer/src/monitor/steps';
 import type { WorkflowSummary } from '../../src/shared/api';
 
 /**
- * Card 385 (B080 F1): with two teams' code maps the camera never settled (zoom 0.30-0.51, the hub moving 50-100 px in
- * 100 ms), so a hub click missed. The workflow panels (gone since B090) grew as the wall zoomed out and were bodies in the forces: each
+ * With two teams' code maps the camera never settled (zoom 0.30-0.51, the hub moving 50-100 px in
+ * 100 ms), so a hub click missed. The workflow panels (gone now) grew as the wall zoomed out and were bodies in the forces: each
  * size step moved the graph, the fit followed, the zoom changed, the panels stepped again; and the forces never cooled.
  */
 
@@ -47,7 +47,7 @@ const wf = (id: number, busy: string[] = []): WorkflowSummary =>
   ({ id, title: `Workflow ${id}`, owner: null, state: 'open', undeclared: false, busy, ending: null, startedAt: new Date(0).toISOString(), lastAt: new Date(id * 1000).toISOString(), messages: 2 });
 const edit = (id: number, team: string, m: string, target: string): StepRow => ({ id, at: new Date().toISOString(), team, member: m, run: 1, kind: 'edit', tool: 'Edit', target });
 
-/** The card 375 test 5 wall: payments (three members, three workflows) and a second team, each with a small code map. */
+/** The monitor e2e spec's test 5 wall: payments (three members, three workflows) and a second team, each with a small code map. */
 function wall(w: number, h: number) {
   const canvas = document.createElement('canvas');
   const ctx = stubContext();
@@ -102,7 +102,7 @@ function drift(o: ReturnType<typeof wall>, ms: number) {
   return { dk, dc, dh };
 }
 
-describe('the camera settles with two teams\' code maps (card 385, F1)', () => {
+describe('the camera settles with two teams\' code maps', () => {
   for (const [w, h] of [[660, 654], [1280, 800]] as const) {
     it(`at ${w} x ${h}: once nothing new comes, the zoom, the camera and the hub stop moving`, () => {
       const o = wall(w, h);

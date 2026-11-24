@@ -8,7 +8,7 @@ import {
 import { MonitorSound, SoundGapMs, type SoundKind } from '../../src/renderer/src/monitor/sound';
 
 /**
- * Card 400 (B088): one "need you" list (questions, network asks, tool asks, blocked and failed members, each once) that
+ * One "need you" list (questions, network asks, tool asks, blocked and failed members, each once) that
  * the Monitor's header and its You node both count; the You node's breakdown by kind; and the needs-you sound and pulse
  * firing once per new item, keyed by its id.
  */

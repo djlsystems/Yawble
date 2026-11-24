@@ -1,4 +1,4 @@
-// Card 394 (B081, verifies card 393): a terminal link (OSC 8) in the remote view (remote.html in headless Chrome
+// A terminal link (OSC 8) in the remote view (remote.html in headless Chrome
 // against the FAKE core of phone-remote.spec.ts) asks through the app's in-page confirm dialog (confirm.ts), never the
 // browser's confirm(): any page 'dialog' event fails the test.
 //  - Clicking an https OSC 8 link shows [data-test=confirm-dialog] with xterm's question and OK labelled "Open".
@@ -8,7 +8,7 @@
 //  - A non-http(s) link (file:, javascript:) neither asks nor opens.
 // DeveloperAda's pane is on Terminal and its session is interactive (so the pane shows the xterm, not the transcript).
 //
-//   npx playwright test card394-terminal-links   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test terminal-links   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -18,7 +18,7 @@ import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'b081-terminal-links');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'terminal-links');
 const URL_ = 'https://example.com/docs?q=1';
 const osc8 = (uri: string, text: string) => `\x1b]8;;${uri}\x1b\\${text}\x1b]8;;\x1b\\`;
 const REPLAY = [

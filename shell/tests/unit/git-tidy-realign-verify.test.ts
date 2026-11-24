@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B094 verify (card 428): every code the core's git.branchRealign really sends (UiRpc.BranchRealignAsync and
+// Every code the core's git.branchRealign really sends (UiRpc.BranchRealignAsync and
 // TeamRepos.GitBranchRealignAsync) lands on the right side: git failures plain, the core saying no as "Refused: ".
 // Messages are the core's own texts.
 import { flushPromises, mount } from '@vue/test-utils';
@@ -34,7 +34,7 @@ async function realignError(code: string, message: string) {
   return w.find('[data-test=tidy-realign-error]').text();
 }
 
-describe('B094 verify: realign codes the core sends', () => {
+describe('realign codes the core sends', () => {
   it.each([
     ['push_failed', "origin's members/payments/marlo was not changed (it moved on origin since the last fetch, or the push failed); nothing changed. git said: fatal: unable to access"],
     ['clone', "Marlo's clone cannot be read: .git is missing. Nothing changed."],

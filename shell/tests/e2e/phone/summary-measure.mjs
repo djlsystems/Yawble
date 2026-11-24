@@ -1,4 +1,4 @@
-// B054 verify (card 270): prints test-results/phone-page-measure.ndjson (written by phone-remote.spec.ts's B054 block), one
+// Prints test-results/phone-page-measure.ndjson (written by phone-remote.spec.ts's page-measure block), one
 // line per page, size and build: px from the top of the window of the first content row and the named rows, the inner
 // vertical scrollers, sideways scroll, and every field under 16 px / 44 px.   node tests/e2e/phone/summary-measure.mjs
 import { readFileSync } from 'node:fs';

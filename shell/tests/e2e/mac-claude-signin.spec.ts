@@ -1,4 +1,4 @@
-// Card 522 (B118 Part A): Settings > Agents on macOS, where Claude Code keeps its sign-in in the login Keychain item
+// Settings > Agents on macOS, where Claude Code keeps its sign-in in the login Keychain item
 // "Claude Code-credentials" and the app's gateway reads it there. The Claude tile shows the core's sign-in line:
 //  - signed in (the Keychain item exists): it says so and that agents use it through the gateway;
 //  - not signed in (no item): it says how to sign in ("run 'claude' in your own terminal and sign in (/login)").
@@ -6,8 +6,8 @@
 // Headless Chrome against the phone-remote fake core (remote.html, tests/e2e/phone); agents.detect answers with the
 // core's own macOS texts (Agents/CliSignIn.cs, SignInCatalog.Claude). 1280x800 and 375x812, light and dark.
 //
-//   $env:PW_CHANNEL='chrome'; npx playwright test card522-mac-claude-signin --workers=1   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B118 (else test-results/B118).
+//   $env:PW_CHANNEL='chrome'; npx playwright test mac-claude-signin --workers=1   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/mac-claude-signin (else test-results/mac-claude-signin).
 import { expect, test, type Browser } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -17,7 +17,7 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B118');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'mac-claude-signin');
 
 // The core's words (SignInCatalog.Claude on macOS).
 const SIGNED_IN = 'Signed in on this computer (the login Keychain item "Claude Code-credentials"). Agents use this sign-in through the app\'s gateway, '
@@ -92,7 +92,7 @@ for (const { label, size } of SIZES) {
       const all = await page.locator('[data-test=agent-tiles]').innerText();
       expect(all).not.toMatch(/cannot run on macOS|Claude members cannot|cannot run here yet/);
       await tile.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: path.join(SHOTS, `card522-agents-mac-claude-signed-in-${label}-${scheme}.png`), fullPage: true });
+      await page.screenshot({ path: path.join(SHOTS, `agents-mac-claude-signed-in-${label}-${scheme}.png`), fullPage: true });
       expect(errors).toEqual([]);
       await ctx.close();
     });
@@ -111,7 +111,7 @@ for (const { label, size } of SIZES) {
       const all = await page.locator('[data-test=agent-tiles]').innerText();
       expect(all).not.toMatch(/cannot run on macOS|Claude members cannot/);
       await tile.scrollIntoViewIfNeeded();
-      await page.screenshot({ path: path.join(SHOTS, `card522-agents-mac-claude-not-signed-in-${label}-${scheme}.png`), fullPage: true });
+      await page.screenshot({ path: path.join(SHOTS, `agents-mac-claude-not-signed-in-${label}-${scheme}.png`), fullPage: true });
       expect(errors).toEqual([]);
       await ctx.close();
     });

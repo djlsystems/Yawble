@@ -1,4 +1,4 @@
-// B091 (card 484): the phone project is chosen by what a spec imports (tests/e2e/phone/specs.ts), and
+// The phone project is chosen by what a spec imports (tests/e2e/phone/specs.ts), and
 // playwright.config.ts refuses to load when a phone spec falls outside it or skips phone/fixtures.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -8,7 +8,7 @@ import { checkPhoneSpecs, isPhoneSpec, listSpecs, phoneSpecs, specMatcher } from
 
 const E2E = path.resolve(__dirname, '..', 'e2e');
 
-// The hand-kept list playwright.config.ts had before B091.
+// The hand-kept list playwright.config.ts had before the specs were chosen by their imports.
 const OLD_PHONE_SPECS = [
   /[\\/]phone[\\/][^\\/]+\.spec\.ts$/,
   /[\\/](teams-buttons|team-more-menu|team-settings-list-rows|team-grid|code-map|monitor|workflow-timeline|commit-view|workflows-page|member-pane-phone|phone-remote|team-settings-phone|tell-icons|workflows-visitor)\.spec\.ts$/,
@@ -22,7 +22,7 @@ let tmp: string | undefined;
 afterEach(() => { if (tmp) rmSync(tmp, { recursive: true, force: true }); tmp = undefined; });
 
 function tree(files: Record<string, string>) {
-  tmp = mkdtempSync(path.join(os.tmpdir(), 'b091-'));
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'phone-specs-'));
   for (const [rel, src] of Object.entries(files)) {
     mkdirSync(path.dirname(path.join(tmp, rel)), { recursive: true });
     writeFileSync(path.join(tmp, rel), src);
@@ -51,8 +51,8 @@ describe('which specs are phone specs', () => {
   });
 });
 
-// B108 (card 500): B091's verify found two ways in that the static `from` test missed.
-describe('a spec that loads phone/ by a dynamic import() or through a helper module (B108)', () => {
+// Two ways in that the static `from` test missed.
+describe('a spec that loads phone/ by a dynamic import() or through a helper module', () => {
   const DYNAMIC = `import { expect, test } from '@playwright/test';\ntest('x', async () => { const { fakeRemote } = await import('./phone/server'); });\n`;
 
   it('a dynamic import(), require() or bare import of a phone/ module makes a phone spec, without reading other files', () => {

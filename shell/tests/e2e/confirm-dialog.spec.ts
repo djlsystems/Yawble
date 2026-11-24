@@ -1,4 +1,4 @@
-// Card 355: the renderer's own confirm dialog (ConfirmDialog.vue / confirm.ts) in place of window.confirm, in the remote
+// The renderer's own confirm dialog (ConfirmDialog.vue / confirm.ts) in place of window.confirm, in the remote
 // view (remote.html in headless Chrome against the FAKE core of phone-remote.spec.ts), on a 390 px phone and an iPad:
 //  - Triggers: Delete asks in the page; Cancel keeps the trigger (no triggers.delete), OK deletes it.
 //  - A member's ⋯ > Remove agent asks in the page; Cancel keeps the member (no members.remove), OK removes it.
@@ -6,7 +6,7 @@
 //    buttons are >= 44 px tall.
 //  - No browser dialog (page 'dialog' event) at any point.
 //
-//   npx playwright test card355-confirm-dialog   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test confirm-dialog   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { answers } from './phone/fake-core';
 import { buildRenderer, fakeRemote } from './phone/server';
@@ -146,7 +146,7 @@ for (const [label, w, h] of [['phone 390x844', 390, 844], ['iPad 820x1180', 820,
       await page.screenshot({ path: test.info().outputPath(`confirm-member-${w}.png`) });
       await page.locator('[data-test=confirm-cancel]').click();
       await expect(confirmBox(page)).toHaveCount(0);
-      // The ⋯ menu (v-if) went before the confirm opened: the focus is back on the ⋯ button, not <body> (card 356).
+      // The ⋯ menu (v-if) went before the confirm opened: the focus is back on the ⋯ button, not <body>.
       await expect(pane.locator('[data-test=member-more]')).toBeFocused();
       await ask();
       await page.keyboard.press('Escape');

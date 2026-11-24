@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 582 (B130 verify): a team whose member has an open needs_decision reads "Waiting on you" in the team header chip,
+// A team whose member has an open needs_decision reads "Waiting on you" in the team header chip,
 // the team list card and the sidebar dot, and the embed sends dot 'waiting'. The teams are fed in the shape the core's
 // teams.list / app.overview really serializes TeamSummary (camelCase, every field: id, name, repoPath, members, running,
 // queued, paused, archived, workflowExpiryDays, waiting), plus an older core's shape with no 'waiting' at all.
@@ -49,7 +49,7 @@ const api = (): YawbleApi => ({
   openTerminal: async () => {},
 } as unknown as YawbleApi);
 
-describe('B130 verify: the app reads a waiting team as Waiting on you', () => {
+describe('the app reads a waiting team as Waiting on you', () => {
   it('sidebar dots, team list cards and each team header chip', async () => {
     const w = mount(App, { props: { api: api(), pollMs: 60_000 } });
     await flushPromises();

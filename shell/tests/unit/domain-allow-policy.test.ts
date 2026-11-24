@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B018 verify (card 185, TesterWren): the policy editors take "*.domain" and show only the core's refusals. Fakes only:
+// The policy editors take "*.domain" and show only the core's refusals. Fakes only:
 // policy.checkHosts answered from a fixed table (the window never judges a host itself).
 import { flushPromises, mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';

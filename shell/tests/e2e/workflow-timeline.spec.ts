@@ -1,10 +1,10 @@
-// Card 430 (B086): the overall time and the Timeline dialog in a real browser (headless Chrome), on remote.html against the
-// FAKE core of phone-remote.spec.ts (core card 429's wire contract, canned). Opened at #workflow=10 (the team's
+// The overall time and the Timeline dialog in a real browser (headless Chrome), on remote.html against the
+// FAKE core of phone-remote.spec.ts (the core's wire shapes, canned). Opened at #workflow=10 (the team's
 // workflows): the row's overall time opens the dialog with a summary row and one row per card. A Visitor sees the same.
 // At 375 px the timeline's axis scrolls inside the dialog and the page never scrolls sideways. Screenshots go to
-// $YAWBLE_TEAM_DOCS/B086 when that is set.
+// $YAWBLE_TEAM_DOCS/timeline when that is set.
 //
-//   npx playwright test card430-timeline      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test workflow-timeline      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import path from 'node:path';
 import { type Access } from './phone/fake-core';
@@ -15,7 +15,7 @@ test.setTimeout(60_000);
 
 test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
-const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'B086') : null;
+const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'timeline') : null;
 
 async function open(browser: Browser, access: Access, w: number, h: number, theme: 'light' | 'dark' = 'light') {
   const s = fakeRemote(builtDir);

@@ -5,8 +5,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { DataFolderInUseError, startCore, type CoreLaunch } from '../../src/main/core-process';
 import { inUseDialog } from '../../src/main/lifetime-dialogs';
 
-// B032 verify (card 151): startCore against a stand-in core process (node -e), as the shell starts the real one.
-const dataDir = mkdtempSync(path.join(os.tmpdir(), 'yawble-b032-'));
+// startCore against a stand-in core process (node -e), as the shell starts the real one.
+const dataDir = mkdtempSync(path.join(os.tmpdir(), 'yawble-start-core-'));
 afterAll(() => rmSync(dataDir, { recursive: true, force: true }));
 const fake = (code: string): CoreLaunch => ({ command: process.execPath, args: ['-e', code, '--'] }); // '--': the core's arguments are not node's
 

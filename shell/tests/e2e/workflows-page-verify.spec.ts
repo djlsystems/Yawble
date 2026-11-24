@@ -1,10 +1,10 @@
-// Card 478 (B104 verify, TesterKofi): the Workflows page in a real browser (headless Chrome) on remote.html, the remote
+// The Workflows page in a real browser (headless Chrome) on remote.html, the remote
 // view, with the phone-remote FAKE core whose workflows.list / workflows.get answer the REAL core's answers
-// (tests/unit/fixtures/workflows, written by core Card478B104VerifyTests: live running / lease / slot / needs-you states,
+// (tests/unit/fixtures/workflows, written by the core's workflows verify test: live running / lease / slot / needs-you states,
 // a dispatched item with its spec, an archived item, an expired workflow). At 1280, 1440 and 375 px, light and dark,
-// with full access and as a Visitor (read-only). Screenshots go to $YAWBLE_TEAM_DOCS/B104/verify.
+// with full access and as a Visitor (read-only). Screenshots go to $YAWBLE_TEAM_DOCS/workflows-page/verify.
 //
-//   npx playwright test card478-workflows-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test workflows-page-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -29,7 +29,7 @@ answers['workflows.get'] = (p) => {
   return structuredClone(g);
 };
 
-const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'B104', 'verify') : null;
+const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'workflows-page', 'verify') : null;
 if (shots) mkdirSync(shots, { recursive: true });
 
 async function open(browser: Browser, access: Access, w: number, h: number, theme: 'light' | 'dark', hash = '#workflows') {
@@ -150,8 +150,7 @@ test('1280 dark: the board\'s Workflows button opens the page', async ({ browser
   await ctx.close();
 });
 
-// Card 478 re-check (TesterKofi, on Ines 0b5f41e). The Backlog answers the two items the rows point at (B001 live,
-// B002 archived), so an Item link can land on its item.
+// The Backlog answers the two items the rows point at (one live, one archived), so an Item link can land on its item.
 const bItem = (id: number, label: string, archivedAt: string | null) => ({
   id, label, team: null, title: label === String(ID.spec) ? 'Workflows page' : 'Old item', body: '# x', state: archivedAt ? 'done' : 'declared', archivedAt,
   dispatchedTeam: null, dispatchedWorkflow: null, dispatchedAt: null, inFlight: false, createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-02T00:00:00Z', dispatchCount: 1,

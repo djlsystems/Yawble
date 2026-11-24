@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Card 466 addition (B073 verify, TesterKofi): DeveloperInes's 3ad0991, the team page's TeamSyncBanner, fed the REAL core's
-// answers. synctobase-*.json were written by core Card466PreviewVerifyTests.SyncToBase_* (GIT_PREVIEWS_FIXTURE_OUT set) through
+// The team page's TeamSyncBanner, fed the REAL core's
+// answers. synctobase-*.json were written by the core's git previews verify tests, SyncToBase_* (GIT_PREVIEWS_FIXTURE_OUT set) through
 // UiRpc's RpcDispatcher, exactly as a window gets them: behind.from = the team tip, behind.to = the base it is behind; with the
 // branches level the core sends behind: null (never a behind with from / to null).
 import { flushPromises, mount } from '@vue/test-utils';
@@ -45,7 +45,7 @@ async function banner(answers: Record<string, (params: any) => unknown>) {
 }
 const shas = (w: any, sel: string) => w.findAll(`${sel} [data-test=commit-list-row]`).map((r: any) => r.attributes('data-sha'));
 
-describe('card466 + 3ad0991: TeamSyncBanner on the real core\'s teams.syncToBase', () => {
+describe('TeamSyncBanner on the real core\'s teams.syncToBase', () => {
   const behind = real('synctobase-behind');
   const range = real('synctobase-range');
 

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Card 472 (B074 verify, TesterKofi): commit links fed the REAL core's git.commitsResolve answers.
-// tests/unit/fixtures/commit-links/*.json were written by core Card472CommitsResolveVerifyTests with COMMIT_LINKS_FIXTURE_OUT set
+// Commit links fed the REAL core's git.commitsResolve answers.
+// tests/unit/fixtures/commit-links/*.json were written by the core's commitsResolve verify test with COMMIT_LINKS_FIXTURE_OUT set
 // (two teams "web" and "cloud" on real repositories; a 7-digit prefix shared by two commits of one repository; the same
 // commit in a team's main repository and its writable extra). The fake API answers each asked ID with the core's own
 // result row for it (an ID the core was not asked is answered as no commit, as the core does for an unknown hex word).
@@ -84,7 +84,7 @@ function place(markdown: string, team: string | null = 'web'): HTMLElement {
 const links = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>('[data-test=commit-link]')];
 const confirmed = (root: ParentNode) => links(root).map((a) => a.dataset.commit);
 
-describe('Card 472: links from the real core\'s answers', () => {
+describe('commit links from the real core\'s answers', () => {
   it('1. short and full IDs: plain text before the answer, links to the full commit after it', async () => {
     const box = place(`Merged ${S.pushed.slice(0, 7)}, full ${S.pushed}, local ${S.local.slice(0, 10)}.`);
     expect(links(box)).toHaveLength(0);
@@ -112,7 +112,7 @@ describe('Card 472: links from the real core\'s answers', () => {
     expect(box.textContent).toBe(`Not commits: ${words.join(', ')}. A branch called cafe stays a word.\n`);
   });
 
-  // Card 482 (F1 re-verify on Ines 54c31b4): flipped from 'link to the first team' to the chooser.
+  // An ID in two teams opens the chooser, not a link to the first team.
   const choiceRepos = () => [...document.querySelectorAll('[data-test=commit-choice-repo]')].map((e) => e.textContent);
   for (const all of [['web', 'cloud'], ['cloud', 'web']]) {
     it(`3a / F1 fixed: the same short ID in two teams, no team on the place and none on screen (the Concierge), all ${all.join(',')}: the chooser, both teams in that order`, async () => {
@@ -251,7 +251,7 @@ describe('Card 472: links from the real core\'s answers', () => {
   });
 });
 
-describe('Card 472, 7: a confirmed link renders in each place', () => {
+describe('a confirmed commit link renders in each place', () => {
   const said = (team = 'web') => `Done: ${team === 'cloud' ? S.cloudOnly.slice(0, 7) : S.pushed.slice(0, 7)}; not a commit: abc1234.`;
 
   it('hand-backs and Manager reports (MemberPane\'s Report)', async () => {

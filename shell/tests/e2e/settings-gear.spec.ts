@@ -1,4 +1,4 @@
-// B115 Part A (card 516): Settings is a gear at the top right, just right of the theme switch, in headless Chrome
+// Settings is a gear at the top right, just right of the theme switch, in headless Chrome
 // against the FAKE core of phone-remote.spec.ts. Two windows:
 //  - the remote view: remote.html, its socket routed to the fake core (fakeRemote);
 //  - the desktop window: index.html of the same build, with a fake window.yawble (the preload bridge) whose call() goes
@@ -6,9 +6,9 @@
 // At 1280x800 and 375x740, light and dark: the gear is in the top bar, right of the theme switch and the bar's last
 // button, at the right edge, named Settings (title and aria-label), its icon drawn in the theme's colours; the sidebar
 // has no Settings item and its run-slots line is still at its bottom; a click opens Settings. Ctrl+, still opens it.
-// Screenshots go to $YAWBLE_TEAM_DOCS/B115/.
+// Screenshots go to $YAWBLE_TEAM_DOCS/settings-gear/.
 //
-//   npx playwright test b115-settings-gear      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test settings-gear      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { createFakeCore } from './phone/fake-core';
@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
-const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'B115') : null;
+const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'settings-gear') : null;
 
 test.beforeAll(async () => { test.setTimeout(600_000); if (shots) ensureDir(shots); await buildRenderer(); });
 
@@ -39,10 +39,10 @@ async function open(browser: Browser, which: Window, w: number, h: number, theme
     const core = createFakeCore();
     core.setAsks(false);
     let id = 0;
-    await ctx.exposeBinding('__b115Call', (_src, method: string, params: unknown) => core.answer(JSON.stringify({ id: ++id, method, params })));
+    await ctx.exposeBinding('__gearCall', (_src, method: string, params: unknown) => core.answer(JSON.stringify({ id: ++id, method, params })));
     await ctx.addInitScript(() => {
       const call = async (method: string, params?: unknown) => {
-        const out = JSON.parse(await (window as any).__b115Call(method, params ?? null));
+        const out = JSON.parse(await (window as any).__gearCall(method, params ?? null));
         if (out.error) throw Object.assign(new Error(out.error.message), { code: out.error.code });
         return out.result;
       };
@@ -118,14 +118,14 @@ for (const which of ['desktop', 'remote'] as const) {
       const lastInSidebar = await page.locator('[data-test=sidebar]').evaluate((s) => s.lastElementChild?.lastElementChild?.querySelector('[data-test=slots]') !== null);
       expect(lastInSidebar, 'the run-slots line is the sidebar\'s last row').toBe(true);
       expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= window.innerWidth + 1), 'no sideways scroll').toBe(true);
-      if (shots) await page.screenshot({ path: path.join(shots, `b115-gear-${which}-${w}-${theme}.png`) });
-      if (shots) await page.locator('header.bar').screenshot({ path: path.join(shots, `b115-bar-${which}-${w}-${theme}.png`) });
+      if (shots) await page.screenshot({ path: path.join(shots, `gear-${which}-${w}-${theme}.png`) });
+      if (shots) await page.locator('header.bar').screenshot({ path: path.join(shots, `bar-${which}-${w}-${theme}.png`) });
 
       await gear.click();
       await expect(page.locator('[data-test=settings]')).toBeVisible();
       await expect(gear).toHaveAttribute('aria-current', 'page');
       if (w < 760) await expect(page.locator('[data-test=settings]')).toHaveAttribute('data-phone-screen', 'list');
-      if (shots) await page.screenshot({ path: path.join(shots, `b115-settings-${which}-${w}-${theme}.png`) });
+      if (shots) await page.screenshot({ path: path.join(shots, `settings-${which}-${w}-${theme}.png`) });
       expect(errors).toEqual([]);
     });
   }

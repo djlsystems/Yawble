@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// B075 (card 447): "Open on …" links, the provider in Team settings > Repositories, and the Git dialog's pull request
-// line, against a fake core on the card 446 contract: git.webLink {teamId, team, repo?, kind, …} -> { url | null };
+// "Open on …" links, the provider in Team settings > Repositories, and the Git dialog's pull request
+// line, against a fake core on the core's contract: git.webLink {teamId, team, repo?, kind, …} -> { url | null };
 // teams.repos entries gain provider, providerDetected, linkPattern, prSupported, prUnavailable; teams.setRepo saves.
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -52,7 +52,7 @@ const gitAnswers = (s: TeamGitStatus, info: RepoProviderInfo | null, link: (p: a
 
 afterEach(() => { document.body.innerHTML = ''; });
 
-describe('Open on … links in the Git dialog (B075)', () => {
+describe('Open on … links in the Git dialog', () => {
   it('shows a link for each commit, branch, compare and file the core gives a url for, with the provider in its text', async () => {
     const { api, calls } = fakeApi(gitAnswers(status(), gitlab));
     const w = mount(GitDialog, { props: { api, team } });
@@ -122,7 +122,7 @@ describe('Open on … links in the Git dialog (B075)', () => {
   });
 });
 
-describe('the Git dialog\'s pull request line (B075)', () => {
+describe('the Git dialog\'s pull request line', () => {
   it('supported: says which provider, no GitHub-only wording', async () => {
     const { api } = fakeApi(gitAnswers(status(), gitlab));
     const w = mount(GitDialog, { props: { api, team } });
@@ -148,7 +148,7 @@ describe('the Git dialog\'s pull request line (B075)', () => {
   });
 });
 
-describe('Team settings > Repositories: provider and link pattern (B075)', () => {
+describe('Team settings > Repositories: provider and link pattern', () => {
   const answers = (state: { main: RepoProviderInfo; tools: RepoProviderInfo }) => ({
     'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
     'teams.push': () => ({ on: false, origin: null }), 'teams.approvals': () => [], 'teams.syncToBase': () => ({ on: true, note: null }),

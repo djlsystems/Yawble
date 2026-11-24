@@ -1,13 +1,13 @@
-// Card 465 (B073, shell): the Git dialog's clickable counts and previews in a real browser (headless Chrome) on remote.html
-// against the FAKE core (tests/e2e/phone/fake-core.ts, setB073(true): git.commitRange, git.mergePreview, git.mergeDiff,
-// git.deletePreview, as DeveloperTomas's YAWBLE_TEAM_DOCS\B073\contract.md has them).
+// The Git dialog's clickable counts and previews in a real browser (headless Chrome) on remote.html
+// against the FAKE core (tests/e2e/phone/fake-core.ts, setGitPreview(true): git.commitRange, git.mergePreview, git.mergeDiff,
+// git.deletePreview, as the core's contract has them).
 //  - 1280 x 800: "2 commits ahead" lists the commits, a row opens the Commit view; Merge to main… shows the outcome, the
 //    commits that land and the files with the combined diff before its Merge button; Delete… on DeveloperBo's branch marks
 //    each commit "work of its own" / "already in main", and after the delete its last commit still opens; Sync now and
 //    Bring main current list what came in.
 //  - 390 x 844 (a phone): the counts' list and the merge preview do not scroll sideways.
-//   npx playwright test card465-git-previews      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B073 (else test-results/B073).
+//   npx playwright test git-previews      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/git-previews (else test-results/git-previews).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -16,20 +16,20 @@ import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B073');
-const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, `card465-${name}.png`) });
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'git-previews');
+const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, `git-previews-${name}.png`) });
 const MERGE = 'def5678a9b0c1d2e3f405162738495a6b7c8d9e0';
 const FEATURE = 'fea7c0de1a2b3c4d5e6f708192a3b4c5d6e7f809';
 
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
-test.afterEach(() => { fakeRemote(builtDir).core.setB073(false); });
+test.afterEach(() => { fakeRemote(builtDir).core.setGitPreview(false); });
 
 async function open(browser: Browser, w: number, h: number) {
   const s = fakeRemote(builtDir);
   s.core.setAccess('full');
   s.core.setAsks(false);
   s.core.setNeedsYou(false);
-  s.core.setB073(true);
+  s.core.setGitPreview(true);
   const mobile = w < 760;
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 3 : 1 });
   await s.attach(ctx);
@@ -131,8 +131,8 @@ test('1280 x 800: counts open their commits; merge and delete previews; sync and
   await shot(page, 'came-in-1280');
 
   expect(s.core.calls).toEqual(expect.arrayContaining(['git.commitRange', 'git.mergePreview', 'git.mergeDiff', 'git.deletePreview']));
-  const b073 = ['git.commitRange', 'git.mergePreview', 'git.mergeDiff', 'git.deletePreview', 'git.merge', 'git.sync', 'git.bringCurrent', 'git.deleteBranches'];
-  expect([...s.core.unknown].filter((m) => b073.includes(m))).toEqual([]);
+  const previewMethods = ['git.commitRange', 'git.mergePreview', 'git.mergeDiff', 'git.deletePreview', 'git.merge', 'git.sync', 'git.bringCurrent', 'git.deleteBranches'];
+  expect([...s.core.unknown].filter((m) => previewMethods.includes(m))).toEqual([]);
   await expect(dialog).toBeVisible();
   expect(errors).toEqual([]);
   await ctx.close();
@@ -160,7 +160,7 @@ test('1280 x 800: the team page "1 commit behind main" opens its commits; Sync n
   s.core.setAccess('full');
   s.core.setAsks(false);
   s.core.setNeedsYou(false);
-  s.core.setB073(true);
+  s.core.setGitPreview(true);
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await s.attach(ctx);
   const page = await ctx.newPage();

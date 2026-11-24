@@ -1,10 +1,10 @@
-// Card 468 (B100 sections 4-5): a team's lessons in headless Chrome against the phone-remote fake core (remote.html,
+// A team's lessons in headless Chrome against the phone-remote fake core (remote.html,
 // tests/e2e/phone) with team_retros fixtures. Team settings > General reads "Lessons: 2, last updated <date> by the retro
 // of workflow 12" with a link; the link opens Settings > Skills at payments' team_retros, which says who last wrote it
 // and lists its versions newest first; Restore on version 1 (after the confirm) sends skills.restore { id: 1 }.
 //
-//   npx playwright test card468-lessons      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B100 (else test-results/B100).
+//   npx playwright test team-lessons      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/team-lessons (else test-results/team-lessons).
 import { expect, test, type Browser } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -14,7 +14,7 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B100');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'team-lessons');
 const BODY = '## Building and testing\n- Run `npm run build` in shell before any e2e spec: specs load shell/out (2026-11-18, workflow 12)\n' +
   '## Git\n- Fetch the team branch before merging a member\'s branch (2026-11-17, workflow 9)\n\n```sh\nnpm run build\n```\nSee [the docs](https://example.com/docs).';
 const retros = { name: 'team_retros', description: 'Lessons from this team\'s earlier work, kept by the Manager\'s retrospectives.', roles: ['any'], body: BODY,
@@ -81,11 +81,11 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   await expect(line).toHaveText(/^Lessons: 2, last updated .+ by the retro of workflow 12$/);
   expect(sent.find((s) => s.method === 'teams.lessons')!.params).toEqual({ teamId: 1 });
   await page.locator('[data-test=team-lessons]').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(SHOTS, 'card468-team-settings-lessons.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'team-settings-lessons.png') });
 
   await page.locator('[data-test=team-lessons-link]').click();
   await expect(page.locator('[data-test=team-general]')).toHaveCount(0); // the team's Settings closed
-  // Card 529: the text renders as markdown (two headings, a list item each, inline code), not the raw source.
+  // The text renders as markdown (two headings, a list item each, inline code), not the raw source.
   const view = page.locator('[data-test=skill-view]');
   await expect(view.locator('h2')).toHaveText(['Building and testing', 'Git']);
   await expect(view.locator('li')).toHaveCount(2);
@@ -96,9 +96,9 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   // Both themes (styles.css keys its variables on <html data-theme>): the person can compare the rendered text.
   const theme = (t: string) => page.evaluate((v) => document.documentElement.setAttribute('data-theme', v), t);
   await theme('light');
-  await page.screenshot({ path: path.join(SHOTS, 'card529-skill-markdown-light.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'skill-markdown-light.png') });
   await theme('dark');
-  await page.screenshot({ path: path.join(SHOTS, 'card529-skill-markdown-dark.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'skill-markdown-dark.png') });
   await theme('light');
   await expect(page.locator('[data-test=skills-pane] h3')).toHaveText('team_retros');
   await expect(page.locator('[data-test=skill-last-writer]')).toContainText('Last written by the retro of workflow 12');
@@ -109,7 +109,7 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   await expect(page.locator('[data-test=skill-version-1]')).toContainText('the retro of workflow 9');
   await page.locator('[data-test=skill-version-show-1]').click();
   await expect(page.locator('[data-test=skill-version-body-1]')).toContainText('Fetch the team branch');
-  await page.screenshot({ path: path.join(SHOTS, 'card468-skills-versions.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'skills-versions.png') });
 
   await page.locator('[data-test=skill-version-restore-1]').click();
   await page.locator('[data-test=confirm-ok]').click();

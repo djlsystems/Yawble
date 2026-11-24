@@ -11,7 +11,7 @@ import { closeTimeline, timelineTarget } from '../../src/renderer/src/timeline/t
 import { confirmState } from '../../src/renderer/src/confirm';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
 
-// B104 (card 477): the Workflows page against a FAKE core answering the contract (YAWBLE_TEAM_DOCS/B104/contract.md):
+// The Workflows page against a FAKE core answering the core's workflows contract:
 // the filters (team, text with highlight, chips with counts), the hash and localStorage, the default order and the column
 // sorts, the ticking elapsed time and its time bar, the Timeline link, the item link, the pane (spec, cards, activity,
 // time), the actions (asked first, none for a Visitor) and reduced motion. Fakes only.
@@ -43,8 +43,8 @@ const counts: WorkflowCounts = { all: 5, open: 3, needsYou: 1, done: 1, closed: 
 const detail = (w: WorkflowRow): WorkflowDetail => ({
   workflow: w,
   cards: [
-    { id: 476, title: 'B104 core', lane: 'in-progress', member: 'DeveloperTomas', status: 'running', time: time(600_000, true) },
-    { id: 477, title: 'B104 shell', lane: 'todo', member: null, status: 'queued', time: time(60_000, true) },
+    { id: 476, title: 'Workflows core', lane: 'in-progress', member: 'DeveloperTomas', status: 'running', time: time(600_000, true) },
+    { id: 477, title: 'Workflows shell', lane: 'todo', member: null, status: 'queued', time: time(60_000, true) },
   ],
   messages: [
     { seq: 9, at: iso(1), kind: 'progress', from: 'DeveloperAda', member: 'DeveloperAda', text: 'Writing the page' },
@@ -60,7 +60,7 @@ function fake(): Fake {
   f.api = {
     call: async (method: string, params: any) => {
       f.calls.push({ method, params });
-      if (method === 'board.card') return { id: params.id, team: 'payments', teamId: 1, member: null, item: null, title: 'B104 core', body: '', status: 'running', lane: 'in-progress', placed: false, awaitingManager: false, workflow: 11, createdAt: iso(10), updatedAt: iso(5), trailCount: 0, trail: [] };
+      if (method === 'board.card') return { id: params.id, team: 'payments', teamId: 1, member: null, item: null, title: 'Workflows core', body: '', status: 'running', lane: 'in-progress', placed: false, awaitingManager: false, workflow: 11, createdAt: iso(10), updatedAt: iso(5), trailCount: 0, trail: [] };
       if (method === 'workflows.list') return { workflows: f.list, counts: f.list.length ? counts : { ...counts, all: 0, open: 0, needsYou: 0, done: 0, closed: 0 }, truncated: false, backlog: f.backlog, now: new Date(NOW).toISOString() } satisfies WorkflowsListAnswer;
       if (method === 'workflows.get') return { ...detail(f.list.find((w) => w.id === params.workflow)!), backlog: f.backlog, ...(f.backlog ? {} : { spec: null }) };
       return {};

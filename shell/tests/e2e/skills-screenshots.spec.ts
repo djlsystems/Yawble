@@ -1,9 +1,9 @@
-// Card 530 (verify of card 529): Settings > Skills in light and dark with a skill that has every markdown element
+// Settings > Skills in light and dark with a skill that has every markdown element
 // (h1-h3, bullet and numbered lists, inline code, a code block, a link, a blockquote, raw HTML that must stay text) and an
 // all-teams skill so the filter pill shows its four choices. Headless Chrome against the phone-remote fake core.
 //
-//   npx playwright test card530-skill-shots      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B100/card530-*.png (else test-results/B100).
+//   npx playwright test skills-screenshots      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/skills/skills-*.png (else test-results/skills).
 import { expect, test } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -13,7 +13,7 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B100');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'skills');
 const BODY = '# Release notes\n\nWrite the notes for **each** release; keep them short.\n\n## Steps\n- Read `git log` since the last tag\n- Group by area\n  - nested item\n\n'
   + '1. Draft\n2. Review\n\n### Commands\n\n```powershell\ngit log --oneline v1.2..HEAD\nnpm run build\n```\n\n> Never paste a secret.\n\n'
   + 'See [the guide](https://example.com/guide). <b>raw</b> <img src=x onerror="window.__x=1">';
@@ -66,16 +66,16 @@ test('Settings > Skills: rendered markdown and the filter pill, light and dark',
   for (const t of ['light', 'dark']) {
     await theme(t);
     await page.waitForTimeout(150);
-    await page.screenshot({ path: path.join(SHOTS, `card530-skill-markdown-${t}.png`) });
+    await page.screenshot({ path: path.join(SHOTS, `skills-markdown-${t}.png`) });
   }
   await theme('dark');
   await page.locator('[data-test=skills-filter-builtin]').click();
   await page.waitForTimeout(150);
-  await page.screenshot({ path: path.join(SHOTS, 'card530-filter-builtin-dark.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'skills-filter-builtin-dark.png') });
   await theme('light');
   await page.locator('[data-test=skills-filter-allTeams]').click();
   await page.waitForTimeout(150);
-  await page.screenshot({ path: path.join(SHOTS, 'card530-filter-allteams-light.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'skills-filter-allteams-light.png') });
   expect(errors).toEqual([]);
   expect(await page.evaluate(() => (window as any).__x)).toBeUndefined();
   await ctx.close();

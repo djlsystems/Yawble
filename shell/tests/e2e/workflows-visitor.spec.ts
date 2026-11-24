@@ -1,4 +1,4 @@
-// B063 (card 305): a read-only Visitor's workflows dialog in a real browser (headless Chrome), against the FAKE core of
+// A read-only Visitor's workflows dialog in a real browser (headless Chrome), against the FAKE core of
 // phone-remote.spec.ts (remote.html, canned answers). Opened at #workflow=10: the team's page with its workflows and
 // that workflow selected. For a Visitor its Nudge and Close are disabled (v-change, the read-only title), and a call
 // forced past the screen (bus.nudgeWorkflow, bus.closeWorkflow on the page's own socket) is refused by the fake, as

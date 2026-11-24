@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import type { Decision, YawbleApi } from '../../src/shared/api';
 
-// Card 548 (B123 verify), check (3): the decision exactly as the card states it renders summary, the two option buttons,
+// A decision with a summary and two options renders summary, the two option buttons,
 // Discuss with the Concierge and a collapsed Details, with no Approve / Always approve. Fakes only.
 const decision: Decision = {
   seq: 77, from: 'Manager', workflow: 9, at: '',
@@ -38,7 +38,7 @@ function view(d: Decision) {
   return { w, calls };
 }
 
-describe('card 548 check (3): the new decision card', () => {
+describe('a decision with a summary and two options', () => {
   it('shows the summary, [Allow localhost & re-run tests] [Skip tests] [Discuss with the Concierge] and collapsed Details', async () => {
     const { w, calls } = view(decision);
     await flushPromises();
@@ -51,7 +51,7 @@ describe('card 548 check (3): the new decision card', () => {
     const details = card.get('[data-test=decision-details]');
     expect((details.element as HTMLDetailsElement).open).toBe(false);
     expect(details.text()).toContain('SocketException (13)');
-    // Skip sends its index and no text: the core sends its reply, once (card 555).
+    // Skip sends its index and no text: the core sends its reply, once.
     await card.get('[data-test=decision-choice-1]').trigger('click');
     await flushPromises();
     expect(calls.find((c) => c.method === 'bus.answer')?.params).toEqual({ teamId: 5, seq: 77, optionIndex: 1, text: '' });

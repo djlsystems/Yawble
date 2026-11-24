@@ -1,5 +1,5 @@
-// Card 420 (verify B096, cards 418 + 419): Settings > Concierge and Settings > Teams in headless Chrome against the
-// phone-remote fake core (remote.html, tests/e2e/phone), with B096's RPCs faked here (concierge.defaults/setDefaults,
+// Settings > Concierge and Settings > Teams in headless Chrome against the
+// phone-remote fake core (remote.html, tests/e2e/phone), with the defaults RPCs faked here (concierge.defaults/setDefaults,
 // teams.defaults/setDefaults/generateNames: the core's shapes). Generate is answered by this fake: no agent runs.
 //  - 1280x800 and 375x812: both tabs, screenshots.
 //  - Concierge: "First available on this computer" when nothing is saved; picking an agent sends concierge.setDefaults.
@@ -9,8 +9,8 @@
 //  - Visitor (read-only): both tabs shown, nothing can be changed, Generate and Save are disabled.
 //  - New Team dialog: starts from teams.defaults (ticked rows in the list, others as "+ <name>").
 //
-//   npx playwright test card420-settings-b096 --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B096 (else test-results/B096).
+//   npx playwright test settings-concierge-teams-defaults --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/settings-defaults (else test-results/settings-defaults).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -20,15 +20,15 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B096');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'settings-defaults');
 
 const COUNTRIES = [
   { code: 'en-US', label: 'United States (US English)' }, { code: 'de-DE', label: 'Germany (German)' }, { code: 'ja-JP', label: 'Japan (Japanese)' },
 ];
 const GENERATED = ['Emma', 'Liam', 'Olivia', 'Noah', 'Ava', 'Elijah', 'Sophia', 'James'];
 
-/** B096 state of the fake: what is saved, and how Generate answers. */
-function b096(opts: { generate?: 'ok' | 'fail' } = {}) {
+/** The fake's defaults state: what is saved, and how Generate answers. */
+function defaultsState(opts: { generate?: 'ok' | 'fail' } = {}) {
   const state = {
     defaultAgent: null as string | null,
     manager: { name: 'Manager', cli: 'claude' },
@@ -70,7 +70,7 @@ function b096(opts: { generate?: 'ok' | 'fail' } = {}) {
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
 
 async function open(browser: Browser, size: { width: number; height: number }, access: Access = 'full', opts: { generate?: 'ok' | 'fail'; slowGenerate?: boolean } = {}) {
-  const state = b096(opts);
+  const state = defaultsState(opts);
   const core = createFakeCore();
   core.setAsks(false);
   core.setAccess(access);
@@ -112,7 +112,7 @@ async function openTab(page: Page, tab: 'open-concierge' | 'open-teams') {
     await page.waitForTimeout(400);
     return;
   }
-  // B115: Settings is the gear at the top right (the desktop window, the remote view and the phone top bar).
+  // Settings is the gear at the top right (the desktop window, the remote view and the phone top bar).
   await page.getByTestId('settings-gear').click();
   await expect(page.locator('[data-test=settings]')).toBeVisible();
   await page.locator(`[data-test=settings] [data-test=${tab}]`).first().click();
@@ -130,7 +130,7 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
     await expect(select).toBeVisible();
     await expect(select).toHaveValue('');
     await expect(select.locator('option').first()).toHaveText('First available on this computer');
-    await page.screenshot({ path: path.join(SHOTS, `card420-concierge-${label}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(SHOTS, `settings-defaults-concierge-${label}.png`), fullPage: true });
     await select.selectOption('codex');
     await expect(page.locator('[data-test=concierge-defaults-saved]')).toBeVisible();
     expect(sent.filter((s) => s.method === 'concierge.setDefaults').at(-1)!.params).toEqual({ defaultAgent: 'codex' });
@@ -151,7 +151,7 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
     await expect(page.locator('[data-test=member-names]')).toHaveValue('Priya\nTomas\nWren\nAda\nHana');
     await expect(page.locator('[data-test=member-names-count]')).toHaveText('5 names, 2 used by a member');
     await expect(page.locator('[data-test=names-country]')).toHaveValue('en-US');
-    await page.screenshot({ path: path.join(SHOTS, `card420-teams-${label}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(SHOTS, `settings-defaults-teams-${label}.png`), fullPage: true });
 
     // Generate: busy and disabled while it runs; then it replaces the box and nothing is saved.
     await page.locator('[data-test=names-country]').selectOption('de-DE');
@@ -164,7 +164,7 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
     expect(sent.filter((s) => s.method === 'teams.generateNames').map((s) => s.params)).toEqual([{ country: 'de-DE' }]);
     expect(sent.some((s) => s.method === 'teams.setDefaults')).toBe(false);
     expect(state.memberNames).toEqual(['Priya', 'Tomas', 'Wren', 'Ada', 'Hana']);
-    await page.screenshot({ path: path.join(SHOTS, `card420-teams-generated-${label}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(SHOTS, `settings-defaults-teams-generated-${label}.png`), fullPage: true });
 
     // Save: one bad line is reported, the rest saved.
     await page.locator('[data-test=member-names]').fill('Lukas\nMia\nMary Ann\n\n mia \nJosé');
@@ -177,7 +177,7 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
     await expect(page.locator('[data-test=member-names-rejected-line]')).toHaveCount(2);
     await expect(page.locator('[data-test=member-names]')).toHaveValue('Lukas\nMia');
     await page.locator('[data-test=member-names-rejected]').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: path.join(SHOTS, `card420-teams-saved-rejected-${label}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(SHOTS, `settings-defaults-teams-saved-rejected-${label}.png`), fullPage: true });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(1);
     expect(errors).toEqual([]);
@@ -191,7 +191,7 @@ test('a failed Generate shows its error line and leaves the box alone', async ({
   await page.locator('[data-test=names-generate]').click();
   await expect(page.locator('[data-test=names-generate-error]')).toContainText('fake failure');
   await expect(page.locator('[data-test=member-names]')).toHaveValue('Priya\nTomas\nWren\nAda\nHana');
-  await page.screenshot({ path: path.join(SHOTS, 'card420-teams-generate-failed-desktop-1280.png'), fullPage: true });
+  await page.screenshot({ path: path.join(SHOTS, 'settings-defaults-teams-generate-failed-desktop-1280.png'), fullPage: true });
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -201,7 +201,7 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
     const { page, ctx, errors, sent } = await open(browser, size, 'read');
     await openTab(page, 'open-concierge');
     await expect(page.locator('[data-test=concierge-default-agent]')).toBeDisabled();
-    await page.screenshot({ path: path.join(SHOTS, `card420-concierge-visitor-${label}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(SHOTS, `settings-defaults-concierge-visitor-${label}.png`), fullPage: true });
     await openTab(page, 'open-teams');
     await expect(page.locator('[data-test=member-names]')).toHaveValue('Priya\nTomas\nWren\nAda\nHana');
     await expect(page.locator('[data-test=default-manager-name]')).toBeDisabled();
@@ -216,13 +216,13 @@ for (const [label, size] of [['desktop-1280', DESKTOP], ['phone-375', PHONE]] as
     await page.locator('[data-test=team-defaults-save]').click({ force: true }).catch(() => {});
     await page.waitForTimeout(300);
     expect(sent.filter((s) => ['teams.generateNames', 'teams.setDefaults', 'concierge.setDefaults'].includes(s.method))).toEqual([]);
-    await page.screenshot({ path: path.join(SHOTS, `card420-teams-visitor-${label}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(SHOTS, `settings-defaults-teams-visitor-${label}.png`), fullPage: true });
     expect(errors).toEqual([]);
     await ctx.close();
   });
 }
 
-// F1 re-check (card 420, fix 18daf84): the window's New chat starts on the saved Concierge default when it is ready.
+// The window's New chat starts on the saved Concierge default when it is ready.
 // Agents here: claude and grok signed in, codex installed but signed out, gemini not installed.
 test.describe('F1: a new chat starts on the saved Concierge default', () => {
   const detect = answers['agents.detect'];
@@ -256,7 +256,7 @@ test.describe('F1: a new chat starts on the saved Concierge default', () => {
     await page.waitForTimeout(400);
     await newChat(page);
     await expect(composerAgent(page)).toHaveValue('grok');
-    await page.screenshot({ path: path.join(SHOTS, 'card420-f1-new-chat-on-grok-desktop-1280.png') });
+    await page.screenshot({ path: path.join(SHOTS, 'settings-defaults-f1-new-chat-on-grok-desktop-1280.png') });
     expect((await sendHello(page, sent)).cli).toBe('grok');
 
     // Change the default in Settings > Concierge, then New chat: no reload.
@@ -306,7 +306,7 @@ test('the New Team dialog starts from teams.defaults: ticked rows in the list, t
   await page.locator('[data-test=member-offers] button').click();
   await expect(page.locator('[data-test=member-name-2]')).toHaveValue('Researcher Amara');
   await expect(page.locator('[data-test=member-offers]')).toHaveCount(0);
-  await page.screenshot({ path: path.join(SHOTS, 'card420-new-team-dialog-desktop-1280.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'settings-defaults-new-team-dialog-desktop-1280.png') });
   expect(sent.some((s) => s.method === 'teams.defaults')).toBe(true);
   expect(errors).toEqual([]);
   await ctx.close();

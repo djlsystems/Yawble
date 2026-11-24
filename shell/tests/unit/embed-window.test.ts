@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B115 Part B (card 518, step 2): embed mode wired into the window. App.vue mounted at remote.html?embed=1 with a fake API
+// Embed mode wired into the window. App.vue mounted at remote.html?embed=1 with a fake API
 // and a fake parent window: no sidebar (wide or phone), no drawer or menu button, no theme switch, the Settings gear kept;
 // the bridge posts yawble.ready then yawble.nav (once, and again on a change); the parent's yawble.navigate goes through
 // the sidebar's handlers, its yawble.theme sets data-theme. theme.ts and theme-boot.js in embed mode neither read nor
@@ -64,7 +64,7 @@ async function page(search: string, opts: { width?: number; stored?: string } = 
   return { w, posted, send, calls, navs: () => posted.filter((p) => p.msg.type === 'yawble.nav').map((p) => p.msg.nav) };
 }
 
-describe('B115 embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
+describe('embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
   beforeEach(() => { vi.resetModules(); localStorage.clear(); sessionStorage.clear(); document.documentElement.removeAttribute('data-theme'); });
   afterEach(() => {
     document.body.innerHTML = '';
@@ -138,7 +138,7 @@ describe('B115 embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
     expect(navs().at(-1)!.places.find((p: any) => p.active)?.id).toBe('concierge');
     await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'logs' } });
     expect(document.querySelector('[data-test=logs]')).not.toBeNull();
-    // B134: the Scripts place opens the Scripts dialog drawn as the page, and lights the place.
+    // The Scripts place opens the Scripts dialog drawn as the page, and lights the place.
     await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'scripts' } });
     expect(document.querySelector('[data-test=scripts]')).not.toBeNull();
     expect(navs().at(-1)!.places.find((p: any) => p.active)?.id).toBe('scripts');

@@ -1,4 +1,4 @@
-// Card 492 (B110): Member settings > Policy in headless Chrome against the phone-remote FAKE core (remote.html,
+// Member settings > Policy in headless Chrome against the phone-remote FAKE core (remote.html,
 // tests/e2e/phone), with the policy RPCs faked here (policy.getMember / previewLoosen / saveLoosen / saveOverride, the
 // core's shapes; the merge is a small stand-in for PolicyMerger). No real program runs.
 //  - 1280x800 and 375x812, light and dark: the remote view (no Browse…, text only).
@@ -9,8 +9,8 @@
 //  - A relative path is warned about before Confirm.
 //  - Text typed and not saved: "Unsaved changes", and closing asks "Discard?" (Cancel keeps the dialog, Discard closes it).
 //
-//   npx playwright test card492-folder-access --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B110 (else test-results/B110).
+//   npx playwright test folder-access --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/folder-access (else test-results/folder-access).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -20,7 +20,7 @@ import { ORIGIN, buildRenderer, builtDir } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(150_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B110');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'folder-access');
 
 /** The fake core's policy for TesterBen (member 3): the global policy, its override and loosening, merged roughly as the core does. */
 function policyFake() {
@@ -114,7 +114,7 @@ test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recurs
 const SIZES = [{ name: '1280', size: { width: 1280, height: 800 } }, { name: '375', size: { width: 375, height: 812 } }];
 for (const { name, size } of SIZES) {
   for (const theme of ['light', 'dark'] as const) {
-    test(`card492 folder access, save model and honest results at ${name} (${theme})`, async ({ browser }) => {
+    test(`folder access, save model and honest results at ${name} (${theme})`, async ({ browser }) => {
       const { page, ctx, errors, sent, state } = await open(browser, size, theme);
       const tag = `${name}-${theme}`;
       await openPolicy(page);

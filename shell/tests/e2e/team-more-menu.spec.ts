@@ -1,11 +1,11 @@
-// Card 332 (verify card 331): the team page's ⋯ menu on an iPhone-wide screen, in a real browser (headless Chrome)
+// The team page's ⋯ menu on an iPhone-wide screen, in a real browser (headless Chrome)
 // against the FAKE core (tests/e2e/phone/fake-core.ts). Measured, not guessed:
 //  - 375 x 812: the open menu's box is inside the viewport; five items Documents, Workflows, Triggers, Git, Settings,
 //    each 44 px tall, their icons (18 px) and labels at one left edge; the menu draws over the member panes
 //    (elementFromPoint at each item's centre is that item, and the menu overlaps a pane); nothing scrolls sideways.
 //  - each item closes the menu and opens its dialog.
 //  - 1280 x 900: no ⋯; the header's five buttons.
-//   npx playwright test card332-team-more-menu     (measurements: test-results/card332-*.json; screenshots: test-results/card332-*.png)
+//   npx playwright test team-more-menu     (measurements: test-results/team-more-menu-*.json; screenshots: test-results/team-more-menu-*.png)
 import { expect, test, type Browser } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -15,14 +15,14 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
 const OUT = path.resolve(__dirname, '..', '..', 'test-results');
-const BUILT = path.resolve(__dirname, '..', '..', 'out', 'card332', 'renderer');
-const save = (name: string, v: unknown) => { mkdirSync(OUT, { recursive: true }); writeFileSync(path.join(OUT, `card332-${name}.json`), JSON.stringify(v, null, 2)); };
+const BUILT = path.resolve(__dirname, '..', '..', 'out', 'team-more-menu', 'renderer');
+const save = (name: string, v: unknown) => { mkdirSync(OUT, { recursive: true }); writeFileSync(path.join(OUT, `team-more-menu-${name}.json`), JSON.stringify(v, null, 2)); };
 
 test.afterEach(() => { fakeRemote(BUILT).core.setNeedsYou(true); });
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  if (!process.env.CARD332_SKIP_BUILD) await buildRenderer(undefined, BUILT);
+  if (!process.env.TEAM_MORE_MENU_SKIP_BUILD) await buildRenderer(undefined, BUILT);
 });
 
 async function teamPage(browser: Browser, w: number, h: number) {
@@ -52,7 +52,7 @@ test('375 x 812: the open ⋯ menu is on screen, its items line up, and it draws
   await page.locator('[data-test=team-more]').click();
   const menu = page.locator('[data-test=team-more-menu]');
   await expect(menu).toBeVisible();
-  await page.screenshot({ path: path.join(OUT, 'card332-menu-375.png') });
+  await page.screenshot({ path: path.join(OUT, 'team-more-menu-375.png') });
   const m = await menu.evaluate((el) => {
     const box = (e: Element) => { const b = e.getBoundingClientRect(); return { l: +b.left.toFixed(1), t: +b.top.toFixed(1), r: +b.right.toFixed(1), b: +b.bottom.toFixed(1), w: +b.width.toFixed(1), h: +b.height.toFixed(1) }; };
     const items = [...el.querySelectorAll('[role=menuitem]')].map((it) => {
@@ -109,7 +109,7 @@ test('375 x 812: each ⋯ item closes the menu and opens its dialog', async ({ b
     const dlg = page.locator('[role=dialog]');
     await expect(dlg).toHaveCount(1);
     titles[id] = await dlg.getAttribute('aria-label');
-    await page.screenshot({ path: path.join(OUT, `card332-${id}-375.png`) });
+    await page.screenshot({ path: path.join(OUT, `team-more-menu-${id}-375.png`) });
     await page.locator('[data-test=modal-close]').click();
     await expect(dlg).toHaveCount(0);
   }
@@ -124,7 +124,7 @@ test('375 x 812: each ⋯ item closes the menu and opens its dialog', async ({ b
 
 test('1280 x 900: the header has its five buttons and no ⋯', async ({ browser }) => {
   const { page, ctx, errors } = await teamPage(browser, 1280, 900);
-  await page.screenshot({ path: path.join(OUT, 'card332-header-1280.png') });
+  await page.screenshot({ path: path.join(OUT, 'team-more-menu-header-1280.png') });
   await expect(page.locator('[data-test=team-more]')).toHaveCount(0);
   const ids = await page.locator('.teamhead .actions > button').evaluateAll((bs) => bs.map((b) => b.getAttribute('data-test')));
   expect(ids).toEqual(['open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage']);

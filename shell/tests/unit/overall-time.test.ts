@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 430 (B086, shell): the overall time on cards and workflow rows and the Timeline dialog, against core card 429's
+// The overall time on cards and workflow rows and the Timeline dialog, against the core's
 // wire contract (BoardCard.time, the workflow item's time, timeline.get) as the phone fake core serves it. The shell
 // only formats: the open items tick on ONE shared 1 s timer. Fake timers throughout.
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
@@ -48,7 +48,7 @@ enableAutoUnmount(afterEach);
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-18T18:00:00Z')); });
 afterEach(() => { closeTimeline(); vi.useRealTimers(); vi.restoreAllMocks(); document.body.innerHTML = ''; });
 
-describe('card 430: formatting', () => {
+describe('overall time: formatting', () => {
   it('says a length as "1h 12m 05s", minutes and seconds padded, a day or more without seconds', () => {
     expect(formatDuration((72 * 60 + 5) * 1000)).toBe('1h 12m 05s');
     expect(formatDuration(12 * MIN + 5000)).toBe('12m 05s');
@@ -83,7 +83,7 @@ describe('card 430: formatting', () => {
   });
 });
 
-describe('card 430: the one shared 1 s timer', () => {
+describe('overall time: the one shared 1 s timer', () => {
   it('an open item counts on from the core answer; a closed one stays as the core said it', () => {
     const o = openTime(10 * MIN), d = doneTime(10 * MIN);
     const t0 = Date.now();
@@ -139,7 +139,7 @@ describe('card 430: the one shared 1 s timer', () => {
   });
 });
 
-describe('card 430: the axis', () => {
+describe('overall time: the axis', () => {
   it('compresses a long quiet stretch behind a break and keeps the rest in order', () => {
     const s = 0, e = 10 * 3600_000;
     const edges = [10 * MIN, 30 * MIN, 9 * 3600_000];
@@ -158,7 +158,7 @@ describe('card 430: the axis', () => {
   });
 });
 
-describe('card 430: the fake cores carry the contract', () => {
+describe('overall time: the fake cores carry the contract', () => {
   it('every card and workflow #10 have a time whose breakdown adds up to overallMs exactly', async () => {
     const list = await callFake('board.list');
     for (const c of list.cards) expect(c.time.breakdown.reduce((a: number, b: any) => a + b.ms, 0)).toBe(c.time.overallMs);
@@ -172,7 +172,7 @@ describe('card 430: the fake cores carry the contract', () => {
   });
 });
 
-describe('card 430: the Timeline dialog', () => {
+describe('overall time: the Timeline dialog', () => {
   async function dialog(target: Parameters<typeof openTimeline>[0], api = fakeApi()) {
     const w = mount(TimelineDialog, { props: { api }, attachTo: document.body });
     openTimeline(target);
@@ -271,7 +271,7 @@ describe('card 430: the Timeline dialog', () => {
   });
 });
 
-describe('card 430: the workflow rows', () => {
+describe('overall time: the workflow rows', () => {
   it('the Teams list tile row and the Workflows dialog subtitle show the overall time; clicking it opens the timeline, not the row', async () => {
     const api = fakeApi();
     const tile = mount(TeamWorkflows, { props: { teamId: 1, api } });
@@ -294,7 +294,7 @@ describe('card 430: the workflow rows', () => {
   });
 });
 
-describe('card 433 F3: placeBreakLabels keeps a break label clear of the start / end labels', () => {
+describe('placeBreakLabels keeps a break label clear of the start / end labels', () => {
   // a 560 px axis, start label 0..40, end label 530..560 ("now"), gap 6
   it('a label centred well inside stays centred under its mark', () => {
     expect(placeBreakLabels(560, 40, 530, [{ x: 280, w: 60 }])).toEqual([250]);

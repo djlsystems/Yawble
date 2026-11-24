@@ -15,8 +15,8 @@ import { Palette } from '../../src/renderer/src/monitor/scene';
 import { isStoppedRun, type AgentCard, type BoardCard, type TerminalBanner, type YawbleApi } from '../../src/shared/api';
 
 /**
- * Card 439 (B097, window): a run the person stopped shows as "Stopped" in a neutral colour everywhere a member's or a
- * run's state shows, and never as needing the person. The core (card 437) sends member attention "stopped", the member
+ * A run the person stopped shows as "Stopped" in a neutral colour everywhere a member's or a
+ * run's state shows, and never as needing the person. The core sends member attention "stopped", the member
  * field lastRunFailureClass, the Monitor feed kind "stopped" and failureClass on run rows; a run recorded "failed" with
  * class "stopped" is stopped too. "interrupted" keeps its own wording; timeout, idle, credential, start_failed and
  * failed stay failures.

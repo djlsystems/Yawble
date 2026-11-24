@@ -1,10 +1,10 @@
-// Card 362 (B067 shell): the Git dialog's "Tidy…" in a real browser (headless Chrome) against the FAKE core
+// The Git dialog's "Tidy…" in a real browser (headless Chrome) against the FAKE core
 // (tests/e2e/phone/fake-core.ts stubs git.tidyPlan, git.deleteBranches and git.branchRealign to the card's contract).
 //  - 1280 x 800: Tidy… lists every class; merged and contained are pre-selected; Delete selected shows the core's plans,
 //    one yes deletes them, the plan is read again and what was kept is listed with why; Realign on DeveloperAda's branch
 //    is refused (she is running) with the reason; Realign on TesterBen's shows old -> new, one yes, done.
 //  - 360 x 740 and 390 x 844 (through the team page's ⋯ menu), and 1280 x 800: nothing in the dialog scrolls sideways.
-//   npx playwright test card362-tidy      (screenshots: $YAWBLE_TEAM_DOCS/B067 when set, else test-results/card362-*.png)
+//   npx playwright test git-tidy      (screenshots: $YAWBLE_TEAM_DOCS/git-tidy when set, else test-results/git-tidy-*.png)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -14,14 +14,14 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
 const OUT = path.resolve(__dirname, '..', '..', 'test-results');
-const SHOTS = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'B067') : OUT;
-const BUILT = path.resolve(__dirname, '..', '..', 'out', 'card362', 'renderer');
-const shot = (page: Page, name: string) => { mkdirSync(SHOTS, { recursive: true }); return page.screenshot({ path: path.join(SHOTS, `card362-${name}.png`) }); };
-const save = (name: string, v: unknown) => { mkdirSync(OUT, { recursive: true }); writeFileSync(path.join(OUT, `card362-${name}.json`), JSON.stringify(v, null, 2)); };
+const SHOTS = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'git-tidy') : OUT;
+const BUILT = path.resolve(__dirname, '..', '..', 'out', 'git-tidy', 'renderer');
+const shot = (page: Page, name: string) => { mkdirSync(SHOTS, { recursive: true }); return page.screenshot({ path: path.join(SHOTS, `git-tidy-${name}.png`) }); };
+const save = (name: string, v: unknown) => { mkdirSync(OUT, { recursive: true }); writeFileSync(path.join(OUT, `git-tidy-${name}.json`), JSON.stringify(v, null, 2)); };
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  if (!process.env.CARD362_SKIP_BUILD) await buildRenderer(undefined, BUILT);
+  if (!process.env.GIT_TIDY_SKIP_BUILD) await buildRenderer(undefined, BUILT);
 });
 test.afterEach(() => { const c = fakeRemote(BUILT).core; c.setNeedsYou(true); c.resetTidy(); });
 
@@ -80,7 +80,7 @@ test('1280 x 800: Tidy… plan, Delete selected with one yes, report kept and wh
   await expect(tidy.locator('[data-test=tidy-proof]')).toContainText('git cherry main members/payments/kofi');
   await expect(tidy.locator('[data-test=tidy-group-working]')).toContainText("DeveloperAda's working branch, not a leftover");
   await expect(tidy.locator('[data-test="tidy-row-feature/refund-limits"] [data-test=tidy-commits]')).toContainText('Refund limits per merchant');
-  // Card 362 fix (F3, F4): the moved row's dropped commits and proof, origin-only's commits, the notes and the base.
+  // The moved row's dropped commits and proof, origin-only's commits, the notes and the base.
   const benRow = tidy.locator('[data-test="tidy-row-members/payments/testerben"]');
   await expect(benRow.locator('[data-test=tidy-commits]')).toContainText('Retry the upload three times');
   await expect(benRow.locator('[data-test=tidy-why]')).toContainText('nothing is lost by realigning it');

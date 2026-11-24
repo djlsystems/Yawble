@@ -1,5 +1,5 @@
-// Card 431 (verify B086): the tester's own e2e of the Timeline dialog on remote.html against the phone fake core
-// (tests/e2e/phone, core card 429's wire contract canned), beside Ines's card430-timeline:
+// The tester's own e2e of the Timeline dialog on remote.html against the phone fake core
+// (tests/e2e/phone, the core's wire contract canned), beside workflow-timeline.spec.ts:
 // - a CARD (the board's card 3, which has a 38 min Stalled stretch) and a WORKFLOW (#10, summary row + one row per
 //   card) open the dialog from their overall time, in light and dark at 1280 and 375; screenshots of both;
 // - the planned / started line ("planned … · started … · 20m before it started"), the Stalled band (hatched), markers;
@@ -9,8 +9,8 @@
 // - at 375 the axis scrolls inside the dialog and the page never scrolls sideways;
 // - no tokens or cost anywhere in the dialog.
 //
-//   npx playwright test card431-b086-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B086 (else test-results/B086).
+//   npx playwright test overall-time-timeline-verify      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Screenshots go to $YAWBLE_TEAM_DOCS/timeline-verify (else test-results/timeline-verify).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -20,7 +20,7 @@ import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B086');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'timeline-verify');
 
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
 
@@ -55,7 +55,7 @@ async function board(page: Page) {
   await expect(page.locator('[data-test=board-card-3]')).toBeVisible({ timeout: 15_000 });
 }
 
-/** The dialog's text never names tokens or cost: time only (B086 item 5). */
+/** The dialog's text never names tokens or cost: time only. */
 async function timeOnly(page: Page) {
   const text = (await page.locator('[data-test=timeline-dialog]').innerText()).toLowerCase();
   expect(text).not.toMatch(/token|cost|\$|usd|price/);
@@ -120,7 +120,7 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
         expect(sz.scroll, 'the axis is wider than the dialog').toBeGreaterThan(sz.box);
         expect(sz.moved, 'the axis scrolls inside the dialog').toBeGreaterThan(0);
       }
-      await page.screenshot({ path: path.join(SHOTS, `card431-card-${w}-${theme}.png`) });
+      await page.screenshot({ path: path.join(SHOTS, `timeline-card-${w}-${theme}.png`) });
       expect(errors).toEqual([]);
       await ctx.close();
     });
@@ -145,7 +145,7 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
       expect(sz.page).toBeLessThanOrEqual(sz.view);
       expect(sz.pageX).toBe(0);
       if (w < 760) expect(sz.moved).toBeGreaterThan(0);
-      await page.screenshot({ path: path.join(SHOTS, `card431-workflow-${w}-${theme}.png`) });
+      await page.screenshot({ path: path.join(SHOTS, `timeline-workflow-${w}-${theme}.png`) });
       expect(errors).toEqual([]);
       await ctx.close();
     });
@@ -165,15 +165,15 @@ for (const [w, h, theme] of [[1280, 800, 'light'], [375, 667, 'dark']] as const)
     // the 40 min of work stays readable: its band is a real share of the axis, not a sliver
     const width = await dlg.locator('.band.agent-working').first().evaluate((b) => b.getBoundingClientRect().width / (b.parentElement as HTMLElement).getBoundingClientRect().width);
     expect(width).toBeGreaterThan(0.05);
-    await page.screenshot({ path: path.join(SHOTS, `card431-break-${w}-${theme}.png`) });
+    await page.screenshot({ path: path.join(SHOTS, `timeline-break-${w}-${theme}.png`) });
     expect(errors).toEqual([]);
     await ctx.close();
   });
 }
 
-// F1 (card 431): at phone width the global touch rule (styles.css: button { min-height: 44px }) also hits the timeline's
+// F1: at phone width the global touch rule (styles.css: button { min-height: 44px }) also hits the timeline's
 // band and marker buttons: a marker is a 44 px square turned 45 deg (62 x 62 px on screen) and a band 44 px tall in a
-// 26 px track, so the markers cover the bands and the start tick. Fixed in card 433: TimelineDialog.vue opts its
+// 26 px track, so the markers cover the bands and the start tick. Fixed: TimelineDialog.vue opts its
 // .band / .mk out of the 44 px minimum.
 test('F1: at 375 the bands stay inside their track and the markers keep their size', async ({ browser }) => {
   const { page, ctx } = await open(browser, { w: 375, h: 667, hash: '#workflow=10' });
@@ -191,7 +191,7 @@ test('F1: at 375 the bands stay inside their track and the markers keep their si
   expect(m.mk, 'a marker stays about 14 px (20 px turned)').toBeLessThanOrEqual(22);
 });
 
-// F3 (card 431, fixed in card 433): workflow #12's break mark sits about 96% along the axis; its centred label
+// F3 (fixed): workflow #12's break mark sits about 96% along the axis; its centred label
 // ("≈ 2d 17h") drew over the end label ("now"). Now it slides clear of the start / end labels, or hides if no room.
 for (const [w, h] of [[1280, 800], [375, 667]] as const) {
   test(`F3: a break label near the axis end never meets the start / end labels at ${w}`, async ({ browser }) => {
@@ -232,7 +232,7 @@ test('a Visitor gets the same card dialog (timeline.get is a read)', async ({ br
   await expect(dlg.locator('[data-test=timeline-error]')).toHaveCount(0);
   await expect(dlg.locator('.band.stalled')).toHaveCount(1);
   expect(s.core.calls).toContain('timeline.get');
-  await page.screenshot({ path: path.join(SHOTS, 'card431-card-visitor-1280-light.png') });
+  await page.screenshot({ path: path.join(SHOTS, 'timeline-card-visitor-1280-light.png') });
   expect(errors).toEqual([]);
   await ctx.close();
 });

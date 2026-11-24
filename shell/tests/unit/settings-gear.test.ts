@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B115 Part A (card 516): Settings is a gear at the top right, the element right after the theme switch in the title
+// Settings is a gear at the top right, the element right after the theme switch in the title
 // bar, in the desktop window, the remote view and the phone top bar. A click opens Settings; Ctrl+, and File > Settings
 // still do. The sidebar (wide and folded) has no Settings item any more, and its run-slots line stays at the bottom.
 // App.vue mounted with a fake API. Fakes only.
@@ -38,7 +38,7 @@ async function page(opts: { remote?: boolean; width?: number } = {}) {
   return w;
 }
 
-describe('B115 Part A: the Settings gear at the top right (App.vue)', { timeout: 30_000 }, () => {
+describe('the Settings gear at the top right (App.vue)', { timeout: 30_000 }, () => {
   beforeEach(() => { vi.resetModules(); localStorage.clear(); sessionStorage.clear(); });
   afterEach(() => { document.body.innerHTML = ''; delete (window as any).yawble; vi.unstubAllGlobals(); });
 

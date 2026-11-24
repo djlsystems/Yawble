@@ -9,8 +9,8 @@ import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.v
 import TeamWorkflows from '../../src/renderer/src/components/TeamWorkflows.vue';
 import { backlogRequest, workflowsRequest } from '../../src/renderer/src/workflows/page';
 
-// B104 (card 477): the ways to the Workflows page - the sidebar item with its open count, the board's Workflows button
-// (filtered to the board's team), a team's "All workflows" - and the B098 links it takes over: the item label in the
+// The ways to the Workflows page - the sidebar item with its open count, the board's Workflows button
+// (filtered to the board's team), a team's "All workflows" - and the item and workflow links it takes over: the item label in the
 // Workflows dialog and a team tile's workflows, the Backlog opened at an item, and a Backlog item's "workflow #N".
 // Fakes only.
 
