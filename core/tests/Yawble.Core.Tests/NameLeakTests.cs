@@ -23,7 +23,14 @@ public sealed partial class NameLeakTests
     [GeneratedRegex(@"mxc", RegexOptions.IgnoreCase)]
     private static partial Regex Vendor();
 
-    [GeneratedRegex(@"openshrimp|(?:design|spec) §|\bphase ?\d|\bslice \d|\bspikes?\b|-design\.md|\bw29833\b", RegexOptions.IgnoreCase)]
+    /// <summary>
+    /// Project-history markers: working names, design-document references, phases and slices, and backlog or card numbers
+    /// ("B118", "card 586", "Card478", "card-445"). A B-number right after a letter, a digit or '#' is not one (a hex
+    /// colour such as #B100FF, a commit hash).
+    /// </summary>
+    [GeneratedRegex(
+        @"openshrimp|(?:design|spec) §|\bphase ?\d|\bslice \d|\bspikes?\b|-design\.md|\bw29833\b|" +
+        @"(?<![0-9A-Za-z#])B\d{3}(?!\d)|(?<![0-9A-Za-z])card[ _-]?#?\d{3}(?!\d)", RegexOptions.IgnoreCase)]
     private static partial Regex History();
 
     /// <summary>
@@ -41,7 +48,7 @@ public sealed partial class NameLeakTests
         Assert.True(problems.Count == 0, $"{problems.Count} lines:\n" + string.Join("\n", problems.Take(200)));
     }
 
-    /// <summary>Card 231: a stray test-output file left untracked in the root does not fail the check; the same name
+    /// <summary>A stray test-output file left untracked in the root does not fail the check; the same name
     /// tracked, the same name in a subfolder, and any other untracked file still do.</summary>
     [Fact]
     public void AStrayTestOutputFileInTheRepoRoot_IsPassedOver_ButNotWhenTrackedOrInASubfolder()
@@ -72,7 +79,7 @@ public sealed partial class NameLeakTests
         var problems = new List<string>();
         foreach (var file in RepositoryFiles(root))
         {
-            if (Vendor().IsMatch(VendorNames().Replace(file, ""))) problems.Add($"{file}: the path");
+            if (Vendor().IsMatch(VendorNames().Replace(file, "")) || History().IsMatch(file)) problems.Add($"{file}: the path");
             if (file == Self || file == "LICENSE") continue;
             var bytes = File.ReadAllBytes(Path.Combine(root, file));
             if (Array.IndexOf(bytes, (byte)0, 0, Math.Min(bytes.Length, 8000)) >= 0) continue; // binary
