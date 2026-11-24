@@ -79,6 +79,19 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
         Exec(c, "INSERT OR IGNORE INTO script_member_state (member_id, updated_at) VALUES ($id, $t);", ("$id", memberId), ("$t", Now()));
     }
 
+    /// <summary>
+    /// B134: when the member's next scheduled trigger fires (the soonest next_due_at of its enabled every, cron and once
+    /// triggers, as stored: UTC ISO); null when it has none (folder and event triggers are not a schedule).
+    /// </summary>
+    public string? NextTriggerAt(long memberId)
+    {
+        using var c = Open();
+        return Scalar(c, """
+            SELECT MIN(next_due_at) FROM triggers
+            WHERE member_id = $id AND enabled = 1 AND next_due_at IS NOT NULL AND kind IN ('every', 'cron', 'once');
+            """, ("$id", memberId)) as string;
+    }
+
     public string? TeamName(long teamId)
     {
         using var c = Open();

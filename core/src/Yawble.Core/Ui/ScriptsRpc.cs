@@ -23,7 +23,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
 
     public static readonly string[] Changes =
     [
-        "scripts.save", "scripts.import", "scripts.testRun", "scripts.memberAdd", "scripts.memberUpdate", "scripts.memberResetVariable",
+        "scripts.save", "scripts.import", "scripts.delete", "scripts.testRun", "scripts.memberAdd", "scripts.memberUpdate", "scripts.memberResetVariable",
         "schemas.save", "schemas.import",
     ];
 
@@ -44,6 +44,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
                     { ["version"] = v.Version, ["ok"] = v.Ok, ["createdAt"] = v.CreatedAt }).ToArray()),
                 "scripts.export" => File(library.Export(ScriptOf(p), OptInt(p, "version"))),
                 "scripts.import" => Saved(library.Import(Str(p, "json"))),
+                "scripts.delete" => Deleted(ScriptOf(p)),
 
                 "schemas.list" => new JsonArray(library.Schemas().Select(s => (JsonNode?)new JsonObject
                     { ["name"] = s.Name, ["description"] = s.Description, ["latestVersion"] = s.LatestVersion, ["builtIn"] = s.BuiltIn, ["updatedAt"] = s.UpdatedAt }).ToArray()),
@@ -71,7 +72,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
         }
         catch (ScriptLibraryException e)
         {
-            throw new RpcException(e.Code is "schema_breaks" or "not_found" or "read_only" ? e.Code : "bad_script", e.Message);
+            throw new RpcException(e.Code is "schema_breaks" or "not_found" or "read_only" or "in_use" ? e.Code : "bad_script", e.Message);
         }
         catch (ScriptRunRefused e)
         {
@@ -81,6 +82,12 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
         {
             throw new RpcException(e.Code, e.Message);
         }
+    }
+
+    private JsonObject Deleted(long scriptId)
+    {
+        library.Delete(scriptId);
+        return new JsonObject { ["deleted"] = true };
     }
 
     // ------------------------------------------------------------------ script members
@@ -154,6 +161,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
             ["consecutiveFailures"] = state.ConsecutiveFailures,
             ["running"] = runner.IsRunning(m.MemberId),
             ["lastRun"] = last is null ? null : Run(last),
+            ["nextTriggerAt"] = store.NextTriggerAt(m.MemberId),
         };
     }
 

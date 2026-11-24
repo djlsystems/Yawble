@@ -206,6 +206,31 @@ public sealed class ScriptLibrary : IScriptSchemaLookup
         return new ScriptSaveResult(id, key, version, ok, !ok, check);
     }
 
+    /// <summary>
+    /// B134: deletes a script and every version (its runs go with it). Refused with in_use while any member uses it; the
+    /// message names each team and member.
+    /// </summary>
+    public void Delete(long scriptId)
+    {
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        var key = Scalar(c, "SELECT script_key FROM scripts WHERE id = $s;", ("$s", scriptId), tx) as string
+            ?? throw new ScriptLibraryException("not_found", $"there is no script {scriptId}");
+        var users = new List<string>();
+        using (var cmd = Cmd(c, """
+            SELECT t.name, m.name FROM members m JOIN teams t ON t.id = m.team_id WHERE m.script_id = $s ORDER BY t.name, m.name;
+            """, ("$s", scriptId)))
+        {
+            cmd.Transaction = tx;
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) users.Add($"{r.GetString(0)}/{r.GetString(1)}");
+        }
+        if (users.Count > 0)
+            throw new ScriptLibraryException("in_use", $"the script {key} is used by {string.Join(", ", users)}: remove or change those members first");
+        Exec(c, tx, "DELETE FROM scripts WHERE id = $s;", ("$s", scriptId));
+        tx.Commit();
+    }
+
     public ExportFile Export(long scriptId, int? version = null)
     {
         var v = Get(scriptId, version);
