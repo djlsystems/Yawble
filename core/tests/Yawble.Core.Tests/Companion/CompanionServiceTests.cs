@@ -1436,12 +1436,13 @@ public class CompanionServiceTests : IDisposable
         var entered = 0;
         rig.OnRoute = async (method, _) =>
         {
-            if (method != "ops.backups") return;
+            if (method != "git.status") return;
             Interlocked.Increment(ref entered);
             await gate.Task;
         };
+        // Each on its own target (a request of the same tool and target would replace the older one instead).
         var calls = Enumerable.Range(0, 15)
-            .Select(_ => Task.Run(() => rig.Service.CallAsync(cc, "backup_restore", new JsonObject { ["backup"] = "daily-20261110.db" }, Ct))).ToList();
+            .Select(i => Task.Run(() => rig.Service.CallAsync(cc, "git_push_branch", new JsonObject { ["team"] = "alpha", ["branch"] = $"members/m{i}" }, Ct))).ToList();
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
         while (Volatile.Read(ref entered) < 15 && DateTime.UtcNow < deadline) await Task.Delay(10, Ct);
         Assert.Equal(15, Volatile.Read(ref entered)); // every call passed the first check while none was stored
@@ -1479,6 +1480,32 @@ public class CompanionServiceTests : IDisposable
         Assert.Equal(ActionState.Done, deleted.State);
         Assert.Null(deleted.NextId);
         Assert.Equal("alpha", Assert.Single(rig.Ui, u => u.Method == "teams.delete").P!["confirm"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ALateApprovalAfterTheTeamMovedNeverRunsTheOldPlan_WithoutGit()
+    {
+        var rig = await MakeRigAsync();
+        var cc = rig.Client("cc", CompanionLevel.Destructive);
+        foreach (var wait in new[] { TimeSpan.FromMinutes(10), TimeSpan.FromDays(2) })
+        {
+            var before = (await rig.Bus.TeamsAsync(Ct)).Single(t => t.Name == "alpha");
+            var r = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
+            rig.Clock.Now += wait;
+            // While it waited, alpha was deleted and a new team of that name made: the plan was for the old team.
+            await rig.Bus.DeleteTeamAsync("alpha", Ct);
+            await rig.Bus.CreateTeamAsync("alpha", "Manager", "claude", null, Ct);
+            Assert.NotEqual(before.Id, (await rig.Bus.TeamsAsync(Ct)).Single(t => t.Name == "alpha").Id);
+
+            var changed = await rig.Approve(r.RequestId!);
+            Assert.Equal(ActionState.Changed, changed.State);
+            Assert.Equal($"the list changed before approval; request {changed.NextId} shows the new list", changed.Result);
+            Assert.DoesNotContain(rig.Methods, m => m == "teams.delete");
+            Assert.Equal(ActionState.Pending, rig.Service.Status(cc, changed.NextId!)!.State);
+            Assert.NotEqual(rig.Service.ListKeyOf(r.RequestId!), rig.Service.ListKeyOf(changed.NextId!));
+            // Denied, so the next round starts clean.
+            Assert.Equal(ActionState.Denied, (await rig.Approve(changed.NextId!, approve: false)).State);
+        }
     }
 
     [Fact]
