@@ -179,7 +179,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     }
 
     /// <summary>A thread as plain lines an agent reads: "#seq time  source  type: the text".</summary>
-    private static string WorkflowText(IReadOnlyList<Message> thread)
+    internal static string WorkflowText(IReadOnlyList<Message> thread)
     {
         if (thread.Count == 0) return "No such workflow on your team.";
         var lines = thread.Select(m =>
@@ -192,6 +192,9 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                     : string.Join(" | ", new[] { "text", "status", "delivered", "reason", "question", "answer" }
                         .Select(k => o[k] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null).Where(s => s is not null))
                       is { Length: > 0 } joined ? joined : m.Payload;
+                // B142: the cards the person accepted closing over a tester's FAIL, in the board's words.
+                if (m.Type == MessageTypes.WorkflowCompleted && Board.ClosedOverFail.Read(o) is { Count: > 0 } overFail)
+                    body += " | " + string.Join(" | ", overFail.Select(e => $"card {e.Card}: {e.Line}"));
             }
             catch (JsonException) { body = m.Payload; }
             if (body.Length > 1200) body = body[..1199] + "…";

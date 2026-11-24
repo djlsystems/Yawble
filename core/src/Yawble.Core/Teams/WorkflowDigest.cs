@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Yawble.Core.Board;
 using Yawble.Core.Bus;
 using Yawble.Core.Monitor;
 
@@ -132,6 +133,20 @@ public static partial class WorkflowDigest
             $"Counts: runs not completed {counts.RunsNotCompleted}; failed commands {counts.FailedCommands}; told again {counts.Retold}; " +
             $"sent back {counts.SendBacks}; blocked {counts.Blocked}; questions to the person {counts.Questions}; host asks {counts.NetworkAsks}; tool asks {counts.ToolAsks}.",
         };
+
+        // B142: the cards the person accepted closing over a tester's FAIL, in the board's own words (the text quoted).
+        if (ends is { Type: MessageTypes.WorkflowCompleted } && ClosedOverFail.Read(ends.Payload) is { Count: > 0 } overFail)
+        {
+            lines.Add("");
+            lines.Add("== closed over a FAIL (accepted by the person) ==");
+            foreach (var e in overFail)
+            {
+                var (prefix, said) = e.Kind == ClosedOverFail.WontDo
+                    ? (ClosedOverFail.WontDoPrefix, e.Reason ?? e.FailLine ?? "no reason given")
+                    : (ClosedOverFail.AcceptedPrefix, e.FailLine ?? "FAIL");
+                lines.Add($"- card {e.Card}{(e.Tester is { } t ? $" (tester {NameOf(t)})" : "")}: {prefix}{Quote(said)}");
+            }
+        }
 
         var members = input.Runs.Select(r => r.Member)
             .Concat(tells.Select(t => t.Member))
