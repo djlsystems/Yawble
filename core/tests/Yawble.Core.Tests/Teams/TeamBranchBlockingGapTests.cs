@@ -157,7 +157,7 @@ public class TeamBranchBlockingGapTests
     }
 
     /// <summary>
-    /// FAULT (card 94, spec 1 and 2). Team "Ada" shares a repository with team Alpha, whose member Ada is still on its old
+    /// FAULT (two teams on one repository). Team "Ada" shares a repository with team Alpha, whose member Ada is still on its old
     /// members/ada (work not merged). Team Ada's Git dialog lists members/ada as blocking with Delete, and the Delete's plan
     /// checks only team Ada's own clones, so it plans (and with the token runs) deleting a branch another team's member is
     /// on. Spec 2: a team whose slug equals another team's member branch must not break that team's branches.
@@ -232,7 +232,7 @@ public class TeamBranchBlockingGapTests
     }
 
     /// <summary>
-    /// FAULT (card 94, spec 1, same-team case). Team "Docs" has a member named Docs still on its old members/docs. Its
+    /// FAULT (same-team case). Team "Docs" has a member named Docs still on its old members/docs. Its
     /// move to members/docs/docs can never happen while members/docs exists (the old branch is kept), and that
     /// branch blocks every other member: Ben's start is refused and told to delete members/docs in the Git dialog, but
     /// that Delete is refused because Docs's clone is on it. No way forward the message names works.

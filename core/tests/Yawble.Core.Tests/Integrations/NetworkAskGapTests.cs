@@ -163,7 +163,7 @@ public sealed class NetworkAskGapTests : IDisposable
     // ------------------------------------------------------------------ "Allow everywhere" and a narrowing override
 
     /// <summary>
-    /// Was a fault (card 62, fixed on card 60): a member whose override narrows network.allowHosts (Settings: a member's own list, a subset of the
+    /// Was a fault: a member whose override narrows network.allowHosts (Settings: a member's own list, a subset of the
     /// global one) is still refused the host after "Allow everywhere", because the override filters the global list
     /// (PolicyMerger.Merge, StoreNetworkPolicy.EffectiveHosts); yet the ask closes and the Manager is told "<host> is now
     /// allowed for Priya; retry what was blocked". The retry is refused again and a new ask is raised.
@@ -258,7 +258,7 @@ public sealed class NetworkAskGapTests : IDisposable
         Assert.Empty(_told);
     }
 
-    // ------------------------------------------------------------------ re-check of the fix (card 62): partial failure and a late ask
+    // ------------------------------------------------------------------ re-check of the fix: partial failure and a late ask
 
     /// <summary>The real store policy, with a hook before each member write (it may refuse or do something meanwhile).</summary>
     private sealed class HookedPolicy(INetworkPolicy inner, Func<long, Task> beforeMember) : INetworkPolicy
@@ -341,7 +341,7 @@ public sealed class NetworkAskGapTests : IDisposable
         Assert.True(omarHas || !omarTold, "Beta's Manager was told pypi.org is allowed for Omar, but Omar's override still filters it out");
     }
 
-    [Fact] // card 67: the Approvals prune goes by when an ask was answered, so a deny's 24-hour quiet outlives the sweep
+    [Fact] // the Approvals prune goes by when an ask was answered, so a deny's 24-hour quiet outlives the sweep
     public async Task ADenyOfAnAskRaisedLongAgo_SurvivesTheSweep_AndTheHostStaysQuiet()
     {
         var asks = Service();
@@ -358,7 +358,7 @@ public sealed class NetworkAskGapTests : IDisposable
     }
 
     /// <summary>
-    /// Card 62 re-check of a91df85: a covered ask the answer listed before its writes, but which the person denies
+    /// A covered ask the answer listed before its writes, but which the person denies
     /// (a cloud viewer, say) while those writes run, is not claimed by the allow: it stays denied with its own note,
     /// the allow closes only its own ask, and the other team's Manager is not told the host is allowed.
     /// </summary>

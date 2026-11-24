@@ -423,7 +423,7 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Empty(_asks.Asks());
     }
 
-    // ------------------------------------------------------------------ lastResult (card 85)
+    // ------------------------------------------------------------------ lastResult
 
     [Fact]
     public async Task TheAsk_KeepsTheLastResultCode_SoAFreshCardKnowsACancelFromAFailure()
@@ -468,7 +468,7 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Null(_asks.Asks(openOnly: false).Single(a => a.Id == id).LastResult);
     }
 
-    // ------------------------------------------------------------------ lastResult gap tests (card 84 re-check, TesterWren)
+    // ------------------------------------------------------------------ lastResult gap tests
 
     private long Scalar(string sql)
     {

@@ -85,7 +85,7 @@ public class TeamBranchGapTests
         var cause = windows
             ? "On Windows that is the agents' sandbox stopping Git for Windows' MSYS2 runtime from starting (0xC0000142); the test runs on a Windows host. "
             : "Nothing in the test is OS-specific, so on Linux or macOS this means git or its transport helpers (git-upload-pack, git-receive-pack) cannot run here: check that git is installed and on PATH. ";
-        return start + cause + "The fault it covers is fixed (card 75).";
+        return start + cause + "The fault it covers is fixed.";
     }
 
     /// <summary>The same, with a faked probe result: the reason names git's error and the cause for the OS it is on,
@@ -177,13 +177,13 @@ public class TeamBranchGapTests
         var s = await f.Repos.GitStatusAsync(ada.TeamId, team, Ct);
 
         Assert.Equal("team/yawble-engineering-team", s.TeamBranch);
-        // Nobody is on members/ada or members/ben: old ones, listed once, in OldBranches only (card 75).
+        // Nobody is on members/ada or members/ben: old ones, listed once, in OldBranches only.
         Assert.Equal(["members/yawble-engineering-team/ada"], s.Members.Select(m => m.Branch));
         Assert.Equal([new TeamGitOldBranch("members/ada", true, false, true), new TeamGitOldBranch("members/ben", true, false, false)], s.OldBranches);
     }
 
     /// <summary>
-    /// Card 75: git.status lists each old-style branch once. One a member is still recorded on (not moved yet) is that
+    /// git.status lists each old-style branch once. One a member is still recorded on (not moved yet) is that
     /// member's branch, in Members only; one nobody is on is old, in OldBranches only. No member clone, no transport.
     /// </summary>
     [Fact]
@@ -221,7 +221,7 @@ public class TeamBranchGapTests
         Assert.Equal(1, cmd.ExecuteNonQuery());
     }
 
-    /// <summary>Card 75, the rehire decision without transport: a clone left on disk with no row is recorded on the branch
+    /// <summary>The rehire decision without transport: a clone left on disk with no row is recorded on the branch
     /// it is on when that is the member's old-style one; anything else keeps the member's own new-style branch.</summary>
     [Theory]
     [InlineData(MemberRole.Member, "Ada", "members/ada", "members/ada")]
@@ -234,7 +234,7 @@ public class TeamBranchGapTests
     public void ARehiredMembersReusedClone_IsRecordedOnItsOldStyleBranch_OnlyWhenItIsOnIt(MemberRole role, string name, string? head, string? expected) =>
         Assert.Equal(expected, TeamRepos.LegacyBranchToAdopt(role, name, head));
 
-    /// <summary>Card 75: the half of the rehire fix that reads the clone left on disk (by file, as the move does: no git in
+    /// <summary>The half of the rehire fix that reads the clone left on disk (by file, as the move does: no git in
     /// the clone, no transport). The full rehire through PrepareAsync is ARehiredSameNamedMember_WithAnOldStyleCloneOnDisk_NoOrigin_...</summary>
     [Fact]
     public void ACloneLeftOnDisk_IsAdoptedOnTheBranchItsHeadIsOn_OnlyWhenThatIsTheMembersOldStyleBranch()
@@ -411,7 +411,7 @@ public class TeamBranchGapTests
     /// <summary>
     /// The same rehire as above on a person's repository with no origin (no push needed; it still needs git's local
     /// transport for the first clone and the fetch-back, so it skips only where that cannot start: SkipUnlessLocalTransport).
-    /// Was a FAULT (core, card 77), fixed in card 75: RemoveMemberAsync deletes the member (its member_clones row goes) but leaves its clone on
+    /// Was a FAULT in core, now fixed: RemoveMemberAsync deletes the member (its member_clones row goes) but leaves its clone on
     /// disk. The rehired member has no row, so MoveLegacyBranchLockedAsync does nothing, CheckoutOf names
     /// members/&lt;team&gt;/&lt;name&gt;, and PrepareAsync reuses the clone and records that branch while the clone's HEAD is
     /// still members/&lt;name&gt;. Fetch-back then looks for a branch the clone does not have, and later starts never move it

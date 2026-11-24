@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Launch;
 
-/// <summary>Card 46 (b)-(d): default model resolution, run rows with agent/model/version/argv, and the core API. Fakes only: no ports, no CLI.</summary>
+/// <summary>Default model resolution, run rows with agent/model/version/argv, and the core API. Fakes only: no ports, no CLI.</summary>
 public class AgentRunRecordTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
