@@ -136,7 +136,7 @@ public sealed class GrokKeeper : IAsyncDisposable
             var after = _home.ReadSession();
             var changed = after is not null && (after.AccessToken != before.AccessToken || after.ExpiresAt != before.ExpiresAt);
             var fresh = after is not null && !after.ExpiredAt(_clock.GetUtcNow(), _options.RefreshAhead);
-            // B143: each check's runs at debug; the loop writes one line for a refresh or a failure.
+            // Each check's runs at debug; the loop writes one line for a refresh or a failure.
             Logs.Diag.Debug("grok", $"grok keeper: `grok {string.Join(' ', args)}` {outcome}; session {(changed ? "refreshed" : "unchanged")}",
                 ("action", args[0]), ("status", outcome));
             if (changed && fresh) return new GrokRefreshResult(true, true, $"refreshed by `grok {args[0]}`", after);
@@ -260,7 +260,7 @@ public sealed class GrokKeeper : IAsyncDisposable
             if (_home.ReadSession() is not null)
             {
                 var result = await RefreshAsync();
-                // B143: a refresh or a failure is said; a check that found the session still fresh or unchanged is debug.
+                // A refresh or a failure is said; a check that found the session still fresh or unchanged is debug.
                 if (result.Changed) Logs.Diag.Info("grok", $"grok keeper: session refreshed ({result.Detail})", ("status", "refreshed"));
                 else if (!result.Valid) Logs.Diag.Warning("grok", $"grok keeper: {result.Detail}", ("status", "failed"));
                 else Logs.Diag.Debug("grok", $"grok keeper: {result}", ("status", "unchanged"));

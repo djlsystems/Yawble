@@ -11,18 +11,18 @@ using Xunit;
 namespace Yawble.Core.Tests.Logs;
 
 /// <summary>
-/// Card 612 (B143 parts 1 and 2): structured Diagnostics lines (a level from the call, key=value fields in a fourth
+/// Structured Diagnostics lines (a level from the call, key=value fields in a fourth
 /// column), debug hidden by default and shown with the Level filter, the team and member filters on the fields, and the
 /// routine lines at debug or summed up once. Fakes only: temp folders, a temp database, a fake grok, scripted runs.
 /// </summary>
-public sealed class B143StructuredLogTests : IDisposable
+public sealed class StructuredLogTests : IDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private readonly TempDb _db = new();
     private readonly FakeClock _clock = new(Now);
 
-    public B143StructuredLogTests() => _db.OpenStore().Dispose(); // the schema
+    public StructuredLogTests() => _db.OpenStore().Dispose(); // the schema
 
     public void Dispose() => _db.Dispose();
 
@@ -148,7 +148,7 @@ public sealed class B143StructuredLogTests : IDisposable
         log.Write("debug", "teams", "Beta/DeveloperInes: fetched", [("member", "Beta/DeveloperInes")]); // debug: not in an "all" tail
 
         // Every event published before now, once delivered (the mark comes after them).
-        events.Publish("test.mark", "b143");
+        events.Publish("test.mark", "structured-log");
         await Wait.UntilAsync(() => Task.FromResult(got.Any(m => m["event"]?.GetValue<string>() == "test.mark")), "the events to be delivered");
         var entry = Assert.Single(got, m => m["event"]?.GetValue<string>() == LogTail.EntryEvent)["data"]!["entry"]!;
         Assert.Equal("Beta/DeveloperInes: fetch failed", entry["text"]!.GetValue<string>());
@@ -164,7 +164,7 @@ public sealed class B143StructuredLogTests : IDisposable
         var log = new DiagnosticLog(_db.Dir, "core", _clock);
         var raw = new StringWriter();
         using var tee = log.Tee(raw);
-        var text = "card 612 once " + Guid.NewGuid().ToString("N");
+        var text = "logged once " + Guid.NewGuid().ToString("N");
         Diag.Attach(log, raw);
         try
         {

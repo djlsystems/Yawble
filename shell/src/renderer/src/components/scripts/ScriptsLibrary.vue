@@ -89,7 +89,7 @@ const usedBy = (x: ScriptSummary) => x.usedBy.map((u) => `${u.team} / ${u.member
     @close="closeEditor" @saved="refresh" />
   <div v-else class="library" data-test="scripts-library">
     <div class="row bar">
-      <span class="muted">Scripts are shared by every team; a script member runs one with its own settings.</span>
+      <span class="muted">Scripts can be shared by any team; a script team member runs one with its own settings.</span>
       <span class="grow" />
       <template v-if="!readOnly">
         <div class="new-wrap">
