@@ -12,7 +12,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Card 455 (B075 F1): the agents' pr_open / pr_status follow the repository's provider (the person's override, else its
+/// The agents' pr_open / pr_status follow the repository's provider (the person's override, else its
 /// origin): gh for GitHub, glab for GitLab, az repos for Azure DevOps; Bitbucket, Gitea and no provider say so and run
 /// nothing. Fake gh / glab / az scripts that print their arguments; origins are addresses only (nothing is fetched).
 /// </summary>

@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// Card 568 (B126 core follow-up): org.summary's teams section counts each agent by its real waiting state (queued only
+/// The org.summary teams section counts each agent by its real waiting state (queued only
 /// for the run queue; waitsForRun, held, pending) and lists who waits and why in <c>waiting</c>, with waitsFor only on
 /// waits-for-run. The names are those yawble-cloud's OrgWire reads. Fakes only.
 /// </summary>

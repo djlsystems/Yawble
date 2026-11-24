@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// Card 429 (B086), the wire for the shell and the cloud (card 430): timeline. is a screen prefix, timeline.get still
+/// The timeline's wire for the shell and the cloud: timeline. is a screen prefix, timeline.get still
 /// reaches the Board with the screens wired, a Visitor may call it over the Cloud Link, and org.summary's workflow rows
 /// carry the same <c>time</c> as the bus.workflows item (its ticking ms alone are not a change).
 /// </summary>

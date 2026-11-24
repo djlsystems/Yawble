@@ -18,7 +18,7 @@ using ScriptRunStatus = Yawble.Core.Scripts.Engine.ScriptRunStatus;
 namespace Yawble.Core.Tests.Scripts.Actions;
 
 /// <summary>
-/// Card 588 independent SC-2 verification: a script's integration step through the real script engine, the API script actions and the real
+/// Independent verification: a script's integration step through the real script engine, the API script actions and the real
 /// IntegrationService, against an in-process messaging API shaped like Twilio's Messages endpoint (FakeHttp: no network, no OS
 /// credential store, placeholder credentials).
 /// </summary>

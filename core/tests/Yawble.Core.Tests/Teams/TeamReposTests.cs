@@ -416,7 +416,7 @@ public class TeamReposTests
     [InlineData("Zoë's", "Zoë", "members/zo-s/zo")]
     public void BranchNames(string team, string member, string branch)
     {
-        // B016: the team part is the same slug as the team branch's.
+        // The team part is the same slug as the team branch's.
         Assert.Equal(branch, TeamRepos.BranchFor(team, member));
         Assert.Equal("team/" + branch.Split('/')[1], TeamRepos.TeamBranchFor(team));
     }

@@ -12,7 +12,7 @@ using Yawble.Core.Ui;
 
 namespace Yawble.Core.Tests.Scripts;
 
-/// <summary>Card 598 (B134): scripts.delete (refused in_use while a member uses it, a change a Visitor may not make) and ScriptMember.nextTriggerAt.</summary>
+/// <summary>scripts.delete (refused in_use while a member uses it, a change a Visitor may not make) and ScriptMember.nextTriggerAt.</summary>
 public class ScriptsDeleteAndNextTriggerTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

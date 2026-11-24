@@ -4,7 +4,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Launch;
 
 /// <summary>
-/// B127 backstop (card 574): <see cref="MacRunFolderHolders"/> finds the processes holding a run folder by cwd or open
+/// The run-folder backstop: <see cref="MacRunFolderHolders"/> finds the processes holding a run folder by cwd or open
 /// files, whatever their ppid or group. All against <see cref="FakeProcessPaths"/>: no real process, any OS.
 /// </summary>
 public class RunFolderHoldersTests

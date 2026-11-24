@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 446 (B075): the provider layer. Which service an origin is on (https, ssh:// with a port, scp-like, with and
+/// The provider layer. Which service an origin is on (https, ssh:// with a port, scp-like, with and
 /// without .git; GitLab's nested groups; every Azure DevOps form; a local folder is plain git), the web links of each
 /// kind per provider, the person's override and link pattern, and pull requests routed to the right CLI (fakes only).
 /// </summary>
@@ -161,7 +161,7 @@ public sealed class RepoProviderTests
         var gh = new RepoHostSetting(null, "https://mirror.example.com/{path}/c/{commit}");
         Assert.Equal("https://mirror.example.com/acme/app/c/" + Sha, RepoProviders.Link("https://github.com/acme/app.git", gh, Request("commit")));
         Assert.Equal("https://github.com/acme/app/pull/7", RepoProviders.Link("https://github.com/acme/app.git", gh, Request("pr")));
-        // Card 447's docs: {base} = https://github.com/owner/name, {path} = owner/name.
+        // The shell's docs: {base} = https://github.com/owner/name, {path} = owner/name.
         var docs = new RepoHostSetting(null, "{base}/commit/{commit}?from={path}");
         Assert.Equal($"https://github.com/owner/name/commit/{Sha}?from=owner/name", RepoProviders.Link("git@github.com:owner/name.git", docs, Request("commit")));
         // A pattern without {base}/{path} works with no origin host at all; one that needs them does not.

@@ -22,7 +22,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 418 (B096 core): the saved defaults (Settings > Concierge and Teams), the member-name list, members' first names
+/// The saved defaults (Settings > Concierge and Teams), the member-name list, members' first names
 /// (0046 members.given_name) and how hire and every way of making a team use them. Generate runs a FAKE launcher only.
 /// </summary>
 public class NameDefaultsTests

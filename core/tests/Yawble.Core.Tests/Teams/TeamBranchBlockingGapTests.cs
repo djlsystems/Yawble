@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B020 / card 94 (tester's gap tests). Each case reaches its check without git's local transport (no push, fetch,
+/// The tester's gap tests of team branches blocked by an old member branch. Each case reaches its check without git's local transport (no push, fetch,
 /// clone or ls-remote between local repositories): origin's side is a remote-tracking ref written with update-ref, the
 /// shared view is a copy of the team repository's .git, a member's clone is a folder whose .git/HEAD is read as a file.
 /// So they also run where local transport is not allowed. Temporary repositories only, no real system program but git.
@@ -126,7 +126,7 @@ public class TeamBranchBlockingGapTests
         Assert.DoesNotContain("Could not read", report.Reason);
     }
 
-    /// <summary>Card 171: the shared view follows the repository, so a members/docs only it has (deleted in the repository
+    /// <summary>The shared view follows the repository, so a members/docs only it has (deleted in the repository
     /// since) does not refuse the start with a branch the Git dialog cannot delete: the refresh after the checks prunes it.
     /// (Here the start may still fail later on local transport in a sandbox; never with the blocked refusal.)</summary>
     [Fact]
@@ -162,7 +162,7 @@ public class TeamBranchBlockingGapTests
     /// checks only team Ada's own clones, so it plans (and with the token runs) deleting a branch another team's member is
     /// on. Spec 2: a team whose slug equals another team's member branch must not break that team's branches.
     /// </summary>
-    [Fact] // fixed by card 104
+    [Fact] // fixed
     public async Task AnotherTeamsInUseOldBranch_IsNotDeletableFromTheBlockedTeamsDialog()
     {
         using var f = new TeamsFixture();
@@ -181,7 +181,7 @@ public class TeamBranchBlockingGapTests
 
         var refused = await Assert.ThrowsAsync<MemberBranchBlockedException>(() => f.Repos.PrepareAsync(adaBen, Ct));
         AssertPlain(refused.Message, "members/ada", "the team's repository");
-        // Card 104: the start says whose branch it is and the way forward that exists: Alpha's member's next start moves it.
+        // The start says whose branch it is and the way forward that exists: Alpha's member's next start moves it.
         Assert.Contains("team Alpha's member Ada", refused.Message);
         Assert.Contains("members/alpha/ada", refused.Message);
         Assert.DoesNotContain("delete members/ada", refused.Message, StringComparison.OrdinalIgnoreCase);
@@ -202,7 +202,7 @@ public class TeamBranchBlockingGapTests
         Assert.Equal(work, AgentGit.Host(picked, "rev-parse", "refs/heads/members/ada"));
     }
 
-    /// <summary>Card 104: with another branch named too, the other team's one is refused and the rest is planned as usual;
+    /// <summary>With another branch named too, the other team's one is refused and the rest is planned as usual;
     /// another team's clone counts for what is checked out.</summary>
     [Fact]
     public async Task AnotherTeamsBranch_IsRefusedBesideADeletableOne()
@@ -233,15 +233,15 @@ public class TeamBranchBlockingGapTests
 
     /// <summary>
     /// FAULT (card 94, spec 1, same-team case). Team "Docs" has a member named Docs still on its old members/docs. Its
-    /// B016 move to members/docs/docs can never happen while members/docs exists (the old branch is kept), and that
+    /// move to members/docs/docs can never happen while members/docs exists (the old branch is kept), and that
     /// branch blocks every other member: Ben's start is refused and told to delete members/docs in the Git dialog, but
     /// that Delete is refused because Docs's clone is on it. No way forward the message names works.
     /// </summary>
-    /// <para>Card 104: the way forward is Docs's own next start, whose B016 move now goes through its old branch (renamed,
+    /// <para>The fix: the way forward is Docs's own next start, whose move to members/docs/docs now goes through its old branch (renamed,
     /// not kept: git cannot keep both). Ben's refusal names that, the dialog marks the branch (no Delete), and the move's
     /// clone side (by file, the part with no transport) is checked here on a real repository; the whole start with a
     /// clone and origin is TeamBranchBlockingTests.ASameTeamMemberNamedLikeTheSlug_MovesThroughItsOldBranch (local transport).</para>
-    [Fact] // fixed by card 104
+    [Fact] // fixed
     public async Task ASameTeamMemberNamedLikeTheSlug_DoesNotLeaveTheTeamWithNoWayForward()
     {
         using var f = new TeamsFixture();
@@ -272,7 +272,7 @@ public class TeamBranchBlockingGapTests
         Assert.Equal("ref: refs/heads/members/docs", File.ReadAllText(Path.Combine(clone, ".git", "HEAD")).Trim());
     }
 
-    /// <summary>Card 104: the move's clone half, by file (no git in the clone): a loose old branch with its reflog, HEAD on it.</summary>
+    /// <summary>The move's clone half, by file (no git in the clone): a loose old branch with its reflog, HEAD on it.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)] // the old branch only in packed-refs

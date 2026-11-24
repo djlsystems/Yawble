@@ -35,7 +35,7 @@ public class PromptsAndNoticesTests
         }
         Assert.Throws<ArgumentException>(() => global::Yawble.Core.Gateway.RoleText.For("admin"));
 
-        // Verify cards (B019): the Manager gives them to the tester, never closes one from a developer's report, and
+        // Verify cards: the Manager gives them to the tester, never closes one from a developer's report, and
         // gives the reason in note on board move when it closes one the tester did not run; the tester tests the
         // developer's branch unchanged and reports on the card and in the hand-back.
         foreach (var needle in new[] { "goes to the team's tester", "never a developer's report", "`note` on `board` `action: move`",

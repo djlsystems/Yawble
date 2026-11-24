@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B020 / card 92: a ref members/&lt;slug&gt; (an old member branch named like a team's slug) blocks that team's
+/// A ref members/&lt;slug&gt; (an old member branch named like a team's slug) blocks that team's
 /// members/&lt;slug&gt;/&lt;name&gt; branches, since git cannot hold both. The member's start fails with a plain message (the
 /// branch, where it is, what to do) and nothing changes; the Git dialog lists the blocker. Temporary repositories and bare
 /// origins only, no network, no real system program.
@@ -36,7 +36,7 @@ public class TeamBranchBlockingTests
         Assert.Contains(branch, message);
         Assert.Contains(where, message);
         Assert.Contains("Nothing was changed", message);
-        // Card 104: there is no team rename, and the Git dialog only deletes: only actions that exist are named.
+        // There is no team rename, and the Git dialog only deletes: only actions that exist are named.
         Assert.DoesNotContain("rename", message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cannot lock ref", message);
     }
@@ -61,7 +61,7 @@ public class TeamBranchBlockingTests
         Assert.Equal([new TeamGitBlockingBranch("members/docs", "main", "local")], s.BlockingBranches);
     }
 
-    /// <summary>Card 171: the shared view follows the repository. A members/docs it still has (deleted in the repository
+    /// <summary>The shared view follows the repository. A members/docs it still has (deleted in the repository
     /// since) is no refusal the Git dialog could act on: the start goes on, and its refresh (fetch --prune) removes it.</summary>
     [Fact]
     public async Task AStaleBlockerInTheSharedView_DoesNotRefuseTheStart_AndGoesAtTheRefresh()
@@ -169,7 +169,7 @@ public class TeamBranchBlockingTests
         var (picked, _) = TeamReposTests.PersonsRepoWithOrigin(f);
         await f.Repos.UseExistingRepoAsync(alphaAda.TeamId, "Alpha", picked, Ct);
         await f.Repos.UseExistingRepoAsync(adaBen.TeamId, "Ada", picked, Ct);
-        // Alpha's Ada, pre-B016: on members/ada, with fetched work.
+        // Alpha's Ada, old-style: on members/ada, with fetched work.
         var c = await f.Repos.PrepareAsync(alphaAda, Ct);
         Ok(c.ClonePath, c.Workspace, "branch", "-m", "members/ada");
         using (var conn = new Microsoft.Data.Sqlite.SqliteConnection(f.Db.ConnectionString))
@@ -194,7 +194,7 @@ public class TeamBranchBlockingTests
         Assert.Equal(tip, AgentGit.Host(picked, "rev-parse", "refs/heads/members/ada")); // kept, never deleted
     }
 
-    /// <summary>The B016 move into a name origin blocks is refused before anything moves: the member stays on its old
+    /// <summary>The move to members/&lt;team&gt;/&lt;name&gt; into a name origin blocks is refused before anything moves: the member stays on its old
     /// branch (its start still works there), and the host repository gets no new branch.</summary>
     [Fact]
     public async Task TheOldStyleMove_IntoANameOriginBlocks_IsRefusedBeforeAnythingMoves()
@@ -229,7 +229,7 @@ public class TeamBranchBlockingTests
     }
 
     /// <summary>
-    /// Card 104 (F2): team "Docs" with a member "Docs" still on its old members/docs. Ben's start is refused and names
+    /// F2: team "Docs" with a member "Docs" still on its old members/docs. Ben's start is refused and names
     /// Docs's next start; that start moves Docs through its own old branch (renamed here and in the clone, HEAD follows),
     /// the push after its run replaces origin's members/docs with members/docs/docs, and then Ben starts.
     /// </summary>
@@ -247,7 +247,7 @@ public class TeamBranchBlockingTests
         }
         var (picked, bare) = TeamReposTests.PersonsRepoWithOrigin(f);
         await f.Repos.UseExistingRepoAsync(ben.TeamId, "Docs", picked, Ct);
-        // Docs, pre-B016: on members/docs, with work fetched back and pushed.
+        // Docs, old-style: on members/docs, with work fetched back and pushed.
         var c = await f.Repos.PrepareAsync(docs, Ct);
         Ok(c.ClonePath, c.Workspace, "branch", "-m", "members/docs");
         using (var conn = new Microsoft.Data.Sqlite.SqliteConnection(f.Db.ConnectionString))
@@ -290,7 +290,7 @@ public class TeamBranchBlockingTests
         Assert.Equal("members/docs/ben", (await f.Repos.PrepareAsync(ben, Ct)).Branch);
     }
 
-    /// <summary>The blockers for a slug are listed by name; a slug nothing blocks has none (card 104: there is no team
+    /// <summary>The blockers for a slug are listed by name; a slug nothing blocks has none (there is no team
     /// rename, so the old rename check is gone and only the listing is left).</summary>
     [Fact]
     public async Task BlockingBranches_AreListedForTheBlockedSlugOnly()

@@ -13,7 +13,7 @@ using RunStatus = Yawble.Core.Scripts.Running.ScriptRunStatus;
 namespace Yawble.Core.Tests.Scripts;
 
 /// <summary>
-/// Card 584 regressions: the runner through the real script engine (SeamScriptEngine), the real checker and the design's
+/// Script runner regressions: the runner through the real script engine (SeamScriptEngine), the real checker and the design's
 /// example script. The fake engine in ScriptRunnerTests let through a triggerId the TriggerFired schema refuses (a number,
 /// not a string) and a dry run without the catalog (its sends reached the provider).
 /// </summary>

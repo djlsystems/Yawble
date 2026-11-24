@@ -146,7 +146,7 @@ public sealed class CommitLinksVerifyTests : IAsyncLifetime
         AgentGit.Host(web, "branch", pushedSha[..9] + "0", localSha); // a branch whose name starts like another commit
         AgentGit.Host(web, "branch", "deadbee1", localSha);
         AgentGit.Host(web, "tag", "beefcafe", localSha);
-        File.WriteAllText(Path.Combine(web, "blob.txt"), "a blob for card 472\n");
+        File.WriteAllText(Path.Combine(web, "blob.txt"), "a blob, not a commit\n");
         var blob = AgentGit.Host(web, "hash-object", "-w", "blob.txt");
         var tree = AgentGit.Host(web, "rev-parse", localSha + "^{tree}");
         AgentGit.HostWithEnv(web, Who, "tag", "-a", "-m", "annotated", "v1", localSha);

@@ -15,7 +15,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B119 Part B (card 534): the team setting "Allow localhost (macOS)" (teams.allow_localhost, 0054). Off by default, read and
+/// The team setting "Allow localhost (macOS)" (teams.allow_localhost, 0054). Off by default, read and
 /// set with teams.localhost over the real UiRpc dispatcher, a set is audited and refused for a read-only cloud viewer
 /// (Visitor), and the launcher gives it to the run's request input (RunSpec.AllowLocalhost). Fakes only.
 /// </summary>
@@ -166,7 +166,7 @@ public class TeamLocalhostSettingTests
         Assert.DoesNotContain("m" + "xc", body, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>B121 part B (card 542, corrected by the person): MTP `dotnet test` binds its pipe as a socket file at a fixed
+    /// <summary>As corrected by the person: MTP `dotnet test` binds its pipe as a socket file at a fixed
     /// /tmp path, so it fails on a Mac with the setting on or off; only classic VSTest `dotnet test` works, and only with the
     /// setting on. The skill says MTP projects always build and run their executable or dotnet exec their dll with the
     /// runner's own filters, names that route in the one-line SocketException message, and keeps /tmp closed.</summary>

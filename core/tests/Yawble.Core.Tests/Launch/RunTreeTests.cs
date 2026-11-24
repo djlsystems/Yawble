@@ -7,7 +7,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Launch;
 
 /// <summary>
-/// B122: on macOS (no PID namespace) the core ends a run's whole tree itself: SIGTERM, a grace, SIGKILL, then the run's
+/// On macOS (no PID namespace) the core ends a run's whole tree itself: SIGTERM, a grace, SIGKILL, then the run's
 /// temp folder, then the run is done. All against <see cref="FakeProcessTable"/>: no real process, any OS.
 /// </summary>
 public class RunTreeTests
@@ -196,7 +196,7 @@ public class RunTreeTests
     [Fact]
     public void ABuildBackgroundedByAShellThatWasSeenOnceAndThenEndedIsReaped()
     {
-        // B127 on the Mac mini: the shell (its own group) runs `dotnet build &` and exits within a second.
+        // Seen on the Mac mini: the shell (its own group) runs `dotnet build &` and exits within a second.
         var table = new FakeProcessTable();
         var root = table.Add(500, table.Self);
         var cli = table.Add(501, root);
@@ -404,7 +404,7 @@ public class RunTreeTests
         var p = new FakeProcess(RunKind.Headless);
         var root = table.Add(p.Id, table.Self);
         var tree = new RunTree(table, root, Fast);
-        // B127: a build launchd's from the start, in a group of its own, with MSBuild's temp files under yr-*.
+        // A build launchd's from the start, in a group of its own, with MSBuild's temp files under yr-*.
         var build = table.Add(p.Id + 7, 1, group: p.Id + 7, ignoresTerm: true);
         var holders = new FakeRunFolderHolders(table, RunFolder, build);
         bool? buildAliveAtRemoval = null;

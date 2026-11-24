@@ -13,7 +13,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
-/// Card 470 (B074 core): git.commitsResolve through the real dispatcher, as the window calls it (by team id, by team
+/// git.commitsResolve through the real dispatcher, as the window calls it (by team id, by team
 /// name, and for every team), its bad_params, and that a read-only viewer (Visitor) may call it remotely and the audit
 /// log counts it as a read.
 /// </summary>

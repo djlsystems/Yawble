@@ -17,7 +17,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 420 (verify B096): gap checks over the real UiRpc, BoardService, McpBusServer hire and ConciergeService. No real
+/// The tester's name-default gap checks over the real UiRpc, BoardService, McpBusServer hire and ConciergeService. No real
 /// agent CLI runs: the hires run in a ScriptedRunner, the Concierge's launcher is a fake that fails to start.
 /// </summary>
 public class NameDefaultsVerifyTests

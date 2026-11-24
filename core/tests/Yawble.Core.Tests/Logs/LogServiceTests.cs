@@ -421,7 +421,7 @@ public sealed class LogServiceTests : IDisposable
             Assert.True(AuditLog.IsReadOnly(read, null), read);
         Assert.True(AuditLog.IsReadOnly("teams.push", new JsonObject { ["teamId"] = 1 }));
         Assert.False(AuditLog.IsReadOnly("teams.push", new JsonObject { ["teamId"] = 1, ["on"] = false }));
-        // B085: teams.workflowExpiry is audited when it sets the days, not when it reads them; an Extend is audited.
+        // teams.workflowExpiry is audited when it sets the days, not when it reads them; an Extend is audited.
         Assert.True(AuditLog.IsReadOnly("teams.workflowExpiry", new JsonObject { ["teamId"] = 1 }));
         Assert.False(AuditLog.IsReadOnly("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }));
         Assert.False(AuditLog.IsReadOnly("bus.workflowExtend", new JsonObject { ["teamId"] = 1, ["workflow"] = 4 }));
@@ -429,7 +429,7 @@ public sealed class LogServiceTests : IDisposable
         Assert.False(AuditLog.IsReadOnly("logs.prune", null));
     }
 
-    // ------------------------------------------------------------------ B015 tester probes (card 70)
+    // ------------------------------------------------------------------ tester probes
 
     [Fact]
     public void Probe_ADenialAndANotNowAt23h59AreKept_At24h01Pruned()

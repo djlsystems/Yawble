@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 448 (verify B075): gaps left by card 446's own tests. Links for self-hosted GitLab (port, nested groups),
+/// The tester's check of repository providers: gaps left by RepoProviderTests. Links for self-hosted GitLab (port, nested groups),
 /// visualstudio.com and its ssh form, an origin carrying a credential, Azure compare by commit, the link pattern's rules
 /// as the contract and docs state them, and the UI RPC contract (teams.setRepo clears with "" too, "MAIN", an extra on
 /// Bitbucket, an unpushed commit, unknown repository) through the window's dispatcher.

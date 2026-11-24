@@ -15,7 +15,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B073 (card 463): the commits behind each count and the previews before Merge to main, Delete and Sync. Fixture
+/// The commits behind each count and the previews before Merge to main, Delete and Sync. Fixture
 /// repositories built here (base trunk); origin, where there is one, is a bare folder whose refs are set as a fetch would
 /// leave them (no transport, no network). Covers: the merge preview's fast-forward, merge commit and conflict text (and
 /// that nothing moved); the delete preview of a merged, a cherry-picked and a unique branch; range lists equal to the

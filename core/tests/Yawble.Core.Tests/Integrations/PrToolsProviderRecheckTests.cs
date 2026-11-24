@@ -12,10 +12,10 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Card 457 (B075 re-check, tester): card 448's F1 repros as tests, from angles card 455's own tests do not take: only glab
+/// The tester's re-check of pull requests by provider, as tests from angles PrToolsProviderTests do not take: only glab
 /// or only az enabled against providers with no pull requests here and against no origin; Azure DevOps on visualstudio.com;
 /// self-hosted GitLab with a port and nested groups; no pull request CLI at all; a credential in the origin never reaches
-/// the text; a person's rule allowing gh's pr_open does not make gh run on a GitLab origin. Rig copied from card 455's.
+/// the text; a person's rule allowing gh's pr_open does not make gh run on a GitLab origin. Rig copied from PrToolsProviderTests.
 /// </summary>
 public class PrToolsProviderRecheckTests
 {

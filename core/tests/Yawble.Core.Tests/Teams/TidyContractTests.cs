@@ -6,13 +6,13 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 363 (verify B067): the core's git.tidyPlan answer (UiRpc.TidyPlanJson) in the window's contract, as
+/// The core's git.tidyPlan answer (UiRpc.TidyPlanJson) in the window's contract, as
 /// shell/src/shared/api.ts TidyPlan / TidyBranch / TidyClass declare it: the same field names, the same seven classes,
 /// optional fields left out when absent, and no local path in the answer. No git needed.
 /// </summary>
 public sealed class TidyContractTests
 {
-    // shell/src/shared/api.ts (card 362): TidyClass and TidyBranch's keys.
+    // shell/src/shared/api.ts: TidyClass and TidyBranch's keys.
     private static readonly string[] ShellClasses = ["merged", "contained", "working", "moved", "own-work", "origin-only", "scratch"];
     private static readonly string[] ShellBranchKeys = ["name", "where", "class", "proof", "commits", "teamSha", "cloneSha", "member"];
 

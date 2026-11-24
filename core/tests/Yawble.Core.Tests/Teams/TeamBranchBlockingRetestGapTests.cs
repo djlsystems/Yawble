@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B020 re-test / card 105 (tester's gap tests on card 104's fix). Like <see cref="TeamBranchBlockingGapTests"/>, none of
+/// The tester's re-test of the blocked-team-branch fix. Like <see cref="TeamBranchBlockingGapTests"/>, none of
 /// these needs git's local transport: origin's side is a remote-tracking ref written with update-ref and origin itself is
 /// a path that does not exist, so a push that is tried fails at once and plainly; clones are folders whose .git/HEAD is a file.
 /// </summary>
@@ -58,7 +58,7 @@ public class TeamBranchBlockingRetestGapTests
     }
 
     /// <summary>
-    /// FAULT F4 (card 105). The F1 refusal compares branch names exactly, but git on Windows (and macOS) finds a loose ref
+    /// FAULT F4. The F1 refusal compares branch names exactly, but git on Windows (and macOS) finds a loose ref
     /// whatever its case: asked for Members/Ada, it reads and deletes members/ada. The checked-out guard compares exactly
     /// too. So git.deleteBranches with "Members/Ada" (and unmergedOk "Members/Ada") deletes team Alpha's in-use, unmerged
     /// members/ada from team Ada's dialog. On a case-sensitive file system git finds no such branch and this passes.
@@ -83,7 +83,7 @@ public class TeamBranchBlockingRetestGapTests
         Assert.Contains("members/ada: REFUSED, team Alpha's member Ada is still on it", plan.Plan);
     }
 
-    /// <summary>Card 106: two branches whose names differ only in case (one packed, one loose): a name matching both is
+    /// <summary>Two branches whose names differ only in case (one packed, one loose): a name matching both is
     /// refused as unclear and neither is deleted.</summary>
     [Fact]
     public async Task ANameMatchingTwoBranchesInAnotherCase_IsRefused()
@@ -106,7 +106,7 @@ public class TeamBranchBlockingRetestGapTests
         Assert.Equal(before, Refs(repo.Path));
     }
 
-    /// <summary>Card 106 (Wren's note on card 105): a same-team member still on its old members/ada, which only origin has
+    /// <summary>Wren's note on the re-test: a same-team member still on its old members/ada, which only origin has
     /// (as of the last fetch): Delete with origin refuses it as checked out, and nothing is pushed.</summary>
     [Fact]
     public async Task ASameTeamMembersInUseOldBranch_OnOriginOnly_IsRefused()

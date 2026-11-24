@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Tasks;
 
 /// <summary>
-/// Card 488 (verify B077, Marlo's card 486): a release host task that takes SIGNING_DLIB and SIGNTOOL from a Connection is saved
+/// The tester's check of Marlo's signing names: a release host task that takes SIGNING_DLIB and SIGNTOOL from a Connection is saved
 /// through the real HostTaskService (Validate + ValidateBindings against a Connection), and a run would read both values from it;
 /// the old YAWBLE_SIGNING_DLIB / YAWBLE_SIGNTOOL bound the same way are still refused. Fakes only: the in-memory credential store
 /// of <see cref="TaskFixture"/>; nothing runs, no signtool.

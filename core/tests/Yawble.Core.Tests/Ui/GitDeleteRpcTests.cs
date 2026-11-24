@@ -98,7 +98,7 @@ public sealed class GitDeleteRpcTests : IAsyncLifetime
         Assert.Empty((await Call("git.status", new JsonObject { ["teamId"] = teamId }))["oldBranches"]!.AsArray());
     }
 
-    /// <summary>B020 / card 92: git.status's blockingBranches, the contract the Git dialog reads: always present, each
+    /// <summary>git.status's blockingBranches, the contract the Git dialog reads: always present, each
     /// { name, repo, location: "local" | "remote" }, and deleted through git.deleteBranches like any other branch.</summary>
     [Fact]
     public async Task BlockingBranches_AreListedWithNameRepoAndLocation_AndDeleteThroughTheUsualPath()

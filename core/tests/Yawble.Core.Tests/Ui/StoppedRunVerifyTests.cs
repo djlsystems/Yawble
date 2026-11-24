@@ -11,8 +11,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
-/// Card 441 (B097 verify, TesterKofi): the stopped-run contract as the window really gets it, from a real engine run the
-/// person stopped. Card 437's own tests build the messages by hand; these read the engine's own agent.failed message
+/// TesterKofi's check of the stopped-run contract as the window really gets it, from a real engine run the
+/// person stopped. StoppedRunTests build the messages by hand; these read the engine's own agent.failed message
 /// through the feed row (UiRpc.MonitorRow), the Concierge watch and the board's card node (board.list).
 /// </summary>
 public class StoppedRunVerifyTests
@@ -94,9 +94,9 @@ public class StoppedRunVerifyTests
     }
 
     /// <summary>
-    /// B097 on the board: a card whose run the person stopped must not keep saying it is running (nothing runs any
+    /// On the board: a card whose run the person stopped must not keep saying it is running (nothing runs any
     /// more). Today the projector keeps the card's status, so a card that had a progress line still says "running"
-    /// in In Progress after the stop. FAILS on 742c73e + 96ddd99 (card 441).
+    /// in In Progress after the stop. FAILS on 742c73e + 96ddd99.
     /// </summary>
     [Fact]
     public void AStoppedCard_DoesNotStaySaying_Running()

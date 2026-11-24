@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
-/// Card 441 round 2 (B097 verify, TesterKofi), against card 437 r2 (b864021): a stopped card has its own status
+/// TesterKofi's round 2 check of stopped runs on the board, against StoppedRunTests r2 (b864021): a stopped card has its own status
 /// "stopped". Checked independently of the developer's own tests:
 /// - a real engine stop: board.list says "stopped" (not running/queued, not Needs You), and a new instruction brings the
 ///   same card back to queued / running;
@@ -65,8 +65,8 @@ public class StoppedRunBoardVerifyTests
             await Wait.UntilAsync(async () => (await Of("stop"))["status"]!.GetValue<string>() == "running", "card says running while it runs");
             var id = (await Of("stop"))["id"]!.GetValue<long>();
             // While it runs, board.list SHOWS the queued card running in In Progress (BoardService, display only). This script
-            // sends no progress line, so its stored lane stays To Do and that is the lane the stopped card keeps (observation
-            // in B097/verify.md: the card moves back from In Progress to To Do on the stop).
+            // sends no progress line, so its stored lane stays To Do and that is the lane the stopped card keeps (observed
+            // in the tester's verify notes: the card moves back from In Progress to To Do on the stop).
             Assert.Equal(Lanes.InProgress, (await Of("stop"))["lane"]!.GetValue<string>());
 
             await Wait.UntilAsync(async () => await engine.StopMemberAsync("Alpha", "stop", Ct), "stop asked");
@@ -201,7 +201,7 @@ public class StoppedRunBoardVerifyTests
                 Exec(c, """
                     INSERT INTO board_cards (team, member, item, title, body, status, lane, placed, awaiting_manager, workflow, created_at, updated_at,
                                              cleared_at, ended_at, ended_how, started_at, timeline_rebuild, timeline_rebuilt)
-                        VALUES ('web', 'Tomas', 'B097', 'A', 'body a', 'running', 'in-progress', 0, 1, 5, 't0', 't1', NULL, NULL, NULL, 't0', 0, 1),
+                        VALUES ('web', 'Tomas', 'B007', 'A', 'body a', 'running', 'in-progress', 0, 1, 5, 't0', 't1', NULL, NULL, NULL, 't0', 0, 1),
                                ('web', 'Ines', NULL, 'B', '', 'failed', 'blocked', 1, 0, 5, 't0', 't2', NULL, 't3', 'expired', NULL, 1, 0),
                                ('web', 'Kofi', NULL, 'C', '', 'queued', 'todo', 0, 0, 6, 't0', 't1', NULL, NULL, NULL, NULL, 0, 0),
                                ('web', NULL, NULL, 'D', '', 'done', 'done', 0, 0, NULL, 't0', 't4', 't5', NULL, NULL, NULL, 0, 0);
@@ -243,7 +243,7 @@ public class StoppedRunBoardVerifyTests
             // The app's own store and projector work on the upgraded db: a stop saves "stopped".
             var store = new BoardStore(cs);
             var card = store.Card(1)!;
-            Assert.Equal(("A", "B097", 5L, true), (card.Title, card.Item, card.Workflow!.Value, card.AwaitingManager));
+            Assert.Equal(("A", "B007", 5L, true), (card.Title, card.Item, card.Workflow!.Value, card.AwaitingManager));
             new BoardProjector(store).Apply(Stop("Tomas", 5, 1, 1));
             Assert.Equal(("stopped", Lanes.InProgress), (store.Card(1)!.Status, store.Card(1)!.Lane));
             Assert.Throws<SqliteException>(() => Exec(db, "UPDATE board_cards SET status = 'halted' WHERE id = 1;"));

@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
-/// Card 445 (B072 verify): git.commitShow and git.commitDiff through the real dispatcher, as the window calls them:
+/// git.commitShow and git.commitDiff through the real dispatcher, as the window calls them:
 /// a malformed or missing sha is bad_params, a commit git does not have is exactly {found:false, goneReason, sha},
 /// its diff is "gone", a missing path is bad_params, and a found commit says codeShown true locally.
 /// </summary>

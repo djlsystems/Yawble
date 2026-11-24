@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// B048 (card 252): org.summary's snapshot built from fake teams, workflows, asks and log problems; the no
+/// The org.summary snapshot built from fake teams, workflows, asks and log problems; the no
 /// token/cost/usage/price rule; the five dashboard methods as reads a Visitor may call; org.summaryChanged pushed only
 /// while watched and at most once per 2 s (a manual clock); a viewer leaving the link is unwatched; the hello's caps.
 /// Fakes only: no socket, no database, no system program.
@@ -35,7 +35,7 @@ public class OrgSummaryTests
             new OrgTeam("api", Paused: true, Archived: false, []),
         ],
         [
-            new OrgWorkflow(10, "web", "Build the login page", "B048", "Live org summary", OrgSummary.Running, 2, 5, Now.AddHours(-2), Now.AddMinutes(-1), "Manager"),
+            new OrgWorkflow(10, "web", "Build the login page", "B004", "Live org summary", OrgSummary.Running, 2, 5, Now.AddHours(-2), Now.AddMinutes(-1), "Manager"),
             new OrgWorkflow(11, "web", "Old but still open", null, null, OrgSummary.NobodyWorking, 0, 0, Now.AddDays(-5), Now.AddDays(-3), "Manager"),
             new OrgWorkflow(12, "web", "Done yesterday morning", null, null, OrgSummary.Completed, 3, 3, Now.AddDays(-2), Now.AddHours(-30), "Manager"),
             new OrgWorkflow(13, "api", "Failed an hour ago", null, null, OrgSummary.Failed, 0, 1, Now.AddHours(-4), Now.AddHours(-1), "Manager"),
@@ -92,7 +92,7 @@ public class OrgSummaryTests
         var first = workflows[0]!;
         Assert.Equal("web", first["team"]!.GetValue<string>());
         Assert.Equal("Build the login page", first["title"]!.GetValue<string>());
-        Assert.Equal("B048", first["item"]!["id"]!.GetValue<string>());
+        Assert.Equal("B004", first["item"]!["id"]!.GetValue<string>());
         Assert.Equal("Live org summary", first["item"]!["title"]!.GetValue<string>());
         Assert.Equal("running", first["state"]!.GetValue<string>());
         Assert.Equal(2, first["cards"]!["done"]!.GetValue<int>());
@@ -131,7 +131,7 @@ public class OrgSummaryTests
     [Fact]
     public void AFailedWorkflow_IsOpen_AndStaysListedAfter24hIdle_ButACompletedOrClosedOneDoesNot()
     {
-        // B051 F2 (card 258): docs/cloud-link.md calls failed open; only completed and closed are ended.
+        // docs/cloud-link.md calls failed open; only completed and closed are ended.
         Assert.False(OrgSummary.Ended(OrgSummary.Failed));
         Assert.True(OrgSummary.Ended(OrgSummary.Completed));
         Assert.True(OrgSummary.Ended(OrgSummary.Closed));

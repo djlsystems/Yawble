@@ -14,7 +14,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Logs;
 
 /// <summary>
-/// Card 442 (verify B101), gap tests over Marlo's card 438. End to end through the real UiRpc behind the audited
+/// The tester's gap tests of All activity over Marlo's AllActivityTests. End to end through the real UiRpc behind the audited
 /// RpcDispatcher: a team made, its member's trigger saved and run, the team paused and deleted; then All activity's rows,
 /// its newest row, its member/team/app filters. Also: an old id-only row about a deleted thing matches no filter;
 /// org.summary's problems survive a flood of audit rows in the hour; logs.tail and logs.query take app over the wire and

@@ -12,7 +12,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
-/// Card 437 (B097, core): a run the person stopped is recorded failed with failure class "stopped" (runs.state is left
+/// A run the person stopped is recorded failed with failure class "stopped" (runs.state is left
 /// as it is), and everything the window and the Cloud Link get says "stopped", not "failed": the member's attention
 /// ("stopped", below failed), lastRunFailureClass on every member node, the feed kind, failureClass on a run's end row,
 /// the remote summary (not errored, not a failed workflow), and no Needs-you item (board, Concierge watch).
@@ -104,7 +104,7 @@ public class StoppedRunTests
         Assert.Equal(("failed", Lanes.NeedsYou), (cards["Ines"].Status, cards["Ines"].Lane));
     }
 
-    // ------------------------------------------------------------------ the card's own status (round 2, card 441)
+    // ------------------------------------------------------------------ the card's own status (round 2)
 
     [Fact]
     public void StoppedIsAKnownStatus_InProgress_NeverNeedsYou_AndQuiet()

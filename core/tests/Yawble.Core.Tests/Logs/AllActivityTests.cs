@@ -12,7 +12,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Logs;
 
 /// <summary>
-/// Card 438 (B101): All activity takes every audit row. Its member column is the member a row names, "&lt;Team&gt;" for
+/// All activity takes every audit row. Its member column is the member a row names, "&lt;Team&gt;" for
 /// a row about a team, or "app" (team empty) for a row about neither; the member filter keeps a member's own rows, the
 /// team filter adds the team's rows, app: true keeps the app's. Names are written into the target when the row is
 /// written, so a row about a team or member deleted since still reads; per-member actions by their own id (a trigger's

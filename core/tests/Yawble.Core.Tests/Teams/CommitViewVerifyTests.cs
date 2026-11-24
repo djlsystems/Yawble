@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 445 (B072 verify, TesterKofi): what CommitViewTests (card 443) does not cover, on a fixture repository whose base
+/// TesterKofi's check of the commit view: what CommitViewTests does not cover, on a fixture repository whose base
 /// is "main" and whose origin is a bare folder whose branches are moved as a push would (see Push):
 ///  - pushed vs not pushed, the bare origin's branch moved too; main never in where.branches; the team branch first even though
 ///    "members/..." sorts before "team/...";
@@ -196,7 +196,7 @@ public class CommitViewVerifyTests
     /// <summary>
     /// F1. git's own message for a merge into main is "Merge branch 'feature/login'" (no "into main"). Round 1 (954cde7)
     /// found the core fell back to the team branch first, so the merge read "into team/alpha" once the team branch had
-    /// main. Round 2 (card 460, fix f669165): into is the branch whose first-parent line holds the merge, so it is main.
+    /// main. Round 2 (fix f669165): into is the branch whose first-parent line holds the merge, so it is main.
     /// </summary>
     [Fact]
     public async Task F1_AMergeMadeOnMain_WithGitsDefaultMessage_IsIntoMain_EvenWhenTheTeamBranchHasIt()

@@ -14,7 +14,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Monitor;
 
 /// <summary>
-/// B079: commits, merges into the team branch, merges into main and pushes, recorded in the team repository as the
+/// Commits, merges into the team branch, merges into main and pushes, recorded in the team repository as the
 /// Monitor's code events, and read with monitor.codeEvents (in the window and over the Cloud Link the same).
 /// </summary>
 public class CodeEventsTests

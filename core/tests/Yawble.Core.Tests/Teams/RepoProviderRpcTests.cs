@@ -13,7 +13,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 446 (B075), the contract the shell builds against (card 447): git.webLink {teamId, team, repo?, kind, ...} -> {url},
+/// The contract the shell builds against: git.webLink {teamId, team, repo?, kind, ...} -> {url},
 /// teams.repos' provider fields (provider = the override) and teams.setRepo, through the window's dispatcher.
 /// </summary>
 public sealed class RepoProviderRpcTests : IAsyncLifetime

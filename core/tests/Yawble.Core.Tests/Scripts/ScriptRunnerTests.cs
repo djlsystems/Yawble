@@ -10,7 +10,7 @@ using Yawble.Core.Triggers;
 namespace Yawble.Core.Tests.Scripts;
 
 /// <summary>
-/// Card 584 (B131): running script members. Dispatch (agents untouched), structured trigger payloads with no workflow per
+/// Running script members. Dispatch (agents untouched), structured trigger payloads with no workflow per
 /// fire, one run at a time, saved variables only on success, three failures one decision, resume after a restart, Test runs.
 /// </summary>
 public class ScriptRunnerTests

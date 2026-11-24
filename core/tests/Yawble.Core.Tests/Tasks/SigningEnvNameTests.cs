@@ -4,7 +4,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Tasks;
 
 /// <summary>
-/// B077: the signing tool paths packaging/windows-signing.cjs reads under their new names (SIGNING_DLIB, SIGNTOOL) can be given to a
+/// The signing tool paths packaging/windows-signing.cjs reads under their new names (SIGNING_DLIB, SIGNTOOL) can be given to a
 /// release host task, from the app's environment or from a Connection; the old YAWBLE_ names stay refused (HostTaskRules is unchanged).
 /// Pure validation: no task runs.
 /// </summary>

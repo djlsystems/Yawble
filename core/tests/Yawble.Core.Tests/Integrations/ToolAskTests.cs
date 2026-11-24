@@ -15,7 +15,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Host tool asks (B013): request_tool names a tool from the app's fixed catalog; the person is asked once per
+/// Host tool asks: request_tool names a tool from the app's fixed catalog; the person is asked once per
 /// (team, tool); Install runs exactly the catalog's winget command for the person at the window; the program is looked
 /// for again afterwards and the Manager is told to retry. Fakes only: a fake tool host records what would run; no test
 /// runs winget, an installer or any other program.
@@ -560,7 +560,7 @@ public sealed class ToolAskTests : IDisposable
         }
     }
 
-    // ------------------------------------------------------------------ B015 tester probes (card 70)
+    // ------------------------------------------------------------------ tester probes
 
     private long ProbeNotNowAt(string tool)
     {

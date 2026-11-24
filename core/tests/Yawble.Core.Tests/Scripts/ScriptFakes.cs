@@ -8,7 +8,7 @@ using Yawble.Core.Scripts.Running;
 namespace Yawble.Core.Tests.Scripts;
 
 /// <summary>
-/// Fakes of the card 583 seam for the library and running tests (card 584): a catalog, a checker and an engine. Every
+/// Fakes of the script engine seam for the library and running tests: a catalog, a checker and an engine. Every
 /// place that builds or reads a seam type (checkpoint, result) is here, so the merge with the real engine changes only this file.
 /// </summary>
 internal static class Seam

@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B016 gap tests (card 77): branch names for a team slug with spaces, a rehired same-named member, extra repositories
+/// Gap tests of member branches that carry the team: branch names for a team slug with spaces, a rehired same-named member, extra repositories
 /// shared by two teams, old branches only on origin, and stale confirms. Local repositories and bare origins in temp
 /// folders only, no network.
 /// </summary>
@@ -47,7 +47,7 @@ public class TeamBranchGapTests
     }
 
     /// <summary>
-    /// Card 231: the origin and clone tests here need nothing Windows-only and nothing Linux lacks, only git's local transport
+    /// The origin and clone tests here need nothing Windows-only and nothing Linux lacks, only git's local transport
     /// (clone of a folder, fetch and push to a folder, ls-remote of one). That starts git helper processes, which a
     /// sandbox may refuse (in the Windows agents' sandbox Git for Windows' MSYS2 runtime fails to start, 0xC0000142).
     /// So instead of a fixed skip they try one local clone first and run wherever it works (Linux, macOS, a Windows host).
@@ -88,7 +88,7 @@ public class TeamBranchGapTests
         return start + cause + "The fault it covers is fixed (card 75).";
     }
 
-    /// <summary>Card 231, with a faked probe result: the reason names git's error and the cause for the OS it is on,
+    /// <summary>The same, with a faked probe result: the reason names git's error and the cause for the OS it is on,
     /// and never blames the Windows sandbox on Linux.</summary>
     [Theory]
     [InlineData(false, "exit 128: fatal: Could not read from remote repository.")]
@@ -226,7 +226,7 @@ public class TeamBranchGapTests
     [Theory]
     [InlineData(MemberRole.Member, "Ada", "members/ada", "members/ada")]
     [InlineData(MemberRole.Member, "Ben Two", "members/ben-two", "members/ben-two")]
-    [InlineData(MemberRole.Member, "Ada", "members/alpha/ada", null)] // a post-B016 clone: nothing to adopt
+    [InlineData(MemberRole.Member, "Ada", "members/alpha/ada", null)] // a clone already on members/<team>/<name>: nothing to adopt
     [InlineData(MemberRole.Member, "Ada", "members/ben", null)]       // another member's old branch
     [InlineData(MemberRole.Member, "Ada", "main", null)]
     [InlineData(MemberRole.Member, "Ada", null, null)]                // detached or unreadable HEAD
@@ -382,7 +382,7 @@ public class TeamBranchGapTests
     }
 
     /// <summary>
-    /// A member hired before B016 is removed (its row goes, its clone stays on disk on members/&lt;name&gt;) and a member of
+    /// A member hired before branches carried the team is removed (its row goes, its clone stays on disk on members/&lt;name&gt;) and a member of
     /// the same name is hired. Its record must name the branch its clone is actually on, or the next fetch-back looks
     /// for a branch the clone does not have and the clone's work never comes back.
     /// </summary>
@@ -395,7 +395,7 @@ public class TeamBranchGapTests
         var (picked, _) = TeamReposTests.PersonsRepoWithOrigin(f);
         await f.Repos.UseExistingRepoAsync(ada.TeamId, "Alpha", picked, Ct);
         var first = await f.Repos.PrepareAsync(ada, Ct);
-        Ok(first.ClonePath, first.Workspace, "branch", "-m", "members/ada"); // the pre-B016 clone
+        Ok(first.ClonePath, first.Workspace, "branch", "-m", "members/ada"); // the old-style clone (members/<name>, without the team)
         var tip = Commit(first.ClonePath, first.Workspace, "unfetched.txt");
         Fire(f, ada);
 
@@ -427,7 +427,7 @@ public class TeamBranchGapTests
         var repo = LocalRepo(f);
         await f.Repos.UseExistingRepoAsync(ada.TeamId, "Alpha", repo, Ct);
         var first = await f.Repos.PrepareAsync(ada, Ct);
-        Ok(first.ClonePath, first.Workspace, "branch", "-m", "members/ada"); // the pre-B016 clone
+        Ok(first.ClonePath, first.Workspace, "branch", "-m", "members/ada"); // the old-style clone (members/<name>, without the team)
         var tip = Commit(first.ClonePath, first.Workspace, "unfetched.txt");
         Fire(f, ada);
 

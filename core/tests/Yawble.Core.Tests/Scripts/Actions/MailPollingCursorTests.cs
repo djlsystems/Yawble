@@ -5,7 +5,7 @@ using Yawble.Core.Tests.Email;
 namespace Yawble.Core.Tests.Scripts.Actions;
 
 /// <summary>
-/// B133: polling a folder with list's after (the id of the last message an earlier list gave) gets every message once, on the plain IMAP fake
+/// Polling a folder with list's after (the id of the last message an earlier list gave) gets every message once, on the plain IMAP fake
 /// and the Gmail fake; a renumbered folder (another UIDVALIDITY) resets the cursor instead of failing.
 /// </summary>
 public class MailPollingCursorTests

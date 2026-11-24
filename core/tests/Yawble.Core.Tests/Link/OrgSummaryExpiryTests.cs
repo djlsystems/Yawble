@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// Card 388 (B085, Wren's F5): org.summary, as the core sends it over the Cloud Link, carries teams[].workflowExpiryDays
+/// Wren's finding F5: org.summary, as the core sends it over the Cloud Link, carries teams[].workflowExpiryDays
 /// (the team's setting, default 3) and workflows[].expiresAt (the same instant as the bus.workflows item's expiresAt; null
 /// while the workflow is worked and once it ended). Built from the real app source over a real bus with a fake clock, and
 /// read as JSON, the way yawble-cloud's OrgWire reads it.

@@ -16,7 +16,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Network asks (B012): a host refused for not being on the allowlist raises one ask per (team, member, host) for the
+/// Network asks: a host refused for not being on the allowlist raises one ask per (team, member, host) for the
 /// person; the four answers change the policy through the policy store; the Manager (or, after a deny, the agent) is told.
 /// Fakes only: a temporary database, a fake clock and a recording tell; no network and no system program.
 /// </summary>
@@ -146,7 +146,7 @@ public sealed class NetworkAskTests : IDisposable
         var priya = Assert.Single(asks, a => a.Member == "Alpha/Priya");
         Assert.Equal("api.nuget.org", priya.Host);
         Assert.Equal(3, priya.Count);
-        // B014: a plain-http refusal's method wins over CONNECT's, so the card can say only https is forwarded
+        // A plain-http refusal's method wins over CONNECT's, so the card can say only https is forwarded
         Assert.Equal("GET", priya.Method);
         Assert.Equal("/v3/index.json", priya.PathSample);
         Assert.True(priya.PlainHttp);

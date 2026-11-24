@@ -5,10 +5,10 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 172 (verify B027 item 6): an old-style member's start when a blocker differs from its new branch only in case.
-/// The B016 move's own clash check (Clash in TeamRepos.Rename.cs) still compares case-sensitively, but it is only reached
+/// An old-style member's start when a blocker differs from its new branch only in case.
+/// The clash check of the move to members/&lt;team&gt;/&lt;name&gt; (Clash in TeamRepos.Rename.cs) still compares case-sensitively, but it is only reached
 /// when the member's clone is on disk (reading the clone needs local transport, so that path is host-only). Without a
-/// clone the move only records the new name, and the B020 check after it (ignoring case) gives the plain refusal that says
+/// clone the move only records the new name, and the blocking-branch check after it (ignoring case) gives the plain refusal that says
 /// what moved. Temporary repositories only; nothing here reaches local transport.
 /// </summary>
 public class MemberBranchCaseClashTests

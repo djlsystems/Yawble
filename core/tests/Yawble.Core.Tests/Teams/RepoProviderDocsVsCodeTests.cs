@@ -4,7 +4,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 457 (B075 re-check, tester): F2 / F4 / F5 and the docs-vs-code check. Each docs statement is paired with the code
+/// The tester's re-check of repository providers: F2 / F4 / F5 and the docs-vs-code check. Each docs statement is paired with the code
 /// that makes it true: features.md's Link pattern and Pull requests lines against RepoProviders.Link (RepoProvider.cs:136)
 /// and TeamRepos.HostView (TeamRepos.Hosts.cs:96-99); connections-and-integrations.md's pull-requests bullet against
 /// RepoHost.PullRequestsUnavailable; UiRpc.cs's WebLinkAsync comment names git.webLink.
@@ -119,7 +119,7 @@ public class RepoProviderDocsVsCodeTests
         var src = File.ReadAllLines(Path.Combine(Root(), "core", "src", "Yawble.Core", "Ui", "UiRpc.cs"));
         var at = Array.FindIndex(src, l => l.Contains("Task<JsonNode?> WebLinkAsync(", StringComparison.Ordinal));
         Assert.True(at > 0, "WebLinkAsync not found");
-        Assert.Contains("git.webLink (B075)", src[at - 1]);
+        Assert.Contains("git.webLink", src[at - 1]);
         Assert.Equal("git.webLink", Yawble.Core.Ui.UiRpc.WebLinkMethod);
     }
 }
