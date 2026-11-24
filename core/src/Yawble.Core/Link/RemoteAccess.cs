@@ -105,7 +105,7 @@ public static class RemoteAccess
             "timeline.get",
             "integrations.list", "integrations.asks", "integrations.calls", "integrations.checklist", "integrations.connectionAttention",
             "integrations.connections", "integrations.discoverStatus", "integrations.mcpList", "integrations.apiList", "integrations.watches",
-            "integrations.taskRuns", "integrations.mcpParse",
+            "integrations.taskRuns", "integrations.mcpParse", "integrations.emailList",
             "tasks.list", "tasks.asks", "tasks.runs",
             "ops.backups",
             "network.asks",
@@ -118,6 +118,8 @@ public static class RemoteAccess
             "org.summary", "org.summary.watch", "org.summary.unwatch",
             "updates.status",
             "code.list", "code.open", "code.read", "code.close", "code.download",
+            // B131: the script library, schemas, script runs and script members: reads (saving, importing, Test run and member changes are changes).
+            .. Ui.ScriptsRpc.Reads,
         ],
         // B119: teams.localhost ("Allow localhost (macOS)") is read by any viewer and set only by a full one.
         readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry", "teams.localhost"],
@@ -144,7 +146,7 @@ public static class RemoteAccess
             "board.clearDone", "board.restore", "board.move", "board.edit", "board.comment",
             "backlog.add", "backlog.archive", "backlog.delete", "backlog.dispatch", "backlog.dispatchNew", "backlog.edit", "backlog.move",
             "backlog.position", "backlog.restore",
-            "integrations.apiDeleteRule", "integrations.apiEnable", "integrations.apiRemove", "integrations.apiSave", "integrations.approve",
+            "integrations.apiDeleteRule", "integrations.apiEnable", "integrations.emailSave", "integrations.emailEnable", "integrations.emailRemove", "integrations.apiRemove", "integrations.apiSave", "integrations.approve",
             "integrations.decline", "integrations.connectionRemove", "integrations.connectionSave", "integrations.connectionTest",
             "integrations.deleteRule", "integrations.deleteWatch", "integrations.detect", "integrations.discover", "integrations.discoverCancel",
             "integrations.enable", "integrations.mcpCheck", "integrations.mcpDeleteRule", "integrations.mcpEnable", "integrations.mcpImport",
@@ -158,6 +160,7 @@ public static class RemoteAccess
             "tools.notNow", "tools.checkAgain",
             "folder.answer",
             "logs.prune", "logs.setRetention",
+            .. Ui.ScriptsRpc.Changes,
         ]);
 
     private static Dictionary<string, Kind> Table(string[] reads, string[] readsUnlessOn, string[] changes)

@@ -247,7 +247,7 @@ public sealed class JsonSchemaValidatorTests
     [Fact]
     public void EveryBuiltInSchemaIsThere_ReadOnly()
     {
-        Assert.Equal(["TriggerFired", "FolderChange", "EventItem", "EmailAddress", "EmailMessage", "ApiResponse"], BuiltInSchemas.All.Select(s => s.Name));
+        Assert.Equal(["TriggerFired", "FolderChange", "EventItem", "EmailAddress", "EmailMessage", "EmailList", "ApiResponse"], BuiltInSchemas.All.Select(s => s.Name));
         Assert.All(BuiltInSchemas.All, s => Assert.True(s.BuiltIn));
         Assert.Empty(BuiltInSchemas.TriggerFired.Validate(JsonNode.Parse("""{ "triggerId": "t1", "kind": "every", "firedAt": "2026-11-23T10:00:00Z" }""")));
         Assert.NotEmpty(BuiltInSchemas.TriggerFired.Validate(JsonNode.Parse("""{ "triggerId": "t1", "kind": "folder", "firedAt": "2026-11-23T10:00:00Z" }""")));

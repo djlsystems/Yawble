@@ -23,6 +23,7 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
 | MCP server, remote | A server at an `https` address | Called from this computer | One tool per server tool, named `server__tool` |
 | API | A web service described by an OpenAPI spec | Called from this computer, with a Connection's secret | One tool per API, named `api_<name>` |
 | Website | A site agents use in a browser window of this app | In the app's window on this computer | One tool per site, named `web_<name>` |
+| Email | A mailbox, signed in with an [Email account](#email-accounts) Connection | Read over IMAP from this computer | Nothing: scripts use it (see [Email](#email)) |
 
 ### CLIs
 
@@ -90,6 +91,137 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
 - Agents get six actions: `open`, `read` and `screenshot` (allowed by default), and `click`, `fill` and `submit`
   (off by default).
 - Agents stay on the site. Pages outside it are never opened.
+
+### Email
+
+The built-in **Email** integration is one mailbox (an [Email account](#email-accounts) Connection) that a team's
+scripts can read. It is offered to teams like the other integrations: to every team, or to some. A script member
+binds its `requires` entry of kind `email` to one of the Email integrations its team has.
+
+- Setting up: `integrations.emailSave { id?, name, connectionId }` names it and picks the email account (only an
+  email account); `integrations.emailEnable { name, all?, teamId?, on? }` offers it; `integrations.emailList` lists
+  them (`{ id, name, kind: "email", connectionId, connection, enabledAll, teamIds }`); `integrations.emailRemove { name }`
+  removes it and keeps the Connection. The Connection's **Used by** shows `Email: <name>`.
+- A call from a team the integration is not turned on for fails the step with
+  `refused: <name> is not turned on for <team>`. With its Connection removed: `refused: <name> has no email account`.
+- Every call is logged in the call history as `email:<name>`, with the script member as the caller, the action and its
+  arguments. Message content is never logged. The password stays in the credential store; it is never in the
+  database, a log, a result or a step failure.
+- Reading never marks a message read: folders are opened read-only (`EXAMINE`), and bodies are fetched with
+  `BODY.PEEK`. Only `markRead` and `move` change the mailbox, and a dry run does neither (it logs `would markRead on <use>`).
+- There is no delete action. `move` refuses a server that offers neither `MOVE` nor `UIDPLUS`, because there it could
+  only move by expunging the whole folder.
+- Sending (`send`, `reply`) and the send policy (recipient allowlist, caps, levels) come in phase 2.
+
+#### Email actions for scripts
+
+A script lists the actions under a requirement of kind `email`, and an `integration` step calls one by its plain
+name (`"action": "list"`, not `email.list`):
+
+```json
+"requires": [ { "name": "mail", "kind": "email", "actions": ["list", "get", "markRead"] } ],
+"steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
+             "args": { "folder": "INBOX", "after": "{vars.lastId}", "since": "2026-11-20T00:00:00Z", "unreadOnly": true }, "into": "res", "next": "b" } ]
+```
+
+| Action | Arguments (JSON types; `?` is optional and may be `null`) | Result | Changes the mailbox |
+|---|---|---|---|
+| `list` | `folder`: string; `since?`: string (ISO-8601); `unreadOnly?`: bool; `max?`: int; `after?`: string (an `id` from an earlier `list` result) | `EmailList`: `{ messages: list<EmailMessage>, cursorReset: bool }` | no |
+| `get` | `id`: string; `folder?`: string | `EmailMessage`, with `body` | no |
+| `search` | `folder`: string; `query`: string | `list<EmailMessage>` | no |
+| `thread` | `threadId`: string | `list<EmailMessage>` | no |
+| `markRead` | `id`: string; `folder?`: string | `EmailMessage` (as it is now) | yes |
+| `move` | `id`: string; `folder`: string (the folder to move it to) | `EmailMessage` (in its new place) | yes |
+
+- `search` and `thread` give at most 200 messages, the newest, oldest first (by `receivedAt`, then the folder's UID).
+- `list`: `unreadOnly` keeps only unread messages, and `list` returns the **first** `max` of them in its order
+  (default and limit 200). `cursorReset` is always present; it is `false` unless `after` no longer applied (below).
+  - **With `after`**, while the folder's UIDVALIDITY is the one in that `id`: only the messages with a higher UID than
+    that message (IMAP `UID SEARCH UID n+1:*`), ordered by UID ascending (arrival order), the first `max` of them.
+    `unreadOnly` still applies. `since`, if given too, is ignored. Dates play no part, so messages that share a second,
+    or that arrive with an old date, are all returned in turn.
+  - **With `after` of another UIDVALIDITY** (the server renumbered the folder; rare, e.g. after the folder was
+    rebuilt): the `id` no longer applies, and `cursorReset` is `true`. With `since`, the result is the plain `since`
+    list (below). Without `since`, it starts from now: no messages.
+  - **Without `after`**: `since` is a plain time filter for first runs and searches, with no exactly-once promise. It
+    is **exclusive**: only messages whose `receivedAt` is **later** than `since`. Without `since`, the whole folder.
+    The oldest `max` come first, ordered by (INTERNALDATE, UID). `receivedAt` is whole seconds, so `since` set to a
+    message's `receivedAt` also leaves out the other messages of that second.
+  - A malformed `after` fails the step as an argument error: `mail list: after '...' is not a message id (...)`.
+- **The poll pattern:** `list { folder, after: vars.lastId, since: <first-run time> }`. After each `list`, if
+  `messages` is **not empty**, save the `id` of the **last** message returned (the newest) in a saved `string`
+  variable and pass it as `after` on the next run. When `messages` is empty, keep the id you have. The first run has no
+  id (`null`), so `since` picks where it starts. On `cursorReset` the script keeps going from what it got: it saves the
+  last id of those messages as usual. **Once the script has a saved id** (every `list` with an `after` that applies),
+  this gets every message exactly once in arrival order, however small `max` is (even 1), when several messages share
+  a second, and when mail arrives between polls. Marking a polled message read or moving it out of the folder does not
+  disturb the saved id.
+  - **The limit:** the first run (no saved id) and a `cursorReset` run use the `since` list, which is ordered by date,
+    not by UID. If that result is cut by `max`, a message with an earlier UID but a later date than the last one
+    returned can be skipped: the next run's `after` starts above the saved message's UID. For example, UID 1 dated
+    10:02 and UID 2 dated 10:01, both after `since`, `max` 1: the first run returns UID 2 and saves its id, and UID 1
+    is never returned. To avoid it, make the first run's `max` large enough to take everything after `since` (the
+    limit is 200), or accept the gap.
+
+  ```json
+  "variables": [ { "name": "res", "type": "EmailList" }, { "name": "last", "type": "EmailMessage" },
+                 { "name": "lastId", "type": "string", "scope": "saved" } ],
+  "steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
+               "args": { "folder": "INBOX", "after": "{vars.lastId}", "since": "2026-11-20T00:00:00Z", "unreadOnly": true, "max": 20 },
+               "into": "res", "next": "b" },
+             { "id": "b", "type": "if", "when": { "left": "{count(vars.res.messages)}", "op": "gt", "right": 0 }, "then": "c", "else": "z" },
+             { "id": "c", "type": "set", "var": "last", "value": "{last(vars.res.messages)}", "next": "d" },
+             { "id": "d", "type": "set", "var": "lastId", "value": "{vars.last.id}", "next": "z" },
+             { "id": "z", "type": "end" } ]
+  ```
+
+- An `id` is **opaque**: keep it as the string you got; do not build or compare ids yourself. It is **per folder**:
+  it names the message in the folder (or Gmail label) it was read from, its `folder`, and is **stable while the
+  message stays in that folder or label**. A message moved to another folder has another id there, and one moved out
+  and back gets a new id (a new UID), so a poll returns it again. Today an id is `"UIDVALIDITY:UID"` of its folder
+  (`"31:7"`); on Gmail `"gm:<X-GM-MSGID>:<UIDVALIDITY>:<UID>"` (`"gm:1789000000000000001:600:7"`).
+- `get`, `markRead`: `folder` is a hint where to look. Without it the id is enough. On Gmail they find the message by
+  the `X-GM-MSGID` in the id: in the `folder` given (the result keeps that folder's id), else in All Mail (the result's
+  `folder` is `[Gmail]/All Mail` and its `id` is the All Mail one). Any id of the same Gmail message works.
+- `search`: on Gmail the query is Gmail's own search syntax (`X-GM-RAW`, e.g. `from:lee is:unread`); elsewhere it is
+  IMAP `SEARCH TEXT` (the words anywhere in the message).
+- `thread`: on Gmail every message with that `X-GM-THRID`, across All Mail (Sent included); their ids are All Mail's.
+  Elsewhere the messages in the inbox and the Sent folder whose Message-ID, In-Reply-To or References carry the thread's id.
+- `move`: on Gmail a label move: the folder's label is added and the inbox label taken off (moving to `INBOX` only
+  adds the inbox label), found by the `X-GM-MSGID`. Elsewhere IMAP `MOVE`. Either way the result's `id` and `folder`
+  are the new ones (on Gmail the same `X-GM-MSGID` with the new label's UIDVALIDITY and UID).
+- The script check knows these arguments: an argument the action does not take, a missing required one, or one of the
+  wrong type is an issue (`unknown-argument`, `missing-field`, `type-mismatch`), and the step's result is typed (its
+  `into` variable and `steps.<id>`). The same check runs again when the step runs, on the evaluated arguments.
+- A failure fails the step with its reason: `mail list: the mailbox has no folder named 'Nowhere'`,
+  `mail get: no message with id 31:9 in the mailbox (...)`, `mail list: the IMAP server at <host>:<port> refused the user name or password`.
+
+**EmailList** (the built-in schema, `list`'s result):
+
+| Field | JSON type | What it is |
+|---|---|---|
+| `messages` | array of EmailMessage | The messages, in the list's order (by UID with `after`, else by `receivedAt`, then UID); the last is the newest. |
+| `cursorReset` | boolean | Always present. `true` when `after` no longer applied (the folder's UIDVALIDITY changed): `messages` is then the `since` list, or empty without `since`. Otherwise `false`. |
+
+**EmailMessage** (the built-in schema):
+
+| Field | JSON type | What it is |
+|---|---|---|
+| `id` | string | Opaque, per folder: stable while the message stays in that folder or label; `list`'s `after`. `"UIDVALIDITY:UID"` of its folder (`"31:2"`); Gmail `"gm:<X-GM-MSGID>:<UIDVALIDITY>:<UID>"`. |
+| `threadId` | string | Gmail: the `X-GM-THRID` in decimal. Otherwise the thread's first Message-ID (References, else In-Reply-To, else its own), else `id`. |
+| `messageId` | string or null | The Message-ID header, without `<` and `>`. |
+| `folder` | string | The folder it was read from (`INBOX`; for a Gmail `get` without `folder`, `[Gmail]/All Mail`). |
+| `from` | EmailAddress | The sender. |
+| `to` | array of EmailAddress | The To recipients. |
+| `cc` | array of EmailAddress | The Cc recipients. |
+| `subject` | string | The subject line (`""` when none). |
+| `receivedAt` | string | The server's INTERNALDATE: a UTC ISO-8601 string in whole seconds, e.g. `"2026-11-20T09:10:00Z"`. |
+| `snippet` | string | The first 500 characters of the plain text, runs of white space as one space. |
+| `hasAttachments` | boolean | Whether it has attachments. |
+| `unread` | boolean | Whether it is unread (no `\Seen` flag). |
+| `body` | string | `get` only: the whole plain text. An HTML-only message's text is converted from its HTML. |
+
+**EmailAddress**: `{ name: string or null, address: string }`.
 
 ### Watches
 

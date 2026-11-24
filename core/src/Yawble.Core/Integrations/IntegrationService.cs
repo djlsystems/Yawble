@@ -143,6 +143,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         {
             if (IsMcpMethod(method)) return await DispatchMcpAsync(method, p, ct);
             if (IsApiMethod(method)) return await DispatchApiAsync(method, p, ct);
+            if (IsEmailIntegrationMethod(method)) return DispatchEmailIntegration(method, p);
             if (IsWatchMethod(method)) return await DispatchWatchAsync(method, p, ct);
             return method switch
             {

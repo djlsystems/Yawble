@@ -27,6 +27,7 @@ public sealed partial class IntegrationService
             "DELETE FROM api_choices WHERE team_id = $t;",
             "DELETE FROM api_rules WHERE team_id = $t;",
             "DELETE FROM api_teams WHERE team_id = $t;",
+            "DELETE FROM email_integration_teams WHERE team_id = $t;",
             "DELETE FROM watches WHERE team_id = $t;",
             // Host tasks (0027): the team's definitions and their approvals; run records stay (task_id goes NULL).
             "DELETE FROM host_task_approvals WHERE task_id IN (SELECT id FROM host_tasks WHERE team_id = $t);",

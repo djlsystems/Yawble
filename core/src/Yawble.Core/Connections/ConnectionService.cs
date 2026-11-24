@@ -348,7 +348,7 @@ public sealed class ConnectionService
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT name FROM apis WHERE connection_id = $i UNION ALL SELECT 'MCP: ' || name FROM mcp_servers WHERE connection_id = $i ORDER BY 1 COLLATE NOCASE;";
+        cmd.CommandText = "SELECT name FROM apis WHERE connection_id = $i UNION ALL SELECT 'MCP: ' || name FROM mcp_servers WHERE connection_id = $i UNION ALL SELECT 'Email: ' || name FROM email_integrations WHERE connection_id = $i ORDER BY 1 COLLATE NOCASE;";
         cmd.Parameters.AddWithValue("$i", id);
         using var r = cmd.ExecuteReader();
         var list = new List<string>();

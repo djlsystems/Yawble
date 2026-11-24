@@ -183,7 +183,7 @@ public static class BuiltInSchemas
     public static readonly ScriptSchema EmailMessage = Make("EmailMessage", """
         { "type": "object", "description": "An email message, without its attachments.",
           "properties": {
-            "id": { "type": "string", "description": "Stable id of the message in the mailbox." },
+            "id": { "type": "string", "description": "Opaque id of the message, per folder: stable while it stays in that folder or label. Also list's polling cursor: save the last one a list gave and pass it back as after." },
             "threadId": { "type": ["string", "null"], "description": "The conversation it belongs to." },
             "messageId": { "type": ["string", "null"], "description": "The Message-ID header." },
             "folder": { "type": "string", "description": "The folder it was read from." },
@@ -191,12 +191,20 @@ public static class BuiltInSchemas
             "to": { "type": "array", "items": { "$ref": "EmailAddress" }, "description": "The To recipients." },
             "cc": { "type": "array", "items": { "$ref": "EmailAddress" }, "description": "The Cc recipients." },
             "subject": { "type": "string", "description": "The subject line." },
-            "receivedAt": { "type": "string", "format": "date-time", "description": "When it arrived." },
+            "receivedAt": { "type": "string", "format": "date-time", "description": "When the server received it (INTERNALDATE): UTC ISO-8601, whole seconds, e.g. 2026-11-20T09:10:00Z." },
             "snippet": { "type": "string", "description": "The first 500 characters of the plain text." },
             "body": { "type": ["string", "null"], "description": "The plain text body, when it was fetched." },
             "hasAttachments": { "type": "boolean", "description": "Whether it has attachments." },
             "unread": { "type": "boolean", "description": "Whether it is unread." } },
           "required": ["id", "from", "subject", "receivedAt"] }
+        """);
+
+    public static readonly ScriptSchema EmailList = Make("EmailList", """
+        { "type": "object", "description": "What an email list returns: the messages, and whether its after no longer applied.",
+          "properties": {
+            "messages": { "type": "array", "items": { "$ref": "EmailMessage" }, "description": "The messages, in the list's order: by UID with after, else by (receivedAt, UID); the last is the newest." },
+            "cursorReset": { "type": "boolean", "description": "True when after no longer applied (the folder was renumbered): the messages are the since list, or none without since. Always present." } },
+          "required": ["messages", "cursorReset"] }
         """);
 
     public static readonly ScriptSchema ApiResponse = Make("ApiResponse", """
@@ -207,7 +215,7 @@ public static class BuiltInSchemas
           "required": ["status"] }
         """);
 
-    public static readonly IReadOnlyList<ScriptSchema> All = [TriggerFired, FolderChange, EventItem, EmailAddress, EmailMessage, ApiResponse];
+    public static readonly IReadOnlyList<ScriptSchema> All = [TriggerFired, FolderChange, EventItem, EmailAddress, EmailMessage, EmailList, ApiResponse];
 
     public static ScriptSchema? Find(string name) => All.FirstOrDefault(s => s.Name == name);
 

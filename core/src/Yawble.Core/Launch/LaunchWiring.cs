@@ -161,3 +161,23 @@ public sealed class LaunchWiring : IAsyncDisposable
         _gatewayHost?.Dispose();
     }
 }
+
+/// <summary>B131: what runs a script member's bus run (a tell to it): the script runner.</summary>
+public interface IScriptMemberRuns
+{
+    bool IsScriptMember(long memberId);
+    Task<RunResult> RunForBusAsync(RunContext run, CancellationToken ct);
+}
+
+/// <summary>
+/// B131: the bus's runner, dispatching by member kind: a script member's run goes to the script engine (through
+/// <see cref="IScriptMemberRuns"/>), an agent's to the runner it always had (the sandbox launcher, wrapped as before),
+/// unchanged. With no script runner set every run is an agent's.
+/// </summary>
+public sealed class ScriptDispatchRunner(IAgentRunner agents, Func<IScriptMemberRuns?> scripts) : IAgentRunner
+{
+    public IAgentRunner Agents { get; } = agents;
+
+    public Task<RunResult> RunAsync(RunContext run, CancellationToken ct) =>
+        scripts() is { } s && s.IsScriptMember(run.Member.Id) ? s.RunForBusAsync(run, ct) : Agents.RunAsync(run, ct);
+}
