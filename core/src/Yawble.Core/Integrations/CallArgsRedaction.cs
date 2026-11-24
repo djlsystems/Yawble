@@ -9,7 +9,7 @@ namespace Yawble.Core.Integrations;
 /// name stays; a value stays only when it is not message content:
 /// - a field named like content (body text, message, subject, html, description, note, ...) keeps only its length: "(57 chars)";
 ///   an object or list under such a name keeps its field names, each value as its length;
-/// - a phone number keeps its last 4 digits: "…0001" (a "whatsapp:" or other prefix stays);
+/// - a phone number keeps its last 4 digits: "...0001" (a "whatsapp:" or other prefix stays);
 /// - any other text longer than <see cref="MaxValue"/> characters, or with a line break, keeps only its length;
 /// - numbers, true/false and null stay.
 /// "body" holding an object is the request's body (its fields are judged by name); "body" holding text is content. The action and the
@@ -55,7 +55,7 @@ public static partial class CallArgsRedaction
     private static JsonNode? Value(string key, JsonNode? value, bool content, bool top)
     {
         // "body" holding an object at the top is the request's body: its fields are judged by their own names
-        var isContent = content || (ContentNames.Contains(Normal(key)) && !(top && value is JsonObject && Normal(key) == "body"));
+        var isContent = content || (IsContentName(key) && !(top && value is JsonObject && Normal(key) == "body"));
         switch (value)
         {
             case null:
@@ -88,6 +88,15 @@ public static partial class CallArgsRedaction
 
     private static JsonValue Length(string s) => JsonValue.Create($"({s.Length} chars)");
 
+    /// <summary>A content name, or one that ends in one of the plainest (html_body, MessageBody, bodyText, email_subject).</summary>
+    private static bool IsContentName(string key)
+    {
+        var n = Normal(key);
+        return ContentNames.Contains(n) || ContentEndings.Any(e => n.Length > e.Length && n.EndsWith(e, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static readonly string[] ContentEndings = ["body", "text", "message", "subject", "content", "html"];
+
     private static string Normal(string key) => key.Replace("_", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal);
 
     /// <summary>
@@ -100,7 +109,7 @@ public static partial class CallArgsRedaction
         if (!m.Success) return null;
         var digits = new string(m.Groups["number"].Value.Where(char.IsAsciiDigit).ToArray());
         if (digits.Length is < 7 or > 15) return null;
-        return JsonValue.Create(m.Groups["prefix"].Value + "…" + digits[^4..]);
+        return JsonValue.Create(m.Groups["prefix"].Value + "..." + digits[^4..]);
     }
 
     [GeneratedRegex(@"^(?<prefix>[A-Za-z][A-Za-z0-9+.-]{0,20}:)?(?<number>\+[0-9][0-9 ().-]{5,24}|\([0-9]{3}\)[0-9 .-]{6,12})$")]
