@@ -16,7 +16,7 @@ namespace Yawble.Core.Tests.Integrations;
 /// origin): gh for GitHub, glab for GitLab, az repos for Azure DevOps; Bitbucket, Gitea and no provider say so and run
 /// nothing. Fake gh / glab / az scripts that print their arguments; origins are addresses only (nothing is fetched).
 /// </summary>
-public class Card455PrToolsTests
+public class PrToolsProviderTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

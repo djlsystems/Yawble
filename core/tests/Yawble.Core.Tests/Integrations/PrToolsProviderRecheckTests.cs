@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Integrations;
 /// self-hosted GitLab with a port and nested groups; no pull request CLI at all; a credential in the origin never reaches
 /// the text; a person's rule allowing gh's pr_open does not make gh run on a GitLab origin. Rig copied from card 455's.
 /// </summary>
-public class Card457B075RecheckTests
+public class PrToolsProviderRecheckTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

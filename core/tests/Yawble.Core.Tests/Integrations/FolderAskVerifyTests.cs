@@ -23,7 +23,7 @@ namespace Yawble.Core.Tests.Integrations;
 /// refused; every refusal (Windows and Linux rules) raises no ask, no push and no count; the Concierge's lines and the
 /// org summary's title never carry the full path. Fakes only: a temporary database, fake runners, fictional paths.
 /// </summary>
-public sealed class Card498B111VerifyTests : IAsyncLifetime
+public sealed class FolderAskVerifyTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

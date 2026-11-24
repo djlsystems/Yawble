@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Integrations;
 /// B018 verify (card 185, TesterWren): gaps found while checking DeveloperMarlo's and DeveloperInes's delivery. Fakes
 /// only: a temporary database, fake timers and a recording tell; no real network, no real program.
 /// </summary>
-public sealed class B018VerifyGapTests : IDisposable
+public sealed class HostAskGroupingGapTests : IDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -29,7 +29,7 @@ public sealed class B018VerifyGapTests : IDisposable
     private readonly NetworkAskService _asks;
     private readonly long _alpha, _priya, _bo;
 
-    public B018VerifyGapTests()
+    public HostAskGroupingGapTests()
     {
         _policies = new PolicyStore(_db.ConnectionString);
         var layout = PolicyFixtures.Layout(TargetOs.Windows, AgentCli.Claude);
