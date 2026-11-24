@@ -21,7 +21,7 @@ public class B133VerifyTests
         var mailbox = new EmailMailbox(session);
         var first = await mailbox.ListAsync("INBOX", null, true, 1, ct);
         Assert.Single(first);
-        var second = await mailbox.ListAsync("INBOX", first[0].ReceivedAt, true, 1, ct);
+        var second = await mailbox.ListAsync("INBOX", null, true, 1, first[0].Cursor, ct);
         Assert.Single(second);
         Assert.NotEqual(first[0].Id, second[0].Id);
     }
@@ -40,7 +40,7 @@ public class B133VerifyTests
         var mailbox = new EmailMailbox(session);
         var first = await mailbox.ListAsync("INBOX", null, true, 1, ct);
         Assert.Single(first);
-        var second = await mailbox.ListAsync("INBOX", first[0].ReceivedAt, true, 1, ct);
+        var second = await mailbox.ListAsync("INBOX", null, true, 1, first[0].Cursor, ct);
         Assert.Single(second);
         Assert.NotEqual(first[0].Id, second[0].Id);
     }
@@ -64,7 +64,7 @@ public class B133VerifyTests
         var first = Assert.Single(await mailbox.ListAsync("INBOX", null, false, 1, ct));
         var next = new FakeMessage(FakeImapMailbox.Plain("sender@example.test", address, "Next", "body"), timestamp) { GmailMessageId = 10000000, GmailThreadId = 10000000 };
         folder.Put(next);
-        var second = await mailbox.ListAsync("INBOX", first.ReceivedAt, false, 1, ct);
+        var second = await mailbox.ListAsync("INBOX", null, false, 1, first.Cursor, ct);
         Assert.Equal("Next", Assert.Single(second).Subject);
     }
     [Theory]
@@ -96,11 +96,11 @@ public class B133VerifyTests
         Assert.Equal(first.ReceivedAt, again.ReceivedAt);
         await mailbox.MarkReadAsync(first.Id, "INBOX", ct);
         await mailbox.MoveAsync(first.Id, "Archive", "INBOX", ct);
-        var second = Assert.Single(await mailbox.ListAsync("INBOX", first.ReceivedAt, true, 1, ct));
+        var second = Assert.Single(await mailbox.ListAsync("INBOX", null, true, 1, first.Cursor, ct));
         Assert.Equal("Second", second.Subject);
-        var third = Assert.Single(await mailbox.ListAsync("INBOX", second.ReceivedAt, true, 1, ct));
+        var third = Assert.Single(await mailbox.ListAsync("INBOX", null, true, 1, second.Cursor, ct));
         Assert.Equal("Third", third.Subject);
-        Assert.Empty(await mailbox.ListAsync("INBOX", third.ReceivedAt, true, 1, ct));
+        Assert.Empty(await mailbox.ListAsync("INBOX", null, true, 1, third.Cursor, ct));
     }
 }
 
