@@ -26,12 +26,19 @@ public sealed partial class NameLeakTests
     /// <summary>
     /// Project-history markers: working names, design-document references, phases and slices, and backlog or card numbers
     /// ("B118", "card 586", "Card478", "card-445"). A B-number right after a letter, a digit or '#' is not one (a hex
-    /// colour such as #B100FF, a commit hash).
+    /// colour such as #B100FF, a commit hash). B000 to B009 are not either: the app's own backlog labels use them as
+    /// examples and test data ("the item, e.g. B006").
     /// </summary>
     [GeneratedRegex(
         @"openshrimp|(?:design|spec) §|\bphase ?\d|\bslice \d|\bspikes?\b|-design\.md|\bw29833\b|" +
-        @"(?<![0-9A-Za-z#])B\d{3}(?!\d)|(?<![0-9A-Za-z])card[ _-]?#?\d{3}(?!\d)", RegexOptions.IgnoreCase)]
+        @"(?<![0-9A-Za-z#])B(?!00)\d{3}(?!\d)|(?<![0-9A-Za-z])card[ _-]?#?\d{3}(?!\d)", RegexOptions.IgnoreCase)]
     private static partial Regex History();
+
+    /// <summary>
+    /// Files from elsewhere, kept as they come, whose lines are not checked for project history (the vendor's name still
+    /// is): the public suffix list, whose GUIDs ("…-a08b-4241-b536-…") read as B-numbers.
+    /// </summary>
+    private static readonly HashSet<string> ThirdParty = ["core/src/Yawble.Core/Policy/public_suffix_list.dat"];
 
     /// <summary>
     /// Test-output files a run leaves in the repository root (core-full.xml, results.xml, full-skips.txt, a .trx): their
@@ -74,10 +81,37 @@ public sealed partial class NameLeakTests
         finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 
-    private static List<string> Scan(string root)
+    /// <summary>
+    /// Backlog and card numbers are history in a line and in a path; a hex colour, a backlog label the app gives as an
+    /// example (B001 to B009) and a four-digit card number are not.
+    /// </summary>
+    [Fact]
+    public void BacklogAndCardNumbers_AreFlaggedInLinesAndPaths_ButNotAHexColour()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "yawble-nameleak-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "tests"));
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "notes.md"), "intro\nfixed in B118 (card 586)\n");
+            File.WriteAllText(Path.Combine(root, "tests", "B135Tests.cs"), "class ScriptToolsTests { }\n");
+            File.WriteAllText(Path.Combine(root, "colours.css"), "a { color: #B100FF; }\n/* the item, e.g. B006; no card 9999 */\n");
+
+            var flagged = Scan(root, ["notes.md", "tests/B135Tests.cs", "colours.css"]);
+
+            Assert.Equal(["notes.md:2: fixed in B118 (card 586)", "tests/B135Tests.cs: the path"], flagged.Order());
+            Assert.Matches(History(), "fixed in B118");
+            Assert.Matches(History(), "see card 586");
+            Assert.DoesNotMatch(History(), "#B100FF");
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
+    private static List<string> Scan(string root) => Scan(root, RepositoryFiles(root));
+
+    private static List<string> Scan(string root, IEnumerable<string> files)
     {
         var problems = new List<string>();
-        foreach (var file in RepositoryFiles(root))
+        foreach (var file in files)
         {
             if (Vendor().IsMatch(VendorNames().Replace(file, "")) || History().IsMatch(file)) problems.Add($"{file}: the path");
             if (file == Self || file == "LICENSE") continue;
@@ -88,7 +122,7 @@ public sealed partial class NameLeakTests
             {
                 var line = lines[i];
                 if (Vendor().IsMatch(VendorNames().Replace(line, ""))) problems.Add($"{file}:{i + 1}: {Trim(line)}");
-                else if (History().IsMatch(line)) problems.Add($"{file}:{i + 1}: {Trim(line)}");
+                else if (!ThirdParty.Contains(file) && History().IsMatch(line)) problems.Add($"{file}:{i + 1}: {Trim(line)}");
             }
         }
         return problems;
