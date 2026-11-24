@@ -27,6 +27,8 @@ const props = defineProps<{
   initial?: ScriptDocument;
   /** Opened from a script member: its bindings and overrides show, and Use real names resolves through them. */
   memberId?: number | null;
+  /** The back button's text (opened from a member: back to its tile). */
+  backLabel?: string;
 }>();
 const emit = defineEmits<{ saved: [r: ScriptSaveResult]; close: [] }>();
 const s = scriptsApi(props.api);
@@ -190,7 +192,7 @@ function pickVersion(e: Event) {
 <template>
   <div class="script-editor" data-test="script-editor">
     <div class="bar row">
-      <button type="button" class="ghost" data-test="editor-back" @click="emit('close')">← Scripts</button>
+      <button type="button" class="ghost" data-test="editor-back" @click="emit('close')">{{ backLabel ?? '← Scripts' }}</button>
       <strong class="name">{{ doc?.name ?? current?.key ?? 'New script' }}</strong>
       <span v-if="current" class="muted"><code>{{ current.key }}</code></span>
       <label v-if="versions.length" class="muted">Version

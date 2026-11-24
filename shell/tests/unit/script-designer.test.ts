@@ -5,10 +5,12 @@
 // through the component's own node slot. Fakes only: no core; made-up names and values only.
 import { enableAutoUnmount, flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TeamSummary, YawbleApi } from '../../src/shared/api';
+import type { AgentCard, TeamSummary, YawbleApi } from '../../src/shared/api';
+import ScriptMemberPane from '../../src/renderer/src/components/ScriptMemberPane.vue';
 import ScriptEditor from '../../src/renderer/src/components/scripts/ScriptEditor.vue';
+import ScriptsLibrary from '../../src/renderer/src/components/scripts/ScriptsLibrary.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
-import { INBOX_SMS_ALERT, pretty } from '../../src/renderer/src/scripts/api';
+import { INBOX_SMS_ALERT as TEMPLATE, pretty } from '../../src/renderer/src/scripts/api';
 import {
   applySuggestion, catalogApi, deriveRequires, expressionSuggestions, ioInText, ioOutText, isAliasDocument, schemaFields, stepIO,
   suggestAt, withDerivedRequires, type DesignContext, type ScriptCatalog, type SchemaFields,
@@ -90,6 +92,18 @@ const SCHEMAS: Record<string, Record<string, unknown>> = {
 };
 const FIELDS: SchemaFields = Object.fromEntries(Object.entries(SCHEMAS).map(([k, v]) => [k, schemaFields(v)]));
 
+/**
+ * The template in the alias form (mail, sms): the shipped template names its integrations by real names ("Support inbox",
+ * "Twilio"), which this catalog does not have, so the tests rename them to aliases a member's bindings resolve.
+ */
+const INBOX_SMS_ALERT: ScriptDocument = (() => {
+  const alias: Record<string, string> = { 'Support inbox': 'mail', Twilio: 'sms' };
+  const d = JSON.parse(JSON.stringify(TEMPLATE)) as ScriptDocument;
+  for (const s of d.steps!) if (typeof s.use === 'string' && alias[s.use]) s.use = alias[s.use];
+  d.requires = (d.requires ?? []).map((r) => ({ ...r, name: alias[r.name] ?? r.name }));
+  return d;
+})();
+
 /** The template in the real-name form. */
 function realDoc(): ScriptDocument {
   const d = JSON.parse(JSON.stringify(INBOX_SMS_ALERT)) as ScriptDocument;
@@ -105,7 +119,7 @@ function realDoc(): ScriptDocument {
 }
 
 interface Call { method: string; params: any }
-function fakeApi(opts: { doc?: ScriptDocument; member?: any; realNames?: any } = {}) {
+function fakeApi(opts: { doc?: ScriptDocument; member?: any; realNames?: any; more?: Record<string, (p: any) => unknown> } = {}) {
   const calls: Call[] = [];
   const handlers: Record<string, (p: any) => unknown> = {
     'scripts.get': (p) => ({ id: 1, key: 'inbox-sms-alert', name: 'Inbox SMS alert', description: '', version: p.version ?? 3, ok: true,
@@ -117,6 +131,7 @@ function fakeApi(opts: { doc?: ScriptDocument; member?: any; realNames?: any } =
     'schemas.get': (p) => ({ name: p.name, description: '', version: 1, builtIn: true, schema: SCHEMAS[p.name], createdAt: at }),
     'scripts.memberGet': () => opts.member,
     'scripts.useRealNames': () => opts.realNames,
+    ...opts.more,
   };
   const api = {
     getInfo: async () => ({}), getAvailableBackends: async () => [], onEvent: () => () => {}, openTerminal: async () => {}, pickFolder: async () => null,
@@ -663,5 +678,113 @@ describe('typed in and out, real names, overrides and the canvas', () => {
     await flushPromises();
     expect(w.find('[data-test=expr-suggestions]').exists()).toBe(false);
     expect(jsonText(w)).toBe(before);
+  });
+});
+
+describe('the designer opened from a script member', () => {
+  const card = { member: { id: 9, teamId: 1, name: 'Poller', role: 'member' } } as unknown as AgentCard;
+  const realBindings = { 'Example Support Inbox': 'Other Inbox' };
+  const scriptMember = (over: Record<string, unknown> = {}) => ({
+    memberId: 9, teamId: 1, team: 'Support', name: 'Poller', scriptId: 1, script: 'inbox-sms-alert', version: 2, runsVersion: 2,
+    settings: {}, bindings: realBindings, timeoutMinutes: 10, consecutiveFailures: 0, running: false, lastRun: null, nextTriggerAt: null,
+    integrations: [{ name: 'Example Support Inbox', kind: 'email', uses: 'Other Inbox', overridden: true },
+      { name: 'Example Texting', kind: 'api', uses: 'Example Texting', overridden: false }],
+    ...over,
+  });
+  const paneHandlers = {
+    'scripts.runs': () => [],
+    'scripts.memberState': () => ({ memberId: 9, variables: {}, consecutiveFailures: 0, updatedAt: null }),
+    'scripts.memberFiles': () => ({ memberId: 9, files: [] }),
+    'triggers.list': () => [],
+    'integrations.emailList': () => [],
+    'integrations.apiList': () => [],
+    'scripts.save': () => ({ id: 1, key: 'inbox-sms-alert', version: 4, ok: true, draft: false, check: clean }),
+  };
+
+  /** The member pane, and the editor its Edit script opens (teleported to the body, so found as a component). */
+  async function openFromPane(f: ReturnType<typeof fakeApi>) {
+    const pane = mount(ScriptMemberPane, { props: { card, api: f.api, pollMs: 60_000 }, attachTo: document.body });
+    await flushPromises();
+    expect(pane.findComponent(ScriptEditor).exists()).toBe(false);
+    await pane.get('[data-test=script-member-edit]').trigger('click');
+    await flushPromises();
+    const ed = pane.findComponent(ScriptEditor);
+    expect(ed.props('memberId')).toBe(9);
+    await ed.get('[data-test=editor-tab-flowchart]').trigger('click');
+    await flushPromises();
+    return { pane, ed };
+  }
+
+  it('Edit script on the member pane opens the member\'s script with its overrides as "Real name → Other"', async () => {
+    const f = fakeApi({ member: scriptMember(), more: paneHandlers });
+    const { pane, ed } = await openFromPane(f);
+    expect(pane.get('[data-test=script-member-edit]').text()).toBe('Edit script');
+    expect(document.body.querySelector('[data-test=script-member-editor] [data-test=script-editor]')).not.toBeNull();
+    expect(f.of('scripts.get').at(-1)!.params.script).toBe('inbox-sms-alert');
+    expect(f.of('scripts.memberGet').map((c) => c.params)).toContainEqual({ memberId: 9 });
+    expect(f.of('scripts.catalog')[0]!.params).toEqual({ teamId: 1 });
+    expect(ed.findAll('[data-test=script-require-override]').map((r) => r.text())).toEqual(['Example Support Inbox → Other Inbox']);
+    await pick(ed, 'list');
+    expect(ed.get('[data-test=form-override]').text()).toBe('Example Support Inbox → Other Inbox');
+    await pick(ed, 'text');
+    expect(ed.find('[data-test=form-override]').exists()).toBe(false);
+    // Back: the tile again.
+    expect(ed.get('[data-test=editor-back]').text()).toBe('← Poller');
+    await ed.get('[data-test=editor-back]').trigger('click');
+    await flushPromises();
+    expect(pane.findComponent(ScriptEditor).exists()).toBe(false);
+    expect(document.body.querySelector('[data-test=script-member-editor]')).toBeNull();
+  });
+
+  it('Use real names from the member sends the member\'s bindings', async () => {
+    const bindings = { mail: 'Example Support Inbox', sms: 'Example Texting' };
+    const member = scriptMember({ bindings, integrations: [
+      { name: 'mail', kind: 'email', uses: 'Example Support Inbox', overridden: false }, { name: 'sms', kind: 'api', uses: 'Example Texting', overridden: false }] });
+    const f = fakeApi({ doc: INBOX_SMS_ALERT, member, more: paneHandlers,
+      realNames: { document: realDoc(), renamed: { mail: 'Example Support Inbox', sms: 'Example Texting' }, unresolved: [] } });
+    const { ed } = await openFromPane(f);
+    await ed.get('[data-test=editor-real-names]').trigger('click');
+    await flushPromises();
+    expect(f.of('scripts.useRealNames')).toHaveLength(1);
+    expect(f.of('scripts.useRealNames')[0]!.params.bindings).toEqual(bindings);
+    expect(docOf(ed)).toEqual(realDoc());
+  });
+
+  it('Save from there saves a new version of the script and leaves the member\'s pin and bindings alone', async () => {
+    const f = fakeApi({ member: scriptMember(), more: paneHandlers });
+    const { ed } = await openFromPane(f);
+    await ed.get('[data-test=editor-save]').trigger('click');
+    await flushPromises();
+    expect(f.of('scripts.save')).toHaveLength(1);
+    expect(JSON.parse(f.of('scripts.save')[0]!.params.document)).toEqual(realDoc());
+    expect(ed.get('[data-test=editor-saved]').text()).toContain('version 4');
+    // Only reads of the member: no memberUpdate (pin or bindings) or any other member write.
+    const memberCalls = new Set(f.calls.map((c) => c.method).filter((m) => m.startsWith('scripts.member')));
+    expect([...memberCalls].sort()).toEqual(['scripts.memberFiles', 'scripts.memberGet', 'scripts.memberState']);
+  });
+
+  it('a Visitor gets Open script and the editor read-only, still with the overrides', async () => {
+    applyRemoteAccess('read');
+    const f = fakeApi({ member: scriptMember(), more: paneHandlers });
+    const { pane, ed } = await openFromPane(f);
+    expect(pane.get('[data-test=script-member-edit]').text()).toBe('Open script');
+    expect(ed.find('[data-test=editor-save]').exists()).toBe(false);
+    expect(ed.findAll('[data-test=script-require-override]')).toHaveLength(1);
+  });
+  it('opened from the library: no member, so no arrows', async () => {
+    const f = fakeApi({ member: scriptMember(), more: { 'scripts.list': () => [{ id: 1, key: 'inbox-sms-alert', name: 'Inbox SMS alert', description: '',
+      latestVersion: 3, runnableVersion: 3, draft: false, updatedAt: at, usedBy: [{ teamId: 1, team: 'Support', memberId: 9, member: 'Poller', version: 2 }] }] } });
+    const w = mount(ScriptsLibrary, { props: { api: f.api, teams }, attachTo: document.body });
+    await flushPromises();
+    await w.get('[data-test=script-open]').trigger('click');
+    await flushPromises();
+    await w.get('[data-test=editor-tab-flowchart]').trigger('click');
+    await flushPromises();
+    expect(f.of('scripts.memberGet')).toHaveLength(0);
+    expect(w.findAll('[data-test=script-require]').length).toBeGreaterThan(0);
+    expect(w.find('[data-test=script-require-override]').exists()).toBe(false);
+    await pick(w, 'list');
+    expect(w.find('[data-test=form-override]').exists()).toBe(false);
+    expect(w.text()).not.toContain('→ Other Inbox');
   });
 });
