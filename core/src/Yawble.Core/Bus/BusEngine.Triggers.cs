@@ -2,8 +2,8 @@ using Yawble.Core.Triggers;
 
 namespace Yawble.Core.Bus;
 
-/// <summary>What one trigger fire did.</summary>
-public sealed record TriggerFire(string Outcome, long? Seq, string? Reason);
+/// <summary>What one trigger fire did. <paramref name="ScriptRunId"/>: the script run a script member's fire started, or recorded as skipped.</summary>
+public sealed record TriggerFire(string Outcome, long? Seq, string? Reason, long? ScriptRunId = null);
 
 /// <summary>
 /// Triggers and wakes. The pump loop sweeps them at most every

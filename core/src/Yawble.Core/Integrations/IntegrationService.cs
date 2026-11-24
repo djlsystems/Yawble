@@ -829,7 +829,9 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
             INSERT INTO integration_calls (at, integration, team, member, workflow, args, decision, rule, exit_code, duration_ms, output_bytes, via, user_name)
             VALUES ($at, $i, $team, $m, $w, $a, $d, $r, $x, $ms, $b, $via, $u);
             """,
-            ("$at", Now()), ("$i", integration), ("$team", team), ("$m", member), ("$w", workflow), ("$a", CliRunner.Redact(JsonSerializer.Serialize(args))),
+            // B143: an API's or Email's arguments keep their names and only the values that are not message content (CallArgsRedaction)
+            ("$at", Now()), ("$i", integration), ("$team", team), ("$m", member), ("$w", workflow),
+            ("$a", CliRunner.Redact(JsonSerializer.Serialize(CallArgsRedaction.ForLog(integration, args)))),
             ("$d", decision), ("$r", rule), ("$x", output?.ExitCode), ("$ms", output is null ? null : (long)output.Duration.TotalMilliseconds),
             ("$b", output?.Bytes), ("$via", who?.Via), ("$u", who?.User));
 

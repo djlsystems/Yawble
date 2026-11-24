@@ -79,8 +79,8 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
     {
         var fire = Start(member.Id, source, payload);
         return fire.Started
-            ? new TriggerFire("fired", null, null)
-            : new TriggerFire("skipped", null, fire.Reason);
+            ? new TriggerFire("fired", null, null, fire.RunId)
+            : new TriggerFire("skipped", null, fire.Reason, fire.RunId);
     }
 
     /// <summary>A start in the background (a trigger's fire, Run now).</summary>
@@ -438,7 +438,9 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
 
         public Task StepCompletedAsync(ScriptStepRecord rec, ScriptRunCheckpoint cp)
         {
-            store.StepCompleted(runId, rec.StepId, rec.Type, rec.Input, rec.Output, rec.Status, rec.StartedAt, rec.EndedAt);
+            // A failed step has no output: its row keeps the reason instead ({ "error": ... }, scrubbed by the store).
+            var output = rec.Output ?? (rec.Error is { } error ? new JsonObject { ["error"] = error } : null);
+            store.StepCompleted(runId, rec.StepId, rec.Type, rec.Input, output, rec.Status, rec.StartedAt, rec.EndedAt);
             // Written before the next step starts: a restart resumes after this step.
             store.SetCheckpoint(runId, cp.ToJson());
             return Task.CompletedTask;
