@@ -26,7 +26,7 @@ const members = reactive<{ name: string; cli: AgentCliId; model: string; role: s
 // ---- models: each row picks one of its agent's models (each with its "from" hint), its default, or types one (Custom…)
 const models = useAgentModels(api);
 const { defaultLabel, modelsOf, loadModels } = models;
-// ---- B147: roles (each row's role picker fills its agent and model) and who the Manager may hire, from the defaults.
+// ---- Roles (each row's role picker fills its agent and model) and who the Manager may hire, from the defaults.
 // An older core without roles: no picker; without a default hire list: the section starts empty (any agent).
 const roles = ref<RoleRow[]>([]);
 const hireList = reactive<HireRow[]>([]);

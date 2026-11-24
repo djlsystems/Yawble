@@ -27,7 +27,7 @@ const country = ref('en-US');
 const countries = ref<{ code: string; label: string }[]>([]);
 const usedCount = ref(0);
 const rejected = ref<{ line: string; reason: string }[]>([]);
-// B147: the role catalog (saved at once by its own buttons) and the default hire list (kept by the tab's Save). An
+// The role catalog (saved at once by its own buttons) and the default hire list (kept by the tab's Save). An
 // older core without them: the Roles section and the hire list are not shown, and Save sends no hireList.
 const models = useAgentModels(api);
 const roles = ref<RoleRow[] | null>(null);

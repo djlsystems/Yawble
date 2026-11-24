@@ -26,7 +26,7 @@ export function useAgentModels(api: YawbleApi) {
   return { profiles, defaultLabel, modelsOf, loadModels, loadProfiles };
 }
 
-/** The role a member was hired as (B147): member.hireRole from teams.agents; null when none. member.role stays
+/** The role a member was hired as: member.hireRole from teams.agents; null when none. member.role stays
  *  'manager' | 'member' and is never read as a hire role. */
 export function hireRoleOf(m: { hireRole?: string | null }): string | null {
   return m.hireRole && m.hireRole.trim() ? m.hireRole.trim() : null;

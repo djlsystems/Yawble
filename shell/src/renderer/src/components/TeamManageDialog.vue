@@ -77,7 +77,7 @@ function act(method: string, params: Record<string, unknown> = {}, done?: (r: an
   }, method);
 }
 
-// ---- B147: who the Manager may hire (teams.hireList, teams.setHireList): rows of a role, its agent and model, from the
+// ---- Who the Manager may hire (teams.hireList, teams.setHireList): rows of a role, its agent and model, from the
 // role catalog (roles.list). An empty list lets the Manager hire any agent. An older core: a note.
 const agentOptions = useAgentOptions(api);
 const models = useAgentModels(api);
