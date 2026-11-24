@@ -371,7 +371,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
     }
 
     /// <summary>
-    /// B143: the one warning line for a failed run, from its finished row (the reason as the store scrubbed it): the script
+    /// the one warning line for a failed run, from its finished row (the reason as the store scrubbed it): the script
     /// run, the member (qualified), the script key@version, the trigger, the failed step's id and type, the integration and
     /// action it called, and the duration. Never the step's input or output (they may carry message content). Never throws.
     /// </summary>

@@ -655,7 +655,7 @@ export interface TaskPreview {
 }
 export interface RunSlots { running: number; limit: number; queued: number }
 /** folderAsks: folder asks waiting for the person (folder.asks, B111), already counted in needsYou. Older cores omit it. */
-/** newest (B143): the newest question or request waiting for the person, with its team; null or absent when none (or an older core). */
+/** newest: the newest question or request waiting for the person, with its team; null or absent when none (or an older core). */
 export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; networkAsks?: number; toolAsks?: number; folderAsks?: number; heavy?: LeaseSnapshot; newest?: { kind: string; title: string; team?: string | null; at?: string } | null }
 /** How the person answers a folder ask: read-write (only for a read-write ask), read-only, or deny. Never wider than asked. */
 export type FolderAskChoice = 'readwrite' | 'read' | 'deny';

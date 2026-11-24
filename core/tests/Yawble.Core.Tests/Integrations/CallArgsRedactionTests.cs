@@ -4,7 +4,7 @@ using Yawble.Core.Integrations;
 
 namespace Yawble.Core.Tests.Integrations;
 
-/// <summary>Card 613 (B143 part 4): what integration_calls.args keeps of an API's or Email's arguments (<see cref="CallArgsRedaction"/>).</summary>
+/// <summary>What integration_calls.args keeps of a call's arguments, for every kind of integration (<see cref="CallArgsRedaction"/>).</summary>
 public class CallArgsRedactionTests
 {
     private static string R(string json) => CallArgsRedaction.Redact(JsonNode.Parse(json)!.AsObject()).ToJsonString();
@@ -56,14 +56,39 @@ public class CallArgsRedactionTests
     }
 
     [Fact]
-    public void ForLog_AppliesToApisAndEmailOnly_AndLeavesTheOtherArgsAsTheyAre()
+    public void ForLog_RedactsApisEmailAndMcpArguments_AndLeavesTheOtherArgsAsTheyAre()
     {
         string[] args = ["CreateMessage", """{"Body":"secret words"}""", "script run 4"];
         Assert.Equal(["CreateMessage", """{"Body":"(12 chars)"}""", "script run 4"], CallArgsRedaction.ForLog("api:twilio", args));
         Assert.Equal("""{"Body":"(12 chars)"}""", CallArgsRedaction.ForLog("email:Sales inbox", args)[1]);
-        Assert.Same(args, CallArgsRedaction.ForLog("gh", args)); // a CLI's argv stays (CliRunner.Redact still scrubs it)
-        Assert.Same(args, CallArgsRedaction.ForLog("mcp:fake", args));
+        Assert.Equal(["CreateMessage", """{"Body":"(12 chars)"}""", "script run 4"], CallArgsRedaction.ForLog("mcp:fake", args));
         string[] notJson = ["CreateMessage", "{\"cut by the scrubber"];
         Assert.Same(notJson, CallArgsRedaction.ForLog("api:twilio", notJson));
+        string[] task = ["anything"];
+        Assert.Same(task, CallArgsRedaction.ForLog("task:build", task));
+    }
+
+    [Fact]
+    public void CommandLine_KeepsTheActionAndOptionNames_AndOnlyTheValuesThatAreNotContent()
+    {
+        string[] issue = ["issue", "create", "--title", "Server down", "--body", "It fell over at noon", "--label", "bug", "-R", "acme/web"];
+        Assert.Equal(["issue", "create", "--title", "(11 chars)", "--body", "(20 chars)", "--label", "bug", "-R", "acme/web"],
+            CallArgsRedaction.ForLog("gh", issue));
+        string[] shortForms = ["pr", "create", "-t", "Fix", "-b", "Long text", "--base=main", "--body=inline words"];
+        Assert.Equal(["pr", "create", "-t", "(3 chars)", "-b", "(9 chars)", "--base=main", "--body=(12 chars)"], CallArgsRedaction.ForLog("gh", shortForms));
+        string[] fields = ["api", "repos/acme/web/issues", "-f", "title=Hello", "-F", "state=open", "--raw-field=body=Hi there"];
+        Assert.Equal(["api", "repos/acme/web/issues", "-f", "title=(5 chars)", "-F", "state=open", "--raw-field=body=(8 chars)"],
+            CallArgsRedaction.ForLog("gh", fields));
+    }
+
+    [Fact]
+    public void CommandLine_PhoneNumbersKeepTheirLast4_AndMultiLineOrVeryLongWordsTheirLength()
+    {
+        var longWord = new string('x', CallArgsRedaction.MaxArgvValue + 1);
+        string[] args = ["communication", "sms", "send", "--to", "+15550001234", "--sender=+15550009999", "line one\nline two", longWord];
+        Assert.Equal(["communication", "sms", "send", "--to", "...1234", "--sender=...9999", "(17 chars)", $"({longWord.Length} chars)"],
+            CallArgsRedaction.ForLog("az", args));
+        string[] plain = ["group", "list", "--query", "[].name", "-o", "tsv"];
+        Assert.Same(plain, CallArgsRedaction.ForLog("az", plain));
     }
 }
