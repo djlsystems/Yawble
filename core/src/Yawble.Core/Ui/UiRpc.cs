@@ -234,7 +234,8 @@ public sealed class UiRpc(
 
     // ---------------------------------------------------------------- triggers
 
-    private static TriggerDraft TriggerDraftOf(JsonObject? p, bool preview = false)
+    /// <summary>triggers.save's parameters as a draft (also read by the script_trigger_set tool, B139, so both read one shape).</summary>
+    internal static TriggerDraft TriggerDraftOf(JsonObject? p, bool preview = false)
     {
         long? OptLong(string name) => p?[name] is JsonValue v && v.TryGetValue<long>(out var l) ? l : null;
         bool Flag(string name, bool fallback) => p?[name] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : fallback;
@@ -269,8 +270,16 @@ public sealed class UiRpc(
     {
         var teams = await bus.TeamsAsync(ct);
         var needsYou = 0;
-        foreach (var t in teams) needsYou += (await bus.OpenDecisionsAsync(t.Name, ct)).Count;
+        var newest = new List<NeedsYouItem>(); // B143: the OS notification names the newest thing waiting and its team
+        foreach (var t in teams)
+        {
+            var open = await bus.OpenDecisionsAsync(t.Name, ct);
+            needsYou += open.Count;
+            foreach (var d in open)
+                newest.Add(new(d.OccurredAt, "question", Bus.DecisionAsk.Read(d.Payload).Headline, t.Name));
+        }
         needsYou += bus.Integrations?.PendingCount() ?? 0; // calls waiting for the person's approval
+        NewestAsks(newest, teams);
         var networkAsks = bus.NetworkAsks?.PendingCount() ?? 0; // hosts agents were refused, waiting for the person (network.asks)
         needsYou += networkAsks;
         var toolAsks = bus.ToolAsks?.PendingCount() ?? 0; // tools agents asked the person to install (tools.asks)
@@ -297,7 +306,32 @@ public sealed class UiRpc(
             ["networkAsks"] = networkAsks,
             ["toolAsks"] = toolAsks,
             ["folderAsks"] = folderAsks,
+            // The newest question or request waiting for the person: { kind, title, team, at }; null when none has a time (or none waits).
+            ["newest"] = newest.OrderByDescending(n => n.At).FirstOrDefault() is { } top
+                ? new JsonObject { ["kind"] = top.Kind, ["title"] = top.Title.Length <= 120 ? top.Title : top.Title[..120] + "…", ["team"] = top.Team, ["at"] = top.At.ToString("O", System.Globalization.CultureInfo.InvariantCulture) }
+                : null,
         };
+    }
+
+    private sealed record NeedsYouItem(DateTimeOffset At, string Kind, string Title, string? Team);
+
+    /// <summary>The approvals, network, tool and folder requests waiting for the person, each with its time, kind, short title and team.</summary>
+    private void NewestAsks(List<NeedsYouItem> into, IReadOnlyList<TeamSummary> teams)
+    {
+        string? TeamName(long id) => teams.FirstOrDefault(t => t.Id == id)?.Name;
+        void Add(string at, string kind, string title, string? team)
+        {
+            if (DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var when)) into.Add(new(when, kind, title, team));
+        }
+        try
+        {
+            foreach (var a in bus.Integrations?.Asks(null, pendingOnly: true) ?? [])
+                Add(a.At, "approval", $"{a.Integration} {a.Action ?? (a.Args.Count > 0 ? a.Args[0] : "")}".Trim(), TeamName(a.TeamId));
+            foreach (var a in bus.NetworkAsks?.Asks() ?? []) Add(a.At, "host", a.Host, a.Team);
+            foreach (var a in bus.ToolAsks?.Asks() ?? []) Add(a.At, "tool", a.Tool, a.Team);
+            foreach (var a in bus.FolderAsks?.Asks() ?? []) Add(a.At, "folder", a.Path, a.Team);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException) { /* the counts stand; the notification just names nothing */ }
     }
 
     /// <summary>
@@ -1197,6 +1231,7 @@ public sealed class UiRpc(
         return action switch
         {
             DecisionActions.AllowLocalhostMac => IsMacOS() ? null : MacOnlyActionReason,
+            DecisionActions.CloseOverFail => null, // B142: the person's yes; the bus records it on the answer
             _ => "The app does not know this action",
         };
     }
@@ -1245,7 +1280,7 @@ public sealed class UiRpc(
             if (repos is not null) body = Attachments.WithImages(body, Attachments.Save(Path.Combine(repos.TeamRoot(team.Name), Teams.TeamDocuments.Folder), images!));
             if (action is not null) await ApplyActionAsync(action, teamId, c);
             return body;
-        }, ct);
+        }, ct, action);
         var result = new JsonObject { ["seq"] = message.Seq };
         if (action is not null) result["applied"] = action;
         return result;
@@ -1260,6 +1295,8 @@ public sealed class UiRpc(
             case DecisionActions.AllowLocalhostMac:
                 await dispatch("teams.localhost", new JsonObject { ["teamId"] = teamId, ["on"] = true }, ct);
                 break;
+            case DecisionActions.CloseOverFail:
+                break; // B142: no setting changes; BusEngine.PersonAnswerAsync records the yes on the answer
             default:
                 throw new RpcException("bad_params", $"the app does not know the action '{action}'");
         }

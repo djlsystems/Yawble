@@ -118,7 +118,7 @@ public sealed class GrokKeeper : IAsyncDisposable
             // refused request is where grok may clear auth.json (B128). Only `grok models` is tried then.
             if (ReferenceEquals(args, _options.FallbackArgs) && !(_home.ReadSession()?.HasRefreshToken ?? false))
             {
-                _options.Log?.Invoke("grok keeper: the session has no refresh token: the one-turn prompt is not run");
+                Logs.Diag.Debug("grok", "grok keeper: the session has no refresh token: the one-turn prompt is not run");
                 continue;
             }
             // A copy of the sign-in as it was: a run that leaves auth.json with no token gets it back.
@@ -128,15 +128,17 @@ public sealed class GrokKeeper : IAsyncDisposable
             {
                 var restored = _home.RestoreAuth(copy);
                 if (restored) Restores++;
-                _options.Log?.Invoke($"grok keeper: `grok {string.Join(' ', args)}` {outcome} and left auth.json with no sign-in; "
-                    + (restored ? "put back as it was before the run" : "it could not be put back"));
+                Logs.Diag.Warning("grok", $"grok keeper: `grok {string.Join(' ', args)}` {outcome} and left auth.json with no sign-in; "
+                    + (restored ? "put back as it was before the run" : "it could not be put back"), ("action", args[0]), ("status", outcome));
                 // The same refusal would clear it again: no further run this time.
                 break;
             }
             var after = _home.ReadSession();
             var changed = after is not null && (after.AccessToken != before.AccessToken || after.ExpiresAt != before.ExpiresAt);
             var fresh = after is not null && !after.ExpiredAt(_clock.GetUtcNow(), _options.RefreshAhead);
-            _options.Log?.Invoke($"grok keeper: `grok {string.Join(' ', args)}` {outcome}; session {(changed ? "refreshed" : "unchanged")}");
+            // B143: each check's runs at debug; the loop writes one line for a refresh or a failure.
+            Logs.Diag.Debug("grok", $"grok keeper: `grok {string.Join(' ', args)}` {outcome}; session {(changed ? "refreshed" : "unchanged")}",
+                ("action", args[0]), ("status", outcome));
             if (changed && fresh) return new GrokRefreshResult(true, true, $"refreshed by `grok {args[0]}`", after);
         }
         var final = _home.ReadSession();
@@ -258,7 +260,10 @@ public sealed class GrokKeeper : IAsyncDisposable
             if (_home.ReadSession() is not null)
             {
                 var result = await RefreshAsync();
-                _options.Log?.Invoke($"grok keeper: {result}");
+                // B143: a refresh or a failure is said; a check that found the session still fresh or unchanged is debug.
+                if (result.Changed) Logs.Diag.Info("grok", $"grok keeper: session refreshed ({result.Detail})", ("status", "refreshed"));
+                else if (!result.Valid) Logs.Diag.Warning("grok", $"grok keeper: {result.Detail}", ("status", "failed"));
+                else Logs.Diag.Debug("grok", $"grok keeper: {result}", ("status", "unchanged"));
             }
         }
     }

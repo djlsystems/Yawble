@@ -20,7 +20,8 @@ public class PromptsAndNoticesTests
         Assert.StartsWith("# Manager", manager);
         foreach (var needle in new[] { "`status`", "`tell`", "END YOUR TURN", "handed back", "run ended", "did not hand back", "interrupted",
                      "numbered items", "members/<team>/<name>", "never ask a member to push", "`workflow_complete`", "`hire`", "`hiring`", "FULL PATH", "already declared", "`needs_decision`",
-                     "Scheduled work (trigger", "act on that job only", "paid model run" })
+                     "Scheduled work (trigger", "act on that job only", "paid model run",
+                     "never close over a tester's FAIL", "`kind: accept-fail` or `wont-do`", "only the person's yes lets you declare over it" })
         {
             Assert.Contains(needle, manager);
         }

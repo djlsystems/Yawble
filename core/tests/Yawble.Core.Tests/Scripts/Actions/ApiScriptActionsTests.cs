@@ -155,7 +155,7 @@ public class ApiScriptActionsTests
     {
         var api = new FakeApi { Answer = new(400, "application/json", """{"code":21211,"message":"invalid To"}""") };
         var e = await Assert.ThrowsAsync<ScriptActionException>(() => new ApiScriptActionsProvider(api).For(Caller()).InvokeAsync(Call(), Ct));
-        Assert.Equal("""400: {"code":21211,"message":"invalid To"}""", e.Message);
+        Assert.Equal("""twilio CreateMessage (POST /x): HTTP 400: {"code":21211,"message":"invalid To"}""", e.Message);
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public class ApiScriptActionsTests
     {
         var api = new FakeApi { Answer = new(503, "text/plain", new string('x', 2000)) };
         var e = await Assert.ThrowsAsync<ScriptActionException>(() => new ApiScriptActionsProvider(api).For(Caller()).InvokeAsync(Call(), Ct));
-        Assert.StartsWith("503: xxx", e.Message);
+        Assert.StartsWith("twilio CreateMessage (POST /x): HTTP 503: xxx", e.Message);
         Assert.True(e.Message.Length < 600, e.Message.Length.ToString());
     }
 
@@ -172,7 +172,7 @@ public class ApiScriptActionsTests
     {
         var api = new FakeApi { Answer = new(0, "", "timed out after 30 s") };
         var e = await Assert.ThrowsAsync<ScriptActionException>(() => new ApiScriptActionsProvider(api).For(Caller()).InvokeAsync(Call(), Ct));
-        Assert.Equal("no answer: timed out after 30 s", e.Message);
+        Assert.Equal("twilio CreateMessage (POST /x): no answer: timed out after 30 s", e.Message);
     }
 
     [Fact]

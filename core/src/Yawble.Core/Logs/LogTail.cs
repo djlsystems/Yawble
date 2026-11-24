@@ -31,15 +31,16 @@ public sealed record LogTailEntry(
 
 /// <summary>
 /// What a tail lets through. <see cref="All"/> false (level "default"): warnings, errors and workflow events; true
-/// ("all"): every level. <see cref="Team"/> a team name, <see cref="Member"/> "Team/Name" (the member wins over the team).
+/// ("all"): every level but debug; <see cref="Debug"/> ("debug") lets debug entries through too. <see cref="Team"/> a team name, <see cref="Member"/> "Team/Name" (the member wins over the team).
 /// A member's own entries only: not its team's "&lt;Team&gt;" entries; a team's take those too (B101). <see cref="App"/>:
 /// only the activity log's entries about no team and no member (team null, member "app").
 /// </summary>
-public sealed record LogTailFilter(bool All = false, string? Team = null, string? Member = null, bool App = false)
+public sealed record LogTailFilter(bool All = false, string? Team = null, string? Member = null, bool App = false, bool Debug = false)
 {
     public bool Matches(LogTailEntry e)
     {
         if (!All && e.Level is not (LogLevels.Error or LogLevels.Warning) && !e.Workflow) return false;
+        if (!Debug && e.Level == LogLevels.Debug) return false;
         if (App && !(e.Team is null && e.Member == "app" && !e.MemberInText)) return false;
         if (Member is { } member)
         {
@@ -48,7 +49,9 @@ public sealed record LogTailFilter(bool All = false, string? Team = null, string
             if (e.Member is not null)
                 return string.Equals(e.Team, team, StringComparison.OrdinalIgnoreCase) && string.Equals(e.Member, name, StringComparison.OrdinalIgnoreCase);
             // A log that names members in passing (the Diagnostics log) matches the way logs.query matches it.
-            return e.MemberInText && e.Text?.Contains(name, StringComparison.OrdinalIgnoreCase) == true;
+            // Its name and its team both named: a bare name would match a namesake in another team (B143).
+            return e.MemberInText && e.Text is { } said && said.Contains(name, StringComparison.OrdinalIgnoreCase)
+                && said.Contains(team, StringComparison.OrdinalIgnoreCase);
         }
         if (Team is { } t)
         {
@@ -59,10 +62,25 @@ public sealed record LogTailFilter(bool All = false, string? Team = null, string
     }
 }
 
-/// <summary>The levels of a log entry, read from what the entry says (the logs keep no level of their own).</summary>
+/// <summary>
+/// The levels of a log entry. A structured Diagnostics line carries its own (<see cref="Diag"/>, in its fields column);
+/// every other entry's is read from what it says. <see cref="Debug"/>: routine lines the default views hide.
+/// </summary>
 public static partial class LogLevels
 {
-    public const string Error = "error", Warning = "warning", Info = "info";
+    public const string Error = "error", Warning = "warning", Info = "info", Debug = "debug";
+
+    /// <summary>The levels, most severe first.</summary>
+    public static readonly IReadOnlyList<string> All = [Error, Warning, Info, Debug];
+
+    /// <summary>A caller's level as one of <see cref="All"/> ("warn" is a warning; anything unknown is info).</summary>
+    public static string Normal(string? level) => level?.Trim().ToLowerInvariant() switch
+    {
+        Error => Error,
+        Warning or "warn" => Warning,
+        Debug => Debug,
+        _ => Info,
+    };
 
     [GeneratedRegex(@"(?i)\b(error|errors|failed|failure|exception|crash|crashed|fatal|unhandled|start_failed)\b")]
     private static partial Regex Errors();

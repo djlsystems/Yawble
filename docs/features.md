@@ -316,10 +316,17 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   2 to 4 **options** (each a button with a label of at most 40 characters and the reply it sends), and **details**
   (its findings, in Markdown, under the summary). A question in one Markdown text (`question`) still works and is
   shown as before.
-  - At most one option may carry an **action**, from a fixed list the app knows: today only `team.allowLocalhostMac`
-    (turn on the team's Allow localhost (macOS)). The agent only names it; nothing changes when it asks. When you
+  - At most one option may carry an **action**, from a fixed list the app knows: `team.allowLocalhostMac`
+    (turn on the team's Allow localhost (macOS)) and `workflow.closeOverFail` (below). The agent only names it; nothing changes when it asks. When you
     pick that option the app applies the action first, then sends the option's reply as your answer. Anything else
     named as an action is refused and the question is not asked.
+  - **Closing over a tester's FAIL** (B142): `workflow_complete` is refused (`tester_fail`) while a card's latest
+    tester hand-back in the workflow starts with FAIL (a later PASS clears it). The refusal names the card, quotes the
+    FAIL line and gives the ways forward: fix it and have the tester verify again; or ask you with `needs_decision`
+    plus `card`, `kind` (`accept-fail`, or `wont-do` with a `reason`) and `reason`. The yes option carries
+    `workflow.closeOverFail` (the app adds a yes and a no when the agent gives no options). Only your pick of that
+    option counts as the yes (typed text or the Concierge's answer does not); the declaration then goes through and
+    its payload lists the card in `closedOverFail: [{ card, tester, failLine, kind: "accepted" | "wont-do", reason }]`.
   - An option whose action you cannot apply is shown disabled with the reason: a Cloud Link Visitor ("Only a
     workgroup Member or an Owner can change this"), anything but the app or a cloud viewer ("Only the person can pick
     this, in the app"), a computer that is not a Mac ("Only on macOS").
@@ -578,15 +585,35 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
     (for `connect-denied`, the host and port it asked for). A host's plain-http and HTTPS refusals stay two rows. Its
     **Times** column says how many times, and in **All activity** the row's detail ends in ` (Nx)` when it counts
     more than one (` (5x)` for five). Refused paths are not folded into one row: the first few of each in a minute are
-    written, and the rest are counted in one more row written at the next such refusal after the minute. Every other
-    row's Times is 1.
+    written, and the rest are counted in one more row written at the next such refusal after the minute. The
+    refusals an agent CLI makes on its own in every run (the Codex `analytics-events` and `plugins/suggested` paths
+    refused with 403, and `/backend-api/ps/mcp` answered 401) are counted on one row per member, path and status for an
+    hour, across that member's runs. Every other row's Times is 1.
   - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
   - **Work history**: **Team messages** and **Board history**.
-  - **Diagnostics**: what the app itself reported (`<data>/logs/`).
+  - **Diagnostics**: what the app itself reported (`<data>/logs/`). Each entry has a time, where it came from (core or
+    shell), its message, a **Level** and **Fields**:
+    - The levels are error, warning, info and debug. The core gives each of its lines its level; an older line and a
+      line the app writes without one (on standard error) get theirs from what they say.
+    - Debug is for routine lines: a run admitted, the heavy-work lease held or released (passing the 30-minute limit is
+      still said), each clone fetched at start-up, a Grok session check that changed nothing, the daily prune, a push to
+      origin. They are hidden unless the Level filter asks for them.
+    - Fields are `key=value` pairs with the ids the line is about: `level`, `area` (`teams`, `bus`, `lease`, `grok`,
+      `logs`, `link`, `doctor`...) and, where known, `team`, `member`, `workflow`, `run`, `script`, `step`, `action`,
+      `integration`, `status`, `ms` and `attempt`. A value with a space in it is in double quotes.
+    - At start-up one line says how many clones were fetched and how many were behind ("start-up fetch-back: fetched 23
+      clones, 7 behind"). After that, a clone gets a line only when its state changes. A branch whose work does not merge
+      cleanly is a warning. A failed push names the branch, git's exit code and the remote. A failed periodic check
+      names the check and the error. When the Cloud Link connection ends, the line gives the exception, how long the
+      connection lasted, which connection it was and the delay before the next one.
 - Filters: team, member, each log's own columns, a date range, and free text across every column. The Member filter
   picks a member (that member's entries only), a team as a whole (its members' entries and the team's own), or, in All
-  activity, `app` (the app's own entries only); picking one clears the others. Every column sorts either way. Pages load as the table scrolls; a row opens to show every field.
+  activity, `app` (the app's own entries only); picking one clears the others. In Diagnostics the team and member
+  filters read a line's `team` and `member` fields, so a member is not matched by a namesake in another team. A line
+  without fields matches when it names both the member and its team. Diagnostics also has a **Level** filter: every level
+  but debug (the default), one level, or all of them, debug included (`logs.query` `level`: `default`, `error`,
+  `warning`, `info`, `debug` or `all`). Every column sorts either way. Pages load as the table scrolls; a row opens to show every field.
 - **Prune…** deletes a log's entries older than a chosen age, or all of them. It first says how many entries and files
   go, their date range, and what is lost, and deletes only after **Delete**. Approvals still waiting for an answer are
   never pruned, and an answered one is kept by when it was answered. Pruning Approvals also removes answered host tool
@@ -601,7 +628,8 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
   same redaction, so a row reads the same everywhere.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
 - A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
-  this computer by level (warnings, errors and workflow events by default, or everything), team and member, and
+  this computer by level (warnings, errors and workflow events by default, everything but debug with `all`, or
+  everything with `debug`), team and member, and
   redacted as above. It stops when the viewer stops it or disconnects.
 
 ## Repositories and git
@@ -784,6 +812,12 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 
 - It pairs once per program, with a code you approve in the window.
 - Access levels: `read`, `act` and `destructive`. Destructive calls wait for your approval in the window.
+- An approval request stays pending until you approve or deny it, however long that takes. The window shows when each
+  one was asked. When you approve, Yawble works the plan out again: the same plan runs, and a plan that changed becomes a
+  new request with the new plan, so a late approval never runs an outdated plan.
+- A request also ends when the program cancels it (`request_cancel`), when the program asks again for the same tool and
+  target (the newer request replaces the older one), after 7 days undecided (expired), or when the app restarts:
+  requests are kept in memory only.
 - It talks only to the running app on this computer. Nothing of it is reachable over Cloud Link.
 - Paired programs are listed and revoked in Settings > Companion.
 - Setup is in the [README](../README.md).

@@ -80,13 +80,20 @@ const edges = computed<Edge<FlowEdge>[]>(() => graph.value.edges.map((e) => ({
 })));
 
 // ---- undo and redo
-const history = createHistory(text.value);
+let history = createHistory(text.value);
 const tick = ref(0);
 let written = text.value;
 const canUndo = computed(() => tick.value >= 0 && history.canUndo);
 const canRedo = computed(() => tick.value >= 0 && history.canRedo);
-// The text changed elsewhere (the JSON view, a version loaded): it is a step of its own in the history.
-watch(text, (t) => { if (t !== written) { written = t; history.push(t); tick.value++; } });
+// The text changed elsewhere (the JSON view, a version loaded): it is a step of its own in the history. The first text
+// arriving into an empty editor (the script loading while this tab is already open) is the starting point, not an edit.
+watch(text, (t) => {
+  if (t === written) return;
+  const first = written.trim() === '';
+  written = t;
+  if (first) history = createHistory(t); else history.push(t);
+  tick.value++;
+});
 
 function write(edited: ScriptDocument) {
   const next = withDerivedRequires(doc.value, edited, props.catalog);
@@ -134,7 +141,14 @@ function onScriptStep(id: string) { selected.value = id; selectedEdge.value = nu
 // ---- the minimap: folded away by default on a small pane
 const canvasEl = ref<HTMLElement | null>(null);
 const showMap = ref(false);
-onMounted(() => { showMap.value = (canvasEl.value?.clientWidth ?? 0) >= MINIMAP_MIN_WIDTH; });
+// Decided once, when the canvas first appears: it may come after mount (the editor opens on the Flowchart before the
+// script has loaded), and the person's own toggle wins from then on.
+let mapDecided = false;
+watch(canvasEl, (el) => {
+  if (!el || mapDecided) return;
+  mapDecided = true;
+  showMap.value = el.clientWidth >= MINIMAP_MIN_WIDTH;
+}, { immediate: true });
 
 // ---- edits
 function onDragStop(e: NodeDragEvent) {

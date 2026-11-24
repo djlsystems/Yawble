@@ -54,7 +54,10 @@ using var dataLock = heldLock;
 Console.WriteLine("YAWBLE-STARTING");
 // Everything the core reports on standard error is also kept in <data>/logs/core-<day>.log (the Diagnostics log).
 var diagnostics = new Yawble.Core.Logs.DiagnosticLog(options.DataDir!, "core");
-Console.SetError(diagnostics.Tee(Console.Error));
+var rawStderr = Console.Error;
+// Structured lines (Logs.Diag) go to the log once, with their level and fields, and echo to the stderr under the tee.
+Yawble.Core.Logs.Diag.Attach(diagnostics, rawStderr);
+Console.SetError(diagnostics.Tee(rawStderr));
 Console.Error.WriteLine(CoreInfo.StartupLine());
 Yawble.Core.Storage.DataFolderAccess.Secure(options.DataDir!, Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!), line => Console.Error.WriteLine(line));
 // The IPC folders crashed launches left behind (no socket in them answers); never ours, never one that is still in use.
@@ -426,7 +429,12 @@ _ = Task.Run(async () =>
     while (true)
     {
         try { await doctorService.RunAsync(CancellationToken.None); }
-        catch (Exception e) { Console.Error.WriteLine($"doctor: the periodic check failed: {e.GetType().Name}"); }
+        catch (Exception e)
+        {
+            // B143: which check was running, the exception and its message.
+            Yawble.Core.Logs.Diag.Error("doctor", $"doctor: the periodic check failed: {e.GetType().Name}: {e.Message}",
+                ("check", doctorService.RunningCheck), ("exception", e.GetType().Name));
+        }
         await Task.Delay(TimeSpan.FromMinutes(15));
     }
 });

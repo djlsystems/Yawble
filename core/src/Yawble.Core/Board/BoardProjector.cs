@@ -247,8 +247,18 @@ public sealed class BoardProjector(BoardStore store)
         var how = m.Type switch { MessageTypes.WorkflowClosed => "closed", MessageTypes.WorkflowExpired => "expired", _ => "completed" };
         var p = Payload(m);
         var lastActivity = m.Type == MessageTypes.WorkflowExpired && Text(p, "endedAt") is { } la ? la : null;
+        // B142: the cards the person accepted closing over a tester's FAIL go to Done whatever their status and the tester rule.
+        var overFail = m.Type == MessageTypes.WorkflowCompleted
+            ? ClosedOverFail.Read(p).GroupBy(e => e.Card).ToDictionary(g => g.Key, g => g.Last())
+            : [];
+        var team = Split(m.Source).Team;
         foreach (var card in store.CardsOfWorkflow(m.CorrelationId))
         {
+            if (overFail.Remove(card.Id, out var accepted))
+            {
+                AcceptedOverFail(card, accepted);
+                continue;
+            }
             if (m.Type == MessageTypes.WorkflowExpired)
             {
                 if (card.Lane == Lanes.Done && card.EndedAt is not null) continue;
@@ -279,9 +289,23 @@ public sealed class BoardProjector(BoardStore store)
             else
                 store.AddTrail(card.Id, Who(m.Source), "workflow done", Text(Payload(m), "delivered") ?? "the work is declared complete", _at);
         }
+        // A listed card of another workflow of the same team (claimed elsewhere since) is closed the same way.
+        foreach (var accepted in overFail.Values)
+            if (store.Card(accepted.Card) is { } other && (team is null || string.Equals(other.Team, team, StringComparison.OrdinalIgnoreCase)))
+                AcceptedOverFail(other, accepted);
         var endedAt = m.Type == MessageTypes.WorkflowExpired && Text(p, "endedAt") is { } last ? last : _at!;
         store.EndCardsOf(m.CorrelationId, how, endedAt);
         if (m.Type == MessageTypes.WorkflowCompleted && store.ItemDispatchedAs(m.CorrelationId) is { State: "ready" } item) store.SaveItem(item with { State = "declared" });
+    }
+
+    /// <summary>
+    /// B142: the person accepted closing the card over a tester's FAIL (or as won't do): it goes to Done, and its trail says
+    /// so from the board ("Closed over a FAIL, accepted by the person: ..." / "Won't do, accepted by the person: ...").
+    /// </summary>
+    private void AcceptedOverFail(CardRow card, ClosedOverFailEntry accepted)
+    {
+        store.Save(card with { Status = "done", Lane = Lanes.Done }, _at);
+        store.AddTrail(card.Id, BoardSource, accepted.TrailKind, accepted.Line, _at);
     }
 
     /// <summary>A card's title from an instruction: its first line, without markdown markers.</summary>
