@@ -4,7 +4,7 @@
 // core), so it runs in the `phone` project with at most PHONE_WORKERS workers. playwright.config.ts builds that project's
 // testMatch from phoneSpecs() and refuses to load (checkPhoneSpecs) when a phone spec would run outside it or does not
 // take `test` from phone/fixtures (which closes the contexts a test leaves open). No Playwright import here, so the unit
-// test (tests/unit/b091-phone-specs.test.ts) runs it under vitest.
+// test (tests/unit/phone-specs.test.ts) runs it under vitest.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
