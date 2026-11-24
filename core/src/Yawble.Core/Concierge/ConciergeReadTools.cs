@@ -39,7 +39,8 @@ public sealed class ConciergeReadTools(
     public static readonly IReadOnlyList<string> LocalOnly = ["backup_now"];
 
     public static readonly IReadOnlyList<string> Names =
-        ["backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "git_merge_preview", "integrations_status", "usage", "doctor", "backup_now"];
+        ["backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "git_merge_preview", "integrations_status", "usage", "doctor", "backup_now",
+         "skills_list", "skills_get"];
 
     public static bool Handles(string name) => Names.Contains(name);
 
@@ -63,9 +64,36 @@ public sealed class ConciergeReadTools(
             "usage" => await UsageAsync(Optional(args, "team"), Int(args, "days") ?? 7, ct),
             "doctor" => await DoctorAsync(ct),
             "backup_now" => await BackupNowAsync(ct),
+            "skills_list" => SkillsList(),
+            "skills_get" => SkillGet(Required(args, "name")),
             _ => throw new ArgumentException($"unknown tool: {name}"),
         };
         return Scrub(text);
+    }
+
+    // ------------------------------------------------------------------------------------------------ skills
+
+    /// <summary>The skills offered to the Concierge: the built-ins that name it, and the person's global ones that do (B135).</summary>
+    private IReadOnlyList<Skills.Skill> ConciergeSkills() => connectionString is null
+        ? Skills.SkillCatalog.BuiltInsForConcierge()
+        : new Skills.SkillCatalog(connectionString).OfferedToConcierge();
+
+    private string SkillsList()
+    {
+        var skills = ConciergeSkills();
+        if (skills.Count == 0) return "No skills are offered to you.";
+        var sb = new StringBuilder("Skills you can load with skills_get (load one before the work it describes):\n");
+        foreach (var s in skills) sb.AppendLine($"- {s.Name}: {s.Description}{(s.Kind == Skills.SkillKinds.Custom ? " (the person's own)" : "")}");
+        return sb.ToString().TrimEnd();
+    }
+
+    private string SkillGet(string name)
+    {
+        var wanted = name.Trim();
+        var skills = ConciergeSkills();
+        var skill = skills.FirstOrDefault(s => string.Equals(s.Name, wanted, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException($"no skill named '{wanted}' is offered to you. Offered: {(skills.Count == 0 ? "none" : string.Join(", ", skills.Select(s => s.Name)))}");
+        return skill.Body;
     }
 
     // ------------------------------------------------------------------------------------------------ doctor and backups
@@ -871,6 +899,9 @@ public sealed class ConciergeReadTools(
             ("team", "string", "Only this team (optional).", false), ("days", "integer", "How many days back (default 7, at most 365).", false));
         yield return Tool("doctor", "The app's health check (the list in Settings > Health): database, disk, sandbox, agent CLIs, Cloud Link, Connections, teams, logs; each OK, warning or failing, with its detail and the fixes it offers. Reads only; doctor_fix runs a fix when the person asks.");
         yield return Tool("backup_now", "Makes a backup of the app's database now (not over the Cloud Link). The person restores in Settings > General; you cannot restore.");
+        yield return Tool("skills_list", "The skills you can load: procedures for work you do now and then (e.g. 'scripts': building, checking, test-running and setting up scripts). Reads only.");
+        yield return Tool("skills_get", "Loads one skill's text (see skills_list). Load 'scripts' before you build, check, test-run, fix or add a script, or set up its Connections.",
+            ("name", "string", "The skill's name, e.g. scripts.", true));
     }
 
     private static JsonObject Tool(string name, string description, params (string Name, string Type, string Description, bool Required)[] parameters)

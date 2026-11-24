@@ -37,10 +37,32 @@ public sealed record Skill(
 /// </summary>
 public sealed partial class SkillCatalog(string connectionString)
 {
-    public static readonly IReadOnlyList<string> Roles = ["manager", "member", "any"];
+    /// <summary>
+    /// The Concierge's role: a skill offered to it names it (B135: the built-in "scripts"). It is not a team role, so "any" (every
+    /// team agent) does not include it, and a team's Manager or members are never offered a Concierge skill.
+    /// </summary>
+    public const string ConciergeRole = "concierge";
+
+    public static readonly IReadOnlyList<string> Roles = ["manager", "member", "any", ConciergeRole];
 
     /// <summary>The built-in skills, in the order the UI lists them.</summary>
     public static IReadOnlyList<Skill> BuiltIns { get; } = LoadBuiltIns();
+
+    /// <summary>
+    /// The skills offered to the Concierge, by name: the built-ins, then the person's global custom skills (a later one of the same name
+    /// wins), those that name the concierge role. The Concierge belongs to no team, so a team's own skills are not offered to it.
+    /// </summary>
+    public IReadOnlyList<Skill> OfferedToConcierge() => ConciergeSkills(BuiltIns.Concat(Custom(null)));
+
+    /// <summary>The built-in skills offered to the Concierge (no database: the custom ones are left out).</summary>
+    public static IReadOnlyList<Skill> BuiltInsForConcierge() => ConciergeSkills(BuiltIns);
+
+    private static List<Skill> ConciergeSkills(IEnumerable<Skill> skills)
+    {
+        var byName = new Dictionary<string, Skill>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in skills) byName[s.Name] = s;
+        return byName.Values.Where(s => s.Roles.Contains(ConciergeRole)).OrderBy(s => s.Name, StringComparer.Ordinal).ToList();
+    }
 
     /// <summary>The skills offered to <paramref name="role"/> in <paramref name="teamId"/>, by name.</summary>
     public IReadOnlyList<Skill> Offered(string role, long teamId)
@@ -77,8 +99,8 @@ public sealed partial class SkillCatalog(string connectionString)
         if (d.Length == 0 || d.Contains('\n')) throw new ArgumentException("a skill's description is one non-empty line");
         if (d.Length > 300) throw new ArgumentException("a skill's description is at most 300 characters");
         var r = (roles ?? []).Select(x => x.Trim().ToLowerInvariant()).Where(x => x.Length > 0).Distinct().ToList();
-        if (r.Count == 0) throw new ArgumentException("a skill is offered to at least one role (manager, member or any)");
-        if (r.FirstOrDefault(x => !Roles.Contains(x)) is { } bad) throw new ArgumentException($"'{bad}' is not a role (manager, member or any)");
+        if (r.Count == 0) throw new ArgumentException("a skill is offered to at least one role (manager, member, any or concierge)");
+        if (r.FirstOrDefault(x => !Roles.Contains(x)) is { } bad) throw new ArgumentException($"'{bad}' is not a role (manager, member, any or concierge)");
         var b = (body ?? "").ReplaceLineEndings("\n").Trim();
         if (b.Length == 0) throw new ArgumentException("a skill's body is the instructions themselves; it cannot be empty");
         if (b.Length > 64 * 1024) throw new ArgumentException("a skill's body is at most 64 KB");

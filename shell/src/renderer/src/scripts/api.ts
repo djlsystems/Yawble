@@ -249,38 +249,46 @@ export const BLANK_SCRIPT: ScriptDocument = {
   steps: [{ id: 'done', type: 'end' }],
 };
 
-/** The "Inbox SMS alert" template (scripts-design.md sections 3 and 12): each new email's subject texted to a list of phones. */
+/**
+ * The "Inbox SMS alert" template (scripts-design.md sections 3 and 12, on the pinned email and api contracts): each new email's subject
+ * texted to a list of phones. The same document as the example in the Concierge's scripts skill: the api action is the operation's id,
+ * email list returns EmailList, and the poll saves the last message's id (docs/connections-and-integrations.md, the poll pattern).
+ */
 export const INBOX_SMS_ALERT: ScriptDocument = {
   format: 'yawble-script/1',
   id: 'inbox-sms-alert',
   name: 'Inbox SMS alert',
-  description: 'Texts the subject of every new email to a list of phones.',
+  description: 'Texts the subject and sender of every new email to a list of phones.',
   trigger: { accepts: ['every', 'cron', 'once'] },
   settings: [
     { name: 'recipients', type: 'list<string>', label: 'Phones to text (E.164, e.g. +15551234567)' },
-    { name: 'fromNumber', type: 'string', label: 'Twilio number that sends' },
+    { name: 'fromNumber', type: 'string', label: 'The SMS number that sends' },
     { name: 'folder', type: 'string', label: 'Mail folder', default: 'INBOX' },
+    { name: 'since', type: 'datetime', label: 'First run: mail received after', default: '2026-11-20T00:00:00Z' },
   ],
   requires: [
     { name: 'mail', kind: 'email', actions: ['list'] },
-    { name: 'sms', kind: 'api', actions: ['POST /2010-04-01/Accounts/{AccountSid}/Messages.json'] },
+    { name: 'sms', kind: 'api', actions: ['CreateMessage'] },
   ],
   variables: [
-    { name: 'lastSeen', type: 'string', scope: 'saved' },
-    { name: 'messages', type: 'list<EmailMessage>', scope: 'run' },
+    { name: 'lastId', type: 'string', scope: 'saved' },
+    { name: 'res', type: 'EmailList', scope: 'run' },
+    { name: 'last', type: 'EmailMessage', scope: 'run' },
     { name: 'sent', type: 'int', scope: 'run', initial: 0 },
   ],
   start: 'list',
   steps: [
-    { id: 'list', type: 'integration', use: 'mail', action: 'list', args: { folder: '{settings.folder}', after: '{vars.lastSeen}' }, into: 'messages', next: 'any' },
-    { id: 'any', type: 'if', when: { left: '{count(vars.messages)}', op: 'gt', right: 0 }, then: 'each', else: 'done' },
-    { id: 'each', type: 'forEach', items: '{vars.messages}', as: 'm', body: 'phones', then: 'mark' },
+    { id: 'list', type: 'integration', use: 'mail', action: 'list',
+      args: { folder: '{settings.folder}', after: '{vars.lastId}', since: '{settings.since}', max: 200 }, into: 'res', next: 'any' },
+    { id: 'any', type: 'if', when: { left: '{count(vars.res.messages)}', op: 'gt', right: 0 }, then: 'each', else: 'done' },
+    { id: 'each', type: 'forEach', items: '{vars.res.messages}', as: 'm', body: 'phones', then: 'keep' },
     { id: 'phones', type: 'forEach', items: '{settings.recipients}', as: 'to', body: 'text', then: null },
-    { id: 'text', type: 'integration', use: 'sms', action: 'POST /2010-04-01/Accounts/{AccountSid}/Messages.json',
+    { id: 'text', type: 'integration', use: 'sms', action: 'CreateMessage',
       args: { To: '{to}', From: '{settings.fromNumber}', Body: 'New email: {m.subject} ({m.from.address})' }, next: 'count' },
     { id: 'count', type: 'set', var: 'sent', value: '{vars.sent + 1}', next: null },
-    { id: 'mark', type: 'set', var: 'lastSeen', value: '{last(vars.messages).cursor}', next: 'log' },
-    { id: 'log', type: 'file.appendLine', path: 'run.log', text: '{now()} {count(vars.messages)} new, {vars.sent} texts', next: 'done' },
+    { id: 'keep', type: 'set', var: 'last', value: '{last(vars.res.messages)}', next: 'mark' },
+    { id: 'mark', type: 'set', var: 'lastId', value: '{vars.last.id}', next: 'log' },
+    { id: 'log', type: 'file.appendLine', path: 'run.log', text: '{now()} {count(vars.res.messages)} new, {vars.sent} texts', next: 'done' },
     { id: 'done', type: 'end' },
   ],
 };
