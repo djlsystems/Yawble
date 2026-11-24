@@ -1,4 +1,4 @@
-// One file's diff, as the core's git.commitDiff sends it (B072, core TeamRepos.CommitView.cs CommitFileDiff), and the
+// One file's diff, as the core's git.commitDiff sends it (core TeamRepos.CommitView.cs CommitFileDiff), and the
 // pure rules the read-only diff viewer (DiffView.vue) shows it by: inline (one column, old and new numbers) or side by
 // side (old left, new right, a run of deleted lines paired with the added run that follows it).
 
