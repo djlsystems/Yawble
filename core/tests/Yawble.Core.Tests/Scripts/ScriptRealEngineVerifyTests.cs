@@ -16,7 +16,7 @@ using Yawble.Core.Ui;
 
 namespace Yawble.Core.Tests.Scripts;
 
-public class B131VerifyTests
+public class ScriptRealEngineVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private sealed class Actions : IScriptActionsProvider, IScriptActions
