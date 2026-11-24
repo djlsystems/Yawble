@@ -15,7 +15,7 @@ namespace Yawble.Core.Tests.Gateway;
 /// Network source's Times column and All activity's " (Nx)" show the count; docs/features.md says so. Temp databases,
 /// a loopback gateway with no allowed hosts, no real network.
 /// </summary>
-public class Card505B105VerifyTests
+public class ConnectDeniedCountVerifyTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 11, 20, 9, 0, 0, TimeSpan.Zero);
 

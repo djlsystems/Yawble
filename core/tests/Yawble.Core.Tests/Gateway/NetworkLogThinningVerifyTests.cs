@@ -20,7 +20,7 @@ namespace Yawble.Core.Tests.Gateway;
 /// Times column and " (Nx)") and 9d32165 (0051, docs/features.md Logs > Network). Fake upstream, fake secrets, temp
 /// databases only.
 /// </summary>
-public class Card464B103VerifyTests
+public class NetworkLogThinningVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset T0 = new(2026, 11, 18, 9, 0, 0, TimeSpan.Zero);
