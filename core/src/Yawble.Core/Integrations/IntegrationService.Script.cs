@@ -34,8 +34,8 @@ public sealed record ScriptApiResult(int Status, string ContentType, string Body
 /// </summary>
 public sealed class ScriptApiRefusedException(string message) : Exception(message);
 
-/// <summary>One parameter a script passes to an operation by name: in = path, query, header or body (a form field, or the JSON body as "body").</summary>
-public sealed record ScriptOperationParameter(string Name, string In, bool Required, string? Type);
+/// <summary>One parameter a script passes to an operation by name: in = path, query, header or body (a form field, or the JSON body as "body"); its JSON type and description when the API gives them.</summary>
+public sealed record ScriptOperationParameter(string Name, string In, bool Required, string? Type, string? Description = null);
 
 /// <summary>
 /// One operation a script may call (the script checker's catalog): its action name, HTTP method, route template, summary, the team's decision
@@ -120,8 +120,26 @@ public sealed partial class IntegrationService
     public IReadOnlyList<ScriptOperation> ListScriptOperations(string team, string integration)
     {
         var (teamId, teamName) = ScriptTeam(team);
-        var api = ScriptApi(teamId, teamName, integration);
-        var teamRules = ApiRulesOf(api.Id, teamId);
+        return ScriptOperationsOf(ScriptApi(teamId, teamName, integration), teamId);
+    }
+
+    /// <summary>
+    /// The operations of the API <paramref name="integration"/> a script may call: for the team <paramref name="teamId"/> (its rules and the
+    /// global ones; the API need not be turned on for it), or with no team under the global rules alone. Throws
+    /// <see cref="ScriptApiRefusedException"/> when there is no web API of that name.
+    /// </summary>
+    public IReadOnlyList<ScriptOperation> ListScriptOperationsFor(string integration, long? teamId)
+    {
+        var name = (integration ?? "").Trim();
+        if (name.StartsWith("api:", StringComparison.OrdinalIgnoreCase)) name = name[4..].Trim();
+        var api = (name.Length == 0 ? null : ApiRows(name).FirstOrDefault(a => a.Kind == "http"))
+            ?? throw new ScriptApiRefusedException($"refused: no API named '{Clip(SecretScrubber.Scrub(name), 60)}'");
+        return ScriptOperationsOf(api, teamId);
+    }
+
+    private List<ScriptOperation> ScriptOperationsOf(ApiRecord api, long? teamId)
+    {
+        var teamRules = teamId is { } tid ? ApiRulesOf(api.Id, tid) : [];
         var global = ApiRulesOf(api.Id, null);
         var fills = PathFillsOf(api);
         var list = new List<ScriptOperation>();
@@ -136,7 +154,7 @@ public sealed partial class IntegrationService
             foreach (var (key, schema) in props)
             {
                 if (key == "body" && ApiIn(schema) is null || filled.Contains(key)) continue;
-                parameters.Add(new ScriptOperationParameter(key, ApiIn(schema) ?? "query", required.Contains(key), TypeOf(schema)));
+                parameters.Add(new ScriptOperationParameter(key, ApiIn(schema) ?? "query", required.Contains(key), TypeOf(schema), DescriptionOf(schema)));
             }
             string? media = null;
             if (props["body"] is JsonObject body && ApiIn(body) is null)
@@ -147,9 +165,9 @@ public sealed partial class IntegrationService
                 {
                     var fieldsRequired = Names(body["required"]);
                     foreach (var (field, schema) in fields)
-                        if (!props.ContainsKey(field)) parameters.Add(new ScriptOperationParameter(field, "body", fieldsRequired.Contains(field), TypeOf(schema)));
+                        if (!props.ContainsKey(field)) parameters.Add(new ScriptOperationParameter(field, "body", fieldsRequired.Contains(field), TypeOf(schema), DescriptionOf(schema)));
                 }
-                else parameters.Add(new ScriptOperationParameter("body", "body", required.Contains("body"), TypeOf(body) ?? "object"));
+                else parameters.Add(new ScriptOperationParameter("body", "body", required.Contains("body"), TypeOf(body) ?? "object", DescriptionOf(body)));
             }
             list.Add(new ScriptOperation(op.Id, op.Method, op.Route, op.Summary, decision, parameters, media));
         }
@@ -157,6 +175,9 @@ public sealed partial class IntegrationService
 
         static HashSet<string> Names(JsonNode? node) =>
             (node as JsonArray ?? []).Select(n => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null).OfType<string>().ToHashSet(StringComparer.Ordinal);
+
+        static string? DescriptionOf(JsonNode? schema) =>
+            (schema as JsonObject)?["description"] is JsonValue d && d.TryGetValue<string>(out var text) && text.Trim().Length > 0 ? text.Trim() : null;
 
         static string? TypeOf(JsonNode? schema) => (schema as JsonObject)?["type"] switch
         {

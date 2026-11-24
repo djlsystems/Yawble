@@ -5,8 +5,8 @@ using Yawble.Core.Scripts.Language;
 namespace Yawble.Core.Scripts.Engine;
 
 /// <summary>
-/// One call of an integration action by an <c>integration</c> step: <see cref="Use"/> is the script's requirement name
-/// (the member binds it to one of the team's integrations), <see cref="Kind"/> its kind, <see cref="Action"/> the action,
+/// One call of an integration action by an <c>integration</c> step: <see cref="Use"/> is the name the step uses (an
+/// integration's real name, or an alias; the run's bindings say which integration it is), <see cref="Kind"/> its kind, <see cref="Action"/> the action,
 /// <see cref="Args"/> the evaluated arguments. <see cref="DryRun"/> is true in a dry run when the engine had no catalog to
 /// tell whether the action changes something: the implementation must then not perform a changing action.
 /// </summary>

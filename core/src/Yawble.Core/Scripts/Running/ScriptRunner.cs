@@ -161,7 +161,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         var bindings = test.Bindings ?? [];
         var runId = _store.StartRun(test.TeamId, null, test.ScriptId, version.Version, "test", test.Input, settings, bindings, test.DryRun, test: true);
         var folder = Path.Combine(_dataRoot, "test", runId.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        var caller = new ScriptCaller(test.TeamId, team, null, null, runId, StringMap(bindings), test.DryRun);
+        var caller = new ScriptCaller(test.TeamId, team, null, null, runId, ScriptSettings.Effective(version.Document, bindings, _library.Integrations), test.DryRun);
         var actions = _actions.For(caller);
         var request = new ScriptRunRequest
         {
@@ -282,7 +282,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         }
         var timeout = TimeSpan.FromMinutes(Math.Max(1, member.TimeoutMinutes));
         var dataFolder = MemberFolder(memberId);
-        var caller = new ScriptCaller(member.TeamId, member.Team, memberId, member.Name, runId, StringMap(run.Bindings ?? member.Bindings), DryRun: false);
+        var caller = new ScriptCaller(member.TeamId, member.Team, memberId, member.Name, runId, ScriptSettings.Effective(version.Document, run.Bindings ?? member.Bindings, _library.Integrations), DryRun: false);
         var actions = _actions.For(caller);
         var request = new ScriptRunRequest
         {
@@ -472,9 +472,6 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         try { return ScriptDocument.Parse(version.DocumentText); }
         catch (Exception e) when (e is not OutOfMemoryException) { throw new FormatException($"version {version.Version} of {version.Key} cannot be read: {e.Message}", e); }
     }
-
-    private static Dictionary<string, string> StringMap(JsonObject o) =>
-        o.Where(kv => kv.Value is JsonValue v && v.TryGetValue<string>(out _)).ToDictionary(kv => kv.Key, kv => kv.Value!.GetValue<string>(), StringComparer.Ordinal);
 
     /// <summary>The engine's journal over the store: each step's row, its checkpoint on the run, and the run's log.</summary>
     private sealed class StoreJournal(ScriptRunStore store, long runId) : IScriptRunJournal
