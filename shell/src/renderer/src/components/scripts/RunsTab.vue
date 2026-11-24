@@ -32,7 +32,7 @@ async function show(r: Run) {
   <div class="runs" data-test="runs-tab">
     <template v-if="open">
       <div class="row"><button type="button" class="ghost" data-test="run-back" @click="open = null">← Runs</button></div>
-      <ScriptRunView :run="open" />
+      <ScriptRunView :run="open" :api="api" />
     </template>
     <template v-else>
       <div class="row"><span class="muted grow">Every script run, across the teams. Test runs are marked.</span><button type="button" class="mini" data-test="runs-refresh" @click="refresh">Refresh</button></div>

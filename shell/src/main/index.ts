@@ -229,6 +229,13 @@ function newWindow(opts: { width: number; height: number; x?: number; y?: number
     return { action: 'deny' };
   });
   win.webContents.on('context-menu', (_e, params) => editMenu(win, params));
+  // The page's errors (a part of it that failed to load or threw) go to the shell log, so a blank page leaves a trace.
+  win.webContents.on('console-message', (e) => {
+    const m = e as unknown as { level?: string; message?: string; sourceId?: string; lineNumber?: number };
+    if (m.level !== 'error') return;
+    const where = m.sourceId ? ` (${path.basename(m.sourceId)}:${m.lineNumber ?? 0})` : '';
+    report.file(`page error: ${String(m.message ?? '').slice(0, 400)}${where}`);
+  });
   win.once('ready-to-show', () => { if (opts.maximized) win.maximize(); win.show(); });
   void win.loadFile(path.join(__dirname, '..', '..', 'renderer', 'index.html'), opts.hash ? { hash: opts.hash } : undefined);
   return win;
