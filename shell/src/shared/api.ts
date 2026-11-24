@@ -223,6 +223,8 @@ export interface LogSourceInfo {
   prunable: boolean; loss: string | null; keptBecause: string | null; defaultDays: number | null; retentionDays: number | null;
   /** Whether the team and member filters apply to it. */
   team: boolean; member: boolean;
+  /** Whether its rows carry a level and it offers the Level filter (logs.query level; debug hidden by default). */
+  levels?: boolean;
 }
 /** A page of a log (logs.query). total: on the first page only. next: the offset of the next page, null at the end. */
 export interface LogPage { rows: Record<string, string | number | null>[]; total: number | null; asOf: string; next: number | null }

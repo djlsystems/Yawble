@@ -737,7 +737,9 @@ public sealed partial class BusEngine : IAsyncDisposable
         });
         _active[runId] = new ActiveRun(context, cancel, task);
         started.SetResult();
-        Log($"run {runId} admitted: {member!.Qualified}, {items.Length} item(s), workflow {context.Correlation}");
+        // B143: routine, at debug.
+        Logs.Diag.Debug("bus", $"run {runId} admitted: {member!.Qualified}, {items.Length} item(s), workflow {context.Correlation}",
+            ("team", member.Team), ("member", member.Qualified), ("run", runId), ("workflow", context.Correlation), ("items", items.Length));
     }
 
     private async Task ExecuteAsync(RunContext run, CancellationTokenSource cancel)

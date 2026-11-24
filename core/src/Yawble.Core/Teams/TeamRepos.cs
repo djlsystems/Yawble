@@ -593,10 +593,12 @@ public sealed partial class TeamRepos
         await gate.WaitAsync(ct);
         try
         {
-            FetchResult Fail(string e)
+            FetchResult Fail(string e, string status = "failed")
             {
                 recordError(e);
-                _log?.Invoke($"{member.Qualified}: {e}");
+                // B143: a warning with its ids (a merge conflict among them: it said nothing to the level regex).
+                Logs.Diag.Warning("teams", $"{member.Qualified}: {e}", ("team", member.Team), ("member", member.Qualified), ("branch", branch),
+                    ("repo", repoPath), ("status", status));
                 return new FetchResult(false, null, e);
             }
             var refName = "refs/heads/" + branch;
@@ -621,16 +623,18 @@ public sealed partial class TeamRepos
             if (fetched.ExitCode != 0) return Fail("could not fetch the member's branch: " + fetched.Stderr);
             recordFetched(sha);
             var before = await RevAsync(repoPath, refName, ct);
-            var landed = await LandFetchedAsync(member, repoPath, branch, sha, ct);
+            var (landed, landedBehind) = await LandFetchedAsync(member, repoPath, branch, sha, ct);
             if (landed is not null)
             {
                 AddSyncNote(member.TeamId, landed);
-                return Fail(landed);
+                return Fail(landed, landed.Contains("does not merge cleanly", StringComparison.Ordinal) ? "conflict" : "failed");
             }
             // B079: what the branch gained is the Monitor's truth about the member's files.
             if (recordEvents && await RevAsync(repoPath, refName, ct) is { } after && after != before)
                 await RecordFetchedAsync(member, repoPath, baseBranch, branch, before, after, workflowId, ct);
-            _log?.Invoke($"{member.Qualified}: fetched {branch} at {sha[..Math.Min(12, sha.Length)]} into {repoPath}");
+            Logs.Diag.Debug("teams", $"{member.Qualified}: fetched {branch} at {sha[..Math.Min(12, sha.Length)]} into {repoPath}",
+                ("team", member.Team), ("member", member.Qualified), ("branch", branch), ("sha", Short(sha)));
+            NoteCloneState(member, repoPath, branch, landedBehind ? CloneBehind : CloneCurrent, sha, null);
             try
             {
                 await UpdateSharedAtAsync(sharedPath, repoPath, baseBranch, ct);
@@ -658,35 +662,41 @@ public sealed partial class TeamRepos
     /// compare-and-swap update-ref. Returns null, or why the work could not be brought in (the branch is then unchanged
     /// and the work stays at the staging ref). Runs git only in the host repository; the caller holds the team lock.
     /// </summary>
-    private async Task<string?> LandFetchedAsync(MemberRef member, string repoPath, string branch, string sha, CancellationToken ct)
+    private async Task<(string? Error, bool Behind)> LandFetchedAsync(MemberRef member, string repoPath, string branch, string sha, CancellationToken ct)
     {
         var refName = "refs/heads/" + branch;
         var current = await RevAsync(repoPath, refName, ct);
-        if (current == sha) return null;
+        if (current == sha) return (null, false);
         if (current is not null && await CheckedOutAnywhereAsync(repoPath, branch, ct) is { } where)
-            return $"{branch} is checked out in {where}, so the app did not update it; the clone's work is at {FetchStagingPrefix}{branch}";
+            return ($"{branch} is checked out in {where}, so the app did not update it; the clone's work is at {FetchStagingPrefix}{branch}", false);
         // No AI attribution in the work's new commits (those no branch of the host repository has yet): refused, never
         // stripped. The work stays at the staging ref, which is the host's only, so the commits are still the member's
         // unpushed own and it amends them itself.
         var newCommits = await Git.RunAsync(repoPath, ct, "log", CommitAttribution.LogFormat, sha, "--not", "--branches", "--");
         if (CommitAttribution.ParseLog(newCommits) is { Count: > 0 } attributed)
-            return CommitAttribution.RefusalText(member.Name, branch, attributed);
+            return (CommitAttribution.RefusalText(member.Name, branch, attributed), false);
         string next;
         if (current is null || await IsAncestorAsync(repoPath, current, sha, ct)) next = sha;
         else if (await IsAncestorAsync(repoPath, sha, current, ct))
         {
-            _log?.Invoke($"{member.Qualified}: the clone's {branch} ({Short(sha)}) is behind the team repository's ({Short(current)}); left as it is");
-            return null;
+            // B143: at debug; the start-up summary counts it, and a line is written only when the clone's state changes.
+            Logs.Diag.Debug("teams", $"{member.Qualified}: the clone's {branch} ({Short(sha)}) is behind the team repository's ({Short(current)}); left as it is",
+                ("team", member.Team), ("member", member.Qualified), ("branch", branch), ("sha", Short(sha)), ("current", Short(current)));
+            return (null, true);
         }
         else
         {
             var (tree, files) = await MergeTreeAsync(repoPath, current, sha, ct);
-            if (tree is null) return ParkedNote(member.Name, branch, files);
+            if (tree is null)
+            {
+                // B143: a merge conflict is a warning (Fail writes it, status conflict); the work waits at the staging ref.
+                return (ParkedNote(member.Name, branch, files), false);
+            }
             next = await Git.RunAsync(repoPath, ct, "-c", "user.name=" + ManagedIdentityName, "-c", "user.email=" + ManagedIdentityEmail,
                 "commit-tree", tree, "-p", current, "-p", sha, "-m", $"Merge {member.Name}'s {branch} into the synced {branch}");
         }
         var update = await Git.TryRunAsync(repoPath, ["update-ref", "-m", "fetch back " + member.Qualified, refName, next, current ?? ""], ct);
-        return update.ExitCode == 0 ? null : $"{branch} moved while its work was being brought in; the clone's work is at {FetchStagingPrefix}{branch}";
+        return (update.ExitCode == 0 ? null : $"{branch} moved while its work was being brought in; the clone's work is at {FetchStagingPrefix}{branch}", false);
     }
 
     private static string ParkedNote(string memberName, string branch, IReadOnlyList<string> files) =>
@@ -800,8 +810,63 @@ public sealed partial class TeamRepos
         return new FetchResult(false, null, error);
     }
 
-    /// <summary>At start-up: checks and fetches back every clone, so work of runs the last process left open is visible.</summary>
+    /// <summary>A clone's branch is level with (or ahead of) the host repository's, or behind it (left as it is).</summary>
+    public const string CloneCurrent = "current", CloneBehind = "behind";
+
+    /// <summary>B143: the state each clone branch was last seen in (member id, host repository, branch), this process.</summary>
+    private readonly ConcurrentDictionary<string, string> _cloneStates = new(StringComparer.Ordinal);
+
+    /// <summary>The start-up fetch-back's counts while it runs (one summary line at its end), else null.</summary>
+    private StartTally? _startTally;
+
+    private sealed class StartTally
+    {
+        public int Fetched, Behind;
+    }
+
+    /// <summary>
+    /// Records the state of a clone's branch after a fetch. During the start-up fetch-back it is only counted (the summary
+    /// line says it); later a line is written when the state changes (behind, or level again), never for the same state.
+    /// </summary>
+    private void NoteCloneState(MemberRef member, string repoPath, string branch, string state, string sha, string? detail)
+    {
+        var key = $"{member.Id.ToString(CultureInfo.InvariantCulture)}|{repoPath}|{branch}";
+        var before = _cloneStates.TryGetValue(key, out var b) ? b : null;
+        _cloneStates[key] = state;
+        if (Volatile.Read(ref _startTally) is { } tally)
+        {
+            Interlocked.Increment(ref tally.Fetched);
+            if (state == CloneBehind) Interlocked.Increment(ref tally.Behind);
+            return;
+        }
+        if (before == state || (before is null && state == CloneCurrent)) return;
+        Logs.Diag.Info("teams", state == CloneBehind
+                ? $"{member.Qualified}: the clone's {branch} is now behind the team repository's; left as it is"
+                : $"{member.Qualified}: the clone's {branch} is level with the team repository's again",
+            ("team", member.Team), ("member", member.Qualified), ("branch", branch), ("sha", Short(sha)), ("status", state), ("detail", detail));
+    }
+
+    /// <summary>
+    /// At start-up: checks and fetches back every clone, so work of runs the last process left open is visible. Writes one
+    /// summary line ("fetched 23 clones, 7 behind"); each clone's own lines are at debug.
+    /// </summary>
     public async Task FetchBackAllAsync(IEnumerable<MemberRef> members, CancellationToken ct = default)
+    {
+        var tally = new StartTally();
+        Volatile.Write(ref _startTally, tally);
+        try
+        {
+            await FetchBackEachAsync(members, ct);
+        }
+        finally
+        {
+            Volatile.Write(ref _startTally, null);
+            Logs.Diag.Info("teams", $"start-up fetch-back: fetched {tally.Fetched} clone{(tally.Fetched == 1 ? "" : "s")}, {tally.Behind} behind",
+                ("fetched", tally.Fetched), ("behind", tally.Behind));
+        }
+    }
+
+    private async Task FetchBackEachAsync(IEnumerable<MemberRef> members, CancellationToken ct)
     {
         foreach (var member in members)
         {
@@ -923,10 +988,16 @@ public sealed partial class TeamRepos
                     rejection ??= output;
                     continue;
                 }
-                _log?.Invoke($"team {member.Team}: push to origin failed: {output}");
+                // B143: which branch, git's exit code and the remote (its URL redacted).
+                Logs.Diag.Warning("teams", $"team {member.Team}: push of {unpublished[i]} to origin failed (exit {run.ExitCode}): {output}",
+                    ("team", member.Team), ("branch", unpublished[i]), ("status", run.ExitCode), ("remote", PersonGitPush.Redact(origin.Stdout)),
+                    ("repo", repo.Path));
                 return new TeamPublishReport(TeamPublishResult.PushFailed, [.. rejected, .. unpublished.Skip(i)], output, published);
             }
-            if (published.Count > 0) _log?.Invoke($"team {member.Team}: pushed {string.Join(", ", published)} to origin");
+            // One line per publish (every branch it pushed), at debug: the Monitor and the Manager's notice say it too.
+            if (published.Count > 0)
+                Logs.Diag.Debug("teams", $"team {member.Team}: pushed {string.Join(", ", published)} to origin",
+                    ("team", member.Team), ("member", member.Qualified), ("repo", repo.Path));
             return rejected.Count > 0
                 ? new TeamPublishReport(TeamPublishResult.Rejected, rejected, rejection, published)
                 : new TeamPublishReport(TeamPublishResult.Published, published);

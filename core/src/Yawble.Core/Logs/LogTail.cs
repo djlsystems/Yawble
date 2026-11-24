@@ -31,15 +31,16 @@ public sealed record LogTailEntry(
 
 /// <summary>
 /// What a tail lets through. <see cref="All"/> false (level "default"): warnings, errors and workflow events; true
-/// ("all"): every level. <see cref="Team"/> a team name, <see cref="Member"/> "Team/Name" (the member wins over the team).
+/// ("all"): every level but debug; <see cref="Debug"/> ("debug") lets debug entries through too. <see cref="Team"/> a team name, <see cref="Member"/> "Team/Name" (the member wins over the team).
 /// A member's own entries only: not its team's "&lt;Team&gt;" entries; a team's take those too (B101). <see cref="App"/>:
 /// only the activity log's entries about no team and no member (team null, member "app").
 /// </summary>
-public sealed record LogTailFilter(bool All = false, string? Team = null, string? Member = null, bool App = false)
+public sealed record LogTailFilter(bool All = false, string? Team = null, string? Member = null, bool App = false, bool Debug = false)
 {
     public bool Matches(LogTailEntry e)
     {
         if (!All && e.Level is not (LogLevels.Error or LogLevels.Warning) && !e.Workflow) return false;
+        if (!Debug && e.Level == LogLevels.Debug) return false;
         if (App && !(e.Team is null && e.Member == "app" && !e.MemberInText)) return false;
         if (Member is { } member)
         {
