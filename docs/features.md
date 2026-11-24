@@ -597,8 +597,9 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
     - The levels are error, warning, info and debug. The core gives each of its lines its level; an older line and a
       line the app writes without one (on standard error) get theirs from what they say.
     - Debug is for routine lines: a run admitted, the heavy-work lease held or released (passing the 30-minute limit is
-      still said), each clone fetched at start-up, a Grok session check that changed nothing, the daily prune, a push to
-      origin. They are hidden unless the Level filter asks for them.
+      still said), each clone fetched at start-up, a Grok session check that changed nothing, a trigger that fired a
+      script member (with the script run it started), the daily prune, and the one line per push to origin (every
+      branch it pushed). They are hidden unless the Level filter asks for them.
     - Fields are `key=value` pairs with the ids the line is about: `level`, `area` (`teams`, `bus`, `lease`, `grok`,
       `logs`, `link`, `doctor`...) and, where known, `team`, `member`, `workflow`, `run`, `script`, `step`, `action`,
       `integration`, `status`, `ms` and `attempt`. A value with a space in it is in double quotes.
@@ -611,9 +612,11 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
   picks a member (that member's entries only), a team as a whole (its members' entries and the team's own), or, in All
   activity, `app` (the app's own entries only); picking one clears the others. In Diagnostics the team and member
   filters read a line's `team` and `member` fields, so a member is not matched by a namesake in another team. A line
-  without fields matches when it names both the member and its team. Diagnostics also has a **Level** filter: every level
-  but debug (the default), one level, or all of them, debug included (`logs.query` `level`: `default`, `error`,
-  `warning`, `info`, `debug` or `all`). Every column sorts either way. Pages load as the table scrolls; a row opens to show every field.
+  without fields matches when it names both the member and its team. All activity and Diagnostics also have a **Level**
+  column and a **Level** filter: every level but debug (the default), one level, or all of them, debug included
+  (`logs.query` `level`: `default`, `error`, `warning`, `info`, `debug` or `all`). An All activity entry has the level
+  the live tail gives it: a team message by its type (failed is an error; blocked and a decision asked are warnings),
+  a run by how it ended, any other by what it says. The other logs have no levels and no Level filter. Every column sorts either way. Pages load as the table scrolls; a row opens to show every field.
 - **Prune…** deletes a log's entries older than a chosen age, or all of them. It first says how many entries and files
   go, their date range, and what is lost, and deletes only after **Delete**. Approvals still waiting for an answer are
   never pruned, and an answered one is kept by when it was answered. Pruning Approvals also removes answered host tool

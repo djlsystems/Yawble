@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Yawble.Core.Logs;
+using Yawble.Core.Tests.Bus;
 using Xunit;
 
 namespace Yawble.Core.Tests.Logs;
@@ -27,8 +28,8 @@ public sealed class ActivityLevelTests : IDisposable
         _db.OpenStore().Dispose(); // the schema
         _logs = new LogService(_db.Dir, _db.ConnectionString, new Clock(Now));
         var at = (Now - TimeSpan.FromMinutes(5)).ToString("O");
-        Exec("INSERT INTO run_records (run_key, team, member, cli, kind, backend, started_at, ended_at, end_class, exit_code) VALUES ('k1', 'web', 'DeveloperAda', 'claude', 'agent', 'host', @t, @t, 'failed', 1);", ("@t", at));
-        Exec("INSERT INTO run_records (run_key, team, member, cli, kind, backend, started_at, ended_at, end_class, exit_code) VALUES ('k2', 'web', 'DeveloperAda', 'claude', 'agent', 'host', @t, @t, 'completed', 0);", ("@t", at));
+        Exec("INSERT INTO run_records (run_key, team, member, cli, kind, backend, started_at, ended_at, end_class, exit_code) VALUES ('k1', 'web', 'DeveloperAda', 'claude', 'headless', 'host', @t, @t, 'failed', 1);", ("@t", at));
+        Exec("INSERT INTO run_records (run_key, team, member, cli, kind, backend, started_at, ended_at, end_class, exit_code) VALUES ('k2', 'web', 'DeveloperAda', 'claude', 'headless', 'host', @t, @t, 'completed', 0);", ("@t", at));
         Exec("INSERT INTO messages (type, payload, source, depth, occurred_at, via) VALUES ('agent.blocked', '{\"reason\":\"no failed words here\"}', 'web/DeveloperAda', 0, @t, 'agent');", ("@t", at));
         // Its payload says "failed", but a message's level is its type's alone: progress is info.
         Exec("INSERT INTO messages (type, payload, source, depth, occurred_at, via) VALUES ('agent.progress', '{\"status\":\"the build failed, retrying\"}', 'web/DeveloperAda', 0, @t, 'agent');", ("@t", at));
