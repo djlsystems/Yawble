@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { TeamSummary, YawbleApi } from '../../../../shared/api';
 import { errorText } from '../../api';
 import { readOnly } from '../../remoteAccess';
@@ -7,12 +7,14 @@ import { jsonProblem, pretty, scriptsApi, stepRange } from '../../scripts/api';
 import type { Check, ScriptDocument, ScriptSaveResult, ScriptVersionRow } from '../../scripts/types';
 import BusyLabel from '../BusyLabel.vue';
 import JsonEditor from './JsonEditor.vue';
+import ScriptFlowchart from './ScriptFlowchart.vue';
 import ScriptOutline from './ScriptOutline.vue';
 import ScriptTestRun from './ScriptTestRun.vue';
 
-// The script editor: the JSON with highlighting, the check's problems by step (a click jumps to the step),
-// the outline beside it, Versions, Save and Test run. The Flowchart tab is a placeholder (the `flowchart` slot);
-// the JSON is the source of truth.
+// The script editor: the JSON with highlighting, the check's problems by step, the outline beside it, Versions, Save
+// and Test run. The Flowchart tab (ScriptFlowchart) edits the same text, so the two views are one document, and the
+// layout it saves is part of that text. A click on a problem jumps to its step in the JSON, or selects its node while
+// the Flowchart tab is open. After a flowchart edit the check runs again (debounced), so a dangling ref shows at once.
 const props = defineProps<{
   api: YawbleApi; teams: readonly TeamSummary[];
   /** The script opened (null: a new one, from `initial`). */
@@ -33,7 +35,7 @@ const loading = ref(!!props.script);
 const busy = ref<null | 'save' | 'check'>(null);
 const error = ref<string | null>(null);
 const savedNote = ref<string | null>(null);
-const tab = ref<'json' | 'flowchart' | 'test'>('json');
+const tab = ref<'json' | 'flowchart' | 'test'>('flowchart');
 const editor = ref<InstanceType<typeof JsonEditor> | null>(null);
 
 const parseProblem = computed(() => jsonProblem(text.value));
@@ -96,6 +98,32 @@ async function runCheck() {
   try { check.value = await s.check(text.value); } catch (e) { error.value = errorText(e); } finally { busy.value = null; }
 }
 
+/** The flowchart's selected node (a problem click while the Flowchart tab is open picks it). */
+const flowSelected = ref<string | null>(null);
+
+/** How long after a flowchart edit the check runs again. */
+const RECHECK_MS = 400;
+let recheckTimer: ReturnType<typeof setTimeout> | null = null;
+function recheckSoon() {
+  if (recheckTimer) clearTimeout(recheckTimer);
+  recheckTimer = setTimeout(async () => {
+    recheckTimer = null;
+    if (parseProblem.value) return;
+    const sent = text.value;
+    try {
+      const c = await s.check(sent);
+      if (text.value === sent) check.value = c;
+    } catch { /* the last check's problems stay; Check shows the error */ }
+  }, RECHECK_MS);
+}
+onBeforeUnmount(() => { if (recheckTimer) clearTimeout(recheckTimer); });
+
+/** A problem's step: its node in the flowchart when that tab is open, else its "id" in the JSON. */
+function showStep(stepId: string) {
+  if (tab.value === 'flowchart') flowSelected.value = stepId;
+  else jumpTo(stepId);
+}
+
 /** Shows a step in the JSON: selects its "id" and scrolls to it. */
 function jumpTo(stepId: string) {
   tab.value = 'json';
@@ -123,8 +151,8 @@ function pickVersion(e: Event) {
       <span v-if="dirty" class="chip" data-test="editor-dirty">not saved</span>
       <span class="grow" />
       <div class="tabs" role="tablist">
-        <button type="button" role="tab" :aria-selected="tab === 'json'" :class="{ on: tab === 'json' }" data-test="editor-tab-json" @click="tab = 'json'">JSON</button>
         <button type="button" role="tab" :aria-selected="tab === 'flowchart'" :class="{ on: tab === 'flowchart' }" data-test="editor-tab-flowchart" @click="tab = 'flowchart'">Flowchart</button>
+        <button type="button" role="tab" :aria-selected="tab === 'json'" :class="{ on: tab === 'json' }" data-test="editor-tab-json" @click="tab = 'json'">JSON</button>
         <button type="button" role="tab" :aria-selected="tab === 'test'" :class="{ on: tab === 'test' }" data-test="editor-tab-test" :disabled="!current"
           :title="current ? 'Try the script on a sample input' : 'Save the script first'" @click="tab = 'test'">Test run</button>
       </div>
@@ -139,30 +167,28 @@ function pickVersion(e: Event) {
       <div class="left">
         <JsonEditor ref="editor" v-model="text" :readonly="readOnly" label="Script JSON" />
         <p v-if="parseProblem" class="error small" data-test="editor-parse">{{ parseProblem }}</p>
-        <div class="problems" data-test="check-problems">
-          <template v-if="check">
-            <p v-if="check.ok && !check.issues.length" class="ok small" data-test="check-ok">The check found no problems.</p>
-            <div v-for="[stepId, list] in grouped" :key="stepId ?? '(document)'" class="group">
-              <button v-if="stepId" type="button" class="link" data-test="check-step" :data-step="stepId" @click="jumpTo(stepId)">Step <code>{{ stepId }}</code></button>
-              <span v-else class="muted">The document</span>
-              <ul>
-                <li v-for="(i, n) in list" :key="n" data-test="check-issue" :data-step="stepId ?? ''">
-                  <button v-if="stepId" type="button" class="link plain" @click="jumpTo(stepId)">{{ i.message }}</button>
-                  <span v-else>{{ i.message }}</span>
-                  <code class="muted code">{{ i.code }}</code>
-                </li>
-              </ul>
-            </div>
-          </template>
-          <p v-else class="muted small">Check or Save to see the script's problems.</p>
-        </div>
       </div>
       <ScriptOutline class="right" :doc="doc" :issue-steps="issueSteps" @step="jumpTo" />
     </div>
     <div v-if="tab === 'flowchart'" class="flowchart" data-test="editor-flowchart">
-      <slot name="flowchart" :doc="doc">
-        <p class="muted">Edit the script as JSON; the outline shows its steps.</p>
-      </slot>
+      <ScriptFlowchart v-model="text" v-model:selected="flowSelected" :issues="check?.issues ?? []" :readonly="readOnly" @edited="recheckSoon" />
+    </div>
+    <div v-if="tab !== 'test'" class="problems" data-test="check-problems">
+      <template v-if="check">
+        <p v-if="check.ok && !check.issues.length" class="ok small" data-test="check-ok">The check found no problems.</p>
+        <div v-for="[stepId, list] in grouped" :key="stepId ?? '(document)'" class="group">
+          <button v-if="stepId" type="button" class="link" data-test="check-step" :data-step="stepId" @click="showStep(stepId)">Step <code>{{ stepId }}</code></button>
+          <span v-else class="muted">The document</span>
+          <ul>
+            <li v-for="(i, n) in list" :key="n" data-test="check-issue" :data-step="stepId ?? ''">
+              <button v-if="stepId" type="button" class="link plain" @click="showStep(stepId)">{{ i.message }}</button>
+              <span v-else>{{ i.message }}</span>
+              <code class="muted code">{{ i.code }}</code>
+            </li>
+          </ul>
+        </div>
+      </template>
+      <p v-else class="muted small">Check or Save to see the script's problems.</p>
     </div>
     <div v-if="tab === 'test' && current" class="test">
       <p v-if="dirty" class="warn small">The test runs version {{ version }} as saved, not the changes above.</p>
@@ -191,5 +217,6 @@ function pickVersion(e: Event) {
 .code { margin-left: 6px; }
 .small { font-size: 12px; margin: 0; }
 .flowchart, .test { padding: 6px 0; }
+.flowchart { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
 @media (max-width: 720px) { .body { grid-template-columns: 1fr; } .right { border-left: 0; padding-left: 0; } }
 </style>

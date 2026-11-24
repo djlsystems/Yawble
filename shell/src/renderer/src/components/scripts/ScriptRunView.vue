@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { runScript, showValue, took, writtenFiles } from '../../scripts/api';
-import type { RunDetail, TestRunResult } from '../../scripts/types';
+import type { YawbleApi } from '../../../../shared/api';
+import { errorText } from '../../api';
+import { pretty, runScript, scriptsApi, showValue, took, writtenFiles } from '../../scripts/api';
+import type { RunDetail, ScriptDocument, TestRunResult } from '../../scripts/types';
+import ScriptFlowchart from './ScriptFlowchart.vue';
 
 // The run view (B134): each step with its input, output, time and status, the run's log, and the files it wrote. Shown
-// for a row of the Runs tab (scripts.run) and right after a Test run (scripts.testRun's answer).
-const props = defineProps<{ run: RunDetail | TestRunResult }>();
+// for a row of the Runs tab (scripts.run) and right after a Test run (scripts.testRun's answer). The Flowchart toggle
+// shows the run's script version, read-only, with the steps it took highlighted and the step it failed at marked: doc
+// is that version's document when the caller has it, else it is loaded (scripts.get with the run's version) over api.
+const props = defineProps<{ run: RunDetail | TestRunResult; doc?: ScriptDocument | null; api?: YawbleApi }>();
 
 const detail = computed(() => ('id' in props.run ? (props.run as RunDetail) : null));
 const status = computed(() => props.run.status);
@@ -24,6 +29,24 @@ async function copy(path: string) {
   try { await navigator.clipboard.writeText(path); copied.value = path; } catch { copied.value = null; }
 }
 const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() : '');
+
+// ---- the flowchart of the run
+const canChart = computed(() => !!props.doc || (!!props.api && !!detail.value));
+const chartOpen = ref(false);
+const chartText = ref<string | null>(props.doc ? pretty(props.doc) : null);
+const chartError = ref<string | null>(null);
+const chartRun = computed(() => ({ taken: [...new Set(steps.value.map((s) => s.stepId))], failed: props.run.failedStepId }));
+async function toggleChart() {
+  chartOpen.value = !chartOpen.value;
+  if (!chartOpen.value || chartText.value !== null || !props.api || !detail.value) return;
+  chartError.value = null;
+  try {
+    const v = await scriptsApi(props.api).get(detail.value.scriptId, detail.value.version);
+    chartText.value = pretty(v.document);
+  } catch (e) {
+    chartError.value = errorText(e);
+  }
+}
 </script>
 
 <template>
@@ -39,6 +62,12 @@ const time = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString() :
         <span class="muted">{{ new Date(detail.startedAt).toLocaleString() }}<template v-if="detail.endedAt"> · {{ took(detail.startedAt, detail.endedAt) }}</template></span>
       </template>
       <span v-else class="muted" data-test="run-id">run {{ (run as TestRunResult).runId }}</span>
+      <button v-if="canChart" type="button" class="mini" :aria-pressed="chartOpen" data-test="run-flowchart-toggle" @click="toggleChart">{{ chartOpen ? 'Hide flowchart' : 'Flowchart' }}</button>
+    </div>
+    <div v-if="chartOpen" class="chart" data-test="run-flowchart">
+      <p v-if="chartError" class="error" data-test="run-flowchart-error">{{ chartError }}</p>
+      <p v-else-if="chartText === null" class="muted">Loading the script…</p>
+      <ScriptFlowchart v-else :model-value="chartText" readonly :run="chartRun" />
     </div>
     <p v-if="run.reason || run.failedStepId" class="error" data-test="run-reason">
       <template v-if="run.failedStepId">Step <code>{{ run.failedStepId }}</code>: </template>{{ run.reason }}
@@ -110,4 +139,5 @@ pre { margin: 0; padding: 6px 8px; background: var(--surface-sunken); border-rad
 .files a { color: var(--accent); }
 .mini { font-size: 11.5px; padding: 1px 6px; }
 .small { font-size: 11.5px; }
+.chart { display: flex; flex-direction: column; min-height: 480px; }
 </style>
