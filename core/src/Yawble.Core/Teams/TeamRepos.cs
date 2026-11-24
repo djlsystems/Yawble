@@ -988,7 +988,7 @@ public sealed partial class TeamRepos
                     rejection ??= output;
                     continue;
                 }
-                // B143: which branch, git's exit code and the remote (its URL redacted).
+                // which branch, git's exit code and the remote (its URL redacted).
                 Logs.Diag.Warning("teams", $"team {member.Team}: push of {unpublished[i]} to origin failed (exit {run.ExitCode}): {output}",
                     ("team", member.Team), ("branch", unpublished[i]), ("status", run.ExitCode), ("remote", PersonGitPush.Redact(origin.Stdout)),
                     ("repo", repo.Path));

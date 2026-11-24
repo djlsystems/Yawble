@@ -84,7 +84,7 @@ public sealed class ApiScriptActions(IScriptApi api, RunCaller caller) : IScript
     }
 
     /// <summary>
-    /// B143: what a failed call was, for the step's reason: the integration, the action, and its HTTP method and route (from the answer, else
+    /// what a failed call was, for the step's reason: the integration, the action, and its HTTP method and route (from the answer, else
     /// the team's catalog), e.g. "twilio CreateMessage (POST /2010-04-01/Accounts/{AccountSid}/Messages.json)".
     /// </summary>
     private string What(string integration, string action, ScriptApiResult result)
