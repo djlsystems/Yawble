@@ -5,7 +5,7 @@ import { errorText, resolveApi, when } from '../api';
 import { readOnly, vChange } from '../remoteAccess';
 import { useBusy } from '../busy';
 import BusyLabel from './BusyLabel.vue';
-import { scriptAtVersion, scriptsApi, shortValue, type ScriptMember, type ScriptMemberState, type ScriptRun } from '../scriptMembers';
+import { scriptAtVersion, scriptsApi, shortValue, type ScriptMember, type ScriptMemberFile, type ScriptMemberState, type ScriptRun } from '../scriptMembers';
 
 // B134 (card 598): a script member's tile on the team page: its name, script@version (on latest: the version it runs),
 // the last run's status and time and the next scheduled trigger; under it the last runs (scripts.runs) and the saved
@@ -18,6 +18,8 @@ const rpc = scriptsApi(api);
 
 const member = ref<ScriptMember | null>(null);
 const runs = ref<ScriptRun[]>([]);
+/** The files its script wrote (run.log and the like): text files show their newest lines. */
+const files = ref<ScriptMemberFile[]>([]);
 const state = ref<ScriptMemberState | null>(null);
 const error = ref<string | null>(null);
 const busy = useBusy();
@@ -34,6 +36,7 @@ async function refresh() {
     if (at !== id.value) return;
     member.value = m; runs.value = r; state.value = s;
     error.value = null;
+    try { files.value = (await rpc.memberFiles(at, 30)).files ?? []; } catch { /* an older core: no files section */ }
     try { mine.value = (await api.call<Trigger[]>('triggers.list', { teamId: props.card.member.teamId })).filter((t) => t.memberId === at); } catch { /* the pill just stays hidden */ }
   } catch (e) {
     if (at === id.value) error.value = errorText(e);
@@ -98,6 +101,12 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
         </li>
       </ul>
       <p v-else class="muted small" data-test="script-member-no-runs">No runs yet.</p>
+      <template v-for="f in files.filter((x) => x.tail && x.tail.length)" :key="f.path">
+        <h4 class="mono" :data-test="`script-member-file-${f.path}`">{{ f.path }} <span class="muted">· {{ when(f.modifiedAt) }}</span></h4>
+        <ol class="log mono" :data-test="`script-member-file-lines-${f.path}`">
+          <li v-for="(line, i) in [...f.tail!].reverse()" :key="i">{{ line }}</li>
+        </ol>
+      </template>
       <h4>Saved variables</h4>
       <ul v-if="variables.length" class="vars" data-test="script-member-variables">
         <li v-for="[name, value] in variables" :key="name" :data-test="`script-variable-${name}`">
@@ -128,6 +137,8 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
 .facts { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--ink-soft); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: auto; }
+.log { list-style: none; margin: 0; padding: 4px 6px; background: var(--code-bg, var(--chip)); border-radius: 4px; font-size: 11.5px; max-height: 160px; overflow: auto; gap: 1px; }
+.log li { white-space: pre-wrap; word-break: break-word; }
 h4 { font-size: 12px; margin: 6px 0 2px; color: var(--ink-soft); font-weight: 600; }
 ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
 .runs li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }

@@ -227,7 +227,7 @@ describe('the Scripts dialog', () => {
     expect(w.get('[data-test=outline-variables]').text()).toContain('lastId string · saved');
     const links = (id: string) => w.findAll(`[data-test=outline-step][data-step="${id}"] [data-test=outline-link]`).map((l) => l.text());
     expect(links('any')).toEqual(['then → each', 'else → done']);
-    expect(links('each')).toEqual(['body → phones', 'then → keep']);
+    expect(links('each')).toEqual(['body → note', 'then → keep']);
     expect(links('phones')).toEqual(['body → text', 'then → end of body']);
     expect(links('done')).toEqual([]);
     expect(w.get('[data-test=outline-step][data-step=list]').text()).toContain('start');

@@ -17,7 +17,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
     public static readonly string[] Reads =
     [
         "scripts.list", "scripts.get", "scripts.check", "scripts.versions", "scripts.export", "scripts.runs", "scripts.run",
-        "scripts.memberGet", "scripts.memberState",
+        "scripts.memberGet", "scripts.memberState", "scripts.memberFiles",
         "schemas.list", "schemas.get", "schemas.check", "schemas.versions", "schemas.export",
     ];
 
@@ -66,6 +66,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
                 "scripts.memberUpdate" => MemberUpdate(p),
                 "scripts.memberGet" => Member(MemberOf(p)),
                 "scripts.memberState" => State(MemberOf(p).MemberId),
+                "scripts.memberFiles" => Files(MemberOf(p).MemberId, (int)Math.Clamp(OptLong(p, "lines") ?? 30, 1, 200)),
                 "scripts.memberResetVariable" => new JsonObject { ["reset"] = store.ResetVariable(MemberOf(p).MemberId, Str(p, "name")) },
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
@@ -163,6 +164,45 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
             ["lastRun"] = last is null ? null : Run(last),
             ["nextTriggerAt"] = store.NextTriggerAt(m.MemberId),
         };
+    }
+
+    private static readonly HashSet<string> TextFiles = new(StringComparer.OrdinalIgnoreCase) { ".log", ".txt", ".csv", ".md", ".jsonl", ".json" };
+    private const int MaxListedFiles = 50, MaxTailBytes = 16 * 1024;
+
+    /// <summary>
+    /// The files a script member wrote in its data folder (newest first, at most 50): path inside the folder, size and time, and
+    /// for a text file (.log, .txt, .csv, .md, .json, .jsonl) its last lines, read from at most its last 16 KB. Reads only.
+    /// </summary>
+    private JsonObject Files(long memberId, int lines)
+    {
+        var root = runner.MemberFolder(memberId);
+        var list = new JsonArray();
+        if (Directory.Exists(root))
+            foreach (var f in new DirectoryInfo(root).EnumerateFiles("*", SearchOption.AllDirectories).OrderByDescending(f => f.LastWriteTimeUtc).Take(MaxListedFiles))
+            {
+                var rel = Path.GetRelativePath(root, f.FullName).Replace(Path.DirectorySeparatorChar, '/');
+                var item = new JsonObject { ["path"] = rel, ["bytes"] = f.Length, ["modifiedAt"] = f.LastWriteTimeUtc.ToString("O") };
+                if (TextFiles.Contains(f.Extension)) item["tail"] = new JsonArray(Tail(f.FullName, lines).Select(l => (JsonNode?)l).ToArray());
+                list.Add(item);
+            }
+        return new JsonObject { ["memberId"] = memberId, ["files"] = list };
+    }
+
+    private static List<string> Tail(string path, int lines)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var start = Math.Max(0, fs.Length - MaxTailBytes);
+            fs.Seek(start, SeekOrigin.Begin);
+            using var reader = new StreamReader(fs, System.Text.Encoding.UTF8);
+            var all = reader.ReadToEnd().ReplaceLineEndings("\n").Split('\n').ToList();
+            if (start > 0 && all.Count > 0) all.RemoveAt(0); // a cut first line
+            while (all.Count > 0 && all[^1].Length == 0) all.RemoveAt(all.Count - 1);
+            return all.Skip(Math.Max(0, all.Count - lines)).ToList();
+        }
+        catch (IOException) { return []; }
+        catch (UnauthorizedAccessException) { return []; }
     }
 
     private JsonObject State(long memberId)

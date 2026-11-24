@@ -179,6 +179,17 @@ public class ScriptsRpcTests
         Assert.True((await r.CallAsync("scripts.memberResetVariable", new JsonObject { ["memberId"] = memberId, ["name"] = "runs" }))!["reset"]!.GetValue<bool>());
         Assert.Empty((await r.CallAsync("scripts.memberState", new JsonObject { ["memberId"] = memberId }))!["variables"]!.AsObject());
 
+        // The member's files: newest first, a text file with its last lines, a binary one without.
+        var folder = r.Runner.MemberFolder(memberId);
+        Directory.CreateDirectory(Path.Combine(folder, "out"));
+        await File.WriteAllTextAsync(Path.Combine(folder, "out", "data.bin"), "x", Ct);
+        File.SetLastWriteTimeUtc(Path.Combine(folder, "out", "data.bin"), DateTime.UtcNow.AddMinutes(-5));
+        await File.WriteAllLinesAsync(Path.Combine(folder, "run.log"), Enumerable.Range(1, 40).Select(i => $"line {i}"), Ct);
+        var files = (await r.CallAsync("scripts.memberFiles", new JsonObject { ["memberId"] = memberId, ["lines"] = 3 }))!["files"]!.AsArray();
+        Assert.Equal(["run.log", "out/data.bin"], files.Select(f => f!["path"]!.GetValue<string>()));
+        Assert.Equal(["line 38", "line 39", "line 40"], files[0]!["tail"]!.AsArray().Select(l => l!.GetValue<string>()));
+        Assert.Null(files[1]!["tail"]);
+
         var runs = (await r.CallAsync("scripts.runs", new JsonObject { ["teamId"] = r.TeamId }))!.AsArray();
         var run = Assert.Single(runs)!.AsObject();
         Assert.Equal(("succeeded", "Poller"), (run["status"]!.GetValue<string>(), run["member"]!.GetValue<string>()));

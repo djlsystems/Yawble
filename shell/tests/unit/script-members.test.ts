@@ -244,6 +244,18 @@ describe('a script member on the team page', () => {
     expect(w3.find('[data-test=script-member-triggers]').exists()).toBe(false);
   });
 
+  it('the newest lines of the files its script writes show newest first; a file without lines is not shown', async () => {
+    const calls: Calls = [];
+    const w = keep(mount(ScriptMemberPane, { props: { card, api: fakeApi(calls, { 'scripts.memberFiles': () => ({ memberId: 9, files: [
+      { path: 'run.log', bytes: 40, modifiedAt: '2026-11-24T16:17:04Z', tail: ['16:12 email: Hello (a@b.test)', '16:17 1 new, 1 texts'] },
+      { path: 'out/data.bin', bytes: 3, modifiedAt: '2026-11-24T16:00:00Z' },
+    ] }) }), pollMs: 60_000 } }));
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'scripts.memberFiles')!.params).toEqual({ memberId: 9, lines: 30 });
+    expect(w.get('[data-test="script-member-file-lines-run.log"]').findAll('li').map((l) => l.text())).toEqual(['16:17 1 new, 1 texts', '16:12 email: Hello (a@b.test)']);
+    expect(w.find('[data-test="script-member-file-out/data.bin"]').exists()).toBe(false);
+  });
+
   it('a member with no scheduled trigger and no run says so', async () => {
     const w = keep(mount(ScriptMemberPane, { props: { card, api: fakeApi([], {
       'scripts.memberGet': () => ({ ...scriptMember, version: 1, lastRun: null, nextTriggerAt: null }),

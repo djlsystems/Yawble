@@ -22,6 +22,9 @@ export interface ScriptMember {
 /** scripts.memberState: the member's saved variables. */
 export interface ScriptMemberState { memberId: number; variables: Record<string, unknown>; consecutiveFailures: number; updatedAt: string | null }
 
+/** scripts.memberFiles: the files a script member wrote in its data folder, newest first; a text file carries its last lines. */
+export interface ScriptMemberFile { path: string; bytes: number; modifiedAt: string; tail?: string[] }
+
 /** scripts.list's ScriptSummary. runnableVersion null: only drafts (no member can run it). */
 export interface ScriptSummary {
   id: number; key: string; name: string; description: string; latestVersion: number; runnableVersion: number | null; draft: boolean; updatedAt: string;
@@ -56,6 +59,7 @@ export const scriptsApi = (api: YawbleApi) => ({
   memberGet: (memberId: number) => api.call<ScriptMember>('scripts.memberGet', { memberId }),
   memberState: (memberId: number) => api.call<ScriptMemberState>('scripts.memberState', { memberId }),
   memberResetVariable: (memberId: number, name: string) => api.call<{ reset: boolean }>('scripts.memberResetVariable', { memberId, name }),
+  memberFiles: (memberId: number, lines = 30) => api.call<{ memberId: number; files: ScriptMemberFile[] }>('scripts.memberFiles', { memberId, lines }),
   runs: (memberId: number, limit = 10) => api.call<ScriptRun[]>('scripts.runs', { memberId, limit }),
 });
 
