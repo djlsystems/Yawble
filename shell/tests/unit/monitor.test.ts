@@ -170,8 +170,8 @@ describe('the workflows on the wall', () => {
 
   it('labels a workflow node "#id title", cut, with "Backlog item " dropped', () => {
     expect(workflowNodeLabel(wf(12, at(0), 'open', [], 'Add a README'))).toBe('#12 Add a README');
-    const backlog = workflowNodeLabel(wf(3848, at(0), 'open', [], "Backlog item B081 Remote UI: xterm's link handler asks first"));
-    expect(backlog).toBe("#3848 B081 Remote UI: xterm's…"); // the docs' example
+    const backlog = workflowNodeLabel(wf(3848, at(0), 'open', [], "Backlog item B008 Remote UI: xterm's link handler asks first"));
+    expect(backlog).toBe("#3848 B008 Remote UI: xterm's…"); // the docs' example
     expect(backlog).not.toContain('Backlog item');
     expect(backlog.endsWith('…')).toBe(true);
     expect(backlog.length).toBe(NodeLabelMax);
@@ -179,11 +179,11 @@ describe('the workflows on the wall', () => {
     expect(NodeLabelMax).toBeLessThanOrEqual(32);
     expect(workflowNodeLabel(wf(5, at(0), 'open', [], '  '))).toBe('#5');
     // A phone zoomed out: only "#id"; zoomed in, or a desktop window at any zoom (whatever its canvas), the title too.
-    const t = wf(3848, at(0), 'open', [], 'Backlog item B081 Remote UI');
+    const t = wf(3848, at(0), 'open', [], 'Backlog item B008 Remote UI');
     expect(workflowNodeLabel(t, { phone: true, zoom: 0.4 })).toBe('#3848');
-    expect(workflowNodeLabel(t, { phone: true, zoom: 1 })).toBe('#3848 B081 Remote UI');
-    expect(workflowNodeLabel(t, { phone: false, zoom: 0.25 })).toBe('#3848 B081 Remote UI');
-    expect(workflowNodeLabel(t, { zoom: 0.39 })).toBe('#3848 B081 Remote UI');
+    expect(workflowNodeLabel(t, { phone: true, zoom: 1 })).toBe('#3848 B008 Remote UI');
+    expect(workflowNodeLabel(t, { phone: false, zoom: 0.25 })).toBe('#3848 B008 Remote UI');
+    expect(workflowNodeLabel(t, { zoom: 0.39 })).toBe('#3848 B008 Remote UI');
   });
 
   it('places workflow labels so that none covers another or a member', () => {
