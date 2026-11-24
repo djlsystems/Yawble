@@ -79,6 +79,18 @@ public class ScriptRunnerTests
     // ------------------------------------------------------------------ dispatch and triggers
 
     [Fact]
+    public async Task ATriggerForAScriptMember_NeedsNoInstruction_ButOneForAnAgentStillDoes()
+    {
+        await using var w = await WorldAsync();
+        var bot = await w.ScriptMemberAsync("Poller");
+        var t = await w.Bus.SaveTriggerAsync(Every(bot) with { Instruction = "" }, Ct);
+        Assert.Equal("", t.Instruction);
+        var ada = await w.Bus.AddScriptMemberAsync(w.TeamId, "Bea", Ct); // a member with no script columns: an agent
+        var e = await Assert.ThrowsAsync<ArgumentException>(() => w.Bus.SaveTriggerAsync(Every(ada.Id) with { Instruction = " " }, Ct));
+        Assert.Equal("a trigger needs an instruction", e.Message);
+    }
+
+    [Fact]
     public async Task ATriggerAimedAtAScriptMember_RunsItsScriptWithTriggerFired_AndStartsNoWorkflow()
     {
         await using var w = await WorldAsync();

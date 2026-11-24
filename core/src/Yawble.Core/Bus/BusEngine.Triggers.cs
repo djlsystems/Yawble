@@ -179,7 +179,10 @@ public sealed partial class BusEngine
         {
             var member = _store.Member(draft.MemberId) ?? throw new ArgumentException("no such member");
             if (string.IsNullOrWhiteSpace(draft.Name)) throw new ArgumentException("a trigger needs a name");
-            if (string.IsNullOrWhiteSpace(draft.Instruction)) throw new ArgumentException("a trigger needs an instruction");
+            // a script member runs its script with the fire's details as input: it is told nothing, so it needs no instruction
+            var isScript = ScriptMembers?.IsScriptMember(member.Id) == true;
+            if (isScript) draft = draft with { Instruction = draft.Instruction?.Trim() ?? "" };
+            else if (string.IsNullOrWhiteSpace(draft.Instruction)) throw new ArgumentException("a trigger needs an instruction");
             if (draft.Id is { } id && _store.Trigger(id) is null) throw new ArgumentException("no such trigger");
             if (!WakeManagerPolicy.IsValid(draft.WakeManager))
                 throw new ArgumentException($"wakeManager must be one of {string.Join(", ", WakeManagerPolicy.All)}");

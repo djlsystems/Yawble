@@ -77,6 +77,29 @@ describe('triggers dialog', () => {
     expect(label.firstChild!.textContent!.trim()).toBe('Instruction'); // the label text comes before the box
   });
 
+  it('a script member needs no instruction and wakes no Manager: the box and the wake choice are hidden', async () => {
+    const { api, calls } = fakeApi({
+      'triggers.list': () => [],
+      'triggers.preview': () => ({ error: null, next: [] }),
+      'triggers.save': (p) => ({ ...nightly, id: 9, name: p.name, memberId: p.memberId }),
+    });
+    const bot = { ...card(5, 'InboxWatcher', 'member'), kind: 'script' } as AgentCard;
+    const w = mount(TriggersDialog, { props: { api, team, agents: [card(1, 'Manager', 'manager'), bot] } });
+    await flushPromises();
+    await w.find('[data-test=trigger-new]').trigger('click');
+    expect(w.find('[data-test=trigger-instruction]').exists()).toBe(true);
+    expect(w.find('[data-test=trigger-member]').findAll('option').map((o) => o.text())).toEqual(['Manager (manager)', 'InboxWatcher (script)']);
+    await w.find('[data-test=trigger-member]').findAll('option')[1].setSelected();
+    expect(w.find('[data-test=trigger-instruction]').exists()).toBe(false);
+    expect(w.find('[data-test=trigger-wake-manager]').exists()).toBe(false);
+    expect(w.find('[data-test=trigger-script-note]').text()).toContain('InboxWatcher runs its script on each fire');
+    await w.find('[data-test=trigger-name]').setValue('inbox poll');
+    expect((w.find('[data-test=trigger-save]').element as HTMLButtonElement).disabled).toBe(false);
+    await w.find('[data-test=trigger-save]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'triggers.save')!.params).toMatchObject({ name: 'inbox poll', memberId: 5, instruction: '' });
+  });
+
   it('saves a new every-N trigger in seconds, for the chosen agent', async () => {
     const { api, calls } = fakeApi({
       'triggers.list': () => [],
