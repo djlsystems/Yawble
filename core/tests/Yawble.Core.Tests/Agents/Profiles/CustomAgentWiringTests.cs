@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Agents.Profiles;
 
-/// <summary>Card 52: a member whose cli is a custom agent's name resolves to its profile everywhere (members.add/update/team_create, launch, run records, usage). Fakes only.</summary>
+/// <summary>A member whose cli is a custom agent's name resolves to its profile everywhere (members.add/update/team_create, launch, run records, usage). Fakes only.</summary>
 public class CustomAgentWiringTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

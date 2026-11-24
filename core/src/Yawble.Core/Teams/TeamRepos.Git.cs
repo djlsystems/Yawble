@@ -234,7 +234,7 @@ public sealed partial class TeamRepos
         }
         var members = new List<TeamGitBranch>();
         // This team's: members/<team>/*, and an old-style members/<name> one only while a member is still on it (not moved
-        // yet). Every other old-style branch is in OldBranches alone, so the dialog shows each branch once (card 75).
+        // yet). Every other old-style branch is in OldBranches alone, so the dialog shows each branch once.
         var legacyInUse = LegacyBranchesInUse(repo.TeamId);
         foreach (var (branch, sha) in await TeamMemberBranchesAsync(repo.TeamId, team, path, legacyInUseOnly: true, ct))
         {
