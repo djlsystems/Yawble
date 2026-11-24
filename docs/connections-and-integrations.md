@@ -121,42 +121,59 @@ name (`"action": "list"`, not `email.list`):
 ```json
 "requires": [ { "name": "mail", "kind": "email", "actions": ["list", "get", "markRead"] } ],
 "steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
-             "args": { "folder": "INBOX", "since": "{vars.lastSeen}", "unreadOnly": true }, "into": "msgs", "next": "b" } ]
+             "args": { "folder": "INBOX", "after": "{vars.lastCursor}", "unreadOnly": true }, "into": "msgs", "next": "b" } ]
 ```
 
 | Action | Arguments (JSON types; `?` is optional and may be `null`) | Result | Changes the mailbox |
 |---|---|---|---|
-| `list` | `folder`: string; `since?`: string, ISO-8601 date-time; `unreadOnly?`: boolean; `max?`: integer | `list<EmailMessage>` | no |
+| `list` | `folder`: string; `after?`: string, a `cursor`; `since?`: string, ISO-8601 date-time (not with `after`); `unreadOnly?`: boolean; `max?`: integer | `list<EmailMessage>` | no |
 | `get` | `id`: string; `folder?`: string | `EmailMessage`, with `body` | no |
 | `search` | `folder`: string; `query`: string | `list<EmailMessage>` | no |
 | `thread` | `threadId`: string | `list<EmailMessage>` | no |
 | `markRead` | `id`: string; `folder?`: string | `EmailMessage` (as it is now) | yes |
 | `move` | `id`: string; `folder`: string (the folder to move it to) | `EmailMessage` (in its new place) | yes |
 
-- Every list is **oldest first** (by `receivedAt`, then the folder's UID). `search` and `thread` give at most 200
-  messages, the newest.
-- `list` pages **forward** through the folder. The exact rules:
-  - `since` is **exclusive**: only messages whose `receivedAt` is later than it.
-  - `unreadOnly` then keeps only unread ones.
-  - Of those, `list` returns the **oldest** `max` (default and limit 200). Whatever is left over is later than the
-    last message returned, so the next poll gets it.
-  - Without `since` it starts from the folder's oldest message. To start "from now", set `lastSeen` to the current time
-    the first time the script runs.
-  - Every message's `receivedAt` in a folder is **distinct**. It is the server's INTERNALDATE (whole seconds) plus a
-    sub-second tie-break taken from the message's own key (Gmail's `X-GM-MSGID`, otherwise its UID, modulo ten
-    million, in 100 ns steps): `"2026-11-20T09:10:00.0000042Z"`. Two messages that arrive in the same second still get
-    different values. The value never changes while the message stays in its folder.
-- **Polling without missing or repeating a message:** after each `list`, save the **last** message's `receivedAt`
-  (the newest one in the result, `{max(vars.msgs, 'receivedAt')}`) as `lastSeen`, and pass it as `since` on the next
-  run. Save it only when the result is not empty, and save the exact string you got: rounding it to the second, or
-  using the time the script ran, can skip or repeat messages. This works however small `max` is (even 1) and when
-  several messages share a second: each poll takes the oldest ones after the cursor, and the cursor moves past
-  exactly those.
-- Limits of the cursor: a message that lands in the folder with an INTERNALDATE older than `lastSeen` (copied or moved
-  in from another folder with its original date, or appended with an old date) is not seen by a poll from that
-  cursor. Two messages of the same second whose keys are a multiple of ten million apart share a `receivedAt`; if
-  `max` splits exactly them, the second one is missed. With `unreadOnly`, a message read in another mail program
-  before the poll is not returned, and is not returned later either.
+- `search` and `thread` give at most 200 messages, the newest, oldest first (by `receivedAt`, then the folder's UID).
+- `list` picks its messages in one of three ways. In each, `unreadOnly` keeps only unread ones, and `list` returns
+  the **first** `max` of them in its order (default and limit 200):
+  - **`after`** (for polling): a `cursor` from an earlier `list` of the same folder. Only messages that arrived in the
+    folder after that message (IMAP `UID SEARCH UID n+1:*`), in **arrival order** (the folder's UID order). Dates
+    play no part, so messages that share a second, or that arrive with an old date, are all returned in turn.
+  - **`since`** (a time filter, not for polling): only messages whose `receivedAt` is **later** than `since`
+    (exclusive). Ordered by `receivedAt`, then UID. `receivedAt` is whole seconds, so `since` set to a message's
+    `receivedAt` also leaves out the other messages of that second.
+  - **neither**: the whole folder, in arrival order (UID order), the same order `after` walks in.
+  - `after` and `since` together fail the step: `mail list: give after or since, not both (poll with after)`.
+- **Polling without missing or repeating a message:** poll with `after`, never with `since`. After each `list`,
+  if the result is **not empty**, save the **last** message's `cursor` (`{last(vars.msgs)}`, then its `cursor`) in a
+  saved `string` variable, and pass it back unchanged as `after` on the next run. When the result is empty, keep the
+  cursor you have. The first run has no cursor (`null`) and starts from the folder's first message. This gets every
+  message exactly once in arrival order, however small `max` is (even 1), when several messages share a second, and
+  when mail arrives between polls:
+
+  ```json
+  "variables": [ { "name": "msgs", "type": "list<EmailMessage>" }, { "name": "last", "type": "EmailMessage" },
+                 { "name": "lastCursor", "type": "string", "scope": "saved" } ],
+  "steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
+               "args": { "folder": "INBOX", "after": "{vars.lastCursor}", "unreadOnly": true, "max": 20 }, "into": "msgs", "next": "b" },
+             { "id": "b", "type": "if", "when": { "left": "{count(vars.msgs)}", "op": "gt", "right": 0 }, "then": "c", "else": "z" },
+             { "id": "c", "type": "set", "var": "last", "value": "{last(vars.msgs)}", "next": "d" },
+             { "id": "d", "type": "set", "var": "lastCursor", "value": "{vars.last.cursor}", "next": "z" },
+             { "id": "z", "type": "end" } ]
+  ```
+
+  Marking a polled message read or moving it out of the folder does not disturb the cursor.
+- A `cursor` is **opaque**: keep it as the string you got. It is valid only for the folder it came from (the
+  message's `folder`). Today it is the folder's UIDVALIDITY and the message's UID, `"31:7"`, also on Gmail, where a
+  label has UIDs too; do not build or compare cursors yourself.
+- Limits of polling with `after`, stated plainly:
+  - A message moved out of the folder and back (or copied in again) gets a new UID there, so it is returned again.
+  - If the server renumbers the folder (a new UIDVALIDITY; rare, e.g. after the folder was rebuilt), the cursor no
+    longer says which messages are new. The step then fails with `mail list: the cursor '31:7' is from an earlier
+    numbering of INBOX (its UIDVALIDITY was 31, it is now 32): ...; start the poll again without after`. It never
+    silently starts over. A malformed `after` fails the same way (`... is not a cursor ...`).
+  - With `unreadOnly`, a message read in another mail program before the poll is not returned, and is not returned
+    later either: the cursor moves past it with the next unread one.
 - `get`, `markRead`: `folder` is a hint where to look. Without it the id is enough.
 - `search`: on Gmail the query is Gmail's own search syntax (`X-GM-RAW`, e.g. `from:lee is:unread`); elsewhere it is
   IMAP `SEARCH TEXT` (the words anywhere in the message).
@@ -182,7 +199,8 @@ name (`"action": "list"`, not `email.list`):
 | `to` | array of EmailAddress | The To recipients. |
 | `cc` | array of EmailAddress | The Cc recipients. |
 | `subject` | string | The subject line (`""` when none). |
-| `receivedAt` | string | When the server received it (its INTERNALDATE) plus the sub-second tie-break above, ISO-8601 in UTC: `"2026-11-20T09:10:00.0000042Z"`. Distinct within a folder; use it as `list`'s `since`. |
+| `cursor` | string | Opaque: the message's place in its `folder`, for `list`'s `after` (see polling above). Valid only for that folder. |
+| `receivedAt` | string | When the server received it (its INTERNALDATE), ISO-8601 in UTC, whole seconds: `"2026-11-20T09:10:00Z"`. Not unique (messages can share a second) and not arrival order: do not poll with it. |
 | `snippet` | string | The first 500 characters of the plain text, runs of white space as one space. |
 | `hasAttachments` | boolean | Whether it has attachments. |
 | `unread` | boolean | Whether it is unread (no `\Seen` flag). |
