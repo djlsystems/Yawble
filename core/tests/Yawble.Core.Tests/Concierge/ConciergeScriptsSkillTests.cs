@@ -137,6 +137,27 @@ public sealed class ConciergeScriptsSkillTests : IDisposable
         Assert.Contains(ScriptDocument.CurrentFormat, body);
     }
 
+    /// <summary>Card 635 (B139): the skill teaches the two tools that turn a script on, by their exact names and fields, and their approvals.</summary>
+    [Fact]
+    public void TheSkillTeachesTheTriggerAndActionAllowTools()
+    {
+        var body = Regex.Replace(ScriptsSkill.Body, @"\s+", " "); // phrases may wrap across lines
+        Assert.Contains("`script_trigger_set`", body);
+        Assert.Contains("`integration_action_allow`", body);
+        Assert.Contains("`integration_action_allow { team, integration, action }`", body);
+        foreach (var field in new[] { "`team`", "`member`", "`name`", "`schedule`", "`enabled`", "`id`", "`only_when_idle`" })
+            Assert.Contains(field, body);
+        foreach (var kind in new[] { "`every`", "`cron`", "`once`", "`event`", "`folder`" })
+            Assert.Contains(kind, body);
+
+        // The offer after a member is added, the needs-approval message it answers, and no loop.
+        Assert.Contains("After `script_member_add` succeeds, offer to turn its trigger on with `script_trigger_set`", body);
+        Assert.Contains("`needs approval: allow <action> for <team>`", body);
+        Assert.Contains("Never ask for a whole API", body);
+        Assert.Contains("Never call it again in a loop", body);
+        Assert.Contains("needs the person's yes in the window", body);
+    }
+
     [Fact]
     public void TheSkillsExampleScript_ChecksCleanWithTheRealCatalogs()
     {
