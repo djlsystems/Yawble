@@ -7,7 +7,7 @@
   </a>
 </p>
 
-<p align="center"><b>AI teamwork. Built-in guardrails. Your control.</b></p>
+<p align="center"><b>Your AI agents don't care if you can't keep up. Yawble makes you their boss.</b></p>
 
 <p align="center">
   <a href="https://yawble.ai">yawble.ai</a> ·

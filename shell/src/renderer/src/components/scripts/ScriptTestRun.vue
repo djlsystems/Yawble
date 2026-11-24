@@ -138,7 +138,7 @@ async function run() {
       </button>
     </div>
     <p v-if="error" class="error" data-test="test-error">{{ error }}</p>
-    <ScriptRunView v-if="result" :run="result" />
+    <ScriptRunView v-if="result" :key="result.runId" :run="result" :doc="doc" />
   </form>
 </template>
 
