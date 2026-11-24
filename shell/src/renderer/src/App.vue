@@ -27,7 +27,9 @@ import { terminalPane } from './terminalPane';
 import { openMemberTerminal, registerTeamPage } from './memberTerminal';
 import BacklogView from './board/BacklogView.vue';
 // The Workflows page (B104) is loaded when first opened: the window's first paint does not wait for it.
-const WorkflowsView = defineAsyncComponent(() => import('./workflows/WorkflowsView.vue'));
+// A page loaded on first use: when its file is gone (the app was rebuilt or updated while this window stayed open), it
+// says so with a Reload button instead of leaving the page blank.
+const WorkflowsView = defineAsyncComponent({ loader: () => import('./workflows/WorkflowsView.vue'), errorComponent: PageLoadFailed });
 import { backlogRequest, isWorkflowsHash, workflowsRequest } from './workflows/page';
 import { WORKFLOWS_LIST, type WorkflowsListAnswer } from '../../shared/api';
 import Sidebar, { type View } from './components/Sidebar.vue';
@@ -54,6 +56,7 @@ import { loadConciergeDefault, newChatAgent, savedConciergeAgent } from './conci
 import { isEmbed, startEmbedBridge, type EmbedNavState } from './embed';
 import { readOnly } from './remoteAccess';
 import EmbedRenameDialog from './components/EmbedRenameDialog.vue';
+import PageLoadFailed from './components/PageLoadFailed.vue';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
 // Concierge is home: a chat with an agent that knows every team. The same screens run in a browser through the

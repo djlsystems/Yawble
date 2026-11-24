@@ -167,7 +167,7 @@ name (`"action": "list"`, not `email.list`):
   "variables": [ { "name": "res", "type": "EmailList" }, { "name": "last", "type": "EmailMessage" },
                  { "name": "lastId", "type": "string", "scope": "saved" } ],
   "steps": [ { "id": "a", "type": "integration", "use": "mail", "action": "list",
-               "args": { "folder": "INBOX", "after": "{vars.lastId}", "since": "2026-11-20T00:00:00Z", "unreadOnly": true, "max": 20 },
+               "args": { "folder": "INBOX", "after": "{vars.lastId}", "since": "2026-11-20T00:00:00Z", "unreadOnly": true, "max": 200 },
                "into": "res", "next": "b" },
              { "id": "b", "type": "if", "when": { "left": "{count(vars.res.messages)}", "op": "gt", "right": 0 }, "then": "c", "else": "z" },
              { "id": "c", "type": "set", "var": "last", "value": "{last(vars.res.messages)}", "next": "d" },
