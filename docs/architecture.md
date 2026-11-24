@@ -253,7 +253,10 @@ allowed only if the file reached the host. Run it from Settings or with
 ## Companion and Cloud Link
 
 - **Companion** (`yawble-companion`): a local-only control endpoint, a per-launch pipe or socket announced in a user-only
-  `control.json`. Programs pair once per name with a level; destructive calls wait for approval in the window. See the
+  `control.json`. Programs pair once per name with a level; destructive calls wait for approval in the window. An
+  approval request is held in memory by `CompanionService` until the person decides it, the client cancels or replaces
+  it, 7 days pass, or the app restarts. It keeps the key its plan was worked out from, never a confirmation token: on
+  approval the plan is worked out again and runs only under the same key, with a token issued then. See the
   [README](../README.md#the-yawble-companion).
 - **Cloud Link**: the core connects out to the cloud service; no inbound port is opened. Remote viewers get a
   restricted set of methods. See [Cloud Link](cloud-link.md).

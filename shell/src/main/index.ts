@@ -10,7 +10,7 @@ import { captureMainOutput, diagnosticLog, processGoneLine, shellStartLine } fro
 import { installScope, isAdministrator, otherSessionsRunning, updaterArgs } from './install-scope';
 import { appFolder } from './app-folder';
 import { Channels, isUiMethod, type Overview } from '../shared/api';
-import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, startedInBackground, type ShellSettings } from './background';
+import { AppTray, applyStartAtLogin, needsYouToast, ShellSettingsFile, startAtLoginRegistered, startedInBackground, type ShellSettings } from './background';
 import { CoreClient } from './core-client';
 import { DataFolderInUseError, locateCore, locateInstallDir, startCore, type RunningCore } from './core-process';
 import { inUseDialog, removedDialog, type LifetimeDialog } from './lifetime-dialogs';
@@ -446,7 +446,7 @@ app.whenReady().then(async () => {
       tray?.update({ running: o.slots.running, queued: o.slots.queued, needsYou: needs });
       // A new question for the person: a system notification when the window is not in front (clicking opens it).
       if (needsYou !== null && needs > needsYou && !(mainWindow?.isFocused() ?? false) && Notification.isSupported()) {
-        const n = new Notification({ title: 'Yawble needs you', body: `${needs} thing${needs === 1 ? '' : 's'} waiting for you (questions, approvals, hosts agents ask to reach, developer tools agents ask for, connections to reconnect).` });
+        const n = new Notification({ title: 'Yawble needs you', body: needsYouToast(needs, o.newest) });
         n.on('click', showMain);
         n.show();
       }

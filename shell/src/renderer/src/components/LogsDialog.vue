@@ -28,6 +28,8 @@ const team = ref(props.member ? props.member.slice(0, props.member.indexOf('/'))
 const member = ref(props.member ?? '');
 /** All activity only (B101): the app's own rows (backlog, settings, triggers, link, backups...), no team or member. */
 const app = ref(false);
+/** The Level filter (a source with levels, the Diagnostics log): '' every level but debug, 'all', or one level. */
+const level = ref('');
 const filters = reactive<Record<string, string>>({});
 const values = reactive<Record<string, string[]>>({});
 const fromDay = ref('');
@@ -46,7 +48,12 @@ const open = ref<string | null>(null);
 let seq = 0;
 
 const source = computed(() => sources.value.find((s) => s.id === sourceId.value) ?? null);
-const columns = computed<LogColumn[]>(() => source.value?.columns ?? []);
+/** The source's columns; a source with levels shows each row's level after its time. */
+const columns = computed<LogColumn[]>(() => {
+  const list = source.value?.columns ?? [];
+  if (!source.value?.levels) return list;
+  return [...list.slice(0, 1), { key: 'level', label: 'Level', kind: 'text', filter: false }, ...list.slice(1)];
+});
 const filterColumns = computed(() => columns.value.filter((c) => c.filter && !(c.key === 'team' && source.value?.team)));
 const groups = computed(() => {
   const by = new Map<string, LogSourceInfo[]>();
@@ -82,8 +89,8 @@ const actionsOpen = ref(false);
 /** Where the filters go on a phone: the top of the list's scroller (B057). */
 const phoneToolsId = `logs-phone-tools-${useId()}`;
 /** How many filters are set (the search box apart): shown on the phone's Filters button. */
-const activeFilters = computed(() => [team.value, member.value, app.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
-const filtered = computed(() => !!(team.value || member.value || app.value || fromDay.value || toDay.value || text.value.trim() || Object.values(filters).some((v) => v)));
+const activeFilters = computed(() => [team.value, member.value, app.value, level.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
+const filtered = computed(() => !!(team.value || member.value || app.value || level.value || fromDay.value || toDay.value || text.value.trim() || Object.values(filters).some((v) => v)));
 
 function query(offset: number) {
   const f: Record<string, string> = {};
@@ -93,6 +100,7 @@ function query(offset: number) {
     team: source.value?.team && !member.value ? team.value || undefined : undefined,
     member: source.value?.member ? member.value || undefined : undefined,
     ...(app.value && appOffered.value ? { app: true } : {}),
+    ...(level.value && source.value?.levels ? { level: level.value } : {}),
     from: fromDay.value ? `${fromDay.value}T00:00:00` : undefined,
     to: toDay.value ? `${toDay.value}T23:59:59.9999999` : undefined,
     text: text.value.trim() || undefined,
@@ -177,7 +185,7 @@ async function loadValues() {
 }
 
 function clearFilters() {
-  team.value = ''; member.value = ''; app.value = false; fromDay.value = ''; toDay.value = ''; text.value = '';
+  team.value = ''; member.value = ''; app.value = false; level.value = ''; fromDay.value = ''; toDay.value = ''; text.value = '';
   for (const k of Object.keys(filters)) filters[k] = '';
 }
 
@@ -196,7 +204,7 @@ watch(team, () => {
   if (team.value) app.value = false;
 });
 watch([team, member, app], () => { void loadValues(); });
-watch([team, member, app, fromDay, toDay, () => ({ ...filters })], () => { void reload(); }, { deep: true });
+watch([team, member, app, level, fromDay, toDay, () => ({ ...filters })], () => { void reload(); }, { deep: true });
 let typing: ReturnType<typeof setTimeout> | undefined;
 watch(text, () => { clearTimeout(typing); typing = setTimeout(() => void reload(), 300); });
 onBeforeUnmount(() => clearTimeout(typing));
@@ -327,6 +335,16 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
               <option v-for="t in wholeTeams" :key="t" :value="`${teamPrefix}${t}`" :data-test="`logs-member-team-${t}`">{{ t }} (whole team)</option>
             </optgroup>
             <option v-if="appOffered" value="app" data-test="logs-member-app">app (the app itself)</option>
+          </select>
+        </label>
+        <label v-if="source?.levels">Level
+          <select v-model="level" data-test="logs-level">
+            <option value="">All but debug</option>
+            <option value="error">Errors</option>
+            <option value="warning">Warnings</option>
+            <option value="info">Info</option>
+            <option value="debug">Debug</option>
+            <option value="all">All, debug too</option>
           </select>
         </label>
         <label v-for="c in filterColumns" :key="c.key">{{ c.label }}

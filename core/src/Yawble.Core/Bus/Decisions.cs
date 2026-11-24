@@ -12,7 +12,14 @@ public static class DecisionActions
     /// <summary>Turns on the team's "Allow localhost (macOS)" (teams.localhost, B119), as Team settings > Network does.</summary>
     public const string AllowLocalhostMac = "team.allowLocalhostMac";
 
-    public static readonly IReadOnlyList<string> All = [AllowLocalhostMac];
+    /// <summary>
+    /// B142 (card 620): the person says yes to closing the workflow over a tester's FAIL on the decision's card (accepted,
+    /// or won't-do). Only on a decision with <c>card</c> and <c>kind</c>; the app changes no setting, the bus records the
+    /// yes on the answer (<c>closeOverFail</c>) and workflow_complete then goes through, listing the card in closedOverFail.
+    /// </summary>
+    public const string CloseOverFail = "workflow.closeOverFail";
+
+    public static readonly IReadOnlyList<string> All = [AllowLocalhostMac, CloseOverFail];
 
     public static bool IsKnown(string? action) => action is not null && All.Contains(action, StringComparer.Ordinal);
 }
@@ -26,7 +33,8 @@ public sealed record DecisionOption(string Label, string Reply, string? Action =
 /// before (<c>{ question }</c>). A call with a summary and no question stores the summary as the question too, so every
 /// reader of "question" keeps working.
 /// </summary>
-public sealed record DecisionAsk(string Question, string? Summary = null, IReadOnlyList<DecisionOption>? Options = null, string? Details = null)
+public sealed record DecisionAsk(string Question, string? Summary = null, IReadOnlyList<DecisionOption>? Options = null, string? Details = null,
+    CloseOverFail? Close = null)
 {
     public const int MinOptions = 2, MaxOptions = 4, MaxLabel = 40;
 
@@ -38,15 +46,42 @@ public sealed record DecisionAsk(string Question, string? Summary = null, IReadO
     /// and a reply; at most one with an action, and that action allowlisted), details. Refused (nothing stored) otherwise.
     /// <paramref name="options"/> may be the array itself or a string holding it as JSON (some CLIs send arrays as text).
     /// </summary>
-    public static DecisionAsk Parse(string? question, string? summary, JsonNode? options, string? details)
+    /// <remarks>
+    /// B142 (card 620): with <paramref name="card"/>, the decision asks the person to close the workflow over that card's
+    /// tester FAIL: <paramref name="kind"/> is required (accept-fail or wont-do), and a won't-do needs a
+    /// <paramref name="reason"/>. Exactly one option must then carry the action workflow.closeOverFail (the yes); with no
+    /// options the core gives two (the yes, and "fix it first"). The action is refused on a decision without a card.
+    /// </remarks>
+    public static DecisionAsk Parse(string? question, string? summary, JsonNode? options, string? details,
+        long? card = null, string? kind = null, string? reason = null)
     {
         question = Trimmed(question);
         summary = Trimmed(summary);
         details = Trimmed(details);
+        reason = Trimmed(reason);
         if (question is null && summary is null) throw new BusRefusal("bad_decision", "give the decision's summary (one plain sentence), or a question");
         var list = ParseOptions(options);
-        return new DecisionAsk(question ?? summary!, summary, list, details);
+        CloseOverFail? close = null;
+        if (card is { } id)
+        {
+            if (Trimmed(kind) is null) throw new BusRefusal("bad_decision", "with card, give kind: accept-fail (accept the tester's FAIL and close) or wont-do (the card will not be done)");
+            close = new CloseOverFail(id, CloseOverFail.ParseKind(kind), reason);
+            if (close.Kind == CloseOverFail.WontDo && reason is null) throw new BusRefusal("bad_decision", $"a won't-do needs a reason: say why card {id} will not be done");
+            list ??= DefaultCloseOptions(close);
+            if (list.Count(o => o.Action == DecisionActions.CloseOverFail) != 1)
+                throw new BusRefusal("bad_decision", $"with card, exactly one option (the yes) must carry action {DecisionActions.CloseOverFail}");
+        }
+        else if (kind is not null && Trimmed(kind) is not null) throw new BusRefusal("bad_decision", "kind goes with card: name the card the tester failed");
+        else if (list?.Any(o => o.Action == DecisionActions.CloseOverFail) == true)
+            throw new BusRefusal("bad_decision", $"action {DecisionActions.CloseOverFail} needs card and kind: name the card the tester failed");
+        return new DecisionAsk(question ?? summary!, summary, list, details, close);
     }
+
+    private static IReadOnlyList<DecisionOption> DefaultCloseOptions(CloseOverFail c) => c.Kind == CloseOverFail.WontDo
+        ? [new("Yes, won't do it", $"Yes: card {c.Card} is won't-do. Close the workflow.", DecisionActions.CloseOverFail),
+           new("No, do the card", $"No: card {c.Card} is to be done. Fix it and have the tester verify it again.")]
+        : [new("Accept and close", $"Yes: accept the FAIL on card {c.Card} and close the workflow.", DecisionActions.CloseOverFail),
+           new("No, fix it first", $"No: fix card {c.Card} and have the tester verify it again.")];
 
     private static IReadOnlyList<DecisionOption>? ParseOptions(JsonNode? node)
     {
@@ -102,6 +137,7 @@ public sealed record DecisionAsk(string Question, string? Summary = null, IReadO
                 return (JsonNode?)item;
             }).ToArray());
         if (Details is not null) o["details"] = Details;
+        if (Close is not null) o["closeOverFail"] = Close.ToJson();
         return o;
     }
 
@@ -119,6 +155,6 @@ public sealed record DecisionAsk(string Question, string? Summary = null, IReadO
             foreach (var n in a)
                 if (n is JsonObject x && S(x, "label") is { } label && S(x, "reply") is { } reply) options.Add(new DecisionOption(label, reply, S(x, "action")));
         }
-        return new DecisionAsk(S(o, "question") ?? S(o, "summary") ?? payload, S(o, "summary"), options, S(o, "details"));
+        return new DecisionAsk(S(o, "question") ?? S(o, "summary") ?? payload, S(o, "summary"), options, S(o, "details"), CloseOverFail.Read(o["closeOverFail"]));
     }
 }

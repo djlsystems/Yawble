@@ -90,8 +90,8 @@ public static class LogSources
             new("gateway_events", "at", 365, "the record of which hosts each run reached or was refused. The guardrail check's report of its own run is kept.")),
 
         new("runs", "Runs", "Security",
-            "One row per sandboxed run: who, which CLI and model, how it ended, its exit code and duration, whether anything outlived it, the policy in force, and the commit it started from.",
-            "run_records t", "t.id", "t.started_at",
+            "One row per sandboxed run: who, which CLI and model, how it ended, its exit code and duration, whether anything outlived it, the policy in force, and the commit it started from. A script member's run also says its script (key@version), what started it, the step it failed at and its script run, which the Script runs log shows step by step.",
+            RunsFrom, "t.id", "t.started_at",
             [
                 new("at", "Started", "t.started_at", "time"),
                 new("team", "Team", "t.team", Filter: true),
@@ -103,12 +103,16 @@ public static class LogSources
                 new("exit", "Exit", "t.exit_code", "number"),
                 new("duration", "Seconds", "ROUND(t.duration_ms / 1000.0, 1)", "number"),
                 new("reason", "Reason", "t.reason"),
+                new("script", "Script", "sc.script_key || '@' || sr.script_version", Filter: true),
+                new("trigger", "Started by", "sr.trigger"),
+                new("failedStep", "Failed step", "sr.failed_step_id"),
+                new("scriptRun", "Script run", "sr.id", "number"),
             ],
             "t.team = @team", "t.team = @team AND t.member = @name",
             new("run_records", "started_at", 365, "how each run before the cutoff ended. The agent's last run and the Settings > Agents run history lose those runs.")),
 
         new("tools", "Tool calls", "Accountability",
-            "Each tool call an agent made through an integration: the program, its arguments, the rule that decided, and how it ended.",
+            "Each tool call an agent or a script member made through an integration: the program, its arguments (for a web API or Email, the argument names and only the values that are not message content), the rule that decided, how it ended (a program's exit code, a web API's HTTP status), how long it took, how much it returned, how it was made and in which workflow. A script member's routine email list calls are one row per member per hour, unless one failed.",
             "integration_calls t", "t.id", "t.at",
             [
                 new("at", "Time", "t.at", "time"),
@@ -118,7 +122,11 @@ public static class LogSources
                 new("args", "Arguments", "t.args"),
                 new("decision", "Decision", "t.decision", Filter: true),
                 new("rule", "Rule", "t.rule"),
-                new("exit", "Exit", "t.exit_code", "number"),
+                new("exit", "Exit/HTTP", "t.exit_code", "number"),
+                new("duration", "Ms", "t.duration_ms", "number"),
+                new("bytes", "Bytes", "t.output_bytes", "number"),
+                new("via", "Via", "t.via", Filter: true),
+                new("workflow", "Workflow", "t.workflow", "number"),
             ],
             "t.team = @team", "t.member = @member",
             new("integration_calls", "at", 365, "the record of which tool calls agents made and which rule allowed or refused each.")),
@@ -201,6 +209,24 @@ public static class LogSources
             "tm.name = @team", "t.requested_by = @member",
             new("host_task_runs", "started_at", 365, "the record of those host task runs. Their output files in the team's documents stay.", Where: "ended_at IS NOT NULL")),
 
+        new("scripts", "Script runs", "Work history",
+            "Each run of a script member, and each Test run: its script (key@version), what started it (a trigger, a tell, a test), how it ended, the step it failed at and why, and how long it took. The member's Runs tab shows each run step by step.",
+            "script_runs t JOIN teams tm ON tm.id = t.team_id JOIN scripts sc ON sc.id = t.script_id LEFT JOIN members m ON m.id = t.member_id", "t.id", "t.started_at",
+            [
+                new("at", "Started", "t.started_at", "time"),
+                new("team", "Team", "tm.name", Filter: true),
+                new("member", "Member", "COALESCE(m.name, CASE WHEN t.test = 1 THEN '(test run)' END)"),
+                new("script", "Script", "sc.script_key || '@' || t.script_version", Filter: true),
+                new("trigger", "Started by", "t.trigger"),
+                new("status", "Status", "t.status", Filter: true),
+                new("failedStep", "Failed step", "t.failed_step_id"),
+                new("reason", "Reason", "t.reason"),
+                new("duration", "Seconds", "ROUND((julianday(t.ended_at) - julianday(t.started_at)) * 86400.0, 1)", "number"),
+                new("run", "Script run", "t.id", "number"),
+            ],
+            "tm.name = @team", "t.member_id = @memberId",
+            null, "a script member's Runs tab is read from them; they go with the member or the script"),
+
         new("transcripts", "Transcripts", "Agent output",
             "Each run's full terminal output, kept as a file only you can read.",
             "transcripts t", "t.run_id", "t.started_at",
@@ -245,6 +271,16 @@ public static class LogSources
             "c.team = @team", "c.team = @team AND t.source = @name",
             null, "each card's history on the board is built from it"),
     ];
+
+    /// <summary>
+    /// The Runs log: run_records, and for a script member's run (kind 'script', run_key "script:&lt;id&gt;", ScriptRunStore.RunKey) its
+    /// script run (sr) and script (sc), read by the run's id.
+    /// </summary>
+    private const string RunsFrom = """
+        run_records t
+          LEFT JOIN script_runs sr ON t.kind = 'script' AND sr.id = CAST(substr(t.run_key, 8) AS INTEGER)
+          LEFT JOIN scripts sc ON sc.id = sr.script_id
+        """;
 
     /// <summary>The prune time of an ask: when it was answered, or when it was raised if no answer time was kept.</summary>
     private const string AnsweredAt = "COALESCE(decided_at, at)";
@@ -298,9 +334,13 @@ public static class LogSources
     private const string ActivityFrom = """
         (
           SELECT COALESCE(r.ended_at, r.started_at) AS at, 'Runs' AS source, r.team || '/' || r.member AS member, 'run ' || COALESCE(r.end_class, 'running') AS event,
-                 trim(COALESCE(r.cli, '') || ' ' || COALESCE(r.model, '') || ' ' || COALESCE(r.kind, '') || COALESCE(' exit ' || r.exit_code, '') || COALESCE(' ' || r.reason, '')) AS details,
+                 trim(COALESCE(r.cli, '') || ' ' || COALESCE(r.model, '') || ' ' || COALESCE(r.kind, '') || COALESCE(' exit ' || r.exit_code, '')
+                      || COALESCE(' ' || rsc.script_key || '@' || rsr.script_version || ' (script run ' || rsr.id || ', ' || rsr.trigger || ')', '')
+                      || COALESCE(' at step ' || rsr.failed_step_id, '') || COALESCE(' ' || r.reason, '')) AS details,
                  'r' || r.id AS rid
             FROM run_records r
+              LEFT JOIN script_runs rsr ON r.kind = 'script' AND rsr.id = CAST(substr(r.run_key, 8) AS INTEGER)
+              LEFT JOIN scripts rsc ON rsc.id = rsr.script_id
           UNION ALL
           SELECT g.at, 'Network', g.member, g.kind, trim(COALESCE(g.method, '') || ' ' || COALESCE(g.target, g.vhost, '') || COALESCE(' ' || g.status, '') || COALESCE(' ' || g.detail, '') || CASE WHEN g.count > 1 THEN ' (' || g.count || 'x)' ELSE '' END), 'g' || g.id
             FROM gateway_events g

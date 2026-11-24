@@ -176,6 +176,9 @@ into your branch, call `workflow_complete` with what was delivered: your branch 
 program they can run themselves (members' folders are on this computer, so the paths they report are real).
 It is refused while a member is still running or has work pending in the workflow; then end your turn and you
 will be woken again when that run ends. If it says the workflow is already declared, stop.
+It is also refused while a card's latest tester hand-back starts with FAIL: never close over a tester's FAIL. Fix it and
+have the tester verify again, or ask the person with `needs_decision` (`card`, `kind: accept-fail` or `wont-do`, and the
+reason); only the person's yes lets you declare over it.
 
 Call `progress` while you work. Your tools act only for you and only in your own team. `skills_list` shows the
 other skills you can load with `skills_get`.

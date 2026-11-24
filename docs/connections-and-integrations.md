@@ -105,9 +105,12 @@ another Email integration turned on for that team when the member overrides it (
   removes it and keeps the Connection. The Connection's **Used by** shows `Email: <name>`.
 - A call from a team the integration is not turned on for fails the step with
   `refused: <name> is not turned on for <team>`. With its Connection removed: `refused: <name> has no email account`.
-- Every call is logged in the call history as `email:<name>`, with the script member as the caller, the action and its
-  arguments. Message content is never logged. The password stays in the credential store; it is never in the
-  database, a log, a result or a step failure.
+- Every call is logged in the call history as `email:<name>` once it is done, with the script member as the caller, the
+  action, the argument names and their plain values, the script run, the mail server's host, how long it took and how
+  many messages came back, or the mail error when it failed (exit 1; a sign-in that was refused says so). Message
+  content is never logged. A member's `list` calls that succeed are one row per member per hour (`N calls this hour`);
+  a failure is always its own row. The password stays in the credential store; it is never in the database, a log, a
+  result or a step failure.
 - Reading never marks a message read: folders are opened read-only (`EXAMINE`), and bodies are fetched with
   `BODY.PEEK`. Only `markRead` and `move` change the mailbox, and a dry run does neither (it logs `would markRead on <use>`).
 - There is no delete action. `move` refuses a server that offers neither `MOVE` nor `UIDPLUS`, because there it could
@@ -351,7 +354,11 @@ remembered only as the exact line. A tool that reveals a sign-in cannot be alway
 
 The agent does not wait. It is woken in the same workflow with the result.
 
-Every call is logged with its decision, the rule that decided it, the team and member, and who started the work.
+Every call is logged with its decision, the rule that decided it, the team and member, and who started the work. For a
+ web API (an agent's or a script's) and for Email, the log keeps the action, the HTTP status (or exit code) and the
+ argument names, with values only for fields that are not message content: a body, text, message or subject keeps only
+ its length, and a phone number its last 4 digits. The request itself is sent whole. A script's failed API call says
+ the integration, the action, the HTTP method and route, and for no answer the host and how long it waited.
 
 ## Network requests are not integrations
 

@@ -138,7 +138,7 @@ public static partial class TimelineRebuild
                         placed = false;
                     }
                     break;
-                case "done" or "workflow done" or "workflow closed":
+                case "done" or "workflow done" or "workflow closed" or ClosedOverFail.AcceptedTrailKind or ClosedOverFail.WontDoTrailKind:
                     status = "done";
                     lane = Lanes.Done;
                     break;
