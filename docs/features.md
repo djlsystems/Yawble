@@ -316,10 +316,17 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   2 to 4 **options** (each a button with a label of at most 40 characters and the reply it sends), and **details**
   (its findings, in Markdown, under the summary). A question in one Markdown text (`question`) still works and is
   shown as before.
-  - At most one option may carry an **action**, from a fixed list the app knows: today only `team.allowLocalhostMac`
-    (turn on the team's Allow localhost (macOS)). The agent only names it; nothing changes when it asks. When you
+  - At most one option may carry an **action**, from a fixed list the app knows: `team.allowLocalhostMac`
+    (turn on the team's Allow localhost (macOS)) and `workflow.closeOverFail` (below). The agent only names it; nothing changes when it asks. When you
     pick that option the app applies the action first, then sends the option's reply as your answer. Anything else
     named as an action is refused and the question is not asked.
+  - **Closing over a tester's FAIL** (B142): `workflow_complete` is refused (`tester_fail`) while a card's latest
+    tester hand-back in the workflow starts with FAIL (a later PASS clears it). The refusal names the card, quotes the
+    FAIL line and gives the ways forward: fix it and have the tester verify again; or ask you with `needs_decision`
+    plus `card`, `kind` (`accept-fail`, or `wont-do` with a `reason`) and `reason`. The yes option carries
+    `workflow.closeOverFail` (the app adds a yes and a no when the agent gives no options). Only your pick of that
+    option counts as the yes (typed text or the Concierge's answer does not); the declaration then goes through and
+    its payload lists the card in `closedOverFail: [{ card, tester, failLine, kind: "accepted" | "wont-do", reason }]`.
   - An option whose action you cannot apply is shown disabled with the reason: a Cloud Link Visitor ("Only a
     workgroup Member or an Owner can change this"), anything but the app or a cloud viewer ("Only the person can pick
     this, in the app"), a computer that is not a Mac ("Only on macOS").
