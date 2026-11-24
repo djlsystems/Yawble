@@ -514,3 +514,19 @@ describe('the helpers', () => {
       { files: ['C:/data/a.txt', 'b.txt'] })).toEqual(['C:/data/a.txt', 'b.txt']);
   });
 });
+it('card 605 independent saved version reproduction', async () => {
+ const f = fakeApi(); const w = await dialog(f.api);
+ await rowOf(w, 'inbox-sms-alert').get('[data-test=script-open]').trigger('click'); await flushPromises();
+ const d: any = JSON.parse(JSON.stringify(INBOX_SMS_ALERT));
+ d.settings = d.settings.filter((s: any) => s.name !== 'folder');
+ d.settings.push({ name: 'fresh', type: 'string', default: 'new-value' });
+ d.requires.push({ name: 'extraMail', kind: 'email', actions: ['list'] }); d.trigger.accepts = ['cron'];
+ await w.get('[data-test=json-text]').setValue(pretty(d)); await w.get('[data-test=editor-tab-test]').trigger('click'); await flushPromises();
+ expect(w.find('[data-test=test-setting-folder]').exists()).toBe(true); expect(w.find('[data-test=test-setting-fresh]').exists()).toBe(false); expect(w.find('[data-test=test-binding-extraMail]').exists()).toBe(false);
+ await w.get('[data-test=script-test-run]').trigger('submit'); await flushPromises();
+ const old = f.of('scripts.testRun')[0]!.params; expect(old.version).toBe(3); expect(old.input.kind).toBe('every'); expect(old.settings).toHaveProperty('folder'); expect(old.settings).not.toHaveProperty('fresh'); expect(old.bindings).not.toHaveProperty('extraMail');
+ await w.get('[data-test=editor-tab-json]').trigger('click'); await w.get('[data-test=editor-save]').trigger('click'); await flushPromises(); await w.get('[data-test=editor-tab-test]').trigger('click'); await flushPromises();
+ expect(w.find('[data-test=test-setting-folder]').exists()).toBe(false); expect(w.find('[data-test=test-setting-fresh]').exists()).toBe(true); expect((w.get('[data-test=test-binding-extraMail] select').element as HTMLSelectElement).value).toBe('Support mail');
+ await w.get('[data-test=script-test-run]').trigger('submit'); await flushPromises();
+ const now = f.of('scripts.testRun')[1]!.params; expect(now.version).toBe(4); expect(now.input.kind).toBe('cron'); expect(now.settings).toHaveProperty('fresh', 'new-value'); expect(now.settings).not.toHaveProperty('folder'); expect(now.bindings).toHaveProperty('extraMail', 'Support mail');
+});
