@@ -80,6 +80,18 @@ public sealed class B135ScriptToolsTests : IAsyncLifetime
         return copy;
     }
 
+    [Fact]
+    public async Task VerifyBuildLoop()
+    {
+        var doc = new JsonObject { ["id"] = "inbox-alert", ["field"] = "txt" };
+        Assert.Contains("unknown_field", await Ok("script_check", new JsonObject { ["document"] = doc.DeepClone() }));
+        doc["field"] = "text";
+        _rpc.Clean = true;
+        Assert.Contains("check: ok", await Ok("script_check", new JsonObject { ["document"] = doc.DeepClone() }));
+        Assert.Contains("it passes its check", await Ok("script_save", new JsonObject { ["document"] = doc.DeepClone() }));
+        Assert.Contains("dry run", await Ok("script_test_run", new JsonObject { ["script"] = "inbox-alert", ["team"] = "alpha", ["dry_run"] = true }));
+    }
+
     // ------------------------------------------------------------------ the list
 
     [Fact]

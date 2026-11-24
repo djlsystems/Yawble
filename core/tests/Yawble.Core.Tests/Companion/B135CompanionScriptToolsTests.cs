@@ -71,6 +71,24 @@ public sealed class B135CompanionScriptToolsTests : IAsyncLifetime
         return r.Text;
     }
 
+    [Fact]
+    public async Task VerifyBuildLoop()
+    {
+        var cc = Client(CompanionLevel.Act);
+        var doc = new JsonObject { ["id"] = "inbox-alert", ["field"] = "txt" };
+        var bad = await _service.CallAsync(cc, ScriptTools.ScriptCheck, new JsonObject { ["document"] = doc.DeepClone() }, Ct);
+        Assert.Contains("unknown_field", bad.Text);
+        doc["field"] = "text";
+        var good = await _service.CallAsync(cc, ScriptTools.ScriptCheck, new JsonObject { ["document"] = doc.DeepClone() }, Ct);
+        Assert.Contains("check: ok", good.Text);
+        var save = await _service.CallAsync(cc, ScriptTools.ScriptSave, new JsonObject { ["document"] = doc.DeepClone() }, Ct);
+        Assert.False(save.IsError, save.Text);
+        var run = await _service.CallAsync(cc, ScriptTools.ScriptTestRun, TestRun(true), Ct);
+        Assert.False(run.IsError, run.Text);
+        Assert.Contains("dry run", run.Text);
+        Assert.Null(run.RequestId);
+    }
+
     // ---------------------------------------------------------------- script_member_add
 
     [Fact]
@@ -347,7 +365,7 @@ public sealed class B135CompanionScriptToolsTests : IAsyncLifetime
                 }),
                 "scripts.get" => new JsonObject { ["id"] = 11, ["key"] = "inbox-alert", ["version"] = 2, ["ok"] = true, ["document"] = new JsonObject { ["id"] = "inbox-alert" }, ["check"] = Clean() },
                 "scripts.save" => new JsonObject { ["id"] = 1, ["key"] = "inbox-alert", ["version"] = 3, ["ok"] = true, ["draft"] = false, ["check"] = Clean() },
-                "scripts.check" => Clean(),
+                "scripts.check" => p["document"]?["field"]?.GetValue<string>() == "txt" ? new JsonObject { ["ok"] = false, ["issues"] = new JsonArray(new JsonObject { ["stepId"] = "send", ["code"] = "unknown_field", ["message"] = "unknown field txt" }), ["schemaReferences"] = new JsonArray() } : Clean(),
                 "scripts.testRun" => TestRun(p),
                 "scripts.runs" => Runs(),
                 "scripts.run" => new JsonObject { ["id"] = 5, ["status"] = "succeeded", ["steps"] = new JsonArray(), ["log"] = new JsonArray() },
