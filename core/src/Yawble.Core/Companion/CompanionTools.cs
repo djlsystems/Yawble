@@ -33,6 +33,8 @@ public static class CompanionTools
         "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
         "team_archive", "team_delete", "team_env_set", "doctor_fix", "team_create", "team_repo_add", "team_repo_remove", "workflow_close",
         "backup_now", "git_merge_team", "backup_restore", "host_task_run", ScriptTools.ScriptMemberAdd,
+        // B139: the same level as script_member_add. Their yes is a request the window approves (CompanionService.ScriptCallAsync).
+        ScriptTools.ScriptTriggerSet, ScriptTools.IntegrationActionAllow,
     ];
 
     /// <summary>The destructive tools whose own first call shows the exact list and issues a token (ConciergeActions' confirm flow).</summary>
@@ -109,7 +111,14 @@ public static class CompanionTools
                         ? " A live run (dry_run false) really sends and writes through the bound integrations; the first live run of a script on a team " + ApprovalNote
                         : " This client may only dry-run (a live run needs the destructive level).");
             }
-            if (Destructive.Contains(name))
+            if (name == ScriptTools.ScriptTriggerSet)
+            {
+                // Only turning a trigger on is approved in the window; turning one off runs at once.
+                copy["description"] = WithoutYesSentences(copy["description"]!.GetValue<string>()) +
+                    " Turning a trigger on (a new enabled trigger, an off one turned on, or an enabled one whose schedule changes) " + ApprovalNote +
+                    " Turning one off, or saving it with enabled false, runs at once.";
+            }
+            else if (Destructive.Contains(name))
             {
                 // The Concierge's wording about tokens and a yes in chat does not apply here (the window approves): those sentences go.
                 var description = WithoutYesSentences(copy["description"]!.GetValue<string>());
