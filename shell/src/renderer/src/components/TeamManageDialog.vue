@@ -3,7 +3,10 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, GitProvider, IntegrationInfo, McpServerInfo, RepoProviderInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
 import { TEAM_WORKFLOW_EXPIRY, TEAMS_SET_REPO, WorkflowExpiryDefaultDays, TEAM_RETROS, TEAMS_LESSONS, PERSON_WRITER } from '../../../shared/api';
 import { TEAM_LOCALHOST, TEAM_LOCALHOST_LABEL, TEAM_LOCALHOST_WARNING } from '../../../shared/api';
-import type { TeamLessons } from '../../../shared/api';
+import type { HireRow, RoleRow, TeamHireRow, TeamLessons } from '../../../shared/api';
+import HireListEditor from './HireListEditor.vue';
+import { useAgentModels } from '../agentModels';
+import { useAgentOptions } from '../agentOptions';
 import { openSkill } from '../skillLink';
 import RepoProviderFields from './RepoProviderFields.vue';
 import { errorText, resolveApi } from '../api';
@@ -17,17 +20,18 @@ import { usePhone } from '../phone';
 import { vChange } from '../remoteAccess';
 
 /**
- * A team's housekeeping: pause or resume it, its repositories, its environment variables, archive it, delete it. Archive and delete need
+ * A team's housekeeping: pause or resume it, who its Manager may hire, its repositories, its environment variables, archive it, delete it. Archive and delete need
  * a quiet team (nothing running, nothing waiting) and say what is still working when it is not.
  */
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi }>();
 const emit = defineEmits<{ close: []; changed: []; deleted: [] }>();
 const api = resolveApi(props.api);
 
-type Tab = 'general' | 'state' | 'repos' | 'env' | 'network' | 'integrations' | 'reset' | 'delete';
+type Tab = 'general' | 'hiring' | 'state' | 'repos' | 'env' | 'network' | 'integrations' | 'reset' | 'delete';
 const tab = ref<Tab>('general');
 const tabs: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
+  { id: 'hiring', label: 'Hiring' },
   { id: 'state', label: 'Pause and archive' },
   { id: 'repos', label: 'Repositories' },
   { id: 'env', label: 'Environment' },
@@ -59,7 +63,7 @@ const work = useBusy();
 const busy = computed(() => work.any());
 const doing = (method: string) => work.is('act', method);
 // Each tab's data has had its first answer (an error is shown above and ends the loading state too).
-const ready = reactive({ localhost: false, expiry: false, quiet: false, push: false, sync: false, repos: false, approvals: false, env: false, ints: false, members: false });
+const ready = reactive({ localhost: false, expiry: false, quiet: false, push: false, sync: false, repos: false, approvals: false, env: false, ints: false, members: false, hiring: false });
 
 function act(method: string, params: Record<string, unknown> = {}, done?: (r: any) => void) {
   return work.run('act', async () => {
@@ -72,6 +76,29 @@ function act(method: string, params: Record<string, unknown> = {}, done?: (r: an
     } catch (e) { error.value = errorText(e); }
   }, method);
 }
+
+// ---- B147: who the Manager may hire (teams.hireList, teams.setHireList): rows of a role, its agent and model, from the
+// role catalog (roles.list). An empty list lets the Manager hire any agent. An older core: a note.
+const agentOptions = useAgentOptions(api);
+const models = useAgentModels(api);
+const roles = ref<RoleRow[]>([]);
+const hireRows = reactive<HireRow[]>([]);
+const hireMissing = ref(false);
+const hireSaved = ref(false);
+const hireUsed = ref<Record<string, number>>({});
+function applyHire(list: TeamHireRow[]) {
+  hireRows.splice(0, hireRows.length, ...list.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })));
+  hireUsed.value = Object.fromEntries(list.map((r) => [r.role, r.used ?? 0]));
+}
+async function loadHiring() {
+  try { applyHire(await api.call<TeamHireRow[]>('teams.hireList', { teamId: props.team.id, team: props.team.id })); hireMissing.value = false; }
+  catch { hireMissing.value = true; } finally { ready.hiring = true; }
+  try { roles.value = await api.call<RoleRow[]>('roles.list'); } catch { roles.value = []; }
+}
+const saveHiring = () => act('teams.setHireList', { team: props.team.id, rows: hireRows.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })) }, () => {
+  hireSaved.value = true;
+  void loadHiring();
+});
 
 // ---- pause / archive
 const quiet = ref<TeamQuiet | null>(null);
@@ -221,7 +248,7 @@ const doReset = () => act('teams.reset', { members: [...resetPick.value], ...res
   resetDone.value = `Done: ${r.done.join('; ') || 'nothing to clear'}.` + (r.left.length ? ` Not removed: ${r.left.join('; ')}.` : '');
 });
 
-onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadLocalhost(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
+onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLessons(); void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadLocalhost(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
 </script>
 
 <template>
@@ -274,6 +301,19 @@ onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void
             <button class="primary" data-test="team-workflow-expiry-save" :disabled="busy || !expiryValid || expiryDraft === expiry" @click="saveExpiry"><BusyLabel :busy="doing(TEAM_WORKFLOW_EXPIRY)" text="Saving…">Save</BusyLabel></button></div>
         </template>
       </div>
+    </section>
+
+    <section v-else-if="tab === 'hiring'" class="pane" data-test="team-hiring">
+      <p class="muted">Who the Manager may hire: each row is a role and the agent and model a member of it runs on.
+        The Manager can hire only these; a hire gets the role's job as its standing instructions.</p>
+      <LoadingNote v-if="!ready.hiring" text="Loading the hire list…" />
+      <p v-else-if="hireMissing" class="muted small" data-test="team-hiring-missing">This version of the app's core keeps no hire list: the Manager may hire any agent.</p>
+      <template v-else>
+        <HireListEditor :rows="hireRows" :roles="roles" :agents="agentOptions" :models="models" :used="hireUsed" test-id="team-hire" @changed="hireSaved = false" />
+        <div class="buttons"><span class="grow" />
+          <span v-if="hireSaved" class="ok" data-test="team-hire-saved">Saved: the Manager hires from this list from now on.</span>
+          <button v-change class="primary" data-test="team-hire-save" :disabled="busy" @click="saveHiring"><BusyLabel :busy="doing('teams.setHireList')" text="Saving…">Save</BusyLabel></button></div>
+      </template>
     </section>
 
     <section v-else-if="tab === 'state'" class="pane">

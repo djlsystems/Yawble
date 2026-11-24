@@ -299,16 +299,16 @@ describe('New Team dialog defaults', () => {
         { id: 1, name: 'claude', baseCli: 'claude', custom: false, defaultModel: 'opus', argsBefore: [], argsAfter: [], removedArgs: [] },
         { id: 2, name: 'codex', baseCli: 'codex', custom: false, defaultModel: 'gpt-5.5', argsBefore: [], argsAfter: [], removedArgs: [] },
       ],
-      'agents.models': (p: any) => ({ models: p.cli === 'claude' ? ['opus', 'sonnet', 'haiku'] : ['gpt-5.5', 'gpt-5.5-mini'], source: 'app' }),
+      'agents.models': (p: any) => ({ models: p.cli === 'claude' ? ['opus', 'sonnet', 'haiku'] : ['gpt-5.5', 'gpt-5.5-mini'], source: 'builtin' }),
     });
     await w.find('[data-test=team-name]').setValue('alpha');
     const opts = (t: string) => Array.from(q<HTMLSelectElement>(t)!.options).map((o) => o.text);
-    expect(opts('manager-model')).toEqual(['default (gpt-5.5)', 'gpt-5.5', 'gpt-5.5-mini']); // the Manager is on Codex
-    expect(opts('member-model-0')).toEqual(['default (opus)', 'opus', 'sonnet', 'haiku']); // Developer on Claude
+    expect(opts('manager-model')).toEqual(['default (gpt-5.5)', 'gpt-5.5', 'gpt-5.5-mini', 'Custom…']); // the Manager is on Codex
+    expect(opts('member-model-0')).toEqual(['default (opus)', 'opus', 'sonnet', 'haiku', 'Custom…']); // Developer on Claude
     await w.find('[data-test=add-member-row]').trigger('click'); // a new row starts on the Manager's agent, Codex
     await flushPromises();
     await w.find('[data-test=member-name-1]').setValue('Tester Ada');
-    expect(opts('member-model-1')).toEqual(['default (gpt-5.5)', 'gpt-5.5', 'gpt-5.5-mini']);
+    expect(opts('member-model-1')).toEqual(['default (gpt-5.5)', 'gpt-5.5', 'gpt-5.5-mini', 'Custom…']);
     await w.find('[data-test=member-model-0]').setValue('sonnet');
     await w.find('[data-test=manager-model]').setValue('gpt-5.5-mini');
     await w.find('[data-test=member-model-1]').setValue('gpt-5.5-mini');

@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import type { TeamDefaultMember, TeamDefaults, TeamDefaultsSaved, YawbleApi } from '../../../shared/api';
+import type { HireRow, RoleRow, TeamDefaultMember, TeamDefaults, TeamDefaultsSaved, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { useAgentOptions } from '../agentOptions';
 import { readOnly, vChange } from '../remoteAccess';
 import BusyLabel from './BusyLabel.vue';
 import LoadingNote from './LoadingNote.vue';
+import HireListEditor from './HireListEditor.vue';
+import RolesSection from './RolesSection.vue';
+import { useAgentModels } from '../agentModels';
 
 // Settings > Teams: the agents a new team starts with (the Manager, and member rows that start in the New Team
 // dialog's list or are offered there), and the list of first names new members are named from. One Save for the tab.
-// Generate fills the names box with names for a country; nothing is kept until Save.
+// Generate fills the names box with names for a country; nothing is kept until Save. The default hire list (who the
+// Manager of a new team may hire) is kept by that Save too; the Roles below it save each change at once.
 const props = defineProps<{ api?: YawbleApi }>();
 const api = resolveApi(props.api);
 const agentOptions = useAgentOptions(api);
@@ -23,6 +27,13 @@ const country = ref('en-US');
 const countries = ref<{ code: string; label: string }[]>([]);
 const usedCount = ref(0);
 const rejected = ref<{ line: string; reason: string }[]>([]);
+// B147: the role catalog (saved at once by its own buttons) and the default hire list (kept by the tab's Save). An
+// older core without them: the Roles section and the hire list are not shown, and Save sends no hireList.
+const models = useAgentModels(api);
+const roles = ref<RoleRow[] | null>(null);
+const hireList = reactive<HireRow[]>([]);
+const hasHireList = ref(false);
+async function loadRoles() { try { roles.value = await api.call<RoleRow[]>('roles.list'); } catch { roles.value = null; } }
 
 const saving = ref(false);
 const saveError = ref<string | null>(null);
@@ -48,6 +59,8 @@ function apply(d: TeamDefaults) {
   countries.value = d.countries ?? [];
   country.value = d.country || countries.value[0]?.code || 'en-US';
   usedCount.value = d.usedCount ?? 0;
+  hasHireList.value = Array.isArray(d.hireList);
+  hireList.splice(0, hireList.length, ...(d.hireList ?? []).map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })));
 }
 
 async function load() {
@@ -56,6 +69,8 @@ async function load() {
 }
 
 onMounted(async () => {
+  void models.loadProfiles();
+  void loadRoles();
   try { await load(); } catch (e) { loadError.value = errorText(e); }
 });
 
@@ -80,6 +95,7 @@ async function save() {
       members: members.filter((m) => m.name.trim()).map((m) => ({ name: m.name.trim(), cli: m.cli, onNewTeams: m.onNewTeams })),
       memberNamesText: namesText.value,
       country: country.value,
+      ...(hasHireList.value ? { hireList: hireList.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })) } : {}),
     });
     rejected.value = r?.rejected ?? [];
     saved.value = true;
@@ -141,6 +157,14 @@ async function generate() {
       </div>
       <button v-change data-test="default-member-add" @click="addMember">+ Add member</button>
 
+      <template v-if="hasHireList">
+        <h3>Who the Manager may hire</h3>
+        <p class="muted small">The hire list new teams start with: the roles the Manager may hire, each on its agent and model. A team's own list
+          is in its Settings, on the Hiring tab.</p>
+        <HireListEditor :rows="hireList" :roles="roles ?? []" :agents="agentOptions" :models="models" test-id="default-hire" :read-only="readOnly"
+          @changed="saved = false" />
+      </template>
+
       <h3>Member names</h3>
       <p class="muted small">New members get a first name picked at random from this list, never one a member of any team already has.
         One name per line.</p>
@@ -171,6 +195,11 @@ async function generate() {
         <span v-if="saved" class="muted small" data-test="team-defaults-saved">Saved</span>
         <span v-if="saveError" class="error" data-test="team-defaults-save-error">{{ saveError }}</span>
       </div>
+
+      <template v-if="roles">
+        <h3>Roles</h3>
+        <RolesSection :api="api" :roles="roles" :agents="agentOptions" :models="models" @changed="loadRoles" />
+      </template>
     </template>
   </section>
 </template>
