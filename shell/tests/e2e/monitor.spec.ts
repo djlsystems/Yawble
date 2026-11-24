@@ -1197,7 +1197,8 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: 'a'.repeat(40), message: 'Refund commit', files: [{ path: 'src/refund/f0.ts', status: 'M' }] });
   feed.event({ kind: 'commit', team: TEAM2, member: 'DeveloperCleo', sha: 'b'.repeat(40), message: 'Cart commit', files: [{ path: 'web/cart/c0.ts', status: 'M' }] });
   feed.event({ kind: 'merge-team', team: TEAM2, member: null, sha: 'c'.repeat(40), message: 'Merge', files: [] });
-  // Card 77: focused, the zoom passes 0.5 and payments' own workflow #10 is labelled "#10", so "#10" matched it.
+  // The instruction text has no "#10": focused, the zoom passes 0.5 and payments' own workflow #10 is labelled "#10",
+  // so a text with "#10" in it would match that label.
   feed.row('instruction', 'DeveloperCleo', 'Manager', 20, 0, 'Card 77: other team comet', TEAM2);
   await page.waitForTimeout(3500);
   const fs = await frames(page);
