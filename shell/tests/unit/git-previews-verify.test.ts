@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// Card 466 (B073 verify, TesterKofi): the Git dialog fed the REAL core's answers. tests/unit/fixtures/card466/*.json were
-// written by core Card466PreviewVerifyTests (CARD466_FIXTURE_OUT set) from fixture repositories (base trunk), serialized as
+// Card 466 (B073 verify, TesterKofi): the Git dialog fed the REAL core's answers. tests/unit/fixtures/git-previews/*.json were
+// written by core Card466PreviewVerifyTests (GIT_PREVIEWS_FIXTURE_OUT set) from fixture repositories (base trunk), serialized as
 // UiRpc sends them. Checks: the shapes are api.ts's; every count asks for the exact pair git.status gave and shows that
 // many rows, each opening the Commit view; the merge and delete previews show the core's words; Merge is offered only when
 // the core says it merges; Sync and Merge list what came in; the deleted branch's commit opens as "it was on X". Faults
@@ -16,7 +16,7 @@ import { mergePreviewView } from '../../src/renderer/src/gitRange';
 import { LOCAL_MARK } from '../../src/renderer/src/localMark';
 import type { BranchSyncResult, CommitRange, CommitShow, DeletePreview, MergePreview, TeamGitResult, TeamGitStatus, YawbleApi } from '../../src/shared/api';
 
-const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'card466', `${name}.json`), 'utf8'));
+const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'git-previews', `${name}.json`), 'utf8'));
 
 function fakeApi(answers: Record<string, (params: any) => unknown>) {
   const calls: { method: string; params: any }[] = [];

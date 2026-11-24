@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Card 466 addition (B073 verify, TesterKofi): DeveloperInes's 3ad0991, the team page's TeamSyncBanner, fed the REAL core's
-// answers. synctobase-*.json were written by core Card466PreviewVerifyTests.SyncToBase_* (CARD466_FIXTURE_OUT set) through
+// answers. synctobase-*.json were written by core Card466PreviewVerifyTests.SyncToBase_* (GIT_PREVIEWS_FIXTURE_OUT set) through
 // UiRpc's RpcDispatcher, exactly as a window gets them: behind.from = the team tip, behind.to = the base it is behind; with the
 // branches level the core sends behind: null (never a behind with from / to null).
 import { flushPromises, mount } from '@vue/test-utils';
@@ -13,7 +13,7 @@ import { commitsInHeading } from '../../src/renderer/src/gitRange';
 import { LOCAL_MARK } from '../../src/renderer/src/localMark';
 import type { YawbleApi } from '../../src/shared/api';
 
-const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'card466', `${name}.json`), 'utf8'));
+const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'git-previews', `${name}.json`), 'utf8'));
 
 function fakeApi(answers: Record<string, (params: any) => unknown>) {
   const calls: { method: string; params: any }[] = [];

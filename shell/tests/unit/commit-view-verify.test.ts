@@ -1,7 +1,7 @@
-﻿// @vitest-environment happy-dom
-// Card 445 (B072 verify, TesterKofi): the Commit view fed the REAL core's answers. tests/unit/fixtures/card445/*.json
+// @vitest-environment happy-dom
+// Card 445 (B072 verify, TesterKofi): the Commit view fed the REAL core's answers. tests/unit/fixtures/commit-view/*.json
 // are git.commitShow results the core wrote from a fixture repository (core Card445CommitViewVerifyTests with
-// CARD445_FIXTURE_OUT set), so these check the shell against the core's actual contract, not a hand-made fake:
+// COMMIT_VIEW_FIXTURE_OUT set), so these check the shell against the core's actual contract, not a hand-made fake:
 // not found is only {found, goneReason, sha}; merge.intoBranch/fromBranch null; made missing; where.branches with the
 // team branch first and never main; codeShown false; a diff refused with remote_refused. Plus the faults round 1 found,
 // flipped in round 2 (card 460) after the fixes (core f669165, shell 7ec603b): F1 a merge made on main now reads
@@ -15,7 +15,7 @@ import CommitView from '../../src/renderer/src/components/CommitView.vue';
 import { closeCommit, gitRequest, mergeLine, whereLines } from '../../src/renderer/src/commitView';
 import type { CommitFound, CommitShow, YawbleApi } from '../../src/shared/api';
 
-const real = (name: string): CommitShow => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'card445', `${name}.json`), 'utf8'));
+const real = (name: string): CommitShow => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'commit-view', `${name}.json`), 'utf8'));
 
 function core(answer: CommitShow, diff?: (params: any) => unknown) {
   const calls: { method: string; params: any }[] = [];

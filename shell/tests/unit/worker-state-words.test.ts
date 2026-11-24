@@ -58,7 +58,7 @@ describe('the Status tooltip of a waiting workflow', () => {
 });
 
 describe('the Workflows page Who column', () => {
-  const real = JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'card478', 'list-open.json'), 'utf8')) as WorkflowsListAnswer;
+  const real = JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'workflows', 'list-open.json'), 'utf8')) as WorkflowsListAnswer;
   const EVE = 17;
   async function page(members: WorkflowRow['members']) {
     const answer = structuredClone(real);

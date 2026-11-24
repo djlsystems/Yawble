@@ -1,6 +1,6 @@
 // Card 478 (B104 verify, TesterKofi): the Workflows page in a real browser (headless Chrome) on remote.html, the remote
 // view, with the phone-remote FAKE core whose workflows.list / workflows.get answer the REAL core's answers
-// (tests/unit/fixtures/card478, written by core Card478B104VerifyTests: live running / lease / slot / needs-you states,
+// (tests/unit/fixtures/workflows, written by core Card478B104VerifyTests: live running / lease / slot / needs-you states,
 // a dispatched item with its spec, an archived item, an expired workflow). At 1280, 1440 and 375 px, light and dark,
 // with full access and as a Visitor (read-only). Screenshots go to $YAWBLE_TEAM_DOCS/B104/verify.
 //
@@ -15,7 +15,7 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
-const fx = (name: string) => JSON.parse(readFileSync(path.join(__dirname, '..', 'unit', 'fixtures', 'card478', `${name}.json`), 'utf8'));
+const fx = (name: string) => JSON.parse(readFileSync(path.join(__dirname, '..', 'unit', 'fixtures', 'workflows', `${name}.json`), 'utf8'));
 const ID = fx('ids') as Record<string, number | string>;
 const LIST = { all: fx('list-all'), open: fx('list-open') };
 const GETS = ['get-running', 'get-dispatched', 'get-needs-you', 'get-closed-archived'].map(fx);

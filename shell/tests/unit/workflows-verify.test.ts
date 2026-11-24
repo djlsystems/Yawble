@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Card 478 (B104 verify, TesterKofi): the Workflows page fed the REAL core's answers.
-// tests/unit/fixtures/card478/*.json were written by core Card478B104VerifyTests with CARD478_FIXTURE_OUT set: a started
+// tests/unit/fixtures/workflows/*.json were written by core Card478B104VerifyTests with WORKFLOWS_FIXTURE_OUT set: a started
 // engine with a scripted fake runner (never a real agent CLI) where Web's Manager runs holding the heavy-work lease and
 // has told Ben (whose run waits for the lease), Cy waits for the lease in his own workflow, Cloud's Dee asked a question
 // with her run still on, Eve waits for a run slot; plus a dispatched item (completed, with its spec), an archived item
@@ -18,7 +18,7 @@ import { closeTimeline, timelineTarget } from '../../src/renderer/src/timeline/t
 import { confirmState } from '../../src/renderer/src/confirm';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
 
-const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'card478', `${name}.json`), 'utf8'));
+const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'workflows', `${name}.json`), 'utf8'));
 const ID = real<Record<string, number | string>>('ids');
 const ALL = real<WorkflowsListAnswer>('list-all');
 const OPEN = real<WorkflowsListAnswer>('list-open');

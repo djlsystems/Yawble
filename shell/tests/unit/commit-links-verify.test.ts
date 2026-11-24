@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Card 472 (B074 verify, TesterKofi): commit links fed the REAL core's git.commitsResolve answers.
-// tests/unit/fixtures/card472/*.json were written by core Card472CommitsResolveVerifyTests with CARD472_FIXTURE_OUT set
+// tests/unit/fixtures/commit-links/*.json were written by core Card472CommitsResolveVerifyTests with COMMIT_LINKS_FIXTURE_OUT set
 // (two teams "web" and "cloud" on real repositories; a 7-digit prefix shared by two commits of one repository; the same
 // commit in a team's main repository and its writable extra). The fake API answers each asked ID with the core's own
 // result row for it (an ID the core was not asked is answered as no commit, as the core does for an unknown hex word).
@@ -24,7 +24,7 @@ import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.v
 import MemberActivity from '../../src/renderer/src/components/MemberActivity.vue';
 import { GIT_COMMITS_RESOLVE, type AgentCard, type BoardCard, type TeamSummary, type YawbleApi } from '../../src/shared/api';
 
-const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'card472', `${name}.json`), 'utf8'));
+const real = <T = any>(name: string): T => JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'commit-links', `${name}.json`), 'utf8'));
 const TWO = real('resolve-two-teams');
 const COLL = real('resolve-one-repo-collision');
 const EXTRA = real('resolve-main-and-extra');
