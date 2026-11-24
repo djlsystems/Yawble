@@ -126,6 +126,7 @@ using var runTerminals = new Yawble.Core.Ui.RunTerminalBridge(runs, terminals, (
 var skillCatalog = new Yawble.Core.Skills.SkillCatalog($"Data Source={dbPath}");
 var fakePty = Environment.GetEnvironmentVariable(Yawble.Core.Bus.BusHost.RunnerVariable) == "fake-pty";
 Yawble.Core.Bus.BusEngine? busForRunner = null;
+Yawble.Core.Scripts.Running.ScriptRunner? scriptRunner = null;
 Yawble.Core.Bus.IAgentRunner? uiRunner = fakePty
     ? new Yawble.Core.Ui.FakePtyRunner(terminals,
         id => busForRunner?.MemberAsync(id).GetAwaiter().GetResult()?.Cli ?? "claude",
@@ -140,8 +141,33 @@ await using var bus = await Yawble.Core.Bus.BusHost.StartAsync(
     // Each run works in the member's own clone of the team repository (<app root>/teams/...).
     appDataRoot: Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!),
     skills: skillCatalog,
-    availableAgents: ct => Yawble.Core.Agents.AgentReadiness.ChoicesAsync(clis, ct));
+    availableAgents: ct => Yawble.Core.Agents.AgentReadiness.ChoicesAsync(clis, ct),
+    // B131: script members' runs go to the script engine, agents' to the launcher as before.
+    wrapRunner: r => new Yawble.Core.Launch.ScriptDispatchRunner(r, () => scriptRunner));
 busForRunner = bus;
+// B131: the global script and schema libraries and the script runner (members' data folders under <data>/scripts). Runs the
+// old core left going resume from their last completed step. SC-2: a script's integration steps are the team's web API operations
+// (kind "api"), through IntegrationService, which is made further down: its calls wait for it (integrationsReady).
+var integrationsReady = new TaskCompletionSource<Yawble.Core.Integrations.IntegrationService>(TaskCreationOptions.RunContinuationsAsynchronously);
+var scriptActions = new Yawble.Core.Scripts.Actions.ScriptActionKinds(new Dictionary<string, Yawble.Core.Scripts.Running.IScriptActionsProvider>
+{
+    [Yawble.Core.Scripts.Actions.ApiScriptActionsProvider.Kind] = new Yawble.Core.Scripts.Actions.ApiScriptActionsProvider(
+        new Yawble.Core.Scripts.Actions.IntegrationScriptApi($"Data Source={dbPath}", integrationsReady.Task)),
+    // SC-3: the built-in Email integration's read actions (kind "email")
+    [Yawble.Core.Scripts.Actions.EmailActions.Kind] = new Yawble.Core.Scripts.Actions.EmailScriptActionsProvider(
+        new Yawble.Core.Scripts.Actions.IntegrationScriptEmail(integrationsReady.Task)),
+});
+var scriptLibrary = new Yawble.Core.Scripts.Library.ScriptLibrary($"Data Source={dbPath}", () => scriptActions.Catalog);
+var scriptRuns = new Yawble.Core.Scripts.Running.ScriptRunStore($"Data Source={dbPath}");
+scriptRunner = new Yawble.Core.Scripts.Running.ScriptRunner(scriptRuns, scriptLibrary, scriptActions,
+    Yawble.Core.Scripts.Running.SeamScriptEngine.Instance, Path.Combine(options.DataDir!, "scripts"),
+    grantedFolders: memberId => policies.GetMember(memberId).Loosen.Filesystem?.Readwrite ?? [],
+    log: line => Console.Error.WriteLine($"scripts: {line}"))
+{
+    Decisions = new Yawble.Core.Scripts.Running.BusScriptDecisions(bus),
+};
+bus.ScriptMembers = scriptRunner;
+scriptRunner.ResumeInterrupted();
 
 // A member's cli is a built-in's id or a custom agent's name: every site resolves it through this (base CLI, argv changes, default model).
 var agentResolver = Yawble.Core.Agents.Profiles.AgentProfileStore.ForReading($"Data Source={dbPath}");
@@ -183,6 +209,7 @@ var ui = new Yawble.Core.Ui.UiRpc(bus, policies, layouts,
     new Yawble.Core.Monitor.StepFeed($"Data Source={dbPath}"),
     // The Monitor's code events (B079): commits, merges and pushes the host recorded in the team repositories.
     new Yawble.Core.Monitor.CodeEvents($"Data Source={dbPath}"));
+ui.Scripts = new Yawble.Core.Ui.ScriptsRpc(bus, scriptLibrary, scriptRuns, scriptRunner);
 // The guardrail check (runs a battery of escape attempts in a sandbox under a member's effective policy).
 // It rides on the launcher: the same layout, policy, per-run gateway and backend as the members' runs.
 // A member's check takes a global run slot through the bus, like a terminal session.
@@ -244,6 +271,7 @@ await using var integrations = new Yawble.Core.Integrations.IntegrationService($
     connections: connections, browser: new Yawble.Core.Integrations.ShellBrowser(), redirect: () => new Yawble.Core.Integrations.LoopbackRedirectReceiver(),
     websites: websiteHost);
 bus.Integrations = integrations;
+integrationsReady.TrySetResult(integrations); // script runs waiting on an integration step go on
 // Network asks: a host a run's gateway refused (or an agent's request_host) waits for the person in Needs you; their answer
 // changes the policy through the policy store, with each member's layout for its checks.
 var networkAsks = new Yawble.Core.Integrations.NetworkAskService($"Data Source={dbPath}",

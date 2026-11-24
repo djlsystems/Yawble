@@ -13,6 +13,7 @@
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" />
     <PackageReference Include="Cronos" />
     <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="MailKit" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Storage/Migrations/*.sql" LogicalName="Yawble.Core.Migrations.%(Filename)%(Extension)" />

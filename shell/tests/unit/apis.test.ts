@@ -93,6 +93,7 @@ describe('APIs and Connections', () => {
       'integrations.saveChecklist': () => ({ ok: true, allowed: 2, asked: 0, denied: 0, removed: 0 }),
     });
     const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: '', teams } });
+    await w.find('[data-test=api-manual]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test=api-signin]').exists()).toBe(false);
     await w.find('[data-test=api-base-url]').setValue('https://api.pets.test/v1');
@@ -130,6 +131,7 @@ describe('APIs and Connections', () => {
       'integrations.checklist': () => { throw new Error('x is not set up yet'); },
     });
     const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: '', teams } });
+    await w.find('[data-test=api-manual]').trigger('click');
     await w.find('[data-test=api-docs-url]').setValue('https://x.test/docs');
     await w.find('[data-test=api-discover]').trigger('click');
     await flushPromises();
@@ -175,6 +177,7 @@ describe('APIs and Connections', () => {
     };
     const a = mk();
     const w = mount(IntegrationDialog, { props: { api: a.api, kind: 'api', name: '', teams } });
+    await w.find('[data-test=api-manual]').trigger('click');
     await flushPromises();
     await w.find('[data-test=dialog-close]').trigger('click');
     await flushPromises();
@@ -223,6 +226,7 @@ describe('APIs and Connections', () => {
       'integrations.saveChecklist': () => { throw new Error('the rules could not be saved'); },
     });
     const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: '', teams } });
+    await w.find('[data-test=api-manual]').trigger('click');
     await flushPromises();
     await w.find('[data-test=api-base-url]').setValue('https://api.pets.test/v1');
     await w.find('[data-test=api-discover]').trigger('click');
@@ -239,6 +243,7 @@ describe('APIs and Connections', () => {
       'integrations.connections': () => [],
     });
     const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: '', teams } });
+    await w.find('[data-test=api-manual]').trigger('click');
     await flushPromises();
     await w.find('[data-test=api-base-url]').setValue('https://other.test');
     await w.find('[data-test=api-name]').setValue('Pets');
@@ -436,6 +441,7 @@ describe('APIs and Connections: final-review fixes', () => {
       'integrations.apiSave': () => { throw new Error('an API named api.pets.test already exists; edit it instead'); },
     });
     const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: '', teams } });
+    await w.find('[data-test=api-manual]').trigger('click');
     await flushPromises();
     await w.find('[data-test=api-base-url]').setValue('https://api.pets.test/v2');
     await w.find('[data-test=api-discover]').trigger('click');
@@ -570,5 +576,127 @@ describe('APIs and Connections: final-review fixes', () => {
     expect(dw.find('[data-test=discover-start-pets]').exists()).toBe(false);
     expect(dw.find('[data-test=discover-remote]').text()).toBe('Discover runs on the computer itself.');
     expect(dw.find('[data-test=api-auth-choice]').exists()).toBe(false);
+  });
+});
+
+describe('Add API: look up one address, and path parameters from the sign-in', () => {
+  it('ApiDialog_LookUp_FillsNameAndServiceFromTheSpec_ThenAddSavesThem', async () => {
+    let created = false;
+    const { api, calls } = fakeApi({
+      'integrations.apiPeek': () => ({ found: true, specUrl: 'https://specs.test/twilio.json', title: 'Twilio - Api', serviceUrl: 'https://api.twilio.test', name: 'Twilio', actions: 197, signIn: 'basic' }),
+      'integrations.apiSave': (p) => { created = true; return { ok: true, name: p.name }; },
+      'integrations.apiList': () => (created ? [apiRow({ name: 'Twilio', baseUrl: 'https://api.twilio.test', connection: null, counts: null })] : []),
+      'integrations.connections': () => [],
+      'integrations.discover': () => ({ state: 'done', found: 0 }),
+      'integrations.discoverStatus': () => ({ state: 'done' }),
+      'integrations.checklist': () => checklist([]),
+    });
+    const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: '', teams } });
+    await flushPromises();
+    expect(w.find('[data-test=api-base-url]').exists()).toBe(false);
+    expect(w.find('[data-test=api-discover]').exists()).toBe(false);
+    await w.find('[data-test=api-source]').setValue('https://specs.test/twilio.json');
+    await w.find('[data-test=api-lookup]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'integrations.apiPeek')!.params).toEqual({ url: 'https://specs.test/twilio.json' });
+    expect(calls.some((c) => c.method === 'integrations.apiSave')).toBe(false);
+    expect(w.find('[data-test=api-peek]').text()).toBe('Found "Twilio - Api": 197 actions, signs in with a username and password.');
+    expect((w.find('[data-test=api-name]').element as HTMLInputElement).value).toBe('Twilio');
+    expect((w.find('[data-test=api-base-url]').element as HTMLInputElement).value).toBe('https://api.twilio.test');
+    await w.find('[data-test=api-discover]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'integrations.apiSave')!.params).toEqual({ name: 'Twilio', baseUrl: 'https://api.twilio.test', docsUrl: 'https://specs.test/twilio.json', create: true });
+  });
+
+  it('ApiDialog_LookUp_NoSpec_TakesTheAddressAsTheService', async () => {
+    const { api } = fakeApi({
+      'integrations.apiPeek': () => ({ found: false, reason: 'nothing there', serviceUrl: 'https://api.pets.test', name: 'pets.test' }),
+      'integrations.apiList': () => [],
+      'integrations.connections': () => [],
+    });
+    const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: '', teams } });
+    await flushPromises();
+    await w.find('[data-test=api-source]').setValue('https://api.pets.test');
+    await w.find('[data-test=api-lookup]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=api-peek]').text()).toContain('No OpenAPI spec found there (nothing there)');
+    expect((w.find('[data-test=api-base-url]').element as HTMLInputElement).value).toBe('https://api.pets.test');
+    expect((w.find('[data-test=api-name]').element as HTMLInputElement).value).toBe('pets.test');
+  });
+
+  it('ApiDialog_PathParameterFilledFromTheUsername_SavesOnlyPathParams', async () => {
+    let fills: Record<string, string> | null = null;
+    const basic = () => apiRow({
+      name: 'Twilio', connection: null, pathParamNames: ['AccountSid', 'Sid'],
+      auth: { type: 'basic', name: null, description: null, pathParams: fills },
+      signIn: { label: 'Username and password', description: null, fields: [{ key: 'username', label: 'Username', secret: false }, { key: 'password', label: 'Password', secret: true }] },
+    });
+    const { api, calls } = fakeApi({
+      'integrations.apiList': () => [basic()],
+      'integrations.connections': () => [],
+      'integrations.apiSave': (p) => { fills = p.pathParams; return { ok: true, name: 'Twilio' }; },
+      'integrations.checklist': () => checklist([]),
+      'integrations.discoverStatus': () => ({ state: 'done' }),
+    });
+    const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: 'Twilio', teams } });
+    await flushPromises();
+    expect(w.find('[data-test=api-path-fill-password]').exists()).toBe(false);
+    const sel = w.find('[data-test=api-path-fill-username]');
+    expect(sel.findAll('option').map((o) => o.text())).toEqual(['nothing (the default)', 'AccountSid', 'Sid']);
+    await sel.setValue('AccountSid');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'integrations.apiSave')!.params).toEqual({ name: 'Twilio', pathParams: { AccountSid: 'username' } });
+    expect((w.find('[data-test=api-path-fill-username]').element as HTMLSelectElement).value).toBe('AccountSid');
+    await w.find('[data-test=api-path-fill-username]').setValue('');
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'integrations.apiSave').at(-1)!.params).toEqual({ name: 'Twilio', pathParams: null });
+  });
+  it('ApiDialog_APathParameterInNearlyEveryAddress_IsOneCheckbox', async () => {
+    let fills: Record<string, string> | null = null;
+    const { api, calls } = fakeApi({
+      'integrations.apiList': () => [apiRow({
+        name: 'Twilio', connection: null, pathParamNames: ['AccountSid', 'Sid'], pathParamCommon: ['AccountSid'],
+        auth: { type: 'basic', name: null, description: null, pathParams: fills },
+        signIn: { label: 'Username and password', description: null, fields: [{ key: 'username', label: 'Username', secret: false }, { key: 'password', label: 'Password', secret: true }] },
+      })],
+      'integrations.connections': () => [],
+      'integrations.apiSave': (p) => { fills = p.pathParams; return { ok: true, name: 'Twilio' }; },
+      'integrations.checklist': () => checklist([]),
+      'integrations.discoverStatus': () => ({ state: 'done' }),
+    });
+    const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: 'Twilio', teams } });
+    await flushPromises();
+    expect(w.find('[data-test=api-path-fills]').exists()).toBe(false);
+    expect(w.find('[data-test=api-path-common-AccountSid]').text()).toContain('Fill AccountSid in every address from the username');
+    await w.find('[data-test=api-path-common-check-AccountSid]').setValue(true);
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'integrations.apiSave')!.params).toEqual({ name: 'Twilio', pathParams: { AccountSid: 'username' } });
+    expect((w.find('[data-test=api-path-common-check-AccountSid]').element as HTMLInputElement).checked).toBe(true);
+  });
+  it('ConnectionsPanel_EmailAccount_TurnedOnForATeam_MakesItsMailboxThenOffersIt', async () => {
+    let mailboxes: any[] = [];
+    const mail = conn({ id: 11, name: 'Support inbox', kind: 'email', usedBy: [], fields: [{ key: 'address', label: 'Email address', secret: false, shown: 'help@example.test', set: true }] });
+    const { api, calls } = fakeApi({
+      'integrations.connections': () => [mail, conn()],
+      'integrations.emailList': () => mailboxes,
+      'integrations.emailSave': (p) => { const m = { id: 1, name: p.name, kind: 'email', connectionId: p.connectionId, connection: null, enabledAll: false, teamIds: [] as number[] }; mailboxes = [m]; return m; },
+      'integrations.emailEnable': (p) => { const m = mailboxes[0]; m.teamIds = p.on ? [...m.teamIds, p.teamId] : m.teamIds.filter((t: number) => t !== p.teamId); return { ok: true }; },
+    });
+    const w = mount(ConnectionsPanel, { props: { api, teams } });
+    await flushPromises();
+    expect(w.find('[data-test=connection-mailbox-7]').exists()).toBe(false);
+    const box = w.find('[data-test=connection-mailbox-11-team-3]');
+    expect((box.element as HTMLInputElement).checked).toBe(false);
+    await box.setValue(true);
+    await flushPromises();
+    expect(calls.filter((c) => c.method.startsWith('integrations.email') && c.method !== 'integrations.emailList').map((c) => [c.method, c.params])).toEqual([
+      ['integrations.emailSave', { name: 'Support inbox', connectionId: 11 }],
+      ['integrations.emailEnable', { name: 'Support inbox', teamId: 3, on: true }],
+    ]);
+    expect((w.find('[data-test=connection-mailbox-11-team-3]').element as HTMLInputElement).checked).toBe(true);
+    await w.find('[data-test=connection-mailbox-11-team-3]').setValue(false);
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'integrations.emailSave')).toHaveLength(1);
+    expect(calls.filter((c) => c.method === 'integrations.emailEnable').at(-1)!.params).toEqual({ name: 'Support inbox', teamId: 3, on: false });
   });
 });

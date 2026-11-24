@@ -314,7 +314,7 @@ export interface UpdateStatus {
 export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
-export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'workflows.'] as const;
+export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'workflows.', 'scripts.', 'schemas.'] as const;
 
 export function isUiMethod(method: unknown): method is string {
   return typeof method === 'string' && UI_METHOD_PREFIXES.some((p) => method.startsWith(p)) && /^[a-zA-Z.]+$/.test(method);
@@ -368,7 +368,11 @@ export interface AgentTestSession { cli: string; agent: string; kind: 'terminal'
 /** The push when one starts or ends (agents.testChanged; never over the Cloud Link). */
 export const AGENT_TEST_CHANGED = 'agents.testChanged';
 
-export interface TeamSummary { id: number; name: string; repoPath: string | null; members: number; running: number; queued: number; paused?: boolean; archived?: boolean }
+export interface TeamSummary {
+  id: number; name: string; repoPath: string | null; members: number; running: number; queued: number; paused?: boolean; archived?: boolean;
+  /** B130: how many of its members have an open needs_decision (older cores: absent, read as 0). */
+  waiting?: number;
+}
 /** Whether a team may be archived or deleted (teams.quiet): what is still working, and its open workflows. */
 export interface TeamQuiet { quiet: boolean; working: string[]; openWorkflows: number[] }
 /** A team's workflow (bus.workflows): one piece of work and everything it led to. */
@@ -549,7 +553,8 @@ export interface ConnectionField { key: string; label: string; secret: boolean; 
 /** 'website' is a login kept in the app window's own session: one non-secret field `site`, no secret.
  * 'oauth' is a browser sign-in with the person's own app: secrets access_token, refresh_token, client_secret (masked); shown in full:
  * client_id, authorize_endpoint, token_endpoint, granted_scopes (space-separated), expires_at and provider (when one was given). */
-export type ConnectionKind = 'secret' | 'oauth' | 'website';
+/** 'email': a mailbox over IMAP and SMTP (fields address, imapHost, imapPort, smtpHost, smtpPort, user; password secret). */
+export type ConnectionKind = 'secret' | 'oauth' | 'website' | 'email';
 export interface Connection {
   id: number; name: string; kind: ConnectionKind; fields: ConnectionField[];
   status: 'untested' | 'works' | 'needs_reconnect'; statusReason: string | null; testedAt: string | null; usedBy: string[];
@@ -565,13 +570,24 @@ export interface ApiRow {
   name: string; baseUrl: string; docsUrl: string | null; specUrl: string | null; title: string | null;
   connection: { id: number; name: string; status: Connection['status']; statusReason?: string | null } | null;
   /** chosen: the person said how it signs in (the spec did not). */
-  auth: { type: 'bearer' | 'header' | 'query' | 'basic' | string; name: string | null; description: string | null; chosen?: boolean } | null;
+  /** pathParams: a path parameter (its name in the route) filled from a Connection field that is not secret, e.g. { AccountSid: 'username' }. */
+  auth: { type: 'bearer' | 'header' | 'query' | 'basic' | string; name: string | null; description: string | null; chosen?: boolean; pathParams?: Record<string, string> | null } | null;
+  /** The path parameters (names in the route) the API's operations take; null for a website. */
+  pathParamNames?: string[] | null;
+  /** Those nearly every operation takes (an account id in every address, e.g. Twilio's AccountSid): offered to fill from the sign-in. */
+  pathParamCommon?: string[] | null;
   signIn: { label: string; description: string | null; fields: { key: string; label: string; secret: boolean }[] } | null;
   /** An OAuth 2 API (auth.type 'oauth2'): the spec's addresses (null when it gave none usable, or only an OpenID address), the scopes the
    * allowed and ask-first actions need, and those its Connection was not granted (non-empty: "Sign in again to allow the new actions"). */
   oauth?: { authorizeUrl: string | null; tokenUrl: string | null; openIdConnectUrl?: string | null; neededScopes: string[]; missingScopes: string[] } | null;
   status: string | null; all: boolean; teams: number[]; counts: DiscoverChecklistData['counts'] | null;
 }
+/** integrations.emailList: a mailbox (an email account Connection) that scripts on the teams it is turned on for can read. */
+export interface EmailIntegration { id: number; name: string; kind: 'email'; connectionId: number | null; connection: unknown; enabledAll: boolean; teamIds: number[] }
+/** integrations.apiPeek { url }: what Add API fills in from one address (nothing is saved). */
+export type ApiPeekResult =
+  | { found: true; specUrl: string; title: string | null; serviceUrl: string | null; name: string; actions: number; signIn: string | null }
+  | { found: false; reason: string; serviceUrl: string; name: string };
 /** integrations.oauthDiscover { provider }: the provider's addresses and offered scopes from its metadata, or found: false (use Advanced). */
 export type OAuthDiscoverResult =
   | { found: true; issuer: string; authorizeUrl: string; tokenUrl: string; scopes: string[] }
@@ -1039,6 +1055,8 @@ export interface AgentCard {
   net?: string; wallTimeout?: string; loosened?: string[]; policyProblems?: string[];
   /** The member has a working copy (clone) on this computer: its card offers the Code browser (teams.agents). */
   hasClone?: boolean;
+  /** B134: 'script' for a script member (its tile reads scripts.memberGet); absent from an older core: an agent. */
+  kind?: 'agent' | 'script';
 }
 
 /**

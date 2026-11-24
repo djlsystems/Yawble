@@ -6,8 +6,10 @@ namespace Yawble.Core.Bus;
 
 /// <summary>One team in the team list: its running and queued counts.</summary>
 /// <param name="WorkflowExpiryDays">The team's workflowExpiryDays (B085): an open workflow nobody works expires after this many days.</param>
+/// <param name="Waiting">B130: how many of the team's members have an open needs_decision (the rule the agent cards use,
+/// OpenDecisionByMember). The team pill says "Waiting on you" while it is above 0 and nothing runs.</param>
 public sealed record TeamSummary(long Id, string Name, string? RepoPath, int Members, int Running, int Queued, bool Paused = false, bool Archived = false,
-    int WorkflowExpiryDays = BusEngine.DefaultWorkflowExpiryDays);
+    int WorkflowExpiryDays = BusEngine.DefaultWorkflowExpiryDays, int Waiting = 0);
 
 /// <summary>The header: global running / limit, and how many wait for a slot across all teams.</summary>
 public sealed record RunSlots(int Running, int Limit, int Queued);
@@ -160,11 +162,15 @@ public sealed partial class BusEngine
             var members = _store.MemberRows();
             return _store.Teams().Select(t =>
             {
-                var ids = members.Where(m => m.TeamId == t.Id).Select(m => m.Id).ToHashSet();
+                var mine = members.Where(m => m.TeamId == t.Id).ToList();
+                var ids = mine.Select(m => m.Id).ToHashSet();
+                // B130: the member cards' rule (B123): a member with an open needs_decision waits on the person.
+                var asking = mine.Count == 0 ? null : OpenDecisionByMember(t.Name);
+                var waiting = asking is null ? 0 : mine.Count(m => asking.ContainsKey($"{m.Team}/{m.Name}"));
                 return new TeamSummary(t.Id, t.Name, t.RepoPath, ids.Count,
                     // An interactive session holds a run slot, so it counts as running.
                     _active.Values.Count(a => ids.Contains(a.Context.Member.Id)) + _sessions.Keys.Count(ids.Contains),
-                    queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived, t.WorkflowExpiryDays ?? DefaultWorkflowExpiryDays);
+                    queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived, t.WorkflowExpiryDays ?? DefaultWorkflowExpiryDays, waiting);
             }).ToArray();
         }, ct);
 

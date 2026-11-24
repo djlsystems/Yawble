@@ -723,6 +723,41 @@ masked in the log and never reaches an agent. See
 - Options: **Only when the agent is idle**, **Enabled**, **Run now**.
 - **Wake the Manager when a run ends**: only on a hand-back or failure (the default), every time, or never.
 
+## Scripts
+
+- A **script** is a JSON document (`yawble-script/1`): typed settings, variables, the integrations it requires and a
+  flowchart of steps. The script library is global: every script is available to every team.
+- Every save of a script is kept as a new version. A save is checked (references, types, reachable steps, the actions
+  it requires); one that fails the check is kept as a **draft**, which no member runs. Scripts are exported and
+  imported as `.json` files. A document's top-level `layout` section (the editor's node positions) is kept unchanged
+  through save, get, export and import.
+- **Schemas** are named object types (a JSON Schema subset), also global and versioned. The built-in schemas
+  (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse) are read-only. A schema save that
+  removes or retypes a field a saved script uses is refused, listing each script, version and step it would break.
+- A **script member** is a team member whose runs are the core's script engine, never an agent CLI. It runs a pinned
+  version of its script or the newest version that passes its check, with its own settings, and binds each
+  integration the script requires to one of the team's integrations.
+- Every trigger kind starts a script member's run, with a structured input: TriggerFired (every, cron, once),
+  FolderChange (the folder and the added, removed and changed files) or EventItem (the event and its item). An
+  instruction told to a script member starts a run with its text. Agents' triggers are unchanged.
+- A script member runs one run at a time: a trigger that fires during a run is skipped and the skip is listed in its
+  runs. The limit is per member: the same script runs at the same time as members of different teams, or as two
+  members of one team. Each member has its own saved variables, data folder, settings, bindings and runs. A trigger's
+  run starts no team workflow and wakes no Manager.
+- A run uses the version of the script it started with, including when it resumes after a restart, even if the script
+  is saved again or the member's pinned version changes meanwhile.
+- A run has a timeout (a member setting, 10 minutes by default), a budget of 10,000 steps and a loop cap. Each step's
+  input, output, status and times are kept (shortened, with secrets masked), with the run's log. A run cut off by the
+  app closing resumes from its last completed step when the app starts again.
+- Saved variables are kept per script member between runs and change only when a run succeeds; one saved variable
+  can be reset. Three failed runs in a row raise one decision card in Needs you; a run that succeeds, or the
+  person's answer, starts the count again.
+- **Test run** runs a version of a script (a draft too) on a sample input and settings for a team, as a dry run by
+  default: changing actions are not performed and are logged as "would ...", and file writes go to a dry-run folder.
+  A test run keeps no saved variables.
+- Script runs are listed with their state, steps and log, and recorded with the agents' runs. A Visitor on the Cloud
+  Link can read scripts, schemas, script members and runs, and cannot change or run any of them.
+
 ## Companion
 
 `yawble-companion` is a small program installed with the app. It lets a program on this computer, such as Claude Code, see and

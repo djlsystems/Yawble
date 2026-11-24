@@ -330,6 +330,14 @@ public sealed class ConciergeActions(
 
     // ------------------------------------------------------------------ confirm flow
 
+    /// <summary>
+    /// The same confirmation flow for a tool outside these actions (B135: the script tools): the first call shows
+    /// <paramref name="plan"/> with a token; only a call with that token, for the same <paramref name="key"/>, in a later turn of
+    /// this conversation started by the person at this computer runs <paramref name="run"/>. Answers "NOT DONE ..." or "ok: ...".
+    /// </summary>
+    public Task<string> ConfirmAsync(string tool, JsonObject args, string plan, string key, Func<CancellationToken, Task<string>> run, CancellationToken ct) =>
+        ConfirmedAsync(tool, args, plan, key, false, run, ct);
+
     private async Task<string> ConfirmedAsync(string tool, JsonObject args, string plan, string key, bool empty, Func<CancellationToken, Task<string>> run, CancellationToken ct)
     {
         if (empty) return "nothing to do:\n" + plan;

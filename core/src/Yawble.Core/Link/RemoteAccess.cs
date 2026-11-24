@@ -105,7 +105,7 @@ public static class RemoteAccess
             "timeline.get",
             "integrations.list", "integrations.asks", "integrations.calls", "integrations.checklist", "integrations.connectionAttention",
             "integrations.connections", "integrations.discoverStatus", "integrations.mcpList", "integrations.apiList", "integrations.watches",
-            "integrations.taskRuns", "integrations.mcpParse",
+            "integrations.taskRuns", "integrations.mcpParse", "integrations.emailList",
             "tasks.list", "tasks.asks", "tasks.runs",
             "ops.backups",
             "network.asks",
@@ -118,6 +118,8 @@ public static class RemoteAccess
             "org.summary", "org.summary.watch", "org.summary.unwatch",
             "updates.status",
             "code.list", "code.open", "code.read", "code.close", "code.download",
+            // B131: the script library, schemas, script runs and script members: reads (saving, importing, Test run and member changes are changes).
+            .. Ui.ScriptsRpc.Reads,
         ],
         // B119: teams.localhost ("Allow localhost (macOS)") is read by any viewer and set only by a full one.
         readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry", "teams.localhost"],
@@ -144,7 +146,7 @@ public static class RemoteAccess
             "board.clearDone", "board.restore", "board.move", "board.edit", "board.comment",
             "backlog.add", "backlog.archive", "backlog.delete", "backlog.dispatch", "backlog.dispatchNew", "backlog.edit", "backlog.move",
             "backlog.position", "backlog.restore",
-            "integrations.apiDeleteRule", "integrations.apiEnable", "integrations.apiRemove", "integrations.apiSave", "integrations.approve",
+            "integrations.apiDeleteRule", "integrations.apiEnable", "integrations.emailSave", "integrations.emailEnable", "integrations.emailRemove", "integrations.apiRemove", "integrations.apiSave", "integrations.apiPeek", "integrations.approve",
             "integrations.decline", "integrations.connectionRemove", "integrations.connectionSave", "integrations.connectionTest",
             "integrations.deleteRule", "integrations.deleteWatch", "integrations.detect", "integrations.discover", "integrations.discoverCancel",
             "integrations.enable", "integrations.mcpCheck", "integrations.mcpDeleteRule", "integrations.mcpEnable", "integrations.mcpImport",
@@ -158,6 +160,7 @@ public static class RemoteAccess
             "tools.notNow", "tools.checkAgain",
             "folder.answer",
             "logs.prune", "logs.setRetention",
+            .. Ui.ScriptsRpc.Changes,
         ]);
 
     private static Dictionary<string, Kind> Table(string[] reads, string[] readsUnlessOn, string[] changes)
@@ -254,7 +257,7 @@ public static class RemoteAccess
         // OAuth sign-ins (and finding a provider's addresses, which makes this computer fetch URLs) are for the person at the computer
         if (method is "integrations.websiteSignIn" or "integrations.websiteSignInDone" || method.StartsWith("integrations.oauth", StringComparison.Ordinal))
             return "sign-ins happen on the computer itself";
-        if (method is "integrations.apiSave" or "integrations.apiRemove"
+        if (method is "integrations.apiSave" or "integrations.apiRemove" or "integrations.apiPeek"
             || method == "integrations.discover" && (parameters?["kind"] as JsonValue)?.TryGetValue<string>(out var kind) == true && kind == "api")
             return "setting up an API happens on the computer itself";
         // Remote MCP servers: sign-ins, imports (they read config files on this computer) and secrets are for the person at the computer, host terminals or not.

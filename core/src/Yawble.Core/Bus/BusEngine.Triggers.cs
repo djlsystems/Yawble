@@ -120,7 +120,8 @@ public sealed partial class BusEngine
             _store.SetWatch(row.Id, state, next);
             return;
         }
-        var fire = Fire(row, now, change.Describe(row.Watch.Root == FolderWatch.Documents ? $"the team's documents{(row.Watch.Path.Length > 0 ? "/" + row.Watch.Path : "")}" : folder));
+        var fire = Fire(row, now, change.Describe(row.Watch.Root == FolderWatch.Documents ? $"the team's documents{(row.Watch.Path.Length > 0 ? "/" + row.Watch.Path : "")}" : folder),
+            Scripts.Running.ScriptPayloads.FolderChange(folder, change.Added, change.Removed, change.Changed));
         // Only a change that was told is taken as the new baseline: a skipped one (busy, paused) fires at the next look,
         // with the same list (only the kinds the trigger fires on).
         if (fire.Outcome == "fired") _store.SetWatchState(row.Id, state);
@@ -140,12 +141,15 @@ public sealed partial class BusEngine
         catch (Teams.DocumentsException) { return null; }
     }
 
-    private TriggerFire Fire(TriggerRow row, DateTimeOffset now, string? what = null)
+    /// <param name="payload">B131: what a script member gets as its run's input (FolderChange, EventItem); null: TriggerFired.</param>
+    private TriggerFire Fire(TriggerRow row, DateTimeOffset now, string? what = null, System.Text.Json.Nodes.JsonObject? payload = null)
     {
         var member = _store.Member(row.MemberId);
         if (member is null) return new TriggerFire("member-missing", null, "the member no longer exists");
         if (_store.Teams().FirstOrDefault(t => t.Id == member.TeamId) is { } team && (team.Paused || team.Archived))
             return new TriggerFire("skipped", null, team.Archived ? "the team is archived" : "the team is paused");
+        // B131: a script member's fire starts its script run with the structured payload; no workflow, no message.
+        if (FireScriptMember(row, member, now, payload) is { } scripted) return scripted;
         if (row.OnlyWhenIdle && IsBusy(member)) return new TriggerFire("skipped", null, $"{member.Name} was busy (only when idle)");
         var text = what is null
             ? $"Scheduled work (trigger \"{row.Name}\", {now:yyyy-MM-dd HH:mm} UTC): {row.Instruction}"
@@ -175,7 +179,10 @@ public sealed partial class BusEngine
         {
             var member = _store.Member(draft.MemberId) ?? throw new ArgumentException("no such member");
             if (string.IsNullOrWhiteSpace(draft.Name)) throw new ArgumentException("a trigger needs a name");
-            if (string.IsNullOrWhiteSpace(draft.Instruction)) throw new ArgumentException("a trigger needs an instruction");
+            // a script member runs its script with the fire's details as input: it is told nothing, so it needs no instruction
+            var isScript = ScriptMembers?.IsScriptMember(member.Id) == true;
+            if (isScript) draft = draft with { Instruction = draft.Instruction?.Trim() ?? "" };
+            else if (string.IsNullOrWhiteSpace(draft.Instruction)) throw new ArgumentException("a trigger needs an instruction");
             if (draft.Id is { } id && _store.Trigger(id) is null) throw new ArgumentException("no such trigger");
             if (!WakeManagerPolicy.IsValid(draft.WakeManager))
                 throw new ArgumentException($"wakeManager must be one of {string.Join(", ", WakeManagerPolicy.All)}");

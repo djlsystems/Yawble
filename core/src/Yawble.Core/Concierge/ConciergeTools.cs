@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Yawble.Core.Bus;
 using Yawble.Core.Gateway;
 using Yawble.Core.Ipc;
+using Yawble.Core.Scripts;
 
 namespace Yawble.Core.Concierge;
 
@@ -47,23 +48,27 @@ public sealed class ConciergeTools(
     /// </summary>
     public static readonly IReadOnlyList<string> Acting =
         ["tell", "answer", "team_create", "team_pause", "team_resume", "workflow_nudge", "workflow_close", "workflow_extend", "backlog_add", "team_repo_add", "team_repo_remove", "backup_now",
-         ConciergeHostTasks.RunTool];
+         ConciergeHostTasks.RunTool, .. ScriptTools.Acting];
 
     /// <summary>
     /// The tools here only for the person at this computer (as <see cref="ConciergeActions.LocalOnly"/>): a new team or
-    /// repository makes the host clone a folder or address for a sandboxed agent, closing a workflow ends work, and a host
-    /// task runs a program on this computer.
+    /// repository makes the host clone a folder or address for a sandboxed agent, closing a workflow ends work, a host
+    /// task runs a program on this computer, and a script member acts for the team (B135). A live script run is refused by its
+    /// arguments as well (<see cref="ScriptTools.RemoteRefused"/>); a dry run stays allowed.
     /// </summary>
-    public static readonly IReadOnlyList<string> LocalOnly = ["team_create", "team_repo_add", "team_repo_remove", "workflow_close", ConciergeHostTasks.RunTool];
+    public static readonly IReadOnlyList<string> LocalOnly = ["team_create", "team_repo_add", "team_repo_remove", "workflow_close", ConciergeHostTasks.RunTool, .. ScriptTools.LocalOnly];
 
     public static readonly IReadOnlyList<string> ToolNames =
         ["team_list", "team_current", "team_status", "team_activity", "tell", "answer", "team_create", "notes_read", "notes_write",
          "watch", "watch_list", "unwatch", "team_workflows", "workflow_nudge", "workflow_close", "workflow_extend", "team_pause", "team_resume",
          "documents_list", "documents_read", "backlog_add", "team_repos", "team_repo_add", "team_repo_remove",
-         .. ConciergeHostTasks.Names, .. ConciergeReadTools.Names];
+         .. ConciergeHostTasks.Names, .. ConciergeReadTools.Names, .. ScriptTools.Names];
 
     private readonly ConciergeReadTools _read = new(bus, ui, store.ConnectionString,
         openPrs: actions is null ? null : actions.OpenPullRequestsAsync, remote: Remote(remote));
+
+    /// <summary>B135: the script and schema tools, onto the scripts.* / schemas.* RPC.</summary>
+    private readonly ScriptTools _scripts = new(bus, ui);
 
     public const int NotesLimit = 16_000;
 
@@ -143,7 +148,8 @@ public sealed class ConciergeTools(
         try
         {
             if (!_turn.ByPerson && Acting.Contains(name)) throw new ArgumentException(ConciergeActions.ReviewRefusal(name));
-            if (_turn.Remote && LocalOnly.Contains(name)) throw new ArgumentException(ConciergeActions.RemoteRefusal(name));
+            if (_turn.Remote && (LocalOnly.Contains(name) || ScriptTools.RemoteRefused(name, args)))
+                throw new ArgumentException(ConciergeActions.RemoteRefusal(ScriptTools.IsLiveRun(name, args) ? name + " with dry_run false (a live run)" : name));
             var text = name switch
             {
                 "team_list" => await TeamListAsync(ct),
@@ -181,6 +187,7 @@ public sealed class ConciergeTools(
                 ConciergeHostTasks.ListTool => await HostTaskListAsync(args, ct),
                 ConciergeHostTasks.RunTool => await HostTaskRunAsync(args, ct),
                 ConciergeHostTasks.StatusTool => await HostTaskStatusAsync(args, ct),
+                _ when ScriptTools.Handles(name) => await ScriptToolAsync(name, args, ct),
                 _ when ConciergeReadTools.Handles(name) => await _read.CallAsync(name, args, ct),
                 _ => (actions is null ? null : await actions.TryCallAsync(name, args, ct)) ?? throw new ArgumentException($"unknown tool: {name}"),
             };
@@ -190,6 +197,21 @@ public sealed class ConciergeTools(
         {
             return (e is RpcException r ? $"refused ({r.Code}): {r.Message}" : e is BusRefusal b ? $"refused ({b.Code}): {b.Message}" : e.Message, true);
         }
+    }
+
+    /// <summary>
+    /// One script tool (B135). Building, checking and dry runs run at once; adding a script member and a script's first live run
+    /// on a team go through the actions' confirmation flow (the list first, the person's yes in a later turn).
+    /// </summary>
+    private async Task<string> ScriptToolAsync(string name, JsonObject args, CancellationToken ct)
+    {
+        if (await _scripts.YesNeededAsync(name, args, ct) is not { } yes) return await _scripts.CallAsync(name, args, ct);
+        if (actions is null) throw new ArgumentException($"refused: {name} needs the person's yes, and this chat cannot take one. Nothing was changed; the person can do it in the app.");
+        return await actions.ConfirmAsync(name, args, yes.Plan, yes.Key, async t =>
+        {
+            var done = await _scripts.CallAsync(name, args, t);
+            return done.StartsWith("ok: ", StringComparison.Ordinal) ? done[4..] : done;
+        }, ct);
     }
 
     private ConciergeHostTasks HostTasks() =>
@@ -556,6 +578,7 @@ public sealed class ConciergeTools(
         Tool("notes_read", "Your notes: what you keep across conversations with the person (preferences, what was dispatched, decisions)."),
         Tool("notes_write", "Replace your notes. Keep them short and current; write after dispatching work, a decision, or learning a preference.",
             ("text", "string", "The whole new notes text (markdown).", true)),
+        .. ScriptTools.Definitions().Select(d => d!.DeepClone()),
     ];
 
     private const string ImagesParameter =

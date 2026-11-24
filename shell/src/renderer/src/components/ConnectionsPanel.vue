@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { confirmDialog } from '../confirm';
-import type { Connection, TeamSummary, YawbleApi } from '../../../shared/api';
+import type { Connection, EmailIntegration, TeamSummary, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import ConnectionDialog from './ConnectionDialog.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
+import Icon from './Icon.vue';
 
 /**
  * Connections: the sign-ins (API keys and tokens) that APIs share, kept on this computer. Values are shown masked, never in full.
@@ -38,9 +39,33 @@ const checking = ref(new Set<number>());
 const loaded = ref(false); // the first answer arrived (or failed)
 async function load() {
   if (remote.value) return;
-  try { list.value = await api.call<Connection[]>('integrations.connections', {}); error.value = null; }
+  try {
+    list.value = await api.call<Connection[]>('integrations.connections', {});
+    error.value = null;
+    if (list.value.some((c) => c.kind === 'email')) await loadEmails();
+  }
   catch (e) { error.value = errorText(e); }
   finally { loaded.value = true; }
+}
+
+// ---- An email account's mailbox, turned on per team: the built-in Email integration scripts on that team read
+const emails = ref<EmailIntegration[]>([]);
+async function loadEmails() {
+  try { emails.value = await api.call<EmailIntegration[]>('integrations.emailList', {}); } catch { emails.value = []; }
+}
+const mailboxOf = (c: Connection) => emails.value.find((e) => e.connectionId === c.id) ?? null;
+const mailboxOn = (c: Connection, teamId: number) => { const m = mailboxOf(c); return !!m && (m.enabledAll || m.teamIds.includes(teamId)); };
+async function setMailboxTeam(c: Connection, teamId: number, on: boolean) {
+  if (!begin(c.id, 'mailbox')) return;
+  error.value = null;
+  try {
+    let m = mailboxOf(c);
+    if (!m) m = await api.call<EmailIntegration>('integrations.emailSave', { name: c.name, connectionId: c.id });
+    await api.call('integrations.emailEnable', { name: m.name, teamId, on });
+    await loadEmails();
+    await load();
+  } catch (e) { error.value = errorText(e); await loadEmails(); }
+  finally { end(); }
 }
 
 function statusText(c: Connection) {
@@ -118,7 +143,7 @@ onBeforeUnmount(() => off?.());
     <p v-if="remote" class="muted" data-test="connections-remote">Connections are managed on the computer itself.</p>
     <template v-else>
       <p class="muted small">
-        The keys and tokens your APIs sign in with, and your website logins. They stay on this computer, are shown masked, and are never given to an agent.
+        The keys and tokens your APIs sign in with, your website logins, and your email accounts. They stay on this computer, are shown masked, and are never given to an agent.
       </p>
       <LoadingNote v-if="!loaded" text="Loading connections…" />
       <p v-if="error" class="error" data-test="connections-error">{{ error }}</p>
@@ -126,13 +151,18 @@ onBeforeUnmount(() => off?.());
       <div v-for="c in list" :key="c.id" class="card" :data-test="`connection-${c.id}`">
         <header class="row">
           <div class="grow">
-            <b>{{ c.name }}</b> <span class="muted small" data-test="connection-kind">{{ c.kind === 'website' ? 'Website login' : c.kind === 'oauth' ? 'OAuth sign-in' : 'API key or token' }}</span>
+            <b>{{ c.name }}</b> <span class="muted small" data-test="connection-kind">{{ c.kind === 'website' ? 'Website login' : c.kind === 'oauth' ? 'OAuth sign-in' : c.kind === 'email' ? 'Email account' : 'API key or token' }}</span>
             <div v-if="signingIn === c.id" class="small" data-test="connection-signin-note">A sign-in window is open. Sign in there, then press Done.</div>
             <div class="small mono" data-test="connection-fields">
               <span v-for="f in c.fields" :key="f.key" class="fld">{{ f.label }}: {{ f.shown ?? 'not set' }}</span>
             </div>
-            <div class="small" :class="c.status === 'works' ? 'ok' : c.status === 'needs_reconnect' ? 'bad' : 'muted'" data-test="connection-status">{{ statusText(c) }}</div>
+            <div class="small status" :class="c.status === 'works' ? 'ok' : c.status === 'needs_reconnect' ? 'bad' : 'muted'" data-test="connection-status"><Icon v-if="!checking.has(c.id) && c.status !== 'untested'" :name="c.status === 'works' ? 'check' : 'alert'" :size="14" class="status-icon" />{{ statusText(c) }}</div>
             <div v-if="serverBound(c)" class="muted small" :data-test="`connection-mcp-note-${c.id}`">Sign in again from Settings → Integrations → MCP servers (Sign in).</div>
+            <div v-if="c.kind === 'email' && (teams ?? []).length" class="small mailbox" :data-test="`connection-mailbox-${c.id}`">
+              <span class="muted">Scripts can read this mailbox on</span>
+              <label v-for="t in teams" :key="t.id" class="check"><input type="checkbox" :checked="mailboxOn(c, t.id)" :disabled="busy !== null"
+                :data-test="`connection-mailbox-${c.id}-team-${t.id}`" @change="setMailboxTeam(c, t.id, ($event.target as HTMLInputElement).checked)" /> {{ t.name }}</label>
+            </div>
             <div class="small" data-test="connection-usedby">
               <template v-if="c.usedBy.length">Used by {{ c.usedBy.join(', ') }}</template>
               <span v-else-if="!taskUses(c).length" class="muted">not used yet</span>
@@ -160,7 +190,9 @@ onBeforeUnmount(() => off?.());
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
 .fld { margin-right: 12px; }
-.ok { color: var(--ok); } .bad { color: var(--bad); }
+.ok { color: var(--ok); } .status.ok { font-weight: 600; }
+.mailbox { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin: 2px 0; } .mailbox .check { display: inline-flex; gap: 4px; align-items: center; }
+.status { display: flex; align-items: flex-start; gap: 4px; } .status-icon { flex: none; margin-top: 1px; } .bad { color: var(--bad); }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .muted { color: var(--muted); font-weight: 400; } .small { font-size: 12px; }
 .link { border: 0; background: transparent; color: var(--accent); }

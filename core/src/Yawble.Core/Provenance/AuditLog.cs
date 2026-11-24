@@ -24,7 +24,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "getGlobal", "getMember", "version",
         // The screens' polls and lookups: what is waiting, the Monitor's steps, workflows, settings shown, catalogs.
         "asks", "steps", "workflows", "item", "connectionAttention", "connections", "versionStatus", "models", "repos",
-        "mcpList", "apiList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
+        "mcpList", "apiList", "emailList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
         "history", "check", "commandLine", "testSessions", "actionStatus", "backups", "doctor", "keepDaily", "restoreStatus",
         "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who", "catalog",
         // The team's network allow list as shown (its Remove, policy.removeTeamHost, is audited).
@@ -81,6 +81,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "workflows.list", "workflows.get",
         // Opening and closing the read-only Code view change nothing (a download is recorded).
         "code.open", "code.close",
+        // B131: a script or schema exported as a file, a script member and its saved state, and one script run in full.
+        "scripts.export", "schemas.export", "scripts.memberGet", "scripts.memberState", "scripts.memberFiles", "scripts.run",
     };
 
     /// <summary>A call that only reads, by its name alone.</summary>

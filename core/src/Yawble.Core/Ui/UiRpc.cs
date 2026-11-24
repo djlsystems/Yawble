@@ -26,7 +26,7 @@ public sealed class UiRpc(
     Monitor.StepFeed? steps = null,
     Monitor.CodeEvents? codeEvents = null)
 {
-    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "workflows."];
+    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "workflows.", "scripts.", "schemas."];
 
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
@@ -50,8 +50,13 @@ public sealed class UiRpc(
     /// <summary>B075: { teamId, team (id or name), repo? (an extra's name; absent: main), kind, commit?, branch?, file?, from?, to?, pr? } -> { url: string|null }.</summary>
     public const string WebLinkMethod = "git.webLink";
 
+    /// <summary>B131: the script library, schemas, runs and script members ("scripts." and "schemas."); null: not in this core.</summary>
+    public ScriptsRpc? Scripts { get; set; }
+
     public async Task<JsonNode?> DispatchAsync(string method, JsonObject? p, CancellationToken ct)
     {
+        if (ScriptsRpc.Handles(method))
+            return await (Scripts ?? throw new RpcException("unavailable", "scripts are not available in this core")).DispatchAsync(method, p, ct);
         try
         {
             return method switch
@@ -357,6 +362,8 @@ public sealed class UiRpc(
             var node = S(card)!.AsObject();
             node["attention"] = Attention(card, asking, reports);
             node["hasClone"] = Code.CodeHost.HasClone(bus.Repos, card.Member);
+            // B134: a script member's tile is the script's (scripts.memberGet), not an agent's.
+            node["kind"] = bus.ScriptMembers?.IsScriptMember(card.Member.Id) == true ? "script" : "agent";
             if (Models is { } models) node["agentModel"] = Agents.MemberModels.Json(models.For(card.Member));
             try
             {

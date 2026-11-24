@@ -14,7 +14,7 @@ import { teamState } from './teamState';
 // stored remote theme (theme.ts) is neither read nor written in embed mode.
 
 /** The screens a place opens (Sidebar.vue's View, less Settings, which is not in the sidebar's places). */
-export type EmbedView = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor';
+export type EmbedView = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'scripts';
 
 /** True when the page was opened with embed=1 (the cloud's frame). */
 export function isEmbed(search: string = typeof location !== 'undefined' ? location.search : ''): boolean {
@@ -61,6 +61,7 @@ const PLACES: readonly { id: EmbedPlaceId; label: string; icon: EmbedIcon }[] = 
   { id: 'board', label: 'Kanban board', icon: 'kanban' },
   { id: 'documents', label: 'Documents', icon: 'documents' },
   { id: 'monitor', label: 'Monitor', icon: 'monitor' },
+  { id: 'scripts', label: 'Scripts', icon: 'scripts' },
   { id: 'logs', label: 'Logs', icon: 'logs' },
 ];
 

@@ -72,7 +72,7 @@ describe('buildNav: the sidebar as data', () => {
     expect(nav.places.map((p) => [p.id, p.label, p.icon])).toEqual([
       ['newChat', 'New chat', 'newChat'], ['concierge', 'Concierge', 'concierge'], ['teams', 'Teams', 'teams'],
       ['backlog', 'Backlog', 'backlog'], ['workflows', 'Workflows', 'workflows'], ['board', 'Kanban board', 'kanban'],
-      ['documents', 'Documents', 'documents'], ['monitor', 'Monitor', 'monitor'], ['logs', 'Logs', 'logs'],
+      ['documents', 'Documents', 'documents'], ['monitor', 'Monitor', 'monitor'], ['scripts', 'Scripts', 'scripts'], ['logs', 'Logs', 'logs'],
 
     ]);
     expect(EMBED_PLACE_IDS).toEqual(nav.places.map((p) => p.id));
@@ -109,7 +109,7 @@ describe('buildNav: the sidebar as data', () => {
     expect(badge(buildNav({ ...base(), openWorkflows: undefined }), 'workflows')).toBeNull();
   });
   it('the active place is the view; New chat, Logs and Settings never light a place', () => {
-    for (const v of ['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor']) {
+    for (const v of ['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'scripts']) {
       expect(buildNav({ ...base(), view: v }).places.filter((p) => p.active).map((p) => p.id)).toEqual([v]);
     }
     expect(buildNav({ ...base(), view: 'settings' }).places.some((p) => p.active)).toBe(false);
@@ -124,6 +124,10 @@ describe('buildNav: the sidebar as data', () => {
     ]);
     // Another screen: no team is active even with a teamId kept.
     expect(buildNav({ ...base(), view: 'board', teamId: 2 }).teams.some((t) => t.active)).toBe(false);
+  });
+  it('B130: a team with an open decision has the waiting dot; running still wins', () => {
+    const nav = buildNav({ ...base(), teams: [team(1, 'asks', { waiting: 1 }), team(2, 'busy', { waiting: 1, running: 1 }), team(3, 'held', { waiting: 1, paused: true })] });
+    expect(nav.teams.map((t) => t.dot)).toEqual(['waiting', 'running', 'waiting']);
   });
   it('the same dots as Sidebar.vue draws', () => {
     const w = mount(Sidebar, { props: { ...base(), remote: true } as any });
@@ -206,7 +210,7 @@ describe('navigate does what the same sidebar click does', () => {
   const s = base();
   const cases: [string, unknown, (w: ReturnType<typeof mount>) => Promise<void>][] = [
     ['newChat', { kind: 'place', id: 'newChat' }, async (w) => { await w.get('[data-test=new-chat]').trigger('click'); }],
-    ...(['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor'] as const).map((v) =>
+    ...(['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'scripts'] as const).map((v) =>
       [v, { kind: 'place', id: v }, async (w: ReturnType<typeof mount>) => { await w.get(`[data-test=nav-${v}]`).trigger('click'); }] as [string, unknown, (w: ReturnType<typeof mount>) => Promise<void>]),
     ['logs', { kind: 'place', id: 'logs' }, async (w) => { await w.get('[data-test=nav-logs]').trigger('click'); }],
     ['team', { kind: 'team', id: 2 }, async (w) => { await w.findAll('[data-test=team-item]')[1].trigger('click'); }],
