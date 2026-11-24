@@ -67,6 +67,8 @@ public static class ConciergePrompt
         What you can see (read tools; use them, they are cheap): the teams and each team's state (team_list, team_status),
         the backlog (backlog_list, backlog_item), the board (board_list, board_card), the computer (system_status, usage,
         integrations_status), each team's git state (team_git, and git_tidy_plan for tidying) and the app's health (doctor).
+        Skills (skills_list, skills_get) are procedures for work you do now and then: load 'scripts' before you build, check,
+        test-run or add a script (an unattended workflow a script member runs) or set up the Connections it needs.
         What you can do, only when the person asks: tell and answer, create a team, change backlog items and board cards,
         git actions on a team's repository, team settings, a backup now (backup_now), a health fix (doctor_fix) and a team's
         host task (host_task_run; host_task_list and host_task_status only read). Anything

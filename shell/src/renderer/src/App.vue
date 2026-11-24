@@ -36,6 +36,7 @@ import Icon from './components/Icon.vue';
 import LoadingNote from './components/LoadingNote.vue';
 import GitBanner from './components/GitBanner.vue';
 import LogsDialog from './components/LogsDialog.vue';
+import ScriptsDialog from './components/scripts/ScriptsDialog.vue';
 import UpdateBanner from './components/UpdateBanner.vue';
 import ThemeToggle from './components/ThemeToggle.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
@@ -157,6 +158,7 @@ const title = computed(() => {
   if (view.value === 'backlog') return 'Backlog';
   if (view.value === 'workflows') return 'Workflows';
   if (view.value === 'logs') return 'Logs';
+  if (view.value === 'scripts') return 'Scripts';
   return view.value === 'board' ? 'Kanban board' : view.value === 'settings' ? 'Settings' : 'Monitor';
 });
 
@@ -442,7 +444,7 @@ const menus = computed<Menu[]>(() => [
     ]),
     { separator: true },
     { id: 'go:concierge', label: 'Concierge' }, { id: 'go:teams', label: 'Teams' }, { id: 'go:backlog', label: 'Backlog' }, { id: 'go:workflows', label: 'Workflows' },
-    { id: 'go:board', label: 'Kanban board' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
+    { id: 'go:board', label: 'Kanban board' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:scripts', label: 'Scripts' }, { id: 'go:logs', label: 'Logs' },
     ...(desktop ? [
       { separator: true } as const,
       { id: 'zoomIn', label: 'Zoom in', keys: `${mod}=` }, { id: 'zoomOut', label: 'Zoom out', keys: `${mod}-` }, { id: 'zoomReset', label: 'Actual size', keys: `${mod}0` },
@@ -609,6 +611,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 
         <DocumentsView v-else-if="view === 'documents'" :teams="teams" :archived="archivedTeams" :api="api" :loading="!overview && !error" />
         <LogsDialog v-else-if="view === 'logs'" page :api="api" />
+        <ScriptsDialog v-else-if="view === 'scripts'" page :api="api" :teams="teams" />
         <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" @open-terminal="openMemberTerminal"
           @open-needs-you="focusTeamId = null; go('board')" />
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />

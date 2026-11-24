@@ -110,7 +110,7 @@ test('embedded: yawble.ready, then yawble.nav once and again on every change', a
   expect(all[0]).toEqual({ type: 'yawble.ready', version: 1 });
   expect(all.filter((m) => m.type === 'yawble.ready')).toHaveLength(1);
   const nav = await lastNav(page);
-  expect(nav.places.map((p: any) => p.id)).toEqual(['newChat', 'concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'logs']);
+  expect(nav.places.map((p: any) => p.id)).toEqual(['newChat', 'concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'scripts', 'logs']);
   expect(nav.teams.map((t: any) => t.name)).toContain('payments');
   expect(nav.chats.map((c: any) => c.title)).toContain('Payments today');
   const before = (await got(page)).length;
