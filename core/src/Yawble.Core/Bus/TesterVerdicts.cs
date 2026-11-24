@@ -31,7 +31,7 @@ public sealed record CloseOverFail(long Card, string Kind, string? Reason)
 }
 
 /// <summary>A card closed over a FAIL, as the WorkflowCompleted payload's <c>closedOverFail</c> lists it.</summary>
-public sealed record ClosedOverFail(long Card, string Tester, string FailLine, string Kind, string? Reason);
+public sealed record FailClosure(long Card, string Tester, string FailLine, string Kind, string? Reason);
 
 /// <summary>A card whose latest tester verdict in the workflow is FAIL, and the person's yes to close over it (if any).</summary>
 public sealed record OutstandingFail(long Card, string Tester, string FailLine, long FailSeq, CloseOverFail? Yes);

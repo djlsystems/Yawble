@@ -450,7 +450,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             var open = fails.Where(f => f.Yes is null).ToList();
             if (open.Count != 0) throw TesterVerdicts.Refusal(open);
             var closedOverFail = fails.Count == 0 ? null
-                : fails.Select(f => new ClosedOverFail(f.Card, f.Tester, f.FailLine, f.Yes!.Kind, f.Yes.Reason)).ToList();
+                : fails.Select(f => new FailClosure(f.Card, f.Tester, f.FailLine, f.Yes!.Kind, f.Yes.Reason)).ToList();
             _statusLines[run.Member.Id] = "declared complete: " + delivered;
             var conflict = check is { Clean: false } ? check : null;
             if (conflict is not null) delivered += $"\n\nNot ready to land: {conflict.Text}.";
