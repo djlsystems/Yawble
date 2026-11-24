@@ -269,7 +269,7 @@ describe('Website login and Add website', () => {
     const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: 'pets', teams } });
     await flushPromises();
     const options = w.find('[data-test=api-connection]').findAll('option').map((o) => o.text());
-    expect(options).toEqual(['Paste a new one above', 'pets key', 'New connection…']);
+    expect(options).toEqual(['a new sign-in, entered here', 'pets key', 'a new saved connection, with its own name…']);
     await w.find('[data-test=api-connection]').setValue('new');
     await flushPromises();
     const dlg = w.findComponent(ConnectionDialog);

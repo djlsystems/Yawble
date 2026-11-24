@@ -251,6 +251,7 @@ async function lookUp() {
 // ---- Path parameters the sign-in fills (Twilio's AccountSid from the username), so callers never give them
 const fillable = computed(() => (signIn.value?.fields ?? []).filter((f) => !f.secret));
 const pathNames = computed(() => apiInfo.value?.pathParamNames ?? []);
+const commonPaths = computed(() => apiInfo.value?.pathParamCommon ?? []);
 function fillFor(fieldKey: string) {
   const map = apiInfo.value?.auth?.pathParams ?? {};
   return Object.keys(map).find((k) => map[k] === fieldKey) ?? '';
@@ -522,27 +523,38 @@ onMounted(async () => { await load(); syncEdit(); });
         <div v-if="signIn && !oauth && !remote && !isWebsite" class="signin-box" data-test="api-signin">
           <b class="small">{{ signInTitle }}</b>
           <p v-if="signIn.description" class="muted small" data-test="api-signin-description">{{ signIn.description }}</p>
+          <label class="small fld">Sign in with
+            <select :value="pick" data-test="api-connection" @change="onPick(($event.target as HTMLSelectElement).value)">
+              <option value="">a new sign-in, entered here</option>
+              <optgroup v-if="apiConnections.length" label="Saved connections">
+                <option v-for="c in apiConnections" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
+              </optgroup>
+              <option value="new">a new saved connection, with its own name…</option>
+            </select>
+          </label>
+          <p class="muted small">Either way the sign-in stays on this computer and agents never see it. A saved connection can be picked again for another API.</p>
           <div v-if="pick === ''" class="secrets">
             <label v-for="f in signIn.fields" :key="f.key" class="small fld">{{ f.label }}
               <input v-model="secretValues[f.key]" :type="f.secret ? 'password' : 'text'" autocomplete="off" :placeholder="f.secret ? 'paste it here' : ''" :data-test="`api-secret-${f.key}`" />
             </label>
           </div>
-          <div v-if="fillable.length && pathNames.length" class="fills" data-test="api-path-fills">
-            <label v-for="f in fillable" :key="f.key" class="small fld">{{ f.label }} also fills the path parameter
+          <template v-if="fillable.length && commonPaths.length">
+            <div v-for="n in commonPaths" :key="n" class="fills" :data-test="`api-path-common-${n}`">
+              <label class="check small"><input type="checkbox" :checked="fillFor(fillable[0]!.key) === n" :data-test="`api-path-common-check-${n}`"
+                @change="setFill(fillable[0]!.key, ($event.target as HTMLInputElement).checked ? n : '')" /> Fill <code class="mono">{{ n }}</code> in every address from the {{ fillable[0]!.label.toLowerCase() }}</label>
+              <p class="muted small indent">Nearly all of {{ apiName }}'s actions have <code class="mono">{{ '{' + n + '}' }}</code> in their address. Ticked, each call fills it in from the sign-in, so scripts and agents never have to give it.</p>
+            </div>
+          </template>
+          <details v-else-if="fillable.length && pathNames.length" class="fills" data-test="api-path-fills">
+            <summary class="small muted">Advanced: fill part of the address from the sign-in</summary>
+            <p class="muted small">Most APIs don't need this. Use it only when an address needs an account id that is also your {{ fillable[0]!.label.toLowerCase() }}.</p>
+            <label v-for="f in fillable" :key="f.key" class="small fld">{{ f.label }} fills
               <select :value="fillFor(f.key)" :data-test="`api-path-fill-${f.key}`" @change="setFill(f.key, ($event.target as HTMLSelectElement).value)">
-                <option value="">none</option>
+                <option value="">nothing (the default)</option>
                 <option v-for="n in pathNames" :key="n" :value="n">{{ n }}</option>
               </select>
             </label>
-            <p class="muted small">Calls then take it from the sign-in, so scripts and agents never give it (for Twilio: AccountSid from the username).</p>
-          </div>
-          <label class="small">Or use a saved connection
-            <select :value="pick" data-test="api-connection" @change="onPick(($event.target as HTMLSelectElement).value)">
-              <option value="">Paste a new one above</option>
-              <option v-for="c in apiConnections" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
-              <option value="new">New connection…</option>
-            </select>
-          </label>
+          </details>
         </div>
         <div v-if="isWebsite && !remote" class="signin-box" data-test="website-login">
           <b class="small">Website login</b>

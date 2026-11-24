@@ -574,6 +574,8 @@ export interface ApiRow {
   auth: { type: 'bearer' | 'header' | 'query' | 'basic' | string; name: string | null; description: string | null; chosen?: boolean; pathParams?: Record<string, string> | null } | null;
   /** The path parameters (names in the route) the API's operations take; null for a website. */
   pathParamNames?: string[] | null;
+  /** Those nearly every operation takes (an account id in every address, e.g. Twilio's AccountSid): offered to fill from the sign-in. */
+  pathParamCommon?: string[] | null;
   signIn: { label: string; description: string | null; fields: { key: string; label: string; secret: boolean }[] } | null;
   /** An OAuth 2 API (auth.type 'oauth2'): the spec's addresses (null when it gave none usable, or only an OpenID address), the scopes the
    * allowed and ask-first actions need, and those its Connection was not granted (non-empty: "Sign in again to allow the new actions"). */

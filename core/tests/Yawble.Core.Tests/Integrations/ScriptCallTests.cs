@@ -397,6 +397,7 @@ public class ScriptCallTests
         await using var r = await Rig.Make(bindAccountSid: false);
         var before = (await r.Rpc("integrations.apiList"))!.AsArray().Single(a => a!["name"]!.GetValue<string>() == "sms")!;
         Assert.Equal(["AccountSid", "Sid"], before["pathParamNames"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Equal(["AccountSid"], before["pathParamCommon"]!.AsArray().Select(n => n!.GetValue<string>())); // in all 4 operations; Sid in 2
         var chosenBefore = before["auth"]!["chosen"]!.GetValue<bool>();
 
         await r.Rpc("integrations.apiSave", new JsonObject { ["name"] = "sms", ["pathParams"] = new JsonObject { ["AccountSid"] = "username" } });

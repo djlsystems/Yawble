@@ -183,6 +183,7 @@ public sealed partial class IntegrationService
             },
             ["signIn"] = SignInJson(a.Auth),
             ["pathParamNames"] = a.Kind == "http" ? new JsonArray(ApiPathParamNames(a.Id).Select(n => (JsonNode?)n).ToArray()) : null,
+            ["pathParamCommon"] = a.Kind == "http" ? new JsonArray(ApiCommonPathParams(a.Id).Select(n => (JsonNode?)n).ToArray()) : null,
             ["oauth"] = a.Kind == "http" && AuthType(a.Auth) == "oauth2" ? OAuthApiJson(a) : null,
             ["status"] = a.Status, ["all"] = a.EnabledAll, ["teams"] = new JsonArray(ApiTeamsOf(a.Id).Select(t => (JsonNode?)t).ToArray()),
             ["counts"] = a.Runs == 0 ? null : CountsJson(() => Discover.GetApiChecklist(a.Name, null)),
@@ -416,6 +417,18 @@ public sealed partial class IntegrationService
         foreach (var prefix in new[] { "api.", "www." })
             if (h.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && h.Length > prefix.Length) h = h[prefix.Length..];
         return Clean(h) is { Length: > 0 } fromHost ? fromHost : host.Host;
+    }
+
+    /// <summary>
+    /// The path parameters nearly every operation takes (at least 80% of them, and at least 3 operations): an account or project id
+    /// in every address, such as Twilio's AccountSid. These are the ones worth filling from the sign-in.
+    /// </summary>
+    private List<string> ApiCommonPathParams(long apiId)
+    {
+        var ops = ApiOps(apiId).Where(o => !o.Gone).ToList();
+        if (ops.Count < 3) return [];
+        return ops.SelectMany(o => (o.Params["properties"] as JsonObject ?? []).Where(p => ApiIn(p.Value) == "path").Select(p => ApiWire(p.Key, p.Value)).Distinct(StringComparer.Ordinal))
+            .GroupBy(n => n, StringComparer.Ordinal).Where(g => g.Count() * 5 >= ops.Count * 4).Select(g => g.Key).Order(StringComparer.Ordinal).ToList();
     }
 
     /// <summary>The names (as in the route) of the path parameters the API's current operations take, sorted.</summary>

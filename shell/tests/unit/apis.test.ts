@@ -642,7 +642,7 @@ describe('Add API: look up one address, and path parameters from the sign-in', (
     await flushPromises();
     expect(w.find('[data-test=api-path-fill-password]').exists()).toBe(false);
     const sel = w.find('[data-test=api-path-fill-username]');
-    expect(sel.findAll('option').map((o) => o.text())).toEqual(['none', 'AccountSid', 'Sid']);
+    expect(sel.findAll('option').map((o) => o.text())).toEqual(['nothing (the default)', 'AccountSid', 'Sid']);
     await sel.setValue('AccountSid');
     await flushPromises();
     expect(calls.find((c) => c.method === 'integrations.apiSave')!.params).toEqual({ name: 'Twilio', pathParams: { AccountSid: 'username' } });
@@ -650,5 +650,27 @@ describe('Add API: look up one address, and path parameters from the sign-in', (
     await w.find('[data-test=api-path-fill-username]').setValue('');
     await flushPromises();
     expect(calls.filter((c) => c.method === 'integrations.apiSave').at(-1)!.params).toEqual({ name: 'Twilio', pathParams: null });
+  });
+  it('ApiDialog_APathParameterInNearlyEveryAddress_IsOneCheckbox', async () => {
+    let fills: Record<string, string> | null = null;
+    const { api, calls } = fakeApi({
+      'integrations.apiList': () => [apiRow({
+        name: 'Twilio', connection: null, pathParamNames: ['AccountSid', 'Sid'], pathParamCommon: ['AccountSid'],
+        auth: { type: 'basic', name: null, description: null, pathParams: fills },
+        signIn: { label: 'Username and password', description: null, fields: [{ key: 'username', label: 'Username', secret: false }, { key: 'password', label: 'Password', secret: true }] },
+      })],
+      'integrations.connections': () => [],
+      'integrations.apiSave': (p) => { fills = p.pathParams; return { ok: true, name: 'Twilio' }; },
+      'integrations.checklist': () => checklist([]),
+      'integrations.discoverStatus': () => ({ state: 'done' }),
+    });
+    const w = mount(IntegrationDialog, { props: { api, kind: 'api', name: 'Twilio', teams } });
+    await flushPromises();
+    expect(w.find('[data-test=api-path-fills]').exists()).toBe(false);
+    expect(w.find('[data-test=api-path-common-AccountSid]').text()).toContain('Fill AccountSid in every address from the username');
+    await w.find('[data-test=api-path-common-check-AccountSid]').setValue(true);
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'integrations.apiSave')!.params).toEqual({ name: 'Twilio', pathParams: { AccountSid: 'username' } });
+    expect((w.find('[data-test=api-path-common-check-AccountSid]').element as HTMLInputElement).checked).toBe(true);
   });
 });
