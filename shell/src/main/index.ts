@@ -10,7 +10,7 @@ import { captureMainOutput, diagnosticLog, processGoneLine, shellStartLine } fro
 import { installScope, isAdministrator, otherSessionsRunning, updaterArgs } from './install-scope';
 import { appFolder } from './app-folder';
 import { Channels, isUiMethod, type Overview } from '../shared/api';
-import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, startedInBackground, type ShellSettings } from './background';
+import { AppTray, applyStartAtLogin, needsYouToast, ShellSettingsFile, startAtLoginRegistered, startedInBackground, type ShellSettings } from './background';
 import { CoreClient } from './core-client';
 import { DataFolderInUseError, locateCore, locateInstallDir, startCore, type RunningCore } from './core-process';
 import { inUseDialog, removedDialog, type LifetimeDialog } from './lifetime-dialogs';
@@ -229,6 +229,13 @@ function newWindow(opts: { width: number; height: number; x?: number; y?: number
     return { action: 'deny' };
   });
   win.webContents.on('context-menu', (_e, params) => editMenu(win, params));
+  // The page's errors (a part of it that failed to load or threw) go to the shell log, so a blank page leaves a trace.
+  win.webContents.on('console-message', (e) => {
+    const m = e as unknown as { level?: string; message?: string; sourceId?: string; lineNumber?: number };
+    if (m.level !== 'error') return;
+    const where = m.sourceId ? ` (${path.basename(m.sourceId)}:${m.lineNumber ?? 0})` : '';
+    report.file(`page error: ${String(m.message ?? '').slice(0, 400)}${where}`);
+  });
   win.once('ready-to-show', () => { if (opts.maximized) win.maximize(); win.show(); });
   void win.loadFile(path.join(__dirname, '..', '..', 'renderer', 'index.html'), opts.hash ? { hash: opts.hash } : undefined);
   return win;
@@ -439,7 +446,7 @@ app.whenReady().then(async () => {
       tray?.update({ running: o.slots.running, queued: o.slots.queued, needsYou: needs });
       // A new question for the person: a system notification when the window is not in front (clicking opens it).
       if (needsYou !== null && needs > needsYou && !(mainWindow?.isFocused() ?? false) && Notification.isSupported()) {
-        const n = new Notification({ title: 'Yawble needs you', body: `${needs} thing${needs === 1 ? '' : 's'} waiting for you (questions, approvals, hosts agents ask to reach, developer tools agents ask for, connections to reconnect).` });
+        const n = new Notification({ title: 'Yawble needs you', body: needsYouToast(needs, o.newest) });
         n.on('click', showMain);
         n.show();
       }

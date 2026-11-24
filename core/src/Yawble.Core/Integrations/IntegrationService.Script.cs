@@ -19,6 +19,12 @@ public sealed record ScriptCaller(string Team, string Member, string ScriptRunId
 public sealed record ScriptApiResult(int Status, string ContentType, string Body)
 {
     public bool Sent { get; init; } = true;
+
+    /// <summary>B143: the request that was sent (method, route template, host) and how long the app waited for an answer; null when unknown.</summary>
+    public string? Method { get; init; }
+    public string? Route { get; init; }
+    public string? Host { get; init; }
+    public double? TimeoutSeconds { get; init; }
 }
 
 /// <summary>
@@ -106,9 +112,10 @@ public sealed partial class IntegrationService
         }
         var result = await SendApiAsync(api, request, sign, view, teamId, ct);
         Record(Decisions.Allow, ruleText, result.Output);
-        return result.Status is { } status
+        var answer = result.Status is { } status
             ? new ScriptApiResult(status, result.Media ?? "", result.Body ?? "")
             : new ScriptApiResult(0, "", result.Text);
+        return answer with { Method = request.Method.Method, Route = op.Route, Host = request.Url.Host, TimeoutSeconds = ApiTimeout.TotalSeconds };
     }
 
     /// <summary>

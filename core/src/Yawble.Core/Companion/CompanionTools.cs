@@ -16,7 +16,7 @@ public static class CompanionTools
     [
         "team_list", "team_status", "team_activity", "team_workflows", "documents_list", "documents_read", "team_repos",
         "backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "integrations_status", "usage", "doctor",
-        "backups_list", "request_status", "host_task_list", "host_task_status",
+        "backups_list", "request_status", "request_cancel", "host_task_list", "host_task_status",
         ScriptTools.SchemasList, ScriptTools.SchemaGet, ScriptTools.ScriptsList, ScriptTools.ScriptGet, ScriptTools.ScriptCheck, ScriptTools.ScriptRuns, ScriptTools.ScriptRun,
     ];
 
@@ -41,7 +41,7 @@ public static class CompanionTools
     public static readonly IReadOnlyList<string> SelfConfirming = ["git_branches_delete", "git_branch_realign", "git_prune", "git_pr_merge", "team_archive", "team_delete"];
 
     /// <summary>The tools the companion serves itself (not the Concierge's).</summary>
-    public static readonly IReadOnlyList<string> Own = ["backups_list", "request_status", "git_merge_team", "backup_restore"];
+    public static readonly IReadOnlyList<string> Own = ["backups_list", "request_status", "request_cancel", "git_merge_team", "backup_restore"];
 
     /// <summary>The parameters of tell and answer that only work in a Concierge chat (never offered, never passed on).</summary>
     public static readonly IReadOnlyList<string> ChatOnlyParameters = ["images", "follow_up"];
@@ -51,7 +51,7 @@ public static class CompanionTools
 
     public const string ApprovalNote =
         "needs the person's approval in the Yawble window: the call returns a request id and the exact plan, and nothing runs until " +
-        "they approve it there (check with request_status).";
+        "they approve it there (check with request_status). It waits until they approve or deny it; request_cancel withdraws it.";
 
     /// <summary>The level a call needs; null for a tool that is not offered at all.</summary>
     public static CompanionLevel? LevelOf(string tool, JsonObject args)
@@ -149,7 +149,9 @@ public static class CompanionTools
     private static IEnumerable<JsonObject> OwnDefinitions()
     {
         yield return Tool("backups_list", "The app's backups on this computer: name, reason, time and size.");
-        yield return Tool("request_status", "Where an approval request stands (pending, done, failed, denied, expired or changed), with its result once it ran.",
+        yield return Tool("request_status", "Where an approval request stands, with its result once it ran. It is pending until the person approves or denies it in the Yawble window; then running, done, failed, denied, or changed (the plan changed before approval, or a newer request of the same tool and target replaced it: the new request is named). It is also denied when you cancel it, and ends by itself only after 7 days undecided (expired) or when the app restarts.",
+            ("id", "string", "The request id a destructive call returned.", true));
+        yield return Tool("request_cancel", "Withdraw one of your own approval requests that is still pending: nothing runs, and the person is no longer asked. A request already decided or running is left as it is.",
             ("id", "string", "The request id a destructive call returned.", true));
         yield return Tool("git_merge_team", "Merge a team's branch into its repository's base branch (a fast-forward or a merge commit, never a rebase; a conflict changes nothing), and push it to origin when there is one.",
             ("team", "string", "The team.", true), ("repo", "string", "Repository name (default main).", false));

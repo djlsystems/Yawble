@@ -7,7 +7,7 @@
   </a>
 </p>
 
-<p align="center"><b>AI teamwork. Built-in guardrails. Your control.</b></p>
+<p align="center"><b>Your AI agents don't care if you can't keep up. Yawble makes you their boss.</b></p>
 
 <p align="center">
   <a href="https://yawble.ai">yawble.ai</a> ·
@@ -186,8 +186,9 @@ pipe (Windows) or unix socket, and nothing of it is reachable over the Cloud Lin
 Levels are cumulative: `read` (status, activity, documents, backlog, board, git state), `act` (also tell a team,
 answer its questions, edit the backlog and board), `destructive` (also push, merge, delete, restore and other
 changes). A destructive call never runs when the program makes it: the window shows the exact plan, and Approve runs
-exactly that once. Settings > Companion lists paired programs and revokes them. Every call is audited with the
-program's name.
+exactly that once. The request stays pending until you approve or deny it; if the plan changed by then, Approve shows
+the new plan as a new request instead. The program can cancel its request, and requests end when the app restarts.
+Settings > Companion lists paired programs and revokes them. Every call is audited with the program's name.
 
 Exit codes: 0 ok, 1 failed, 2 usage, 3 the app is not running, 4 not paired, 5 refused, 6 waiting for your approval,
 130 interrupted.

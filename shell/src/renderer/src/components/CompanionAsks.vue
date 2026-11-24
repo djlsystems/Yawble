@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue';
 import type { CompanionAction, CompanionActionStatus, CompanionLevel, CompanionList, CompanionPairing, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import { COMPANION_LEVEL_TEXT, levelsUpTo } from '../companionLevels';
+import { askedAgo } from '../companionAge';
 import BusyLabel from './BusyLabel.vue';
 import { usePhone } from '../phone';
 
@@ -133,7 +134,7 @@ onBeforeUnmount(() => { off?.(); if (timer) clearInterval(timer); });
       </div>
     </article>
     <article v-for="a in actions" :key="a.id" class="card" data-test="companion-action" :data-state="a.state">
-      <h3><b>{{ a.client }}</b> asks to run <code>{{ a.tool }}</code></h3>
+      <h3><b>{{ a.client }}</b> asks to run <code>{{ a.tool }}</code><span v-if="askedAgo(a.asked)" class="age" :title="a.asked" data-test="companion-asked">{{ askedAgo(a.asked) }}</span></h3>
       <p v-if="a.state === 'running'" class="muted" data-test="companion-running">Running now…</p>
       <p v-else class="muted">This runs exactly what is listed, once, only if you approve it.</p>
       <pre class="plan" data-test="companion-plan">{{ a.plan }}</pre>
@@ -156,6 +157,7 @@ onBeforeUnmount(() => { off?.(); if (timer) clearInterval(timer); });
 .card { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; background: var(--surface); }
 .card h3 { margin: 0 0 6px; font-size: 14px; font-weight: 500; }
 .card p { margin: 4px 0; font-size: 13px; }
+.age { margin-left: 8px; font-size: 12px; color: var(--muted); }
 .code { font-size: 16px; letter-spacing: 2px; font-weight: 700; }
 .level { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 .plan { white-space: pre-wrap; word-break: break-word; background: var(--bg); border-radius: 4px; padding: 6px 8px; margin: 6px 0; font-size: 12.5px; max-height: 240px; overflow: auto; }

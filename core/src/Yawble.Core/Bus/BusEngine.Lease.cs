@@ -175,7 +175,8 @@ public sealed partial class BusEngine
                             var hold = new LeaseHold(run, step, now, NewLeaseUse(run, step, now));
                             hold.Use.GrantedAt = now;
                             _leaseHolders.Add(hold);
-                            Log($"lease: {run.Member.Qualified} holds it for \"{step}\"");
+                            Logs.Diag.Debug("lease", $"lease: {run.Member.Qualified} holds it for \"{step}\"",
+                                ("team", run.Member.Team), ("member", run.Member.Qualified), ("run", run.RunId), ("step", step));
                             LeaseChanged?.Invoke();
                             return Granted(hold);
                         }
@@ -198,7 +199,8 @@ public sealed partial class BusEngine
                     if (queued > 0) run.IdleClock?.Resume();
                     if (held + queued > 0)
                     {
-                        Log($"lease: {run.Member.Qualified} {(held > 0 ? "released it" : "left the queue")}");
+                        Logs.Diag.Debug("lease", $"lease: {run.Member.Qualified} {(held > 0 ? "released it" : "left the queue")}",
+                            ("team", run.Member.Team), ("member", run.Member.Qualified), ("run", run.RunId));
                         TidyLease(now);
                         LeaseChanged?.Invoke();
                     }

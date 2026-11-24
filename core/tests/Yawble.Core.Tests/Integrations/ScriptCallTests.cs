@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -246,6 +246,34 @@ public class ScriptCallTests
         Assert.Contains("CreateMessage", call.Args);
         Assert.Contains("script run run-42", call.Args);
         Assert.DoesNotContain(AuthToken, call.Args);
+    }
+
+    [Fact] // card 613 (B143 part 4): the Tool calls log keeps the argument names, the phone numbers' last 4 digits and no message content
+    public async Task TheCallLog_KeepsArgumentNames_NotTheMessage_AndPhonesToTheirLast4Digits()
+    {
+        await using var r = await Rig.Make();
+        const string body = "New email from Lee Client <lee@example.test>: Quote request";
+        await r.Script("CreateMessage", new JsonObject { ["To"] = "+15551230000", ["From"] = "+15559870000", ["Body"] = body, ["SendAsMms"] = false });
+        // the agent's path: the body as an object
+        await r.Ada(new { action = "CreateMessage", @params = new { body = new { To = "+15551234567", From = "+15559870000", Body = body } } });
+
+        var calls = r.Calls();
+        Assert.Equal(2, calls.Count);
+        var script = System.Text.Json.JsonSerializer.Deserialize<List<string>>(calls[0].Args)!;
+        Assert.Equal("CreateMessage", script[0]);
+        Assert.Equal($$"""{"To":"...0000","From":"...0000","Body":"({{body.Length}} chars)","SendAsMms":false}""", script[1]);
+        Assert.Equal("script run run-42", script[2]);
+        var agent = System.Text.Json.JsonSerializer.Deserialize<List<string>>(calls[1].Args)!;
+        Assert.Equal($$$"""{"body":{"To":"...4567","From":"...0000","Body":"({{{body.Length}}} chars)"}}""", agent[1]);
+        foreach (var c in calls)
+        {
+            Assert.DoesNotContain("Quote request", c.Args);
+            Assert.DoesNotContain("lee@example.test", c.Args);
+            Assert.DoesNotContain("1555123", c.Args);
+            Assert.DoesNotContain("1555987", c.Args);
+        }
+        // the request itself went out whole
+        Assert.Contains(r.Sent, s => s.Body!.Contains("Quote+request", StringComparison.Ordinal) || s.Body.Contains("Quote%20request", StringComparison.Ordinal));
     }
 
     [Fact]
