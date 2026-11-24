@@ -9,12 +9,12 @@ namespace Yawble.CodeBrowser.Tests;
 /// They run on Windows (the Windows handle path) and, through the same seams, on macOS / Linux (the POSIX path);
 /// on this Windows machine the POSIX path is compiled but not run.
 /// </summary>
-public class B034BreakTests : IDisposable
+public class HandleCheckBreakTests : IDisposable
 {
     private readonly TempDir _tmp = new();
     private readonly string _clone;
 
-    public B034BreakTests()
+    public HandleCheckBreakTests()
     {
         _clone = _tmp.Sub("clone");
         TempDir.Write(_clone, "src/app.cs", "class A {}\n");
