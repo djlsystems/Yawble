@@ -5,11 +5,13 @@ import { errorText, resolveApi, when } from '../api';
 import { readOnly, vChange } from '../remoteAccess';
 import { useBusy } from '../busy';
 import BusyLabel from './BusyLabel.vue';
+import ScriptMemberIntegrations from './ScriptMemberIntegrations.vue';
 import { scriptAtVersion, scriptsApi, shortValue, type ScriptMember, type ScriptMemberFile, type ScriptMemberState, type ScriptRun } from '../scriptMembers';
 
 // B134 (card 598): a script member's tile on the team page: its name, script@version (on latest: the version it runs),
 // the last run's status and time and the next scheduled trigger; under it the last runs (scripts.runs) and the saved
-// variables (scripts.memberState), each with a Reset (scripts.memberResetVariable) that a Visitor does not get.
+// variables (scripts.memberState), each with a Reset (scripts.memberResetVariable) that a Visitor does not get. Its
+// integrations show what it uses for each one the script names, and Change sets or clears an override.
 const props = defineProps<{ card: AgentCard; api?: YawbleApi; pollMs?: number; pending?: 'remove' | null }>();
 /** triggers: open the Triggers dialog, on this trigger when it is the member's only one. */
 const emit = defineEmits<{ remove: []; triggers: [triggerId: number | null] }>();
@@ -92,6 +94,7 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
     </div>
     <p v-if="error" class="error small" data-test="script-member-pane-error">{{ error }}</p>
     <div class="body">
+      <ScriptMemberIntegrations v-if="member" :api="api" :member="member" @updated="(m) => { member = m; }" />
       <h4>Last runs</h4>
       <ul v-if="runs.length" class="runs" data-test="script-member-runs">
         <li v-for="r in runs" :key="r.id" data-test="script-member-run">

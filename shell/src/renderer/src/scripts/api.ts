@@ -1,6 +1,6 @@
-import type { ApiRow, Connection, YawbleApi } from '../../../shared/api';
+import type { ApiRow, YawbleApi } from '../../../shared/api';
 import type {
-  Check, ExportResult, Run, RunDetail, SchemaSaveResult, SchemaSummary, SchemaVersion, ScriptDeleteResult, ScriptDocument,
+  Check, ExportResult, Run, RunDetail, SchemaSaveResult, SchemaSummary, SchemaUsage, SchemaVersion, ScriptDeleteResult, ScriptDocument,
   ScriptSaveResult, ScriptStep, ScriptSummary, ScriptVersion, ScriptVersionRow, Step, TestRunParams, TestRunResult,
 } from './types';
 
@@ -25,24 +25,38 @@ export const scriptsApi = (api: YawbleApi) => ({
   schema: (name: string, version?: number) => api.call<SchemaVersion>('schemas.get', version === undefined ? { name } : { name, version }),
   schemaSave: (name: string, schema: Record<string, unknown> | string, description?: string) =>
     api.call<SchemaSaveResult>('schemas.save', description === undefined ? { name, schema } : { name, description, schema }),
+  /** Where a schema is used: each script's latest version, with the variables typed with it and the steps that read it. */
+  schemaUsage: (name: string) => api.call<SchemaUsage>('schemas.usage', { name }),
+  /**
+   * What a script can call: the person's integrations with their actions and typed params, and the expression functions.
+   * The result is the designer's ScriptCatalog (its type lives with the designer: pass it as T).
+   */
+  catalog: <T = unknown>(teamId?: number) => api.call<T>('scripts.catalog', teamId === undefined ? {} : { teamId }),
+  /** An alias document rewritten to real integration names (nothing saved); T is the designer's UseRealNamesResult. */
+  useRealNames: <T = unknown>(document: ScriptDocument | string, bindings?: Record<string, string>) =>
+    api.call<T>('scripts.useRealNames', bindings === undefined ? { document } : { document, bindings }),
 });
 export type ScriptsApi = ReturnType<typeof scriptsApi>;
 
 /** An integration a requires entry can be bound to: its name (what bindings carry) and its kind (api, email). */
 export interface BindingChoice { name: string; kind: string }
 
+/** An Email integration as integrations.emailList gives it. */
+interface EmailIntegrationRow { name: string; enabledAll: boolean; teamIds: number[] }
+
 /**
- * The integrations of a team a script's requires can be bound to: the web APIs offered to the team (kind api) and the
- * email accounts (kind email, by their Connection's name). Either list failing leaves the other.
+ * The integrations turned on for a team that a script's step can use, or a member can use in place of one: the web APIs
+ * (kind api) and the Email integrations (kind email), by the names Settings > Integrations shows. Either list failing
+ * leaves the other.
  */
 export async function teamBindingChoices(api: YawbleApi, teamId: number): Promise<BindingChoice[]> {
-  const [apis, conns] = await Promise.all([
+  const [apis, emails] = await Promise.all([
     api.call<ApiRow[]>('integrations.apiList', {}).catch(() => [] as ApiRow[]),
-    api.call<Connection[]>('integrations.connections', {}).catch(() => [] as Connection[]),
+    api.call<EmailIntegrationRow[]>('integrations.emailList', {}).catch(() => [] as EmailIntegrationRow[]),
   ]);
   return [
-    ...(apis ?? []).filter((a) => a.kind === 'http' && (a.all || a.teams.includes(teamId))).map((a) => ({ name: a.name, kind: 'api' })),
-    ...(conns ?? []).filter((c) => (c.kind as string) === 'email').map((c) => ({ name: c.name, kind: 'email' })),
+    ...(Array.isArray(apis) ? apis : []).filter((a) => a.kind === 'http' && (a.all || a.teams.includes(teamId))).map((a) => ({ name: a.name, kind: 'api' })),
+    ...(Array.isArray(emails) ? emails : []).filter((e) => e.enabledAll || (e.teamIds ?? []).includes(teamId)).map((e) => ({ name: e.name, kind: 'email' })),
   ];
 }
 

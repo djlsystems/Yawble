@@ -12,11 +12,24 @@ export interface ScriptRun {
   failedStepId: string | null; reason: string | null; startedAt: string; endedAt: string | null;
 }
 
+/**
+ * One integration a script member's runs use (scripts.memberGet's integrations): `name` as the script's steps name it, `uses`
+ * the integration that runs ('' for an alias with no binding), `overridden` when the member replaces a real name with another.
+ */
+export interface ScriptMemberIntegration { name: string; kind: 'email' | 'api'; uses: string; overridden: boolean }
+
 /** A script member (ScriptMember): version null = latest, runsVersion the version it runs; nextTriggerAt UTC ISO or null. */
 export interface ScriptMember {
   memberId: number; teamId: number; team: string; name: string; scriptId: number; script: string; version: number | null; runsVersion: number | null;
   settings: Record<string, unknown>; bindings: Record<string, string>; timeoutMinutes: number; consecutiveFailures: number;
   running?: boolean; lastRun: ScriptRun | null; nextTriggerAt: string | null;
+  /** Each integration the script names and what the member uses for it (an older core leaves it out). */
+  integrations?: ScriptMemberIntegration[];
+}
+
+/** scripts.memberUpdate: what is given changes (bindings replaces the member's whole map). */
+export interface ScriptMemberUpdate {
+  memberId: number; version?: number | null; settings?: Record<string, unknown>; bindings?: Record<string, string>; timeoutMinutes?: number;
 }
 
 /** scripts.memberState: the member's saved variables. */
@@ -57,6 +70,7 @@ export const scriptsApi = (api: YawbleApi) => ({
   get: (script: number | string, version?: number) => api.call<ScriptVersionDoc>('scripts.get', version === undefined ? { script } : { script, version }),
   memberAdd: (p: ScriptMemberAdd) => api.call<ScriptMember>('scripts.memberAdd', { ...p }),
   memberGet: (memberId: number) => api.call<ScriptMember>('scripts.memberGet', { memberId }),
+  memberUpdate: (p: ScriptMemberUpdate) => api.call<ScriptMember>('scripts.memberUpdate', { ...p }),
   memberState: (memberId: number) => api.call<ScriptMemberState>('scripts.memberState', { memberId }),
   memberResetVariable: (memberId: number, name: string) => api.call<{ reset: boolean }>('scripts.memberResetVariable', { memberId, name }),
   memberFiles: (memberId: number, lines = 30) => api.call<{ memberId: number; files: ScriptMemberFile[] }>('scripts.memberFiles', { memberId, lines }),
@@ -71,9 +85,56 @@ export async function bindableIntegrations(api: YawbleApi, teamId: number, kind:
   }
   if (kind === 'api') {
     const rows = await api.call<ApiRow[]>('integrations.apiList', {});
-    return rows.filter((r) => r.all || r.teams.includes(teamId)).map((r) => r.name);
+    return rows.filter((r) => (r.kind ?? 'http') === 'http' && (r.all || r.teams.includes(teamId))).map((r) => r.name);
   }
   return null; // a kind the page does not list: the name is typed
+}
+
+// ---- integrations: real names and the per-member override ----
+
+/** One of the person's integrations a script can name: its name, its kind, and the teams it is turned on for. */
+export interface KnownIntegration { name: string; kind: 'email' | 'api'; all: boolean; teamIds: number[] }
+
+/** Every Email integration and web API by name (either list failing leaves the other). */
+export async function knownIntegrations(api: YawbleApi): Promise<KnownIntegration[]> {
+  const [emails, apis] = await Promise.all([
+    api.call<EmailIntegrationRow[]>('integrations.emailList', {}).catch(() => [] as EmailIntegrationRow[]),
+    api.call<ApiRow[]>('integrations.apiList', {}).catch(() => [] as ApiRow[]),
+  ]);
+  return [
+    ...(emails ?? []).map((e) => ({ name: e.name, kind: 'email' as const, all: e.enabledAll, teamIds: e.teamIds ?? [] })),
+    ...(apis ?? []).filter((a) => (a.kind ?? 'http') === 'http').map((a) => ({ name: a.name, kind: 'api' as const, all: a.all, teamIds: a.teams ?? [] })),
+  ];
+}
+
+/** Whether a requires name is one of the person's integrations (a real name) rather than an alias each member binds. */
+export const isRealName = (known: readonly KnownIntegration[], name: string) =>
+  known.some((k) => k.name.toLowerCase() === name.trim().toLowerCase());
+
+/** "Yawble DistinctID Support → Other inbox" for an override (or an alias's binding); the name alone when the member uses it. */
+export function integrationText(i: Pick<ScriptMemberIntegration, 'name' | 'uses'>): string {
+  if (!i.uses) return `${i.name} → (not set)`;
+  return i.uses.toLowerCase() === i.name.toLowerCase() ? i.name : `${i.name} → ${i.uses}`;
+}
+
+/** What a member may use in place of an integration: the team's integrations of the same kind, other than the one named. */
+export function overrideChoices(choices: readonly { name: string; kind: string }[], i: Pick<ScriptMemberIntegration, 'name' | 'kind'>): string[] {
+  return choices.filter((c) => c.kind === i.kind && c.name.toLowerCase() !== i.name.toLowerCase()).map((c) => c.name);
+}
+
+/**
+ * The bindings to save from the form: per requires name the choice ('' = use the integration the script names, so no entry).
+ * An alias keeps its binding even when it names the same text.
+ */
+export function bindingsFrom(choice: Record<string, string>, real: (name: string) => boolean): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(choice)) {
+    const v = (value ?? '').trim();
+    if (!v) continue;
+    if (real(name) && v.toLowerCase() === name.trim().toLowerCase()) continue;
+    out[name] = v;
+  }
+  return out;
 }
 
 // ---- the settings form ----

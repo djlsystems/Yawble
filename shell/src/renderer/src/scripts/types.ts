@@ -4,7 +4,8 @@
 /** One problem the check found; stepId null: the document as a whole (settings, requires, variables). */
 export interface CheckIssue { stepId: string | null; code: string; message: string }
 export interface SchemaReference { schema: string; fieldPath: string; stepId: string }
-export interface Check { ok: boolean; issues: CheckIssue[]; schemaReferences: SchemaReference[] }
+/** warnings never make a draft (stale-requires: the document's requires did not match its steps; the save stores the derived one). */
+export interface Check { ok: boolean; issues: CheckIssue[]; schemaReferences: SchemaReference[]; warnings?: CheckIssue[] }
 
 /** A team member that runs a script (version null: on "latest"). */
 export interface ScriptUse { teamId: number; team: string; memberId: number; member: string; version: number | null }
@@ -40,6 +41,9 @@ export interface SchemaVersion { name: string; description: string; version: num
 /** A script step a schema change would break. */
 export interface SchemaBreak { scriptId: number; script: string; version: number; stepId: string; fieldPath: string }
 export interface SchemaSaveResult { name: string; version: number; breaks: SchemaBreak[] }
+/** schemas.usage: each script whose latest version uses the schema, the variables typed with it and the steps that read it. */
+export interface SchemaUse { id: number; name: string; version: number; variables: string[]; steps: string[] }
+export interface SchemaUsage { scripts: SchemaUse[] }
 
 export interface Step {
   seq: number; stepId: string; type: string; input: unknown; output: unknown; status: string; startedAt: string; endedAt: string | null;
