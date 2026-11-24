@@ -320,6 +320,58 @@ public class RolesAndHireListTests
         Assert.Matches(@"Run slots: \d+ in use of \d+ on this computer; \d+ run\(s\) queued for a slot\.$", status);
     }
 
+    [Fact]
+    public async Task ANewRole_ThroughTheShellsCalls_IsHiredAndShownOnTheTile_AndARenameFollowsEverywhere()
+    {
+        (string Text, bool Error) hired = default;
+        long teamId = 0;
+        await using var rig = await ManagerRunAsync(
+            async (r, id) =>
+            {
+                teamId = id;
+                // Settings > Teams > Roles adds a role; Team settings > Hiring puts it on the team's list.
+                await r.Call("roles.save", new { name = "Designer", job = "Draws the screens.", agent = "codex", model = "gpt-5" });
+                var saved = (await r.Call("teams.setHireList", new { team = id, rows = new object[] { new { role = "designer", agent = "codex", model = "  " } } }))!.AsArray();
+                var row = Assert.Single(saved)!.AsObject();
+                Assert.Equal(["agent", "job", "model", "role"], row.Select(p => p.Key).Order(StringComparer.Ordinal));
+                Assert.Equal(("Designer", "Draws the screens.", "codex"), (row["role"]!.GetValue<string>(), row["job"]!.GetValue<string>(), row["agent"]!.GetValue<string>()));
+                Assert.Null(row["model"]); // blank: the agent's default
+            },
+            async run => hired = await Tool(run, "hire", new { role = "Designer" }));
+
+        Assert.False(hired.Error, hired.Text);
+        Assert.Contains("(codex) as Designer", hired.Text);
+        var list = (await rig.Call("teams.hireList", new { teamId }))!.AsArray();
+        Assert.Equal("Designer", Assert.Single(list)!["role"]!.GetValue<string>());
+
+        static async Task<JsonNode> Tile(Rig rig, long teamId) =>
+            (await rig.Call("teams.agents", new { teamId }))!.AsArray().Select(c => c!["member"]!).Single(m => m["role"]!.GetValue<string>() == "member");
+        var tile = await Tile(rig, teamId);
+        Assert.Equal("Designer", tile["hireRole"]!.GetValue<string>());
+        Assert.StartsWith("Designer", tile["name"]!.GetValue<string>());
+        var member = (await rig.Members("Alpha")).Single(m => m.Role == "member");
+        Assert.Equal(("codex", "", "Draws the screens."), (member.Cli, member.Model, member.Instructions));
+
+        // The default hire list uses it too; a rename follows into the team's list, the default list and the member.
+        await rig.Call("teams.setDefaults", new { hireList = new object[] { new { role = "Designer", agent = "claude", model = (string?)null } } });
+        await rig.Call("roles.save", new { name = "Painter", job = "Paints the screens.", agent = "codex", originalName = "designer" });
+        Assert.Equal("Painter", Assert.Single((await rig.Call("teams.hireList", new { team = "Alpha" }))!.AsArray())!["role"]!.GetValue<string>());
+        Assert.Equal("Painter", Assert.Single((await rig.Call("teams.defaults"))!["hireList"]!.AsArray())!["role"]!.GetValue<string>());
+        Assert.Equal("Painter", (await Tile(rig, teamId))["hireRole"]!.GetValue<string>());
+
+        // Removing it is refused while the team's list uses it, then while the default list does, then allowed.
+        var refused = await rig.Refused("roles.remove", new { name = "Painter" });
+        Assert.Equal(("in_use", "Role Painter is used by the hire list of: Alpha"), (refused.Code, refused.Message));
+        await rig.Call("teams.setHireList", new { team = teamId, rows = Array.Empty<object>() });
+        refused = await rig.Refused("roles.remove", new { name = "Painter" });
+        Assert.Equal("in_use", refused.Code);
+        Assert.Contains("default hire list", refused.Message);
+        await rig.Call("teams.setDefaults", new { hireList = Array.Empty<object>() });
+        await rig.Call("roles.remove", new { name = "Painter" });
+        Assert.DoesNotContain((await rig.Call("roles.list"))!.AsArray(), r => r!["name"]!.GetValue<string>() == "Painter");
+        Assert.Equal("no_such_role", (await rig.Refused("roles.save", new { name = "Sculptor", job = "x", agent = "claude", originalName = "Painter" })).Code);
+    }
+
     // ---------------------------------------------------------------- the Manager's guidance
 
     [Fact]
