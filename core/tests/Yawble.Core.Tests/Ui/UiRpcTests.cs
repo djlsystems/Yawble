@@ -90,6 +90,18 @@ public sealed class UiRpcTests : IAsyncLifetime
         agents.Single(a => a!["member"]!["name"]!.GetValue<string>() == name)!["member"]!["id"]!.GetValue<long>();
 
     [Fact]
+    public async Task ANewTeam_GivesEachAgentTheModelChosenForIt_AndLeavesTheRestOnTheirDefault()
+    {
+        var teamId = (await Call("teams.create", new
+        {
+            name = "models", managerCli = "claude", managerModel = "sonnet",
+            members = new object[] { new { name = "Ada Lovelace", cli = "claude", model = "haiku" }, new { name = "Ben Okafor", cli = "grok" } },
+        }))!["teamId"]!.GetValue<long>();
+        var agents = await Agents(teamId);
+        Assert.Equal(["sonnet", "haiku", ""], agents.Select(a => a!["member"]!["model"]?.GetValue<string>() ?? ""));
+    }
+
+    [Fact]
     public async Task TwoTeamsOneMixed_AddAndRemoveAgents()
     {
         var mixed = await CreateMixedTeam();
