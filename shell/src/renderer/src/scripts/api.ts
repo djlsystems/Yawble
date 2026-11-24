@@ -250,9 +250,10 @@ export const BLANK_SCRIPT: ScriptDocument = {
 };
 
 /**
- * The "Inbox SMS alert" template (on the pinned email and api contracts): each new email's subject
- * texted to a list of phones. The same document as the example in the Concierge's scripts skill: the api action is the operation's id,
- * email list returns EmailList, and the poll saves the last message's id (docs/connections-and-integrations.md, the poll pattern).
+ * The "Inbox SMS alert" template: each new email's subject texted to a list of phones. Its steps name the integrations as
+ * Settings > Integrations shows them ("Support inbox", an Email integration, and "Twilio", a web API); a member whose
+ * integrations have other names replaces each in its settings. The api action is the operation's id, email list returns
+ * EmailList, and the poll saves the last message's id (docs/connections-and-integrations.md, the poll pattern).
  */
 export const INBOX_SMS_ALERT: ScriptDocument = {
   format: 'yawble-script/1',
@@ -267,8 +268,8 @@ export const INBOX_SMS_ALERT: ScriptDocument = {
     { name: 'since', type: 'datetime', label: 'First run: mail received after', default: '2026-11-20T00:00:00Z' },
   ],
   requires: [
-    { name: 'mail', kind: 'email', actions: ['list'] },
-    { name: 'sms', kind: 'api', actions: ['CreateMessage'] },
+    { name: 'Support inbox', kind: 'email', actions: ['list'] },
+    { name: 'Twilio', kind: 'api', actions: ['CreateMessage'] },
   ],
   variables: [
     { name: 'lastId', type: 'string', scope: 'saved' },
@@ -278,13 +279,13 @@ export const INBOX_SMS_ALERT: ScriptDocument = {
   ],
   start: 'list',
   steps: [
-    { id: 'list', type: 'integration', use: 'mail', action: 'list',
+    { id: 'list', type: 'integration', use: 'Support inbox', action: 'list',
       args: { folder: '{settings.folder}', after: '{vars.lastId}', since: '{settings.since}', max: 200 }, into: 'res', next: 'any' },
     { id: 'any', type: 'if', when: { left: '{count(vars.res.messages)}', op: 'gt', right: 0 }, then: 'each', else: 'done' },
     { id: 'each', type: 'forEach', items: '{vars.res.messages}', as: 'm', body: 'note', then: 'keep' },
     { id: 'note', type: 'file.appendLine', path: 'run.log', text: '{now()} email: {m.subject} ({m.from.address}), received {m.receivedAt}', next: 'phones' },
     { id: 'phones', type: 'forEach', items: '{settings.recipients}', as: 'to', body: 'text', then: null },
-    { id: 'text', type: 'integration', use: 'sms', action: 'CreateMessage',
+    { id: 'text', type: 'integration', use: 'Twilio', action: 'CreateMessage',
       args: { To: '{to}', From: '{settings.fromNumber}', Body: 'New email: {m.subject} ({m.from.address})' }, next: 'count' },
     { id: 'count', type: 'set', var: 'sent', value: '{vars.sent + 1}', next: null },
     { id: 'keep', type: 'set', var: 'last', value: '{last(vars.res.messages)}', next: 'mark' },

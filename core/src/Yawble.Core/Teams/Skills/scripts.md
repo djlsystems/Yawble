@@ -45,7 +45,7 @@ model. You build scripts for the person with your script tools; the person sees 
 { "format": "yawble-script/1", "id": "kebab-key", "name": "...", "description": "...",
   "trigger": { "accepts": ["every", "cron", "once"] },
   "settings":  [ { "name": "...", "type": "...", "label": "...", "default": ... } ],
-  "requires":  [ { "name": "mail", "kind": "email", "actions": ["list"] } ],
+  "requires":  [ { "name": "Support inbox", "kind": "email", "actions": ["list"] } ],
   "variables": [ { "name": "...", "type": "...", "scope": "run" | "saved", "initial": ... } ],
   "outputs":   [ { "name": "...", "type": "..." } ],
   "start": "<first step id>",
@@ -59,11 +59,18 @@ model. You build scripts for the person with your script tools; the person sees 
   `"input": "<type>"`.
 - `settings`: set per member when it is added (phones, folder names, thresholds). A setting with no `default`
   must be given.
-- `requires`: each integration by a name the steps `use`, its `kind` and every action the steps call. Each member
-  binds the name to one of its team's integrations. A script never names a Connection.
+- An `integration` step's `use` is the integration's name exactly as `integrations_status` (and Settings >
+  Integrations) shows it: an Email integration's name or an API's name (`"Support inbox"`, `"Twilio"`). A script never
+  names a Connection.
+- `requires` lists each integration the steps use, its `kind` and the actions they call (sorted). The save and the
+  check derive it from the steps; one that does not match is replaced and reported as a warning, not an issue.
   - kind `email`, actions `list get search thread markRead move` (there is no send action).
   - kind `api`: the operation's id as the API's checklist shows it (e.g. `CreateMessage`), one the team allows or
     asks for.
+- A member uses the integrations the steps name; each must be turned on for its team. A member may replace one with
+  another of the same kind turned on for its team (its `bindings`: `{ "Support inbox": "Other inbox" }`).
+- Older scripts name integrations by a short alias in `requires` (`mail`, `sms`); each of their members binds the
+  alias to a real integration. They keep working; write new scripts with the real names.
 - `variables`: `run` variables live for one run; `saved` ones are kept for the member and written back only when a
   run succeeds (a failed poll does not move its place).
 - Types: `int float string bool date datetime duration any`, `enum(a, b)`, `list<T>`, or a schema's name. Built-in
@@ -80,7 +87,7 @@ top level). Every step must be reachable from `start`; a loop body must end with
 | `if` | `when` (a condition), `then`, `else` | branches |
 | `switch` | `on`, `cases` `{ "value": "stepId" }`, `default` | branches on a value |
 | `forEach` | `items`, `as`, `body`, `then` | runs `body` once per item, the item named by `as`; `then` after the last |
-| `integration` | `use`, `action`, `args`, `into`, `next` | calls one action of a `requires` entry; the result goes `into` a variable |
+| `integration` | `use`, `action`, `args`, `into`, `next` | calls one action of an integration (by its name); the result goes `into` a variable |
 | `file.writeAllText`, `file.appendLine` | `path`, `text`, `next` | writes a text file |
 | `file.readAllText`, `file.readLines`, `file.exists` | `path`, `into`, `next` | reads (string, `list<string>`, bool) |
 | `file.delete` | `path`, `next` | deletes a file |
@@ -164,8 +171,8 @@ the app.
     { "name": "since", "type": "datetime", "label": "First run: mail received after", "default": "2026-11-20T00:00:00Z" }
   ],
   "requires": [
-    { "name": "mail", "kind": "email", "actions": ["list"] },
-    { "name": "sms", "kind": "api", "actions": ["CreateMessage"] }
+    { "name": "Support inbox", "kind": "email", "actions": ["list"] },
+    { "name": "Twilio", "kind": "api", "actions": ["CreateMessage"] }
   ],
   "variables": [
     { "name": "lastId", "type": "string", "scope": "saved" },
@@ -175,14 +182,14 @@ the app.
   ],
   "start": "list",
   "steps": [
-    { "id": "list", "type": "integration", "use": "mail", "action": "list",
+    { "id": "list", "type": "integration", "use": "Support inbox", "action": "list",
       "args": { "folder": "{settings.folder}", "after": "{vars.lastId}", "since": "{settings.since}", "max": 200 },
       "into": "res", "next": "any" },
     { "id": "any", "type": "if", "when": { "left": "{count(vars.res.messages)}", "op": "gt", "right": 0 },
       "then": "each", "else": "done" },
     { "id": "each", "type": "forEach", "items": "{vars.res.messages}", "as": "m", "body": "phones", "then": "keep" },
     { "id": "phones", "type": "forEach", "items": "{settings.recipients}", "as": "to", "body": "text", "then": null },
-    { "id": "text", "type": "integration", "use": "sms", "action": "CreateMessage",
+    { "id": "text", "type": "integration", "use": "Twilio", "action": "CreateMessage",
       "args": { "To": "{to}", "From": "{settings.fromNumber}", "Body": "New email: {m.subject} ({m.from.address})" },
       "next": "count" },
     { "id": "count", "type": "set", "var": "sent", "value": "{vars.sent + 1}", "next": null },
@@ -195,8 +202,8 @@ the app.
 }
 ```
 
-Its member binds `mail` to the team's Email integration and `sms` to the SMS API, and sets `recipients` and
-`fromNumber`; a 5-minute `every` trigger runs it.
+Write the names `integrations_status` gives in place of `Support inbox` and `Twilio`. Its member uses those
+integrations (turned on for its team) and sets `recipients` and `fromNumber`; a 5-minute `every` trigger runs it.
 
 ## What to tell the person
 
