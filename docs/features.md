@@ -350,6 +350,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - It keeps notes across conversations, and can watch teams and review their updates. A review it starts on its own
   can read and recommend, never act.
 - You can attach images to a message.
+- It builds scripts from a description and sets them up: it adds the script member, turns its trigger on
+  (`script_trigger_set`) and allows one API action a step needs (`integration_action_allow`), each after your yes in
+  the window (see [Scripts](#scripts)).
 
 ## Board, Backlog and Documents
 
@@ -776,6 +779,20 @@ masked in the log and never reaches an agent. See
   A test run keeps no saved variables.
 - Script runs are listed with their state, steps and log, and recorded with the agents' runs. A Visitor on the Cloud
   Link can read scripts, schemas, script members and runs, and cannot change or run any of them.
+- **Building with the Concierge.** The Concierge (and a program paired through the companion) builds, checks, saves
+  and dry-runs scripts with its script tools, and adds a script member with `script_member_add`. Two more tools turn
+  a script on:
+  - `script_trigger_set { team, member, name, schedule, enabled?, id?, only_when_idle? }` creates or changes a trigger
+    aimed at a script member. `schedule` is a trigger's schedule (every, cron, once, event or folder); `enabled` is
+    `true` unless given. Turning a trigger on, or changing the schedule of one that is on, waits for your yes in the
+    window; turning one off does not.
+  - `integration_action_allow { team, integration, action }` adds a team allow rule for exactly one API action (its
+    operation id), for a step that failed with `needs approval: allow <action> for <team>`. It always waits for your
+    yes in the window. It is refused for an unknown API or action, an API not turned on for the team, or a sign-in
+    action, and answers "already allowed" when the action already is. It runs only on this computer, never over the
+    Cloud Link.
+  - The tool's answer is the outcome (done, declined or refused); the Concierge tells you what it said and does not
+    ask again in a loop.
 
 ## Companion
 
@@ -786,6 +803,8 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 - Access levels: `read`, `act` and `destructive`. Destructive calls wait for your approval in the window.
 - It talks only to the running app on this computer. Nothing of it is reachable over Cloud Link.
 - Paired programs are listed and revoked in Settings > Companion.
+- A paired program has the Concierge's script tools, `script_trigger_set` and `integration_action_allow` among them,
+  with the same yes in the window (see [Scripts](#scripts)).
 - Setup is in the [README](../README.md).
 
 ## Updates

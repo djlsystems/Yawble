@@ -320,6 +320,19 @@ Within a layer the most specific pattern wins. On a tie, off beats ask first, wh
 matched against the arguments joined by spaces, case-insensitively; `*` matches anything. For example, `pr merge*`
 matches `pr merge 12 --squash`. API actions and MCP tools are matched by their exact name.
 
+### A team allow rule from the Concierge or the companion
+
+A script member's run has nobody to ask, so an API action whose rule asks first fails its step with
+`needs approval: allow <action> for <team>`. The Concierge, or a program paired through the companion, can then ask
+for that action with `integration_action_allow { team, integration, action }`:
+
+- It adds one **team** allow rule for exactly that API operation id (for example `CreateMessage`), the same rule
+  **Always allow** for this team saves. It never allows a whole API or a pattern.
+- It always waits for your yes in the window.
+- It is refused for an unknown API or action, an API that is not turned on for the team, or a sign-in action. When the action is already allowed it answers "already allowed" and changes nothing.
+- It runs only on this computer: it is refused over [Cloud Link](#over-cloud-link).
+- The rule is an ordinary rule: you can see, edit or remove it in the API's checklist for the team.
+
 ### The checklist
 
 **Discover** builds a checklist of what an integration can do:
@@ -448,6 +461,7 @@ remotely and happen only on the computer itself:
 - seeing or changing Connections, and defining or changing a host task's environment from a Connection;
 - every sign-in: OAuth, website logins, MCP server sign-ins, and opening a terminal to sign a CLI in;
 - adding, removing or discovering an API;
+- a Concierge's `integration_action_allow` (a team allow rule for one API action);
 - importing MCP servers, and adding, changing or reading a remote MCP server;
 - while host terminals are not allowed for Cloud Link: adding an MCP server, defining a host task, or adding a CLI
   the app does not know.
