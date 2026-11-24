@@ -13,7 +13,7 @@ import { useBusy } from '../busy';
 // Triggers: tell a member an instruction on a schedule (every N, cron, once), each fire a
 // new workflow. Fires missed while the app was closed are recorded, not caught up. "Only when idle" skips a fire
 // while the member is busy.
-const props = defineProps<{ api?: YawbleApi; team: TeamSummary; agents: AgentCard[] }>();
+const props = defineProps<{ api?: YawbleApi; team: TeamSummary; agents: AgentCard[]; /** Open straight on this trigger's form. */ editId?: number | null }>();
 const emit = defineEmits<{ close: [] }>();
 const api = resolveApi(props.api);
 
@@ -158,7 +158,11 @@ watch(() => [form.kind, form.every, form.unit, form.cron, form.timezone, form.fi
   }, 300);
 });
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  const t = props.editId != null ? triggers.value.find((x) => x.id === props.editId) : undefined;
+  if (t) edit(t);
+});
 </script>
 
 <template>

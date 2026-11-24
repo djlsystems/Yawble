@@ -62,6 +62,8 @@ const error = ref<string | null>(null);
 /** The last refresh failed (cleared by the next one that works); action errors stay in `error`. */
 const refreshError = ref<string | null>(null);
 const showTriggers = ref(false);
+/** A script member's Triggers pill with one trigger opens the dialog on it. */
+const triggerToEdit = ref<number | null>(null);
 const showGit = ref(false);
 // B072: the Commit view's Compare with main / Show its branch open this team's Git dialog (at the commit's branch).
 const gitBranch = ref<string | null>(null);
@@ -313,7 +315,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
     </p>
     <!-- A phone (card 282): the "commits behind" bar goes under Tell the Manager, so Tell stays the first row. -->
     <TeamSyncBanner v-if="!phone" :key="team.id" :api="api" :team="team" />
-    <TriggersDialog v-if="showTriggers" :api="api" :team="team" :agents="cards" @close="showTriggers = false" />
+    <TriggersDialog v-if="showTriggers" :api="api" :team="team" :agents="cards" :edit-id="triggerToEdit" @close="showTriggers = false; triggerToEdit = null" />
     <GitDialog v-if="showGit" :api="api" :team="team" :focus-branch="gitBranch" @close="showGit = false; gitBranch = null" />
     <WorkflowsDialog v-if="showWorkflows" :key="workflowFocus ?? 0" :api="api" :team="team" :poll-ms="pollMs" :focus="workflowFocus" @close="showWorkflows = false" />
     <DocumentsDialog v-if="showDocs" :api="api" :team="team" @close="showDocs = false" />
@@ -399,7 +401,8 @@ defineExpose({ refresh, openWorkflows, openDocuments });
     <div ref="grid" class="member-grid" :style="phone ? undefined : gridStyle" data-test="member-grid">
       <div v-for="c in cards" :key="c.member.id" class="member-cell" data-test="member-cell">
         <ScriptMemberPane v-if="c.kind === 'script'" :card="c" :api="api" :poll-ms="pollMs"
-          :pending="busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null" @remove="remove(c)" />
+          :pending="busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null" @remove="remove(c)"
+          @triggers="(id) => { triggerToEdit = id; showTriggers = true; }" />
         <MemberPane v-else :ref="(p) => setPaneRef(c.member.name, p)" :card="c" :api="api" :poll-ms="pollMs"
           :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
           :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" :activity-limit="phone ? PhoneActivityRows : undefined"

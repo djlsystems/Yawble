@@ -100,6 +100,13 @@ describe('triggers dialog', () => {
     expect(calls.find((c) => c.method === 'triggers.save')!.params).toMatchObject({ name: 'inbox poll', memberId: 5, instruction: '' });
   });
 
+  it('opened with editId, it goes straight to that trigger form', async () => {
+    const { api } = fakeApi({ 'triggers.list': () => [nightly], 'triggers.preview': () => ({ error: null, next: [] }) });
+    const w = mount(TriggersDialog, { props: { api, team, agents: [card(1, 'Manager', 'manager'), card(2, 'Ada', 'member')], editId: nightly.id } });
+    await flushPromises();
+    expect((w.find('[data-test=trigger-name]').element as HTMLInputElement).value).toBe(nightly.name);
+  });
+
   it('saves a new every-N trigger in seconds, for the chosen agent', async () => {
     const { api, calls } = fakeApi({
       'triggers.list': () => [],

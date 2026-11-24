@@ -218,6 +218,32 @@ describe('a script member on the team page', () => {
     expect(calls.find((c) => c.method === 'scripts.runs')!.params).toEqual({ memberId: 9, limit: 10 });
   });
 
+  it('an enabled trigger lights the Triggers pill; with one trigger, clicking it asks to edit that trigger', async () => {
+    const trig = (id: number, memberId: number, enabled = true) => ({ id, teamId: 1, memberId, name: `t${id}`, schedule: { kind: 'every', intervalSec: 300 }, instruction: '', onlyWhenIdle: true, enabled, nextDueAt: null, lastFiredAt: null, wakeManager: 'onHandbackOrFailure' });
+    let list = [trig(4, 9), trig(5, 2)];
+    const calls: Calls = [];
+    const w = keep(mount(ScriptMemberPane, { props: { card, api: fakeApi(calls, { 'triggers.list': () => list }), pollMs: 60_000 } }));
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'triggers.list')!.params).toEqual({ teamId: 1 });
+    const pill = w.get('[data-test=script-member-triggers]');
+    expect(pill.text()).toBe('trigger on');
+    expect(pill.attributes('title')).toBe('t4: every 5 min');
+    await pill.trigger('click');
+    expect(w.emitted('triggers')).toEqual([[4]]);
+
+    list = [trig(4, 9), trig(6, 9)];
+    const w2 = keep(mount(ScriptMemberPane, { props: { card, api: fakeApi([], { 'triggers.list': () => list }), pollMs: 60_000 } }));
+    await flushPromises();
+    expect(w2.get('[data-test=script-member-triggers]').text()).toBe('2 triggers on');
+    await w2.get('[data-test=script-member-triggers]').trigger('click');
+    expect(w2.emitted('triggers')).toEqual([[null]]);
+
+    list = [trig(4, 9, false)];
+    const w3 = keep(mount(ScriptMemberPane, { props: { card, api: fakeApi([], { 'triggers.list': () => list }), pollMs: 60_000 } }));
+    await flushPromises();
+    expect(w3.find('[data-test=script-member-triggers]').exists()).toBe(false);
+  });
+
   it('a member with no scheduled trigger and no run says so', async () => {
     const w = keep(mount(ScriptMemberPane, { props: { card, api: fakeApi([], {
       'scripts.memberGet': () => ({ ...scriptMember, version: 1, lastRun: null, nextTriggerAt: null }),
