@@ -15,7 +15,7 @@ namespace Yawble.Core.Tests.Agents;
 /// (GrokKeeperOptions.RunGrok). No real grok runs and no real ~/.grok is read: the tile's FakeHost path maps to the temp
 /// home's auth.json.
 /// </summary>
-public class B128VerifyTests
+public class GrokSignInTileVerifyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private const string TilePath = "/home/alice/.grok/auth.json";
