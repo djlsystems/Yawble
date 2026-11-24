@@ -3,6 +3,8 @@
 // per step type, the Script pane, the JSON tabs, Use real names, a member's overrides, the minimap's toggle and the End
 // node at the bottom. Vue Flow's canvas needs a real layout engine, so it is replaced by a stub that renders each node
 // through the component's own node slot. Fakes only: no core; made-up names and values only.
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { enableAutoUnmount, flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentCard, TeamSummary, YawbleApi } from '../../src/shared/api';
@@ -10,7 +12,7 @@ import ScriptMemberPane from '../../src/renderer/src/components/ScriptMemberPane
 import ScriptEditor from '../../src/renderer/src/components/scripts/ScriptEditor.vue';
 import ScriptsLibrary from '../../src/renderer/src/components/scripts/ScriptsLibrary.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
-import { INBOX_SMS_ALERT as TEMPLATE, pretty } from '../../src/renderer/src/scripts/api';
+import { BLANK_SCRIPT, INBOX_SMS_ALERT as TEMPLATE, pretty } from '../../src/renderer/src/scripts/api';
 import {
   applySuggestion, catalogApi, deriveRequires, expressionSuggestions, ioInText, ioOutText, isAliasDocument, schemaFields, stepIO,
   suggestAt, withDerivedRequires, type DesignContext, type ScriptCatalog, type SchemaFields,
@@ -451,6 +453,48 @@ describe('the step forms', () => {
     expect(w.find('[data-test=expr-suggestions]').exists()).toBe(false);
   });
 
+  it('log: reads the step\'s id, text and next, writes each edit back, and both JSON tabs show it', async () => {
+    const doc: ScriptDocument = { ...realDoc(), start: 'first', steps: [
+      { id: 'first', type: 'log', text: 'Hello {settings.folder}', next: 'say' },
+      { id: 'say', type: 'log', text: '{count(vars.res.messages)} new', next: 'done' },
+      { id: 'done', type: 'end' },
+    ] };
+    const w = await editor(fakeApi({ doc }).api);
+    await pick(w, 'say');
+    const form = w.get('[data-test=step-form]');
+    expect(form.attributes('data-type')).toBe('log');
+    // It reads every field the log step has.
+    expect((form.get('[data-test=form-id]').element as HTMLInputElement).value).toBe('say');
+    expect((expr(form, 'text').element as HTMLInputElement).value).toBe('{count(vars.res.messages)} new');
+    expect(form.get('[data-test=expr-field][data-name=text] [data-test=expr-type]').text()).toBe('string');
+    expect((form.get('[data-test=form-next]').element as HTMLSelectElement).value).toBe('done');
+    expect(form.get('[data-test=form-next]').findAll('option').map((o) => o.attributes('value'))).toEqual(['', 'first', 'done']);
+    expect(form.find('[data-test=form-into]').exists()).toBe(false);
+
+    // And writes each one back: text, next (another step, then the end), id.
+    await typeIn(expr(w, 'text'), 'Checked {settings.folder}: {vars.sent} sent');
+    expect(stepOf(w, 'say').text).toBe('Checked {settings.folder}: {vars.sent} sent');
+    await changeTo(w.get('[data-test=form-next]'), 'first');
+    expect(stepOf(w, 'say').next).toBe('first');
+    await changeTo(w.get('[data-test=form-next]'), '');
+    expect(stepOf(w, 'say').next).toBeNull();
+    await changeTo(w.get('[data-test=form-id]'), 'report');
+    expect(docOf(w).steps!.map((s) => s.id)).toEqual(['first', 'report', 'done']);
+    const edited = { id: 'report', type: 'log', text: 'Checked {settings.folder}: {vars.sent} sent', next: null };
+    expect(stepOf(w, 'report')).toEqual(edited);
+    // The other steps are as they were.
+    expect(stepOf(w, 'first')).toEqual(doc.steps![0]);
+
+    // The step panel's JSON tab shows the edited step, and the editor's JSON tab the whole document with it.
+    expect(w.get('[data-test=flow-panel]').attributes('data-node')).toBe('report');
+    await w.get('[data-test=flow-panel-tab-json]').trigger('click');
+    expect(JSON.parse((w.get('[data-test=flow-panel-json]').element as HTMLTextAreaElement).value)).toEqual(edited);
+    await w.get('[data-test=editor-tab-json]').trigger('click');
+    await flushPromises();
+    expect(docOf(w).steps![1]).toEqual(edited);
+    expect(jsonText(w)).toContain('"text": "Checked {settings.folder}: {vars.sent} sent"');
+  });
+
   it('a JSON edit in the step panel and the form are one step; invalid JSON is refused and the form stays', async () => {
     const w = await editor(fakeApi().api);
     await pick(w, 'note');
@@ -678,6 +722,90 @@ describe('typed in and out, real names, overrides and the canvas', () => {
     await flushPromises();
     expect(w.find('[data-test=expr-suggestions]').exists()).toBe(false);
     expect(jsonText(w)).toBe(before);
+  });
+});
+
+/**
+ * The document the next test builds through the designer, committed for the core: DesignerBuiltScriptTests loads it and runs
+ * the real checker over it. When the designer's output changes on purpose, run this file once with YAWBLE_WRITE_FIXTURE=1.
+ */
+const DESIGNER_BUILT = resolve(__dirname, '../../../core/tests/Yawble.Core.Tests/Scripts/Fixtures/designer-built.json');
+
+describe('a script built only through the designer', () => {
+  it('Blank, then the Script pane, the palette, the step forms and a canvas connection: the JSON is the committed fixture', async () => {
+    const w = await editor(fakeApi().api, { script: undefined, initial: BLANK_SCRIPT });
+    const set = async (sel: string, value: string, i = 0) => { await changeTo(w.findAll(`[data-test=${sel}]`)[i]!, value); };
+    const add = async (type: string) => { await w.get(`[data-test=palette-${type}]`).trigger('click'); await flushPromises(); };
+
+    // The Script pane: name, id, description, a setting and a variable.
+    await typeIn(w.get('[data-test=script-name]'), 'Designer built');
+    await typeIn(w.get('[data-test=script-id]'), 'designer-built');
+    await typeIn(w.get('[data-test=script-description]'), 'Counts new mail and logs it.');
+    await w.get('[data-test=setting-add]').trigger('click');
+    await flushPromises();
+    await set('setting-name', 'folder');
+    await set('setting-label', 'Mail folder');
+    await set('setting-default', 'INBOX');
+    await w.get('[data-test=variable-add]').trigger('click');
+    await flushPromises();
+    await set('variable-name', 'found');
+    await set('variable-type', 'int');
+    await set('variable-initial', '0');
+
+    // An integration step that saves its result into a new variable.
+    await add('integration');
+    await set('form-id', 'list');
+    await set('form-use', 'Example Support Inbox');
+    await set('form-action', 'list');
+    await typeIn(expr(w, 'arg-folder'), '{settings.folder}');
+    await typeIn(expr(w, 'arg-max'), '10');
+    await set('form-into', '__new');
+    expect((w.get('[data-test=form-into-new-type]').element as HTMLInputElement).value).toBe('EmailList');
+    await w.get('[data-test=form-into-new-name]').setValue('res');
+    await w.get('[data-test=form-into-new-add]').trigger('click');
+    await flushPromises();
+
+    // An if, a set and a log.
+    await add('if');
+    await set('form-id', 'any');
+    await typeIn(expr(w, 'when-left'), '{count(vars.res.messages)}');
+    await set('form-when-op', 'gt');
+    await typeIn(expr(w, 'when-right'), '0');
+    await add('set');
+    await set('form-id', 'keep');
+    await set('form-var', 'found');
+    await typeIn(expr(w, 'value'), '{count(vars.res.messages)}');
+    await add('log');
+    await set('form-id', 'say');
+    await typeIn(expr(w, 'text'), '{vars.found} new in {settings.folder}');
+    await set('form-next', 'done');
+
+    // The connections: through the forms, and the start on the canvas.
+    await pick(w, 'list');
+    await set('form-next', 'any');
+    await pick(w, 'any');
+    await set('form-then', 'keep');
+    await set('form-else', 'done');
+    await pick(w, 'keep');
+    await set('form-next', 'say');
+    w.findComponent({ name: 'VueFlowStub' }).vm.$emit('connect', { source: START_ID, target: 'list', sourceHandle: null, targetHandle: null });
+    await flushPromises();
+
+    const built = docOf(w);
+    expect(built.start).toBe('list');
+    expect(built.steps!.map((s) => [s.id, s.type])).toEqual([['done', 'end'], ['list', 'integration'], ['any', 'if'], ['keep', 'set'], ['say', 'log']]);
+    expect(built.requires).toEqual([{ name: 'Example Support Inbox', kind: 'email', actions: ['list'] }]);
+    expect(built.variables).toEqual([{ name: 'found', type: 'int', scope: 'run', initial: 0 }, { name: 'res', type: 'EmailList', scope: 'run' }]);
+    expect(built.steps!.find((s) => s.id === 'list')).toMatchObject({ args: { folder: '{settings.folder}', max: 10 }, into: 'res', next: 'any' });
+    // 0 typed into the blank If's right value is the number (the text "0" the checker refuses against an int).
+    expect(built.steps!.find((s) => s.id === 'any')!.when).toEqual({ left: '{count(vars.res.messages)}', op: 'gt', right: 0 });
+
+    const expected = `${pretty(built)}\n`;
+    if (process.env.YAWBLE_WRITE_FIXTURE === '1') writeFileSync(DESIGNER_BUILT, expected, 'utf8');
+    expect(existsSync(DESIGNER_BUILT), DESIGNER_BUILT).toBe(true);
+    const fixture = readFileSync(DESIGNER_BUILT, 'utf8').replace(/\r\n/g, '\n');
+    expect(JSON.parse(fixture)).toEqual(built);
+    expect(fixture).toBe(expected);
   });
 });
 

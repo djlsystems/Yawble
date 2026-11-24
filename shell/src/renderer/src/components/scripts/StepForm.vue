@@ -120,6 +120,11 @@ function addInto() {
 
 // ---- if
 const when = computed(() => obj(props.step.when));
+/**
+ * A side of the comparison as its field takes it: the blank If's '' is no value yet, so 0 typed there is the number 0 (as on a
+ * side that held a number), not the text "0" the checker refuses against an int ("'gt' compares int with string").
+ */
+const side = (v: unknown) => (v === '' ? undefined : v);
 const simpleWhen = computed(() => props.step.when === undefined || props.step.when === null
   || (typeof props.step.when === 'object' && !Array.isArray(props.step.when) && !('all' in when.value) && !('any' in when.value) && !('not' in when.value)));
 function setWhen(key: 'left' | 'op' | 'right', v: unknown) {
@@ -230,13 +235,13 @@ function addOutput() {
     <!-- if -->
     <template v-else-if="step.type === 'if'">
       <template v-if="simpleWhen">
-        <ExpressionField name="when-left" label="Left value" :model-value="when.left" :suggestions="suggestions" :readonly="readonly" @update:model-value="(v) => setWhen('left', v)" />
+        <ExpressionField name="when-left" label="Left value" :model-value="side(when.left)" :suggestions="suggestions" :readonly="readonly" @update:model-value="(v) => setWhen('left', v)" />
         <label class="field">Operator
           <select :value="String(when.op ?? 'eq')" :disabled="readonly" data-test="form-when-op" @change="(e) => setWhen('op', (e.target as HTMLSelectElement).value)">
             <option v-for="op in CONDITION_OPS" :key="op" :value="op">{{ op }}</option>
           </select>
         </label>
-        <ExpressionField v-if="!isUnaryOp(String(when.op ?? 'eq'))" name="when-right" label="Right value" :model-value="when.right" :suggestions="suggestions" :readonly="readonly"
+        <ExpressionField v-if="!isUnaryOp(String(when.op ?? 'eq'))" name="when-right" label="Right value" :model-value="side(when.right)" :suggestions="suggestions" :readonly="readonly"
           @update:model-value="(v) => setWhen('right', v)" />
       </template>
       <p v-else class="muted small" data-test="form-when-combined">This condition combines others (all, any or not): edit it on the JSON tab.</p>
