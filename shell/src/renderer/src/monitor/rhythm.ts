@@ -194,7 +194,7 @@ export function onYouNode(x: number, y: number, w: number, h: number, keepOut: r
   return Math.hypot(x - n.x, y - n.y) <= n.r + 6;
 }
 
-/** "Card 373 (B080 ...)", "[card 373] ..." -> 373; null when the text names no card. */
+/** "Card 4373 (...)", "[card 4373] ..." -> 4373; null when the text names no card. */
 export function cardOf(text: string | null): number | null {
   if (!text) return null;
   const m = /\bcard\s*#?\s*(\d{1,6})\b/i.exec(text);

@@ -77,8 +77,8 @@ export const NodeLabelMinPx = 8;
 export const NodeIdOnlyZoom = 0.6;
 
 /**
- * A workflow node's label: "#3848 B081 Remote UI: xterm's…", the title's "Backlog item " dropped (a backlog
- * workflow is titled "Backlog item B081 ..."), cut to `max` characters in all. Only "#id" on a phone zoomed out:
+ * A workflow node's label: "#3848 B008 Remote UI: xterm's…", the title's "Backlog item " dropped (a backlog
+ * workflow is titled "Backlog item B008 ..."), cut to `max` characters in all. Only "#id" on a phone zoomed out:
  * `phone` is the window being phone-wide (narrowScreen.ts), not the wall's canvas, which is as narrow on a 1280 px
  * desktop with the sidebar and Activity open.
  */

@@ -194,8 +194,8 @@ const expiryDays = (teamId: number) => expiry.days.get(teamId) ?? 3;
 const localhostOn = new Set<number>();
 
 /** The Workflows page's rows (workflows.list / workflows.get, as the core's contract has them), across
- *  both teams: #10 running (B011, Ada on it), #12 waiting on you, #15 waiting for the lease, #16 idle (expires in 20 h),
- *  and ended ones: #9 expired, #14 completed today (B013, archived), #8 closed. */
+ *  both teams: #10 running (item "B011", Ada on it), #12 waiting on you, #15 waiting for the lease, #16 idle (expires in 20 h),
+ *  and ended ones: #9 expired, #14 completed today (item "B013", archived), #8 closed. */
 function workflowRows() {
   const wfTime = (createdAgo: number, endedAgo: number | null, how: string | null, segs: [Cat, number][]) => {
     const overallMs = (createdAgo - (endedAgo ?? 0)) * 60_000;
