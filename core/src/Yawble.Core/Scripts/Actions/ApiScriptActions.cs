@@ -75,9 +75,25 @@ public sealed class ApiScriptActions(IScriptApi api, RunCaller caller) : IScript
         catch (ScriptApiRefusedException e) { throw new ScriptActionException(e.Message); }
 
         if (!result.Sent) return Response(0, JsonValue.Create(result.Body));
-        if (result.Status == 0) throw new ScriptActionException("no answer: " + Clip(SecretScrubber.Scrub(result.Body)));
-        if (result.Status is < 200 or > 299) throw new ScriptActionException($"{result.Status}: {Clip(SecretScrubber.Scrub(result.Body))}");
+        if (result.Status == 0)
+            throw new ScriptActionException($"{What(integration, call.Action, result)}: no answer{(result.Host is { Length: > 0 } host ? " from " + host : "")}"
+                + (result.TimeoutSeconds is { } t ? $" (waited up to {t.ToString("0.#", CultureInfo.InvariantCulture)} s)" : "") + ": " + Clip(SecretScrubber.Scrub(result.Body)));
+        if (result.Status is < 200 or > 299)
+            throw new ScriptActionException($"{What(integration, call.Action, result)}: HTTP {result.Status}: {Clip(SecretScrubber.Scrub(result.Body))}");
         return Response(result.Status, Body(result));
+    }
+
+    /// <summary>
+    /// B143: what a failed call was, for the step's reason: the integration, the action, and its HTTP method and route (from the answer, else
+    /// the team's catalog), e.g. "twilio CreateMessage (POST /2010-04-01/Accounts/{AccountSid}/Messages.json)".
+    /// </summary>
+    private string What(string integration, string action, ScriptApiResult result)
+    {
+        var op = result.Method is null || result.Route is null ? TeamCatalog.Operations.FirstOrDefault(o => o.Action == action) : null;
+        var method = (result.Method ?? op?.Method)?.ToUpperInvariant();
+        var route = result.Route ?? op?.Route;
+        var request = string.Join(' ', new[] { method, route }.Where(s => !string.IsNullOrEmpty(s)));
+        return $"{integration} {action}" + (request.Length > 0 ? $" ({request})" : "");
     }
 
     private static JsonObject Response(int status, JsonNode? body) => new() { ["status"] = status, ["body"] = body };

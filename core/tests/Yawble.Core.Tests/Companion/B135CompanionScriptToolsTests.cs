@@ -229,7 +229,12 @@ public sealed class B135CompanionScriptToolsTests : IAsyncLifetime
         Assert.NotNull(b.RequestId);
         Assert.NotEqual(a.RequestId, b.RequestId);
         Assert.Contains("\"subject\":\"other\"", b.Text);
-        Assert.Equal(2, _service.PendingCount);
+        // The same tool and target (the script on the team): the newer request replaces the older one (B141).
+        Assert.Equal(1, _service.PendingCount);
+        var old = _service.Status(cc, a.RequestId!)!;
+        Assert.Equal(ActionState.Changed, old.State);
+        Assert.Equal($"replaced by {b.RequestId}", old.Result);
+        Assert.Equal(b.RequestId, old.NextId);
     }
 
     // ---------------------------------------------------------------- no request

@@ -101,7 +101,7 @@ public class DecisionOptionsTests
         var props = tool["inputSchema"]!["properties"]!.AsObject();
         Assert.True(props.ContainsKey("summary") && props.ContainsKey("options") && props.ContainsKey("details") && props.ContainsKey("question"));
         Assert.Empty(tool["inputSchema"]!["required"]!.AsArray());
-        Assert.Equal([DecisionActions.AllowLocalhostMac], props["options"]!["items"]!["properties"]!["action"]!["enum"]!.AsArray().Select(a => a!.GetValue<string>()));
+        Assert.Equal([DecisionActions.AllowLocalhostMac, DecisionActions.CloseOverFail], props["options"]!["items"]!["properties"]!["action"]!["enum"]!.AsArray().Select(a => a!.GetValue<string>()));
         Assert.Contains("Never number findings", tool["description"]!.GetValue<string>());
     }
 

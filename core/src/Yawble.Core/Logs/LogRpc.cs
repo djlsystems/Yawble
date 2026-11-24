@@ -44,7 +44,7 @@ public sealed class LogRpc(LogService logs, LogTail? tail = null)
     }
 
     /// <summary>
-    /// logs.tail {level: "default"|"all", team?, member?, app?}: pushes each new entry that passes as "logs.tailEntry"
+    /// logs.tail {level: "default"|"all"|"debug", team?, member?, app?}: pushes each new entry that passes as "logs.tailEntry"
     /// {tail, entry} until logs.untail or the viewer leaves (<see cref="LogTail"/>). Returns the tail's id and its filter.
     /// app true: only the activity log's entries about no team and no member (team null, member "app"; B101).
     /// </summary>
@@ -52,12 +52,12 @@ public sealed class LogRpc(LogService logs, LogTail? tail = null)
     {
         var t = tail ?? throw new RpcException("unavailable", "logs.tail is not wired in this core");
         var level = Text(p, "level") ?? "default";
-        if (level is not ("default" or "all")) throw new ArgumentException("level is \"default\" (warnings, errors and workflow events) or \"all\"");
+        if (level is not ("default" or "all" or "debug")) throw new ArgumentException("level is \"default\" (warnings, errors and workflow events), \"all\" (every level but debug) or \"debug\" (debug too)");
         var member = Text(p, "member");
         if (member is not null && (member.IndexOf('/') <= 0 || member.EndsWith('/'))) throw new ArgumentException("member is \"Team/Name\"");
         var team = Text(p, "team");
         var app = Bool(p, "app");
-        var id = t.Start(new LogTailFilter(level == "all", team, member, app), Actor.Current);
+        var id = t.Start(new LogTailFilter(level is "all" or "debug", team, member, app, Debug: level == "debug"), Actor.Current);
         return new JsonObject { ["tail"] = id, ["level"] = level, ["team"] = team, ["member"] = member, ["app"] = app };
     }
 
@@ -110,7 +110,15 @@ public sealed class LogRpc(LogService logs, LogTail? tail = null)
         return new LogQuery(
             Required(p, "source"), Text(p, "team"), Text(p, "member"), Text(p, "from"), Text(p, "to"), Text(p, "text"), filters,
             Text(p, "sort"), p?["descending"]?.GetValue<bool>() ?? true, p?["offset"]?.GetValue<int>() ?? 0,
-            p?["limit"]?.GetValue<int>() ?? 100, Text(p, "asOf"), Bool(p, "app"));
+            p?["limit"]?.GetValue<int>() ?? 100, Text(p, "asOf"), Bool(p, "app"), QueryLevel(p));
+    }
+
+    /// <summary>logs.query's level: "default" (every level but debug; also when absent), "all", or one level.</summary>
+    private static string? QueryLevel(JsonObject? p)
+    {
+        var level = Text(p, "level")?.ToLowerInvariant();
+        if (level is null or "default" or "all" || LogLevels.All.Contains(level)) return level;
+        throw new ArgumentException("level is \"default\" (every level but debug), \"all\", \"error\", \"warning\", \"info\" or \"debug\"");
     }
 
     /// <summary>A true/false parameter (B101's app filter); absent is false.</summary>
