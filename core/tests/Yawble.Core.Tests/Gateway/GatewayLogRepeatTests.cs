@@ -46,7 +46,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_FiveConnectRefusalsOfOneHostInARun_AreOneRow_CountFive()
+    public void ConnectRefused_FiveConnectRefusalsOfOneHostInARun_AreOneRow_CountFive()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();
@@ -61,7 +61,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_ARetryLoop_IsOneRow_NotSummarisedByTheWindow()
+    public void ConnectRefused_ARetryLoop_IsOneRow_NotSummarisedByTheWindow()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();
@@ -78,7 +78,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_TwoHosts_AreTwoRows_AndAnotherRunIsANewRow()
+    public void ConnectRefused_TwoHosts_AreTwoRows_AndAnotherRunIsANewRow()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();
@@ -94,7 +94,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_AHostsHttpAndHttpsRefusals_AreTwoRows()
+    public void ConnectRefused_AHostsHttpAndHttpsRefusals_AreTwoRows()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();
@@ -114,7 +114,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_OtherKinds_AreUnchanged()
+    public void ConnectRefused_OtherKinds_AreUnchanged()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();

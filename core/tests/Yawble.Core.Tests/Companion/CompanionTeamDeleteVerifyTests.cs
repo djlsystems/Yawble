@@ -20,7 +20,7 @@ namespace Yawble.Core.Tests.Companion;
 public class CompanionTeamDeleteVerifyTests : IDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-    private readonly string _root = Directory.CreateTempSubdirectory("yawble-b141-").FullName;
+    private readonly string _root = Directory.CreateTempSubdirectory("yawble-team-delete-").FullName;
     private readonly TempDb _db = new();
 
     public void Dispose()

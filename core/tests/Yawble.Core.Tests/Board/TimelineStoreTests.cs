@@ -213,7 +213,7 @@ public class TimelineStoreTests
     }
 
     [Fact]
-    public void AnExpiredWorkflowsCardsEndAtItsLastActivity_B085()
+    public void AnExpiredWorkflowsCardsEndAtItsLastActivity()
     {
         var (db, store, p, _) = Rig(At("09:00", 14));
         using var __ = db;

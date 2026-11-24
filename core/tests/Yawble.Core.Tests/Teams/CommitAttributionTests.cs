@@ -71,7 +71,7 @@ public class CommitAttributionTests
     }
 
     [Fact]
-    public void TheB028CommitBodyItself_DescribesTheTrailers_ButCarriesNone()
+    public void TheAttributionCommitBodyItself_DescribesTheTrailers_ButCarriesNone()
     {
         const string body = """
             B028: refuse fetching back commits that carry AI attribution lines

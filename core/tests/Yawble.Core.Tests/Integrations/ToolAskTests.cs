@@ -574,7 +574,7 @@ public sealed class ToolAskTests : IDisposable
     private long ProbeCount(string sql) => Insert(sql);
 
     [Fact]
-    public async Task Probe_B015_ANotNowForDotnetSdkLts_HoldsDotnetSdk10_ThroughPruningAll_UntilIts24HoursEnd()
+    public async Task Probe_ANotNowForDotnetSdkLts_HoldsDotnetSdk10_ThroughPruningAll_UntilIts24HoursEnd()
     {
         // A Not now on dotnet-sdk-10 25 hours ago (its hold is over), then a Not now on dotnet-sdk-lts (the same package).
         await Request(Priya, "dotnet-sdk-10");
@@ -609,7 +609,7 @@ public sealed class ToolAskTests : IDisposable
     }
 
     [Fact]
-    public async Task Probe_B015_TheInterruptedRow_ReadsInTheApprovalsLog_AndSurvivesPruningAll()
+    public async Task Probe_TheInterruptedRow_ReadsInTheApprovalsLog_AndSurvivesPruningAll()
     {
         await Request(Priya, "nodejs-lts");
         var id = _asks.Asks().Single().Id;
@@ -623,7 +623,7 @@ public sealed class ToolAskTests : IDisposable
         var logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
         var rows = logs.Query(new LogQuery("approvals"))["rows"]!.AsArray().Select(r => r!.AsObject())
             .Where(r => r["integration"]!.GetValue<string>() == "host tool").ToList();
-        File.WriteAllText(Path.Combine(Path.GetTempPath(), "b015-approvals-rows.json"),
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "yawble-host-tool-approvals-rows.json"),
             new JsonArray(rows.Select(r => (JsonNode)r.DeepClone()).ToArray()).ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         var interrupted = Assert.Single(rows, r => r["args"]!.GetValue<string>().Contains(ToolAskService.InterruptedDetail));
         Assert.Equal("failed", interrupted["state"]!.GetValue<string>());

@@ -67,7 +67,7 @@ public class LeaseWaitTimelineVerifyTests
             $"{what}: expected [{Show(expected)}] but was [{Show(actual)}]");
 
     [Fact]
-    public async Task Card478_O1_LeaseQueueTime_IsWaitingForSlot_OnThePane_TheBoardTimeline_AndTheWorkflowsPage()
+    public async Task LeaseQueueTime_IsWaitingForSlot_OnThePane_TheBoardTimeline_AndTheWorkflowsPage()
     {
         using var db = new TempDb();
         var clock = new FakeClock(new DateTimeOffset(2026, 11, 19, 9, 0, 0, TimeSpan.Zero));

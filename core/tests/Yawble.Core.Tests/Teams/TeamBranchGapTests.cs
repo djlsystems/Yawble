@@ -235,7 +235,7 @@ public class TeamBranchGapTests
         Assert.Equal(expected, TeamRepos.LegacyBranchToAdopt(role, name, head));
 
     /// <summary>Card 75: the half of the rehire fix that reads the clone left on disk (by file, as the move does: no git in
-    /// the clone, no transport). The full rehire through PrepareAsync is ARehiredSameNamedMember_WithAPreB016CloneOnDisk_NoOrigin_...</summary>
+    /// the clone, no transport). The full rehire through PrepareAsync is ARehiredSameNamedMember_WithAnOldStyleCloneOnDisk_NoOrigin_...</summary>
     [Fact]
     public void ACloneLeftOnDisk_IsAdoptedOnTheBranchItsHeadIsOn_OnlyWhenThatIsTheMembersOldStyleBranch()
     {
@@ -249,8 +249,8 @@ public class TeamBranchGapTests
             return dir;
         }
 
-        Assert.Equal("members/ada", TeamRepos.AdoptLegacyClone(ada, Clone("pre-b016", "members/ada")));
-        Assert.Null(TeamRepos.AdoptLegacyClone(ada, Clone("post-b016", "members/alpha/ada")));
+        Assert.Equal("members/ada", TeamRepos.AdoptLegacyClone(ada, Clone("old-style", "members/ada")));
+        Assert.Null(TeamRepos.AdoptLegacyClone(ada, Clone("team-style", "members/alpha/ada")));
         Assert.Null(TeamRepos.AdoptLegacyClone(ada, Clone("someone-else", "members/ben")));
         Assert.Null(TeamRepos.AdoptLegacyClone(ada, Clone("empty", null)));
         Assert.Null(TeamRepos.AdoptLegacyClone(ada, Path.Combine(f.Db.Dir, "missing")));
@@ -360,7 +360,7 @@ public class TeamBranchGapTests
     }
 
     [Fact]
-    public async Task ARehiredSameNamedMember_AfterB016_GetsTheSameBranch_AndItsEarlierWorkComesBack()
+    public async Task ARehiredSameNamedMember_WithTeamBranches_GetsTheSameBranch_AndItsEarlierWorkComesBack()
     {
         SkipUnlessLocalTransport("push to a local origin, the member clone, fetch-back");
         using var f = new TeamsFixture();
@@ -419,7 +419,7 @@ public class TeamBranchGapTests
     /// Now the move at start adopts a clone on disk with no row when it is on members/&lt;name&gt; (records it, then moves it).
     /// </summary>
     [Fact]
-    public async Task ARehiredSameNamedMember_WithAPreB016CloneOnDisk_NoOrigin_IsRecordedOnTheBranchItsCloneIsOn()
+    public async Task ARehiredSameNamedMember_WithAnOldStyleCloneOnDisk_NoOrigin_IsRecordedOnTheBranchItsCloneIsOn()
     {
         SkipUnlessLocalTransport("the first clone, the fetch into the shared view, the move's ls-remote of the clone, fetch-back");
         using var f = new TeamsFixture();

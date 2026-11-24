@@ -240,7 +240,7 @@ public class TeamBranchBlockingRetestGapTests
 
     private static string NewRepo(string branch)
     {
-        var dir = Path.Combine(Path.GetTempPath(), "yb105-" + Guid.NewGuid().ToString("N")[..8]);
+        var dir = Path.Combine(Path.GetTempPath(), "yawble-branch-blocking-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
         AgentGit.Host(dir, "init", "-q", "-b", branch);
         AgentGit.Host(dir, "-c", "user.name=a", "-c", "user.email=a@x", "commit", "-q", "--allow-empty", "-m", "base");

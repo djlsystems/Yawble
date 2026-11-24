@@ -278,7 +278,7 @@ public class TeamBranchBlockingGapTests
     [InlineData(true)] // the old branch only in packed-refs
     public void TheClonesOldBranch_IsRenamedUnderItself_ByFile(bool packed)
     {
-        var dir = Path.Combine(Path.GetTempPath(), "yb104-" + Guid.NewGuid().ToString("N")[..8]);
+        var dir = Path.Combine(Path.GetTempPath(), "yawble-old-branch-rename-" + Guid.NewGuid().ToString("N")[..8]);
         try
         {
             Directory.CreateDirectory(dir);
@@ -312,7 +312,7 @@ public class TeamBranchBlockingGapTests
     [Fact]
     public void TheClonesOldBranch_IsNotRenamed_WhenItMovedSinceItWasRead()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "yb104-" + Guid.NewGuid().ToString("N")[..8]);
+        var dir = Path.Combine(Path.GetTempPath(), "yawble-old-branch-rename-" + Guid.NewGuid().ToString("N")[..8]);
         try
         {
             Directory.CreateDirectory(dir);

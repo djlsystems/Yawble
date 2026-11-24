@@ -34,7 +34,7 @@ public sealed partial class NameLeakTests
     private static partial Regex History();
 
     /// <summary>
-    /// Test-output files a run leaves in the repository root (b038-full.xml, results.xml, full-skips.txt, a .trx): their
+    /// Test-output files a run leaves in the repository root (core-full.xml, results.xml, full-skips.txt, a .trx): their
     /// test names and messages quote what this test looks for. Only an untracked file directly in the root is passed
     /// over; a tracked one, or one in a subfolder, is checked like any other file.
     /// </summary>
@@ -62,7 +62,7 @@ public sealed partial class NameLeakTests
             File.WriteAllText(Path.Combine(root, "clean.txt"), "nothing here\n");
             File.WriteAllText(Path.Combine(root, "tracked-results.xml"), leak);
             Git(root, "add", "clean.txt", "tracked-results.xml");
-            foreach (var stray in new[] { "b038-full.xml", "results.xml", "full-skips.txt", "run.trx" })
+            foreach (var stray in new[] { "core-full.xml", "results.xml", "full-skips.txt", "run.trx" })
                 File.WriteAllText(Path.Combine(root, stray), leak);
             File.WriteAllText(Path.Combine(root, "sub", "results.xml"), leak);
             File.WriteAllText(Path.Combine(root, "notes.md"), leak);

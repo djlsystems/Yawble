@@ -269,7 +269,7 @@ public sealed class HostAskGroupingGapTests : IDisposable
     // ------------------------------------------------------------------ B039 verify (card 228, TesterKofi): gaps
 
     [Fact]
-    public async Task B039_TwoMembersGroupedDeny_EachHostIsQuietOnlyForItsOwnMember()
+    public async Task TwoMembersGroupedDeny_EachHostIsQuietOnlyForItsOwnMember()
     {
         var priya = new[] { Ask("Alpha/Priya", "crl3.digicert.com"), Ask("Alpha/Priya", "ocsp.digicert.com") };
         var bo = new[] { Ask("Alpha/Bo", "crl4.digicert.com"), Ask("Alpha/Bo", "cacerts.digicert.com") };
@@ -289,7 +289,7 @@ public sealed class HostAskGroupingGapTests : IDisposable
     }
 
     [Fact]
-    public async Task B039_GroupedDeny_QuietEndsAfter24Hours_ForEveryHost()
+    public async Task GroupedDeny_QuietEndsAfter24Hours_ForEveryHost()
     {
         var ids = new[] { Ask("Alpha/Priya", "crl3.digicert.com"), Ask("Alpha/Priya", "ocsp.digicert.com"), Ask("Alpha/Priya", "crl4.digicert.com") };
         await _asks.AnswerGroupAsync(ids[0], ids, NetworkAskChoices.Deny, null, false, Ct);
@@ -301,7 +301,7 @@ public sealed class HostAskGroupingGapTests : IDisposable
     }
 
     [Fact]
-    public async Task B039_GroupedDeny_AnAskAnsweredMeanwhile_IsLeftOutOfTheOneNotice()
+    public async Task GroupedDeny_AnAskAnsweredMeanwhile_IsLeftOutOfTheOneNotice()
     {
         var ids = new[] { Ask("Alpha/Priya", "crl3.digicert.com"), Ask("Alpha/Priya", "ocsp.digicert.com"), Ask("Alpha/Priya", "crl4.digicert.com") };
         await _asks.AnswerAsync(ids[1], NetworkAskChoices.Deny, null, Ct); // answered on its own first: told once for it
@@ -319,7 +319,7 @@ public sealed class HostAskGroupingGapTests : IDisposable
     }
 
     [Fact]
-    public async Task B039_GroupedDeny_ThroughTheRpc_TellsOnce_WithTheNote()
+    public async Task GroupedDeny_ThroughTheRpc_TellsOnce_WithTheNote()
     {
         var ids = new[] { Ask("Alpha/Priya", "crl3.digicert.com"), Ask("Alpha/Priya", "ocsp.digicert.com"), Ask("Alpha/Priya", "crl4.digicert.com") };
         var r = await _asks.DispatchAsync("network.answer", new JsonObject
@@ -338,7 +338,7 @@ public sealed class HostAskGroupingGapTests : IDisposable
     }
 
     [Fact]
-    public async Task B039_GroupedAllow_IsUnchanged_OneManagerNotice_NoMemberTell()
+    public async Task GroupedAllow_IsUnchanged_OneManagerNotice_NoMemberTell()
     {
         var ids = new[] { Ask("Alpha/Priya", "crl3.digicert.com"), Ask("Alpha/Priya", "ocsp.digicert.com"), Ask("Alpha/Priya", "crl4.digicert.com") };
         var r = await _asks.AnswerGroupAsync(ids[0], ids, NetworkAskChoices.Agent, null, false, Ct);

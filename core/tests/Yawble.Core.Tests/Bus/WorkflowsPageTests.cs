@@ -306,7 +306,7 @@ public class WorkflowsPageTests
         var item = rig.Board.AddItem("Commit view", "the spec", "Alpha");
         var w = rig.Tell("Alpha", "Ada", "do it");
         rig.Board.AddDispatch(item.Id, "Alpha", w, "you");
-        var dir = Directory.CreateTempSubdirectory("yawble-b104-link-").FullName;
+        var dir = Directory.CreateTempSubdirectory("yawble-workflows-link-").FullName;
         var link = new CloudLink(dir, (m, p, ct) => rig.Rpc.DispatchAsync(m, p, ct), new AppEvents());
         try
         {
