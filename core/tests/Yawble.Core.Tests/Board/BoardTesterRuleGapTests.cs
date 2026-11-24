@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Board;
 /// <item>Item 4: the tester's own question or block is not a finished test.</item>
 /// </list>
 /// </summary>
-public class B027VerifyBoardGapTests
+public class BoardTesterRuleGapTests
 {
     private long _seq = 500;
 

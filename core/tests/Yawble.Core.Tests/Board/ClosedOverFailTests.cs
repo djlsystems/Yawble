@@ -16,7 +16,7 @@ namespace Yawble.Core.Tests.Board;
 /// workflow_show say the same line; the Concierge's workflow watch says "closed over a FAIL (accepted)". Without the field
 /// nothing changes. Fakes only: hand-made messages.
 /// </summary>
-public class B142ClosedOverFailTests
+public class ClosedOverFailTests
 {
     private long _seq = 100;
 

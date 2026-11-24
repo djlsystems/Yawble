@@ -12,7 +12,7 @@ namespace Yawble.Core.Tests.Board;
 /// that run handed back. Gap tests beside BoardTesterRuleTests / BoardTesterDoneGapTests. Fakes only: the projector fed
 /// hand-made messages shaped like BusEngine's agent.completed payload.
 /// </summary>
-public class B027Item4RecheckGapTests
+public class TesterRunEndedRecheckTests
 {
     private long _seq = 900;
 

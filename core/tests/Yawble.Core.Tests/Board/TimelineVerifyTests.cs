@@ -12,7 +12,7 @@ namespace Yawble.Core.Tests.Board;
 /// (the priority merge is the highest open card per moment and everything adds up exactly, to the millisecond), a
 /// Visitor may read timeline.get, and no token or cost field is on the wire. Fixed times only.
 /// </summary>
-public class Card431B086VerifyTests
+public class TimelineVerifyTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
