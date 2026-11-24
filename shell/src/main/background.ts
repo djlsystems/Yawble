@@ -95,7 +95,7 @@ export function statusLine(s: TrayStatus | null): string {
   return parts.join(' · ');
 }
 
-/** B143: the newest thing waiting for the person (app.overview newest): a question, a tool-call approval, a host, a tool or a folder request. */
+/** The newest thing waiting for the person (app.overview newest): a question, a tool-call approval, a host, a tool or a folder request. */
 export interface NeedsYouNewest { kind: string; title: string; team?: string | null; at?: string }
 
 const NewestKind: Record<string, string> = {

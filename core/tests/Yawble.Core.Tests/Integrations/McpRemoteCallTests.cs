@@ -357,4 +357,21 @@ public class McpRemoteCallTests
         Assert.DoesNotContain(Key, list);
         Assert.Contains("api_key=", list);
     }
+
+    [Fact]
+    public async Task TheToolCallRow_KeepsTheToolAndArgumentNames_NotWhatWasSaid()
+    {
+        await using var r = await Rig.MakeAsync();
+        await r.SaveHttp();
+        await r.Allow("echo", "allow");
+        await r.RunAgent(run => Rig.Call(run, "remote__echo", new { msg = "the meeting moved to 3pm", to = "+15550001234", channel = "general" }));
+        Assert.Equal("echo: the meeting moved to 3pm", r.Seen); // the server got the real arguments
+        using var c = new Microsoft.Data.Sqlite.SqliteConnection(r.Db.ConnectionString);
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT args FROM integration_calls WHERE integration = 'mcp:remote' AND decision = 'allow';";
+        var args = System.Text.Json.JsonSerializer.Deserialize<string[]>((string)cmd.ExecuteScalar()!)!;
+        Assert.Equal("echo", args[0]);
+        Assert.Equal("""{"msg":"(24 chars)","to":"...1234","channel":"general"}""", args[1]);
+    }
 }

@@ -294,15 +294,18 @@ The event carries the sections that changed, each in full:
 
 ### `logs.tail`, `logs.untail` and `logs.tailEntry`
 
-- `logs.tail {level: "default" | "all", team?: string, member?: string, app?: boolean}` starts pushing this computer's
+- `logs.tail {level: "default" | "all" | "debug", team?: string, member?: string, app?: boolean}` starts pushing this computer's
   new log entries, as they are written, to this viewer. `default` sends warning and error entries and workflow events;
-  `all` sends every level. `team` and `member` narrow it to one team or one member; `app: true` to the entries about
+  `all` sends every level but debug; `debug` sends debug entries (the Diagnostics log's routine lines) too. `team` and `member` narrow it to one team or one member; `app: true` to the entries about
   no team and no member.
 - The activity log carries every audit entry (B101). An entry about a member has its `team` and `member`; one about a
   whole team has `member: "<Team>"` (the team's name in angle brackets) and its `team`; one about the app itself
   (backlog, settings, the link, backups...) has `team: null, member: "app"`. A member filter takes that member's own
   entries only; a team filter takes its members' entries and its `<Team>` entries. `logs.query {source: "activity"}`
-  takes the same `team`, `member` and `app: true`, and `logs.sources` says which source offers `app`.
+  takes the same `team`, `member` and `app: true`, and `logs.sources` says which source offers `app`. Its rows carry
+  the `level` the tail gives the same entry, and `logs.query` takes `level` (`default`: every level but debug, `all`,
+  or one of `error`, `warning`, `info`, `debug`) for each source whose `logs.sources` entry says `levels: true`
+  (All activity and Diagnostics).
 - Each entry that passes the filter is pushed as the event `logs.tailEntry`, carrying one entry. `logs.query` rows
   and `logs.tailEntry` entries are redacted the same way, by the same code as the window's Logs page: known secrets
   and token-shaped text become `[redacted]`.

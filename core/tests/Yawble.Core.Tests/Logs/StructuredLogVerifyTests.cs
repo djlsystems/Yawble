@@ -23,19 +23,19 @@ using RunStatus = Yawble.Core.Scripts.Running.ScriptRunStatus;
 namespace Yawble.Core.Tests.Logs;
 
 /// <summary>
-/// Card 615 (B143 verify): end to end with fakes. A real Diagnostics file holding old 3-column lines and new 4-column lines,
+/// Structured logs end to end with fakes. A real Diagnostics file holding old 3-column lines and new 4-column lines,
 /// read back through logs.query (the RPC) with the Level filter and the team+member filter on two teams that both have a
 /// DeveloperInes; two start-up fetch-backs; a failing script run whose warning line goes into a real Diagnostics file and
 /// is read back; the email login failure as the Tool calls log shows it.
 /// </summary>
-public sealed class B143VerifyTests : IDisposable
+public sealed class StructuredLogVerifyTests : IDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 24, 12, 0, 0, TimeSpan.Zero);
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private readonly TempDb _db = new();
     private readonly Yawble.Core.Tests.Gateway.FakeClock _clock = new(Now);
 
-    public B143VerifyTests() => _db.OpenStore().Dispose();
+    public StructuredLogVerifyTests() => _db.OpenStore().Dispose();
 
     public void Dispose() => _db.Dispose();
 
@@ -137,7 +137,7 @@ public sealed class B143VerifyTests : IDisposable
         log.Write("debug", "lease", "lease: Alpha/Ada holds it", [("member", "Alpha/Ada")]);
         log.Write("info", "teams", "start-up fetch-back: fetched 2 clones, 0 behind");
 
-        events.Publish("test.mark", "b143-verify");
+        events.Publish("test.mark", "structured-log-verify");
         await Wait.UntilAsync(() => Task.FromResult(got.Any(m => m["event"]?.GetValue<string>() == "test.mark")), "the events to be delivered");
         var entries = got.Where(m => m["event"]?.GetValue<string>() == LogTail.EntryEvent).Select(m => m["data"]!).ToList();
         string Of(JsonNode t) => t.ToJsonString();
@@ -157,8 +157,8 @@ public sealed class B143VerifyTests : IDisposable
         using var capture = Diag.Capture(e => { lock (seen) seen.Add(e); });
         using var f = new TeamsFixture();
         var (_, ada, ben) = f.Team();
-        // B143_VERIFY_APPROOT: a shorter folder for the app root where the temp folder is too deep for git ("Filename too long").
-        var appRoot = Environment.GetEnvironmentVariable("B143_VERIFY_APPROOT") is { Length: > 0 } shortRoot
+        // STRUCTURED_LOG_VERIFY_APPROOT: a shorter folder for the app root where the temp folder is too deep for git ("Filename too long").
+        var appRoot = Environment.GetEnvironmentVariable("STRUCTURED_LOG_VERIFY_APPROOT") is { Length: > 0 } shortRoot
             ? Directory.CreateDirectory(Path.Combine(shortRoot, Guid.NewGuid().ToString("N")[..8])).FullName
             : f.AppRoot;
         var emptyGlobal = Path.Combine(f.Db.Dir, "empty.gitconfig");

@@ -12,12 +12,12 @@ using Yawble.Core.Tests.Email;
 namespace Yawble.Core.Tests.Scripts.Actions;
 
 /// <summary>
-/// Card 613 (B143 part A): the Email integration's Tool-call row is written after the work: a refused sign-in leaves a row that says it failed
+/// The Email integration's Tool-call row is written after the work: a refused sign-in leaves a row that says it failed
 /// and why, with the host and the duration (before: a bare "allow" row written before IMAP opened); a success says how many messages came back,
 /// never their content; a script member's routine lists are one row per member per hour, unless one failed. Against the fake IMAP server, with
 /// a fixed clock (the hour is the clock's).
 /// </summary>
-public sealed class B143EmailCallRowTests : IAsyncLifetime
+public sealed class EmailCallRowTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private const string Me = "pat@example.test";
