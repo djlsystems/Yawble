@@ -10,7 +10,7 @@ namespace Yawble.Core.Tests.Launch;
 /// B129 verify (card 580): run 109's shape, but the sleep in group 25720 outlives SIGKILL in the backstop's second reap.
 /// The teardown line names it as found through the group and still running; the record counts it as left behind.
 /// </summary>
-public class B129VerifyTests
+public class BackstopSurvivorTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
