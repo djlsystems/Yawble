@@ -9,7 +9,7 @@ import { hireRoleOf } from '../../src/renderer/src/agentModels';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
 import type { HireRow, RoleRow, TeamDefaults, TeamHireRow, TeamSummary, YawbleApi } from '../../src/shared/api';
 
-// B147: the role catalog (Settings > Teams > Roles), the default hire list (Settings > Teams), a team's hire list (Team
+// Roles and hire lists: the role catalog (Settings > Teams > Roles), the default hire list (Settings > Teams), a team's hire list (Team
 // settings > Hiring), the role picker and "Who the Manager may hire" on New team, and the role on a member's tile.
 // A scripted fake core: no agent, no network.
 type Answer = (params: any) => unknown;
@@ -301,7 +301,6 @@ describe('Team settings > Hiring', () => {
     expect(val(w, 'team-hire-agent-0')).toBe('claude');
     expect(val(w, 'team-hire-model-0')).toBe('opus');
     expect(w.find('[data-test=team-hire-max-0]').exists()).toBe(false);
-    expect(w.find('[data-test=team-hire-used-0]').exists()).toBe(false);
     expect(w.get('[data-test=team-hiring]').text()).not.toContain('hired');
     await w.get('[data-test=team-hire-model-0]').setValue(''); // back to the agent's default
     await w.get('[data-test=team-hire-add]').trigger('click');
@@ -319,18 +318,16 @@ describe('Team settings > Hiring', () => {
     expect(w.get('[data-test=team-hiring]').text()).not.toContain('at most');
   });
 
-  it('shows how many hold a role as "N hired", a count and not a limit', async () => {
+  it('shows rows of exactly role, agent and model, with no count per role, and sends them back as they are', async () => {
     const f = api([
-      { role: 'Developer', job: ROLES[0].job, agent: 'claude', model: 'opus', used: 2, holders: [5, 6] },
-      { role: 'Tester', job: '', agent: 'codex', model: null, used: 0, holders: [] },
+      { role: 'Developer', job: ROLES[0].job, agent: 'claude', model: 'opus' },
+      { role: 'Tester', job: '', agent: 'codex', model: null },
     ]);
     const w = await openHiring(f.api);
-    expect(w.get('[data-test=team-hire-used-0]').text()).toBe('2 hired');
-    expect(w.find('[data-test=team-hire-used-1]').exists()).toBe(false);
+    expect(w.get('[data-test=team-hiring]').text()).not.toContain('hired');
     expect(w.get('[data-test=team-hiring]').text()).not.toContain('of max');
     await w.get('[data-test=team-hire-save]').trigger('click');
     await flushPromises();
-    // used and holders are not sent back.
     expect(f.of('teams.setHireList')[0].params.rows).toEqual([
       { role: 'Developer', agent: 'claude', model: 'opus' }, { role: 'Tester', agent: 'codex', model: null },
     ]);
