@@ -59,10 +59,25 @@ public sealed record LogTailFilter(bool All = false, string? Team = null, string
     }
 }
 
-/// <summary>The levels of a log entry, read from what the entry says (the logs keep no level of their own).</summary>
+/// <summary>
+/// The levels of a log entry. A structured Diagnostics line carries its own (<see cref="Diag"/>, in its fields column);
+/// every other entry's is read from what it says. <see cref="Debug"/>: routine lines the default views hide.
+/// </summary>
 public static partial class LogLevels
 {
-    public const string Error = "error", Warning = "warning", Info = "info";
+    public const string Error = "error", Warning = "warning", Info = "info", Debug = "debug";
+
+    /// <summary>The levels, most severe first.</summary>
+    public static readonly IReadOnlyList<string> All = [Error, Warning, Info, Debug];
+
+    /// <summary>A caller's level as one of <see cref="All"/> ("warn" is a warning; anything unknown is info).</summary>
+    public static string Normal(string? level) => level?.Trim().ToLowerInvariant() switch
+    {
+        Error => Error,
+        Warning or "warn" => Warning,
+        Debug => Debug,
+        _ => Info,
+    };
 
     [GeneratedRegex(@"(?i)\b(error|errors|failed|failure|exception|crash|crashed|fatal|unhandled|start_failed)\b")]
     private static partial Regex Errors();
