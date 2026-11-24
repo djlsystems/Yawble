@@ -10,7 +10,7 @@ namespace Yawble.Core.Tests.Link;
 /// for the run queue; waitsForRun, held, pending) and lists who waits and why in <c>waiting</c>, with waitsFor only on
 /// waits-for-run. The names are those yawble-cloud's OrgWire reads. Fakes only.
 /// </summary>
-public class Card568OrgSummaryWaitingTests
+public class OrgSummaryWaitingTests
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 22, 12, 0, 0, TimeSpan.Zero);
 

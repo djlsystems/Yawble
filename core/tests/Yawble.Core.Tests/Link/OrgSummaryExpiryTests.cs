@@ -16,7 +16,7 @@ namespace Yawble.Core.Tests.Link;
 /// while the workflow is worked and once it ended). Built from the real app source over a real bus with a fake clock, and
 /// read as JSON, the way yawble-cloud's OrgWire reads it.
 /// </summary>
-public class Card388OrgSummaryExpiryTests
+public class OrgSummaryExpiryTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);

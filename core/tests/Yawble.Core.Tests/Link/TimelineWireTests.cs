@@ -15,7 +15,7 @@ namespace Yawble.Core.Tests.Link;
 /// reaches the Board with the screens wired, a Visitor may call it over the Cloud Link, and org.summary's workflow rows
 /// carry the same <c>time</c> as the bus.workflows item (its ticking ms alone are not a change).
 /// </summary>
-public class Card429TimelineWireTests
+public class TimelineWireTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
