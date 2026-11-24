@@ -3,8 +3,8 @@ using System.Text.RegularExpressions;
 
 namespace Yawble.Core.Bus;
 
-/// <summary>A row of a team's hire list as Team settings shows it: the role's job, and the members hired as it (by id).</summary>
-public sealed record HireListEntry(string Role, string Job, string Agent, string? Model, int Used, IReadOnlyList<long> Holders);
+/// <summary>A row of a team's hire list as Team settings shows it: the role, its job, and the agent and model a hire of it runs with.</summary>
+public sealed record HireListEntry(string Role, string Job, string Agent, string? Model);
 
 /// <summary>A row of the hiring tool: a role the Manager may hire, its description, agent and model, and whether the agent can run now.</summary>
 public sealed record HiringRow(string Role, string Description, string Agent, string? Model, bool Ready, string Detail);
@@ -80,17 +80,13 @@ public sealed partial class BusEngine
 
     // ---------------------------------------------------------------- the hire list
 
-    /// <summary>The team's hire list, each row with its role's job and the members hired as it.</summary>
+    /// <summary>The team's hire list, each row with its role's job.</summary>
     public Task<IReadOnlyList<HireListEntry>> HireListAsync(long teamId, CancellationToken ct = default) =>
         WithGate(() =>
         {
             if (_store.Teams().All(t => t.Id != teamId)) throw new BusRefusal("no_such_team", $"there is no team {teamId}");
-            var members = _store.MemberRows(teamId);
-            return (IReadOnlyList<HireListEntry>)_store.HireList(teamId).Select(r =>
-            {
-                var holders = members.Where(m => string.Equals(m.HireRole, r.Role, StringComparison.OrdinalIgnoreCase)).Select(m => m.Id).ToList();
-                return new HireListEntry(r.Role, _store.Role(r.Role)?.Job ?? "", r.Agent, r.Model, holders.Count, holders);
-            }).ToList();
+            return (IReadOnlyList<HireListEntry>)_store.HireList(teamId)
+                .Select(r => new HireListEntry(r.Role, _store.Role(r.Role)?.Job ?? "", r.Agent, r.Model)).ToList();
         }, ct);
 
     /// <summary>Replaces the team's hire list (Team settings > Hiring); an empty list opens hiring to any agent again.</summary>

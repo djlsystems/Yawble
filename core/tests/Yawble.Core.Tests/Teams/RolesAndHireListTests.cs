@@ -174,7 +174,7 @@ public class RolesAndHireListTests
         // A new team without a hireList starts from the defaults.
         var fromDefaults = (await rig.Call("teams.create", new { name = "alpha", managerCli = "claude", members = Array.Empty<object>() }))!["teamId"]!.GetValue<long>();
         var list = (await rig.Call("teams.hireList", new { teamId = fromDefaults }))!.AsArray();
-        Assert.Equal(("Developer", "codex", "gpt-5", 0), (list[0]!["role"]!.GetValue<string>(), list[0]!["agent"]!.GetValue<string>(), list[0]!["model"]!.GetValue<string>(), list[0]!["used"]!.GetValue<int>()));
+        Assert.Equal(("Developer", "codex", "gpt-5"), (list[0]!["role"]!.GetValue<string>(), list[0]!["agent"]!.GetValue<string>(), list[0]!["model"]!.GetValue<string>()));
         Assert.Equal("Writes the code and its unit tests on its own branch.", list[0]!["job"]!.GetValue<string>());
 
         // New team with its own list and a member row with a role (no name: named for the role; its agent and model as given).
@@ -191,7 +191,10 @@ public class RolesAndHireListTests
         Assert.Equal(("Reviewer", "codex", "gpt-5-mini"), (reviewer.HireRole, reviewer.Cli, reviewer.Model));
         Assert.Contains("reports findings, does not rewrite", reviewer.Instructions);
         Assert.Null(members.Single(m => m.Name == "DeveloperZed").HireRole);
-        Assert.Equal((1, reviewer.Id), (reviewerRow["used"]!.GetValue<int>(), reviewerRow["holders"]!.AsArray().Single()!.GetValue<long>()));
+        Assert.Equal(("Reviewer", "codex"), (reviewerRow["role"]!.GetValue<string>(), reviewerRow["agent"]!.GetValue<string>()));
+        Assert.Null(reviewerRow["model"]);
+        Assert.Contains("reports findings, does not rewrite", reviewerRow["job"]!.GetValue<string>());
+        Assert.Equal(["agent", "job", "model", "role"], reviewerRow.AsObject().Select(p => p.Key).Order(StringComparer.Ordinal));
 
         // teams.agents carries the hire role as member.hireRole; member.role stays manager / member.
         var cards = (await rig.Call("teams.agents", new { teamId = beta }))!.AsArray().Select(c => c!["member"]!).ToList();
