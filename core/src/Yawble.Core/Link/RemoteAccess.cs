@@ -72,6 +72,8 @@ public static class RemoteAccess
             "teams.list", "teams.agents", "teams.quiet", "teams.env", "teams.approvals", "teams.repos",
             // Settings > Teams and Settings > Concierge as saved (saving them and Generate are changes).
             "teams.defaults", "concierge.defaults",
+            // The role catalog and a team's hire list as shown (saving and removing them are changes).
+            "roles.list", "teams.hireList",
             "docs.list", "docs.read", "docs.folder",
             "members.get",
             "bus.decisions", "bus.workflows",
@@ -128,6 +130,7 @@ public static class RemoteAccess
             "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",
             "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo", "teams.setRepo",
             "teams.setDefaults", "teams.generateNames", "concierge.setDefaults",
+            "roles.save", "roles.remove", "teams.setHireList",
             "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
             "members.add", "members.remove", "members.update",
             "bus.tellManager", "bus.answer", "bus.closeWorkflow", "bus.stopWorkflow", "bus.nudgeWorkflow",

@@ -5,8 +5,9 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Agents;
 
 /// <summary>
-/// The model a member pane names, and where the name comes from. Source <c>member</c> / <c>agent</c>: the model a run
-/// is launched with (<see cref="AgentModels.Resolve"/>, the same order). Source <c>observed</c>: the CLI picks its own
+/// The model a member pane names, and where the name comes from. Source <c>member</c> / <c>agent</c> / <c>settings</c> (the
+/// model the person's own CLI settings name): the model a run is launched with (<see cref="AgentModels.Resolve(string?, string?, Policy.AgentCli, ICliModelSettings?)"/>,
+/// the same order). Source <c>observed</c>: the CLI picks its own
 /// model, and this is the one the member's last run used most (the gateway's usage_events, by output tokens, so a CLI's
 /// small side-task model does not win); <see cref="At"/> is that run's last request. Source <c>cli</c>: the CLI's own
 /// default and no run reported a model yet; <see cref="Model"/> is empty.
@@ -19,14 +20,14 @@ public static class MemberModelSources
 }
 
 /// <summary>Resolves <see cref="MemberModel"/> for the team page's member cards (teams.agents).</summary>
-public sealed class MemberModels(string connectionString, IAgentResolver? agents, AgentDefaultsStore? defaults)
+public sealed class MemberModels(string connectionString, IAgentResolver? agents, AgentDefaultsStore? defaults, ICliModelSettings? settings = null)
 {
     public MemberModel For(MemberRow member)
     {
         ResolvedAgent agent;
         try { agent = agents.Resolve(member.Cli); }
         catch (ArgumentException) { return new MemberModel("", ModelSources.Cli); }
-        var set = AgentModels.Resolve(member.Model, agent.Custom ? agent.DefaultModel : defaults?.Get(agent.Cli));
+        var set = AgentModels.Resolve(member.Model, agent.Custom ? agent.DefaultModel : defaults?.Get(agent.Cli), agent.Cli, settings);
         if (set.Source != ModelSources.Cli) return new MemberModel(set.Model, set.Source);
         return LastRunModel($"{member.Team}/{member.Name}") is { } seen
             ? new MemberModel(seen.Model, MemberModelSources.Observed, seen.At)

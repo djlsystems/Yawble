@@ -4,6 +4,7 @@ import { PaneHeaderKey } from '../terminalPane';
 import { isStoppedRun, type AgentCard, type YawbleApi } from '../../../shared/api';
 import type { ActivityRow } from '../monitor/model';
 import { agentPillText, agentPillTitle } from '../memberModel';
+import { hireRoleOf } from '../agentModels';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import Icon from './Icon.vue';
 import MemberActivity from './MemberActivity.vue';
@@ -151,7 +152,7 @@ defineExpose({ el: () => root.value });
       <strong data-test="agent-name" :title="m.name">{{ displayName(m.name) }}</strong>
       <!-- The pills sit on their own row under the name, so the name gets the whole first row (the ☰ stays on it). -->
       <span class="pills" data-test="agent-pills">
-        <span class="chip">{{ m.role }}</span>
+        <span class="chip" data-test="agent-role" :title="hireRoleOf(m) ? `${m.role}, hired as ${hireRoleOf(m)}` : undefined">{{ hireRoleOf(m) ?? m.role }}</span>
         <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
         <span class="label" data-test="agent-face-state">{{ stateLabel }}</span>
         <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>

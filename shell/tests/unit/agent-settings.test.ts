@@ -63,7 +63,7 @@ function core(extra: Record<string, (p: any) => unknown> = {}) {
     'agents.detect': () => [found('claude', '2.2.0'), found('grok', '1.0.77')],
     'agentProfiles.list': () => [builtin('claude', 'opus'), builtin('grok'), mine, grokMine],
     'agents.commandLine': described,
-    'agents.models': (p: any) => ({ models: p.cli === 'grok' ? ['grok-4'] : ['opus', 'sonnet', 'haiku'], source: 'app' }),
+    'agents.models': (p: any) => ({ models: p.cli === 'grok' ? ['grok-4'] : ['opus', 'sonnet', 'haiku'], source: 'builtin' }),
     'agents.versionStatus': (p: any) => ({ cli: p.cli, detected: '2.2.0', lastRun: p.cli === 'claude' ? '2.1.0' : '2.2.0', changed: p.cli === 'claude' }),
     'agentProfiles.check': () => [],
     ...extra,

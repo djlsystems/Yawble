@@ -370,11 +370,15 @@ bus.LeaseChanged = () => events.Publish(Yawble.Core.Bus.BusEngine.LeaseChangedEv
 var agentDefaults = launch.AgentDefaults ?? new Yawble.Core.Agents.AgentDefaultsStore($"Data Source={dbPath}");
 concierge.AgentResolver = agentResolver;
 Yawble.Core.Agents.Profiles.AgentProfileStore? agentProfileStore = null;
-var agentChangeLog = new Yawble.Core.Agents.Profiles.AgentChangeLog($"Data Source={dbPath}", null, (agent, model) => agentProfileStore!.ResolveModel(agent, model));
+// The person's own CLI settings (read only): the model a member with none and no agent default runs with, and one picker source.
+var cliModelSettings = launch.ModelSettings ?? Yawble.Core.Agents.CliModelSettings.ForThisComputer();
+var agentChangeLog = new Yawble.Core.Agents.Profiles.AgentChangeLog($"Data Source={dbPath}", null, (agent, model) => agentProfileStore!.ResolveModel(agent, model),
+    agent => agentProfileStore!.CliOf(agent) is { } changedCli && cliModelSettings.DefaultModel(changedCli) is { } fromSettings
+        ? (fromSettings, $"model from your {Yawble.Core.Policy.AgentClis.DisplayName(changedCli)} settings") : null);
 agentProfileStore = new Yawble.Core.Agents.Profiles.AgentProfileStore($"Data Source={dbPath}", agentChangeLog, new Yawble.Core.Agents.Profiles.SqliteAgentUsage($"Data Source={dbPath}"), defaults: agentDefaults);
 bus.AgentChanges = agentChangeLog;
 // The member panes' agent pill: the model each member runs (set, the agent's default, or the one its last run used).
-ui.Models = new Yawble.Core.Agents.MemberModels($"Data Source={dbPath}", agentResolver, agentDefaults);
+ui.Models = new Yawble.Core.Agents.MemberModels($"Data Source={dbPath}", agentResolver, agentDefaults, cliModelSettings);
 var agentProfileRpc = new Yawble.Core.Agents.Profiles.AgentProfileRpc(agentProfileStore, agentChangeLog);
 boardForConcierge = board.DispatchAsync;
 if (bus.Repos is { } actionRepos)
@@ -445,7 +449,11 @@ _ = Task.Run(async () =>
 });
 // Command line, default model, run records, versions and updates for Settings > Agents and Member settings.
 var agentInfoRpc = launch.Launcher is null ? null : new Yawble.Core.Agents.AgentInfoRpc(launch.Launcher, agentDefaults,
-    new Yawble.Core.Agents.ModelCatalog(), clis,
+    // The pickers' lists: the CLI's own listing, the person's CLI settings, the models runs used, the built-in list.
+    new Yawble.Core.Agents.ModelCatalog(
+        new Yawble.Core.Agents.CliModelListing(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Environment.GetEnvironmentVariable,
+            new Yawble.Core.Agents.RealCliProcessRunner(), cli => HostCliPath(Yawble.Core.Policy.AgentClis.Id(cli)), launch.GrokModelsOutput),
+        cliModelSettings, new Yawble.Core.Agents.SqliteModelsUsed($"Data Source={dbPath}")), clis,
     new Yawble.Core.Launch.RunRecordStore($"Data Source={dbPath}"), memberDirectory, new Yawble.Core.Agents.WindowsUpdateTerminal(), agentResolver, agentChangeLog);
 // The read-only code browser of members' clones (watched while a member runs or a Code dialog is open on it).
 await using var codeBrowser = new Yawble.CodeBrowser.CodeBrowserService(new Yawble.Core.Code.CodeHost(bus, runs, events, policies));
