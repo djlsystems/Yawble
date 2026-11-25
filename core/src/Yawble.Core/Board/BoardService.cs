@@ -116,6 +116,17 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         };
     }
 
+    /// <summary>
+    /// Takes back an item just added (docs.moveToBacklog when the document could not be removed): gone as if never added,
+    /// whatever its state. False when there was no such item.
+    /// </summary>
+    public bool TakeBackItem(long id)
+    {
+        if (store.Item(id) is not { } item) return false;
+        if (item.ArchivedAt is null) store.SaveItem(item with { ArchivedAt = store.Now() }); // DeleteItem removes archived items only
+        return store.DeleteItem(id);
+    }
+
     // ---------------------------------------------------------------- the board
 
     /// <summary>

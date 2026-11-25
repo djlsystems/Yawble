@@ -63,6 +63,7 @@ public class AuditClassificationTests
         "docs.delete",
         "docs.folder",
         "docs.mkdir",
+        "docs.moveToBacklog",
         "docs.rename",
         "docs.upload",
         "docs.write",
