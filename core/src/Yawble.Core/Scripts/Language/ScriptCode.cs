@@ -72,7 +72,7 @@ public static class ScriptCode
             if (x is ParseErrorException p)
             {
                 var line = Math.Max(1, p.LineNumber - LineOffset);
-                return new ScriptCodeSyntaxError(p.Description, line, Math.Max(1, p.Column));
+                return new ScriptCodeSyntaxError(p.Description, line, p.Column + 1); // Acornima counts columns from 0
             }
         return null;
     }
@@ -106,7 +106,9 @@ public static class ScriptCode
                 return JsValue.Undefined;
             }));
 
-            var value = engine.Evaluate(Wrap(code));
+            // Prepared first, so a syntax error is reported as one (with its line and column), not as a thrown SyntaxError.
+            var script = JsEngine.PrepareScript(Wrap(code), source: null, strict: true);
+            var value = engine.Evaluate(script);
             JsonNode? result = null;
             if (!value.IsUndefined() && !value.IsNull())
             {
@@ -137,8 +139,9 @@ public static class ScriptCode
         JavaScriptException js => $"the code threw {js.Message}{At(js.Location.Start.Line)}",
         _ when SyntaxError(e) is { } s => $"the code does not parse: {s.Message} (line {s.Line}, column {s.Column})",
         ExecutionCanceledException => "the code was stopped",
-        JintException j => $"the code failed: {j.Message}",
-        _ => null,
+        // Anything else the engine throws (an internal limit, a host error) fails the step too; a cancellation goes on up.
+        OperationCanceledException => null,
+        _ => $"the code failed: {e.Message}",
     };
 
     private static string At(int scriptLine) => scriptLine > LineOffset ? $" (line {scriptLine - LineOffset})" : "";
