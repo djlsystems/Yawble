@@ -124,7 +124,7 @@ function onEdgeClick(e: EdgeMouseEvent) { selectedEdge.value = e.edge.id; select
 /** A click on the empty canvas: nothing selected, so the Script pane shows. */
 function onPaneClick() { selectedEdge.value = null; selected.value = null; }
 
-/** The Script pane shows when no step is selected (or the start node is). */
+/** The Script pane shows when no step is selected; with the start node selected it shows only the triggers. */
 const showScriptPane = computed(() => !selected.value || selected.value === START_ID || !selectedNode.value);
 
 function onPanelChange(s: ScriptStep, variable?: ScriptVariable) {
@@ -272,7 +272,8 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
         </div>
       </div>
       <aside v-if="showScriptPane && ctx" class="side" data-test="flow-script-side">
-        <ScriptPane :ctx="ctx" :readonly="!!readonly" :integrations="integrations" @change="onScriptChange" @step="onScriptStep" />
+        <ScriptPane :key="selected === START_ID ? 'start' : 'script'" :ctx="ctx" :readonly="!!readonly" :integrations="integrations" :start="selected === START_ID"
+          @change="onScriptChange" @step="onScriptStep" @script="selected = null" />
       </aside>
       <FlowStepPanel v-else-if="selectedNode && ctx" :key="selectedNode.id" :node="selectedNode" :step="selectedStep" :readonly="!!readonly"
         :ctx="ctx" :integrations="integrations" @change="onPanelChange" @remove="deleteNode" @close="selected = null" />

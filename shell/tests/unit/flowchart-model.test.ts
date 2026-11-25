@@ -1,7 +1,7 @@
 // The flowchart model: the script document as nodes and edges, and the designer's edits going back into the document.
 import { describe, expect, it } from 'vitest';
 import {
-  END_ID, START_ID, STEP_TYPES, addStep, autoLayout, branchesOf, clearLayout, connect, createHistory, docToGraph,
+  END_ID, FILE_OPERATIONS, PALETTE, START_ID, STEP_TYPES, addStep, withFileOperation, autoLayout, branchesOf, clearLayout, connect, createHistory, docToGraph,
   moveNode, removeEdge, removeStep, replaceStep, type FlowEdge,
 } from '../../src/renderer/src/scripts/flowchart';
 import type { ScriptDocument } from '../../src/renderer/src/scripts/types';
@@ -54,7 +54,7 @@ describe('docToGraph', () => {
     expect(byId.count.detail).toBe('n = {vars.n + 1}');
     expect(byId.write.detail).toBe('out.txt');
     expect(byId.done.stepType).toBe('end');
-    expect(byId[START_ID].detail).toBe('every, tell');
+    expect(byId[START_ID].detail).toBe('on every, tell');
   });
 
   it('every STEP_TYPES entry maps to its kind, and an unknown type is other', () => {
@@ -236,6 +236,29 @@ describe('edits', () => {
 
   it('every template is a step of its own type', () => {
     for (const t of STEP_TYPES) expect(t.template.type).toBe(t.type);
+  });
+
+  it('every palette block and file operation is a step type the checker accepts', () => {
+    const known = new Set(STEP_TYPES.map((t) => t.type));
+    for (const b of PALETTE.flatMap((g) => g.blocks)) expect(known.has(b.type), b.key).toBe(true);
+    for (const o of FILE_OPERATIONS) expect(known.has(o.type), o.type).toBe(true);
+    const fileTypes = STEP_TYPES.filter((t) => t.kind === 'file').map((t) => t.type).sort();
+    expect(FILE_OPERATIONS.map((o) => o.type).sort()).toEqual(fileTypes);
+  });
+});
+
+describe('withFileOperation', () => {
+  const read = { id: 'f', type: 'file.readAllText', path: '{settings.p}', into: 'body', next: 'n' };
+  it('keeps the path and next; a write gains text and loses into', () => {
+    expect(withFileOperation(read, 'file.writeAllText')).toEqual({ id: 'f', type: 'file.writeAllText', path: '{settings.p}', text: '', next: 'n' });
+  });
+  it('a read keeps into; a delete drops text and into', () => {
+    expect(withFileOperation(read, 'file.exists')).toEqual({ ...read, type: 'file.exists' });
+    expect(withFileOperation({ ...read, type: 'file.appendLine', text: 'x' }, 'file.delete')).toEqual({ id: 'f', type: 'file.delete', path: '{settings.p}', next: 'n' });
+  });
+  it('an unknown type or the same one leaves the step as it is', () => {
+    expect(withFileOperation(read, 'log')).toBe(read);
+    expect(withFileOperation(read, 'file.readAllText')).toBe(read);
   });
 });
 

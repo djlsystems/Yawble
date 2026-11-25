@@ -5,6 +5,7 @@ import {
   type DesignContext, type MemberIntegration,
 } from '../../scripts/catalog';
 import type { ScriptStep, ScriptVariable } from '../../scripts/types';
+import { FILE_OPERATIONS, withFileOperation } from '../../scripts/flowchart';
 import ExpressionField from './ExpressionField.vue';
 
 // The Design form of one step, by its type. Every change emits the whole step; a new variable made for "save result
@@ -38,6 +39,11 @@ const types = computed(() => [...NATIVE_TYPES, ...schemaNames.value]);
 const isFile = computed(() => props.step.type.startsWith('file.'));
 const fileWrites = computed(() => props.step.type === 'file.writeAllText' || props.step.type === 'file.appendLine');
 const fileReads = computed(() => ['file.readAllText', 'file.readLines', 'file.exists'].includes(props.step.type));
+/** The File block's operation: the step becomes that file step type (see withFileOperation). */
+function pickFileOp(e: Event) {
+  if (props.readonly) return;
+  emit('change', withFileOperation(copy(props.step), (e.target as HTMLSelectElement).value));
+}
 const hasNext = computed(() => !['if', 'switch', 'forEach', 'end'].includes(props.step.type));
 
 const setRef = (key: string) => (e: Event) => change((s) => { const v = (e.target as HTMLSelectElement).value; s[key] = v === '' ? null : v; });
@@ -311,6 +317,11 @@ function addOutput() {
 
     <!-- file.* -->
     <template v-else-if="isFile">
+      <label class="field">Operation
+        <select :value="step.type" :disabled="readonly" data-test="form-file-op" @change="pickFileOp">
+          <option v-for="o in FILE_OPERATIONS" :key="o.type" :value="o.type">{{ o.label }}</option>
+        </select>
+      </label>
       <ExpressionField name="path" label="Path" type="string" required :model-value="step.path" :suggestions="suggestions" :readonly="readonly"
         @update:model-value="(v) => change((s) => { s.path = v; })" />
       <ExpressionField v-if="fileWrites" name="text" label="Text" type="string" required :model-value="step.text" :suggestions="suggestions" :readonly="readonly"

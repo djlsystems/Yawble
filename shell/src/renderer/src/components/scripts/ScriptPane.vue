@@ -11,8 +11,10 @@ const props = defineProps<{
   ctx: DesignContext;
   readonly: boolean;
   integrations?: MemberIntegration[] | null;
+  /** The Start node is selected: only how the script starts (its triggers), with a way to the whole script. */
+  start?: boolean;
 }>();
-const emit = defineEmits<{ change: [doc: ScriptDocument]; step: [stepId: string] }>();
+const emit = defineEmits<{ change: [doc: ScriptDocument]; step: [stepId: string]; script: [] }>();
 
 interface Output { name: string; type: string; description?: string }
 
@@ -115,12 +117,28 @@ function editJson(e: Event) {
 
 <template>
   <div class="pane" data-test="script-pane">
-    <div class="tabs" role="tablist">
+    <template v-if="start">
+      <div class="head" data-test="start-pane">
+        <strong>Start</strong>
+        <span class="muted small">The run starts here, when one of these triggers fires.</span>
+      </div>
+    </template>
+    <div v-else class="tabs" role="tablist">
       <button type="button" role="tab" :aria-selected="tab === 'design'" :class="{ on: tab === 'design' }" data-test="script-pane-tab-design" @click="tab = 'design'">Design</button>
       <button type="button" role="tab" :aria-selected="tab === 'json'" :class="{ on: tab === 'json' }" data-test="script-pane-tab-json" @click="tab = 'json'">JSON</button>
     </div>
 
-    <div v-if="tab === 'design'" class="design" data-test="script-pane-design">
+    <div v-if="start" class="design">
+      <fieldset class="group" data-test="script-accepts">
+        <legend>Triggers it accepts</legend>
+        <label v-for="k in TRIGGER_KINDS" :key="k" class="check">
+          <input type="checkbox" :checked="accepts.includes(k)" :disabled="readonly" :data-test="`script-accept-${k}`" @change="toggleAccept(k, ($event.target as HTMLInputElement).checked)" />{{ k }}
+        </label>
+      </fieldset>
+      <p class="muted small">When it fires is set on the member that runs the script (its Triggers pill).</p>
+      <button type="button" class="link" data-test="start-pane-script" @click="emit('script')">The whole script: settings, variables, outputs</button>
+    </div>
+    <div v-else-if="tab === 'design'" class="design" data-test="script-pane-design">
       <label class="field">Name <input :value="doc.name ?? ''" :readonly="readonly" data-test="script-name" @input="change((d) => { d.name = ($event.target as HTMLInputElement).value; })" /></label>
       <label class="field">Id <input :value="doc.id ?? ''" :readonly="readonly" spellcheck="false" data-test="script-id" @input="change((d) => { d.id = ($event.target as HTMLInputElement).value; })" /></label>
       <label class="field">Description <textarea :value="doc.description ?? ''" :readonly="readonly" rows="2" data-test="script-description" @input="change((d) => { d.description = ($event.target as HTMLTextAreaElement).value; })" /></label>
@@ -211,6 +229,7 @@ function editJson(e: Event) {
 
 <style scoped>
 .pane { display: flex; flex-direction: column; gap: 8px; min-height: 0; font-size: 12.5px; }
+.head { display: flex; flex-direction: column; gap: 2px; }
 .tabs { display: inline-flex; align-self: flex-start; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .tabs button { border: 0; border-radius: 0; padding: 3px 10px; font-size: 12px; background: var(--surface); color: var(--ink); }
 .tabs button.on { background: var(--selected); }
