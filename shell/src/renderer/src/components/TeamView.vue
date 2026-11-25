@@ -260,16 +260,10 @@ onBeforeUnmount(() => {
   memberAvailableWidth.value = Infinity;
 });
 
-/**
- * The Workflows page filtered to this team, with a workflow selected when given. Kept exposed only while App.vue still
- * calls it (the drawer's team Workflows item, a Monitor workflow): it goes once App.vue opens the page itself.
- */
-function openWorkflows(workflow?: number) { openWorkflowsPage({ teamId: props.team.id, ...(workflow ? { workflow } : {}) }); }
-
 /** Opens the team's documents (on a phone the drawer's Documents item does: the header has no button for it). */
 function openDocuments() { showDocs.value = true; }
 
-defineExpose({ refresh, openWorkflows, openDocuments });
+defineExpose({ refresh, openDocuments });
 </script>
 
 <template>
