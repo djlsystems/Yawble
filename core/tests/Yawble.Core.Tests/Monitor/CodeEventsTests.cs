@@ -37,6 +37,7 @@ public class CodeEventsTests
     [Fact]
     public async Task AFetchBackWithTwoNewCommits_GivesTwoCommitEvents_WithTheirFilesAndStatus()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var c = await f.Repos.PrepareAsync(ada, Ct);
@@ -81,6 +82,7 @@ public class CodeEventsTests
     [Fact]
     public async Task TheTeamBranch_AMergeOfAMemberBranch_AFastForward_AndTheManagersOwnCommit()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (manager, ada, ben) = f.Team();
         var a = await f.Repos.PrepareAsync(ada, Ct);

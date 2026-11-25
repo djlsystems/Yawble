@@ -39,12 +39,23 @@ internal sealed class StandInSandboxes : IAsyncDisposable
 
     public int Started => _started.Count;
 
+    /// <summary>The argument that makes this test program a stand-in sandbox: it waits, running no test, until it is killed.</summary>
+    public const string StandInArgument = "--stand-in-sandbox";
+
+#pragma warning disable CA2255 // Runs before the test runner reads its arguments, on purpose.
+    [System.Runtime.CompilerServices.ModuleInitializer]
+#pragma warning restore CA2255
+    internal static void WaitIfStandIn()
+    {
+        if (Environment.GetCommandLineArgs().Skip(1).Contains(StandInArgument)) { Thread.Sleep(TimeSpan.FromMinutes(10)); Environment.Exit(0); }
+    }
+
     /// <summary>Starts one stand-in sandbox: a sleeping process that runs until it is ended.</summary>
     public Process Start()
     {
-        var start = OperatingSystem.IsWindows()
-            ? new ProcessStartInfo("ping") { ArgumentList = { "-n", "600", "127.0.0.1" } }
-            : new ProcessStartInfo("sleep") { ArgumentList = { "600" } };
+        // This test program itself, told to only wait (see WaitIfStandIn): a fake with no network and no system
+        // program (a ping of loopback, say, ends at once inside an agent's sandbox, which has no IP driver).
+        var start = new ProcessStartInfo(Environment.ProcessPath!) { ArgumentList = { StandInArgument } };
         start.UseShellExecute = false;
         start.CreateNoWindow = true;
         start.RedirectStandardOutput = true;

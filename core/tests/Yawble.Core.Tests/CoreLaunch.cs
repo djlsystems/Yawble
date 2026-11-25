@@ -6,6 +6,21 @@ namespace Yawble.Core.Tests;
 internal static class CoreLaunch
 {
     /// <summary>
+    /// The dotnet that runs this test process (the muxer above its runtime folder), for starting the core so that the
+    /// process started IS the core. A plain "dotnet" from PATH may be a launcher that starts the real one as its child
+    /// (an agent's sandbox puts such a dotnet first on PATH), and then the started process's pid is not the core's.
+    /// Falls back to "dotnet" when the muxer is not found there.
+    /// </summary>
+    public static string Dotnet { get; } = FindDotnet();
+
+    private static string FindDotnet()
+    {
+        var root = Path.GetFullPath(Path.Combine(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
+        var muxer = Path.Combine(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        return File.Exists(muxer) ? muxer : "dotnet";
+    }
+
+    /// <summary>
     /// Points the core's yawble companion home (YAWBLE_HOME) at a fresh temp folder, so the core's control.json is never
     /// written to the real %APPDATA%\yawble-companion. Returns the home (not created; the core makes it). A test that sets its
     /// own YAWBLE_HOME keeps it.

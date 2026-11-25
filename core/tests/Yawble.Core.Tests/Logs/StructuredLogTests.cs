@@ -204,6 +204,7 @@ public sealed class StructuredLogTests : IDisposable
     [Fact]
     public async Task TheStartUpFetchBack_WritesOneSummaryLine_AndEachCloneAtDebug()
     {
+        SandboxGit.RequireLocalTransport();
         var seen = new List<DiagEntry>();
         using var capture = Diag.Capture(e => { lock (seen) seen.Add(e); });
         using var f = new TeamsFixture();

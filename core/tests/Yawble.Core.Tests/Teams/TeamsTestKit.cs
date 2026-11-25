@@ -30,6 +30,8 @@ internal static class AgentGit
             foreach (var name in new[] { "SystemRoot", "windir" })
                 if (Environment.GetEnvironmentVariable(name) is { } value) psi.Environment[name] = value;
         }
+        // Long paths on: a test repository below a deep temp root (TestTemp) must not fail as "Filename too long".
+        foreach (var o in TestTemp.GitOptions) psi.ArgumentList.Add(o);
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         p.StandardInput.Close();
@@ -43,6 +45,7 @@ internal static class AgentGit
     public static string Ok(MemberCheckout checkout, params string[] args)
     {
         var r = Run(checkout, args);
+        if (r.ExitCode != 0) SandboxGit.SkipIfShCouldNotStart(r.Stderr);
         Assert.True(r.ExitCode == 0, $"git {string.Join(' ', args)}: {r.Stderr}");
         return r.Stdout;
     }
@@ -58,12 +61,14 @@ internal static class AgentGit
             foreach (var name in new[] { "SystemRoot", "windir" })
                 if (Environment.GetEnvironmentVariable(name) is { } value) psi.Environment[name] = value;
         foreach (var (k, v) in env) psi.Environment[k] = v;
+        foreach (var o in TestTemp.GitOptions) psi.ArgumentList.Add(o);
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi)!;
         p.StandardInput.Close();
         var stdout = p.StandardOutput.ReadToEnd();
         var stderr = p.StandardError.ReadToEnd();
         p.WaitForExit();
+        if (p.ExitCode != 0) SandboxGit.SkipIfShCouldNotStart(stderr);
         Assert.True(p.ExitCode == 0, $"git {string.Join(' ', args)}: {stderr}");
         return stdout.ReplaceLineEndings("\n").TrimEnd();
     }
@@ -72,6 +77,7 @@ internal static class AgentGit
     public static string Host(string cwd, params string[] args)
     {
         var r = Run(cwd, Path.GetTempPath(), ["-c", "protocol.allow=never", "-c", "protocol.file.allow=always", .. args]);
+        if (r.ExitCode != 0) SandboxGit.SkipIfShCouldNotStart(r.Stderr);
         Assert.True(r.ExitCode == 0, $"git {string.Join(' ', args)}: {r.Stderr}");
         return r.Stdout;
     }

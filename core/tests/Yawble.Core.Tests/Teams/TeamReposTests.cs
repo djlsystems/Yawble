@@ -16,6 +16,7 @@ public class TeamReposTests
     [Fact]
     public async Task TheCloneIsTheRunLayoutsImplicitGrant_OnItsOwnBranch_WithNoRemoteAndNoCredentialHelper()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, ben) = f.Team();
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
@@ -70,6 +71,7 @@ public class TeamReposTests
     [Fact]
     public async Task FetchBack_BringsTheMembersBranchIntoTheTeamRepo_AndANewCloneResumesIt()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
@@ -181,6 +183,7 @@ public class TeamReposTests
     [Fact]
     public async Task ThePostRunCheck_RemovesRemotesCredentialHelpersAndCredentialFiles_AndRecordsThem()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
@@ -222,6 +225,7 @@ public class TeamReposTests
     [Fact]
     public async Task TheHostNeverRunsGitInsideAUsedClone_SoItsHooksAndFsmonitorNeverRun()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
@@ -260,6 +264,7 @@ public class TeamReposTests
     [Fact]
     public async Task AGitDirThatPointsElsewhere_IsRefusedAtFetchBack()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, ben) = f.Team();
         var adaCheckout = await f.Repos.PrepareAsync(ada, Ct);
@@ -277,6 +282,7 @@ public class TeamReposTests
     [Fact]
     public async Task AGitdirFileInsideTheClonesDotGit_OrAlternates_AreRefusedAtFetchBack_AndNothingElseIsRead()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, ben) = f.Team();
         var adaCheckout = await f.Repos.PrepareAsync(ada, Ct);
@@ -322,6 +328,7 @@ public class TeamReposTests
     [Fact]
     public async Task AtStartUp_TheCoreFetchesBackWorkOfARunTheLastProcessLeftOpen_AndWrapsRunsInClones()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
@@ -350,6 +357,7 @@ public class TeamReposTests
     [Fact]
     public async Task ThePostRunCheck_RemovesFilesTheAgentMadeReadOnly()
     {
+        SandboxGit.RequireLocalTransport();
         // Windows refuses to delete a read-only file and git cannot rename its config.lock over one; on every OS the
         // check must still remove the credential file and the remote, and the fetch-back still succeed.
         using var f = new TeamsFixture();

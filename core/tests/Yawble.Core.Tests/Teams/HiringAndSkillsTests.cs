@@ -168,6 +168,7 @@ public class HiringAndSkillsTests
     [Fact]
     public async Task TheSharedViewHoldsEveryMembersBranch_AndAMemberFetchesATeammatesWorkFromIt()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, ben) = f.Team();
         var adaCheckout = await f.Repos.PrepareAsync(ada, Ct);

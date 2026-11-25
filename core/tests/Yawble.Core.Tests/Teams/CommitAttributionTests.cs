@@ -116,6 +116,7 @@ public class CommitAttributionTests
     [Fact]
     public async Task FetchBack_RefusesABranchWithAttributedCommits_LeavesItUnchanged_AndTakesTheAmendedWork()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var checkout = await f.Repos.PrepareAsync(ada, Ct);

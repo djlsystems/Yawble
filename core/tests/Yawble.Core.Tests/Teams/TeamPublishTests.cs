@@ -23,6 +23,7 @@ public class TeamPublishTests
 
     private static async Task Commit(TeamsFixture f, MemberRef member, string file)
     {
+        SandboxGit.RequireLocalTransport();
         var checkout = await f.Repos.PrepareAsync(member, Ct);
         File.WriteAllText(Path.Combine(checkout.ClonePath, file), file);
         AgentGit.Ok(checkout, "add", file);
