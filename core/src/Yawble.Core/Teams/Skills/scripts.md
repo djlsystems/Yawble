@@ -8,7 +8,7 @@ roles: [concierge]
 A script is a JSON document (`yawble-script/1`): settings, the integrations it needs, variables, and a graph of
 steps. It is global (every team can use it) and every save keeps a new version. A team runs it as a **script
 member**: the core's script engine runs it on that member's triggers. It never runs a program and never calls a
-model. You build scripts for the person with your script tools; the person sees the same scripts in the
+model; a `tell` step gives work to the team's agents instead. You build scripts for the person with your script tools; the person sees the same scripts in the
 **Scripts** place.
 
 ## Your tools for scripts
@@ -123,6 +123,7 @@ top level). Every step must be reachable from `start`; a loop body must end with
 | `file.readAllText`, `file.readLines`, `file.exists` | `path`, `into`, `next` | reads (string, `list<string>`, bool) |
 | `file.delete` | `path`, `next` | deletes a file |
 | `log` | `text`, `next` | a line in the run's log |
+| `tell` | `member`, `team`, `text`, `wait`, `timeout`, `reply`, `into`, `next` | gives work to an agent member of a team (section Tell) |
 | `end` | `outputs` (optional) | ends the run, setting declared outputs |
 
 - File paths: relative ones are in the member's data folder; an absolute path must be in a folder the team granted
@@ -134,6 +135,35 @@ top level). Every step must be reachable from `start`; a loop body must end with
   the Connection fills (an account id) are left out of `args`; a form body's fields go in `args` by name.
 - Limits: a run timeout (10 minutes by default), a step budget, a cap on a loop's items. One run at a time per
   member.
+
+## Tell
+
+A script never runs an agent. A `tell` step gives work to an agent member of a team, as the person's tell does.
+
+```json
+{ "id": "triage", "type": "tell", "member": "Manager", "team": "Support",
+  "text": "A customer wrote about {m.subject}. Read it and decide if it is a refund request.",
+  "wait": true, "timeout": "4h", "reply": "TriageResult", "into": "triage", "next": "route" }
+```
+
+- `member`: an agent member's name, default `Manager`. Telling the Manager starts a workflow it plans. Telling another
+  agent member gives that member one card directly, in a workflow the Manager sees but does not plan. Script members
+  and the person cannot be told; a name that is not an agent member of the team when the step runs fails the step.
+- `team`: default the script member's own team. Another team is named here. Settings > Scripts **Scripts may tell
+  other teams** (on by default) turned off fails such a step with that reason.
+- `text`: the instruction, a template. The workflow says which script, member and run it came from.
+- `wait`: `false` (default) goes on at once. `true` parks the run (state `waiting`) until the workflow is done, fails
+  or is blocked, or `timeout` passes: `30m`, `4h`, `2d`; default `24h`, at most `7d`. A waiting run holds no run slot,
+  its run timeout stops, and it resumes after an app restart. It is still the member's run, so its triggers that fire
+  meanwhile are skipped: a poller that tells should not wait. Cancelling the run leaves the workflow alone.
+- `reply` (only with `wait`): a schema's name. The instruction asks the agent to end its answer with JSON of that
+  schema; a reply that does not match fails the step.
+- `into`: a variable of type `TellResult { outcome, workflow, reply, data }`. `outcome` is one of `sent` (`wait`
+  false), `done`, `failed`, `blocked`, `timedOut` or `dryRun`; `reply` is the agent's closing summary; `data` is the
+  reply's JSON (of the `reply` schema), or null.
+- A run tells at most 5 times (a member setting, at most 50); the next tell fails the run.
+- A dry run or a test run never sends a tell: the log says `would tell <member> of <team>: ...` and `into` gets
+  outcome `dryRun`. The Scripts place's Test run takes a made-up reply for each tell that waits.
 
 ## Values and expressions
 
@@ -156,7 +186,9 @@ top level). Every step must be reachable from `start`; a loop body must end with
 ## Patterns
 
 - **Fixed rules before agent steps.** Sort what you can with conditions (a known sender, a subject that
-  `matches`), and leave only the rest to judgment. Agent steps come later; until then a script has none.
+  `matches`), and `tell` an agent only about the rest. Each tell starts paid agent work.
+- **A poller tells without waiting.** A script on a short `every` trigger tells with `wait: false`; a waiting run
+  skips the member's triggers until it resumes.
 - **One item at a time for anything an agent writes that is sent.** Loop over the items with `forEach` and send each
   on its own, so one customer's text never ends up in another's message. Recipients come from settings or the
   data, never from what an agent wrote.

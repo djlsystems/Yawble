@@ -304,7 +304,7 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
 .node[data-kind=forEach] { background: var(--pill-violet-bg); color: var(--pill-violet-ink); border-style: dashed; }
 .node[data-kind=set] { background: var(--pill-info-bg); color: var(--pill-info-ink); }
 .node[data-kind=file] { background: var(--chip-claude-bg); color: var(--chip-claude-ink); border-radius: 2px 14px 2px 2px; }
-.node[data-kind=agent] { background: var(--chip-grok-bg); color: var(--chip-grok-ink); border-radius: 14px; }
+.node[data-kind=tell] { background: var(--chip-grok-bg); color: var(--chip-grok-ink); border-radius: 14px; }
 /* if / switch: a diamond drawn behind the text */
 .node.diamond { background: transparent; border: 0; color: var(--pill-yellow-ink); }
 .node.diamond::before { content: ''; position: absolute; inset: 0; background: var(--warn-line-strong); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }

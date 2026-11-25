@@ -27,6 +27,7 @@ const emit = defineEmits<{ add: [type: string] }>();
 .item[data-kind=forEach] { border-left: 4px solid var(--pill-violet-ink); }
 .item[data-kind=set] { border-left: 4px solid var(--pill-info-ink); }
 .item[data-kind=file] { border-left: 4px solid var(--chip-claude-ink); }
+.item[data-kind=tell] { border-left: 4px solid var(--chip-grok-ink); }
 .item[data-kind=end] { border-left: 4px solid var(--pill-green-ink); }
 .item[data-kind=other] { border-left: 4px solid var(--pill-neutral-ink); }
 .small { font-size: 11.5px; }

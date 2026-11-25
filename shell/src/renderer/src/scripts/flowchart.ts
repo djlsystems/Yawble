@@ -9,7 +9,7 @@
 import dagre from '@dagrejs/dagre';
 import type { Check, ScriptDocument, ScriptStep } from './types';
 
-export type FlowKind = 'start' | 'end' | 'integration' | 'if' | 'switch' | 'forEach' | 'set' | 'file' | 'agent' | 'other';
+export type FlowKind = 'start' | 'end' | 'integration' | 'if' | 'switch' | 'forEach' | 'set' | 'file' | 'tell' | 'other';
 export type EdgeKind = 'next' | 'then' | 'else' | 'case' | 'default' | 'body';
 
 export interface FlowNode {
@@ -18,7 +18,7 @@ export interface FlowNode {
   /** The step's `type` ('' for the start and end nodes). */
   stepType: string;
   title: string;
-  /** integration: use.action; if: the condition; switch: the value it branches on; forEach: "items as x". */
+  /** integration: use.action; if: the condition; switch: the value it branches on; forEach: "items as x"; tell: "tell Ava (waits)". */
   detail: string;
   position: { x: number; y: number };
   /** The check's messages for this step (the start node carries the document-wide ones). */
@@ -65,6 +65,7 @@ export const STEP_TYPES: readonly { type: string; kind: FlowKind; label: string;
   { type: 'file.readLines', kind: 'file', label: "Read a file's lines", template: { type: 'file.readLines', path: '', next: null } },
   { type: 'file.exists', kind: 'file', label: 'Check a file exists', template: { type: 'file.exists', path: '', next: null } },
   { type: 'file.delete', kind: 'file', label: 'Delete a file', template: { type: 'file.delete', path: '', next: null } },
+  { type: 'tell', kind: 'tell', label: 'Tell a team member', template: { type: 'tell', member: 'Manager', text: '', next: null } },
   { type: 'end', kind: 'end', label: 'End', template: { type: 'end' } },
 ];
 
@@ -93,6 +94,7 @@ export const PALETTE: readonly { group: string; blocks: readonly { key: string; 
     { key: 'integration', type: 'integration', kind: 'integration', label: 'Integration' },
     { key: 'file', type: 'file.readAllText', kind: 'file', label: 'File' },
     { key: 'log', type: 'log', kind: 'other', label: 'Log' },
+    { key: 'tell', type: 'tell', kind: 'tell', label: 'Tell' },
   ] },
 ];
 
@@ -108,8 +110,7 @@ export function withFileOperation(step: ScriptStep, type: string): ScriptStep {
 
 function kindOf(type: string): FlowKind {
   const known = STEP_TYPES.find((t) => t.type === type);
-  if (known) return known.kind;
-  return type === 'agent' ? 'agent' : 'other';
+  return known ? known.kind : 'other';
 }
 
 // ---- helpers
@@ -143,6 +144,13 @@ function conditionText(c: unknown): string {
   return show(c);
 }
 
+/** "tell Manager", "tell Ava (waits)"; another team adds it: "tell Manager of Billing". */
+export function tellDetail(step: ScriptStep): string {
+  const member = text(step.member)?.trim() || 'Manager';
+  const team = text(step.team)?.trim();
+  return `tell ${member}${team ? ` of ${team}` : ''}${step.wait === true ? ' (waits)' : ''}`;
+}
+
 function detailOf(step: ScriptStep): string {
   switch (step.type) {
     case 'integration': return `${text(step.use) ?? ''}.${text(step.action) ?? ''}`;
@@ -151,6 +159,7 @@ function detailOf(step: ScriptStep): string {
     case 'forEach': return `${show(step.items)} as ${text(step.as) ?? ''}`;
     case 'set': return `${text(step.var) ?? ''} = ${show(step.value)}`;
     case 'log': return show(step.text);
+    case 'tell': return tellDetail(step);
     case 'end': return step.outputs && typeof step.outputs === 'object' ? Object.keys(step.outputs).join(', ') : '';
     default: return kindOf(step.type) === 'file' ? show(step.path) : '';
   }

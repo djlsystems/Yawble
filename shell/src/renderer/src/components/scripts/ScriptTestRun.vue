@@ -46,6 +46,27 @@ function choicesFor(kind: string): BindingChoice[] {
   return same.length ? same : choices.value;
 }
 
+// A test run never sends a tell: a tell that waits takes the made-up reply typed here (JSON when it has a reply schema,
+// else text); one left empty gets no reply. TellResult.outcome is dryRun either way.
+const waitingTells = computed(() => (Array.isArray(props.doc?.steps) ? props.doc!.steps! : [])
+  .filter((st) => st && st.type === 'tell' && st.wait === true)
+  .map((st) => ({ id: st.id, reply: typeof st.reply === 'string' && st.reply ? st.reply : null })));
+const replies = reactive<Record<string, string>>({});
+/** The replies to send: JSON where the text is JSON (an object or a list), else the text. */
+function tellReplies(): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const t of waitingTells.value) {
+    const text = replies[t.id] ?? '';
+    if (!text.trim()) continue;
+    const trimmed = text.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try { out[t.id] = JSON.parse(trimmed); continue; } catch { /* sent as text: the core says what is wrong with it */ }
+    }
+    out[t.id] = text;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 const inputMode = ref<'fake' | 'sample'>('fake');
 const sample = ref('{\n  \n}');
 const dryRun = ref(true);
@@ -75,12 +96,14 @@ async function run() {
   }
   const bind: Record<string, string> = {};
   for (const r of requires.value) if (bindings[r.name]) bind[r.name] = bindings[r.name]!;
+  const made = tellReplies();
   busy.value = true;
   try {
     const r = await s.testRun({
       script: props.script.id, ...(props.version !== undefined ? { version: props.version } : {}),
       input: inputMode.value === 'fake' ? fakeTriggerFired(props.doc) : JSON.parse(sample.value),
       settings: set, bindings: bind, teamId: teamId.value, dryRun: dryRun.value,
+      ...(made ? { tellReplies: made } : {}),
     });
     result.value = r;
     emit('ran', r);
@@ -119,6 +142,15 @@ async function run() {
           <option value="">(not bound)</option>
           <option v-for="c in choicesFor(r.kind)" :key="`${c.kind}:${c.name}`" :value="c.name">{{ c.name }}</option>
         </select>
+      </label>
+    </fieldset>
+
+    <fieldset v-if="waitingTells.length" data-test="test-tell-replies">
+      <legend>Tells that wait</legend>
+      <p class="muted small">A test run does not send a tell. Type the reply each one gets, as if the agent had answered (left empty: no reply).</p>
+      <label v-for="t in waitingTells" :key="t.id" class="field" :data-test="`test-tell-reply-${t.id}`">
+        <span>Made-up reply for <code>{{ t.id }}</code> <span class="muted">{{ t.reply ? `(JSON of ${t.reply})` : '(text)' }}</span></span>
+        <textarea v-model="replies[t.id]" class="mono" rows="3" :placeholder="t.reply ? '{ }' : 'The closing summary'" data-test="test-tell-reply" />
       </label>
     </fieldset>
 
