@@ -430,6 +430,35 @@ public class ScriptTellRunnerTests
     }
 
     [Fact]
+    public async Task TheSettingsPair_DefaultsToTellOtherTeamsOn_SetsAndReadsBack_AndIsRefusedToAVisitor()
+    {
+        await using var r = await new Rig().InitAsync();
+        var rpc = r.Rpc();
+
+        // No app_defaults row: on.
+        Assert.Null(r.Db.OpenStore().AppDefault(ScriptRunStore.TellOtherTeamsKey));
+        Assert.True((await rpc.DispatchAsync("scripts.settings", new JsonObject(), Ct))!["tellOtherTeams"]!.GetValue<bool>());
+
+        // Set off, read back through the RPC, the store and the stored row.
+        var off = (await rpc.DispatchAsync("scripts.setSettings", new JsonObject { ["tellOtherTeams"] = false }, Ct))!.AsObject();
+        Assert.Equal("""{"tellOtherTeams":false}""", off.ToJsonString());
+        Assert.Equal("""{"tellOtherTeams":false}""", (await rpc.DispatchAsync("scripts.settings", new JsonObject(), Ct))!.ToJsonString());
+        Assert.False(r.Store.TellOtherTeams());
+        Assert.Equal("false", r.Db.OpenStore().AppDefault(ScriptRunStore.TellOtherTeamsKey));
+
+        // And on again.
+        Assert.True((await rpc.DispatchAsync("scripts.setSettings", new JsonObject { ["tellOtherTeams"] = true }, Ct))!["tellOtherTeams"]!.GetValue<bool>());
+        Assert.True((await rpc.DispatchAsync("scripts.settings", null, Ct))!["tellOtherTeams"]!.GetValue<bool>());
+
+        // A Visitor (read-only Cloud Link) may read the setting but not change it.
+        Assert.Null(Yawble.Core.Link.RemoteAccess.Refusal("scripts.settings", new JsonObject(), allowHostTerminals: false, Yawble.Core.Link.RemoteAccess.Read));
+        Assert.Equal(Yawble.Core.Link.RemoteAccess.ReadOnlyRefusal, Yawble.Core.Link.RemoteAccess.Refusal("scripts.setSettings",
+            new JsonObject { ["tellOtherTeams"] = false }, allowHostTerminals: false, Yawble.Core.Link.RemoteAccess.Read));
+        Assert.Null(Yawble.Core.Link.RemoteAccess.Refusal("scripts.setSettings",
+            new JsonObject { ["tellOtherTeams"] = false }, allowHostTerminals: false, Yawble.Core.Link.RemoteAccess.Full));
+    }
+
+    [Fact]
     public async Task MaxTells_IsAMemberSetting_ZeroToFifty()
     {
         await using var r = await new Rig().InitAsync();

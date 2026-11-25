@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import {
-  actionOf, CONDITION_OPS, expressionSuggestions, integrationOf, ioInText, ioOutText, isUnaryOp, NATIVE_TYPES, stepIO,
+  actionOf, CONDITION_OPS, expressionSuggestions, integrationOf, ioInText, ioOutText, isUnaryOp, NATIVE_TYPES, ownTellTeam, stepIO,
+  TELL_DEFAULT_MEMBER, TELL_DEFAULT_TIMEOUT, TELL_TIMEOUTS, tellMembers, tellTeamOf, timeoutProblem,
   type DesignContext, type MemberIntegration,
 } from '../../scripts/catalog';
 import type { ScriptStep, ScriptVariable } from '../../scripts/types';
@@ -45,6 +46,8 @@ function pickFileOp(e: Event) {
   emit('change', withFileOperation(copy(props.step), (e.target as HTMLSelectElement).value));
 }
 const hasNext = computed(() => !['if', 'switch', 'forEach', 'end'].includes(props.step.type));
+/** The steps whose result can be saved into a variable from this form (a new one too). */
+const hasInto = computed(() => props.step.type === 'integration' || props.step.type === 'tell');
 
 const setRef = (key: string) => (e: Event) => change((s) => { const v = (e.target as HTMLSelectElement).value; s[key] = v === '' ? null : v; });
 
@@ -122,6 +125,59 @@ function addInto() {
   const name = newName.value.trim();
   intoChoice.value = null;
   change((s) => { s.into = name; }, { name, type: newType.value.trim(), scope: 'run' });
+}
+
+// ---- tell
+// The team ('' = the script member's own team, so the step names none), the member (the team's agent members from the
+// catalog, the Manager first and by default), the text, and Wait; timeout and reply only mean something while it waits,
+// so turning Wait off removes them.
+const tellTargets = computed(() => props.ctx.catalog?.tellTargets ?? []);
+const ownTeam = computed(() => ownTellTeam(props.ctx.catalog));
+const otherTeams = computed(() => tellTargets.value.slice(1));
+const otherTeamsAllowed = computed(() => props.ctx.catalog?.tellOtherTeams !== false);
+/** The team select's value: '' for none named (or the own team named). */
+const tellTeam = computed(() => {
+  const t = str(props.step.team).trim();
+  return t && ownTeam.value && t.toLowerCase() === ownTeam.value.team.toLowerCase() ? '' : t;
+});
+const tellTeamKnown = computed(() => !tellTeam.value || otherTeams.value.some((t) => t.team.toLowerCase() === tellTeam.value.toLowerCase()));
+const tellMember = computed(() => str(props.step.member).trim() || TELL_DEFAULT_MEMBER);
+const memberChoices = computed(() => tellMembers(props.ctx.catalog, props.step));
+/** The catalog lists the step's team's agent members (it may not, opened from the library without a team). */
+const membersListed = computed(() => tellTeamOf(props.ctx.catalog, props.step) !== null);
+const waits = computed(() => props.step.wait === true);
+const timeoutText = computed(() => str(props.step.timeout));
+const timeoutError = computed(() => timeoutProblem(timeoutText.value));
+const replyName = computed(() => str(props.step.reply));
+
+function pickTeam(e: Event) {
+  const team = (e.target as HTMLSelectElement).value;
+  change((s) => {
+    if (team === '') delete s.team; else s.team = team;
+    // A member the new team does not have goes back to the Manager.
+    const listed = tellTeamOf(props.ctx.catalog, s);
+    const member = str(s.member).trim() || TELL_DEFAULT_MEMBER;
+    if (listed && member !== TELL_DEFAULT_MEMBER && !listed.members.includes(member)) s.member = TELL_DEFAULT_MEMBER;
+  });
+}
+function pickMember(e: Event) {
+  const member = (e.target as HTMLSelectElement).value;
+  change((s) => { s.member = member; });
+}
+function setWait(e: Event) {
+  const on = (e.target as HTMLInputElement).checked;
+  change((s) => {
+    if (on) { s.wait = true; return; }
+    delete s.wait; delete s.timeout; delete s.reply;
+  });
+}
+function setTimeoutText(e: Event) {
+  const t = (e.target as HTMLInputElement).value.trim();
+  change((s) => { if (t) s.timeout = t; else delete s.timeout; });
+}
+function pickReply(e: Event) {
+  const name = (e.target as HTMLSelectElement).value;
+  change((s) => { if (name) s.reply = name; else delete s.reply; });
 }
 
 // ---- if
@@ -223,19 +279,57 @@ function addOutput() {
           <button v-if="!readonly && action" type="button" class="mini" data-test="form-arg-remove" @click="setArg(k, undefined, false)">Remove</button>
         </div>
       </fieldset>
-      <label class="field">Save result into
-        <select :value="intoValue" :disabled="readonly" data-test="form-into" @change="pickInto">
-          <option value="">(don't save it)</option>
-          <option v-for="v in variables" :key="v.name" :value="v.name">{{ v.name }}: {{ v.type }}{{ io.out && io.out.type === v.type ? ' ✓' : '' }}</option>
-          <option v-if="!readonly" :value="NEW">New variable…</option>
+    </template>
+
+    <!-- tell -->
+    <template v-else-if="step.type === 'tell'">
+      <!-- Opened without a team (the library), the catalog lists no teams or members: both are typed. -->
+      <template v-if="!tellTargets.length">
+        <label class="field">Team
+          <input :value="tellTeam" :readonly="readonly" placeholder="the member's own team" spellcheck="false" data-test="form-tell-team-text"
+            @change="(e) => change((s) => { const v = (e.target as HTMLInputElement).value.trim(); if (v) s.team = v; else delete s.team; })" />
+        </label>
+        <label class="field">Member
+          <input :value="tellMember" :readonly="readonly" list="step-form-tell-members" spellcheck="false" data-test="form-tell-member-text"
+            @change="(e) => change((s) => { s.member = (e.target as HTMLInputElement).value.trim() || TELL_DEFAULT_MEMBER; })" />
+        </label>
+        <datalist id="step-form-tell-members"><option :value="TELL_DEFAULT_MEMBER" /></datalist>
+      </template>
+      <label v-if="tellTargets.length" class="field">Team
+        <select :value="tellTeam" :disabled="readonly" data-test="form-tell-team" @change="pickTeam">
+          <option value="">{{ ownTeam ? `${ownTeam.team} (own team)` : 'The member\'s own team' }}</option>
+          <option v-if="tellTeam && !tellTeamKnown" :value="tellTeam">{{ tellTeam }} (not a team here)</option>
+          <option v-for="t in otherTeams" :key="t.teamId" :value="t.team" :disabled="!otherTeamsAllowed">{{ t.team }}</option>
         </select>
       </label>
-      <div v-if="intoChoice === NEW" class="new row" data-test="form-into-new">
-        <input v-model="newName" placeholder="name" spellcheck="false" data-test="form-into-new-name" />
-        <input v-model="newType" list="step-form-types" placeholder="type" spellcheck="false" data-test="form-into-new-type" />
-        <button type="button" class="mini" :disabled="!!newProblem" :title="newProblem ?? ''" data-test="form-into-new-add" @click="addInto">Add</button>
-        <button type="button" class="mini" @click="intoChoice = null">Cancel</button>
-      </div>
+      <p v-if="!otherTeamsAllowed" class="muted small" data-test="form-tell-no-other-teams">Settings &gt; Scripts turns off telling other teams: a tell to another team fails.</p>
+      <label v-if="tellTargets.length" class="field">Member
+        <select :value="tellMember" :disabled="readonly" data-test="form-tell-member" @change="pickMember">
+          <option v-if="!memberChoices.includes(tellMember)" :value="tellMember">{{ tellMember }}{{ membersListed ? ' (not an agent member of the team)' : '' }}</option>
+          <option v-for="m in memberChoices" :key="m" :value="m">{{ m }}</option>
+        </select>
+      </label>
+      <p class="muted small">Telling the Manager starts a workflow it plans; telling another agent member gives that member one card.</p>
+      <ExpressionField name="tell-text" label="Text" type="string" required :model-value="step.text" :suggestions="suggestions" :readonly="readonly"
+        @update:model-value="(v) => change((s) => { s.text = v; })" />
+      <label class="check">
+        <input type="checkbox" :checked="waits" :disabled="readonly" data-test="form-tell-wait" @change="setWait" />
+        Wait for the outcome (the run waits until the workflow is done, fails or is blocked)
+      </label>
+      <template v-if="waits">
+        <label class="field">Timeout
+          <input :value="timeoutText" :readonly="readonly" list="step-form-timeouts" :placeholder="`${TELL_DEFAULT_TIMEOUT} (at most 7d)`" spellcheck="false"
+            data-test="form-tell-timeout" @change="setTimeoutText" />
+        </label>
+        <p v-if="timeoutError" class="warn small" data-test="form-tell-timeout-problem">{{ timeoutError }}</p>
+        <label class="field">Reply schema
+          <select :value="replyName" :disabled="readonly" data-test="form-tell-reply" @change="pickReply">
+            <option value="">(none: just the closing summary)</option>
+            <option v-if="replyName && !schemaNames.includes(replyName)" :value="replyName">{{ replyName }} (not a schema)</option>
+            <option v-for="n in schemaNames" :key="n" :value="n">{{ n }}</option>
+          </select>
+        </label>
+      </template>
     </template>
 
     <!-- if -->
@@ -357,6 +451,22 @@ function addOutput() {
 
     <p v-else class="muted small" data-test="form-other">Edit this step on the JSON tab.</p>
 
+    <template v-if="hasInto">
+      <label class="field">Save result into
+        <select :value="intoValue" :disabled="readonly" data-test="form-into" @change="pickInto">
+          <option value="">(don't save it)</option>
+          <option v-for="v in variables" :key="v.name" :value="v.name">{{ v.name }}: {{ v.type }}{{ io.out && io.out.type === v.type ? ' ✓' : '' }}</option>
+          <option v-if="!readonly" :value="NEW">New variable…</option>
+        </select>
+      </label>
+      <div v-if="intoChoice === NEW" class="new row" data-test="form-into-new">
+        <input v-model="newName" placeholder="name" spellcheck="false" data-test="form-into-new-name" />
+        <input v-model="newType" list="step-form-types" placeholder="type" spellcheck="false" data-test="form-into-new-type" />
+        <button type="button" class="mini" :disabled="!!newProblem" :title="newProblem ?? ''" data-test="form-into-new-add" @click="addInto">Add</button>
+        <button type="button" class="mini" @click="intoChoice = null">Cancel</button>
+      </div>
+    </template>
+
     <label v-if="hasNext" class="field">Next
       <select :value="str(step.next)" :disabled="readonly" data-test="form-next" @change="setRef('next')($event)">
         <option value="">(end)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
@@ -369,6 +479,7 @@ function addOutput() {
     </div>
 
     <datalist id="step-form-types"><option v-for="t in types" :key="t" :value="t" /></datalist>
+    <datalist id="step-form-timeouts"><option v-for="t in TELL_TIMEOUTS" :key="t" :value="t" /></datalist>
     <datalist id="step-form-outputs"><option v-for="o in declaredOutputs" :key="o.name" :value="o.name" /></datalist>
   </div>
 </template>
@@ -377,6 +488,7 @@ function addOutput() {
 .form { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
 .field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--ink-soft); }
 .field input, .field select, .case input, .output > input, .new input { font-size: 12px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
+.check { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; color: var(--ink-soft); }
 .group { border: 1px solid var(--line-soft); border-radius: 5px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; margin: 0; }
 .group legend { font-size: 11.5px; color: var(--muted); padding: 0 4px; }
 .row { display: flex; gap: 6px; align-items: center; }

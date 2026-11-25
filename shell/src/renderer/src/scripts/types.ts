@@ -49,7 +49,8 @@ export interface Step {
   seq: number; stepId: string; type: string; input: unknown; output: unknown; status: string; startedAt: string; endedAt: string | null;
 }
 
-export type RunStatus = 'running' | 'succeeded' | 'failed' | 'skipped' | 'interrupted';
+/** waiting: parked at a tell that waits, until its workflow is done, fails or is blocked, or the tell's timeout passes. */
+export type RunStatus = 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped' | 'interrupted';
 
 export interface Run {
   id: number; teamId: number; team: string; memberId: number | null; member: string | null; scriptId: number;
@@ -61,6 +62,8 @@ export interface Run {
   status: RunStatus;
   dryRun: boolean; test: boolean; input: unknown; outputs: Record<string, unknown> | null;
   failedStepId: string | null; reason: string | null; startedAt: string; endedAt: string | null;
+  /** The workflow a waiting run waits on (status waiting), else null; an older core leaves it out. */
+  waitWorkflowId?: number | null;
 }
 
 /** scripts.run { id }: the run with its steps and log. */
@@ -69,11 +72,17 @@ export interface RunDetail extends Run { steps: Step[]; log: { at: string; line:
 export interface TestRunParams {
   script: number | string; version?: number; input?: unknown; settings?: Record<string, unknown>;
   bindings?: Record<string, string>; teamId: number; dryRun?: boolean;
+  /** Made-up replies for tells that wait, by step id: text, or JSON for a tell with a reply schema. A test run never sends a tell. */
+  tellReplies?: Record<string, unknown>;
 }
 export interface TestRunResult {
   runId: number; status: RunStatus; failedStepId: string | null; reason: string | null;
   outputs: Record<string, unknown> | null; steps: Step[]; log: string[];
 }
+
+/** What a tell step puts into its variable. data: the reply's JSON, of the step's reply schema (null without one). */
+export type TellOutcome = 'sent' | 'done' | 'failed' | 'blocked' | 'timedOut' | 'dryRun';
+export interface TellResult { outcome: TellOutcome; workflow: number; reply: string; data: unknown }
 
 // ---- the script document, as far as the Scripts place reads it
 

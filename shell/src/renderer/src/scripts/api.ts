@@ -38,6 +38,15 @@ export const scriptsApi = (api: YawbleApi) => ({
 });
 export type ScriptsApi = ReturnType<typeof scriptsApi>;
 
+/** Settings > Scripts: what applies to every script member. tellOtherTeams: a tell may name another team (on by default). */
+export interface ScriptsAppSettings { tellOtherTeams: boolean }
+
+/** The core's app settings for scripts (scripts.tellOtherTeams): read, and set what is given. */
+export const scriptsSettingsApi = (api: YawbleApi) => ({
+  get: () => api.call<ScriptsAppSettings>('scripts.settings', {}),
+  set: (patch: Partial<ScriptsAppSettings>) => api.call<ScriptsAppSettings>('scripts.setSettings', { ...patch }),
+});
+
 /** An integration a requires entry can be bound to: its name (what bindings carry) and its kind (api, email). */
 export interface BindingChoice { name: string; kind: string }
 
