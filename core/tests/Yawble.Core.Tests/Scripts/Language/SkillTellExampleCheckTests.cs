@@ -6,11 +6,11 @@ using Yawble.Core.Skills;
 namespace Yawble.Core.Tests.Scripts.Language;
 
 /// <summary>
-/// Card 653 (tester helper): the tell example under the scripts skill's "## Tell" heading, taken verbatim from the skill,
+/// Tester helper: the tell example under the scripts skill's "## Tell" heading, taken verbatim from the skill,
 /// put into a script that defines what it names (a forEach giving <c>m</c>, a TriageResult schema, a TellResult variable
 /// <c>triage</c>, a <c>route</c> step) and checked with the real checker.
 /// </summary>
-public sealed class Card653SkillTellExampleTests
+public sealed class SkillTellExampleCheckTests
 {
     private static readonly ScriptSchema TriageResult = ScriptSchema.Parse("TriageResult", """
         { "type": "object", "properties": { "refund": { "type": "boolean" } }, "required": ["refund"] }
