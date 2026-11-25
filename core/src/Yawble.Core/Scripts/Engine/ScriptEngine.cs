@@ -93,7 +93,7 @@ public static class ScriptEngine
                 case "steps": value = _steps; return true;
             }
             for (var i = _frames.Count - 1; i >= 0; i--)
-                if (_frames[i].As == name)
+                if (!_frames[i].IsWhile && _frames[i].As == name)
                 {
                     var f = _frames[i];
                     value = f.Index < f.Items.Count ? f.Items[f.Index] : null;
@@ -306,12 +306,20 @@ public static class ScriptEngine
                 _vars[v.Name] = ScriptValues.Convert(ScriptValues.FromNode(v.Initial), _varTypes[v.Name], Find);
         }
 
-        /// <summary>After a step: a null successor ends the innermost body, which moves its loop to the next item or past it.</summary>
+        /// <summary>
+        /// After a step: a null successor ends the innermost body, which moves its loop to the next item or past it. A while's pass
+        /// ends by going back to the while step, which checks its condition again (a step of its own, saved like any other).
+        /// </summary>
         private void Advance()
         {
             while (_next is null && _frames.Count > 0)
             {
                 var frame = _frames[^1];
+                if (frame.IsWhile)
+                {
+                    _next = frame.StepId;
+                    return;
+                }
                 var loop = _doc.Step(frame.StepId)!;
                 frame.Index++;
                 if (frame.Index < frame.Items.Count)
@@ -354,6 +362,7 @@ public static class ScriptEngine
                 ScriptStepTypes.FileReadAllText or ScriptStepTypes.FileReadLines or ScriptStepTypes.FileExists or ScriptStepTypes.FileDelete => Pick("path"),
                 "log" => Pick("text"),
                 ScriptTell.StepType => Pick("member", "team", "text", "wait", "timeout", "reply"),
+                ScriptCode.StepType => new JsonObject { ["inputs"] = ev.EvaluateValue(step["inputs"]) ?? new JsonObject() },
                 "end" => step["outputs"] is { } o ? new JsonObject { ["outputs"] = ev.EvaluateValue(o) } : null,
                 _ => null,
             };
@@ -394,6 +403,10 @@ public static class ScriptEngine
                     _frames.Add(new ScriptLoopFrame { StepId = step.Id, As = name, Items = (JsonArray)items.DeepClone(), Index = 0 });
                     return (output, body);
                 }
+                case ScriptLoop.StepType:
+                    return While(step);
+                case ScriptCode.StepType:
+                    return (await CodeAsync(step, input as JsonObject ?? []), next);
                 case "integration":
                     return (await IntegrationAsync(step, (JsonObject)input!), next);
                 case ScriptStepTypes.FileWriteAllText or ScriptStepTypes.FileAppendLine:
@@ -586,6 +599,60 @@ public static class ScriptEngine
             var errors = schema.Validate(json, Find);
             if (errors.Count > 0) throw new ScriptStepException($"the reply does not match {replyName}: {string.Join("; ", errors.Take(3))}");
             return json;
+        }
+
+        /// <summary>
+        /// A while: reached from outside it starts at pass 0; reached again at the end of a pass (its frame on top) it counts that
+        /// pass. Its condition false goes to then (the frame gone); true runs the body again, unless the passes reached max or the
+        /// loop cap, which fails the run.
+        /// </summary>
+        private (JsonNode? Output, string? Next) While(ScriptStep step)
+        {
+            var frame = _frames.Count > 0 && _frames[^1] is { IsWhile: true } top && top.StepId == step.Id ? top : null;
+            if (frame is not null) frame.Index++;
+            var passes = frame?.Index ?? 0;
+            var max = step["max"] is { } m && ScriptValues.FromNode(m) is long l ? (int)Math.Clamp(l, 1, ScriptLoop.MaxLimit) : ScriptLoop.DefaultMax;
+            var holds = ScriptCondition.Parse(step["when"]).Evaluate(Evaluator());
+            var output = new JsonObject { ["result"] = holds, ["passes"] = passes };
+            if (!holds)
+            {
+                if (frame is not null) _frames.RemoveAt(_frames.Count - 1);
+                return (output, step.Text("then"));
+            }
+            if (passes >= max) throw new ScriptStepException(ScriptLoop.RanMax(step.Id, max));
+            if (passes >= _req.LoopCap) throw new ScriptStepException($"the loop '{step.Id}' reached the loop cap of {_req.LoopCap} passes");
+            var body = step.Text("body") ?? throw new ScriptStepException("while has no body");
+            if (frame is null) _frames.Add(new ScriptLoopFrame { StepId = step.Id, IsWhile = true, Index = 0 });
+            return (output, body);
+        }
+
+        /// <summary>
+        /// A code step: runs the function on its evaluated inputs under the code limits (off the run's thread, so the run's
+        /// cancellation reaches it), writes what it logged, then checks the returned value against returns and keeps it.
+        /// </summary>
+        private async Task<JsonNode?> CodeAsync(ScriptStep step, JsonObject input)
+        {
+            var code = step.Text("code") ?? throw new ScriptStepException("code has no code");
+            var inputs = input["inputs"] as JsonObject ?? [];
+            ScriptCodeOutcome outcome;
+            try
+            {
+                outcome = await Task.Run(() => ScriptCode.Run(code, inputs, _req.CodeLimits, _ct), _ct);
+            }
+            catch (ScriptCodeException e)
+            {
+                foreach (var line in ScriptCode.LogOf(e)) await LogAsync(line);
+                throw new ScriptStepException(e.Message);
+            }
+            foreach (var line in outcome.Log) await LogAsync(line);
+
+            var returns = step.Text("returns") is { Length: > 0 } text
+                ? ScriptType.Parse(text, Find, out var why) ?? throw new ScriptStepException($"returns: {why}")
+                : ScriptType.Any;
+            JsonNode? value;
+            try { value = ScriptValues.Convert(ScriptValues.FromNode(outcome.Result), returns, Find); }
+            catch (ScriptValueException e) { throw new ScriptStepException($"the code returned {ScriptValues.Describe(ScriptValues.FromNode(outcome.Result))}, not {returns}: {e.Message}"); }
+            return Result(step, value);
         }
 
         private static string? OptText(JsonNode? input, string name) =>

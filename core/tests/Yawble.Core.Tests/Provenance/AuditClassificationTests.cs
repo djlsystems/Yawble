@@ -138,7 +138,7 @@ public class AuditClassificationTests
         "skills.save",
         // The script library, schemas, Test run and script members.
         "schemas.import", "schemas.save", "scripts.delete", "scripts.import", "scripts.memberAdd", "scripts.memberResetVariable", "scripts.memberUpdate",
-        "scripts.save", "scripts.testRun",
+        "scripts.save", "scripts.testRun", "scripts.setSettings", "scripts.cancelRun",
         "tasks.approve",
         "tasks.cancel",
         "tasks.decline",
