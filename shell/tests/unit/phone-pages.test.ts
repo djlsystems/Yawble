@@ -220,7 +220,7 @@ async function backlog(width: number) {
 }
 async function teamPage(width: number, behind = false, of = team) {
   screen(width);
-  const dialogs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, WorkflowsDialog: true, DocumentsDialog: true, LogsDialog: true };
+  const dialogs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, DocumentsDialog: true, LogsDialog: true };
   const w = keep(mount(TeamView, { props: { team: of, api: teamApi(behind), pollMs: 100_000 }, global: { stubs: dialogs } }));
   await settle();
   return w;

@@ -1,17 +1,19 @@
 // @vitest-environment happy-dom
 // On a phone (below 760 px) the team page's Documents and Workflows move from its header into the drawer,
-// under the open team's name; a tap closes the drawer and opens that team's dialog. The desktop keeps the header
+// under the open team's name; a tap closes the drawer and opens that team's Documents dialog, or the Workflows page
+// filtered to the team. The desktop keeps the header
 // buttons. Also: a dialog sheet's header never shrinks over its body (the Workflows title sat on its intro text).
 // A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import App from '../../src/renderer/src/App.vue';
 import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
+import { workflowsRequest } from '../../src/renderer/src/workflows/page';
 import { PHONE_BREAKPOINT, PHONE_QUERY } from '../../src/renderer/src/phone';
 import type { TeamSummary, YawbleApi } from '../../src/shared/api';
 
@@ -111,7 +113,7 @@ describe('the drawer on a phone: the open team\'s Documents and Workflows', () =
     expect(w.find('[data-test=drawer-team]').exists()).toBe(false);
   });
 
-  it('a tap on Documents closes the drawer and opens the team\'s documents; Workflows its workflows', async () => {
+  it('a tap on Documents closes the drawer and opens the team\'s documents; Workflows the Workflows page at the team', async () => {
     setWidth(390);
     const w = await mountApp();
     await openTeamPage(w);
@@ -127,10 +129,14 @@ describe('the drawer on a phone: the open team\'s Documents and Workflows', () =
 
     await w.get('[data-test=drawer-toggle]').trigger('click');
     await w.get('[data-test=drawer-team-workflows]').trigger('click');
-    await flushPromises();
+    for (let i = 0; i < 6; i++) await flushPromises();
     expect(drawerState(w)).toBe('closed');
-    expect(dialogTitles()).toEqual(['payments · workflows']);
-    expect(document.querySelector('.modal')?.classList.contains('sheet')).toBe(true);
+    expect(dialogTitles()).toEqual([]); // no dialog: the page
+    // The page is loaded when first opened (App.vue's async component).
+    await vi.waitFor(() => expect(w.find('[data-test=workflows-view]').exists()).toBe(true));
+    await flushPromises();
+    expect(w.get('[data-test=phone-title]').text()).toBe('Workflows');
+    expect((w.get('[data-test=workflows-team-filter]').element as HTMLSelectElement).value).toBe('1');
   });
 
   it('on the desktop: no team group in the sidebar; the header keeps both buttons', async () => {
@@ -174,20 +180,21 @@ describe('the team page header', () => {
     expect(dialogTitles()).toEqual(['payments · documents']);
   });
 
-  it('on the desktop: both buttons, opening their dialogs; openWorkflows(id) still selects a workflow', async () => {
+  it('on the desktop: both buttons; Documents opens its dialog, Workflows the Workflows page for the team (no dialog)', async () => {
     setWidth(1024);
     const w = await mountTeam();
     await w.get('[data-test=open-documents]').trigger('click');
     await flushPromises();
     expect(dialogTitles()).toEqual(['payments · documents']);
     await w.get('[data-test=modal-close]').trigger('click');
-    await w.get('[data-test=open-workflows]').trigger('click');
+    const b = w.get('[data-test=open-workflows]');
+    expect(b.text()).toBe('Workflows');
+    expect(b.attributes('title')).toMatch(/Workflows page/);
+    await b.trigger('click');
     await flushPromises();
-    expect(dialogTitles()).toEqual(['payments · workflows']);
-    await w.get('[data-test=modal-close]').trigger('click');
-    (w.vm as unknown as { openWorkflows: (id?: number) => void }).openWorkflows(42);
-    await nextTick();
-    expect(dialogTitles()).toEqual(['payments · workflows']);
+    expect(dialogTitles()).toEqual([]);
+    expect(workflowsRequest.value).toMatchObject({ teamId: 1 });
+    expect(workflowsRequest.value?.workflow ?? null).toBeNull();
   });
 
   it('follows the width: the buttons go below 760 px and come back at 760 px', async () => {

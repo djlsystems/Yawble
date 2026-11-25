@@ -1,10 +1,9 @@
-// A read-only Visitor's workflows dialog in a real browser (headless Chrome), against the FAKE core of
-// phone-remote.spec.ts (remote.html, canned answers). Opened at #workflow=10: the team's page with its workflows and
-// that workflow selected. For a Visitor its Nudge and Close are disabled (v-change, the read-only title), and a call
-// forced past the screen (bus.nudgeWorkflow, bus.closeWorkflow on the page's own socket) is refused by the fake, as
-// core's RemoteAccess refuses it. With full access the same buttons are enabled.
-//
-//   npx playwright test workflows-visitor      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// A read-only Visitor's Workflows page in a real browser (headless Chrome), against the FAKE core of
+// phone-remote.spec.ts (remote.html, canned answers). Opened at #workflow=10: the Workflows page with that workflow's
+// pane open. For a Visitor the pane has no Nudge, Stop or Close (nothing to tap, nothing called), and a call forced past
+// the screen (bus.nudgeWorkflow, bus.closeWorkflow, bus.stopWorkflow on the page's own socket) is refused by the fake,
+// as core's RemoteAccess refuses it. With full access the running one's Stop and Close are there and asked first.
+////   npx playwright test workflows-visitor      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import { type Access } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
@@ -25,32 +24,26 @@ async function open(browser: Browser, access: Access, w = 1280, h = 800) {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${s.url}#workflow=10`);
-  await expect(page.locator('[data-test=workflow-10]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-test=workflow-pane][data-id="10"]')).toBeVisible({ timeout: 30_000 });
   return { s, page, ctx, errors };
 }
 
 for (const [w, h] of [[1280, 800], [375, 667]] as const) {
-  test(`Visitor at ${w}x${h}, #workflow=10: Nudge and Close are disabled with the read-only title`, async ({ browser }) => {
+  test(`Visitor at ${w}x${h}, #workflow=10: the pane has no Nudge, Stop or Close, and nothing is called`, async ({ browser }) => {
     const { s, page, ctx, errors } = await open(browser, 'read', w, h);
-    const wf = page.locator('[data-test=workflow-10]');
-    await expect(wf).toHaveAttribute('aria-current', 'true');
+    const pane = page.locator('[data-test=workflow-pane]');
     await expect(page.locator('[data-test=remote-access-chip]')).toBeVisible();
-    for (const b of ['workflow-nudge', 'workflow-close']) {
-      const btn = wf.locator(`[data-test=${b}]`);
-      await expect(btn, b).toBeDisabled();
-      await expect(btn, b).toHaveAttribute('title', /read-only access/);
-    }
-    // A tap on a disabled button opens nothing: no note field, no confirm button, no call.
-    await wf.locator('[data-test=workflow-nudge]').click({ force: true });
-    await expect(wf.locator('[data-test=workflow-text]')).toHaveCount(0);
-    await expect(wf.locator('[data-test=workflow-confirm]')).toHaveCount(0);
+    await expect(pane.locator('[data-test=workflow-pane-title]')).toHaveText('Partial refunds');
+    await expect(pane.locator('[data-test=workflow-pane-actions]')).toHaveCount(0);
+    for (const b of ['workflow-pane-nudge', 'workflow-pane-stop', 'workflow-pane-close-wf', 'workflow-pane-extend']) await expect(pane.locator(`[data-test=${b}]`), b).toHaveCount(0);
+    await expect(page.locator('[data-test=confirm-dialog]')).toHaveCount(0);
     expect(s.core.calls).not.toContain('bus.nudgeWorkflow');
     expect(s.core.calls).not.toContain('bus.closeWorkflow');
+    expect(s.core.calls).not.toContain('bus.stopWorkflow');
     expect(errors).toEqual([]);
     await ctx.close();
   });
 }
-
 test('Visitor: a nudge or close forced on the page\'s socket is refused by the fake (as core refuses it)', async ({ browser }) => {
   const { s, page, ctx } = await open(browser, 'read');
   const replies = await page.evaluate(async () => {
@@ -72,14 +65,19 @@ test('Visitor: a nudge or close forced on the page\'s socket is refused by the f
   await ctx.close();
 });
 
-test('full access, #workflow=10: Nudge and Close are enabled and Nudge opens its confirm button, enabled', async ({ browser }) => {
-  const { page, ctx, errors } = await open(browser, 'full');
-  const wf = page.locator('[data-test=workflow-10]');
+test('full access, #workflow=10: the running one has Stop and Close, and Stop asks first (declined: nothing sent)', async ({ browser }) => {
+  const { s, page, ctx, errors } = await open(browser, 'full');
+  const pane = page.locator('[data-test=workflow-pane]');
   await expect(page.locator('[data-test=remote-access-chip]')).toHaveCount(0);
-  await expect(wf.locator('[data-test=workflow-nudge]')).toBeEnabled();
-  await expect(wf.locator('[data-test=workflow-close]')).toBeEnabled();
-  await wf.locator('[data-test=workflow-nudge]').click();
-  await expect(wf.locator('[data-test=workflow-confirm]')).toBeEnabled();
+  await expect(pane.locator('[data-test=workflow-pane-stop]')).toBeEnabled();
+  await expect(pane.locator('[data-test=workflow-pane-close-wf]')).toBeEnabled();
+  await expect(pane.locator('[data-test=workflow-pane-nudge]')).toHaveCount(0); // a run is on it
+  await pane.locator('[data-test=workflow-pane-stop]').click();
+  await expect(page.locator('[data-test=confirm-message]')).toHaveText('Stop what runs in #10 now? The workflow stays open.');
+  await expect(page.locator('[data-test=confirm-ok]')).toBeEnabled();
+  await page.locator('[data-test=confirm-cancel]').click();
+  await expect(page.locator('[data-test=confirm-dialog]')).toHaveCount(0);
+  expect(s.core.calls).not.toContain('bus.stopWorkflow');
   expect(errors).toEqual([]);
   await ctx.close();
 });

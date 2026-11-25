@@ -44,6 +44,16 @@ async function open(browser: Browser, o: { access?: Access; w?: number; h?: numb
   return { s, page, ctx, errors };
 }
 
+/** The Workflows page at #workflow=N: the page shows, workflow N's pane is open; returns the pane's overall time.
+ * (On a phone the page's rows hide while a pane is open, so the pane's Time block is the overall time at every width.) */
+async function paneTime(page: Page, id: number) {
+  await expect(page.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 30_000 });
+  const pane = page.locator('[data-test=workflow-pane]');
+  await expect(pane).toHaveAttribute('data-id', String(id), { timeout: 15_000 });
+  await expect(page.locator('[role=dialog]')).toHaveCount(0);
+  return pane.locator('[data-test=workflow-pane-time] [data-test=overall-time]');
+}
+
 async function board(page: Page) {
   await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
   const nav = page.locator('[data-test=nav-board]').first();
@@ -127,8 +137,9 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
 
     test(`a workflow's overall time opens its timeline at ${w} (${theme})`, async ({ browser }) => {
       const { s, page, ctx, errors } = await open(browser, { w, h, theme, hash: '#workflow=10' });
-      await expect(page.locator('[data-test=workflow-10]')).toBeVisible({ timeout: 30_000 });
-      await page.locator('[data-test=workflow-10] [data-test=overall-time]').click();
+      const time = await paneTime(page, 10);
+      await expect(time).toHaveText(/\dh \d\dm \d\ds/);
+      await time.click();
       const dlg = page.locator('[data-test=timeline-dialog]');
       await expect(dlg).toBeVisible();
       await expect(dlg).toHaveAttribute('data-kind', 'workflow');
@@ -154,10 +165,8 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
 
 for (const [w, h, theme] of [[1280, 800, 'light'], [375, 667, 'dark']] as const) {
   test(`a long quiet gap is compressed behind a break mark at ${w} (${theme})`, async ({ browser }) => {
-    const { page, ctx, errors } = await open(browser, { w, h, theme, expiry: true, hash: '#workflow=10' });
-    const row = page.locator('[data-test=workflow-12]');
-    await expect(row).toBeVisible({ timeout: 30_000 });
-    await row.locator('[data-test=overall-time]').click();
+    const { page, ctx, errors } = await open(browser, { w, h, theme, expiry: true, hash: '#workflow=12' });
+    await (await paneTime(page, 12)).click();
     const dlg = page.locator('[data-test=timeline-dialog]');
     await expect(dlg).toBeVisible();
     await expect(dlg.locator('[data-test=timeline-break]').first()).toBeAttached();
@@ -177,7 +186,7 @@ for (const [w, h, theme] of [[1280, 800, 'light'], [375, 667, 'dark']] as const)
 // .band / .mk out of the 44 px minimum.
 test('F1: at 375 the bands stay inside their track and the markers keep their size', async ({ browser }) => {
   const { page, ctx } = await open(browser, { w: 375, h: 667, hash: '#workflow=10' });
-  await page.locator('[data-test=workflow-10] [data-test=overall-time]').click();
+  await (await paneTime(page, 10)).click();
   await expect(page.locator('[data-test=timeline-band]').first()).toBeVisible();
   const m = await page.evaluate(() => {
     const box = (e: Element) => e.getBoundingClientRect();
@@ -195,8 +204,8 @@ test('F1: at 375 the bands stay inside their track and the markers keep their si
 // ("≈ 2d 17h") drew over the end label ("now"). Now it slides clear of the start / end labels, or hides if no room.
 for (const [w, h] of [[1280, 800], [375, 667]] as const) {
   test(`F3: a break label near the axis end never meets the start / end labels at ${w}`, async ({ browser }) => {
-    const { page, ctx, errors } = await open(browser, { w, h, expiry: true, hash: '#workflow=10' });
-    await page.locator('[data-test=workflow-12] [data-test=overall-time]').click();
+    const { page, ctx, errors } = await open(browser, { w, h, expiry: true, hash: '#workflow=12' });
+    await (await paneTime(page, 12)).click();
     const dlg = page.locator('[data-test=timeline-dialog]');
     await expect(dlg.locator('[data-test=timeline-break-label]').first()).toBeAttached();
     await expect.poll(async () => page.evaluate(() => {

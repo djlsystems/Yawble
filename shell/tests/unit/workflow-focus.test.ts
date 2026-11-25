@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../src/renderer/src/App.vue';
 import BacklogView from '../../src/renderer/src/board/BacklogView.vue';
 import type { YawbleApi } from '../../src/shared/api';
@@ -13,15 +13,29 @@ const backlog = [1, 2, 3].map((id) => ({
   archivedAt: null, dispatchedTeam: null, dispatchedWorkflow: null, dispatchedAt: null, inFlight: false, dispatchCount: 0,
 }));
 
+/** The Workflows page's rows (workflows.list / workflows.get) for the same workflows. */
+const pageRow = (w: (typeof workflows)[number]) => ({
+  ...w, ownerId: 1, endedAt: w.state === 'completed' ? w.lastAt : null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null, time: null,
+  team: 'payments', teamId: 1, waitingFor: null, working: false, item: null, members: [], status: w.state === 'completed' ? 'completed' : 'idle',
+});
+const calls: { method: string; p: any }[] = [];
+
 function api(): YawbleApi {
   return {
     getInfo: async () => { throw new Error('no'); },
     getAvailableBackends: async () => [],
     call: async (method: string, p?: any) => {
+      calls.push({ method, p });
       switch (method) {
         case 'app.overview': return { slots: { running: 0, limit: 8, queued: 0 }, teams: [{ id: 1, name: 'payments', repoPath: null, members: 1, running: 0, queued: 0 }] } as any;
         case 'link.status': return { state: 'off', viewers: [] } as any;
         case 'bus.workflows': return workflows as any;
+        case 'workflows.list': return { workflows: workflows.map(pageRow), counts: { all: 3, open: 1, needsYou: 0, done: 2, closed: 0, completedToday: 0 }, truncated: false, backlog: true, now: '' } as any;
+        case 'workflows.get': {
+          const w = workflows.find((x) => x.id === p.workflow);
+          if (!w) throw Object.assign(new Error('no such workflow'), { code: 'no_such_workflow' });
+          return { workflow: pageRow(w), cards: [], messages: [], spec: null, backlog: true } as any;
+        }
         case 'backlog.list': return backlog as any;
         case 'backlog.item': return { ...backlog.find((i) => i.id === p.id), dispatches: [] } as any;
         case 'monitor.messages': return { end: 0, messages: [] } as any;
@@ -40,48 +54,59 @@ async function clickMonitorWorkflow(id: number) {
   await w.get('[data-test=nav-monitor]').trigger('click');
   for (let i = 0; i < 4; i++) await flushPromises();
   await w.findAll('[data-test=monitor-workflow]').find((b) => b.attributes('data-id') === String(id))!.trigger('click');
+  await vi.waitFor(() => expect(w.find('[data-test=workflows-view]').exists()).toBe(true)); // loaded when first opened
   for (let i = 0; i < 6; i++) await flushPromises();
   return w;
 }
 
-describe('a workflow clicked on the Monitor', () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = ''; });
+const selectedRows = (w: Awaited<ReturnType<typeof clickMonitorWorkflow>>) =>
+  w.findAll('[data-test=workflows-row]').filter((e) => e.classes().includes('sel')).map((e) => Number(e.attributes('data-wf')));
+const teamFilter = (w: Awaited<ReturnType<typeof clickMonitorWorkflow>>) => (w.get('[data-test=workflows-team-filter]').element as HTMLSelectElement).value;
 
-  it("opens its team's workflows with that workflow selected", async () => {
+describe('a workflow clicked on the Monitor', () => {
+  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = ''; calls.length = 0; history.replaceState(null, '', '/'); });
+
+  it('opens the Workflows page at that workflow: its team, All, selected, its pane open, no dialog', async () => {
     const w = await clickMonitorWorkflow(413);
-    const sel = w.findAll('[data-test^=workflow-]').filter((e) => e.classes().includes('sel'));
-    expect(sel.map((e) => e.attributes('data-test'))).toEqual(['workflow-413']);
-    expect(w.get('[data-test=workflow-413]').attributes('aria-current')).toBe('true');
+    expect(w.find('[data-test=monitor-workflow]').exists()).toBe(false); // the page, not the Monitor
+    expect(w.find('[data-test=workflows-view]').exists()).toBe(true);
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(selectedRows(w)).toEqual([413]);
+    expect(w.get('[data-test=workflow-pane]').attributes('data-id')).toBe('413');
+    expect(teamFilter(w)).toBe('1');
+    expect(w.get('[data-test=workflows-chip-all]').attributes('aria-selected')).toBe('true');
     expect(w.find('[data-test=backlog-row]').exists()).toBe(false);
     w.unmount();
   });
 
-  it('opens the dialog over the Monitor, and closing it stays on the Monitor', async () => {
+  it('Esc closes the pane and stays on the page, as on the page itself', async () => {
     const w = await clickMonitorWorkflow(413);
-    expect(w.find('[data-test=monitor-workflow]').exists()).toBe(true); // still the Monitor, not the team's page
-    await w.get('[data-test=modal-close]').trigger('click');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     for (let i = 0; i < 4; i++) await flushPromises();
-    expect(w.find('[data-test=workflow-413]').exists()).toBe(false);
-    expect(w.find('[data-test=monitor-workflow]').exists()).toBe(true);
+    expect(w.find('[data-test=workflow-pane]').exists()).toBe(false);
+    expect(w.find('[data-test=workflows-view]').exists()).toBe(true);
     w.unmount();
   });
 
-  it("the team's workflows header opens the dialog over the Monitor too", async () => {
+  it("the team's workflows header opens the page at the team's workflows, nothing selected", async () => {
     const w = mount(App, { props: { api: api(), pollMs: 60_000 }, attachTo: document.body });
     await flushPromises();
     await w.get('[data-test=nav-monitor]').trigger('click');
     for (let i = 0; i < 4; i++) await flushPromises();
     await w.get('[data-test=monitor-workflows-team]').trigger('click');
+    await vi.waitFor(() => expect(w.find('[data-test=workflows-view]').exists()).toBe(true));
     for (let i = 0; i < 6; i++) await flushPromises();
-    expect(w.find('[data-test=workflow-413]').exists()).toBe(true);
-    expect(w.find('[data-test=monitor-workflow]').exists()).toBe(true);
+    expect(w.find('[data-test=workflows-view]').exists()).toBe(true);
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(teamFilter(w)).toBe('1');
+    expect(selectedRows(w)).toEqual([]);
+    expect(w.find('[data-test=workflow-pane]').exists()).toBe(false);
     w.unmount();
   });
 
   it('selects whichever workflow was clicked, whether or not it came from the backlog', async () => {
     const w = await clickMonitorWorkflow(77);
-    expect(w.get('[data-test=workflow-77]').classes()).toContain('sel');
-    expect(w.get('[data-test=workflow-413]').classes()).not.toContain('sel');
+    expect(selectedRows(w)).toEqual([77]);
     w.unmount();
   });
 });

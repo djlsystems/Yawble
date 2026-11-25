@@ -1,9 +1,8 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../src/renderer/src/App.vue';
-import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
-import { findWorkflowTeam, parseRemoteHash } from '../../src/renderer/src/remoteHash';
+import { parseRemoteHash } from '../../src/renderer/src/remoteHash';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
 import type { YawbleApi } from '../../src/shared/api';
 
@@ -47,33 +46,6 @@ describe('parseRemoteHash (the remote view opened from the org dashboard)', () =
   });
 });
 
-describe('findWorkflowTeam', () => {
-  const lists: Record<number, number[]> = { 1: [10, 11], 2: [20], 3: [30, 413] };
-  const asked: number[] = [];
-  const list = async (t: number) => { asked.push(t); if (t === 2) throw new Error('refused'); return lists[t] ?? []; };
-  beforeEach(() => { asked.length = 0; });
-
-  it('finds the team whose workflows hold the id, skipping a team whose list fails', async () => {
-    expect(await findWorkflowTeam(413, [1, 2, 3], list)).toBe(3);
-    expect(asked).toEqual([1, 2, 3]);
-  });
-
-  it('asks the hinted team first', async () => {
-    expect(await findWorkflowTeam(413, [1, 2, 3], list, 3)).toBe(3);
-    expect(asked).toEqual([3]);
-  });
-
-  it('a wrong or unknown hint still finds the right team', async () => {
-    expect(await findWorkflowTeam(11, [1, 2, 3], list, 3)).toBe(1);
-    expect(await findWorkflowTeam(11, [1, 2, 3], list, 99)).toBe(1);
-  });
-
-  it('null when no team has it', async () => {
-    expect(await findWorkflowTeam(999, [1, 2, 3], list)).toBeNull();
-    expect(await findWorkflowTeam(999, [], list)).toBeNull();
-  });
-});
-
 // ---- the remote view itself: App mounted as remote.html would, with the hash set ----
 
 const wf = (id: number) => ({ id, title: `Work ${id}`, owner: 'Manager', state: 'open', undeclared: false, busy: [], ending: null, startedAt: '', lastAt: '2026-11-16T10:00:00Z', messages: 2 });
@@ -87,7 +59,17 @@ const teams = [
 // huge: 250 (#2250 … #2001), so #2030 is the 221st newest, past core's most (200).
 const newestFirst = (top: number, n: number) => Array.from({ length: n }, (_, i) => top - i);
 const workflowsOf: Record<number, number[]> = { 1: [10, 11], 2: [413, 20], 3: newestFirst(1120, 120), 4: newestFirst(2250, 250) };
-const limits: Array<{ teamId: number; limit: number }> = [];
+const calls: { method: string; p: any }[] = [];
+const teamOf = (id: number) => Number(Object.keys(workflowsOf).find((t) => workflowsOf[Number(t)]!.includes(id)) ?? 0);
+/** A Workflows page row (workflows.list / workflows.get) for a workflow of the fake. */
+const pageRow = (id: number) => {
+  const t = teams.find((x) => x.id === teamOf(id))!;
+  return { ...wf(id), ownerId: 1, endedAt: null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null, time: null, team: t.name, teamId: t.id,
+    waitingFor: null, working: false, item: null, members: [], status: 'idle' };
+};
+/** The page's list: each team's newest 50 only, so an older workflow is not among its rows. */
+const listed = (teamId?: number) => Object.entries(workflowsOf).filter(([t]) => teamId === undefined || Number(t) === teamId)
+  .flatMap(([, ids]) => ids.slice(0, 50)).map(pageRow);
 
 function remoteApi(): YawbleApi {
   return {
@@ -95,13 +77,20 @@ function remoteApi(): YawbleApi {
     getInfo: async () => { throw new Error('no'); },
     getAvailableBackends: async () => [],
     call: async (method: string, p?: any) => {
+      calls.push({ method, p });
       switch (method) {
         case 'app.overview': return { slots: { running: 0, limit: 8, queued: 0 }, teams } as any;
         case 'bus.workflows': {
           // Core's limit: default 30, clamped to 1..200 (BusEngine.WorkflowsAsync).
-          const limit = Math.min(Math.max(p.limit ?? 30, 1), 200);
-          limits.push({ teamId: p.teamId, limit });
-          return (workflowsOf[p.teamId] ?? []).slice(0, limit).map(wf) as any;
+          return (workflowsOf[p.teamId] ?? []).slice(0, Math.min(Math.max(p.limit ?? 30, 1), 200)).map(wf) as any;
+        }
+        case 'workflows.list': {
+          const rows = listed(p?.teamId);
+          return { workflows: rows, counts: { all: rows.length, open: rows.length, needsYou: 0, done: 0, closed: 0, completedToday: 0 }, truncated: true, backlog: true, now: '' } as any;
+        }
+        case 'workflows.get': {
+          if (!teamOf(p.workflow)) throw Object.assign(new Error(`there is no workflow ${p.workflow}`), { code: 'no_such_workflow' });
+          return { workflow: pageRow(p.workflow), cards: [], messages: [], spec: null, backlog: true } as any;
         }
         case 'monitor.messages': return { end: 0, messages: [] } as any;
         case 'monitor.steps': return { end: 0, pending: false, steps: [] } as any;
@@ -113,141 +102,107 @@ function remoteApi(): YawbleApi {
   } as unknown as YawbleApi;
 }
 
-async function open(hash: string, readOnly = false) {
-  window.location.hash = hash;
-  applyRemoteAccess(readOnly ? 'read' : 'full');
-  const w = mount(App, { props: { api: remoteApi(), pollMs: 60_000 }, attachTo: document.body });
+/** Waits for the place the link opens; the Workflows page is loaded when first opened (App.vue's async component). */
+async function settle(w: VueWrapper, page: boolean) {
   for (let i = 0; i < 8; i++) await flushPromises();
+  if (page) await vi.waitFor(() => expect(w.find('[data-test=workflows-view]').exists()).toBe(true));
+  for (let i = 0; i < 8; i++) await flushPromises();
+}
+async function open(hash: string, opts: { readOnly?: boolean; page?: boolean } = {}) {
+  window.location.hash = hash;
+  applyRemoteAccess(opts.readOnly ? 'read' : 'full');
+  const w = mount(App, { props: { api: remoteApi(), pollMs: 60_000 }, attachTo: document.body });
+  await settle(w, opts.page ?? true);
   return w;
 }
+const teamFilter = (w: VueWrapper) => (w.get('[data-test=workflows-team-filter]').element as HTMLSelectElement).value;
+const selectedRows = (w: VueWrapper) => w.findAll('[data-test=workflows-row]').filter((e) => e.classes().includes('sel')).map((e) => Number(e.attributes('data-wf')));
+const pane = (w: VueWrapper) => w.find('[data-test=workflow-pane]');
 
 describe('the remote view opens where the link says', () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = ''; });
+  beforeEach(() => { localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = ''; calls.length = 0; });
   afterEach(() => { window.location.hash = ''; applyRemoteAccess('full'); });
 
-  it('#workflow=413 opens team web with workflow 413 selected', async () => {
+  it('#workflow=413 opens the Workflows page at it: its team (web) the filter, selected, its pane open, no dialog', async () => {
     const w = await open('#workflow=413');
-    expect(document.title).toContain('web');
-    expect(w.get('[data-test=workflow-413]').classes()).toContain('sel');
+    expect(teamFilter(w)).toBe('2');
+    expect(selectedRows(w)).toEqual([413]);
+    expect(pane(w).attributes('data-id')).toBe('413');
+    expect(document.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(w.find('[data-test=workflows-not-found]').exists()).toBe(false);
     w.unmount();
   });
 
-  it('a read-only Visitor can still open the thread', async () => {
-    const w = await open('#workflow=413', true);
+  it('a read-only Visitor can still open it', async () => {
+    const w = await open('#workflow=413', { readOnly: true });
     expect(document.documentElement.dataset.remoteAccess).toBe('read');
-    expect(w.get('[data-test=workflow-413]').classes()).toContain('sel');
+    expect(pane(w).attributes('data-id')).toBe('413');
     w.unmount();
   });
 
   it('#team=1 opens that team', async () => {
-    const w = await open('#team=1');
+    const w = await open('#team=1', { page: false });
     expect(document.title).toContain('payments');
-    expect(w.find('[data-test=workflow-10]').exists()).toBe(false);
+    expect(w.find('[data-test=workflows-view]').exists()).toBe(false);
     w.unmount();
   });
 
-  it('an unknown workflow, an unknown team, or garbage leaves the start page, with no error', async () => {
-    for (const h of ['#workflow=999', '#team=42', '#workflow=x']) {
-      const w = await open(h);
+  it('an unknown team or garbage leaves the start page, with no error', async () => {
+    for (const h of ['#team=42', '#workflow=x']) {
+      const w = await open(h, { page: false });
       expect(w.find('[data-test=concierge-hero]').exists()).toBe(true);
-      expect(w.find('[data-test^=workflow-]').exists()).toBe(false);
+      expect(w.find('[data-test=workflows-view]').exists()).toBe(false);
       expect(w.find('.error').exists()).toBe(false);
-      // A well-formed workflow id no team lists is named in a short note; a team or garbage is not.
-      expect(w.find('[data-test=hash-note]').exists()).toBe(h === '#workflow=999');
       w.unmount();
     }
   });
 
-  it('a workflow older than the newest 50 (the 91st newest of 120) opens selected', async () => {
-    limits.length = 0;
+  it('a workflow older than the page\'s rows (the 91st newest of 120) is read by itself and opens with its pane', async () => {
     const w = await open('#workflow=1030');
-    expect(document.title).toContain('busy');
-    expect(w.get('[data-test=workflow-1030]').classes()).toContain('sel');
-    expect(w.findAll('[data-test^=workflow-]').filter((e) => e.classes().includes('sel'))).toHaveLength(1);
-    expect(w.find('[data-test=workflow-not-found]').exists()).toBe(false);
-    // The dialog asked for 50, then for 200 to find it (other reads of the team page come and go around it).
-    const reads = limits.filter((l) => l.teamId === 3).map((l) => l.limit);
-    expect(reads.indexOf(50)).toBeGreaterThanOrEqual(0);
-    expect(reads.slice(reads.indexOf(50) + 1)).toContain(200);
+    expect(teamFilter(w)).toBe('3');
+    expect(pane(w).attributes('data-id')).toBe('1030');
+    expect(selectedRows(w)).toEqual([1030]);
+    expect(calls.some((c) => c.method === 'workflows.get' && c.p.workflow === 1030)).toBe(true);
+    expect(calls.some((c) => c.method === 'bus.workflows')).toBe(false); // no hunt through each team's newest
     w.unmount();
   });
 
-  it('a workflow past the newest 200 says it was not found instead of nothing', async () => {
+  it('one past every team\'s newest 200 opens too (the core knows it)', async () => {
     const w = await open('#workflow=2030');
-    expect(w.find('[data-test=concierge-hero]').exists()).toBe(true);
-    expect(w.get('[data-test=hash-note]').text()).toContain('Workflow #2030 was not found');
-    expect(w.find('.error').exists()).toBe(false);
-    await w.get('[data-test=hash-note-dismiss]').trigger('click');
-    expect(w.find('[data-test=hash-note]').exists()).toBe(false);
+    expect(teamFilter(w)).toBe('4');
+    expect(pane(w).attributes('data-id')).toBe('2030');
     w.unmount();
   });
 
-  it('past 200 with its team as the hint: that team opens at its Workflows, with the note there', async () => {
-    const w = await open('#workflow=2030&team=4');
-    expect(document.title).toContain('huge');
-    expect(w.get('[data-test=workflow-not-found]').text()).toBe("Workflow #2030 was not found among this team's newest 200 workflows.");
-    expect(w.find('[data-test=workflow-2250]').exists()).toBe(true);
-    expect(w.findAll('[data-test^=workflow-]').some((e) => e.classes().includes('sel'))).toBe(false);
-    expect(w.find('[data-test=hash-note]').exists()).toBe(false);
+  it('a workflow the core does not know: the page says "Workflow #N was not found", no pane; Dismiss hides it', async () => {
+    const w = await open('#workflow=999');
+    expect(w.get('[data-test=workflows-not-found]').text()).toContain('Workflow #999 was not found');
+    expect(pane(w).exists()).toBe(false);
+    expect(selectedRows(w)).toEqual([]);
+    expect(teamFilter(w)).toBe('');
+    expect(w.find('.error').exists()).toBe(false);
+    await w.get('[data-test=workflows-not-found-dismiss]').trigger('click');
+    expect(w.find('[data-test=workflows-not-found]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('unknown, with a known team as the hint: that team is the filter, with the note', async () => {
+    const w = await open('#workflow=999&team=4');
+    expect(teamFilter(w)).toBe('4');
+    expect(w.get('[data-test=workflows-not-found]').text()).toContain('Workflow #999 was not found');
+    expect(pane(w).exists()).toBe(false);
     w.unmount();
   });
 
   it('a later change of the hash opens the new place', async () => {
-    const w = await open('');
+    const w = await open('', { page: false });
     expect(w.find('[data-test=concierge-hero]').exists()).toBe(true);
     window.location.hash = '#workflow=11';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-    for (let i = 0; i < 8; i++) await flushPromises();
-    expect(w.get('[data-test=workflow-11]').classes()).toContain('sel');
+    await settle(w, true);
+    expect(teamFilter(w)).toBe('1');
+    expect(pane(w).attributes('data-id')).toBe('11');
     w.unmount();
   });
 });
 
-// ---- the Workflows dialog alone: focus over a long list ----
-
-describe('WorkflowsDialog opened at a workflow', () => {
-  beforeEach(() => { document.body.innerHTML = ''; limits.length = 0; });
-
-  async function dialog(team: number, focus: number) {
-    const w = mount(WorkflowsDialog, { props: { api: remoteApi(), team: teams.find((t) => t.id === team)!, pollMs: 60_000, focus }, attachTo: document.body });
-    for (let i = 0; i < 6; i++) await flushPromises();
-    return w;
-  }
-
-  it('among the newest 50: one read of 50, selected', async () => {
-    const w = await dialog(3, 1100);
-    expect(document.querySelector('[data-wf="1100"]')?.classList.contains('sel')).toBe(true);
-    expect(limits.map((l) => l.limit)).toEqual([50]);
-    w.unmount();
-  });
-
-  it('the 91st newest of 120: read again at 200, then selected and scrolled to', async () => {
-    const scrolled: string[] = [];
-    const orig = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.getAttribute('data-wf') ?? ''); };
-    try {
-      const w = await dialog(3, 1030);
-      expect(document.querySelector('[data-wf="1030"]')?.classList.contains('sel')).toBe(true);
-      expect(document.querySelectorAll('[data-wf]')).toHaveLength(120);
-      expect(limits.map((l) => l.limit)).toEqual([50, 200]);
-      expect(scrolled).toEqual(['1030']);
-      expect(w.find('[data-test=workflow-not-found]').exists()).toBe(false);
-      w.unmount();
-    } finally { Element.prototype.scrollIntoView = orig; }
-  });
-
-  it('past the newest 200: the newest 200 and a not-found note, nothing selected', async () => {
-    const w = await dialog(4, 2030);
-    expect(document.querySelectorAll('[data-wf]')).toHaveLength(200);
-    expect(document.querySelector('[data-wf].sel')).toBeNull();
-    expect(w.get('[data-test=workflow-not-found]').text()).toContain('#2030');
-    w.unmount();
-  });
-
-  it('a short list without it: no second read, "not found in this team"', async () => {
-    const w = await dialog(1, 999);
-    expect(limits.map((l) => l.limit)).toEqual([50]);
-    expect(w.get('[data-test=workflow-not-found]').text()).toBe('Workflow #999 was not found in this team.');
-    w.unmount();
-  });
-});

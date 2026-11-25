@@ -204,9 +204,9 @@ function workflowRows() {
       overallMs, rebuilt: false, breakdown: [...segs.map(([category, m]) => ({ category, ms: m * 60_000 })), ...(overallMs > known ? [{ category: 'idle', ms: overallMs - known }] : [])] };
   };
   const base = { undeclared: false, busy: [] as string[], ending: null as string | null, endedAt: null as string | null, expiredAt: null, expiresAt: null as string | null,
-    expiryWarning: null, question: null as number | null, waitingFor: null as string | null, working: false, item: null as unknown, members: [] as unknown[], ownerId: 1 };
+    expiryWarning: null as string | null, question: null as number | null, waitingFor: null as string | null, working: false, item: null as unknown, members: [] as unknown[], ownerId: 1 };
   const t1 = { team: 'payments', teamId: 1 }, t2 = { team: teamRows[1].name, teamId: 2 };
-  return [
+  return followExpiry([
     { ...base, ...t1, id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', status: 'running', working: true, busy: ['DeveloperAda is running'], startedAt: iso(120), lastAt: iso(1), messages: 14,
       item: { label: 'B011', title: 'Partial refunds', archived: false }, members: [{ id: 2, name: 'DeveloperAda', state: 'running' }, { id: 3, name: 'TesterBen', state: 'queued' }], time: timeline.workflow.time },
     { ...base, ...t1, id: 12, title: 'Refund limits per merchant', owner: 'Manager', state: 'open', status: 'needs-you', question: 3, startedAt: iso(400), lastAt: iso(30), messages: 6,
@@ -221,7 +221,18 @@ function workflowRows() {
       time: wfTime(9000, 4 * 1440, 'expired', [['not-started', 5], ['agent-working', 40]]) },
     { ...base, ...t2, id: 8, title: 'Try a new payment provider', owner: 'Manager', state: 'closed', status: 'closed', ending: 'Not now', startedAt: iso(6000), lastAt: iso(3000), endedAt: iso(3000), messages: 2,
       time: wfTime(6000, 3000, 'closed', [['not-started', 5], ['agent-working', 15]]) },
-  ];
+  ]);
+}
+/** The page rows follow the expiry fixtures as bus.workflows does: with setExpiry(true) #12 expires in 20 h and is warned (it waits on
+ *  question 3), and an Extend (bus.workflowExtend, on or off) sets the row's new expiresAt and drops its warning. */
+function followExpiry<T extends { id: number; state: string; question: number | null; expiresAt: string | null; expiryWarning: string | null }>(rows: T[]): T[] {
+  return rows.map((w) => {
+    if (w.state !== 'open') return w;
+    const extended = expiry.extended.get(w.id);
+    if (extended) return { ...w, expiresAt: extended, expiryWarning: null };
+    if (expiry.on && w.id === 12) return { ...w, expiresAt: later(20 * 60), expiryWarning: warningText(w.id, w.question ?? 3) };
+    return w;
+  });
 }
 const workflowChip: Record<string, (s: string) => boolean> = {
   all: () => true, open: (s) => ['running', 'needs-you', 'waiting', 'idle', 'stopped'].includes(s), 'needs-you': (s) => s === 'needs-you', done: (s) => s === 'completed', closed: (s) => s === 'closed' || s === 'expired',
@@ -295,7 +306,7 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   // reads, or sets with days. Like the core: returns the updated list item; an ended workflow is refused with already_ended.
   'bus.workflowExtend': (p) => {
     const id = Number(p?.workflow);
-    const w = [...workflows, ...(expiry.on ? expiryWorkflows() : [])].find((x) => x.id === id);
+    const w = [...workflows, ...(expiry.on ? expiryWorkflows() : [])].find((x) => x.id === id) ?? workflowRows().find((x) => x.id === id);
     if (w && w.state !== 'open') throw Object.assign(new Error(`workflow #${id} has already ended`), { code: 'already_ended' });
     const expiresAt = new Date(Date.now() + expiryDays(Number(p?.teamId ?? 1)) * 86400_000).toISOString();
     expiry.extended.set(id, expiresAt);
