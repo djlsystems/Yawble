@@ -130,8 +130,8 @@ const linkState = computed(() => link.value?.state ?? 'off');
 const linkTitle = computed(() => {
   const l = link.value;
   switch (l?.state) {
-    case 'connected': return `Cloud Link: connected to ${l.url}${l.viewers.length ? ` Â· viewing now: ${l.viewers.join(', ')}` : ''}`;
-    case 'connecting': return 'Cloud Link: connectingâ€¦';
+    case 'connected': return `Cloud Link: connected to ${l.url}${l.viewers.length ? ` · viewing now: ${l.viewers.join(', ')}` : ''}`;
+    case 'connecting': return 'Cloud Link: connecting…';
     case 'offline': return `Cloud Link: not connected, retrying${l.error ? ` (${l.error})` : ''}`;
     case 'pairing': return 'Cloud Link: waiting for the pairing code to be entered on the site';
     default: return 'Cloud Link: off. Attach this computer to a cloud site to see and drive it from a browser.';
@@ -303,7 +303,7 @@ async function rename(id: string, t: string) {
   void loadConversations();
 }
 
-// The chat being deleted: its row in the sidebar keeps "Deletingâ€¦" until the core answers.
+// The chat being deleted: its row in the sidebar keeps "Deleting…" until the core answers.
 const removingChat = ref<string | null>(null);
 async function remove(id: string) {
   if (removingChat.value) return;
@@ -325,7 +325,7 @@ function go(place: View) {
   if (place === 'teams') selected.value = null;
 }
 
-/** Opens Settings at a tab (the hint "Settings â†’ Agents", a member's link to the global guardrails). */
+/** Opens Settings at a tab (the hint "Settings → Agents", a member's link to the global guardrails). */
 function menu(item: SettingsTab) {
   // File > Settings opens the list of sections on a phone; a link to one section (Agents, About) opens that section.
   settingsLanding.value = item === 'general';
@@ -401,22 +401,22 @@ watch(gitRequest, (r) => {
 onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); window.removeEventListener('hashchange', openFromHash); });
 
 // The window's own title (taskbar, Alt+Tab) follows the place; the page shows its own heading.
-watch(title, (t) => { document.title = t ? `${t} Â· Yawble` : 'Yawble'; }, { immediate: true });
+watch(title, (t) => { document.title = t ? `${t} · Yawble` : 'Yawble'; }, { immediate: true });
 
 // ---- the menu bar (File, Edit, View, Help) and its shortcuts
 const desktop = typeof api.windowCommand === 'function';
 const isMac = api.platform === 'darwin';
-const mod = isMac ? 'âŒ˜' : 'Ctrl+';
+const mod = isMac ? '⌘' : 'Ctrl+';
 const menus = computed<Menu[]>(() => [
   { label: 'File', items: [
     { id: 'newChat', label: 'New chat', keys: `${mod}N` },
-    { id: 'newTeam', label: 'New teamâ€¦' },
+    { id: 'newTeam', label: 'New team…' },
     { separator: true },
     { id: 'settings', label: 'Settings', keys: `${mod},` },
-    ...(desktop ? [{ separator: true } as const, { id: 'quit', label: isMac ? 'Quit Yawble' : 'Exit', keys: isMac ? 'âŒ˜Q' : undefined }] : []),
+    ...(desktop ? [{ separator: true } as const, { id: 'quit', label: isMac ? 'Quit Yawble' : 'Exit', keys: isMac ? '⌘Q' : undefined }] : []),
   ] },
   ...(desktop ? [{ label: 'Edit', items: [
-    { id: 'undo', label: 'Undo', keys: `${mod}Z` }, { id: 'redo', label: 'Redo', keys: isMac ? 'â‡§âŒ˜Z' : 'Ctrl+Y' },
+    { id: 'undo', label: 'Undo', keys: `${mod}Z` }, { id: 'redo', label: 'Redo', keys: isMac ? '⇧⌘Z' : 'Ctrl+Y' },
     { separator: true } as const,
     { id: 'cut', label: 'Cut', keys: `${mod}X` }, { id: 'copy', label: 'Copy', keys: `${mod}C` }, { id: 'paste', label: 'Paste', keys: `${mod}V` },
     { id: 'selectAll', label: 'Select all', keys: `${mod}A` },
@@ -440,7 +440,7 @@ const menus = computed<Menu[]>(() => [
     ...(desktop ? [
       { separator: true } as const,
       { id: 'zoomIn', label: 'Zoom in', keys: `${mod}=` }, { id: 'zoomOut', label: 'Zoom out', keys: `${mod}-` }, { id: 'zoomReset', label: 'Actual size', keys: `${mod}0` },
-      // Developer tools is not on the menu; Ctrl+Shift+I / âŒ¥âŒ˜I still opens them (shortcut below), for diagnosing.
+      // Developer tools is not on the menu; Ctrl+Shift+I / ⌥⌘I still opens them (shortcut below), for diagnosing.
       { separator: true } as const,
       { id: 'reload', label: 'Reload', keys: `${mod}R` },
     ] : []),
@@ -596,7 +596,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           <TeamsList v-else-if="overview" class="team-grid-wrap" :teams="teams" :archived="archivedTeams" :api="api" :poll-ms="pollMs" :refresh="refresh"
             @open="openFromTeams" @settings="manageTeam = $event" @new-team="dialog = 'newTeam'" />
           <p v-else-if="error" class="error pad" data-test="teams-error">The teams could not be loaded: {{ error }}</p>
-          <div v-else class="pad" data-test="loading"><LoadingNote text="Loading teams (starting the core)â€¦" /></div>
+          <div v-else class="pad" data-test="loading"><LoadingNote text="Loading teams (starting the core)…" /></div>
         </section>
 
         <DocumentsView v-else-if="view === 'documents'" :teams="teams" :archived="archivedTeams" :api="api" :loading="!overview && !error" />

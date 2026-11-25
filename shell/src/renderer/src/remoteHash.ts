@@ -1,7 +1,7 @@
 // Where a link into the remote view asks it to open. The cloud site's org dashboard opens a row as
 // remote.html#workflow={wf} (the Workflows page at that workflow) and a "Needs attention" row as #team={id} (that team).
-// Both may be given (#workflow=12&team=3): the team is then a hint, the page's team filter when the core does not name the workflow's team. #terminal/<memberId> is an agent's
-// terminal window, picked by main.ts before anything here runs: this module leaves it alone. Pure: no window, no api.
+// Both may be given (#workflow=12&team=3): the team is then a hint, the page's team filter when the core does not name
+// the workflow's team. #terminal/<memberId> is an agent's terminal window, picked by main.ts before anything here runs: this module leaves it alone. Pure: no window, no api.
 
 export type HashTarget =
   | { kind: 'workflow'; workflow: number; team: number | null }
