@@ -328,3 +328,14 @@ describe('a script member on the team page', () => {
     expect(w.get('[data-test=script-member-version]').text()).toBe('inbox-sms-alert@latest (v2)');
   });
 });
+
+describe('script member pane layout', () => {
+  it('keeps each part of the body at its own height, so a file\'s lines never shrink to a sliver; the corners match the team cards', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync('src/renderer/src/components/ScriptMemberPane.vue', 'utf8');
+    expect(css).toMatch(/\.body \{[^}]*overflow: auto;[^}]*\}/);
+    expect(css).toMatch(/\.body > \* \{ flex: none; \}/);
+    expect(css).toMatch(/\.log \{[^}]*max-height: 160px;[^}]*overflow: auto;/);
+    expect(css).toMatch(/\.pane \{[^}]*border-radius: 14px;/);
+  });
+});

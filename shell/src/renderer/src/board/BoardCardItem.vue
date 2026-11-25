@@ -5,6 +5,7 @@ import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName } from '../faces/faces';
 import { cardFace, cardStatusLook } from './cards';
 import OverallTime from '../timeline/OverallTime.vue';
+import RunningOutline from '../components/RunningOutline.vue';
 import { hasTime } from '../timeline/time';
 
 // One card: the member's face in its state ring (none when unassigned), the item it comes from, the title, who and
@@ -35,7 +36,9 @@ const leaseTitle = computed(() => {
 </script>
 
 <template>
-  <button class="card" :class="{ selected }" :style="{ '--status': color }" :data-test="`board-card-${card.id}`" data-card @click="emit('open')">
+  <button class="card" :class="{ selected, running: card.status === 'running' }" :style="{ '--status': color }" :data-test="`board-card-${card.id}`" data-card @click="emit('open')">
+    <!-- Running: a dotted outline whose dots move clockwise, just inside the edge, as on running team and member cards. -->
+    <RunningOutline v-if="card.status === 'running'" :radius="7.5" />
     <div class="top">
       <MemberAvatar v-if="card.member" :team="card.team" :member="card.member" :state="cardFace(card)" :size="26" />
       <span v-else class="nobody" title="Unassigned">?</span>
@@ -63,6 +66,10 @@ const leaseTitle = computed(() => {
   border: 1px solid var(--line); border-left: 4px solid var(--status); background: color-mix(in srgb, var(--status) 5%, var(--surface)); cursor: pointer; }
 .card:hover { border-color: color-mix(in srgb, var(--status) 55%, var(--line)); border-left-color: var(--status); }
 .card.selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+/* Running: the border gives way to RunningOutline's dots. The left border is 1px like the others, the padding taking up
+   the 3px, so the dots sit evenly and nothing moves. Positioned only while running (the board's leave animation makes
+   a leaving card absolute). */
+.card.running, .card.running:hover { position: relative; border-color: transparent; border-left-width: 1px; padding-left: 13px; }
 .top { display: flex; gap: 6px; align-items: flex-start; }
 .nobody { width: 26px; height: 26px; margin: 4px; border-radius: 50%; border: 1.5px dashed var(--muted); color: var(--muted); display: grid; place-items: center; font-weight: 700; font-size: 12px; flex: none; }
 .what { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 3px; }
@@ -82,6 +89,7 @@ const leaseTitle = computed(() => {
 /* A phone: a roomier card, at least a 44 px tap target. */
 @media (max-width: 759.98px) {
   .card { min-height: 44px; padding: 10px 12px; }
+  .card.running, .card.running:hover { padding-left: 15px; }
   .title { font-size: 14px; }
 }
 </style>
