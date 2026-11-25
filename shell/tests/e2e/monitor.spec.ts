@@ -442,6 +442,15 @@ function seed(feed: Feed) {
 // ---------------------------------------------------------------------------------------------------------------------
 // 1. Workflow nodes
 
+/** A workflow node click opens the Workflows page (no dialog): the page shown, filtered to the team, the workflow's pane open. */
+const wfPaneOpen = (page: Page, id: number) => page.locator(`[data-test=workflows-view] [data-test=workflow-pane][data-id="${id}"]`);
+async function expectWorkflowsPage(page: Page, id: number, team = '1') {
+  await expect(page.locator('[data-test=workflows-view]')).toBeVisible();
+  await expect(wfPaneOpen(page, id)).toBeVisible();
+  await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue(team);
+  await expect(page.locator('[role=dialog]')).toHaveCount(0);
+}
+
 test('1 workflow nodes: open ones tied to their members (or hub), blocked look, completed flashes green and drifts, closed fades with a cross; a click opens it', async ({ browser }) => {
   const feed = new Feed();
   seed(feed);
@@ -498,11 +507,11 @@ test('1 workflow nodes: open ones tied to their members (or hub), blocked look, 
     f = await lastFrame(page);
     const n = wfNode(f, 12)!;
     await clickWorld(page, n.op, n);
-    if (await page.locator('[data-test=workflow-12]').count()) break;
+    if (await wfPaneOpen(page, 12).count()) break;
     await page.waitForTimeout(300);
   }
-  await expect(page.locator('[data-test=workflow-12]')).toHaveAttribute('aria-current', 'true');
-  r.clickOpens = 'workflow-12 selected in the Workflows dialog';
+  await expectWorkflowsPage(page, 12);
+  r.clickOpens = 'the Workflows page with workflow 12 open (team payments)';
   await shot(page, 'wf-04-click-opens-workflow');
   result.workflowNodes = r;
   expect(errors).toEqual([]);
@@ -524,10 +533,10 @@ test('1b a workflow node click with a team focused: the workflow opens; is the f
     f = await lastFrame(page);
     const n = wfNode(f, 10)!;
     await clickWorld(page, n.op, n);
-    if (await page.locator('[data-test=workflow-10]').count()) break;
+    if (await wfPaneOpen(page, 10).count()) break;
     await page.waitForTimeout(300);
   }
-  await expect(page.locator('[data-test=workflow-10]')).toHaveAttribute('aria-current', 'true');
+  await expectWorkflowsPage(page, 10);
   const focusAfter = await page.locator('[data-test=monitor-focus]').count();
   result.wfClickFocused = { workflowOpened: true, focusChipAfterClick: focusAfter };
   await shot(page, 'wf-05-click-while-focused');

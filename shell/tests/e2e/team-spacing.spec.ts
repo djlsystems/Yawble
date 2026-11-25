@@ -702,6 +702,9 @@ test('the spacing setting at 375 light: the phone cog shows Team spacing and mov
 // =====================================================================================================================
 // No panel; the node labels.
 
+/** A workflow node click opens the Workflows page with that workflow's pane (the old dialog is gone). */
+const wfOpened = (page: Page, id: number) => page.locator(`[data-test=workflows-view] [data-test=workflow-pane][data-id="${id}"]`);
+
 for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'open'], ['dark', 375, 'open'], ['light', 375, 'open'], ['dark', 1280, 'collapsed'], ['light', 1280, 'collapsed']] as const) {
   test(`labels ${theme} ${w} activity ${activity}: no panel, "#id title" as the rule, >= 8 px, overlaps, hover / click / drag`, async ({ browser }) => {
     const r: Record<string, any> = {};
@@ -751,7 +754,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       const tip = (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : null;
       await page.mouse.down(); await page.mouse.up();
       await page.waitForTimeout(300);
-      const opened = await page.locator('[data-test^=workflow-]').count();
+      const opened = await page.locator('[data-test=workflows-view], [data-test=workflow-pane], [role=dialog]').count();
       r.panelSpot.push({ x: Math.round(s.x), y: Math.round(s.y), tip, opened });
       if (opened) await page.keyboard.press('Escape');
     }
@@ -778,7 +781,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       for (let i = 1; i <= 8; i++) await page.mouse.move(box.x + s.x + i * 8, box.y + s.y + i * 4);
       await page.mouse.up();
       await page.waitForTimeout(500);
-      r.dragOpened = await page.locator(`[data-test=workflow-${target}]`).count();
+      r.dragOpened = await wfOpened(page, target).count();
       expect(r.dragOpened, 'a drag opens nothing').toBe(0);
     }
     await page.waitForTimeout(800);
@@ -789,10 +792,15 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       await page.waitForTimeout(120);
       await page.mouse.down(); await page.mouse.up();
       await page.waitForTimeout(400);
-      opened = await page.locator(`[data-test=workflow-${target}]`).count();
+      opened = await wfOpened(page, target).count();
     }
-    r.clickOpened = opened ? await page.locator(`[data-test=workflow-${target}]`).getAttribute('aria-current') : null;
-    expect(r.clickOpened, 'a click opens the workflow').toBe('true');
+    r.clickOpened = opened > 0;
+    expect(r.clickOpened, 'a click opens the workflow').toBe(true);
+    // On the Workflows page (no dialog), filtered to bravo (team 2), with the workflow's pane open.
+    await expect(page.locator('[data-test=workflows-view]')).toBeVisible();
+    await expect(wfOpened(page, target)).toBeVisible();
+    await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue('2');
+    await expect(page.locator('[role=dialog]')).toHaveCount(0);
     await page.screenshot({ path: path.join(NODES_DIR, 'screens', `click-opens-${tag}.png`) });
     console.log(`nodes ${tag}:`, JSON.stringify(r));
     expect(errors).toEqual([]);
