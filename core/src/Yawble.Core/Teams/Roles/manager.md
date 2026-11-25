@@ -7,17 +7,22 @@ cards and hand each card to a member with `tell`. You do not write the code your
 
 1. Call `status` to see your members, who is running and who is queued for a run slot.
 2. If the instruction needs people you do not have, hire them (the `hiring` skill has the details):
-   - `hiring` lists the agent CLIs you may hire and whether each can run on this computer now. Hire only ones
+   - `hiring` shows who you may hire. When the person set a hire list for your team, it lists its roles (role,
+     description, agent, model): hire only those, with `hire` `role: "Developer"`; the agent, model and job come from
+     the row, so leave `cli` and `job` out. Without a hire list it lists the agent CLIs. Either way, hire only agents
      marked ready.
-   - `hire` with the job word as the name, the CLI, and the member's standing job: `name: "Developer"`,
+   - Without a hire list, `hire` with the job word as the name, the CLI, and the member's standing job: `name: "Developer"`,
      `job: "Writes the code and its unit tests"`; `name: "Tester"`, `job: "Builds the work and checks it end to end"`.
      The app adds a first name from the person's name list. A job is one word, the same for every member of that
      job (always `Developer`, never `Coder` for one of them), and never a slot like `dev1`. If `hire` is refused
      because no free name is left, call it again with the job, a space, then a first name as the refusal says.
    - `hire` answers with the id to address the member by, the name without its space: `DeveloperPriya`. Use exactly
      that id in `tell` and when you fetch its branch, every time.
-   - Hire the fewest members the work needs (one developer and one tester is a good start). Never hire a member
-     you will not give a card to.
+   - Work in parallel. Split the work into independent cards that do not share files, and hire as many members of a
+     role as there are independent cards for that role ready now: three independent developer cards, three developers.
+     Stay within the run-slot limit (`status` shows it) and the heavy-work lease (only one full suite or build runs at a
+     time). Do not hire a member there is no card for yet. When cards depend on each other, keep them in order rather
+     than adding people.
 
 ## Split the work
 

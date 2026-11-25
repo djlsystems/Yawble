@@ -53,7 +53,8 @@ internal sealed class LaunchKit : IAsyncDisposable
     public static async Task<LaunchKit> StartAsync(int limit = 4, int idleSec = 60, int wallSec = 120, ICredentialModes? credentials = null,
         TempDb? db = null, IRunGatewayFactory? gateways = null, IRunTranscripts? transcripts = null, ISandboxBackend? realBackend = null,
         double speed = Speed, IReadOnlyList<string>? allowHosts = null, Func<IAgentRunner, LaunchHost, string, IAgentRunner>? wrapRunner = null,
-        ICliDetector? clis = null, Func<string, string?>? realPath = null, Func<int, RunTree?>? runTrees = null)
+        ICliDetector? clis = null, Func<string, string?>? realPath = null, Func<int, RunTree?>? runTrees = null,
+        Yawble.Core.Agents.ICliModelSettings? cliSettings = null)
     {
         var ownsDb = db is null;
         db ??= new TempDb();
@@ -82,7 +83,7 @@ internal sealed class LaunchKit : IAsyncDisposable
             transcripts: transcripts, agentDefaults: defaults,
             // The scripted backend's pids are not real processes: never the real macOS process table behind them (a real
             // backend keeps the launcher's own default).
-            runTrees: runTrees ?? (realBackend is null ? _ => null : null));
+            runTrees: runTrees ?? (realBackend is null ? _ => null : null), cliSettings: cliSettings);
         // The app wraps the launcher's runner (TeamRepoRunner: the member's clone of the team repository).
         IAgentRunner runner = new SandboxAgentRunner(launcher);
         if (wrapRunner is not null) runner = wrapRunner(runner, host, db.ConnectionString);

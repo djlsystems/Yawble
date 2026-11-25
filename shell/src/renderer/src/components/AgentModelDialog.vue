@@ -6,14 +6,15 @@ import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import AgentModelPicker from './AgentModelPicker.vue';
+import { modelOptions, type ModelOption } from '../modelOptions';
 
 // An agent's default model. A built-in's is saved with agentProfiles.setDefaultModel; a custom agent's with
-// agentProfiles.update (its arguments unchanged). The list is the app's own (agents.models runs no CLI).
+// agentProfiles.update (its arguments unchanged). The list is agents.models' (the core may run the CLI's own model listing, cached 5 minutes), each model with where it comes from.
 const props = defineProps<{ api?: YawbleApi; agent: AgentProfileRow; title: string }>();
 const emit = defineEmits<{ close: []; saved: [string] }>();
 const api = resolveApi(props.api);
 
-const models = ref<string[]>([]);
+const models = ref<ModelOption[]>([]);
 const modelsReady = ref(false); // the picker waits for the list, so a listed model is not first shown as Custom…
 const model = ref(props.agent.defaultModel ?? '');
 const error = ref<string | null>(null);
@@ -21,7 +22,7 @@ const saving = ref(false);
 const incomplete = ref(false); // Custom… with no name
 
 onMounted(async () => {
-  try { models.value = (await api.call<AgentModelList>('agents.models', { cli: props.agent.baseCli })).models; }
+  try { models.value = modelOptions(await api.call<AgentModelList>('agents.models', { cli: props.agent.baseCli })); }
   catch (e) { error.value = errorText(e); }
   modelsReady.value = true;
 });

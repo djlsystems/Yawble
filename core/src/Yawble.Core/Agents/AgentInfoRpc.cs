@@ -16,10 +16,16 @@ namespace Yawble.Core.Agents;
 /// launch[] (the executable / launcher tokens) and groups[] ({tokens[], locked, tail, removed, reason}: the built-in arguments,
 /// from the same AgentPresets.BuiltIn the launch uses). A draft (an agent being edited) is {cli, model?, argsBefore?, argsAfter?,
 /// removedArgs?}: with any of the three lists, the base CLI is described with those changes (validated first: bad_params).</item>
-/// <item><c>agents.models</c> {cli} -> {models[], source: "app"}: the list the app carries. No CLI is ever run for it.</item>
+/// <item><c>agents.models</c> {cli, refresh?} -> {models[], source, items: [{model, from, fromLabel}]}: the union of the CLI's own listing
+/// (from "cli", "the CLI"), the person's CLI settings (from "settings", "your Codex settings"), the models this CLI's runs used over the
+/// last 90 days (from "runs", "your runs") and the built-in list (from "builtin", "built-in"), in that order, each model once.
+/// models[] is the items' models; source is the first item's from. Kept per CLI for a few minutes; refresh: true asks again.
+/// No listing prompts, signs in or writes the person's CLI folder (<see cref="ModelCatalog"/>, <see cref="CliModelListing"/>).</item>
 /// <item><c>agents.defaultModels</c> -> {claude: "", grok: "gpt-...", ...} ("" = the CLI's default).</item>
 /// <item><c>agents.setDefaultModel</c> {cli, model} -> {cli, previous, model}. The person or the Concierge only.</item>
-/// <item><c>agents.resolveModel</c> {team, member} or {cli, model?} -> {model, source: member|agent|cli, label} (label e.g. "Agent default (opus)").</item>
+/// <item><c>agents.resolveModel</c> {team, member} or {cli, model?} -> {model, source: member|agent|settings|cli, label}: the member's model,
+/// else the agent's default, else the model the person's CLI settings name (label e.g. "Your Codex settings (gpt-6.1-sol)"), else the CLI's
+/// own default (label "The CLI's default"); label e.g. "Agent default (opus)".</item>
 /// <item><c>agents.versionStatus</c> {cli} -> {cli, detected, lastRun, changed}.</item>
 /// <item><c>agents.checkForUpdates</c> {cli} -> {opened, command[]}: opens a visible terminal running the CLI's own update command. The person's window only.</item>
 /// <item><c>agents.runRecords</c> {team?, member?, limit?} -> runs, newest first: agent, model, modelSource, cliVersion, argv[], startedAt, endedAt (UTC).</item>
@@ -55,7 +61,7 @@ public sealed class AgentInfoRpc(
                     cli = Cli(p);
                     var problems = AgentPresets.ValidateCustomization(cli, draft);
                     if (problems.Count > 0) throw new RpcException("bad_params", string.Join("; ", problems));
-                    resolved = AgentModels.Resolve(null, OptModel(p));
+                    resolved = AgentModels.Resolve(null, OptModel(p), cli, catalog.Settings);
                     custom = draft;
                     agent = cli.Id();
                 }
@@ -72,15 +78,23 @@ public sealed class AgentInfoRpc(
                 {
                     ["cli"] = cli.Id(),
                     ["agent"] = agent,
-                    ["model"] = Model(resolved),
+                    ["model"] = Model(resolved, cli),
                     ["headless"] = Lines(lines.Headless, lines.HeadlessGroups),
                     ["interactive"] = Lines(lines.Interactive, lines.InteractiveGroups),
                 };
             }
             case "agents.models":
             {
-                var listing = catalog.List(Cli(p)); // the app's own list: no CLI is run
-                return new JsonObject { ["models"] = new JsonArray(listing.Models.Select(m => (JsonNode?)m).ToArray()), ["source"] = listing.Source };
+                var listing = await catalog.ListAsync(Cli(p), p?["refresh"] is JsonValue r && r.TryGetValue<bool>(out var refresh) && refresh, ct);
+                return new JsonObject
+                {
+                    ["models"] = new JsonArray(listing.Models.Select(m => (JsonNode?)m).ToArray()),
+                    ["source"] = listing.Source,
+                    ["items"] = new JsonArray(listing.Items.Select(i => (JsonNode?)new JsonObject
+                    {
+                        ["model"] = i.Model, ["from"] = i.From, ["fromLabel"] = i.FromLabel,
+                    }).ToArray()),
+                };
             }
             case "agents.defaultModels":
             {
@@ -107,7 +121,7 @@ public sealed class AgentInfoRpc(
             case "agents.resolveModel":
             {
                 var (cli, member, memberModel) = Subject(p);
-                return Model(Resolve(cli, member, memberModel));
+                return Model(Resolve(cli, member, memberModel), cli);
             }
             case "agents.versionStatus":
             {
@@ -208,12 +222,11 @@ public sealed class AgentInfoRpc(
     }
 
     private ModelResolution Resolve(AgentCli cli, LaunchMember? member, string? memberModel) =>
-        AgentModels.Resolve(memberModel, member?.Agent is not null ? member.AgentModel : defaults.Get(cli));
+        AgentModels.Resolve(memberModel, member?.Agent is not null ? member.AgentModel : defaults.Get(cli), cli, catalog.Settings);
 
-    private static JsonObject Model(ModelResolution r) => new()
+    private static JsonObject Model(ModelResolution r, AgentCli cli) => new()
     {
-        ["model"] = r.Model, ["source"] = r.Source,
-        ["label"] = r.Source switch { ModelSources.Agent => $"Agent default ({r.Model})", ModelSources.Cli => "The CLI's default", _ => r.Model },
+        ["model"] = r.Model, ["source"] = r.Source, ["label"] = AgentModels.Label(r, cli),
     };
 
     /// <summary>The optional "model" parameter: a string or absent; anything else is bad_params.</summary>

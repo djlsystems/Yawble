@@ -68,6 +68,12 @@ public sealed class LaunchWiring : IAsyncDisposable
     /// renews the person's own Grok home and is not shared).</summary>
     public GrokKeeper? Keeper => null;
 
+    /// <summary>What the gateway keeper's last <c>grok models</c> printed, for the model pickers (it is never run for them).</summary>
+    public string? GrokModelsOutput() => _keeper?.ModelsOutput;
+
+    /// <summary>The person's own CLI settings (read only), whose model a member with none and no agent default is launched with.</summary>
+    public Agents.ICliModelSettings? ModelSettings { get; private init; }
+
     public string? Problem { get; }
 
     public static LaunchWiring Create(string dataDir, string connectionString, ICliDetector clis, string? installDir,
@@ -130,16 +136,18 @@ public sealed class LaunchWiring : IAsyncDisposable
             UserTempDir: userTemp, RunTempOwner: runTempOwner);
         // Paths are canonicalised (symlinks resolved) before they are compared or handed to the sandbox.
         var agentDefaults = new Agents.AgentDefaultsStore(connectionString);
+        var modelSettings = Agents.CliModelSettings.ForThisComputer();
         var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(connectionString),
             new PolicyStore(connectionString, canonicalize: HostPathCanonicalizer.Canonicalize),
             // Each CLI's own sign-in on this host; the app's credential store is not a source for runs.
             new HostSignInModes(), new GatewayRunFactory(gatewayHost), backend,
             new RunRecordStore(connectionString), registry,
             transcripts: new StoreTranscripts(new TranscriptStore(data, connectionString)), agentDefaults: agentDefaults,
-            log: log);
+            log: log, cliSettings: modelSettings);
         return new LaunchWiring(new SandboxAgentRunner(launcher), launcher, gatewayHost, keeper, null)
         {
             AgentDefaults = agentDefaults,
+            ModelSettings = modelSettings,
             Credentials = credentials,
             GrokHome = grokHome,
         };

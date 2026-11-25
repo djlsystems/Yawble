@@ -23,10 +23,10 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
 
 const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), process.env.C347_SHOTS || 'C347-verify');
-const IDS = ['general', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
-const LABELS = ['General', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
+const IDS = ['general', 'hiring', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
+const LABELS = ['General', 'Hiring', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
 const PANES: Record<string, string> = {
-  general: '[data-test=team-general]', state: '[data-test=team-approvals]', repos: '[data-test=repo-main]', env: '[data-test=env-add]',
+  general: '[data-test=team-general]', hiring: '[data-test=team-hiring]', state: '[data-test=team-approvals]', repos: '[data-test=repo-main]', env: '[data-test=env-add]',
   network: '[data-test=team-network]', integrations: '[data-test=team-integrations]', reset: '[data-test=team-reset]', delete: '[data-test=team-delete-pane]',
 };
 

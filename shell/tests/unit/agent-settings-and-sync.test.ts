@@ -43,7 +43,7 @@ describe('opening agent settings runs nothing on the host', () => {
       'agentProfiles.list': () => [builtin('claude'), builtin('grok'), builtin('codex')],
       'agentProfiles.setDefaultModel': () => ({}),
       'agents.commandLine': () => lines('claude', '', "The CLI's default"),
-      'agents.models': () => ({ models: ['grok-4'], source: 'app' }),
+      'agents.models': () => ({ models: ['grok-4'], source: 'builtin' }),
       'agents.versionStatus': (p: any) => ({ cli: p.cli, detected: '1', lastRun: '1', changed: false }),
       'members.get': () => member,
       'policy.getMember': () => ({ backend: 'x', global: {}, override: {}, loosen: {}, widening: [], violations: [], effective: { notes: [] }, implicit: { readwrite: [], readonly: [], denied: [] }, loosenSummary: [] }),
@@ -53,7 +53,7 @@ describe('opening agent settings runs nothing on the host', () => {
     await flushPromises();
     await panel.get('[data-test=agent-cli-grok] [data-test=tile-model]').trigger('click');
     await flushPromises();
-    expect(panel.text()).toContain("the app's list");
+    expect(panel.text()).toContain('Custom… takes any other model name');
     await panel.get('[data-test=model-dialog-pick]').setValue('grok-4');
     await panel.get('[data-test=model-dialog-save]').trigger('click'); // a save reloads the list
     await flushPromises();
@@ -75,7 +75,7 @@ describe('member preview uses the member\'s actual agent', () => {
     const member = { id: 3, teamId: 1, team: 'T', name: 'Ada', role: 'member', cli: mine.name, instructions: '', model: '', credential: 'default' };
     const { api, calls } = fakeApi({
       'agentProfiles.list': () => [builtin('claude', 'sonnet'), mine],
-      'agents.models': () => ({ models: ['opus', 'sonnet', 'haiku'], source: 'app' }),
+      'agents.models': () => ({ models: ['opus', 'sonnet', 'haiku'], source: 'builtin' }),
       'agents.commandLine': (p: any) => p.cli === mine.name
         ? lines(mine.name, p.model ?? 'opus', p.model ?? 'Agent default (opus)', ['--foo=1'])
         : lines('claude', p.model ?? 'sonnet', p.model ?? 'Agent default (sonnet)'),

@@ -33,6 +33,26 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   Concierge's default agent once, with no Yawble tools and in a folder deleted afterwards, for 100 popular first names
   of the chosen **Country** (default United States). Its names replace the text, unsaved until **Save**. The country is
   saved with the list.
+- **Roles** (Settings > Teams > Roles) is the role catalog. A role has a name (one word, which is also the name word a
+  member of it gets), a short job description (the member's standing instructions), a suggested agent and a suggested
+  model. It starts with Developer, Tester, Reviewer, Researcher, Architect and Writer. You add, edit and remove roles;
+  renaming one renames it in every hire list and on every member hired as it. Removing a role that a team's hire list
+  (or the default hire list) uses is refused, and the message names those teams.
+- A team's **hire list** (Team settings > Hiring, and "Who the Manager may hire" on New team) says who its Manager may
+  hire: rows of a role, an agent (built-in or custom) and a model (the agent's default, or a picked one). A new team
+  starts from the default hire list in Settings > Teams. The list is a hard limit:
+  - The Manager's `hire` names a role from the list; the name is optional (the role word, with a first name added). The
+    member runs with the row's agent and model and gets the role's job. A role not on the list, or a different CLI or
+    job, is refused with the reason; the refusal for a role names the roles on the list.
+  - The Manager's `hiring` tool lists the rows (role, description, agent, model) and whether each agent can run on this
+    computer now.
+  - An empty hire list means any agent and free job text, as for teams made before hire lists.
+  - There is no count per role: the Manager hires as many members of a role as it has independent cards for, within
+    the computer's run slots.
+  - The member's tile shows its role, and the agent change log records the role with the hire.
+- On **New team**, each member row has a role picker beside its agent and model. Choosing a role fills in the role's
+  agent and model, and both stay editable; a row with a role and no name is named for the role, and the member gets the
+  role's job.
 - **Member settings** has General (CLI, model, credential, instructions) and Policy (see
   [Sandbox and policy](#sandbox-and-policy)).
 - Team **Settings** has the tabs General, Members, Repositories, Environment and Integrations:
@@ -60,7 +80,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     and at the right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
     Stop and Remove.
   - The agent chip reads agent/model, e.g. `claude/claude-opus-5-5`: the model set on the member, else the agent's
-    default model, else (the CLI picks its own) the model the member's last run used most, as the provider reported
+    default model, else the model your own CLI settings name (see Agent CLIs, Models), else (the CLI picks its own)
+    the model the member's last run used most, as the provider reported
     it; before a first run it reads `claude/default`. Its tooltip says which of these it is.
   - A row of tabs, **Report | Activity | Terminal**, with the run's details beside them (how its last run ended, its
     queue position, policy problems).
@@ -154,6 +175,23 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - **Settings > Agents** lists detected CLIs (**Detect again**), each with whether you are signed in to it on this
   computer (or how to sign in), and custom agents. A custom agent copies a built-in
   with its own name, default model and command-line arguments.
+- **Models.** The model pickers list, in this order and each model once, with where each one comes from:
+  - **the CLI**: the CLI's own list, where it gives one without a prompt or a sign-in. Grok: what the app's last
+    `grok models` printed (the run that keeps your Grok sign-in fresh; it is never run just for the list) and the
+    models cache grok keeps in its folder. Codex: the models cache Codex keeps in `~/.codex` (`models_cache.json`).
+    GitHub Copilot: the `--model` choices of `copilot --help`, run with a throwaway home and a time limit.
+    Antigravity and Claude Code give no list.
+  - **your settings**: the model your own CLI settings name: the top-level `model` in `~/.codex/config.toml` (or
+    `$CODEX_HOME`), `model` or `default_model` in `~/.grok/config.toml`, `model` in `~/.copilot/settings.json` or
+    `config.json`, in `~/.gemini/antigravity-cli/settings.json` and in `~/.claude/settings.json`.
+  - **your runs**: the models this CLI's runs used over the last 90 days, as the providers reported them.
+  - **built-in**: the list the app carries.
+  The app only reads these files; it never writes them. A source that fails or times out adds nothing and the others
+  stand. A CLI's list is kept for a few minutes. You can still type any other model name.
+- A member with no model of its own and an agent with no default model run with the model your CLI settings name
+  ("Your Codex settings (gpt-6.1-sol)"), passed on the command line, since a member's own CLI folder has no such
+  setting. With none there either, the CLI picks its own default. The agent change log notes when the model in effect
+  comes from your settings.
 - **Terminal** opens an agent's own interface in the window. **Test** runs it with a diagnostic prompt that checks
   its version, folders and access.
 
