@@ -1,8 +1,11 @@
 <script setup lang="ts">
 // The documents browser, shared by a team's Documents dialog and the Documents page.
 import { computed, onMounted, ref } from 'vue';
-import type { DocEntry, DocFile, DocList, YawbleApi, TeamSummary } from '../../../shared/api';
+import type { BacklogItem, DocEntry, DocFile, DocList, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
+import { confirmDialog } from '../confirm';
+import { vChange } from '../remoteAccess';
+import { openBacklogItem } from '../workflows/page';
 import { renderMarkdown } from '../markdown';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
@@ -12,8 +15,8 @@ import { useNarrow } from '../narrowScreen';
 
 /**
  * A team's documents: what its agents write for the person (reports, specs, plans) and anything the person adds. Browse
- * folders, read Markdown formatted, view images and text, edit and create text files, upload, rename, delete, and open
- * the folder on this computer. The team's agents read and write the same folder ($YAWBLE_TEAM_DOCS).
+ * folders, read Markdown formatted, view images and text, edit and create text files, upload, rename, delete, move a
+ * text document to the Backlog, and open the folder on this computer. The team's agents read and write the same folder ($YAWBLE_TEAM_DOCS).
  */
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; above?: string; fill?: boolean }>();
 const emit = defineEmits<{ up: [] }>();
@@ -101,6 +104,27 @@ const remove = (path: string) => work.run('docs', async () => {
   confirmDelete.value = null;
 }, 'delete');
 
+// Move to Backlog (docs.moveToBacklog): the open text document becomes a backlog item for this team and leaves the
+// team's documents. After the move the preview closes, the list reloads and a note links to the item in the Backlog.
+const moved = ref<string | null>(null);
+async function moveToBacklog() {
+  const doc = open.value;
+  if (!doc || acting.value) return;
+  const ok = await confirmDialog({
+    message: `Move ${doc.name} to the backlog? It becomes a backlog item for ${props.team.name} and is removed from the team's documents.`,
+    okLabel: 'Move to Backlog',
+  });
+  if (!ok) return;
+  await work.run('docs', async () => {
+    moved.value = null;
+    const item = await call<BacklogItem>('docs.moveToBacklog', { path: doc.path });
+    if (!item) return;
+    if (open.value?.path === doc.path) { open.value = null; editing.value = false; }
+    await load();
+    moved.value = item.label;
+  }, 'backlog');
+}
+
 const upload = (files: FileList | null) => work.run('docs', () => doUpload(files), 'upload');
 async function doUpload(files: FileList | null) {
   for (const f of Array.from(files ?? [])) {
@@ -179,6 +203,8 @@ onMounted(() => void load(''));
       <button :disabled="acting" @click="naming = null">Cancel</button>
     </div>
     <p v-if="error" class="error" data-test="docs-error">{{ error }}</p>
+    <p v-if="moved" class="muted small" data-test="docs-moved">Moved to the backlog as
+      <a href="#" data-test="docs-moved-link" @click.prevent="openBacklogItem(moved)">{{ moved }}</a></p>
     <div class="split" :class="{ reading: phone && fileShown }" data-test="docs-split">
       <ul v-show="!(phone && fileShown)" class="files" data-test="docs-list">
         <li v-if="!list && !error" class="loading"><LoadingNote text="Loading documents…" /></li>
@@ -208,7 +234,11 @@ onMounted(() => void load(''));
             <span class="muted small">{{ size(open.size) }}</span>
             <span class="grow" />
             <template v-if="editable">
-              <button v-if="!editing" data-test="doc-edit" @click="startEdit">Edit</button>
+              <template v-if="!editing">
+                <button v-change data-test="doc-move-to-backlog" title="Make this document a backlog item for the team and remove it from the documents"
+                  :disabled="busy || acting" :aria-busy="doing('backlog')" @click="moveToBacklog"><BusyLabel :busy="doing('backlog')" text="Moving…">Move to Backlog</BusyLabel></button>
+                <button data-test="doc-edit" @click="startEdit">Edit</button>
+              </template>
               <template v-else>
                 <button class="primary" data-test="doc-save" :disabled="busy || acting" :aria-busy="doing('save')" @click="save"><BusyLabel :busy="doing('save')" text="Saving…">Save</BusyLabel></button>
                 <button :disabled="acting" @click="editing = false">Cancel</button>
