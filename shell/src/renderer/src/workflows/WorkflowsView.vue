@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { WORKFLOWS_LIST, type TeamSummary, type WorkflowRow, type WorkflowsListAnswer, type YawbleApi } from '../../../shared/api';
+import { WORKFLOWS_GET, WORKFLOWS_LIST, type TeamSummary, type WorkflowDetail, type WorkflowRow, type WorkflowsListAnswer, type YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { ago } from '../board/cards';
 import CardPanel from '../board/CardPanel.vue';
@@ -48,12 +48,16 @@ if (fromHash) {
   if (fromHash.selected !== undefined) selected.value = fromHash.selected;
 }
 const filters = ref<Filters>(start);
+/** The workflow the page was opened at when the list does not hold it (an old one past the newest): read by itself. */
+const single = ref<WorkflowRow | null>(null);
+/** "Workflow #N was not found": the page was opened at a workflow the core does not know. */
+const notFound = ref<string | null>(null);
 function applyRequest(r: WorkflowsRequest | null | undefined) {
   if (!r) return;
   const f = { ...filters.value };
   if (r.teamId !== undefined) f.teamId = r.teamId;
   // Opened at one workflow: whatever its state, it is shown (All, no text).
-  if (r.workflow != null) { f.chip = 'all'; f.q = ''; selected.value = r.workflow; cursor.value = r.workflow; }
+  if (r.workflow != null) { f.chip = 'all'; f.q = ''; selected.value = r.workflow; cursor.value = r.workflow; notFound.value = null; single.value = null; }
   filters.value = f;
 }
 const cursor = ref<number | null>(selected.value);
@@ -111,14 +115,41 @@ const teamOptions = computed(() => {
   for (const w of answer.value?.workflows ?? []) if (!m.has(w.teamId)) m.set(w.teamId, w.team);
   return [...m].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 });
+/** The list's rows, and the workflow read by itself when the list does not hold it. */
+const rowsAll = computed<WorkflowRow[]>(() => {
+  const list = answer.value?.workflows ?? [];
+  const s = single.value;
+  return s && !list.some((w) => w.id === s.id) ? [...list, s] : list;
+});
 const shown = computed(() => {
   const f = filters.value;
-  const rows = (answer.value?.workflows ?? []).filter((w) => (f.teamId === null || w.teamId === f.teamId) && inChip(w, f.chip) && matchesText(w, f.q));
+  const rows = rowsAll.value.filter((w) => (f.teamId === null || w.teamId === f.teamId) && inChip(w, f.chip) && matchesText(w, f.q));
   return sortRows(rows, f.sort);
 });
 const counts = computed(() => answer.value?.counts ?? null);
 const backlogReadable = computed(() => answer.value?.backlog ?? true);
-const open = computed(() => (selected.value === null ? null : answer.value?.workflows.find((w) => w.id === selected.value) ?? null));
+const open = computed(() => (selected.value === null ? null : rowsAll.value.find((w) => w.id === selected.value) ?? null));
+// Opened at a workflow the list does not hold (older than the newest the core lists, or the list not yet in): read that
+// one with workflows.get and open its pane; one the core does not know is named in a note and no pane opens.
+let reading: number | null = null;
+async function readSingle(id: number) {
+  if (reading === id) return;
+  reading = id;
+  try {
+    const d = await api.call<WorkflowDetail>(WORKFLOWS_GET, { workflow: id });
+    if (selected.value !== id) return;
+    if (d?.workflow?.id !== id) throw Object.assign(new Error('no such workflow'), { code: 'no_such_workflow' });
+    single.value = d.workflow;
+  } catch (e) {
+    if (selected.value !== id) return;
+    notFound.value = (e as { code?: string })?.code === 'no_such_workflow' ? `Workflow #${id} was not found.` : `Workflow #${id} could not be loaded: ${errorText(e)}`;
+    selected.value = null;
+  } finally { if (reading === id) reading = null; }
+}
+watch([selected, answer], ([id, a]) => {
+  if (id === null || !a || single.value?.id === id || (a.workflows ?? []).some((w) => w.id === id)) return;
+  void readSingle(id);
+}, { immediate: true });
 const filtered = computed(() => filters.value.teamId !== null || !!filters.value.q.trim() || filters.value.chip !== 'all');
 // The header's Clear shows only when the filters differ from the defaults (the page opens on the Open chip) and puts them back.
 const atDefaults = computed(() => filters.value.teamId === DefaultFilters.teamId && !filters.value.q.trim() && filters.value.chip === DefaultFilters.chip);
@@ -154,7 +185,7 @@ function setTeam(v: string) { filters.value = { ...filters.value, teamId: v ? Nu
 function clearFilters() { filters.value = { ...filters.value, teamId: null, q: '', chip: 'all' }; }
 
 // ---- selection and the keyboard: up/down move the selection, Enter opens the pane, Esc closes it ----
-function select(w: WorkflowRow) { cursor.value = w.id; selected.value = w.id; }
+function select(w: WorkflowRow) { cursor.value = w.id; selected.value = w.id; notFound.value = null; }
 function closePane() { selected.value = null; }
 const listEl = ref<HTMLElement | null>(null);
 function move(step: 1 | -1) {
@@ -224,6 +255,8 @@ const timeline = (w: WorkflowRow) => openTimeline({ kind: 'workflow', id: w.id, 
         </div>
         <p v-if="summary && phone && !open" class="summary muted phone-sum" data-test="workflows-summary">{{ summary }}</p>
         <p v-if="error" class="error" data-test="workflows-error">{{ error }}</p>
+        <p v-if="notFound" class="note" role="status" data-test="workflows-not-found">{{ notFound }}
+          <button class="link" data-test="workflows-not-found-dismiss" @click="notFound = null">Dismiss</button></p>
         <p v-if="answer?.truncated" class="muted small" data-test="workflows-truncated">Showing every open workflow and the newest {{ Limit }} others; filter to find an older one.</p>
 
         <div class="split" :class="{ withItem: !!open }">
@@ -325,6 +358,7 @@ const timeline = (w: WorkflowRow) => openTimeline({ kind: 'workflow', id: w.id, 
 .s-started { stroke: var(--state-running); opacity: .55; }
 .s-completed { stroke: var(--ok); }
 .error { color: var(--bad); }
+.note { margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--ink-soft); display: flex; gap: 10px; align-items: center; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }

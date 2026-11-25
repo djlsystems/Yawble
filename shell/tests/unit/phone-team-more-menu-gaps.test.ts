@@ -138,6 +138,7 @@ describe('the team ⋯ menu in the App at 375 px', () => {
     expect(dialogTitles()).toEqual(['payments · documents']);
     await closeDialog(w);
     await w.get('[data-test=drawer-toggle]').trigger('click');
+    expect(w.get('[data-test=drawer-team] .team-name').text()).toBe('Team payments');
     await w.get('[data-test=drawer-team-workflows]').trigger('click');
     await flushPromises();
     await onWorkflowsPage(w, 'drawer-team-workflows');
