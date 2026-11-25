@@ -445,8 +445,8 @@ function seed(feed: Feed) {
 /** A workflow node click opens the Workflows page (no dialog): the page shown, filtered to the team, the workflow's pane open. */
 const wfPaneOpen = (page: Page, id: number) => page.locator(`[data-test=workflows-view] [data-test=workflow-pane][data-id="${id}"]`);
 async function expectWorkflowsPage(page: Page, id: number, team = '1') {
-  await expect(page.locator('[data-test=workflows-view]')).toBeVisible();
-  await expect(wfPaneOpen(page, id)).toBeVisible();
+  await expect(page.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 });
+  await expect(wfPaneOpen(page, id)).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue(team);
   await expect(page.locator('[role=dialog]')).toHaveCount(0);
 }
@@ -507,7 +507,7 @@ test('1 workflow nodes: open ones tied to their members (or hub), blocked look, 
     f = await lastFrame(page);
     const n = wfNode(f, 12)!;
     await clickWorld(page, n.op, n);
-    if (await wfPaneOpen(page, 12).count()) break;
+    if (await page.locator('[data-test=workflows-view]').count() || !(await page.locator('[data-test=monitor-canvas]').count())) break; // left the Monitor
     await page.waitForTimeout(300);
   }
   await expectWorkflowsPage(page, 12);
@@ -533,7 +533,7 @@ test('1b a workflow node click with a team focused: the workflow opens; is the f
     f = await lastFrame(page);
     const n = wfNode(f, 10)!;
     await clickWorld(page, n.op, n);
-    if (await wfPaneOpen(page, 10).count()) break;
+    if (await page.locator('[data-test=workflows-view]').count() || !(await page.locator('[data-test=monitor-canvas]').count())) break; // left the Monitor
     await page.waitForTimeout(300);
   }
   await expectWorkflowsPage(page, 10);

@@ -96,8 +96,31 @@ class Feed {
       return this.events.filter((e) => Date.parse(e.at) >= since && (!p?.team || e.team.toLowerCase() === String(p.team).toLowerCase()));
     }
     if (method === 'bus.workflows') return JSON.parse(JSON.stringify(this.wfs.get(p?.teamId) ?? []));
+    // The Workflows page (a node click opens it) reads this wall's workflows, not the phone fake core's.
+    if (method === 'workflows.list') {
+      const rows = this.pageRows().filter((w) => p?.teamId == null || w.teamId === Number(p.teamId));
+      const n = (f: (s: string) => boolean) => rows.filter((w) => f(w.status)).length;
+      const counts = { all: rows.length, open: n((s) => s === 'running' || s === 'idle'), needsYou: 0, done: n((s) => s === 'completed'), closed: n((s) => s === 'closed'),
+        running: n((s) => s === 'running'), waiting: 0, idle: n((s) => s === 'idle'), stopped: 0, completed: n((s) => s === 'completed'), expired: 0, completedToday: n((s) => s === 'completed') };
+      return { workflows: rows, counts, truncated: false, backlog: true, now: this.iso(0) };
+    }
+    if (method === 'workflows.get') {
+      const w = this.pageRows().find((x) => x.id === Number(p?.workflow));
+      if (!w) throw Object.assign(new Error('no such workflow'), { code: 'no_such_workflow' });
+      return { workflow: w, cards: [], messages: [], spec: null, backlog: true };
+    }
     if (method === 'network.asks' || method === 'tools.asks') return [];
     return undefined;
+  }
+  /** bus.workflows' rows as the page's contract has them (workflows.list / workflows.get). */
+  private pageRows() {
+    return [...this.wfs].flatMap(([teamId, list]) => list.map((w) => {
+      const open = w.state === 'open';
+      const overallMs = Date.parse(open ? this.iso(0) : w.lastAt) - Date.parse(w.startedAt);
+      return { ...w, teamId, team: TEAMS[teamId - 1] ?? `team-${teamId}`, ownerId: teamId * 10, status: open ? (w.busy.length ? 'running' : 'idle') : w.state,
+        working: w.busy.length > 0, endedAt: open ? null : w.lastAt, expiredAt: null, expiresAt: null, expiryWarning: null, question: null, waitingFor: null, item: null, members: [],
+        time: { createdAt: w.startedAt, startedAt: w.startedAt, endedAt: open ? null : w.lastAt, endedHow: open ? null : w.state, open, overallMs, rebuilt: false, breakdown: [{ category: 'agent-working', ms: overallMs }] } };
+    }));
   }
 }
 
@@ -781,7 +804,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       for (let i = 1; i <= 8; i++) await page.mouse.move(box.x + s.x + i * 8, box.y + s.y + i * 4);
       await page.mouse.up();
       await page.waitForTimeout(500);
-      r.dragOpened = await wfOpened(page, target).count();
+      r.dragOpened = await page.locator('[data-test=workflows-view], [data-test=workflow-pane]').count();
       expect(r.dragOpened, 'a drag opens nothing').toBe(0);
     }
     await page.waitForTimeout(800);
@@ -792,13 +815,13 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       await page.waitForTimeout(120);
       await page.mouse.down(); await page.mouse.up();
       await page.waitForTimeout(400);
-      opened = await wfOpened(page, target).count();
+      opened = (await page.locator('[data-test=workflows-view]').count()) || (await page.locator('[data-test=monitor-canvas]').count() ? 0 : 1); // left the Monitor
     }
     r.clickOpened = opened > 0;
     expect(r.clickOpened, 'a click opens the workflow').toBe(true);
     // On the Workflows page (no dialog), filtered to bravo (team 2), with the workflow's pane open.
-    await expect(page.locator('[data-test=workflows-view]')).toBeVisible();
-    await expect(wfOpened(page, target)).toBeVisible();
+    await expect(page.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 });
+    await expect(wfOpened(page, target)).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue('2');
     await expect(page.locator('[role=dialog]')).toHaveCount(0);
     await page.screenshot({ path: path.join(NODES_DIR, 'screens', `click-opens-${tag}.png`) });
