@@ -1,6 +1,6 @@
 // The overall time and the Timeline dialog in a real browser (headless Chrome), on remote.html against the
 // FAKE core of phone-remote.spec.ts (the core's wire shapes, canned). Opened at #workflow=10 (the team's
-// workflows): the row's overall time opens the dialog with a summary row and one row per card. A Visitor sees the same.
+// workflows page, #10's pane open): the pane's overall time opens the dialog with a summary row and one row per card. A Visitor sees the same.
 // At 375 px the timeline's axis scrolls inside the dialog and the page never scrolls sideways. Screenshots go to
 // $YAWBLE_TEAM_DOCS/timeline when that is set.
 //
@@ -28,14 +28,18 @@ async function open(browser: Browser, access: Access, w: number, h: number, them
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${s.url}#workflow=10`);
-  await expect(page.locator('[data-test=workflow-10]')).toBeVisible({ timeout: 30_000 });
+  // #workflow=10 opens the Workflows page with #10's pane (no dialog)
+  await expect(page.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-test=workflow-pane]')).toHaveAttribute('data-id', '10', { timeout: 15_000 });
+  await expect(page.locator('[role=dialog]')).toHaveCount(0);
   return { s, page, ctx, errors };
 }
 
 for (const [access, w, h, theme] of [['full', 1280, 800, 'light'], ['read', 1280, 800, 'dark'], ['full', 375, 667, 'light'], ['read', 375, 667, 'dark']] as const) {
   test(`${access} at ${w}x${h} (${theme}): the workflow's overall time opens its timeline`, async ({ browser }) => {
     const { s, page, ctx, errors } = await open(browser, access, w, h, theme);
-    const time = page.locator('[data-test=workflow-10] [data-test=overall-time]');
+    // the pane's Time block (on a phone the page's rows hide while the pane is open)
+    const time = page.locator('[data-test=workflow-pane] [data-test=workflow-pane-time] [data-test=overall-time]');
     await expect(time).toBeVisible();
     await expect(time).toHaveText(/\dh \d\dm \d\ds/);
     await time.click();
