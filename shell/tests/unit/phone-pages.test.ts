@@ -193,8 +193,8 @@ const DesktopCss: Record<string, string> = {
   // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
   // .is-stopped, a stopped run's neutral left edge and label colour.
   // The "Waiting on you" chip link (.kind.waiting) and the Report's note (.waiting-note). The pills
-  // row under the name (two-row title grid).
-  'components/MemberPane.vue': '084a856ccdf2c295',
+  // row under the name (two-row title grid). The running member's "#N" workflow links (.runs, .run-link).
+  'components/MemberPane.vue': 'c7e8098884482c44',
   'components/MemberActivity.vue': '89ae98395143684a',
   'components/DocumentsView.vue': '30090ebf288b8c9e',
   // The documents list's Modified column: a wider list and the size / modified cells.
