@@ -258,8 +258,12 @@ async function freshFrame(page: Page): Promise<Frame> {
 }
 /** Waits until the frames kept (the last 2.5 s) show what `ok` wants (polled); returns them. */
 async function untilFrames(page: Page, ok: (fs: Frame[]) => unknown, timeout = 10_000): Promise<Frame[]> {
-  let fs: Frame[] = [];
-  await expect.poll(async () => { fs = await frames(page); return !!ok(fs); }, { timeout, intervals: [100] }).toBe(true).catch(() => {});
+  // Each poll fetches only the frames kept since the last (fetching all of them each time slows the page).
+  const fs: Frame[] = [];
+  await expect.poll(async () => {
+    fs.push(...await page.evaluate((t) => (window as any).__frames.filter((f: Frame) => f.at > t), fs.at(-1)?.at ?? -Infinity));
+    return !!ok(fs);
+  }, { timeout, intervals: [100] }).toBe(true).catch(() => {});
   return fs;
 }
 

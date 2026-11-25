@@ -358,8 +358,12 @@ async function untilFrame(page: Page, ok: (f: Frame) => unknown, timeout = 10_00
 }
 /** Waits until the frames kept since they were last cleared show what `ok` wants (polled); returns them. */
 async function untilFrames(page: Page, ok: (fs: Frame[]) => unknown, timeout = 10_000): Promise<Frame[]> {
-  let fs: Frame[] = [];
-  await expect.poll(async () => { fs = await frames(page); return !!ok(fs); }, { timeout, intervals: [120] }).toBe(true).catch(() => {});
+  // Each poll fetches only the frames kept since the last (fetching all of them each time slowed the page enough to drop frames).
+  const fs: Frame[] = [];
+  await expect.poll(async () => {
+    fs.push(...await page.evaluate((t) => (window as any).__frames.filter((f: Frame) => f.at > t), fs.at(-1)?.at ?? -Infinity));
+    return !!ok(fs);
+  }, { timeout, intervals: [120] }).toBe(true).catch(() => {});
   return fs;
 }
 /** The most of what `get` counts over the frames drawn in the next `ms` (the frames kept cover about 5 s). */
@@ -763,6 +767,7 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   // The flight, until its arrival ring has opened.
   const arrivalRing = (x: Frame) => x.ops.some((o) => o.op === 'stroke' && isScreen(o) && o.style === C.decision && o.lw === 2 && o.items?.some((i) => i.t === 'arc' && i.r > 26));
   let fs = await untilFrames(page, (all) => all.some(arrivalRing), 6000);
+  await untilFrame(page, (x) => youFlyers(x).length === 0, 4000); // the flight's tail gone
   const netFlying = fs.filter((x) => youFlyers(x).length >= 4).length;
   const netRing = fs.some(arrivalRing);
   const netLabel = fs.some((x) => texts(x).includes('registry.npmjs.org'));
@@ -779,6 +784,7 @@ test('3b You node: pending network and tool asks are counted (waiting at open: n
   push('tools.asksChanged');
   f = await untilFrame(page, (x) => youNode(x)?.count === '4', 6000);
   fs = await untilFrames(page, (all) => all.some(arrivalRing), 6000); // the flight in, its ring opened
+  await untilFrame(page, (x) => youFlyers(x).length === 0, 4000); // and its tail gone
   r.toolAdded = { count: youNode(f)?.count ?? null, flyingFrames: fs.filter((x) => youFlyers(x).length >= 4).length };
   expect(youNode(f)?.count, 'a new tool ask: 4').toBe('4');
   expect((r.toolAdded as any).flyingFrames, 'the new tool ask flies in').toBeGreaterThan(5);
@@ -883,22 +889,14 @@ for (const W of [1280, 375]) {
       const tones0 = await tonesNeedYou(page);
       change();
       const said = await both(n);
-      if (want.flights > 0) {
-        // Until a flight has been seen in the air and none is now, and the tones have sounded. Only the newest frame is
-        // read while waiting: reading all the kept frames this often slowed the page enough to drop the ring's frames.
-        let sawHead = false;
-        await expect.poll(async () => {
-          const lf = await lastFrame(page);
-          const heads = youHeads(lf).length;
-          sawHead ||= heads > 0;
-          return sawHead && heads === 0 && (await tonesNeedYou(page)) - tones0 >= want.tones;
-        }, { timeout: 8000, intervals: [120] }).toBe(true).catch(() => {});
-        await freshFrame(page); // the arrival ring's last frames
-      } else await page.waitForTimeout(settle); // a window: nothing may fly in or sound
+      // A measurement window: a flight's whole life and its ring (1.5 s) and more, in which exactly the wanted flights,
+      // rings and tones may start. (Waiting instead for the flights to land, by reading the frames while they flew, slowed
+      // the page enough that the arrival rings' few frames were dropped.)
+      await page.waitForTimeout(settle);
       const fs = await frames(page);
       const s = {
         name, want: n, ...said, flights: starts(fs, (f) => youHeads(f).length), flightColors: [...new Set(fs.flatMap(youHeads))],
-        rings: starts(fs, (f) => youRingsNew(f, youNode(f) ?? you)), tones: (await tonesNeedYou(page)) - tones0, frames: fs.length,
+        rings: starts(fs, (f) => youRingsNew(f, you)), tones: (await tonesNeedYou(page)) - tones0, frames: fs.length,
       };
       r.steps.push(s);
       if (s.node !== (n === 0 ? null : String(n)) || s.header !== n) mismatches.push(`${name}: header ${s.header}, node ${s.node}, want ${n}`);

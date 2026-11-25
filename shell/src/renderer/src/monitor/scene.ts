@@ -607,7 +607,9 @@ export class MonitorScene {
     // over SpacingShrink too far apart. The labels grow as the camera zooms out to the wider oval, and jump from spot to
     // spot as things move, so a narrow band each way kept it moving.
     const err = (want - rx1) * nearestPair(count);
-    if (err < SpacingSlack && err > -SpacingShrink) { this.spacingStill = true; return; }
+    // Nothing to move: still, once measured at the camera's final zoom (the labels' size follows it, so a measure
+    // while the camera eases can want a move later).
+    if (err < SpacingSlack && err > -SpacingShrink) { this.spacingStill = cameraAtTarget(this.cam, this.target); return; }
     if (this.spacingMoves >= (overlap ? 2 * SpacingMoves : SpacingMoves)) { this.spacingStill = true; return; }
     this.spacingMoves++;
     this.spacingStill = false;
