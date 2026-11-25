@@ -1,12 +1,12 @@
-﻿// Card 665 (B152 verify): every workflows entry point opens the Workflows page, in headless Chrome against the
+// Every workflows entry point opens the Workflows page, in headless Chrome against the
 // phone-remote fake core (remote.html, tests/e2e/phone): the Teams-list chip, the Team page's Workflows button and its
-// â‹¯ menu item, the Monitor's screen-reader list (a team's header and a workflow), the phone drawer's Workflows item and
+// ⋯ menu item, the Monitor's screen-reader list (a team's header and a workflow), the phone drawer's Workflows item and
 // #workflow=N (a known one, one outside the loaded rows, an unknown one). Each lands on the page with the right team
 // filter, the named workflow selected and its pane open, no dialog; Esc and the phone pane's Back close the pane. In
 // ?embed=1 yawble.nav reports Workflows as the active place. A Visitor switch while a confirm is open closes it and sends
 // nothing. #12's expiry on the page (setExpiry) and the Needs you warning after Extend.
 //
-//   npx playwright test card665 --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+//   npx playwright test workflows-entry-points --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { answers } from './phone/fake-core';
@@ -15,7 +15,7 @@ import { ORIGIN, buildRenderer, ensureDir, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
-const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'B152') : null;
+const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'workflows-entry-points') : null;
 test.beforeAll(async () => { test.setTimeout(600_000); if (shots) ensureDir(shots); await buildRenderer(); });
 
 const saved = { ...answers };
@@ -71,7 +71,7 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
     await ctx.close();
   });
 
-  test(`${w}: Team page Workflows (button at 1280, â‹¯ menu at 375) opens the page filtered to the team, no pane, no dialog`, async ({ browser }) => {
+  test(`${w}: Team page Workflows (button at 1280, ⋯ menu at 375) opens the page filtered to the team, no pane, no dialog`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, w, h);
     await navTo(page, 'teams');
     await page.locator('[data-test=team-open-checkout-web-with-a-rather-long-team-name], [data-test=team-open-payments]').last().click();
