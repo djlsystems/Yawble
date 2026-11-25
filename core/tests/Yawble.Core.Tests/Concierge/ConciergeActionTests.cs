@@ -82,11 +82,16 @@ public class ConciergeActionTests : IDisposable
         var bus = new BusEngine(_db.OpenStore(), new UnavailableRunner(), new BusOptions { IdleOffer = false });
         await bus.StartAsync(Ct);
         await bus.CreateTeamAsync("alpha", "Manager", "claude", null, Ct);
-        Run(_root, "init", "--bare", "-b", "main", Origin);
-        Run(_root, "clone", Origin, Work);
+        // Origin and the working repo are made without git's local transport (no clone, fetch or push between
+        // folders): that starts Git for Windows' sh, which cannot start in an agent's sandbox (see SandboxGit).
+        Run(_root, "init", "-q", "--bare", "-b", "main", Origin);
+        Run(_root, "init", "-q", "-b", "main", Work);
+        Run(Work, "remote", "add", "origin", Origin);
+        Run(Work, "config", "branch.main.remote", "origin");
+        Run(Work, "config", "branch.main.merge", "refs/heads/main");
         Config(Work);
         Commit(Work, "base.txt", "base");
-        Run(Work, "push", "origin", "HEAD:main");
+        PushToOrigin(Work, "main");
         return new Rig { Bus = bus, Git = new ConciergeGit(_git, _pusher), Repo = new ActionRepo("main", Work, "main", clones) };
     }
 
@@ -116,6 +121,29 @@ public class ConciergeActionTests : IDisposable
         p.WaitForExit();
         if (p.ExitCode != 0) throw new InvalidOperationException($"git {string.Join(' ', args)}: {e}");
         return o.Trim();
+    }
+
+    /// <summary>
+    /// What "git push origin &lt;branches&gt;" does for the rig, through a bundle file: origin gets the branches and
+    /// <paramref name="dir"/>'s origin/ refs follow. A bundle needs no local transport, so this runs in the sandbox.
+    /// </summary>
+    private void PushToOrigin(string dir, params string[] branches)
+    {
+        var bundle = Path.Combine(_root, $"push-{Guid.NewGuid():N}.bundle");
+        Run(dir, ["bundle", "create", "-q", bundle, .. branches.Select(b => "refs/heads/" + b)]);
+        Run(Origin, ["fetch", "-q", bundle, .. branches.Select(b => $"+refs/heads/{b}:refs/heads/{b}")]);
+        foreach (var b in branches) Run(dir, "update-ref", "refs/remotes/origin/" + b, "refs/heads/" + b);
+        File.Delete(bundle);
+    }
+
+    /// <summary>What "git clone origin &lt;dest&gt;" does for the rig, through a bundle of origin's branches; its origin is then origin.</summary>
+    private void CloneOrigin(string dest)
+    {
+        var bundle = Path.Combine(_root, $"clone-{Guid.NewGuid():N}.bundle");
+        Run(Origin, "bundle", "create", "-q", bundle, "--branches");
+        Run(_root, "clone", "-q", "-b", "main", bundle, dest);
+        Run(dest, "remote", "set-url", "origin", Origin);
+        File.Delete(bundle);
     }
 
     private void Config(string dir) { Run(dir, "config", "user.name", "T"); Run(dir, "config", "user.email", "t@example.test"); Run(dir, "config", "commit.gpgsign", "false"); }
@@ -234,7 +262,7 @@ public class ConciergeActionTests : IDisposable
         // A member's clone with members/ines checked out (its HEAD is only read, never run in).
         var rig = await MakeRigAsync(Clone);
         Branch("members/ines", merged: true);
-        Run(_root, "clone", Origin, Clone);
+        CloneOrigin(Clone);
         Run(Clone, "checkout", "-q", "-b", "members/ines");
         Branch("members/unmerged", merged: false);
 
@@ -262,7 +290,7 @@ public class ConciergeActionTests : IDisposable
     {
         var rig = await MakeRigAsync(Clone);
         Branch("members/ines", merged: true);
-        Run(_root, "clone", Origin, Clone);
+        CloneOrigin(Clone);
         var token = Token(Call("git_branches_delete", rig.Actions(), new() { ["team"] = "alpha" }));
         Run(Clone, "checkout", "-q", "-b", "members/ines");
         var again = Call("git_branches_delete", rig.Actions(), new() { ["team"] = "alpha", ["confirm"] = token });
@@ -277,7 +305,7 @@ public class ConciergeActionTests : IDisposable
     {
         var rig = await MakeRigAsync();
         var sha = Branch("members/shipped", merged: true);
-        Run(Work, "push", "origin", "members/shipped", "main");
+        PushToOrigin(Work, "members/shipped", "main");
         var args = new JsonObject { ["team"] = "alpha", ["branches"] = "members/shipped", ["remote"] = true };
         var shown = Call("git_branches_delete", rig.Actions(), args);
         Assert.Contains($"delete origin/members/shipped at {sha}", shown);
@@ -292,16 +320,16 @@ public class ConciergeActionTests : IDisposable
     {
         var rig = await MakeRigAsync();
         Branch("members/shipped", merged: true);
-        Run(Work, "push", "origin", "members/shipped", "main");
+        PushToOrigin(Work, "members/shipped", "main");
         var args = new JsonObject { ["team"] = "alpha", ["branches"] = "members/shipped", ["remote"] = true };
         var shown = Call("git_branches_delete", rig.Actions(), args);
         args["confirm"] = Token(shown);
         // Someone else pushes to the branch on origin after the list was shown (this clone's origin/ ref is not refreshed).
         var other = Path.Combine(_root, "other");
-        Run(_root, "clone", "-q", Origin, other);
+        CloneOrigin(other);
         Run(other, "checkout", "-q", "members/shipped");
         Run(other, "-c", "user.name=o", "-c", "user.email=o@e.x", "commit", "-q", "--allow-empty", "-m", "newer work");
-        Run(other, "push", "-q", "origin", "members/shipped");
+        PushToOrigin(other, "members/shipped");
         var done = Call("git_branches_delete", rig.Actions(), args);
         Assert.Contains("origin/members/shipped: kept", done);
         Assert.NotEqual("", Run(Origin, "branch", "--list", "members/shipped"));
@@ -312,7 +340,7 @@ public class ConciergeActionTests : IDisposable
     {
         var rig = await MakeRigAsync();
         var sha = Branch("members/gone", merged: true);
-        Run(Work, "push", "origin", "members/gone");
+        PushToOrigin(Work, "members/gone");
         Run(Origin, "branch", "-D", "members/gone"); // gone on origin, still remembered here
         var shown = Call("git_prune", rig.Actions(), new() { ["team"] = "alpha" });
         Assert.Contains("origin/members/gone", shown);
@@ -373,7 +401,7 @@ public class ConciergeActionTests : IDisposable
         Assert.Equal(before, Sha("members/c"));
 
         // A branch some clone has checked out is left alone.
-        Run(_root, "clone", Origin, Clone);
+        CloneOrigin(Clone);
         Run(Clone, "checkout", "-q", "-b", "members/s2");
         Run(Work, "branch", "members/s2", "main~1");
         var held = Call("git_sync_branch", a, new() { ["team"] = "alpha", ["branch"] = "members/s2" });
@@ -720,7 +748,7 @@ public class ConciergeActionTests : IDisposable
     {
         var rig = await MakeRigAsync();
         var sha = Branch("members/old", merged: true);
-        Run(Work, "push", "origin", "members/old");
+        PushToOrigin(Work, "members/old");
         var originBefore = Run(Origin, "for-each-ref", "--format=%(refname) %(objectname)");
         var remote = new ConciergeTurn("c1", byPerson: true, remote: true);
         var cases = new (string Tool, JsonObject Args)[]
