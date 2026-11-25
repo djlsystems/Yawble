@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import {
-  actionOf, CONDITION_OPS, expressionSuggestions, integrationOf, ioInText, ioOutText, isUnaryOp, NATIVE_TYPES, stepIO,
+  actionOf, CONDITION_OPS, expressionSuggestions, integrationOf, ioInText, ioOutText, isUnaryOp, NATIVE_TYPES, ownTellTeam, stepIO,
+  TELL_DEFAULT_MEMBER, TELL_DEFAULT_TIMEOUT, TELL_TIMEOUTS, tellMembers, tellTeamOf, timeoutProblem,
   type DesignContext, type MemberIntegration,
 } from '../../scripts/catalog';
 import type { ScriptStep, ScriptVariable } from '../../scripts/types';
@@ -44,7 +45,9 @@ function pickFileOp(e: Event) {
   if (props.readonly) return;
   emit('change', withFileOperation(copy(props.step), (e.target as HTMLSelectElement).value));
 }
-const hasNext = computed(() => !['if', 'switch', 'forEach', 'end'].includes(props.step.type));
+const hasNext = computed(() => !['if', 'switch', 'forEach', 'while', 'end'].includes(props.step.type));
+/** The steps whose result can be saved into a variable from this form (a new one too). */
+const hasInto = computed(() => ['integration', 'tell', 'code'].includes(props.step.type));
 
 const setRef = (key: string) => (e: Event) => change((s) => { const v = (e.target as HTMLSelectElement).value; s[key] = v === '' ? null : v; });
 
@@ -124,7 +127,115 @@ function addInto() {
   change((s) => { s.into = name; }, { name, type: newType.value.trim(), scope: 'run' });
 }
 
-// ---- if
+// ---- tell
+// The team ('' = the script member's own team, so the step names none), the member (the team's agent members from the
+// catalog, the Manager first and by default), the text, and Wait; timeout and reply only mean something while it waits,
+// so turning Wait off removes them.
+const tellTargets = computed(() => props.ctx.catalog?.tellTargets ?? []);
+const ownTeam = computed(() => ownTellTeam(props.ctx.catalog));
+const otherTeams = computed(() => tellTargets.value.slice(1));
+const otherTeamsAllowed = computed(() => props.ctx.catalog?.tellOtherTeams !== false);
+/** The team select's value: '' for none named (or the own team named). */
+const tellTeam = computed(() => {
+  const t = str(props.step.team).trim();
+  return t && ownTeam.value && t.toLowerCase() === ownTeam.value.team.toLowerCase() ? '' : t;
+});
+const tellTeamKnown = computed(() => !tellTeam.value || otherTeams.value.some((t) => t.team.toLowerCase() === tellTeam.value.toLowerCase()));
+const tellMember = computed(() => str(props.step.member).trim() || TELL_DEFAULT_MEMBER);
+const memberChoices = computed(() => tellMembers(props.ctx.catalog, props.step));
+/** The catalog lists the step's team's agent members (it may not, opened from the library without a team). */
+const membersListed = computed(() => tellTeamOf(props.ctx.catalog, props.step) !== null);
+const waits = computed(() => props.step.wait === true);
+const timeoutText = computed(() => str(props.step.timeout));
+const timeoutError = computed(() => timeoutProblem(timeoutText.value));
+const replyName = computed(() => str(props.step.reply));
+
+function pickTeam(e: Event) {
+  const team = (e.target as HTMLSelectElement).value;
+  change((s) => {
+    if (team === '') delete s.team; else s.team = team;
+    // A member the new team does not have goes back to the Manager.
+    const listed = tellTeamOf(props.ctx.catalog, s);
+    const member = str(s.member).trim() || TELL_DEFAULT_MEMBER;
+    if (listed && member !== TELL_DEFAULT_MEMBER && !listed.members.includes(member)) s.member = TELL_DEFAULT_MEMBER;
+  });
+}
+function pickMember(e: Event) {
+  const member = (e.target as HTMLSelectElement).value;
+  change((s) => { s.member = member; });
+}
+function setWait(e: Event) {
+  const on = (e.target as HTMLInputElement).checked;
+  change((s) => {
+    if (on) { s.wait = true; return; }
+    delete s.wait; delete s.timeout; delete s.reply;
+  });
+}
+function setTimeoutText(e: Event) {
+  const t = (e.target as HTMLInputElement).value.trim();
+  change((s) => { if (t) s.timeout = t; else delete s.timeout; });
+}
+function pickReply(e: Event) {
+  const name = (e.target as HTMLSelectElement).value;
+  change((s) => { if (name) s.reply = name; else delete s.reply; });
+}
+
+// ---- code
+// The inputs (a name and an expression each; in the code they are inputs.<name>), the function body, the type it
+// returns (none given: any) and save into.
+const codeInputs = computed(() => Object.entries(obj(props.step.inputs)));
+function setInputs(list: [string, unknown][]) {
+  change((s) => { s.inputs = Object.fromEntries(list); });
+}
+const inputNameOk = (name: string, i: number) => /^[A-Za-z_$][\w$]*$/.test(name) && !codeInputs.value.some(([k], j) => j !== i && k === name);
+function renameInput(i: number, e: Event) {
+  const name = (e.target as HTMLInputElement).value.trim();
+  if (!inputNameOk(name, i)) { (e.target as HTMLInputElement).value = codeInputs.value[i]?.[0] ?? ''; return; }
+  setInputs(codeInputs.value.map(([k, v], j) => [j === i ? name : k, v]));
+}
+function addInput() {
+  let n = codeInputs.value.length + 1;
+  while (codeInputs.value.some(([k]) => k === `input${n}`)) n++;
+  setInputs([...codeInputs.value, [`input${n}`, '']]);
+}
+const removeInput = (i: number) => setInputs(codeInputs.value.filter((_, j) => j !== i));
+const INDENT = '  ';
+/** Tab in the code area indents at the cursor (or the selection) instead of leaving the field; Shift+Tab still leaves it. */
+function codeKey(e: KeyboardEvent) {
+  if (e.key !== 'Tab' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || props.readonly) return;
+  e.preventDefault();
+  const area = e.target as HTMLTextAreaElement;
+  const { selectionStart: a, selectionEnd: b, value } = area;
+  area.value = value.slice(0, a) + INDENT + value.slice(b);
+  area.selectionStart = area.selectionEnd = a + INDENT.length;
+  change((s) => { s.code = area.value; });
+}
+function setReturns(e: Event) {
+  const t = (e.target as HTMLInputElement).value.trim();
+  change((s) => { if (t) s.returns = t; else delete s.returns; });
+}
+
+// ---- while
+/** The default and the largest number of passes a loop may make. */
+const LOOP_MAX_DEFAULT = 100;
+const LOOP_MAX_LIMIT = 10000;
+const maxText = ref<string | null>(null);
+const maxShown = computed(() => maxText.value ?? (typeof props.step.max === 'number' ? String(props.step.max) : ''));
+const maxProblem = computed(() => {
+  const t = maxShown.value.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 1 && n <= LOOP_MAX_LIMIT ? null : `Max is a whole number from 1 to ${LOOP_MAX_LIMIT}.`;
+});
+function setMax(e: Event) {
+  maxText.value = (e.target as HTMLInputElement).value;
+  if (maxProblem.value) return;
+  const t = maxText.value.trim();
+  maxText.value = null;
+  change((s) => { if (t) s.max = Number(t); else delete s.max; });
+}
+
+// ---- if (and the condition of while)
 const when = computed(() => obj(props.step.when));
 /**
  * A side of the comparison as its field takes it: the blank If's '' is no value yet, so 0 typed there is the number 0 (as on a
@@ -223,23 +334,84 @@ function addOutput() {
           <button v-if="!readonly && action" type="button" class="mini" data-test="form-arg-remove" @click="setArg(k, undefined, false)">Remove</button>
         </div>
       </fieldset>
-      <label class="field">Save result into
-        <select :value="intoValue" :disabled="readonly" data-test="form-into" @change="pickInto">
-          <option value="">(don't save it)</option>
-          <option v-for="v in variables" :key="v.name" :value="v.name">{{ v.name }}: {{ v.type }}{{ io.out && io.out.type === v.type ? ' ✓' : '' }}</option>
-          <option v-if="!readonly" :value="NEW">New variable…</option>
-        </select>
-      </label>
-      <div v-if="intoChoice === NEW" class="new row" data-test="form-into-new">
-        <input v-model="newName" placeholder="name" spellcheck="false" data-test="form-into-new-name" />
-        <input v-model="newType" list="step-form-types" placeholder="type" spellcheck="false" data-test="form-into-new-type" />
-        <button type="button" class="mini" :disabled="!!newProblem" :title="newProblem ?? ''" data-test="form-into-new-add" @click="addInto">Add</button>
-        <button type="button" class="mini" @click="intoChoice = null">Cancel</button>
-      </div>
     </template>
 
-    <!-- if -->
-    <template v-else-if="step.type === 'if'">
+    <!-- tell -->
+    <template v-else-if="step.type === 'tell'">
+      <!-- Opened without a team (the library), the catalog lists no teams or members: both are typed. -->
+      <template v-if="!tellTargets.length">
+        <label class="field">Team
+          <input :value="tellTeam" :readonly="readonly" placeholder="the member's own team" spellcheck="false" data-test="form-tell-team-text"
+            @change="(e) => change((s) => { const v = (e.target as HTMLInputElement).value.trim(); if (v) s.team = v; else delete s.team; })" />
+        </label>
+        <label class="field">Member
+          <input :value="tellMember" :readonly="readonly" list="step-form-tell-members" spellcheck="false" data-test="form-tell-member-text"
+            @change="(e) => change((s) => { s.member = (e.target as HTMLInputElement).value.trim() || TELL_DEFAULT_MEMBER; })" />
+        </label>
+        <datalist id="step-form-tell-members"><option :value="TELL_DEFAULT_MEMBER" /></datalist>
+      </template>
+      <label v-if="tellTargets.length" class="field">Team
+        <select :value="tellTeam" :disabled="readonly" data-test="form-tell-team" @change="pickTeam">
+          <option value="">{{ ownTeam ? `${ownTeam.team} (own team)` : 'The member\'s own team' }}</option>
+          <option v-if="tellTeam && !tellTeamKnown" :value="tellTeam">{{ tellTeam }} (not a team here)</option>
+          <option v-for="t in otherTeams" :key="t.teamId" :value="t.team" :disabled="!otherTeamsAllowed">{{ t.team }}</option>
+        </select>
+      </label>
+      <p v-if="!otherTeamsAllowed" class="muted small" data-test="form-tell-no-other-teams">Settings &gt; Scripts turns off telling other teams: a tell to another team fails.</p>
+      <label v-if="tellTargets.length" class="field">Member
+        <select :value="tellMember" :disabled="readonly" data-test="form-tell-member" @change="pickMember">
+          <option v-if="!memberChoices.includes(tellMember)" :value="tellMember">{{ tellMember }}{{ membersListed ? ' (not an agent member of the team)' : '' }}</option>
+          <option v-for="m in memberChoices" :key="m" :value="m">{{ m }}</option>
+        </select>
+      </label>
+      <p class="muted small">Telling the Manager starts a workflow it plans; telling another agent member gives that member one card.</p>
+      <ExpressionField name="tell-text" label="Text" type="string" required :model-value="step.text" :suggestions="suggestions" :readonly="readonly"
+        @update:model-value="(v) => change((s) => { s.text = v; })" />
+      <label class="check">
+        <input type="checkbox" :checked="waits" :disabled="readonly" data-test="form-tell-wait" @change="setWait" />
+        Wait for the outcome (the run waits until the workflow is done, fails or is blocked)
+      </label>
+      <template v-if="waits">
+        <label class="field">Timeout
+          <input :value="timeoutText" :readonly="readonly" list="step-form-timeouts" :placeholder="`${TELL_DEFAULT_TIMEOUT} (at most 7d)`" spellcheck="false"
+            data-test="form-tell-timeout" @change="setTimeoutText" />
+        </label>
+        <p v-if="timeoutError" class="warn small" data-test="form-tell-timeout-problem">{{ timeoutError }}</p>
+        <label class="field">Reply schema
+          <select :value="replyName" :disabled="readonly" data-test="form-tell-reply" @change="pickReply">
+            <option value="">(none: just the closing summary)</option>
+            <option v-if="replyName && !schemaNames.includes(replyName)" :value="replyName">{{ replyName }} (not a schema)</option>
+            <option v-for="n in schemaNames" :key="n" :value="n">{{ n }}</option>
+          </select>
+        </label>
+      </template>
+    </template>
+
+    <!-- code -->
+    <template v-else-if="step.type === 'code'">
+      <fieldset class="group" data-test="form-code-inputs">
+        <legend>Inputs</legend>
+        <p v-if="!codeInputs.length" class="muted small">No inputs: the code gets an empty inputs.</p>
+        <div v-for="([k, v], i) in codeInputs" :key="i" class="output" data-test="form-code-input" :data-name="k">
+          <input :value="k" :readonly="readonly" spellcheck="false" aria-label="Input name" data-test="form-code-input-name" @change="renameInput(i, $event)" />
+          <ExpressionField :name="`input-${k}`" label="Value" :model-value="v" :suggestions="suggestions" :readonly="readonly"
+            @update:model-value="(x) => setInputs(codeInputs.map(([a, b], j) => [a, j === i ? x : b]))" />
+          <button v-if="!readonly" type="button" class="mini" data-test="form-code-input-remove" @click="removeInput(i)">Remove</button>
+        </div>
+        <button v-if="!readonly" type="button" class="mini" data-test="form-code-input-add" @click="addInput">Add an input</button>
+      </fieldset>
+      <label class="field">Code (JavaScript: the body of a function; it returns the result)
+        <textarea class="code" :value="str(step.code)" :readonly="readonly" spellcheck="false" rows="8" data-test="form-code"
+          @keydown="codeKey" @input="change((s) => { s.code = ($event.target as HTMLTextAreaElement).value; })" />
+      </label>
+      <p class="muted small">The code has inputs.&lt;name&gt; and log(text), nothing else. It may run 2 seconds and use 64 MB.</p>
+      <label class="field">Returns
+        <input :value="str(step.returns)" :readonly="readonly" list="step-form-types" placeholder="any" spellcheck="false" data-test="form-code-returns" @change="setReturns" />
+      </label>
+    </template>
+
+    <!-- if, and while's condition -->
+    <template v-else-if="step.type === 'if' || step.type === 'while'">
       <template v-if="simpleWhen">
         <ExpressionField name="when-left" label="Left value" :model-value="side(when.left)" :suggestions="suggestions" :readonly="readonly" @update:model-value="(v) => setWhen('left', v)" />
         <label class="field">Operator
@@ -251,6 +423,25 @@ function addOutput() {
           @update:model-value="(v) => setWhen('right', v)" />
       </template>
       <p v-else class="muted small" data-test="form-when-combined">This condition combines others (all, any or not): edit it on the JSON tab.</p>
+      <template v-if="step.type === 'while'">
+        <p class="muted small">Checked before each pass: while it is true the body runs again; when it is false the run goes to Then.</p>
+        <label class="field">Max passes
+          <input type="number" min="1" :max="LOOP_MAX_LIMIT" step="1" :value="maxShown" :readonly="readonly" :placeholder="`${LOOP_MAX_DEFAULT}`" data-test="form-while-max" @change="setMax" />
+        </label>
+        <p v-if="maxProblem" class="warn small" data-test="form-while-max-problem">{{ maxProblem }}</p>
+        <p v-else class="muted small">Empty: {{ LOOP_MAX_DEFAULT }}. At most {{ LOOP_MAX_LIMIT }}; a loop that passes it fails the run.</p>
+        <label class="field">Body (each pass)
+          <select :value="str(step.body)" :disabled="readonly" data-test="form-body" @change="setRef('body')($event)">
+            <option value="">(none)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </label>
+        <label class="field">Then (when done)
+          <select :value="str(step.then)" :disabled="readonly" data-test="form-then" @change="setRef('then')($event)">
+            <option value="">(end)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </label>
+      </template>
+      <template v-else>
       <label class="field">Then (yes)
         <select :value="str(step.then)" :disabled="readonly" data-test="form-then" @change="setRef('then')($event)">
           <option value="">(end)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
@@ -261,6 +452,7 @@ function addOutput() {
           <option value="">(end)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
         </select>
       </label>
+      </template>
     </template>
 
     <!-- switch -->
@@ -357,6 +549,22 @@ function addOutput() {
 
     <p v-else class="muted small" data-test="form-other">Edit this step on the JSON tab.</p>
 
+    <template v-if="hasInto">
+      <label class="field">Save result into
+        <select :value="intoValue" :disabled="readonly" data-test="form-into" @change="pickInto">
+          <option value="">(don't save it)</option>
+          <option v-for="v in variables" :key="v.name" :value="v.name">{{ v.name }}: {{ v.type }}{{ io.out && io.out.type === v.type ? ' ✓' : '' }}</option>
+          <option v-if="!readonly" :value="NEW">New variable…</option>
+        </select>
+      </label>
+      <div v-if="intoChoice === NEW" class="new row" data-test="form-into-new">
+        <input v-model="newName" placeholder="name" spellcheck="false" data-test="form-into-new-name" />
+        <input v-model="newType" list="step-form-types" placeholder="type" spellcheck="false" data-test="form-into-new-type" />
+        <button type="button" class="mini" :disabled="!!newProblem" :title="newProblem ?? ''" data-test="form-into-new-add" @click="addInto">Add</button>
+        <button type="button" class="mini" @click="intoChoice = null">Cancel</button>
+      </div>
+    </template>
+
     <label v-if="hasNext" class="field">Next
       <select :value="str(step.next)" :disabled="readonly" data-test="form-next" @change="setRef('next')($event)">
         <option value="">(end)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
@@ -369,6 +577,7 @@ function addOutput() {
     </div>
 
     <datalist id="step-form-types"><option v-for="t in types" :key="t" :value="t" /></datalist>
+    <datalist id="step-form-timeouts"><option v-for="t in TELL_TIMEOUTS" :key="t" :value="t" /></datalist>
     <datalist id="step-form-outputs"><option v-for="o in declaredOutputs" :key="o.name" :value="o.name" /></datalist>
   </div>
 </template>
@@ -377,6 +586,7 @@ function addOutput() {
 .form { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
 .field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--ink-soft); }
 .field input, .field select, .case input, .output > input, .new input { font-size: 12px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); }
+.check { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; color: var(--ink-soft); }
 .group { border: 1px solid var(--line-soft); border-radius: 5px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; margin: 0; }
 .group legend { font-size: 11.5px; color: var(--muted); padding: 0 4px; }
 .row { display: flex; gap: 6px; align-items: center; }
@@ -388,6 +598,7 @@ function addOutput() {
 .override { color: var(--accent); margin: 0; }
 .io { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 5px; background: var(--surface-2); font-size: 11.5px; }
 .io code { word-break: break-word; }
+.field textarea.code { font-family: ui-monospace, monospace; font-size: 12px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); resize: vertical; tab-size: 2; white-space: pre; }
 .mini { font-size: 11.5px; padding: 1px 8px; align-self: flex-start; }
 .small { font-size: 12px; margin: 0; }
 .warn { color: var(--warn-ink); }

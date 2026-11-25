@@ -14,6 +14,7 @@
     <PackageReference Include="Cronos" />
     <PackageReference Include="YamlDotNet" />
     <PackageReference Include="MailKit" />
+    <PackageReference Include="Jint" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Storage/Migrations/*.sql" LogicalName="Yawble.Core.Migrations.%(Filename)%(Extension)" />

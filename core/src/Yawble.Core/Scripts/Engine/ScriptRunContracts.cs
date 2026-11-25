@@ -19,6 +19,50 @@ public interface IScriptActions
     Task<JsonNode?> InvokeAsync(ScriptActionCall call, CancellationToken ct);
 }
 
+/// <summary>
+/// A <c>tell</c> step's work for an agent member: <see cref="Member"/> (the Manager by default), <see cref="Team"/> (null: the
+/// script member's own team), the evaluated <see cref="Text"/>, whether the run waits, and the reply schema the agent is asked
+/// to end with (its name and JSON Schema), if any.
+/// </summary>
+public sealed record ScriptTellCall(string StepId, string Member, string? Team, string Text, bool Wait, string? ReplySchemaName, JsonObject? ReplySchema);
+
+/// <summary>A tell that went: the workflow it started, and the member and team it went to.</summary>
+public sealed record ScriptTellSent(long Workflow, string Member, string Team);
+
+/// <summary>
+/// Gives a tell step's work to the team's agents (the bus, in the app; tests fake it). A refusal (no such agent member, a script
+/// member, another team when that is off) throws <see cref="ScriptActionException"/>: the step fails with its message.
+/// </summary>
+public interface IScriptTeller
+{
+    Task<ScriptTellSent> TellAsync(ScriptTellCall call, CancellationToken ct);
+}
+
+/// <summary>
+/// What a run waits on, saved in its checkpoint: <see cref="Kind"/> (<c>workflow</c> for a tell; a later step such as askPerson
+/// adds its own), the step that waits, the workflow (or other key), since when and until when (null: no timeout), and the step's own
+/// details (<see cref="Data"/>, e.g. a tell's reply schema).
+/// </summary>
+public sealed class ScriptWait
+{
+    public const string WorkflowKind = "workflow";
+
+    public required string Kind { get; init; }
+    public required string StepId { get; init; }
+    public long? Workflow { get; init; }
+    public string? Key { get; init; }
+    public DateTimeOffset Since { get; init; }
+    public DateTimeOffset? Until { get; init; }
+    public JsonObject? Data { get; init; }
+    public JsonNode? Input { get; init; }
+}
+
+/// <summary>
+/// How a wait ended: <see cref="Outcome"/> (for a tell: done, failed, blocked or timedOut), the text that came with it (a tell's
+/// closing summary, a blocked reason).
+/// </summary>
+public sealed record ScriptWaitResult(string Outcome, string? Text = null);
+
 /// <summary>A folder the team granted, which a script's file steps may use besides the member's data folder.</summary>
 public sealed record ScriptFolderGrant(string Path, bool CanWrite);
 
@@ -57,20 +101,50 @@ public sealed record ScriptRunRequest
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(10);
     public int StepBudget { get; init; } = 10_000;
 
-    /// <summary>The most items one forEach may loop over.</summary>
+    /// <summary>The most items one forEach may loop over, and the most passes one while may make (whatever its max).</summary>
     public int LoopCap { get; init; } = 1_000;
+
+    /// <summary>The limits each code step runs under (time, memory, statements, call depth).</summary>
+    public ScriptCodeLimits CodeLimits { get; init; } = ScriptCodeLimits.Default;
 
     /// <summary>The last checkpoint of a run that was cut off; the run goes on from there.</summary>
     public ScriptRunCheckpoint? ResumeFrom { get; init; }
 
     /// <summary>The clock for the timeout and date functions (tests fake it); null is the system clock.</summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>Who a tell step gives work to; null: a tell step fails (no team to tell). A dry run never calls it.</summary>
+    public IScriptTeller? Teller { get; init; }
+
+    /// <summary>Tells are not sent even when the run is not a dry run (a Test run): they log and give outcome dryRun.</summary>
+    public bool DryTells { get; init; }
+
+    /// <summary>The run's team, as the dry-run log names it ("would tell Manager of Support: ...").</summary>
+    public string? Team { get; init; }
+
+    /// <summary>The most tells the run may make; the next one fails the run.</summary>
+    public int MaxTells { get; init; } = Language.ScriptTell.DefaultMaxTells;
+
+    /// <summary>
+    /// A Test run's made-up replies for its waiting tells, by step id: text, or JSON (the reply's data). A dry run's waiting tell
+    /// with one gets it as its reply instead of nothing.
+    /// </summary>
+    public JsonObject? TellReplies { get; init; }
+
+    /// <summary>
+    /// How the wait the checkpoint (<see cref="ResumeFrom"/>) is parked on ended. Null with a waiting checkpoint: the run goes on
+    /// only when the wait's timeout has passed (outcome timedOut); otherwise it stays waiting.
+    /// </summary>
+    public ScriptWaitResult? WaitResult { get; init; }
 }
 
 public enum ScriptRunStatus
 {
     Succeeded,
     Failed,
+
+    /// <summary>The run is parked on <see cref="ScriptRunResult.Wait"/> (a tell that waits); its checkpoint is saved at that step.</summary>
+    Waiting,
 }
 
 /// <summary>
@@ -85,6 +159,9 @@ public sealed record ScriptRunResult(
 
     /// <summary>Steps run, counting those before a resume (the step budget counts the same).</summary>
     public int StepsRun { get; init; }
+
+    /// <summary>With <see cref="ScriptRunStatus.Waiting"/>: what the run waits on (also in its checkpoint).</summary>
+    public ScriptWait? Wait { get; init; }
 }
 
 /// <summary>One step as it ran: its evaluated input, its output, <c>succeeded</c> or <c>failed</c> (then <see cref="Error"/>).</summary>
@@ -104,6 +181,12 @@ public interface IScriptRunJournal
     Task StepCompletedAsync(ScriptStepRecord rec, ScriptRunCheckpoint cp);
 
     Task LogAsync(string line);
+
+    /// <summary>
+    /// A step parks the run (status <c>waiting</c>): <paramref name="cp"/> holds the wait and is the state the run resumes from.
+    /// The step's row stays open until it completes. By default the checkpoint goes through <see cref="StepCompletedAsync"/>.
+    /// </summary>
+    Task StepWaitingAsync(ScriptStepRecord rec, ScriptRunCheckpoint cp) => StepCompletedAsync(rec, cp);
 }
 
 /// <summary>A journal that keeps nothing (a check-only caller, tests that do not look).</summary>
@@ -115,15 +198,20 @@ public sealed class NullScriptRunJournal : IScriptRunJournal
     public Task LogAsync(string line) => Task.CompletedTask;
 }
 
-/// <summary>A forEach being run: its step, the item name, the items and the index of the current one.</summary>
+/// <summary>
+/// A loop being run: its step. For a forEach, the item name, the items and the index of the current one. For a while
+/// (<see cref="IsWhile"/>), no items: <see cref="Index"/> is the passes it has finished, and the end of a pass goes back to the
+/// while step, which checks its condition again.
+/// </summary>
 public sealed class ScriptLoopFrame
 {
     public required string StepId { get; init; }
-    public required string As { get; init; }
-    public required JsonArray Items { get; init; }
+    public string? As { get; init; }
+    public JsonArray Items { get; init; } = [];
     public int Index { get; set; }
+    public bool IsWhile { get; init; }
 
-    public ScriptLoopFrame Clone() => new() { StepId = StepId, As = As, Items = (JsonArray)Items.DeepClone(), Index = Index };
+    public ScriptLoopFrame Clone() => new() { StepId = StepId, As = As, Items = (JsonArray)Items.DeepClone(), Index = Index, IsWhile = IsWhile };
 }
 
 /// <summary>
@@ -145,6 +233,18 @@ public sealed class ScriptRunCheckpoint
 
     /// <summary>An <c>end</c> step ran: nothing more to do.</summary>
     public bool Ended { get; init; }
+
+    /// <summary>The tells the run has made (the member's maxTells caps them).</summary>
+    public int Tells { get; init; }
+
+    /// <summary>
+    /// How long the run has been going, in milliseconds, without the time it waited: the run timeout counts this, so the clock
+    /// stops while a run waits (and while the app is closed).
+    /// </summary>
+    public long ActiveMs { get; init; }
+
+    /// <summary>What the run is parked on, at step <see cref="ScriptWait.StepId"/> (<see cref="Next"/> is that step); null when it is not waiting.</summary>
+    public ScriptWait? Wait { get; init; }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsDone => Ended || (Next is null && Frames.Count == 0);

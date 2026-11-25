@@ -3,13 +3,16 @@ import type { ApiRow, YawbleApi } from '../../shared/api';
 // Script members on the team page. The shapes and method names are the core's, from the team documents'
 // scripts-rpc.md (core Ui/ScriptsRpc.cs); the calls go through the window's own api.call like every other screen.
 
-export type ScriptRunStatus = 'running' | 'succeeded' | 'failed' | 'skipped' | 'interrupted';
+/** waiting: parked at a tell that waits on a workflow (waitWorkflowId). */
+export type ScriptRunStatus = 'running' | 'waiting' | 'succeeded' | 'failed' | 'skipped' | 'interrupted';
 
 /** One script run (Run in scripts-rpc.md). */
 export interface ScriptRun {
   id: number; teamId: number; team: string; memberId: number | null; member: string | null; scriptId: number; script: string; version: number;
   trigger: string; status: ScriptRunStatus; dryRun: boolean; test: boolean; input: unknown; outputs: Record<string, unknown> | null;
   failedStepId: string | null; reason: string | null; startedAt: string; endedAt: string | null;
+  /** The workflow a waiting run waits on, else null (an older core leaves it out). */
+  waitWorkflowId?: number | null;
 }
 
 /**
@@ -23,13 +26,20 @@ export interface ScriptMember {
   memberId: number; teamId: number; team: string; name: string; scriptId: number; script: string; version: number | null; runsVersion: number | null;
   settings: Record<string, unknown>; bindings: Record<string, string>; timeoutMinutes: number; consecutiveFailures: number;
   running?: boolean; lastRun: ScriptRun | null; nextTriggerAt: string | null;
+  /** How many tells one run may make (default 5, at most 50); the next one fails the run. An older core leaves it out. */
+  maxTells?: number;
   /** Each integration the script names and what the member uses for it (an older core leaves it out). */
   integrations?: ScriptMemberIntegration[];
 }
 
+/** A member's tells per run: the default and the most it can be set to. */
+export const MAX_TELLS_DEFAULT = 5;
+export const MAX_TELLS_LIMIT = 50;
+
 /** scripts.memberUpdate: what is given changes (bindings replaces the member's whole map). */
 export interface ScriptMemberUpdate {
   memberId: number; version?: number | null; settings?: Record<string, unknown>; bindings?: Record<string, string>; timeoutMinutes?: number;
+  maxTells?: number;
 }
 
 /** scripts.memberState: the member's saved variables. */
