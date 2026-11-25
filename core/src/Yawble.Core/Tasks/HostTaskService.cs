@@ -31,6 +31,12 @@ public sealed record TaskEvaluation(HostTask Task, TaskRepoInfo Repo, RepoGit Gi
 /// </summary>
 public sealed class HostTaskService
 {
+    /// <summary>
+    /// How long one second of a task's time limit lasts: one second. A test that waits for a time limit shortens it, so
+    /// the 10-second minimum does not cost 10 real seconds; the limit saved, shown and reported stays in seconds.
+    /// </summary>
+    internal TimeSpan SecondLength { get; set; } = TimeSpan.FromSeconds(1);
+
     public const int DeclineCooldownMinutes = 10, MaxAsksPerTeamPerHour = 5, KeepLogsPerTask = 20;
 
     private readonly HostTaskStore _store;
@@ -522,7 +528,7 @@ public sealed class HostTaskService
             var options = new TaskProcessOptions
             {
                 Program = eval.ProgramResolved, Args = task.Def.Args, WorkingDirectory = eval.WorkdirPath, Environment = env,
-                Timeout = TimeSpan.FromSeconds(task.Def.TimeoutSeconds), LogPath = logPath, SecretValues = secrets, LogCapBytes = LogCapBytes,
+                Timeout = SecondLength * task.Def.TimeoutSeconds, LogPath = logPath, SecretValues = secrets, LogCapBytes = LogCapBytes,
             };
             var cts = new CancellationTokenSource();
             _liveLogs[runId] = logPath; // before the run starts: a quick one removes it when it is over

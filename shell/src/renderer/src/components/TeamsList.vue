@@ -10,6 +10,7 @@ import Icon from './Icon.vue';
 import TeamStateChip from './TeamStateChip.vue';
 import TeamMembers from './TeamMembers.vue';
 import TeamWorkflows from './TeamWorkflows.vue';
+import RunningOutline from './RunningOutline.vue';
 import TileGrip from './TileGrip.vue';
 import WorkflowsDialog from './WorkflowsDialog.vue';
 import { usePhone } from '../phone';
@@ -86,6 +87,8 @@ watch(phone, () => void fit());
     <div class="team-grid" :class="{ 'icons-only': iconsOnly }" :style="gridStyle" data-test="team-grid">
       <div v-for="t in teams" :key="t.id" class="tile-cell">
       <div class="team-card" :class="`is-${teamState(t)}`" :data-state="teamState(t)" data-test="team-card">
+        <!-- Running: a dotted outline whose dots move clockwise, just inside the edge (the card clips its overflow). -->
+        <RunningOutline v-if="teamState(t) === 'running'" :radius="11.5" />
         <button class="card-open" :data-test="`team-open-${t.name}`" @click="emit('open', t.id)">
           <span class="card-title"><strong class="card-name" :title="t.name">{{ t.name }}</strong><TeamStateChip :team="t" data-test="team-state" /></span>
           <TeamMembers :team-id="t.id" :api="api" :poll-ms="pollMs" :fallback="`${t.members} agents · ${t.running} running · ${t.queued} queued`" />
@@ -176,20 +179,16 @@ watch(phone, () => void fit());
 .danger-text { color: var(--bad); }
 .tile-btn.danger { background: var(--bad); border-color: var(--bad); color: var(--on-accent); }
 .team-card.archived { opacity: .75; }
-/* A team's state: the outline says it at a glance, the chip says it in words; running breathes. */
+/* A team's state: the outline says it at a glance, the chip says it in words; running's dots move clockwise. */
 .team-card { --team-state: var(--state-idle); }
-.team-card.is-running { --team-state: var(--state-running); border-color: var(--team-state); animation: team-breathe 2.4s ease-in-out infinite; }
+/* Running: the border gives way to RunningOutline's moving dots. */
+.team-card.is-running, .team-card.is-running:hover { --team-state: var(--state-running); border-color: transparent; }
 .team-card.is-waiting { --team-state: var(--state-decision); border-color: var(--team-state); }
 .team-card.is-queued { --team-state: var(--state-waiting); border-color: var(--team-state); border-style: dashed; }
 .team-card.is-paused { --team-state: var(--state-blocked); border-color: var(--team-state); }
-.team-card.is-running:hover, .team-card.is-waiting:hover, .team-card.is-queued:hover, .team-card.is-paused:hover { border-color: var(--team-state); }
+.team-card.is-waiting:hover, .team-card.is-queued:hover, .team-card.is-paused:hover { border-color: var(--team-state); }
 .card-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-title > :not(.card-name) { flex: none; }
-@keyframes team-breathe {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running) 0%, transparent); }
-  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--state-running) 22%, transparent); }
-}
-@media (prefers-reduced-motion: reduce) { .team-card.is-running { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-running) 22%, transparent); } }
 .paused-tag { color: var(--warn); font-weight: 600; }
 .link { border: 0; background: transparent; color: var(--accent); padding: 0; }
 .team-card.add-wrap { border-style: dashed; padding: 0; }

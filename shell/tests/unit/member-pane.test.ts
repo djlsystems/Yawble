@@ -67,7 +67,10 @@ describe("a member's pane", () => {
     const w = pane({ card: card({ state: 'running', statusLine: 'Split work' }) });
     const root = w.get('[data-test=agent-DeveloperMarlo]');
     expect(root.element.tagName).toBe('SECTION');
-    expect([...root.element.children].map((c) => c.getAttribute('data-test'))).toEqual(['agent-title', 'member-tabs', 'member-pane-body']);
+    // The running outline is decoration (aria-hidden), drawn over the frame's edge, not part of it.
+    const parts = [...root.element.children].filter((c) => c.getAttribute('aria-hidden') !== 'true');
+    expect(parts.map((c) => c.getAttribute('data-test'))).toEqual(['agent-title', 'member-tabs', 'member-pane-body']);
+    expect(root.find('[data-test=running-outline]').exists()).toBe(true);
     const title = w.get('[data-test=agent-title]');
     expect(title.find('[data-test=agent-name]').exists()).toBe(true);
     expect(title.get('[data-test=agent-face-state]').text()).toBe('Running');

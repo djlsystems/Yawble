@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, provide, reactive, ref, useId, watch } from 'vue';
 import { PaneHeaderKey } from '../terminalPane';
+import RunningOutline from './RunningOutline.vue';
 import { isStoppedRun, type AgentCard, type YawbleApi } from '../../../shared/api';
 import type { ActivityRow } from '../monitor/model';
 import { agentPillText, agentPillTitle } from '../memberModel';
@@ -147,6 +148,8 @@ defineExpose({ el: () => root.value });
 
 <template>
   <section ref="root" class="pane" :class="[state, `is-${face}`, `view-${view}`, { phone }]" :data-test="`agent-${m.name}`" :aria-label="displayName(m.name)">
+    <!-- Running: a dotted outline whose dots move clockwise, just inside the edge (the team page clips the pane's sides). -->
+    <RunningOutline v-if="face === 'running'" :radius="11.5" />
     <div class="title" data-test="agent-title">
       <MemberAvatar class="avatar" :team="m.team" :member="m.name" :state="face" :size="26" :title="stateLabel" />
       <strong data-test="agent-name" :title="m.name">{{ displayName(m.name) }}</strong>
@@ -227,7 +230,7 @@ defineExpose({ el: () => root.value });
 /* A tile in the team page's grid: the pane fills its cell (the grid sets the height) as a column - the
    title bar and the tabs at their own height, the view taking the rest and scrolling inside it - and never wider than
    the cell: what the title bar holds shrinks and ellipsizes. Outside a grid (no set height) it is as tall as its rows. */
-.pane { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 4px 10px 4px;
+.pane { position: relative; width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 14px; padding: 4px 10px 4px;
   display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
 /* Two rows: the avatar, the name and the ☰ on the first; the pills (role, CLI, state, more waiting) under the name. */
 .title { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 30px 20px; height: 54px;
@@ -288,14 +291,9 @@ defineExpose({ el: () => root.value });
 .small { font-size: 12px; }
 .muted { color: var(--muted); }
 .pane { --card-state: var(--state-idle); }
-.is-running { --card-state: var(--state-running); border-color: color-mix(in srgb, var(--state-running) 55%, var(--line)); border-left-color: var(--state-running);
-  animation: member-breathe 2.4s ease-in-out infinite; }
-/* A running member breathes, like a running team's card; idle and the other states stay still. */
-@keyframes member-breathe {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running) 0%, transparent); }
-  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--state-running) 22%, transparent); }
-}
-@media (prefers-reduced-motion: reduce) { .is-running { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-running) 22%, transparent); } }
+/* A running member's border gives way to RunningOutline's moving dots, like a running team's card; the other states stay still. */
+/* The left border is 1px like the others, the padding taking up the 2px, so the dots sit evenly and nothing moves. */
+.is-running { --card-state: var(--state-running); border-color: transparent; border-left-width: 1px; padding-left: 12px; }
 .is-waiting { --card-state: var(--state-waiting); border-left-color: var(--state-waiting); }
 .is-decision { --card-state: var(--state-decision); border-left-color: var(--state-decision); }
 .is-blocked { --card-state: var(--state-blocked); border-left-color: var(--state-blocked); }
@@ -306,6 +304,7 @@ defineExpose({ el: () => root.value });
 @media (max-width: 759.98px) {
   /* Not a tile: a block as tall as its rows, the view at its own height (the page scrolls). */
   .pane { padding: 4px 8px 8px; display: block; height: auto; }
+  .pane.is-running { padding-left: 10px; }
   .pane > .body { overflow: visible; }
   .title { grid-template-rows: 44px 20px; height: 68px; }
   .menu-button { height: 44px; min-width: 44px; }

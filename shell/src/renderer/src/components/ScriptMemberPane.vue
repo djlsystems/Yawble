@@ -175,7 +175,7 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
 </template>
 
 <style scoped>
-.pane { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px;
+.pane { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 14px;
   padding: 6px 10px; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
 .pane.running { border-left-color: var(--ok); }
 .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -195,6 +195,9 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
 .tells input { width: 56px; font-size: 12px; padding: 1px 4px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: auto; }
+/* The body scrolls as a whole; its parts keep their own height. A part that scrolls itself (the file's lines) would
+   otherwise shrink to a sliver with a scroll bar and no way to make it taller. */
+.body > * { flex: none; }
 .log { list-style: none; margin: 0; padding: 4px 6px; background: var(--code-bg, var(--chip)); border-radius: 4px; font-size: 11.5px; max-height: 160px; overflow: auto; gap: 1px; }
 .log li { white-space: pre-wrap; word-break: break-word; }
 h4 { font-size: 12px; margin: 6px 0 2px; color: var(--ink-soft); font-weight: 600; }

@@ -194,7 +194,8 @@ const DesktopCss: Record<string, string> = {
   // .is-stopped, a stopped run's neutral left edge and label colour.
   // The "Waiting on you" chip link (.kind.waiting) and the Report's note (.waiting-note). The pills
   // row under the name (two-row title grid).
-  'components/MemberPane.vue': '084a856ccdf2c295',
+  // A running member's pane: a 1px border that gives way to RunningOutline's dots; corners match the team cards (14px).
+  'components/MemberPane.vue': '050b2ddf9ce22867',
   'components/MemberActivity.vue': '89ae98395143684a',
   'components/DocumentsView.vue': '30090ebf288b8c9e',
   // The documents list's Modified column: a wider list and the size / modified cells.
