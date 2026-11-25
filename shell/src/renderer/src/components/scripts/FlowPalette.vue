@@ -24,9 +24,10 @@ const emit = defineEmits<{ add: [type: string] }>();
 .item:hover { background: var(--hover); }
 .item[data-kind=integration] { border-left: 4px solid var(--pill-blue-ink); }
 .item[data-kind=if], .item[data-kind=switch] { border-left: 4px solid var(--pill-yellow-ink); }
-.item[data-kind=forEach] { border-left: 4px solid var(--pill-violet-ink); }
+.item[data-kind=forEach], .item[data-kind=while] { border-left: 4px solid var(--pill-violet-ink); }
 .item[data-kind=set] { border-left: 4px solid var(--pill-info-ink); }
 .item[data-kind=file] { border-left: 4px solid var(--chip-claude-ink); }
+.item[data-kind=code] { border-left: 4px solid var(--pill-neutral-ink); }
 .item[data-kind=tell] { border-left: 4px solid var(--chip-grok-ink); }
 .item[data-kind=end] { border-left: 4px solid var(--pill-green-ink); }
 .item[data-kind=other] { border-left: 4px solid var(--pill-neutral-ink); }

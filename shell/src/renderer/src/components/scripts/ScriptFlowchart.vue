@@ -185,10 +185,10 @@ const branchKey = (b: Branch) => (b.kind === 'case' ? `case:${b.value}` : b.kind
 function branchLabel(b: Branch, source: string): string {
   const type = doc.value?.steps?.find((s) => s.id === source)?.type;
   switch (b.kind) {
-    case 'then': return type === 'forEach' ? 'then (when done)' : 'then (yes)';
+    case 'then': return type === 'forEach' || type === 'while' ? 'then (when done)' : 'then (yes)';
     case 'else': return 'else (no)';
     case 'case': return `case ${b.value}`;
-    case 'body': return 'body (each)';
+    case 'body': return type === 'while' ? 'body (repeat)' : 'body (each)';
     default: return b.kind;
   }
 }
@@ -301,9 +301,11 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
 .node .detail { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .node.round { border-radius: 36px; background: var(--pill-green-bg); color: var(--pill-green-ink); border-color: var(--ok-rule); }
 .node[data-kind=integration] { background: var(--pill-blue-bg); color: var(--pill-blue-ink); border-color: var(--pill-blue-line); }
-.node[data-kind=forEach] { background: var(--pill-violet-bg); color: var(--pill-violet-ink); border-style: dashed; }
+/* A Loop (while) is drawn as For each is. */
+.node[data-kind=forEach], .node[data-kind=while] { background: var(--pill-violet-bg); color: var(--pill-violet-ink); border-style: dashed; }
 .node[data-kind=set] { background: var(--pill-info-bg); color: var(--pill-info-ink); }
 .node[data-kind=file] { background: var(--chip-claude-bg); color: var(--chip-claude-ink); border-radius: 2px 14px 2px 2px; }
+.node[data-kind=code] { background: var(--pill-neutral-bg); color: var(--pill-neutral-ink); border-radius: 2px; }
 .node[data-kind=tell] { background: var(--chip-grok-bg); color: var(--chip-grok-ink); border-radius: 14px; }
 /* if / switch: a diamond drawn behind the text */
 .node.diamond { background: transparent; border: 0; color: var(--pill-yellow-ink); }
