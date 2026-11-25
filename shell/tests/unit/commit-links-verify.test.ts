@@ -20,7 +20,7 @@ import ChatMessage from '../../src/renderer/src/components/ChatMessage.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
 import TranscriptView from '../../src/renderer/src/components/TranscriptView.vue';
 import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
-import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
+import { mountPane, paneRow } from './workflow-pane-fake';
 import MemberActivity from '../../src/renderer/src/components/MemberActivity.vue';
 import { GIT_COMMITS_RESOLVE, type AgentCard, type BoardCard, type TeamSummary, type YawbleApi } from '../../src/shared/api';
 
@@ -282,15 +282,15 @@ describe('a confirmed commit link renders in each place', () => {
     expect(core.resolves()).toHaveLength(1);
   });
 
-  it('workflow threads: the ending (WorkflowsDialog) and a thread\'s messages (TranscriptView)', async () => {
-    const wf = { id: 10, title: 'Card 5', state: 'delivered', owner: null, messages: 4, startedAt: '2026-11-18T18:00:00Z', lastAt: '2026-11-18T19:00:00Z',
-      endedAt: '2026-11-18T19:00:00Z', ending: said(), busy: [], time: null, expiresAt: null, expiredAt: null };
-    use(fakeCore({ 'bus.workflows': () => [wf] }));
-    keep(mount(WorkflowsDialog, { props: { team: { id: 1, name: 'web' } as TeamSummary, api: core.api, pollMs: 0 }, attachTo: document.body }));
+  it('workflow threads: a handback in the Workflows page\'s pane and a thread\'s messages (TranscriptView)', async () => {
+    const row = paneRow({ id: 10, title: 'Partial refunds', status: 'completed', team: 'web' });
+    const handback = { seq: 4, at: '2026-11-18T19:00:00Z', kind: 'handback', from: 'Ada', member: 'Ada', text: said() };
+    use(fakeCore({ 'workflows.get': () => ({ workflow: row, cards: [], messages: [handback], spec: null, backlog: true }) }));
+    const p = keep(await mountPane(row, core.api));
     const line = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: said() }] } });
     const t = keep(mount(TranscriptView, { props: { text: line }, attachTo: document.body }));
     await settle();
-    expect(confirmed(document.querySelector('.ending')!)).toEqual([S.pushed]);
+    expect(confirmed(p.get('[data-test=workflow-pane-message]').element)).toEqual([S.pushed]);
     expect(confirmed(t.element)).toEqual([S.pushed]);
   });
 

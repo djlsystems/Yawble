@@ -13,7 +13,7 @@ import CommitText from '../../src/renderer/src/components/CommitText.vue';
 import ChatMessage from '../../src/renderer/src/components/ChatMessage.vue';
 import MemberActivity from '../../src/renderer/src/components/MemberActivity.vue';
 import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
-import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
+import { mountPane, paneRow } from './workflow-pane-fake';
 import { GIT_COMMITS_RESOLVE, isUiMethod, type BoardCard, type CommitMatch, type TeamSummary, type YawbleApi } from '../../src/shared/api';
 
 // A commit-shaped ID is a link only once git.commitsResolve confirms it, against a fake core with the
@@ -341,16 +341,15 @@ describe('every place IDs appear renders a confirmed link', () => {
     expect(w.text()).toContain('abc1234');
   });
 
-  it('a workflow thread\'s ending (WorkflowsDialog: what was delivered)', async () => {
-    const wf = { id: 10, title: 'Card 5', state: 'delivered', owner: null, messages: 4, startedAt: '2026-11-18T18:00:00Z', lastAt: '2026-11-18T19:00:00Z',
-      endedAt: '2026-11-18T19:00:00Z', ending: said, busy: [], time: null, expiresAt: null, expiredAt: null };
-    core = fakeCore({ 'bus.workflows': () => [wf] });
+  it('a workflow\'s handback (the Workflows page\'s pane: what was delivered)', async () => {
+    const row = paneRow({ id: 10, title: 'Partial refunds', status: 'completed' });
+    const handback = { seq: 4, at: '2026-11-18T19:00:00Z', kind: 'handback', from: 'DeveloperAda', member: 'DeveloperAda', text: said };
+    core = fakeCore({ 'workflows.get': () => ({ workflow: row, cards: [], messages: [handback], spec: null, backlog: true }) });
     configureCommitResolve({ api: core.api });
-    const team = { id: 1, name: 'payments' } as TeamSummary;
-    const w = mount(WorkflowsDialog, { props: { team, api: core.api, pollMs: 0 }, attachTo: document.body });
+    const w = await mountPane(row, core.api);
     cleanup.push(() => w.unmount());
     await settle();
-    expect(confirmed(document.body)).toEqual([ADA]);
+    expect(confirmed(w.get('[data-test=workflow-pane-message]').element)).toEqual([ADA]);
   });
 
   it('plain text from anywhere (CommitText): text until confirmed, then a link; a click opens it in its team', async () => {
