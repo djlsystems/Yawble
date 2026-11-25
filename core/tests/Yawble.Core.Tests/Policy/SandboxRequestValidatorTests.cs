@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Policy;
 
 /// <summary>
-/// B044: the dry run never asks the sandbox to bind a granted path that is missing on this host. Sandbox release 1.0.1
+/// The dry run never asks the sandbox to bind a granted path that is missing on this host. Sandbox release 1.0.1
 /// cannot: bwrap exits during setup and the network supervisor prints "failed to query Bubblewrap loopback
 /// readiness" - once per Linux golden file (fictional /home/alice paths) on a host with bwrap. A fake sandbox here
 /// records what the validator submits, so this runs on every OS.
@@ -137,7 +137,7 @@ public class SandboxRequestValidatorTests
     public void TheLinuxGoldenFilesNoLongerMakeBwrapExitBeforeTheReadinessQuery()
     {
         Assert.Equal(10, LinuxGoldens.Count());
-        // Before B044 the dry run submitted the golden policy unchanged: the fictional /home/alice grants made bwrap
+        // The old dry run submitted the golden policy unchanged: the fictional /home/alice grants made bwrap
         // exit at mount, once per Linux golden file - the ~10 lines of a Fedora Core.Tests run.
         var before = new FakeBubblewrap();
         // (the old ProbeCopy changed only the command and the timeout, so the binds were the golden file's own)

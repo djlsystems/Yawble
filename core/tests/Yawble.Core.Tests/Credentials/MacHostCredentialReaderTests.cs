@@ -48,7 +48,7 @@ public sealed class FakeSecurityTool : ISecurityTool
 }
 
 /// <summary>
-/// B124: the macOS reader of Claude Code's Keychain item runs /usr/bin/security (absolute path, argv list, 5 s), reads
+/// The macOS reader of Claude Code's Keychain item runs /usr/bin/security (absolute path, argv list, 5 s), reads
 /// the value from stdout, treats exit 44 as absent and every other failure as unreadable with the exit code only, and
 /// never writes, modifies or deletes the item. Fakes only.
 /// </summary>

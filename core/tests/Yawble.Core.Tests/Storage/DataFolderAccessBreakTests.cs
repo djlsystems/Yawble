@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Storage;
 
 /// <summary>
-/// B031 item 7, tester's checks of DataFolderAccess.Secure as Program.cs calls it, with the app root from
+/// The tester's checks of DataFolderAccess.Secure as Program.cs calls it, with the app root from
 /// BusHost.AppRootFor (the parent of any folder named "data"). POSIX only.
 /// </summary>
 public sealed class DataFolderAccessBreakTests : IDisposable

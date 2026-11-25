@@ -6,7 +6,7 @@ using Yawble.Core.Teams;
 namespace Yawble.Core.Bus;
 
 /// <summary>
-/// B100: the Manager's look back at a finished workflow. workflow_digest gives the Manager the facts of one of its team's
+/// The Manager's look back at a finished workflow. workflow_digest gives the Manager the facts of one of its team's
 /// workflows (Teams/WorkflowDigest.cs builds the text; this gathers what it is built from). When a workflow_complete is
 /// accepted, the team's Manager is given one retro item for it, unless the workflow was small and uneventful
 /// (<see cref="DigestCounts.Eventful"/>): its own workflow, rooted by the app, so the completed one stays completed. A

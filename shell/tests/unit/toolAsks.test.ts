@@ -329,7 +329,7 @@ describe('ToolAskCard on Linux', () => {
     expect(w.findAll('button:not(.discuss)').map((b) => b.text())).toEqual(['Check again', 'Not now']);
   });
 
-  // ---------------------------------------------------------------- B017 gap tests (card 84, TesterWren)
+  // ---------------------------------------------------------------- the tester's gap tests
 
   it('Gap_APackageFailure_IsInErrorRed_AndTheButtonBecomesTryAgain', async () => {
     const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: No match for argument: dotnet-sdk-10.0).';
@@ -397,10 +397,10 @@ describe('ToolAskCard on Linux', () => {
     expect(w.text().split('sandbox cannot see it')).toHaveLength(2);
   });
 
-  // FAULT (B017, card 84): a failed install whose program is only under the home folder returns the output AND the home
+  // FAULT (found by the gap tests): a failed install whose program is only under the home folder returns the output AND the home
   // note as one message (ToolAsks.cs InstallAsync, result homeOnly with exit code != 0); the card hides its homeOnly note
   // only when the note equals the message, so the home text is shown twice.
-  // Fixed (card 85): the card hides its note when the message already contains it. Passes as plain it (card 84 re-check).
+  // Fixed: the card hides its note when the message already contains it. Passes as plain it.
   it('Gap_FAULT_HomeOnlyAfterAFailedInstall_ShowsTheHomeTextOnce', () => {
     const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: No match for argument: dotnet-sdk-10.0).';
     const { api } = fakeApi({});
@@ -408,10 +408,10 @@ describe('ToolAskCard on Linux', () => {
     expect(w.text().split('sandbox cannot see it')).toHaveLength(2);
   });
 
-  // FAULT (B017, card 84): "cancelled"/"notAuthorized" is known only from the click's reply in this card. The core keeps
+  // FAULT (found by the gap tests): "cancelled"/"notAuthorized" is known only from the click's reply in this card. The core keeps
   // the plain words as the ask's error but sends no result code with tools.asks, so a fresh card (window reloaded, the
   // other view, a remote view) shows the cancelled words in error red with Try again.
-  // Fixed (card 85): tools.asks sends the ask's lastResult, and the card reads it when it has no reply of its own.
+  // Fixed: tools.asks sends the ask's lastResult, and the card reads it when it has no reply of its own.
   it.each([
     ['cancelled', CANCELLED],
     ['notAuthorized', NOT_AUTHORIZED],
@@ -423,7 +423,7 @@ describe('ToolAskCard on Linux', () => {
     expect(w.get('[data-test=tool-ask-install]').text()).toBe('Install');
   });
 
-  // ---------------------------------------------------------------- card 85 re-check (card 84, TesterWren)
+  // ---------------------------------------------------------------- re-check after the fix
 
   it('Gap_HomeOnly_WithNoMessage_StillShowsTheNoteOnce', () => {
     const { api } = fakeApi({});

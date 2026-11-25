@@ -5,7 +5,7 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Board;
 
 /// <summary>
-/// B086's times from what is stored: a card's timeline lines (0047), the workflow's runs and its messages, and the runs
+/// The board's times from what is stored: a card's timeline lines (0047), the workflow's runs and its messages, and the runs
 /// working now (their stalls so far). <see cref="TimelineCalculator"/> does the arithmetic; this reads its inputs and
 /// writes the wire contract (<c>time</c> on BoardCard and workflow items; <c>timeline.get</c>).
 /// </summary>
@@ -71,7 +71,7 @@ public sealed class BoardTimeline(BoardStore store)
     }
 
     /// <summary>
-    /// B104: the times of many workflows at once (the Workflows page), in a fixed number of statements however many there
+    /// The times of many workflows at once (the Workflows page), in a fixed number of statements however many there
     /// are. <paramref name="threads"/>: each workflow's messages, oldest first. Workflows without messages are left out.
     /// </summary>
     public IReadOnlyDictionary<long, TimeSummary> TimesOf(IReadOnlyDictionary<long, IReadOnlyList<Message>> threads, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
@@ -221,7 +221,7 @@ public sealed class BoardTimeline(BoardStore store)
     // ---------------------------------------------------------------- plumbing
 
     /// <summary>
-    /// B126: the workflow's runs plus, for each member waiting in the run queue now for work in it, a run queued since it
+    /// The workflow's runs plus, for each member waiting in the run queue now for work in it, a run queued since it
     /// joined and not started (started = now), so that wait is Waiting for a slot while it lasts.
     /// </summary>
     private static IReadOnlyList<RunSpan> WithQueued(IReadOnlyList<RunSpan> runs, long workflow, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)

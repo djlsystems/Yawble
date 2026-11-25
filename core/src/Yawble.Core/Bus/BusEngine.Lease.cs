@@ -30,7 +30,7 @@ public sealed partial class BusEngine
     private sealed record LeaseHold(RunContext Run, string What, DateTimeOffset Since, LeaseUse Use);
 
     /// <summary>
-    /// One use of the lease, for workflow_digest (B100): asked, given, given back. Kept in memory like the lease itself
+    /// One use of the lease, for workflow_digest: asked, given, given back. Kept in memory like the lease itself
     /// (the newest <see cref="LeaseHistoryMax"/>), so a restart forgets them.
     /// </summary>
     internal sealed class LeaseUse(long runId, long workflow, string member, string what, DateTimeOffset askedAt)
@@ -60,7 +60,7 @@ public sealed partial class BusEngine
         [.. _leaseHistory.Where(u => u.Workflow == workflow).Select(u => new Teams.DigestLease(u.Member, u.What, u.AskedAt, u.GrantedAt, u.EndedAt))];
 
     /// <summary>
-    /// B106 (card 494): a run's waits in the lease's queue as of <paramref name="now"/> (under the gate), from asking to
+    /// A run's waits in the lease's queue as of <paramref name="now"/> (under the gate), from asking to
     /// being given it, leaving the queue or the run's end; one still waiting runs to now. A lease given at once is no wait.
     /// The lease itself is the record, so every run has them, whatever its idle clock keeps.
     /// </summary>
@@ -77,7 +77,7 @@ public sealed partial class BusEngine
     }
 
     /// <summary>
-    /// A run's stalls and lease waits for the board's time (B086): what its idle clock keeps, with its waits in the lease's
+    /// A run's stalls and lease waits for the board's time: what its idle clock keeps, with its waits in the lease's
     /// queue (<see cref="LeaseWaitsOf"/>) added to the holds and overlapping holds joined into one.
     /// </summary>
     private RunActivitySpans ActivityOf(RunContext run, DateTimeOffset now)

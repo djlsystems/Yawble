@@ -4,7 +4,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Code;
 
 /// <summary>
-/// B031 finding 1a re-verify (card 148), tester's extra layouts for the POSIX ".." walk, driven on every OS through
+/// The tester's re-check of the POSIX walk fix: extra layouts for the POSIX ".." walk, driven on every OS through
 /// the internal physicalDotDot switch. Skips where links cannot be made.
 /// </summary>
 public sealed class PosixDotDotWalkBreakTests : IDisposable

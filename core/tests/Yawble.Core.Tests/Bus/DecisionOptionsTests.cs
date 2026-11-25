@@ -13,7 +13,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// B123 (card 546): needs_decision with summary, options and details; an option's allowlisted action
+/// needs_decision with summary, options and details; an option's allowlisted action
 /// (team.allowLocalhostMac) is applied only when the person answers with that option (bus.answer optionIndex), through
 /// teams.localhost (its rights and audit); bus.decisions says whether this caller may apply it; a member with an open
 /// question shows "Waiting on you" with the decision's id. Fakes only: the bus tools go through McpBusServer in process.
@@ -371,7 +371,7 @@ public class DecisionOptionsTests
         Assert.Empty(await rig.Decisions());
     }
 
-    // ------------------------------------------------------------------ card 548 (B123 verify)
+    // ------------------------------------------------------------------ the tester's checks
 
     [Fact]
     public async Task TheShellsAnswer_TextEqualToTheReply_IsSentOnce_AndStillAppliesTheAction()
@@ -403,7 +403,7 @@ public class DecisionOptionsTests
         Assert.Empty(rig.LocalhostAudit());
     }
 
-    // ------------------------------------------------------------------ card 555 (B123 review fixes)
+    // ------------------------------------------------------------------ fixes from review
 
     [Fact]
     public async Task ARefusedAnswer_ToAnArchivedTeam_LeavesAllowLocalhostOff_AndSendsNothing()

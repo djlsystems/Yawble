@@ -108,7 +108,7 @@ public class FolderTriggerTests
         Assert.Contains(why, e.Message);
     }
 
-    // ---------------------------------------------------------------- B125 "Fire on"
+    // ---------------------------------------------------------------- the "Fire on" setting
 
     /// <summary>Settles <paramref name="now"/> after <paramref name="state"/>: one look sees it, the next (quiet 10 s later) fires.</summary>
     private static (FolderChange? Fire, string State) Settle(Dictionary<string, long> now, string state, ref DateTimeOffset at, string fireOn)
@@ -196,7 +196,7 @@ public class FolderTriggerTests
         (fire, _) = Settle(before, s, ref at, FolderWatch.AnyChange); // a remove alone fires under any change
         Assert.Equal(["new.pdf"], fire!.Removed);
 
-        // no setting: any change, as before B125
+        // no setting: any change, as before the setting existed
         var (_, d0) = FolderWatcher.Look(before, null, T0, 10);
         var (_, d1) = FolderWatcher.Look(after, d0, T0.AddSeconds(30), 10);
         var (fireDefault, _) = FolderWatcher.Look(after, d1, T0.AddSeconds(60), 10);

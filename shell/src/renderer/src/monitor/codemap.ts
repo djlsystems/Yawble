@@ -398,7 +398,7 @@ export const MapCore = 130;
  * within it). The map lies on an arc pointing away from the others, so only the part of it that wraps back toward
  * them counts: the map is laid out as the scene lays it (layoutTeamMap at MapMembersReach + MapPastMembers), and its
  * nodes with their labels are measured along the directions to the neighbours, which lie `spread` radians either side
- * of straight back (0 for two teams; neighbourSpread in the scene). Card 409: it counted the arc's sideways spread
+ * of straight back (0 for two teams; neighbourSpread in the scene). It used to count the arc's sideways spread
  * (depth × sin(half-span)), which lies across the line between the teams, not on it, so the default spacing left the
  * middle of the wall empty.
  */

@@ -13,7 +13,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B100 sections 4-5 (card 468): the team's lessons. The Manager alone writes its own team's team_retros with
+/// The team's lessons. The Manager alone writes its own team's team_retros with
 /// team_retros_write (size cap, every write a version, a person's edit never overwritten unread); every run of that team,
 /// and no other, gets the lessons in its prompt. Fakes only: scripted runs, no agent CLI.
 /// </summary>

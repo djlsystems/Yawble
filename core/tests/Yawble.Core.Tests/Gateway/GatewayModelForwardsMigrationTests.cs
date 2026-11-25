@@ -6,8 +6,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Gateway;
 
 /// <summary>
-/// Card 462 (B103): migration 0051 deletes the old one-row-per-request successful model forwards, keeping each run's
-/// first per model vhost and the first after each credential problem or rate limit there (card 475), and leaves everything else in gateway_events as it was.
+/// Migration 0051 deletes the old one-row-per-request successful model forwards, keeping each run's
+/// first per model vhost and the first after each credential problem or rate limit there, and leaves everything else in gateway_events as it was.
 /// </summary>
 public class GatewayModelForwardsMigrationTests
 {
@@ -80,7 +80,7 @@ public class GatewayModelForwardsMigrationTests
     [Fact]
     public void KeepsTheFirstSuccessAfterEachCredentialProblemOrRateLimitOnThatRunsVhost()
     {
-        // Card 475: the live rule (GatewayLog.Write) writes the first 2xx forward after a credential problem or rate
+        // The live rule (GatewayLog.Write) writes the first 2xx forward after a credential problem or rate
         // limit on the vhost again, and GatewayVerdicts.From reads it as the problem cleared; 0051 must keep it too.
         var dir = Directory.CreateTempSubdirectory("yawble-db-").FullName;
         var cs = $"Data Source={Path.Combine(dir, "t.db")};Pooling=False";

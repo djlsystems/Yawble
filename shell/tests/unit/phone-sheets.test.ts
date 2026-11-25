@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-// B057 items 1 and 2 (card 274): on a phone (below 760 px), as measured on an iPhone SE's instance frame (375 x 521
+// On a phone (below 760 px), as measured on an iPhone SE's instance frame (375 x 521
 // portrait, 667 x 263 landscape):
 // - the Logs sheet's list fills what the sheet leaves it (no fixed 200 px), the filters and Sort by scroll away at the
 //   top of the list instead of eating into the sheet, and Load more is the list's last row (reached by scrolling to the
 //   end), with Filters closed and open;
-// - a member's terminal (in its pane on the team page since B061, card 307) is the whole screen with one header row (title, the Formatted / Raw tabs, a ⋯ holding the
+// - a member's terminal (in its pane on the team page) is the whole screen with one header row (title, the Formatted / Raw tabs, a ⋯ holding the
 //   bar's state, Open interactive CLI, Policy and Stop, and ✕), the terminal taking the rest (at least 60% of the height).
 // At 1280 px nothing changes.
 //
@@ -173,7 +173,7 @@ describe('Logs on a phone: the list fills the sheet, Load more is always reachab
         const body = logs.parentElement!;
         expect([css(logs).display, css(logs).flexDirection, css(logs).flexGrow, px(css(logs).minHeight)]).toEqual(['flex', 'column', '1', 0]);
         expect([css(body).display, css(body).flexDirection, css(body).flexGrow, px(css(body).minHeight), css(body).overflow]).toEqual(['flex', 'column', '1', 0, 'hidden']);
-        // (The sheet itself is the screen's height: Modal.vue's `.modal.sheet.full { height: 100dvh }`, B037. happy-dom
+        // (The sheet itself is the screen's height: Modal.vue's `.modal.sheet.full { height: 100dvh }`. happy-dom
         // drops dvh values as unknown, so it is not asserted here; the frame height is used below.)
         expect(sheet.classList.contains('full')).toBe(true);
 
@@ -257,7 +257,7 @@ describe('Logs on a phone: the list fills the sheet, Load more is always reachab
 });
 
 // ================================================================ the member terminal (in its pane on the team page)
-// B061 moved a member's terminal from the right-hand TerminalPane into its MemberPane on the team page; card 307: B057's
+// A member's terminal is in its MemberPane on the team page, not the right-hand TerminalPane; the
 // phone terminal (full screen, one header row, the ⋯ with the bar, the capped Policy strip) came with it. The member's
 // terminal is opened the way the team page does it: its pane switched to Terminal (memberPaneView).
 
@@ -265,7 +265,7 @@ const banner = (): TerminalBanner => ({
   title: 'web / DeveloperAda · sandbox', details: ['timeout 15 min'], loosened: [], interactive: false,
   state: 'idle', runId: null, queuePosition: null, queueLength: 0, lastRunState: 'completed', lastRunReason: null,
 } as unknown as TerminalBanner);
-/** A long policy (B057 verify O2): 8 entries and 2 loosened. */
+/** A long policy: 8 entries and 2 loosened. */
 const longBanner = (): TerminalBanner => ({
   ...banner(),
   details: ['sandbox job object', 'CLI claude 2.1', 'network via proxy', 'allow api.anthropic.com', 'allow registry.npmjs.org',
@@ -285,7 +285,7 @@ const ada = (): AgentCard => ({
 async function openTerminal(make: () => TerminalBanner = banner) {
   const { api } = fakeApi({ 'terminal.banner': () => make(), 'terminal.stop': () => null });
   const w = keep(mount(MemberPane, { props: { card: ada(), api, pollMs: 60_000 }, attachTo: document.body, global: { stubs: { TerminalView: true, TranscriptView: true } } }));
-  // Tapped open (B064: a remembered Terminal applies at desktop widths only).
+  // Tapped open (a remembered Terminal applies at desktop widths only).
   await w.get('[data-test=member-view-terminal]').trigger('click');
   await settle();
   return w;
@@ -379,7 +379,7 @@ describe('the member terminal on a phone: full screen, one header row', () => {
   });
 });
 
-describe('the ⋯ state line (B057 verify O3): no separator for an empty field', () => {
+describe('the ⋯ state line: no separator for an empty field', () => {
   it('a headless run with no command known reads "Run 42 · input off during headless run"', async () => {
     setScreen(Landscape);
     const w = await openTerminal(() => ({ ...banner(), state: 'running', runId: 42 } as unknown as TerminalBanner));
@@ -391,7 +391,7 @@ describe('the ⋯ state line (B057 verify O3): no separator for an empty field',
 
 // ================================================================ a channel terminal (still the right-hand TerminalPane)
 
-describe('a channel terminal on a phone keeps B057 in TerminalPane', () => {
+describe('a channel terminal on a phone keeps the phone terminal layout in TerminalPane', () => {
   it('full screen, one 44 px header row with the tabs; 1280: a side pane with its handle', async () => {
     const { api } = fakeApi({});
     showChannelTerminal('agent-test:claude', 'Claude · Test', () => {});

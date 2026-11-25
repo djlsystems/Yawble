@@ -437,18 +437,18 @@ public class GuardrailCheckTests
         Assert.Equal(1, (await bus.SchedulerSnapshotAsync(Ct)).Running);
     }
 
-    // ---------------------------------------------------------------- card 474: check.no-model-call on the B103 log
+    // ---------------------------------------------------------------- check.no-model-call on the thinned log
 
-    private static readonly DateTimeOffset T474 = new(2026, 11, 18, 9, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset LogTime = new(2026, 11, 18, 9, 0, 0, TimeSpan.Zero);
 
     private static GatewayEvent Forward(string vhost, int status) =>
-        new(40, "beta/Tess", T474, GatewayEventKinds.Forward, false, vhost, "POST", "/v1/messages", status);
+        new(40, "beta/Tess", LogTime, GatewayEventKinds.Forward, false, vhost, "POST", "/v1/messages", status);
 
-    /// <summary>The events go through the real GatewayLog (temp database), so the check reads what B103 writes.</summary>
+    /// <summary>The events go through the real GatewayLog (temp database), so the check reads what the thinned log writes.</summary>
     private static GuardrailResult NoModelCallOnLog(IEnumerable<GatewayEvent> events)
     {
         using var db = new Yawble.Core.Tests.Bus.TempDb();
-        var log = new GatewayLog(db.ConnectionString, new FakeClock(T474));
+        var log = new GatewayLog(db.ConnectionString, new FakeClock(LogTime));
         foreach (var e in events) log.Write(e);
         return GuardrailCheck.NoModelCall(log.Read(40));
     }
@@ -479,9 +479,9 @@ public class GuardrailCheckTests
     public void NoModelCall_NoModelForward_PassesWithTheSameText()
     {
         var r = NoModelCallOnLog([
-            new GatewayEvent(40, "beta/Tess", T474, GatewayEventKinds.Bus, false, Vhosts.Bus, "POST", "/rpc", 200),
-            new GatewayEvent(40, "beta/Tess", T474, GatewayEventKinds.Forward, false, Vhosts.Bus, "POST", "/rpc", 200),
-            new GatewayEvent(40, "beta/Tess", T474, GatewayEventKinds.HostDenied, true, "example.com", "GET", "http://example.com/", 403),
+            new GatewayEvent(40, "beta/Tess", LogTime, GatewayEventKinds.Bus, false, Vhosts.Bus, "POST", "/rpc", 200),
+            new GatewayEvent(40, "beta/Tess", LogTime, GatewayEventKinds.Forward, false, Vhosts.Bus, "POST", "/rpc", 200),
+            new GatewayEvent(40, "beta/Tess", LogTime, GatewayEventKinds.HostDenied, true, "example.com", "GET", "http://example.com/", 403),
         ]);
         Assert.Equal((Verdicts.Blocked, Verdicts.Blocked, true), (r.Verdict, r.Expected, r.AsExpected));
         Assert.Equal("the run's gateway forwarded nothing to a model vhost during the check, so no credential was swapped in", r.Evidence);

@@ -7,7 +7,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// B019 gap tests (card 91, TesterWren): the edges of the verify-card rule that BoardTesterDoneTests does not pin -
+/// Gap tests (TesterWren): the edges of the verify-card rule that BoardTesterDoneTests does not pin -
 /// the person's own move, a developer's move, which member counts as a tester, what counts as the tester having run,
 /// and the comment's wording.
 /// </summary>
@@ -102,7 +102,7 @@ public class BoardTesterDoneGapTests
     [Fact]
     public async Task ADevelopersMove_OfAnUntestedTesterCardToDone_IsRefusedWithoutAReason()
     {
-        // B027 item 2: not only the Manager - any mover but the tester itself.
+        // Not only the Manager - any mover but the tester itself.
         await using var rig = await Rig.StartAsync(("DeveloperPriya", ""), ("TesterWren", ""));
         var card = rig.Card("TesterWren");
 
@@ -155,7 +155,7 @@ public class BoardTesterDoneGapTests
     [InlineData("TesterQa", "Developer", true)]      // the name alone is enough
     [InlineData("Kai", "tester, end to end", true)]  // the job title has the word, any case
     [InlineData("Kai", "  Tester: checks", true)]    // leading spaces in the job
-    [InlineData("Kai", "Testing lead", true)]        // B027 item 5: testing, testers and QA count too
+    [InlineData("Kai", "Testing lead", true)]        // testing, testers and QA count too
     [InlineData("Kai", "Testers' guild", true)]
     [InlineData("Kai", "Developer and Tester", true)] // anywhere in the title
     [InlineData("Kai", "QA engineer", true)]
@@ -175,7 +175,7 @@ public class BoardTesterDoneGapTests
     [Fact]
     public async Task TheTestersOwnBoardComment_DoesNotCountAsHavingTested()
     {
-        // B027 item 4: only a hand-back or a finished run after the latest assignment counts; a comment does not.
+        // Only a hand-back or a finished run after the latest assignment counts; a comment does not.
         await using var rig = await Rig.StartAsync(("TesterWren", ""));
         var card = rig.Card("TesterWren");
 
@@ -187,7 +187,7 @@ public class BoardTesterDoneGapTests
         Assert.DoesNotContain(rig.Store.Trail(card.Id), t => t.Kind == "comment" && t.Source == "Manager");
     }
 
-    /// <summary>Card 170: the tester's run that was cut off (completed, exit -1, no hand-back) does not let the Manager
+    /// <summary>The tester's run that was cut off (completed, exit -1, no hand-back) does not let the Manager
     /// move the card to Done without a reason; one that handed back does.</summary>
     [Fact]
     public async Task ATestersRunCutOffWithoutAHandBack_StillNeedsAReasonForDone()

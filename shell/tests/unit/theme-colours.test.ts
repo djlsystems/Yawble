@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B029: the window's colours come from the theme variables in styles.css (light on :root, dark on
+// The window's colours come from the theme variables in styles.css (light on :root, dark on
 // [data-theme="dark"] on <html>). These tests keep it that way: no hard-coded colour in a component's <style>,
 // a dark value for every variable, and the Monitor reading the same values in both themes.
 import { readdirSync, readFileSync } from 'node:fs';
@@ -208,7 +208,7 @@ describe('the Monitor does not change with the theme', () => {
   it('the canvas palette (scene.ts reads --state-* from <html>) is the same in both themes', () => {
     const l = page('light'); const atLight = l.read(l.html, states);
     const d = page('dark'); const atDark = d.read(d.html, states);
-    expect(states.length).toBe(7); // card 439 (B097) added --state-stopped
+    expect(states.length).toBe(7); // including --state-stopped
     expect(atDark).toEqual(atLight);
     expect(atLight['--state-running']).toBe(light.get('--state-running'));
   });

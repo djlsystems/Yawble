@@ -10,7 +10,7 @@ import { openWorkflowsPage, workflowItems, type ItemsOf } from '../workflows/pag
 
 // A team's workflows on its card in the Teams list: the 50 newest (TileWorkflowsShown) and every open one however old
 // (bus.workflows lists those), last updated first, scrolling inside the tile, each with its state (the Monitor's colours
-// and icons; expired, B085, its own), "#id title", its overall time (B086; it opens the timeline) and the time of its last entry (an ended one: its recorded end, endedAt). A row opens the team's workflows with that one selected.
+// and icons; expired has its own), "#id title", its overall time (it opens the timeline) and the time of its last entry (an ended one: its recorded end, endedAt). A row opens the team's workflows with that one selected.
 const props = defineProps<{ teamId: number; api: YawbleApi; pollMs?: number }>();
 const emit = defineEmits<{ open: [workflow: number] }>();
 
@@ -27,7 +27,7 @@ async function load() {
   } catch { failed.value = true; /* keeps what it showed */ }
 }
 
-// B098 (B104): each workflow's backlog item as a link; workflows.list is asked again only when a new workflow shows.
+// Each workflow's backlog item as a link; workflows.list is asked again only when a new workflow shows.
 const items = ref<ItemsOf | null>(null);
 const looked = new Set<number>();
 async function loadItems() {
@@ -86,7 +86,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 .twf-title :deep(.item-link), .twf-title :deep(.item-plain) { font-size: 11px; }
 .twf-id { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .twf-time { color: var(--ink-soft); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-/* A phone (B037): each workflow row is a 44 px tap target. */
+/* A phone: each workflow row is a 44 px tap target. */
 @media (max-width: 759.98px) {
   .twf-row { min-height: 44px; font-size: 13px; }
 }

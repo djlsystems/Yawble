@@ -65,7 +65,7 @@ public class GoldenRequestTests
     }
 
     /// <summary>
-    /// Card 536 (B119): Allow localhost is closed when off. In the committed files, every macOS golden except
+    /// Allow localhost is closed when off. In the committed files, every macOS golden except
     /// macos-claude-localhost has ingress deny and hostLoopback deny and no ingress rule; macos-claude-localhost has exactly the
     /// SDK's pair, egress deny, and differs from its off twin macos-claude in network.ingress only.
     /// </summary>

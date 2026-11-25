@@ -15,7 +15,7 @@ const props = defineProps<{ teams: TeamSummary[]; archived: TeamSummary[]; api?:
 
 const openId = ref<number | null>(null);
 const team = computed(() => [...props.teams, ...props.archived].find((t) => t.id === openId.value) ?? null);
-/** A phone (B054): the root's intro is left out, so the team folders start right under the title. */
+/** A phone: the root's intro is left out, so the team folders start right under the title. */
 const phone = useNarrow();
 </script>
 
@@ -59,10 +59,10 @@ h2 { margin: 0 0 4px; font-size: 22px; }
 .name { font-weight: 600; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; font-weight: 400; }
-/* A phone (B037): one column of team folders, each a roomy tap target; the open browser uses the full width. */
+/* A phone: one column of team folders, each a roomy tap target; the open browser uses the full width. */
 @media (max-width: 759.98px) {
   .docs-place { padding: 4px 10px 16px; }
-  /* One scroller (B054): the page; an open team's browser is at its own height inside it (nothing pinned, no inner scroller). */
+  /* One scroller: the page; an open team's browser is at its own height inside it (nothing pinned, no inner scroller). */
   .docs-place.fill { display: block; overflow: auto; }
   .wrap, .wrap.fill { display: block; margin: 4px auto 0; }
   h2 { margin: 0; font-size: 18px; line-height: 28px; height: 28px; }

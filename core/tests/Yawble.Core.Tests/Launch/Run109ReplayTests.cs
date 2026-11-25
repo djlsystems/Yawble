@@ -7,7 +7,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Launch;
 
 /// <summary>
-/// B127 verify (card 575): run_records 109 on the Mac mini, replayed with fakes. The agent's Bash shell 25720 (its own
+/// Run_records 109 on the Mac mini, replayed with fakes. The agent's Bash shell 25720 (its own
 /// group) ran `dotnet build -m:4 -nodeReuse:false &amp;` and exited within a second, before the tree's first read of
 /// the process list. Left behind, all in group 25720: 25723 dotnet build (ppid 1), 25724 the wrapper's build -m:1,
 /// 25734 /bin/sh running an exec.cmd with its cwd under yr-*/MSBuildTemp, 25735 sleep 600.
@@ -75,7 +75,7 @@ public class Run109ReplayTests
         Assert.Equal(0, exit.LeftBehind);
         Assert.Contains(table.Log, e => e.Group && e.Pid == 25720 && e.Signal == RunTree.SIGKILL);
         var line = Assert.Single(log);
-        // B129: the second reap's killpg on group 25720 ends the build, the wrapper and the sleep too; the line names
+        // The second reap's killpg on group 25720 ends the build, the wrapper and the sleep too; the line names
         // them all, not only the process the backstop found holding the folder.
         Assert.Equal($"run teardown: tree survived: {build} (group, reaped), {wrapper} (group, reaped), "
             + $"{exec} (run-folder, reaped), {sleep} (group, reaped)", line);

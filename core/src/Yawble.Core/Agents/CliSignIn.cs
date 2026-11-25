@@ -131,7 +131,7 @@ public static class SignInCatalog
     public const int GrokAuthReadLimit = 256 * 1024;
 
     /// <summary>
-    /// Grok: ~/.grok/auth.json (or $GROK_HOME/auth.json). Signed in only when the file holds a usable token (B128): grok
+    /// Grok: ~/.grok/auth.json (or $GROK_HOME/auth.json). Signed in only when the file holds a usable token: grok
     /// leaves `{}` behind when xAI refuses its refresh, so a file that exists says nothing. The file is read here for
     /// that alone; no value from it is kept or shown.
     /// </summary>

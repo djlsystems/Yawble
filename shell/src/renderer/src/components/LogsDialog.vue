@@ -22,7 +22,7 @@ const ScriptRunView = defineAsyncComponent(() => import('./scripts/ScriptRunView
 const props = defineProps<{ api: YawbleApi; source?: string; team?: string; member?: string; page?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
-/** A phone (B037): each entry is a card of its columns' values (tap for them in full), sorted with a select. */
+/** A phone: each entry is a card of its columns' values (tap for them in full), sorted with a select. */
 const phone = useNarrow();
 const pageSize = 100;
 const sources = ref<LogSourceInfo[]>([]);
@@ -30,7 +30,7 @@ const who = ref<LogWho>({ teams: [], members: [] });
 const sourceId = ref(props.source ?? 'activity');
 const team = ref(props.member ? props.member.slice(0, props.member.indexOf('/')) : props.team ?? '');
 const member = ref(props.member ?? '');
-/** All activity only (B101): the app's own rows (backlog, settings, triggers, link, backups...), no team or member. */
+/** All activity only: the app's own rows (backlog, settings, triggers, link, backups...), no team or member. */
 const app = ref(false);
 /** The Level filter (a source with levels: All activity, Diagnostics): '' every level but debug, 'all', or one level. */
 const level = ref('');
@@ -71,7 +71,7 @@ const wholeTeams = computed(() => (team.value ? [team.value] : who.value.teams))
 const appOffered = computed(() => sourceId.value === 'activity');
 const teamPrefix = 'team:';
 /**
- * The Member filter (B101) picks one of: a member (member=team/Name), a team as a whole (team=X, no member) or the app
+ * The Member filter picks one of: a member (member=team/Name), a team as a whole (team=X, no member) or the app
  * (app=true, no team or member). Picking one clears the others.
  */
 const whoPick = computed<string>({
@@ -90,7 +90,7 @@ const local = computed(() => !props.api.remote);
 const filtersOpen = ref(false);
 /** On a phone Prune… and Retention… fold behind a ⋯ (the bar is then one row in landscape). */
 const actionsOpen = ref(false);
-/** Where the filters go on a phone: the top of the list's scroller (B057). */
+/** Where the filters go on a phone: the top of the list's scroller. */
 const phoneToolsId = `logs-phone-tools-${useId()}`;
 /** How many filters are set (the search box apart): shown on the phone's Filters button. */
 const activeFilters = computed(() => [team.value, member.value, app.value, level.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
@@ -557,9 +557,9 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent, inhe
 .entry-card dt { color: var(--muted); font-weight: 600; }
 .entry-card dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entry-card.open dd { white-space: pre-wrap; word-break: break-word; overflow: visible; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
-/* A phone (B037): the bars wrap into full-width rows, labels over their controls, tap targets 44 px. */
+/* A phone: the bars wrap into full-width rows, labels over their controls, tap targets 44 px. */
 @media (max-width: 759.98px) {
-  /* B057: one row in landscape (Log, Filters, ⋯, search), two in portrait (the search on its own row under them). */
+  /* One row in landscape (Log, Filters, ⋯, search), two in portrait (the search on its own row under them). */
   .bar { position: relative; }
   .bar .source { order: 0; flex: 1 1 180px; min-width: 0; }
   .filters-toggle { order: 1; flex: none; white-space: nowrap; }
@@ -574,7 +574,7 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent, inhe
   button, select, input { min-height: 44px; box-sizing: border-box; }
   .mini { min-width: 44px; }
   .keep td { display: block; padding: 2px 0; }
-  /* B057: the list fills what the sheet has left (no fixed height); the filters and Sort by scroll away at its top,
+  /* The list fills what the sheet has left (no fixed height); the filters and Sort by scroll away at its top,
      Load more is at its end. */
   .scroll { flex: 1 1 0; min-height: 0; }
   .phone-tools .filters { padding: 8px; border-bottom: 1px solid var(--line); }

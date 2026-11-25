@@ -97,7 +97,7 @@ public sealed class GrokKeeper : IAsyncDisposable
         }
     }
 
-    /// <summary>How many times a grok run left auth.json with no token and the keeper put it back (B128).</summary>
+    /// <summary>How many times a grok run left auth.json with no token and the keeper put it back.</summary>
     public int Restores { get; private set; }
 
     private async Task<GrokRefreshResult> DoRefreshAsync(bool force)
@@ -115,7 +115,7 @@ public sealed class GrokKeeper : IAsyncDisposable
         {
             if (args.Count == 0) continue;
             // The one-turn prompt is a model request: with no refresh token grok cannot renew the session, and a
-            // refused request is where grok may clear auth.json (B128). Only `grok models` is tried then.
+            // refused request is where grok may clear auth.json. Only `grok models` is tried then.
             if (ReferenceEquals(args, _options.FallbackArgs) && !(_home.ReadSession()?.HasRefreshToken ?? false))
             {
                 Logs.Diag.Debug("grok", "grok keeper: the session has no refresh token: the one-turn prompt is not run");

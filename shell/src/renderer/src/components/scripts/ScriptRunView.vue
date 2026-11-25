@@ -6,7 +6,7 @@ import { pretty, runScript, scriptsApi, showValue, took, writtenFiles } from '..
 import type { RunDetail, ScriptDocument, TestRunResult } from '../../scripts/types';
 import ScriptFlowchart from './ScriptFlowchart.vue';
 
-// The run view (B134): each step with its input, output, time and status, the run's log, and the files it wrote. Shown
+// The run view: each step with its input, output, time and status, the run's log, and the files it wrote. Shown
 // for a row of the Runs tab (scripts.run) and right after a Test run (scripts.testRun's answer). The Flowchart toggle
 // shows the run's script version, read-only, with the steps it took highlighted and the step it failed at marked: doc
 // is that version's document when the caller has it, else it is loaded (scripts.get with the run's version) over api.

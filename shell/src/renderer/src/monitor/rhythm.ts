@@ -1,7 +1,7 @@
 import type { Effect } from './model';
 
 /**
- * THE SCENE'S PURE RULES (B080), kept out of scene.ts so they are tested without a canvas:
+ * THE SCENE'S PURE RULES, kept out of scene.ts so they are tested without a canvas:
  * - density: how many effects the wall draws in one frame (calm / normal / lively), the most telling first;
  * - focus: which team the wall zooms to, and how dim the rest is;
  * - the work rhythm: how fast a member's disc pulses for its step rate, how full a command's ring is;
@@ -132,7 +132,7 @@ let lastAt: { key: string; at: { x: number; y: number; r: number } } | null = nu
 
 /**
  * The You node's place on the wall (canvas CSS px): at the right edge, half way down below the counts (at least 120 px
- * down), always inside the wall and clear of the keep-out rects (card 416: on a short phone wall the controls row with
+ * down), always inside the wall and clear of the keep-out rects (on a short phone wall the controls row with
  * Legend covers the bottom). The rects come most telling first: the Legend button, then the controls row, then the
  * open legend. When its place is covered it moves the least it can: above, below or left of what covers it, else to
  * the nearest clear spot on the wall; then the same with no gap to the edge or the rects. When no spot on the wall is
@@ -194,7 +194,7 @@ export function onYouNode(x: number, y: number, w: number, h: number, keepOut: r
   return Math.hypot(x - n.x, y - n.y) <= n.r + 6;
 }
 
-/** "Card 373 (B080 ...)", "[card 373] ..." -> 373; null when the text names no card. */
+/** "Card 4373 (...)", "[card 4373] ..." -> 4373; null when the text names no card. */
 export function cardOf(text: string | null): number | null {
   if (!text) return null;
   const m = /\bcard\s*#?\s*(\d{1,6})\b/i.exec(text);

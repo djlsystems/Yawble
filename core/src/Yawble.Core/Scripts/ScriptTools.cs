@@ -21,7 +21,7 @@ public enum ScriptToolApproval
 
     /// <summary>
     /// The person's yes whenever a script member's trigger ends up enabled and that is new: a new enabled trigger, an off one turned on, or an
-    /// enabled one whose schedule changes (B139). Turning a trigger off, or saving one off, needs none.
+    /// enabled one whose schedule changes. Turning a trigger off, or saving one off, needs none.
     /// </summary>
     EnabledTrigger,
 }
@@ -35,7 +35,7 @@ public sealed record ScriptToolInfo(string Name, bool Changes, bool LocalOnly, S
 public sealed record ScriptToolYes(string Plan, string Key);
 
 /// <summary>
-/// The script and schema tools (B135) for a chat that builds scripts for the person: the Concierge, and the companion's tools.
+/// The script and schema tools for a chat that builds scripts for the person: the Concierge, and the companion's tools.
 /// For every tool its name, its MCP Tool definition, its call onto the scripts.* / schemas.* RPC (<paramref name="ui"/>, the
 /// person's own buttons, so the same rules and refusals apply) and its approval class. Teams and members are given by name.
 /// The approval itself (showing the plan, the person's yes in a later turn) is the caller's confirmation flow: ask
@@ -66,7 +66,7 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
         new(ScriptRuns, false, false, ScriptToolApproval.None),
         new(ScriptRun, false, false, ScriptToolApproval.None),
         new(ScriptMemberAdd, true, true, ScriptToolApproval.PersonsYes),
-        // B139. triggers.save is a change a full Cloud Link viewer may make (Link/RemoteAccess.cs), so this is not local only; its yes is still asked.
+        // triggers.save is a change a full Cloud Link viewer may make (Link/RemoteAccess.cs), so this is not local only; its yes is still asked.
         new(ScriptTriggerSet, true, false, ScriptToolApproval.EnabledTrigger),
         new(IntegrationActionAllow, true, true, ScriptToolApproval.PersonsYes),
     ];
@@ -177,7 +177,7 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
 
     /// <summary>
     /// What the person must say yes to before this call runs, or null when it runs without (everything but a member add, a
-    /// script's first live run on a team, a script member's trigger turned on (B139) and an API action not yet allowed (B139)).
+    /// script's first live run on a team, a script member's trigger turned on and an API action not yet allowed).
     /// Reads only; a call that would be refused (an agent member, an unknown API) throws its refusal here, before any yes is asked.
     /// </summary>
     public async Task<ScriptToolYes?> YesNeededAsync(string name, JsonObject args, CancellationToken ct)
@@ -322,7 +322,7 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
                "Give it a trigger (or tell it) to run it; turning a trigger on is the person's choice.";
     }
 
-    // ------------------------------------------------------------------ B139: a script member's trigger
+    // ------------------------------------------------------------------ a script member's trigger
 
     /// <summary>
     /// What a script_trigger_set call would save: the triggers.save parameters, the draft they read as, the trigger it changes (with id),
@@ -457,7 +457,7 @@ public sealed class ScriptTools(BusEngine bus, Func<string, JsonObject?, Cancell
 
     private static string Plural(int n, string unit) => n == 1 ? unit : $"{n} {unit}s";
 
-    // ------------------------------------------------------------------ B139: allowing an API action
+    // ------------------------------------------------------------------ allowing an API action
 
     /// <summary>The API action a call names, checked (unknown API, not on for the team, unknown or gone action, a sign-in action: refused, nothing written).</summary>
     private async Task<Integrations.ScriptActionToAllow> ActionToAllowAsync(JsonObject args, CancellationToken ct)

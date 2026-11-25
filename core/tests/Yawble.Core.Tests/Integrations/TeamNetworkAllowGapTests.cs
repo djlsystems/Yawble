@@ -18,7 +18,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// B014 test (card 73) gap tests, beside TeamNetworkAllowTests: the team list survives a member's narrowing override and
+/// Gap tests of the team's network allow list, beside TeamNetworkAllowTests: the team list survives a member's narrowing override and
 /// is per team; Remove matches the host however it is typed; a removed member's older ask (no member_id) closes, another
 /// team's member with the same name keeps its own; a re-hire with the same name gets a fresh ask; a name resolving to a
 /// public address as well as a private one is still asked about. Fakes only: a temporary database, fake runners, an
@@ -157,7 +157,7 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
         await Assert.ThrowsAsync<RpcException>(() => Call("policy.removeTeamHost", new { teamId = 99_999, host = "pypi.org" }));
     }
 
-    // ------------------------------------------------------------------ B022 (card 127): a member hired mid-add is checked
+    // ------------------------------------------------------------------ a member hired mid-add is checked
 
     /// <summary>
     /// A store whose fake dry run hires Cleo (as members.add writes her row) on its first check - after AllowForTeamAsync
@@ -234,7 +234,7 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
         Assert.Empty(_policies.TeamHosts(team));
     }
 
-    // ------------------------------------------------------------------ B022 verify (card 128): removals, the snapshot check, the limit's edge
+    // ------------------------------------------------------------------ verify: removals, the snapshot check, the limit's edge
 
     [Fact]
     public async Task AllowForTeam_AMemberRemovedAfterTheChecks_BeforeTheWrite_TheListIsBuiltAgainWithoutThem()

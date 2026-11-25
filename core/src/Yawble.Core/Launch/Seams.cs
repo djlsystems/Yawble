@@ -82,7 +82,7 @@ public interface ICredentialModes
 /// <summary>
 /// The idle clock. Touched by every bridge tool call; read by the watchdog. Held while the run waits in the heavy-work
 /// lease's queue (the watchdog then sees no idle time); resumed with a full window when the wait ends.
-/// It also keeps the run's quiet stretches for the board's time accounting (B086): each gap between two signs of
+/// It also keeps the run's quiet stretches for the board's time accounting: each gap between two signs of
 /// activity (a bus call, or a model request going out or streaming back: <see cref="Saw"/>) of at least <see cref="Bus.RunActivitySpans.StallAfter"/> (Stalled, from the last sign of activity), and each
 /// hold (Waiting for a slot).
 /// </summary>

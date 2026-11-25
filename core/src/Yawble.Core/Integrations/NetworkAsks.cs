@@ -364,7 +364,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                 throw new ArgumentException($"network request {other} is not one of {first.MemberName}'s requests for {key ?? first.Host}; answer it on its own");
         }
 
-        // A Deny tells each member once, after every ask is answered, listing all of its denied hosts (B039); an Allow's
+        // A Deny tells each member once, after every ask is answered, listing all of its denied hosts; an Allow's
         // notices already merge in the Manager's notice window.
         var deny = choice == NetworkAskChoices.Deny;
         var denied = new List<NetworkAskRow>();
@@ -545,7 +545,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
 
     /// <summary>
     /// What a member is told about a Deny: one ask ("The person denied network access to api.nuget.org (network request
-    /// 7). It is not asked again ...") or a grouped item's asks, every host in one message (B039).
+    /// 7). It is not asked again ...") or a grouped item's asks, every host in one message.
     /// </summary>
     internal static string DeniedText(IReadOnlyList<NetworkAskRow> asks, string? note)
     {
@@ -562,7 +562,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
 
     /// <summary>
     /// How long "now allowed" notices to one team's Manager are gathered before it is told once, listing every host
-    /// (B018: one dotnet restore needed four hosts, and each allow woke the Manager). The window opens with the first
+    /// (one dotnet restore needed four hosts, and each allow woke the Manager). The window opens with the first
     /// notice; every notice to the same Manager before it closes joins it. Zero or less: each notice is told at once.
     /// </summary>
     public TimeSpan NoticeWindow { get; set; } = TimeSpan.FromSeconds(5);

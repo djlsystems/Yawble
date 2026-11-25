@@ -9,7 +9,7 @@ import {
 import BusyLabel from './BusyLabel.vue';
 import type { Busy } from '../busy';
 
-// B110: Member settings > Policy, at the top: which folders this member may use, and the one obvious step to give it one.
+// Member settings > Policy, at the top: which folders this member may use, and the one obvious step to give it one.
 // Each row is an effective folder with where it comes from. Adding a folder beyond the global policy is a loosening, so it
 // goes through the core's policy.previewLoosen and a confirm of exactly what it gives, then policy.saveLoosen (the core
 // still refuses anything else; nothing about who may loosen changes here). Removing the member's own entry confirms too.

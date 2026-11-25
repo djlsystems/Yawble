@@ -278,7 +278,7 @@ describe("a member's pane: Report | Activity | Terminal", () => {
   });
 });
 
-// B076 (card 366): the panes are tiles in a grid, two a row at 1280 px and narrower when resized; the grid sets the
+// The panes are tiles in a grid, two a row at 1280 px and narrower when resized; the grid sets the
 // tile's height. happy-dom lays nothing out, so the pane's own desktop rules (outside the phone block) are matched
 // against the mounted elements: the last rule that matches an element and sets a property wins, as in the page.
 const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/MemberPane.vue'), 'utf8').replace(/\r\n/g, '\n');

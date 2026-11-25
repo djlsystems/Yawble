@@ -36,7 +36,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'reset', label: 'Reset' },
   { id: 'delete', label: 'Delete' },
 ];
-// A phone (card 346), laid out like the app's Settings on a phone (SettingsView): the dialog opens at the list of its
+// A phone, laid out like the app's Settings on a phone (SettingsView): the dialog opens at the list of its
 // sections; a tap opens that section alone under a sticky Back + title; Back returns to the list. Desktop: the tab row.
 const phone = usePhone();
 const sectionOpen = ref(false);
@@ -91,7 +91,7 @@ async function loadSync() { try { sync.value = await api.call('teams.syncToBase'
 const setSync = (on: boolean) => act('teams.syncToBase', { on }, (r) => { sync.value = r; });
 const baseName = computed(() => repos.value?.main?.baseBranch ?? 'the base branch');
 
-// ---- B119: "Allow localhost (macOS)" (off by default). An older core without it: the block is not shown. A Visitor sees it
+// ---- "Allow localhost (macOS)" (off by default). An older core without it: the block is not shown. A Visitor sees it
 // read-only (v-change); the core refuses a Visitor's set anyway.
 const localhost = ref<{ on: boolean } | null>(null);
 async function loadLocalhost() { try { localhost.value = await api.call<{ on: boolean }>(TEAM_LOCALHOST, { teamId: props.team.id }); } catch { localhost.value = null; } finally { ready.localhost = true; } }
@@ -99,7 +99,7 @@ const setLocalhost = (on: boolean) => act(TEAM_LOCALHOST, { on }, (r: { on: bool
 // The warning's `code` spans (the text is kept word for word in TEAM_LOCALHOST_WARNING).
 const localhostWarning = TEAM_LOCALHOST_WARNING.split('`').map((text, i) => ({ text, code: i % 2 === 1 }));
 
-// ---- B085: expire idle workflows after N days (workflowExpiryDays, default 3). An older core without it: the field is not shown.
+// ---- Expire idle workflows after N days (workflowExpiryDays, default 3). An older core without it: the field is not shown.
 const expiry = ref<number | null>(null);
 const expiryDraft = ref<number>(WorkflowExpiryDefaultDays);
 const expirySaved = ref(false);
@@ -117,7 +117,7 @@ const saveExpiry = () => act(TEAM_WORKFLOW_EXPIRY, { days: expiryDraft.value }, 
   expirySaved.value = true;
 });
 
-// ---- B100: the team's lessons (its team_retros skill, kept by the Manager's retrospectives). An older core: not shown.
+// ---- The team's lessons (its team_retros skill, kept by the Manager's retrospectives). An older core: not shown.
 const lessons = ref<TeamLessons | null>(null);
 async function loadLessons() { try { lessons.value = await api.call<TeamLessons>(TEAMS_LESSONS, { teamId: props.team.id }); } catch { lessons.value = null; } }
 const day = (iso: string | null) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(); };
@@ -132,7 +132,7 @@ function showLessons() { openSkill(props.team.id, TEAM_RETROS); emit('close'); }
 // ---- repositories: the main one (every member's working directory) and the others, writable or read-only
 interface ExtraRepo extends RepoProviderInfo { name: string; path: string; writable: boolean; baseBranch: string; source: string | null }
 const repos = ref<{ main: ({ path: string; baseBranch: string; managed: boolean; origin: string | null; name: string | null } & RepoProviderInfo) | null; extras: ExtraRepo[] } | null>(null);
-// B075: the provider fields show only when the core sends providerDetected (an older core does not).
+// The provider fields show only when the core sends providerDetected (an older core does not).
 const hasProvider = (r: RepoProviderInfo | null | undefined) => !!r && r.providerDetected !== undefined;
 const saveProvider = (name: string | null, v: { provider: GitProvider | null; linkPattern: string | null }) =>
   act(TEAMS_SET_REPO, { ...(name ? { name } : {}), provider: v.provider, linkPattern: v.linkPattern }, () => {
@@ -499,7 +499,7 @@ label.check input { width: auto; padding: 0; }
 .warn { color: var(--warn); margin: 0; }
 .ok { color: var(--ok); font-size: 12.5px; }
 .error { color: var(--bad); }
-/* ---- a phone (card 346), like the app's Settings on a phone (SettingsView): the list of sections as full-width 52 px
+/* ---- a phone, like the app's Settings on a phone (SettingsView): the list of sections as full-width 52 px
    rows with a chevron, or one section under a slim sticky Back + title. Nothing is wider than the sheet. */
 .phone .tabs.list { flex-direction: column; flex-wrap: nowrap; gap: 0; border-bottom: 0; border-top: 1px solid var(--line-soft); margin-bottom: 12px; }
 .phone .tabs.list button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 52px; padding: 0 6px 0 4px;

@@ -9,7 +9,7 @@ using Yawble.Core.Scripts.Running;
 namespace Yawble.Core.Ui;
 
 /// <summary>
-/// B131: the script library, schemas, script runs and script members over IPC (UiRpc hands every "scripts." and "schemas."
+/// The script library, schemas, script runs and script members over IPC (UiRpc hands every "scripts." and "schemas."
 /// method here). The names and shapes are in the team documents' scripts-rpc.md. A Visitor (Cloud Link, read-only) may call
 /// only the reads (<see cref="Reads"/>, listed in Link.RemoteAccess); everything else is refused there for a Visitor.
 /// </summary>

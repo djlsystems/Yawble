@@ -128,7 +128,7 @@ public sealed partial class BusEngine
         }, ct);
 
     /// <summary>
-    /// Reads, or sets when <paramref name="on"/> is given, the team's "Allow localhost (macOS)" (0054, B119; off by default):
+    /// Reads, or sets when <paramref name="on"/> is given, the team's "Allow localhost (macOS)" (0054; off by default):
     /// whether its macOS runs may open local ports and reach any service on the Mac's loopback. The value now.
     /// </summary>
     public Task<bool> TeamLocalhostAsync(string team, bool? on, CancellationToken ct = default) =>

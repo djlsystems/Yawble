@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { hunkTitle, normalizeHunks, sideBySide, type DiffWireHunk } from '../src/diff';
 import DiffView from '../src/DiffView.vue';
 
-// B072: the read-only diff viewer the Commit view opens a file in, fed git.commitDiff's hunks as the core sends them
+// The read-only diff viewer the Commit view opens a file in, fed git.commitDiff's hunks as the core sends them
 // (kind context / added / deleted; old / new only on the side(s) a line is on; git's own header line).
 
 const hunk: DiffWireHunk = { header: '@@ -10,4 +10,5 @@ class Refund', oldStart: 10, oldCount: 4, newStart: 10, newCount: 5, lines: [

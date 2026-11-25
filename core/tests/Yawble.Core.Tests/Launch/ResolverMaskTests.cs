@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Launch;
 
 /// <summary>
-/// B035: no name lookup inside a Linux sandbox reaches the host's resolver. The host resolver's sockets and the
+/// No name lookup inside a Linux sandbox reaches the host's resolver. The host resolver's sockets and the
 /// name-service files present on the host are denied (masked) in every Linux request. Fakes only: the host's disk is a
 /// dictionary of real paths.
 /// </summary>
@@ -102,7 +102,7 @@ public class ResolverMaskTests
         string json;
         lock (kit.Backend.Requests) json = kit.Backend.Requests.Single().Json;
         // The request's deniedPaths are canonicalized on the real host (HostPathCanonicalizer): on Fedora and RHEL
-        // /etc/nsswitch.conf is a symlink to /etc/authselect/nsswitch.conf, so compare canonical forms (B038).
+        // /etc/nsswitch.conf is a symlink to /etc/authselect/nsswitch.conf, so compare canonical forms.
         var denied = Denied(JsonNode.Parse(json)!.AsObject());
         static string C(string p) => HostPathCanonicalizer.Canonicalize(p);
         foreach (var m in new[] { "/run/systemd/resolve", "/run/dbus", "/run/avahi-daemon", "/etc/nsswitch.conf" }) Assert.Contains(C(m), denied);

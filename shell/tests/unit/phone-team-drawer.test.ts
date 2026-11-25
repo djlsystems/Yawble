@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 316: on a phone (below 760 px) the team page's Documents and Workflows move from its header into the drawer,
+// On a phone (below 760 px) the team page's Documents and Workflows move from its header into the drawer,
 // under the open team's name; a tap closes the drawer and opens that team's dialog. The desktop keeps the header
 // buttons. Also: a dialog sheet's header never shrinks over its body (the Workflows title sat on its intro text).
 // A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
@@ -80,7 +80,7 @@ async function openTeamPage(w: VueWrapper) {
   expect(drawerState(w)).toBe('closed');
 }
 
-describe('the drawer on a phone: the open team\'s Documents and Workflows (card 316)', () => {
+describe('the drawer on a phone: the open team\'s Documents and Workflows', () => {
   it('shows the two items only while a team page is open, under the team\'s name, near the drawer\'s top', async () => {
     setWidth(390);
     const w = await mountApp();
@@ -154,14 +154,14 @@ describe('the drawer on a phone: the open team\'s Documents and Workflows (card 
   });
 });
 
-describe('the team page header (card 316)', () => {
+describe('the team page header', () => {
   const mountTeam = async () => {
     const w = keep(mount(TeamView, { props: { team, api: fakeApi(), pollMs: 60_000 }, attachTo: document.body }));
     await flushPromises();
     return w;
   };
 
-  it('on a phone: no Documents or Workflows buttons in the header; all five are behind ⋯ (B054, card 331); the exposed openers still open the dialogs', async () => {
+  it('on a phone: no Documents or Workflows buttons in the header; all five are behind ⋯; the exposed openers still open the dialogs', async () => {
     setWidth(390);
     const w = await mountTeam();
     expect(w.find('[data-test=open-documents]').exists()).toBe(false);
@@ -202,7 +202,7 @@ describe('the team page header (card 316)', () => {
   });
 });
 
-describe('a dialog sheet\'s header over its body (card 316, Modal.vue)', () => {
+describe('a dialog sheet\'s header over its body (Modal.vue)', () => {
   const css = readFileSync(resolve(__dirname, '../../src/renderer/src/components/Modal.vue'), 'utf8');
   it('never shrinks, is opaque and is not sticky: the title sits above the body, never on it', () => {
     expect(css).toMatch(/\nheader \{[^}]*flex: none;[^}]*background: var\(--surface\)/);

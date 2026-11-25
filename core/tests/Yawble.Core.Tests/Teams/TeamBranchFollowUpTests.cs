@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 171 (B027 items 6-9, B020 follow-ups). Temporary repositories only; no git local transport (no push, fetch, clone
+/// Follow-ups to old member branches and blocked team branches. Temporary repositories only; no git local transport (no push, fetch, clone
 /// or ls-remote between local repositories), so these also run in a sandbox that does not allow it. Item 7's tests are
 /// TeamBranchBlockingTests.AStaleBlockerInTheSharedView_DoesNotRefuseTheStart_AndGoesAtTheRefresh (local transport) and
 /// TeamBranchBlockingGapTests.AStaleSharedViewBlocker_DoesNotRefuseTheStart.
@@ -90,7 +90,7 @@ public class TeamBranchFollowUpTests
 
     // ------------------------------------------------------------------ item 8: a refusal after a move says what moved
 
-    /// <summary>The B016 move runs before the checks. When a check then refuses, the message does not say "Nothing was
+    /// <summary>The move to members/&lt;team&gt;/&lt;name&gt; runs before the checks. When a check then refuses, the message does not say "Nothing was
     /// changed": it says which branch moved, and the move stands (the member is recorded on its new branch).</summary>
     [Fact]
     public async Task ARefusalAfterTheOldStyleMove_SaysWhatMoved()

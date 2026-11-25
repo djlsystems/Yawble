@@ -38,7 +38,7 @@ for (const rule of ['fence', 'code_block'] as const) {
   };
 }
 
-// B072: a commit ID in the text (or alone in inline code) opens the Commit view. B074: only once the core confirms it is
+// A commit ID in the text (or alone in inline code) opens the Commit view, but only once the core confirms it is
 // a commit. It renders as a plain-text candidate, our own markup around the escaped ID (never a web link):
 // <span data-commit-id="<id>">; the document's observer (commitResolve.ts installCommitResolve, App.vue) asks
 // git.commitsResolve for every candidate on the screen in one call and turns a confirmed one into a [data-commit] link,

@@ -5,7 +5,7 @@ using Yawble.Core.Triggers;
 namespace Yawble.Core.Bus;
 
 /// <summary>A workflow as the person sees it in a team's list (bus.workflows).</summary>
-/// <param name="State">open, completed (declared done), closed (by a person) or expired (by the app, B085). New work after any of them reopens it.</param>
+/// <param name="State">open, completed (declared done), closed (by a person) or expired (by the app). New work after any of them reopens it.</param>
 /// <param name="Undeclared">Open, with nothing running, queued or waiting to be woken: nobody is working it.</param>
 /// <param name="Busy">What is still working it, in words ("Ada is running").</param>
 /// <param name="EndedAt">When it ended (null while open): an expired one's last real activity, not the expiry time.</param>
@@ -13,7 +13,7 @@ namespace Yawble.Core.Bus;
 /// <param name="ExpiresAt">When it will expire if nothing happens (open and idle only; null while something works it or is due to).</param>
 /// <param name="ExpiryWarning">The warning given for a workflow that waits on the person's answer ("#12 will expire tomorrow; ...").</param>
 /// <param name="Question">The question an open workflow waits on the person's answer to (its needs-decision message, as bus.decisions' id); null when none.</param>
-/// <param name="Time">B086: its overall time (created to its end, or now while open) and where that time went; null without a board.</param>
+/// <param name="Time">Its overall time (created to its end, or now while open) and where that time went; null without a board.</param>
 public sealed record WorkflowSummary(
     long Id, string Title, string? Owner, string State, bool Undeclared, IReadOnlyList<string> Busy, string? Ending,
     DateTimeOffset StartedAt, DateTimeOffset LastAt, int Messages,
@@ -39,7 +39,7 @@ public sealed partial class BusEngine
     /// so an open workflow nobody is working is never cut off a list (the team's Workflows, the Concierge, the
     /// companion's tools and the cloud dashboard all read this).
     /// </summary>
-    /// <remarks><paramref name="time"/>: with each one's time (B086, from the board); false for readers that do not show it.</remarks>
+    /// <remarks><paramref name="time"/>: with each one's time (from the board); false for readers that do not show it.</remarks>
     public Task<IReadOnlyList<WorkflowSummary>> WorkflowsAsync(string team, int limit = 30, CancellationToken ct = default, bool time = true) =>
         WithGate<IReadOnlyList<WorkflowSummary>>(() =>
         {

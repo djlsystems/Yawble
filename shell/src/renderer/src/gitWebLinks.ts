@@ -1,4 +1,4 @@
-// B075 (card 447): "Open on GitHub/GitLab/…" links. The core builds every url (git.webLink, card 446) from the
+// "Open on GitHub/GitLab/…" links. The core builds every url (git.webLink) from the
 // repository's provider or link pattern and answers null when there is no link (a commit not on origin, a host it does not
 // know with no pattern); the shell only asks and shows the ones it got.
 import type { GitProvider, GitWebLinkQuery, RepoProviderInfo, YawbleApi } from '../../shared/api';

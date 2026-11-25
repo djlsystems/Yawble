@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NetworkAsk, ToolAsk, YawbleApi } from '../../src/shared/api';
 import { MonitorModel } from '../../src/renderer/src/monitor/model';
 
-// Card 386 (B080 fix F2): the Monitor view reads the waiting network and tool asks the way Needs you does
+// The Monitor view reads the waiting network and tool asks the way Needs you does
 // (network.asks / tools.asks, their change events, a slow poll) and hands them to the live model's setAsks, so they
 // count on the You node. The wall is a fake scene; the model is the real one.
 vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
@@ -75,7 +75,7 @@ beforeEach(() => {
 });
 afterEach(() => { for (const w of mounted.splice(0)) w.unmount(); spy.mockRestore(); vi.restoreAllMocks(); });
 
-describe('the You node gets the network and tool asks (card 386)', () => {
+describe('the You node gets the network and tool asks', () => {
   it('on load: setAsks with the pending network asks (one item per member and domain) and the pending tool asks', async () => {
     netAsks = [
       net({ id: 1, host: 'crl3.digicert.com', domain: 'digicert.com' }),

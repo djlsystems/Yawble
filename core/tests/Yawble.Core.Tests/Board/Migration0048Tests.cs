@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// Card 437 round 2: 0048 rebuilds board_cards so its status may be 'stopped'. Run again over a database with cards and
+/// 0048 rebuilds board_cards so its status may be 'stopped'. Run again over a database with cards and
 /// trail lines (its schema_migrations row removed), it keeps every card, trail line, id and counter, and the trail still
 /// cascades with its card.
 /// </summary>

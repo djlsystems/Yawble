@@ -20,7 +20,7 @@ async function load() {
 }
 
 function tip(card: AgentCard): string {
-  const c = { ...card, state: cardState(card) }; // B126: the wait state in either shape
+  const c = { ...card, state: cardState(card) }; // the wait state in either shape
   const doing = c.statusLine?.split('\n').find((l) => l.trim() !== '')?.trim();
   const queued = c.state === 'queued' && c.queuePosition ? ` (#${c.queuePosition} in the queue)`
     : c.state === 'waits-for-run' || c.state === 'held' || c.state === 'pending' ? ` (${waitSays(c.state, c.waitsFor)})` : '';

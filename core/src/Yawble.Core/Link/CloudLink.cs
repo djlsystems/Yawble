@@ -503,7 +503,7 @@ public sealed class CloudLink : IAsyncDisposable
     /// This computer's hello on the link: who it is, and what it understands. "caps": "access" says it enforces each
     /// call's "access" (a read-only viewer's change calls are refused here), so the site lets a Visitor open it;
     /// "summary" that it answers org.summary and pushes org.summaryChanged while watched; "logsTail" that it answers
-    /// logs.tail with logs.tailEntry pushes (B048). The site shows a computer without them as "update Yawble to appear here".
+    /// logs.tail with logs.tailEntry pushes. The site shows a computer without them as "update Yawble to appear here".
     /// </summary>
     internal static JsonObject Hello() => new()
     {

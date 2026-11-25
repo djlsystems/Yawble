@@ -10,7 +10,7 @@ using RunCaller = Yawble.Core.Scripts.Running.ScriptCaller;
 
 namespace Yawble.Core.Tests.Scripts.Actions;
 
-/// <summary>Card 587 (SC-2): the "api" kind behind the script seam, against a fake of the integrations (no HTTP, no database).</summary>
+/// <summary>The "api" kind behind the script seam, against a fake of the integrations (no HTTP, no database).</summary>
 public class ApiScriptActionsTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

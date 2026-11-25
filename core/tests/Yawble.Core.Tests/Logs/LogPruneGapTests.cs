@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Logs;
 
 /// <summary>
-/// Gap tests for card 60 / 0326f54: pruning the Approvals log also prunes answered network asks. The preview counts
+/// Gap tests: pruning the Approvals log also prunes answered network asks. The preview counts
 /// exactly what Prune deletes across both tables, oldest and newest span both, a waiting ask of either kind stays
 /// however old, and the person's own retention for Approvals carries the network asks with it. Every row is made up.
 /// </summary>
@@ -153,7 +153,7 @@ public sealed class LogPruneGapTests : IDisposable
         Assert.Equal(1, Count("SELECT count(*) FROM network_asks WHERE host = 'waiting.example'"));
     }
 
-    [Fact] // card 60: was skipped as the fault from 0326f54 (cut by at, not decided_at)
+    [Fact] // was a fault: the prune cut by at, not decided_at
     public void AnOldAskAnsweredJustNow_SurvivesTheNextSweep()
     {
         // Raised 400 days ago, waited all that time, denied an hour ago. The cutoff is by when it was raised (at),
@@ -183,7 +183,7 @@ public sealed class LogPruneGapTests : IDisposable
         Assert.Equal(0, Count("SELECT count(*) FROM network_asks WHERE host = 'late.example'"));
     }
 
-    [Fact] // card 62 re-check of 524cb07: an answered row with no answer time kept goes by when it was raised
+    [Fact] // an answered row with no answer time kept goes by when it was raised
     public void AnAnsweredAskWithNoDecidedAt_GoesByWhenItWasRaised()
     {
         Exec("INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state) VALUES (@at, 1, 'web/DeveloperAda', 'old.example', 'CONNECT', @at, 'denied');", ("@at", Ago(400)));

@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { isCommitId, openCommit } from '../commitView';
 
-// B072: a commit ID the app shows, as a link that opens the Commit view. Not an ID (empty, "—"): plain text.
+// A commit ID the app shows, as a link that opens the Commit view. Not an ID (empty, "—"): plain text.
 const props = withDefaults(defineProps<{ team: string | string[]; sha: string | null | undefined; length?: number }>(), { length: 10 });
 const ok = computed(() => !!props.sha && isCommitId(props.sha));
 const shown = computed(() => (props.sha ? props.sha.slice(0, props.length) : '—'));

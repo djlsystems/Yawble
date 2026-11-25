@@ -7,7 +7,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Storage;
 
 /// <summary>
-/// B031 finding 7a re-verify (card 148), tester's attempts to break the app-root decision as Program.cs feeds it
+/// The tester's attempts to break the app-root decision as Program.cs feeds it
 /// (BusHost.AppRootFor of the --data-dir). Pure decisions run on every OS; the on-disk ones skip on Windows.
 /// </summary>
 public sealed class AppRootToTightenBreakTests : IDisposable

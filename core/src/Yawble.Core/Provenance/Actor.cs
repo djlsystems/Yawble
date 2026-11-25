@@ -30,7 +30,7 @@ public sealed record Actor(string Via, string? User)
 
     /// <summary>
     /// For Via Cloud: the viewer's access as the site said (Link.RemoteAccess.Full or Read, a workgroup Visitor). RemoteAccess
-    /// already refuses a Visitor's change calls; this lets a read (bus.decisions, B123) say what the viewer may not do.
+    /// already refuses a Visitor's change calls; this lets a read (bus.decisions) say what the viewer may not do.
     /// </summary>
     public string Access { get; init; } = "full";
 

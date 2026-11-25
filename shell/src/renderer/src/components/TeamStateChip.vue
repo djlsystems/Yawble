@@ -4,7 +4,7 @@ import type { TeamSummary } from '../../../shared/api';
 import { teamState, teamStateLabel } from '../teamState';
 
 // A team's state in words and colour (Running, Waiting on you, Queued, Paused, Idle): the same chip on its card in the
-// list and in its own page title. A running team's chip carries a small pulsing dot. Waiting on you (B130) has the
+// list and in its own page title. A running team's chip carries a small pulsing dot. Waiting on you has the
 // member card's decision colour.
 const props = defineProps<{ team: Pick<TeamSummary, 'running' | 'queued' | 'paused' | 'waiting'> }>();
 const state = computed(() => teamState(props.team));

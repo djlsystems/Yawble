@@ -321,7 +321,7 @@ public static class SandboxRequestInvariants
     }
 
     /// <summary>
-    /// macOS, the team's "Allow localhost" (B119). Off (RunSpec.AllowLocalhost false, the default): the request has no ingress
+    /// macOS, the team's "Allow localhost". Off (RunSpec.AllowLocalhost false, the default): the request has no ingress
     /// allow at all - ingress.default is deny, hostLoopback is deny, and there are no ingress allow rules. On: exactly the
     /// SDK's pair (ingress.default allow and hostLoopback allow, the one loopback form Seatbelt accepts) and nothing more;
     /// egress stays deny with no rules and the run's gateway the only proxy.

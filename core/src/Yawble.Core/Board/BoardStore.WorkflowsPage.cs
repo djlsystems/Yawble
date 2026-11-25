@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Yawble.Core.Board;
 
-/// <summary>B104: the Workflows page's board reads for many workflows at once, each one statement.</summary>
+/// <summary>The Workflows page's board reads for many workflows at once, each one statement.</summary>
 public sealed partial class BoardStore
 {
     /// <summary>The cards of these workflows. One statement.</summary>

@@ -1,6 +1,6 @@
 import type { ApiRow, YawbleApi } from '../../shared/api';
 
-// B134 (card 598): script members on the team page. The shapes and method names are the core's, from the team documents'
+// Script members on the team page. The shapes and method names are the core's, from the team documents'
 // scripts-rpc.md (core Ui/ScriptsRpc.cs); the calls go through the window's own api.call like every other screen.
 
 export type ScriptRunStatus = 'running' | 'succeeded' | 'failed' | 'skipped' | 'interrupted';

@@ -4,7 +4,7 @@ using Yawble.Core.Monitor;
 namespace Yawble.Core.Teams;
 
 /// <summary>
-/// B073: the commits behind every count and the previews of Merge to main and Delete, for the Git dialog
+/// The commits behind every count and the previews of Merge to main and Delete, for the Git dialog
 /// (git.commitRange, git.mergePreview, git.mergeDiff, git.deletePreview), over <see cref="GitPreviews"/>. Reads only.
 /// A deleted branch's commits are recorded (code events of kind branch-deleted), so the commit view still opens them.
 /// </summary>

@@ -28,7 +28,7 @@ public class GatewayPartsTests
         Assert.False(Vhosts.HostAllowed("eu.api.x.ai", allow));
     }
 
-    // B018 (card 183): a domain allow ("*.digicert.com") matches every subdomain, never the apex, never a lookalike.
+    // A domain allow ("*.digicert.com") matches every subdomain, never the apex, never a lookalike.
     [Theory]
     [InlineData("crl3.digicert.com", true)]
     [InlineData("ocsp.digicert.com", true)]

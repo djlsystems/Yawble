@@ -5,7 +5,7 @@ using Yawble.Core.Concierge;
 namespace Yawble.Core.Teams;
 
 /// <summary>
-/// B016: member branches carry the team, members/&lt;team&gt;/&lt;name&gt;. A member whose clone is still on the old
+/// Member branches carry the team, members/&lt;team&gt;/&lt;name&gt;. A member whose clone is still on the old
 /// members/&lt;name&gt; moves at its next start:
 /// <list type="bullet">
 /// <item>The host repository gets the new branch at its old branch's commit (create-only; an existing new branch is never
@@ -16,11 +16,11 @@ namespace Yawble.Core.Teams;
 /// <item>The old branch is left everywhere it is (host repository, clone, origin): never deleted, never forced. The person
 ///   deletes it in the Git dialog. The new one is pushed after the run like any branch origin does not have.</item>
 /// <item>Except when the old branch is a parent path of the new one (team "Docs", member "Docs": members/docs to
-///   members/docs/docs, card 104): git cannot keep both, so the old branch is renamed (repository, clone) and, on origin,
+///   members/docs/docs): git cannot keep both, so the old branch is renamed (repository, clone) and, on origin,
 ///   replaced by the new one at the push after the run when the new one holds all its commits.</item>
 /// </list>
 /// Anything that would make the move unsafe (a clone .git the host may not read, a link on the ref path, a name clash with
-/// an existing ref here, in the clone or on origin's side: B020) leaves the member on its old branch, with the reason logged.
+/// an existing ref here, in the clone or on origin's side) leaves the member on its old branch, with the reason logged.
 /// </summary>
 public sealed partial class TeamRepos
 {
@@ -31,7 +31,7 @@ public sealed partial class TeamRepos
         if (member.Role == MemberRole.Manager) return null;
         if (Row(member.Id) is null && AdoptLegacyClone(member, CheckoutOf(member, repo).ClonePath) is { } adopted)
         {
-            // A rehired member (its row went with RemoveMemberAsync) reusing a pre-B016 clone: record the branch the clone
+            // A rehired member (its row went with RemoveMemberAsync) reusing an old-style clone (members/<name>): record the branch the clone
             // is on, then move it like any old-style member. If the move cannot be made, the row still names the clone's branch.
             InsertClone(member.Id, CheckoutOf(member, repo).ClonePath, adopted);
             _log?.Invoke($"{member.Qualified}: reusing the clone on disk, on {adopted}");
@@ -94,7 +94,7 @@ public sealed partial class TeamRepos
         var cloneHasNew = newTip.Length > 0;
         // The clone already has the new name at another commit (an agent made it, or an earlier move stopped half-way and
         // work went on the old one): switching to it could hide work. Stay, and say why.
-        // Card 104: the old branch is a parent path of the new one (team "Docs", member "Docs": members/docs to
+        // The old branch is a parent path of the new one (team "Docs", member "Docs": members/docs to
         // members/docs/docs). Git cannot keep both, so here, and only here, the old branch is renamed, not kept: in the
         // repository by git branch -m, in the clone by file (MoveCloneRefThrough), and on origin by the push after the run.
         var through = to.StartsWith(from + "/", StringComparison.Ordinal);
@@ -102,7 +102,7 @@ public sealed partial class TeamRepos
             return $"{from} is also the branch of team {other.Team}'s member {other.Member}";
         if (cloneHasNew && newTip != cloneTip) return $"the clone already has {to} at another commit than {from}";
         if (!cloneHasNew && await RefClashAsync(repoPath, gitDir, to, through ? from : null, ct) is { } cloneClash) return $"the clone already has {cloneClash}";
-        // B020: the same check for the new name on origin's side, before anything moves (the push would fail later). The
+        // The same check for the new name on origin's side, before anything moves (the push would fail later). The
         // member's own old branch there is replaced by the push after the run (PublishRepoAsync), when nobody else is on it.
         if ((await BlockersOnOriginAsync(repoPath, to, ct)).FirstOrDefault(b => !(through && b == from)) is { } onOrigin)
             return $"origin already has {onOrigin} (as of the last fetch)";
@@ -158,7 +158,7 @@ public sealed partial class TeamRepos
         Clash((await Git.RunAsync(repoPath, ct, "for-each-ref", "--format=%(refname)", "refs/heads/")).Split('\n', StringSplitOptions.RemoveEmptyEntries), branch, except);
 
     /// <summary>The first ref that clashes with refs/heads/<paramref name="branch"/>, other than refs/heads/<paramref name="except"/>
-    /// (the old branch a move goes through, card 104).</summary>
+    /// (the old branch a move goes through).</summary>
     private static string? Clash(IEnumerable<string> refs, string branch, string? except = null)
     {
         var wanted = "refs/heads/" + branch;
@@ -223,7 +223,7 @@ public sealed partial class TeamRepos
     }
 
     /// <summary>
-    /// Card 104: renames the clone's branch <paramref name="from"/> to <paramref name="to"/> under it (members/docs to
+    /// Renames the clone's branch <paramref name="from"/> to <paramref name="to"/> under it (members/docs to
     /// members/docs/docs), by file, as <c>git branch -m</c> would, without running git in the clone. The old ref (a loose file
     /// and/or a packed-refs line, at <paramref name="tip"/>) goes, the new loose ref is written at the same commit, the reflog
     /// moves with it, and HEAD follows when it was on the old branch. Every path on the way must be a plain folder or file

@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// B100: the retro item a completed workflow queues for its Manager, and workflow_digest as the bus serves it (fakes only:
+/// The retro item a completed workflow queues for its Manager, and workflow_digest as the bus serves it (fakes only:
 /// a scripted runner calls the tools as an agent would).
 /// </summary>
 public class RetroTests

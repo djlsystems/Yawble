@@ -7,7 +7,7 @@ import {
 import { confirmDialog, type ConfirmOptions } from './confirm';
 import { teamState } from './teamState';
 
-// B115 Part B: the remote view embedded in the cloud page (remote.html?embed=1&theme=light|dark, in a frame). The
+// Embed mode: the remote view embedded in the cloud page (remote.html?embed=1&theme=light|dark, in a frame). The
 // desktop's own sidebar and theme switch are not drawn; the sidebar is published to the parent window as yawble.nav and
 // the parent's yawble.navigate / yawble.theme messages are followed (contract: shared/embedContract.ts and
 // docs/cloud-link.md). This module never imports theme.ts and never touches the browser's storage: the viewer's own

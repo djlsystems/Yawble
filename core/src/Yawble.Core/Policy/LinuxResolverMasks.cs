@@ -2,7 +2,7 @@ namespace Yawble.Core.Policy;
 
 /// <summary>
 /// Linux: the host paths through which a name lookup inside the sandbox reaches a resolver OUTSIDE the sandbox's private
-/// network namespace, so the lookup would leave without the gateway (B035). Every one that is on the host is denied in
+/// network namespace, so the lookup would leave without the gateway. Every one that is on the host is denied in
 /// every Linux request (<see cref="RunLayout.ImplicitDenied"/>), which the sandbox turns into a mask: an empty tmpfs over a
 /// folder, /dev/null over a file.
 ///
@@ -19,10 +19,10 @@ namespace Yawble.Core.Policy;
 /// host's loopback, which the private namespace cannot reach either). The sandbox's request contract can only mask
 /// these files, not bind other content over them; an empty file is the closest to "hosts: files dns" and "no nameserver".
 /// Plain DNS to any nameserver is closed by the sandbox's proxy-only firewall in any case; the guardrail check proves it
-/// for slirp4netns's own nameservers (B038: dns.slirp-udp, dns.slirp-tcp and dns.gateway-udp, raw queries to 10.0.2.3:53
+/// for slirp4netns's own nameservers (dns.slirp-udp, dns.slirp-tcp and dns.gateway-udp, raw queries to 10.0.2.3:53
 /// and 10.0.2.2:53 that never read resolv.conf) and for the user's session bus (dbus.user).
 ///
-/// Users who exist only in sssd or LDAP (B038 decision: left as is). With nsswitch.conf empty, glibc looks users up in
+/// Users who exist only in sssd or LDAP (decided: left as is). With nsswitch.conf empty, glibc looks users up in
 /// /etc/passwd and /etc/group only, so such a user has no passwd entry inside: getpwuid fails, Node's os.userInfo()
 /// throws, `id -un` prints the number. The launcher does not write a minimal passwd/group/nsswitch for the sandbox,
 /// because: (1) the sandbox's request contract can only grant a host path at its own place or mask it, never put a file
