@@ -22,7 +22,7 @@ public class CoreProcessTests
         var dataDir = Directory.CreateTempSubdirectory("yawble-data-").FullName;
         var address = IpcEndpoint.NewAddress(dataDir);
         var coreDll = Path.Combine(AppContext.BaseDirectory, "yawble-core.dll");
-        var start = new ProcessStartInfo("dotnet")
+        var start = new ProcessStartInfo(CoreLaunch.Dotnet)
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -69,7 +69,7 @@ public class CoreProcessTests
         var dataDir = Directory.CreateTempSubdirectory("yawble-data-").FullName;
         var home = Path.Combine(Directory.CreateTempSubdirectory("yawble-yhome-").FullName, "yawble");
         var address = IpcEndpoint.NewAddress(dataDir);
-        var start = new ProcessStartInfo("dotnet")
+        var start = new ProcessStartInfo(CoreLaunch.Dotnet)
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -133,7 +133,7 @@ public class CoreProcessTests
         }
         Process Start(string address)
         {
-            var psi = new ProcessStartInfo("dotnet")
+            var psi = new ProcessStartInfo(CoreLaunch.Dotnet)
             {
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
@@ -181,7 +181,7 @@ public class CoreProcessTests
     [Fact]
     public async Task RefusesToStartWithoutAToken()
     {
-        var start = new ProcessStartInfo("dotnet")
+        var start = new ProcessStartInfo(CoreLaunch.Dotnet)
         {
             RedirectStandardError = true,
             RedirectStandardOutput = true,

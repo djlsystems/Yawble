@@ -390,8 +390,11 @@ public class ConciergeReadToolsTests : IDisposable
 
     // ------------------------------------------------------------------------------------------------ git
 
-    private async Task<string> G(string dir, params string[] args) =>
-        await _git.RunAsync(dir, ["-c", "user.name=Test", "-c", "user.email=test@example.test", .. args], Ct);
+    private async Task<string> G(string dir, params string[] args)
+    {
+        try { return await _git.RunAsync(dir, ["-c", "user.name=Test", "-c", "user.email=test@example.test", .. args], Ct); }
+        catch (GitException e) { SandboxGit.SkipIfShCouldNotStart(e.Message); throw; }
+    }
 
     private async Task Commit(string dir, string file, string text, string message)
     {
@@ -438,6 +441,7 @@ public class ConciergeReadToolsTests : IDisposable
     [Fact]
     public async Task TeamGitReportsBranchesMergeState_OriginMatch_AndEveryClonesUnpushedAndUncommittedWork()
     {
+        SandboxGit.RequireLocalTransport();
         await _bus.CreateTeamAsync("alpha", ct: Ct);
         var target = await RepoAsync();
         var text = await Run(Tools((_, _) => Task.FromResult<IReadOnlyList<GitRepoTarget>>([target])), "team_git", new() { ["team"] = "alpha" });
@@ -460,6 +464,7 @@ public class ConciergeReadToolsTests : IDisposable
     [Fact]
     public async Task TeamGitNeverRunsGitInAMembersClone_SoItsFsmonitorFilterAndHooksNeverRun_AndStillReportsItsBranches()
     {
+        SandboxGit.RequireLocalTransport();
         await _bus.CreateTeamAsync("alpha", ct: Ct);
         var target = await RepoAsync();
         var ada = target.Clones[0].Path;
@@ -541,6 +546,7 @@ public class ConciergeReadToolsTests : IDisposable
     [Fact]
     public async Task AClonesObjectAlternatesAreRefused()
     {
+        SandboxGit.RequireLocalTransport();
         await _bus.CreateTeamAsync("alpha", ct: Ct);
         var target = await RepoAsync();
         var secret = await SecretRepoAsync();
@@ -654,6 +660,7 @@ public class ConciergeReadToolsTests : IDisposable
     [Fact]
     public async Task TeamGitListsAtMost200BranchesOfAClone_AndSaysTheListWasCut()
     {
+        SandboxGit.RequireLocalTransport();
         await _bus.CreateTeamAsync("alpha", ct: Ct);
         var target = await RepoAsync();
         var ada = target.Clones[0].Path;
@@ -670,6 +677,7 @@ public class ConciergeReadToolsTests : IDisposable
     [Fact]
     public async Task TeamGitStatesEveryCheckItCouldNotRun_AndNeverPrintsACredentialInAnOriginAddress()
     {
+        SandboxGit.RequireLocalTransport();
         await _bus.CreateTeamAsync("alpha", ct: Ct);
         var target = await RepoAsync();
         await G(target.Path, "remote", "set-url", "origin", $"https://user:{Token}@example.test/x.git");
@@ -688,6 +696,7 @@ public class ConciergeReadToolsTests : IDisposable
     [Fact]
     public async Task TeamGitReadsOpenPullRequestsWhenAFakeGhAnswers_AndSaysSoWhenItDoesNot()
     {
+        SandboxGit.RequireLocalTransport();
         await _bus.CreateTeamAsync("alpha", ct: Ct);
         var target = await RepoAsync();
         await G(target.Path, "remote", "set-url", "origin", "https://github.com/acme/app.git"); // pull requests are read for GitHub only

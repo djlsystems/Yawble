@@ -65,6 +65,7 @@ public class TeamSyncTests
     [Fact]
     public async Task ATeamBranchBehindItsBase_IsFastForwarded_AndTheBundleCarriesIt()
     {
+        SandboxGit.RequireLocalTransport();
         var (f, _, ada, repo) = Ready();
         using var _f = f;
         AgentGit.Host(repo, "branch", "team/alpha");
@@ -201,6 +202,7 @@ public class TeamSyncTests
     [Fact]
     public async Task TheManagersFirstRunOfAWorkflow_SyncsFirst_AndAConflictIsAtTheTopOfItsInstruction()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var runner = new CaptureRunner();
         await using var engine = new BusEngine(f.Db.OpenStore(), new TeamRepoRunner(runner, f.Repos),
@@ -238,6 +240,7 @@ public class TeamSyncTests
     [Fact]
     public async Task TheRunRecordKeepsTheBaseCommitTheCloneWasBuiltOn()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
@@ -266,6 +269,7 @@ public class TeamSyncTests
     private static async Task<(TeamsFixture F, MemberRef Ada, MemberCheckout Clone, string Repo, string Synced)> SyncedWhileTheCloneWasNot(
         string? baseChange = null)
     {
+        SandboxGit.RequireLocalTransport();
         var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var repo = (await f.Repos.EnsureTeamRepoAsync(ada.TeamId, "Alpha", Ct)).Path;

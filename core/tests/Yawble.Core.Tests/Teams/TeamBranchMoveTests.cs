@@ -185,6 +185,7 @@ public class TeamBranchMoveTests
     [Fact]
     public async Task AnOldStyleMemberWithNoFetchedWork_MovesItsClone_AndTheNextFetchBackMakesTheBranch()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team();
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
@@ -234,6 +235,7 @@ public class TeamBranchMoveTests
     [Fact]
     public async Task AMemberNamedLikeItsTeam_MovesThroughItsOwnOldBranch()
     {
+        SandboxGit.RequireLocalTransport();
         // Team "Ada" with a member "Ada": members/ada/ada cannot exist beside members/ada, so the member's own old
         // branch is moved through: members/ada becomes members/ada/ada, its work and HEAD with it.
         using var f = new TeamsFixture();

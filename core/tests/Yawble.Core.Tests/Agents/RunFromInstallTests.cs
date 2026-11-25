@@ -193,9 +193,9 @@ public class RunFromInstallTests
         var requests = kit.Backend.Requests.Where(r => LaunchKit.IsFor(r.Json, "dev1")).Select(r => JsonNode.Parse(r.Json)!).ToList();
         string Cmd(JsonNode r) => r["process"]!["commandLine"]!.GetValue<string>();
         List<string> Ro(JsonNode r) => r["filesystem"]!["readonlyPaths"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
-        Assert.StartsWith(HostPathCanonicalizer.Canonicalize(Path.Combine(v1, "claude")), Cmd(requests[0]).Trim('\''));
+        Assert.StartsWith(HostPathCanonicalizer.Canonicalize(Path.Combine(v1, "claude")), Cmd(requests[0]).Trim('\'', '"'));
         Assert.Contains(HostPathCanonicalizer.Canonicalize(v1), Ro(requests[0]));
-        Assert.StartsWith(HostPathCanonicalizer.Canonicalize(Path.Combine(v2, "claude")), Cmd(requests[1]).Trim('\''));
+        Assert.StartsWith(HostPathCanonicalizer.Canonicalize(Path.Combine(v2, "claude")), Cmd(requests[1]).Trim('\'', '"'));
         Assert.DoesNotContain(HostPathCanonicalizer.Canonicalize(v1), Ro(requests[1]));
         Assert.True(clis.Calls >= 2);
 

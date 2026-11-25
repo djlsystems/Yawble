@@ -66,6 +66,7 @@ public class TeamBranchBlockingTests
     [Fact]
     public async Task AStaleBlockerInTheSharedView_DoesNotRefuseTheStart_AndGoesAtTheRefresh()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (manager, ada, _) = f.Team("Docs");
         await f.Repos.PrepareAsync(manager, Ct); // the Manager's start makes the shared view (team/docs is not blocked)
@@ -83,6 +84,7 @@ public class TeamBranchBlockingTests
     [Fact]
     public async Task ABlockingBranchInTheMembersClone_FailsTheStartPlainly_AndTheCloneIsNotTouched()
     {
+        SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team("Docs");
         var c = await f.Repos.PrepareAsync(ada, Ct);
