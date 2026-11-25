@@ -105,7 +105,10 @@ and say in plain words when it would fire ("every 5 minutes, starting now", "wee
 - `variables`: `run` variables live for one run; `saved` ones are kept for the member and written back only when a
   run succeeds (a failed poll does not move its place).
 - Types: `int float string bool date datetime duration any`, `enum(a, b)`, `list<T>`, or a schema's name. Built-in
-  schemas: `TriggerFired`, `FolderChange`, `EventItem`, `EmailAddress`, `EmailMessage`, `EmailList`, `ApiResponse`.
+  schemas: `TriggerFired`, `FolderChange`, `EventItem`, `EmailAddress`, `EmailMessage`, `EmailList`, `ApiResponse`, `TellResult`.
+- `TellResult` is what a `tell` step gives back: `outcome` (`enum(sent, done, failed, blocked, timedOut, dryRun)`),
+  `workflow` (int, 0 in a dry run), `reply` (string, the agent's closing summary) and `data`, which takes the type of
+  the tell's `reply` schema (null without one or when the work did not finish).
 
 ## Steps
 

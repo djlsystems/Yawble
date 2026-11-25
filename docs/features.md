@@ -772,7 +772,9 @@ masked in the log and never reaches an agent. See
   imported as `.json` files. A document's top-level `layout` section (the editor's node positions) is kept unchanged
   through save, get, export and import.
 - **Schemas** are named object types (a JSON Schema subset), also global and versioned. The built-in schemas
-  (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse) are read-only. A schema save that
+  (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse, TellResult) are read-only.
+  TellResult is what a Tell step gives back: `outcome` (sent, done, failed, blocked, timedOut or dryRun), `workflow`,
+  `reply` (the agent's closing summary) and `data`, typed by the tell's reply schema. A schema save that
   removes or retypes a field a saved script uses is refused, listing each script, version and step it would break.
 - The **Schemas** tab shows each schema as a tree of its fields: type, required, description, enum values, and the
   schemas a field refers to (as an item of a list too). A built-in schema is read-only. Your own schema has a
