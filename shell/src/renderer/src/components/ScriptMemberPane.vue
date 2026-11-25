@@ -7,6 +7,7 @@ import { useBusy } from '../busy';
 import BusyLabel from './BusyLabel.vue';
 import ScriptMemberIntegrations from './ScriptMemberIntegrations.vue';
 import ScriptEditor from './scripts/ScriptEditor.vue';
+import RunWaitLink from './scripts/RunWaitLink.vue';
 import { scriptAtVersion, scriptsApi, shortValue, type ScriptMember, type ScriptMemberFile, type ScriptMemberState, type ScriptRun } from '../scriptMembers';
 
 // A script member's tile on the team page: its name, script@version (on latest: the version it runs),
@@ -78,7 +79,7 @@ const editTeams = computed<TeamSummary[]>(() => (member.value
   ? [{ id: member.value.teamId, name: member.value.team, repoPath: null, members: 0, running: 0, queued: 0 }] : []));
 function closeEditor() { editing.value = false; void refresh(); }
 
-const statusLabel: Record<string, string> = { running: 'Running', succeeded: 'Succeeded', failed: 'Failed', skipped: 'Skipped', interrupted: 'Interrupted' };
+const statusLabel: Record<string, string> = { running: 'Running', waiting: 'Waiting', succeeded: 'Succeeded', failed: 'Failed', skipped: 'Skipped', interrupted: 'Interrupted' };
 const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.slice(8)}` : t);
 </script>
 
@@ -99,7 +100,8 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
       <span class="mono" data-test="script-member-version">{{ member ? scriptAtVersion(member) : '…' }}</span>
       <span data-test="script-member-last-run">Last run:
         <template v-if="last"><span class="status" :class="last.status" data-test="script-member-last-status">{{ statusLabel[last.status] ?? last.status }}</span>
-          {{ when(last.endedAt ?? last.startedAt) }}</template>
+          {{ when(last.endedAt ?? last.startedAt) }}
+          <RunWaitLink v-if="last.status === 'waiting'" :workflow="last.waitWorkflowId ?? null" /></template>
         <template v-else-if="member">never</template>
       </span>
       <span data-test="script-member-next">Next trigger: {{ member ? (member.nextTriggerAt ? when(member.nextTriggerAt) : 'none scheduled') : '…' }}</span>
@@ -112,6 +114,7 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
         <li v-for="r in runs" :key="r.id" data-test="script-member-run">
           <span class="status" :class="r.status">{{ statusLabel[r.status] ?? r.status }}</span>
           <span class="muted">{{ when(r.startedAt) }} · v{{ r.version }} · {{ triggerLabel(r.trigger) }}</span>
+          <RunWaitLink v-if="r.status === 'waiting'" :workflow="r.waitWorkflowId ?? null" />
           <span v-if="r.reason" class="reason" :title="r.reason">{{ r.reason }}</span>
         </li>
       </ul>
@@ -172,7 +175,7 @@ ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: col
 .status { font-weight: 600; }
 .status.succeeded { color: var(--ok); }
 .status.failed, .status.interrupted { color: var(--bad); }
-.status.running { color: var(--accent); }
+.status.running, .status.waiting { color: var(--accent); }
 .status.skipped { color: var(--muted); }
 .small-btn { font-size: 12px; padding: 1px 8px; }
 .danger { color: var(--bad); }
