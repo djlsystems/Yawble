@@ -13,6 +13,7 @@ import App from '../../src/renderer/src/App.vue';
 import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
+import { workflowsRequest } from '../../src/renderer/src/workflows/page';
 import { PHONE_BREAKPOINT, PHONE_QUERY } from '../../src/renderer/src/phone';
 import type { TeamSummary, YawbleApi } from '../../src/shared/api';
 
@@ -179,20 +180,21 @@ describe('the team page header', () => {
     expect(dialogTitles()).toEqual(['payments · documents']);
   });
 
-  it('on the desktop: both buttons, opening their dialogs; openWorkflows(id) still selects a workflow', async () => {
+  it('on the desktop: both buttons; Documents opens its dialog, Workflows the Workflows page for the team (no dialog)', async () => {
     setWidth(1024);
     const w = await mountTeam();
     await w.get('[data-test=open-documents]').trigger('click');
     await flushPromises();
     expect(dialogTitles()).toEqual(['payments · documents']);
     await w.get('[data-test=modal-close]').trigger('click');
-    await w.get('[data-test=open-workflows]').trigger('click');
+    const b = w.get('[data-test=open-workflows]');
+    expect(b.text()).toBe('Workflows');
+    expect(b.attributes('title')).toMatch(/Workflows page/);
+    await b.trigger('click');
     await flushPromises();
-    expect(dialogTitles()).toEqual(['payments · workflows']);
-    await w.get('[data-test=modal-close]').trigger('click');
-    (w.vm as unknown as { openWorkflows: (id?: number) => void }).openWorkflows(42);
-    await nextTick();
-    expect(dialogTitles()).toEqual(['payments · workflows']);
+    expect(dialogTitles()).toEqual([]);
+    expect(workflowsRequest.value).toMatchObject({ teamId: 1 });
+    expect(workflowsRequest.value?.workflow ?? null).toBeNull();
   });
 
   it('follows the width: the buttons go below 760 px and come back at 760 px', async () => {

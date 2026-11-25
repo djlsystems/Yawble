@@ -2,7 +2,6 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../src/renderer/src/App.vue';
-import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
 import { parseRemoteHash } from '../../src/renderer/src/remoteHash';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
 import type { YawbleApi } from '../../src/shared/api';
@@ -60,7 +59,6 @@ const teams = [
 // huge: 250 (#2250 … #2001), so #2030 is the 221st newest, past core's most (200).
 const newestFirst = (top: number, n: number) => Array.from({ length: n }, (_, i) => top - i);
 const workflowsOf: Record<number, number[]> = { 1: [10, 11], 2: [413, 20], 3: newestFirst(1120, 120), 4: newestFirst(2250, 250) };
-const limits: Array<{ teamId: number; limit: number }> = [];
 const calls: { method: string; p: any }[] = [];
 const teamOf = (id: number) => Number(Object.keys(workflowsOf).find((t) => workflowsOf[Number(t)]!.includes(id)) ?? 0);
 /** A Workflows page row (workflows.list / workflows.get) for a workflow of the fake. */
@@ -84,9 +82,7 @@ function remoteApi(): YawbleApi {
         case 'app.overview': return { slots: { running: 0, limit: 8, queued: 0 }, teams } as any;
         case 'bus.workflows': {
           // Core's limit: default 30, clamped to 1..200 (BusEngine.WorkflowsAsync).
-          const limit = Math.min(Math.max(p.limit ?? 30, 1), 200);
-          limits.push({ teamId: p.teamId, limit });
-          return (workflowsOf[p.teamId] ?? []).slice(0, limit).map(wf) as any;
+          return (workflowsOf[p.teamId] ?? []).slice(0, Math.min(Math.max(p.limit ?? 30, 1), 200)).map(wf) as any;
         }
         case 'workflows.list': {
           const rows = listed(p?.teamId);
@@ -210,51 +206,3 @@ describe('the remote view opens where the link says', () => {
   });
 });
 
-// ---- the Workflows dialog alone: focus over a long list ----
-
-describe('WorkflowsDialog opened at a workflow', () => {
-  beforeEach(() => { document.body.innerHTML = ''; limits.length = 0; });
-
-  async function dialog(team: number, focus: number) {
-    const w = mount(WorkflowsDialog, { props: { api: remoteApi(), team: teams.find((t) => t.id === team)!, pollMs: 60_000, focus }, attachTo: document.body });
-    for (let i = 0; i < 6; i++) await flushPromises();
-    return w;
-  }
-
-  it('among the newest 50: one read of 50, selected', async () => {
-    const w = await dialog(3, 1100);
-    expect(document.querySelector('[data-wf="1100"]')?.classList.contains('sel')).toBe(true);
-    expect(limits.map((l) => l.limit)).toEqual([50]);
-    w.unmount();
-  });
-
-  it('the 91st newest of 120: read again at 200, then selected and scrolled to', async () => {
-    const scrolled: string[] = [];
-    const orig = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.getAttribute('data-wf') ?? ''); };
-    try {
-      const w = await dialog(3, 1030);
-      expect(document.querySelector('[data-wf="1030"]')?.classList.contains('sel')).toBe(true);
-      expect(document.querySelectorAll('[data-wf]')).toHaveLength(120);
-      expect(limits.map((l) => l.limit)).toEqual([50, 200]);
-      expect(scrolled).toEqual(['1030']);
-      expect(w.find('[data-test=workflow-not-found]').exists()).toBe(false);
-      w.unmount();
-    } finally { Element.prototype.scrollIntoView = orig; }
-  });
-
-  it('past the newest 200: the newest 200 and a not-found note, nothing selected', async () => {
-    const w = await dialog(4, 2030);
-    expect(document.querySelectorAll('[data-wf]')).toHaveLength(200);
-    expect(document.querySelector('[data-wf].sel')).toBeNull();
-    expect(w.get('[data-test=workflow-not-found]').text()).toContain('#2030');
-    w.unmount();
-  });
-
-  it('a short list without it: no second read, "not found in this team"', async () => {
-    const w = await dialog(1, 999);
-    expect(limits.map((l) => l.limit)).toEqual([50]);
-    expect(w.get('[data-test=workflow-not-found]').text()).toBe('Workflow #999 was not found in this team.');
-    w.unmount();
-  });
-});
