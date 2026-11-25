@@ -1,7 +1,7 @@
 // The flowchart model: the script document as nodes and edges, and the designer's edits going back into the document.
 import { describe, expect, it } from 'vitest';
 import {
-  END_ID, FILE_OPERATIONS, PALETTE, START_ID, STEP_TYPES, addStep, withFileOperation, autoLayout, branchesOf, clearLayout, connect, createHistory, docToGraph,
+  END_ID, FILE_OPERATIONS, PALETTE, START_ID, STEP_TYPES, addStep, tellDetail, withFileOperation, autoLayout, branchesOf, clearLayout, connect, createHistory, docToGraph,
   moveNode, removeEdge, removeStep, replaceStep, type FlowEdge,
 } from '../../src/renderer/src/scripts/flowchart';
 import type { ScriptDocument } from '../../src/renderer/src/scripts/types';
@@ -62,9 +62,36 @@ describe('docToGraph', () => {
       const doc: ScriptDocument = { start: 'a', steps: [{ id: 'a', ...t.template }] };
       expect(docToGraph(doc).nodes.find((n) => n.id === 'a')?.kind).toBe(t.kind);
     }
-    const odd = docToGraph({ start: 'a', steps: [{ id: 'a', type: 'mystery', next: null }, { id: 'b', type: 'agent', next: null }] });
+    // A type the checker does not know (an agent step is not one: a script tells the team instead) is other.
+    const odd = docToGraph({ start: 'a', steps: [{ id: 'a', type: 'mystery', next: null }, { id: 'b', type: 'agent', next: null }, { id: 'c', type: 'tell', text: 'x', next: null }] });
     expect(odd.nodes.find((n) => n.id === 'a')?.kind).toBe('other');
-    expect(odd.nodes.find((n) => n.id === 'b')?.kind).toBe('agent');
+    expect(odd.nodes.find((n) => n.id === 'b')?.kind).toBe('other');
+    expect(odd.nodes.find((n) => n.id === 'c')?.kind).toBe('tell');
+  });
+
+  it('a tell node says whom it tells, the team when it names one, and when it waits', () => {
+    const doc: ScriptDocument = { start: 'a', steps: [
+      { id: 'a', type: 'tell', text: 'Look at {input.text}', next: 'b' },
+      { id: 'b', type: 'tell', member: 'Ava', text: 'x', wait: true, next: 'c' },
+      { id: 'c', type: 'tell', member: 'Manager', team: 'Billing', text: 'x', wait: false, next: 'd' },
+      { id: 'd', type: 'tell', member: 'Ava', team: 'Billing', text: 'x', wait: true, timeout: '4h', next: null },
+    ] };
+    const detail = (id: string) => docToGraph(doc).nodes.find((n) => n.id === id)!.detail;
+    expect(detail('a')).toBe('tell Manager');
+    expect(detail('b')).toBe('tell Ava (waits)');
+    expect(detail('c')).toBe('tell Manager of Billing');
+    expect(detail('d')).toBe('tell Ava of Billing (waits)');
+    expect(tellDetail({ id: 'x', type: 'tell', member: '  ', text: '' })).toBe('tell Manager');
+    // A tell has one successor, next, like every plain step.
+    expect(branchesOf(doc, 'a')).toEqual([{ kind: 'next' }]);
+    expect(docToGraph(doc).edges.find((e) => e.id === 'a->next')).toMatchObject({ target: 'b', kind: 'next' });
+  });
+
+  it('the Tell block is in the Do group and adds a blank tell to the Manager that goes on at once', () => {
+    const doGroup = PALETTE.find((g) => g.group === 'Do')!;
+    expect(doGroup.blocks.find((b) => b.key === 'tell')).toEqual({ key: 'tell', type: 'tell', kind: 'tell', label: 'Tell' });
+    const r = addStep({ start: 'a', steps: [{ id: 'a', type: 'end' }] }, 'tell');
+    expect(r.doc.steps!.find((s) => s.id === r.id)).toEqual({ id: r.id, type: 'tell', member: 'Manager', text: '', next: null });
   });
 
   it('draws every branch kind', () => {
