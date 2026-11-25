@@ -43,8 +43,8 @@ export interface ScriptsAppSettings { tellOtherTeams: boolean }
 
 /** The core's app settings for scripts (scripts.tellOtherTeams): read, and set what is given. */
 export const scriptsSettingsApi = (api: YawbleApi) => ({
-  get: () => api.call<ScriptsAppSettings>('scripts.appSettings', {}),
-  set: (patch: Partial<ScriptsAppSettings>) => api.call<ScriptsAppSettings>('scripts.setAppSettings', { ...patch }),
+  get: () => api.call<ScriptsAppSettings>('scripts.settings', {}),
+  set: (patch: Partial<ScriptsAppSettings>) => api.call<ScriptsAppSettings>('scripts.setSettings', { ...patch }),
 });
 
 /** An integration a requires entry can be bound to: its name (what bindings carry) and its kind (api, email). */

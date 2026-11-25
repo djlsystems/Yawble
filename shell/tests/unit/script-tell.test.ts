@@ -414,7 +414,7 @@ describe('a waiting run', () => {
 describe('Settings > Scripts', () => {
   it('shows "Scripts may tell other teams" and sets it', async () => {
     let on = true;
-    const f = fakeApi({ 'scripts.appSettings': () => ({ tellOtherTeams: on }), 'scripts.setAppSettings': (p) => { on = p.tellOtherTeams; return { tellOtherTeams: on }; } });
+    const f = fakeApi({ 'scripts.settings': () => ({ tellOtherTeams: on }), 'scripts.setSettings': (p) => { on = p.tellOtherTeams; return { tellOtherTeams: on }; } });
     const w = mount(ScriptsSettings, { props: { api: f.api } });
     await flushPromises();
     const box = w.get('[data-test=scripts-tell-other-teams]');
@@ -422,12 +422,12 @@ describe('Settings > Scripts', () => {
     expect(w.text()).toContain('Scripts may tell other teams');
     await box.setValue(false);
     await flushPromises();
-    expect(f.of('scripts.setAppSettings').map((c) => c.params)).toEqual([{ tellOtherTeams: false }]);
+    expect(f.of('scripts.setSettings').map((c) => c.params)).toEqual([{ tellOtherTeams: false }]);
     expect((box.element as HTMLInputElement).checked).toBe(false);
   });
 
   it('a refused change says why and the box goes back', async () => {
-    const f = fakeApi({ 'scripts.appSettings': () => ({ tellOtherTeams: true }), 'scripts.setAppSettings': () => { throw new Error('not allowed here'); } });
+    const f = fakeApi({ 'scripts.settings': () => ({ tellOtherTeams: true }), 'scripts.setSettings': () => { throw new Error('not allowed here'); } });
     const w = mount(ScriptsSettings, { props: { api: f.api } });
     await flushPromises();
     const box = w.get('[data-test=scripts-tell-other-teams]');
@@ -439,7 +439,7 @@ describe('Settings > Scripts', () => {
 
   it('a Visitor cannot change it', async () => {
     applyRemoteAccess('read');
-    const w = mount(ScriptsSettings, { props: { api: fakeApi({ 'scripts.appSettings': () => ({ tellOtherTeams: true }) }).api } });
+    const w = mount(ScriptsSettings, { props: { api: fakeApi({ 'scripts.settings': () => ({ tellOtherTeams: true }) }).api } });
     await flushPromises();
     expect(w.get('[data-test=scripts-tell-other-teams]').attributes('disabled')).toBeDefined();
   });
