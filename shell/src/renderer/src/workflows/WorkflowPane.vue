@@ -5,7 +5,7 @@ import { errorText } from '../api';
 import { ago } from '../board/cards';
 import { displayName } from '../faces/faces';
 import { renderMarkdown } from '../markdown';
-import { confirmDialog } from '../confirm';
+import { confirmDialog, confirmState, type ConfirmState } from '../confirm';
 import { extendErrorText } from '../workflowExpiry';
 import CommitText from '../components/CommitText.vue';
 import LoadingNote from '../components/LoadingNote.vue';
@@ -21,7 +21,8 @@ import { statusLook, statusTip, timeBar } from './page';
  * The Workflows page's inline pane, like the Backlog's item pane: the workflow's header (status, #id, the clean
  * title, the item link, its team), the item's spec (collapsed, Show all), its cards by lane (each opens in the board's
  * card panel), its last messages newest first (commit IDs link as in the rest of the app), its time, and the actions the Workflows
- * dialog has - Nudge, Extend, Stop, Close - each asked first in the app's own confirm dialog, none for a Visitor.
+ * dialog has - Nudge, Extend, Stop, Close - each asked first in the app's own confirm dialog, none for a Visitor (an open question
+ * closes as Cancel when access turns read-only).
  * Read with workflows.get (the core's workflows contract) when opened and on every poll.
  */
 const props = defineProps<{ row: WorkflowRow; api: YawbleApi; pollMs?: number; readOnly?: boolean; phone?: boolean }>();
@@ -87,10 +88,26 @@ const Actions: Record<Action['id'], Action> = {
   stop: { id: 'stop', method: 'bus.stopWorkflow', ask: 'Stop what runs in #{id} now? The workflow stays open.', ok: 'Stop', danger: true, doing: 'Stopping…' },
   close: { id: 'close', method: 'bus.closeWorkflow', ask: 'Close #{id} without declaring it complete?', ok: 'Close it', danger: true, doing: 'Closing…' },
 };
+/** The pane's own question while it is on screen: closed (as Cancel) when access turns read-only, the workflow
+ *  changes or the pane goes, so a Visitor's OK never acts. */
+let asking: ConfirmState | null = null;
+function cancelAsk() {
+  const q = asking;
+  asking = null;
+  if (q && confirmState.value === q) q.resolve(false);
+}
+watch(() => props.readOnly, (ro) => { if (ro) cancelAsk(); });
+watch(() => props.row.id, cancelAsk);
+onBeforeUnmount(cancelAsk);
 async function act(a: Action) {
   if (busy.value || props.readOnly) return;
   const id = w.value.id;
-  if (!(await confirmDialog({ message: a.ask.replace('{id}', String(id)), okLabel: a.ok, danger: a.danger }))) return;
+  const answer = confirmDialog({ message: a.ask.replace('{id}', String(id)), okLabel: a.ok, danger: a.danger });
+  const q = confirmState.value;
+  asking = q;
+  const ok = await answer;
+  if (asking === q) asking = null;
+  if (!ok || props.readOnly || id !== props.row.id) return;
   busy.value = a.id;
   error.value = null;
   try {
