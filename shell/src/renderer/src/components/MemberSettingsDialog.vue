@@ -8,6 +8,7 @@ import { confirmDialog } from '../confirm';
 import FolderAccess from './FolderAccess.vue';
 import { agentClis } from '../agentClis';
 import { agentDefaultLabel } from '../agentArgs';
+import { modelOptions, modelOptionText, type ModelOption } from '../modelOptions';
 import GuardrailPanel from './GuardrailPanel.vue';
 import TeamNetworkAllows from './TeamNetworkAllows.vue';
 import Modal from './Modal.vue';
@@ -48,7 +49,8 @@ const preview = ref<string[] | null>(null);
 const loosenHostProblems = useHostProblems(api, () => (loosenText['network.allowHosts'] ?? '').split(/[\r\n,]+/));
 // The agents one can choose (built-ins then custom), the picked agent's default model and known models, and a live command line.
 const agentChoices = ref<AgentProfileRow[]>([]);
-const modelList = ref<string[]>([]);
+const modelOpts = ref<ModelOption[]>([]);
+const modelList = computed(() => modelOpts.value.map((o) => o.model));
 const cmdLines = ref<CommandLines | null>(null);
 const CUSTOM_MODEL = '__custom__';
 const modelPick = ref('');
@@ -64,8 +66,8 @@ function syncPick() {
 async function refreshAgentInfo() {
   try {
     const l = await api.call<AgentModelList>('agents.models', { cli: baseCli.value });
-    modelList.value = l.models;
-  } catch { modelList.value = []; }
+    modelOpts.value = modelOptions(l);
+  } catch { modelOpts.value = []; }
   syncPick();
   await refreshPreview();
 }
@@ -296,7 +298,7 @@ const loosenChanged = () => { preview.value = null; };
       <label>Model
         <select v-model="modelPick" data-test="member-model-pick" @change="onModelPick">
           <option value="">{{ agentDefaultLabel(agentDefault) }}</option>
-          <option v-for="m in modelList" :key="m" :value="m">{{ m }}</option>
+          <option v-for="o in modelOpts" :key="o.model" :value="o.model" :data-from="o.from || undefined">{{ modelOptionText(o) }}</option>
           <option :value="CUSTOM_MODEL">Custom…</option>
         </select>
         <input v-if="modelPick === CUSTOM_MODEL" v-model="general.model" placeholder="model name" data-test="member-model" @input="refreshPreview" />

@@ -265,7 +265,7 @@ describe('agents dialogs that fetch on open', () => {
     keep(mount(AgentModelDialog, { props: { api: f.api, agent, title: 'Claude Code' }, attachTo: document.body }));
     await flushPromises();
     expect(document.body.textContent).toContain('Loading the models…');
-    await f.answer('agents.models', { models: ['opus'], source: 'app' });
+    await f.answer('agents.models', { models: ['opus'], source: 'builtin' });
     expect(document.body.textContent).not.toContain('Loading the models…');
   });
 
@@ -276,7 +276,7 @@ describe('agents dialogs that fetch on open', () => {
     await flushPromises();
     expect(document.body.textContent).toContain('Loading the models…');
     expect(document.body.textContent).toContain('Loading the command line…');
-    await f.answer('agents.models', { models: ['opus'], source: 'app' });
+    await f.answer('agents.models', { models: ['opus'], source: 'builtin' });
     expect(document.body.textContent).not.toContain('Loading the models…');
     await f.answer('agentProfiles.check', []);
     await f.answer('agents.commandLine', { cli: 'claude', agent: 'claude', model: { model: '', source: 'cli', label: "The CLI's default" },

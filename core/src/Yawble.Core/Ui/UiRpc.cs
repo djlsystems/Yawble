@@ -26,7 +26,7 @@ public sealed class UiRpc(
     Monitor.StepFeed? steps = null,
     Monitor.CodeEvents? codeEvents = null)
 {
-    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "workflows.", "scripts.", "schemas."];
+    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "workflows.", "scripts.", "schemas.", "roles."];
 
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
@@ -74,6 +74,13 @@ public sealed class UiRpc(
                 "teams.setDefaults" => S(await SetTeamDefaultsAsync(p, ct)),
                 "teams.generateNames" => await GenerateNamesAsync(p, ct),
                 "teams.agents" => await AgentsAsync(Long(p, "teamId"), ct),
+                // Settings > Teams > Roles: the role catalog; Team settings > Hiring: who the team's Manager may hire.
+                "roles.list" => S(await bus.RolesAsync(ct)),
+                "roles.save" => S(await bus.SaveRoleAsync(new RoleRow(OptStr(p, "name") ?? "", OptStr(p, "job") ?? "", OptStr(p, "agent") ?? "", OptStr(p, "model")),
+                    OptStr(p, "originalName"), ct)),
+                "roles.remove" => await Then(bus.RemoveRoleAsync(Str(p, "name"), ct)),
+                "teams.hireList" => S(await bus.HireListAsync(await HireListTeamAsync(p, ct), ct)),
+                "teams.setHireList" => S(await bus.SetHireListAsync(await HireListTeamAsync(p, ct), HireRows(p?["rows"]) ?? [], ct)),
                 "docs.list" => Docs().List(await TeamNameOf(Long(p, "teamId"), ct), OptStr(p, "path")),
                 "docs.read" => Docs().Read(await TeamNameOf(Long(p, "teamId"), ct), Str(p, "path")),
                 "docs.write" => Docs().Write(await TeamNameOf(Long(p, "teamId"), ct), Str(p, "path"), Str(p, "text")),
@@ -336,10 +343,28 @@ public sealed class UiRpc(
         catch (Microsoft.Data.Sqlite.SqliteException) { /* the counts stand; the notification just names nothing */ }
     }
 
+    /// <summary>teams.hireList / teams.setHireList name the team as team (its id or name) or teamId.</summary>
+    private async Task<long> HireListTeamAsync(JsonObject? p, CancellationToken ct)
+    {
+        if (OptLong(p, "teamId") is { } id) return id;
+        if (OptLong(p, "team") is { } byId) return byId;
+        var name = OptStr(p, "team") ?? throw new RpcException("bad_params", "team is required");
+        return (await bus.TeamsAsync(ct)).FirstOrDefault(t => string.Equals(t.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))?.Id
+            ?? throw new RpcException("no_such_team", $"there is no team {name}");
+    }
+
+    /// <summary>Hire list rows [{role, agent, model|null}] (null when the field is absent).</summary>
+    private static List<HireListRow>? HireRows(JsonNode? rows) =>
+        rows is JsonArray a
+            ? a.Select(r => new HireListRow(OptStr(r as JsonObject, "role") ?? "", OptStr(r as JsonObject, "agent") ?? "", OptStr(r as JsonObject, "model"))).ToList()
+            : null;
+
     /// <summary>
-    /// teams.create {name, managerName?, managerCli?, members?: [{name, cli}], repoPath? | repoUrl?}. What is not given
-    /// comes from Settings > Teams (the saved Manager, the member rows ticked "On new teams"); a member name that is a
-    /// job word alone gets a first name from the member-name list, or the team is refused before anything is made.
+    /// teams.create {name, managerName?, managerCli?, members?: [{name, cli, model?, role?}], hireList?: [{role, agent, model}],
+    /// repoPath? | repoUrl?}. What is not given comes from Settings > Teams (the saved Manager, the member rows ticked "On new
+    /// teams", the default hire list); a member name that is a job word alone gets a first name from the member-name list,
+    /// or the team is refused before anything is made. A member row's role names it (when it has no name), gives its agent
+    /// (when it has none) and its standing job.
     /// </summary>
     private async Task<JsonNode?> CreateTeamAsync(JsonObject? p, CancellationToken ct)
     {
@@ -347,7 +372,8 @@ public sealed class UiRpc(
         var members = p?["members"] is JsonArray given
             ? given.Select(n => (Name: n?["name"]?.GetValue<string>() ?? "", Cli: n?["cli"]?.GetValue<string>())).ToList()
             : null;
-        var plan = await bus.PlanNewTeamAsync(OptStr(p, "managerName"), OptStr(p, "managerCli"), members, ct);
+        var roles = p?["members"] is JsonArray withRoles ? withRoles.Select(n => OptStr(n as JsonObject, "role")).ToList() : null;
+        var plan = await bus.PlanNewTeamAsync(OptStr(p, "managerName"), OptStr(p, "managerCli"), members, ct, roles, HireRows(p?["hireList"]));
         var repoPath = OptStr(p, "repoPath");
         if (OptStr(p, "repoUrl") is { Length: > 0 } url)
         {
@@ -385,7 +411,7 @@ public sealed class UiRpc(
         }
     }
 
-    /// <summary>teams.setDefaults {manager?: {name, cli}, members?: [{name, cli, onNewTeams}], memberNamesText?, country?} -> {saved, rejected}.</summary>
+    /// <summary>teams.setDefaults {manager?: {name, cli}, members?: [{name, cli, onNewTeams}], memberNamesText?, country?, hireList?: [{role, agent, model}]} -> {saved, rejected}.</summary>
     private Task<TeamDefaultsSaved> SetTeamDefaultsAsync(JsonObject? p, CancellationToken ct)
     {
         var manager = p?["manager"] is JsonObject m
@@ -396,7 +422,7 @@ public sealed class UiRpc(
                 r?["onNewTeams"] is JsonValue v && v.TryGetValue<bool>(out var on) && on)).ToList()
             : null;
         var text = p?["memberNamesText"] is JsonValue t && t.TryGetValue<string>(out var s) ? s : null;
-        return bus.SetTeamDefaultsAsync(manager, members, text, OptStr(p, "country"), ct);
+        return bus.SetTeamDefaultsAsync(manager, members, text, OptStr(p, "country"), ct, HireRows(p?["hireList"]));
     }
 
     /// <summary>teams.generateNames {country} -> {names}: popular first names of the country from the Concierge's default agent, not saved.</summary>

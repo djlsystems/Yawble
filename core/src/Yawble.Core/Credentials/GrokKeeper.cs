@@ -97,6 +97,12 @@ public sealed class GrokKeeper : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// What the keeper's last successful <c>grok models</c> printed (null until one ran). The model pickers reuse it
+    /// (<see cref="Agents.CliModelListing"/>); grok is never run for a list.
+    /// </summary>
+    public string? ModelsOutput { get; private set; }
+
     /// <summary>How many times a grok run left auth.json with no token and the keeper put it back.</summary>
     public int Restores { get; private set; }
 
@@ -169,6 +175,8 @@ public sealed class GrokKeeper : IAsyncDisposable
                 return "timed out";
             }
             await Task.WhenAll(stdout, stderr);
+            // What `grok models` printed is the model pickers' list from the CLI (agents.models): kept, never asked for again.
+            if (process.ExitCode == 0 && args.Count == 1 && args[0] == "models") ModelsOutput = await stdout;
             return $"exited {process.ExitCode}";
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
