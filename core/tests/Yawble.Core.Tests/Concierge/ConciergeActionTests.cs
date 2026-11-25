@@ -311,6 +311,7 @@ public class ConciergeActionTests : IDisposable
         Assert.Contains($"delete origin/members/shipped at {sha}", shown);
         args["confirm"] = Token(shown);
         var done = Call("git_branches_delete", rig.Actions(), args);
+        SandboxGit.SkipIfShCouldNotStart(done);
         Assert.Contains($"git push origin {sha}:refs/heads/members/shipped", done);
         Assert.Equal("", Run(Origin, "branch", "--list", "members/shipped"));
     }
@@ -343,6 +344,7 @@ public class ConciergeActionTests : IDisposable
         PushToOrigin(Work, "members/gone");
         Run(Origin, "branch", "-D", "members/gone"); // gone on origin, still remembered here
         var shown = Call("git_prune", rig.Actions(), new() { ["team"] = "alpha" });
+        SandboxGit.SkipIfShCouldNotStart(shown);
         Assert.Contains("origin/members/gone", shown);
         Assert.Contains(sha, shown);
         Assert.Contains("origin/members/gone", Run(Work, "branch", "-r"));
@@ -362,6 +364,7 @@ public class ConciergeActionTests : IDisposable
         var sha = Branch("members/p", merged: false);
         var a = rig.Actions();
         var ok = Call("git_push_branch", a, new() { ["team"] = "alpha", ["branch"] = "members/p" });
+        SandboxGit.SkipIfShCouldNotStart(ok);
         Assert.Contains($"pushed members/p at {sha}", ok);
         Assert.Equal(sha, Run(Origin, "rev-parse", "members/p"));
 
@@ -736,6 +739,7 @@ public class ConciergeActionTests : IDisposable
         Run(Work, "remote", "set-url", "origin", "file://" + (local.StartsWith('/') ? "" : "/") + local + "/https://user:hunter2@x.invalid/none.git");
         Branch("members/x", merged: false);
         var failed = Call("git_push_branch", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/x" });
+        SandboxGit.SkipIfShCouldNotStart(failed); // git quotes the address only once its sh started
         Assert.StartsWith("REFUSED", failed);
         Assert.Contains("https://***@x.invalid", failed); // git did quote it, and it was redacted
         Assert.DoesNotContain("hunter2", failed);
@@ -782,7 +786,9 @@ public class ConciergeActionTests : IDisposable
         Assert.StartsWith("ok:", Call("backlog_ready", rig.Actions(remote), new() { ["item"] = "B006" }));
         Assert.StartsWith("ok:", Call("board_comment", rig.Actions(remote), new() { ["card"] = 38, ["text"] = "from the phone" }));
         // And the same actions from the computer still work.
-        Assert.StartsWith("ok:", Call("git_push_branch", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/old" }));
+        var pushedOld = Call("git_push_branch", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/old" });
+        SandboxGit.SkipIfShCouldNotStart(pushedOld);
+        Assert.StartsWith("ok:", pushedOld);
         Assert.StartsWith("NOT DONE", Call("team_archive", rig.Actions(), new() { ["team"] = "alpha" }));
     }
 
@@ -868,7 +874,9 @@ public class ConciergeActionTests : IDisposable
         Assert.Equal(sha, Sha("members/r"));
 
         // The person's own turn runs them.
-        Assert.Contains("pushed members/r", Call("git_push_branch", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/r" }));
+        var pushedR = Call("git_push_branch", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/r" });
+        SandboxGit.SkipIfShCouldNotStart(pushedR);
+        Assert.Contains("pushed members/r", pushedR);
         Assert.StartsWith("ok:", Call("team_env_set", rig.Actions(), new() { ["team"] = "alpha", ["name"] = "NEW_VAR", ["value"] = "v" }));
         Assert.StartsWith("ok:", Call("board_move", rig.Actions(), new() { ["card"] = 38, ["lane"] = "done" }));
     }
@@ -1001,7 +1009,9 @@ public class ConciergeActionTests : IDisposable
 
         // From the window: it runs.
         var (local, id) = await SendAsync(null, Yawble.Core.Provenance.Actor.Window);
-        Assert.Contains("pushed members/p", await CallTool(local, "git_push_branch", new() { ["team"] = "alpha", ["branch"] = "members/p" }));
+        var pushedLocal = await CallTool(local, "git_push_branch", new() { ["team"] = "alpha", ["branch"] = "members/p" });
+        SandboxGit.SkipIfShCouldNotStart(pushedLocal); // the push to the test's local origin needs git's local transport
+        Assert.Contains("pushed members/p", pushedLocal);
         var shown = await CallTool(local, "team_archive", new() { ["team"] = "alpha" });
         Assert.StartsWith("NOT DONE", shown);
 

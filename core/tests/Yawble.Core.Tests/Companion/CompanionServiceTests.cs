@@ -459,6 +459,7 @@ public class CompanionServiceTests : IDisposable
         // Nothing to delete: said at once, no request.
         Run(Work, "branch", "-D", "members/old");
         var none = await rig.Service.CallAsync(cc, "git_prune", new JsonObject { ["team"] = "alpha" }, Ct);
+        SandboxGit.SkipIfShCouldNotStart(none.Text); // prune asks the test's local origin, over git's local transport
         Assert.StartsWith("nothing to do", none.Text);
         Assert.Null(none.RequestId);
     }
@@ -686,6 +687,7 @@ public class CompanionServiceTests : IDisposable
         Assert.Equal(3, rig.Service.PendingCount);
 
         var pushed = await rig.Approve(push.RequestId);
+        SandboxGit.SkipIfShCouldNotStart(pushed.Result); // the push to the test's local origin needs git's local transport
         Assert.Equal(ActionState.Done, pushed.State);
         Assert.Equal(sha, Run(Origin, "rev-parse", "members/ines"));
 
@@ -1089,7 +1091,9 @@ public class CompanionServiceTests : IDisposable
         Assert.Contains("2222222222222222222222222222222222222222", rig.Service.Status(cc, merged.NextId!)!.Plan);
 
         // The new requests, approved while nothing moved, run.
-        Assert.Equal(ActionState.Done, (await rig.Approve(pushed.NextId!)).State);
+        var pushedNew = await rig.Approve(pushed.NextId!);
+        SandboxGit.SkipIfShCouldNotStart(pushedNew.Result); // the push to the test's local origin needs git's local transport
+        Assert.Equal(ActionState.Done, pushedNew.State);
         Assert.Equal(sha2, Run(Origin, "rev-parse", "members/ines"));
         Assert.Equal(ActionState.Done, (await rig.Approve(merged.NextId!)).State);
         Assert.Single(rig.Ui, u => u.Method == "git.merge");
