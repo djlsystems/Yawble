@@ -13,6 +13,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
@@ -67,7 +68,7 @@ async function open(browser: Browser, o: Opts = {}) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${ORIGIN}/remote.html`);
   await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-  await page.waitForTimeout(400);
+  await settled(page);
   await goTeam(page, phone);
   return {
     page, ctx, errors, core, adds,
@@ -81,7 +82,7 @@ async function goTeam(page: Page, phone: boolean) {
   await page.locator('[data-test=team-open-payments]').click();
   await expect(page.locator('[data-test=member-grid]')).toBeVisible();
   await expect(page.locator('[data-test=member-cell]')).toHaveCount(3);
-  await page.waitForTimeout(500);
+  await settled(page);
 }
 
 /** Every cell of the grid (members and New member), in order, with its rect. */
@@ -103,7 +104,7 @@ async function drag(page: Page, sel: string, dx: number, dy: number) {
   await page.mouse.move(x + dx / 2, y + dy / 2, { steps: 4 });
   await page.mouse.move(x + dx, y + dy, { steps: 4 });
   await page.mouse.up();
-  await page.waitForTimeout(200);
+  await settled(page);
 }
 
 test('1280: two equal tiles per row by default, New member last, handles on every tile', async ({ browser }) => {
@@ -150,7 +151,8 @@ test('1280: w and h handles resize every tile together; kept in yawble.memberTil
   for (const c of cs) { expect(c.w, 'width kept after reload').toBe(280); expect(c.h, 'height kept after reload').toBe(440); }
   // The Teams list's tiles did not take the member size.
   await page.locator('[data-test=sidebar] [data-test=nav-teams]').first().click();
-  await page.waitForTimeout(400);
+  await expect(page.locator('[data-test^=team-tile], .team-grid > *').first()).toBeVisible();
+  await settled(page);
   const teamTileW = await page.evaluate(() => Math.round((document.querySelector('[data-test^=team-tile], .team-grid > *') as HTMLElement | null)?.getBoundingClientRect().width ?? -1));
   expect(teamTileW, 'a Teams list tile is not 280 wide').not.toBe(280);
   // Clamped: a huge drag stops at the grid's width, never beyond.
@@ -218,7 +220,7 @@ for (const theme of ['light', 'dark'] as const) {
           await cell.locator('[data-test=member-more]').click();
           const menu = cell.locator('[data-test=member-more-menu]');
           await expect(menu).toBeVisible();
-          await page.waitForTimeout(150);
+          await settled(page);
           await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${tiles.w}x${tiles.h}-menu${i}-${theme}.png`) });
           const vis = await menu.evaluate((el) => {
             const r = el.getBoundingClientRect();
@@ -377,7 +379,7 @@ for (const theme of ['light', 'dark'] as const) {
         await cell.locator('[data-test=member-more]').click();
         const menu = cell.locator('[data-test=member-more-menu]');
         await expect(menu).toBeVisible();
-        await page.waitForTimeout(150);
+        await settled(page);
         await page.screenshot({ path: path.join(SHOTS, `menu-over-grips-${vw}-280x200-menu${i}-${theme}.png`) });
         const o = await menu.evaluate((el, idx) => {
           const m = el.getBoundingClientRect();

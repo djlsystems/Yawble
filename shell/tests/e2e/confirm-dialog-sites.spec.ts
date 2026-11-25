@@ -23,6 +23,7 @@ import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, fakeRemote } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(180_000);
@@ -148,7 +149,7 @@ async function openSettings(page: Page, section: 'open-skills' | 'open-integrati
   await page.getByTestId('settings-gear').click();
   await expect(page.locator('[data-test=settings]')).toBeVisible();
   await page.locator(`[data-test=settings] [data-test=${section}]`).first().click();
-  await page.waitForTimeout(400);
+  await settled(page);
 }
 
 const box = (page: Page) => page.locator('[data-test=confirm-dialog]');
@@ -220,7 +221,7 @@ interface Site {
   after?: (page: Page, s: Size) => Promise<void>;
 }
 
-const tabs = (tab: string) => async (page: Page) => { await openSettings(page, 'open-integrations'); await page.locator(`[data-test=${tab}]`).click(); await page.waitForTimeout(300); };
+const tabs = (tab: string) => async (page: Page) => { await openSettings(page, 'open-integrations'); await page.locator(`[data-test=${tab}]`).click(); await settled(page); };
 const editGh = async (page: Page) => {
   await openSettings(page, 'open-integrations');
   await page.locator('[data-test=integration-edit-gh]').click();
@@ -386,7 +387,7 @@ for (const s of SIZES) {
         await expectConfirm(page, s, site.id, site.message, site.ok, true);
         await page.keyboard.press('Escape');
         await expect(box(page)).toHaveCount(0);
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(300); // nothing may be sent: the time a stray call would take to reach the fake core
         expect(count(site.method), 'Escape: no call').toBe(before);
         await site.kept(page);
         const back = await page.evaluate(() => document.activeElement?.getAttribute('data-test') ?? document.activeElement?.tagName ?? null);
@@ -397,7 +398,7 @@ for (const s of SIZES) {
         await expectConfirm(page, s, site.id, site.message, site.ok, false);
         await page.locator('[data-test=confirm-cancel]').click();
         await expect(box(page)).toHaveCount(0);
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(300); // nothing may be sent: the time a stray call would take to reach the fake core
         expect(count(site.method), 'Cancel: no call').toBe(before);
         await site.kept(page);
         expect.soft(await focusBack.evaluateAll((els) => els.includes(document.activeElement as Element)), 'Cancel: the focus is back on the opener').toBe(true);
@@ -407,7 +408,7 @@ for (const s of SIZES) {
         await expect(box(page)).toBeVisible();
         await page.mouse.click(3, 3);
         await expect(box(page)).toHaveCount(0);
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(300); // nothing may be sent: the time a stray call would take to reach the fake core
         expect(count(site.method), 'backdrop: no call').toBe(before);
         await site.kept(page);
 

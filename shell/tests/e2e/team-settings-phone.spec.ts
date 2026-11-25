@@ -10,6 +10,7 @@ import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
+import { settled } from './settle';
 
 // The Settings dialog's own calls (not in the shared fake): two environment variables (one long), no integrations.
 answers['teams.env'] = () => ({ API_BASE_URL: 'http://localhost:5173/api/v1/some/long/path/that/would/overflow', TEST_USER: 'tester@example.com' });
@@ -51,7 +52,7 @@ async function openSettings(browser: Browser, w: number, h: number) {
   }
   await manage.click();
   await expect(page.locator('[data-test=manage-tabs]')).toBeVisible();
-  await page.waitForTimeout(300);
+  await settled(page);
   await expect(page.locator('[data-test=manage-error]')).toHaveCount(0);
   return { page, ctx, errors };
 }
@@ -115,7 +116,7 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
     await expect(page.locator(PANES[id]!).first()).toBeVisible();
     const back = await page.locator('[data-test=manage-back]').boundingBox();
     expect.soft(back && back.height, `${id}: Back is a 44 px tap target`).toBeGreaterThanOrEqual(44);
-    await page.waitForTimeout(150);
+    await settled(page);
     const o = await overflow(page);
     expect.soft(o.bad, `${id}: nothing wider than the screen`).toEqual([]);
     if (['general', 'env', 'delete'].includes(id)) await page.screenshot({ path: path.join(SHOTS, `team-settings-390x844-${id}.png`) });
@@ -135,7 +136,7 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
   const headTop = async () => (await page.locator('.section-head').boundingBox())!.y;
   const before = await headTop();
   await body.evaluate((b) => { b.scrollTop = b.scrollHeight; });
-  await page.waitForTimeout(100);
+  await settled(page);
   const scrolled = await body.evaluate((b) => b.scrollTop);
   if (scrolled > 20) expect(Math.abs((await headTop()) - before), 'the head stays put as the section scrolls').toBeLessThanOrEqual(13);
 

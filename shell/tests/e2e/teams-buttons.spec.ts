@@ -10,6 +10,7 @@ import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { buildRenderer, fakeRemote } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
@@ -39,7 +40,7 @@ async function teamsPage(browser: Browser, w: number, h: number, tile?: { w: num
   }
   await page.locator('[data-test=sidebar] [data-test=nav-teams]').first().click();
   await expect(page.locator('[data-test=team-card]').first()).toBeVisible();
-  await page.waitForTimeout(500);
+  await settled(page);
   return { page, ctx };
 }
 
@@ -86,7 +87,8 @@ test('375 px iPhone: the four buttons are 44 px icons on one row', async ({ brow
   expect.soft(m.scrollWidth, 'the row does not overflow').toBeLessThanOrEqual(m.clientWidth);
 
   await page.locator('[data-test=team-card]').first().locator('[data-test=card-delete]').click();
-  await page.waitForTimeout(300);
+  await expect(page.locator('[data-test=team-card]').first().locator('[data-test=card-delete-yes]')).toBeVisible();
+  await settled(page);
   const c = await row(page);
   measured['phone375.confirm'] = c;
   await page.locator('[data-test=team-card]').first().screenshot({ path: path.join(OUT, 'teams-buttons-phone375-confirm.png') });
@@ -107,7 +109,8 @@ test('375 px iPhone: the four buttons are 44 px icons on one row', async ({ brow
   // The second team has a long name: its question must ellipsize, not push the buttons out.
   const second = page.locator('[data-test=team-card]').nth(1);
   await second.locator('[data-test=card-delete]').click();
-  await page.waitForTimeout(300);
+  await expect(second.locator('[data-test=card-delete-yes]')).toBeVisible();
+  await settled(page);
   const long = await second.locator('[data-test=card-actions]').evaluate((r) => {
     const q = r.querySelector('.confirm-q') as HTMLElement; const s = getComputedStyle(q);
     const no = r.querySelector('[data-test=card-delete-no]')!.getBoundingClientRect(); const rb = r.getBoundingClientRect();

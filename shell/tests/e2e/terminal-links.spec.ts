@@ -14,6 +14,7 @@ import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
@@ -78,15 +79,19 @@ async function open(browser: Browser, w: number, h: number) {
   }
   await expect(pane.locator('[data-test=member-terminal]')).toBeVisible({ timeout: 30_000 });
   await expect(pane.locator('.xterm-rows')).toContainText('DOCSLINK', { timeout: 15_000 });
-  await page.waitForTimeout(300);
+  await settled(page); // the terminal fitted to its pane
   return { page, ctx, pane, errors, dialogs, popups };
 }
 
 const opens = (page: Page) => page.evaluate(() => (window as any).__opens as (string | null)[][]);
 const box = (page: Page) => page.locator('[data-test=confirm-dialog]');
 
-/** Clicks the visible text of a link in the xterm (hover first: xterm finds an OSC 8 link on mouse move). */
-async function clickLink(page: Page, text: string, mobile: boolean) {
+/**
+ * Clicks the visible text of a link in the xterm (hover first: xterm finds an OSC 8 link on mouse move and shows the
+ * pointer, .xterm-screen.xterm-cursor-pointer). xterm takes only http(s) OSC 8 links as links (`link` false: a file: or
+ * javascript: one gets no pointer). Then the page is let come to rest: a dialog the click opens is up by then.
+ */
+async function clickLink(page: Page, text: string, mobile: boolean, link = true) {
   const span = page.locator('[data-test=agent-DeveloperAda] .xterm-rows span', { hasText: text }).first();
   const r = (await span.boundingBox())!;
   // The span may hold more than the link's text; aim at the link's first characters.
@@ -96,9 +101,11 @@ async function clickLink(page: Page, text: string, mobile: boolean) {
   const y = r.y + r.height / 2;
   await page.mouse.move(x - 30, y);
   await page.mouse.move(x, y, { steps: 4 });
-  await page.waitForTimeout(150);
+  const screen = page.locator('[data-test=agent-DeveloperAda] .xterm-screen');
+  if (link) await expect(screen, `${text}: xterm shows the link pointer`).toHaveClass(/\bxterm-cursor-pointer\b/);
+  else await expect(screen, `${text}: xterm takes it for no link`).not.toHaveClass(/\bxterm-cursor-pointer\b/);
   if (mobile) { await page.mouse.down(); await page.mouse.up(); } else await page.mouse.click(x, y);
-  await page.waitForTimeout(300);
+  await settled(page);
 }
 
 for (const [w, h] of [[1280, 800], [390, 844]] as const) {
@@ -113,7 +120,7 @@ for (const [w, h] of [[1280, 800], [390, 844]] as const) {
       await page.screenshot({ path: path.join(SHOTS, `dialog-${w}x${h}.png`) });
       await page.locator('[data-test=confirm-cancel]').click();
       await expect(box(page)).toHaveCount(0);
-      await page.waitForTimeout(800);
+      await settled(page); // the confirm's answer handled (an open would be called as it closes)
       expect(await opens(page), 'Cancel: no window.open').toEqual([]);
       expect(popups, 'Cancel: no popup').toEqual([]);
       expect(dialogs, 'no browser dialog').toEqual([]);
@@ -127,7 +134,7 @@ for (const [w, h] of [[1280, 800], [390, 844]] as const) {
       await expect(box(page)).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(box(page)).toHaveCount(0);
-      await page.waitForTimeout(800);
+      await settled(page); // the confirm's answer handled (an open would be called as it closes)
       expect(await opens(page), 'Escape: no window.open').toEqual([]);
       expect(popups, 'Escape: no popup').toEqual([]);
       expect(dialogs, 'no browser dialog').toEqual([]);
@@ -144,7 +151,7 @@ for (const [w, h] of [[1280, 800], [390, 844]] as const) {
       const p = await popup;
       await p.waitForLoadState('domcontentloaded').catch(() => {});
       await expect(box(page)).toHaveCount(0);
-      await page.waitForTimeout(1500);
+      await settled(page);
       expect(await opens(page), 'Open: window.open once, _blank, noopener').toEqual([[URL_, '_blank', 'noopener,noreferrer']]);
       expect(popups.length, 'one popup').toBe(1);
       expect(p.url(), 'the popup is the link').toBe(URL_);
@@ -157,8 +164,7 @@ for (const [w, h] of [[1280, 800], [390, 844]] as const) {
     test('non-http(s) links (file:, javascript:) neither ask nor open', async ({ browser }) => {
       const { page, ctx, errors, dialogs, popups } = await open(browser, w, h);
       for (const t of ['FILELINK', 'JSLINK']) {
-        await clickLink(page, t, mobile);
-        await page.waitForTimeout(500);
+        await clickLink(page, t, mobile, false);
         await expect(box(page), `${t}: no dialog`).toHaveCount(0);
       }
       await page.screenshot({ path: path.join(SHOTS, `non-http-${w}x${h}.png`) });

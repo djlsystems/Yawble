@@ -13,6 +13,7 @@
 import { devices, expect, test, type Page } from './fixtures';
 import { PHONE_BREAKPOINT } from '../../../src/renderer/src/phone';
 import { buildRenderer, builtDir, fakeRemote } from './server';
+import { resized, settled } from '../settle';
 
 test.use({ browserName: 'webkit', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
@@ -81,13 +82,11 @@ for (const r of ROTATIONS) for (const p of PLACES) {
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(`${s.url}${p.hash}`);
     await expect(page.locator(p.ready).first()).toBeVisible({ timeout: 30_000 });
-    await page.waitForTimeout(300);
+    await settled(page);
     const before = await measure(page);
     expect(before.phone, `before: ${JSON.stringify(before)}`).toBe(from.width < PHONE_BREAKPOINT);
 
-    await page.setViewportSize(to);
-    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
-    await page.waitForTimeout(300);
+    await resized(page, to.width, to.height);
     const after = await measure(page);
     const info = JSON.stringify({ before, after });
     expect(after.innerWidth, info).toBe(to.width);
