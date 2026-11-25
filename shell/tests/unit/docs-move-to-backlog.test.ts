@@ -19,7 +19,7 @@ const files: Record<string, DocFile> = {
 };
 // What backlog.add answers (BoardService.ItemJson), with made-up values.
 const item: BacklogItem = {
-  id: 41, label: 'B900', team: 'payments', title: 'A plan', body: 'Some text.', state: 'pending', archivedAt: null,
+  id: 41, label: 'B007', team: 'payments', title: 'A plan', body: 'Some text.', state: 'pending', archivedAt: null,
   dispatchedTeam: null, dispatchedWorkflow: null, dispatchedAt: null, inFlight: false,
   createdAt: '2026-01-02T03:04:05Z', updatedAt: '2026-01-02T03:04:05Z', dispatchCount: 0,
 };
@@ -120,9 +120,9 @@ describe('Documents: Move to Backlog', () => {
     expect(w.find('[data-test="doc-notes.txt"]').exists()).toBe(true);
 
     const note = w.get('[data-test=docs-moved]');
-    expect(note.text().replace(/\s+/g, ' ')).toBe('Moved to the backlog as B900');
+    expect(note.text().replace(/\s+/g, ' ')).toBe('Moved to the backlog as B007');
     await note.get('[data-test=docs-moved-link]').trigger('click');
-    expect(backlogRequest.value).toMatchObject({ label: 'B900', archived: false });
+    expect(backlogRequest.value).toMatchObject({ label: 'B007', archived: false });
     expect(w.find('[data-test=docs-error]').exists()).toBe(false);
   });
 
