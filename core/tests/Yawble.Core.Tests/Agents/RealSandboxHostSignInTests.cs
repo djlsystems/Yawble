@@ -18,7 +18,7 @@ namespace Yawble.Core.Tests.Agents;
 /// config folder, and the rest of the home, are not reachable; the host's sign-in file is unchanged afterwards (size and time, never content).
 /// The guardrail check under host sign-in passes against the real home. No value of a sign-in is read, copied or printed.
 /// <para>The folder probe (TheSignInFileIsHeldByTheGatewayAndNothingOfItsFolderIsReachable) tries to write and move the
-/// sign-in, so it runs the real CLI against a FAKE home with a fake sign-in, never the person's real one (B038).</para>
+/// sign-in, so it runs the real CLI against a FAKE home with a fake sign-in, never the person's real one.</para>
 /// <para>The real prompt (a model call on the person's account) runs only with YAWBLE_REAL_SIGNIN_PROMPT=1.</para>
 /// <para>Skipped when the CLI is not installed or not signed in on this host, or a proxy-mode sandbox cannot run here.</para>
 /// </summary>
@@ -88,7 +88,7 @@ public partial class RealSandboxHostSignInTests(ITestOutputHelper output)
     public async Task TheSignInFileIsHeldByTheGatewayAndNothingOfItsFolderIsReachable(string id)
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "a POSIX-shell probe; on Windows TheGuardrailCheckPassesWithTheHostSignInGranted covers the sign-in");
-        // B038: a FAKE home with a FAKE sign-in and the host's REAL installed CLI. The probe tries to move and write the
+        // A FAKE home with a FAKE sign-in and the host's REAL installed CLI. The probe tries to move and write the
         // sign-in, so it must never run against the person's real ~/.claude or ~/.grok.
         var fakeHome = Directory.CreateTempSubdirectory("yawble-signin-home-").FullName;
         try

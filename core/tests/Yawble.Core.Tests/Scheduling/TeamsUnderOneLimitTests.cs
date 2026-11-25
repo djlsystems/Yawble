@@ -27,7 +27,7 @@ public class TeamsUnderOneLimitTests
     {
         using var db = new TempDb();
         await using var sandboxes = new StandInSandboxes();
-        // B038: the queue is watched by snapshots, and a queued entry can live for less than one snapshot interval (the
+        // The queue is watched by snapshots, and a queued entry can live for less than one snapshot interval (the
         // Managers' runs end right after their tells). So each Manager holds its slot after telling until the watcher has
         // seen agents of BOTH teams queued: the test waits for that state instead of hoping a snapshot catches it.
         var bothTeamsSeenQueued = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

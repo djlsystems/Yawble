@@ -44,7 +44,7 @@ public class GatewayWiringTests
     [Fact]
     public void DeniedConnectsSumsTheFoldedRefusals()
     {
-        // B105: five CONNECT refusals of one host in a run are one row with Count 5.
+        // Five CONNECT refusals of one host in a run are one row with Count 5.
         var one = GatewayVerdicts.From([E(GatewayEventKinds.ConnectDenied, target: "api.anthropic.com:443") with { Count = 5 }]);
         Assert.Equal(5, one.DeniedConnects);
         Assert.Equal(["api.anthropic.com:443"], one.DeniedHosts);

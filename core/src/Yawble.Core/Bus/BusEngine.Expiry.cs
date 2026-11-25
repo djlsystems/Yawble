@@ -4,12 +4,12 @@ using System.Text.Json.Nodes;
 
 namespace Yawble.Core.Bus;
 
-/// <summary>The one warning before a workflow that waits on the person's answer expires (B085).</summary>
+/// <summary>The one warning before a workflow that waits on the person's answer expires.</summary>
 /// <param name="Text">"#&lt;id&gt; will expire tomorrow; it waits on your answer to question &lt;n&gt;".</param>
 public sealed record WorkflowExpiryWarning(long TeamId, string Team, long Workflow, long Question, DateTimeOffset ExpiresAt, string Text);
 
 /// <summary>
-/// Workflow expiry (B085): an open workflow with no activity for the team's workflowExpiryDays (default 3) is closed by the
+/// Workflow expiry: an open workflow with no activity for the team's workflowExpiryDays (default 3) is closed by the
 /// app as "expired", so nothing stays open forever. Activity is any message in it (an instruction, a run's report, a
 /// hand-back, a status change, the person's answer) and the person's Extend. Never idle, so never expired: a run working it
 /// or queued for it, a wake (wake_me) or an automatic resume due in it. One that waits on the person's answer to a question
@@ -116,7 +116,11 @@ public sealed partial class BusEngine
         if (wall < _nextExpirySweep) return;
         _nextExpirySweep = wall + ExpirySweepInterval;
         try { SweepExpiry(_store.Clock.GetUtcNow()); }
-        catch (Exception ex) { Log($"workflow expiry sweep failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logs.Diag.Warning("bus", $"workflow expiry sweep failed: {ex.GetType().Name}: {ex.Message}",
+                ("check", "workflow expiry sweep"), ("exception", ex.GetType().Name));
+        }
     }
 
     private int SweepExpiry(DateTimeOffset now)
@@ -187,7 +191,7 @@ public sealed partial class BusEngine
     private IdleWorkflow? IdleOf(long teamId, long correlation, IReadOnlyList<Message> thread, IReadOnlyList<BusStore.PendingRow> pending, DateTimeOffset now) =>
         IdleOf(correlation, thread, pending, now, () => _store.OpenWakes(correlation), () => _store.WorkflowExpiry(correlation), () => ExpiryDaysOf(teamId));
 
-    /// <summary><see cref="IdleOf(long, long, IReadOnlyList{Message}, IReadOnlyList{BusStore.PendingRow}, DateTimeOffset)"/> with its reads given (B104 reads them for every workflow at once).</summary>
+    /// <summary><see cref="IdleOf(long, long, IReadOnlyList{Message}, IReadOnlyList{BusStore.PendingRow}, DateTimeOffset)"/> with its reads given (the Workflows page reads them for every workflow at once).</summary>
     private IdleWorkflow? IdleOf(long correlation, IReadOnlyList<Message> thread, IReadOnlyList<BusStore.PendingRow> pending, DateTimeOffset now,
         Func<int> openWakes, Func<WorkflowExpiryRow?> expiry, Func<int> expiryDays)
     {
@@ -275,7 +279,7 @@ public sealed partial class BusEngine
             time ? TimeOf(w.Id, thread, now) : null);
     }
 
-    /// <summary>B086: the workflow's time from the board (null without one, or when it cannot be read: the list still answers).</summary>
+    /// <summary>The workflow's time from the board (null without one, or when it cannot be read: the list still answers).</summary>
     private Board.TimeSummary? TimeOf(long workflow, IReadOnlyList<Message> thread, DateTimeOffset now)
     {
         if (Board is not { } board) return null;

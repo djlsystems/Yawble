@@ -1,4 +1,4 @@
-// B067 (card 362): the Git dialog's "Tidy…": git.tidyPlan's branches in one list grouped by class, which rows are
+// The Git dialog's "Tidy…": git.tidyPlan's branches in one list grouped by class, which rows are
 // pre-selected to delete, the git.deleteBranches requests for a selection, and the report of what was kept and why.
 // Pure, so the grouping and selection are unit-tested without the dialog.
 import type { TidyBranch, TidyClass, TidyPlan } from '../../shared/api';

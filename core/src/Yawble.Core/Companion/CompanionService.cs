@@ -6,6 +6,7 @@ using Yawble.Core.Bus;
 using Yawble.Core.Concierge;
 using Yawble.Core.Ipc;
 using Yawble.Core.Provenance;
+using Yawble.Core.Scripts;
 
 namespace Yawble.Core.Companion;
 
@@ -21,10 +22,13 @@ public sealed record ActionStatus(string Id, ActionState State, string Plan, str
 /// (<see cref="ConciergeTools"/> → ConciergeReadTools / ConciergeActions) as <see cref="Actor.ExternalClient"/>: the same
 /// refusals, scrubbing and confirmation binding apply. Reads and acts run in a turn that is the person's (they paired the
 /// client and granted its level) but remote (Cloud Link parity). A destructive call never runs on the client's call: it
-/// becomes an approval request with the exact plan, which only the person at the app's window approves or denies. On
-/// approval this service runs exactly the stored tool and arguments once, in a fresh local turn of the request's own
-/// conversation, redeeming the token from its OWN <see cref="ConfirmationBook"/> (never shown to the client, never the
-/// Concierge chat's). Pairings and requests are in memory only.
+/// becomes an approval request with the exact plan, which only the person at the app's window approves or denies. A request
+/// stays pending until the person decides it, the client cancels it or replaces it with a newer one of the same tool and
+/// target, or <see cref="ActionCap"/> passes. On approval this service works the plan out again and runs exactly the stored
+/// tool and arguments once, in a fresh local turn of the request's own conversation: a plan that changed meanwhile becomes a
+/// new request and nothing runs. The confirmation token is issued at that approval, in this service's OWN
+/// <see cref="ConfirmationBook"/> (never shown to the client, never the Concierge chat's). Pairings and requests are in memory
+/// only: they end when the app restarts.
 /// </summary>
 public sealed partial class CompanionService(
     BusEngine bus,
@@ -39,10 +43,12 @@ public sealed partial class CompanionService(
     public const string ChangedEvent = "companion.changed";
     public static readonly TimeSpan PairingLife = TimeSpan.FromMinutes(5);
     /// <summary>
-    /// A little shorter than its token's life (<see cref="ConfirmationBook.Life"/>): approved at its last moment, the run still
-    /// redeems its token, so a late approval says Expired, never "the list changed".
+    /// The longest an approval request waits for the person: past it, it ends Expired. Not tied to a token's life: the token is
+    /// issued when the person approves, after the plan is worked out again.
     /// </summary>
-    public static readonly TimeSpan ActionLife = ConfirmationBook.Life - TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan ActionCap = TimeSpan.FromDays(7);
+    public const string ExpiredResult = "expired: not decided within 7 days";
+    public const string RestartedResult = "ended: the app restarted";
     public const int MaxPendingPairings = 3;
     public const int MaxPendingPerClient = 10;
 
@@ -63,6 +69,8 @@ public sealed partial class CompanionService(
     private const string CodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    /// <summary>The script and schema tools, onto the app's scripts.* / schemas.* calls.</summary>
+    private readonly ScriptTools _scripts = new(bus, route);
     private readonly ConfirmationBook _book = new(clock);
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Pairing> _pairings = [];
@@ -89,7 +97,7 @@ public sealed partial class CompanionService(
         public TaskCompletionSource Decided { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    private sealed class Request(string id, long clientId, string client, string tool, JsonObject args, string plan, string? token, string? bound, string conversation, DateTimeOffset expires)
+    private sealed class Request(string id, long clientId, string client, string tool, JsonObject args, string plan, string? listKey, string? bound, string conversation, DateTimeOffset asked)
     {
         public string Id { get; } = id;
         /// <summary>The client row that made it: a later client of the same name is another client (never sees or decides it).</summary>
@@ -98,11 +106,19 @@ public sealed partial class CompanionService(
         public string Tool { get; } = tool;
         public JsonObject Args { get; } = args;
         public string Plan { get; } = plan;
-        public string? Token { get; } = token;
+        /// <summary>
+        /// For a plan that is a Concierge list: the key the list was worked out from (never its token). At approval the list is
+        /// worked out again; it runs only under the same key, with the token issued then.
+        /// </summary>
+        public string? ListKey { get; } = listKey;
         /// <summary>For <see cref="ShaBound"/> tools: the commit the plan showed.</summary>
         public string? Bound { get; } = bound;
         public string Conversation { get; } = conversation;
-        public DateTimeOffset Expires { get; } = expires;
+        /// <summary>When the request was made (companion.list "asked").</summary>
+        public DateTimeOffset Asked { get; } = asked;
+        public DateTimeOffset Expires => Asked + ActionCap;
+        /// <summary>What it acts on: a newer pending request of the same client, tool and target replaces it.</summary>
+        public string Target { get; } = TargetOf(tool, args);
         public ActionState State { get; set; } = ActionState.Pending;
         public string? Result { get; set; }
         public string? NextId { get; set; }
@@ -111,7 +127,20 @@ public sealed partial class CompanionService(
     }
 
     /// <summary>A destructive call made ready: either an answer at once (nothing to do), or the plan to approve.</summary>
-    private sealed record Prepared(string? Immediate, string Plan, string? Token, string? Bound);
+    private sealed record Prepared(string? Immediate, string Plan, string? ListKey, string? Bound);
+
+    /// <summary>The arguments that name what a call acts on (its team, repository and branch, or its item, and the name it acts on).</summary>
+    private static readonly string[] TargetArguments = ["branch", "item", "card", "name", "member", "pr", "fix", "workflow", "backup", "task", "script", "id",
+        // integration_action_allow's own target, so allowing two actions are two requests, not one replacing the other.
+        "integration", "action"];
+
+    /// <summary>A call's target: the team (any case), the repository (default main) and the identifying arguments.</summary>
+    private static string TargetOf(string tool, JsonObject args)
+    {
+        static string V(JsonNode? n) => n is JsonValue v ? v.ToString().Trim() : "";
+        var repo = V(args["repo"]);
+        return string.Join('\u001f', [tool, V(args["team"]).ToLowerInvariant(), repo.Length == 0 ? "main" : repo, .. TargetArguments.Select(k => V(args[k]))]);
+    }
 
     private DateTimeOffset Now => _clock.GetUtcNow();
 
@@ -181,7 +210,8 @@ public sealed partial class CompanionService(
         using var acting = Actor.Use(actor);
         try
         {
-            var result = needs == CompanionLevel.Destructive ? await RequestAsync(client, tool, args, ct) : await ReadOrActAsync(client, tool, args, ct);
+            var result = ScriptTools.Handles(tool) ? await ScriptCallAsync(client, tool, args, needs.Value, ct)
+                : needs == CompanionLevel.Destructive ? await RequestAsync(client, tool, args, ct) : await ReadOrActAsync(client, tool, args, ct);
             return result with { Text = needs == CompanionLevel.Destructive ? RequestSafe(result.Text) : ClientSafe(result.Text) };
         }
         catch (Exception e) when (e is ArgumentException or RpcException or BusRefusal)
@@ -201,7 +231,13 @@ public sealed partial class CompanionService(
             case "request_status":
             {
                 var id = CompanionTools.Text(args, "id") ?? throw new ArgumentException("'id' is required");
-                var s = StatusOf(client.Id, id) ?? throw new ArgumentException($"there is no request '{id}' of this client");
+                var s = StatusOf(client.Id, id) ?? throw new ArgumentException(NoSuchRequest(id));
+                return new CompanionResult(Describe(s), false);
+            }
+            case "request_cancel":
+            {
+                var id = CompanionTools.Text(args, "id") ?? throw new ArgumentException("'id' is required");
+                var s = Cancel(client, id) ?? throw new ArgumentException(NoSuchRequest(id));
                 return new CompanionResult(Describe(s), false);
             }
             case "backups_list":
@@ -227,8 +263,25 @@ public sealed partial class CompanionService(
         return new CompanionResult(text, isError);
     }
 
+    /// <summary>
+    /// A script tool. A call the person must say yes to (adding a script member, a script's first live run on a team)
+    /// becomes a request with the plan <see cref="ScriptTools.YesNeededAsync"/> gives, bound to its key: approved, it runs
+    /// only if the same call still means the same thing, else it is a new request. Every other call runs now (a dry run, a
+    /// later live run, a build or a check); acts and live runs are audited.
+    /// </summary>
+    private async Task<CompanionResult> ScriptCallAsync(CompanionClient client, string tool, JsonObject args, CompanionLevel needs, CancellationToken ct)
+    {
+        args.Remove("confirm"); // a client never supplies a yes
+        if (ScriptTools.ApprovalOf(tool) != ScriptToolApproval.None && await _scripts.YesNeededAsync(tool, args, ct) is { } yes)
+            return await RequestAsync(client, tool, args, ct, yes);
+        var text = await _scripts.CallAsync(tool, args, ct);
+        if (needs != CompanionLevel.Read) audit.Record(Actor.ExternalClient(client.Name), "companion." + tool, SafeParams(args), "ok");
+        return new CompanionResult(text, false);
+    }
+
     /// <summary>A destructive call: never run now. The exact plan becomes a request the window approves or denies.</summary>
-    private async Task<CompanionResult> RequestAsync(CompanionClient client, string tool, JsonObject args, CancellationToken ct)
+    /// <param name="yes">For a script tool: the plan and key its call needs a yes for.</param>
+    private async Task<CompanionResult> RequestAsync(CompanionClient client, string tool, JsonObject args, CancellationToken ct, ScriptToolYes? yes = null)
     {
         var name = client.Name;
         args.Remove("confirm"); // a client never supplies a yes
@@ -237,53 +290,110 @@ public sealed partial class CompanionService(
                 throw new ArgumentException($"refused: '{key}' is longer than 8 KB ({s.Length} characters); the person must be able to read in full what they approve, so shorten it");
         // Checked before the window is asked: a plan with a blank where a required value goes would only fail once approved.
         if (CompanionTools.MissingRequired(tool, args) is { } missing) throw new ArgumentException($"'{missing}' is required");
+        var target = TargetOf(tool, args);
         lock (_gate)
         {
             Sweep();
-            RefuseOverCap(client.Id);
+            RefuseOverCap(client.Id, tool, target);
         }
         var id = NewId("r");
         var conversation = $"external:{name}:{id}";
-        var expires = Now + ActionLife;
-        var prepared = await PrepareAsync(name, tool, args, conversation, ct);
+        var asked = Now;
+        var prepared = yes is not null ? new Prepared(null, yes.Plan, null, yes.Key) : await PrepareAsync(name, tool, args, conversation, ct);
         if (prepared.Immediate is { } immediate) return new CompanionResult(immediate, false);
-        var request = new Request(id, client.Id, name, tool, args, RequestSafe(prepared.Plan), prepared.Token, prepared.Bound, conversation, expires);
+        var request = new Request(id, client.Id, name, tool, args, RequestSafe(prepared.Plan), prepared.ListKey, prepared.Bound, conversation, asked);
+        List<Request> replaced;
         lock (_gate)
         {
             // Revoked while the plan was being made: nothing is stored.
             if (!IsActive(client.Id)) throw new ArgumentException("refused: this client was revoked in the app; pair it again to use it");
             // Checked again: other calls of this client may have stored theirs while this plan was made.
             Sweep();
-            RefuseOverCap(client.Id);
+            RefuseOverCap(client.Id, tool, target);
+            // The newer request of the same tool and target is the one the person decides: the older one ends, pointing at it.
+            replaced = Replaceable(client.Id, tool, target).ToList();
+            foreach (var old in replaced)
+            {
+                old.NextId = id;
+                Finish(old, ActionState.Changed, $"replaced by {id}");
+            }
             _requests[id] = request;
         }
+        foreach (var old in replaced)
+            audit.Record(Actor.ExternalClient(name), "companion." + tool, SafeParams(old.Args), $"replaced (request {old.Id}) by request {id}");
         audit.Record(Actor.ExternalClient(name), "companion." + tool, SafeParams(args), $"awaiting the person's approval (request {id})");
         Changed();
         return new CompanionResult($"NOT DONE: waiting for the person's approval in the Yawble window (request {id}): {request.Plan}", false, id);
     }
 
-    /// <summary>Under the gate: a client may have at most <see cref="MaxPendingPerClient"/> requests waiting.</summary>
-    private void RefuseOverCap(long clientId)
+    /// <summary>
+    /// For an approved script request: the new request when the same call now needs a yes to something else (the script's
+    /// runnable version moved, the team's name points elsewhere); null when it still means what was shown, or needs no yes now
+    /// (a live run happened since, so this is no longer the first).
+    /// </summary>
+    private async Task<Request?> ScriptChangedAsync(Request r, CancellationToken ct) =>
+        await _scripts.YesNeededAsync(r.Tool, r.Args, ct) is { } yes && yes.Key != r.Bound
+            ? new Request(NewId("r"), r.ClientId, r.Client, r.Tool, r.Args.DeepClone().AsObject(), RequestSafe(yes.Plan), null, yes.Key, r.Conversation, Now)
+            : null;
+
+    /// <summary>Under the gate: this client's pending requests a new one of this tool and target replaces.</summary>
+    private IEnumerable<Request> Replaceable(long clientId, string tool, string target) =>
+        _requests.Values.Where(r => r.ClientId == clientId && r.State == ActionState.Pending && r.Tool == tool && r.Target == target);
+
+    /// <summary>
+    /// Under the gate: a client may have at most <see cref="MaxPendingPerClient"/> requests waiting (the ones a new request of
+    /// this tool and target replaces do not count: they end when it is stored).
+    /// </summary>
+    private void RefuseOverCap(long clientId, string tool, string target)
     {
-        if (_requests.Values.Count(r => r.ClientId == clientId && r.State == ActionState.Pending) >= MaxPendingPerClient)
-            throw new ArgumentException($"refused: this client already has {MaxPendingPerClient} requests waiting for the person; wait until they are decided");
+        var waiting = _requests.Values.Count(r => r.ClientId == clientId && r.State == ActionState.Pending) - Replaceable(clientId, tool, target).Count();
+        if (waiting >= MaxPendingPerClient)
+            throw new ArgumentException($"refused: this client already has {MaxPendingPerClient} requests waiting for the person; wait until they are decided, or cancel one with request_cancel");
     }
 
-    /// <summary>The plan (and, for a self-confirming tool, its private token; for a SHA-bound one, the commit shown).</summary>
+    /// <summary>
+    /// The client withdraws its own pending request: it ends Denied ("cancelled by the client") and nothing runs. A request already
+    /// decided or running is left as it is (its status is answered). Null for another client's or an unknown id.
+    /// </summary>
+    public ActionStatus? Cancel(CompanionClient client, string id)
+    {
+        ActionStatus s;
+        Request r;
+        lock (_gate)
+        {
+            Sweep();
+            if (!_requests.TryGetValue(id, out var found) || found.ClientId != client.Id) return null;
+            r = found;
+            if (r.State != ActionState.Pending) return StatusOf(r);
+            Finish(r, ActionState.Denied, "cancelled by the client");
+            s = StatusOf(r);
+        }
+        audit.Record(Actor.ExternalClient(r.Client), "companion." + r.Tool, SafeParams(r.Args), $"cancelled by the client (request {id})");
+        Changed();
+        return s;
+    }
+
+    /// <summary>What a client is told for a request id it does not have (requests are in memory: a restart ends them).</summary>
+    public static string NoSuchRequest(string id) =>
+        $"there is no request '{id}' of this client. Requests are kept in memory: one made before the app last started has {RestartedResult}; ask again if it is still needed";
+
+    /// <summary>
+    /// The plan (and, for a self-confirming tool, the key its list was worked out from; for a SHA-bound one, the commit shown).
+    /// The list's token is withdrawn at once: the token that runs is issued when the person approves.
+    /// </summary>
     private async Task<Prepared> PrepareAsync(string name, string tool, JsonObject args, string conversation, CancellationToken ct)
     {
         if (CompanionTools.SelfConfirming.Contains(tool))
         {
-            // The Concierge's own confirm flow makes the exact list and its token, in the companion's book. Local: the list is
-            // only looked at here; the yes is the person's click.
+            // The Concierge's own confirm flow makes the exact list, in the companion's book. Local: the list is only looked at
+            // here; the yes is the person's click.
             var planTurn = new ConciergeTurn(conversation, byPerson: true, remote: false);
-            var tools = new ConciergeTools(bus, store, route, () => null, null, _clock, actionsFor(planTurn, _book), remote: false, planTurn, Actor.ExternalClient(name));
-            var (text, isError) = await tools.CallToolAsync(tool, args, ct);
+            var (text, isError) = await ConciergeCallAsync(tool, args, planTurn, Actor.ExternalClient(name), ct);
+            var issued = TakeIssued(planTurn);
             if (isError) throw new ArgumentException(text);
             if (text.StartsWith("nothing to do", StringComparison.Ordinal)) return new Prepared(text, "", null, null);
-            var issued = _book.IssuedIn(planTurn);
             if (issued.Count != 1) throw new ArgumentException($"refused: {tool} did not make a list to approve");
-            return new Prepared(null, issued[0].Plan, issued[0].Token, null);
+            return new Prepared(null, issued[0].Plan, issued[0].Key, null);
         }
         var plan = CompanionTools.Describe(tool, args);
         string? bound = null;
@@ -316,6 +426,25 @@ public sealed partial class CompanionService(
         }
         return new Prepared(null, plan, null, bound);
     }
+
+    /// <summary>A Concierge list issued in a turn of the companion's book: its token, the exact list and the key it was worked out from.</summary>
+    private sealed record Listed(string Token, string Plan, string Key);
+
+    /// <summary>The lists issued in <paramref name="turn"/> (their tokens still redeemable).</summary>
+    private List<Listed> Issued(ConciergeTurn turn) =>
+        [.. _book.IssuedIn(turn).Select(i => _book.KeyOf(i.Token) is { } key ? new Listed(i.Token, i.Plan, key) : null).OfType<Listed>()];
+
+    /// <summary>As <see cref="Issued"/>, with every token withdrawn: a request keeps a list's key, never its token.</summary>
+    private List<Listed> TakeIssued(ConciergeTurn turn)
+    {
+        var issued = Issued(turn);
+        foreach (var i in issued) _book.Withdraw(i.Token);
+        return issued;
+    }
+
+    /// <summary>One of the Concierge's tools, local, in <paramref name="turn"/> of the companion's book.</summary>
+    private Task<(string Text, bool IsError)> ConciergeCallAsync(string tool, JsonObject args, ConciergeTurn turn, Actor actor, CancellationToken ct) =>
+        new ConciergeTools(bus, store, route, () => null, null, _clock, actionsFor(turn, _book), remote: false, turn, actor).CallToolAsync(tool, args, ct);
 
     private async Task<TeamSummary> TeamAsync(JsonObject args, CancellationToken ct)
     {
@@ -437,7 +566,6 @@ public sealed partial class CompanionService(
     {
         var id = r.Id;
         var actor = Actor.ExternalClient(r.Client) with { ApprovedBy = approver };
-        var turn = new ConciergeTurn(r.Conversation, byPerson: true, remote: false);
         var state = ActionState.Failed;
         var result = "failed: the run stopped before it finished";
         Request? next = null;
@@ -446,7 +574,14 @@ public sealed partial class CompanionService(
         {
             using (Actor.Use(actor))
             {
-                if (ShaBound.Contains(r.Tool) && await BoundNowAsync(r, ct) != r.Bound)
+                if (ScriptTools.Handles(r.Tool) && await ScriptChangedAsync(r, ct) is { } changed)
+                {
+                    // What was shown is not what the call would do now: approving the old plan must not run it. Shown again instead.
+                    next = changed;
+                    state = ActionState.Changed;
+                    reallyChanged = true;
+                }
+                else if (ShaBound.Contains(r.Tool) && await BoundNowAsync(r, ct) != r.Bound)
                 {
                     // What was shown moved since: approving the old plan must not act on the new commit. Shown again instead.
                     var prepared = await PrepareAsync(r.Client, r.Tool, r.Args, r.Conversation, ct);
@@ -457,24 +592,59 @@ public sealed partial class CompanionService(
                     }
                     else
                     {
-                        next = new Request(NewId("r"), r.ClientId, r.Client, r.Tool, r.Args.DeepClone().AsObject(), RequestSafe(prepared.Plan), prepared.Token, prepared.Bound, r.Conversation, Now + ActionLife);
+                        next = new Request(NewId("r"), r.ClientId, r.Client, r.Tool, r.Args.DeepClone().AsObject(), RequestSafe(prepared.Plan), prepared.ListKey, prepared.Bound, r.Conversation, Now);
                         state = ActionState.Changed;
                         reallyChanged = true;
                     }
                 }
                 else
                 {
-                    var (text, isError) = await ExecuteAsync(r, turn, actor, ct);
-                    result = RequestSafe(text);
-                    state = isError ? ActionState.Failed : ActionState.Done;
-                    // The run issued a new list (it changed since it was shown, or a second step needs its own yes): a new request.
-                    if (_book.IssuedIn(turn) is [var issued, ..])
+                    string? token = null;
+                    (string Text, bool IsError)? planned = null;
+                    if (r.ListKey is not null)
                     {
-                        next = new Request(NewId("r"), r.ClientId, r.Client, r.Tool, r.Args.DeepClone().AsObject(), RequestSafe(issued.Plan), issued.Token, null, r.Conversation, Now + ActionLife);
-                        state = ActionState.Changed;
-                        // Redeeming a shown list gave a new one: it changed. Without a token, this was the first look of a
-                        // tool whose second step needs its own yes (team_env_set replace, doctor_fix): nothing changed.
-                        reallyChanged = r.Token is not null;
+                        // The token is issued now, however long the request waited: the list is worked out again, and it runs
+                        // only if it is the list that was shown (the same key). For a tool whose list is a second step
+                        // (team_env_set replace, doctor_fix), this is its first call again: with nothing left that needs a
+                        // second yes, it does what the first approval asked for, and no list is made.
+                        var planTurn = new ConciergeTurn(r.Conversation, byPerson: true, remote: false);
+                        var call = await ConciergeCallAsync(r.Tool, r.Args.DeepClone().AsObject(), planTurn, actor, ct);
+                        var fresh = Issued(planTurn);
+                        if (fresh is [var same] && same.Key == r.ListKey) token = same.Token;
+                        else
+                        {
+                            foreach (var f in fresh) _book.Withdraw(f.Token);
+                            if (fresh is [var other, ..])
+                            {
+                                // What was shown is not what would run now: approving the old list must not run the new one.
+                                next = new Request(NewId("r"), r.ClientId, r.Client, r.Tool, r.Args.DeepClone().AsObject(), RequestSafe(other.Plan), other.Key, null, r.Conversation, Now);
+                                state = ActionState.Changed;
+                                reallyChanged = true;
+                            }
+                            else planned = call; // nothing to do now, refused, or (a second-step tool) done as first approved
+                        }
+                    }
+                    if (planned is { } p)
+                    {
+                        result = RequestSafe(p.Text);
+                        state = p.IsError ? ActionState.Failed : ActionState.Done;
+                    }
+                    else if (next is null)
+                    {
+                        // A later turn than the plan's: the token issued there is redeemed here.
+                        var turn = new ConciergeTurn(r.Conversation, byPerson: true, remote: false);
+                        var (text, isError) = await ExecuteAsync(r, token, turn, actor, ct);
+                        result = RequestSafe(text);
+                        state = isError ? ActionState.Failed : ActionState.Done;
+                        // The run issued a new list (it changed since it was worked out, or a second step needs its own yes): a new request.
+                        if (TakeIssued(turn) is [var issued, ..])
+                        {
+                            next = new Request(NewId("r"), r.ClientId, r.Client, r.Tool, r.Args.DeepClone().AsObject(), RequestSafe(issued.Plan), issued.Key, null, r.Conversation, Now);
+                            state = ActionState.Changed;
+                            // Redeeming a shown list gave a new one: it changed. Without a list, this was the first look of a
+                            // tool whose second step needs its own yes (team_env_set replace, doctor_fix): nothing changed.
+                            reallyChanged = r.ListKey is not null;
+                        }
                     }
                 }
             }
@@ -555,8 +725,10 @@ public sealed partial class CompanionService(
         await Task.WhenAll(runs).ConfigureAwait(false); // never faults: each run catches everything
     }
 
-    private async Task<(string Text, bool IsError)> ExecuteAsync(Request r, ConciergeTurn turn, Actor actor, CancellationToken ct)
+    /// <param name="token">For a list: the token issued at this approval.</param>
+    private async Task<(string Text, bool IsError)> ExecuteAsync(Request r, string? token, ConciergeTurn turn, Actor actor, CancellationToken ct)
     {
+        if (ScriptTools.Handles(r.Tool)) return (await _scripts.CallAsync(r.Tool, r.Args.DeepClone().AsObject(), ct), false);
         switch (r.Tool)
         {
             case "git_merge_team":
@@ -576,9 +748,8 @@ public sealed partial class CompanionService(
             default:
             {
                 var args = r.Args.DeepClone().AsObject();
-                if (r.Token is { } token) args["confirm"] = token;
-                var tools = new ConciergeTools(bus, store, route, () => null, null, _clock, actionsFor(turn, _book), remote: false, turn, actor);
-                return await tools.CallToolAsync(r.Tool, args, ct);
+                if (token is not null) args["confirm"] = token;
+                return await ConciergeCallAsync(r.Tool, args, turn, actor, ct);
             }
         }
     }
@@ -591,12 +762,12 @@ public sealed partial class CompanionService(
         r.Finished.TrySetResult();
     }
 
-    /// <summary>Marks what has expired; forgets finished requests after a while. Under the gate.</summary>
+    /// <summary>Ends what passed <see cref="ActionCap"/> undecided; forgets finished requests after a while. Under the gate.</summary>
     private void Sweep()
     {
         var now = Now;
         foreach (var r in _requests.Values.Where(r => r.State == ActionState.Pending && r.Expires <= now).ToList())
-            Finish(r, ActionState.Expired, "expired: nobody approved it in time");
+            Finish(r, ActionState.Expired, ExpiredResult);
         foreach (var r in _requests.Values.Where(r => r.FinishedAt is { } at && at + KeepFinished <= now).ToList())
         {
             _requests.Remove(r.Id);
@@ -664,16 +835,20 @@ public sealed partial class CompanionService(
         }
     }
 
-    /// <summary>For tests only: the token a request will redeem (never shown to any client or the window).</summary>
-    internal string? TokenOf(string id)
+    /// <summary>For tests only: the key a request's list was worked out from (a request never holds a token).</summary>
+    internal string? ListKeyOf(string id)
     {
-        lock (_gate) return _requests.GetValueOrDefault(id)?.Token;
+        lock (_gate) return _requests.GetValueOrDefault(id)?.ListKey;
     }
+
+    /// <summary>For tests only: the companion's own confirmation book.</summary>
+    internal ConfirmationBook Book => _book;
 
     private static string Describe(ActionStatus s) =>
         $"request {s.Id}: {s.State.ToString().ToLowerInvariant()}" +
-        (s.State == ActionState.Pending ? " (waiting for the person's approval in the Yawble window)" : s.State == ActionState.Running ? " (approved; running now)" : "") +
-        $"\nplan: {s.Plan}" + (s.Result is { } res ? $"\nresult: {res}" : "") + (s.NextId is { } n ? $"\nthe list changed: the new request is {n}" : "");
+        (s.State == ActionState.Pending ? " (waiting for the person to approve or deny it in the Yawble window; it stays pending until they do, you cancel it with request_cancel, or the app restarts)"
+            : s.State == ActionState.Running ? " (approved; running now)" : "") +
+        $"\nplan: {s.Plan}" + (s.Result is { } res ? $"\nresult: {res}" : "") + (s.NextId is { } n ? $"\nthe new request is {n}" : "");
 
     // ------------------------------------------------------------------ pairing
 
@@ -806,10 +981,10 @@ public sealed partial class CompanionService(
             Sweep();
             foreach (var p in _pairings.Values.Where(p => p.Outcome is null).OrderBy(p => p.Expires))
                 pairings.Add(new JsonObject { ["id"] = p.Id, ["name"] = p.Name, ["level"] = CompanionLevels.Name(p.Level), ["code"] = p.Code, ["expires"] = Iso(p.Expires) });
-            foreach (var r in _requests.Values.Where(r => r.State is ActionState.Pending or ActionState.Running).OrderBy(r => r.Expires))
+            foreach (var r in _requests.Values.Where(r => r.State is ActionState.Pending or ActionState.Running).OrderBy(r => r.Asked))
                 actions.Add(new JsonObject
                 {
-                    ["id"] = r.Id, ["client"] = r.Client, ["tool"] = r.Tool, ["plan"] = r.Plan, ["expires"] = Iso(r.Expires),
+                    ["id"] = r.Id, ["client"] = r.Client, ["tool"] = r.Tool, ["plan"] = r.Plan, ["asked"] = Iso(r.Asked), ["expires"] = Iso(r.Expires),
                     ["state"] = r.State == ActionState.Running ? "running" : "pending",
                 });
         }

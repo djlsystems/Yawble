@@ -436,7 +436,7 @@ public sealed partial class BusStore : IDisposable
 
     // ---- plumbing ----
 
-    /// <summary>How many statements this store has run (tests count a read's queries: B104's no-N+1 check).</summary>
+    /// <summary>How many statements this store has run (tests count a read's queries: the no-N+1 check).</summary>
     public long Queries { get; private set; }
 
     private SqliteCommand Command(string sql, params (string Name, object? Value)[] args)

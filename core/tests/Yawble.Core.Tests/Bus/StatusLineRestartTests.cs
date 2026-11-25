@@ -42,9 +42,41 @@ public class StatusLineRestartTests
         Assert.Equal("polishing", cards["Ada"].StatusLine);
         Assert.Equal("blocked: no key", cards["Ben"].StatusLine);
         Assert.Equal("handed back: the fix", cards["Cy"].StatusLine);
-        Assert.Equal("needs decision: which db?", cards["Di"].StatusLine);
+        Assert.Equal("Waiting on you: which db?", cards["Di"].StatusLine);
         Assert.Equal("declared complete: all done", cards["Manager"].StatusLine);
         Assert.Null(cards["Ed"].StatusLine);
+    }
+
+    [Fact]
+    public async Task AnOpenQuestionShowsTheSameLineAfterARestartAsOnTheLiveEngine()
+    {
+        // The live engine shows a member's open needs_decision as "Waiting on you: ..."; the engine seeded from
+        // the log after a restart must show the very same line (card and status), not the old "needs decision: ...".
+        using var db = new TempDb();
+        long teamId;
+        string? liveCard, liveStatus;
+        var runner = new ScriptedRunner().On("Alpha/Di", async (run, ct) =>
+        {
+            await run.NeedsDecisionAsync("which db?", ct);
+            return RunResult.Ok;
+        });
+        await using (var first = new BusEngine(db.OpenStore(), runner, new BusOptions { IdleOffer = false }))
+        {
+            teamId = await first.CreateTeamAsync("Alpha", ct: Ct);
+            await first.AddMemberAsync("Alpha", "Di", ct: Ct);
+            await first.StartAsync(Ct);
+            await first.PersonTellAsync("Alpha", "Di", "pick the database", ct: Ct);
+            await Wait.UntilAsync(() => first.IsQuiescentAsync(Ct), "quiet");
+            liveCard = (await first.AgentCardsAsync(teamId, Ct)).Single(c => c.Member.Name == "Di").StatusLine;
+            liveStatus = (await first.TeamStatusAsync("Alpha", Ct)).Single(s => s.Name == "Di").StatusLine;
+        }
+        Assert.Equal("Waiting on you: which db?", liveCard);
+        Assert.Equal(liveCard, liveStatus);
+
+        await using var second = new BusEngine(db.OpenStore(), new ScriptedRunner(), new BusOptions { IdleOffer = false });
+        await second.StartAsync(Ct);
+        Assert.Equal(liveCard, (await second.AgentCardsAsync(teamId, Ct)).Single(c => c.Member.Name == "Di").StatusLine);
+        Assert.Equal(liveStatus, (await second.TeamStatusAsync("Alpha", Ct)).Single(s => s.Name == "Di").StatusLine);
     }
 
     [Fact]

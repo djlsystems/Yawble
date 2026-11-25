@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B076 (card 365): a team page's members are equal tiles in a wrapping grid, like the Teams list; the width and height
+// A team page's members are equal tiles in a wrapping grid, like the Teams list; the width and height
 // handles in the gaps resize every tile at once and the size is kept (memberTileSize.ts, this viewer's storage). The
 // last tile is New member: its + opens the add form (Job and first name, CLI, Add) in the tile. On a phone: one
 // full-width tile per row, as tall as its content, no handles, New member last.

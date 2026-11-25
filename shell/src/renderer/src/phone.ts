@@ -1,6 +1,6 @@
 import { getCurrentScope, onScopeDispose, readonly, ref, type Ref } from 'vue';
 
-// The phone layout (B037): below 760 px wide the screens change to one column (the sidebar becomes a drawer, a dialog a
+// The phone layout: below 760 px wide the screens change to one column (the sidebar becomes a drawer, a dialog a
 // full-screen sheet, Settings one section per screen); at 760 px and wider nothing changes. Components ask usePhone()
 // and put a `phone` class on their root, so the layout is plain CSS keyed on that class (and testable without a real
 // media query engine). The same width is in styles.css's @media rules (PHONE_QUERY).

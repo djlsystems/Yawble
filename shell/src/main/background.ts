@@ -95,6 +95,31 @@ export function statusLine(s: TrayStatus | null): string {
   return parts.join(' · ');
 }
 
+/** The newest thing waiting for the person (app.overview newest): a question, a tool-call approval, a host, a tool or a folder request. */
+export interface NeedsYouNewest { kind: string; title: string; team?: string | null; at?: string }
+
+const NewestKind: Record<string, string> = {
+  question: 'a question',
+  approval: 'a tool call to approve',
+  host: 'a host to allow',
+  tool: 'a tool to install',
+  folder: 'a folder request',
+};
+
+/**
+ * The OS notification's body: how many things wait, then the newest one and its team ("Newest: a question from payments: Ship it?").
+ * Without a newest item (an older core, or only connections to reconnect) it lists the kinds, as before.
+ */
+export function needsYouToast(needs: number, newest?: NeedsYouNewest | null): string {
+  const count = `${needs} thing${needs === 1 ? '' : 's'} waiting for you`;
+  if (!newest || !newest.title) {
+    return `${count} (questions, approvals, hosts agents ask to reach, developer tools agents ask for, connections to reconnect).`;
+  }
+  const kind = NewestKind[newest.kind] ?? 'a request';
+  const title = newest.title.length > 120 ? `${newest.title.slice(0, 120)}…` : newest.title;
+  return `${count}. Newest: ${kind}${newest.team ? ` from ${newest.team}` : ''}: ${title}`;
+}
+
 export interface TrayActions {
   open(): void;
   quit(): void;

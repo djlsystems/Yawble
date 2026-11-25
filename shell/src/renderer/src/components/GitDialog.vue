@@ -23,14 +23,14 @@ import { branchLocalOnly, branchLocalTitle } from '../localMark';
 // top), see the team's branches against the base branch, fetch origin,
 // bring the base current, merge the team branch to it, or ask the team to bring its branch current. The person's
 // buttons only. Nothing is ever forced, rebased or stashed; a merge that would conflict changes nothing.
-/** focusBranch (B072, the Commit view's Show its branch): that branch's row is marked. */
+/** focusBranch (the Commit view's Show its branch): that branch's row is marked. */
 const props = defineProps<{ api?: YawbleApi; team: TeamSummary; focusBranch?: string | null }>();
 const emit = defineEmits<{ close: [] }>();
 const api = resolveApi(props.api);
 
 const status = ref<TeamGitStatus | null>(null);
 const error = ref<string | null>(null);
-/** B073: a result may list the commits that came in (each opens the Commit view) and, after a delete, the deleted
+/** A result may list the commits that came in (each opens the Commit view) and, after a delete, the deleted
  * branches' last commits the app keeps on record. */
 type DialogResult = TeamGitResult & { commitsHeading?: string | null; commitsList?: CommitRow[] | null; commitsTotal?: number; recorded?: { branch: string; sha: string }[] | null };
 const result = ref<DialogResult | null>(null);
@@ -41,9 +41,9 @@ const confirming = ref(false);
 const repo = ref('');
 const choices = ref<{ name: string; label: string }[]>([]);
 const mainName = ref<string | null>(null);
-// B067: Tidy… (every branch of the team's repositories in one plan; TidyPanel).
+// Tidy… (every branch of the team's repositories in one plan; TidyPanel).
 const tidying = ref(false);
-// B075: each repository's provider (teams.repos), for the "Open on …" text and the pull request line.
+// Each repository's provider (teams.repos), for the "Open on …" text and the pull request line.
 const providers = ref<Record<string, RepoProviderInfo>>({});
 async function loadChoices() {
   try {
@@ -66,7 +66,7 @@ const prLine = computed(() => {
   return { ok: false, text: p.prUnavailable || 'Pull requests are not supported for this repository from here.' };
 });
 
-// B075: "Open on …" links for what the dialog shows (the core answers null for anything not on origin: no link then).
+// "Open on …" links for what the dialog shows (the core answers null for anything not on origin: no link then).
 const links = ref<Record<string, string>>({});
 const link = (q: GitWebLinkQuery) => links.value[linkKey(q)] ?? null;
 function linkQueries(s: TeamGitStatus): GitWebLinkQuery[] {
@@ -140,7 +140,7 @@ async function act(method: 'git.fetch' | 'git.bringCurrent' | 'git.merge', label
     result.value = r;
     if (r.status) status.value = r.status;
     if (method !== 'git.fetch') {
-      // B073: the commits that came in / landed (the core's commits; an older core: read the range before..after).
+      // The commits that came in / landed (the core's commits; an older core: read the range before..after).
       const given = r.commits === undefined ? undefined : { commits: r.commits ?? [], count: r.commitCount ?? r.commits?.length ?? 0 };
       void commitsIn(base, given, before, r.status?.baseSha ?? r.sha ?? null);
     }
@@ -154,7 +154,7 @@ async function act(method: 'git.fetch' | 'git.bringCurrent' | 'git.merge', label
   }
 }
 
-// ---- B073: the commits an action brought into a branch: the core's list when it sent one (empty: nothing came in),
+// ---- The commits an action brought into a branch: the core's list when it sent one (empty: nothing came in),
 // else (an older core) git.commitRange from the commit before to the one after.
 async function commitsIn(branch: string, given: { commits: CommitRow[]; count: number } | undefined, before: string | null, after: string | null) {
   const res = result.value;
@@ -173,7 +173,7 @@ async function commitsIn(branch: string, given: { commits: CommitRow[]; count: n
   } catch { /* an older core: the result's message only */ }
 }
 
-// ---- B073: a count opens the list of those commits (git.commitRange); the same link again closes it (another link for
+// ---- A count opens the list of those commits (git.commitRange); the same link again closes it (another link for
 // the same range, e.g. the two "behind" counts, shows it again).
 const range = ref<{ key: string; ask: RangeAsk; data: CommitRange | null; error: string | null } | null>(null);
 async function openRange(kind: CountKind, branch?: string, source: string = kind) {
@@ -193,7 +193,7 @@ async function openRange(kind: CountKind, branch?: string, source: string = kind
   }
 }
 
-// ---- B073: Merge to <base>… reads git.mergePreview first; Merge is offered under it (an older core: no preview, as before).
+// ---- Merge to <base>… reads git.mergePreview first; Merge is offered under it (an older core: no preview, as before).
 const preview = ref<{ data: MergePreview | null; error: string | null } | null>(null);
 const previewView = computed(() => (preview.value?.data ? mergePreviewView(preview.value.data) : null));
 function startMerge() {
@@ -260,7 +260,7 @@ async function askTeam() {
 // branch is deleted only when the person ticks it, which re-plans with it in unmergedOk so the plan shown is the one
 // confirmed. A stale answer (the branches changed since the plan) is shown and planned again.
 interface DeleteTarget { branch: string; remote: boolean; unmerged: boolean; mergeUnknown?: boolean }
-// B073: beside the plan, git.deletePreview lists the branch's commits not in the base, each "already in main" or "work of
+// Beside the plan, git.deletePreview lists the branch's commits not in the base, each "already in main" or "work of
 // its own", so the person sees what is lost (an older core: the plan alone, as before).
 const deleting = ref<(DeleteTarget & {
   unmergedOk: boolean; plan: GitDeletePlan | null; note: string | null; error: string | null;
@@ -286,7 +286,7 @@ const oldWhere = (o: TeamGitOldBranch) => (o.local && o.remote ? 'here and on or
 // A members/<slug> branch named like this team's slug blocks its members/<slug>/<member> branches (git cannot hold
 // both). git.status lists one entry per ref (here, on origin); the dialog shows one per branch and repository. Whether
 // its commits are merged is not known here, so the person may tick to delete it anyway; the core's plan says which.
-// One a member is still on (inUseBy, core card 104) has no Delete: that member's next start moves it, which frees the name.
+// One a member is still on (inUseBy) has no Delete: that member's next start moves it, which frees the name.
 interface BlockingRow { name: string; repo: string; local: boolean; remote: boolean; inUseBy?: string; movesTo?: string }
 const blockingBranches = computed<BlockingRow[]>(() => {
   const rows: BlockingRow[] = [];
@@ -574,7 +574,7 @@ onMounted(() => { void loadChoices(); void load(); });
 .lost { margin: 6px 0; }
 .lost .loses { color: var(--warn-ink); font-weight: 600; }
 .focus { box-shadow: inset 4px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
-/* B108 (card 499): on a phone the member-branch table (long branch names in <code>, "In team/<name>") made the dialog's
+/* On a phone the member-branch table (long branch names in <code>, "In team/<name>") made the dialog's
    body 548 px wide at 360 px, so it scrolled sideways. There each branch is a block instead: the branch name on its own
    line (breaking anywhere), then the commit, "Ahead of <base>: n", "In <team branch>: yes" and Delete… labelled from the
    cells' data-label. The desktop keeps the table. */

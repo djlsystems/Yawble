@@ -98,7 +98,7 @@ public sealed partial class TeamRepos
     public string MemberRoot(string team, string member) => Path.Combine(TeamRoot(team), "members", Segment(member));
 
     /// <summary>
-    /// The member's one branch: members/&lt;team&gt;/&lt;name&gt; (B016), both parts as <see cref="SlugOf"/> makes them, the
+    /// The member's one branch: members/&lt;team&gt;/&lt;name&gt;, both parts as <see cref="SlugOf"/> makes them, the
     /// team's the same as in <see cref="TeamBranchFor"/>. Two teams sharing a repository or an origin never share a member branch.
     /// </summary>
     public static string BranchFor(string team, string memberName) => MemberBranchPrefix(team) + SlugOf(memberName);
@@ -106,7 +106,7 @@ public sealed partial class TeamRepos
     /// <summary>members/&lt;team&gt;/: where every branch of the team's members is.</summary>
     public static string MemberBranchPrefix(string team) => BranchPrefix + SlugOf(team) + "/";
 
-    /// <summary>The branch a member had before B016: members/&lt;name&gt;, without the team. Moved at the member's next start.</summary>
+    /// <summary>The old-style member branch: members/&lt;name&gt;, without the team. Moved at the member's next start.</summary>
     public static string LegacyBranchFor(string memberName) => BranchPrefix + SlugOf(memberName);
 
     /// <summary>Whether a branch is an old-style member branch (members/&lt;name&gt;, one level, no team).</summary>
@@ -341,13 +341,13 @@ public sealed partial class TeamRepos
         try
         {
             if (AppCloned(repo.Path)) await RefreshFromOriginAsync(repo.Path, repo.BaseBranch, ct);
-            // B016: a member still on members/<name> moves to members/<team>/<name> (the old branch is kept).
+            // A member still on members/<name> moves to members/<team>/<name> (the old branch is kept).
             // Before the shared view is updated, so its bundle already has the new branch.
             var moves = new List<string>();
             if (await MoveLegacyBranchLockedAsync(member, repo, ct) is { } movedFrom)
                 moves.Add(MoveLine(member.Name, "the team's repository", movedFrom, BranchFor(member.Team, member.Name)));
-            // B020: a members/<team> ref (here, on origin or in the clone) blocks the member's branch: a plain refusal
-            // before anything is made, never git's "cannot lock ref" later. Card 171: every repository is checked here, and a
+            // A members/<team> ref (here, on origin or in the clone) blocks the member's branch: a plain refusal
+            // before anything is made, never git's "cannot lock ref" later. Every repository is checked here, and a
             // refusal after the move above says what moved.
             var planned = CheckoutOf(member, repo);
             try
@@ -593,10 +593,12 @@ public sealed partial class TeamRepos
         await gate.WaitAsync(ct);
         try
         {
-            FetchResult Fail(string e)
+            FetchResult Fail(string e, string status = "failed")
             {
                 recordError(e);
-                _log?.Invoke($"{member.Qualified}: {e}");
+                // A warning with its ids (a merge conflict among them: it said nothing to the level regex).
+                Logs.Diag.Warning("teams", $"{member.Qualified}: {e}", ("team", member.Team), ("member", member.Qualified), ("branch", branch),
+                    ("repo", repoPath), ("status", status));
                 return new FetchResult(false, null, e);
             }
             var refName = "refs/heads/" + branch;
@@ -621,16 +623,18 @@ public sealed partial class TeamRepos
             if (fetched.ExitCode != 0) return Fail("could not fetch the member's branch: " + fetched.Stderr);
             recordFetched(sha);
             var before = await RevAsync(repoPath, refName, ct);
-            var landed = await LandFetchedAsync(member, repoPath, branch, sha, ct);
+            var (landed, landedBehind) = await LandFetchedAsync(member, repoPath, branch, sha, ct);
             if (landed is not null)
             {
                 AddSyncNote(member.TeamId, landed);
-                return Fail(landed);
+                return Fail(landed, landed.Contains("does not merge cleanly", StringComparison.Ordinal) ? "conflict" : "failed");
             }
-            // B079: what the branch gained is the Monitor's truth about the member's files.
+            // What the branch gained is the Monitor's truth about the member's files.
             if (recordEvents && await RevAsync(repoPath, refName, ct) is { } after && after != before)
                 await RecordFetchedAsync(member, repoPath, baseBranch, branch, before, after, workflowId, ct);
-            _log?.Invoke($"{member.Qualified}: fetched {branch} at {sha[..Math.Min(12, sha.Length)]} into {repoPath}");
+            Logs.Diag.Debug("teams", $"{member.Qualified}: fetched {branch} at {sha[..Math.Min(12, sha.Length)]} into {repoPath}",
+                ("team", member.Team), ("member", member.Qualified), ("branch", branch), ("sha", Short(sha)));
+            NoteCloneState(member, repoPath, branch, landedBehind ? CloneBehind : CloneCurrent, sha, null);
             try
             {
                 await UpdateSharedAtAsync(sharedPath, repoPath, baseBranch, ct);
@@ -658,35 +662,41 @@ public sealed partial class TeamRepos
     /// compare-and-swap update-ref. Returns null, or why the work could not be brought in (the branch is then unchanged
     /// and the work stays at the staging ref). Runs git only in the host repository; the caller holds the team lock.
     /// </summary>
-    private async Task<string?> LandFetchedAsync(MemberRef member, string repoPath, string branch, string sha, CancellationToken ct)
+    private async Task<(string? Error, bool Behind)> LandFetchedAsync(MemberRef member, string repoPath, string branch, string sha, CancellationToken ct)
     {
         var refName = "refs/heads/" + branch;
         var current = await RevAsync(repoPath, refName, ct);
-        if (current == sha) return null;
+        if (current == sha) return (null, false);
         if (current is not null && await CheckedOutAnywhereAsync(repoPath, branch, ct) is { } where)
-            return $"{branch} is checked out in {where}, so the app did not update it; the clone's work is at {FetchStagingPrefix}{branch}";
+            return ($"{branch} is checked out in {where}, so the app did not update it; the clone's work is at {FetchStagingPrefix}{branch}", false);
         // No AI attribution in the work's new commits (those no branch of the host repository has yet): refused, never
         // stripped. The work stays at the staging ref, which is the host's only, so the commits are still the member's
         // unpushed own and it amends them itself.
         var newCommits = await Git.RunAsync(repoPath, ct, "log", CommitAttribution.LogFormat, sha, "--not", "--branches", "--");
         if (CommitAttribution.ParseLog(newCommits) is { Count: > 0 } attributed)
-            return CommitAttribution.RefusalText(member.Name, branch, attributed);
+            return (CommitAttribution.RefusalText(member.Name, branch, attributed), false);
         string next;
         if (current is null || await IsAncestorAsync(repoPath, current, sha, ct)) next = sha;
         else if (await IsAncestorAsync(repoPath, sha, current, ct))
         {
-            _log?.Invoke($"{member.Qualified}: the clone's {branch} ({Short(sha)}) is behind the team repository's ({Short(current)}); left as it is");
-            return null;
+            // At debug; the start-up summary counts it, and a line is written only when the clone's state changes.
+            Logs.Diag.Debug("teams", $"{member.Qualified}: the clone's {branch} ({Short(sha)}) is behind the team repository's ({Short(current)}); left as it is",
+                ("team", member.Team), ("member", member.Qualified), ("branch", branch), ("sha", Short(sha)), ("current", Short(current)));
+            return (null, true);
         }
         else
         {
             var (tree, files) = await MergeTreeAsync(repoPath, current, sha, ct);
-            if (tree is null) return ParkedNote(member.Name, branch, files);
+            if (tree is null)
+            {
+                // A merge conflict is a warning (Fail writes it, status conflict); the work waits at the staging ref.
+                return (ParkedNote(member.Name, branch, files), false);
+            }
             next = await Git.RunAsync(repoPath, ct, "-c", "user.name=" + ManagedIdentityName, "-c", "user.email=" + ManagedIdentityEmail,
                 "commit-tree", tree, "-p", current, "-p", sha, "-m", $"Merge {member.Name}'s {branch} into the synced {branch}");
         }
         var update = await Git.TryRunAsync(repoPath, ["update-ref", "-m", "fetch back " + member.Qualified, refName, next, current ?? ""], ct);
-        return update.ExitCode == 0 ? null : $"{branch} moved while its work was being brought in; the clone's work is at {FetchStagingPrefix}{branch}";
+        return (update.ExitCode == 0 ? null : $"{branch} moved while its work was being brought in; the clone's work is at {FetchStagingPrefix}{branch}", false);
     }
 
     private static string ParkedNote(string memberName, string branch, IReadOnlyList<string> files) =>
@@ -800,8 +810,63 @@ public sealed partial class TeamRepos
         return new FetchResult(false, null, error);
     }
 
-    /// <summary>At start-up: checks and fetches back every clone, so work of runs the last process left open is visible.</summary>
+    /// <summary>A clone's branch is level with (or ahead of) the host repository's, or behind it (left as it is).</summary>
+    public const string CloneCurrent = "current", CloneBehind = "behind";
+
+    /// <summary>The state each clone branch was last seen in (member id, host repository, branch), this process.</summary>
+    private readonly ConcurrentDictionary<string, string> _cloneStates = new(StringComparer.Ordinal);
+
+    /// <summary>The start-up fetch-back's counts while it runs (one summary line at its end), else null.</summary>
+    private StartTally? _startTally;
+
+    private sealed class StartTally
+    {
+        public int Fetched, Behind;
+    }
+
+    /// <summary>
+    /// Records the state of a clone's branch after a fetch. During the start-up fetch-back it is only counted (the summary
+    /// line says it); later a line is written when the state changes (behind, or level again), never for the same state.
+    /// </summary>
+    private void NoteCloneState(MemberRef member, string repoPath, string branch, string state, string sha, string? detail)
+    {
+        var key = $"{member.Id.ToString(CultureInfo.InvariantCulture)}|{repoPath}|{branch}";
+        var before = _cloneStates.TryGetValue(key, out var b) ? b : null;
+        _cloneStates[key] = state;
+        if (Volatile.Read(ref _startTally) is { } tally)
+        {
+            Interlocked.Increment(ref tally.Fetched);
+            if (state == CloneBehind) Interlocked.Increment(ref tally.Behind);
+            return;
+        }
+        if (before == state || (before is null && state == CloneCurrent)) return;
+        Logs.Diag.Info("teams", state == CloneBehind
+                ? $"{member.Qualified}: the clone's {branch} is now behind the team repository's; left as it is"
+                : $"{member.Qualified}: the clone's {branch} is level with the team repository's again",
+            ("team", member.Team), ("member", member.Qualified), ("branch", branch), ("sha", Short(sha)), ("status", state), ("detail", detail));
+    }
+
+    /// <summary>
+    /// At start-up: checks and fetches back every clone, so work of runs the last process left open is visible. Writes one
+    /// summary line ("fetched 23 clones, 7 behind"); each clone's own lines are at debug.
+    /// </summary>
     public async Task FetchBackAllAsync(IEnumerable<MemberRef> members, CancellationToken ct = default)
+    {
+        var tally = new StartTally();
+        Volatile.Write(ref _startTally, tally);
+        try
+        {
+            await FetchBackEachAsync(members, ct);
+        }
+        finally
+        {
+            Volatile.Write(ref _startTally, null);
+            Logs.Diag.Info("teams", $"start-up fetch-back: fetched {tally.Fetched} clone{(tally.Fetched == 1 ? "" : "s")}, {tally.Behind} behind",
+                ("fetched", tally.Fetched), ("behind", tally.Behind));
+        }
+    }
+
+    private async Task FetchBackEachAsync(IEnumerable<MemberRef> members, CancellationToken ct)
     {
         foreach (var member in members)
         {
@@ -828,7 +893,7 @@ public sealed partial class TeamRepos
     /// <summary>
     /// Pushes every branch of the member's team repository that origin does not have yet: members' branches and the
     /// team branch, never the base branch or main/master. A member branch origin has behind the team's copy (its commits
-    /// reached origin through another branch, a merge into main) is fast-forwarded too (B067). Called after each run's fetch-back (and so after the
+    /// reached origin through another branch, a merge into main) is fast-forwarded too. Called after each run's fetch-back (and so after the
     /// Manager's run in which it declared the workflow complete). Never forced; a refused branch does not stop the
     /// others; the first transport failure stops the push and names what did not go. Never throws for git: a failed
     /// push is reported, never the run's failure (a transport problem, not an agent fault).
@@ -839,7 +904,7 @@ public sealed partial class TeamRepos
         if (repo is null || !Directory.Exists(repo.Path)) return TeamPublishReport.None;
         if (!PushesToOrigin(member.TeamId)) return TeamPublishReport.None; // the person turned pushing off for this team
         var report = await PublishRepoAsync(member, repo.Path, repo.BaseBranch, ct);
-        // B079: what reached origin is a Monitor code event (the primary repository's branches).
+        // What reached origin is a Monitor code event (the primary repository's branches).
         if (report.Result is TeamPublishResult.Published or TeamPublishResult.Rejected or TeamPublishResult.PushFailed)
             await RecordPushedAsync(member, repo.Path, report.Result == TeamPublishResult.Published ? report.Branches : report.Published ?? [], workflowId, ct);
         // The team's other writable repositories are pushed the same way; their outcome is folded into the report.
@@ -869,12 +934,12 @@ public sealed partial class TeamRepos
                 var isAhead = ahead.ExitCode != 0 || ahead.Stdout != "0";
                 // The team branch is also compared with origin's copy: a fast-forward to a member's tip adds no commit,
                 // yet origin's team branch has not moved. So is a member branch: one moved to members/<team>/<name>
-                // (B016) holds only commits origin has on the old name, yet origin does not have the new one.
+                // holds only commits origin has on the old name, yet origin does not have the new one.
                 if (!isAhead && (branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal) || branch.StartsWith(BranchPrefix, StringComparison.Ordinal)))
                 {
                     var local = await Git.TryRunAsync(repo.Path, ["rev-parse", "refs/heads/" + branch], ct);
                     var remote = await Git.TryRunAsync(repo.Path, ["rev-parse", "--verify", "-q", "refs/remotes/origin/" + branch], ct);
-                    // A member branch when origin lacks it, or (B067) when origin's copy is behind the team's: a fast-forward,
+                    // A member branch when origin lacks it, or when origin's copy is behind the team's: a fast-forward,
                     // never forced. One origin has at a commit the team's copy does not contain is not ours to move (Realign).
                     isAhead = remote.ExitCode != 0 || (remote.Stdout != local.Stdout && (branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal)
                         || (await Git.TryRunAsync(repo.Path, ["merge-base", "--is-ancestor", remote.Stdout, local.Stdout], ct)).ExitCode == 0));
@@ -893,7 +958,7 @@ public sealed partial class TeamRepos
             string? rejection = null;
             for (var i = 0; i < unpublished.Count; i++)
             {
-                // B020: origin has a branch at one of this one's parent paths (members/<team> for members/<team>/<name>):
+                // Origin has a branch at one of this one's parent paths (members/<team> for members/<team>/<name>):
                 // not pushed, said plainly, never git's "cannot lock ref".
                 var blockers = (await BlockersOnOriginAsync(repo.Path, unpublished[i], ct)).ToList();
                 // A branch on origin is never deleted here, not even a member's own old branch that its new one is under
@@ -923,10 +988,16 @@ public sealed partial class TeamRepos
                     rejection ??= output;
                     continue;
                 }
-                _log?.Invoke($"team {member.Team}: push to origin failed: {output}");
+                // which branch, git's exit code and the remote (its URL redacted).
+                Logs.Diag.Warning("teams", $"team {member.Team}: push of {unpublished[i]} to origin failed (exit {run.ExitCode}): {output}",
+                    ("team", member.Team), ("branch", unpublished[i]), ("status", run.ExitCode), ("remote", PersonGitPush.Redact(origin.Stdout)),
+                    ("repo", repo.Path));
                 return new TeamPublishReport(TeamPublishResult.PushFailed, [.. rejected, .. unpublished.Skip(i)], output, published);
             }
-            if (published.Count > 0) _log?.Invoke($"team {member.Team}: pushed {string.Join(", ", published)} to origin");
+            // One line per publish (every branch it pushed), at debug: the Monitor and the Manager's notice say it too.
+            if (published.Count > 0)
+                Logs.Diag.Debug("teams", $"team {member.Team}: pushed {string.Join(", ", published)} to origin",
+                    ("team", member.Team), ("member", member.Qualified), ("repo", repo.Path));
             return rejected.Count > 0
                 ? new TeamPublishReport(TeamPublishResult.Rejected, rejected, rejection, published)
                 : new TeamPublishReport(TeamPublishResult.Published, published);

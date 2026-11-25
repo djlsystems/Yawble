@@ -229,7 +229,7 @@ public class CliDetectionTests
             .File("/home/u/.grok/downloads/grok-1.0.70-linux-x86_64", FakeHost.Elf)
             .Link("/home/u/.grok/bin/grok", "../downloads/grok-1.0.77-linux-x86_64")
             .Link("/home/u/.local/bin/grok", "/home/u/.grok/bin/grok")
-            .File("/home/u/.grok/auth.json", "{}")
+            .File("/home/u/.grok/auth.json", SignInTests.GrokAuthJson)
             .OnPath("/home/u/.local/bin", "/usr/bin");
         f.VersionOutput = "grok 1.0.77 (50ca579fa996)";
 
@@ -246,8 +246,9 @@ public class CliDetectionTests
         var probe = Assert.Single(f.Probes);
         Assert.Equal(["--no-auto-update", "--version"], probe.Arguments);
         Assert.Equal("1", probe.Environment["GROK_DISABLE_AUTOUPDATER"]);
-        NoConfigReads(f, g, "/home/u/.grok/downloads");
-        Assert.DoesNotContain(f.Reads, r => r.EndsWith("auth.json"));
+        // auth.json is the one file of ~/.grok read: whether it holds a token.
+        NoConfigReads(f, g, "/home/u/.grok/downloads", "/home/u/.grok/auth.json");
+        Assert.Equal(SignInStatus.SignedIn, g.SignIn!.Status);
     }
 
     [Fact]
@@ -472,7 +473,7 @@ public class CliDetectionTests
             .File(@"C:\Users\u\.grok\bin\grove.exe", FakeHost.Pe)
             .File(@"C:\Users\u\.grok\downloads\grok-windows-x86_64.exe", FakeHost.Pe)
             .Dir(@"C:\Users\u\AppData\Local\grok\git\2.47.1")
-            .File(@"C:\Users\u\.grok\auth.json", "{}")
+            .File(@"C:\Users\u\.grok\auth.json", SignInTests.GrokAuthJson)
             .OnPath(@"C:\Users\u\.grok\bin");
         f.Vars["LOCALAPPDATA"] = @"C:\Users\u\AppData\Local";
         f.VersionOutput = "grok 1.0.77 (x) [stable]";
@@ -484,7 +485,7 @@ public class CliDetectionTests
         Assert.Equal([@"C:\Users\u\.grok\bin", @"C:\Users\u\AppData\Local\grok\git"], g.ReadOnlyFolders);
         Assert.Equal([@"C:\Users\u\.grok"], g.ConfigFolders);
         Assert.Contains("https://x.ai/cli/install.ps1", g.InstallHelp);
-        NoConfigReads(f, g, @"C:\Users\u\.grok\bin");
+        NoConfigReads(f, g, @"C:\Users\u\.grok\bin", @"C:\Users\u\.grok\auth.json");
     }
 
     [Fact]

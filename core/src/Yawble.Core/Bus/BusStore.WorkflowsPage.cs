@@ -4,14 +4,14 @@ using System.Text.Json;
 namespace Yawble.Core.Bus;
 
 /// <summary>
-/// One workflow's head, read for every workflow at once (B104's Workflows page): its id, first and last time, message
+/// One workflow's head, read for every workflow at once (the Workflows page): its id, first and last time, message
 /// count, newest seq, whether it has ended (as <see cref="BusStore.WorkflowEnded"/> reads it), its root message and the
 /// source of its first message from a member (which team it is, when the root names none).
 /// </summary>
 public sealed record WorkflowHead(long Id, DateTimeOffset First, DateTimeOffset Last, int Count, long MaxSeq, bool Ended,
     Message? Root, string? FirstMemberSource, string? EndType = null, DateTimeOffset? EndAt = null);
 
-/// <summary>B104: the Workflows page's reads, each one statement however many workflows there are.</summary>
+/// <summary>The Workflows page's reads, each one statement however many workflows there are.</summary>
 public sealed partial class BusStore
 {
     /// <summary>Every workflow's head, newest activity first. One statement.</summary>

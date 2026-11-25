@@ -6,9 +6,37 @@ namespace Yawble.Core.Credentials;
 /// <summary>The current Grok session as the gateway needs it. Never logged.</summary>
 public sealed record GrokSession(string AccessToken, DateTimeOffset? ExpiresAt, string? AuthMode)
 {
+    /// <summary>The same entry carries a refresh token: grok can renew this session itself.</summary>
+    public bool HasRefreshToken { get; init; }
+
     public bool ExpiredAt(DateTimeOffset now, TimeSpan? margin = null) => ExpiresAt is { } at && now + (margin ?? TimeSpan.Zero) >= at;
 
-    public override string ToString() => $"GrokSession(<redacted>, expires {ExpiresAt:O}, mode {AuthMode})";
+    /// <summary>
+    /// Usable now: unexpired, or expired with a refresh token grok can renew it with. An expired session without one
+    /// is a sign-in in name only.
+    /// </summary>
+    public bool UsableAt(DateTimeOffset now) => HasRefreshToken || !ExpiredAt(now);
+
+    public override string ToString() => $"GrokSession(<redacted>, expires {ExpiresAt:O}, mode {AuthMode}, refresh token {(HasRefreshToken ? "yes" : "no")})";
+}
+
+/// <summary>What auth.json holds, for the Agents tile (no value is ever kept or shown).</summary>
+public enum GrokAuthState
+{
+    /// <summary>No auth.json.</summary>
+    Missing,
+
+    /// <summary>Not JSON, not a JSON object, or empty: grok cannot use it.</summary>
+    Unreadable,
+
+    /// <summary>A JSON object with no access token in it (`{}`: grok cleared its sign-in).</summary>
+    NoToken,
+
+    /// <summary>A token that has expired, and no refresh token to renew it with.</summary>
+    Expired,
+
+    /// <summary>A token grok can use (unexpired, or renewable with its refresh token).</summary>
+    Usable,
 }
 
 /// <summary>
@@ -39,7 +67,8 @@ public sealed class GrokHome
     /// <summary>
     /// True for the person's OWN Grok home on this computer (GROK_HOME, else ~/.grok), which the person's grok signed in
     /// to outside the app. The app only reads it and lets the person's own grok renew it; it never creates, widens or
-    /// deletes anything in it.
+    /// deletes anything in it. The one write: the keeper puts auth.json back as it was when its own grok run left it
+    /// with no token (<see cref="RestoreAuth"/>).
     /// </summary>
     public bool PersonsOwn { get; private init; }
 
@@ -71,6 +100,40 @@ public sealed class GrokHome
 
     public bool SignedIn => ReadSession() is not null;
 
+    /// <summary>auth.json's bytes as they are now; null when there is none or it cannot be read.</summary>
+    public byte[]? ReadAuthBytes()
+    {
+        try
+        {
+            return File.ReadAllBytes(AuthFile);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Puts auth.json back as <paramref name="bytes"/> (the keeper's copy from before a grok run that left it signed
+    /// out). Written beside it and moved over it, so a reader never sees half a file.
+    /// </summary>
+    public bool RestoreAuth(byte[] bytes)
+    {
+        var temp = AuthFile + ".yawble-restore";
+        try
+        {
+            File.WriteAllBytes(temp, bytes);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.Move(temp, AuthFile, overwrite: true);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            try { File.Delete(temp); } catch (Exception d) when (d is IOException or UnauthorizedAccessException) { }
+            return false;
+        }
+    }
+
     /// <summary>The session in auth.json, or null when there is none (not signed in, or a file we cannot read).</summary>
     public GrokSession? ReadSession()
     {
@@ -87,6 +150,13 @@ public sealed class GrokHome
         {
             return null; // mid-rewrite by xAI's CLI: the caller retries on the next request
         }
+        return Parse(text);
+    }
+
+    /// <summary>The session in auth.json's text; null when it holds none (empty, `{}`, bad JSON, no token).</summary>
+    public static GrokSession? Parse(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
         try
         {
             using var doc = JsonDocument.Parse(text);
@@ -95,6 +165,29 @@ public sealed class GrokHome
         catch (JsonException)
         {
             return null;
+        }
+    }
+
+    /// <summary>What auth.json's text holds (null text: there is no file).</summary>
+    public static GrokAuthState Inspect(string? text, DateTimeOffset now)
+    {
+        if (text is null) return GrokAuthState.Missing;
+        if (string.IsNullOrWhiteSpace(text)) return GrokAuthState.Unreadable;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return GrokAuthState.Unreadable;
+            return Pick(doc.RootElement) switch
+            {
+                // A refresh token alone (the access token dropped): grok renews the session from it on its next run.
+                null => HoldsRefreshToken(doc.RootElement) ? GrokAuthState.Usable : GrokAuthState.NoToken,
+                { } s when s.UsableAt(now) => GrokAuthState.Usable,
+                _ => GrokAuthState.Expired,
+            };
+        }
+        catch (JsonException)
+        {
+            return GrokAuthState.Unreadable;
         }
     }
 
@@ -118,8 +211,28 @@ public sealed class GrokHome
         if (entry.ValueKind != JsonValueKind.Object) return null;
         var token = Text(entry, "access_token") ?? Text(entry, "key");
         if (string.IsNullOrEmpty(token)) return null;
-        return new GrokSession(token, Expiry(entry), Text(entry, "auth_mode"));
+        return new GrokSession(token, Expiry(entry), Text(entry, "auth_mode")) { HasRefreshToken = !string.IsNullOrEmpty(Text(entry, "refresh_token")) };
     }
+
+    /// <summary>The root (flat file) or one of its entries carries a refresh token.</summary>
+    public static bool HoldsRefreshToken(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return HoldsRefreshToken(doc.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HoldsRefreshToken(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object
+        && (!string.IsNullOrEmpty(Text(root, "refresh_token"))
+            || root.EnumerateObject().Any(p => p.Value.ValueKind == JsonValueKind.Object && !string.IsNullOrEmpty(Text(p.Value, "refresh_token"))));
 
     private static string? Text(JsonElement entry, string name) =>
         entry.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

@@ -25,7 +25,7 @@ export interface CoreInfo {
   sandbox: SandboxInfo;
   schema: string[];
   hostChecks?: HostCheck[];
-  /** A remote view's access, over the Cloud Link (B025): "read" for a workgroup Visitor. Missing means "full". */
+  /** A remote view's access, over the Cloud Link: "read" for a workgroup Visitor. Missing means "full". */
   remoteAccess?: RemoteAccess;
 }
 
@@ -223,6 +223,8 @@ export interface LogSourceInfo {
   prunable: boolean; loss: string | null; keptBecause: string | null; defaultDays: number | null; retentionDays: number | null;
   /** Whether the team and member filters apply to it. */
   team: boolean; member: boolean;
+  /** Whether its rows carry a level and it offers the Level filter (logs.query level; debug hidden by default). */
+  levels?: boolean;
 }
 /** A page of a log (logs.query). total: on the first page only. next: the offset of the next page, null at the end. */
 export interface LogPage { rows: Record<string, string | number | null>[]; total: number | null; asOf: string; next: number | null }
@@ -261,7 +263,8 @@ export type CompanionLevel = 'read' | 'act' | 'destructive';
 export interface CompanionClientInfo { name: string; level: CompanionLevel; pairedAt: string; pairedBy: string; lastUsedAt: string | null; revokedAt: string | null }
 export interface CompanionPairing { id: string; name: string; level: CompanionLevel; code: string; expires: string }
 /** A destructive call waiting for the person: `plan` is agent-influenced text, always shown as plain text. */
-export interface CompanionAction { id: string; client: string; tool: string; plan: string; expires: string; state: 'pending' | 'running' }
+/** A companion request waiting for the person. `asked` is when it was made (ISO UTC, like `expires`; an older core leaves it out). */
+export interface CompanionAction { id: string; client: string; tool: string; plan: string; expires: string; asked?: string; state: 'pending' | 'running' }
 export interface CompanionList { clients: CompanionClientInfo[]; pairings: CompanionPairing[]; actions: CompanionAction[] }
 /** companion.decideAction and companion.actionStatus (a read only): running for an approval just made (the run goes on in the core; companion.changed says when it ends),
  *  else how the request ended (changed: the list moved on, nextId is the new request). */
@@ -290,7 +293,19 @@ export interface TeamDefaults {
   countries: { code: string; label: string }[];
   /** How many names on the list a member of some team already has. */
   usedCount: number;
+  /** The hire list new teams start with (absent from an older core). */
+  hireList?: HireRow[];
 }
+
+/** roles.list: a role of the catalog (Settings > Teams > Roles). name is one word, also the name word on hire;
+ *  job becomes the hire's standing instructions; agent and model are the suggestion (model null: the agent's default). */
+export interface RoleRow { name: string; job: string; agent: string; model: string | null }
+
+/** A row of a hire list (who the Manager may hire): a role, its agent and model (null: the agent's default). */
+export interface HireRow { role: string; agent: string; model: string | null }
+
+/** teams.hireList: a team's rows (role, agent, model) with the role's job. There is no count or maximum per role. */
+export interface TeamHireRow extends HireRow { job: string }
 
 /** teams.setDefaults: what was saved, and the member-name lines that were not (with why). */
 export interface TeamDefaultsSaved { saved: unknown; rejected: { line: string; reason: string }[] }
@@ -314,7 +329,7 @@ export interface UpdateStatus {
 export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
-export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'workflows.'] as const;
+export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'workflows.', 'scripts.', 'schemas.', 'roles.'] as const;
 
 export function isUiMethod(method: unknown): method is string {
   return typeof method === 'string' && UI_METHOD_PREFIXES.some((p) => method.startsWith(p)) && /^[a-zA-Z.]+$/.test(method);
@@ -343,7 +358,7 @@ export interface CommandLines {
   cli: string;
   /** The custom agent's name, or the built-in's id. */
   agent?: string;
-  model: { model: string; source: 'member' | 'agent' | 'cli' | string; label: string };
+  model: { model: string; source: 'member' | 'agent' | 'settings' | 'cli' | string; label: string }; // label shown as the core says it
   headless: CommandLineKind;
   interactive: CommandLineKind;
 }
@@ -352,7 +367,10 @@ export interface CommandLineKind { argv: string[]; env: string[]; launch?: strin
 /** One built-in argument (flag + value): locked = the app depends on it (reason says why); tail = it carries the prompt and stays last;
  *  removed = the customization described removes it. Per-run values are placeholders (<prompt>, <session id>, <workspace>/…). */
 export interface ArgGroup { tokens: string[]; locked: boolean; tail: boolean; removed: boolean; reason?: string | null }
-export interface AgentModelList { models: string[]; source: 'app' | string } // the app's own list: no CLI is run for it
+/** One model of agents.models and where the app found it; fromLabel is the hint shown beside it ("your Codex settings"). */
+export interface AgentModelItem { model: string; from: 'cli' | 'settings' | 'runs' | 'builtin' | string; fromLabel: string }
+/** agents.models: the models (no CLI is run for it); items, when the core sends them, says where each comes from. */
+export interface AgentModelList { models: string[]; source: 'cli' | 'settings' | 'runs' | 'builtin' | string; items?: AgentModelItem[] }
 export interface AgentVersionStatus { cli: string; detected: string | null; lastRun: string | null; changed: boolean }
 /** agentProfiles.list: every agent one can choose (built-ins with their default model, then the custom ones). */
 export interface AgentProfileRow {
@@ -368,26 +386,30 @@ export interface AgentTestSession { cli: string; agent: string; kind: 'terminal'
 /** The push when one starts or ends (agents.testChanged; never over the Cloud Link). */
 export const AGENT_TEST_CHANGED = 'agents.testChanged';
 
-export interface TeamSummary { id: number; name: string; repoPath: string | null; members: number; running: number; queued: number; paused?: boolean; archived?: boolean }
+export interface TeamSummary {
+  id: number; name: string; repoPath: string | null; members: number; running: number; queued: number; paused?: boolean; archived?: boolean;
+  /** How many of its members have an open needs_decision (older cores: absent, read as 0). */
+  waiting?: number;
+}
 /** Whether a team may be archived or deleted (teams.quiet): what is still working, and its open workflows. */
 export interface TeamQuiet { quiet: boolean; working: string[]; openWorkflows: number[] }
 /** A team's workflow (bus.workflows): one piece of work and everything it led to. */
 export interface WorkflowSummary {
   id: number; title: string; owner: string | null; state: WorkflowState; undeclared: boolean;
   busy: string[]; ending: string | null; startedAt: string; lastAt: string; messages: number;
-  /** B085: an ended workflow's recorded end; for an expired one its last real activity, not the expiry time (older cores: absent). */
+  /** An ended workflow's recorded end; for an expired one its last real activity, not the expiry time (older cores: absent). */
   endedAt?: string | null;
-  /** B085: when the app closed it as expired; null otherwise. */
+  /** When the app closed it as expired; null otherwise. */
   expiredAt?: string | null;
-  /** B085: when an open, idle workflow would expire; null when it is not idle (a run, a wake or a trigger is pending). */
+  /** When an open, idle workflow would expire; null when it is not idle (a run, a wake or a trigger is pending). */
   expiresAt?: string | null;
-  /** B085: the question an open workflow waits on the person for (its number), when the core names one. */
+  /** The question an open workflow waits on the person for (its number), when the core names one. */
   question?: number | null;
-  /** B086: its overall time and breakdown, computed by the core (older cores: absent). */
+  /** Its overall time and breakdown, computed by the core (older cores: absent). */
   time?: ItemTime | null;
 }
 
-// ---- B086: overall time and the timeline (core card 429). The core computes every time; the screens only format. ----
+// ---- Overall time and the timeline. The core computes every time; the screens only format. ----
 /** The categories, each moment of a card or workflow in exactly one (kebab-case on the wire). */
 export type TimeCategory = 'agent-working' | 'stalled' | 'waiting-on-you' | 'waiting-for-slot' | 'waiting-on-teammate'
   | 'blocked' | 'scheduled' | 'not-started' | 'idle' | 'was-done';
@@ -422,32 +444,48 @@ export interface Timeline {
   markers: TimelineMarker[];
 }
 export const TIMELINE_GET = 'timeline.get';
-/** A workflow's state (bus.workflows): "expired" is closed by the app after workflowExpiryDays without activity (B085). */
+/** A workflow's state (bus.workflows): "expired" is closed by the app after workflowExpiryDays without activity. */
 export type WorkflowState = 'open' | 'completed' | 'closed' | 'expired';
-/** B085: the RPC that resets an open workflow's expiry clock ({ teamId, workflow }). */
+/** The RPC that resets an open workflow's expiry clock ({ teamId, workflow }). */
 export const WORKFLOW_EXTEND = 'bus.workflowExtend';
-/** B085: a team's "expire idle workflows after N days" setting ({ teamId, days? } -> { days }); default 3. */
+/** A team's "expire idle workflows after N days" setting ({ teamId, days? } -> { days }); default 3. */
 export const TEAM_WORKFLOW_EXPIRY = 'teams.workflowExpiry';
 export const WorkflowExpiryDefaultDays = 3;
+/** A team's "Allow localhost (macOS)" ({ teamId, on? } -> { on }); off by default. Setting it is a full-access change. */
+export const TEAM_LOCALHOST = 'teams.localhost';
+export const TEAM_LOCALHOST_LABEL = 'Allow localhost (macOS)';
+/** The warning shown with the toggle, word for word. */
+export const TEAM_LOCALHOST_WARNING = "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners. While it is on, a server an agent starts on `0.0.0.0` can be reached from other machines on your network unless the macOS firewall blocks it. Keep the macOS firewall on. Outbound traffic still goes only through the gateway.";
 /** The time a workflow's row shows: its recorded end once ended (an expired one: its last activity), else its last entry. */
 export function workflowTime(w: Pick<WorkflowSummary, 'state' | 'lastAt' | 'endedAt'>): string {
   return w.state !== 'open' && w.endedAt ? w.endedAt : w.lastAt;
 }
-// ---- B104: the Workflows page (core card 476, YAWBLE_TEAM_DOCS/B104/contract.md): every team's workflows in one table ----
+// ---- The Workflows page (the core's workflows.list / workflows.get contract): every team's workflows in one table ----
 export const WORKFLOWS_LIST = 'workflows.list';
 export const WORKFLOWS_GET = 'workflows.get';
 /** The Status column: an ended workflow's state, or how an open one stands (first match: needs-you, running, waiting, stopped, idle). */
 export type WorkflowRowStatus = 'running' | 'needs-you' | 'waiting' | 'idle' | 'stopped' | 'completed' | 'closed' | 'expired';
 /** The backlog item a workflow was dispatched from (archived: open it in the Backlog's archive). */
 export interface WorkflowItem { label: string; title: string; archived: boolean }
-/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits for a run slot. */
-export interface WorkflowMember { id: number; name: string; state: 'running' | 'lease' | 'queued' }
-/** A workflows.list row: every WorkflowSummary field (title cleaned), plus the B104 fields. No tokens, no cost. */
+/**
+ * Why a member's delivery has not started (the core's worker states). queued: in the run queue, waiting for a run
+ * slot (the only one that counts as Waiting for a slot on the timeline); waits-for-run: a hand-back held until the run
+ * that sent it ends (waitsFor: the sender's name); held: the team is paused or archived; pending: anything else.
+ */
+export type WorkerWaitState = 'queued' | 'waits-for-run' | 'held' | 'pending';
+/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits (WorkerWaitState). */
+export interface WorkflowMember {
+  id: number; name: string; state: 'running' | 'lease' | WorkerWaitState;
+  /** waits-for-run: the member whose run must end first. */
+  waitsFor?: string | null;
+}
+/** A workflows.list row: every WorkflowSummary field (title cleaned), plus the Workflows page's fields. No tokens, no cost. */
 export interface WorkflowRow extends WorkflowSummary {
   ownerId: number | null;
   team: string; teamId: number;
   status: WorkflowRowStatus;
-  waitingFor: 'slot' | 'lease' | 'wake' | null;
+  /** slot only while a member is in the run queue; else what the undelivered work waits for (WorkerWaitState words). */
+  waitingFor: 'slot' | 'lease' | 'wake' | 'waits-for-run' | 'held' | 'pending' | null;
   /** A run of it is active right now (the icon is animated), whatever the status. */
   working: boolean;
   item: WorkflowItem | null;
@@ -533,11 +571,12 @@ export interface ConnectionField { key: string; label: string; secret: boolean; 
 /** 'website' is a login kept in the app window's own session: one non-secret field `site`, no secret.
  * 'oauth' is a browser sign-in with the person's own app: secrets access_token, refresh_token, client_secret (masked); shown in full:
  * client_id, authorize_endpoint, token_endpoint, granted_scopes (space-separated), expires_at and provider (when one was given). */
-export type ConnectionKind = 'secret' | 'oauth' | 'website';
+/** 'email': a mailbox over IMAP and SMTP (fields address, imapHost, imapPort, smtpHost, smtpPort, user; password secret). */
+export type ConnectionKind = 'secret' | 'oauth' | 'website' | 'email';
 export interface Connection {
   id: number; name: string; kind: ConnectionKind; fields: ConnectionField[];
   status: 'untested' | 'works' | 'needs_reconnect'; statusReason: string | null; testedAt: string | null; usedBy: string[];
-  /** The host tasks with an environment variable from this Connection (B023); removing it stops them starting. Absent from an older core. */
+  /** The host tasks with an environment variable from this Connection; removing it stops them starting. Absent from an older core. */
   usedByTasks?: ConnectionTaskUse[];
 }
 /** A host task that binds a Connection: its team and its name. */
@@ -549,13 +588,24 @@ export interface ApiRow {
   name: string; baseUrl: string; docsUrl: string | null; specUrl: string | null; title: string | null;
   connection: { id: number; name: string; status: Connection['status']; statusReason?: string | null } | null;
   /** chosen: the person said how it signs in (the spec did not). */
-  auth: { type: 'bearer' | 'header' | 'query' | 'basic' | string; name: string | null; description: string | null; chosen?: boolean } | null;
+  /** pathParams: a path parameter (its name in the route) filled from a Connection field that is not secret, e.g. { AccountSid: 'username' }. */
+  auth: { type: 'bearer' | 'header' | 'query' | 'basic' | string; name: string | null; description: string | null; chosen?: boolean; pathParams?: Record<string, string> | null } | null;
+  /** The path parameters (names in the route) the API's operations take; null for a website. */
+  pathParamNames?: string[] | null;
+  /** Those nearly every operation takes (an account id in every address, e.g. Twilio's AccountSid): offered to fill from the sign-in. */
+  pathParamCommon?: string[] | null;
   signIn: { label: string; description: string | null; fields: { key: string; label: string; secret: boolean }[] } | null;
   /** An OAuth 2 API (auth.type 'oauth2'): the spec's addresses (null when it gave none usable, or only an OpenID address), the scopes the
    * allowed and ask-first actions need, and those its Connection was not granted (non-empty: "Sign in again to allow the new actions"). */
   oauth?: { authorizeUrl: string | null; tokenUrl: string | null; openIdConnectUrl?: string | null; neededScopes: string[]; missingScopes: string[] } | null;
   status: string | null; all: boolean; teams: number[]; counts: DiscoverChecklistData['counts'] | null;
 }
+/** integrations.emailList: a mailbox (an email account Connection) that scripts on the teams it is turned on for can read. */
+export interface EmailIntegration { id: number; name: string; kind: 'email'; connectionId: number | null; connection: unknown; enabledAll: boolean; teamIds: number[] }
+/** integrations.apiPeek { url }: what Add API fills in from one address (nothing is saved). */
+export type ApiPeekResult =
+  | { found: true; specUrl: string; title: string | null; serviceUrl: string | null; name: string; actions: number; signIn: string | null }
+  | { found: false; reason: string; serviceUrl: string; name: string };
 /** integrations.oauthDiscover { provider }: the provider's addresses and offered scopes from its metadata, or found: false (use Advanced). */
 export type OAuthDiscoverResult =
   | { found: true; issuer: string; authorizeUrl: string; tokenUrl: string; scopes: string[] }
@@ -576,7 +626,7 @@ export interface WatchInfo {
 export interface TaskAskDetail {
   commit: string; program: string; workdir: string; args: string[]; timeout_s: number; env_names: string[]; pin_mode: 'files' | 'commit';
   pinned: string[]; warnings: string[]; standingApproval: boolean;
-  /** Each binding as shown ("GH_TOKEN ← Connection 'Name' (field)"): names only, never a value (B023). */
+  /** Each binding as shown ("GH_TOKEN ← Connection 'Name' (field)"): names only, never a value. */
   env_from_connections?: string[];
   changed?: {
     approvedCommit: string; currentCommit: string; diffAvailable: boolean; definitionHashChanged: boolean; filesHashChanged: boolean;
@@ -593,11 +643,11 @@ export interface IntegrationAsk {
 export interface HostTaskDef {
   name: string; repo: string; program: string; args: string[]; workdir: string; timeoutSeconds: number; envNames: string[]; watch: string[];
   pinMode: 'files' | 'commit'; commandLineOnly: boolean;
-  /** Environment variables whose value is read from a Connection's secret field at start (B023). The binding is pinned, never the value. */
+  /** Environment variables whose value is read from a Connection's secret field at start. The binding is pinned, never the value. */
   envFromConnections?: EnvFromConnection[];
-  /** One line on what the task does, shown on the task row and to the Concierge (B066). Omitted when empty. */
+  /** One line on what the task does, shown on the task row and to the Concierge. Omitted when empty. */
   description?: string;
-  /** What to check once it has run, e.g. a health URL (B066). Omitted when empty. */
+  /** What to check once it has run, e.g. a health URL. Omitted when empty. */
   checkAfter?: string;
 }
 /** One binding: variable `name` takes the secret `field` of Connection `connectionId`; `connectionName` is for display only. */
@@ -619,8 +669,9 @@ export interface TaskPreview {
   problem: string | null; programResolved: string | null; commit: string | null; pinned: string[]; warnings: string[]; commandLineOnly: boolean;
 }
 export interface RunSlots { running: number; limit: number; queued: number }
-/** folderAsks: folder asks waiting for the person (folder.asks, B111), already counted in needsYou. Older cores omit it. */
-export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; networkAsks?: number; toolAsks?: number; folderAsks?: number; heavy?: LeaseSnapshot }
+/** folderAsks: folder asks waiting for the person (folder.asks), already counted in needsYou. Older cores omit it. */
+/** newest: the newest question or request waiting for the person, with its team; null or absent when none (or an older core). */
+export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; networkAsks?: number; toolAsks?: number; folderAsks?: number; heavy?: LeaseSnapshot; newest?: { kind: string; title: string; team?: string | null; at?: string } | null }
 /** How the person answers a folder ask: read-write (only for a read-write ask), read-only, or deny. Never wider than asked. */
 export type FolderAskChoice = 'readwrite' | 'read' | 'deny';
 /**
@@ -736,7 +787,7 @@ export interface Skill {
   teamId: number | null; team: string | null; id: number | null; updatedAt: string | null;
 }
 
-/** B100: a team's lessons, the team-scoped skill the Manager's retrospectives keep (team_retros_write). */
+/** A team's lessons, the team-scoped skill the Manager's retrospectives keep (team_retros_write). */
 export const TEAM_RETROS = 'team_retros';
 /** A team skill's kept versions, newest first ({ teamId, name } → SkillVersion[]). */
 export const SKILLS_VERSIONS = 'skills.versions';
@@ -767,13 +818,17 @@ export interface TriggerSchedule {
   kind: 'every' | 'cron' | 'once' | 'folder' | 'event'; intervalSec: number | null; cron: string | null; timezone: string | null; fireAt: string | null;
 }
 export type WakeManager = 'always' | 'onHandbackOrFailure' | 'never';
+/** Which folder changes fire a folder trigger. A new trigger takes 'added'; one saved without it (an older core) is 'any'. */
+export type WatchFireOn = 'added' | 'added-or-changed' | 'any';
+export const WATCH_FIRE_ON_LABELS: Record<WatchFireOn, string> = { added: 'Added files', 'added-or-changed': 'Added or changed', any: 'Any change' };
+export const fireOnOf = (w: { fireOn?: WatchFireOn | null } | null | undefined): WatchFireOn => w?.fireOn ?? 'any';
 export interface Trigger {
   id: number; teamId: number; memberId: number; name: string; schedule: TriggerSchedule; instruction: string;
   onlyWhenIdle: boolean; enabled: boolean; nextDueAt: string | null; lastFiredAt: string | null;
   /** Whether the trigger's runs wake the Manager when they end (a hand-back always does). */
   wakeManager: WakeManager;
   /** A folder-change trigger's folder: the team's documents (path inside) or a folder on this computer. */
-  watch?: { root: 'documents' | 'host'; path: string; glob: string | null; quietSec: number } | null;
+  watch?: { root: 'documents' | 'host'; path: string; glob: string | null; quietSec: number; fireOn?: WatchFireOn | null } | null;
   /** An event trigger's event name pattern (web.pr, web.*). */
   eventName?: string | null;
   lastOutcome: 'fired' | 'skipped' | 'missed' | 'member-missing' | null; lastReason: string | null; lastSeq: number | null; missedCount: number;
@@ -781,7 +836,7 @@ export interface Trigger {
 export interface TriggerFire { outcome: string; seq: number | null; reason: string | null }
 
 /** The Git dialog (git.status / git.fetch / git.bringCurrent / git.merge / git.askTeam / git.deleteBranches; core Teams/TeamRepos.Git.cs). */
-/** B073 (absent from an older core): aheadRange, the pair behind aheadOfBase; push, the branch's local-only flag. */
+/** Absent from an older core: aheadRange, the pair behind aheadOfBase; push, the branch's local-only flag. */
 export interface TeamGitBranch {
   branch: string; sha: string; aheadOfBase: number; inTeamBranch: boolean; aheadRange?: CommitRangeRef | null; push?: BranchPush | null;
 }
@@ -799,10 +854,10 @@ export interface TeamGitStatus {
    * they block this team's member branches: one entry per ref, here (local) or on origin (remote). Absent from a core
    * that does not list them. */
   blockingBranches?: TeamGitBlockingBranch[];
-  /** B073: the commit pair behind each count (absent from an older core). */
+  /** The commit pair behind each count (absent from an older core). */
   ranges?: TeamGitRanges | null;
 }
-/** inUseBy (core card 104): a member is still on it, its old members/<name> ("team Alpha's member Ada", or "member Docs of
+/** inUseBy: a member is still on it, its old members/<name> ("team Alpha's member Ada", or "member Docs of
  * this team"); it is not deleted from the dialog but moves to movesTo at that member's next start. Absent otherwise. */
 export interface TeamGitBlockingBranch { name: string; repo: string; location: 'local' | 'remote'; inUseBy?: string; movesTo?: string }
 /** git.deleteBranches without confirm: what would be deleted, as text for the person, and the token that confirms exactly
@@ -810,10 +865,10 @@ export interface TeamGitBlockingBranch { name: string; repo: string; location: '
  * means the branches changed since the plan. */
 export interface GitDeletePlan { plan: string; token: string; empty: boolean }
 export interface GitDeleteResult { result: string }
-/** B075 (cards 446/447): the hosting provider of a repository's origin. none: plain git (no links unless a link pattern). */
+/** The hosting provider of a repository's origin. none: plain git (no links unless a link pattern). */
 export type GitProvider = 'github' | 'gitlab' | 'bitbucket' | 'azuredevops' | 'gitea' | 'none';
 export const GIT_PROVIDERS: GitProvider[] = ['github', 'gitlab', 'bitbucket', 'azuredevops', 'gitea', 'none'];
-/** B075: what teams.repos adds to main and to each extra (absent from an older core). provider: the person's override
+/** What teams.repos adds to main and to each extra (absent from an older core). provider: the person's override
  * (null: none, detection is used); providerDetected: from origin; linkPattern: one or more templates separated by
  * whitespace, each used for the link kind whose placeholders it holds (LINK_PATTERN_KINDS); prSupported, or
  * prUnavailable: why not (shown as is). The core may also send providerOverride, equal to provider: ignored. */
@@ -821,14 +876,14 @@ export interface RepoProviderInfo {
   provider?: GitProvider | null; providerDetected?: GitProvider | null; linkPattern?: string | null;
   prSupported?: boolean; prUnavailable?: string | null;
 }
-/** B075 git.webLink {teamId, team, repo?, kind, commit?, branch?, file?, from?, to?, pr?} -> { url } (null: no link, e.g.
+/** git.webLink {teamId, team, repo?, kind, commit?, branch?, file?, from?, to?, pr?} -> { url } (null: no link, e.g.
  * a commit not on origin or a host with no provider and no pattern). */
 export const GIT_WEB_LINK = 'git.webLink';
 export type GitWebLinkKind = 'commit' | 'branch' | 'file' | 'compare' | 'pr';
 export interface GitWebLinkQuery { kind: GitWebLinkKind; commit?: string; branch?: string; file?: string; from?: string; to?: string; pr?: number }
-/** B075 teams.setRepo {teamId, name? (an extra's; absent: the main one), provider (null: detect), linkPattern (null: none)}. */
+/** teams.setRepo {teamId, name? (an extra's; absent: the main one), provider (null: detect), linkPattern (null: none)}. */
 export const TEAMS_SET_REPO = 'teams.setRepo';
-/** B075 (Marlo, card 446): a linkPattern template is used for the kind whose placeholders it holds exactly; {base} and
+/** A linkPattern template is used for the kind whose placeholders it holds exactly; {base} and
  * {path} may appear in any template. */
 export const LINK_PATTERN_KINDS: { kind: GitWebLinkKind; placeholders: string[] }[] = [
   { kind: 'commit', placeholders: ['{commit}'] },
@@ -837,7 +892,7 @@ export const LINK_PATTERN_KINDS: { kind: GitWebLinkKind; placeholders: string[] 
   { kind: 'compare', placeholders: ['{from}', '{to}'] },
   { kind: 'pr', placeholders: ['{pr}'] },
 ];
-/** B067 git.tidyPlan {team}: every branch of the team's repositories (here, on origin, in the members' clones) in one class.
+/** git.tidyPlan {team}: every branch of the team's repositories (here, on origin, in the members' clones) in one class.
  * merged: in the base; contained: every commit has an equivalent in the base (proof: git cherry's answer, as text);
  * working: a member's working branch (in use, kept); moved: the team's copy differs from the member's clone (teamSha vs
  * cloneSha; Realign sets the team's and origin's copy to the clone's); own-work: commits of its own (commits), needs a look;
@@ -852,12 +907,12 @@ export interface TidyBranch {
  * that was skipped, for example), so a branch missing from the list is not silently missing. */
 export interface TidyRepo { repo: string; baseBranch?: string | null; branches: TidyBranch[]; notes?: string[] | null }
 export interface TidyPlan { repos: TidyRepo[] }
-/** B067 git.branchRealign {team, repo, member, expectOld?, expectNew?}: the old and new commit of the member branch in
+/** git.branchRealign {team, repo, member, expectOld?, expectNew?}: the old and new commit of the member branch in
  * the team repository (and origin). expectOld / expectNew bind the yes to the team and clone commits the person was
  * shown: the core refuses with code "stale" if either moved. Also refused (an error) while the member runs. */
 export interface BranchRealignResult { oldSha: string; newSha: string }
 /**
- * B072 git.commitShow {team | teamId, sha, repo?} (core TeamRepos.CommitView.cs CommitInfo.ToJson): one commit of the
+ * git.commitShow {team | teamId, sha, repo?} (core TeamRepos.CommitView.cs CommitInfo.ToJson): one commit of the
  * team's repository, from plain git (never an agent's clone). sha: 4 to 64 hex digits, else the error bad_params.
  * found=false: git no longer has it; the answer is then only {found, goneReason, sha} (goneReason is plain words and
  * may name the branch and member). made: the member, card and workflow that made it (the app's own records); absent
@@ -879,14 +934,14 @@ export interface CommitFound {
   isMerge: boolean; parents: string[];
   merge?: { intoBranch: string | null; fromBranch: string | null; fromMember?: string | null; commitCount: number } | null;
   made?: { member: string; card?: number | null; workflow?: number | null } | null;
-  /** deletedFrom (B073): the deleted branch it was on (absent otherwise). */
+  /** deletedFrom: the deleted branch it was on (absent otherwise). */
   where: { inMain: boolean; branches: string[]; otherBranches?: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[]; deletedFrom?: string };
   files: CommitFile[];
   codeShown: boolean;
 }
 export type CommitShow = CommitGone | CommitFound;
 /**
- * B074 git.commitsResolve {team? | teamId?, ids} (contract B074/contract.md, core card 470): which of the commit-shaped IDs
+ * git.commitsResolve {team? | teamId?, ids}: which of the commit-shaped IDs
  * on a screen are real commits, in ONE call. ids: 7 to 40 hex digits each, short or full; at most 200 distinct per call
  * (GIT_COMMITS_RESOLVE_MAX; more is bad_params, so the shell splits above it). Neither team nor teamId: every team.
  * results: one per distinct ID, in the order asked (id lower case); matches: none (not a commit: the text stays text),
@@ -903,7 +958,7 @@ export interface CommitsResolved {
   errors?: { team: string; teamId: number; repo: string | null; message: string }[];
 }
 /**
- * B072 git.commitDiff {team | teamId, sha, path, repo?} (core CommitFileDiff.ToJson): one file's diff against the first
+ * git.commitDiff {team | teamId, sha, path, repo?} (core CommitFileDiff.ToJson): one file's diff against the first
  * parent. Each hunk: git's header line, its starts and counts, and its lines (kind context / added / deleted; old / new:
  * the 1-based line numbers, only on the side(s) the line is on). Binary, over 5000 changed lines or 2M characters, or a
  * pure rename: a summary and no hunks. Errors: gone, no_such_file, bad_params, git_failed; remote_refused for a cloud
@@ -920,7 +975,7 @@ export interface CommitDiff {
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {
   on: boolean; note: string | null; baseBranch: string | null;
-  /** from / to (B073): the pair behind count (from = the team tip, to = the base it is behind), passed unchanged to
+  /** from / to: the pair behind count (from = the team tip, to = the base it is behind), passed unchanged to
    * git.commitRange. The core sends both whenever behind is non-null (contract.md); optional only for an older core. */
   behind: { teamBranch: string; count: number; text: string; from?: string | null; to?: string | null } | null;
 }
@@ -928,18 +983,18 @@ export interface TeamSyncState {
 export interface BranchSyncResult {
   outcome: 'off' | 'no-base' | 'in-step' | 'synced' | 'conflict'; baseBranch: string; baseSha: string | null; behind: number;
   moved: string[]; conflicts: string[]; note: string | null;
-  /** B073: the commits the team branch received from the base, newest first (empty when nothing came in; absent from an
+  /** The commits the team branch received from the base, newest first (empty when nothing came in; absent from an
    * older core: the dialog reads them with git.commitRange from the team commit before to the one after). */
   incoming?: CommitRow[]; incomingCount?: number; incomingTruncated?: boolean; incomingRange?: CommitRangeRef | null;
 }
 export interface TeamGitResult {
   outcome: string; message: string; changed: boolean; sha: string | null; files: string[] | null; status: TeamGitStatus | null;
-  /** B073 (git.bringCurrent, git.merge): the commits that came in / landed, null otherwise; absent from an older core. */
+  /** git.bringCurrent, git.merge: the commits that came in / landed, null otherwise; absent from an older core. */
   commits?: CommitRow[] | null; commitCount?: number; commitsTruncated?: boolean; range?: CommitRangeRef | null;
 }
 
-// ---- B073 (cards 463 core, 465 shell): clickable counts and previews in the Git dialog. Contract (DeveloperTomas):
-// YAWBLE_TEAM_DOCS\B073\contract.md. Every call takes {teamId | team, repo?} and is a read.
+// ---- Clickable counts and previews in the Git dialog (the core's git.commitRange / mergePreview / deletePreview
+// contract). Every call takes {teamId | team, repo?} and is a read.
 /** One commit of a list, newest first. notPushed: THE local-only flag (no origin ref has it; always true without an
  * origin: hasOrigin words it "local only" then, else "not pushed"). */
 export interface CommitRow {
@@ -984,18 +1039,25 @@ export interface DeletePreview {
 export interface MemberRow {
   id: number; teamId: number; team: string; name: string; role: 'manager' | 'member'; cli: 'claude' | 'grok' | 'codex' | 'copilot' | 'antigravity';
   instructions: string; model: string; credential: string;
+  /** The role from the team's hire list the member was hired as (Developer, Tester...); null or absent when none. */
+  hireRole?: string | null;
 }
 
 /** teams.agents' agentModel: the model a member runs and where its name comes from: set on the member, the agent's default,
  *  observed (the CLI's own default; the model its last run used most, at = that run's last request), or cli (not run yet; name ''). */
-export interface AgentModelShown { name: string; source: 'member' | 'agent' | 'observed' | 'cli' | string; at: string | null }
+export interface AgentModelShown { name: string; source: 'member' | 'agent' | 'settings' | 'observed' | 'cli' | string; at: string | null }
 
 export interface AgentCard {
-  member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'queued' | 'idle'; queuePosition: number | null; queueLength: number;
+  /** Besides running and idle, the WorkerWaitState of work not started (an older core sends only queued). */
+  member: MemberRow; agentModel?: AgentModelShown | null; state: 'running' | 'idle' | WorkerWaitState; queuePosition: number | null; queueLength: number;
+  /** Why queued instructions have not started, next to a state of queued or idle (cardState reads either shape). */
+  waitState?: WorkerWaitState | null;
+  /** waits-for-run: the member whose run must end first. */
+  waitsFor?: string | null;
   queuedInstructions: number; statusLine: string | null; runId: number | null; runStartedAt: string | null;
   lastRunState: string | null; lastRunReason: string | null;
   /**
-   * B097: the last run's failure class (core FailureClasses: failed, timeout, idle, stopped, credential, start_failed,
+   * The last run's failure class (core FailureClasses: failed, timeout, idle, stopped, credential, start_failed,
    * interrupted, rate); null when it did not fail. "stopped": the person stopped it (recorded failed, never a failure).
    */
   lastRunFailureClass?: RunFailureClass | null;
@@ -1003,15 +1065,40 @@ export interface AgentCard {
   lease?: 'holding' | 'waiting' | null; leaseWhat?: string | null; leasePosition?: number | null;
   /**
    * What the member needs from a person, loudest first: an open question, blocked, its last run failed (core
-   * UiRpc.Attention). "stopped" (B097): the person stopped its last run; shown neutral, never as needing the person.
+   * UiRpc.Attention). "stopped": the person stopped its last run; shown neutral, never as needing the person.
    */
   attention?: 'decision' | 'blocked' | 'failed' | 'stopped' | null;
+  /**
+   * The open decision this member waits on (its Decision.seq), null when none. While set the tile says "Waiting on
+   * you" (status and report chip) and links to that decision card, not the last report.
+   */
+  decisionId?: number | null;
   net?: string; wallTimeout?: string; loosened?: string[]; policyProblems?: string[];
   /** The member has a working copy (clone) on this computer: its card offers the Code browser (teams.agents). */
   hasClone?: boolean;
+  /** 'script' for a script member (its tile reads scripts.memberGet); absent from an older core: an agent. */
+  kind?: 'agent' | 'script';
 }
 
-export interface Decision { seq: number; from: string; question: string; workflow: number; at: string }
+/**
+ * One answer the asker offers (needs_decision's options, 2 to 4): the button's label and the text sent as the
+ * answer. An option may carry an allowlisted app action (e.g. "team.allowLocalhostMac") that core applies when the person
+ * answers with it (bus.answer with optionIndex); actionAvailable false (a Visitor, not macOS) disables the button and
+ * actionUnavailableReason says why.
+ */
+export interface DecisionOption {
+  label: string; reply: string; action?: string | null;
+  actionAvailable?: boolean; actionUnavailableReason?: string | null;
+}
+
+/**
+ * An open needs_decision: summary (the plain ask), options and details (Markdown findings) when the asker gave
+ * them; an older decision has only question. bus.answer takes { teamId, seq, text, optionIndex? } (0-based).
+ */
+export interface Decision {
+  seq: number; from: string; question: string; workflow: number; at: string;
+  summary?: string | null; options?: DecisionOption[] | null; details?: string | null;
+}
 
 export interface SecretStatus { connected: boolean; addedAt: string | null; expiresAt: string | null; lastUsedAt: string | null; renewSoon: boolean; problem: string | null }
 export interface GrokLoginStatus { signedIn: boolean; expiresAt: string | null; lastRefreshAt: string | null; problem: string | null }
@@ -1068,15 +1155,15 @@ export interface TerminalBanner {
   /** The member holds or waits for an INTERACTIVE session (never a headless run). */
   interactive?: boolean;
   lastRunState: string | null; lastRunReason: string | null;
-  /** B097: the last run's failure class, as AgentCard.lastRunFailureClass. */
+  /** The last run's failure class, as AgentCard.lastRunFailureClass. */
   lastRunFailureClass?: RunFailureClass | null;
 }
 
-/** B097: a failed run's class (core Bus/Messages.cs FailureClasses); a string for a class this shell does not know. */
+/** A failed run's class (core Bus/Messages.cs FailureClasses); a string for a class this shell does not know. */
 export type RunFailureClass = 'failed' | 'timeout' | 'idle' | 'stopped' | 'credential' | 'start_failed' | 'interrupted' | 'rate' | (string & {});
 
 /**
- * B097: whether a run (a member's last run, a feed row, a run row) was stopped by the person: failure class "stopped",
+ * Whether a run (a member's last run, a feed row, a run row) was stopped by the person: failure class "stopped",
  * even when its state still says "failed" (the core records a stopped run as failed with class "stopped").
  */
 export function isStoppedRun(r: { state?: string | null; failureClass?: string | null; attention?: string | null } | null | undefined): boolean {
@@ -1160,7 +1247,7 @@ export interface ConciergeTurnEvent {
 }
 
 // ---- the Board (core Board/BoardService.cs): cards in four lanes, and the backlog ----
-/** 'stopped' (B097): the person stopped the card's run; lane In Progress / To Do, never Needs you, never red. */
+/** 'stopped': the person stopped the card's run; lane In Progress / To Do, never Needs you, never red. */
 export type CardStatus = 'queued' | 'running' | 'blocked' | 'needs-decision' | 'failed' | 'completed' | 'handback' | 'done' | 'stopped';
 export type LaneId = 'todo' | 'in-progress' | 'blocked' | 'done';
 export interface BoardCard {
@@ -1172,7 +1259,7 @@ export interface BoardCard {
   memberState?: { state: AgentCard['state']; attention: AgentCard['attention']; lastRunFailureClass?: AgentCard['lastRunFailureClass'] };
   /** The heavy-work lease of the card's member, on the card it is working on only: held, or waited for (queue position). */
   lease?: { state: 'holding' | 'waiting'; what: string | null; position: number | null };
-  /** B086: its overall time and breakdown, computed by the core (older cores: absent). */
+  /** Its overall time and breakdown, computed by the core (older cores: absent). */
   time?: ItemTime | null;
 }
 export interface BoardTrailLine { id: number; at: string; source: string; kind: string; text: string }

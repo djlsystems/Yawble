@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Teams;
 
-/// <summary>B100: the workflow digest built from a fixture workflow (no bus, no agent CLI: records and transcript lines).</summary>
+/// <summary>The workflow digest built from a fixture workflow (no bus, no agent CLI: records and transcript lines).</summary>
 public class WorkflowDigestTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 11, 18, 9, 0, 0, TimeSpan.Zero);

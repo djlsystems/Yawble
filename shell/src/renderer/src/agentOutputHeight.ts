@@ -29,7 +29,7 @@ export function setOutputHeight(h: number): void {
 }
 
 /**
- * Card 334: the limit (70% of the window's height) follows the window. A rotation or resize clamps the chosen height
+ * The limit (70% of the window's height) follows the window. A rotation or resize clamps the chosen height
  * again to the new limit, without saving it, so a phone or iPad turned to landscape and back gets its height back.
  */
 export function followWindowHeight(): void { outputHeight.value = clampOutput(wanted); }

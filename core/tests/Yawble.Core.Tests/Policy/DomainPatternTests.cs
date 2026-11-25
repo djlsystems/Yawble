@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Policy;
 
-/// <summary>B018 (card 183): the bundled Public Suffix List and the PublicSuffix lookups.</summary>
+/// <summary>The bundled Public Suffix List and the PublicSuffix lookups.</summary>
 public class PublicSuffixTests
 {
     [Fact]
@@ -153,7 +153,7 @@ public class PublicSuffixTests
     }
 }
 
-/// <summary>B018 (card 183): FloorRules.HostProblem for domain allows ("*.domain").</summary>
+/// <summary>FloorRules.HostProblem for domain allows ("*.domain").</summary>
 public class FloorRulesDomainPatternTests
 {
     [Theory]
@@ -229,7 +229,7 @@ public class FloorRulesDomainPatternTests
     }
 }
 
-/// <summary>B018 (card 183): the policy editors' backend takes "*.domain" in the loosen block, the team list and the global hosts.</summary>
+/// <summary>The policy editors' backend takes "*.domain" in the loosen block, the team list and the global hosts.</summary>
 public sealed class PolicyDomainPatternTests : IDisposable
 {
     private readonly string dir = Directory.CreateTempSubdirectory("yawble-policy-pattern-").FullName;

@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Gateway;
 
 /// <summary>
-/// B103: a run's successful model requests are not each a gateway_events row (each is a usage_events row); the first
+/// A run's successful model requests are not each a gateway_events row (each is a usage_events row); the first
 /// per model vhost is, and the first after a credential problem or a rate limit, so the run's verdict still clears.
 /// A host denied again in the run counts on its first row. Fake upstream and fake secrets only.
 /// </summary>

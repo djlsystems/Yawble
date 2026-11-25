@@ -30,7 +30,7 @@ public sealed record CodeEvent(
     public const string Landed = "landed";
     public const string Push = "push";
 
-    /// <summary>B073: a commit of a branch the person deleted (its tip and each commit not in the base), so the commit view
+    /// <summary>A commit of a branch the person deleted (its tip and each commit not in the base), so the commit view
     /// still says where it was. Kept for git.commitShow only: never in <see cref="CodeEvents.Read"/> (the Monitor's feed).</summary>
     public const string BranchDeleted = "branch-deleted";
 

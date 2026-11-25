@@ -118,7 +118,7 @@ async function loadAgents() {
 }
 
 // The live Terminal / Test sessions (agents.testSessions, window only), refreshed on agents.testChanged: a session the
-// person hid (the pane closed with Ctrl+`, or replaced by another terminal) stays visible on its tile, to Open or Stop.
+// person hid (replaced by another terminal in the pane) stays visible on its tile, to Open or Stop.
 const sessions = ref<AgentTestSession[]>([]);
 let sessionsAsked = 0;
 async function loadSessions() {
@@ -314,7 +314,7 @@ onBeforeUnmount(() => { offChanged?.(); offChanged = null; clearInterval(watchin
     <p v-if="error" class="error" data-test="agents-error">{{ error }}</p>
     <p v-if="notice" class="ok small" data-test="agents-notice">{{ notice }}</p>
     <p v-if="testing" class="muted small" data-test="agents-test-note">
-      The session runs in the terminal pane on the right (View → Terminal).
+      The session runs in the terminal pane on the right.
       <button class="link" data-test="agents-test-stop" :disabled="stoppingTest" :aria-busy="stoppingTest" @click="stop"><BusyLabel :busy="stoppingTest" text="Stopping…">Stop it</BusyLabel></button>
     </p>
 

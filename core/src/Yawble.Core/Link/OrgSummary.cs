@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace Yawble.Core.Link;
 
-// B048: the facts org.summary is built from. Only what the app already tracks; by the person's rule there is no token,
+// The facts org.summary is built from. Only what the app already tracks; by the person's rule there is no token,
 // cost, usage, price or value figure anywhere in here, even though run records hold token counts.
 
 /// <summary>This computer: its name, the name it has on the cloud site, the build, the OS, when the core started, and its run slots.</summary>
@@ -12,19 +12,22 @@ public sealed record OrgComputer(string Name, string? Label, string Version, str
 /// <summary>An agent that is running now: who, its role, what it is doing (its card, or its workflow), since when.</summary>
 public sealed record OrgRunningAgent(string Member, string Role, string? Doing, DateTimeOffset? Since);
 
-/// <summary>One agent of a team, as the summary counts it: state running | queued | idle, whether its last run failed, and
-/// whether the person stopped its last run (B097: a stopped run is not a failure).</summary>
+/// <summary>One agent of a team, as the summary counts it: state running | idle | one of <see cref="Bus.WaitStates"/> (
+/// queued, waits-for-run, held, pending; the agent card's state), whether its last run failed, and whether the person
+/// stopped its last run (a stopped run is not a failure). <paramref name="WaitsFor"/>: with waits-for-run, the member
+/// whose run must end first.</summary>
 public sealed record OrgAgent(string Member, string Role, string State, bool LastRunFailed, string? Doing = null, DateTimeOffset? Since = null,
-    bool LastRunStopped = false);
+    bool LastRunStopped = false, string? WaitsFor = null);
 
-/// <summary>A team and its agents; <paramref name="WorkflowExpiryDays"/> is its setting (B085: an open workflow nobody works expires after it).</summary>
+/// <summary>A team and its agents; <paramref name="WorkflowExpiryDays"/> is its setting (an open workflow nobody works expires after it).
+/// <paramref name="WaitingOnYou"/>: how many of its agents have an open needs_decision (TeamSummary.Waiting).</summary>
 public sealed record OrgTeam(string Name, bool Paused, bool Archived, IReadOnlyList<OrgAgent> Agents,
-    int WorkflowExpiryDays = Bus.BusEngine.DefaultWorkflowExpiryDays);
+    int WorkflowExpiryDays = Bus.BusEngine.DefaultWorkflowExpiryDays, int WaitingOnYou = 0);
 
 /// <summary>
 /// A workflow. <paramref name="State"/> is one of <see cref="OrgSummary.WorkflowStates"/>; <paramref name="Item"/> is the
-/// backlog item's label (B048) when the workflow came from one. <paramref name="Time"/>: its overall time and where it went
-/// (B086), the wire contract's <c>time</c> as on the bus.workflows item; null without a board.
+/// backlog item's label when the workflow came from one. <paramref name="Time"/>: its overall time and where it went
+/// as the wire contract's <c>time</c> as on the bus.workflows item; null without a board.
 /// </summary>
 public sealed record OrgWorkflow(long Id, string Team, string Title, string? Item, string? ItemTitle, string State, int CardsDone, int CardsTotal,
     DateTimeOffset StartedAt, DateTimeOffset LastActivity, string? Owner, DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null,
@@ -73,7 +76,7 @@ public static class OrgSummary
     private const int MaxMessage = 200;
 
     /// <summary>
-    /// Only completed (declared done), closed (closed by a person) and expired (closed by the app, B085) are ended; every
+    /// Only completed (declared done), closed (closed by a person) and expired (closed by the app) are ended; every
     /// other state, failed included, is open and stays in the snapshot however old its last activity (docs/cloud-link.md).
     /// </summary>
     public static bool Ended(string state) => state is Completed or Closed or Expired;
@@ -104,7 +107,10 @@ public static class OrgSummary
     private static JsonArray TeamsOf(IReadOnlyList<OrgTeam> teams) => new(teams.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Select(t =>
     {
         var running = t.Agents.Where(a => a.State == "running").ToList();
-        var idle = t.Agents.Where(a => a.State is not ("running" or "queued")).ToList();
+        // An agent whose work has not started is in one of the wait states, never idle (an unknown state counts as pending).
+        var waiting = t.Agents.Where(a => a.State is not ("running" or "idle")).Select(a => (Agent: a, State: WaitStateOf(a.State))).ToList();
+        var idle = t.Agents.Where(a => a.State == "idle").ToList();
+        int Waiting(string state) => waiting.Count(w => w.State == state);
         return (JsonNode)new JsonObject
         {
             ["name"] = t.Name,
@@ -115,12 +121,18 @@ public static class OrgSummary
             {
                 ["total"] = t.Agents.Count,
                 ["running"] = running.Count,
-                ["queued"] = t.Agents.Count(a => a.State == "queued"),
+                // Queued is only the run queue (a run slot); the other work not started is counted by why it waits.
+                ["queued"] = Waiting(Bus.WaitStates.Queued),
+                ["waitsForRun"] = Waiting(Bus.WaitStates.WaitsForRun),
+                ["held"] = Waiting(Bus.WaitStates.Held),
+                ["pending"] = Waiting(Bus.WaitStates.Pending),
                 // An idle agent whose last run failed counts as errored, not idle.
                 ["idle"] = idle.Count(a => !a.LastRunFailed),
                 ["errored"] = idle.Count(a => a.LastRunFailed),
-                // B097: an idle agent whose last run the person stopped: counted in idle (not errored), and said here.
+                // An idle agent whose last run the person stopped: counted in idle (not errored), and said here.
                 ["stopped"] = idle.Count(a => a.LastRunStopped && !a.LastRunFailed),
+                // Agents with an open needs_decision (whatever their state above): the team waits on the person.
+                ["waitingOnYou"] = t.WaitingOnYou,
             },
             ["running"] = new JsonArray(running.Select(a => (JsonNode)new JsonObject
             {
@@ -129,8 +141,17 @@ public static class OrgSummary
                 ["doing"] = a.Doing is null ? null : Title(a.Doing),
                 ["since"] = a.Since is { } s ? Time(s) : null,
             }).ToArray()),
+            // Who has work not started, and why; waitsFor (the sender whose run must end first) only with waits-for-run.
+            ["waiting"] = new JsonArray(waiting.Select(w => (JsonNode)new JsonObject
+            {
+                ["member"] = w.Agent.Member,
+                ["state"] = w.State,
+                ["waitsFor"] = w.State == Bus.WaitStates.WaitsForRun ? w.Agent.WaitsFor : null,
+            }).ToArray()),
         };
     }).ToArray());
+
+    private static string WaitStateOf(string state) => Bus.WaitStates.All.Contains(state) ? state : Bus.WaitStates.Pending;
 
     private static JsonArray WorkflowsOf(IReadOnlyList<OrgWorkflow> workflows, DateTimeOffset now) => new(workflows
         .Where(w => !Ended(w.State) || now - w.LastActivity <= EndedWorkflowsFor)
@@ -146,12 +167,12 @@ public static class OrgSummary
             ["startedAt"] = Time(w.StartedAt),
             ["lastActivityAt"] = Time(w.LastActivity),
             ["owner"] = w.Owner,
-            // B085: when it ended (an expired one: its last real activity, not the expiry) and when the app expired it.
+            // When it ended (an expired one: its last real activity, not the expiry) and when the app expired it.
             ["endedAt"] = w.EndedAt is { } e ? Time(e) : null,
             ["expiredAt"] = w.ExpiredAt is { } x ? Time(x) : null,
-            // B085: when it expires if nothing happens, as on the bus.workflows item; null while it is worked, and once ended.
+            // When it expires if nothing happens, as on the bus.workflows item; null while it is worked, and once ended.
             ["expiresAt"] = w.ExpiresAt is { } d ? Time(d) : null,
-            // B086: its overall time and where it went, as on the bus.workflows item (null without a board).
+            // Its overall time and where it went, as on the bus.workflows item (null without a board).
             ["time"] = w.Time?.ToJson(),
         }).ToArray());
 
@@ -208,7 +229,7 @@ public static class OrgSummary
     {
         if (section == "workflows" && node is JsonArray rows)
         {
-            // B086: an open workflow's time grows every second, like the uptime: its ms alone are not a change (the
+            // An open workflow's time grows every second, like the uptime: its ms alone are not a change (the
             // breakdown's categories still are). The section goes out in full with the next real change.
             var flows = rows.DeepClone().AsArray();
             foreach (var time in flows.Select(r => r?["time"]).OfType<JsonObject>().Where(t => t["open"]?.GetValue<bool>() == true))

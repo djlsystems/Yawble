@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The window's confirm dialog (card 355), shown over everything for what confirm.ts asks; modelled on the cloud web
+// The window's confirm dialog, shown over everything for what confirm.ts asks; modelled on the cloud web
 // app's AppDialog.vue. Enter = OK, Escape, a click on the backdrop or Cancel = cancel. OK has the focus; Tab stays
 // inside; the focus goes back to where it was when the dialog closes. The keys are taken by a capture listener on the
 // document while it is open (added on open, removed on close), so Escape never also closes the dialog under it.

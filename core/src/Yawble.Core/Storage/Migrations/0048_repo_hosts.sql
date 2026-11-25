@@ -1,4 +1,4 @@
--- 0048 repository providers (B075): the person's per-repository override of where a repository is hosted.
+-- 0048 repository providers: the person's per-repository override of where a repository is hosted.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --
 -- repo: "main" for the team's primary repository (team_repos), else an extra repository's name (team_extra_repos).

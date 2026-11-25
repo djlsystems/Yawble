@@ -16,8 +16,8 @@ import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
 import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
 import { GIT_COMMITS_RESOLVE, isUiMethod, type BoardCard, type CommitMatch, type TeamSummary, type YawbleApi } from '../../src/shared/api';
 
-// B074 (card 471): a commit-shaped ID is a link only once git.commitsResolve confirms it, against a fake core with the
-// contract DeveloperTomas fixed (YAWBLE_TEAM_DOCS\B074\contract.md: {team? | teamId?, ids} -> {max, results: [{id, valid,
+// A commit-shaped ID is a link only once git.commitsResolve confirms it, against a fake core with the
+// core's contract ({team? | teamId?, ids} -> {max, results: [{id, valid,
 // matches: [{team, teamId, repo (null: main), fullId, shortId, title, pushed}]}]}, at most 200 IDs a call).
 
 const ADA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
@@ -32,7 +32,7 @@ const COMMITS: CommitMatch[] = [
   { team: 'payments', repo: null, fullId: LOCAL, title: 'Receipts: a new layout', pushed: false },
   { team: 'payments', repo: null, fullId: TWIN_WEB, title: 'Web: fix the refund button', pushed: true },
   { team: 'payments', repo: 'payments-cloud', fullId: TWIN_CLOUD, title: 'Cloud: retry the webhook', pushed: true },
-  // The same commit in two teams (card 471 F1: a merged base both teams carry).
+  // The same commit in two teams (a merged base both teams carry).
   { team: 'web', repo: null, fullId: SHARED, title: 'Shared: the base both teams have', pushed: true },
   { team: 'cloud', repo: null, fullId: SHARED, title: 'Shared: the base both teams have', pushed: true },
 ];
@@ -88,7 +88,7 @@ function place(markdown: string, team = 'payments'): HTMLElement {
 }
 const links = (root: ParentNode) => [...root.querySelectorAll<HTMLElement>('[data-test=commit-link]')];
 
-describe('B074: commit links only for confirmed commits', () => {
+describe('commit links only for confirmed commits', () => {
   it('the new core method is one the window may call (git.*)', () => {
     expect(isUiMethod(GIT_COMMITS_RESOLVE)).toBe(true);
   });
@@ -194,14 +194,14 @@ describe('B074: commit links only for confirmed commits', () => {
     const a = { team: 'web', repo: null, fullId: ADA, title: 'a', pushed: true };
     const b = { team: 'payments', repo: null, fullId: LOCAL, title: 'b', pushed: true };
     expect(pickMatches([a, b], ['payments', 'web'], 'payments')).toEqual([b]);
-    // Card 471 F1: only the place's own team narrows; the screen's team (or the first of every team) only orders.
+    // Only the place's own team narrows; the screen's team (or the first of every team) only orders.
     expect(pickMatches([a, b], ['payments', 'web'])).toEqual([b, a]);
     expect(pickMatches([a, b], ['payments', 'web'], null)).toEqual([b, a]);
     expect(pickMatches([a, b], ['ops', 'payments', 'web'], 'ops')).toEqual([b, a]);
     expect(pickMatches([a, b], ['ops', 'payments', 'web'])).toEqual([b, a]);
     expect(pickMatches([a, a], ['web'])).toEqual([a]);
   });
-  it('card 471 F1: an ID in two teams, in a place with no team of its own, opens the chooser whatever the team order', async () => {
+  it('an ID in two teams, in a place with no team of its own, opens the chooser whatever the team order', async () => {
     for (const all of [['web', 'cloud'], ['cloud', 'web']]) {
       resetCommitResolve();
       document.body.innerHTML = '';
@@ -218,7 +218,7 @@ describe('B074: commit links only for confirmed commits', () => {
       closeChoice();
     }
   });
-  it('card 471 F1: the screen\'s team alone does not narrow (it only comes first); the place\'s own team does', async () => {
+  it('the screen\'s team alone does not narrow (it only comes first); the place\'s own team does', async () => {
     commitTeams.value = { current: 'cloud', all: ['web', 'cloud'] };
     const open = document.createElement('div');
     open.innerHTML = renderMarkdown(`Both teams have ${SHARED.slice(0, 8)}.`);
@@ -232,7 +232,7 @@ describe('B074: commit links only for confirmed commits', () => {
     expect(links(own)[0].dataset.commitState).toBe('link');
     expect(links(own)[0].dataset.commitIn).toBe('web');
   });
-  it('card 471 F1: CommitText narrows only to its own team prop', async () => {
+  it('CommitText narrows only to its own team prop', async () => {
     commitTeams.value = { current: 'cloud', all: ['web', 'cloud'] };
     const bare = mount(CommitText, { props: { text: `Merged ${SHARED.slice(0, 8)}` }, attachTo: document.body });
     const mine = mount(CommitText, { props: { text: `Merged ${SHARED.slice(0, 8)}`, team: 'web' }, attachTo: document.body });
@@ -244,7 +244,7 @@ describe('B074: commit links only for confirmed commits', () => {
   });
 });
 
-describe('B074: through the remote view\'s client, as a Visitor', () => {
+describe('commit links through the remote view\'s client, as a Visitor', () => {
   class FakeSocket {
     static OPEN = 1;
     static last: FakeSocket | null = null;
@@ -291,7 +291,7 @@ describe('B074: through the remote view\'s client, as a Visitor', () => {
   });
 });
 
-describe('B074: every place IDs appear renders a confirmed link', () => {
+describe('every place IDs appear renders a confirmed link', () => {
   const said = `Done: ${ADA.slice(0, 7)}; not a commit: abc1234.`;
   const confirmed = (root: ParentNode) => links(root).map((a) => a.dataset.commit);
 

@@ -34,7 +34,7 @@ const clock = (t: number, seconds = false) => new Date(t).toLocaleTimeString([],
 
 /** How tall a message's tick stands: what needs the person or ends something stands tallest. */
 function tickHeight(row: FeedRow): number {
-  // A run the person stopped (B097) is a plain end, as tall as a finished run, not a failure.
+  // A run the person stopped is a plain end, as tall as a finished run, not a failure.
   switch (feedKindOf(row)) {
     case 'decision': case 'failed': case 'blocked': case 'done': return 20;
     case 'completed': case 'stopped': case 'handback': case 'instruction': return 14;
@@ -244,7 +244,7 @@ canvas { display: block; width: 100%; }
 .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row i.steps { background: rgba(147, 197, 253, .7); }
 .dim { color: #94a3b8; }
-/* A phone (B037): the tip fits the screen; the strip is the tap target (58 px tall). */
+/* A phone: the tip fits the screen; the strip is the tap target (58 px tall). */
 @media (max-width: 759.98px) {
   .tip { width: min(300px, calc(100vw - 24px)); }
 }

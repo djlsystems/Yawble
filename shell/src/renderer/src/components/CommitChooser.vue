@@ -5,7 +5,7 @@ import { openCommit } from '../commitView';
 import { closeChoice, commitChoice, commitTitle, repoName } from '../commitResolve';
 import Modal from './Modal.vue';
 
-// B074: an ID that names more than one commit (the same short ID in several repositories or teams): a small list of
+// An ID that names more than one commit (the same short ID in several repositories or teams): a small list of
 // repository and commit title; picking one opens the Commit view on that one. Mounted once (App.vue).
 const manyTeams = computed(() => new Set(commitChoice.value?.matches.map((m) => m.team) ?? []).size > 1);
 

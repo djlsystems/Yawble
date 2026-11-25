@@ -280,7 +280,7 @@ public class RealSandboxLauncherTests
             [l.CredentialDir] = [],
             [l.HostGrokHome] = [],
             [dev2] = [],
-            // B038 decision: the home may show the names of the policy's own denied folders (~/.ssh, ~/Desktop,
+            // Decided: the home may show the names of the policy's own denied folders (~/.ssh, ~/Desktop,
             // ~/Documents, ...) as empty masks. Those names are the global policy's fixed list, the same on every
             // host and present whether or not the host has the folder, so they tell the sandbox nothing about the
             // host; what must not show is anything of the host's own (checked by the fake home's other entries).

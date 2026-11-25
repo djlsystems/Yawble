@@ -1,10 +1,10 @@
-// B063 (card 305): a read-only Visitor's workflows dialog in a real browser (headless Chrome), against the FAKE core of
+// A read-only Visitor's workflows dialog in a real browser (headless Chrome), against the FAKE core of
 // phone-remote.spec.ts (remote.html, canned answers). Opened at #workflow=10: the team's page with its workflows and
 // that workflow selected. For a Visitor its Nudge and Close are disabled (v-change, the read-only title), and a call
 // forced past the screen (bus.nudgeWorkflow, bus.closeWorkflow on the page's own socket) is refused by the fake, as
 // core's RemoteAccess refuses it. With full access the same buttons are enabled.
 //
-//   npx playwright test workflows-visitor      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test workflows-visitor      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import { type Access } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';

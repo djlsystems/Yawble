@@ -6,7 +6,7 @@ import { LOCAL_MARK, commitLocalOnly } from '../localMark';
 import CommitLink from './CommitLink.vue';
 import LocalMark from './LocalMark.vue';
 
-// B073: a list of commits (a count's range, what a merge lands, what a sync brought in, a branch's commits before a
+// A list of commits (a count's range, what a merge lands, what a sync brought in, a branch's commits before a
 // delete). Each ID opens the Commit view. hasOrigin: false says once that every commit is local only (no mark per row);
 // absent (an older core) marks nothing. marks: an optional label per commit, keyed by sha (the delete preview's states).
 const props = defineProps<{

@@ -1,4 +1,4 @@
--- 0045 workflow expiry (B085): an open workflow nobody works is closed by the app as "expired" after the team's
+-- 0045 workflow expiry: an open workflow nobody works is closed by the app as "expired" after the team's
 -- workflowExpiryDays without activity; closing a workflow (any way) ends its open cards.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --

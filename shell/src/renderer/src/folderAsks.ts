@@ -1,6 +1,6 @@
-// B111 (card 497): folder asks, shell side. An agent asks for a folder outside its clone (read or read-write); the
-// person approves (never wider than asked), approves read-only, or denies. The contract is DeveloperMarlo's (card 496,
-// docs/folder-asks.md): the FolderAsk types are shared/api.ts's, re-exported here (card 507), never declared again.
+// Folder asks, shell side. An agent asks for a folder outside its clone (read or read-write); the
+// person approves (never wider than asked), approves read-only, or denies. The contract is the core's
+// (docs/folder-asks.md): the FolderAsk types are shared/api.ts's, re-exported here, never declared again.
 import type { FolderAsk, FolderAskChoice } from '../../shared/api';
 
 export type { FolderAsk, FolderAskChoice } from '../../shared/api';

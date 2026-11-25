@@ -165,7 +165,7 @@ public static class CliCatalog
 
     public static CliEntry? Of(string name) => Known.FirstOrDefault(k => string.Equals(k.Name, name, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The CLIs that make the agents' pull requests (pr_open / pr_status, B075): gh (GitHub), glab (GitLab), az (Azure DevOps, az repos).</summary>
+    /// <summary>The CLIs that make the agents' pull requests (pr_open / pr_status): gh (GitHub), glab (GitLab), az (Azure DevOps, az repos).</summary>
     public static readonly IReadOnlyList<string> PullRequestClis = ["gh", "glab", "az"];
 
     public static bool MakesPullRequests(string cli) => PullRequestClis.Contains(cli, StringComparer.OrdinalIgnoreCase);

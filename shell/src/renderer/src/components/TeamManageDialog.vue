@@ -2,7 +2,11 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, GitProvider, IntegrationInfo, McpServerInfo, RepoProviderInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
 import { TEAM_WORKFLOW_EXPIRY, TEAMS_SET_REPO, WorkflowExpiryDefaultDays, TEAM_RETROS, TEAMS_LESSONS, PERSON_WRITER } from '../../../shared/api';
-import type { TeamLessons } from '../../../shared/api';
+import { TEAM_LOCALHOST, TEAM_LOCALHOST_LABEL, TEAM_LOCALHOST_WARNING } from '../../../shared/api';
+import type { HireRow, RoleRow, TeamHireRow, TeamLessons } from '../../../shared/api';
+import HireListEditor from './HireListEditor.vue';
+import { useAgentModels } from '../agentModels';
+import { useAgentOptions } from '../agentOptions';
 import { openSkill } from '../skillLink';
 import RepoProviderFields from './RepoProviderFields.vue';
 import { errorText, resolveApi } from '../api';
@@ -13,19 +17,21 @@ import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import { usePhone } from '../phone';
+import { vChange } from '../remoteAccess';
 
 /**
- * A team's housekeeping: pause or resume it, its repositories, its environment variables, archive it, delete it. Archive and delete need
+ * A team's housekeeping: pause or resume it, who its Manager may hire, its repositories, its environment variables, archive it, delete it. Archive and delete need
  * a quiet team (nothing running, nothing waiting) and say what is still working when it is not.
  */
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi }>();
 const emit = defineEmits<{ close: []; changed: []; deleted: [] }>();
 const api = resolveApi(props.api);
 
-type Tab = 'general' | 'state' | 'repos' | 'env' | 'network' | 'integrations' | 'reset' | 'delete';
+type Tab = 'general' | 'hiring' | 'state' | 'repos' | 'env' | 'network' | 'integrations' | 'reset' | 'delete';
 const tab = ref<Tab>('general');
 const tabs: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
+  { id: 'hiring', label: 'Hiring' },
   { id: 'state', label: 'Pause and archive' },
   { id: 'repos', label: 'Repositories' },
   { id: 'env', label: 'Environment' },
@@ -34,7 +40,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'reset', label: 'Reset' },
   { id: 'delete', label: 'Delete' },
 ];
-// A phone (card 346), laid out like the app's Settings on a phone (SettingsView): the dialog opens at the list of its
+// A phone, laid out like the app's Settings on a phone (SettingsView): the dialog opens at the list of its
 // sections; a tap opens that section alone under a sticky Back + title; Back returns to the list. Desktop: the tab row.
 const phone = usePhone();
 const sectionOpen = ref(false);
@@ -57,7 +63,7 @@ const work = useBusy();
 const busy = computed(() => work.any());
 const doing = (method: string) => work.is('act', method);
 // Each tab's data has had its first answer (an error is shown above and ends the loading state too).
-const ready = reactive({ expiry: false, quiet: false, push: false, sync: false, repos: false, approvals: false, env: false, ints: false, members: false });
+const ready = reactive({ localhost: false, expiry: false, quiet: false, push: false, sync: false, repos: false, approvals: false, env: false, ints: false, members: false, hiring: false });
 
 function act(method: string, params: Record<string, unknown> = {}, done?: (r: any) => void) {
   return work.run('act', async () => {
@@ -70,6 +76,27 @@ function act(method: string, params: Record<string, unknown> = {}, done?: (r: an
     } catch (e) { error.value = errorText(e); }
   }, method);
 }
+
+// ---- Who the Manager may hire (teams.hireList, teams.setHireList): rows of a role, its agent and model, from the
+// role catalog (roles.list). An empty list lets the Manager hire any agent. An older core: a note.
+const agentOptions = useAgentOptions(api);
+const models = useAgentModels(api);
+const roles = ref<RoleRow[]>([]);
+const hireRows = reactive<HireRow[]>([]);
+const hireMissing = ref(false);
+const hireSaved = ref(false);
+function applyHire(list: TeamHireRow[]) {
+  hireRows.splice(0, hireRows.length, ...list.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })));
+}
+async function loadHiring() {
+  try { applyHire(await api.call<TeamHireRow[]>('teams.hireList', { teamId: props.team.id, team: props.team.id })); hireMissing.value = false; }
+  catch { hireMissing.value = true; } finally { ready.hiring = true; }
+  try { roles.value = await api.call<RoleRow[]>('roles.list'); } catch { roles.value = []; }
+}
+const saveHiring = () => act('teams.setHireList', { team: props.team.id, rows: hireRows.map((r) => ({ role: r.role, agent: r.agent, model: r.model ?? null })) }, () => {
+  hireSaved.value = true;
+  void loadHiring();
+});
 
 // ---- pause / archive
 const quiet = ref<TeamQuiet | null>(null);
@@ -89,7 +116,15 @@ async function loadSync() { try { sync.value = await api.call('teams.syncToBase'
 const setSync = (on: boolean) => act('teams.syncToBase', { on }, (r) => { sync.value = r; });
 const baseName = computed(() => repos.value?.main?.baseBranch ?? 'the base branch');
 
-// ---- B085: expire idle workflows after N days (workflowExpiryDays, default 3). An older core without it: the field is not shown.
+// ---- "Allow localhost (macOS)" (off by default). An older core without it: the block is not shown. A Visitor sees it
+// read-only (v-change); the core refuses a Visitor's set anyway.
+const localhost = ref<{ on: boolean } | null>(null);
+async function loadLocalhost() { try { localhost.value = await api.call<{ on: boolean }>(TEAM_LOCALHOST, { teamId: props.team.id }); } catch { localhost.value = null; } finally { ready.localhost = true; } }
+const setLocalhost = (on: boolean) => act(TEAM_LOCALHOST, { on }, (r: { on: boolean }) => { localhost.value = r; });
+// The warning's `code` spans (the text is kept word for word in TEAM_LOCALHOST_WARNING).
+const localhostWarning = TEAM_LOCALHOST_WARNING.split('`').map((text, i) => ({ text, code: i % 2 === 1 }));
+
+// ---- Expire idle workflows after N days (workflowExpiryDays, default 3). An older core without it: the field is not shown.
 const expiry = ref<number | null>(null);
 const expiryDraft = ref<number>(WorkflowExpiryDefaultDays);
 const expirySaved = ref(false);
@@ -107,7 +142,7 @@ const saveExpiry = () => act(TEAM_WORKFLOW_EXPIRY, { days: expiryDraft.value }, 
   expirySaved.value = true;
 });
 
-// ---- B100: the team's lessons (its team_retros skill, kept by the Manager's retrospectives). An older core: not shown.
+// ---- The team's lessons (its team_retros skill, kept by the Manager's retrospectives). An older core: not shown.
 const lessons = ref<TeamLessons | null>(null);
 async function loadLessons() { try { lessons.value = await api.call<TeamLessons>(TEAMS_LESSONS, { teamId: props.team.id }); } catch { lessons.value = null; } }
 const day = (iso: string | null) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(); };
@@ -122,7 +157,7 @@ function showLessons() { openSkill(props.team.id, TEAM_RETROS); emit('close'); }
 // ---- repositories: the main one (every member's working directory) and the others, writable or read-only
 interface ExtraRepo extends RepoProviderInfo { name: string; path: string; writable: boolean; baseBranch: string; source: string | null }
 const repos = ref<{ main: ({ path: string; baseBranch: string; managed: boolean; origin: string | null; name: string | null } & RepoProviderInfo) | null; extras: ExtraRepo[] } | null>(null);
-// B075: the provider fields show only when the core sends providerDetected (an older core does not).
+// The provider fields show only when the core sends providerDetected (an older core does not).
 const hasProvider = (r: RepoProviderInfo | null | undefined) => !!r && r.providerDetected !== undefined;
 const saveProvider = (name: string | null, v: { provider: GitProvider | null; linkPattern: string | null }) =>
   act(TEAMS_SET_REPO, { ...(name ? { name } : {}), provider: v.provider, linkPattern: v.linkPattern }, () => {
@@ -211,7 +246,7 @@ const doReset = () => act('teams.reset', { members: [...resetPick.value], ...res
   resetDone.value = `Done: ${r.done.join('; ') || 'nothing to clear'}.` + (r.left.length ? ` Not removed: ${r.left.join('; ')}.` : '');
 });
 
-onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
+onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLessons(); void loadExpiry(); void checkQuiet(); void loadEnv(); void loadMembers(); void loadPush(); void loadSync(); void loadLocalhost(); void loadRepos(); void loadApprovals(); void loadIntegrations(); });
 </script>
 
 <template>
@@ -264,6 +299,19 @@ onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void
             <button class="primary" data-test="team-workflow-expiry-save" :disabled="busy || !expiryValid || expiryDraft === expiry" @click="saveExpiry"><BusyLabel :busy="doing(TEAM_WORKFLOW_EXPIRY)" text="Saving…">Save</BusyLabel></button></div>
         </template>
       </div>
+    </section>
+
+    <section v-else-if="tab === 'hiring'" class="pane" data-test="team-hiring">
+      <p class="muted">Who the Manager may hire: each row is a role and the agent and model a member of it runs on.
+        The Manager can hire only these; a hire gets the role's job as its standing instructions.</p>
+      <LoadingNote v-if="!ready.hiring" text="Loading the hire list…" />
+      <p v-else-if="hireMissing" class="muted small" data-test="team-hiring-missing">This version of the app's core keeps no hire list: the Manager may hire any agent.</p>
+      <template v-else>
+        <HireListEditor :rows="hireRows" :roles="roles" :agents="agentOptions" :models="models" test-id="team-hire" @changed="hireSaved = false" />
+        <div class="buttons"><span class="grow" />
+          <span v-if="hireSaved" class="ok" data-test="team-hire-saved">Saved: the Manager hires from this list from now on.</span>
+          <button v-change class="primary" data-test="team-hire-save" :disabled="busy" @click="saveHiring"><BusyLabel :busy="doing('teams.setHireList')" text="Saving…">Save</BusyLabel></button></div>
+      </template>
     </section>
 
     <section v-else-if="tab === 'state'" class="pane">
@@ -381,6 +429,16 @@ onMounted(() => { void loadLessons(); void loadExpiry(); void checkQuiet(); void
 
     <section v-else-if="tab === 'network'" class="pane" data-test="team-network">
       <div class="block"><TeamNetworkAllows :team-id="team.id" :api="api" @changed="emit('changed')" /></div>
+      <div v-if="!ready.localhost || localhost" class="block" data-test="team-localhost">
+        <h4>Localhost</h4>
+        <LoadingNote v-if="!ready.localhost" text="Loading…" />
+        <template v-else-if="localhost">
+          <label class="check"><input v-change type="checkbox" :checked="localhost.on" data-test="team-localhost-toggle" :disabled="busy"
+            @change="setLocalhost(($event.target as HTMLInputElement).checked)" />{{ TEAM_LOCALHOST_LABEL }}</label>
+          <p class="note small" data-test="team-localhost-warning"><template v-for="(s, i) in localhostWarning" :key="i"><code v-if="s.code">{{ s.text }}</code><template v-else>{{ s.text }}</template></template></p>
+          <p class="muted small">Off by default. It applies to this team's runs on macOS from their next run; Windows and Linux runs already have a loopback of their own.</p>
+        </template>
+      </div>
       <p class="muted small">Each member's own policy (its override and Loosen…) is in the member's settings, on its Policy tab, next to this list.</p>
     </section>
 
@@ -479,7 +537,7 @@ label.check input { width: auto; padding: 0; }
 .warn { color: var(--warn); margin: 0; }
 .ok { color: var(--ok); font-size: 12.5px; }
 .error { color: var(--bad); }
-/* ---- a phone (card 346), like the app's Settings on a phone (SettingsView): the list of sections as full-width 52 px
+/* ---- a phone, like the app's Settings on a phone (SettingsView): the list of sections as full-width 52 px
    rows with a chevron, or one section under a slim sticky Back + title. Nothing is wider than the sheet. */
 .phone .tabs.list { flex-direction: column; flex-wrap: nowrap; gap: 0; border-bottom: 0; border-top: 1px solid var(--line-soft); margin-bottom: 12px; }
 .phone .tabs.list button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 52px; padding: 0 6px 0 4px;

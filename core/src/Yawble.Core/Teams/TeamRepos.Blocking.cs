@@ -4,11 +4,11 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Teams;
 
 /// <summary>
-/// A branch that stops this team's member branches being made (B020): git cannot hold a ref <c>members/&lt;x&gt;</c> and refs
+/// A branch that stops this team's member branches being made: git cannot hold a ref <c>members/&lt;x&gt;</c> and refs
 /// under <c>members/&lt;x&gt;/</c> at once, so an old <c>members/docs</c> (or a branch named just <c>members</c>) blocks every
 /// <c>members/docs/&lt;name&gt;</c> of team "Docs". <c>Repo</c>: "main" or the extra repository's name, as the Git dialog's
 /// Delete takes it. <c>Location</c>: <c>local</c> (a branch of that repository) or <c>remote</c> (origin's, as of the last fetch).
-/// <para><see cref="InUseBy"/> (card 104): set when a member (of this team or another one on the same repository) is still
+/// <para><see cref="InUseBy"/>: set when a member (of this team or another one on the same repository) is still
 /// recorded on that branch, its old-style members/&lt;name&gt;: for example "team Alpha's member Ada". Such a branch is not
 /// deleted from the Git dialog (the dialog shows no Delete for it): it moves to <see cref="MovesTo"/> at that member's next
 /// start, which frees the name.</para>
@@ -19,17 +19,17 @@ public sealed record TeamGitBlockingBranch(string Name, string Repo, string Loca
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? MovesTo { get; init; }
 }
 
-/// <summary>A member's start refused because a branch blocks its member branch (B020). Nothing was changed, unless the
-/// message says what the start's B016 move already did (card 171).</summary>
+/// <summary>A member's start refused because a branch blocks its member branch. Nothing was changed, unless the
+/// message says what the start's move of an old-style branch already did.</summary>
 public sealed class MemberBranchBlockedException(string message) : InvalidOperationException(message);
 
 /// <summary>
-/// B020: before a member branch members/&lt;team&gt;/&lt;name&gt; is made or pushed, the refs that would block it are looked
+/// Before a member branch members/&lt;team&gt;/&lt;name&gt; is made or pushed, the refs that would block it are looked
 /// for, ignoring case: in the host repository (its branches, and origin's remote-tracking refs) and the member's clone
-/// (read with upload-pack, never git in the clone); the shared view follows the repository (card 171). Found: the member's
+/// (read with upload-pack, never git in the clone); the shared view follows the repository. Found: the member's
 /// start fails with a plain message naming the branch, where it is and what to do, and nothing is deleted, renamed or moved
-/// (or, after a B016 move, the message says what moved). The same-team B016 move runs first (and itself
-/// refuses a move that would clash, except through the member's own old branch: team "Docs", member "Docs", card 104).
+/// (or, after an old-style branch's move, the message says what moved). The same-team move of an old-style branch runs first (and itself
+/// refuses a move that would clash, except through the member's own old branch: team "Docs", member "Docs").
 /// The Git dialog lists the blockers (<see cref="TeamGitStatus.BlockingBranches"/>) for its Delete, under the usual approval
 /// rules; one a member of any team on the repository is still on is marked and never deleted from there.
 /// </summary>
@@ -49,7 +49,7 @@ public sealed partial class TeamRepos
     /// <summary>
     /// The blocking refs in a repository the host owns or the person's (git runs there): its branches and, with
     /// <paramref name="withRemote"/>, origin's remote-tracking ones. Each as (branch name as git has it, "local" | "remote").
-    /// <para>Card 171: matched ignoring case. On Windows and macOS loose refs are files, so <c>Members/Docs</c> blocks
+    /// <para>Matched ignoring case. On Windows and macOS loose refs are files, so <c>Members/Docs</c> blocks
     /// members/docs/&lt;name&gt; as surely as members/docs does; it gets the plain message, never git's "cannot lock ref".</para>
     /// </summary>
     private async Task<IReadOnlyList<(string Name, string Location)>> BlockingRefsAsync(string path, IReadOnlyList<string> names, bool withRemote,
@@ -92,7 +92,7 @@ public sealed partial class TeamRepos
 
     /// <summary>
     /// Every member of every team that uses the repository at <paramref name="repoPath"/> (as its main repository or as an
-    /// extra one), with the branch its clone is recorded on (card 104: teams sharing a repository see each other's old-style
+    /// extra one), with the branch its clone is recorded on (teams sharing a repository see each other's old-style
     /// members/&lt;name&gt; branches, and one team's dialog must never delete another team's live branch).
     /// </summary>
     internal IReadOnlyList<RepoUser> RepoUsers(string repoPath)
@@ -149,7 +149,7 @@ public sealed partial class TeamRepos
     private const string NothingChanged = "Nothing was changed. ";
 
     /// <summary>
-    /// Card 171: a refusal that comes after the start already moved a branch (the B016 move of an old-style member, which
+    /// A refusal that comes after the start already moved a branch (the move of an old-style member to its team's branch, which
     /// runs before the checks) says what moved, instead of "Nothing was changed". <paramref name="moves"/>: one line each.
     /// </summary>
     internal static MemberBranchBlockedException WithMoves(MemberBranchBlockedException e, IReadOnlyList<string> moves) =>
@@ -157,7 +157,7 @@ public sealed partial class TeamRepos
             : new MemberBranchBlockedException(e.Message.Replace(NothingChanged,
                 $"Only this was changed before it was found: {string.Join("; ", moves)}. Nothing else was changed. ", StringComparison.Ordinal));
 
-    /// <summary>The line <see cref="WithMoves"/> gives for one B016 move.</summary>
+    /// <summary>The line <see cref="WithMoves"/> gives for one move of an old-style branch.</summary>
     internal static string MoveLine(string memberName, string repoLabel, string from, string to) =>
         $"{memberName}'s branch in {repoLabel} moved from {from} to {to}"
         + (to.StartsWith(from + "/", StringComparison.Ordinal) ? $" ({from} was renamed, git cannot keep both)" : $" ({from} is kept)");
@@ -167,12 +167,12 @@ public sealed partial class TeamRepos
     /// caller holds the team's lock). Only for a member branch of the team (a Manager's team/&lt;team&gt; and an old-style
     /// branch a member is still on are not made anew). <paramref name="repoLabel"/>: how the message names the repository.
     /// Looked for in the repository (its branches and origin's, as of the last fetch) and the member's clone.
-    /// <para>Card 171: not in the team's shared view. It is a mirror of the repository's branches, refreshed with
+    /// <para>Not in the team's shared view. It is a mirror of the repository's branches, refreshed with
     /// <c>fetch --prune</c> (which prunes before it fetches) right after these checks, so a blocker it still has that the
     /// repository has not (deleted there since) goes at that refresh; refusing for it named a branch the Git dialog, which
     /// lists the repository's branches, could not act on. One the repository has is found there.</para>
-    /// <para>The member's own old branch, just moved through (team "Docs", member "Docs": members/docs to members/docs/docs,
-    /// card 104), does not refuse its own start on origin when the new branch holds its commits (the push after the run
+    /// <para>The member's own old branch, just moved through (team "Docs", member "Docs": members/docs to members/docs/docs),
+    /// does not refuse its own start on origin when the new branch holds its commits (the push after the run
     /// replaces it, see <see cref="PublishRepoAsync"/>).</para>
     /// </summary>
     private async Task CheckMemberBranchFreeAsync(MemberRef member, string branch, string repoLabel, string repoPath,
@@ -202,7 +202,7 @@ public sealed partial class TeamRepos
     }
 
     /// <summary>The old-style branch a member branch is under when the member is named like its team's slug (members/docs for
-    /// members/docs/docs), else null: that member's B016 move goes through its own old branch (card 104).</summary>
+    /// members/docs/docs), else null: that member's move to its team's branch goes through its own old branch.</summary>
     internal static string? OwnOldBranchOf(string team, string branch) =>
         branch == MemberBranchPrefix(team) + SlugOf(team) ? BranchPrefix + SlugOf(team) : null;
 

@@ -1,6 +1,6 @@
 namespace Yawble.Core.Bus;
 
-/// <summary>The reads behind workflow_digest and the retro item (B100).</summary>
+/// <summary>The reads behind workflow_digest and the retro item.</summary>
 public sealed partial class BusStore
 {
     /// <summary>The runs of one workflow, oldest first.</summary>

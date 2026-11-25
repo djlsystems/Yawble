@@ -6,7 +6,7 @@ import BusyLabel from './BusyLabel.vue';
 import { vChange } from '../remoteAccess';
 
 /**
- * B085 in Needs you: an open workflow that waits on the person's answer and will expire within a day, as
+ * Expiring workflows in Needs you: an open workflow that waits on the person's answer and will expire within a day, as
  * "#<id> will expire tomorrow; it waits on your answer to question <n>", with Extend (bus.workflowExtend: resets
  * its expiry clock). The teams looked at are those with a needs-decision card on the Board; a workflow shows when it has
  * such a card (or the core names its question) and its expiresAt (bus.workflows) is within a day. Filtered by the Board's team name. An older core (no

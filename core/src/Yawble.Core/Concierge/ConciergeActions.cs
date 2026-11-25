@@ -67,6 +67,16 @@ public sealed class ConfirmationBook(TimeProvider? clock = null)
             .Select(p => new IssuedConfirmation(p.Key, p.Value.Tool, p.Value.Plan)).ToList();
     }
 
+    /// <summary>
+    /// The key a pending token was issued for (what its list was worked out from), or null for an unknown or expired one. Two
+    /// tokens of one tool with the same key are for the same list: the companion compares them to tell whether a plan changed.
+    /// </summary>
+    public string? KeyOf(string token) =>
+        _pending.TryGetValue(token, out var p) && p.Expires > _clock.GetUtcNow() ? p.Key : null;
+
+    /// <summary>Drops a token nobody will redeem (the companion keeps a list's key, not its token, while the person decides).</summary>
+    public void Withdraw(string token) => _pending.TryRemove(token, out _);
+
     public Outcome Redeem(ConciergeTurn turn, string tool, string key, string token)
     {
         if (!_pending.TryGetValue(token, out var p)) return Outcome.Unknown;
@@ -238,7 +248,7 @@ public sealed class ConciergeActions(
             case "git_branches_delete":
             {
                 var (team, repo) = await RepoAsync(args, ct);
-                // B073: each deleted branch's commits are recorded, so the commit view still opens them.
+                // Each deleted branch's commits are recorded, so the commit view still opens them.
                 var plan = await git.PlanDeleteAsync(repo, List(args, "branches"), List(args, "unmerged_ok"), Bool(args, "remote"), ct,
                     deleted: bus.Repos is { } teamRepos ? (b, sha, token) => teamRepos.RecordBranchDeletedAsync(team.Id, team.Name, repo.Path, repo.BaseBranch, b, sha, token) : null);
                 return await ConfirmedAsync(name, args, $"Delete these branches in {team.Name}:\n{plan.Text}", plan.Key, plan.Empty, plan.Run, ct);
@@ -330,6 +340,14 @@ public sealed class ConciergeActions(
 
     // ------------------------------------------------------------------ confirm flow
 
+    /// <summary>
+    /// The same confirmation flow for a tool outside these actions (the script tools): the first call shows
+    /// <paramref name="plan"/> with a token; only a call with that token, for the same <paramref name="key"/>, in a later turn of
+    /// this conversation started by the person at this computer runs <paramref name="run"/>. Answers "NOT DONE ..." or "ok: ...".
+    /// </summary>
+    public Task<string> ConfirmAsync(string tool, JsonObject args, string plan, string key, Func<CancellationToken, Task<string>> run, CancellationToken ct) =>
+        ConfirmedAsync(tool, args, plan, key, false, run, ct);
+
     private async Task<string> ConfirmedAsync(string tool, JsonObject args, string plan, string key, bool empty, Func<CancellationToken, Task<string>> run, CancellationToken ct)
     {
         if (empty) return "nothing to do:\n" + plan;
@@ -401,7 +419,7 @@ public sealed class ConciergeActions(
     }
 
     /// <summary>
-    /// git_branch_realign (B067): sets the team repository's and origin's copy of a member's branch to its clone's commit (a
+    /// git_branch_realign: sets the team repository's and origin's copy of a member's branch to its clone's commit (a
     /// forced update). The first call shows old and new commit and a token; the run, after the person's yes, checks they are
     /// still the ones shown. Refused while the member runs, at either call.
     /// </summary>
@@ -496,7 +514,7 @@ public sealed class ConciergeActions(
 
     private static RepoProviderKind ProviderOf(string? origin, RepoHostSetting? setting) => setting?.Provider ?? RepoProviders.Detect(origin);
 
-    /// <summary>The runner of a provider's CLI: gh as given (as before B075), the others through the host CLI runner; null: none here.</summary>
+    /// <summary>The runner of a provider's CLI: gh as given, the others through the host CLI runner; null: none here.</summary>
     private HostCliRunner? Runner(RepoProviderKind kind) => kind == RepoProviderKind.GitHub
         ? gh is { } g ? (_, path, a, token) => g(path, a, token) : null
         : cli;
@@ -638,7 +656,7 @@ public sealed class ConciergeActions(
         {
             var members = (await bus.AgentCardsAsync(team.Id, ct)).Select(c => c.Member.Name).ToList();
             var list = new List<ActionRepo>();
-            // Card 104: every team's clones of the repository count for what is checked out, not only this team's.
+            // Every team's clones of the repository count for what is checked out, not only this team's.
             List<string> With(string repoPath, IEnumerable<string> own) => own.Concat(teamRepos.RepoUsers(repoPath).Select(u => u.ClonePath)).Distinct().ToList();
             if (teamRepos.RepoOf(team.Id) is { } main)
                 list.Add(new ActionRepo("main", main.Path, main.BaseBranch, With(main.Path, members.Select(m => Path.Combine(teamRepos.MemberRoot(team.Name, m), "repo")))));

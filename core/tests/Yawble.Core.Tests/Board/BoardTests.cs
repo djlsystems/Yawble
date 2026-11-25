@@ -290,7 +290,7 @@ public class BoardTests
         Assert.Single(list["cards"]!.AsArray());
     }
 
-    /// <summary>B097 (card 437): "stopped" is a card status board.edit knows; it puts the card in In Progress, never Needs You.</summary>
+    /// <summary>"stopped" is a card status board.edit knows; it puts the card in In Progress, never Needs You.</summary>
     [Fact]
     public async Task EditingACardToStopped_IsKnown_AndInProgress()
     {

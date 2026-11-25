@@ -71,7 +71,7 @@ public sealed class UiRpcTests : IAsyncLifetime
     [Fact]
     public async Task TeamsWorkflowExpiry_ReadsWithTeamId_SetsWithDays_AndRefusesOutsideOneTo365()
     {
-        // B085 (card 388/389): the shell's get-or-set, like teams.push; the default is 3.
+        // teams.workflowExpiry is the shell's get-or-set, like teams.push; the default is 3.
         var teamId = await CreateMixedTeam();
         Assert.Equal(3, (await Call("teams.workflowExpiry", new { teamId }))!["days"]!.GetValue<int>());
         Assert.Equal(7, (await Call("teams.workflowExpiry", new { teamId, days = 7 }))!["days"]!.GetValue<int>());
@@ -88,6 +88,18 @@ public sealed class UiRpcTests : IAsyncLifetime
 
     private static long IdOf(JsonArray agents, string name) =>
         agents.Single(a => a!["member"]!["name"]!.GetValue<string>() == name)!["member"]!["id"]!.GetValue<long>();
+
+    [Fact]
+    public async Task ANewTeam_GivesEachAgentTheModelChosenForIt_AndLeavesTheRestOnTheirDefault()
+    {
+        var teamId = (await Call("teams.create", new
+        {
+            name = "models", managerCli = "claude", managerModel = "sonnet",
+            members = new object[] { new { name = "Ada Lovelace", cli = "claude", model = "haiku" }, new { name = "Ben Okafor", cli = "grok" } },
+        }))!["teamId"]!.GetValue<long>();
+        var agents = await Agents(teamId);
+        Assert.Equal(["sonnet", "haiku", ""], agents.Select(a => a!["member"]!["model"]?.GetValue<string>() ?? ""));
+    }
 
     [Fact]
     public async Task TwoTeamsOneMixed_AddAndRemoveAgents()

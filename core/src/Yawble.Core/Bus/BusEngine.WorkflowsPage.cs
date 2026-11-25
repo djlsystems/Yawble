@@ -4,14 +4,48 @@ using System.Text.Json.Nodes;
 
 namespace Yawble.Core.Bus;
 
-/// <summary>The backlog item a workflow was dispatched as (B104). <paramref name="Spec"/>: its body (workflows.get only).</summary>
+/// <summary>The backlog item a workflow was dispatched as. <paramref name="Spec"/>: its body (workflows.get only).</summary>
 public sealed record WorkflowItemRef(long Id, string Label, string Title, bool Archived, string Spec);
 
-/// <summary>A member working a workflow now: running (its run is active), lease (its run waits for the heavy-work lease) or queued.</summary>
-public sealed record WorkflowWorker(long Id, string Name, string State);
+/// <summary>
+/// A member working a workflow now: running (its run is active), lease (its run waits for the heavy-work lease), or one of
+/// <see cref="WaitStates"/> for work not started yet. <paramref name="WaitsFor"/>: with waits-for-run, the name of the member
+/// whose run must end first (the hand-back's sender); null otherwise.
+/// </summary>
+public sealed record WorkflowWorker(long Id, string Name, string State, string? WaitsFor = null);
 
 /// <summary>
-/// One row of the Workflows page (B104, contract B104/contract.md): the team's WorkflowSummary with its clean title, plus
+/// Why a member's undelivered work has not started (the Workflows page's members, team status, the timeline).
+/// Only <see cref="Queued"/> is a wait for a run slot.
+/// </summary>
+public static class WaitStates
+{
+    /// <summary>queued: the member is in the run queue, waiting for a run slot.</summary>
+    public const string Queued = "queued";
+
+    /// <summary>waits-for-run: a hand-back held until the run that sent it ends (and its branch is fetched back).</summary>
+    public const string WaitsForRun = "waits-for-run";
+
+    /// <summary>held: the member's team is paused or archived.</summary>
+    public const string Held = "held";
+
+    /// <summary>pending: anything else (the member runs in another workflow, has a session open, waits to retry a start, ...).</summary>
+    public const string Pending = "pending";
+
+    public static readonly IReadOnlyList<string> All = [Queued, WaitsForRun, Held, Pending];
+
+    /// <summary>The state in words (the companion's and the Workflows page's wording).</summary>
+    public static string Text(string state, string? waitsFor) => state switch
+    {
+        Queued => "queued for a run slot",
+        WaitsForRun => $"waits for {waitsFor ?? "the sender"}'s run to end",
+        Held => "waits: team paused",
+        _ => "has work waiting",
+    };
+}
+
+/// <summary>
+/// One row of the Workflows page: the team's WorkflowSummary with its clean title, plus
 /// its team, the Status column's word, who works it now and the backlog item it came from.
 /// </summary>
 public sealed record WorkflowRow(WorkflowSummary Summary, string Team, long TeamId, long? OwnerId, string Status, string? WaitingFor,
@@ -21,7 +55,7 @@ public sealed record WorkflowRow(WorkflowSummary Summary, string Team, long Team
 public sealed record WorkflowsPage(IReadOnlyList<WorkflowRow> Rows, IReadOnlyDictionary<string, int> Counts, bool Truncated, DateTimeOffset Now);
 
 /// <summary>
-/// B104, the Workflows page: every team's workflows in one list. Read in a fixed number of statements however many
+/// The Workflows page: every team's workflows in one list. Read in a fixed number of statements however many
 /// workflows there are (the heads of all of them in one, then the threads, wakes, expiry rows, items and times of the
 /// ones shown in one each): no per-workflow query.
 /// </summary>
@@ -29,7 +63,7 @@ public sealed partial class BusEngine
 {
     public const int DefaultPageLimit = 200, MaxPageLimit = 1000;
 
-    /// <summary>The Status column's words (contract B104).</summary>
+    /// <summary>The Status column's words.</summary>
     public static class WorkflowStatuses
     {
         public const string Running = "running", NeedsYou = "needs-you", Waiting = "waiting", Idle = "idle", Stopped = "stopped",
@@ -114,12 +148,14 @@ public sealed partial class BusEngine
         var items = ItemsOf(heads.Select(h => h.Head).ToList());
         var pending = _store.Pending();
         var leaseWaiting = _leaseQueue.Select(l => l.Run.RunId).ToHashSet();
+        var queue = _store.Queue();
+        var held = _store.HeldTeams();
         var candidates = new List<Candidate>();
         foreach (var (h, team, owner) in heads)
         {
             var item = items.GetValueOrDefault(h.Id);
             var c = new Candidate(h, team, owner, item, item?.Title is { Length: > 0 } t ? Clip(t) : TitleOf(h.Root));
-            if (!h.Ended) c.Members.AddRange(WorkersOf(h.Id, pending, leaseWaiting, byQualified));
+            if (!h.Ended) c.Members.AddRange(WorkersOf(h.Id, pending, leaseWaiting, byQualified, queue, held));
             candidates.Add(c);
         }
 
@@ -157,7 +193,7 @@ public sealed partial class BusEngine
                 c.Question is not null ? (WorkflowStatuses.NeedsYou, null)
                 : active.Any(r => !leaseWaiting.Contains(r.RunId)) ? (WorkflowStatuses.Running, null)
                 : active.Count > 0 ? (WorkflowStatuses.Waiting, "lease")
-                : pending.Any(p => p.Correlation == w) ? (WorkflowStatuses.Waiting, "slot")
+                : pending.Any(p => p.Correlation == w) ? (WorkflowStatuses.Waiting, WaitingForOf(c.Members))
                 : openWakes > 0 || ResumeDue(thread) ? (WorkflowStatuses.Waiting, "wake")
                 : LastRunStopped(thread) ? (WorkflowStatuses.Stopped, null)
                 : (WorkflowStatuses.Idle, (string?)null);
@@ -246,7 +282,7 @@ public sealed partial class BusEngine
         }
     }
 
-    /// <summary>Each workflow's backlog item: its newest dispatch (backlog_dispatches), else the root message's payload item (B098).</summary>
+    /// <summary>Each workflow's backlog item: its newest dispatch (backlog_dispatches), else the root message's payload item.</summary>
     private Dictionary<long, WorkflowItemRef> ItemsOf(IReadOnlyList<WorkflowHead> heads)
     {
         var result = new Dictionary<long, WorkflowItemRef>();
@@ -272,20 +308,53 @@ public sealed partial class BusEngine
         static WorkflowItemRef Ref(Board.ItemRow i) => new(i.Id, i.Label, i.Title, i.ArchivedAt is not null, i.Body);
     }
 
-    /// <summary>Who works the workflow now: running (active run), lease (its active run waits for the lease), queued (a delivery not started).</summary>
+    /// <summary>
+    /// Who works the workflow now: running (active run), lease (its active run waits for the lease), else why its
+    /// delivery here has not started (<see cref="WaitOf"/>: queued, waits-for-run with the sender's name, held, pending).
+    /// </summary>
     private IEnumerable<WorkflowWorker> WorkersOf(long workflow, IReadOnlyList<BusStore.PendingRow> pending, IReadOnlySet<long> leaseWaiting,
-        IReadOnlyDictionary<string, MemberRef> byQualified)
+        IReadOnlyDictionary<string, MemberRef> byQualified, IReadOnlyList<BusStore.QueueRow> queue, IReadOnlySet<long> held)
     {
         var seen = new HashSet<long>();
         foreach (var run in _active.Values.Select(a => a.Context).Where(r => r.Correlation == workflow))
             if (seen.Add(run.Member.Id))
                 yield return new WorkflowWorker(run.Member.Id, run.Member.Name, leaseWaiting.Contains(run.RunId) ? "lease" : "running");
-        foreach (var p in pending.Where(p => p.Correlation == workflow))
-            if (byQualified.TryGetValue(p.Subscriber, out var m) && seen.Add(m.Id))
-                yield return new WorkflowWorker(m.Id, m.Name, "queued");
+        foreach (var g in pending.Where(p => p.Correlation == workflow).GroupBy(p => p.Subscriber, StringComparer.OrdinalIgnoreCase))
+            if (byQualified.TryGetValue(g.Key, out var m) && seen.Add(m.Id))
+            {
+                var (state, waitsFor) = WaitOf(m.Id, m.TeamId, [.. g], queue, held);
+                yield return new WorkflowWorker(m.Id, m.Name, state, waitsFor);
+            }
     }
 
-    /// <summary>The newest run end in the thread was a run the person stopped (B097: failed with class stopped).</summary>
+    /// <summary>
+    /// Why a member's undelivered work (<paramref name="rows"/>: its pending deliveries, in one workflow or all) has
+    /// not started. Its team paused or archived: held. Every unstarted row a hand-back still held for the run that sent it:
+    /// waits-for-run, with that sender's name. In the run queue: queued (the only wait for a run slot). Else pending.
+    /// Under the gate.
+    /// </summary>
+    private (string State, string? WaitsFor) WaitOf(long memberId, long teamId, IReadOnlyList<BusStore.PendingRow> rows,
+        IReadOnlyList<BusStore.QueueRow> queue, IReadOnlySet<long> held)
+    {
+        if (held.Contains(teamId)) return (WaitStates.Held, null);
+        var senders = rows.Where(r => !r.Started).Select(HeldBy).ToList();
+        if (senders.Count > 0 && senders.All(s => s is not null)) return (WaitStates.WaitsForRun, senders[0]!.Member.Name);
+        if (queue.Any(q => q.MemberId == memberId && q.Kind == QueueKinds.Run)) return (WaitStates.Queued, null);
+        return (WaitStates.Pending, null);
+    }
+
+    /// <summary>The row's waitingFor when the workflow waits on undelivered work: slot only while a member is queued for one.</summary>
+    private static string WaitingForOf(IReadOnlyList<WorkflowWorker> workers)
+    {
+        var states = workers.Select(m => m.State).ToHashSet();
+        return states.Contains(WaitStates.Queued) ? "slot"
+            : states.Contains(WaitStates.WaitsForRun) ? WaitStates.WaitsForRun
+            : states.Contains(WaitStates.Pending) ? WaitStates.Pending
+            : states.Contains(WaitStates.Held) ? WaitStates.Held
+            : WaitStates.Pending;
+    }
+
+    /// <summary>The newest run end in the thread was a run the person stopped (failed with class stopped).</summary>
     private static bool LastRunStopped(IReadOnlyList<Message> thread) =>
         thread.LastOrDefault(m => m.Type is MessageTypes.Completed or MessageTypes.Failed) is { Type: MessageTypes.Failed } f
         && Text(f, "failureClass") == FailureClasses.Stopped;

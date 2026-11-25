@@ -19,7 +19,7 @@ public sealed class BusOptions
     /// <summary>Tell a workflow's owner, once, when its run ends with the workflow open and nobody working it (on by default).</summary>
     public bool IdleOffer { get; init; } = true;
 
-    /// <summary>B100: queue a retro item for the team's Manager when a workflow_complete is accepted (on by default).</summary>
+    /// <summary>Queue a retro item for the team's Manager when a workflow_complete is accepted (on by default).</summary>
     public bool Retros { get; init; } = true;
 
     /// <summary>The most deliveries of one workflow in one run.</summary>
@@ -253,10 +253,73 @@ public sealed partial class BusEngine : IAsyncDisposable
         {
             var target = _store.Member(team, member) ?? throw new BusRefusal("no_such_member", $"'{team}' has no member named '{member}'");
             if (_store.Teams().FirstOrDefault(t => t.Id == target.TeamId) is { Archived: true } archived)
-                throw new BusRefusal("archived", $"'{archived.Name}' is archived, and an archived team does no work. Nothing was sent. Unarchive it first (it comes back paused), then resume it.");
+                throw ArchivedRefusal(archived.Name);
             if (causation is { } cause) CheckDepth(cause);
             return Publish(new NewMessage(MessageTypes.Instruction(target), BatchText.InstructionPayload(text, extra), MessageTypes.PersonSource, causation));
         }, ct);
+
+    /// <summary>The decisions an answer is being given to right now, guarded by the gate.</summary>
+    private readonly HashSet<long> _answering = [];
+
+    public const string AnsweredAlready = "that question is answered already or is not this team's";
+
+    /// <summary>
+    /// The person's answer to <paramref name="team"/>'s open decision <paramref name="decision"/> (asked by
+    /// <paramref name="member"/>). Under the gate, every check that can refuse runs first (the member, an archived team, the
+    /// depth limit, the decision still open and not being answered by another call) and the decision is claimed; only then
+    /// <paramref name="beforePublish"/> runs (it may change the text, e.g. saved images, and applies a decision action), and
+    /// the answer is published under the gate after the same checks again. A second answer while the first is claimed is
+    /// refused as answered already, so an action is applied and a reply sent once. <paramref name="beforePublish"/> runs
+    /// outside the gate because an action is the setting's own call, which takes the gate itself.
+    /// </summary>
+    /// <remarks><paramref name="action"/> is the picked option's action; for
+    /// <see cref="DecisionActions.CloseOverFail"/> the answer records the person's yes (<c>closeOverFail</c>, from the question).</remarks>
+    public async Task<Message> PersonAnswerAsync(string team, string member, string text, long decision,
+        Func<string, CancellationToken, Task<string>>? beforePublish = null, CancellationToken ct = default, string? action = null)
+    {
+        await WithGate(() =>
+        {
+            CheckAnswer(team, member, decision);
+            if (!_answering.Add(decision)) throw new BusRefusal("no_such_decision", AnsweredAlready);
+        }, ct);
+        try
+        {
+            if (beforePublish is not null) text = await beforePublish(text, ct);
+            return await WithGate(() =>
+            {
+                var target = CheckAnswer(team, member, decision);
+                return Publish(new NewMessage(MessageTypes.Instruction(target), BatchText.InstructionPayload(text.Trim(), YesOf(action, decision)), MessageTypes.PersonSource, decision));
+            }, CancellationToken.None);
+        }
+        finally
+        {
+            await WithGate(() => { _answering.Remove(decision); }, CancellationToken.None);
+        }
+    }
+
+    /// <summary>The person's yes to close over a FAIL, recorded on the answer; null for any other answer.</summary>
+    private System.Text.Json.Nodes.JsonObject? YesOf(string? action, long decision)
+    {
+        if (action != DecisionActions.CloseOverFail || _store.Find(decision) is not { } question
+            || DecisionAsk.Read(question.Payload).Close is not { } close) return null;
+        var yes = close.ToJson();
+        yes["decision"] = decision;
+        return new System.Text.Json.Nodes.JsonObject { ["closeOverFail"] = yes };
+    }
+
+    private static BusRefusal ArchivedRefusal(string team) =>
+        new("archived", $"'{team}' is archived, and an archived team does no work. Nothing was sent. Unarchive it first (it comes back paused), then resume it.");
+
+    /// <summary>The refusals of an answer (under the gate): the member, an archived team, the depth limit, the decision still open.</summary>
+    private MemberRef CheckAnswer(string team, string member, long decision)
+    {
+        var target = _store.Member(team, member) ?? throw new BusRefusal("no_such_member", $"'{team}' has no member named '{member}'");
+        if (_store.Teams().FirstOrDefault(t => t.Id == target.TeamId) is { Archived: true } archived)
+            throw ArchivedRefusal(archived.Name);
+        CheckDepth(decision);
+        if (!_store.OpenDecisions(team).Any(m => m.Seq == decision)) throw new BusRefusal("no_such_decision", AnsweredAlready);
+        return target;
+    }
 
     // ------------------------------------------------------------------ the tools, identity from the run
 
@@ -287,7 +350,7 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// <summary>The host tool asks (tools from the app's catalog an agent asked for), behind the request_tool tool; null when not wired.</summary>
     public Integrations.ToolAskService? ToolAsks { get; set; }
 
-    /// <summary>The folder asks (B111: a folder an agent asked to read or write), behind the request_folder tool; null when not wired.</summary>
+    /// <summary>The folder asks (a folder an agent asked to read or write), behind the request_folder tool; null when not wired.</summary>
     public Integrations.FolderAskService? FolderAsks { get; set; }
 
     internal Task<Message> HandbackAsync(RunContext run, string delivered, CancellationToken ct) =>
@@ -301,7 +364,8 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (string.IsNullOrWhiteSpace(delivered)) throw new BusRefusal("empty", "say what you delivered");
             _statusLines[run.Member.Id] = "handed back: " + delivered;
             run.HandedBack = true;
-            return Publish(new NewMessage(MessageTypes.Handback, JsonSerializer.Serialize(new { delivered }), run.Member.Qualified, run.Causation));
+            // The run id ties the hand-back to the run that sent it (Ripe holds it only while that run is active).
+            return Publish(new NewMessage(MessageTypes.Handback, JsonSerializer.Serialize(new { delivered, runId = run.RunId }), run.Member.Qualified, run.Causation));
         }, ct);
 
     /// <summary>
@@ -343,7 +407,7 @@ public sealed partial class BusEngine : IAsyncDisposable
         // declaration; it rides on it, so the work is not reported as ready to land.
         var check = string.IsNullOrWhiteSpace(delivered) ? null : await MergeCheckForAsync(run.Member, ct);
         var completed = await CompleteAsync(run, delivered, check, ct);
-        await QueueRetroAsync(run.Member, completed, ct); // B100: the Manager's look back, when the workflow was eventful
+        await QueueRetroAsync(run.Member, completed, ct); // the Manager's look back, when the workflow was eventful
         return completed;
     }
 
@@ -381,6 +445,12 @@ public sealed partial class BusEngine : IAsyncDisposable
             {
                 throw new BusRefusal("busy", "workflow completion refused because work is still in flight under this workflow: " + string.Join("; ", busy));
             }
+            // Never over a tester's FAIL, unless the person said yes to closing over it.
+            var fails = TesterVerdicts.Outstanding(_store.Workflow(correlation), run.Member.Team, TestersOf(run.Member.TeamId));
+            var open = fails.Where(f => f.Yes is null).ToList();
+            if (open.Count != 0) throw TesterVerdicts.Refusal(open);
+            var closedOverFail = fails.Count == 0 ? null
+                : fails.Select(f => new FailClosure(f.Card, f.Tester, f.FailLine, f.Yes!.Kind, f.Yes.Reason)).ToList();
             _statusLines[run.Member.Id] = "declared complete: " + delivered;
             var conflict = check is { Clean: false } ? check : null;
             if (conflict is not null) delivered += $"\n\nNot ready to land: {conflict.Text}.";
@@ -389,8 +459,32 @@ public sealed partial class BusEngine : IAsyncDisposable
                 {
                     delivered, declaredBy = run.Member.Qualified, onBehalfOf = onBehalf ? owner.Qualified : null,
                     mergeConflict = conflict is null ? null : new { into = conflict.BaseBranch, files = conflict.Files },
+                    closedOverFail = closedOverFail?.Select(c => new { card = c.Card, tester = c.Tester, failLine = c.FailLine, kind = c.Kind, reason = c.Reason }),
                 }),
                 run.Member.Qualified, run.Causation));
+        }, ct);
+
+    /// <summary>The team's testers by name, by the rule BoardProjector.TestersOf uses (Board.TesterRule.IsTester).</summary>
+    private IReadOnlySet<string> TestersOf(long teamId) =>
+        _store.MemberRows(teamId).Where(Yawble.Core.Board.TesterRule.IsTester).Select(m => m.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A needs_decision tied to a tester's FAIL (<see cref="DecisionAsk.Close"/>). Refused unless the card's
+    /// latest tester verdict in this workflow is a FAIL; otherwise stored like any decision.
+    /// </summary>
+    internal Task<Message> AskCloseOverFailAsync(RunContext run, DecisionAsk ask, CancellationToken ct) =>
+        WithGate(() =>
+        {
+            EnsureActive(run);
+            var close = ask.Close!;
+            var fails = TesterVerdicts.Outstanding(_store.Workflow(run.Correlation), run.Member.Team, TestersOf(run.Member.TeamId));
+            if (!fails.Any(f => f.Card == close.Card))
+            {
+                throw new BusRefusal("no_fail",
+                    $"card {close.Card} has no tester FAIL outstanding in this workflow, so there is nothing to close over; ask without card and kind");
+            }
+            _statusLines[run.Member.Id] = "needs decision: " + ask.Headline;
+            return Publish(new NewMessage(MessageTypes.NeedsDecision, ask.ToPayload().ToJsonString(), run.Member.Qualified, run.Causation));
         }, ct);
 
     internal Task<IReadOnlyList<MemberStatus>> TeamStatusAsync(long teamId, CancellationToken ct) =>
@@ -403,18 +497,40 @@ public sealed partial class BusEngine : IAsyncDisposable
     {
         var queue = _store.Queue();
         var unstarted = _store.Pending(started: false);
+        var held = _store.HeldTeams();
         TidyLease(_store.Clock.GetUtcNow());
-        return _store.TeamMembers(teamId).Select(m =>
+        var members = _store.TeamMembers(teamId);
+        var asking = members.Count == 0 ? new Dictionary<string, Message>(StringComparer.OrdinalIgnoreCase) : OpenDecisionByMember(members[0].Team);
+        return members.Select(m =>
         {
             var position = RunScheduler.PositionOf(queue, q => q.MemberId == m.Id);
             var state = _active.Values.Any(a => a.Context.Member.Id == m.Id) ? "running"
                 : _sessions.ContainsKey(m.Id) ? "session" : position is not null ? "queued" : "idle";
-            var waiting = unstarted.Count(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase));
-            return new MemberStatus(m.Name, m.Role == MemberRole.Manager ? "manager" : "member", state, position, waiting,
-                _statusLines.GetValueOrDefault(m.Id),
-                LeaseOf(m.Id) is { } l ? (l.State == "holding" ? $"holds the heavy-work lease for \"{l.What}\"" : $"waiting for the heavy-work lease (position {l.Position})") : null);
+            var mine = unstarted.Where(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase)).ToList();
+            var (waitState, waitsFor) = mine.Count == 0 ? (null, null) : WaitOf(m.Id, m.TeamId, mine, queue, held);
+            var decision = asking.GetValueOrDefault(m.Qualified);
+            return new MemberStatus(m.Name, m.Role == MemberRole.Manager ? "manager" : "member", state, position, mine.Count,
+                decision is not null ? WaitingLine(decision) : _statusLines.GetValueOrDefault(m.Id),
+                LeaseOf(m.Id) is { } l ? (l.State == "holding" ? $"holds the heavy-work lease for \"{l.What}\"" : $"waiting for the heavy-work lease (position {l.Position})") : null,
+                decision?.Seq, waitState, waitsFor);
         }).ToArray();
     }
+
+    /// <summary>What a member's card and status say while a question of its waits on the person.</summary>
+    public const string WaitingOnYou = "Waiting on you";
+
+    /// <summary>"Waiting on you: " and the decision's summary (or its question).</summary>
+    internal static string WaitingLine(Message decision) => WaitingOnYou + ": " + DecisionAsk.Read(decision.Payload).Headline;
+
+    /// <summary>
+    /// Each member's newest unanswered needs_decision in a team, by qualified name (BusStore.OpenDecisions: in any of
+    /// its workflows). The status line is the member's last report in memory, so a workflow_complete or a hand-back after
+    /// the question (another workflow, or the Manager declaring) used to replace "needs decision" while the person still
+    /// owed the answer; the open question wins until it is answered.
+    /// </summary>
+    private Dictionary<string, Message> OpenDecisionByMember(string team) =>
+        _store.OpenDecisions(team).GroupBy(m => m.Source, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.MaxBy(m => m.Seq)!, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>True when nothing is running, queued, undelivered or unpumped. For tests and the UI's "idle".</summary>
     public Task<bool> IsQuiescentAsync(CancellationToken ct = default) =>
@@ -491,7 +607,7 @@ public sealed partial class BusEngine : IAsyncDisposable
                 {
                     if (_stopping) return;
                     SweepTriggersIfDue();
-                    SweepExpiryIfDue(); // B085: warn about, and expire, open workflows nobody works
+                    SweepExpiryIfDue(); // warn about, and expire, open workflows nobody works
                     Pump();
                     if (OfferIdleReminders()) Pump();
                     Schedule();
@@ -579,7 +695,7 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// <summary>Every member with undelivered work and no run joins the back of the queue, oldest work first.</summary>
     private void EnqueueEligible()
     {
-        // B100: a member whose only waiting work is retro items comes last, and joins only while nobody else is queued.
+        // A member whose only waiting work is retro items comes last, and joins only while nobody else is queued.
         var waiting = _store.Pending(started: false)
             .Where(Ripe)
             .GroupBy(p => p.Subscriber, StringComparer.OrdinalIgnoreCase)
@@ -607,12 +723,24 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// A hand-back waits for the end of the run that sent it: the host fetches the member's branch back (and pushes)
     /// only after the run, so a Manager woken by the hand-back alone would find the work not yet in the shared view
     /// and spend a run learning to wait. Once the run ends, the hand-back and the run's ending row reach the Manager
-    /// together, in one run.
+    /// together, in one run. Only the run that SENT it holds it (its fetch-back is part of that run), not a later
+    /// run of the same member in another workflow.
     /// </summary>
-    private bool Ripe(BusStore.PendingRow row)
+    private bool Ripe(BusStore.PendingRow row) => HeldBy(row) is null;
+
+    /// <summary>
+    /// The active run a hand-back delivery waits for: the run that sent it, while it (and so its fetch-back) has not
+    /// ended. Null when the row is no hand-back or is ripe. The hand-back's payload names its run (runId); one from
+    /// before carries none and waits for the sender's active run of the same causation (a run's causation is its first item).
+    /// After a restart nothing is active, so every unstarted hand-back is ripe (start-up fetched every branch back).
+    /// </summary>
+    private RunContext? HeldBy(BusStore.PendingRow row)
     {
-        if (_store.Find(row.Seq) is not { } m || m.Type != MessageTypes.Handback) return true;
-        return !_active.Values.Any(a => string.Equals(a.Context.Member.Qualified, m.Source, StringComparison.OrdinalIgnoreCase));
+        if (_store.Find(row.Seq) is not { } m || m.Type != MessageTypes.Handback) return null;
+        if (Payload(m)?["runId"] is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<long>(out var runId))
+            return _active.TryGetValue(runId, out var sender) ? sender.Context : null;
+        return _active.Values.Select(a => a.Context).FirstOrDefault(c =>
+            c.Causation == m.CausationSeq && string.Equals(c.Member.Qualified, m.Source, StringComparison.OrdinalIgnoreCase));
     }
 
     private void Admit(BusStore.QueueRow entry)
@@ -624,7 +752,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (member is null) return ((long, List<BusStore.PendingRow>)?)null;
             var unstarted = _store.Pending(member.Qualified, started: false).Where(Ripe).ToList();
             if (unstarted.Count == 0) return null;
-            var first = unstarted.FirstOrDefault(p => !IsRetro(p)) ?? unstarted[0]; // B100: a retro item after any other work
+            var first = unstarted.FirstOrDefault(p => !IsRetro(p)) ?? unstarted[0]; // a retro item after any other work
             var batch = unstarted.Where(p => p.Correlation == first.Correlation).Take(Math.Max(1, _options.BatchLimit)).ToList();
             var runId = _store.InsertRun(member.Id, entry.Id, first.Seq, first.Correlation, batch.Count, entry.EnqueuedAt);
             foreach (var row in batch) _store.StartPending(member.Qualified, row.Seq, runId);
@@ -651,7 +779,9 @@ public sealed partial class BusEngine : IAsyncDisposable
         });
         _active[runId] = new ActiveRun(context, cancel, task);
         started.SetResult();
-        Log($"run {runId} admitted: {member!.Qualified}, {items.Length} item(s), workflow {context.Correlation}");
+        // Routine, at debug.
+        Logs.Diag.Debug("bus", $"run {runId} admitted: {member!.Qualified}, {items.Length} item(s), workflow {context.Correlation}",
+            ("team", member.Team), ("member", member.Qualified), ("run", runId), ("workflow", context.Correlation), ("items", items.Length));
     }
 
     private async Task ExecuteAsync(RunContext run, CancellationTokenSource cancel)
@@ -687,7 +817,7 @@ public sealed partial class BusEngine : IAsyncDisposable
                 var wakeManager = WakeManagerPolicy.OfRun(run.Items);
                 // A member that ends without handing back but asked to be woken is not stuck: say when it comes back.
                 var wake = run.Member.Role == MemberRole.Member && !run.HandedBack ? _store.NextWake(run.Member.Id) : null;
-                // B086: the run's stalls and lease waits, for the board's time accounting. B106: the lease waits come from the
+                // The run's stalls and lease waits, for the board's time accounting. The lease waits come from the
                 // lease's own queue too (ReleaseLeaseOf above ended a wait still queued), so a run without an idle clock has them.
                 var spans = ActivityOf(run, _store.Clock.GetUtcNow());
                 _store.Append(new NewMessage(result.Succeeded ? MessageTypes.Completed : MessageTypes.Failed,

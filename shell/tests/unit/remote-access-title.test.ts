@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defineComponent, h, nextTick, ref, withDirectives } from 'vue';
 import { applyRemoteAccess, READ_ONLY_TITLE, vChange } from '../../src/renderer/src/remoteAccess';
 
-// B025 re-verify (card 164): the tester's break tests for the finding 2 fix (card 163) - the screen's own :title on a
+// Break tests for the fix that keeps a button's own :title - the screen's own :title on a
 // v-change button must come back as the screen has it NOW when access goes from read back to full. Fakes only.
 
 afterEach(() => applyRemoteAccess('full'));

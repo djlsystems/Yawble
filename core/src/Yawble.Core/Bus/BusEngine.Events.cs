@@ -27,7 +27,7 @@ public sealed partial class BusEngine
                          && Yawble.Core.Integrations.CliRules.Matches(p, name)))
             {
                 var what = $"Event {name}:\n{Describe(item)}";
-                var fire = Fire(row, now, what);
+                var fire = Fire(row, now, what, Scripts.Running.ScriptPayloads.EventItem(name, item));
                 _store.RecordTriggerOutcome(row.Id, fire.Outcome == "fired" ? now : null, null, fire.Outcome, fire.Reason, fire.Seq, row.MissedCount);
                 if (fire.Outcome == "fired") fired++;
             }

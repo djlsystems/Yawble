@@ -212,7 +212,7 @@ public class IntegrationTests
         engine.Integrations = integrations;
         var alpha = await engine.CreateTeamAsync("Alpha", ct: Ct);
         await repos.EnsureTeamRepoAsync(alpha, "Alpha", Ct);
-        Yawble.Core.Tests.Teams.AgentGit.Host(repos.RepoOf(alpha)!.Path, "remote", "add", "origin", "https://github.com/acme/app.git"); // on GitHub: gh (B075)
+        Yawble.Core.Tests.Teams.AgentGit.Host(repos.RepoOf(alpha)!.Path, "remote", "add", "origin", "https://github.com/acme/app.git"); // on GitHub: gh
         await integrations.DispatchAsync("integrations.enable", new JsonObject { ["name"] = "gh", ["teamId"] = alpha, ["on"] = true }, Ct);
         // pr_status is allowed by its built-in row; deny it for this team so the test never reaches GitHub.
         await integrations.DispatchAsync("integrations.saveRule", new JsonObject { ["name"] = "gh", ["teamId"] = alpha, ["pattern"] = "pr_status*", ["decision"] = "deny" }, Ct);

@@ -19,6 +19,8 @@
     <None Include="Integrations/Fixtures/openapi/*" CopyToOutputDirectory="PreserveNewest" />
     <!-- The stand-in agent CLI that RealSandboxLauncherTests runs inside a real sandbox. -->
     <None Include="Launch/RealSandbox/standin-cli.py" CopyToOutputDirectory="PreserveNewest" />
+    <!-- A script the shell's designer built (shell/tests/unit/script-designer.test.ts) for DesignerBuiltScriptTests. -->
+    <None Include="Scripts/Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <!-- yawble-bridge's relay, compiled in: the bridge tests run it in this process against the in-memory gateway (no port);

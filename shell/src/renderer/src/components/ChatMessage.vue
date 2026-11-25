@@ -5,7 +5,7 @@ import type { ConciergeToolUse } from '../../../shared/api';
 import { copyCodeFrom, renderMarkdown } from '../markdown';
 import Icon from './Icon.vue';
 import { usePhone } from '../phone';
-// A phone (B037): wider bubbles, and a wide table or code block scrolls inside the message instead of the page.
+// A phone: wider bubbles, and a wide table or code block scrolls inside the message instead of the page.
 const phone = usePhone();
 
 // One message of a Concierge chat: the person's on the right, the Concierge's as rendered markdown with the tools it

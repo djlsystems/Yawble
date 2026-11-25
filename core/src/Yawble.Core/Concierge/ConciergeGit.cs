@@ -16,7 +16,7 @@ public sealed record GitPlan(string Text, string Key, bool Empty, Func<Cancellat
 /// <item>Nothing is forced. Deleting a ref is compare-and-delete on the SHA that was shown.</item>
 /// <item>A branch some clone has checked out, the base branch, and a branch the base does not contain (unmerged) are never
 ///   deleted, unless the person NAMED the unmerged one (<c>unmergedOk</c>); a checked-out one never. A branch whose every
-///   commit already has an equivalent in the base (B067: contained, see <see cref="ContainedProofAsync"/>) counts as merged.</item>
+///   commit already has an equivalent in the base (contained, see <see cref="ContainedProofAsync"/>) counts as merged.</item>
 /// <item>Every deleted branch's SHA is recorded (in the result and in <c>.git/yawble-concierge-deleted-branches.txt</c>)
 ///   so it can be restored with <c>git branch &lt;name&gt; &lt;sha&gt;</c>.</item>
 /// </list>
@@ -34,8 +34,8 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
 
     /// <summary>Plans deleting <paramref name="names"/> (or, when none, every merged branch) from the repository; refusals are listed with the reason.
     /// <paramref name="refuse"/>: the caller's own refusal for a branch (why it is not deleted), or null; applied to every
-    /// branch considered, named or not (card 171: another team's member still on it).</summary>
-    /// <param name="deleted">B073: called after each local branch is deleted, with its name and the SHA it had (the app records its commits).</param>
+    /// branch considered, named or not (another team's member still on it).</summary>
+    /// <param name="deleted">Called after each local branch is deleted, with its name and the SHA it had (the app records its commits).</param>
     public async Task<GitPlan> PlanDeleteAsync(ActionRepo repo, IReadOnlyList<string> names, IReadOnlyList<string> unmergedOk, bool remote, CancellationToken ct,
         Func<string, string?>? refuse = null, Func<string, string, CancellationToken, Task>? deleted = null)
     {
@@ -49,7 +49,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
         List<string> wanted;
         if (names.Count > 0)
         {
-            // Card 106 (F4): plan, guard, key and delete on the exact ref names git will act on.
+            // Plan, guard, key and delete on the exact ref names git will act on.
             var (exact, ambiguous) = await ResolveBranchNamesAsync(path, names, remote, ct);
             foreach (var line in ambiguous) sb.AppendLine(line);
             wanted = exact;
@@ -78,13 +78,13 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
                 sb.AppendLine($"- {branch}: REFUSED, {why}");
                 continue;
             }
-            // Card 106: a checked-out branch is refused on origin's side too (a clone on it, only origin has it yet).
+            // A checked-out branch is refused on origin's side too (a clone on it, only origin has it yet).
             if (checkedOut.TryGetValue(branch, out var where))
             {
                 sb.AppendLine($"- {branch} ({Short(sha ?? rsha!)}): REFUSED, checked out in {where}");
                 continue;
             }
-            // B067: a branch whose every commit already has an equivalent in the base (cherry-picked there) counts as merged:
+            // A branch whose every commit already has an equivalent in the base (cherry-picked there) counts as merged:
             // nothing is lost by deleting it, and the plan line carries the proof.
             async Task<(bool Merged, string? Proof)> State(string tip) =>
                 await IsAncestorAsync(path, tip, baseSha, ct) || (originBase is not null && await IsAncestorAsync(path, tip, originBase, ct))
@@ -102,7 +102,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
                     continue;
                 }
                 sb.AppendLine($"- delete {branch} at {sha}{How(state)}");
-                // B073: what deleting it loses, the same text as the Git dialog's git.deletePreview.
+                // What deleting it loses, the same text as the Git dialog's git.deletePreview.
                 foreach (var line in (await previews.DeletePreviewAsync(path, repo.BaseBranch, branch, ct)).Text.Split('\n'))
                     sb.Append("    ").AppendLine(line);
                 key.Append("L ").Append(branch).Append(' ').AppendLine(sha);
@@ -149,7 +149,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
         });
     }
 
-    // ------------------------------------------------------------------ contained in base (B067)
+    // ------------------------------------------------------------------ contained in base
 
     /// <summary>At most this many base commits are fingerprinted when git cherry cannot tell (a branch that merged the base after a cherry-pick).</summary>
     public const int MaxFingerprintedBaseCommits = 5000;
@@ -306,7 +306,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
     /// <summary>Branch -> where it is checked out: the repository itself, its worktrees, and every member clone (HEAD file read, never git run there).</summary>
     public async Task<Dictionary<string, string>> CheckedOutAsync(ActionRepo repo, CancellationToken ct)
     {
-        // Ignoring case (card 106, F4): git on Windows and macOS treats Members/Ada and members/ada as one loose ref.
+        // Ignoring case: git on Windows and macOS treats Members/Ada and members/ada as one loose ref.
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if ((await git.TryRunAsync(repo.Path, ["symbolic-ref", "-q", "--short", "HEAD"], ct)) is { ExitCode: 0, Stdout.Length: > 0 } head)
             map[head.Stdout] = repo.Path;
@@ -347,7 +347,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
     }
 
     /// <summary>
-    /// Card 106 (F4): git on Windows and macOS finds a loose ref whatever its case (asked for Members/Ada it reads and
+    /// Git on Windows and macOS finds a loose ref whatever its case (asked for Members/Ada it reads and
     /// deletes members/ada), so every guard must see the name git will act on. Each requested name is matched, ignoring
     /// case, against the branches there are (refs/heads, and refs/remotes/origin when <paramref name="remote"/>): one exact
     /// name found is used instead; none is kept as asked (git finds nothing either); two or more that differ only in case

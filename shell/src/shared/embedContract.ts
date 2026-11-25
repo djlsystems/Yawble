@@ -1,16 +1,20 @@
-// B115: the contract between the remote view opened by the cloud (remote.html?embed=1&theme=light|dark, in a frame)
+// The contract between the remote view opened by the cloud (remote.html?embed=1&theme=light|dark, in a frame)
 // and the cloud page around it. window.postMessage both ways; both sides check event.origin === location.origin and
 // event.source (the frame's parent window, or the frame's window), and ignore anything else. The text of the contract is
-// in docs/cloud-link.md ("Embedded in the cloud"); the cloud team has the same text in B116. No backward compatibility:
+// in docs/cloud-link.md ("Embedded in the cloud"); the cloud team keeps the same text. No backward compatibility:
 // a change here is a new version.
 
 export const EMBED_VERSION = 1;
 
 /** The short icon keys: the cloud draws its own icon for a key it knows. */
-export type EmbedIcon = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'kanban' | 'documents' | 'monitor' | 'logs';
+export type EmbedIcon = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'kanban' | 'documents' | 'monitor' | 'scripts' | 'logs';
 
-/** The places, in Sidebar.vue's order: New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs. */
-export type EmbedPlaceId = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'board' | 'documents' | 'monitor' | 'logs';
+/**
+ * The places, in Sidebar.vue's order: New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Scripts, Logs.
+ * No Terminal and no Help: an agent's terminal is in its pane on the team page (and its output is never sent up), and the
+ * version and help links are in Settings, which the cloud's own settings button opens.
+ */
+export type EmbedPlaceId = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'board' | 'documents' | 'monitor' | 'scripts' | 'logs';
 
 export interface EmbedPlace {
   id: EmbedPlaceId;
@@ -24,7 +28,7 @@ export interface EmbedPlace {
 }
 
 /** A team's dot, as the sidebar draws it. The cloud draws a value it does not know as idle. */
-export type EmbedTeamDot = 'idle' | 'running' | 'queued' | 'paused' | 'attention';
+export type EmbedTeamDot = 'idle' | 'running' | 'waiting' | 'queued' | 'paused' | 'attention';
 
 export interface EmbedTeam {
   id: number;

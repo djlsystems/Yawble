@@ -18,7 +18,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// B014 (card 71): the team's network allow list (0041) and the network-ask fixes. "Allow for this team" writes the
+/// The team's network allow list (0041) and the network-ask fixes. "Allow for this team" writes the
 /// team's list in one write; every member's run of that team (later hires too) gets it through the policy merger; Remove
 /// takes it away for the next run. A name resolving only to private addresses raises no ask; a removed member's waiting
 /// ask closes; the 24-hour deny is the member's id, so a new member with an old name is asked again; a plain-http ask

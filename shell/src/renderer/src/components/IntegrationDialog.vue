@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { confirmDialog } from '../confirm';
 import { useEscapeClose } from '../escapeClose';
-import type { ApiRow, Connection, IntegrationInfo, McpServerInfo, YawbleApi, TeamSummary } from '../../../shared/api';
+import type { ApiPeekResult, ApiRow, Connection, IntegrationInfo, McpServerInfo, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import ConnectionDialog from './ConnectionDialog.vue';
 import DiscoverChecklist from './DiscoverChecklist.vue';
@@ -221,6 +221,53 @@ function applyApi(row: ApiRow | null) {
   if (!form.value.docsUrl) form.value.docsUrl = row.docsUrl ?? '';
   if (pick.value === '' && row.connection) pick.value = String(row.connection.id);
 }
+// ---- Add API: one address (the spec, or the service), looked up before anything is saved
+const isNewHttp = computed(() => isApi.value && !isWebsite.value && !apiName.value);
+const source = ref('');
+const peek = ref<ApiPeekResult | null>(null);
+const manual = ref(false);
+const peekText = computed(() => {
+  const r = peek.value;
+  if (!r) return '';
+  if (!r.found) return `No OpenAPI spec found there (${r.reason}). It is taken as the service address; add and the app looks in the usual places.`;
+  const what = `${r.actions} action${r.actions === 1 ? '' : 's'}`;
+  return `Found ${r.title ? `"${r.title}"` : 'a spec'}: ${what}${r.signIn ? `, signs in with ${r.signIn === 'basic' ? 'a username and password' : r.signIn === 'oauth2' ? 'OAuth' : 'a key or token'}` : ''}.${r.serviceUrl ? '' : ' It does not say where the service is: give the service URL.'}`;
+});
+async function lookUp() {
+  if (remote.value || busy.value || !source.value.trim()) return;
+  error.value = null;
+  busy.value = true;
+  doing.value = 'lookup';
+  try {
+    const r = await api.call<ApiPeekResult>('integrations.apiPeek', { url: source.value.trim() });
+    peek.value = r;
+    form.value.name = r.name;
+    form.value.baseUrl = r.serviceUrl ?? '';
+    form.value.docsUrl = r.found ? r.specUrl : '';
+  } catch (e) { error.value = errorText(e); }
+  finally { busy.value = false; }
+}
+
+// ---- Path parameters the sign-in fills (Twilio's AccountSid from the username), so callers never give them
+const fillable = computed(() => (signIn.value?.fields ?? []).filter((f) => !f.secret));
+const pathNames = computed(() => apiInfo.value?.pathParamNames ?? []);
+const commonPaths = computed(() => apiInfo.value?.pathParamCommon ?? []);
+function fillFor(fieldKey: string) {
+  const map = apiInfo.value?.auth?.pathParams ?? {};
+  return Object.keys(map).find((k) => map[k] === fieldKey) ?? '';
+}
+async function setFill(fieldKey: string, param: string) {
+  if (remote.value || !apiName.value) return;
+  const map: Record<string, string> = {};
+  for (const [k, v] of Object.entries(apiInfo.value?.auth?.pathParams ?? {})) if (v !== fieldKey && k !== param) map[k] = v;
+  if (param) map[param] = fieldKey;
+  error.value = null;
+  try {
+    await api.call('integrations.apiSave', { name: apiName.value, pathParams: Object.keys(map).length ? map : null });
+    await loadApi();
+  } catch (e) { error.value = errorText(e); }
+}
+
 async function loadApi() {
   const row = (await api.call<ApiRow[]>('integrations.apiList', {})).find((a) => a.name.toLowerCase() === apiName.value.toLowerCase()) ?? null;
   applyApi(row);
@@ -393,21 +440,45 @@ onMounted(async () => { await load(); syncEdit(); });
       <LoadingNote v-if="!loaded && !error && (!isApi || apiName)" :text="isApi ? 'Loading the API…' : isMcp ? 'Loading the MCP server…' : 'Loading the CLI…'" />
 
       <section v-if="isApi" class="apiform" data-test="api-form">
-        <label class="small fld">{{ isWebsite ? 'Site address' : 'Service URL' }}
-          <input v-model="form.baseUrl" class="mono" :placeholder="isWebsite ? 'https://intranet.example.com' : 'https://api.example.com'" data-test="api-base-url" />
-        </label>
-        <label v-if="!isWebsite" class="small fld">Documentation URL
-          <input v-model="form.docsUrl" class="mono" placeholder="https://example.com/docs or the spec's address" data-test="api-docs-url" />
-        </label>
-        <label class="small fld">Name
-          <input v-model="form.name" :disabled="!!apiName" :placeholder="isWebsite ? 'the site host' : 'from the spec'" data-test="api-name" />
-        </label>
-        <div class="row">
-          <button :disabled="busy || remote || (!form.baseUrl.trim() && !form.docsUrl.trim())" data-test="api-discover" :aria-busy="doing === 'discover'" @click="discover"><BusyLabel :busy="doing === 'discover'" text="Discovering…">Discover</BusyLabel></button>
-          <span v-if="remote" class="muted small" data-test="api-remote">{{ remoteSentence }}</span>
-          <span v-else-if="apiInfo?.status" class="small" :class="apiInfo.status.startsWith('not working') ? 'warn' : 'ok'" data-test="api-result">{{ apiInfo.status }}</span>
-        </div>
-
+        <template v-if="isNewHttp && !manual">
+          <label class="small fld">The API's OpenAPI spec, or the service's address
+            <input v-model="source" class="mono" placeholder="https://example.com/openapi.json or https://api.example.com" data-test="api-source" @keydown.enter="lookUp" />
+          </label>
+          <p class="muted small">The spec (a link often ending in openapi.json or .yaml) tells the app where the service is, what it can do and how it signs in.</p>
+          <div class="row">
+            <button :class="{ primary: !peek }" :disabled="busy || remote || !source.trim()" data-test="api-lookup" :aria-busy="doing === 'lookup'" @click="lookUp"><BusyLabel :busy="doing === 'lookup'" text="Looking…">Look up</BusyLabel></button>
+            <button class="linkish small" data-test="api-manual" @click="manual = true">Enter the addresses yourself</button>
+          </div>
+          <template v-if="peek">
+            <p class="small" :class="peek.found ? 'ok' : 'warn'" data-test="api-peek">{{ peekText }}</p>
+            <label class="small fld">Name
+              <input v-model="form.name" data-test="api-name" />
+            </label>
+            <label class="small fld">Service URL (where the calls go)
+              <input v-model="form.baseUrl" class="mono" placeholder="https://api.example.com" data-test="api-base-url" />
+            </label>
+            <p v-if="peek.found" class="muted small mono" data-test="api-spec-url">Spec: {{ peek.specUrl }}</p>
+            <div class="row">
+              <button class="primary" :disabled="busy || remote || !form.name.trim() || (!form.baseUrl.trim() && !form.docsUrl.trim())" data-test="api-discover" :aria-busy="doing === 'discover'" @click="discover"><BusyLabel :busy="doing === 'discover'" text="Adding…">Add and list its actions</BusyLabel></button>
+            </div>
+          </template>
+        </template>
+        <template v-else>
+          <label class="small fld">{{ isWebsite ? 'Site address' : 'Service URL' }}
+            <input v-model="form.baseUrl" class="mono" :placeholder="isWebsite ? 'https://intranet.example.com' : 'https://api.example.com'" data-test="api-base-url" />
+          </label>
+          <label v-if="!isWebsite" class="small fld">OpenAPI spec or documentation link (optional)
+            <input v-model="form.docsUrl" class="mono" placeholder="https://example.com/openapi.json" data-test="api-docs-url" />
+          </label>
+          <label class="small fld">Name
+            <input v-model="form.name" :disabled="!!apiName" :placeholder="isWebsite ? 'the site host' : 'the service host'" data-test="api-name" />
+          </label>
+          <div class="row">
+            <button :disabled="busy || remote || (!form.baseUrl.trim() && !form.docsUrl.trim())" data-test="api-discover" :aria-busy="doing === 'discover'" @click="discover"><BusyLabel :busy="doing === 'discover'" text="Discovering…">Discover</BusyLabel></button>
+            <span v-if="remote" class="muted small" data-test="api-remote">{{ remoteSentence }}</span>
+            <span v-else-if="apiInfo?.status" class="small" :class="apiInfo.status.startsWith('not working') ? 'warn' : 'ok'" data-test="api-result">{{ apiInfo.status }}</span>
+          </div>
+        </template>
         <div v-if="askAuth && !remote" class="signin-box" data-test="api-auth-choice">
           <b class="small">How does this API sign in?</b>
           <p class="muted small">Its description does not say. If you are not sure, leave it on None.</p>
@@ -452,18 +523,38 @@ onMounted(async () => { await load(); syncEdit(); });
         <div v-if="signIn && !oauth && !remote && !isWebsite" class="signin-box" data-test="api-signin">
           <b class="small">{{ signInTitle }}</b>
           <p v-if="signIn.description" class="muted small" data-test="api-signin-description">{{ signIn.description }}</p>
+          <label class="small fld">Sign in with
+            <select :value="pick" data-test="api-connection" @change="onPick(($event.target as HTMLSelectElement).value)">
+              <option value="">a new sign-in, entered here</option>
+              <optgroup v-if="apiConnections.length" label="Saved connections">
+                <option v-for="c in apiConnections" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
+              </optgroup>
+              <option value="new">a new saved connection, with its own name…</option>
+            </select>
+          </label>
+          <p class="muted small">Either way the sign-in stays on this computer and agents never see it. A saved connection can be picked again for another API.</p>
           <div v-if="pick === ''" class="secrets">
             <label v-for="f in signIn.fields" :key="f.key" class="small fld">{{ f.label }}
               <input v-model="secretValues[f.key]" :type="f.secret ? 'password' : 'text'" autocomplete="off" :placeholder="f.secret ? 'paste it here' : ''" :data-test="`api-secret-${f.key}`" />
             </label>
           </div>
-          <label class="small">Or use a saved connection
-            <select :value="pick" data-test="api-connection" @change="onPick(($event.target as HTMLSelectElement).value)">
-              <option value="">Paste a new one above</option>
-              <option v-for="c in apiConnections" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
-              <option value="new">New connection…</option>
-            </select>
-          </label>
+          <template v-if="fillable.length && commonPaths.length">
+            <div v-for="n in commonPaths" :key="n" class="fills" :data-test="`api-path-common-${n}`">
+              <label class="check small"><input type="checkbox" :checked="fillFor(fillable[0]!.key) === n" :data-test="`api-path-common-check-${n}`"
+                @change="setFill(fillable[0]!.key, ($event.target as HTMLInputElement).checked ? n : '')" /> Fill <code class="mono">{{ n }}</code> in every address from the {{ fillable[0]!.label.toLowerCase() }}</label>
+              <p class="muted small indent">Nearly all of {{ apiName }}'s actions have <code class="mono">{{ '{' + n + '}' }}</code> in their address. Ticked, each call fills it in from the sign-in, so scripts and agents never have to give it.</p>
+            </div>
+          </template>
+          <details v-else-if="fillable.length && pathNames.length" class="fills" data-test="api-path-fills">
+            <summary class="small muted">Advanced: fill part of the address from the sign-in</summary>
+            <p class="muted small">Most APIs don't need this. Use it only when an address needs an account id that is also your {{ fillable[0]!.label.toLowerCase() }}.</p>
+            <label v-for="f in fillable" :key="f.key" class="small fld">{{ f.label }} fills
+              <select :value="fillFor(f.key)" :data-test="`api-path-fill-${f.key}`" @change="setFill(f.key, ($event.target as HTMLSelectElement).value)">
+                <option value="">nothing (the default)</option>
+                <option v-for="n in pathNames" :key="n" :value="n">{{ n }}</option>
+              </select>
+            </label>
+          </details>
         </div>
         <div v-if="isWebsite && !remote" class="signin-box" data-test="website-login">
           <b class="small">Website login</b>
@@ -555,6 +646,8 @@ h3 { margin: 0; font-size: 16px; }
 .fld input { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; margin-top: 2px; }
 .signin-box { border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 .indent { margin-left: 22px; }
+.fills select { display: block; margin-top: 2px; }
+.linkish { background: none; border: none; color: var(--accent); padding: 0 4px; cursor: pointer; }
 .needed { background: var(--warn-soft); border-radius: 6px; padding: 2px 4px; }
 fieldset { border: 0; margin: 0; padding: 0; }
 fieldset.signin-box { border: 1px solid var(--line-soft); padding: 8px 10px; }

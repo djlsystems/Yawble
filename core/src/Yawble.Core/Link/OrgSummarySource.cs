@@ -9,7 +9,7 @@ namespace Yawble.Core.Link;
 /// org.summary's facts from the running app: the bus (teams, agents, run slots, workflows, decisions), the board (cards and
 /// the backlog item a workflow came from), the asks waiting for the person (tool-call approvals, network and tool requests)
 /// and the logs (warnings and errors of the last hour). It reads; it never changes anything. Never read: the model usage
-/// log and the token counts on run records (B048: no tokens, cost or usage in the summary).
+/// log and the token counts on run records (no tokens, cost or usage in the summary).
 /// </summary>
 public sealed class AppOrgSummarySource(
     BusEngine bus,
@@ -36,9 +36,11 @@ public sealed class AppOrgSummarySource(
         {
             var cards = await bus.AgentCardsAsync(t.Id, ct).ConfigureAwait(false);
             teams.Add(new OrgTeam(t.Name, t.Paused, t.Archived, cards.Select(c => new OrgAgent(c.Member.Name, Role(c.Member), c.State,
-                // B097: a run the person stopped is reported as stopped, never as failed.
+                // A run the person stopped is reported as stopped, never as failed.
                 c.LastRunFailed, c.State == "running" ? Doing(t.Name, c) : null,
-                c.State == "running" ? ParseTime(c.RunStartedAt) : null, c.LastRunStopped)).ToList(), t.WorkflowExpiryDays));
+                c.State == "running" ? ParseTime(c.RunStartedAt) : null, c.LastRunStopped,
+                // The card's state already says why work waits; waitsFor goes with waits-for-run only.
+                c.State == Bus.WaitStates.WaitsForRun ? c.WaitsFor : null)).ToList(), t.WorkflowExpiryDays, t.Waiting));
 
             var decisions = await bus.OpenDecisionsAsync(t.Name, ct).ConfigureAwait(false);
             asks.AddRange(decisions.Select(d => new OrgAsk("decision", t.Name, Field(d, "question") ?? Field(d, "text") ?? "a decision")));
@@ -105,7 +107,7 @@ public sealed class AppOrgSummarySource(
         var from = (_clock.GetUtcNow() - OrgSummary.ProblemsFor).ToString("O", CultureInfo.InvariantCulture);
         try
         {
-            // Only the sources a problem comes from, each its own page: every audit entry is in the activity log too (B101),
+            // Only the sources a problem comes from, each its own page: every audit entry is in the activity log too,
             // and a busy hour of them must not push a failed run out of the page.
             foreach (var row in ProblemSources.SelectMany(s => Rows(logs.Query(new Logs.LogQuery(Logs.LogSources.Activity, From: from,
                          Filters: new Dictionary<string, string> { ["source"] = s }, Limit: Logs.LogService.MaxPage)))))

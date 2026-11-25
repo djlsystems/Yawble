@@ -13,6 +13,9 @@ public interface IGatewayCredentials
     /// <summary>The host Grok home's current, unexpired session; null when there is none.</summary>
     GrokSession? GrokSession();
 
+    /// <summary>The session auth.json holds now, expired or not (what a refusal is tied to, <see cref="GrokSignInWatch"/>); no keeper is started.</summary>
+    GrokSession? StoredGrokSession() => GrokSession();
+
     /// <summary>Asks the Grok keeper to refresh (xAI's CLI on the host does it).</summary>
     Task<GrokRefreshResult> RefreshGrokAsync(bool force);
 
@@ -66,6 +69,8 @@ public sealed class GatewayCredentials(CredentialService credentials, GrokHome g
         keeper?.Start();
         return grokHome.ReadSession() is { } session && !session.ExpiredAt(_clock.GetUtcNow()) ? session : null;
     }
+
+    public GrokSession? StoredGrokSession() => grokHome.ReadSession();
 
     public Task<GrokRefreshResult> RefreshGrokAsync(bool force) =>
         keeper?.RefreshAsync(force) ?? Task.FromResult(new GrokRefreshResult(false, false, "Grok login expired: sign in again (no Grok keeper is running)", null));
@@ -217,6 +222,9 @@ public sealed class GatewayHost : IDisposable
     public RunTokenRegistry Tokens { get; }
     public GatewayHostOptions Options { get; }
     internal HttpClient Upstream { get; }
+
+    /// <summary>The latest Grok sign-in outcome across every run's gateway (the Agents tile shows a refusal).</summary>
+    public GrokSignInWatch GrokSignIn { get; } = new();
 
     /// <summary>The network asks: a host refused for not being on the allowlist is reported here (null: plain refusals only). Set by the host at start.</summary>
     public IHostRefusals? Refusals { get; set; }

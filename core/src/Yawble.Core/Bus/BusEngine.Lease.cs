@@ -30,7 +30,7 @@ public sealed partial class BusEngine
     private sealed record LeaseHold(RunContext Run, string What, DateTimeOffset Since, LeaseUse Use);
 
     /// <summary>
-    /// One use of the lease, for workflow_digest (B100): asked, given, given back. Kept in memory like the lease itself
+    /// One use of the lease, for workflow_digest: asked, given, given back. Kept in memory like the lease itself
     /// (the newest <see cref="LeaseHistoryMax"/>), so a restart forgets them.
     /// </summary>
     internal sealed class LeaseUse(long runId, long workflow, string member, string what, DateTimeOffset askedAt)
@@ -60,7 +60,7 @@ public sealed partial class BusEngine
         [.. _leaseHistory.Where(u => u.Workflow == workflow).Select(u => new Teams.DigestLease(u.Member, u.What, u.AskedAt, u.GrantedAt, u.EndedAt))];
 
     /// <summary>
-    /// B106 (card 494): a run's waits in the lease's queue as of <paramref name="now"/> (under the gate), from asking to
+    /// A run's waits in the lease's queue as of <paramref name="now"/> (under the gate), from asking to
     /// being given it, leaving the queue or the run's end; one still waiting runs to now. A lease given at once is no wait.
     /// The lease itself is the record, so every run has them, whatever its idle clock keeps.
     /// </summary>
@@ -77,7 +77,7 @@ public sealed partial class BusEngine
     }
 
     /// <summary>
-    /// A run's stalls and lease waits for the board's time (B086): what its idle clock keeps, with its waits in the lease's
+    /// A run's stalls and lease waits for the board's time: what its idle clock keeps, with its waits in the lease's
     /// queue (<see cref="LeaseWaitsOf"/>) added to the holds and overlapping holds joined into one.
     /// </summary>
     private RunActivitySpans ActivityOf(RunContext run, DateTimeOffset now)
@@ -175,14 +175,16 @@ public sealed partial class BusEngine
                             var hold = new LeaseHold(run, step, now, NewLeaseUse(run, step, now));
                             hold.Use.GrantedAt = now;
                             _leaseHolders.Add(hold);
-                            Log($"lease: {run.Member.Qualified} holds it for \"{step}\"");
+                            Logs.Diag.Debug("lease", $"lease: {run.Member.Qualified} holds it for \"{step}\"",
+                                ("team", run.Member.Team), ("member", run.Member.Qualified), ("run", run.RunId), ("step", step));
                             LeaseChanged?.Invoke();
                             return Granted(hold);
                         }
                         _leaseQueue.Add(new LeaseHold(run, step, now, NewLeaseUse(run, step, now)));
                         place = _leaseQueue.Count - 1;
                         run.IdleClock?.Hold();
-                        Log($"lease: {run.Member.Qualified} queued for \"{step}\" at position {place + 1}");
+                        Logs.Diag.Debug("lease", $"lease: {run.Member.Qualified} queued for \"{step}\" at position {place + 1}",
+                            ("team", run.Member.Team), ("member", run.Member.Qualified), ("run", run.RunId), ("step", step));
                         LeaseChanged?.Invoke();
                     }
                     return $"queued, position {place + 1}; {HoldersText(now)}. Keep working on something else, or check with lease status every " +
@@ -198,7 +200,8 @@ public sealed partial class BusEngine
                     if (queued > 0) run.IdleClock?.Resume();
                     if (held + queued > 0)
                     {
-                        Log($"lease: {run.Member.Qualified} {(held > 0 ? "released it" : "left the queue")}");
+                        Logs.Diag.Debug("lease", $"lease: {run.Member.Qualified} {(held > 0 ? "released it" : "left the queue")}",
+                            ("team", run.Member.Team), ("member", run.Member.Qualified), ("run", run.RunId));
                         TidyLease(now);
                         LeaseChanged?.Invoke();
                     }
@@ -240,7 +243,9 @@ public sealed partial class BusEngine
                 var after = _leaseQueue.Count > 0 ? "and went to the next in line" : "and was released";
                 _leaseNotices[h.Run.RunId] = $"Your heavy-work lease for \"{h.What}\" passed its {LeaseLimit.TotalMinutes:0}-minute limit {after}. " +
                                              "Take it again with lease acquire before any more heavy work.";
-                Log($"lease: {h.Run.Member.Qualified} passed the {LeaseLimit.TotalMinutes:0}-minute limit");
+                // Not routine: a holder that kept the lease past its limit is said, as a warning.
+                Logs.Diag.Warning("lease", $"lease: {h.Run.Member.Qualified} passed the {LeaseLimit.TotalMinutes:0}-minute limit",
+                    ("team", h.Run.Member.Team), ("member", h.Run.Member.Qualified), ("run", h.Run.RunId), ("step", h.What));
             }
         }
         var limit = HeavyAtOnce;
@@ -252,7 +257,8 @@ public sealed partial class BusEngine
             next.Use.GrantedAt = now;
             next.Run.IdleClock?.Resume(); // a full idle window from now
             _leaseNotices[next.Run.RunId] = $"You now hold the heavy-work lease for \"{next.What}\"; run it, then release.";
-            Log($"lease: handed to {next.Run.Member.Qualified} for \"{next.What}\"");
+            Logs.Diag.Debug("lease", $"lease: handed to {next.Run.Member.Qualified} for \"{next.What}\"",
+                ("team", next.Run.Member.Team), ("member", next.Run.Member.Qualified), ("run", next.Run.RunId), ("step", next.What));
             changed = true;
         }
         if (changed) LeaseChanged?.Invoke();

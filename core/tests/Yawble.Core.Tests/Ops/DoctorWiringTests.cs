@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Ops;
 
-/// <summary>Card 44: the doctor over the real ConnectionService, the issued-keys ledger, the file store index and the gateway self-test. Fakes only.</summary>
+/// <summary>The doctor over the real ConnectionService, the issued-keys ledger, the file store index and the gateway self-test. Fakes only.</summary>
 public class DoctorWiringTests : IDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

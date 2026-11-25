@@ -33,6 +33,26 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   Concierge's default agent once, with no Yawble tools and in a folder deleted afterwards, for 100 popular first names
   of the chosen **Country** (default United States). Its names replace the text, unsaved until **Save**. The country is
   saved with the list.
+- **Roles** (Settings > Teams > Roles) is the role catalog. A role has a name (one word, which is also the name word a
+  member of it gets), a short job description (the member's standing instructions), a suggested agent and a suggested
+  model. It starts with Developer, Tester, Reviewer, Researcher, Architect and Writer. You add, edit and remove roles;
+  renaming one renames it in every hire list and on every member hired as it. Removing a role that a team's hire list
+  (or the default hire list) uses is refused, and the message names those teams.
+- A team's **hire list** (Team settings > Hiring, and "Who the Manager may hire" on New team) says who its Manager may
+  hire: rows of a role, an agent (built-in or custom) and a model (the agent's default, or a picked one). A new team
+  starts from the default hire list in Settings > Teams. The list is a hard limit:
+  - The Manager's `hire` names a role from the list; the name is optional (the role word, with a first name added). The
+    member runs with the row's agent and model and gets the role's job. A role not on the list, or a different CLI or
+    job, is refused with the reason; the refusal for a role names the roles on the list.
+  - The Manager's `hiring` tool lists the rows (role, description, agent, model) and whether each agent can run on this
+    computer now.
+  - An empty hire list means any agent and free job text, as for teams made before hire lists.
+  - There is no count per role: the Manager hires as many members of a role as it has independent cards for, within
+    the computer's run slots.
+  - The member's tile shows its role, and the agent change log records the role with the hire.
+- On **New team**, each member row has a role picker beside its agent and model. Choosing a role fills in the role's
+  agent and model, and both stay editable; a row with a role and no name is named for the role, and the member gets the
+  role's job.
 - **Member settings** has General (CLI, model, credential, instructions) and Policy (see
   [Sandbox and policy](#sandbox-and-policy)).
 - Team **Settings** has the tabs General, Members, Repositories, Environment and Integrations:
@@ -60,7 +80,8 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     and at the right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
     Stop and Remove.
   - The agent chip reads agent/model, e.g. `claude/claude-opus-5-5`: the model set on the member, else the agent's
-    default model, else (the CLI picks its own) the model the member's last run used most, as the provider reported
+    default model, else the model your own CLI settings name (see Agent CLIs, Models), else (the CLI picks its own)
+    the model the member's last run used most, as the provider reported
     it; before a first run it reads `claude/default`. Its tooltip says which of these it is.
   - A row of tabs, **Report | Activity | Terminal**, with the run's details beside them (how its last run ended, its
     queue position, policy problems).
@@ -110,7 +131,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     Closed and expired move every card to Done, a waiting one too; completed leaves a card waiting on a person where
     it is. Telling the card's member something in the workflow makes the card live again.
 - **Skills** (Settings > Skills) are instructions agents load through the app, offered to chosen roles and teams.
-- **How a team learns** (B100). Agents keep no memory between runs, so a team keeps its lessons in one place: its
+- **How a team learns**. Agents keep no memory between runs, so a team keeps its lessons in one place: its
   **team_retros** skill, a team-scoped skill (offered to every role) with a short list of lessons, each
   "- <lesson> (<date>, workflow <id>)", under a few headings (Building and testing, Git, Working with the person ...).
   - After a workflow completes, the Manager looks back on it (a retrospective) and keeps at most a few lessons a later run
@@ -146,8 +167,31 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Grok: the app's switch, your Grok login, or an xAI API key.
   - The other CLIs: their own sign-in on this computer.
 - Credentials are kept in the OS credential store and used by the run's gateway, never inside the sandbox.
-- **Settings > Agents** lists detected CLIs (**Detect again**) and custom agents. A custom agent copies a built-in
+- Claude Code on macOS keeps its sign-in in the login Keychain item "Claude Code-credentials". The app's gateway reads
+  it there with macOS's own `security` tool, the same tool Claude Code uses to keep the item, so macOS shows no
+  Keychain prompt. The gateway keeps the token in memory and reads the item again only shortly before the token
+  expires or when the model API refuses it. No sandbox gets the Keychain, and the app never changes the item.
+  Settings > Agents shows Claude Code as signed in when that item exists.
+- **Settings > Agents** lists detected CLIs (**Detect again**), each with whether you are signed in to it on this
+  computer (or how to sign in), and custom agents. A custom agent copies a built-in
   with its own name, default model and command-line arguments.
+- **Models.** The model pickers list, in this order and each model once, with where each one comes from:
+  - **the CLI**: the CLI's own list, where it gives one without a prompt or a sign-in. Grok: what the app's last
+    `grok models` printed (the run that keeps your Grok sign-in fresh; it is never run just for the list) and the
+    models cache grok keeps in its folder. Codex: the models cache Codex keeps in `~/.codex` (`models_cache.json`).
+    GitHub Copilot: the `--model` choices of `copilot --help`, run with a throwaway home and a time limit.
+    Antigravity and Claude Code give no list.
+  - **your settings**: the model your own CLI settings name: the top-level `model` in `~/.codex/config.toml` (or
+    `$CODEX_HOME`), `model` or `default_model` in `~/.grok/config.toml`, `model` in `~/.copilot/settings.json` or
+    `config.json`, in `~/.gemini/antigravity-cli/settings.json` and in `~/.claude/settings.json`.
+  - **your runs**: the models this CLI's runs used over the last 90 days, as the providers reported them.
+  - **built-in**: the list the app carries.
+  The app only reads these files; it never writes them. A source that fails or times out adds nothing and the others
+  stand. A CLI's list is kept for a few minutes. You can still type any other model name.
+- A member with no model of its own and an agent with no default model run with the model your CLI settings name
+  ("Your Codex settings (gpt-6.1-sol)"), passed on the command line, since a member's own CLI folder has no such
+  setting. With none there either, the CLI picks its own default. The agent change log notes when the model in effect
+  comes from your settings.
 - **Terminal** opens an agent's own interface in the window. **Test** runs it with a diagnostic prompt that checks
   its version, folders and access.
 
@@ -256,10 +300,14 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     requests close and the Managers are told, as after an Install; not found, the item stays open and says so. It
     installs nothing, so a Cloud Link view may use it too.
 
-  On macOS the item shows the command to run yourself (`brew ...`); the app installs nothing. Each request, answer and
+  On macOS the item shows the command to run yourself (`brew ...`); the app installs nothing. The .NET SDK is found
+  where Terminal finds it, even when the app was started from the Dock: on the app's PATH, in the folders `/etc/paths`
+  and `/etc/paths.d` list (Homebrew's `/opt/homebrew/bin`, the installer's `/usr/local/share/dotnet`), and in those two
+  folders. Its real folder (after links, e.g. `/usr/local/share/dotnet`) is readable to every run and on its PATH, so
+  **Check again** and the runs agree on whether it is there. Each request, answer and
   result is in the **Approvals** log; the Concierge's status lists the open ones.
   The items show in the same **Needs you** strip above every view, and in the Board's **Needs You** lane when the Board
-  is open (its team and member filters apply). A machine-wide tool says "Windows may ask for permission". While
+  is open (its team and member filters apply). On Windows a machine-wide tool says "Windows may ask for permission". While
   winget runs the item says what it is doing (installing, then looking for the program) and its buttons wait; when the
   program is found the item goes and a line says the tool is installed. **Not now** takes an optional note for the
   agent. A remote view has no **Install** and says to install it in the Yawble window; it shows **Not now**, and on
@@ -277,6 +325,52 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   a removed host is gone from the team's next runs (a member's own loosen block keeps what it has). Adding and removing
   are in the audit log. A host in a member's own loosen block stays there until it is removed from that member's
   policy.
+- **Allow localhost (macOS)** is a per-team setting on the team's **Network** tab, off by default. Its warning reads:
+  "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev
+  servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners. While it is on, a
+  server an agent starts on `0.0.0.0` can be reached from other machines on your network unless the macOS firewall
+  blocks it. Keep the macOS firewall on. Outbound traffic still goes only through the gateway."
+  - It is off by default and set per team. On, the team's macOS runs may open local ports and reach every service on
+    the Mac's loopback. Off, they reach only their own gateway there. It applies from each member's next run.
+  - While it is on, a server an agent starts on `0.0.0.0` (any address, not only loopback) can be reached from other
+    machines on the network unless the macOS firewall blocks it. Keep the macOS firewall on while the setting is on.
+  - Outbound traffic still goes only through the run's gateway: the setting opens local ports and the Mac's loopback,
+    never a direct connection to another host.
+  - Windows and Linux runs do not read it: their sandboxes give each run a loopback of its own.
+  - Turning it on or off is in the audit log. It is a full-access change: a Cloud Link Visitor sees it read-only and
+    cannot set it, and the core refuses a Visitor's change.
+  - Classic VSTest `dotnet test` needs a local port, so on macOS it works only with the setting on.
+  - xUnit v3 / Microsoft.Testing.Platform `dotnet test` does not work on macOS with the setting on or off: it opens
+    its pipe as a socket file at a fixed `/tmp` path, which the sandbox refuses, and the setting opens only local
+    ports. `/tmp` stays closed; there is no grant for it.
+  - So the dev-tools skill tells agents on macOS to make test projects xUnit v3 / Microsoft.Testing.Platform, build
+    the test project and run its executable (or `dotnet exec` its dll), filtering with the runner's own options. When
+    `dotnet test` fails with `SocketException (13)` Permission denied, the agent tells its Manager in one line where
+    the setting is, and for an xUnit v3 / Microsoft.Testing.Platform project also that its tests run as the
+    executable.
+  - A decision can offer it as an answer (see Decisions below): the option "Allow localhost" turns it on for you
+    when you pick it, exactly as the Network tab does (the same rights and the same audit entry), and only on a Mac.
+- **Decisions** (`needs_decision`): an agent asks you with a **summary** (the decision in one plain sentence),
+  2 to 4 **options** (each a button with a label of at most 40 characters and the reply it sends), and **details**
+  (its findings, in Markdown, under the summary). A question in one Markdown text (`question`) still works and is
+  shown as before.
+  - At most one option may carry an **action**, from a fixed list the app knows: `team.allowLocalhostMac`
+    (turn on the team's Allow localhost (macOS)) and `workflow.closeOverFail` (below). The agent only names it; nothing changes when it asks. When you
+    pick that option the app applies the action first, then sends the option's reply as your answer. Anything else
+    named as an action is refused and the question is not asked.
+  - **Closing over a tester's FAIL**: `workflow_complete` is refused (`tester_fail`) while a card's latest
+    tester hand-back in the workflow starts with FAIL (a later PASS clears it). The refusal names the card, quotes the
+    FAIL line and gives the ways forward: fix it and have the tester verify again; or ask you with `needs_decision`
+    plus `card`, `kind` (`accept-fail`, or `wont-do` with a `reason`) and `reason`. The yes option carries
+    `workflow.closeOverFail` (the app adds a yes and a no when the agent gives no options). Only your pick of that
+    option counts as the yes (typed text or the Concierge's answer does not); the declaration then goes through and
+    its payload lists the card in `closedOverFail: [{ card, tester, failLine, kind: "accepted" | "wont-do", reason }]`.
+  - An option whose action you cannot apply is shown disabled with the reason: a Cloud Link Visitor ("Only a
+    workgroup Member or an Owner can change this"), anything but the app or a cloud viewer ("Only the person can pick
+    this, in the app"), a computer that is not a Mac ("Only on macOS").
+  - While a member's question is open, its card and the team status say **Waiting on you** with a link to the
+    question, whatever it reported after asking (a hand-back, or the workflow declared complete). Once you answer it,
+    the card shows its last report again.
 - Floor rules nobody can loosen:
   - model vendors' API and sign-in hosts are never allowed hosts;
   - no IP addresses or wildcards;
@@ -301,6 +395,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - It keeps notes across conversations, and can watch teams and review their updates. A review it starts on its own
   can read and recommend, never act.
 - You can attach images to a message.
+- It builds scripts from a description and sets them up: it adds the script member, turns its trigger on
+  (`script_trigger_set`) and allows one API action a step needs (`integration_action_allow`), each after your yes in
+  the window (see [Scripts](#scripts)).
 
 ## Board, Backlog and Documents
 
@@ -346,8 +443,10 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     is active on it), **Stalled** (a run is active but shows no sign of work for 10 minutes or more: no tool call, no
     progress and no model request going out or answer streaming back; from its last sign of activity to its next
     one, or to the run's end), **Waiting on you** (an open question to you),
-    **Waiting for a slot** (queued for a run slot, or waiting for the heavy-work lease), **Waiting on a teammate**
-    (handed back, or its run ended, and it waits for the Manager or a tester), **Blocked** (blocked, or its run failed),
+    **Waiting for a slot** (its member is in the run queue for a run slot, or its run waits for the heavy-work lease),
+    **Waiting on a teammate** (handed back, or its run ended, and it waits for the Manager or a tester; or it has work
+    whose member is not in the run queue: busy in another workflow, its team paused, or a hand-back waiting for its
+    sender's run to end), **Blocked** (blocked, or its run failed),
     **Scheduled** (parked until the wake it asked for), **Not started** (planned, no member yet), **Idle** (open,
     nobody working it, nothing scheduled) and **Was done**.
   - A workflow's cards overlap, so they are not added up: each moment takes the highest category among its cards
@@ -436,7 +535,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots.
 - **Workflow nodes**: each open workflow is a small node tied by dashed lines to the members working it (to its team
   while nobody is on it). It flashes green and drifts away when it completes, fades with a cross when it is closed,
-  and shows a "!" while it is blocked. Under it, its number and title ("#3848 B081 Remote UI: xterm's…"), cut to
+  and shows a "!" while it is blocked. Under it, its number and title ("#3848 Remote UI: xterm's link…"), cut to
   30 characters, with a backlog workflow's "Backlog item " left out; hover it for the whole title, click it to open the
   workflow. The label is never smaller than 8 px on screen and dims with its team. When the window is phone-wide
   (under 760 px) and the wall is zoomed out, it shows only "#3848". A desktop window always shows the title, even
@@ -504,8 +603,8 @@ provisional signal, and the only source for reads.
 
 ## Logs
 
-**Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. **Logs** in the ☰ menu of
-a member's pane opens it at that member's activity.
+**Logs** (in the sidebar under Monitor) is a page that shows every log the app keeps, one at a time, as a table. **Logs** in
+the ☰ menu of a member's pane opens the same table as a dialog, at that member's activity.
 
 - **Logs:**
   - **All activity**: everything that happened, by members, teams and the app, gathered from every log below, with
@@ -527,15 +626,40 @@ a member's pane opens it at that member's activity.
     (for `connect-denied`, the host and port it asked for). A host's plain-http and HTTPS refusals stay two rows. Its
     **Times** column says how many times, and in **All activity** the row's detail ends in ` (Nx)` when it counts
     more than one (` (5x)` for five). Refused paths are not folded into one row: the first few of each in a minute are
-    written, and the rest are counted in one more row written at the next such refusal after the minute. Every other
-    row's Times is 1.
+    written, and the rest are counted in one more row written at the next such refusal after the minute. The
+    refusals an agent CLI makes on its own in every run (the Codex `analytics-events` and `plugins/suggested` paths
+    refused with 403, and `/backend-api/ps/mcp` answered 401) are counted on one row per member, path and status for an
+    hour, across that member's runs. Every other row's Times is 1.
   - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
-  - **Work history**: **Team messages** and **Board history**.
-  - **Diagnostics**: what the app itself reported (`<data>/logs/`).
+  - **Work history**: **Team messages**, **Board history** and **Script runs**. A Script runs row's **Script run**
+    opens that run's view (each step with its input, output and status, the run's log and its files); **← Script runs**
+    goes back to the log.
+  - **Diagnostics**: what the app itself reported (`<data>/logs/`). Each entry has a time, where it came from (core or
+    shell), its message, a **Level** and **Fields**:
+    - The levels are error, warning, info and debug. The core gives each of its lines its level; an older line and a
+      line the app writes without one (on standard error) get theirs from what they say.
+    - Debug is for routine lines: a run admitted, the heavy-work lease held, queued for, handed on or released (a holder
+      passing the 30-minute limit is a warning), each clone fetched at start-up, a Grok session check that changed nothing, a trigger that fired a
+      script member (with the script run it started), the daily prune, and the one line per push to origin (every
+      branch it pushed). They are hidden unless the Level filter asks for them.
+    - Fields are `key=value` pairs with the ids the line is about: `level`, `area` (`teams`, `bus`, `lease`, `grok`,
+      `logs`, `link`, `doctor`...) and, where known, `team`, `member`, `workflow`, `run`, `script`, `step`, `action`,
+      `integration`, `status`, `ms` and `attempt`. A value with a space in it is in double quotes.
+    - At start-up one line says how many clones were fetched and how many were behind ("start-up fetch-back: fetched 23
+      clones, 7 behind"). After that, a clone gets a line only when its state changes. A branch whose work does not merge
+      cleanly is a warning. A failed push names the branch, git's exit code and the remote. A failed periodic check
+      names the check and the error. When the Cloud Link connection ends, the line gives the exception, how long the
+      connection lasted, which connection it was and the delay before the next one.
 - Filters: team, member, each log's own columns, a date range, and free text across every column. The Member filter
   picks a member (that member's entries only), a team as a whole (its members' entries and the team's own), or, in All
-  activity, `app` (the app's own entries only); picking one clears the others. Every column sorts either way. Pages load as the table scrolls; a row opens to show every field.
+  activity, `app` (the app's own entries only); picking one clears the others. In Diagnostics the team and member
+  filters read a line's `team` and `member` fields, so a member is not matched by a namesake in another team. A line
+  without fields matches when it names both the member and its team. All activity and Diagnostics also have a **Level**
+  column and a **Level** filter: every level but debug (the default), one level, or all of them, debug included
+  (`logs.query` `level`: `default`, `error`, `warning`, `info`, `debug` or `all`). An All activity entry has the level
+  the live tail gives it: a team message by its type (failed is an error; blocked and a decision asked are warnings),
+  a run by how it ended, any other by what it says. The other logs have no levels and no Level filter. Every column sorts either way. Pages load as the table scrolls; a row opens to show every field.
 - **Prune…** deletes a log's entries older than a chosen age, or all of them. It first says how many entries and files
   go, their date range, and what is lost, and deletes only after **Delete**. Approvals still waiting for an answer are
   never pruned, and an answered one is kept by when it was answered. Pruning Approvals also removes answered host tool
@@ -546,11 +670,16 @@ a member's pane opens it at that member's activity.
   are built from them.
 - **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
-- Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs dialog, `logs.query` over the Cloud Link and the live tail all use the
+- Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs page, `logs.query` over the Cloud Link and the live tail all use the
   same redaction, so a row reads the same everywhere.
+- **Tool calls** keeps, for every integration (web APIs, websites, Email, MCP servers and CLIs such as gh and az), the
+  action, the argument names and only the argument values that are not message content: a body, message, subject or
+  title (or a CLI's `--body`, `--title`, `-m`...) keeps only its length, a long or multi-line value keeps only its
+  length, and a phone number keeps only its last 4 digits (`...0001`). Rows written before this are not rewritten.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
 - A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
-  this computer by level (warnings, errors and workflow events by default, or everything), team and member, and
+  this computer by level (warnings, errors and workflow events by default, everything but debug with `all`, or
+  everything with `debug`), team and member, and
   redacted as above. It stops when the viewer stops it or disconnects.
 
 ## Repositories and git
@@ -664,10 +793,81 @@ masked in the log and never reaches an agent. See
   - **Cron**: 5 or 6 fields, with a timezone.
   - **Once**: at a set time.
   - **Folder**: when files in the team's documents or a folder on this computer change and settle. It can filter by
-    file pattern.
+    file pattern. **Fire on** chooses which changes wake the agent: **Added files** (the default for a new trigger),
+    **Added or changed** (a file added or changed in size), or **Any change** (added, removed or changed; folder
+    triggers made before this choice keep it). A change that does not match never fires, so an agent that moves the
+    files it was woken for out of the folder is not woken again. The instruction lists only the changes that fire.
   - **Event**: when an integration watch reports a new item.
 - Options: **Only when the agent is idle**, **Enabled**, **Run now**.
 - **Wake the Manager when a run ends**: only on a hand-back or failure (the default), every time, or never.
+
+## Scripts
+
+- A **script** is a JSON document (`yawble-script/1`): typed settings, variables, the integrations it requires and a
+  flowchart of steps. The script library is global: every script is available to every team.
+- Every save of a script is kept as a new version. A save is checked (references, types, reachable steps, the actions
+  it requires); one that fails the check is kept as a **draft**, which no member runs. Scripts are exported and
+  imported as `.json` files. A document's top-level `layout` section (the editor's node positions) is kept unchanged
+  through save, get, export and import.
+- **Schemas** are named object types (a JSON Schema subset), also global and versioned. The built-in schemas
+  (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse) are read-only. A schema save that
+  removes or retypes a field a saved script uses is refused, listing each script, version and step it would break.
+- The **Schemas** tab shows each schema as a tree of its fields: type, required, description, enum values, and the
+  schemas a field refers to (as an item of a list too). A built-in schema is read-only. Your own schema has a
+  **Design** tab (add, remove and reorder fields; each field's name, type (a native type, `list<…>` or another schema),
+  required, description and enum values) and a **JSON** tab; both edit one schema, checked when it is saved. **Used in**
+  lists the scripts whose latest version uses the schema, with the variables typed with it and the steps that read it.
+- A script's `integration` steps name the person's integrations as Settings > Integrations shows them: an Email
+  integration's name (`"use": "Support inbox"`) or a web API's name (`"use": "Twilio"`). The script's `requires` (each
+  integration it uses, its kind and the actions its steps call) is derived from the steps on every save and check; a
+  `requires` that does not match the steps is replaced and reported as a warning, never as a reason for a draft.
+- A **script member** is a team member whose runs are the core's script engine, never an agent CLI. It runs a pinned
+  version of its script or the newest version that passes its check, with its own settings. It uses the integrations
+  the script names, and each must be turned on for its team; the same integration serves every team it is turned on
+  for. Adding or changing a member whose script uses an integration that is not turned on for its team is refused
+  with the reason.
+- **Per-member override**: a member may use another integration of the same kind in place of one the script names
+  ("Support inbox → Other inbox"), for example a different mailbox for each team. The override is kept in the member's
+  bindings (`{ "Support inbox": "Other inbox" }`), shown on the member's tile and in its settings, and used by every run
+  of that member. An override to an integration of another kind, or to one not turned on for the member's team, is
+  refused with the reason.
+- Scripts written before real names name each integration by an alias in `requires` (`mail`, `sms`), and each of their
+  members binds every alias to a real integration. They check and run as they always have. **Use real names** in the
+  editor (`scripts.useRealNames`) rewrites such a script to the real names, taken from a member's bindings.
+- Every trigger kind starts a script member's run, with a structured input: TriggerFired (every, cron, once),
+  FolderChange (the folder and the added, removed and changed files) or EventItem (the event and its item). An
+  instruction told to a script member starts a run with its text. Agents' triggers are unchanged.
+- A script member runs one run at a time: a trigger that fires during a run is skipped and the skip is listed in its
+  runs. The limit is per member: the same script runs at the same time as members of different teams, or as two
+  members of one team. Each member has its own saved variables, data folder, settings, bindings and runs. A trigger's
+  run starts no team workflow and wakes no Manager.
+- A run uses the version of the script it started with, including when it resumes after a restart, even if the script
+  is saved again or the member's pinned version changes meanwhile.
+- A run has a timeout (a member setting, 10 minutes by default), a budget of 10,000 steps and a loop cap. Each step's
+  input, output, status and times are kept (shortened, with secrets masked), with the run's log. A run cut off by the
+  app closing resumes from its last completed step when the app starts again.
+- Saved variables are kept per script member between runs and change only when a run succeeds; one saved variable
+  can be reset. Three failed runs in a row raise one decision card in Needs you; a run that succeeds, or the
+  person's answer, starts the count again.
+- **Test run** runs a version of a script (a draft too) on a sample input and settings for a team, as a dry run by
+  default: changing actions are not performed and are logged as "would ...", and file writes go to a dry-run folder.
+  A test run keeps no saved variables.
+- Script runs are listed with their state, steps and log, and recorded with the agents' runs. A Visitor on the Cloud
+  Link can read scripts, schemas, script members and runs, and cannot change or run any of them.
+- **Building with the Concierge.** The Concierge (and a program paired through the companion) builds, checks, saves
+  and dry-runs scripts with its script tools, and adds a script member with `script_member_add`. Two more tools turn
+  a script on:
+  - `script_trigger_set { team, member, name, schedule, enabled?, id?, only_when_idle? }` creates or changes a trigger
+    aimed at a script member. `schedule` is a trigger's schedule (every, cron, once, event or folder); `enabled` is
+    `true` unless given. Turning a trigger on, or changing the schedule of one that is on, waits for your yes in the
+    window; turning one off does not.
+  - `integration_action_allow { team, integration, action }` adds a team allow rule for exactly one API action (its
+    operation id), for a step that failed with `needs approval: allow <action> for <team>`. It always waits for your
+    yes in the window. It is refused for an unknown API or action, an API not turned on for the team, or a sign-in
+    action, and answers "already allowed" when the action already is. It runs only on this computer, never over the
+    Cloud Link.
+  - The tool's answer is the outcome (done, declined or refused); the Concierge tells you what it said and does not
+    ask again in a loop.
 
 ## Companion
 
@@ -676,8 +876,16 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 
 - It pairs once per program, with a code you approve in the window.
 - Access levels: `read`, `act` and `destructive`. Destructive calls wait for your approval in the window.
+- An approval request stays pending until you approve or deny it, however long that takes. The window shows when each
+  one was asked. When you approve, Yawble works the plan out again: the same plan runs, and a plan that changed becomes a
+  new request with the new plan, so a late approval never runs an outdated plan.
+- A request also ends when the program cancels it (`request_cancel`), when the program asks again for the same tool and
+  target (the newer request replaces the older one), after 7 days undecided (expired), or when the app restarts:
+  requests are kept in memory only.
 - It talks only to the running app on this computer. Nothing of it is reachable over Cloud Link.
 - Paired programs are listed and revoked in Settings > Companion.
+- A paired program has the Concierge's script tools, `script_trigger_set` and `integration_action_allow` among them,
+  with the same yes in the window (see [Scripts](#scripts)).
 - Setup is in the [README](../README.md).
 
 ## Updates

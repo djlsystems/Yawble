@@ -163,7 +163,7 @@ onMounted(load);
 .link.danger { color: var(--bad); }
 .add-cli { margin-top: 6px; }
 .error { color: var(--bad); }
-/* A phone (B054): the sub-tabs wrap onto a second row rather than run off a 351 px screen; the add box takes the width. */
+/* A phone: the sub-tabs wrap onto a second row rather than run off a 351 px screen; the add box takes the width. */
 @media (max-width: 759.98px) {
   .tabs { flex-wrap: wrap; }
   .pill { flex: 1 1 auto; }

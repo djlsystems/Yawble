@@ -10,7 +10,7 @@ import {
 import { renderMarkdown } from '../../src/renderer/src/markdown';
 import { isUiMethod, type CommitDiff, type CommitFound, type CommitShow, type YawbleApi } from '../../src/shared/api';
 
-// B072 (card 444): the Commit view against a fake core with the card's contract (git.commitShow, git.commitDiff).
+// The Commit view against a fake core with the core's contract (git.commitShow, git.commitDiff).
 
 const SHA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
 const base = (over: Partial<CommitFound> = {}): CommitFound => ({
@@ -89,13 +89,13 @@ describe('commit IDs in the app', () => {
     expect(commitParts('Merged c62216a and 7c63337 into main.').filter((p) => p.sha).map((p) => p.sha)).toEqual(['c62216a', '7c63337']);
     expect(commitParts('see https://x.dev/commit/c62216a').some((p) => p.sha)).toBe(false);
     expect(commitParts('file abc1234def.ts or src/c62216a').some((p) => p.sha)).toBe(false);
-    expect(commitParts('B072 card 444 on 2026-11-18').some((p) => p.sha)).toBe(false);
+    expect(commitParts('B008 card 4444 on 2026-11-18').some((p) => p.sha)).toBe(false);
     expect(commitParts('CAFE1234 in capitals').some((p) => p.sha)).toBe(false);
     const parts = commitParts('at c62216a.');
     expect(parts.map((p) => p.text).join('')).toBe('at c62216a.');
   });
 
-  // B074: rendered IDs are candidates (text) until git.commitsResolve confirms them; commit-links-resolve.test.ts covers
+  // Rendered IDs are candidates (text) until git.commitsResolve confirms them; commit-links-resolve.test.ts covers
   // the upgrade to a link.
   it('rendered markdown marks an ID in text and in inline code as a candidate, never in a link or a code block', () => {
     const html = renderMarkdown('Commit 56b5597 on `aefd652`.\n\n```\ngit show 96ddd99\n```\n\n[see](https://x.dev/56b5597abc)');
@@ -312,7 +312,7 @@ describe('the Commit view', () => {
     expect(lines[0].text).toBe('On no branch (a branch that held it was deleted)');
   });
 
-  // Card 459 (F2 from verify card 445): where.otherBranches, the other local branches holding it.
+  // where.otherBranches, the other local branches holding it.
   it('a commit only on the person\'s own branch names it, not as deleted; Show its branch stays off', async () => {
     const c = base({ where: { inMain: false, branches: [], otherBranches: ['feature/x'], onlyOnMember: null, pushed: false, tags: [] } });
     const w = await view(fakeCore({ payments: c }));
