@@ -85,6 +85,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "scripts.export", "schemas.export", "scripts.memberGet", "scripts.memberState", "scripts.memberFiles", "scripts.run",
         // The designer's action catalog, a document rewritten to real integration names (nothing saved) and where a schema is used.
         "scripts.catalog", "scripts.useRealNames", "schemas.usage",
+        // Settings > Scripts read-out (tellOtherTeams); scripts.setSettings is audited.
+        "scripts.settings",
     };
 
     /// <summary>A call that only reads, by its name alone.</summary>
