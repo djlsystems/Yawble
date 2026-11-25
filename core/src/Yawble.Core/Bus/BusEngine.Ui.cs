@@ -22,14 +22,24 @@ public sealed record RunSlots(int Running, int Limit, int Queued);
 /// "Waiting on you: ..." (BusEngine.WaitingOnYou), not whatever the member reported after it.
 /// WaitState / WaitsFor: with QueuedInstructions, why they have not started (WaitStates: queued, waits-for-run with
 /// the sender's name, held, pending); null when none waits. State: running | idle | one of WaitStates: queued while
-/// the member is in the run queue, else its WaitState when work waits (waits-for-run, held, pending), else idle.</summary>
+/// the member is in the run queue, else its WaitState when work waits (waits-for-run, held, pending), else idle.
+/// RunWorkflows: the workflows (CorrelationIds) the active run's items belong to, distinct, oldest first; empty when
+/// the member has no run (idle, queued, or an interactive session, which has no run items). Always on the wire as
+/// runWorkflows, an array of numbers.</summary>
 public sealed record AgentCard(
     MemberRow Member, string State, int? QueuePosition, int QueueLength, int QueuedInstructions, string? StatusLine,
     long? RunId, string? RunStartedAt, string? LastRunState, string? LastRunReason,
     string? Lease = null, string? LeaseWhat = null, int? LeasePosition = null,
     bool Interactive = false, string? LastRunFailureClass = null, long? DecisionId = null,
-    string? WaitState = null, string? WaitsFor = null)
+    string? WaitState = null, string? WaitsFor = null, IReadOnlyList<long>? RunWorkflows = null)
 {
+    /// <summary>Never null: a card built without it lists no workflows.</summary>
+    public IReadOnlyList<long> RunWorkflows { get; init; } = RunWorkflows ?? [];
+
+    /// <summary>The distinct workflows of a run's items, in the order they first appear (items are oldest first).</summary>
+    internal static IReadOnlyList<long> WorkflowsOf(IReadOnlyList<Message>? items) =>
+        items is null ? [] : [.. items.Select(i => i.CorrelationId).Distinct()];
+
     /// <summary>The last run ended because the person (or the app on their behalf) stopped it: not a failure to flag.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool LastRunStopped => LastRunState == "failed" && LastRunFailureClass == FailureClasses.Stopped;
@@ -210,7 +220,8 @@ public sealed partial class BusEngine
                     active is null ? null : last?.StartedAt,
                     last?.State, last?.Reason,
                     lease?.State, lease?.What, lease?.Position,
-                    HasSession(m.Id), last?.FailureClass, decision?.Seq, waitState, waitsFor);
+                    HasSession(m.Id), last?.FailureClass, decision?.Seq, waitState, waitsFor,
+                    AgentCard.WorkflowsOf(active?.Context.Items));
             }).ToArray();
         }, ct);
 
