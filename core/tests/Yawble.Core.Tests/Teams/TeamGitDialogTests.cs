@@ -24,6 +24,7 @@ public class TeamGitDialogTests
     /// <summary>A commit on the member's branch, fetched back into the team repository as a run's end does.</summary>
     private static async Task Commit(TeamsFixture f, MemberRef member, string file, string content)
     {
+        SandboxGit.RequireLocalTransport();
         var checkout = await f.Repos.PrepareAsync(member, Ct);
         File.WriteAllText(Path.Combine(checkout.ClonePath, file), content);
         AgentGit.Ok(checkout, "add", file);

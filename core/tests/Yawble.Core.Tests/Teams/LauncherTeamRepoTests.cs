@@ -17,6 +17,7 @@ public class LauncherTeamRepoTests
     [Fact]
     public async Task TheLauncherRunsInTheMembersCloneWithTheTeamPrompt()
     {
+        SandboxGit.RequireLocalTransport();
         TeamRepos? repos = null;
         await using var kit = await LaunchKit.StartAsync(wrapRunner: (inner, host, connection) =>
         {

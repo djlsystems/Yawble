@@ -152,11 +152,20 @@ public class CompanionServiceTests : IDisposable
         };
         if (git)
         {
-            Run(_root, "init", "--bare", "-b", "main", Origin);
-            Run(_root, "clone", Origin, Work);
+            // Made without git's local transport (no clone or push between folders): that starts Git for Windows'
+            // sh, which cannot start in an agent's sandbox (see SandboxGit). Origin gets main through a bundle.
+            Run(_root, "init", "-q", "--bare", "-b", "main", Origin);
+            Run(_root, "init", "-q", "-b", "main", Work);
+            Run(Work, "remote", "add", "origin", Origin);
+            Run(Work, "config", "branch.main.remote", "origin");
+            Run(Work, "config", "branch.main.merge", "refs/heads/main");
             Config(Work);
             Commit(Work, "base.txt", "base");
-            Run(Work, "push", "origin", "HEAD:main");
+            var bundle = Path.Combine(_root, "main.bundle");
+            Run(Work, "bundle", "create", "-q", bundle, "refs/heads/main");
+            Run(Origin, "fetch", "-q", bundle, "+refs/heads/main:refs/heads/main");
+            Run(Work, "update-ref", "refs/remotes/origin/main", "refs/heads/main");
+            File.Delete(bundle);
             rig.Repo = new ActionRepo("main", Work, "main", []);
         }
         rig.Service = new CompanionService(rig.Bus, rig.Store, rig.RouteAsync, rig.Actions, rig.Clients, rig.Audit, rig.Events, clock);
@@ -450,6 +459,7 @@ public class CompanionServiceTests : IDisposable
         // Nothing to delete: said at once, no request.
         Run(Work, "branch", "-D", "members/old");
         var none = await rig.Service.CallAsync(cc, "git_prune", new JsonObject { ["team"] = "alpha" }, Ct);
+        SandboxGit.SkipIfShCouldNotStart(none.Text); // prune asks the test's local origin, over git's local transport
         Assert.StartsWith("nothing to do", none.Text);
         Assert.Null(none.RequestId);
     }
@@ -677,6 +687,7 @@ public class CompanionServiceTests : IDisposable
         Assert.Equal(3, rig.Service.PendingCount);
 
         var pushed = await rig.Approve(push.RequestId);
+        SandboxGit.SkipIfShCouldNotStart(pushed.Result); // the push to the test's local origin needs git's local transport
         Assert.Equal(ActionState.Done, pushed.State);
         Assert.Equal(sha, Run(Origin, "rev-parse", "members/ines"));
 
@@ -1080,7 +1091,9 @@ public class CompanionServiceTests : IDisposable
         Assert.Contains("2222222222222222222222222222222222222222", rig.Service.Status(cc, merged.NextId!)!.Plan);
 
         // The new requests, approved while nothing moved, run.
-        Assert.Equal(ActionState.Done, (await rig.Approve(pushed.NextId!)).State);
+        var pushedNew = await rig.Approve(pushed.NextId!);
+        SandboxGit.SkipIfShCouldNotStart(pushedNew.Result); // the push to the test's local origin needs git's local transport
+        Assert.Equal(ActionState.Done, pushedNew.State);
         Assert.Equal(sha2, Run(Origin, "rev-parse", "members/ines"));
         Assert.Equal(ActionState.Done, (await rig.Approve(merged.NextId!)).State);
         Assert.Single(rig.Ui, u => u.Method == "git.merge");

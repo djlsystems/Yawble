@@ -153,6 +153,7 @@ public sealed class StructuredLogVerifyTests : IDisposable
     [Fact]
     public async Task TwoStartUps_EachWriteOneSummaryLine_AndTheSecondWritesNoPerCloneLineAboveDebug()
     {
+        SandboxGit.RequireLocalTransport();
         var seen = new List<DiagEntry>();
         using var capture = Diag.Capture(e => { lock (seen) seen.Add(e); });
         using var f = new TeamsFixture();

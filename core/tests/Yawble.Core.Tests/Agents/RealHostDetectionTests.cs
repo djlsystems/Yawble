@@ -45,6 +45,9 @@ public class RealHostDetectionTests
         }
 
         Assert.True(File.Exists(cli.ExecutablePath), cli.ExecutablePath);
+        // Inside an agent's sandbox the person's own CLI may be found but not run (its "--version" gives nothing).
+        Assert.SkipWhen(SandboxGit.InsideWindowsSandbox && string.IsNullOrWhiteSpace(cli.Version) && !ExpectedHere.ContainsKey(cliId),
+            $"{cliId} is installed but did not run inside this agent's sandbox (no version); run the HostCli tests outside the sandbox");
         Assert.False(string.IsNullOrWhiteSpace(cli.Version), $"{cliId} reported no version");
         Assert.Matches(@"^\d+\.\d+\.\d+", cli.Version);
         Assert.NotEmpty(cli.ReadOnlyFolders);

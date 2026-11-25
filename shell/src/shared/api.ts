@@ -1078,6 +1078,8 @@ export interface AgentCard {
   hasClone?: boolean;
   /** 'script' for a script member (its tile reads scripts.memberGet); absent from an older core: an agent. */
   kind?: 'agent' | 'script';
+  /** The workflows the member's current run works on (their numbers), oldest first; [] when not running; absent from an older core. */
+  runWorkflows?: number[];
 }
 
 /**
