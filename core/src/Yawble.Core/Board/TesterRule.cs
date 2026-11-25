@@ -3,7 +3,7 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Board;
 
 /// <summary>
-/// B019 / B027: a tester's card reaches Done only once that tester has tested it, or with a reason on the card.
+/// A tester's card reaches Done only once that tester has tested it, or with a reason on the card.
 /// <list type="bullet">
 /// <item>Who is a tester (<see cref="IsTester"/>): a member other than the Manager whose name starts with "Tester"
 ///   ("Tester Wren" is TesterWren), or whose role or job title has one of the words test, tester, testers, testing or QA,
@@ -13,7 +13,7 @@ namespace Yawble.Core.Board;
 /// <item>Whose card it is: the card's member now, or any member it was assigned to ("Assigned to X:" on the trail).</item>
 /// <item>Has the tester tested it (<see cref="UntestedTester"/>): only the tester's own hand-back or finished run
 ///   ("handed back" / "run ended" under its name) after the card's latest assignment counts, and a finished run only
-///   when that run handed back (card 170: a run cut off after its final answer still ends "completed", exit -1). A
+///   when that run handed back (a run cut off after its final answer still ends "completed", exit -1). A
 ///   failed (crashed) run, a run that ended without a hand-back, a run before the card was last assigned or told new work, its progress, questions and board comments do not.</item>
 /// </list>
 /// </summary>

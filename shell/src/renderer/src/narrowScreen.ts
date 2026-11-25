@@ -1,7 +1,7 @@
 import { getCurrentInstance, onBeforeUnmount, readonly, ref, type Ref } from 'vue';
 
 /**
- * The phone layout (B037): a window below 760 px wide. The screens' scoped styles use the same width in
+ * The phone layout: a window below 760 px wide. The screens' scoped styles use the same width in
  * `@media (max-width: 759.98px)`; this is for what CSS cannot do (one board lane at a time, the list or the file,
  * entries as cards). At 760 px and wider nothing changes.
  */

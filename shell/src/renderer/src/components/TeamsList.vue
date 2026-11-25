@@ -72,7 +72,7 @@ onBeforeUnmount(() => { observer?.disconnect(); availableWidth.value = Infinity;
 watch([renderedWidth, () => props.teams.map((t) => `${t.id}:${t.paused}`).join(), showArchived, cardBusy, () => props.archived.length], () => void fit());
 const gridStyle = computed(() => ({ '--tile-w': `${renderedWidth.value}px`, '--tile-h': `${tileSize.value.h}px` }));
 const lab = (method: string, id: number, idle: string, busy: string) => (cardDoing(method, id) ? busy : idle);
-// A phone (B037): one tile per row, the full width, as tall as its content (the @media rules); no size grips (a drag handle in a 14 px
+// A phone: one tile per row, the full width, as tall as its content (the @media rules); no size grips (a drag handle in a 14 px
 // gap is no tap target, and one column has nothing to size). Labels and icons as long as the row fits, as on a desktop.
 const phone = usePhone();
 watch(phone, () => void fit());
@@ -179,9 +179,10 @@ watch(phone, () => void fit());
 /* A team's state: the outline says it at a glance, the chip says it in words; running breathes. */
 .team-card { --team-state: var(--state-idle); }
 .team-card.is-running { --team-state: var(--state-running); border-color: var(--team-state); animation: team-breathe 2.4s ease-in-out infinite; }
+.team-card.is-waiting { --team-state: var(--state-decision); border-color: var(--team-state); }
 .team-card.is-queued { --team-state: var(--state-waiting); border-color: var(--team-state); border-style: dashed; }
 .team-card.is-paused { --team-state: var(--state-blocked); border-color: var(--team-state); }
-.team-card.is-running:hover, .team-card.is-queued:hover, .team-card.is-paused:hover { border-color: var(--team-state); }
+.team-card.is-running:hover, .team-card.is-waiting:hover, .team-card.is-queued:hover, .team-card.is-paused:hover { border-color: var(--team-state); }
 .card-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card-title > :not(.card-name) { flex: none; }
 @keyframes team-breathe {
@@ -199,14 +200,14 @@ watch(phone, () => void fit());
 .phone .tile-btn { height: 44px; min-width: 44px; padding: 0 10px; }
 .phone .icons-only .card-actions.normal .tile-btn { width: 44px; }
 .phone .link { min-height: 44px; min-width: 0; }
-/* A phone (B037): one column of team cards as tall as their content (the shared tile size and its grips do not
+/* A phone: one column of team cards as tall as their content (the shared tile size and its grips do not
    apply), the buttons 44 px. */
 @media (max-width: 759.98px) {
   .team-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 12px; }
   .tile-cell > .team-card { height: auto; }
   .team-card { max-height: 22rem; }
   .team-card.add-wrap { min-height: 64px; }
-  /* One row, never wrapped: a wrapped row never overflows, so fit() would never switch a phone to icons-only (card 319). */
+  /* One row, never wrapped: a wrapped row never overflows, so fit() would never switch a phone to icons-only. */
   .card-actions { flex-wrap: nowrap; }
   .tile-btn { height: 44px; padding: 0 12px; }
   .icons-only .card-actions.normal .tile-btn { width: 44px; }

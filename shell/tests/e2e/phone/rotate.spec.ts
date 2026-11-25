@@ -1,4 +1,4 @@
-// Card 334: the remote view (remote.html, the fake core of phone-remote.spec.ts) follows a rotation in WebKit with the
+// The remote view (remote.html, the fake core of phone-remote.spec.ts) follows a rotation in WebKit with the
 // iPad and iPhone device descriptors: iPad landscape -> portrait, phone portrait -> landscape, rotated mid-test by
 // setViewportSize, on the home page, a team page (#team=1) and a workflow (#workflow=10). After the rotation: no
 // horizontal overflow, the app root is exactly as tall as the visible viewport (no gap, nothing cut off at the bottom),
@@ -9,7 +9,7 @@
 // the page asks for no text inflation in landscape (text-size-adjust: 100%). tests/unit/rotate-viewport.test.ts checks
 // the same in the sources.
 //
-//   npx playwright test rotate      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test rotate      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { devices, expect, test, type Page } from './fixtures';
 import { PHONE_BREAKPOINT } from '../../../src/renderer/src/phone';
 import { buildRenderer, builtDir, fakeRemote } from './server';

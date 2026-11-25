@@ -7,7 +7,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// B019: the Manager moving a tester's card to Done before the tester has run on it gives the reason in note, and the
+/// The Manager moving a tester's card to Done before the tester has run on it gives the reason in note, and the
 /// reason is a comment on the card; without one the move is refused. Teams with no tester, and members' moves, are as before.
 /// </summary>
 public class BoardTesterDoneTests
@@ -128,7 +128,7 @@ public class BoardTesterDoneTests
     {
         await using var rig = await Rig.StartAsync(("TesterWren", ""));
         // The tester is given work (its card) and runs on it: the projector writes its report on the trail under its name.
-        // B027 item 4: its hand-back (not a progress note) is what counts.
+        // Its hand-back (not a progress note) is what counts.
         await rig.InRunOf("TesterWren", (run, _) => run.HandbackAsync("checked the login page: 3 passed", Ct));
         await rig.InRunOf("Manager", (_, service) => service.ProjectAsync(Ct));
         var card = rig.Store.Cards("payments").Single(c => c.Member == "TesterWren");

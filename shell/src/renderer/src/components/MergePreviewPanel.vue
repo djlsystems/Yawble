@@ -9,7 +9,7 @@ import LoadingNote from './LoadingNote.vue';
 import LocalMark from './LocalMark.vue';
 import { branchLocalOnly, branchLocalTitle } from '../localMark';
 
-// B073: Merge to <base>… shows this before its Merge button: the core's outcome sentence, the commits that land (each
+// Merge to <base>… shows this before its Merge button: the core's outcome sentence, the commits that land (each
 // opens the Commit view), and the files changed all together with their combined diff (git.mergeDiff, in the code
 // browser's DiffView, as the Commit view shows a commit's).
 const props = defineProps<{ api: YawbleApi; team: string; params: Record<string, unknown>; preview: MergePreview }>();

@@ -32,14 +32,14 @@ const text = ref('');
 const box = ref<HTMLTextAreaElement | null>(null);
 const picker = ref<HTMLInputElement | null>(null);
 const attach = useImageAttachments();
-// A phone (B037): the box takes the width its page gives it (ConciergeView), 16 px text (a phone browser zooms into a
+// A phone: the box takes the width its page gives it (ConciergeView), 16 px text (a phone browser zooms into a
 // smaller field), tap-sized pickers and buttons; Enter makes a new line there (the keyboard's own key), Send sends.
 // No autofocus on a phone: it would bring the keyboard up over a screen the person has only just opened.
 const phone = usePhone();
 const canSend = computed(() => (text.value.trim().length > 0 || attach.images.value.length > 0) && !props.running);
-// B057: on a phone the team and agent pickers (and the note) fold behind one button, so the idle box is one row.
+// On a phone the team and agent pickers (and the note) fold behind one button, so the idle box is one row.
 const pickersOpen = ref(false);
-// The page folds its other dock rows away while they are open in landscape (B057 F1: ConciergeView's watch row).
+// The page folds its other dock rows away while they are open in landscape (ConciergeView's watch row).
 watch(pickersOpen, (open) => emit('pickers', open));
 const noAgents = computed(() => (props.agentsLoaded ? 'No agent CLI found (Settings > Agents)' : 'Finding agents…'));
 const pickersTitle = computed(() => {
@@ -87,7 +87,7 @@ onMounted(() => { if (props.autofocus && !phone.value) focus(); });
         <button class="x" title="Remove" data-test="composer-image-remove" @click="attach.remove(i)">✕</button>
       </span>
     </div>
-    <!-- A phone (B057): ONE row (the pickers' button, the text, Attach, Send); the team and agent pickers and the note
+    <!-- A phone: ONE row (the pickers' button, the text, Attach, Send); the team and agent pickers and the note
          fold out above it, each picker on its own full-width row. -->
     <template v-if="phone">
       <div v-if="pickersOpen" class="pickers" data-test="composer-pickers">
@@ -170,7 +170,7 @@ textarea { width: 100%; border: 0; outline: 0; resize: none; background: transpa
 .thumb .x { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: var(--scrim); color: var(--on-scrim); font-size: 10px; line-height: 18px; }
 .problem { color: var(--bad); font-size: 12px; margin: 2px 0; }
 /* A phone: full width, 16 px text, the box no taller than a third of the screen (the keyboard takes much of it).
-   B057: idle it is ONE 44 px row (pickers' button, text, Attach, Send) in 5 px of padding: 56 px with the border, so
+   Idle it is ONE 44 px row (pickers' button, text, Attach, Send) in 5 px of padding: 56 px with the border, so
    the thread keeps the screen (a 263 px landscape frame left the messages 69 px under the old two-row box). */
 .composer.phone { width: 100%; border-radius: 18px; padding: 5px 6px; }
 /* The box is a 44 px tap target even with one row (grow() sets its height to scrollHeight: border-box, padding included). */
@@ -189,7 +189,7 @@ textarea { width: 100%; border: 0; outline: 0; resize: none; background: transpa
 .row-label { display: inline-flex; align-items: center; gap: 4px; flex: none; width: 64px; }
 .row-pick select { flex: 1; min-width: 0; width: 100%; font-size: 16px; min-height: 44px; box-sizing: border-box; color: var(--ink); text-overflow: ellipsis; }
 .note { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 2px 2px 0; }
-/* B057 F1, a phone in landscape (263 px tall): the two pickers side by side on one row, the note under them, and the
+/* A phone in landscape (263 px tall): the two pickers side by side on one row, the note under them, and the
    panel never taller than 40 % of the screen (it scrolls past that), so the text row under it always stays on screen. */
 @media (orientation: landscape) {
   .pickers { flex-direction: row; flex-wrap: wrap; gap: 4px 8px; box-sizing: border-box; max-height: 40dvh; overflow-y: auto; }

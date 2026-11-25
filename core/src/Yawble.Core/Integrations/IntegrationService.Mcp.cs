@@ -181,6 +181,8 @@ public sealed partial class IntegrationService : IAsyncDisposable
         if (id is { } eid && Conns.Get(eid) is null) throw new ArgumentException("no such connection");
         if (explicitId && Conns.Get(id!.Value) is { Kind: "website" } login)
             throw new ArgumentException($"'{login.Name}' is a website login: it signs in to a website in this app's window, not an MCP server; choose an API key or token");
+        if (explicitId && Conns.Get(id!.Value) is { Kind: Email.EmailConnection.Kind } mailbox)
+            throw new ArgumentException($"'{mailbox.Name}' is an email account: it signs in to a mailbox, not an MCP server; choose an API key or token");
         if (secretNames.Count == 0) return explicitId || keepForOauth ? id : null;
 
         var current = id is { } cid ? Conns.Secrets(cid) : new Dictionary<string, string>();

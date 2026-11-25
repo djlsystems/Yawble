@@ -15,7 +15,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Host tool asks (B013): request_tool names a tool from the app's fixed catalog; the person is asked once per
+/// Host tool asks: request_tool names a tool from the app's fixed catalog; the person is asked once per
 /// (team, tool); Install runs exactly the catalog's winget command for the person at the window; the program is looked
 /// for again afterwards and the Manager is told to retry. Fakes only: a fake tool host records what would run; no test
 /// runs winget, an installer or any other program.
@@ -331,6 +331,20 @@ public sealed class ToolAskTests : IDisposable
         Assert.Empty(_host.Runs);
     }
 
+    [Fact]
+    public async Task OffWindows_TheAskCarriesNoWingetIdAndNoWindowsScope()
+    {
+        // The card on a Mac showed "Microsoft.DotNet.SDK.10 · installs for the whole computer: Windows may ask for permission".
+        _host.IsWindows = false;
+        await Request(Priya, "dotnet-sdk-lts");
+        var item = (await _asks.DispatchAsync("tools.asks", null, Ct))!.AsArray().Single()!.AsObject();
+        Assert.Null(item["wingetId"]);
+        Assert.Null(item["scope"]);
+        var entry = (await _asks.DispatchAsync("tools.catalog", null, Ct))!.AsArray().First()!.AsObject();
+        Assert.Null(entry["wingetId"]);
+        Assert.Null(entry["scope"]);
+    }
+
     [Theory]
     [InlineData("NAME=\"Fedora Linux\"\nID=fedora\nVERSION_ID=44\n", LinuxPackager.Dnf)]
     [InlineData("ID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\n", LinuxPackager.Dnf)]
@@ -546,7 +560,7 @@ public sealed class ToolAskTests : IDisposable
         }
     }
 
-    // ------------------------------------------------------------------ B015 tester probes (card 70)
+    // ------------------------------------------------------------------ tester probes
 
     private long ProbeNotNowAt(string tool)
     {
@@ -560,7 +574,7 @@ public sealed class ToolAskTests : IDisposable
     private long ProbeCount(string sql) => Insert(sql);
 
     [Fact]
-    public async Task Probe_B015_ANotNowForDotnetSdkLts_HoldsDotnetSdk10_ThroughPruningAll_UntilIts24HoursEnd()
+    public async Task Probe_ANotNowForDotnetSdkLts_HoldsDotnetSdk10_ThroughPruningAll_UntilIts24HoursEnd()
     {
         // A Not now on dotnet-sdk-10 25 hours ago (its hold is over), then a Not now on dotnet-sdk-lts (the same package).
         await Request(Priya, "dotnet-sdk-10");
@@ -595,7 +609,7 @@ public sealed class ToolAskTests : IDisposable
     }
 
     [Fact]
-    public async Task Probe_B015_TheInterruptedRow_ReadsInTheApprovalsLog_AndSurvivesPruningAll()
+    public async Task Probe_TheInterruptedRow_ReadsInTheApprovalsLog_AndSurvivesPruningAll()
     {
         await Request(Priya, "nodejs-lts");
         var id = _asks.Asks().Single().Id;
@@ -609,7 +623,7 @@ public sealed class ToolAskTests : IDisposable
         var logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
         var rows = logs.Query(new LogQuery("approvals"))["rows"]!.AsArray().Select(r => r!.AsObject())
             .Where(r => r["integration"]!.GetValue<string>() == "host tool").ToList();
-        File.WriteAllText(Path.Combine(Path.GetTempPath(), "b015-approvals-rows.json"),
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "yawble-host-tool-approvals-rows.json"),
             new JsonArray(rows.Select(r => (JsonNode)r.DeepClone()).ToArray()).ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         var interrupted = Assert.Single(rows, r => r["args"]!.GetValue<string>().Contains(ToolAskService.InterruptedDetail));
         Assert.Equal("failed", interrupted["state"]!.GetValue<string>());

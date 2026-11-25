@@ -22,7 +22,7 @@ public sealed partial class BusStore
 {
     private const string TriggerColumns =
         "id, team_id, member_id, name, kind, interval_sec, cron, timezone, fire_at, instruction, only_when_idle, enabled, " +
-        "next_due_at, last_fired_at, last_outcome, last_reason, last_seq, missed_count, wake_manager, watch_root, watch_path, watch_glob, quiet_sec, event_name";
+        "next_due_at, last_fired_at, last_outcome, last_reason, last_seq, missed_count, wake_manager, watch_root, watch_path, watch_glob, quiet_sec, event_name, fire_on";
 
     public IReadOnlyList<TriggerRow> Triggers(long? teamId = null, long? id = null) =>
         TriggerRows("WHERE ($t IS NULL OR team_id = $t) AND ($id IS NULL OR id = $id) ORDER BY id", ("$t", teamId), ("$id", id));
@@ -44,7 +44,7 @@ public sealed partial class BusStore
             ("$tz", s.Timezone), ("$at", s.FireAt is { } a ? Iso(a) : null), ("$ins", d.Instruction), ("$idle", d.OnlyWhenIdle ? 1 : 0),
             ("$en", d.Enabled ? 1 : 0), ("$next", nextDueAt is { } n ? Iso(n) : null), ("$now", Now()), ("$id", d.Id), ("$wake", d.WakeManager),
             ("$by", by.User), ("$byvia", by.Via),
-            ("$ev", d.EventName), ("$wr", d.Watch?.Root), ("$wp", d.Watch?.Path), ("$wg", string.IsNullOrWhiteSpace(d.Watch?.Glob) ? null : d.Watch!.Glob!.Trim()), ("$wq", d.Watch?.QuietSec),
+            ("$ev", d.EventName), ("$wr", d.Watch?.Root), ("$wp", d.Watch?.Path), ("$wg", string.IsNullOrWhiteSpace(d.Watch?.Glob) ? null : d.Watch!.Glob!.Trim()), ("$wq", d.Watch?.QuietSec), ("$fo", d.Watch?.FireOn),
         ];
         if (d.Id is null)
         {
@@ -52,9 +52,9 @@ public sealed partial class BusStore
                 """
                 INSERT INTO triggers (team_id, member_id, name, kind, interval_sec, cron, timezone, fire_at, instruction, only_when_idle,
                                       enabled, next_due_at, wake_manager, created_at, updated_at, saved_by, saved_via,
-                                      watch_root, watch_path, watch_glob, quiet_sec, event_name)
+                                      watch_root, watch_path, watch_glob, quiet_sec, event_name, fire_on)
                 VALUES ($team, $member, $name, $kind, $iv, $cron, $tz, $at, $ins, $idle, $en, $next, $wake, $now, $now, $by, $byvia,
-                        $wr, $wp, $wg, $wq, $ev) RETURNING id;
+                        $wr, $wp, $wg, $wq, $ev, $fo) RETURNING id;
                 """, args);
         }
         Exec(
@@ -62,7 +62,7 @@ public sealed partial class BusStore
             UPDATE triggers SET member_id = $member, name = $name, kind = $kind, interval_sec = $iv, cron = $cron, timezone = $tz,
                 fire_at = $at, instruction = $ins, only_when_idle = $idle, enabled = $en, next_due_at = $next, wake_manager = $wake,
                 updated_at = $now, saved_by = $by, saved_via = $byvia,
-                watch_root = $wr, watch_path = $wp, watch_glob = $wg, quiet_sec = $wq, watch_state = NULL, event_name = $ev
+                watch_root = $wr, watch_path = $wp, watch_glob = $wg, quiet_sec = $wq, watch_state = NULL, event_name = $ev, fire_on = $fo
             WHERE id = $id;
             """, args);
         return d.Id.Value;
@@ -131,7 +131,8 @@ public sealed partial class BusStore
             var schedule = new TriggerSchedule(r.GetString(4), r.IsDBNull(5) ? null : r.GetInt32(5), S(6), S(7), Parse(S(8)));
             list.Add(new TriggerRow(r.GetInt64(0), r.GetInt64(1), r.GetInt64(2), r.GetString(3), schedule, r.GetString(9), r.GetInt64(10) == 1,
                 r.GetInt64(11) == 1, Parse(S(12)), Parse(S(13)), S(14), S(15), r.IsDBNull(16) ? null : r.GetInt64(16), r.GetInt32(17),
-                r.GetString(18), S(19) is { } root ? new FolderWatch(root, S(20) ?? "", S(21), r.IsDBNull(22) ? FolderWatch.DefaultQuietSec : r.GetInt32(22)) : null, S(23)));
+                r.GetString(18), S(19) is { } root ? new FolderWatch(root, S(20) ?? "", S(21), r.IsDBNull(22) ? FolderWatch.DefaultQuietSec : r.GetInt32(22),
+                    S(24) ?? FolderWatch.AnyChange) : null, S(23))); // a row from before 0055: any change
         }
         return list;
     }

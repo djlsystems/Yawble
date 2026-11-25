@@ -97,11 +97,13 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                 "progress" => Sent(await run.ProgressAsync(Required(args, "status"), ct)),
                 "handback" => Sent(await run.HandbackAsync(Required(args, "delivered"), ct)),
                 "blocked" => Sent(await run.BlockedAsync(Required(args, "reason"), OptionalInt(args, "item"), ct)),
-                "needs_decision" => Sent(await run.NeedsDecisionAsync(Required(args, "question"), ct)),
+                "needs_decision" => Sent(await run.NeedsDecisionAsync(
+                    DecisionAsk.Parse(Optional(args, "question"), Optional(args, "summary"), args["options"], Optional(args, "details"),
+                        OptionalLong(args, "card"), Optional(args, "kind"), Optional(args, "reason")), ct)),
                 "workflow_complete" => Sent(await run.WorkflowCompleteAsync(Required(args, "delivered"), ct)),
-                "status" => JsonSerializer.Serialize(await run.StatusAsync(ct), RpcJson),
-                "hiring" => JsonSerializer.Serialize(await run.HiringAsync(ct), RpcJson),
-                "hire" => Hired(await run.HireAsync(Required(args, "name"), Optional(args, "cli"), Optional(args, "job"), ct)),
+                "status" => await StatusTextAsync(ct),
+                "hiring" => HiringText(await run.HiringOfferAsync(ct)),
+                "hire" => Hired(await run.HireAsync(Optional(args, "name"), Optional(args, "cli"), Optional(args, "job"), Optional(args, "role"), ct)),
                 "skills_get" => run.Skill(Required(args, "name")).Body,
                 "wake_me" => Woken(await run.WakeMeAsync(OptionalInt(args, "minutes") ?? throw new RpcError(-32602, "wake_me needs minutes"), Required(args, "note"), ct)),
                 "skills_list" => string.Join(Environment.NewLine, run.Skills().Select(x => $"{x.Name} - {x.Description}")),
@@ -159,8 +161,30 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     private static string? Optional(JsonObject args, string name) =>
         args[name] is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s : null;
 
+    /// <summary>status: the roster, then the computer's run slots (how many members can run at once: the limit on parallel work).</summary>
+    private async Task<string> StatusTextAsync(CancellationToken ct)
+    {
+        var roster = JsonSerializer.Serialize(await run.StatusAsync(ct), RpcJson);
+        var slots = await run.Engine.RunSlotsAsync(ct);
+        return roster + Environment.NewLine + $"Run slots: {slots.Running} in use of {slots.Limit} on this computer; {slots.Queued} run(s) queued for a slot.";
+    }
+
+    /// <summary>
+    /// hiring: with a hire list, its rows (role, description, agent, model, and whether the agent can run now) and the rule;
+    /// without one, every agent and whether it can run now, as before.
+    /// </summary>
+    private static string HiringText(HiringOffer offer) =>
+        offer.HireList.Count == 0
+            ? JsonSerializer.Serialize(offer.Agents, RpcJson)
+            : JsonSerializer.Serialize(new
+            {
+                hireList = offer.HireList,
+                rule = "Hire only these roles: hire with role (and name only to give a first name). The agent, model and job are the row's; " +
+                       "a different cli or job is refused. Hire only rows whose agent is ready.",
+            }, RpcJson);
+
     private static string Hired(MemberRow m) =>
-        $"ok: hired {m.Name} ({m.Cli}) into team {m.Team}. Address it as '{m.Name}' every time (tell, its branch {Teams.TeamRepos.BranchFor(m.Team, m.Name)}). Its clone and branch are made at its first run. Give it work with tell.";
+        $"ok: hired {m.Name} ({m.Cli}{(m.Model.Length > 0 ? ", " + m.Model : "")}){(m.HireRole is { } role ? " as " + role : "")} into team {m.Team}. Address it as '{m.Name}' every time (tell, its branch {Teams.TeamRepos.BranchFor(m.Team, m.Name)}). Its clone and branch are made at its first run. Give it work with tell.";
 
     private static async Task<string> RepoText(RunContext run, CancellationToken ct)
     {
@@ -178,7 +202,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     }
 
     /// <summary>A thread as plain lines an agent reads: "#seq time  source  type: the text".</summary>
-    private static string WorkflowText(IReadOnlyList<Message> thread)
+    internal static string WorkflowText(IReadOnlyList<Message> thread)
     {
         if (thread.Count == 0) return "No such workflow on your team.";
         var lines = thread.Select(m =>
@@ -191,6 +215,9 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                     : string.Join(" | ", new[] { "text", "status", "delivered", "reason", "question", "answer" }
                         .Select(k => o[k] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null).Where(s => s is not null))
                       is { Length: > 0 } joined ? joined : m.Payload;
+                // The cards the person accepted closing over a tester's FAIL, in the board's words.
+                if (m.Type == MessageTypes.WorkflowCompleted && Board.ClosedOverFail.Read(o) is { Count: > 0 } overFail)
+                    body += " | " + string.Join(" | ", overFail.Select(e => $"card {e.Card}: {e.Line}"));
             }
             catch (JsonException) { body = m.Payload; }
             if (body.Length > 1200) body = body[..1199] + "…";
@@ -258,21 +285,21 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                 "(what ran and passed, what could not run and why) and anything left open"), true)),
         Tool("blocked", "Stop without finishing, and say why. With item, blocks only that numbered item of your batch.",
             ("reason", "string", ReportText("Why you stopped: the summary says what is in the way; then what you tried and what would unblock it"), true), ("item", "integer", "Optional: the batch item number.", false)),
-        Tool("needs_decision", "Ask the person a question. The answer arrives as a new instruction in this workflow. Then end your turn: " +
-                               "do not also call blocked for the same thing.",
-            ("question", "string", "The decision you need, in Markdown: the question first in one sentence, then any items or options as a " +
-                                   "list or table (one per line), then what to reply (e.g. approve, or what to change). The app shows it formatted, " +
-                                   "with Approve and answer buttons.", true)),
-        Tool("workflow_complete", "Declare the workflow done (its owner, or the Manager). Refused while other work in it is running or pending.",
+        NeedsDecisionTool(),
+        Tool("workflow_complete", "Declare the workflow done (its owner, or the Manager). Refused while other work in it is running or pending, " +
+            "and while a card's latest tester hand-back is a FAIL unless the person said yes to closing over it (needs_decision with card and kind).",
             ("delivered", "string", ReportText("What was delivered: the summary names the branch and commit; then each item delivered, the tests " +
                 "and anything left open"), true)),
-        Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and queued instructions."),
-        Tool("hiring", "The Manager: the agent CLIs you may hire, and whether each can run on this computer now."),
+        Tool("status", "Your team: roster, who is running, who is queued for a run slot (with position), and each member's waiting instructions with why they wait (waitState: queued for a slot, waits-for-run with waitsFor, held for a paused team, pending); then the computer's run slots in use and their limit."),
+        Tool("hiring", "The Manager: who you may hire. With a hire list: its roles (role, description, agent, model) and whether each agent can run on this computer now; " +
+                       "without one: the agent CLIs and whether each can run now."),
         Tool("hire", "The Manager: add a member to your team. It starts idle; give it work with tell.",
-            ("name", "string", "The job word alone, one word: 'Developer', 'Tester'. The app adds a first name from the person's list; the answer gives " +
-                "the id to address it by ('DeveloperPriya'). Only when a refusal asks for one: the job, a space, then a first name as the refusal says.", true),
-            ("cli", "string", "Which agent CLI runs it (see hiring). Default: your own.", false),
-            ("job", "string", "Its standing job on the team, e.g. 'Developer: writes the code' or 'Tester: builds and tests'.", false)),
+            ("role", "string", "The role to hire, one of the hire list's (see hiring); required when the team has a hire list. " +
+                "Its row gives the agent, model and job.", false),
+            ("name", "string", "The job word alone, one word: 'Developer', 'Tester' (default: the role). The app adds a first name from the person's list; the answer gives " +
+                "the id to address it by ('DeveloperPriya'). Only when a refusal asks for one: the job, a space, then a first name as the refusal says.", false),
+            ("cli", "string", "Which agent CLI runs it (see hiring). Default: your own, or the hire list row's.", false),
+            ("job", "string", "Its standing job on the team, e.g. 'Developer: writes the code' or 'Tester: builds and tests'. With a hire list: leave it out.", false)),
         Tool("skills_get", "Load a skill: your role text (manager or member) or any skill skills_list offers you.",
             ("name", "string", "The skill's name, e.g. manager, member, team-git.", true)),
         Tool("skills_list", "The skills offered to you: name and one line each. Load one with skills_get."),
@@ -316,6 +343,50 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     private static string ReportText(string what) =>
         what + ". Write Markdown: a one-sentence summary on the first line, then the details as short bullet lists or short paragraphs, " +
         "one item per line, with real line breaks between them (never one long paragraph).";
+
+    /// <summary>
+    /// needs_decision with summary (one plain sentence), options (2-4 answers as buttons, one may carry an allowlisted
+    /// action the app applies when the person picks it), details (the findings, Markdown). question stays accepted.
+    /// </summary>
+    private static JsonObject NeedsDecisionTool()
+    {
+        var tool = Tool("needs_decision",
+            "Ask the person to decide something. Put the decision first in plain words (summary), the answers they can pick as options " +
+            "(each one a button), and your findings in details. Never number findings so they read as choices: the choices are the options. " +
+            "The answer arrives as a new instruction in this workflow. Then end your turn: do not also call blocked for the same thing.",
+            ("summary", "string", "The decision in one plain sentence a person reads first, e.g. 'Should the team's runs reach localhost on macOS?'.", false),
+            ("details", "string", "What you found and why it matters, in Markdown (lists, tables). Shown under the summary.", false),
+            ("question", "string", "Older form, still accepted: the whole decision as Markdown in one text. Prefer summary, options and details.", false),
+            ("card", "integer", "Only to close the workflow over a tester's FAIL: the card the tester failed. Then give kind, and the yes option carries action " +
+                                DecisionActions.CloseOverFail + " (with no options the app gives a yes and a no). workflow_complete goes through once the person picks the yes.", false),
+            ("kind", "string", "With card: accept-fail (accept the FAIL as it is and close) or wont-do (the card will not be done; needs a reason).", false),
+            ("reason", "string", "With card: why. Required for wont-do; for accept-fail, why the FAIL can be accepted.", false));
+        tool["inputSchema"]!["properties"]!["kind"]!["enum"] = new JsonArray("accept-fail", "wont-do");
+        tool["inputSchema"]!["properties"]!["options"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["description"] = $"{DecisionAsk.MinOptions} to {DecisionAsk.MaxOptions} answers the person can pick. label: the button (at most {DecisionAsk.MaxLabel} characters); " +
+                              "reply: the answer you get when it is picked; action (optional, at most one option): a change the app makes for the person " +
+                              $"when they pick it - only {DecisionActions.AllowLocalhostMac} (turns on the team's 'Allow localhost (macOS)') or, with card and kind, " +
+                              $"{DecisionActions.CloseOverFail} (the person's yes to closing over the tester's FAIL). " +
+                              "You never make that change yourself.",
+            ["minItems"] = DecisionAsk.MinOptions,
+            ["maxItems"] = DecisionAsk.MaxOptions,
+            ["items"] = new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JsonObject
+                {
+                    ["label"] = new JsonObject { ["type"] = "string", ["maxLength"] = DecisionAsk.MaxLabel },
+                    ["reply"] = new JsonObject { ["type"] = "string" },
+                    ["action"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(DecisionActions.All.Select(a => (JsonNode?)a).ToArray()) },
+                },
+                ["required"] = new JsonArray("label", "reply"),
+                ["additionalProperties"] = false,
+            },
+        };
+        return tool;
+    }
 
     private static JsonObject Tool(string name, string description, params (string Name, string Type, string Description, bool Required)[] parameters)
     {

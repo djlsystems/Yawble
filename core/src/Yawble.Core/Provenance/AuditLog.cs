@@ -24,7 +24,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "getGlobal", "getMember", "version",
         // The screens' polls and lookups: what is waiting, the Monitor's steps, workflows, settings shown, catalogs.
         "asks", "steps", "workflows", "item", "connectionAttention", "connections", "versionStatus", "models", "repos",
-        "mcpList", "apiList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
+        "mcpList", "apiList", "apiPeek", "emailList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
         "history", "check", "commandLine", "testSessions", "actionStatus", "backups", "doctor", "keepDaily", "restoreStatus",
         "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who", "catalog",
         // The team's network allow list as shown (its Remove, policy.removeTeamHost, is audited).
@@ -33,7 +33,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "checkHosts",
         // Settings > Teams and Settings > Concierge as saved (teams.defaults, concierge.defaults); setDefaults and generateNames are audited.
         "defaults",
-        // B100: a team skill's kept versions (skills.versions) and Team settings' "Lessons" line (teams.lessons); skills.restore is audited.
+        // A team skill's kept versions (skills.versions) and Team settings' "Lessons" line (teams.lessons); skills.restore is audited.
         "versions", "lessons",
     };
 
@@ -41,8 +41,10 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
     private static readonly Dictionary<string, string> GetOrSet = new(StringComparer.Ordinal)
     {
         ["teams.push"] = "on", ["teams.syncToBase"] = "on",
-        // B085: { teamId } reads the team's workflowExpiryDays, { teamId, days } sets it.
+        // { teamId } reads the team's workflowExpiryDays, { teamId, days } sets it.
         ["teams.workflowExpiry"] = "days",
+        // { teamId } reads "Allow localhost (macOS)", { teamId, on } sets it.
+        ["teams.localhost"] = "on",
     };
 
     /// <summary>A call that only reads: not audited. A get-or-set call reads when it carries no value to set.</summary>
@@ -69,16 +71,22 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "agents.resolveModel", "agents.checkForUpdates",
         // The tidy plan (what Tidy would do; doing it is audited).
         "git.tidyPlan",
-        // B075: a web link only reads the repository's refs. B072: the commit view reads a commit and a file's diff.
+        // A web link only reads the repository's refs. The commit view reads a commit and a file's diff.
         "git.webLink", "git.commitShow", "git.commitDiff",
-        // B074: resolving a batch of hex words to commits only reads.
+        // Resolving a batch of hex words to commits only reads.
         "git.commitsResolve",
-        // B073: the commits behind a count and the Merge / Delete previews change nothing.
+        // The commits behind a count and the Merge / Delete previews change nothing.
         "git.commitRange", "git.mergePreview", "git.mergeDiff", "git.deletePreview",
-        // B104: the Workflows page's list of every team's workflows, and one workflow in full.
+        // The Workflows page's list of every team's workflows, and one workflow in full.
         "workflows.list", "workflows.get",
+        // A team's hire list as Team settings > Hiring shows it (teams.setHireList is audited).
+        "teams.hireList",
         // Opening and closing the read-only Code view change nothing (a download is recorded).
         "code.open", "code.close",
+        // A script or schema exported as a file, a script member and its saved state, and one script run in full.
+        "scripts.export", "schemas.export", "scripts.memberGet", "scripts.memberState", "scripts.memberFiles", "scripts.run",
+        // The designer's action catalog, a document rewritten to real integration names (nothing saved) and where a schema is used.
+        "scripts.catalog", "scripts.useRealNames", "schemas.usage",
     };
 
     /// <summary>A call that only reads, by its name alone.</summary>
@@ -103,7 +111,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
     }
 
     /// <summary>
-    /// The names a call's ids stand for, appended to its target so the row stays readable after a delete (B101):
+    /// The names a call's ids stand for, appended to its target so the row stays readable after a delete:
     /// teamId= gets " team=&lt;Team&gt;", memberId= gets " member=&lt;Team&gt;/&lt;Name&gt;", and a per-member action
     /// addressed by its own id (a trigger, an asked tool call, a network or host tool ask) gets " memberId=… member=…".
     /// Read before the call runs (a delete removes what it names); null when there is nothing to add or nothing found.
@@ -191,11 +199,11 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         return found;
     }
 
-    /// <summary>The activity log's key of an audit row about no team and no member: team empty, member "app" (B101).</summary>
+    /// <summary>The activity log's key of an audit row about no team and no member: team empty, member "app".</summary>
     public const string AppKey = "/app";
 
     /// <summary>
-    /// Who an audit row is about, as the activity log keys it (B101): "Team/Name" for a member; "Team/&lt;Team&gt;" for a
+    /// Who an audit row is about, as the activity log keys it: "Team/Name" for a member; "Team/&lt;Team&gt;" for a
     /// team; "/app" for neither. <paramref name="joinedMember"/> and <paramref name="joinedTeam"/>: what the target's
     /// memberId= and teamId= name today (null when gone); else the names written into the target. An id whose name is
     /// lost (a row written before names were kept, about something deleted since): null.

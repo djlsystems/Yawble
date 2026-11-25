@@ -5,18 +5,22 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Board;
 
 /// <summary>
-/// B086's times from what is stored: a card's timeline lines (0047), the workflow's runs and its messages, and the runs
+/// The board's times from what is stored: a card's timeline lines (0047), the workflow's runs and its messages, and the runs
 /// working now (their stalls so far). <see cref="TimelineCalculator"/> does the arithmetic; this reads its inputs and
 /// writes the wire contract (<c>time</c> on BoardCard and workflow items; <c>timeline.get</c>).
 /// </summary>
 public sealed class BoardTimeline(BoardStore store)
 {
-    /// <summary>A card's timeline as of <paramref name="now"/>. <paramref name="runs"/>: the runs of its workflow, when already read.</summary>
+    /// <summary>
+    /// A card's timeline as of <paramref name="now"/>. <paramref name="runs"/>: the runs of its workflow as stored, when
+    /// already read (the live run-queue waits in <paramref name="live"/> are added here).
+    /// </summary>
     public CardTimeline OfCard(CardRow card, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now, IReadOnlyList<RunSpan>? runs = null)
     {
         var lines = store.Timeline(card.Id); // fills in an old card's timeline from its trail first
         var fresh = store.Card(card.Id) ?? card;
-        return OfCard(fresh, lines, live, now, runs ?? (fresh.Workflow is { } wf ? store.RunsOf(wf) : []));
+        if (fresh.Workflow is not { } wf) return OfCard(fresh, lines, live, now, runs ?? []);
+        return OfCard(fresh, lines, live, now, WithQueued(runs ?? store.RunsOf(wf), wf, live, now));
     }
 
     /// <summary>A card's timeline from what is already read: the card (after its rebuild), its lines and its workflow's runs.</summary>
@@ -61,13 +65,13 @@ public sealed class BoardTimeline(BoardStore store)
     public WorkflowTimeline? OfWorkflow(long workflow, IReadOnlyList<Message> thread, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
     {
         if (thread.Count == 0) return null;
-        var runs = store.RunsOf(workflow);
-        var cards = store.CardsOfWorkflow(workflow).OrderBy(c => c.Id).Select(c => OfCard(c, live, now, runs)).ToList();
-        return OfWorkflow(workflow, thread, runs, cards, store.LooseTimeline(workflow), live, now);
+        var stored = store.RunsOf(workflow);
+        var cards = store.CardsOfWorkflow(workflow).OrderBy(c => c.Id).Select(c => OfCard(c, live, now, stored)).ToList();
+        return OfWorkflow(workflow, thread, WithQueued(stored, workflow, live, now), cards, store.LooseTimeline(workflow), live, now);
     }
 
     /// <summary>
-    /// B104: the times of many workflows at once (the Workflows page), in a fixed number of statements however many there
+    /// The times of many workflows at once (the Workflows page), in a fixed number of statements however many there
     /// are. <paramref name="threads"/>: each workflow's messages, oldest first. Workflows without messages are left out.
     /// </summary>
     public IReadOnlyDictionary<long, TimeSummary> TimesOf(IReadOnlyDictionary<long, IReadOnlyList<Message>> threads, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
@@ -82,7 +86,7 @@ public sealed class BoardTimeline(BoardStore store)
         var loose = lines.Where(l => l.CardId is null && l.Workflow is not null).GroupBy(l => l.Workflow!.Value).ToDictionary(g => g.Key, g => (IReadOnlyList<TimelineLine>)[.. g]);
         foreach (var w in ids)
         {
-            var wfRuns = runs.GetValueOrDefault(w) ?? [];
+            var wfRuns = WithQueued(runs.GetValueOrDefault(w) ?? [], w, live, now);
             var cardTimes = (cards.GetValueOrDefault(w) ?? []).Select(c => OfCard(c, cardLines.GetValueOrDefault(c.Id) ?? [], live, now, wfRuns)).ToList();
             result[w] = OfWorkflow(w, threads[w], wfRuns, cardTimes, loose.GetValueOrDefault(w) ?? [], live, now).Time;
         }
@@ -215,6 +219,17 @@ public sealed class BoardTimeline(BoardStore store)
         (t.Rebuilt ? " [rebuilt from history]" : "");
 
     // ---------------------------------------------------------------- plumbing
+
+    /// <summary>
+    /// The workflow's runs plus, for each member waiting in the run queue now for work in it, a run queued since it
+    /// joined and not started (started = now), so that wait is Waiting for a slot while it lasts.
+    /// </summary>
+    private static IReadOnlyList<RunSpan> WithQueued(IReadOnlyList<RunSpan> runs, long workflow, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
+    {
+        var queued = live.Where(a => a.Workflow == workflow && a.QueuedSince is { } q && q < now)
+            .Select(a => new RunSpan(a.Member, a.QueuedSince!.Value, now, null)).ToList();
+        return queued.Count == 0 ? runs : [.. runs, .. queued];
+    }
 
     private static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 

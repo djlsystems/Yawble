@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// B020 (card 93): a members/<slug> branch that blocks the team's members/<slug>/<member> branches, as git.status lists it
-// in blockingBranches (core card 92), is shown in its own section with Delete through the existing two-step delete.
+// A members/<slug> branch that blocks the team's members/<slug>/<member> branches, as git.status lists it
+// in blockingBranches, is shown in its own section with Delete through the existing two-step delete.
 import { flushPromises, mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import GitDialog from '../../src/renderer/src/components/GitDialog.vue';
@@ -97,7 +97,7 @@ describe('git dialog: blocking members/<slug> branches', () => {
     expect(w.find('[data-test=git-blocking-branch]').text().toLowerCase()).not.toContain('rename');
   });
 
-  it('a branch a member is still on (inUseBy, card 104) says whose it is and where it moves, and has no Delete', async () => {
+  it('a branch a member is still on (inUseBy) says whose it is and where it moves, and has no Delete', async () => {
     const { api, calls } = fakeApi({
       'git.status': () => ({ ...base, blockingBranches: [
         { name: 'members/docs', repo: 'service', location: 'local', inUseBy: "team Alpha's member Docs", movesTo: 'members/alpha/docs' },

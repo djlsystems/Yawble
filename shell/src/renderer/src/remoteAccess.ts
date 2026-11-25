@@ -1,7 +1,7 @@
 import { computed, ref, watch, type Directive, type VNode } from 'vue';
 import type { CoreInfo, RemoteAccess } from '../../shared/api';
 
-// A remote view's access to the instance (B025): "full" (an Owner, or a workgroup Member) or "read" (a workgroup
+// A remote view's access to the instance: "full" (an Owner, or a workgroup Member) or "read" (a workgroup
 // Visitor). The core says it in core.getInfo over the link (remoteAccess); a missing or unknown value is "full", so an
 // older core keeps working. The desktop window never sets it, so it stays "full" there.
 //

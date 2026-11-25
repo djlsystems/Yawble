@@ -12,7 +12,7 @@ import MonitorView from '../../src/renderer/src/monitor/MonitorView.vue';
 import Timeline from '../../src/renderer/src/monitor/Timeline.vue';
 import type { YawbleApi } from '../../src/shared/api';
 
-// Fixtures in the shape card 370's monitor.codeEvents returns (oldest first).
+// Fixtures in the shape the core's monitor.codeEvents returns (oldest first).
 const t0 = Date.parse('2026-11-17T10:00:00Z');
 const iso = (ms: number) => new Date(ms).toISOString();
 let ids = 0;

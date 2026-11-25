@@ -151,7 +151,7 @@ async function go(place: Place, opts: { push?: boolean; line?: number | null } =
   await listing;
 }
 
-// A phone (B037): the list first, then a file opened from it full-screen with a back control to the list. Following
+// A phone: the list first, then a file opened from it full-screen with a back control to the list. Following
 // edits changes the file shown, not which of the two is on screen.
 const phone = useNarrow();
 const phonePane = ref<'list' | 'file'>('list');
@@ -436,7 +436,7 @@ defineExpose({ go, session });
 .cb-md :deep(.cb-img-alt) { color: var(--muted); font-style: italic; }
 .small { font-size: 12px; }
 .cb-back, .cb-open-file { align-self: flex-start; border: 0; background: transparent; color: var(--accent); padding: 0 4px; min-height: 44px; font-size: 14px; text-align: left; }
-/* A phone (B037): one pane at a time (the list, or the file with "← Files"), as tall as the screen allows; tap targets 44 px. */
+/* A phone: one pane at a time (the list, or the file with "← Files"), as tall as the screen allows; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .cb { height: calc(100vh - 140px); min-height: 280px; }
   .cb-panes { grid-template-columns: minmax(0, 1fr); }

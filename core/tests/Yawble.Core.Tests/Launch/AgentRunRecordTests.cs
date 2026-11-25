@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Launch;
 
-/// <summary>Card 46 (b)-(d): default model resolution, run rows with agent/model/version/argv, and the core API. Fakes only: no ports, no CLI.</summary>
+/// <summary>Default model resolution, run rows with agent/model/version/argv, and the core API. Fakes only: no ports, no CLI.</summary>
 public class AgentRunRecordTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -110,21 +110,22 @@ public class AgentRunRecordTests
     }
 
     [Fact]
-    public void The_model_list_is_the_apps_own_for_every_cli_and_every_item_is_a_valid_model()
+    public async Task With_no_other_source_the_model_list_is_the_built_in_one_for_every_cli_and_every_item_is_a_valid_model()
     {
         var catalog = new ModelCatalog();
         foreach (var cli in Enum.GetValues<AgentCli>())
         {
-            var listing = catalog.List(cli);
-            Assert.Equal("app", listing.Source);
+            var listing = await catalog.ListAsync(cli, false, Ct);
+            Assert.Equal("builtin", listing.Source);
             Assert.NotEmpty(listing.Models);
             Assert.All(listing.Models, m => Assert.True(AgentModels.IsValidModel(m), m));
+            Assert.All(listing.Items, i => Assert.Equal(("builtin", "built-in"), (i.From, i.FromLabel)));
         }
-        Assert.Equal(["opus", "sonnet", "haiku"], catalog.List(AgentCli.Claude).Models.Take(3));
+        Assert.Equal(["opus", "sonnet", "haiku"], (await catalog.ListAsync(AgentCli.Claude, false, Ct)).Models.Take(3));
     }
 
     [Fact]
-    public async Task Asking_for_models_runs_no_cli_and_looks_nothing_up_from_the_window_or_over_the_cloud_link()
+    public async Task Asking_for_models_with_no_cli_listing_given_runs_no_cli_from_the_window_or_over_the_cloud_link()
     {
         await using var kit = await LaunchKit.StartAsync();
         // A detector that finds every CLI: if listing asked a CLI it would have to find it first.
@@ -140,7 +141,7 @@ public class AgentRunRecordTests
                 {
                     // What Settings > Agents and Member settings call when they open and after a save.
                     var models = await rpc.DispatchAsync("agents.models", new JsonObject { ["cli"] = cli }, Ct);
-                    Assert.Equal("app", models!["source"]!.GetValue<string>());
+                    Assert.Equal("builtin", models!["source"]!.GetValue<string>());
                     await rpc.DispatchAsync("agents.defaultModels", null, Ct);
                 }
             }
@@ -188,7 +189,7 @@ public class AgentRunRecordTests
             Assert.DoesNotContain("-p", shown["interactive"]!["argv"]!.AsArray().Select(a => a!.GetValue<string>()));
 
             var models = await rpc.DispatchAsync("agents.models", new JsonObject { ["cli"] = "grok" }, Ct);
-            Assert.Equal("app", models!["source"]!.GetValue<string>());
+            Assert.Equal("builtin", models!["source"]!.GetValue<string>());
             var all = await rpc.DispatchAsync("agents.defaultModels", null, Ct);
             Assert.Equal("haiku", all!["claude"]!.GetValue<string>());
 

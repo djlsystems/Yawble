@@ -109,7 +109,7 @@ function fitOnce(): void {
   scene?.fit();
 }
 /**
- * What the view asks of the scene beyond the camera (DeveloperTomas's scene.ts, card 373): each one optional, so a
+ * What the view asks of the scene beyond the camera (scene.ts): each one optional, so a
  * scene without it leaves the view's control doing nothing on the wall (the view's own state is kept all the same).
  */
 interface SceneExtras {
@@ -177,7 +177,7 @@ function onWallUp(e: PointerEvent): void {
     return;
   }
   youOpen.value = false;
-  // B072: a click on a commit dot opens its Commit view.
+  // A click on a commit dot opens its Commit view.
   const h = hover.value;
   if (h?.kind === 'commit' && h.sha && h.team) { openCommit(h.team, h.sha); return; }
   if (p.seq === pickSeq) leaveFocus();
@@ -204,11 +204,11 @@ function toggleSound(): void {
 }
 
 /**
- * A phone (B037): the wall fills the screen, the activity starts collapsed (a bar under the timeline; how it is left
+ * A phone: the wall fills the screen, the activity starts collapsed (a bar under the timeline; how it is left
  * there is not kept, so the desktop's choice stands), and the camera and legend controls sit in one compact row.
  */
 const phone = useNarrow();
-// The workflow nodes' labels go by the window being phone-wide, not by the wall's canvas (card 409).
+// The workflow nodes' labels go by the window being phone-wide, not by the wall's canvas.
 watch(phone, (on) => scene?.setPhone?.(on));
 const activityOpen = ref(phone.value ? false : (() => { try { return localStorage.getItem('yawble.monitor.activity') !== 'collapsed'; } catch { return true; } })());
 function toggleActivity(): void {
@@ -218,7 +218,7 @@ function toggleActivity(): void {
 }
 const counts = ref({ running: 0, waiting: 0, needYou: 0, members: 0, perMinute: 0 });
 /**
- * What waits for the person (B088): the live model's need-you list, the same one the You node counts, so the header's
+ * What waits for the person: the live model's need-you list, the same one the You node counts, so the header's
  * "N need you" is always its length. Published with the counts.
  */
 const needYou = shallowRef<NeedYouItem[]>([]);
@@ -229,7 +229,7 @@ function publishCounts(): void {
 /** The heavy-work lease line under the counts (null: hidden, the lease is free and nobody waits). */
 const heavy = ref<string | null>(null);
 const hover = ref<SceneHover | null>(null);
-// B098 (B104): a workflow node's panel names the backlog item it came from. Looked up (workflows.list) when a workflow
+// A workflow node's panel names the backlog item it came from. Looked up (workflows.list) when a workflow
 // is first hovered, once per workflow; an older core without workflows.list names none.
 const itemOf = shallowRef(new Map<number, WorkflowItem | null>());
 const hoverItem = computed(() => (hover.value?.kind === 'workflow' && hover.value.workflow ? itemOf.value.get(hover.value.workflow.id) ?? null : null));
@@ -245,13 +245,13 @@ const NeedYouLook: Record<NeedYouKind, 'decision' | 'blocked' | 'fail'> = { ques
 const youOpen = ref(false);
 const youShown = computed(() => youOpen.value || hover.value?.kind === 'you');
 /**
- * The wall's size as the panel is placed by (B088): measured each time the panel shows and whenever the canvas
+ * The wall's size as the panel is placed by: measured each time the panel shows and whenever the canvas
  * resizes (Needs you banners, a shorter window), so the panel follows the You node; a computed over
  * getBoundingClientRect() alone would keep its first answer.
  */
 const wallSize = ref({ w: 0, h: 0 });
 /**
- * What the You node keeps clear of (card 416), in canvas CSS px: the controls (a phone's row along the bottom holds
+ * What the You node keeps clear of, in canvas CSS px: the controls (a phone's row along the bottom holds
  * Legend), the desktop's Legend button and the open legend. Measured with the wall's size and given to the scene, so
  * the node it draws and hits is where the panel is placed.
  */
@@ -496,7 +496,7 @@ async function codeFeed(first: boolean): Promise<CodeEvent[]> {
 
 /**
  * The network, tool and folder asks waiting for the person (network.asks, pending; tools.asks, pending or installing;
- * folder.asks, pending, B111), read the
+ * folder.asks, pending), read the
  * way Needs you reads them (NetworkAsks.vue, ToolAsks.vue): at the start, on network.asksChanged / tools.asksChanged and
  * on a slow poll. One You item per Needs-you item (a member's network asks on one domain are one, groupAsks), handed to
  * the live model's setAsks, which counts them on the You node and flies a new one to it. Those waiting at the start
@@ -562,7 +562,7 @@ async function tick(first = false) {
     const fe = await codeFeed(first);
     await workflowFeed(first, new Set(fr.map((r) => r.team.toLowerCase())));
     if (first) catchUp(live, [...fr].sort((a, b) => timeOf(a) - timeOf(b)), fs, fe);
-    // The need-you items new since the last look fly to the You node and sound, once each (B088); those there when the
+    // The need-you items new since the last look fly to the You node and sound, once each; those there when the
     // Monitor opens are counted, not flown.
     live.syncNeedYou(performance.now(), !first);
     const from = Date.now() - MaxWindowMinutes * 60_000;
@@ -852,7 +852,7 @@ onBeforeUnmount(() => {
             </li>
           </template>
         </ul>
-        <!-- The You node's breakdown (B088): hovered on a desktop, tapped on a phone; the same list as the header's count. -->
+        <!-- The You node's breakdown: hovered on a desktop, tapped on a phone; the same list as the header's count. -->
         <div v-if="youShown" class="you-tip" :class="{ open: youOpen }" :style="youTipStyle" data-test="monitor-you-tip"
           :role="youOpen ? 'dialog' : undefined" :aria-label="youOpen ? 'What needs you' : undefined">
           <strong data-test="monitor-you-summary">{{ needYouSummary(needYou) }}</strong>
@@ -1054,7 +1054,7 @@ onBeforeUnmount(() => {
 @keyframes row-in { from { opacity: 0; transform: translateX(12px); } }
 @media (prefers-reduced-motion: reduce) { .live, .activity li, .wfi.working circle { animation: none; } }
 @media (max-width: 900px) { .monitor { flex-direction: column; } .activity { width: auto; height: 40%; border-left: 0; border-top: 1px solid #1e293b; } .activity.collapsed { width: auto; height: 2.25rem; } .rail { flex-direction: row; justify-content: center; } .rail-label { writing-mode: horizontal-tb; transform: none; } }
-/* A phone (B037): the wall takes the screen, the HUD is compact, the camera, forces cog and legend controls are one row
+/* A phone: the wall takes the screen, the HUD is compact, the camera, forces cog and legend controls are one row
    of 44 px buttons under it (the forces panel opens above that row), the legend scrolls inside the wall, and the activity is a 44 px bar (open: half the height). Still dark. */
 @media (max-width: 759.98px) {
   .hud { padding: 8px 10px 18px; }

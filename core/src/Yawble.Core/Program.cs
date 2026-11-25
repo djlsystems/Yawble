@@ -54,7 +54,10 @@ using var dataLock = heldLock;
 Console.WriteLine("YAWBLE-STARTING");
 // Everything the core reports on standard error is also kept in <data>/logs/core-<day>.log (the Diagnostics log).
 var diagnostics = new Yawble.Core.Logs.DiagnosticLog(options.DataDir!, "core");
-Console.SetError(diagnostics.Tee(Console.Error));
+var rawStderr = Console.Error;
+// Structured lines (Logs.Diag) go to the log once, with their level and fields, and echo to the stderr under the tee.
+Yawble.Core.Logs.Diag.Attach(diagnostics, rawStderr);
+Console.SetError(diagnostics.Tee(rawStderr));
 Console.Error.WriteLine(CoreInfo.StartupLine());
 Yawble.Core.Storage.DataFolderAccess.Secure(options.DataDir!, Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!), line => Console.Error.WriteLine(line));
 // The IPC folders crashed launches left behind (no socket in them answers); never ours, never one that is still in use.
@@ -126,6 +129,7 @@ using var runTerminals = new Yawble.Core.Ui.RunTerminalBridge(runs, terminals, (
 var skillCatalog = new Yawble.Core.Skills.SkillCatalog($"Data Source={dbPath}");
 var fakePty = Environment.GetEnvironmentVariable(Yawble.Core.Bus.BusHost.RunnerVariable) == "fake-pty";
 Yawble.Core.Bus.BusEngine? busForRunner = null;
+Yawble.Core.Scripts.Running.ScriptRunner? scriptRunner = null;
 Yawble.Core.Bus.IAgentRunner? uiRunner = fakePty
     ? new Yawble.Core.Ui.FakePtyRunner(terminals,
         id => busForRunner?.MemberAsync(id).GetAwaiter().GetResult()?.Cli ?? "claude",
@@ -140,8 +144,35 @@ await using var bus = await Yawble.Core.Bus.BusHost.StartAsync(
     // Each run works in the member's own clone of the team repository (<app root>/teams/...).
     appDataRoot: Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!),
     skills: skillCatalog,
-    availableAgents: ct => Yawble.Core.Agents.AgentReadiness.ChoicesAsync(clis, ct));
+    availableAgents: ct => Yawble.Core.Agents.AgentReadiness.ChoicesAsync(clis, ct),
+    // Script members' runs go to the script engine, agents' to the launcher as before.
+    wrapRunner: r => new Yawble.Core.Launch.ScriptDispatchRunner(r, () => scriptRunner));
 busForRunner = bus;
+// The global script and schema libraries and the script runner (members' data folders under <data>/scripts). Runs the
+// old core left going resume from their last completed step. SC-2: a script's integration steps are the team's web API operations
+// (kind "api"), through IntegrationService, which is made further down: its calls wait for it (integrationsReady).
+var integrationsReady = new TaskCompletionSource<Yawble.Core.Integrations.IntegrationService>(TaskCreationOptions.RunContinuationsAsynchronously);
+var scriptActions = new Yawble.Core.Scripts.Actions.ScriptActionKinds(new Dictionary<string, Yawble.Core.Scripts.Running.IScriptActionsProvider>
+{
+    [Yawble.Core.Scripts.Actions.ApiScriptActionsProvider.Kind] = new Yawble.Core.Scripts.Actions.ApiScriptActionsProvider(
+        new Yawble.Core.Scripts.Actions.IntegrationScriptApi($"Data Source={dbPath}", integrationsReady.Task)),
+    // SC-3: the built-in Email integration's read actions (kind "email")
+    [Yawble.Core.Scripts.Actions.EmailActions.Kind] = new Yawble.Core.Scripts.Actions.EmailScriptActionsProvider(
+        new Yawble.Core.Scripts.Actions.IntegrationScriptEmail(integrationsReady.Task)),
+});
+// A script's steps name the person's integrations (Email integrations, web APIs) by their real names: the directory reads them.
+var scriptLibrary = new Yawble.Core.Scripts.Library.ScriptLibrary($"Data Source={dbPath}", () => scriptActions.Catalog,
+    integrations: new Yawble.Core.Scripts.Library.IntegrationScriptDirectory($"Data Source={dbPath}", integrationsReady.Task));
+var scriptRuns = new Yawble.Core.Scripts.Running.ScriptRunStore($"Data Source={dbPath}");
+scriptRunner = new Yawble.Core.Scripts.Running.ScriptRunner(scriptRuns, scriptLibrary, scriptActions,
+    Yawble.Core.Scripts.Running.SeamScriptEngine.Instance, Path.Combine(options.DataDir!, "scripts"),
+    grantedFolders: memberId => policies.GetMember(memberId).Loosen.Filesystem?.Readwrite ?? [],
+    log: line => Console.Error.WriteLine($"scripts: {line}"))
+{
+    Decisions = new Yawble.Core.Scripts.Running.BusScriptDecisions(bus),
+};
+bus.ScriptMembers = scriptRunner;
+scriptRunner.ResumeInterrupted();
 
 // A member's cli is a built-in's id or a custom agent's name: every site resolves it through this (base CLI, argv changes, default model).
 var agentResolver = Yawble.Core.Agents.Profiles.AgentProfileStore.ForReading($"Data Source={dbPath}");
@@ -181,8 +212,9 @@ var ui = new Yawble.Core.Ui.UiRpc(bus, policies, layouts,
     skillCatalog,
     // The Monitor's step feed: what the members do, read from their runs' transcripts.
     new Yawble.Core.Monitor.StepFeed($"Data Source={dbPath}"),
-    // The Monitor's code events (B079): commits, merges and pushes the host recorded in the team repositories.
+    // The Monitor's code events: commits, merges and pushes the host recorded in the team repositories.
     new Yawble.Core.Monitor.CodeEvents($"Data Source={dbPath}"));
+ui.Scripts = new Yawble.Core.Ui.ScriptsRpc(bus, scriptLibrary, scriptRuns, scriptRunner);
 // The guardrail check (runs a battery of escape attempts in a sandbox under a member's effective policy).
 // It rides on the launcher: the same layout, policy, per-run gateway and backend as the members' runs.
 // A member's check takes a global run slot through the bus, like a terminal session.
@@ -228,7 +260,7 @@ var concierge = new Yawble.Core.Concierge.ConciergeService(
 // (The saved default agent, Settings > Concierge, comes first when it still resolves: ConciergeService.DefaultAgentAsync.)
 // Settings > Teams' Generate: one headless run of the Concierge's default agent with no Yawble tools.
 bus.NameGenerator = concierge.GenerateNamesAsync;
-// B085: a workflow that waits on the person's answer and will expire tomorrow is posted once as a Concierge Update.
+// A workflow that waits on the person's answer and will expire tomorrow is posted once as a Concierge Update.
 bus.ExpiryWarned = w => concierge.PostAppUpdate(w.TeamId, w.Team, w.Text, "expiring");
 // The Cloud Link (optional): a remote viewer's calls go through this same dispatcher, after RemoteAccess.
 RpcDispatcher? dispatcherForLink = null;
@@ -244,6 +276,7 @@ await using var integrations = new Yawble.Core.Integrations.IntegrationService($
     connections: connections, browser: new Yawble.Core.Integrations.ShellBrowser(), redirect: () => new Yawble.Core.Integrations.LoopbackRedirectReceiver(),
     websites: websiteHost);
 bus.Integrations = integrations;
+integrationsReady.TrySetResult(integrations); // script runs waiting on an integration step go on
 // Network asks: a host a run's gateway refused (or an agent's request_host) waits for the person in Needs you; their answer
 // changes the policy through the policy store, with each member's layout for its checks.
 var networkAsks = new Yawble.Core.Integrations.NetworkAskService($"Data Source={dbPath}",
@@ -267,7 +300,7 @@ var toolAsks = new Yawble.Core.Integrations.ToolAskService($"Data Source={dbPath
 toolAsks.Changed = () => events.Publish(Yawble.Core.Integrations.ToolAskService.ChangedEvent, null);
 toolAsks.Progress = e => events.Publish(Yawble.Core.Integrations.ToolAskService.ProgressEvent, e);
 bus.ToolAsks = toolAsks;
-// Folder asks (B111): a folder an agent asked to read or write (request_folder) waits for the person in Needs you; an
+// Folder asks: a folder an agent asked to read or write (request_folder) waits for the person in Needs you; an
 // approval writes the member's loosen block through the policy store, as policy.saveLoosen does.
 var folderAsks = new Yawble.Core.Integrations.FolderAskService($"Data Source={dbPath}", policies,
     async (memberId, ct) =>
@@ -323,7 +356,7 @@ if (bus.Repos is { } taskRepos)
 var board = new Yawble.Core.Board.BoardService(new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), bus,
     line => Console.Error.WriteLine($"board: {line}"));
 bus.Board = board;
-// B100: workflow_digest reads the runs' transcripts.
+// workflow_digest reads the runs' transcripts.
 var digestTranscripts = new Yawble.Core.Transcripts.TranscriptStore(options.DataDir!, $"Data Source={dbPath}");
 bus.TranscriptOf = digestTranscripts.Read;
 board.Changed = () => events.Publish(Yawble.Core.Board.BoardService.ChangedEvent, null); // clear done / restore: open boards refresh
@@ -332,11 +365,15 @@ bus.LeaseChanged = () => events.Publish(Yawble.Core.Bus.BusEngine.LeaseChangedEv
 var agentDefaults = launch.AgentDefaults ?? new Yawble.Core.Agents.AgentDefaultsStore($"Data Source={dbPath}");
 concierge.AgentResolver = agentResolver;
 Yawble.Core.Agents.Profiles.AgentProfileStore? agentProfileStore = null;
-var agentChangeLog = new Yawble.Core.Agents.Profiles.AgentChangeLog($"Data Source={dbPath}", null, (agent, model) => agentProfileStore!.ResolveModel(agent, model));
+// The person's own CLI settings (read only): the model a member with none and no agent default runs with, and one picker source.
+var cliModelSettings = launch.ModelSettings ?? Yawble.Core.Agents.CliModelSettings.ForThisComputer();
+var agentChangeLog = new Yawble.Core.Agents.Profiles.AgentChangeLog($"Data Source={dbPath}", null, (agent, model) => agentProfileStore!.ResolveModel(agent, model),
+    agent => agentProfileStore!.CliOf(agent) is { } changedCli && cliModelSettings.DefaultModel(changedCli) is { } fromSettings
+        ? (fromSettings, $"model from your {Yawble.Core.Policy.AgentClis.DisplayName(changedCli)} settings") : null);
 agentProfileStore = new Yawble.Core.Agents.Profiles.AgentProfileStore($"Data Source={dbPath}", agentChangeLog, new Yawble.Core.Agents.Profiles.SqliteAgentUsage($"Data Source={dbPath}"), defaults: agentDefaults);
 bus.AgentChanges = agentChangeLog;
 // The member panes' agent pill: the model each member runs (set, the agent's default, or the one its last run used).
-ui.Models = new Yawble.Core.Agents.MemberModels($"Data Source={dbPath}", agentResolver, agentDefaults);
+ui.Models = new Yawble.Core.Agents.MemberModels($"Data Source={dbPath}", agentResolver, agentDefaults, cliModelSettings);
 var agentProfileRpc = new Yawble.Core.Agents.Profiles.AgentProfileRpc(agentProfileStore, agentChangeLog);
 boardForConcierge = board.DispatchAsync;
 if (bus.Repos is { } actionRepos)
@@ -396,18 +433,27 @@ _ = Task.Run(async () =>
     while (true)
     {
         try { await doctorService.RunAsync(CancellationToken.None); }
-        catch (Exception e) { Console.Error.WriteLine($"doctor: the periodic check failed: {e.GetType().Name}"); }
+        catch (Exception e)
+        {
+            // which check was running, the exception and its message.
+            Yawble.Core.Logs.Diag.Error("doctor", $"doctor: the periodic check failed: {e.GetType().Name}: {e.Message}",
+                ("check", doctorService.RunningCheck), ("exception", e.GetType().Name));
+        }
         await Task.Delay(TimeSpan.FromMinutes(15));
     }
 });
 // Command line, default model, run records, versions and updates for Settings > Agents and Member settings.
 var agentInfoRpc = launch.Launcher is null ? null : new Yawble.Core.Agents.AgentInfoRpc(launch.Launcher, agentDefaults,
-    new Yawble.Core.Agents.ModelCatalog(), clis,
+    // The pickers' lists: the CLI's own listing, the person's CLI settings, the models runs used, the built-in list.
+    new Yawble.Core.Agents.ModelCatalog(
+        new Yawble.Core.Agents.CliModelListing(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Environment.GetEnvironmentVariable,
+            new Yawble.Core.Agents.RealCliProcessRunner(), cli => HostCliPath(Yawble.Core.Policy.AgentClis.Id(cli)), launch.GrokModelsOutput),
+        cliModelSettings, new Yawble.Core.Agents.SqliteModelsUsed($"Data Source={dbPath}")), clis,
     new Yawble.Core.Launch.RunRecordStore($"Data Source={dbPath}"), memberDirectory, new Yawble.Core.Agents.WindowsUpdateTerminal(), agentResolver, agentChangeLog);
 // The read-only code browser of members' clones (watched while a member runs or a Code dialog is open on it).
 await using var codeBrowser = new Yawble.CodeBrowser.CodeBrowserService(new Yawble.Core.Code.CodeHost(bus, runs, events, policies));
 codeBrowser.Start();
-// The cloud org dashboard (B048): org.summary from what the app already tracks (never tokens, cost or usage), pushed as
+// The cloud org dashboard: org.summary from what the app already tracks (never tokens, cost or usage), pushed as
 // org.summaryChanged while a viewer watches; a Cloud Link viewer who leaves is unwatched.
 await using var orgSummary = new Yawble.Core.Link.OrgSummaryService(
     new Yawble.Core.Link.AppOrgSummarySource(bus, new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), integrations, networkAsks, toolAsks, logService,
@@ -416,13 +462,15 @@ await using var orgSummary = new Yawble.Core.Link.OrgSummaryService(
 link.ViewersChanged += orgSummary.ViewersPresent;
 orgSummary.Start();
 var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, runs, guardrail, ui, hostChecks,
-    scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: clis, agentTests: agentTests, link: link, concierge: concierge, board: board,
+    scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: new Yawble.Core.Agents.GatewaySignInOverlay(clis, launch.GrokSignIn), agentTests: agentTests, link: link, concierge: concierge, board: board,
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
     code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService, logTail),
     updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks, orgSummary: orgSummary,
     folderAsks: folderAsks);
 dispatcherForLink = dispatcher;
+// A decision option's action (Allow localhost) is applied as the setting's own call, audited as that call.
+ui.Dispatch = (method, p, ct) => dispatcher.DispatchAsAsync(Yawble.Core.Provenance.Actor.Current ?? Yawble.Core.Provenance.Actor.Window, method, p, ct);
 link.Start();
 
 // Not disposed: ProcessExit can still fire after Main returns. The first way out writes "core stopping: <reason>" to the core log.

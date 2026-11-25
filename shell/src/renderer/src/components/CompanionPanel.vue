@@ -13,7 +13,7 @@ import { usePhone } from '../phone';
  * (level, pair, add), and the paired programs (revoke asks first). Only at this computer, never remote.
  */
 const props = defineProps<{ api: YawbleApi }>();
-// A phone (B037): a command and its Copy button stack, the paired programs' table scrolls sideways on its own.
+// A phone: a command and its Copy button stack, the paired programs' table scrolls sideways on its own.
 const phone = usePhone();
 
 const clients = ref<CompanionClientInfo[]>([]);

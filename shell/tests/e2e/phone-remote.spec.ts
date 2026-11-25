@@ -1,4 +1,4 @@
-// B037 verify (card 169): remote.html on a phone, end to end in a real browser (headless Chrome), against a FAKE core
+// Remote.html on a phone, end to end in a real browser (headless Chrome), against a FAKE core
 // (tests/e2e/phone/fake-core.ts: canned answers over the page's socket, nothing real behind it).
 //
 // Every screen at 390 x 844 and 360 x 740: the page must not scroll sideways (scrollWidth > innerWidth), no visible
@@ -6,8 +6,8 @@
 // visualViewport), the Visitor chip, the dark Monitor and its forces panel, the 759 / 760 px edges, rotation, and at
 // 1280 px the desktop layout compared with main's at BASE_COMMIT (tests/e2e/phone/server.ts; one line to bump).
 //
-//   npx playwright test phone-remote            (B037_SKIP_BUILD=1 reuses out/b037/renderer*; the base tree is out/b037/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
-// Screenshots go to $YAWBLE_TEAM_DOCS/B037-screens (else test-results/B037-screens); the audit to test-results/b037-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
+//   npx playwright test phone-remote            (E2E_SKIP_BUILD=1 reuses out/e2e/renderer*; the base tree is out/e2e/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
+// Screenshots go to $YAWBLE_TEAM_DOCS/phone-screens (else test-results/phone-screens); the audit to test-results/phone-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -17,16 +17,16 @@ import { BASE_COMMIT, baseBuiltDir, baseShellDir, buildRenderer, builtDir, extra
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'B037-screens');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'phone-screens');
 // One line per audit (each worker appends; Playwright empties test-results at the start of a run).
-const RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'b037-audit.ndjson');
+const RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'phone-audit.ndjson');
 const results = { push(r: { screen: string; size: string; audit: Audit }) { mkdirSync(path.dirname(RESULTS), { recursive: true }); appendFileSync(RESULTS, JSON.stringify(r) + '\n'); } };
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
   mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
-  if (process.env.B037_NO_BASE !== '1') { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
+  if (process.env.E2E_NO_BASE !== '1') { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
 });
 
 type Size = { w: number; h: number };
@@ -183,7 +183,7 @@ for (const size of PHONES) {
       await expect(page.locator('[data-test=team-title]')).toBeVisible();
       await check(page, 'team', size);
       await page.screenshot({ path: path.join(SHOTS, `team-full-${tag(size)}.png`), fullPage: true });
-      // B061: on a phone a member's Code is in its pane's ⋯ menu (member-more): open the first one that has a clone.
+      // On a phone a member's Code is in its pane's ⋯ menu (member-more): open the first one that has a clone.
       const code = page.locator('[data-test=open-code]:visible').first();
       if (!(await code.isVisible().catch(() => false))) {
         const mores = page.locator('[data-test=member-more]');
@@ -271,14 +271,15 @@ for (const size of PHONES) {
       expect(errors).toEqual([]);
     });
 
-    test('Logs (a dialog as a sheet): the list and an entry', async ({ browser }) => {
+    test('Logs (a page): the list and an entry', async ({ browser }) => {
       const { page, errors } = await open(browser, size, { asks: false });
       await nav(page, 'nav-logs');
-      const sheet = page.locator('.modal, [role=dialog]').first();
+      const sheet = page.locator('[data-test=logs]').first();
       await expect(sheet).toBeVisible();
+      await expect(page.locator('.modal, [role=dialog]')).toHaveCount(0);
       await page.waitForTimeout(600);
       const b = (await sheet.boundingBox())!;
-      expect.soft(Math.round(b.width), 'the dialog is a full-width sheet').toBeGreaterThanOrEqual(size.w - 1);
+      expect.soft(Math.round(b.width), 'the page takes the width (less its padding)').toBeGreaterThanOrEqual(size.w - 40);
       await check(page, 'logs', size);
       const row = page.locator('[data-test=logs-cards] [data-test=logs-row]').first();
       if (await row.count()) {
@@ -291,7 +292,7 @@ for (const size of PHONES) {
 
     test('Settings: the sections list and a section', async ({ browser }) => {
       const { page, errors } = await open(browser, size, { asks: false });
-      // B115: Settings is the gear at the right of the phone top bar.
+      // Settings is the gear at the right of the phone top bar.
       await page.getByTestId('settings-gear').click();
       await expect(page.locator('[data-test=settings]')).toBeVisible();
       await page.waitForTimeout(500);
@@ -312,7 +313,7 @@ for (const size of PHONES) {
       await page.locator('[data-test=documents-view]').getByText('payments', { exact: true }).first().click();
       await page.waitForTimeout(500);
       await check(page, 'documents-team', size);
-      const doc = page.locator('[data-test="doc-B037-report.md"]').first();
+      const doc = page.locator('[data-test="doc-phone-report.md"]').first();
       await doc.click();
       await page.waitForTimeout(500);
       await check(page, 'document', size);
@@ -333,9 +334,9 @@ for (const size of PHONES) {
       await check(page, 'visitor-board', size);
     });
 
-    // F7 re-verify (card 177): the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
+    // F7 re-verify: the Visitor's 150 px top-bar padding is kept in the shell's top bar only.
     test('Visitor (read-only) F7: the composer matches full access, the chip clears the top bar, Documents and Logs bars', async ({ browser }) => {
-      // B057: on a phone the team and agent pickers fold out above the bar (one button opens them).
+      // On a phone the team and agent pickers fold out above the bar (one button opens them).
       const composerBar = async (page: Page) => { await page.locator('[data-test=composer-pickers-toggle]').click(); return page.locator('[data-test=composer] .bar').evaluate((bar) => {
         const r = (sel: string) => { const e = bar.closest('[data-test=composer]')!.querySelector(sel); const b = e ? (e.closest('.pick') ?? e).getBoundingClientRect() : null; return b ? { x: b.x, w: b.width, h: b.height, right: b.right } : null; };
         const bb = bar.getBoundingClientRect();
@@ -388,29 +389,19 @@ for (const size of PHONES) {
       expect.soft(d.maxRight, 'Documents bar controls inside the bar').toBeLessThanOrEqual(d.barRight + 1);
       await check(page, 'reverify2-visitor-documents', size);
       await nav(page, 'nav-logs');
-      await expect(page.locator('.modal, [role=dialog]').first()).toBeVisible();
+      await expect(page.locator('[data-test=logs]').first()).toBeVisible();
       await page.waitForTimeout(600);
-      const l = await barInfo('.modal .bar, [role=dialog] .bar');
+      const l = await barInfo('[data-test=logs] .bar');
       results.push({ screen: 'f7-logs-bar', size: tag(size), audit: l as unknown as Audit });
       expect.soft(parseFloat(l.padR), 'Logs bar padding-right under 150').toBeLessThan(150);
       expect.soft(l.sw, 'Logs bar does not overflow').toBeLessThanOrEqual(l.cw + 1);
       expect.soft(l.maxRight, 'Logs bar controls inside the bar').toBeLessThanOrEqual(l.barRight + 1);
       await check(page, 'reverify2-visitor-logs', size);
-      // A dialog sheet's Close (top right) must not be drawn under the chip (the chip lets taps through, but hides the ✕).
-      const close = await page.evaluate(() => {
-        const c = document.querySelector('[data-test=modal-close]')!.getBoundingClientRect();
-        const chip = document.querySelector('[data-test=remote-access-chip]')!.getBoundingClientRect();
-        const ow = Math.max(0, Math.min(c.right, chip.right) - Math.max(c.left, chip.left)), oh = Math.max(0, Math.min(c.bottom, chip.bottom) - Math.max(c.top, chip.top));
-        return { close: [Math.round(c.left), Math.round(c.top), Math.round(c.width), Math.round(c.height)], chip: [Math.round(chip.left), Math.round(chip.top), Math.round(chip.width), Math.round(chip.height)], coveredPct: Math.round((100 * ow * oh) / (c.width * c.height)) };
-      });
-      results.push({ screen: 'f8-logs-close', size: tag(size), audit: close as unknown as Audit });
-      expect.soft(close.coveredPct, `Logs sheet's Close under the Visitor chip (close ${close.close}, chip ${close.chip})`).toBe(0);
-      await page.locator('[data-test=modal-close]').click();
-      await expect(page.locator('[data-test=modal-close]')).toHaveCount(0);
+      // Logs is a page (no sheet, so no Close for the Visitor chip to cover).
       expect(errors).toEqual([]);
     });
 
-    // F8 re-verify (card 182): every phone sheet a Visitor can open keeps Close and its title clear of the chip; with
+    // F8 re-verify: every phone sheet a Visitor can open keeps Close and its title clear of the chip; with
     // full access the sheet header is as before (6 px right padding, Close at the right edge).
     test('F8: every sheet - Close and title clear of the Visitor chip; full-access header unchanged', async ({ browser }) => {
       test.setTimeout(240_000);
@@ -428,25 +419,24 @@ for (const size of PHONES) {
         return { title: h2.textContent!.trim(), padR: getComputedStyle(head).paddingRight, close: [Math.round(c.left), Math.round(c.right), Math.round(c.width), Math.round(c.height)], chip: chip ? [Math.round(chip.left), Math.round(chip.right)] : null,
           closeCoveredPct: cover(c), titleCoveredPct: cover(t), titleW: Math.round(t.width), titleTruncated: h2.scrollWidth > h2.clientWidth + 1, sw: document.documentElement.scrollWidth, iw: innerWidth };
       });
-      // Openers: Logs from the drawer, then each sheet the team page and its first agent card offer (when shown).
+      // Openers: each sheet the team page and its first agent card offer (when shown). The app's Logs is a page.
       const openers: { name: string; go: (page: Page) => Promise<boolean> }[] = [
-        { name: 'logs', go: async (p) => { await nav(p, 'nav-logs'); return true; } },
         ...['open-code', 'open-settings', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
           name: id.replace('open-', 'team-'),
           go: async (p: Page) => {
             await nav(p, 'nav-teams');
             await p.locator('[data-test=team-open-payments]').click();
             await expect(p.locator('[data-test=team-title]')).toBeVisible();
-            // On a phone the team's Documents and Workflows are in the drawer, not the header (card 316).
+            // On a phone the team's Documents and Workflows are in the drawer, not the header.
             if (id === 'open-documents' || id === 'open-workflows') { await nav(p, id.replace('open-', 'drawer-team-')); return true; }
             const b = p.locator(`[data-test=${id}]`).first();
-            // B054 (card 270): on a phone Triggers, Git and Settings are in the team page's ⋯ menu: open it first.
+            // On a phone Triggers, Git and Settings are in the team page's ⋯ menu: open it first.
             const more = p.locator('[data-test=team-more]');
             if (!(await b.isVisible().catch(() => false)) && (await more.isVisible().catch(() => false))) {
               await more.click();
               await expect(p.locator('[data-test=team-more-menu]')).toBeVisible();
             }
-            // B061: on a phone a member's Code, Settings and Logs are in its pane's ⋯ menu (member-more).
+            // On a phone a member's Code, Settings and Logs are in its pane's ⋯ menu (member-more).
             const memberMore = p.locator('[data-test=member-more]').first();
             if (!(await b.isVisible().catch(() => false)) && (await memberMore.isVisible().catch(() => false))) {
               if (await more.isVisible().catch(() => false) && (await p.locator('[data-test=team-more-menu]').count())) await more.click();
@@ -491,7 +481,7 @@ for (const size of PHONES) {
       }
       console.log(`F8 sheets @${tag(size)}: ${JSON.stringify(seen)}`);
       results.push({ screen: 'f8-sheets', size: tag(size), audit: seen as unknown as Audit });
-      // B054: the three sheets behind ⋯ are still checked on a phone (an opener that is gone is a fault, not a skip).
+      // The three sheets behind ⋯ are still checked on a phone (an opener that is gone is a fault, not a skip).
       for (const name of ['team-triggers', 'team-git', 'team-manage'])
         for (const access of ['read', 'full'] as const)
           expect.soft(typeof seen[name]?.[access], `${name} (${access}) @${tag(size)}: opened as a sheet (${JSON.stringify(seen[name]?.[access])})`).toBe('object');
@@ -592,8 +582,8 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
 });
 
 test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}`, () => {
-  test.skip(process.env.B037_NO_BASE === '1', 'no base build');
-  // B054 verify (card 270): also the pages B054 changes past their landing screen - a team's page, a team's documents
+  test.skip(process.env.E2E_NO_BASE === '1', 'no base build');
+  // Also the phone pages past their landing screen - a team's page, a team's documents
   // folder, and the Settings sections (Skills with a skill picked, Guardrails, Integrations, System).
   const tap = (sel: string) => async (p: Page) => { await p.locator(sel).first().click(); await p.waitForTimeout(500); };
   const deeper: Record<string, ((p: Page) => Promise<void>)[]> = {
@@ -604,7 +594,7 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
     'settings-integrations': [tap('[data-test=settings] [data-test=open-integrations]')],
     'settings-system': [tap('[data-test=settings] [data-test=open-system]')],
   };
-  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'], ['nav-logs', 'logs'],
+  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'],
     ['nav-teams', 'team-page'], ['nav-documents', 'documents-folder'], ['open-app-settings', 'settings-skill'], ['open-app-settings', 'settings-guardrails'], ['open-app-settings', 'settings-integrations'], ['open-app-settings', 'settings-system']] as const) {
     test(`${name}: every [data-test] element in the same place and size`, async ({ browser }) => {
       const size = { w: 1280, h: 800 };
@@ -613,13 +603,13 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
       const layouts: Record<string, Layout> = {};
       for (const [which, dir] of [['base', baseBuiltDir], ['branch', builtDir]] as const) {
         const { page } = await open(browser, size, { dir, mobile: false });
-        // B115: the base build has Settings in the sidebar, this one the gear at the top right.
+        // The base build has Settings in the sidebar, this one the gear at the top right.
         if (id) await page.locator(id === 'open-app-settings' ? '[data-test=sidebar] [data-test=open-app-settings], [data-test=settings-gear]' : `[data-test=sidebar] [data-test=${id}]`).first().click();
         for (const step of deeper[name] ?? []) await step(page);
         await page.waitForTimeout(900);
         await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${name}-${which}.png`) });
         layouts[which] = await page.evaluate(() => {
-          // A team's page (B061, card 312): its members (.member-cell, an AgentCard + activity row on main, one framed
+          // A team's page: its members (.member-cell, an AgentCard + activity row on main, one framed
           // MemberPane here) are measured apart; what comes after them is listed in `below`.
           const cells = [...document.querySelectorAll('.member-cell')];
           const last = cells[cells.length - 1];
@@ -637,7 +627,7 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
             out[k] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
             if (last && (last.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) below.push(k);
           }
-          // B076 (card 367): the members are a grid now and its last cell is the New member tile (not a member pane).
+          // The members are a grid now and its last cell is the New member tile (not a member pane).
           const panes = cells.filter((c) => !c.classList.contains('new-cell')).map((c) => {
             const body = c.querySelector('[data-test=member-pane-body]');
             return { name: c.querySelector('[data-test^=agent-]')?.getAttribute('data-test') ?? '?', frames: c.querySelectorAll('section.pane').length,
@@ -648,17 +638,17 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
         await page.context().close();
       }
       const base = layouts.base!, branch = layouts.branch!;
-      // What follows the members may move down or up by however much taller or shorter the members area is (B061).
+      // What follows the members may move down or up by however much taller or shorter the members area is.
       const shift = base.members && branch.members ? (branch.members.bottom - branch.members.top) - (base.members.bottom - base.members.top) : 0;
       const moved = (v: string | undefined, dy: number) => v?.replace(/^(-?\d+),(-?\d+)/, (_m, x, y) => `${x},${Number(y) - dy}`);
       // A data-test the branch adds (a hook main does not have) is not a layout change: listed, not compared.
       const diff: string[] = [];
       const added = Object.keys(branch.out).filter((k) => !(k.replace(/#\d+$/, '#1') in base.out));
-      if (added.length) console.log(`${name} @1280: hooks new in B037 (not compared): ${added.join(', ')}`);
-      // B076 (card 367): the add row under the members went on purpose; its fields are in the New member tile (a
-      // .member-cell, measured with the members, card367-team-grid.spec.ts checks it).
-      const goneInB076 = new Set(['add-agent-name#1', 'add-agent-cli#1', 'add-agent#1']);
-      // B080 (card 374): the Monitor's density and sound controls sit right of the cog in the camera row, so the row's
+      if (added.length) console.log(`${name} @1280: hooks new in this branch (not compared): ${added.join(', ')}`);
+      // The add row under the members went on purpose; its fields are in the New member tile (a
+      // .member-cell, measured with the members, team-grid.spec.ts checks it).
+      const goneFromTeamPage = new Set(['add-agent-name#1', 'add-agent-cli#1', 'add-agent#1']);
+      // The Monitor's density and sound controls sit right of the cog in the camera row, so the row's
       // right-aligned controls move left together - one shared x shift, same y and size, nothing else.
       const shiftedIn374 = new Set(['monitor-camera#1', 'monitor-autofit#1', 'monitor-fit#1', 'monitor-pin#1', 'monitor-layout-toggle#1']);
       const xOf = (v: string | undefined) => Number(v?.split(',')[0]);
@@ -667,21 +657,21 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
       const movedX = (v: string | undefined, dx: number) => v?.replace(/^(-?\d+),/, (_m, x) => `${Number(x) - dx},`);
       for (const k of new Set([...Object.keys(base.out), ...Object.keys(branch.out)])) {
         if (added.includes(k)) continue;
-        if (name === 'team-page' && goneInB076.has(k) && !(k in branch.out)) continue;
+        if (name === 'team-page' && goneFromTeamPage.has(k) && !(k in branch.out)) continue;
         if (name === 'monitor' && shiftedIn374.has(k)) {
           // 1 px of rounding either way (sub-pixel widths round independently).
           const same = [-1, 0, 1].some((e) => base.out[k] === movedX(branch.out[k], dx374 + e));
-          if (!same) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / B037 ${branch.out[k] ?? '-'} (card 374 row shift ${dx374})`);
+          if (!same) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / branch ${branch.out[k] ?? '-'} (camera row shift ${dx374})`);
           continue;
         }
         const b = branch.below.includes(k) ? moved(branch.out[k], shift) : branch.out[k];
-        if (base.out[k] !== b) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / B037 ${branch.out[k] ?? '-'}${branch.below.includes(k) ? ` (below the members, shift ${shift})` : ''}`);
+        if (base.out[k] !== b) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / branch ${branch.out[k] ?? '-'}${branch.below.includes(k) ? ` (below the members, shift ${shift})` : ''}`);
       }
       expect.soft(diff, `${name} at 1280 px differs from main ${BASE_COMMIT}`).toEqual([]);
       if (base.members || branch.members) {
         // The members area starts where main's did: one frame per member, showing one view (its chosen tab's).
         // eslint-disable-next-line no-console
-        console.log(`${name} @1280: members main ${JSON.stringify(base.members)} / B061 ${JSON.stringify(branch.members)}; ${JSON.stringify(branch.panes)}`);
+        console.log(`${name} @1280: members main ${JSON.stringify(base.members)} / branch ${JSON.stringify(branch.members)}; ${JSON.stringify(branch.panes)}`);
         expect.soft(branch.members?.top, `${name}: the members start where main's do`).toBe(base.members?.top);
         expect.soft(branch.panes.length, `${name}: one pane per member`).toBe(base.panes.length);
         for (const p of branch.panes) {
@@ -693,24 +683,24 @@ test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}
   }
 });
 
-// B054 verify (card 270): iPhone SE sizes, portrait 375 x 501 and landscape 667 x 263 (both the phone layout). Per page:
+// iPhone SE sizes, portrait 375 x 501 and landscape 667 x 263 (both the phone layout). Per page:
 // where the first content row starts (px from the top of the frame, the browser window; ~120 px is the portrait target,
 // on screen in landscape), no nested vertical scrollers, no sideways scroll, every field 16 px / 44 px, the Settings
 // back control after scrolling Guardrails to its bottom, and a picked skill in view. "before" is the base team branch
-// (B037_BASE_DIR, e.g. 8b39e07), "after" this branch; only "after" is asserted, "before" is measured and recorded.
+// (E2E_BASE_DIR, e.g. 8b39e07), "after" this branch; only "after" is asserted, "before" is measured and recorded.
 const SE: Size[] = [{ w: 375, h: 501 }, { w: 667, h: 263 }];
-type B054 = { first: { sel: string; top: number; bottom: number } | null; rows: Record<string, { top: number; bottom: number } | null>; topBar: number;
+type PageMeasure = { first: { sel: string; top: number; bottom: number } | null; rows: Record<string, { top: number; bottom: number } | null>; topBar: number;
   scrollers: string[]; inputs: { what: string; font: number; h: number }[]; overflow: boolean; sw: number };
-const B054_RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'b054-measure.ndjson');
+const MEASURE_RESULTS = path.resolve(__dirname, '..', '..', 'test-results', 'phone-page-measure.ndjson');
 
 /** Measures the screen: the first visible match of `first` (in order), the named rows, the inner vertical scrollers, the fields. */
-function measure(page: Page, first: string[], rows: Record<string, string> = {}): Promise<B054> {
+function measure(page: Page, first: string[], rows: Record<string, string> = {}): Promise<PageMeasure> {
   return page.evaluate(([first, rows]) => {
     const shown = (el: Element) => { if (el.closest('[inert], [aria-hidden=true]')) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (el as HTMLElement).checkVisibility?.({ checkVisibilityCSS: true } as any) !== false && r.right > 0 && r.left < innerWidth; };
     const box = (sel: string) => { const el = [...document.querySelectorAll(sel)].find(shown); if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
-    let f: B054['first'] = null;
+    let f: PageMeasure['first'] = null;
     for (const s of first as string[]) { const b = box(s); if (b) { f = { sel: s, ...b }; break; } }
-    const named: B054['rows'] = {};
+    const named: PageMeasure['rows'] = {};
     for (const [k, s] of Object.entries(rows as Record<string, string>)) named[k] = box(s);
     const bar = document.querySelector('.app.phone > .main > header.bar, .app > .main > header.bar');
     const describe = (el: Element) => `${el.tagName.toLowerCase()}${el.getAttribute('data-test') ? `[data-test=${el.getAttribute('data-test')}]` : ''}${typeof (el as HTMLElement).className === 'string' && (el as HTMLElement).className ? '.' + (el as HTMLElement).className.trim().split(/\s+/).slice(0, 3).join('.') : ''}`;
@@ -731,19 +721,19 @@ function measure(page: Page, first: string[], rows: Record<string, string> = {})
 
 for (const size of SE) {
   const portrait = size.h > size.w;
-  test.describe(`B054 iPhone SE ${tag(size)} (${portrait ? 'portrait' : 'landscape'})`, () => {
-    const builds = [['after', builtDir], ...(process.env.B037_NO_BASE === '1' ? [] : [['before', baseBuiltDir]])] as const;
+  test.describe(`iPhone SE ${tag(size)} (${portrait ? 'portrait' : 'landscape'})`, () => {
+    const builds = [['after', builtDir], ...(process.env.E2E_NO_BASE === '1' ? [] : [['before', baseBuiltDir]])] as const;
     for (const [which, dir] of builds) {
       test(`${which}: Backlog, Team, Documents and every Settings section`, async ({ browser }) => {
         test.setTimeout(240_000);
         const after = which === 'after';
-        const rec = (screen: string, m: B054, extra: Record<string, unknown> = {}) => {
-          mkdirSync(path.dirname(B054_RESULTS), { recursive: true });
-          appendFileSync(B054_RESULTS, JSON.stringify({ which, screen, size: tag(size), ...m, ...extra }) + '\n');
+        const rec = (screen: string, m: PageMeasure, extra: Record<string, unknown> = {}) => {
+          mkdirSync(path.dirname(MEASURE_RESULTS), { recursive: true });
+          appendFileSync(MEASURE_RESULTS, JSON.stringify({ which, screen, size: tag(size), ...m, ...extra }) + '\n');
         };
         const where = (screen: string) => `${screen} @${tag(size)}`;
         /** The checks for a page; the first content row against the target (portrait) or on screen (landscape). */
-        const judge = (screen: string, m: B054, o: { scrollersOk?: number; at?: boolean } = {}) => {
+        const judge = (screen: string, m: PageMeasure, o: { scrollersOk?: number; at?: boolean } = {}) => {
           if (!after) return;
           expect.soft(m.first, `${where(screen)}: a first content row`).not.toBeNull();
           // at: false - a fold or field the user opened pushes the list down: not judged for where the row starts.
@@ -758,9 +748,9 @@ for (const size of SE) {
             expect.soft(i.h, `${where(screen)}: ${i.what} height`).toBeGreaterThanOrEqual(44);
           }
         };
-        const SHOTS54 = path.join(path.dirname(SHOTS), 'B054-screens');
-        mkdirSync(SHOTS54, { recursive: true });
-        const shot = (screen: string) => page.screenshot({ path: path.join(SHOTS54, `${which}-${screen}-${tag(size)}.png`) });
+        const SHOTS_SE = path.join(path.dirname(SHOTS), 'phone-se-screens');
+        mkdirSync(SHOTS_SE, { recursive: true });
+        const shot = (screen: string) => page.screenshot({ path: path.join(SHOTS_SE, `${which}-${screen}-${tag(size)}.png`) });
         let { page, ctx, errors } = await open(browser, size, { dir, asks: false });
 
         // Backlog: the list, then the search-and-sort fold open (its fields).
@@ -819,8 +809,11 @@ for (const size of SE) {
         if (after) expect.soft(m.inputs.some((i) => /docs-name/.test(i.what)), `${where('documents-new-file')}: the name field shown`).toBe(true);
 
         // Settings: the list, then each section; Guardrails scrolled to its bottom; Skills with a skill picked.
+        // The after build has the Settings gear at the top right; the before build (the base renderer) has no
+        // gear, Settings is in the sidebar drawer.
         const openSettings = async () => {
-          await page.getByTestId('settings-gear').click();
+          if (after) await page.getByTestId('settings-gear').click();
+          else await nav(page, 'open-app-settings');
           await expect(page.locator('[data-test=settings]')).toBeVisible();
           await page.waitForTimeout(400);
         };

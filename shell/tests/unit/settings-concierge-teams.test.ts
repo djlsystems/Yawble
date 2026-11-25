@@ -7,7 +7,7 @@ import { applyRemoteAccess, READ_ONLY_TITLE } from '../../src/renderer/src/remot
 import { newChatAgent, savedConciergeAgent } from '../../src/renderer/src/conciergeDefault';
 import type { TeamDefaults, YawbleApi } from '../../src/shared/api';
 
-// B096: Settings > Concierge (the default agent) and Settings > Teams (New Team defaults, the member-name list and
+// Settings > Concierge (the default agent) and Settings > Teams (New Team defaults, the member-name list and
 // Generate), and the New Team dialog starting from those defaults. A scripted fake core: no agent, no network.
 type Answer = (params: any) => unknown;
 function fakeApi(answers: Record<string, Answer>) {
@@ -79,7 +79,7 @@ describe('Settings > Concierge', () => {
     await flushPromises();
     expect(f.of('concierge.setDefaults').at(-1)!.params).toEqual({ defaultAgent: 'codex' });
     expect(w.find('[data-test=concierge-defaults-saved]').exists()).toBe(true);
-    // Card 419 F1: the window's next new chat starts on it without reading concierge.defaults again.
+    // The window's next new chat starts on it without reading concierge.defaults again.
     expect(savedConciergeAgent.value).toBe('codex');
     expect(newChatAgent([{ id: 'claude', ready: true }, { id: 'codex', ready: true }], savedConciergeAgent.value)).toBe('codex');
     await select.setValue('');
@@ -290,6 +290,37 @@ describe('New Team dialog defaults', () => {
       name: 'alpha', managerName: 'Chief', managerCli: 'codex',
       members: [{ name: 'Developer Kofi', cli: 'claude' }, { name: 'Tester Ada', cli: 'codex' }, { name: 'Writer', cli: 'codex' }],
     });
+  });
+
+  it('each row picks a model of its agent, defaulting to its agent default; a new agent resets it; only chosen models are sent', async () => {
+    const { w, of } = await dialog({
+      'teams.defaults': () => defaults(),
+      'agentProfiles.list': () => [
+        { id: 1, name: 'claude', baseCli: 'claude', custom: false, defaultModel: 'opus', argsBefore: [], argsAfter: [], removedArgs: [] },
+        { id: 2, name: 'codex', baseCli: 'codex', custom: false, defaultModel: 'gpt-5.5', argsBefore: [], argsAfter: [], removedArgs: [] },
+      ],
+      'agents.models': (p: any) => ({ models: p.cli === 'claude' ? ['opus', 'sonnet', 'haiku'] : ['gpt-5.5', 'gpt-5.5-mini'], source: 'builtin' }),
+    });
+    await w.find('[data-test=team-name]').setValue('alpha');
+    const opts = (t: string) => Array.from(q<HTMLSelectElement>(t)!.options).map((o) => o.text);
+    expect(opts('manager-model')).toEqual(['default (gpt-5.5)', 'gpt-5.5', 'gpt-5.5-mini', 'Custom…']); // the Manager is on Codex
+    expect(opts('member-model-0')).toEqual(['default (opus)', 'opus', 'sonnet', 'haiku', 'Custom…']); // Developer on Claude
+    await w.find('[data-test=add-member-row]').trigger('click'); // a new row starts on the Manager's agent, Codex
+    await flushPromises();
+    await w.find('[data-test=member-name-1]').setValue('Tester Ada');
+    expect(opts('member-model-1')).toEqual(['default (gpt-5.5)', 'gpt-5.5', 'gpt-5.5-mini', 'Custom…']);
+    await w.find('[data-test=member-model-0]').setValue('sonnet');
+    await w.find('[data-test=manager-model]').setValue('gpt-5.5-mini');
+    await w.find('[data-test=member-model-1]').setValue('gpt-5.5-mini');
+    await w.find('[data-test=member-cli-1]').setValue('claude'); // a new agent: back to its default
+    await flushPromises();
+    expect(q<HTMLSelectElement>('member-model-1')!.value).toBe('');
+    await w.find('[data-test=create-team]').trigger('click');
+    await flushPromises();
+    const sent = of('teams.create')[0].params;
+    expect(sent.managerModel).toBe('gpt-5.5-mini');
+    expect(sent.members[0]).toEqual({ name: 'Developer', cli: 'claude', model: 'sonnet' });
+    expect(sent.members[1]).toEqual({ name: 'Tester Ada', cli: 'claude' });
   });
 
   it('with nothing saved (or an older core) it starts as before: Manager on Claude, no members, no offers', async () => {

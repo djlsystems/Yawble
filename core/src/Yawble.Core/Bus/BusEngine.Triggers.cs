@@ -2,8 +2,8 @@ using Yawble.Core.Triggers;
 
 namespace Yawble.Core.Bus;
 
-/// <summary>What one trigger fire did.</summary>
-public sealed record TriggerFire(string Outcome, long? Seq, string? Reason);
+/// <summary>What one trigger fire did. <paramref name="ScriptRunId"/>: the script run a script member's fire started, or recorded as skipped.</summary>
+public sealed record TriggerFire(string Outcome, long? Seq, string? Reason, long? ScriptRunId = null);
 
 /// <summary>
 /// Triggers and wakes. The pump loop sweeps them at most every
@@ -43,7 +43,11 @@ public sealed partial class BusEngine
     private void SweepTriggers(DateTimeOffset now)
     {
         try { ResumeRateLimited(now); }
-        catch (Exception ex) { Log($"automatic resume sweep failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Logs.Diag.Warning("triggers", $"automatic resume sweep failed: {ex.GetType().Name}: {ex.Message}",
+                ("check", "resuming rate-limited runs"), ("exception", ex.GetType().Name));
+        }
         foreach (var row in _store.DueTriggers(now))
         {
             try
@@ -52,7 +56,10 @@ public sealed partial class BusEngine
             }
             catch (Exception ex)
             {
-                Log($"trigger {row.Id} ({row.Name}) failed: {ex.Message}");
+                var member = MemberOrNull(row.MemberId);
+                Logs.Diag.Warning("triggers", $"trigger {row.Id} ({row.Name}) failed: {ex.GetType().Name}: {ex.Message}",
+                    ("team", member?.Team ?? TeamNameOrNull(row.TeamId)), ("member", member?.Qualified), ("trigger", row.Id),
+                    ("schedule", row.Schedule.Kind), ("exception", ex.GetType().Name));
             }
         }
         foreach (var wake in _store.DueWakes(now))
@@ -72,9 +79,25 @@ public sealed partial class BusEngine
             }
             catch (Exception ex)
             {
-                Log($"wake {wake.Id} failed: {ex.Message}");
+                var member = MemberOrNull(wake.MemberId);
+                Logs.Diag.Warning("triggers", $"wake {wake.Id} failed: {ex.GetType().Name}: {ex.Message}",
+                    ("team", member?.Team), ("member", member?.Qualified), ("wake", wake.Id), ("schedule", "wake"),
+                    ("causation", wake.CausationSeq),("exception", ex.GetType().Name));
             }
         }
+    }
+
+    /// <summary>A member for a failure's log line; null when it is gone or cannot be read (the line is written anyway).</summary>
+    private MemberRef? MemberOrNull(long memberId)
+    {
+        try { return _store.Member(memberId); }
+        catch (Exception) { return null; }
+    }
+
+    private string? TeamNameOrNull(long teamId)
+    {
+        try { return _store.Teams().FirstOrDefault(t => t.Id == teamId)?.Name; }
+        catch (Exception) { return null; }
     }
 
     private void FireDue(TriggerRow row, DateTimeOffset now)
@@ -114,14 +137,16 @@ public sealed partial class BusEngine
             _store.RecordTriggerOutcome(row.Id, null, next, "skipped", folder is null ? "nothing to watch" : $"the folder {folder} is not there", null, row.MissedCount);
             return;
         }
-        var (change, state) = FolderWatcher.Look(FolderWatcher.Listing(folder, row.Watch!.Glob), _store.WatchState(row.Id), now, row.Watch.QuietSec);
+        var (change, state) = FolderWatcher.Look(FolderWatcher.Listing(folder, row.Watch!.Glob), _store.WatchState(row.Id), now, row.Watch.QuietSec, row.Watch.FireOn);
         if (change is null)
         {
             _store.SetWatch(row.Id, state, next);
             return;
         }
-        var fire = Fire(row, now, change.Describe(row.Watch.Root == FolderWatch.Documents ? $"the team's documents{(row.Watch.Path.Length > 0 ? "/" + row.Watch.Path : "")}" : folder));
-        // Only a change that was told is taken as the new baseline: a skipped one (busy, paused) fires at the next look.
+        var fire = Fire(row, now, change.Describe(row.Watch.Root == FolderWatch.Documents ? $"the team's documents{(row.Watch.Path.Length > 0 ? "/" + row.Watch.Path : "")}" : folder),
+            Scripts.Running.ScriptPayloads.FolderChange(folder, change.Added, change.Removed, change.Changed));
+        // Only a change that was told is taken as the new baseline: a skipped one (busy, paused) fires at the next look,
+        // with the same list (only the kinds the trigger fires on).
         if (fire.Outcome == "fired") _store.SetWatchState(row.Id, state);
         _store.RecordTriggerOutcome(row.Id, fire.Outcome == "fired" ? now : null, next, fire.Outcome, fire.Reason, fire.Seq, row.MissedCount);
     }
@@ -139,12 +164,15 @@ public sealed partial class BusEngine
         catch (Teams.DocumentsException) { return null; }
     }
 
-    private TriggerFire Fire(TriggerRow row, DateTimeOffset now, string? what = null)
+    /// <param name="payload">What a script member gets as its run's input (FolderChange, EventItem); null: TriggerFired.</param>
+    private TriggerFire Fire(TriggerRow row, DateTimeOffset now, string? what = null, System.Text.Json.Nodes.JsonObject? payload = null)
     {
         var member = _store.Member(row.MemberId);
         if (member is null) return new TriggerFire("member-missing", null, "the member no longer exists");
         if (_store.Teams().FirstOrDefault(t => t.Id == member.TeamId) is { } team && (team.Paused || team.Archived))
             return new TriggerFire("skipped", null, team.Archived ? "the team is archived" : "the team is paused");
+        // A script member's fire starts its script run with the structured payload; no workflow, no message.
+        if (FireScriptMember(row, member, now, payload) is { } scripted) return scripted;
         if (row.OnlyWhenIdle && IsBusy(member)) return new TriggerFire("skipped", null, $"{member.Name} was busy (only when idle)");
         var text = what is null
             ? $"Scheduled work (trigger \"{row.Name}\", {now:yyyy-MM-dd HH:mm} UTC): {row.Instruction}"
@@ -174,13 +202,22 @@ public sealed partial class BusEngine
         {
             var member = _store.Member(draft.MemberId) ?? throw new ArgumentException("no such member");
             if (string.IsNullOrWhiteSpace(draft.Name)) throw new ArgumentException("a trigger needs a name");
-            if (string.IsNullOrWhiteSpace(draft.Instruction)) throw new ArgumentException("a trigger needs an instruction");
+            // a script member runs its script with the fire's details as input: it is told nothing, so it needs no instruction
+            var isScript = ScriptMembers?.IsScriptMember(member.Id) == true;
+            if (isScript) draft = draft with { Instruction = draft.Instruction?.Trim() ?? "" };
+            else if (string.IsNullOrWhiteSpace(draft.Instruction)) throw new ArgumentException("a trigger needs an instruction");
             if (draft.Id is { } id && _store.Trigger(id) is null) throw new ArgumentException("no such trigger");
             if (!WakeManagerPolicy.IsValid(draft.WakeManager))
                 throw new ArgumentException($"wakeManager must be one of {string.Join(", ", WakeManagerPolicy.All)}");
             var now = DateTimeOffset.UtcNow;
             if (TriggerScheduling.Validate(draft.Schedule, draft.Schedule.Kind == TriggerKinds.Once ? now : null) is { } why) throw new ArgumentException(why);
-            if (draft.Schedule.Kind == TriggerKinds.Folder) draft = draft with { Watch = CheckWatch(draft.Watch) };
+            if (draft.Schedule.Kind == TriggerKinds.Folder)
+            {
+                // No "Fire on" given (an empty value): an edit keeps the trigger's own, a new trigger fires on added files.
+                if (draft.Watch is { FireOn: null or "" } w)
+                    draft = draft with { Watch = w with { FireOn = draft.Id is { } eid && _store.Trigger(eid)?.Watch is { } old ? old.FireOn : FolderWatch.Added } };
+                draft = draft with { Watch = CheckWatch(draft.Watch) };
+            }
             else draft = draft with { Watch = null };
             if (draft.Schedule.Kind == TriggerKinds.Event)
             {
@@ -214,6 +251,7 @@ public sealed partial class BusEngine
             throw new ArgumentException("watch root is documents or host");
         }
         if (w.QuietSec is < 0 or > 3600) throw new ArgumentException("the quiet period is 0 to 3600 seconds");
+        if (!FolderWatch.FireOnValues.Contains(w.FireOn)) throw new ArgumentException($"fire on is one of {string.Join(", ", FolderWatch.FireOnValues)}");
         return w with { Path = path };
     }
 

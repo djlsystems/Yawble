@@ -29,7 +29,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
     Connections.ConnectionService? connections = null, Func<HttpMessageHandler>? httpHandler = null,
     Func<HttpMessageHandler>? apiCallHandler = null, Func<HttpMessageHandler>? mcpHandler = null,
     IBrowser? browser = null, Func<IRedirectReceiver>? redirect = null,
-    Func<IReadOnlyList<McpConfigSource>>? mcpSources = null, IWebsiteHost? websites = null)
+    Func<IReadOnlyList<McpConfigSource>>? mcpSources = null, IWebsiteHost? websites = null, Email.IMailClientFactory? mail = null)
 {
     /// <summary>The shared sign-ins (null in a host that has no credential store: the connection methods then say so).</summary>
     private Connections.ConnectionService Conns => connections ?? throw new RpcException("unavailable", "connections are not available here");
@@ -143,6 +143,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         {
             if (IsMcpMethod(method)) return await DispatchMcpAsync(method, p, ct);
             if (IsApiMethod(method)) return await DispatchApiAsync(method, p, ct);
+            if (IsEmailIntegrationMethod(method)) return DispatchEmailIntegration(method, p);
             if (IsWatchMethod(method)) return await DispatchWatchAsync(method, p, ct);
             return method switch
             {
@@ -348,7 +349,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
     }
 
     /// <summary>
-    /// A team repository's provider for pull requests (B075): the person's override, else detected from its origin; with
+    /// A team repository's provider for pull requests: the person's override, else detected from its origin; with
     /// the origin (null: none) and the repository's name ("main" or an extra's).
     /// </summary>
     private async Task<(Teams.RepoProviderKind Kind, string? Origin, string Name)> PullRequestProviderOfAsync(long teamId, string? repo, string? path, CancellationToken ct)
@@ -405,7 +406,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         }).ToList();
         if (OffersPullRequests(teamId, enabled))
         {
-            // The built-ins (B075): the team branch as a pull request on the repository's provider, through that provider's CLI and
+            // The built-ins: the team branch as a pull request on the repository's provider, through that provider's CLI and
             // under its rules (pr_open asks by default, pr_status runs).
             tools.Add(Tool("pr_open", "Open a pull request (a merge request on GitLab) from your team's branch into the repository's base branch, with your delivery as its description, " +
                 "on the repository's provider: GitHub through gh, GitLab through glab, Azure DevOps through az repos. Bitbucket, Gitea and a repository with no provider have none from here: it says so. " +
@@ -471,7 +472,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         if (tool is "pr_open" or "pr_status")
         {
             var baseBranch = repoBase ?? throw new ArgumentException("your team has no repository here");
-            // The repository's provider (the person's override, else its origin's) picks the pull request provider (B075,
+            // The repository's provider (the person's override, else its origin's) picks the pull request provider (
             // Teams/PullRequestProviders.cs) and so the CLI: gh, glab or az repos. Others have none from here, and nothing runs.
             var (kind, origin, name) = await PullRequestProviderOfAsync(run.Member.TeamId, repoName, repoPath, ct);
             if (Teams.RepoHost.PullRequestsUnavailable(name, origin, kind) is { } why) throw new ArgumentException(why);
@@ -828,7 +829,9 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
             INSERT INTO integration_calls (at, integration, team, member, workflow, args, decision, rule, exit_code, duration_ms, output_bytes, via, user_name)
             VALUES ($at, $i, $team, $m, $w, $a, $d, $r, $x, $ms, $b, $via, $u);
             """,
-            ("$at", Now()), ("$i", integration), ("$team", team), ("$m", member), ("$w", workflow), ("$a", CliRunner.Redact(JsonSerializer.Serialize(args))),
+            // every call's arguments keep their names and only the values that are not message content (CallArgsRedaction)
+            ("$at", Now()), ("$i", integration), ("$team", team), ("$m", member), ("$w", workflow),
+            ("$a", CliRunner.Redact(JsonSerializer.Serialize(CallArgsRedaction.ForLog(integration, args)))),
             ("$d", decision), ("$r", rule), ("$x", output?.ExitCode), ("$ms", output is null ? null : (long)output.Duration.TotalMilliseconds),
             ("$b", output?.Bytes), ("$via", who?.Via), ("$u", who?.User));
 

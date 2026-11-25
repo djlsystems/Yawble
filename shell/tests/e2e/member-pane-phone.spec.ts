@@ -1,4 +1,4 @@
-// B061 verify (card 288): a member's pane on the team page in a real browser (headless Chrome), against the FAKE core
+// A member's pane on the team page in a real browser (headless Chrome), against the FAKE core
 // of phone-remote.spec.ts (remote.html, canned answers). DeveloperAda's pane is on its Terminal tab.
 // On a phone (375x501, 375x667, 667x263, 667x375): no sideways scroll, the terminal full width, its transcript at least
 // 60% of the visible height, the header's controls 44 px. At 1280 x 800: one frame, one view (the chosen tab's), the
@@ -8,7 +8,7 @@
 // ⋯ opens the state line and Stop (never Open interactive CLI: the terminal in a pane is never interactive), ✕ goes
 // back to the Report.
 //
-//   npx playwright test member-pane-phone      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test member-pane-phone      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -18,7 +18,7 @@ import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
-const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), process.env.B061_SHOTS || 'B061-screens');
+const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), process.env.MEMBER_PANE_SHOTS || 'member-pane-screens');
 
 // The terminal's calls (not in the shared fake): an idle member's last run, replayed.
 answers['terminal.banner'] = (p) => ({ memberId: p?.memberId, channel: `member:${p?.memberId}`, title: 'payments / DeveloperAda', details: ['timeout 2h'], loosened: [],
@@ -43,7 +43,7 @@ async function open(browser: Browser, w: number, h: number) {
   await page.goto(`${s.url}#team=1`);
   const pane = page.locator('[data-test=agent-DeveloperAda]');
   if (mobile) {
-    // A phone (B064) opens the team page with every member on the Report: the pane's Terminal tab opens the terminal.
+    // A phone opens the team page with every member on the Report: the pane's Terminal tab opens the terminal.
     await expect(pane.locator('[data-test=member-view-report]')).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });
     await pane.locator('[data-test=member-view-terminal]').click();
   }
@@ -65,7 +65,7 @@ for (const [w, h] of [[375, 501], [375, 667], [667, 263], [667, 375]] as const) 
       const head = term?.querySelector('[data-test=terminal-pane-head]') ?? null;
       const controls = [...(head?.querySelectorAll('button') ?? [])].filter((b) => (b as HTMLElement).offsetParent)
         .map((b) => ({ t: b.getAttribute('data-test'), w: b.getBoundingClientRect().width, h: b.getBoundingClientRect().height }));
-      // What is on top at the middle of the terminal's ⋯: the header row itself, not the app's top bar (card 286 F3).
+      // What is on top at the middle of the terminal's ⋯: the header row itself, not the app's top bar.
       const more = term?.querySelector('[data-test=terminal-pane-more]') ?? null;
       const mr = r(more);
       const atHead = mr ? document.elementFromPoint(mr.left + mr.width / 2, mr.top + mr.height / 2) : null;
@@ -99,7 +99,7 @@ for (const [w, h] of [[375, 501], [375, 667], [667, 263], [667, 375]] as const) 
   });
 }
 
-test('desktop 1280x800: one frame, one view, the pane fills its grid tile (B076)', async ({ browser }) => {
+test('desktop 1280x800: one frame, one view, the pane fills its grid tile', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, 1280, 800);
   await page.screenshot({ path: path.join(SHOTS, 'member-pane-1280x800.png') });
   const m = await page.evaluate(() => {
@@ -118,7 +118,7 @@ test('desktop 1280x800: one frame, one view, the pane fills its grid tile (B076)
     expect(v.views, `${n}: one view`).toBe(1);
     expect(v.tabs, `${n}: tabs`).toEqual(['Report', 'Activity', 'Terminal']);
     expect(v.menu, `${n}: the ☰ in the title bar`).toBe(true);
-    // B076 (card 367): the members are tiles of one shared height (340 by default); the pane fills its tile (was <= 193, B061).
+    // The members are tiles of one shared height (340 by default); the pane fills its tile (it was <= 193 before the tiles).
     expect(v.h, `${n}: pane height = its tile's`).toBe(v.cell);
     expect(v.cell, `${n}: the default tile height`).toBe(340);
   }

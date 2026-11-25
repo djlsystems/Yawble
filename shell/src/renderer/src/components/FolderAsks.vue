@@ -6,7 +6,7 @@ import { usePhone } from '../phone';
 import { FOLDER_ASKS_CHANGED, folderAnswerText, folderAskMember, pendingFolderAsks, type FolderAsk, type FolderAskChoice } from '../folderAsks';
 
 /**
- * The waiting folder asks in Needs you (folder.asks, pending only; B111): one card per ask. Refreshed on
+ * The waiting folder asks in Needs you (folder.asks, pending only): one card per ask. Refreshed on
  * folder.asksChanged (an ask raised or answered, here or in another view) and on a slow poll. `banner`: the window-wide
  * strip above every view (App.vue); otherwise a plain list (the Board's Needs You lane, a member's pane), filtered by
  * team and member names. After an answer the item goes and a short line says what it did ("applies from its next run")

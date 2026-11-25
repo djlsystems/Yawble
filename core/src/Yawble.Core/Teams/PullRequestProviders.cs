@@ -11,7 +11,7 @@ public delegate Task<GitResult> HostCliRunner(string cli, string workingDirector
 public sealed record PullRequestInfo(long Number, string Title, string Head, string Base, bool Open, string Key);
 
 /// <summary>
-/// Pull requests on one provider (B075), through the person's own CLI on this computer. Every call refuses with a
+/// Pull requests on one provider, through the person's own CLI on this computer. Every call refuses with a
 /// clear reason (an <see cref="ArgumentException"/>) when the CLI is missing, not signed in or answers something unreadable.
 /// </summary>
 public interface IPullRequestProvider
@@ -170,7 +170,7 @@ public abstract class CliPullRequests(HostCliRunner run) : IPullRequestProvider
     protected static long Num(JsonNode? n) => n is JsonValue v && (v.TryGetValue<long>(out var l) || (v.TryGetValue<string>(out var s) && long.TryParse(s, out l))) ? l : 0;
 }
 
-/// <summary>GitHub through gh (as before B075).</summary>
+/// <summary>GitHub through gh.</summary>
 public sealed class GitHubPullRequests(HostCliRunner run) : CliPullRequests(run)
 {
     public override RepoProviderKind Kind => RepoProviderKind.GitHub;

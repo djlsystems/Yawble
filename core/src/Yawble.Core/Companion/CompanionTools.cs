@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Yawble.Core.Concierge;
+using Yawble.Core.Scripts;
 
 namespace Yawble.Core.Companion;
 
@@ -15,27 +16,32 @@ public static class CompanionTools
     [
         "team_list", "team_status", "team_activity", "team_workflows", "documents_list", "documents_read", "team_repos",
         "backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "integrations_status", "usage", "doctor",
-        "backups_list", "request_status", "host_task_list", "host_task_status",
+        "backups_list", "request_status", "request_cancel", "host_task_list", "host_task_status",
+        ScriptTools.SchemasList, ScriptTools.SchemaGet, ScriptTools.ScriptsList, ScriptTools.ScriptGet, ScriptTools.ScriptCheck, ScriptTools.ScriptRuns, ScriptTools.ScriptRun,
     ];
 
     public static readonly IReadOnlyList<string> Act =
     [
         "tell", "answer", "team_pause", "team_resume", "workflow_nudge", "backlog_add", "backlog_edit", "backlog_ready", "backlog_dispatch",
         "backlog_archive", "backlog_restore", "board_move", "board_comment", "team_unarchive", "team_agent_change",
+        // script_test_run here is a dry run; a live run (dry_run false) needs the destructive level (LevelOf).
+        ScriptTools.SchemaSave, ScriptTools.ScriptSave, ScriptTools.ScriptTestRun,
     ];
 
     public static readonly IReadOnlyList<string> Destructive =
     [
         "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
         "team_archive", "team_delete", "team_env_set", "doctor_fix", "team_create", "team_repo_add", "team_repo_remove", "workflow_close",
-        "backup_now", "git_merge_team", "backup_restore", "host_task_run",
+        "backup_now", "git_merge_team", "backup_restore", "host_task_run", ScriptTools.ScriptMemberAdd,
+        // The same level as script_member_add. Their yes is a request the window approves (CompanionService.ScriptCallAsync).
+        ScriptTools.ScriptTriggerSet, ScriptTools.IntegrationActionAllow,
     ];
 
     /// <summary>The destructive tools whose own first call shows the exact list and issues a token (ConciergeActions' confirm flow).</summary>
     public static readonly IReadOnlyList<string> SelfConfirming = ["git_branches_delete", "git_branch_realign", "git_prune", "git_pr_merge", "team_archive", "team_delete"];
 
     /// <summary>The tools the companion serves itself (not the Concierge's).</summary>
-    public static readonly IReadOnlyList<string> Own = ["backups_list", "request_status", "git_merge_team", "backup_restore"];
+    public static readonly IReadOnlyList<string> Own = ["backups_list", "request_status", "request_cancel", "git_merge_team", "backup_restore"];
 
     /// <summary>The parameters of tell and answer that only work in a Concierge chat (never offered, never passed on).</summary>
     public static readonly IReadOnlyList<string> ChatOnlyParameters = ["images", "follow_up"];
@@ -45,12 +51,14 @@ public static class CompanionTools
 
     public const string ApprovalNote =
         "needs the person's approval in the Yawble window: the call returns a request id and the exact plan, and nothing runs until " +
-        "they approve it there (check with request_status).";
+        "they approve it there (check with request_status). It waits until they approve or deny it; request_cancel withdraws it.";
 
     /// <summary>The level a call needs; null for a tool that is not offered at all.</summary>
     public static CompanionLevel? LevelOf(string tool, JsonObject args)
     {
         if (tool == "backlog_dispatch" && NewTeam(args)) return CompanionLevel.Destructive;
+        // A live script run really sends and writes through the team's integrations; a dry run is an act.
+        if (ScriptTools.IsLiveRun(tool, args)) return CompanionLevel.Destructive;
         if (Read.Contains(tool)) return CompanionLevel.Read;
         if (Act.Contains(tool)) return CompanionLevel.Act;
         if (Destructive.Contains(tool)) return CompanionLevel.Destructive;
@@ -95,11 +103,25 @@ public static class CompanionTools
                 if (level < CompanionLevel.Destructive) foreach (var p in NewTeamParameters) Drop(schema, p);
                 else copy["description"] = copy["description"]!.GetValue<string>() + " With new_team, this " + ApprovalNote;
             }
-            if (Destructive.Contains(name))
+            if (name == ScriptTools.ScriptTestRun)
+            {
+                // The Concierge's sentence about a token and a yes in chat goes; the window approves a first live run here.
+                copy["description"] = WithoutYesSentences(copy["description"]!.GetValue<string>()) +
+                    (level >= CompanionLevel.Destructive
+                        ? " A live run (dry_run false) really sends and writes through the bound integrations; the first live run of a script on a team " + ApprovalNote
+                        : " This client may only dry-run (a live run needs the destructive level).");
+            }
+            if (name == ScriptTools.ScriptTriggerSet)
+            {
+                // Only turning a trigger on is approved in the window; turning one off runs at once.
+                copy["description"] = WithoutYesSentences(copy["description"]!.GetValue<string>()) +
+                    " Turning a trigger on (a new enabled trigger, an off one turned on, or an enabled one whose schedule changes) " + ApprovalNote +
+                    " Turning one off, or saving it with enabled false, runs at once.";
+            }
+            else if (Destructive.Contains(name))
             {
                 // The Concierge's wording about tokens and a yes in chat does not apply here (the window approves): those sentences go.
-                var description = string.Join(' ', System.Text.RegularExpressions.Regex.Split(copy["description"]!.GetValue<string>(), @"(?<=\.)\s+")
-                    .Where(sentence => !System.Text.RegularExpressions.Regex.IsMatch(sentence, @"(?i)token|confirm|\byes\b"))).Trim();
+                var description = WithoutYesSentences(copy["description"]!.GetValue<string>());
                 // An external client has no chat for the Update at a host task run's end: it checks host_task_status instead.
                 if (name == ConciergeHostTasks.RunTool)
                     description = string.Join(' ', System.Text.RegularExpressions.Regex.Split(description, @"(?<=\.)\s+")
@@ -110,6 +132,11 @@ public static class CompanionTools
         }
         return list;
     }
+
+    /// <summary>A description without its sentences about a token, confirm or a yes (the window approves here).</summary>
+    private static string WithoutYesSentences(string description) =>
+        string.Join(' ', System.Text.RegularExpressions.Regex.Split(description, @"(?<=\.)\s+")
+            .Where(sentence => !System.Text.RegularExpressions.Regex.IsMatch(sentence, @"(?i)token|confirm|\byes\b"))).Trim();
 
     private static void Drop(JsonObject? schema, string parameter)
     {
@@ -122,7 +149,9 @@ public static class CompanionTools
     private static IEnumerable<JsonObject> OwnDefinitions()
     {
         yield return Tool("backups_list", "The app's backups on this computer: name, reason, time and size.");
-        yield return Tool("request_status", "Where an approval request stands (pending, done, failed, denied, expired or changed), with its result once it ran.",
+        yield return Tool("request_status", "Where an approval request stands, with its result once it ran. It is pending until the person approves or denies it in the Yawble window; then running, done, failed, denied, or changed (the plan changed before approval, or a newer request of the same tool and target replaced it: the new request is named). It is also denied when you cancel it, and ends by itself only after 7 days undecided (expired) or when the app restarts.",
+            ("id", "string", "The request id a destructive call returned.", true));
+        yield return Tool("request_cancel", "Withdraw one of your own approval requests that is still pending: nothing runs, and the person is no longer asked. A request already decided or running is left as it is.",
             ("id", "string", "The request id a destructive call returned.", true));
         yield return Tool("git_merge_team", "Merge a team's branch into its repository's base branch (a fast-forward or a merge commit, never a rebase; a conflict changes nothing), and push it to origin when there is one.",
             ("team", "string", "The team.", true), ("repo", "string", "Repository name (default main).", false));

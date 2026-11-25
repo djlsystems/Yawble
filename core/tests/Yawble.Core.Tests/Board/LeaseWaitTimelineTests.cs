@@ -10,9 +10,9 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// Card 494 (B106): a run's time in the heavy-work lease's queue is Waiting for a slot, not Agent working, on its card and
+/// A run's time in the heavy-work lease's queue is Waiting for a slot, not Agent working, on its card and
 /// on a card-less member's row, while it still waits (live) and after it is given the lease (and after the run ended).
-/// A REAL lease queue on a started engine; the runs are scripted fakes with no idle clock (as in B104's verify fixture,
+/// A REAL lease queue on a started engine; the runs are scripted fakes with no idle clock (as in WorkflowsLiveStatesVerifyTests,
 /// where Ben's card 4 counted its wait as Agent working), and one fake clock for the bus and the board.
 /// </summary>
 public class LeaseWaitTimelineTests

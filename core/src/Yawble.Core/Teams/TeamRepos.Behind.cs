@@ -3,7 +3,7 @@ namespace Yawble.Core.Teams;
 /// <summary>How far a team's branch is behind its base branch. <c>Age</c>: how old the oldest base commit it lacks is.</summary>
 public sealed record TeamBehind(string TeamBranch, string BaseBranch, int Behind, TimeSpan? Age)
 {
-    /// <summary>B073: the pair the count stands for (the commits on <c>To</c> that <c>From</c> lacks): the team tip, and the base it is behind.</summary>
+    /// <summary>The pair the count stands for (the commits on <c>To</c> that <c>From</c> lacks): the team tip, and the base it is behind.</summary>
     public CommitRangeRef? Range { get; init; }
 
     /// <summary>"team/x is 3 commits behind main" (what the team page, team_status and system_status say).</summary>

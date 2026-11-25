@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, watch } from 'vue';
 import type { ItemTime } from '../../../shared/api';
 import { formatDuration, liveOverallMs, nowRef, openTimeline, overallSays, subscribeNow, type TimelineTarget } from './time';
 
-// B086: an item's overall time, one quiet line: a clock mark and "1h 12m 05s". An open item ticks on the ONE shared
+// An item's overall time, one quiet line: a clock mark and "1h 12m 05s". An open item ticks on the ONE shared
 // 1 s timer (time.ts), subscribed only while it is open and shown. Clicking it opens the timeline dialog for the item;
 // it sits inside a card or row that is itself a button, so it stops the click there and is a focusable role=button.
 const props = defineProps<{ time: ItemTime; target: TimelineTarget }>();

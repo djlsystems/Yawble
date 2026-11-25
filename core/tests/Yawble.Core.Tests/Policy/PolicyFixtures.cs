@@ -28,11 +28,14 @@ internal static class PolicyFixtures
         _ => ("/home/alice", "/home/alice/.local/share/yawble", "/opt/yawble/resources", "linux-x64"),
     };
 
+    /// <summary>macOS: the fictional machine's per-user temp folder (DARWIN_USER_TEMP_DIR, canonical: 56 bytes + "/").</summary>
+    public const string MacUserTemp = "/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/";
+
     public static RunLayout Layout(TargetOs os, AgentCli cli, MemberRef? member = null, string? install = null, bool signIn = false)
     {
         var m = Machine(os);
         return RunLayout.Standard(os, m.Home, m.AppData, m.Install, member ?? Me, cli,
-            Cli(os, cli, install ?? DefaultInstall(cli), signIn), Everyone);
+            Cli(os, cli, install ?? DefaultInstall(cli), signIn), Everyone) with { UserTempDir = os == TargetOs.MacOS ? MacUserTemp : null };
     }
 
     /// <summary>
@@ -46,7 +49,8 @@ internal static class PolicyFixtures
         var sep = os == TargetOs.Windows ? '\\' : '/';
         string H(params string[] parts) => home + sep + string.Join(sep, parts);
         if (cli == AgentCli.Claude && os == TargetOs.MacOS)
-            return new CliSignIn(SignInStatus.Pending, SignInCatalog.MacClaudePending, [], new Dictionary<string, string>());
+            return new CliSignIn(SignInStatus.SignedIn, "signed in", [new CliSignInFile(Yawble.Core.Credentials.ClaudeHostSession.KeychainService, SignInAccess.HostStore, true, "Claude (macOS login Keychain)")],
+                new Dictionary<string, string>());
         if (cli == AgentCli.Codex)
             return new CliSignIn(SignInStatus.SignedIn, "signed in", [new CliSignInFile(H(".codex", "auth.json"), SignInAccess.CopyIn, true, "Codex")],
                 new Dictionary<string, string>());

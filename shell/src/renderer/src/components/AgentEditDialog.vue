@@ -7,6 +7,7 @@ import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import AgentModelPicker from './AgentModelPicker.vue';
+import { modelOptions, type ModelOption } from '../modelOptions';
 
 // One of the person's own agents: a built-in CLI with extra arguments before / after the built-in ones and unlocked
 // built-ins removed. The command line is shown as it will run, as chips: the launcher (plain), the person's Before
@@ -35,7 +36,7 @@ const model = ref(props.initial.defaultModel ?? '');
 const before = ref<Chip[]>(props.initial.argsBefore.map(chip));
 const after = ref<Chip[]>(props.initial.argsAfter.map(chip));
 const removed = ref<string[]>([...props.initial.removedArgs]);
-const models = ref<string[]>([]);
+const models = ref<ModelOption[]>([]);
 const modelsReady = ref(false); // the picker waits for the list, so a listed model is not first shown as Custom…
 const modelIncomplete = ref(false); // Custom… with no name yet
 const refusals = ref<ArgRefusal[]>([]);
@@ -110,7 +111,7 @@ async function preview() {
 
 onMounted(async () => {
   void check(true);
-  try { models.value = (await api.call<AgentModelList>('agents.models', { cli: props.baseCli })).models; }
+  try { models.value = modelOptions(await api.call<AgentModelList>('agents.models', { cli: props.baseCli })); }
   catch (e) { error.value = errorText(e); }
   modelsReady.value = true;
 });

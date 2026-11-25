@@ -9,7 +9,7 @@ import CommitText from './CommitText.vue';
 // A member's activity beside its card on the team board: the lines the Monitor's activity list shows for that member,
 // newest first, in the board's light look and without the face (the card beside it has it). It is as tall as the card
 // and scrolls inside.
-// limit (a phone, B054): only the newest lines show, at their own height (no inner scroller); a last line says how many more
+// limit (a phone): only the newest lines show, at their own height (no inner scroller); a last line says how many more
 // are in the member's Logs. Without it, every line, scrolling inside.
 const props = defineProps<{ rows: readonly ActivityRow[]; loaded: boolean; now: number; limit?: number }>();
 const shown = computed(() => (props.limit ? props.rows.slice(0, props.limit) : props.rows));
@@ -40,7 +40,7 @@ li + li { border-top: 1px solid var(--line-soft); }
 .text { color: var(--ink-soft); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .dim { color: var(--muted); }
 .none { border-left-color: transparent; }
-/* A phone (B037): under its member's card, full width; a line's text may run to three lines. */
+/* A phone: under its member's card, full width; a line's text may run to three lines. */
 @media (max-width: 759.98px) {
   .activity { min-height: 8rem; }
   .activity.capped { min-height: 0; }

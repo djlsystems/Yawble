@@ -218,12 +218,40 @@ describe('LogsDialog', () => {
     expect(w.find('[data-test=logs-prune-open]').exists()).toBe(true); // kept to its retention, like the core's
     w.unmount();
   });
+
+  it('ALogWithLevels_ShowsItsLevelColumnAndTheLevelFilter_DebugHiddenUntilAsked', async () => {
+    // As the core offers Diagnostics now (FileLogs.Diagnostics, LogService.Sources): a Fields column and levels.
+    const diagnostics: LogSourceInfo = {
+      id: 'diagnostics', title: 'Diagnostics', group: 'Diagnostics', about: 'What the app itself reported.',
+      columns: [col('at', 'Time', 'time'), col('origin', 'From', 'text', true), col('text', 'Message'), col('fields', 'Fields')],
+      prunable: true, loss: 'the app\'s own messages from those days.', keptBecause: null, defaultDays: 14, retentionDays: 14, team: true, member: true,
+      levels: true,
+    };
+    const { api, calls } = fakeApi(false, [diagnostics]);
+    const w = mount(LogsDialog, { props: { api, source: 'diagnostics' }, attachTo: document.body });
+    await flushPromises();
+    expect(w.findAll('thead th').map((t) => t.text().replace('▼', ''))).toEqual(['Time', 'Level', 'From', 'Message', 'Fields']);
+    // The default asks for no level: the core leaves debug out.
+    expect(firsts(calls).at(-1)).not.toHaveProperty('level');
+    expect(w.find('[data-test=logs-level]').element).toHaveProperty('value', '');
+    await w.find('[data-test=logs-level]').setValue('debug');
+    await flushPromises();
+    expect(queries(calls).at(-1)).toMatchObject({ source: 'diagnostics', level: 'debug' });
+    await w.find('[data-test=logs-clear]').trigger('click');
+    await flushPromises();
+    expect(queries(calls).at(-1)).not.toHaveProperty('level');
+    // A log without levels offers no Level filter.
+    await w.find('[data-test=logs-source]').setValue('audit');
+    await flushPromises();
+    expect(w.find('[data-test=logs-level]').exists()).toBe(false);
+    w.unmount();
+  });
 });
 
-// B101 (card 440): the Member filter picks a member, a team as a whole or the app. The core (card 438) answers
+// The Member filter picks a member, a team as a whole or the app. The core answers
 // logs.query source=activity on this contract: member="team/Name" -> that member only; team="X" and no member -> X's
 // members plus X's team rows (member column "<X>"); app=true -> the app's own rows only (team empty, member "app").
-describe('LogsDialog: the Member filter on a member, a team or the app (B101)', () => {
+describe('LogsDialog: the Member filter on a member, a team or the app', () => {
   const opts = (w: ReturnType<typeof mount>) => w.findAll('[data-test=logs-member] option').map((o) => [(o.element as HTMLOptionElement).value, o.text()]);
 
   it('OffersEachMember_EachTeamAsAWhole_AndTheApp', async () => {
@@ -353,8 +381,8 @@ describe('LogsDialog: the Member filter on a member, a team or the app (B101)', 
     w.unmount();
   });
 
-  it('Card451_PickingATeamOrClearFilters_AfterApp_WidensTheSourceValuesAgain', async () => {
-    // TesterWren, card 451 (B101 F1 re-check): the other two ways app goes away.
+  it('PickingATeamOrClearFilters_AfterApp_WidensTheSourceValuesAgain', async () => {
+    // The other two ways app goes away.
     const { api, calls } = fakeApi();
     const inner = api.call;
     api.call = (async (method: string, params?: Record<string, unknown>) => {

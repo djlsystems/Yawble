@@ -1,16 +1,16 @@
-// B091 (card 484): which specs are phone specs, chosen by what they import, not by a hand-kept list of names.
+// Which specs are phone specs, chosen by what they import, not by a hand-kept list of names.
 //
 // A phone spec loads the built renderer into a phone-sized page (tests/e2e/phone/server.ts, buildRenderer, the fake
 // core), so it runs in the `phone` project with at most PHONE_WORKERS workers. playwright.config.ts builds that project's
 // testMatch from phoneSpecs() and refuses to load (checkPhoneSpecs) when a phone spec would run outside it or does not
 // take `test` from phone/fixtures (which closes the contexts a test leaves open). No Playwright import here, so the unit
-// test (tests/unit/b091-phone-specs.test.ts) runs it under vitest.
+// test (tests/unit/phone-specs.test.ts) runs it under vitest.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 /**
  * Every relative module a source loads: `import ... from './x'`, `export ... from './x'`, a bare `import './x'`, and
- * (B108, card 500) a dynamic `import('./x')` and `require('./x')`. Package imports ('@playwright/test') are left out.
+ * a dynamic `import('./x')` and `require('./x')`. Package imports ('@playwright/test') are left out.
  */
 const RELATIVE_LOAD = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"`](\.\.?\/[^'"`]*)['"`]/g;
 /** A specifier naming a module in a phone/ folder ('./phone/server', '../phone/fake-core', '../e2e/phone/server'). */
@@ -43,8 +43,8 @@ function moduleFile(dir: string, rel: string) {
 
 /**
  * Whether a spec (its path relative to tests/e2e, and its source) is a phone spec: it is in phone/, names buildRenderer,
- * or loads a module in tests/e2e/phone/ - by a static import, a dynamic import() or require() (B108), or, when dir is
- * given, through a helper module under dir that does, followed transitively (B108). Without dir only the spec's own
+ * or loads a module in tests/e2e/phone/ - by a static import, a dynamic import() or require(), or, when dir is
+ * given, through a helper module under dir that does, followed transitively. Without dir only the spec's own
  * source is read.
  */
 export function isPhoneSpec(rel: string, src: string, dir?: string, seen = new Set<string>()): boolean {

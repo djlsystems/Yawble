@@ -1,7 +1,7 @@
 namespace Yawble.Core.Teams;
 
 /// <summary>
-/// One of a team's repositories as the provider layer sees it (B075): where it is hosted (detected from its origin, or
+/// One of a team's repositories as the provider layer sees it: where it is hosted (detected from its origin, or
 /// the person's override), its link pattern, and whether pull requests can be made from here.
 /// </summary>
 public sealed record RepoHostView(
@@ -101,7 +101,7 @@ public sealed partial class TeamRepos
     }
 
     /// <summary>
-    /// git.webLink (B075): the web address of a commit, branch, file at a commit, compare or pull request of a team's
+    /// git.webLink: the web address of a commit, branch, file at a commit, compare or pull request of a team's
     /// repository, or null: no origin, no provider layout or pattern for it, or the commit/branch is not on origin (as of
     /// the last fetch: an unpushed commit has no page there).
     /// </summary>

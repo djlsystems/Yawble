@@ -1,4 +1,4 @@
-// B029 (card 143): the colours main paints before and around the page (title-bar.ts: the window controls' overlay,
+// The colours main paints before and around the page (title-bar.ts: the window controls' overlay,
 // dimmed and not; a new window's backgroundColor) must equal the palette the page itself paints with. This test
 // reads styles.css and terminal-theme.css, and the rules that say which variable the bar and the page use, so the
 // two cannot drift apart again.

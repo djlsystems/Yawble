@@ -11,7 +11,7 @@ using C = Yawble.Core.Board.TimeCategories;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// B086 through the store: the projector records each card's states and markers (0047), an old card's timeline is rebuilt
+/// Card and workflow time through the store: the projector records each card's states and markers (0047), an old card's timeline is rebuilt
 /// from its trail, and workflow 3573's trail is the reference case. Fake clocks only.
 /// </summary>
 public class TimelineStoreTests
@@ -59,7 +59,7 @@ public class TimelineStoreTests
     {
         var (db, store, p, clock) = Rig(At("16:01"));
         using var _ = db;
-        var planned = store.AddCard("web", null, "B086", "Timeline", "", "queued", Lanes.Todo, 3573);
+        var planned = store.AddCard("web", null, "B008", "Timeline", "", "queued", Lanes.Todo, 3573);
         store.AddTrail(planned.Id, "Manager", "planned", "Timeline");
         p.Apply(Tell("TesterKofi", "Test the timeline", 3573, At("16:54"), extra: new { card = planned.Id }));
         p.Apply(M(MessageTypes.Progress, new { status = "testing" }, "web/TesterKofi", 3573, At("17:00")));
@@ -71,7 +71,8 @@ public class TimelineStoreTests
         Assert.Equal(At("16:01"), BoardStore.Time(t.Time.CreatedAt));
         Assert.Equal(At("16:54"), BoardStore.Time(t.Time.StartedAt!));
         Assert.Equal(Min(53), Share(t.Time, C.NotStarted));
-        Assert.Equal(Min(6), Share(t.Time, C.WaitingForSlot));
+        Assert.Equal(Min(6), Share(t.Time, C.WaitingOnTeammate)); // told, but no run in the run queue: not a slot wait
+        Assert.Equal(0, Share(t.Time, C.WaitingForSlot));
         Assert.Equal(Min(30), Share(t.Time, C.AgentWorking));
         Assert.Equal(Min(89), t.Time.OverallMs);
         Assert.Equal(("done", false, false), (t.Time.EndedHow, t.Time.Open, t.Time.Rebuilt));
@@ -113,7 +114,7 @@ public class TimelineStoreTests
     }
 
     /// <summary>
-    /// B097 with B086: a run the person stopped is not a failure on the timeline either: no watchdog-end marker, no Blocked
+    /// A run the person stopped is not a failure on the timeline either: no watchdog-end marker, no Blocked
     /// time (the card keeps its status), while the stalls the run did have are kept. Rebuilt from the trail, the same.
     /// </summary>
     [Fact]
@@ -131,7 +132,7 @@ public class TimelineStoreTests
         var card = store.Cards("web")[0];
         Assert.Equal(("stopped", Lanes.InProgress), (card.Status, card.Lane));
 
-        // Card 437 round 2: after the stop the card is Idle (8 min to 18:00): not Blocked, not Agent working.
+        // After the stop the card is Idle (8 min to 18:00): not Blocked, not Agent working.
         var t = TimeOf(store, card.Id, At("18:00"));
         Assert.DoesNotContain(t.Markers, m => m.Kind == TimeMarkers.WatchdogEnd);
         Assert.Equal(0, Share(t.Time, C.Blocked));
@@ -147,9 +148,9 @@ public class TimelineStoreTests
         Assert.Equal(Min(8), Share(rebuilt.Time, C.Idle));
     }
 
-    /// <summary>Card 437 round 2: new work after a stop re-queues the card (Waiting for a slot again), live and rebuilt.</summary>
+    /// <summary>New work after a stop re-queues the card, live and rebuilt. With no run in the run queue that wait is Waiting on a teammate, not Waiting for a slot.</summary>
     [Fact]
-    public void NewWorkAfterAStop_IsWaitingForASlotAgain_LiveOrRebuilt()
+    public void NewWorkAfterAStop_WaitsAgain_LiveOrRebuilt()
     {
         var (db, store, p, _) = Rig(At("10:00"));
         using var __ = db;
@@ -163,7 +164,8 @@ public class TimelineStoreTests
         foreach (var t in new[] { TimeOf(store, card.Id, At("11:00")), Rebuilt() })
         {
             Assert.Equal(Min(30), Share(t.Time, C.Idle));            // 10:20 - 10:50, stopped
-            Assert.Equal(Min(15), Share(t.Time, C.WaitingForSlot));  // 10:00 - 10:05 and 10:50 - 11:00
+            Assert.Equal(Min(15), Share(t.Time, C.WaitingOnTeammate)); // 10:00 - 10:05 and 10:50 - 11:00
+            Assert.Equal(0, Share(t.Time, C.WaitingForSlot));
             Assert.Equal(0, Share(t.Time, C.Blocked));
         }
 
@@ -192,7 +194,8 @@ public class TimelineStoreTests
         }, "web/DeveloperAda", 8, At("11:20")));
         var t = TimeOf(store, store.Cards("web")[0].Id, At("11:20"));
         Assert.Equal(Min(30), Share(t.Time, C.Stalled)); // the run's own stall, not "from the last trail line" (10:01)
-        Assert.Equal(Min(1 + 20), Share(t.Time, C.WaitingForSlot)); // queued 10:00-10:01, and the lease wait 10:10-10:30
+        Assert.Equal(Min(20), Share(t.Time, C.WaitingForSlot)); // the lease wait 10:10-10:30
+        Assert.Equal(Min(1), Share(t.Time, C.WaitingOnTeammate)); // told 10:00-10:01 with no run in the run queue
         Assert.Equal(Min(9 + 20), Share(t.Time, C.AgentWorking));
     }
 
@@ -210,7 +213,7 @@ public class TimelineStoreTests
     }
 
     [Fact]
-    public void AnExpiredWorkflowsCardsEndAtItsLastActivity_B085()
+    public void AnExpiredWorkflowsCardsEndAtItsLastActivity()
     {
         var (db, store, p, _) = Rig(At("09:00", 14));
         using var __ = db;
@@ -244,7 +247,7 @@ public class TimelineStoreTests
     {
         var (db, store, _, _) = Rig(At("16:01"));
         using var __ = db;
-        var card = store.AddCard("web", null, "B079", "Verify the code map", "", "queued", Lanes.Todo, 3573);
+        var card = store.AddCard("web", null, "B007", "Verify the code map", "", "queued", Lanes.Todo, 3573);
         store.AddTrail(card.Id, "Manager", "planned", "Verify the code map", TimelineCalculator.Iso(At("16:01")));
         store.AddTrail(card.Id, "Manager", "assigned", "Assigned to TesterKofi: verify it", TimelineCalculator.Iso(At("16:54")));
         store.AddTrail(card.Id, "TesterKofi", "progress", "fetching the branch", TimelineCalculator.Iso(At("16:58")));
@@ -265,7 +268,7 @@ public class TimelineStoreTests
         Assert.True(store.Card(card.Id)!.Rebuilt);
         Assert.All(store.Timeline(card.Id), l => Assert.True(l.Rebuilt));
         Assert.Equal(At("16:54"), BoardStore.Time(t.Time.StartedAt!));
-        Assert.Equal([C.NotStarted, C.WaitingForSlot, C.AgentWorking, C.Stalled, C.Blocked], t.Bands.Select(b => b.Category));
+        Assert.Equal([C.NotStarted, C.WaitingOnTeammate, C.AgentWorking, C.Stalled, C.Blocked], t.Bands.Select(b => b.Category)); // no run queued
         Assert.Equal(Min(38), Share(t.Time, C.Stalled));
         Assert.Contains(t.Markers, m => m.Kind == TimeMarkers.WatchdogEnd && m.At == At("17:52"));
 
@@ -302,18 +305,18 @@ public class TimelineStoreTests
     // ---------------------------------------------------------------- the reference case: workflow 3573
 
     /// <summary>
-    /// Workflow 3573's trail as it stood before B086 (rebuilt from history): a developer's card, then card 375, which the
+    /// Workflow 3573's trail as it stood before the board recorded timelines (rebuilt from history): a developer's card, then the tester's card, which the
     /// Manager planned at 16:01 and gave TesterKofi at 16:54. TesterKofi's run showed no progress from 17:14 until the idle
     /// watchdog ended it at 17:52 UTC; the Manager told it again and it handed back at 18:13; the workflow was declared
-    /// complete at 18:14. About 3 h overall, 38 min of it Stalled (card 375), not Agent working.
+    /// complete at 18:14. About 3 h overall, 38 min of it Stalled (the tester's card), not Agent working.
     /// </summary>
     [Fact]
-    public void Workflow3573_IsAbout3hOverall_With38MinutesStalledForCard375()
+    public void Workflow3573_IsAbout3hOverall_With38MinutesStalledForTheTestersCard()
     {
         var (db, store, _, _) = Rig(At("15:12:40"));
         using var __ = db;
         string I(string hhmm) => TimelineCalculator.Iso(At(hhmm));
-        var dev = store.AddCard("browser", null, "B079", "Code map: files stay 2 minutes", "", "queued", Lanes.Todo, 3573, I("15:20"));
+        var dev = store.AddCard("browser", null, "B007", "Code map: files stay 2 minutes", "", "queued", Lanes.Todo, 3573, I("15:20"));
         foreach (var (at, source, kind, text) in new[]
         {
             ("15:20", "Manager", "planned", "Code map: files stay 2 minutes"),
@@ -323,7 +326,7 @@ public class TimelineStoreTests
             ("16:41", "DeveloperTomas", "handed back", "fe233e3"),
             ("18:14:10", "Manager", "workflow done", "the work is declared complete"),
         }) store.AddTrail(dev.Id, source, kind, text, I(at));
-        var c375 = store.AddCard("browser", null, "B079", "Verify the code map", "", "queued", Lanes.Todo, 3573, I("16:01"));
+        var testerCard = store.AddCard("browser", null, "B007", "Verify the code map", "", "queued", Lanes.Todo, 3573, I("16:01"));
         foreach (var (at, source, kind, text) in new[]
         {
             ("16:01", "Manager", "planned", "Verify the code map"),
@@ -335,7 +338,7 @@ public class TimelineStoreTests
             ("18:00", "TesterKofi", "progress", "running the e2e suite again"),
             ("18:13", "TesterKofi", "handed back", "verified: pass"),
             ("18:14:10", "Manager", "workflow done", "the work is declared complete"),
-        }) store.AddTrail(c375.Id, source, kind, text, I(at));
+        }) store.AddTrail(testerCard.Id, source, kind, text, I(at));
         using (var c = new SqliteConnection(db.ConnectionString))
         {
             c.Open();
@@ -346,20 +349,20 @@ public class TimelineStoreTests
                 """;
             cmd.Parameters.AddWithValue("$end", I("18:14:10"));
             cmd.Parameters.AddWithValue("$dev", dev.Id);
-            cmd.Parameters.AddWithValue("$tester", c375.Id);
+            cmd.Parameters.AddWithValue("$tester", testerCard.Id);
             cmd.ExecuteNonQuery();
         }
         MakeOld(db, dev.Id);
-        MakeOld(db, c375.Id);
+        MakeOld(db, testerCard.Id);
 
         var thread = new[]
         {
-            Tell("Manager", "Backlog item B079 is dispatched to your team.", 3573, At("15:12:40"), from: "person", extra: new { item = "B079" }),
+            Tell("Manager", "Backlog item B007 is dispatched to your team.", 3573, At("15:12:40"), from: "person", extra: new { item = "B007" }),
             Tell("DeveloperTomas", "build it", 3573, At("15:22")),
             Tell("TesterKofi", "verify the code map", 3573, At("16:54")),
             M(MessageTypes.Failed, new { reason = "idle: no progress for 1800 s", failureClass = "idle" }, "browser/TesterKofi", 3573, At("17:52")),
             Tell("TesterKofi", "Run the suite again", 3573, At("17:57")),
-            M(MessageTypes.WorkflowCompleted, new { delivered = "B079 verified" }, "browser/Manager", 3573, At("18:14:10")),
+            M(MessageTypes.WorkflowCompleted, new { delivered = "B007 verified" }, "browser/Manager", 3573, At("18:14:10")),
         };
         var w = new BoardTimeline(store).OfWorkflow(3573, thread, [], At("19:00"))!;
 
@@ -371,16 +374,16 @@ public class TimelineStoreTests
         Assert.Equal(w.Time.OverallMs, w.Time.Breakdown.Sum(b => b.Ms));
         Assert.Equal(Min(38), Share(w.Time, C.Stalled));
 
-        var card375 = w.Rows.Single(r => r.Card == c375.Id);
-        Assert.Equal("TesterKofi", card375.Member);
-        var stall = Assert.Single(card375.Bands, b => b.Category == C.Stalled);
+        var testerRow = w.Rows.Single(r => r.Card == testerCard.Id);
+        Assert.Equal("TesterKofi", testerRow.Member);
+        var stall = Assert.Single(testerRow.Bands, b => b.Category == C.Stalled);
         Assert.Equal((At("17:14"), At("17:52")), (stall.Start, stall.End));
         var summaryStall = Assert.Single(w.Summary, b => b.Category == C.Stalled);
         Assert.Equal((At("17:14"), At("17:52")), (summaryStall.Start, summaryStall.End));
-        Assert.Contains(w.Markers, m => m.Kind == TimeMarkers.WatchdogEnd && m.Card == c375.Id && m.At == At("17:52"));
+        Assert.Contains(w.Markers, m => m.Kind == TimeMarkers.WatchdogEnd && m.Card == testerCard.Id && m.At == At("17:52"));
 
-        // Card 375 on its own: planned 16:01, started 16:54, done 18:13; 53 min before it started.
-        var t = TimeOf(store, c375.Id, At("19:00"));
+        // The tester's card on its own: planned 16:01, started 16:54, done 18:13; 53 min before it started.
+        var t = TimeOf(store, testerCard.Id, At("19:00"));
         Assert.Equal((At("16:01"), At("16:54"), At("18:13")),
             (BoardStore.Time(t.Time.CreatedAt), BoardStore.Time(t.Time.StartedAt!), BoardStore.Time(t.Time.EndedAt!)));
         Assert.Equal(Min(53), Share(t.Time, C.NotStarted));

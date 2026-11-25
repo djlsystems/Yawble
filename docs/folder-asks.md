@@ -1,4 +1,4 @@
-# Folder asks (B111)
+# Folder asks
 
 An agent that needs a folder outside its sandbox (a data folder to read, an output folder to write) asks the person
 with the bus tool `request_folder`. The person approves or denies it in Needs you. An approval writes the path into the
@@ -101,7 +101,7 @@ reload `folder.asks` / `app.overview`.
 
 `folderAsks`: the number of waiting folder asks, also added into `needsYou` (as `networkAsks` and `toolAsks`).
 
-## Card text (for the shell, card 497)
+## Card text (what the shell shows)
 
 "`<Team> / <Member> asks read-write on <path> - <reason>`" (read-only: "asks read-only on"), whether the folder
 exists (`exists`), Approve / Deny; for a read-write ask Approve also offers Read-only. When `askedBy` is not `member`,
@@ -123,4 +123,4 @@ The org summary (`org.summary`) counts them as `needsYou.folderRequests` (per te
 - A member removed from its team has its waiting asks closed (`closed`); a team deleted has its asks deleted.
 - Role texts (member.md, manager.md) and the tool's description: "ask with request_folder; never ask the person to
   edit policy by hand".
-- Not done here: the Logs dialog's Approvals log and `workflow_digest` do not list folder asks yet.
+- Not done here: the Logs page's Approvals log and `workflow_digest` do not list folder asks yet.

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B037: the phone layout (below 760 px wide) of the shell, the drawer, sheets, the Concierge, Needs You and Settings;
+// The phone layout (below 760 px wide) of the shell, the drawer, sheets, the Concierge, Needs You and Settings;
 // at 760 px and wider nothing changes. The width comes from a fake matchMedia and the on-screen keyboard from a fake
 // visualViewport; the API is a scripted fake (no core, no network).
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -213,7 +213,8 @@ describe('the shell on a phone: the drawer', () => {
     expect(more.attributes('aria-expanded')).toBe('true');
     expect((w.get('[data-test=drawer-menu-items]').element as HTMLElement).style.display).toBe('');
     const items = w.findAll('[data-test=drawer-menu-items] button').map((b) => b.attributes('data-test'));
-    expect(items).toEqual(['drawer-terminal', 'drawer-theme:system', 'drawer-theme:light', 'drawer-theme:dark', 'drawer-checkUpdates', 'drawer-about', 'drawer-go:settings-agents']);
+    // No Terminal for a Visitor (the core refuses every terminal call to a read-only viewer).
+    expect(items).toEqual(['drawer-theme:system', 'drawer-theme:light', 'drawer-theme:dark', 'drawer-checkUpdates', 'drawer-about', 'drawer-go:settings-agents']);
     expect(w.get('[data-test="drawer-theme:system"]').attributes('aria-checked')).toBeDefined();
     // The read-only chip is on the page, outside the drawer, so it shows whether the drawer is open or not.
     const chip = document.querySelector('[data-test=remote-access-chip]');
@@ -487,8 +488,8 @@ describe('tooltips by tap (no hover on a phone)', () => {
   });
 });
 
-// TesterKofi's phone e2e (B037-report.md, card 167): F1 to F4. happy-dom has no layout, so the sizes are the CSS rules.
-describe('B037 e2e faults F1 to F4', () => {
+// The faults F1 to F4 the phone e2e run found. happy-dom has no layout, so the sizes are the CSS rules.
+describe('phone e2e faults F1 to F4', () => {
   const src = (file: string) => readFileSync(resolve(__dirname, `../../src/renderer/src/${file}`), 'utf8');
   const asks = {
     ...core,
@@ -523,7 +524,7 @@ describe('B037 e2e faults F1 to F4', () => {
 
   it('F1: the box holds them all in at most 40% of a phone\'s height and scrolls; no banner has its own half-screen cap', () => {
     const app = src('App.vue');
-    // 50dvh after its 50vh fallback (card 334): half of what the browser really shows.
+    // 50dvh after its 50vh fallback: half of what the browser really shows.
     expect(app).toContain('.banners { display: block; flex: none; max-height: 50vh; max-height: 50dvh; overflow-y: auto;');
     expect(app).toContain('.phone .banners { max-height: 40dvh; }');
     expect(app).toMatch(/\.content \{ flex: 1; min-height: 0;/); // the view takes the rest
@@ -560,7 +561,7 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(w.emitted('command')?.[0]).toEqual(['about']);
     await w.get('[data-test=drawer-more]').trigger('click');
     expect(items().style.display).toBe('none');
-    // The run-slots line is in the drawer, after the lists; Settings is not (B115: it is the gear in the top bar).
+    // The run-slots line is in the drawer, after the lists; Settings is not (it is the gear in the top bar).
     expect(w.find('[data-test=open-app-settings]').exists()).toBe(false);
     expect(w.get('[data-test=slots]').text()).toContain('Run slots');
   });
@@ -570,7 +571,7 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(css).toContain('.side.drawer { overflow-y: auto;');
     expect(css).toContain('.drawer .brand, .drawer .item.new, .drawer .places, .drawer .foot, .drawer .lists { flex: none; }');
     expect(css).toContain('.drawer .lists { overflow: visible; }');
-    // The desktop sidebar keeps its rules: the lists flex and scroll. Card 334: only a window shorter than its fixed rows
+    // The desktop sidebar keeps its rules: the lists flex and scroll. Only a window shorter than its fixed rows
     // (a phone in landscape at a desktop width) scrolls the sidebar itself, the lists then kept at least 96 px.
     expect(css).toContain('.lists { flex: 1; overflow: auto; min-height: min(96px, 100%); }');
     expect(css).toMatch(/\.side \{ [^}]*min-height: 0; overflow-y: auto; padding: 8px 8px 6px; \}/);
@@ -593,7 +594,7 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(w.get('[data-test=composer-attach]').classes()).toEqual(expect.arrayContaining(['pick', 'attach']));
   });
 
-  it('F7 (card 176): the Visitor chip\'s 150 px room is kept in the top bar only, never in the Composer\'s bar', async () => {
+  it('F7: the Visitor chip\'s 150 px room is kept in the top bar only, never in the Composer\'s bar', async () => {
     const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
     const rule = /(:root\[data-remote-access="read"\][^{]*)\{ padding-right: calc\(150px/.exec(css);
     expect(rule).not.toBeNull();
@@ -609,7 +610,7 @@ describe('B037 e2e faults F1 to F4', () => {
     expect(bar.matches(selector)).toBe(false);
   });
 
-  it('F8 (card 181): a sheet\'s header keeps the Visitor chip\'s 150 px room too; no bar in its body, nothing on the desktop', async () => {
+  it('F8: a sheet\'s header keeps the Visitor chip\'s 150 px room too; no bar in its body, nothing on the desktop', async () => {
     const css = readFileSync(resolve(__dirname, '../../src/renderer/src/styles.css'), 'utf8');
     const at = css.indexOf('@media (max-width: 759.98px) {');
     const m = /(:root\[data-remote-access="read"\][^{]*\.modal\.sheet[^{]*)\{ padding-right: calc\(150px/.exec(css);

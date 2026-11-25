@@ -28,6 +28,8 @@ export interface ThemeEnv {
   notify?: (theme: Theme) => void;
   /** The page's window, for 'storage' events: a choice made in another window of the app (same key) is followed here. */
   events?: Pick<Window, 'addEventListener' | 'removeEventListener'>;
+  /** The mode to start with when nothing is kept (no storage: the embedded remote view's ?theme=). Default system. */
+  initialMode?: ThemeMode;
 }
 
 export interface ThemeState {
@@ -65,7 +67,7 @@ export function createTheme(env: ThemeEnv): ThemeController {
   try { media = env.matchMedia?.(DARK_QUERY) ?? null; } catch { media = null; }
   const osTheme = (): Theme => (media?.matches ? 'dark' : 'light');
 
-  const state = reactive<ThemeState>({ mode: readMode(env, key), current: 'light' });
+  const state = reactive<ThemeState>({ mode: env.storage ? readMode(env, key) : env.initialMode ?? 'system', current: 'light' });
 
   const apply = () => {
     state.current = state.mode === 'system' ? osTheme() : state.mode;
@@ -102,21 +104,30 @@ export function createTheme(env: ThemeEnv): ThemeController {
   };
 }
 
-/** The page's theme: the desktop window's own, or a remote view's (its own key). Set up when this module loads. */
-function pageTheme(): ThemeController {
-  const w = typeof window !== 'undefined' ? window : undefined;
+/**
+ * The page's theme set-up: the desktop window's own, or a remote view's (its own key). The remote view embedded in
+ * the cloud page (?embed=1, embed.ts) has no storage at all: the viewer's kept yawble.remoteTheme is neither read nor
+ * written, nor followed from another tab; it starts at the cloud's ?theme=light|dark (else the OS) and the cloud's
+ * yawble.theme messages set it after (App.vue, through setMode, which keeps nothing without storage).
+ */
+export function pageThemeEnv(w: (Window & typeof globalThis) | undefined = typeof window !== 'undefined' ? window : undefined): ThemeEnv {
   const yawble = w?.yawble as Window['yawble'] | undefined;
-  return createTheme({
-    storage: () => localStorage,
+  const base: ThemeEnv = {
     matchMedia: w && typeof w.matchMedia === 'function' ? (q) => w.matchMedia(q) : undefined,
-    root: typeof document !== 'undefined' ? document.documentElement : undefined,
+    root: w?.document?.documentElement,
     key: yawble?.remote ? REMOTE_THEME_KEY : THEME_KEY,
     notify: yawble?.remote ? undefined : (t) => yawble?.setTheme?.(t),
-    events: w,
-  });
+  };
+  let q: URLSearchParams | null = null;
+  try { q = new URLSearchParams(w?.location?.search ?? ''); } catch { q = null; }
+  if (q?.get('embed') === '1') {
+    const given = q.get('theme');
+    return { ...base, initialMode: given === 'light' || given === 'dark' ? given : 'system' };
+  }
+  return { ...base, storage: () => localStorage, events: w };
 }
 
-export const theme = pageTheme();
+export const theme = createTheme(pageThemeEnv());
 
 /** The title-bar button's words: what one click does. */
 export function toggleLabel(current: Theme): string {

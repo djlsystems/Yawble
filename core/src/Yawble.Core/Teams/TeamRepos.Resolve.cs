@@ -25,7 +25,7 @@ public sealed record CommitIdResolution(string Id, bool Valid, IReadOnlyList<Com
 /// <summary>A repository git.commitsResolve could not read.</summary>
 public sealed record CommitResolveError(string Team, long TeamId, string? Repo, string Message);
 
-/// <summary>git.commitsResolve (B074): every asked ID's matches, in the order asked, and the repositories that could not be read.</summary>
+/// <summary>git.commitsResolve: every asked ID's matches, in the order asked, and the repositories that could not be read.</summary>
 public sealed record CommitsResolved(IReadOnlyList<CommitIdResolution> Results, IReadOnlyList<CommitResolveError> Errors)
 {
     public JsonObject ToJson()
@@ -45,8 +45,8 @@ public sealed record CommitsResolved(IReadOnlyList<CommitIdResolution> Results, 
 }
 
 /// <summary>
-/// B074: which of a batch of hex words are commits of the team's repositories (or every team's), for the shell to turn
-/// commit IDs in text into Commit view links. The same rules as the Commit view (B072): only commit objects whose ID
+/// Which of a batch of hex words are commits of the team's repositories (or every team's), for the shell to turn
+/// commit IDs in text into Commit view links. The same rules as the Commit view: only commit objects whose ID
 /// starts with the digits match, never a branch or tag named like hex; pushed is "some origin branch has it". A
 /// constant number of git processes per repository, whatever the batch: reads only, outside the team's lock.
 /// </summary>

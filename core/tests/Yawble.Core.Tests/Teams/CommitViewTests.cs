@@ -10,7 +10,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B072 (card 443), the commit view's core: git.commitShow and git.commitDiff on a fixture repository built here (the
+/// The commit view's core: git.commitShow and git.commitDiff on a fixture repository built here (the
 /// person's repository, base trunk): an ordinary commit, a renamed file, a binary file, a merge (first-parent diff, its
 /// commit count), an unpushed commit against one in origin's refs, a commit in tags, a deleted branch's commit (still
 /// there, then gone after git cleans up), and the Cloud Link's view with members' code shown and hidden. Local

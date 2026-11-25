@@ -73,7 +73,7 @@ public static class TeamPrompt
     }
 
     /// <summary>
-    /// B100: the team's lessons (its team_retros skill, kept by the Manager's retrospectives), in every run of the team,
+    /// The team's lessons (its team_retros skill, kept by the Manager's retrospectives), in every run of the team,
     /// the Manager's and the members'. None when the team has none; another team's are never here (by team).
     /// </summary>
     public static IReadOnlyList<string> LessonLines(string? lessons)

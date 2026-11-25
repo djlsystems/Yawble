@@ -1,4 +1,4 @@
-// B029 (card 144): no white first frame in the dark theme. Before the page's stylesheet paints, a classic script file
+// No white first frame in the dark theme. Before the page's stylesheet paints, a classic script file
 // (public/theme-boot.js, from 'self' as the CSP allows) sets data-theme on <html>; main keeps the last theme a page said
 // (theme.json) so the first window of the next launch starts with the person's choice, not only the OS's.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

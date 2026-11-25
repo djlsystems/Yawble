@@ -18,7 +18,8 @@ public class NeverEmitTests
         foreach (var os in Enum.GetValues<TargetOs>())
             foreach (var mode in Enum.GetValues<CredentialMode>())
                 foreach (var kind in Enum.GetValues<RunKind>())
-                    data.Add(os, mode, kind);
+                    if (!(os == TargetOs.MacOS && mode == CredentialMode.ClaudeHostSignIn)) // macOS never offers it: refused below
+                        data.Add(os, mode, kind);
         return data;
     }
 
@@ -80,6 +81,123 @@ public class NeverEmitTests
     [Fact]
     public void CatchesSeatbeltKeychainAccess() =>
         AssertCaught(TargetOs.MacOS, r => r["seatbelt"]!["keychainAccess"] = true, "keychainAccess");
+
+    [Theory]
+    [InlineData("com.apple.securityd")]
+    [InlineData("com.apple.securityd.xpc")]
+    [InlineData("com.apple.pasteboard.1")]
+    public void CatchesAMachLookupBeyondTheCertificateAndGroupServices(string name) =>
+        AssertCaught(TargetOs.MacOS, r => r["seatbelt"]!["extraMachLookups"]!.AsArray().Add(name), "extraMachLookups");
+
+    [Fact]
+    public void AMacRunLooksUpOnlyTheCertificateAndGroupServices_AndTheLoginKeychainStaysDenied()
+    {
+        var run = PolicyFixtures.Run(TargetOs.MacOS, CredentialMode.ClaudeGatewaySignIn);
+        var c = SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, null, run);
+        Assert.Equal(["com.apple.SecurityServer", "com.apple.trustd.agent", "com.apple.system.opendirectoryd.libinfo"],
+            c.Request["seatbelt"]!["extraMachLookups"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Contains(run.Layout.Home.TrimEnd('/') + "/Library/Keychains", c.Request["filesystem"]!["deniedPaths"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.False(c.Request["seatbelt"]!["keychainAccess"]!.GetValue<bool>());
+        Assert.Empty(SandboxRequestInvariants.Check(c, run));
+    }
+
+    [Fact]
+    public void CatchesSecurityServerWithoutTheLoginKeychainDenied() =>
+        AssertCaught(TargetOs.MacOS, r =>
+        {
+            var denied = r["filesystem"]!["deniedPaths"]!.AsArray();
+            foreach (var n in denied.Where(n => n!.GetValue<string>().EndsWith("/Library/Keychains", StringComparison.Ordinal)).ToList()) denied.Remove(n);
+        }, "~/Library/Keychains");
+
+    // ---- macOS Claude is held by the gateway (it reads the login Keychain on the host); a Mac sandbox gets no sign-in.
+
+    [Fact]
+    public void AMacClaudeRunWithTheFileGrantModeIsRefused()
+    {
+        var run = PolicyFixtures.Run(TargetOs.MacOS, CredentialMode.ClaudeHostSignIn);
+        var e = Assert.Throws<InvalidOperationException>(() => SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, null, run));
+        Assert.Contains("macOS never uses ClaudeHostSignIn", e.Message);
+    }
+
+    [Theory]
+    [InlineData("/Users/alice/Library/Keychains")]
+    [InlineData("/Users/alice/Library/Keychains/login.keychain-db")]
+    [InlineData("/Library/Keychains")]
+    [InlineData("/Users/alice/Library")]
+    [InlineData("/Users/alice/.claude/.credentials.json")]
+    [InlineData("/Users/alice/src/reference/.credentials.json")]
+    [InlineData("/Users/alice/src/reference/backup.keychain-db")]
+    public void CatchesAKeychainOrSignInFileGrantOnAMac(string grant)
+    {
+        foreach (var mode in new[] { CredentialMode.ClaudeGatewaySignIn, CredentialMode.ClaudeSubscription, CredentialMode.GrokGatewaySignIn })
+        {
+            var (compiled, run) = Valid(TargetOs.MacOS, mode);
+            var request = (JsonObject)compiled.Request.DeepClone();
+            ((JsonArray)request["filesystem"]!["readonlyPaths"]!).Add(grant);
+            var problems = SandboxRequestInvariants.CheckRequest(request, run);
+            Assert.Contains(problems, p => p.Contains(grant, StringComparison.Ordinal) && (p.Contains("Keychain") || p.Contains("sign-in file") || p.Contains("implicitly denied")));
+        }
+    }
+
+    [Fact]
+    public void CatchesTheClaudeStoreVariableOnAMac() =>
+        AssertCaught(TargetOs.MacOS, r => Env(r).Add("CLAUDE_SECURESTORAGE_CONFIG_DIR=/Users/alice/.claude"), "never set on macOS", CredentialMode.ClaudeGatewaySignIn);
+
+    [Fact]
+    public void AMacClaudeGatewayRunCarriesNoCredentialPathOrSecret()
+    {
+        var (compiled, run) = Valid(TargetOs.MacOS, CredentialMode.ClaudeGatewaySignIn);
+        Assert.Empty(SandboxRequestInvariants.Check(compiled, run));
+        var text = compiled.RequestJson;
+        foreach (var never in new[] { ".credentials.json", "Claude Code-credentials", "keychain-db", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "sk-ant-" })
+            Assert.DoesNotContain(never, text);
+        var fs = compiled.Request["filesystem"]!;
+        var grants = ((JsonArray)fs["readonlyPaths"]!).Concat((JsonArray)fs["readwritePaths"]!).Select(n => n!.GetValue<string>()).ToList();
+        Assert.DoesNotContain(grants, g => g.Contains("Keychains", StringComparison.Ordinal) || g.Contains("/.claude", StringComparison.Ordinal) && !g.Contains("/members/"));
+        Assert.Contains("/Users/alice/Library/Keychains", ((JsonArray)fs["deniedPaths"]!).Select(n => n!.GetValue<string>()));
+        Assert.False(compiled.Request["seatbelt"]!["keychainAccess"]!.GetValue<bool>());
+    }
+
+    /// <summary>
+    /// What /usr/bin/security prints for Claude Code's item (the sign-in JSON, or anything it echoes when it fails)
+    /// never reaches a log line, an error, an exception or a result's text, whatever the tool answers.
+    /// </summary>
+    [Fact]
+    public async Task TheKeychainValueReadWithTheSecurityToolIsNeverEmitted()
+    {
+        const string access = "sk-ant-oat01-NEVEREMITKEYCHAIN0123456789";
+        const string refresh = "sk-ant-ort01-NEVEREMITKEYCHAINREFRESH01";
+        var json = Yawble.Core.Tests.Credentials.FakeKeychain.ClaudeSignIn(access, DateTimeOffset.UtcNow.AddMinutes(2), refresh);
+        var service = Yawble.Core.Credentials.ClaudeHostSession.KeychainService;
+        var emitted = new List<string>();
+        void Log(string line) { lock (emitted) emitted.Add(line); }
+
+        var answers = new (int Exit, string Stdout, bool TimedOut)[] { (0, json + "\n", false), (44, "", false), (1, json, false), (51, access, false), (-1, json, true) };
+        foreach (var (exit, stdout, timedOut) in answers)
+        {
+            var tool = new Fixed(new Yawble.Core.Credentials.SecurityToolResult(exit, stdout, timedOut));
+            emitted.Add(tool.Result.ToString());
+            var reader = new Yawble.Core.Credentials.MacHostCredentialReader(tool);
+            try { reader.Read(service); } catch (Exception e) { emitted.Add(e.ToString()); }
+            emitted.AddRange(reader.Targets(service));
+            var session = new Yawble.Core.Credentials.ClaudeHostSession("/nonexistent/.credentials.json", () => "claude", Log,
+                runClaude: (_, _, _) => Task.CompletedTask, keychain: reader);
+            await session.CurrentAsync(TestContext.Current.CancellationToken);
+            await session.RefreshAsync(force: true, TestContext.Current.CancellationToken);
+            emitted.Add(session.Source);
+        }
+
+        Assert.NotEmpty(emitted);
+        foreach (var line in emitted)
+            foreach (var never in new[] { "NEVEREMITKEYCHAIN", "claudeAiOauth", "sk-ant-" })
+                Assert.DoesNotContain(never, line);
+    }
+
+    private sealed class Fixed(Yawble.Core.Credentials.SecurityToolResult result) : Yawble.Core.Credentials.ISecurityTool
+    {
+        public Yawble.Core.Credentials.SecurityToolResult Result => result;
+        public Yawble.Core.Credentials.SecurityToolResult Run(IReadOnlyList<string> arguments, TimeSpan timeout) => result;
+    }
 
     [Theory]
     [InlineData(TargetOs.Linux)]
@@ -219,7 +337,7 @@ public class NeverEmitTests
     public void TheHostGrokHomeIsAlwaysDeniedAndNeverGranted()
     {
         foreach (var os in Enum.GetValues<TargetOs>())
-            foreach (var mode in Enum.GetValues<CredentialMode>())
+            foreach (var mode in Enum.GetValues<CredentialMode>().Where(m => !(os == TargetOs.MacOS && m == CredentialMode.ClaudeHostSignIn)))
             {
                 var run = PolicyFixtures.Run(os, mode);
                 var r = SandboxRequestCompiler.Compile(PolicyFixtures.Global, null, PolicyFixtures.Loosen, run).Request;

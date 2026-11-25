@@ -7,7 +7,7 @@
   </a>
 </p>
 
-<p align="center"><b>AI teamwork. Built-in guardrails. Your control.</b></p>
+<p align="center"><b>Your AI agents don't care if you can't keep up. Yawble makes you their boss.</b></p>
 
 <p align="center">
   <a href="https://yawble.ai">yawble.ai</a> ·
@@ -114,6 +114,12 @@ any file ends unsigned. It needs the Windows SDK's `signtool`, the Artifact Sign
 (`Azure.CodeSigning.Dlib.dll`; `SIGNING_DLIB` names it when it is not where they install it, and `SIGNTOOL` names `signtool.exe`), an `az login`, and
 the Certificate Profile Signer role on the account.
 
+On macOS, `--sign` signs every Mach-O in the bundle and the app with the keychain's Developer ID Application identity
+(`YAWBLE_MAC_IDENTITY` picks one when there are several), with the hardened runtime and
+`packaging/mac/entitlements.plist`, notarizes the app with the notarytool keychain profile that `YAWBLE_NOTARY_PROFILE`
+names (`xcrun notarytool store-credentials <name>`), staples the ticket, signs, notarizes and staples the `.dmg` as well, and writes `Yawble-<version>-mac-arm64.dmg`,
+the `.zip` and `SHA256SUMS-mac`. The build fails unless `codesign`, Gatekeeper (`spctl`) and `stapler` accept the app.
+
 ### Run in development
 
 The shell finds the core in this order: `YAWBLE_CORE_PATH` (a `.dll` runs under `dotnet`), `resources/core` in a
@@ -160,13 +166,13 @@ stand-in CLIs and fake model servers. The tests that check the CLIs installed on
 
 `yawble-companion` (installed with the app in `resources/bin/`) lets another program on the same computer, such as Claude Code,
 see and work with your teams through the running app: as an MCP server (`yawble-companion mcp`) or as a CLI (`yawble-companion status`,
-`yawble tell <team> <instruction>`, `yawble help`). It talks only to the app on this computer, over a per-launch named
+`yawble-companion tell <team> <instruction>`, `yawble-companion help`). It talks only to the app on this computer, over a per-launch named
 pipe (Windows) or unix socket, and nothing of it is reachable over the Cloud Link.
 
 1. **Pair** once per program, with the app running:
 
    ```bash
-   "<install>\resources\bin\yawble.exe" pair --name claude-code --level act
+   "<install>\resources\bin\yawble-companion.exe" pair --name claude-code --level act
    ```
 
    The terminal and the Yawble window show the same 6-character code; approve in the window only when they match.
@@ -174,14 +180,15 @@ pipe (Windows) or unix socket, and nothing of it is reachable over the Cloud Lin
 2. **Add it to Claude Code.** Settings > Companion shows the exact command with a Copy button:
 
    ```bash
-   claude mcp add --scope user yawble -- "<install>\resources\bin\yawble.exe" mcp
+   claude mcp add --scope user yawble -- "<install>\resources\bin\yawble-companion.exe" mcp
    ```
 
 Levels are cumulative: `read` (status, activity, documents, backlog, board, git state), `act` (also tell a team,
 answer its questions, edit the backlog and board), `destructive` (also push, merge, delete, restore and other
 changes). A destructive call never runs when the program makes it: the window shows the exact plan, and Approve runs
-exactly that once. Settings > Companion lists paired programs and revokes them. Every call is audited with the
-program's name.
+exactly that once. The request stays pending until you approve or deny it; if the plan changed by then, Approve shows
+the new plan as a new request instead. The program can cancel its request, and requests end when the app restarts.
+Settings > Companion lists paired programs and revokes them. Every call is audited with the program's name.
 
 Exit codes: 0 ok, 1 failed, 2 usage, 3 the app is not running, 4 not paired, 5 refused, 6 waiting for your approval,
 130 interrupted.

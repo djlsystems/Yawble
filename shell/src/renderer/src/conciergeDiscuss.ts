@@ -16,6 +16,9 @@ export function discussWithConcierge(teamId: number | null, text: string): void 
   discussRequest.value = { teamId, text, seq: ++seq };
 }
 
+/** Scripts > New > Ask the Concierge: the first message, for the person to finish and send. */
+export const ASK_CONCIERGE_PROMPT = 'Help me build a script that ';
+
 /** Agent-written text as a Markdown quote, clipped: the Concierge reads it as the agent's words, not the person's. */
 export function quoted(text: string, max = 1200): string {
   const t = text.trim();

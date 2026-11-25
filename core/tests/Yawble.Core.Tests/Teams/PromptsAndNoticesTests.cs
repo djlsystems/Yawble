@@ -20,7 +20,8 @@ public class PromptsAndNoticesTests
         Assert.StartsWith("# Manager", manager);
         foreach (var needle in new[] { "`status`", "`tell`", "END YOUR TURN", "handed back", "run ended", "did not hand back", "interrupted",
                      "numbered items", "members/<team>/<name>", "never ask a member to push", "`workflow_complete`", "`hire`", "`hiring`", "FULL PATH", "already declared", "`needs_decision`",
-                     "Scheduled work (trigger", "act on that job only", "paid model run" })
+                     "Scheduled work (trigger", "act on that job only", "paid model run",
+                     "never close over a tester's FAIL", "`kind: accept-fail` or `wont-do`", "only the person's yes lets you declare over it" })
         {
             Assert.Contains(needle, manager);
         }
@@ -34,7 +35,7 @@ public class PromptsAndNoticesTests
         }
         Assert.Throws<ArgumentException>(() => global::Yawble.Core.Gateway.RoleText.For("admin"));
 
-        // Verify cards (B019): the Manager gives them to the tester, never closes one from a developer's report, and
+        // Verify cards: the Manager gives them to the tester, never closes one from a developer's report, and
         // gives the reason in note on board move when it closes one the tester did not run; the tester tests the
         // developer's branch unchanged and reports on the card and in the hand-back.
         foreach (var needle in new[] { "goes to the team's tester", "never a developer's report", "`note` on `board` `action: move`",

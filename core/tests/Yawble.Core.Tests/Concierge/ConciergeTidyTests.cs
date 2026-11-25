@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Concierge;
 
 /// <summary>
-/// B067 (card 361) through the Concierge: git_tidy_plan's text, a contained branch deleted by git_branches_delete without
+/// Git tidy through the Concierge: git_tidy_plan's text, a contained branch deleted by git_branches_delete without
 /// unmerged_ok, and git_branch_realign's confirm flow (show old -> new, the person's yes in a later turn, the old commit
 /// recorded). Temp repositories only.
 /// </summary>

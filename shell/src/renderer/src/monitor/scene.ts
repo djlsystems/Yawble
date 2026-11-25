@@ -32,13 +32,13 @@ import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodM
  * screen are not drawn, and all the maps together show at most MaxMapNodes files (fewer at a lower density).
  * The layout is a d3-force simulation
  * ticked once per frame while it is awake; it cools to rest once nothing changes, and so the camera, which fits
- * everything unless the person has moved it in the last 12 s, settles too (card 385).
+ * everything unless the person has moved it in the last 12 s, settles too.
  * Under reduced motion nothing turns or throbs.
  *
- * B080, livelier and easier to follow:
+ * Livelier and easier to follow:
  *   workflow nodes - every open workflow is a small node tied by dashed lines to the members working it (to its hub
  *     while nobody is on it); completed, it flashes green and drifts away; closed, it fades with a cross; blocked, it
- *     wears the blocked colour and a "!". Under it, "#id title" (B090; the WORKFLOWS panel is gone); hover gives the
+ *     wears the blocked colour and a "!". Under it, "#id title" (there is no WORKFLOWS panel); hover gives the
  *     whole title, a click opens the workflow.
  *   work rhythm - a member's disc pulses faster the more steps it takes; a command shows a ring filling round it
  *     while it runs, then a green or red burst by its exit code when that is known; thinking shimmers softly.
@@ -100,7 +100,7 @@ const StepIconGap = 20;
 const OvalY = 0.62;
 /**
  * How far a team's cluster reaches from its hub toward the other teams before its code map: the members, their names
- * and the workflow nodes with their labels; and the room left between two clusters at Team spacing 1. Card 409: 130
+ * and the workflow nodes with their labels; and the room left between two clusters at Team spacing 1. 130
  * (was 100): with the map's room counted only toward the neighbours, two teams at 100 apart settled with their workflow
  * labels and members touching in 1 run of 8.
  */
@@ -145,7 +145,7 @@ const SpacingShrink = 16;
 const SpacingMoves = 12;
 
 /**
- * Card 411 (F6): the oval's x radius at Team spacing 1 that puts the nearest two clusters ClusterGap apart, from the
+ * The oval's x radius at Team spacing 1 that puts the nearest two clusters ClusterGap apart, from the
  * clusters as drawn now. For each pair of teams: their hubs' distance d, the least distance g between their drawn things
  * (negative when they overlap), so they would touch at d - g; the radius scales with the hubs' distance, so the pair
  * wants rx * (d - g + ClusterGap) / d. The widest want wins, never under MinMeasuredRx.
@@ -167,7 +167,7 @@ export function boxesGap(a: readonly Box[], b: readonly Box[]): number {
 }
 
 /**
- * A force that acts only between nodes of the same team (card 411, F6): one `make()` per team, each given only its
+ * A force that acts only between nodes of the same team: one `make()` per team, each given only its
  * team's nodes. The teams' repulsion used to push whole clusters apart as well, so where they settled depended on the
  * start (the random birth spots and the order the teams, workflows and maps arrived in): 3 teams' nearest gap ran 4-248.
  * Now a cluster's own forces only shape it, and its place comes from its home alone (measuredOvalRx).
@@ -240,13 +240,13 @@ export function pinchCamera(start: { dist: number; k: number; wx: number; wy: nu
   return { k, x: start.wx - (mid[0] - w / 2) / k, y: start.wy - (mid[1] - h / 2) / k };
 }
 
-/** The least reach a map node has for a tap or a click, in screen px, at any zoom (a fingertip at 375 px, card 398). */
+/** The least reach a map node has for a tap or a click, in screen px, at any zoom (a fingertip at 375 px). */
 export const MinHitPx = 22;
 
 /**
  * The map node a world point (wx, wy) is on at zoom k, or null: each node reaches its own world reach (a team hub 14, others
  * their radius + 8) or MinHitPx on screen, whichever is more, and of the nodes in reach the nearest wins, so close nodes do
- * not steal each other's taps. Workflow nodes (B090) are hit like the rest; a 'workflows' panel (gone) is never picked.
+ * not steal each other's taps. Workflow nodes are hit like the rest; there is no 'workflows' panel to pick.
  */
 export function nearestNodeAt<N extends { kind: string; r: number; x?: number; y?: number }>(
   nodes: Iterable<N>, wx: number, wy: number, k: number,
@@ -265,7 +265,7 @@ export function nearestNodeAt<N extends { kind: string; r: number; x?: number; y
 /**
  * Whether a map node mapD (world px) from the pointer at (wx, wy) takes the hover and the click over the workflow node
  * in reach there (nearestNodeAt over the workflow nodes, or null): only when the point is off the workflow's square and
- * the map node is the nearer (card 411, F4: a square under its map's folder could not be hovered or clicked).
+ * the map node is the nearer (otherwise a square under its map's folder could not be hovered or clicked).
  */
 export function mapBeatsWorkflow(mapD: number, wf: { r: number; x?: number; y?: number } | null, wx: number, wy: number): boolean {
   if (!wf) return true;
@@ -376,7 +376,7 @@ export class MonitorScene {
     this.reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.sim = forceSimulation<Node>([])
       // The forces cool to rest (alpha target 0) once nothing changes: kept warm, two teams' hubs kept circling one
-      // another and the camera's fit chased them (card 385).
+      // another and the camera's fit chased them.
       .alphaDecay(0.02).alphaTarget(0)
       .force('link', forceLink<Node, Link>([]))
       .force('wfmlink', forceLink<Node, Link>([]))
@@ -433,7 +433,7 @@ export class MonitorScene {
     return w > 0 && h > 0 && onYouNode(x, y, w, h, this.youKeepOut);
   }
 
-  /** What the You node keeps clear of (canvas CSS px; the view measures its Legend button and controls, card 416). */
+  /** What the You node keeps clear of (canvas CSS px; the view measures its Legend button and controls). */
   private youKeepOut: KeepOut[] = [];
   setYouKeepOut(rects: readonly KeepOut[]): void { this.youKeepOut = rects.map((k) => ({ ...k })); }
   /** The You node's place now: inside the wall, clear of the view's controls. */
@@ -553,7 +553,7 @@ export class MonitorScene {
   private spacingAt = -Infinity;
 
   /**
-   * Card 411 (F6): once the forces have nearly cooled, the clusters as drawn are measured and the oval is resized so the
+   * Once the forces have nearly cooled, the clusters as drawn are measured and the oval is resized so the
    * nearest two sit ClusterGap apart (measuredOvalRx), the same every run whatever the start. A small move is not made
    * (SpacingSlack, SpacingShrink), and at most SpacingMoves are made while the clusters hold the same things (twice as
    * many while two overlap), so it comes to rest. It measures only at Team spacing 1, under Auto fit; other spacings
@@ -608,7 +608,7 @@ export class MonitorScene {
   private shifts = new Map<string, { dx: number; dy: number }>();
 
   /**
-   * Card 411 (F6): each hub is held (fx, fy) and eases to its home; the person's drag moves it, and it eases back once let
+   * Each hub is held (fx, fy) and eases to its home; the person's drag moves it, and it eases back once let
    * go. Left to the forces, a hub stopped wherever it was when they cooled to rest, up to 90 px short of its home and
    * differently each run, so the teams' places and gaps changed from run to run.
    */
@@ -643,7 +643,7 @@ export class MonitorScene {
   }
 
   /**
-   * Each team's things as drawn now, as world boxes (card 411): its hub and name pill, its members' discs and names, its
+   * Each team's things as drawn now, as world boxes: its hub and name pill, its members' discs and names, its
    * workflow squares (not their labels) and its code map's folders, files and "+N" nodes. With its hub, by team in lower case.
    */
   private drawnParts(): Map<string, { hub: { x: number; y: number }; boxes: Box[] }> {
@@ -655,7 +655,7 @@ export class MonitorScene {
     for (const n of this.nodes.values()) {
       if (n.kind === 'team') { add(n.team, disc(n.x!, n.y!, n.r)); add(n.team, this.pillBox(n)); }
       else if (n.kind === 'member') {
-        // A name counts as round, as wide as it is (as card 403's spec measures it), so names never meet across the gap.
+        // A name counts as round, as wide as it is (as the team-spacing e2e spec measures it), so names never meet across the gap.
         const b = this.memberNameBox(n);
         add(n.team, disc(n.x!, n.y!, n.r)); add(n.team, disc(b.x + b.w / 2, b.y + b.h / 2, Math.max(b.h / 2, b.w / 2)));
       }
@@ -807,7 +807,7 @@ export class MonitorScene {
     const c = this.ctx;
     const obstacles: LabelObstacle[] = [];
     // The other teams' code maps (a node and its label, as clusters() counts them): a label stays in its own cluster.
-    // Card 411 (F5): every team's own map too, as drawn (a folder's box and, zoomed in, its name; a file's dot).
+    // Every team's own map too, as drawn (a folder's box and, zoomed in, its name; a file's dot).
     const mapNames = k > 0.55;
     c.font = `600 10px ${family}`;
     for (const m of this.mapNodes) {
@@ -828,7 +828,7 @@ export class MonitorScene {
       if (n.kind === 'member') {
         const ring = n.r + 5;
         obstacles.push({ x: n.x! - ring, y: n.y! - ring, w: ring * 2, h: ring * 2 }, this.memberNameBox(n));
-      } else if (n.kind === 'team') obstacles.push(this.pillBox(n)); // card 411 (F3): the hub's name pill, drawn over the labels
+      } else if (n.kind === 'team') obstacles.push(this.pillBox(n)); // the hub's name pill, drawn over the labels
     }
     const asks: LabelAsk[] = [];
     for (const n of this.nodes.values()) {
@@ -927,7 +927,7 @@ export class MonitorScene {
     c.globalCompositeOperation = 'source-over';
     for (const n of this.nodes.values()) if (n.kind === 'member') this.drawMember(c, n, now, motion, dim(n.key));
     this.drawMapNodes(c, now, dim, view);
-    // The workflow nodes over the maps (card 411, F4): a square that sits on its map's folder still shows, and is hit first.
+    // The workflow nodes over the maps: a square that sits on its map's folder still shows, and is hit first.
     const plan = this.wfLabelPlan();
     for (const n of this.nodes.values()) if (n.kind === 'wf') this.drawWorkflowNode(c, n, now, motion, dim(n.key), plan.font, plan.labels.get(n.key) ?? null);
     this.drawCommits(c, now);
@@ -948,7 +948,7 @@ export class MonitorScene {
     this.drawYouNode(c, now, motion);
   }
 
-  // ---------- the workflow nodes (B080) ----------
+  // ---------- the workflow nodes ----------
 
   /** The dashed lines from each workflow node to the members working it (or its hub), a dot running along when worked. */
   private drawWorkflowLines(c: CanvasRenderingContext2D, now: number, motion: number, dim: (k: string) => number): void {
@@ -1026,7 +1026,7 @@ export class MonitorScene {
     c.globalCompositeOperation = 'lighter';
   }
 
-  // ---------- the You node (B080) ----------
+  // ---------- the You node ----------
 
   /** What waits for the person, flying from its member to the You node (screen space); reduced: a still line. */
   private drawToYou(c: CanvasRenderingContext2D, e: Extract<Effect, { kind: 'you' }>, now: number, motion: number): void {
@@ -1061,7 +1061,7 @@ export class MonitorScene {
   private drawYouNode(c: CanvasRenderingContext2D, now: number, motion: number): void {
     if (!this.w || !this.h) return;
     const { x, y, r } = this.youNode();
-    const count = this.model?.needYouItems().length ?? 0; // the header's "N need you" too (B088)
+    const count = this.model?.needYouItems().length ?? 0; // the header's "N need you" too
     const color = Palette.decision;
     // Something just arrived: a ring opens out from it.
     const arrived = this.drawn.filter((e) => e.kind === 'you' && (now - e.at) / this.life(e) > 0.75);
@@ -1801,7 +1801,7 @@ export class MonitorScene {
   }
 
   /**
-   * The map node under a screen point, if any (they are small, so the reach is a few pixels on screen). Card 411 (F4): not
+   * The map node under a screen point, if any (they are small, so the reach is a few pixels on screen). Not
    * when a workflow node in reach is nearer the point, so a square that sits on its map's folder can still be hovered and
    * clicked (mapBeatsWorkflow).
    */
@@ -1870,7 +1870,7 @@ export class MonitorScene {
         }
         return;
       }
-      // The You node sits over the wall: hovering it shows what waits for the person (the view's need-you list, B088);
+      // The You node sits over the wall: hovering it shows what waits for the person (the view's need-you list);
       // the view opens Needs you on its click.
       this.hoverYou = this.hitYouNode(sx, sy);
       if (this.hoverYou) {

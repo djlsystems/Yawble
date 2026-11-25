@@ -1,7 +1,7 @@
-﻿// Prints test-results/b037-audit.ndjson (written by phone-remote.spec.ts) as one block per screen: overflow, off-screen
+// Prints test-results/phone-audit.ndjson (written by phone-remote.spec.ts) as one block per screen: overflow, off-screen
 // and small controls.   node tests/e2e/phone/summary.mjs [screen-filter]
 import { readFileSync } from 'node:fs';
-const r = readFileSync(new URL('../../../test-results/b037-audit.ndjson', import.meta.url), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+const r = readFileSync(new URL('../../../test-results/phone-audit.ndjson', import.meta.url), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 const only = process.argv[2];
 for (const x of r) {
   if (only && !x.screen.includes(only)) continue;

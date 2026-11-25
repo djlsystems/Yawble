@@ -81,7 +81,7 @@ test('real demo: a Claude Manager splits a task between a Claude member and a Gr
     }
     await shot(main, 'workflow-done');
 
-    // Ben's terminal in his pane on the team page (B061): his last run (replay).
+    // Ben's terminal in his pane on the team page: his last run (replay).
     await main.locator('[data-test=agent-Ben] [data-test=member-view-terminal]').click();
     await main.locator('[data-test=agent-Ben] [data-test=member-terminal]').waitFor();
     await main.waitForTimeout(3000);

@@ -5,7 +5,7 @@ import { GIT_PROVIDERS, LINK_PATTERN_KINDS } from '../../../shared/api';
 import { PROVIDER_LABELS } from '../gitWebLinks';
 import BusyLabel from './BusyLabel.vue';
 
-// B075 (card 447): Team settings > Repositories, one repository's provider. The detected provider (read-only), an
+// Team settings > Repositories, one repository's provider. The detected provider (read-only), an
 // override (blank: use the detected one) and an optional link pattern for a self-hosted or unknown host. Save hands
 // both to the dialog, which saves them with teams.setRepo and reads teams.repos again.
 const props = defineProps<{ info: RepoProviderInfo; testId: string; busy: boolean; saving: boolean }>();
@@ -24,7 +24,7 @@ const detected = computed(() => {
   const d = props.info.providerDetected;
   return d ? PROVIDER_LABELS[d] : 'not detected (plain git)';
 });
-// "commit {commit}, branch {branch}, file {commit} {file}, …" from the core's rule (card 446).
+// "commit {commit}, branch {branch}, file {commit} {file}, …" from the core's rule.
 const kindsHint = LINK_PATTERN_KINDS.map((k) => `${k.kind} ${k.placeholders.join(' ')}`).join(', ');
 const changed = computed(() => (provider.value || null) !== (props.info.provider ?? null) || (pattern.value.trim() || null) !== (props.info.linkPattern ?? null));
 const save = () => emit('save', { provider: provider.value || null, linkPattern: pattern.value.trim() || null });

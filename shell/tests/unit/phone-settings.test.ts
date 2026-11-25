@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B054 (card 269): Settings on a phone (below 760 px wide), as measured on an iPhone SE: 375 x 501 in portrait and
+// Settings on a phone (below 760 px wide), as measured on an iPhone SE: 375 x 501 in portrait and
 // 667 x 263 in landscape. The back control stays in reach at the bottom of a long section, a picked skill opens as its
 // own view, nothing inside a section scrolls on its own or sideways, and every text field, select and textarea is at
 // least 16 px and 44 px tall (no zoom on focus). At 1280 px nothing changes.
@@ -317,7 +317,7 @@ describe('the 16 px / 44 px phone rule beats the scoped field sizes of other scr
   });
 });
 
-describe('card 283: a 16 px field is never wider than its container (the Kanban team filter at 360 x 740)', () => {
+describe('a 16 px field is never wider than its container (the Kanban team filter at 360 x 740)', () => {
   const longTeam = 'Yawble Code Browser Team with a much longer name than fits';
   const boardApi = () => ({
     call: async (method: string) => {
@@ -355,7 +355,7 @@ describe('card 283: a 16 px field is never wider than its container (the Kanban 
   });
 });
 
-describe('card 300: a growing field keeps a floor and its row wraps (the decline notes beside their buttons)', () => {
+describe('a growing field keeps a floor and its row wraps (the decline notes beside their buttons)', () => {
   /** `tree` built under `file`'s scope id: [tag, class, children]; returns the elements by data-test. */
   type Node = [string, string, Node[]?, string?];
   function build(file: string, node: Node, parent: Element = document.body, out: Record<string, HTMLElement> = {}) {

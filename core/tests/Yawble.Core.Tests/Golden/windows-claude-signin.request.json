@@ -12,6 +12,7 @@
       "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
       "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
       "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1",
+      "CLAUDE_CODE_TMPDIR=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\tmp",
       "CLAUDE_CODE_USE_POWERSHELL_TOOL=1",
       "CLAUDE_CONFIG_DIR=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home\\.claude",
       "CLAUDE_SECURESTORAGE_CONFIG_DIR=C:\\Users\\alice\\.claude",

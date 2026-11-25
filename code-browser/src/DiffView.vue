@@ -5,7 +5,7 @@ import { normalizeHunks, sideBySide, type DiffWireHunk } from './diff';
 import { useNarrow } from './narrow';
 import './theme.css';
 
-// One file's diff, read-only (B072's Commit view): inline (one column with the old and new line numbers) or side by side
+// One file's diff, read-only (opened from the Commit view): inline (one column with the old and new line numbers) or side by side
 // (old left, new right). Text is highlighted by highlight.js line by line (its escaped HTML only, as CodeLines). A
 // binary or too-large file, or a pure rename, shows the core's summary line instead of any content (git.commitDiff sends no
 // hunks then). A narrow screen starts inline.

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 380 (fault from verify card 356): member pane ⋯ > Remove agent opens the window's confirm (TeamView's remove).
+// Member pane ⋯ > Remove agent opens the window's confirm (TeamView's remove).
 // The menu (v-if) goes on the pick, taking the clicked item with it; the confirm must hand the focus back to the ⋯
 // button on Cancel, Escape or the backdrop - not to <body> - and nothing is removed. OK removes once.
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';

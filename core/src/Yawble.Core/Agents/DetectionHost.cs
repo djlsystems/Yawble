@@ -30,17 +30,93 @@ public sealed record ResolvedProgram(
 /// Path logic and launcher resolution for one host (real or fake), in the target OS's path rules: a Windows host is
 /// resolved with '\', drive roots and case-insensitive names, even when the tests run on Linux.
 /// </summary>
-public sealed partial class DetectionHost(HostEnvironment env, IHostFileSystem fs, ICliProcessRunner runner)
+public sealed partial class DetectionHost(HostEnvironment env, IHostFileSystem fs, ICliProcessRunner runner, ICliProcessRunner? loginShell = null)
 {
     public HostEnvironment Env { get; } = env;
     public IHostFileSystem Fs { get; } = fs;
     public ICliProcessRunner Runner { get; } = runner;
+
+    /// <summary>Runs the person's login shell (macOS/Linux) to read its PATH; null: it is never read.</summary>
+    public ICliProcessRunner? LoginShell { get; } = loginShell;
+
     public PolicyPaths Paths { get; } = new(env.Os, env.Home);
     public TargetOs Os => Env.Os;
     public string Home => Paths.Home;
+
+    /// <summary>
+    /// The host's credential store for presence checks (macOS: the login Keychain, where Claude Code keeps its sign-in).
+    /// Null: the real store of this computer when it is the OS detected, else none (tests give a fake).
+    /// </summary>
+    public Credentials.IHostCredentialReader? CredentialStore { get; init; }
+
+    /// <summary>The Keychain to check: <see cref="CredentialStore"/>, else this Mac's own (only when detecting macOS on a Mac).</summary>
+    public Credentials.IHostCredentialReader Keychain =>
+        CredentialStore ?? (Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? SignInCatalog.Store : new Credentials.NoHostCredentialReader());
     private char Sep => Os == TargetOs.Windows ? '\\' : '/';
 
-    public static DetectionHost ForThisHost() => new(HostEnvironment.Current(), new RealHostFileSystem(), new RealCliProcessRunner());
+    public static DetectionHost ForThisHost() =>
+        new(HostEnvironment.Current(), new RealHostFileSystem(), new RealCliProcessRunner(), new RealCliProcessRunner(scratchHome: false));
+
+    // ------------------------------------------------------------------ login-shell PATH
+
+    public static readonly TimeSpan LoginShellTimeout = TimeSpan.FromSeconds(3);
+
+    /// <summary>Printed on both sides of the PATH, so a profile that prints a banner or motd does not end up in it.</summary>
+    public const string LoginShellMarker = "__YAWBLE_PATH__";
+
+    private readonly object _loginGate = new();
+    private Task<IReadOnlyList<string>?>? _loginPath;
+
+    /// <summary>
+    /// The PATH of the person's login shell (<c>$SHELL -ilc 'printf %s "$PATH"'</c>), on macOS and Linux: a desktop
+    /// launch (Finder, Dock, a .desktop file) gives the core a short PATH without ~/.local/bin and the like, while the
+    /// person's terminal has them. Read once per detection (this host) and shared by every detector. Null on Windows,
+    /// and when it cannot be read: no $SHELL, the shell does not start, times out (<see cref="LoginShellTimeout"/>),
+    /// exits non-zero or prints no PATH.
+    /// </summary>
+    public Task<IReadOnlyList<string>?> LoginShellPathAsync(CancellationToken ct)
+    {
+        lock (_loginGate) return _loginPath ??= ReadLoginShellPathAsync(ct);
+    }
+
+    private async Task<IReadOnlyList<string>?> ReadLoginShellPathAsync(CancellationToken ct)
+    {
+        if (Os == TargetOs.Windows || LoginShell is null) return null;
+        if (Env.Var("SHELL") is not { } shell || RootOf(shell) is null) return null;
+        // fish keeps PATH as a list ("$PATH" joins it with spaces): join it with ':' itself.
+        var value = FileName(shell) == "fish" ? "(string join : $PATH)" : "\"$PATH\"";
+        var script = $"printf '{LoginShellMarker}%s{LoginShellMarker}' {value}";
+        CliProbeResult r;
+        try
+        {
+            r = await LoginShell.RunAsync(new CliProbeCommand(shell, ["-ilc", script], new Dictionary<string, string>(), LoginShellTimeout), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+        if (r.StartError is not null || r.TimedOut || r.ExitCode != 0) return null;
+        var start = r.Stdout.IndexOf(LoginShellMarker, StringComparison.Ordinal);
+        if (start < 0) return null;
+        start += LoginShellMarker.Length;
+        var end = r.Stdout.IndexOf(LoginShellMarker, start, StringComparison.Ordinal);
+        if (end < 0) return null;
+        var dirs = r.Stdout[start..end].Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return dirs.Length == 0 ? null : dirs;
+    }
+
+    /// <summary>
+    /// Whether the person's own terminal finds programs in <paramref name="folder"/>: on Windows the core's PATH says
+    /// (the caller already looked there); on macOS/Linux the login shell's PATH, and when that cannot be read, true:
+    /// no "not on your PATH" warning rather than a false one.
+    /// </summary>
+    public async Task<bool> OnPersonsPathAsync(string folder, CancellationToken ct)
+    {
+        if (Os == TargetOs.Windows) return false;
+        if (await LoginShellPathAsync(ct) is not { } dirs) return true;
+        var canonical = Canonical(folder);
+        return dirs.Any(d => Normalize(d) is { } n && (Paths.Same(n, folder) || Paths.Same(Canonical(n), canonical)));
+    }
 
     // ------------------------------------------------------------------ paths
 

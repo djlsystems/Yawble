@@ -3,11 +3,11 @@ import type { CommitFound } from '../../shared/api';
 import { LOCAL_MARK } from './localMark';
 import { cachedMatches, commitChoice, pickMatches, placeTeam } from './commitResolve';
 
-// B072: the one Commit view any commit ID in the app opens (hand-backs, the board's trail, the Monitor, the Tidy panel,
+// The one Commit view any commit ID in the app opens (hand-backs, the board's trail, the Monitor, the Tidy panel,
 // the Git dialog). One at a time: opening another commit replaces it. teams: where to look, in order; the first team
 // whose repository has the commit is shown (a hand-back in the Concierge does not say its team).
 
-/** repo (B074): the repository a resolved link named, in teams[0] (absent: the team's main repository). */
+/** repo: the repository a resolved link named, in teams[0] (absent: the team's main repository). */
 export interface CommitTarget { teams: string[]; sha: string; repo?: string }
 
 export const commitTarget = shallowRef<CommitTarget | null>(null);
@@ -48,7 +48,7 @@ export function installCommitLinks(doc: Document = document): () => void {
     e.stopPropagation();
     const id = el.dataset.commit ?? '';
     const teams = teamsFor(el);
-    // B074: an ID that names several commits opens the chooser (repository and title); one confirmed by
+    // An ID that names several commits opens the chooser (repository and title); one confirmed by
     // git.commitsResolve opens in the team and repository it was found in, then the usual order.
     if (el.dataset.commitChoose !== undefined) {
       const matches = pickMatches(cachedMatches(id) ?? [], teams, placeTeam(el));

@@ -1,7 +1,7 @@
 import type { CommitRangeRef, DeletePreview, DeletePreviewCommit, MergePreview, TeamGitStatus } from '../../shared/api';
 
-// B073 (card 465): the Git dialog's clickable counts and previews, in words (pure, so each case is tested without
-// mounting). The RPCs are DeveloperTomas's (contract YAWBLE_TEAM_DOCS\B073\contract.md): git.commitRange,
+// The Git dialog's clickable counts and previews, in words (pure, so each case is tested without
+// mounting). The RPCs are the core's: git.commitRange,
 // git.mergePreview, git.mergeDiff and git.deletePreview.
 
 export const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`;

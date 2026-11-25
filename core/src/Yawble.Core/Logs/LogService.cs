@@ -8,12 +8,14 @@ namespace Yawble.Core.Logs;
 /// What the Logs dialog asks for. <paramref name="Member"/> is "Team/Name". <paramref name="From"/> and
 /// <paramref name="To"/> are ISO times (inclusive, compared as text). <paramref name="AsOf"/>: the time the first page
 /// was read, so later pages are of the same list while new entries arrive. <paramref name="App"/>: only the rows about no
-/// team and no member (the activity log's "app" rows, B101); a source without such rows has none.
+/// team and no member (the activity log's "app" rows); a source without such rows has none.
+/// <paramref name="Level"/> (a source with levels: All activity and the Diagnostics log): null or "default" every level but debug; "all"
+/// every level; "error", "warning", "info" or "debug" that level only.
 /// </summary>
 public sealed record LogQuery(
     string Source, string? Team = null, string? Member = null, string? From = null, string? To = null, string? Text = null,
     IReadOnlyDictionary<string, string>? Filters = null, string? Sort = null, bool Descending = true, int Offset = 0,
-    int Limit = 100, string? AsOf = null, bool App = false);
+    int Limit = 100, string? AsOf = null, bool App = false, string? Level = null);
 
 /// <summary>What pruning a source before a cutoff would delete.</summary>
 public sealed record LogPrunePreview(string Source, string Title, string Cutoff, long Count, string? Oldest, string? Newest, string Loss, long Files);
@@ -39,15 +41,15 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         foreach (var s in LogSources.All)
         {
             list.Add(Describe(s.Id, s.Title, s.Group, s.About, s.Columns, s.Prune is not null, s.Prune?.Loss, s.KeptBecause, s.Prune?.DefaultDays,
-                team: s.TeamWhere is not null, member: s.MemberWhere is not null, app: s.AppWhere is not null));
+                team: s.TeamWhere is not null, member: s.MemberWhere is not null, app: s.AppWhere is not null, levels: s.LevelSql is not null));
         }
         foreach (var f in FileLogs.All)
-            list.Add(Describe(f.Id, f.Title, f.Group, f.About, f.Columns, true, f.Loss, null, f.DefaultDays, f.MemberInText, f.MemberInText, false));
+            list.Add(Describe(f.Id, f.Title, f.Group, f.About, f.Columns, true, f.Loss, null, f.DefaultDays, f.MemberInText, f.MemberInText, false, levels: f.Columns.Any(c => c.Key == "fields")));
         return list;
     }
 
     private JsonObject Describe(string id, string title, string group, string about, IReadOnlyList<LogColumn> columns, bool prunable,
-        string? loss, string? kept, int? defaultDays, bool team, bool member, bool app) => new()
+        string? loss, string? kept, int? defaultDays, bool team, bool member, bool app, bool levels) => new()
     {
         ["id"] = id,
         ["title"] = title,
@@ -66,6 +68,8 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         ["member"] = member,
         // The source offers the app filter (logs.query app: true): the activity log's rows about no team and no member.
         ["app"] = app,
+        // The source offers the Level filter (logs.query level) and its rows carry a level; debug is hidden by default.
+        ["levels"] = levels,
     };
 
     private static bool Known(string id) => LogSources.Find(id) is not null || FileLogs.Find(id) is not null;
@@ -86,6 +90,8 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         var sort = s.Columns.FirstOrDefault(col => col.Key == q.Sort) ?? s.Columns[0];
         var dir = q.Descending ? "DESC" : "ASC";
         var select = string.Join(", ", s.Columns.Select(col => $"{col.Sql} AS \"{col.Key}\""));
+        // A source with levels also gives each row's level, after its columns.
+        if (s.LevelSql is not null) select += $", {s.LevelSql} AS level";
         cmd.CommandText = $"SELECT {s.RowId} AS _id, {select} FROM {s.From} WHERE {where} ORDER BY {sort.Sql} {dir}, {s.RowId} {dir} LIMIT @limit OFFSET @offset;";
         cmd.Parameters.AddWithValue("@limit", limit + 1);
         cmd.Parameters.AddWithValue("@offset", offset);
@@ -98,6 +104,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
                 if (rows.Count == limit) { more = true; break; }
                 var row = new JsonObject { ["_id"] = Value(r, 0)?.ToString() };
                 for (var i = 0; i < s.Columns.Count; i++) row[s.Columns[i].Key] = Value(r, i + 1);
+                if (s.LevelSql is not null) row["level"] = Value(r, s.Columns.Count + 1);
                 rows.Add(LogRedaction.Row(row));
             }
         }
@@ -135,6 +142,17 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             else parts.Add($"({s.TeamWhere})");
         }
         if (q.App) parts.Add(s.AppWhere is null ? "0" : $"({s.AppWhere})");
+        // Levels (a source with a level): debug is left out unless asked for ("debug" or "all"); a level picks that one.
+        if (s.LevelSql is not null)
+        {
+            var wanted = q.Level?.Trim().ToLowerInvariant();
+            if (wanted is null or "" or "default") parts.Add($"{s.LevelSql} <> '{LogLevels.Debug}'");
+            else if (wanted != "all")
+            {
+                parts.Add($"{s.LevelSql} = @level");
+                cmd.Parameters.AddWithValue("@level", LogLevels.Normal(wanted));
+            }
+        }
         if (!string.IsNullOrWhiteSpace(q.From)) { parts.Add($"{s.Time} >= @from"); cmd.Parameters.AddWithValue("@from", q.From); }
         if (!string.IsNullOrWhiteSpace(q.To)) { parts.Add($"{s.Time} <= @to"); cmd.Parameters.AddWithValue("@to", q.To); }
         var n = 0;
@@ -204,17 +222,62 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         return list;
     }
 
+    /// <summary>
+    /// The level of a file log's entry: a structured Diagnostics line's own (its fields column), else read from its text;
+    /// a log without a fields column has no levels (null).
+    /// </summary>
+    private static string? LevelOf(FileLogSource f, string[] e, int fieldsIndex, int textIndex)
+    {
+        if (fieldsIndex < 0) return null;
+        if (e[fieldsIndex] is { Length: > 0 } column && DiagFields.Get(DiagFields.Parse(column), DiagFields.LevelKey) is { } level)
+            return LogLevels.Normal(level);
+        return LogLevels.Of(null, textIndex >= 0 ? e[textIndex] : null);
+    }
+
+    /// <summary>
+    /// Whether an entry is about <paramref name="team"/> (and <paramref name="name"/>, when given): a structured line by
+    /// its team and member fields only; an untagged (older) line by naming them in its text.
+    /// </summary>
+    private static bool AboutWho(string[] e, int fieldsIndex, string team, string? name)
+    {
+        if (fieldsIndex >= 0 && e[fieldsIndex] is { Length: > 0 } column)
+        {
+            var (t, m) = DiagFields.TeamMember(DiagFields.Parse(column));
+            if (!string.Equals(t, team, StringComparison.OrdinalIgnoreCase)) return false;
+            return name is null || string.Equals(m, name, StringComparison.OrdinalIgnoreCase);
+        }
+        // A member by its name and its team both named ("Alpha/Ines", "team Alpha: Ines ..."): its bare name would match a
+        // namesake in another team.
+        bool Says(string s) => e.Any(v => v?.Contains(s, StringComparison.OrdinalIgnoreCase) == true);
+        return Says(team) && (name is null || Says(name));
+    }
+
     private JsonObject QueryFile(FileLogSource f, LogQuery q, string asOf, int offset, int limit)
     {
+        var cols = f.Columns.ToList();
+        var fieldsIndex = cols.FindIndex(c => c.Key == "fields");
+        var textIndex = cols.FindIndex(c => c.Key == "text");
         IEnumerable<string[]> rows = f.Read(dataDir).Select(e => e.Fields).Where(e => string.CompareOrdinal(e[0] ?? "", asOf) <= 0);
         if (q.App) rows = [];
+        // Levels (a log with a fields column): debug is left out unless asked for ("debug" or "all"); a level picks that one.
+        if (fieldsIndex >= 0)
+        {
+            var wanted = q.Level?.Trim().ToLowerInvariant();
+            rows = wanted switch
+            {
+                null or "" or "default" => rows.Where(e => LevelOf(f, e, fieldsIndex, textIndex) != LogLevels.Debug),
+                "all" => rows,
+                _ => rows.Where(e => LevelOf(f, e, fieldsIndex, textIndex) == LogLevels.Normal(wanted)),
+            };
+        }
         if (!string.IsNullOrWhiteSpace(q.Member))
         {
-            var name = q.Member[(q.Member.IndexOf('/') + 1)..];
-            rows = f.MemberInText ? rows.Where(e => e.Any(v => v?.Contains(name, StringComparison.OrdinalIgnoreCase) == true)) : [];
+            var slash = q.Member.IndexOf('/');
+            var (team, name) = (q.Member[..Math.Max(0, slash)], q.Member[(slash + 1)..]);
+            rows = f.MemberInText ? rows.Where(e => AboutWho(e, fieldsIndex, team, name)) : [];
         }
         else if (!string.IsNullOrWhiteSpace(q.Team))
-            rows = f.MemberInText ? rows.Where(e => e.Any(v => v?.Contains(q.Team, StringComparison.OrdinalIgnoreCase) == true)) : [];
+            rows = f.MemberInText ? rows.Where(e => AboutWho(e, fieldsIndex, q.Team.Trim(), null)) : [];
         if (!string.IsNullOrWhiteSpace(q.From)) rows = rows.Where(e => string.CompareOrdinal(e[0] ?? "", q.From) >= 0);
         if (!string.IsNullOrWhiteSpace(q.To)) rows = rows.Where(e => string.CompareOrdinal(e[0] ?? "", q.To) <= 0);
         foreach (var (key, value) in q.Filters ?? new Dictionary<string, string>())
@@ -236,6 +299,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         {
             var row = new JsonObject { ["_id"] = $"{offset + i}" };
             for (var k = 0; k < f.Columns.Count; k++) row[f.Columns[k].Key] = e[k];
+            if (fieldsIndex >= 0) row["level"] = LevelOf(f, e, fieldsIndex, textIndex);
             page.Add(LogRedaction.Row(row));
         }
         return Page(page, offset == 0 ? list.Count : null, asOf, offset + limit < list.Count ? offset + limit : null);
@@ -260,13 +324,13 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             string? Str(int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture);
             var source = Str(2) ?? "";
             var key = Str(3);
-            // "Team/Name", "Team/<Team>" (about a team) or "/app" (about the app: no team, member "app"); B101.
+            // "Team/Name", "Team/<Team>" (about a team) or "/app" (about the app: no team, member "app").
             var slash = key?.IndexOf('/') ?? -1;
             var (team, member) = slash >= 0 ? (slash > 0 ? key![..slash] : null, key![(slash + 1)..]) : ((string?)null, (string?)null);
             var ev = Str(4);
             var text = Str(5);
             var message = source == "Messages";
-            var level = message ? LogLevels.OfMessage(ev) : LogLevels.Of(ev, text);
+            var level = LogLevels.OfActivity(source, ev, text);
             list.Add((Str(0) ?? "", new LogTailEntry(Str(1) ?? "", source, level, team, member, ev, text, message && LogLevels.IsWorkflowEvent(ev))));
         }
         return list;
@@ -431,7 +495,10 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         }
         var orphans = ForgetMissingTranscripts();
         if (orphans > 0) done["transcripts"] = done.GetValueOrDefault("transcripts") + orphans;
-        foreach (var (id, n) in done) log?.Invoke($"Logs: pruned {n} {id} entr{(n == 1 ? "y" : "ies")} past their retention");
+        // One line per sweep, at debug (routine).
+        if (done.Count > 0)
+            Diag.Debug("logs", "Logs: pruned " + string.Join(", ", done.Select(d => $"{d.Value} {d.Key} entr{(d.Value == 1 ? "y" : "ies")}")) + " past their retention",
+                [.. done.Select(d => (d.Key, (object?)d.Value))]);
         return done;
     }
 

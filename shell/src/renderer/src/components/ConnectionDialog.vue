@@ -10,7 +10,7 @@ import { errorText, resolveApi } from '../api';
  * a secret box is empty with the masked value as its placeholder, and leaving it empty keeps what is stored. Replace clears it for typing.
  */
 const props = defineProps<{
-  api?: YawbleApi; connection?: Connection | null; startKind?: 'secret' | 'website' | 'oauth';
+  api?: YawbleApi; connection?: Connection | null; startKind?: 'secret' | 'website' | 'oauth' | 'email';
   /** true: only an API key or token can be made here (no kind choice) */ secretOnly?: boolean;
   /** a new website login's site, prefilled (Add website's address) */ startSite?: string;
 }>();
@@ -23,7 +23,9 @@ interface FieldRow { key: string; label: string; secret: boolean; value: string;
 const editing = props.connection ?? null;
 const name = ref(editing?.name ?? '');
 /** 'secret' = an API key or token; 'website' = a login to a website, signed in once in the app's own browser session (no secret here). */
-const kind = ref<'secret' | 'website' | 'oauth'>(editing ? (editing.kind === 'website' ? 'website' : editing.kind === 'oauth' ? 'oauth' : 'secret') : (props.startKind ?? 'secret'));
+const kind = ref<'secret' | 'website' | 'oauth' | 'email'>(editing
+  ? (editing.kind === 'website' || editing.kind === 'oauth' || editing.kind === 'email' ? editing.kind : 'secret')
+  : (props.startKind ?? 'secret'));
 const site = ref(editing?.kind === 'website' ? (editing.fields.find((f) => f.key === 'site')?.shown ?? '') : (props.startSite ?? ''));
 const remote = !!api.remote;
 /** The saved website login, once saved: Sign in and Done need its id. */
@@ -173,8 +175,52 @@ async function saveOAuth() {
   finally { busy.value = false; }
 }
 
+// ---- Email account: a mailbox over IMAP (reading) and SMTP. The password is secret: never received back, empty keeps the stored one.
+/** Gmail's servers; the core's EmailConnection.Gmail has the same values. */
+const GMAIL = { imapHost: 'imap.gmail.com', imapPort: '993', smtpHost: 'smtp.gmail.com', smtpPort: '465' };
+const GMAIL_NOTE = 'Use a Google app password; it needs 2-Step Verification';
+const mailField = (key: string) => editing?.kind === 'email' ? (editing.fields.find((f) => f.key === key)?.shown ?? '') : '';
+const mail = ref({
+  address: mailField('address'), imapHost: mailField('imapHost'), imapPort: mailField('imapPort'),
+  smtpHost: mailField('smtpHost'), smtpPort: mailField('smtpPort'),
+  // a user that is the address is shown as the default (empty), so it follows a new address
+  user: mailField('user') && mailField('user') !== mailField('address') ? mailField('user') : '',
+});
+const mailPassword = ref('');
+const hasMailPassword = editing?.kind === 'email' && !!editing.fields.find((f) => f.key === 'password')?.set;
+const isGmail = computed(() => mail.value.imapHost.trim().toLowerCase() === GMAIL.imapHost || mail.value.smtpHost.trim().toLowerCase() === GMAIL.smtpHost);
+function gmailPreset() { mail.value = { ...mail.value, ...GMAIL }; }
+
+async function saveEmail() {
+  error.value = null;
+  const m = mail.value;
+  if (!m.address.trim()) { error.value = 'Give the email address.'; return; }
+  if (!m.imapHost.trim() || !m.smtpHost.trim()) { error.value = 'Give the IMAP and SMTP servers, or press Gmail.'; return; }
+  const imapPort = Number(m.imapPort), smtpPort = Number(m.smtpPort);
+  if (!Number.isInteger(imapPort) || !Number.isInteger(smtpPort) || imapPort < 1 || smtpPort < 1 || imapPort > 65535 || smtpPort > 65535) {
+    error.value = 'The ports are numbers from 1 to 65535.'; return;
+  }
+  if (!editing && !mailPassword.value) { error.value = 'Give the password.'; return; }
+  if (busy.value) return;
+  busy.value = true; doing.value = 'save';
+  try {
+    const c = await api.call<Connection>('integrations.connectionSave', {
+      kind: 'email',
+      ...(editing ? { id: editing.id } : {}),
+      ...(name.value.trim() ? { name: name.value.trim() } : {}),
+      address: m.address.trim(), imapHost: m.imapHost.trim(), imapPort, smtpHost: m.smtpHost.trim(), smtpPort, user: m.user.trim(),
+      ...(mailPassword.value ? { password: mailPassword.value } : {}),
+    });
+    mailPassword.value = '';
+    emit('saved', c);
+    emit('close');
+  } catch (e) { error.value = errorText(e); }
+  finally { busy.value = false; }
+}
+
 async function save() {
   if (kind.value === 'website') { await saveWebsite(); return; }
+  if (kind.value === 'email') { await saveEmail(); return; }
   error.value = null;
   if (!name.value.trim()) { error.value = 'Give the connection a name.'; return; }
   const used = new Set<string>();
@@ -212,12 +258,51 @@ async function save() {
       <div v-if="!editing && !secretOnly" class="row" data-test="connection-kind">
         <label class="check small"><input v-model="kind" type="radio" value="secret" :disabled="!!savedLogin" data-test="connection-kind-secret" /> API key or token</label>
         <label class="check small"><input v-model="kind" type="radio" value="website" :disabled="!!savedLogin" data-test="connection-kind-website" /> Website login</label>
+        <label class="check small"><input v-model="kind" type="radio" value="email" :disabled="!!savedLogin" data-test="connection-kind-email" /> Email account</label>
         <label v-if="!remote" class="check small"><input v-model="kind" type="radio" value="oauth" data-test="connection-kind-oauth" /> OAuth sign-in</label>
       </div>
       <label class="small block">Name
-        <input v-model="name" :placeholder="kind === 'website' ? 'optional, e.g. Intranet login' : 'e.g. Stripe key'" data-test="connection-name" />
+        <input v-model="name" :placeholder="kind === 'website' ? 'optional, e.g. Intranet login' : kind === 'email' ? 'optional; the address when empty' : 'e.g. Stripe key'" data-test="connection-name" />
       </label>
-      <template v-if="kind === 'oauth'">
+      <template v-if="kind === 'email'">
+        <label class="small block">Email address
+          <input v-model="mail.address" type="email" autocomplete="off" placeholder="name@example.com" data-test="email-address" />
+        </label>
+        <div class="row">
+          <span class="muted small grow">Servers</span>
+          <button data-test="email-preset-gmail" @click="gmailPreset">Gmail</button>
+        </div>
+        <div class="row">
+          <label class="small grow">IMAP server
+            <input v-model="mail.imapHost" class="mono" placeholder="imap.example.com" data-test="email-imap-host" />
+          </label>
+          <label class="small port">Port
+            <input v-model="mail.imapPort" class="mono" inputmode="numeric" placeholder="993" data-test="email-imap-port" />
+          </label>
+        </div>
+        <div class="row">
+          <label class="small grow">SMTP server
+            <input v-model="mail.smtpHost" class="mono" placeholder="smtp.example.com" data-test="email-smtp-host" />
+          </label>
+          <label class="small port">Port
+            <input v-model="mail.smtpPort" class="mono" inputmode="numeric" placeholder="465" data-test="email-smtp-port" />
+          </label>
+        </div>
+        <label class="small block">User name
+          <input v-model="mail.user" autocomplete="off" placeholder="the email address" data-test="email-user" />
+        </label>
+        <label class="small block">Password
+          <input v-model="mailPassword" type="password" autocomplete="off" :placeholder="hasMailPassword ? 'saved; leave empty to keep it' : 'an app password'" data-test="email-password" />
+        </label>
+        <p v-if="isGmail" class="small warn" data-test="email-gmail-note">{{ GMAIL_NOTE }}</p>
+        <p class="muted small">Ports 993 and 465 use TLS; any other port must offer STARTTLS. Test signs in and lists the folders; it sends nothing.</p>
+        <div class="row">
+          <span class="grow" />
+          <button data-test="connection-cancel" @click="emit('close')">Cancel</button>
+          <button class="primary" :disabled="busy" data-test="connection-save" @click="save"><BusyLabel :busy="doing === 'save'" text="Saving…">Save</BusyLabel></button>
+        </div>
+      </template>
+      <template v-else-if="kind === 'oauth'">
         <p v-if="remote" class="muted small" data-test="oauth-remote">Sign in on the computer itself.</p>
         <template v-else>
           <div class="row">
@@ -313,6 +398,8 @@ h3 { margin: 0 0 4px; font-size: 16px; }
 .block { display: block; }
 .grow { flex: 1; min-width: 0; }
 .label { min-width: 120px; }
+.port { width: 90px; }
+.row > label input { display: block; width: 100%; box-sizing: border-box; margin-top: 2px; }
 input { font: inherit; font-size: 13px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; }
 .block input { display: block; width: 100%; box-sizing: border-box; margin-top: 2px; }
 .check { display: flex; gap: 4px; align-items: center; }

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 
@@ -27,6 +28,7 @@ public sealed class BusRelay : IDisposable
             UseProxy = true,
             UseCookies = false,
             AllowAutoRedirect = false,
+            ConnectCallback = (context, ct) => ConnectAsync(context.DnsEndPoint, ct),
         })
         {
             Timeout = TimeSpan.FromMinutes(5),
@@ -79,6 +81,39 @@ public sealed class BusRelay : IDisposable
             await log.WriteLineAsync($"yawble-bridge: the gateway could not be reached: {e.Message}");
             return id is null ? null : Error(id, "the bus could not be reached: " + e.Message);
         }
+    }
+
+    /// <summary>
+    /// Connects to the gateway on a socket of the address's own family. The default connect opens a dual-mode IPv6
+    /// socket and reaches 127.0.0.1 as ::ffff:127.0.0.1, which the macOS sandbox profile's loopback rule does not
+    /// match: every bus call failed "Permission denied (127.0.0.1:port)" while the CLI's own traffic got through.
+    /// </summary>
+    public static async ValueTask<Stream> ConnectAsync(DnsEndPoint endpoint, CancellationToken ct)
+    {
+        var addresses = IPAddress.TryParse(endpoint.Host, out var literal)
+            ? [literal]
+            : (await Dns.GetHostAddressesAsync(endpoint.Host, ct)).OrderBy(a => a.AddressFamily == AddressFamily.InterNetwork ? 0 : 1).ToArray();
+        Exception? last = null;
+        foreach (var address in addresses)
+        {
+            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            try
+            {
+                await socket.ConnectAsync(new IPEndPoint(address, endpoint.Port), ct);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+            catch (SocketException e)
+            {
+                socket.Dispose();
+                last = e;
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+        throw last ?? new SocketException((int)SocketError.HostNotFound);
     }
 
     /// <summary>The JSON text of the message's id (number or string), or null for a notification or unparsable line.</summary>

@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue';
 import type { LogColumn, LogPage, LogPrunePreview, LogSourceInfo, LogWho, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import Modal from './Modal.vue';
 import BusyLabel from './BusyLabel.vue';
 import LoadingNote from './LoadingNote.vue';
 import { useNarrow } from '../narrowScreen';
+import { scriptsApi } from '../scripts/api';
+import type { RunDetail } from '../scripts/types';
+// Loaded when a run is opened: the run view brings the flowchart library with it.
+const ScriptRunView = defineAsyncComponent(() => import('./scripts/ScriptRunView.vue').then((m) => m.default));
 
 /**
  * Logs: every log the app keeps, one at a time, as a table. The source is chosen from a list; the team, the member,
@@ -14,10 +18,11 @@ import { useNarrow } from '../narrowScreen';
  * each log is kept. A cloud viewer reads only. Opened from the sidebar, or from a member's card already filtered to
  * that member's activity.
  */
-const props = defineProps<{ api: YawbleApi; source?: string; team?: string; member?: string }>();
+// `page`: drawn as the app's Logs place (inline, filling it) instead of a dialog; a member's logs stay a dialog.
+const props = defineProps<{ api: YawbleApi; source?: string; team?: string; member?: string; page?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
-/** A phone (B037): each entry is a card of its columns' values (tap for them in full), sorted with a select. */
+/** A phone: each entry is a card of its columns' values (tap for them in full), sorted with a select. */
 const phone = useNarrow();
 const pageSize = 100;
 const sources = ref<LogSourceInfo[]>([]);
@@ -25,8 +30,10 @@ const who = ref<LogWho>({ teams: [], members: [] });
 const sourceId = ref(props.source ?? 'activity');
 const team = ref(props.member ? props.member.slice(0, props.member.indexOf('/')) : props.team ?? '');
 const member = ref(props.member ?? '');
-/** All activity only (B101): the app's own rows (backlog, settings, triggers, link, backups...), no team or member. */
+/** All activity only: the app's own rows (backlog, settings, triggers, link, backups...), no team or member. */
 const app = ref(false);
+/** The Level filter (a source with levels: All activity, Diagnostics): '' every level but debug, 'all', or one level. */
+const level = ref('');
 const filters = reactive<Record<string, string>>({});
 const values = reactive<Record<string, string[]>>({});
 const fromDay = ref('');
@@ -45,7 +52,12 @@ const open = ref<string | null>(null);
 let seq = 0;
 
 const source = computed(() => sources.value.find((s) => s.id === sourceId.value) ?? null);
-const columns = computed<LogColumn[]>(() => source.value?.columns ?? []);
+/** The source's columns; a source with levels shows each row's level after its time. */
+const columns = computed<LogColumn[]>(() => {
+  const list = source.value?.columns ?? [];
+  if (!source.value?.levels) return list;
+  return [...list.slice(0, 1), { key: 'level', label: 'Level', kind: 'text', filter: false }, ...list.slice(1)];
+});
 const filterColumns = computed(() => columns.value.filter((c) => c.filter && !(c.key === 'team' && source.value?.team)));
 const groups = computed(() => {
   const by = new Map<string, LogSourceInfo[]>();
@@ -59,7 +71,7 @@ const wholeTeams = computed(() => (team.value ? [team.value] : who.value.teams))
 const appOffered = computed(() => sourceId.value === 'activity');
 const teamPrefix = 'team:';
 /**
- * The Member filter (B101) picks one of: a member (member=team/Name), a team as a whole (team=X, no member) or the app
+ * The Member filter picks one of: a member (member=team/Name), a team as a whole (team=X, no member) or the app
  * (app=true, no team or member). Picking one clears the others.
  */
 const whoPick = computed<string>({
@@ -78,11 +90,11 @@ const local = computed(() => !props.api.remote);
 const filtersOpen = ref(false);
 /** On a phone Prune… and Retention… fold behind a ⋯ (the bar is then one row in landscape). */
 const actionsOpen = ref(false);
-/** Where the filters go on a phone: the top of the list's scroller (B057). */
+/** Where the filters go on a phone: the top of the list's scroller. */
 const phoneToolsId = `logs-phone-tools-${useId()}`;
 /** How many filters are set (the search box apart): shown on the phone's Filters button. */
-const activeFilters = computed(() => [team.value, member.value, app.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
-const filtered = computed(() => !!(team.value || member.value || app.value || fromDay.value || toDay.value || text.value.trim() || Object.values(filters).some((v) => v)));
+const activeFilters = computed(() => [team.value, member.value, app.value, level.value, fromDay.value, toDay.value, ...Object.values(filters)].filter((v) => !!v).length);
+const filtered = computed(() => !!(team.value || member.value || app.value || level.value || fromDay.value || toDay.value || text.value.trim() || Object.values(filters).some((v) => v)));
 
 function query(offset: number) {
   const f: Record<string, string> = {};
@@ -92,6 +104,7 @@ function query(offset: number) {
     team: source.value?.team && !member.value ? team.value || undefined : undefined,
     member: source.value?.member ? member.value || undefined : undefined,
     ...(app.value && appOffered.value ? { app: true } : {}),
+    ...(level.value && source.value?.levels ? { level: level.value } : {}),
     from: fromDay.value ? `${fromDay.value}T00:00:00` : undefined,
     to: toDay.value ? `${toDay.value}T23:59:59.9999999` : undefined,
     text: text.value.trim() || undefined,
@@ -176,7 +189,7 @@ async function loadValues() {
 }
 
 function clearFilters() {
-  team.value = ''; member.value = ''; app.value = false; fromDay.value = ''; toDay.value = ''; text.value = '';
+  team.value = ''; member.value = ''; app.value = false; level.value = ''; fromDay.value = ''; toDay.value = ''; text.value = '';
   for (const k of Object.keys(filters)) filters[k] = '';
 }
 
@@ -195,7 +208,7 @@ watch(team, () => {
   if (team.value) app.value = false;
 });
 watch([team, member, app], () => { void loadValues(); });
-watch([team, member, app, fromDay, toDay, () => ({ ...filters })], () => { void reload(); }, { deep: true });
+watch([team, member, app, level, fromDay, toDay, () => ({ ...filters })], () => { void reload(); }, { deep: true });
 let typing: ReturnType<typeof setTimeout> | undefined;
 watch(text, () => { clearTimeout(typing); typing = setTimeout(() => void reload(), 300); });
 onBeforeUnmount(() => clearTimeout(typing));
@@ -229,6 +242,24 @@ function when(iso: string): string {
 }
 
 function memberLabel(key: string) { return key.slice(key.indexOf('/') + 1); }
+
+// ------------------------------------------------------------------ a script run's view (Script runs)
+
+/** The Script runs log: its 'run' column is the script run's id, which opens that run's view. */
+const runLinks = computed(() => sourceId.value === 'scripts' && columns.value.some((c) => c.key === 'run'));
+function runIdOf(row: LogPage['rows'][number], c: LogColumn): number | null {
+  if (!runLinks.value || c.key !== 'run') return null;
+  const id = Number(row[c.key]);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+const runView = ref<RunDetail | null>(null);
+const runError = ref<string | null>(null);
+async function openRun(id: number) {
+  runError.value = null;
+  try { runView.value = await scriptsApi(props.api).run(id); }
+  catch (e) { runError.value = errorText(e); }
+}
+watch(sourceId, () => { runView.value = null; runError.value = null; });
 
 // ------------------------------------------------------------------ prune and retention (this computer only)
 
@@ -281,8 +312,8 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 </script>
 
 <template>
-  <Modal title="Logs" full @close="emit('close')">
-    <div class="logs" data-test="logs">
+  <component :is="page ? 'section' : Modal" v-bind="page ? { class: 'logs-page', 'aria-label': 'Logs' } : { title: 'Logs', full: true }" @close="emit('close')">
+    <div class="logs" :class="{ page }" data-test="logs">
       <div class="bar">
         <label class="source">Log
           <select v-model="sourceId" data-test="logs-source">
@@ -326,6 +357,16 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
               <option v-for="t in wholeTeams" :key="t" :value="`${teamPrefix}${t}`" :data-test="`logs-member-team-${t}`">{{ t }} (whole team)</option>
             </optgroup>
             <option v-if="appOffered" value="app" data-test="logs-member-app">app (the app itself)</option>
+          </select>
+        </label>
+        <label v-if="source?.levels">Level
+          <select v-model="level" data-test="logs-level">
+            <option value="">All but debug</option>
+            <option value="error">Errors</option>
+            <option value="warning">Warnings</option>
+            <option value="info">Info</option>
+            <option value="debug">Debug</option>
+            <option value="all">All, debug too</option>
           </select>
         </label>
         <label v-for="c in filterColumns" :key="c.key">{{ c.label }}
@@ -401,7 +442,12 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
         <template v-if="total !== null">{{ total.toLocaleString() }} {{ total === 1 ? 'entry' : 'entries' }}<template v-if="rows.length < total">, {{ rows.length.toLocaleString() }} shown</template></template>
       </p>
 
-      <div ref="scroller" class="scroll" data-test="logs-scroll" @scroll.passive="onScroll">
+      <p v-if="runError" class="error small" data-test="logs-run-error">{{ runError }}</p>
+      <section v-if="runView" class="run" data-test="logs-run">
+        <div class="row"><button type="button" class="ghost" data-test="logs-run-back" @click="runView = null">← Script runs</button></div>
+        <ScriptRunView :run="runView" :api="api" />
+      </section>
+      <div v-show="!runView" ref="scroller" class="scroll" data-test="logs-scroll" @scroll.passive="onScroll">
         <div :id="phoneToolsId" class="phone-tools" data-test="logs-phone-tools"></div>
         <template v-if="phone">
           <ol class="cards" data-test="logs-cards">
@@ -412,7 +458,11 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
                 <template v-for="c in columns" :key="c.key">
                   <template v-if="open === String(r._id) || cell(r, c)">
                     <dt>{{ c.label }}</dt>
-                    <dd :class="c.kind">{{ open === String(r._id) ? (r[c.key] ?? '') : cell(r, c) }}</dd>
+                    <dd :class="c.kind">
+                      <button v-if="runIdOf(r, c)" type="button" class="link" :data-test="`logs-run-link-${runIdOf(r, c)}`" :aria-label="`Open script run ${runIdOf(r, c)}`"
+                        @click.stop="openRun(runIdOf(r, c)!)" @keydown.enter.stop>{{ cell(r, c) }}</button>
+                      <template v-else>{{ open === String(r._id) ? (r[c.key] ?? '') : cell(r, c) }}</template>
+                    </dd>
                   </template>
                 </template>
               </dl>
@@ -432,7 +482,11 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
           <tbody>
             <template v-for="r in rows" :key="String(r._id)">
               <tr class="entry" :class="{ open: open === String(r._id) }" data-test="logs-row" @click="open = open === String(r._id) ? null : String(r._id)">
-                <td v-for="c in columns" :key="c.key" :class="c.kind" :title="r[c.key] === null ? '' : String(r[c.key])">{{ cell(r, c) }}</td>
+                <td v-for="c in columns" :key="c.key" :class="c.kind" :title="r[c.key] === null ? '' : String(r[c.key])">
+                  <button v-if="runIdOf(r, c)" type="button" class="link" :data-test="`logs-run-link-${runIdOf(r, c)}`" :aria-label="`Open script run ${runIdOf(r, c)}`"
+                    @click.stop="openRun(runIdOf(r, c)!)">{{ cell(r, c) }}</button>
+                  <template v-else>{{ cell(r, c) }}</template>
+                </td>
               </tr>
               <tr v-if="open === String(r._id)" class="detail" data-test="logs-detail">
                 <td :colspan="columns.length">
@@ -451,17 +505,21 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
         <button v-else-if="next !== null" type="button" class="mini more" data-test="logs-more" @click="more">Load more</button>
       </div>
     </div>
-  </Modal>
+  </component>
 </template>
 
 <style scoped>
 .logs { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; gap: 8px; }
+.logs-page { flex: 1 1 0; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.logs.page { padding: 12px 16px; }
 .bar, .filters, .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .bar .source select { margin-left: 6px; min-width: 200px; }
 .bar .search { min-width: 200px; }
 .bar button.on { background: var(--hover); }
 /* Prune… and Retention… are the bar's own buttons at desktop width (the wrapper takes no box); on a phone, the ⋯ menu. */
 .actions { display: contents; }
+.run { flex: 1 1 0; min-height: 0; overflow: auto; }
+button.link { background: none; border: 0; padding: 0; color: var(--accent, inherit); text-decoration: underline; cursor: pointer; font: inherit; }
 .filters label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
 .filters select { max-width: 220px; }
 .about { margin: 0; }
@@ -499,9 +557,9 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 .entry-card dt { color: var(--muted); font-weight: 600; }
 .entry-card dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entry-card.open dd { white-space: pre-wrap; word-break: break-word; overflow: visible; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
-/* A phone (B037): the bars wrap into full-width rows, labels over their controls, tap targets 44 px. */
+/* A phone: the bars wrap into full-width rows, labels over their controls, tap targets 44 px. */
 @media (max-width: 759.98px) {
-  /* B057: one row in landscape (Log, Filters, ⋯, search), two in portrait (the search on its own row under them). */
+  /* One row in landscape (Log, Filters, ⋯, search), two in portrait (the search on its own row under them). */
   .bar { position: relative; }
   .bar .source { order: 0; flex: 1 1 180px; min-width: 0; }
   .filters-toggle { order: 1; flex: none; white-space: nowrap; }
@@ -516,7 +574,7 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
   button, select, input { min-height: 44px; box-sizing: border-box; }
   .mini { min-width: 44px; }
   .keep td { display: block; padding: 2px 0; }
-  /* B057: the list fills what the sheet has left (no fixed height); the filters and Sort by scroll away at its top,
+  /* The list fills what the sheet has left (no fixed height); the filters and Sort by scroll away at its top,
      Load more is at its end. */
   .scroll { flex: 1 1 0; min-height: 0; }
   .phone-tools .filters { padding: 8px; border-bottom: 1px solid var(--line); }

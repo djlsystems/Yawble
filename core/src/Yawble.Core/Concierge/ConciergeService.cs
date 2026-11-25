@@ -353,7 +353,8 @@ public sealed class ConciergeService
                 }
                 catch (Exception e) when (e is not OperationCanceledException)
                 {
-                    Console.Error.WriteLine($"concierge: watching failed this time: {e.Message}");
+                    Logs.Diag.Warning("concierge", $"concierge: watching failed this time: {e.GetType().Name}: {e.Message}",
+                        ("check", "watches and due review turns"), ("exception", e.GetType().Name));
                 }
             }
             while (await timer.WaitForNextTickAsync(ct));
@@ -419,7 +420,7 @@ public sealed class ConciergeService
     }
 
     /// <summary>
-    /// An Update the app itself has for the person about a team (B085's expiry warning): posted once, in the newest chat
+    /// An Update the app itself has for the person about a team (a workflow's expiry warning): posted once, in the newest chat
     /// about that team, else the newest chat. False when there is no chat at all (Needs you still shows it).
     /// </summary>
     public bool PostAppUpdate(long teamId, string team, string text, string kind)

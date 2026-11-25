@@ -620,6 +620,9 @@ public static class AgentPresets
                 env["CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL"] = "1";
                 env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false";
                 env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1";
+                // Claude Code keeps its own temp folder (/tmp/claude-<uid>) whatever TMPDIR says; outside the member's
+                // tmp the sandbox refuses it (macOS: "EPERM ... open '/tmp/claude-501'") and the run ends at once.
+                env["CLAUDE_CODE_TMPDIR"] = l.Tmp;
                 // Windows: Claude Code's shell tool needs Git Bash or its PowerShell tool. Git Bash (MSYS2) cannot
                 // start in a ProcessContainer (microsoft/mxc#1061), so the PowerShell tool is used.
                 if (l.Os == TargetOs.Windows) env["CLAUDE_CODE_USE_POWERSHELL_TOOL"] = "1";

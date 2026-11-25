@@ -5,9 +5,11 @@ using Yawble.Core.Scheduling;
 namespace Yawble.Core.Bus;
 
 /// <summary>One team in the team list: its running and queued counts.</summary>
-/// <param name="WorkflowExpiryDays">The team's workflowExpiryDays (B085): an open workflow nobody works expires after this many days.</param>
+/// <param name="WorkflowExpiryDays">The team's workflowExpiryDays: an open workflow nobody works expires after this many days.</param>
+/// <param name="Waiting">How many of the team's members have an open needs_decision (the rule the agent cards use,
+/// OpenDecisionByMember). The team pill says "Waiting on you" while it is above 0 and nothing runs.</param>
 public sealed record TeamSummary(long Id, string Name, string? RepoPath, int Members, int Running, int Queued, bool Paused = false, bool Archived = false,
-    int WorkflowExpiryDays = BusEngine.DefaultWorkflowExpiryDays);
+    int WorkflowExpiryDays = BusEngine.DefaultWorkflowExpiryDays, int Waiting = 0);
 
 /// <summary>The header: global running / limit, and how many wait for a slot across all teams.</summary>
 public sealed record RunSlots(int Running, int Limit, int Queued);
@@ -15,12 +17,18 @@ public sealed record RunSlots(int Running, int Limit, int Queued);
 /// <summary>One agent card: the member, its state, queue position and the last run's outcome. Interactive: the
 /// member holds or waits for an interactive terminal session (not a headless run), so the pane's ✕ may end it.
 /// LastRunFailureClass: the last run's runs.failure_class (stopped, timeout, idle, interrupted, ...; null when it did not
-/// fail): a run the person stopped is recorded failed with class "stopped" and is shown as stopped, not failed (B097).</summary>
+/// fail): a run the person stopped is recorded failed with class "stopped" and is shown as stopped, not failed.
+/// DecisionId: the member's newest unanswered needs_decision (its message seq); while there is one, StatusLine is
+/// "Waiting on you: ..." (BusEngine.WaitingOnYou), not whatever the member reported after it.
+/// WaitState / WaitsFor: with QueuedInstructions, why they have not started (WaitStates: queued, waits-for-run with
+/// the sender's name, held, pending); null when none waits. State: running | idle | one of WaitStates: queued while
+/// the member is in the run queue, else its WaitState when work waits (waits-for-run, held, pending), else idle.</summary>
 public sealed record AgentCard(
     MemberRow Member, string State, int? QueuePosition, int QueueLength, int QueuedInstructions, string? StatusLine,
     long? RunId, string? RunStartedAt, string? LastRunState, string? LastRunReason,
     string? Lease = null, string? LeaseWhat = null, int? LeasePosition = null,
-    bool Interactive = false, string? LastRunFailureClass = null)
+    bool Interactive = false, string? LastRunFailureClass = null, long? DecisionId = null,
+    string? WaitState = null, string? WaitsFor = null)
 {
     /// <summary>The last run ended because the person (or the app on their behalf) stopped it: not a failure to flag.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -76,7 +84,8 @@ public sealed partial class BusEngine
         var manager = m.Role == "manager";
         changes.RecordSubjectChange(manager ? Agents.Profiles.AgentChangeLog.KindManagerAgent : Agents.Profiles.AgentChangeLog.KindMemberAgent,
             manager ? Agents.Profiles.AgentChangeLog.ManagerSubject(m.Team) : Agents.Profiles.AgentChangeLog.MemberSubject(m.Team, m.Name),
-            new Agents.Profiles.AgentSetting("", ""), new Agents.Profiles.AgentSetting(m.Cli, m.Model), how, actor);
+            new Agents.Profiles.AgentSetting("", ""), new Agents.Profiles.AgentSetting(m.Cli, m.Model), how, actor,
+            m.HireRole is { } role ? Agents.Profiles.AgentChangeLog.RoleDetail(role) : null);
     }
 
     private Task<MemberRow> AddMemberCoreAsync(long teamId, string name, string cli, CancellationToken ct) =>
@@ -154,11 +163,15 @@ public sealed partial class BusEngine
             var members = _store.MemberRows();
             return _store.Teams().Select(t =>
             {
-                var ids = members.Where(m => m.TeamId == t.Id).Select(m => m.Id).ToHashSet();
+                var mine = members.Where(m => m.TeamId == t.Id).ToList();
+                var ids = mine.Select(m => m.Id).ToHashSet();
+                // The member cards' rule: a member with an open needs_decision waits on the person.
+                var asking = mine.Count == 0 ? null : OpenDecisionByMember(t.Name);
+                var waiting = asking is null ? 0 : mine.Count(m => asking.ContainsKey($"{m.Team}/{m.Name}"));
                 return new TeamSummary(t.Id, t.Name, t.RepoPath, ids.Count,
                     // An interactive session holds a run slot, so it counts as running.
                     _active.Values.Count(a => ids.Contains(a.Context.Member.Id)) + _sessions.Keys.Count(ids.Contains),
-                    queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived, t.WorkflowExpiryDays ?? DefaultWorkflowExpiryDays);
+                    queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived, t.WorkflowExpiryDays ?? DefaultWorkflowExpiryDays, waiting);
             }).ToArray();
         }, ct);
 
@@ -171,25 +184,33 @@ public sealed partial class BusEngine
             var queue = _store.Queue();
             var unstarted = _store.Pending(started: false);
             var runs = _store.Runs();
+            var held = _store.HeldTeams();
             TidyLease(_store.Clock.GetUtcNow());
-            return _store.MemberRows(teamId).Select(m =>
+            var rows = _store.MemberRows(teamId);
+            // A member with an open needs_decision shows "Waiting on you" (and the decision's id), whatever it said after.
+            var asking = rows.Count == 0 ? new Dictionary<string, Message>(StringComparer.OrdinalIgnoreCase) : OpenDecisionByMember(rows[0].Team);
+            return rows.Select(m =>
             {
                 var lease = LeaseOf(m.Id);
                 var active = _active.Values.FirstOrDefault(a => a.Context.Member.Id == m.Id);
                 var position = RunScheduler.PositionOf(queue, q => q.MemberId == m.Id);
                 var qualified = $"{m.Team}/{m.Name}";
                 var last = runs.Where(r => r.MemberId == m.Id).MaxBy(r => r.Id);
+                var decision = asking.GetValueOrDefault(qualified);
+                var mine = unstarted.Where(p => string.Equals(p.Subscriber, qualified, StringComparison.OrdinalIgnoreCase)).ToList();
+                var (waitState, waitsFor) = mine.Count == 0 ? (null, null) : WaitOf(m.Id, m.TeamId, mine, queue, held);
                 return new AgentCard(m,
                     // A live interactive session holds a slot: the card shows it running (and Stop ends it).
-                    active is not null || _sessions.ContainsKey(m.Id) ? "running" : position is not null ? "queued" : "idle",
+                    // Work not started and not in the run queue says why (waits-for-run, held, pending), as WaitOf does.
+                    active is not null || _sessions.ContainsKey(m.Id) ? "running" : position is not null ? WaitStates.Queued : waitState ?? "idle",
                     position, queue.Count,
-                    unstarted.Count(p => string.Equals(p.Subscriber, qualified, StringComparison.OrdinalIgnoreCase)),
-                    _statusLines.GetValueOrDefault(m.Id),
+                    mine.Count,
+                    decision is not null ? WaitingLine(decision) : _statusLines.GetValueOrDefault(m.Id),
                     active?.Context.RunId,
                     active is null ? null : last?.StartedAt,
                     last?.State, last?.Reason,
                     lease?.State, lease?.What, lease?.Position,
-                    HasSession(m.Id), last?.FailureClass);
+                    HasSession(m.Id), last?.FailureClass, decision?.Seq, waitState, waitsFor);
             }).ToArray();
         }, ct);
 
@@ -229,20 +250,35 @@ public sealed partial class BusEngine
     public Task<IReadOnlyList<Message>> RecentTeamMessagesAsync(string team, int limit, CancellationToken ct = default) =>
         WithGate(() => _store.RecentTeamMessages(team, limit), ct);
 
-    /// <summary>One workflow's messages, oldest first (the board's timeline of a workflow, B086).</summary>
+    /// <summary>One workflow's messages, oldest first (the board's timeline of a workflow).</summary>
     public Task<IReadOnlyList<Message>> WorkflowThreadAsync(long correlation, CancellationToken ct = default) =>
         WithGate(() => _store.Workflow(correlation), ct);
 
-    /// <summary>The runs working now and their quiet stretches so far (B086: live Stalled and Waiting-for-a-slot time).</summary>
+    /// <summary>The runs working now and their quiet stretches so far (live Stalled and Waiting-for-a-slot time).</summary>
     public Task<IReadOnlyList<LiveRunActivity>> LiveActivityAsync(CancellationToken ct = default) =>
         WithGate(() => LiveActivity(_store.Clock.GetUtcNow()), ct);
 
     /// <summary>Under the gate.</summary>
-    /// <remarks>B106: every active run, with its lease waits from the lease's own queue (not only a run with an idle clock).</remarks>
-    private IReadOnlyList<LiveRunActivity> LiveActivity(DateTimeOffset now) =>
-        [.. _active.Values.Select(a => (a.Context, Spans: ActivityOf(a.Context, now)))
+    /// <remarks>Every active run, with its lease waits from the lease's own queue (not only a run with an idle clock).
+    /// And every member in the run queue, once per workflow of its ripe undelivered work, since it joined.</remarks>
+    private IReadOnlyList<LiveRunActivity> LiveActivity(DateTimeOffset now)
+    {
+        List<LiveRunActivity> live = [.. _active.Values.Select(a => (a.Context, Spans: ActivityOf(a.Context, now)))
             .Where(x => x.Spans.Stalls.Count > 0 || x.Spans.Holds.Count > 0)
             .Select(x => new LiveRunActivity(x.Context.Member.Team, x.Context.Member.Name, x.Context.Correlation, x.Spans))];
+        var queue = _store.Queue().Where(q => q.Kind == QueueKinds.Run).ToList();
+        if (queue.Count == 0) return live;
+        var unstarted = _store.Pending(started: false);
+        foreach (var q in queue)
+        {
+            if (_store.Member(q.MemberId) is not { } m) continue;
+            var since = Yawble.Core.Board.BoardStore.Time(q.EnqueuedAt);
+            foreach (var w in unstarted.Where(p => string.Equals(p.Subscriber, m.Qualified, StringComparison.OrdinalIgnoreCase) && Ripe(p))
+                         .Select(p => p.Correlation).Distinct())
+                live.Add(new LiveRunActivity(m.Team, m.Name, w, RunActivitySpans.None, since));
+        }
+        return live;
+    }
 
     /// <summary>The active run of a member, if any (the terminal window attaches to it).</summary>
     public Task<long?> ActiveRunOfAsync(long memberId, CancellationToken ct = default) =>
@@ -265,19 +301,21 @@ public sealed partial class BusEngine
     /// <summary>
     /// The Manager hires a member into its own team: a new agent with its name, CLI and standing
     /// instructions (its job on the team). The name must be free in the team and usable as a folder name; the CLI is
-    /// the Manager's own when none is given. Only a Manager may hire, and only into its own team.
+    /// the Manager's own when none is given. Only a Manager may hire, and only into its own team. When the team has a hire
+    /// list, <paramref name="role"/> must be one of its roles and the agent, model and job are that row's (HireTerms).
     /// </summary>
-    internal async Task<MemberRow> HireAsync(RunContext run, string name, string? cli, string? instructions, CancellationToken ct)
+    internal async Task<MemberRow> HireAsync(RunContext run, string? name, string? cli, string? instructions, CancellationToken ct, string? role = null)
     {
-        var row = await HireCoreAsync(run, name, cli, instructions, ct);
+        var row = await HireCoreAsync(run, name, cli, instructions, role, ct);
         LogFirstAgent(row, Agents.Profiles.AgentChangeLog.HowManagerHire, new Provenance.Actor(Provenance.Actor.Agent, run.Member.Qualified));
         return row;
     }
 
-    private Task<MemberRow> HireCoreAsync(RunContext run, string name, string? cli, string? instructions, CancellationToken ct) =>
+    private Task<MemberRow> HireCoreAsync(RunContext run, string? asked, string? askedCli, string? askedJob, string? role, CancellationToken ct) =>
         WithGate(() => _store.InTransaction(() =>
         {
             if (run.Member.Role != MemberRole.Manager) throw new BusRefusal("not_allowed", "only the Manager hires members");
+            var (name, cli, instructions, model, hireRole) = HireTerms(run.Member.TeamId, asked, askedCli, askedJob, role);
             // The job word alone gets a first name from the person's list; a full name must have an unused first name.
             var (label, given) = HireName(name);
             string trimmed;
@@ -294,8 +332,9 @@ public sealed partial class BusEngine
             var own = _store.MemberRows(memberId: run.Member.Id).Single().Cli;
             var chosen = CheckCli(string.IsNullOrWhiteSpace(cli) ? own : cli.Trim());
             var m = AddMember(run.Member.TeamId, trimmed, MemberRole.Member, chosen, given);
-            if (!string.IsNullOrWhiteSpace(instructions)) _store.UpdateMember(m.Id, chosen, instructions.Trim(), "", "default");
-            Log($"{run.Member.Qualified} hired {m.Qualified} ({chosen})");
+            if (!string.IsNullOrWhiteSpace(instructions) || model.Length > 0) _store.UpdateMember(m.Id, chosen, (instructions ?? "").Trim(), model, "default");
+            if (hireRole is not null) _store.SetHireRole(m.Id, hireRole);
+            Log($"{run.Member.Qualified} hired {m.Qualified} ({chosen}{(hireRole is null ? "" : ", " + hireRole)})");
             return _store.MemberRows(memberId: m.Id).Single();
         }), ct);
 

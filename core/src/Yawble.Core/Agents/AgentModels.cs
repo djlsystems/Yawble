@@ -5,24 +5,43 @@ using Yawble.Core.Policy;
 
 namespace Yawble.Core.Agents;
 
-/// <summary>Where a run's model came from: the member's own setting, the agent's default, or the CLI's own default.</summary>
+/// <summary>
+/// Where a run's model came from: the member's own setting, the agent's default, the model the person's own CLI settings
+/// name (~/.codex/config.toml and the like, <see cref="ICliModelSettings"/>), or the CLI's own default.
+/// </summary>
 public static class ModelSources
 {
-    public const string Member = "member", Agent = "agent", Cli = "cli";
+    public const string Member = "member", Agent = "agent", Settings = "settings", Cli = "cli";
 }
 
 /// <summary>The model a run uses and why. <see cref="Model"/> is empty only for <see cref="ModelSources.Cli"/>: the CLI picks its own.</summary>
 public sealed record ModelResolution(string Model, string Source);
 
-/// <summary>Default model resolution: member override, then the agent's default, then the CLI's default.</summary>
+/// <summary>Default model resolution: member override, then the agent's default, then the CLI settings' model, then the CLI's default.</summary>
 public static class AgentModels
 {
-    public static ModelResolution Resolve(string? memberModel, string? agentDefault)
+    public static ModelResolution Resolve(string? memberModel, string? agentDefault, string? settingsModel = null)
     {
         if (!string.IsNullOrWhiteSpace(memberModel)) return new(memberModel.Trim(), ModelSources.Member);
         if (!string.IsNullOrWhiteSpace(agentDefault)) return new(agentDefault.Trim(), ModelSources.Agent);
+        if (!string.IsNullOrWhiteSpace(settingsModel) && IsValidModel(settingsModel.Trim())) return new(settingsModel.Trim(), ModelSources.Settings);
         return new("", ModelSources.Cli);
     }
+
+    /// <summary>The settings' model, asked only when nothing above it names one (the file is not read otherwise).</summary>
+    public static ModelResolution Resolve(string? memberModel, string? agentDefault, AgentCli cli, ICliModelSettings? settings) =>
+        !string.IsNullOrWhiteSpace(memberModel) || !string.IsNullOrWhiteSpace(agentDefault) || settings is null
+            ? Resolve(memberModel, agentDefault)
+            : Resolve(memberModel, agentDefault, settings.DefaultModel(cli));
+
+    /// <summary>How a resolution is shown: "Agent default (opus)", "Your Codex settings (gpt-6.1-sol)", "The CLI's default".</summary>
+    public static string Label(ModelResolution r, AgentCli cli) => r.Source switch
+    {
+        ModelSources.Agent => $"Agent default ({r.Model})",
+        ModelSources.Settings => $"Your {cli.DisplayName()} settings ({r.Model})",
+        ModelSources.Cli => "The CLI's default",
+        _ => r.Model,
+    };
 
     /// <summary>A model name is passed as one argv item; refuse what is not a plain model id (also what the compiler accepts).</summary>
     public static bool IsValidModel(string model) => model.Length is > 0 and <= 128 && Regex.IsMatch(model, "^[A-Za-z0-9._:/@-]+$");
@@ -84,18 +103,78 @@ public sealed class AgentDefaultsStore(string connectionString, TimeProvider? cl
 }
 
 /// <summary>
-/// The known models per CLI: a list the app carries, never asked of the CLI. Asking ("grok models", "codex models") would
-/// run the CLI on the host, outside the sandbox, with the person's credentials, hidden and automatically;
-/// and none of those commands has been checked against its CLI's own help. A list here may lag the
-/// vendor's: the person can always type any other model name (custom text), which is passed exactly as typed.
+/// The models a picker offers per CLI: the union of four sources, in this order, each model once (the first source that
+/// names it is the one shown):
+/// <list type="number">
+/// <item>the CLI's own listing (<see cref="ICliModelListing"/>: Grok's keeper's last <c>grok models</c>, Codex's models
+/// cache, <c>copilot --help</c>); never a prompt or a sign-in, with a timeout;</item>
+/// <item>the model the person's own CLI settings name (<see cref="ICliModelSettings"/>, read only);</item>
+/// <item>the models this CLI's runs used over the last 90 days (<see cref="IModelsUsed"/>, usage_events);</item>
+/// <item>the built-in list (<see cref="Known"/>).</item>
+/// </list>
+/// A source that fails or is not given adds nothing. The result is kept per CLI for <see cref="CacheFor"/>; a refresh asks
+/// again. The person can still type any other model name (custom text), which is passed exactly as typed.
 /// </summary>
-public sealed class ModelCatalog
+public sealed class ModelCatalog(
+    ICliModelListing? listing = null,
+    ICliModelSettings? settings = null,
+    IModelsUsed? used = null,
+    TimeProvider? clock = null)
 {
-    public sealed record Listing(IReadOnlyList<string> Models, string Source);
+    public static readonly TimeSpan CacheFor = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan RunsWithin = TimeSpan.FromDays(90);
 
-    /// <summary>The list for <paramref name="cli"/>. Pure: starts no process and asks nothing.</summary>
-    public Listing List(AgentCli cli) => new(Known(cli), "app");
+    /// <summary>One model and where it comes from (<see cref="ModelListFrom"/>), with the picker's label for that source.</summary>
+    public sealed record Item(string Model, string From, string FromLabel);
 
+    /// <summary><see cref="Source"/> is the first item's source (the best one that named any model).</summary>
+    public sealed record Listing(IReadOnlyList<string> Models, string Source, IReadOnlyList<Item> Items);
+
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly Lock _lock = new();
+    private readonly Dictionary<AgentCli, (DateTimeOffset At, Listing Listing)> _cache = [];
+
+    /// <summary>The person's CLI settings reader this catalog uses (also for model resolution), or null.</summary>
+    public ICliModelSettings? Settings => settings;
+
+    /// <summary>The list for <paramref name="cli"/>: from the cache when it is younger than <see cref="CacheFor"/>, unless <paramref name="refresh"/>.</summary>
+    public async Task<Listing> ListAsync(AgentCli cli, bool refresh, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow();
+        lock (_lock)
+        {
+            if (!refresh && _cache.TryGetValue(cli, out var hit) && now - hit.At < CacheFor) return hit.Listing;
+        }
+        var items = new List<Item>();
+        void Add(IEnumerable<string>? models, string from)
+        {
+            foreach (var m in models ?? [])
+            {
+                var model = m.Trim();
+                if (!AgentModels.IsValidModel(model) || items.Any(i => string.Equals(i.Model, model, StringComparison.Ordinal))) continue;
+                items.Add(new Item(model, from, ModelListFrom.Label(from, cli)));
+            }
+        }
+        Add(await Safe(async () => listing is null ? null : await listing.ListAsync(cli, ct)), ModelListFrom.Cli);
+        Add(await Safe(() => Task.FromResult<IReadOnlyList<string>?>(settings?.DefaultModel(cli) is { } s ? [s] : null)), ModelListFrom.Settings);
+        Add(await Safe(() => Task.FromResult<IReadOnlyList<string>?>(used?.Used(cli, RunsWithin))), ModelListFrom.Runs);
+        Add(Known(cli), ModelListFrom.Builtin);
+        var result = new Listing([.. items.Select(i => i.Model)], items.Count > 0 ? items[0].From : ModelListFrom.Builtin, items);
+        lock (_lock) _cache[cli] = (now, result);
+        return result;
+
+        async Task<IReadOnlyList<string>?> Safe(Func<Task<IReadOnlyList<string>?>> source)
+        {
+            try { return await source(); }
+            catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                Logs.Diag.Debug("agents", $"a model list source for {cli.Id()} failed: {e.GetType().Name}: {e.Message}");
+                return null;
+            }
+        }
+    }
+
+    /// <summary>The built-in list: the current names, last in the merge (the other sources come first).</summary>
     public static IReadOnlyList<string> Known(AgentCli cli) => cli switch
     {
         AgentCli.Claude => AgentModels.ClaudeModels,
@@ -106,9 +185,9 @@ public sealed class ModelCatalog
         _ => [],
     };
 
-    public static IReadOnlyList<string> CodexModels { get; } = ["gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5.1", "gpt-5", "o3", "o4-mini"];
-    public static IReadOnlyList<string> GrokModels { get; } = ["grok-code-fast-1", "grok-4", "grok-4-fast", "grok-3", "grok-3-mini"];
-    public static IReadOnlyList<string> CopilotModels { get; } = ["claude-sonnet-4.5", "claude-haiku-4.5", "gpt-5", "gpt-5-mini", "gpt-5.1-codex"];
+    public static IReadOnlyList<string> CodexModels { get; } = ["gpt-6.1-sol", "gpt-6.1-terra"];
+    public static IReadOnlyList<string> GrokModels { get; } = ["grok-4.7-build", "grok-4.6-build"];
+    public static IReadOnlyList<string> CopilotModels { get; } = ["mai-code-2-flash"];
     public static IReadOnlyList<string> AntigravityModels { get; } = ["gemini-3-pro", "gemini-2.5-pro", "gemini-2.5-flash"];
 }
 

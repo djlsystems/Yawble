@@ -1,11 +1,11 @@
-// Card 335 (verify card 334, TesterKofi): rotations rotate.spec.ts does not cover, in WebKit on the remote view.
+// Rotations rotate.spec.ts does not cover, in WebKit on the remote view.
 //  - back and forth twice (portrait -> landscape -> portrait -> landscape -> portrait) on a phone and an iPad;
 //  - a rotation with a modal / phone sheet open (#workflow=10, the workflows dialog);
 //  - a rotation with the phone drawer open.
 // After every turn: no horizontal overflow, the app root exactly as tall as the viewport, the layout for the new width
 // (phone below PHONE_BREAKPOINT, the desktop sidebar from it), and an open modal inside the viewport.
 //
-//   npx playwright test rotate-tester      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test rotate-tester      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { devices, expect, test, type Page } from './fixtures';
 import { PHONE_BREAKPOINT } from '../../../src/renderer/src/phone';
 import { buildRenderer, builtDir, fakeRemote } from './server';

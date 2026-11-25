@@ -26,7 +26,7 @@ public sealed class UiRpc(
     Monitor.StepFeed? steps = null,
     Monitor.CodeEvents? codeEvents = null)
 {
-    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "workflows."];
+    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "workflows.", "scripts.", "schemas.", "roles."];
 
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
@@ -34,14 +34,29 @@ public sealed class UiRpc(
     /// <summary>teams.agents' agentModel per card: the model the member's pill names and where the name comes from.</summary>
     public Agents.MemberModels? Models { get; set; }
 
-    /// <summary>The methods here, by prefix, and B085's workflowExtend under its contract name (also bus.workflowExtend).</summary>
+    /// <summary>
+    /// The app's dispatcher as the current caller (RpcDispatcher.DispatchAsAsync), through which a decision option's
+    /// action is applied, so it is the same call Team settings makes and is audited as that call. Unset: this class's own
+    /// methods, unaudited (cores without an audit log).
+    /// </summary>
+    public Func<string, JsonObject?, CancellationToken, Task<JsonNode?>>? Dispatch { get; set; }
+
+    /// <summary>Whether this computer is a Mac: "Allow localhost (macOS)" applies only there. Tests set it.</summary>
+    public Func<bool> IsMacOS { get; set; } = OperatingSystem.IsMacOS;
+
+    /// <summary>The methods here, by prefix, and workflowExtend under its contract name (also bus.workflowExtend).</summary>
     public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method is "workflowExtend";
 
-    /// <summary>B075: { teamId, team (id or name), repo? (an extra's name; absent: main), kind, commit?, branch?, file?, from?, to?, pr? } -> { url: string|null }.</summary>
+    /// <summary>{ teamId, team (id or name), repo? (an extra's name; absent: main), kind, commit?, branch?, file?, from?, to?, pr? } -> { url: string|null }.</summary>
     public const string WebLinkMethod = "git.webLink";
+
+    /// <summary>The script library, schemas, runs and script members ("scripts." and "schemas."); null: not in this core.</summary>
+    public ScriptsRpc? Scripts { get; set; }
 
     public async Task<JsonNode?> DispatchAsync(string method, JsonObject? p, CancellationToken ct)
     {
+        if (ScriptsRpc.Handles(method))
+            return await (Scripts ?? throw new RpcException("unavailable", "scripts are not available in this core")).DispatchAsync(method, p, ct);
         try
         {
             return method switch
@@ -59,6 +74,13 @@ public sealed class UiRpc(
                 "teams.setDefaults" => S(await SetTeamDefaultsAsync(p, ct)),
                 "teams.generateNames" => await GenerateNamesAsync(p, ct),
                 "teams.agents" => await AgentsAsync(Long(p, "teamId"), ct),
+                // Settings > Teams > Roles: the role catalog; Team settings > Hiring: who the team's Manager may hire.
+                "roles.list" => S(await bus.RolesAsync(ct)),
+                "roles.save" => S(await bus.SaveRoleAsync(new RoleRow(OptStr(p, "name") ?? "", OptStr(p, "job") ?? "", OptStr(p, "agent") ?? "", OptStr(p, "model")),
+                    OptStr(p, "originalName"), ct)),
+                "roles.remove" => await Then(bus.RemoveRoleAsync(Str(p, "name"), ct)),
+                "teams.hireList" => S(await bus.HireListAsync(await HireListTeamAsync(p, ct), ct)),
+                "teams.setHireList" => S(await bus.SetHireListAsync(await HireListTeamAsync(p, ct), HireRows(p?["rows"]) ?? [], ct)),
                 "docs.list" => Docs().List(await TeamNameOf(Long(p, "teamId"), ct), OptStr(p, "path")),
                 "docs.read" => Docs().Read(await TeamNameOf(Long(p, "teamId"), ct), Str(p, "path")),
                 "docs.write" => Docs().Write(await TeamNameOf(Long(p, "teamId"), ct), Str(p, "path"), Str(p, "text")),
@@ -78,8 +100,10 @@ public sealed class UiRpc(
                     new TeamResetOptions(Flag(p, "dropWaiting"), Flag(p, "clearHome"), Flag(p, "removeClone"), Flag(p, "clearDocuments")), ct)),
                 "teams.syncToBase" => await SyncSettingAsync(Long(p, "teamId"), p?["on"] is JsonValue sv && sv.TryGetValue<bool>(out var son) ? son : null, ct),
                 "teams.push" => PushSetting(Long(p, "teamId"), p?["on"] is JsonValue pv && pv.TryGetValue<bool>(out var pon) ? pon : null),
-                // B085: { teamId } reads the team's workflowExpiryDays (default 3), { teamId, days: 1-365 } sets it; both return { days }.
+                // { teamId } reads the team's workflowExpiryDays (default 3), { teamId, days: 1-365 } sets it; both return { days }.
                 "teams.workflowExpiry" => await WorkflowExpiryAsync(p, ct),
+                // { teamId } reads "Allow localhost (macOS)" (off by default), { teamId, on } sets it; both return { on }.
+                "teams.localhost" => await LocalhostSettingAsync(p, ct),
                 "teams.env" => S(await bus.TeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
                 "teams.setEnv" => S(await bus.SetTeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), EnvEntries(p), ct)),
                 "teams.approvals" => S(await bus.TeamApprovalsAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
@@ -89,7 +113,7 @@ public sealed class UiRpc(
                 "teams.repos" => await TeamReposListAsync(Long(p, "teamId"), ct),
                 "teams.addRepo" => await AddRepoAsync(Long(p, "teamId"), p, ct),
                 "teams.removeRepo" => await RemoveRepoAsync(Long(p, "teamId"), Str(p, "name"), ct),
-                // B075: a repository's provider override and link pattern (Team settings > Repositories).
+                // A repository's provider override and link pattern (Team settings > Repositories).
                 "teams.setRepo" => await SetRepoAsync(Long(p, "teamId"), p, ct),
                 "git.webLink" => await WebLinkAsync(p, ct),
 
@@ -101,14 +125,17 @@ public sealed class UiRpc(
 
                 "bus.tellManager" => await TellManagerAsync(Long(p, "teamId"), OptStr(p, "text") ?? "", ct, Attachments.Read(p)),
                 "bus.decisions" => await DecisionsAsync(Long(p, "teamId"), ct),
-                "bus.answer" => await AnswerAsync(Long(p, "teamId"), Long(p, "seq"), Str(p, "text"), ct, Attachments.Read(p)),
+                // optionIndex (0-based, optional) picks one of the decision's options: its reply is the answer (text, when
+                // also given, follows it), and its action, if any, is applied first as Team settings would (teams.localhost).
+                "bus.answer" => await AnswerAsync(Long(p, "teamId"), Long(p, "seq"), OptionIndex(p) is not null ? OptStr(p, "text") ?? "" : Str(p, "text"),
+                    ct, Attachments.Read(p), OptionIndex(p)),
                 "bus.workflows" => S(await bus.WorkflowsAsync(await TeamNameOf(Long(p, "teamId"), ct), (int)(OptLong(p, "limit") ?? 30), ct)),
                 "bus.closeWorkflow" => S(await bus.CloseWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), OptStr(p, "reason"), ct)),
                 "bus.stopWorkflow" => new JsonObject { ["stopped"] = await bus.StopWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), ct) },
                 "bus.nudgeWorkflow" => S(await bus.NudgeWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), OptStr(p, "note"), ct)),
-                // B085 Extend: resets an open workflow's idle clock. teamId is optional (the workflow names its team).
+                // Extend: resets an open workflow's idle clock. teamId is optional (the workflow names its team).
                 "workflowExtend" or "bus.workflowExtend" => S(await ExtendAsync(p, ct)),
-                // B104, the Workflows page: every team's workflows, and one in full (reads only; contract B104/contract.md).
+                // The Workflows page: every team's workflows, and one in full (reads only).
                 "workflows.list" => await WorkflowsListAsync(p, ct),
                 "workflows.get" => await WorkflowGetAsync(Long(p, "workflow"), ct),
 
@@ -145,7 +172,7 @@ public sealed class UiRpc(
                     (p?["roles"] as JsonArray ?? []).Select(n => n?.GetValue<string>() ?? ""), Str(p, "body"),
                     p?["teamId"] is JsonValue t && t.TryGetValue<long>(out var team) ? team : null)),
                 "skills.delete" => new JsonObject { ["deleted"] = Catalog().Delete(Long(p, "id")) },
-                // B100: a team skill's kept versions (team_retros: the Manager's retros and the person's edits), newest first; Restore.
+                // A team skill's kept versions (team_retros: the Manager's retros and the person's edits), newest first; Restore.
                 "skills.versions" => S(Catalog().Versions(Long(p, "teamId"), Str(p, "name"))),
                 "skills.restore" => S(Catalog().Restore(Long(p, "id"))),
                 "teams.lessons" => S(Catalog().Lessons(Long(p, "teamId"))),
@@ -166,11 +193,11 @@ public sealed class UiRpc(
                 "git.deleteBranches" => await DeleteBranchesAsync(p, ct),
                 "git.tidyPlan" => await TidyPlanAsync(p, ct),
                 "git.branchRealign" => await BranchRealignAsync(p, ct),
-                // B072, the commit view: reads only.
+                // The commit view: reads only.
                 "git.commitShow" => await CommitShowAsync(p, ct),
                 "git.commitDiff" => await CommitDiffAsync(p, ct),
             "git.commitsResolve" => await CommitsResolveAsync(p, ct),
-                // B073: the commits behind a count, and the previews of Merge to main and Delete: reads only.
+                // The commits behind a count, and the previews of Merge to main and Delete: reads only.
                 "git.commitRange" => await CommitRangeAsync(p, ct),
                 "git.mergePreview" => await MergePreviewAsync(p, ct),
                 "git.mergeDiff" => await MergeDiffAsync(p, ct),
@@ -214,7 +241,8 @@ public sealed class UiRpc(
 
     // ---------------------------------------------------------------- triggers
 
-    private static TriggerDraft TriggerDraftOf(JsonObject? p, bool preview = false)
+    /// <summary>triggers.save's parameters as a draft (also read by the script_trigger_set tool, so both read one shape).</summary>
+    internal static TriggerDraft TriggerDraftOf(JsonObject? p, bool preview = false)
     {
         long? OptLong(string name) => p?[name] is JsonValue v && v.TryGetValue<long>(out var l) ? l : null;
         bool Flag(string name, bool fallback) => p?[name] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : fallback;
@@ -226,7 +254,9 @@ public sealed class UiRpc(
             preview ? "" : Str(p, "instruction"), Flag("onlyWhenIdle", true), Flag("enabled", true),
             OptStr(p, "wakeManager") ?? Triggers.WakeManagerPolicy.OnHandbackOrFailure,
             OptStr(p, "watchRoot") is { } root ? new Triggers.FolderWatch(root, OptStr(p, "watchPath") ?? "", OptStr(p, "watchGlob"),
-                (int)(OptLong("quietSec") ?? Triggers.FolderWatch.DefaultQuietSec)) : null,
+                (int)(OptLong("quietSec") ?? Triggers.FolderWatch.DefaultQuietSec),
+                // "Fire on": absent on a new trigger means added files; absent on an edit keeps the trigger's own.
+                OptStr(p, "fireOn") ?? (OptLong("id") is null ? Triggers.FolderWatch.Added : "")) : null,
             OptStr(p, "eventName"));
     }
 
@@ -247,8 +277,16 @@ public sealed class UiRpc(
     {
         var teams = await bus.TeamsAsync(ct);
         var needsYou = 0;
-        foreach (var t in teams) needsYou += (await bus.OpenDecisionsAsync(t.Name, ct)).Count;
+        var newest = new List<NeedsYouItem>(); // the OS notification names the newest thing waiting and its team
+        foreach (var t in teams)
+        {
+            var open = await bus.OpenDecisionsAsync(t.Name, ct);
+            needsYou += open.Count;
+            foreach (var d in open)
+                newest.Add(new(d.OccurredAt, "question", Bus.DecisionAsk.Read(d.Payload).Headline, t.Name));
+        }
         needsYou += bus.Integrations?.PendingCount() ?? 0; // calls waiting for the person's approval
+        NewestAsks(newest, teams);
         var networkAsks = bus.NetworkAsks?.PendingCount() ?? 0; // hosts agents were refused, waiting for the person (network.asks)
         needsYou += networkAsks;
         var toolAsks = bus.ToolAsks?.PendingCount() ?? 0; // tools agents asked the person to install (tools.asks)
@@ -275,13 +313,56 @@ public sealed class UiRpc(
             ["networkAsks"] = networkAsks,
             ["toolAsks"] = toolAsks,
             ["folderAsks"] = folderAsks,
+            // The newest question or request waiting for the person: { kind, title, team, at }; null when none has a time (or none waits).
+            ["newest"] = newest.OrderByDescending(n => n.At).FirstOrDefault() is { } top
+                ? new JsonObject { ["kind"] = top.Kind, ["title"] = top.Title.Length <= 120 ? top.Title : top.Title[..120] + "…", ["team"] = top.Team, ["at"] = top.At.ToString("O", System.Globalization.CultureInfo.InvariantCulture) }
+                : null,
         };
     }
 
+    private sealed record NeedsYouItem(DateTimeOffset At, string Kind, string Title, string? Team);
+
+    /// <summary>The approvals, network, tool and folder requests waiting for the person, each with its time, kind, short title and team.</summary>
+    private void NewestAsks(List<NeedsYouItem> into, IReadOnlyList<TeamSummary> teams)
+    {
+        string? TeamName(long id) => teams.FirstOrDefault(t => t.Id == id)?.Name;
+        void Add(string at, string kind, string title, string? team)
+        {
+            if (DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var when)) into.Add(new(when, kind, title, team));
+        }
+        try
+        {
+            foreach (var a in bus.Integrations?.Asks(null, pendingOnly: true) ?? [])
+                Add(a.At, "approval", $"{a.Integration} {a.Action ?? (a.Args.Count > 0 ? a.Args[0] : "")}".Trim(), TeamName(a.TeamId));
+            foreach (var a in bus.NetworkAsks?.Asks() ?? []) Add(a.At, "host", a.Host, a.Team);
+            foreach (var a in bus.ToolAsks?.Asks() ?? []) Add(a.At, "tool", a.Tool, a.Team);
+            foreach (var a in bus.FolderAsks?.Asks() ?? []) Add(a.At, "folder", a.Path, a.Team);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException) { /* the counts stand; the notification just names nothing */ }
+    }
+
+    /// <summary>teams.hireList / teams.setHireList name the team as team (its id or name) or teamId.</summary>
+    private async Task<long> HireListTeamAsync(JsonObject? p, CancellationToken ct)
+    {
+        if (OptLong(p, "teamId") is { } id) return id;
+        if (OptLong(p, "team") is { } byId) return byId;
+        var name = OptStr(p, "team") ?? throw new RpcException("bad_params", "team is required");
+        return (await bus.TeamsAsync(ct)).FirstOrDefault(t => string.Equals(t.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))?.Id
+            ?? throw new RpcException("no_such_team", $"there is no team {name}");
+    }
+
+    /// <summary>Hire list rows [{role, agent, model|null}] (null when the field is absent).</summary>
+    private static List<HireListRow>? HireRows(JsonNode? rows) =>
+        rows is JsonArray a
+            ? a.Select(r => new HireListRow(OptStr(r as JsonObject, "role") ?? "", OptStr(r as JsonObject, "agent") ?? "", OptStr(r as JsonObject, "model"))).ToList()
+            : null;
+
     /// <summary>
-    /// teams.create {name, managerName?, managerCli?, members?: [{name, cli}], repoPath? | repoUrl?}. What is not given
-    /// comes from Settings > Teams (the saved Manager, the member rows ticked "On new teams"); a member name that is a
-    /// job word alone gets a first name from the member-name list, or the team is refused before anything is made.
+    /// teams.create {name, managerName?, managerCli?, members?: [{name, cli, model?, role?}], hireList?: [{role, agent, model}],
+    /// repoPath? | repoUrl?}. What is not given comes from Settings > Teams (the saved Manager, the member rows ticked "On new
+    /// teams", the default hire list); a member name that is a job word alone gets a first name from the member-name list,
+    /// or the team is refused before anything is made. A member row's role names it (when it has no name), gives its agent
+    /// (when it has none) and its standing job.
     /// </summary>
     private async Task<JsonNode?> CreateTeamAsync(JsonObject? p, CancellationToken ct)
     {
@@ -289,7 +370,8 @@ public sealed class UiRpc(
         var members = p?["members"] is JsonArray given
             ? given.Select(n => (Name: n?["name"]?.GetValue<string>() ?? "", Cli: n?["cli"]?.GetValue<string>())).ToList()
             : null;
-        var plan = await bus.PlanNewTeamAsync(OptStr(p, "managerName"), OptStr(p, "managerCli"), members, ct);
+        var roles = p?["members"] is JsonArray withRoles ? withRoles.Select(n => OptStr(n as JsonObject, "role")).ToList() : null;
+        var plan = await bus.PlanNewTeamAsync(OptStr(p, "managerName"), OptStr(p, "managerCli"), members, ct, roles, HireRows(p?["hireList"]));
         var repoPath = OptStr(p, "repoPath");
         if (OptStr(p, "repoUrl") is { Length: > 0 } url)
         {
@@ -301,10 +383,33 @@ public sealed class UiRpc(
             catch (ArgumentException e) { throw new RpcException("clone_failed", e.Message); }
         }
         var teamId = await bus.CreatePlannedTeamAsync(name, plan, repoPath, ct);
+        await SetNewTeamModelsAsync(teamId, plan, p, ct);
         return new JsonObject { ["teamId"] = teamId };
     }
 
-    /// <summary>teams.setDefaults {manager?: {name, cli}, members?: [{name, cli, onNewTeams}], memberNamesText?, country?} -> {saved, rejected}.</summary>
+    /// <summary>
+    /// The models chosen in the New team dialog: managerModel, and members[i].model for the i-th member row (the plan keeps
+    /// the rows' order; a job word alone got a first name added, so the row is found by its planned name). A blank model
+    /// leaves the agent's default. Set like Member settings does (members.update), so the change log records it.
+    /// </summary>
+    private async Task SetNewTeamModelsAsync(long teamId, NewTeamPlan plan, JsonObject? p, CancellationToken ct)
+    {
+        static string Key(string n) { try { return Teams.MemberNames.IdFor(n); } catch (ArgumentException) { return n.Trim(); } }
+        var wanted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (p?["members"] is JsonArray given)
+            for (var i = 0; i < given.Count && i < plan.Members.Count; i++)
+                if (OptStr(given[i] as JsonObject, "model")?.Trim() is { Length: > 0 } model) wanted[Key(plan.Members[i].Name)] = model;
+        var managerModel = OptStr(p, "managerModel")?.Trim();
+        if (wanted.Count == 0 && string.IsNullOrEmpty(managerModel)) return;
+        foreach (var row in (await bus.AllMemberRowsAsync(ct)).Where(r => r.TeamId == teamId))
+        {
+            var model = row.Role == "manager" ? managerModel : wanted.GetValueOrDefault(Key(row.Name));
+            if (!string.IsNullOrEmpty(model) && model != row.Model)
+                await bus.UpdateMemberAsync(row.Id, row.Cli, row.Instructions, model, row.Credential, ct);
+        }
+    }
+
+    /// <summary>teams.setDefaults {manager?: {name, cli}, members?: [{name, cli, onNewTeams}], memberNamesText?, country?, hireList?: [{role, agent, model}]} -> {saved, rejected}.</summary>
     private Task<TeamDefaultsSaved> SetTeamDefaultsAsync(JsonObject? p, CancellationToken ct)
     {
         var manager = p?["manager"] is JsonObject m
@@ -315,7 +420,7 @@ public sealed class UiRpc(
                 r?["onNewTeams"] is JsonValue v && v.TryGetValue<bool>(out var on) && on)).ToList()
             : null;
         var text = p?["memberNamesText"] is JsonValue t && t.TryGetValue<string>(out var s) ? s : null;
-        return bus.SetTeamDefaultsAsync(manager, members, text, OptStr(p, "country"), ct);
+        return bus.SetTeamDefaultsAsync(manager, members, text, OptStr(p, "country"), ct, HireRows(p?["hireList"]));
     }
 
     /// <summary>teams.generateNames {country} -> {names}: popular first names of the country from the Concierge's default agent, not saved.</summary>
@@ -340,6 +445,8 @@ public sealed class UiRpc(
             var node = S(card)!.AsObject();
             node["attention"] = Attention(card, asking, reports);
             node["hasClone"] = Code.CodeHost.HasClone(bus.Repos, card.Member);
+            // A script member's tile is the script's (scripts.memberGet), not an agent's.
+            node["kind"] = bus.ScriptMembers?.IsScriptMember(card.Member.Id) == true ? "script" : "agent";
             if (Models is { } models) node["agentModel"] = Agents.MemberModels.Json(models.For(card.Member));
             try
             {
@@ -361,7 +468,7 @@ public sealed class UiRpc(
     /// <summary>
     /// What the member needs from a person, loudest first: "decision" (a question of its is open), "blocked" (its last
     /// report said it is blocked), "failed" (its last run failed), "stopped" (the person stopped its last run: shown
-    /// quietly, not as a failure; B097); null when nothing. The faces' rings show it.
+    /// quietly, not as a failure); null when nothing. The faces' rings show it.
     /// </summary>
     internal static string? Attention(AgentCard card, IReadOnlySet<string> asking, IReadOnlyDictionary<string, Message> reports)
     {
@@ -401,7 +508,7 @@ public sealed class UiRpc(
     }
 
     /// <summary>
-    /// monitor.codeEvents {team?, since?, until?, after?, limit?}: what really reached the team repository (B079,
+    /// monitor.codeEvents {team?, since?, until?, after?, limit?}: what really reached the team repository (see
     /// Monitor/CodeEvents), oldest first: [{id, kind: commit|merge-team|landed|push, team, member?, branch, sha, message,
     /// files: [{path, status, oldPath?}], at, recordedAt, workflowId?, into?, branches?}]. since/until are ISO times
     /// filtering <c>at</c>; after is an id cursor. Without a store there are none.
@@ -443,7 +550,7 @@ public sealed class UiRpc(
             (kind, text) = m.Type switch
             {
                 MessageTypes.Completed => ("completed", Field("reason")),
-                // A run the person stopped is recorded failed with class "stopped": the feed says "stopped" (B097).
+                // A run the person stopped is recorded failed with class "stopped": the feed says "stopped".
                 MessageTypes.Failed => (Field("failureClass") == FailureClasses.Stopped ? "stopped" : "failed", Field("reason")),
                 MessageTypes.Handback => ("handback", Field("delivered")),
                 MessageTypes.Progress => ("progress", Field("status")),
@@ -463,7 +570,7 @@ public sealed class UiRpc(
             ["seq"] = m.Seq, ["kind"] = kind, ["team"] = about.team, ["member"] = about.member, ["from"] = from,
             ["text"] = text, ["workflow"] = m.CorrelationId, ["at"] = m.OccurredAt.ToString("O"),
         };
-        // A run's end row says how it ended (B097): failureClass is null for a completed run.
+        // A run's end row says how it ended: failureClass is null for a completed run.
         if (m.Type is MessageTypes.Failed or MessageTypes.Completed)
             row["failureClass"] = m.Type == MessageTypes.Failed ? Field("failureClass") ?? FailureClasses.Failed : null;
         return row;
@@ -549,7 +656,7 @@ public sealed class UiRpc(
             : new JsonObject { ["plan"] = done.Plan, ["token"] = done.Token, ["empty"] = done.Empty };
     }
 
-    /// <summary>B067: the team of a tidy call, by teamId (as every git RPC) or by its name (team).</summary>
+    /// <summary>The team of a tidy call, by teamId (as every git RPC) or by its name (team).</summary>
     private async Task<(Teams.TeamRepos Repos, TeamSummary Team)> TidyTeamAsync(JsonObject? p, CancellationToken ct)
     {
         if (OptLong(p, "teamId") is { } id) return await GitTeamAsync(id, ct);
@@ -561,7 +668,7 @@ public sealed class UiRpc(
 
     /// <summary>
     /// git.tidyPlan {teamId | team} -> {repos:[{repo, branches:[{name, where:[local|origin|clone:&lt;member&gt;], class, proof?,
-    /// commits?[{sha,subject}], teamSha?, cloneSha?, member?}], notes?}]} (B067). Reads only.
+    /// commits?[{sha,subject}], teamSha?, cloneSha?, member?}], notes?}]}. Reads only.
     /// </summary>
     private async Task<JsonNode?> TidyPlanAsync(JsonObject? p, CancellationToken ct)
     {
@@ -603,7 +710,7 @@ public sealed class UiRpc(
     }
 
     /// <summary>
-    /// git.branchRealign {teamId | team, repo, member, expectOld?, expectNew?} -> {oldSha, newSha, ...} (B067): the window asked
+    /// git.branchRealign {teamId | team, repo, member, expectOld?, expectNew?} -> {oldSha, newSha, ...}: the window asked
     /// the person's yes. Refused with code <c>running</c> while the member runs (or has its interactive session open),
     /// <c>stale</c> when the commits are not the ones shown, and the other refusals' own codes.
     /// </summary>
@@ -637,7 +744,7 @@ public sealed class UiRpc(
     }
 
     /// <summary>
-    /// git.commitShow {team | teamId, sha, repo?} (B072): a commit of the team's repository, read with plain git: what it
+    /// git.commitShow {team | teamId, sha, repo?}: a commit of the team's repository, read with plain git: what it
     /// is, where it is, its files. {found: false, goneReason, sha} when git does not have it. codeShown is true here; the
     /// Cloud Link sets it false when members' code is not shown to cloud viewers (and refuses git.commitDiff).
     /// </summary>
@@ -649,7 +756,7 @@ public sealed class UiRpc(
     }
 
     /// <summary>
-    /// git.commitDiff {team | teamId, sha, path, repo?} (B072): one file's diff in the commit (a merge: against its first
+    /// git.commitDiff {team | teamId, sha, path, repo?}: one file's diff in the commit (a merge: against its first
     /// parent), as hunks of lines for side-by-side and inline views; binary or too large: a summary and no hunks.
     /// Errors: gone (git no longer has the commit), no_such_file (the commit does not change that path).
     /// </summary>
@@ -662,10 +769,9 @@ public sealed class UiRpc(
     }
 
     /// <summary>
-    /// git.commitsResolve {team? | teamId?, ids:[...]} (B074): which of a batch of 7-40 digit hex IDs are commits of the
+    /// git.commitsResolve {team? | teamId?, ids:[...]}: which of a batch of 7-40 digit hex IDs are commits of the
     /// team's repositories (no team: every team's), {max, results:[{id, valid, matches:[{team, teamId, repo, fullId,
     /// shortId, title, pushed}]}], errors?}. At most <see cref="Teams.TeamRepos.MaxResolveIds"/> distinct IDs. Reads only.
-    /// Contract: B074/contract.md in the team's documents.
     /// </summary>
     private async Task<JsonNode?> CommitsResolveAsync(JsonObject? p, CancellationToken ct)
     {
@@ -692,7 +798,7 @@ public sealed class UiRpc(
         return await CommitCallAsync(async () => (await repos.ResolveCommitIdsAsync(teams, ids, ct)).ToJson());
     }
 
-    /// <summary>git.commitRange {team | teamId, repo?, from, to, limit?} (B073): the commits on to that from lacks (the pair a count gives), newest first.</summary>
+    /// <summary>git.commitRange {team | teamId, repo?, from, to, limit?}: the commits on to that from lacks (the pair a count gives), newest first.</summary>
     private async Task<JsonNode?> CommitRangeAsync(JsonObject? p, CancellationToken ct)
     {
         var (repos, team) = await TidyTeamAsync(p, ct);
@@ -702,7 +808,7 @@ public sealed class UiRpc(
         return await CommitCallAsync(async () => S(await repos.GitCommitRangeAsync(team.Id, team.Name, from, to, limit, ct, OptStr(p, "repo")))!.AsObject());
     }
 
-    /// <summary>git.mergePreview {team | teamId, repo?} (B073): what Merge to main would do, its commits and combined diff; nothing moves.</summary>
+    /// <summary>git.mergePreview {team | teamId, repo?}: what Merge to main would do, its commits and combined diff; nothing moves.</summary>
     private async Task<JsonNode?> MergePreviewAsync(JsonObject? p, CancellationToken ct)
     {
         var (repos, team) = await TidyTeamAsync(p, ct);
@@ -715,7 +821,7 @@ public sealed class UiRpc(
         });
     }
 
-    /// <summary>git.mergeDiff {team | teamId, repo?, from, to, path} (B073): one file of a merge preview's combined diff, shaped as git.commitDiff.</summary>
+    /// <summary>git.mergeDiff {team | teamId, repo?, from, to, path}: one file of a merge preview's combined diff, shaped as git.commitDiff.</summary>
     private async Task<JsonNode?> MergeDiffAsync(JsonObject? p, CancellationToken ct)
     {
         var (repos, team) = await TidyTeamAsync(p, ct);
@@ -725,7 +831,7 @@ public sealed class UiRpc(
         return await CommitCallAsync(async () => (await repos.GitMergeDiffAsync(team.Id, team.Name, from, to, path, ct, OptStr(p, "repo"))).ToJson());
     }
 
-    /// <summary>git.deletePreview {team | teamId, repo?, branch} (B073): what deleting the local branch loses.</summary>
+    /// <summary>git.deletePreview {team | teamId, repo?, branch}: what deleting the local branch loses.</summary>
     private async Task<JsonNode?> DeletePreviewAsync(JsonObject? p, CancellationToken ct)
     {
         var (repos, team) = await TidyTeamAsync(p, ct);
@@ -777,6 +883,21 @@ public sealed class UiRpc(
         var repos = bus.Repos ?? throw new RpcException("unavailable", "team repositories need the app's data folder");
         if (on is { } v) repos.SetPushesToOrigin(teamId, v);
         return new JsonObject { ["on"] = repos.PushesToOrigin(teamId), ["origin"] = repos.RepoOf(teamId)?.Path };
+    }
+
+    /// <summary>
+    /// teams.localhost: reads, or sets with "on" (true or false; anything else is refused), the team's "Allow localhost
+    /// (macOS)". A set is audited and is a full-access change (RemoteAccess: refused for a Visitor).
+    /// </summary>
+    private async Task<JsonNode> LocalhostSettingAsync(JsonObject? p, CancellationToken ct)
+    {
+        bool? on = null;
+        if (p?["on"] is { } raw)
+        {
+            if (raw is not JsonValue v || !v.TryGetValue<bool>(out var b)) throw new RpcException("bad_request", "on must be true or false");
+            on = b;
+        }
+        return new JsonObject { ["on"] = await bus.TeamLocalhostAsync(await TeamNameOf(Long(p, "teamId"), ct), on, ct) };
     }
 
     /// <summary>
@@ -835,7 +956,7 @@ public sealed class UiRpc(
     }
 
     /// <summary>
-    /// B075's fields of a repository (card 447's contract): provider = the person's OVERRIDE (null: detected),
+    /// A repository's provider fields: provider = the person's OVERRIDE (null: detected),
     /// providerDetected = what the origin says, linkPattern, prSupported and prUnavailable (why not, or null).
     /// </summary>
     private static void AddHost(JsonObject o, Teams.RepoHostView h)
@@ -868,7 +989,7 @@ public sealed class UiRpc(
         return await MainRepoJsonAsync(repos, teamId, ct) ?? new JsonObject();
     }
 
-    /// <summary>git.webLink (B075): the web address of a commit, branch, file, compare or pull request, or { url: null }.</summary>
+    /// <summary>git.webLink: the web address of a commit, branch, file, compare or pull request, or { url: null }.</summary>
     private async Task<JsonNode?> WebLinkAsync(JsonObject? p, CancellationToken ct)
     {
         // team: the team's id or its name (teamId also taken).
@@ -957,12 +1078,12 @@ public sealed class UiRpc(
             .Select(e => new KeyValuePair<string, string>((e["name"]?.GetValue<string>() ?? "").Trim(), e["value"]?.GetValue<string>() ?? ""))
             .Where(e => e.Key.Length > 0).ToList();
 
-    // ---------------------------------------------------------------- B104: the Workflows page
+    // ---------------------------------------------------------------- the Workflows page
 
     /// <summary>How many of a workflow's messages workflows.get gives (newest first).</summary>
     public const int WorkflowMessages = 30;
 
-    /// <summary>workflows.list {teamId?, q?, state?, limit?}: {workflows, counts, truncated, backlog, now} (contract B104/contract.md).</summary>
+    /// <summary>workflows.list {teamId?, q?, state?, limit?}: {workflows, counts, truncated, backlog, now}.</summary>
     private async Task<JsonNode> WorkflowsListAsync(JsonObject? p, CancellationToken ct)
     {
         if (p?["limit"] is JsonValue lv && !WholeNumber(lv, out _)) throw new RpcException("bad_params", "limit must be a number");
@@ -980,7 +1101,7 @@ public sealed class UiRpc(
         };
     }
 
-    /// <summary>workflows.get {workflow}: {workflow, cards, messages, spec, backlog} (contract B104/contract.md).</summary>
+    /// <summary>workflows.get {workflow}: {workflow, cards, messages, spec, backlog}.</summary>
     private async Task<JsonNode> WorkflowGetAsync(long workflow, CancellationToken ct)
     {
         var board = bus.Board;
@@ -1016,7 +1137,7 @@ public sealed class UiRpc(
         };
     }
 
-    /// <summary>A WorkflowRow on the wire: bus.workflows' summary fields, then B104's own.</summary>
+    /// <summary>A WorkflowRow on the wire: bus.workflows' summary fields, then the Workflows page's own.</summary>
     internal static JsonObject WorkflowRowJson(WorkflowRow r)
     {
         var node = S(r.Summary)!.AsObject();
@@ -1027,7 +1148,8 @@ public sealed class UiRpc(
         node["waitingFor"] = r.WaitingFor;
         node["working"] = r.Working;
         node["item"] = r.Item is { } i ? new JsonObject { ["label"] = i.Label, ["title"] = i.Title, ["archived"] = i.Archived } : null;
-        node["members"] = new JsonArray([.. r.Members.Select(m => (JsonNode)new JsonObject { ["id"] = m.Id, ["name"] = m.Name, ["state"] = m.State })]);
+        // State is running | lease | queued | waits-for-run | held | pending; waitsFor names the sender with waits-for-run.
+        node["members"] = new JsonArray([.. r.Members.Select(m => (JsonNode)new JsonObject { ["id"] = m.Id, ["name"] = m.Name, ["state"] = m.State, ["waitsFor"] = m.WaitsFor })]);
         return node;
     }
 
@@ -1093,41 +1215,139 @@ public sealed class UiRpc(
     private async Task<JsonNode?> DecisionsAsync(long teamId, CancellationToken ct)
     {
         var team = (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId) ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
-        // B085: the question a workflow about to expire waits on carries the warning (its Needs-you line) and when it expires.
+        // The question a workflow about to expire waits on carries the warning (its Needs-you line) and when it expires.
         var warnings = await bus.ExpiryWarningsAsync(team.Name, ct);
         var list = new JsonArray();
         foreach (var m in await bus.OpenDecisionsAsync(team.Name, ct))
         {
-            string? question = null;
-            try { question = JsonNode.Parse(m.Payload)?["question"]?.GetValue<string>(); } catch (JsonException) { }
-            list.Add(new JsonObject
+            var ask = DecisionAsk.Read(m.Payload);
+            var row = new JsonObject
             {
                 ["seq"] = m.Seq,
                 ["from"] = m.Source[(m.Source.IndexOf('/') + 1)..],
-                ["question"] = question ?? m.Payload,
+                ["question"] = ask.Question,
+                // The decision in one plain sentence, the answers as buttons, the findings (Markdown). Null / absent
+                // for a question-only ask.
+                ["summary"] = ask.Summary,
+                ["details"] = ask.Details,
                 ["workflow"] = m.CorrelationId,
                 ["at"] = m.OccurredAt.ToString("O"),
                 ["expiresAt"] = warnings.TryGetValue(m.CorrelationId, out var warning) && warning.Question == m.Seq ? warning.ExpiresAt.ToString("O") : null,
                 ["expiryWarning"] = warning is not null && warning.Question == m.Seq ? warning.Text : null,
-            });
+            };
+            if (ask.Options is { } options) row["options"] = OptionsJson(options);
+            list.Add(row);
         }
         return list;
     }
 
-    /// <summary>The person's answer joins the asker's workflow: an instruction to the asker, caused by the question.</summary>
-    private async Task<JsonNode?> AnswerAsync(long teamId, long seq, string text, CancellationToken ct, IReadOnlyList<(string Name, byte[] Bytes)>? images = null)
+    /// <summary>
+    /// bus.decisions' options: [{ label, reply, action?, actionAvailable?, actionUnavailableReason? }]. An option with an
+    /// action says whether this caller may apply it and, when not, why in plain words (the shell disables its button).
+    /// </summary>
+    private JsonArray OptionsJson(IReadOnlyList<DecisionOption> options) => new(options.Select(o =>
+    {
+        var node = new JsonObject { ["label"] = o.Label, ["reply"] = o.Reply };
+        if (o.Action is { } action)
+        {
+            var reason = ActionUnavailable(action);
+            node["action"] = action;
+            node["actionAvailable"] = reason is null;
+            node["actionUnavailableReason"] = reason;
+        }
+        return (JsonNode?)node;
+    }).ToArray());
+
+    /// <summary>What a Visitor reads on an option whose action they cannot apply.</summary>
+    public const string VisitorActionReason = "Only a workgroup Member or an Owner can change this; you are a Visitor";
+
+    /// <summary>What a caller that is not the person (the Concierge, a companion, an agent, a trigger) reads.</summary>
+    public const string NotThePersonActionReason = "Only the person can pick this, in the app";
+
+    public const string MacOnlyActionReason = "Only on macOS: Allow localhost applies to runs on a Mac";
+
+    /// <summary>
+    /// Null when the current caller may apply a decision action here; otherwise why not. The rights are those of the call the
+    /// action makes (teams.localhost with on: a full-access change, RemoteAccess refuses it for a Visitor), and only the person
+    /// answers: the window (Via App) or a full cloud viewer. "Allow localhost (macOS)" applies only on a Mac.
+    /// </summary>
+    internal string? ActionUnavailable(string action)
+    {
+        var actor = Provenance.Actor.Current;
+        if (actor is { Via: Provenance.Actor.Cloud, ReadOnly: true }) return VisitorActionReason;
+        if (actor is not { Via: Provenance.Actor.App or Provenance.Actor.Cloud }) return NotThePersonActionReason;
+        return action switch
+        {
+            DecisionActions.AllowLocalhostMac => IsMacOS() ? null : MacOnlyActionReason,
+            DecisionActions.CloseOverFail => null, // The person's yes; the bus records it on the answer
+            _ => "The app does not know this action",
+        };
+    }
+
+    /// <summary>bus.answer's optionIndex: absent, or a whole number (anything else is refused).</summary>
+    private static int? OptionIndex(JsonObject? p) => p?["optionIndex"] switch
+    {
+        null => null,
+        JsonValue v when WholeNumber(v, out var l) && l is >= 0 and <= int.MaxValue => (int)l,
+        _ => throw new RpcException("bad_params", "optionIndex must be the option's number, from 0"),
+    };
+
+    /// <summary>
+    /// The person's answer joins the asker's workflow: an instruction to the asker, caused by the question. With
+    /// <paramref name="optionIndex"/>, the answer is that option's reply (then <paramref name="text"/>, when given and
+    /// different); an option with an action applies it through the app's dispatcher, the same call as Team settings
+    /// (teams.localhost on, audited as that call), only after every check that can refuse the answer has passed and the
+    /// decision is claimed (BusEngine.PersonAnswerAsync), so a refused or second answer changes nothing. A caller who may
+    /// not apply it is refused and nothing is sent; an action that fails sends nothing either.
+    /// </summary>
+    private async Task<JsonNode?> AnswerAsync(long teamId, long seq, string text, CancellationToken ct, IReadOnlyList<(string Name, byte[] Bytes)>? images = null,
+        int? optionIndex = null)
     {
         var team = (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId) ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
         var question = (await bus.OpenDecisionsAsync(team.Name, ct)).SingleOrDefault(m => m.Seq == seq)
-            ?? throw new RpcException("no_such_decision", "that question is answered already or is not this team's");
+            ?? throw new RpcException("no_such_decision", BusEngine.AnsweredAlready);
         var asker = question.Source[(question.Source.IndexOf('/') + 1)..];
-        if (images is { Count: > 0 })
+        string? action = null;
+        if (optionIndex is { } index)
         {
-            var repos = bus.Repos ?? throw new RpcException("unavailable", "images need the app's data folder");
-            text = Attachments.WithImages(text, Attachments.Save(Path.Combine(repos.TeamRoot(team.Name), Teams.TeamDocuments.Folder), images));
+            var options = DecisionAsk.Read(question.Payload).Options;
+            if (options is null || index >= options.Count)
+                throw new RpcException("bad_params", options is null ? "this question has no options" : $"optionIndex must be 0 to {options.Count - 1}");
+            var option = options[index];
+            // The text is what the person typed besides the option (the shell sends only that); the reply comes first, once.
+            text = text.Trim().Length == 0 || text.Trim() == option.Reply ? option.Reply : option.Reply + "\n\n" + text.Trim();
+            action = option.Action;
+            if (action is not null && ActionUnavailable(action) is { } reason) throw new RpcException("forbidden", reason);
         }
-        var message = await bus.PersonTellAsync(team.Name, asker, text.Trim(), seq, ct);
-        return new JsonObject { ["seq"] = message.Seq };
+        var repos = images is { Count: > 0 } ? bus.Repos ?? throw new RpcException("unavailable", "images need the app's data folder") : null;
+        // The bus checks the answer (archived team, depth, still open, not being answered by another call) and
+        // claims the decision before anything changes; the images are saved and the action applied only then, and the
+        // reply is published right after. A refusal anywhere before leaves the setting as it was.
+        var message = await bus.PersonAnswerAsync(team.Name, asker, text, seq, async (body, c) =>
+        {
+            if (repos is not null) body = Attachments.WithImages(body, Attachments.Save(Path.Combine(repos.TeamRoot(team.Name), Teams.TeamDocuments.Folder), images!));
+            if (action is not null) await ApplyActionAsync(action, teamId, c);
+            return body;
+        }, ct, action);
+        var result = new JsonObject { ["seq"] = message.Seq };
+        if (action is not null) result["applied"] = action;
+        return result;
+    }
+
+    /// <summary>A decision action, as the setting's own call (so its rights check and audit are the setting's).</summary>
+    private async Task ApplyActionAsync(string action, long teamId, CancellationToken ct)
+    {
+        var dispatch = Dispatch ?? ((m, p, c) => DispatchAsync(m, p, c));
+        switch (action)
+        {
+            case DecisionActions.AllowLocalhostMac:
+                await dispatch("teams.localhost", new JsonObject { ["teamId"] = teamId, ["on"] = true }, ct);
+                break;
+            case DecisionActions.CloseOverFail:
+                break; // No setting changes; BusEngine.PersonAnswerAsync records the yes on the answer
+            default:
+                throw new RpcException("bad_params", $"the app does not know the action '{action}'");
+        }
     }
 
     // ---------------------------------------------------------------- policy
