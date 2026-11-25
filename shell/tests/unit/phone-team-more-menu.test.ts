@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // On a phone the team page's ⋯ menu lists Documents, Workflows, Triggers, Git and Settings, in that order,
-// each with an icon of the same size (no emoji); Documents and Workflows open their dialogs and close the menu. The
+// each with an icon of the same size (no emoji); Documents opens its dialog, Workflows the Workflows page filtered to the team,
+// and both close the menu. The
 // menu stays on screen at 375 px and sits above the member panes. The desktop header is unchanged.
 // A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -9,6 +10,7 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
+import { workflowsRequest } from '../../src/renderer/src/workflows/page';
 import { PHONE_BREAKPOINT, PHONE_QUERY } from '../../src/renderer/src/phone';
 import type { TeamSummary, YawbleApi } from '../../src/shared/api';
 
@@ -26,7 +28,7 @@ beforeEach(() => {
   applyRemoteAccess('full');
 });
 let wrappers: VueWrapper[] = [];
-afterEach(() => { for (const w of wrappers) w.unmount(); wrappers = []; document.body.innerHTML = ''; });
+afterEach(() => { for (const w of wrappers) w.unmount(); wrappers = []; workflowsRequest.value = null; document.body.innerHTML = ''; });
 
 const team = { id: 1, name: 'payments', repoPath: null, members: 2, running: 0, queued: 0 } as TeamSummary;
 function fakeApi(): YawbleApi {
@@ -69,7 +71,7 @@ describe('the team ⋯ menu on a phone', () => {
     expect(icon).toContain(`workflow: '${d(1)}'`);
   });
 
-  it('Documents and Workflows each close the menu and open their dialog', async () => {
+  it('Documents closes the menu and opens its dialog; Workflows closes it and opens the Workflows page for the team, no dialog', async () => {
     const w = await mountTeam();
     await w.get('[data-test=team-more]').trigger('click');
     await w.get('[data-test=open-documents-menu]').trigger('click');
@@ -83,7 +85,16 @@ describe('the team ⋯ menu on a phone', () => {
     await w.get('[data-test=open-workflows-menu]').trigger('click');
     await flushPromises();
     expect(w.find('[data-test=team-more-menu]').exists()).toBe(false);
-    expect(dialogTitles()).toEqual(['payments · workflows']);
+    expect(dialogTitles()).toEqual([]);
+    expect(workflowsRequest.value).toMatchObject({ teamId: 1 });
+    expect(workflowsRequest.value?.workflow ?? null).toBeNull();  });
+
+  it('the Workflows item is still labelled Workflows and its tooltip says it opens the Workflows page', async () => {
+    const w = await mountTeam();
+    await w.get('[data-test=team-more]').trigger('click');
+    const b = w.get('[data-test=open-workflows-menu]');
+    expect(b.text()).toBe('Workflows');
+    expect(b.attributes('title')).toMatch(/Workflows page/);
   });
 
   it('the menu CSS: 44 px rows with one gap, left-aligned, kept on screen and above the member panes', () => {

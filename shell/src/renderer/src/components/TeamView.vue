@@ -22,7 +22,6 @@ import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 import GitDialog from './GitDialog.vue';
-import WorkflowsDialog from './WorkflowsDialog.vue';
 import TeamManageDialog from './TeamManageDialog.vue';
 import DocumentsDialog from './DocumentsDialog.vue';
 import CodeDialog from './CodeDialog.vue';
@@ -33,6 +32,7 @@ import { renderMarkdown } from '../markdown';
 import { decisionLayout, questionMarkdown, type DecisionButton } from '../questionFormat';
 import { useImageAttachments } from '../imageAttachments';
 import { useNarrow } from '../narrowScreen';
+import { openWorkflowsPage } from '../workflows/page';
 
 // A team's agent list: the Tell Manager box, open needs_decision questions, the cards, and Add agent.
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number }>();
@@ -73,7 +73,6 @@ watch(gitRequest, (r) => {
   showGit.value = true;
   gitRequest.value = null;
 }, { immediate: true });
-const showWorkflows = ref(false);
 const showManage = ref(false);
 const showDocs = ref(false);
 /** The Add form's CLI choice also offers a script member (its own form: script, version, settings, bindings). */
@@ -261,15 +260,10 @@ onBeforeUnmount(() => {
   memberAvailableWidth.value = Infinity;
 });
 
-/** Opens the Workflows dialog (the Monitor opens a team here when a workflow node is clicked). */
-const workflowFocus = ref<number | null>(null);
-/** Opens the team's workflows, with one of them selected when given (a workflow clicked on the Monitor). */
-function openWorkflows(workflow?: number) { workflowFocus.value = workflow ?? null; showWorkflows.value = true; }
-
 /** Opens the team's documents (on a phone the drawer's Documents item does: the header has no button for it). */
 function openDocuments() { showDocs.value = true; }
 
-defineExpose({ refresh, openWorkflows, openDocuments });
+defineExpose({ refresh, openDocuments });
 </script>
 
 <template>
@@ -292,7 +286,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
           <button class="hbtn" data-test="team-more" title="More" aria-label="More team actions" aria-haspopup="menu" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen"><Icon name="more" :size="18" /></button>
           <span v-if="moreOpen" class="menu" role="menu" data-test="team-more-menu">
             <button role="menuitem" data-test="open-documents-menu" @click="moreOpen = false; openDocuments()"><Icon name="docs" :size="18" />Documents</button>
-            <button role="menuitem" data-test="open-workflows-menu" @click="moreOpen = false; openWorkflows()"><Icon name="workflow" :size="18" />Workflows</button>
+            <button role="menuitem" data-test="open-workflows-menu" title="Opens the Workflows page with this team's workflows" @click="moreOpen = false; openWorkflowsPage({ teamId: team.id })"><Icon name="workflow" :size="18" />Workflows</button>
             <button role="menuitem" data-test="open-triggers" @click="moreOpen = false; showTriggers = true"><Icon name="clock" :size="18" />Triggers</button>
             <button role="menuitem" data-test="open-git" @click="moreOpen = false; showGit = true"><Icon name="branch" :size="18" />Git</button>
             <button role="menuitem" data-test="open-manage" @click="moreOpen = false; showManage = true"><Icon name="settings" :size="18" />Settings</button>
@@ -301,7 +295,7 @@ defineExpose({ refresh, openWorkflows, openDocuments });
       </div>
       <div v-else class="actions">
         <button data-test="open-documents" title="What the team writes for you, and what you add" @click="openDocuments"><Icon name="docs" :size="14" /> Documents</button>
-        <button data-test="open-workflows" title="The team's pieces of work: nudge, stop or close one" @click="openWorkflows()"><Icon name="workflow" :size="14" /> Workflows</button>
+        <button data-test="open-workflows" title="Opens the Workflows page with this team's workflows" @click="openWorkflowsPage({ teamId: team.id })"><Icon name="workflow" :size="14" /> Workflows</button>
         <button data-test="open-triggers" title="Work on a schedule" @click="showTriggers = true">⏰ Triggers</button>
         <button data-test="open-git" title="The team's branches, merge to main" @click="showGit = true">⎇ Git</button>
         <button data-test="open-manage" title="The team's repositories, pause and archive, environment, reset, delete" @click="showManage = true">
@@ -317,7 +311,6 @@ defineExpose({ refresh, openWorkflows, openDocuments });
     <TeamSyncBanner v-if="!phone" :key="team.id" :api="api" :team="team" />
     <TriggersDialog v-if="showTriggers" :api="api" :team="team" :agents="cards" :edit-id="triggerToEdit" @close="showTriggers = false; triggerToEdit = null" />
     <GitDialog v-if="showGit" :api="api" :team="team" :focus-branch="gitBranch" @close="showGit = false; gitBranch = null" />
-    <WorkflowsDialog v-if="showWorkflows" :key="workflowFocus ?? 0" :api="api" :team="team" :poll-ms="pollMs" :focus="workflowFocus" @close="showWorkflows = false" />
     <DocumentsDialog v-if="showDocs" :api="api" :team="team" @close="showDocs = false" />
     <CodeDialog :api="api" />
     <TeamManageDialog v-if="showManage" :api="api" :team="team" @close="showManage = false" @changed="emit('changed')"

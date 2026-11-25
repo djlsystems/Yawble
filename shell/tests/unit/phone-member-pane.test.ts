@@ -50,7 +50,7 @@ const api = {
 } as unknown as YawbleApi;
 async function teamPage(width: number) {
   screen(width);
-  const stubs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, WorkflowsDialog: true, DocumentsDialog: true, LogsDialog: true, TerminalScreen: true };
+  const stubs = { GitDialog: true, TriggersDialog: true, TeamManageDialog: true, DocumentsDialog: true, LogsDialog: true, TerminalScreen: true };
   // In the document, as in the app: the phone terminal's bar teleports into its header's ⋯ menu by id.
   const w = mount(TeamView, { props: { team, api, pollMs: 100_000 }, attachTo: document.body, global: { stubs } });
   wrappers.push(w);

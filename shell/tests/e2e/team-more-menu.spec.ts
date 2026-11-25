@@ -3,7 +3,7 @@
 //  - 375 x 812: the open menu's box is inside the viewport; five items Documents, Workflows, Triggers, Git, Settings,
 //    each 44 px tall, their icons (18 px) and labels at one left edge; the menu draws over the member panes
 //    (elementFromPoint at each item's centre is that item, and the menu overlaps a pane); nothing scrolls sideways.
-//  - each item closes the menu and opens its dialog.
+//  - each item closes the menu; Workflows opens the Workflows page filtered to the team, the others their dialog.
 //  - 1280 x 900: no ⋯; the header's five buttons.
 //   npx playwright test team-more-menu     (measurements: test-results/team-more-menu-*.json; screenshots: test-results/team-more-menu-*.png)
 import { expect, test, type Browser } from './phone/fixtures';
@@ -98,10 +98,10 @@ test('375 x 812: the open ⋯ menu is on screen, its items line up, and it draws
   await ctx.close();
 });
 
-test('375 x 812: each ⋯ item closes the menu and opens its dialog', async ({ browser }) => {
+test('375 x 812: each ⋯ dialog item closes the menu and opens its dialog', async ({ browser }) => {
   const { page, ctx, errors } = await teamPage(browser, 375, 812);
   const titles: Record<string, string | null> = {};
-  for (const id of ITEMS) {
+  for (const id of ITEMS.filter((i) => i !== 'open-workflows-menu')) {
     await page.locator('[data-test=team-more]').click();
     await expect(page.locator('[data-test=team-more-menu]')).toBeVisible();
     await page.locator(`[data-test=team-more-menu] [data-test=${id}]`).click();
@@ -115,9 +115,26 @@ test('375 x 812: each ⋯ item closes the menu and opens its dialog', async ({ b
   }
   save('dialogs-375', titles);
   expect(titles).toEqual({
-    'open-documents-menu': 'payments · documents', 'open-workflows-menu': 'payments · workflows',
+    'open-documents-menu': 'payments · documents',
     'open-triggers': 'Triggers · payments', 'open-git': 'Git · payments', 'open-manage': 'Settings · payments',
   });
+  expect(errors).toEqual([]);
+  await ctx.close();
+});
+
+test('375 x 812: the ⋯ Workflows item closes the menu and opens the Workflows page filtered to the team, no dialog', async ({ browser }) => {
+  const { page, ctx, errors } = await teamPage(browser, 375, 812);
+  await page.locator('[data-test=team-more]').click();
+  const item = page.locator('[data-test=team-more-menu] [data-test=open-workflows-menu]');
+  await expect(item).toHaveText('Workflows');
+  await expect(item).toHaveAttribute('title', /Workflows page/);
+  await item.click();
+  await expect(page.locator('[data-test=team-more-menu]')).toHaveCount(0);
+  await expect(page.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue('1');
+  await expect(page.locator('[data-test=team-title]')).toHaveCount(0);
+  await expect(page.locator('[role=dialog]')).toHaveCount(0);
+  await page.screenshot({ path: path.join(OUT, 'team-more-menu-open-workflows-menu-375.png') });
   expect(errors).toEqual([]);
   await ctx.close();
 });

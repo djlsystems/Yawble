@@ -11,8 +11,8 @@ import TeamStateChip from './TeamStateChip.vue';
 import TeamMembers from './TeamMembers.vue';
 import TeamWorkflows from './TeamWorkflows.vue';
 import TileGrip from './TileGrip.vue';
-import WorkflowsDialog from './WorkflowsDialog.vue';
 import { usePhone } from '../phone';
+import { openWorkflowsPage } from '../workflows/page';
 
 // The Teams page: one grid of equally sized tiles (every team, then "New team"), resized together by the grip on any
 // of them (teamTileSize.ts). A tile is the header (name, state, counts), a row of icon buttons, then the recent
@@ -26,8 +26,6 @@ const cardDoing = (method: string, teamId: number) => cards.is('card', `${method
 const confirmDelete = ref<number | null>(null);
 const showArchived = ref(false);
 const failure = ref<string | null>(null);
-// A workflow picked on a tile opens the team's workflows dialog here, over the list; closing it stays on the list.
-const workflowOf = ref<{ team: TeamSummary; id: number } | null>(null);
 
 function teamAction(method: string, teamId: number, params: Record<string, unknown> = {}) {
   return cards.run('card', async () => {
@@ -105,7 +103,7 @@ watch(phone, () => void fit());
             <button class="tile-btn" data-test="card-delete-no" :disabled="cardBusy" @click.stop="confirmDelete = null">Cancel</button>
           </template>
         </div>
-        <TeamWorkflows :team-id="t.id" :api="api" :poll-ms="pollMs" @open="workflowOf = { team: t, id: $event }" />
+        <TeamWorkflows :team-id="t.id" :api="api" :poll-ms="pollMs" @open="openWorkflowsPage({ teamId: t.id, workflow: $event })" />
         <TileGrip v-if="!phone" />
       </div>
       <template v-if="!phone"><TileGrip axis="w" /><TileGrip axis="h" /></template>
@@ -144,7 +142,6 @@ watch(phone, () => void fit());
         </div>
       </div>
     </template>
-    <WorkflowsDialog v-if="workflowOf" :key="`${workflowOf.team.id}:${workflowOf.id}`" :api="api" :team="workflowOf.team" :poll-ms="pollMs" :focus="workflowOf.id" @close="workflowOf = null" />
     <p v-if="!teams.length" class="muted" data-test="no-teams">No teams yet. Install and sign in to your agent CLIs in your own terminal (Settings → Agents), then create a team with a Manager.</p>
   </div>
 </template>

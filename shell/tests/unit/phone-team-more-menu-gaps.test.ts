@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 // Gaps in phone-team-more-menu.test.ts, through the whole App at 375 px. Each of the five
-// ⋯ items (Documents, Workflows, Triggers, Git, Settings) closes the menu on the tap and opens its own dialog, one at a
-// time; the drawer's Team group still offers Documents/Workflows and they still open the dialogs; widening to 1280 px
+// ⋯ items (Documents, Workflows, Triggers, Git, Settings) closes the menu on the tap; Workflows opens the Workflows page
+// filtered to the team, the others their own dialog, one at a time; the drawer's Team group still offers Documents (its
+// dialog) and Workflows (the page); widening to 1280 px
 // shows the desktop header unchanged with no ⋯. A fake matchMedia gives the width; the API is a scripted fake.
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import App from '../../src/renderer/src/App.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
@@ -32,6 +33,7 @@ beforeEach(() => {
     }),
   });
   try { localStorage.clear(); sessionStorage.clear(); } catch { /* none */ }
+  history.replaceState(null, '', '/');
   applyRemoteAccess('full');
 });
 let wrappers: VueWrapper[] = [];
@@ -43,6 +45,7 @@ const core: Record<string, () => unknown> = {
   'link.status': () => ({ state: 'off', viewers: [] }),
   'agents.detect': () => [],
   'concierge.list': () => [],
+  'workflows.list': () => ({ workflows: [], counts: null, truncated: false, backlog: true, now: '2026-11-19T10:00:00Z' }),
   'git.status': () => ({
     repoPath: 'C:\\work\\payments', managed: false, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: null,
     baseSha: 'aaaaaaaaaaaa', originBaseSha: null, baseAheadOfOrigin: 0, baseBehindOrigin: 0,
@@ -78,16 +81,23 @@ async function closeDialog(w: VueWrapper) {
   expect(dialogTitles()).toEqual([]);
 }
 
+/** The Workflows page is shown, filtered to team payments (id 1), and no dialog is open. */
+async function onWorkflowsPage(w: VueWrapper, what: string) {
+  await vi.waitFor(() => expect(w.find('[data-test=workflows-view]').exists(), what).toBe(true));
+  expect(w.find('[data-test=team-title]').exists(), what).toBe(false);
+  expect((w.get('[data-test=workflows-team-filter]').element as HTMLSelectElement).value, what).toBe('1');
+  expect(dialogTitles(), what).toEqual([]);
+}
+
 const ITEMS: [string, string][] = [
   ['open-documents-menu', 'payments · documents'],
-  ['open-workflows-menu', 'payments · workflows'],
   ['open-triggers', 'Triggers · payments'],
   ['open-git', 'Git · payments'],
   ['open-manage', 'Settings · payments'],
 ];
 
 describe('the team ⋯ menu in the App at 375 px', () => {
-  it('each of the five items closes the menu on the tap and opens its own dialog, one after another', async () => {
+  it('each of the four dialog items closes the menu on the tap and opens its own dialog, one after another', async () => {
     const w = await openTeamPage();
     for (const [id, title] of ITEMS) {
       await w.get('[data-test=team-more]').trigger('click');
@@ -101,6 +111,15 @@ describe('the team ⋯ menu in the App at 375 px', () => {
     }
   });
 
+  it('Workflows closes the menu on the tap and opens the Workflows page filtered to the team', async () => {
+    const w = await openTeamPage();
+    await w.get('[data-test=team-more]').trigger('click');
+    await w.get('[data-test=team-more-menu] [data-test=open-workflows-menu]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=team-more-menu]').exists()).toBe(false);
+    await onWorkflowsPage(w, 'open-workflows-menu');
+  });
+
   it('⋯ toggles the menu shut again without opening anything', async () => {
     const w = await openTeamPage();
     await w.get('[data-test=team-more]').trigger('click');
@@ -110,16 +129,19 @@ describe('the team ⋯ menu in the App at 375 px', () => {
     expect(dialogTitles()).toEqual([]);
   });
 
-  it('the drawer Team group still offers Documents and Workflows, and they open the dialogs', async () => {
+  it('the drawer Team group still offers Documents (its dialog) and Workflows (the Workflows page for the team)', async () => {
     const w = await openTeamPage();
-    for (const [id, title] of [['drawer-team-documents', 'payments · documents'], ['drawer-team-workflows', 'payments · workflows']]) {
-      await w.get('[data-test=drawer-toggle]').trigger('click');
-      expect(w.get('[data-test=drawer-team] .team-name').text()).toBe('Team payments');
-      await w.get(`[data-test=${id}]`).trigger('click');
-      await flushPromises();
-      expect(dialogTitles(), id).toEqual([title]);
-      await closeDialog(w);
-    }
+    await w.get('[data-test=drawer-toggle]').trigger('click');
+    expect(w.get('[data-test=drawer-team] .team-name').text()).toBe('Team payments');
+    await w.get('[data-test=drawer-team-documents]').trigger('click');
+    await flushPromises();
+    expect(dialogTitles()).toEqual(['payments · documents']);
+    await closeDialog(w);
+    await w.get('[data-test=drawer-toggle]').trigger('click');
+    expect(w.get('[data-test=drawer-team] .team-name').text()).toBe('Team payments');
+    await w.get('[data-test=drawer-team-workflows]').trigger('click');
+    await flushPromises();
+    await onWorkflowsPage(w, 'drawer-team-workflows');
   });
 
   it('at 1280 px the header is the desktop one: five labelled buttons, no ⋯, no phone menu', async () => {

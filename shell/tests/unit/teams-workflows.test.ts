@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../src/renderer/src/App.vue';
 import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
 import type { YawbleApi } from '../../src/shared/api';
@@ -22,7 +22,12 @@ const agents = [
   agent(3, 'TesterWren', 'member', 'queued', { queuePosition: 2 }),
 ];
 
+// The same workflows as the Workflows page's rows (workflows.list), for where a tile's workflow leads.
+const rows = list.map((w) => ({ ...w, team: 'payments', teamId: 1, status: w.state === 'open' ? (w.busy.length ? 'running' : 'idle') : w.state, working: w.busy.length > 0,
+  endedAt: w.state === 'open' ? null : w.lastAt, expiredAt: null, expiresAt: null, expiryWarning: null, question: null, time: null, waitingFor: null, item: null, members: [] }));
+
 let asked: any[] = [];
+let pageAsked: any[] = [];
 function api(): YawbleApi {
   return {
     getInfo: async () => { throw new Error('no'); },
@@ -35,6 +40,8 @@ function api(): YawbleApi {
         case 'link.status': return { state: 'off', viewers: [] } as any;
         case 'bus.workflows': asked.push(p); return (p?.teamId === 1 ? list : []) as any;
         case 'teams.agents': return (p?.teamId === 1 ? agents : []) as any;
+        case 'workflows.list': pageAsked.push(p); return { workflows: rows.filter((r) => p?.teamId === undefined || r.teamId === p.teamId), counts: { all: rows.length, open: 2 }, truncated: false, backlog: true, now: '2026-11-11T12:00:00Z' } as any;
+        case 'workflows.get': return { workflow: rows.find((r) => r.id === p?.workflow), cards: [], messages: [], spec: null, backlog: true } as any;
         default: return [] as any;
       }
     },
@@ -52,7 +59,7 @@ async function teamsPage() {
 }
 
 describe("each team's card lists its recent workflows", () => {
-  beforeEach(() => { asked = []; localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = ''; });
+  beforeEach(() => { asked = []; pageAsked = []; localStorage.clear(); sessionStorage.clear(); document.body.innerHTML = ''; history.replaceState(null, '', '/'); });
 
   it('shows up to the 50 newest (every one the core lists), last updated first, with their state and last-entry time', async () => {
     const w = await teamsPage();
@@ -111,16 +118,20 @@ describe("each team's card lists its recent workflows", () => {
     w.unmount();
   });
 
-  it("opens the team's workflows over the Teams list with the clicked one selected, and closing stays on the list", async () => {
+  it("a workflow on a tile opens the Workflows page filtered to the team, with the clicked one selected and its pane open", async () => {
     const w = await teamsPage();
     await w.findAll('[data-test=team-workflow]').find((r) => r.attributes('data-id') === '4')!.trigger('click');
     for (let i = 0; i < 6; i++) await flushPromises();
-    expect(w.get('[data-test=workflow-4]').classes()).toContain('sel');
-    expect(w.findAll('[data-test=team-card]')).toHaveLength(2); // still the Teams list, not the team's page
-    await w.get('[data-test=modal-close]').trigger('click');
-    for (let i = 0; i < 4; i++) await flushPromises();
-    expect(w.find('[data-test=workflow-4]').exists()).toBe(false);
-    expect(w.findAll('[data-test=team-card]')).toHaveLength(2);
+    // The Workflows page, not a dialog over the list: filtered to the tile's team, on All, #4 selected with its pane open.
+    await vi.waitFor(() => expect(w.find('[data-test=workflow-pane]').exists()).toBe(true));
+    expect(w.find('[data-test=workflows-view]').exists()).toBe(true);
+    expect(w.find('[data-test=team-card]').exists()).toBe(false);
+    expect(w.find('[data-test=workflows]').exists()).toBe(false);
+    expect((w.get('[data-test=workflows-team-filter]').element as HTMLSelectElement).value).toBe('1');
+    expect(w.get('[data-test=workflows-chip-all]').classes()).toContain('on');
+    expect(pageAsked.at(-1)).toMatchObject({ teamId: 1, state: 'all' });
+    expect(w.get('[data-test=workflows-row][data-wf="4"]').attributes('aria-selected')).toBe('true');
+    expect(w.get('[data-test=workflow-pane]').attributes('data-id')).toBe('4');
     w.unmount();
   });
   it("has a Settings button that opens the team's settings, which show its repository path (the card does not)", async () => {

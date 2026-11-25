@@ -330,9 +330,9 @@ describe('the filter re-check: F1 stays on the Workflows table; O2 the defaults'
     }
   });
 
-  it('F1: the team tiles, the Workflows dialog and the pane pass no q', () => {
+  it('F1: the team tiles and the pane pass no q', () => {
     const src = (p: string) => readFileSync(path.join(__dirname, '..', '..', 'src', 'renderer', 'src', p), 'utf8');
-    for (const p of ['components/TeamWorkflows.vue', 'components/WorkflowsDialog.vue', 'workflows/WorkflowPane.vue']) {
+    for (const p of ['components/TeamWorkflows.vue', 'workflows/WorkflowPane.vue']) {
       const tags = src(p).match(/<ItemLink\b[^>]*>/g) ?? [];
       expect(tags.length, p).toBeGreaterThan(0);
       for (const t of tags) expect(t, p).not.toMatch(/\bq=|:q\b/);

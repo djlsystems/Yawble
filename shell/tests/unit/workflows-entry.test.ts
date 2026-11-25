@@ -5,17 +5,21 @@ import type { TeamSummary, YawbleApi } from '../../src/shared/api';
 import BoardView from '../../src/renderer/src/board/BoardView.vue';
 import BacklogView from '../../src/renderer/src/board/BacklogView.vue';
 import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
-import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
 import TeamWorkflows from '../../src/renderer/src/components/TeamWorkflows.vue';
+import TeamsList from '../../src/renderer/src/components/TeamsList.vue';
+import TeamView from '../../src/renderer/src/components/TeamView.vue';
+import WorkflowsView from '../../src/renderer/src/workflows/WorkflowsView.vue';
+import { mountPane, paneCore, paneRow } from './workflow-pane-fake';
 import { backlogRequest, workflowsRequest } from '../../src/renderer/src/workflows/page';
 
 // The ways to the Workflows page - the sidebar item with its open count, the board's Workflows button
-// (filtered to the board's team), a team's "All workflows" - and the item and workflow links it takes over: the item label in the
-// Workflows dialog and a team tile's workflows, the Backlog opened at an item, and a Backlog item's "workflow #N".
+// (filtered to the board's team), a team's "All workflows", the team page's Workflows button and a Teams-list tile's
+// workflow (the team, and that workflow selected) - and the item and workflow links: the item label in the page's pane
+// and a team tile's workflows, the Backlog opened at an item, and a Backlog item's "workflow #N".
 // Fakes only.
 
 enableAutoUnmount(afterEach);
-afterEach(() => { workflowsRequest.value = null; backlogRequest.value = null; document.body.innerHTML = ''; });
+afterEach(() => { workflowsRequest.value = null; backlogRequest.value = null; localStorage.clear(); history.replaceState(null, '', '/'); document.body.innerHTML = ''; });
 
 const at = '2026-11-19T09:00:00Z';
 const wf = (id: number) => ({ id, title: `Workflow ${id}`, owner: 'Manager', state: 'open', undeclared: false, busy: [], ending: null, startedAt: at, lastAt: at, messages: 2 });
@@ -67,31 +71,51 @@ describe("the board's Workflows button", () => {
   });
 });
 
-describe('the Workflows dialog (the team page) and a team tile', () => {
-  const team = { id: 1, name: 'payments' } as TeamSummary;
-  it('the dialog shows the item label as a link to the Backlog, and links to the page filtered to the team', async () => {
-    const w = mount(WorkflowsDialog, { props: { team, api: api({ 'bus.workflows': () => [wf(10), wf(11)], 'workflows.list': () => listAnswer() }), pollMs: 600_000 }, attachTo: document.body });
+describe("the team page's Workflows, a team tile and the page's pane", () => {
+  const team = { id: 1, name: 'payments', repoPath: null, members: 0, running: 0, queued: 0 } as TeamSummary;
+  const withItem = paneRow({ id: 10, item: { label: 'B006', title: 'Partial refunds', archived: false } });
+  it('the Workflows button on the team page opens the page filtered to the team, nothing selected; no dialog', async () => {
+    const w = mount(TeamView, { props: { team, api: api({ 'teams.agents': () => [], 'bus.decisions': () => [], 'integrations.asks': () => [] }), pollMs: 600_000 }, attachTo: document.body });
     await flushPromises();
-    const links = w.findAll('[data-test=workflow-10] [data-test=workflow-item-link]');
-    expect(links.map((l) => l.text())).toEqual(['B096']);
-    expect(w.find('[data-test=workflow-11] [data-test=workflow-item-link]').exists()).toBe(false);
-    expect(w.find('[data-test=workflow-11] [data-test=workflow-item-none]').exists()).toBe(false); // no "—" in the dialog
-    await links[0].trigger('click');
-    expect(backlogRequest.value).toMatchObject({ label: 'B096', archived: false });
-    await w.get('[data-test=workflows-all]').trigger('click');
+    await w.get('[data-test=open-workflows]').trigger('click');
     expect(workflowsRequest.value).toMatchObject({ teamId: 1 });
-    expect(w.emitted('close')).toHaveLength(1);
+    expect(workflowsRequest.value?.workflow ?? null).toBeNull();
+    expect(document.querySelector('[role=dialog]')).toBeNull();
   });
-  it('without backlog access the label is plain text; an older core (no workflows.list) shows none', async () => {
-    let w = mount(WorkflowsDialog, { props: { team, api: api({ 'bus.workflows': () => [wf(10)], 'workflows.list': () => listAnswer(false) }), pollMs: 600_000 }, attachTo: document.body });
+  it('a workflow on a Teams-list tile opens the page filtered to that team with the workflow selected; no dialog', async () => {
+    const other = { ...team, id: 2, name: 'billing' };
+    const w = mount(TeamsList, { props: { teams: [team, other], archived: [], api: api({ 'bus.workflows': (p) => (p?.teamId === 2 ? [wf(30)] : [wf(10)]), 'workflows.list': () => listAnswer() }), pollMs: 600_000, refresh: () => {} }, attachTo: document.body });
     await flushPromises();
-    expect(w.get('[data-test=workflow-10] [data-test=workflow-item-text]').text()).toBe('B096');
+    await w.get('[data-test=team-workflow][data-id="30"]').trigger('click');
+    expect(workflowsRequest.value).toMatchObject({ teamId: 2, workflow: 30 });
+    expect(document.querySelector('[role=dialog]')).toBeNull();
+    expect(w.emitted('open')).toBeUndefined(); // the list does not open the team's page
+  });
+  it("the page opened from there lands with the team filter, All, and the workflow's pane", async () => {
+    const core = paneCore(() => [withItem, paneRow({ id: 11 }), paneRow({ id: 30, team: 'billing', teamId: 2, status: 'completed' })]);
+    const w = mount(WorkflowsView, { props: { teams: [team, { ...team, id: 2, name: 'billing' }], api: core.api, pollMs: 600_000, request: { teamId: 2, workflow: 30, seq: 1 } }, attachTo: document.body });
+    await flushPromises();
+    expect((w.get('[data-test=workflows-team-filter]').element as HTMLSelectElement).value).toBe('2');
+    expect(w.get('[data-test=workflows-chip-all]').classes()).toContain('on');
+    expect(core.calls.find((c) => c.method === 'workflows.list')!.params).toMatchObject({ teamId: 2, state: 'all' });
+    expect(w.get('[data-test=workflow-pane]').attributes('data-id')).toBe('30');
     w.unmount();
-    const old = { call: async (m: string) => { if (m === 'bus.workflows') return [wf(10)]; throw Object.assign(new Error('nope'), { code: 'method_not_found' }); } } as unknown as YawbleApi;
-    w = mount(WorkflowsDialog, { props: { team, api: old, pollMs: 600_000 }, attachTo: document.body });
-    await flushPromises();
-    expect(w.find('[data-test=workflow-10]').exists()).toBe(true);
+  });
+  it("the pane shows the item label as a link to the Backlog; without backlog access it is plain text; none without an item", async () => {
+    let w = await mountPane(withItem, paneCore(() => [withItem]).api);
+    const link = w.get('[data-test=workflow-pane] [data-test=workflow-item-link]');
+    expect(link.text()).toBe('B006');
+    await link.trigger('click');
+    expect(backlogRequest.value).toMatchObject({ label: 'B006', archived: false });
+    w.unmount();
+    w = await mountPane(withItem, paneCore(() => [withItem], { backlog: false }).api);
+    expect(w.get('[data-test=workflow-item-text]').text()).toBe('B006');
     expect(w.find('[data-test=workflow-item-link]').exists()).toBe(false);
+    w.unmount();
+    const plain = paneRow({ id: 11 });
+    w = await mountPane(plain, paneCore(() => [plain]).api);
+    expect(w.find('[data-test=workflow-item-link]').exists()).toBe(false);
+    expect(w.find('[data-test=workflow-item-none]').exists()).toBe(false);
   });
   it("a team tile's workflow shows its item as a link inside the row, and All workflows opens the page", async () => {
     const calls: { method: string; params: any }[] = [];

@@ -7,12 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BoardCardItem from '../../src/renderer/src/board/BoardCardItem.vue';
 import TimelineDialog from '../../src/renderer/src/timeline/TimelineDialog.vue';
 import TeamWorkflows from '../../src/renderer/src/components/TeamWorkflows.vue';
-import WorkflowsDialog from '../../src/renderer/src/components/WorkflowsDialog.vue';
+import WorkflowPane from '../../src/renderer/src/workflows/WorkflowPane.vue';
 import {
   BreakMinMs, buildAxis, clock, closeTimeline, formatDuration, formatShort, liveOverallMs, openTimeline, placeBreakLabels, shares, subscribeNow, tickerState,
 } from '../../src/renderer/src/timeline/time';
 import { createFakeCore } from '../e2e/phone/fake-core';
-import type { BoardCard, ItemTime, YawbleApi } from '../../src/shared/api';
+import type { BoardCard, ItemTime, WorkflowsListAnswer, YawbleApi } from '../../src/shared/api';
 
 const MIN = 60_000;
 
@@ -272,7 +272,7 @@ describe('overall time: the Timeline dialog', () => {
 });
 
 describe('overall time: the workflow rows', () => {
-  it('the Teams list tile row and the Workflows dialog subtitle show the overall time; clicking it opens the timeline, not the row', async () => {
+  it("the Teams list tile row and the Workflows page's pane show the overall time; clicking it opens the timeline, not the row", async () => {
     const api = fakeApi();
     const tile = mount(TeamWorkflows, { props: { teamId: 1, api } });
     await flushPromises();
@@ -284,13 +284,16 @@ describe('overall time: the workflow rows', () => {
     expect(timelineTarget.value).toMatchObject({ kind: 'workflow', id: 10 });
     closeTimeline();
 
-    const dlg = mount(WorkflowsDialog, { props: { api, team: { id: 1, name: 'payments' } as any }, attachTo: document.body });
+    const wf = (await api.call<WorkflowsListAnswer>('workflows.list', { teamId: 1, state: 'all' })).workflows.find((w) => w.id === 10)!;
+    const pane = mount(WorkflowPane, { props: { api, row: wf, pollMs: 600_000 }, attachTo: document.body });
     await flushPromises();
-    const meta = dlg.get('[data-test="workflow-10"] .meta');
-    expect(meta.text()).toMatch(/started .* \(\s*2h 00m 00s\s*\)/);
+    const time = pane.get('[data-test="workflow-pane-time"]');
+    expect(time.get('[data-test="overall-time-value"]').text()).toBe('2h 00m 00s');
     vi.advanceTimersByTime(1000);
     await flushPromises();
-    expect(meta.get('[data-test="overall-time-value"]').text()).toBe('2h 00m 01s');
+    expect(time.get('[data-test="overall-time-value"]').text()).toBe('2h 00m 01s');
+    await time.get('[data-test="overall-time"]').trigger('click');
+    expect(timelineTarget.value).toMatchObject({ kind: 'workflow', id: 10 });
   });
 });
 

@@ -106,7 +106,8 @@ function finishRename(id: string) {
 
     <button class="item new" data-test="new-chat" @click="emit('newChat')"><Icon name="newChat" />New chat</button>
 
-    <!-- A phone with a team page open: that team's Documents and Workflows (its header has no room for them). -->
+    <!-- A phone with a team page open: that team's Documents and Workflows (its header has no room for them). Workflows
+         opens the Workflows page filtered to the team (App.vue). -->
     <div v-if="drawer && openTeamName" class="team-group" data-test="drawer-team">
       <h3 class="team-name" :title="`Team ${openTeamName}`">Team {{ openTeamName }}</h3>
       <button class="item" data-test="drawer-team-documents" @click="emit('teamDocuments')"><Icon name="docs" />Documents</button>
