@@ -6,7 +6,7 @@ namespace Yawble.Core.Scripts.Running;
 
 /// <summary>A script member as the members row keeps it (0056): its script, pinned version (null = latest), settings, bindings, timeout.</summary>
 public sealed record ScriptMemberRow(long MemberId, long TeamId, string Team, string Name, long ScriptId, int? Version, JsonObject Settings,
-    JsonObject Bindings, int TimeoutMinutes)
+    JsonObject Bindings, int TimeoutMinutes, int MaxTells = Language.ScriptTell.DefaultMaxTells)
 {
     public string Qualified => $"{Team}/{Name}";
 }
@@ -16,7 +16,8 @@ public sealed record ScriptMemberState(long MemberId, JsonObject Variables, int 
 /// <summary>One script run (script_runs). Trigger: trigger:&lt;id&gt;, tell or test.</summary>
 public sealed record ScriptRunRow(long Id, long TeamId, string Team, long? MemberId, string? Member, long ScriptId, string Script, int Version,
     string Trigger, string Status, bool DryRun, bool Test, JsonNode? Input, JsonObject? Settings, JsonObject? Bindings, JsonObject? Outputs,
-    string? FailedStepId, string? Reason, string? Checkpoint, string StartedAt, string? EndedAt);
+    string? FailedStepId, string? Reason, string? Checkpoint, string StartedAt, string? EndedAt,
+    string? WaitKind = null, long? WaitWorkflowId = null, string? WaitUntil = null);
 
 /// <summary>One journaled step of a run (input and output truncated and scrubbed).</summary>
 public sealed record ScriptStepRow(int Seq, string? StepId, string? Type, JsonNode? Input, JsonNode? Output, string Status, bool Truncated,
@@ -27,6 +28,9 @@ public sealed record ScriptLogLine(string At, string Line);
 public static class ScriptRunStatus
 {
     public const string Running = "running";
+
+    /// <summary>Parked on a wait (a tell that waits): no run slot held, resumed when the wait ends; it still counts as the member's run.</summary>
+    public const string Waiting = "waiting";
     public const string Succeeded = "succeeded";
     public const string Failed = "failed";
     public const string Skipped = "skipped";
@@ -58,24 +62,29 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
     {
         using var c = Open();
         using var cmd = Cmd(c, """
-            SELECT m.id, t.id, t.name, m.name, m.script_id, m.script_version, m.settings, m.bindings, m.script_timeout_min
+            SELECT m.id, t.id, t.name, m.name, m.script_id, m.script_version, m.settings, m.bindings, m.script_timeout_min, m.script_max_tells
             FROM members m JOIN teams t ON t.id = m.team_id WHERE m.id = $id AND m.kind = 'script' AND m.script_id IS NOT NULL;
             """, ("$id", memberId));
         using var r = cmd.ExecuteReader();
         if (!r.Read()) return null;
         return new ScriptMemberRow(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetString(3), r.GetInt64(4),
-            r.IsDBNull(5) ? null : r.GetInt32(5), ObjectOf(r, 6), ObjectOf(r, 7), r.IsDBNull(8) ? DefaultTimeoutMinutes : r.GetInt32(8));
+            r.IsDBNull(5) ? null : r.GetInt32(5), ObjectOf(r, 6), ObjectOf(r, 7), r.IsDBNull(8) ? DefaultTimeoutMinutes : r.GetInt32(8),
+            r.IsDBNull(9) ? Language.ScriptTell.DefaultMaxTells : r.GetInt32(9));
     }
 
-    /// <summary>Makes a member a script member, or changes one (the script, its version: null = latest, settings, bindings, timeout).</summary>
-    public void SetScriptMember(long memberId, long scriptId, int? version, JsonObject settings, JsonObject bindings, int? timeoutMinutes)
+    /// <summary>
+    /// Makes a member a script member, or changes one (the script, its version: null = latest, settings, bindings, timeout, and the
+    /// most tells one run may make: null = 5).
+    /// </summary>
+    public void SetScriptMember(long memberId, long scriptId, int? version, JsonObject settings, JsonObject bindings, int? timeoutMinutes, int? maxTells = null)
     {
         using var c = Open();
         Exec(c, """
-            UPDATE members SET kind = 'script', script_id = $s, script_version = $v, settings = $set, bindings = $b, script_timeout_min = $to
+            UPDATE members SET kind = 'script', script_id = $s, script_version = $v, settings = $set, bindings = $b, script_timeout_min = $to,
+                               script_max_tells = $mt
             WHERE id = $id;
             """, ("$s", scriptId), ("$v", version), ("$set", settings.ToJsonString()), ("$b", bindings.ToJsonString()),
-            ("$to", timeoutMinutes), ("$id", memberId));
+            ("$to", timeoutMinutes), ("$mt", maxTells), ("$id", memberId));
         Exec(c, "INSERT OR IGNORE INTO script_member_state (member_id, updated_at) VALUES ($id, $t);", ("$id", memberId), ("$t", Now()));
     }
 
@@ -191,7 +200,11 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
         using var c = Open();
         using var tx = c.BeginTransaction();
         var now = Now();
-        Exec(c, tx, "UPDATE script_runs SET status = $s, outputs = $o, failed_step_id = $f, reason = $r, ended_at = $t WHERE id = $id;",
+        Exec(c, tx, """
+            UPDATE script_runs SET status = $s, outputs = $o, failed_step_id = $f, reason = $r, ended_at = $t,
+                                   wait_kind = NULL, wait_workflow_id = NULL, wait_until = NULL
+            WHERE id = $id;
+            """,
             ("$s", status), ("$o", outputs is null ? null : Field(outputs).Text), ("$f", failedStepId), ("$r", Scrub(reason)), ("$t", now), ("$id", runId));
         var started = Scalar(c, "SELECT started_at FROM script_runs WHERE id = $id;", tx, ("$id", runId)) as string;
         long? duration = started is not null && DateTimeOffset.TryParse(started, out var s) ? (long)(_clock.GetUtcNow() - s).TotalMilliseconds : null;
@@ -205,6 +218,28 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
         using var c = Open();
         Exec(c, "UPDATE script_runs SET checkpoint = $c WHERE id = $id;", ("$c", checkpointJson), ("$id", runId));
     }
+
+    /// <summary>The run parks on a wait: status waiting, with what it waits on (its checkpoint, written before, holds the rest).</summary>
+    public void Park(long runId, string kind, long? workflow, DateTimeOffset? until)
+    {
+        using var c = Open();
+        Exec(c, "UPDATE script_runs SET status = 'waiting', wait_kind = $k, wait_workflow_id = $w, wait_until = $u WHERE id = $id AND status = 'running';",
+            ("$k", kind), ("$w", workflow), ("$u", until?.UtcDateTime.ToString("O")), ("$id", runId));
+    }
+
+    /// <summary>A waiting run's wait ended: it is running again (false when it was not waiting: another sweep took it, or it was cancelled).</summary>
+    public bool Unpark(long runId)
+    {
+        using var c = Open();
+        return Exec(c, "UPDATE script_runs SET status = 'running', wait_kind = NULL, wait_workflow_id = NULL, wait_until = NULL WHERE id = $id AND status = 'waiting';",
+            ("$id", runId)) == 1;
+    }
+
+    /// <summary>Runs parked on a wait, oldest first.</summary>
+    public IReadOnlyList<ScriptRunRow> Waiting() => Runs("WHERE r.status = 'waiting'", 10_000).OrderBy(r => r.Id).ToList();
+
+    /// <summary>The member's waiting run, if it has one (it counts as the member's run: triggers that fire are skipped).</summary>
+    public ScriptRunRow? WaitingRunOf(long memberId) => Runs("WHERE r.status = 'waiting' AND r.member_id = $m", 1, ("$m", memberId)).FirstOrDefault();
 
     /// <summary>Runs still marked running: after a restart, the ones the old core was in the middle of.</summary>
     public IReadOnlyList<ScriptRunRow> Unfinished() => Runs("WHERE r.status = 'running'", 10_000);
@@ -225,7 +260,8 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
         using var c = Open();
         using var cmd = Cmd(c, $"""
             SELECT r.id, r.team_id, t.name, r.member_id, m.name, r.script_id, s.script_key, r.script_version, r.trigger, r.status, r.dry_run, r.test,
-                   r.input, r.settings, r.bindings, r.outputs, r.failed_step_id, r.reason, r.checkpoint, r.started_at, r.ended_at
+                   r.input, r.settings, r.bindings, r.outputs, r.failed_step_id, r.reason, r.checkpoint, r.started_at, r.ended_at,
+                   r.wait_kind, r.wait_workflow_id, r.wait_until
             FROM script_runs r JOIN teams t ON t.id = r.team_id JOIN scripts s ON s.id = r.script_id LEFT JOIN members m ON m.id = r.member_id
             {where} ORDER BY r.id DESC LIMIT {limit};
             """, args);
@@ -237,7 +273,8 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
                 r.GetInt64(5), r.GetString(6), r.GetInt32(7), r.GetString(8), r.GetString(9), r.GetInt64(10) != 0, r.GetInt64(11) != 0,
                 NodeOf(r, 12), NodeOf(r, 13) as JsonObject, NodeOf(r, 14) as JsonObject, NodeOf(r, 15) as JsonObject,
                 r.IsDBNull(16) ? null : r.GetString(16), r.IsDBNull(17) ? null : r.GetString(17), r.IsDBNull(18) ? null : r.GetString(18),
-                r.GetString(19), r.IsDBNull(20) ? null : r.GetString(20)));
+                r.GetString(19), r.IsDBNull(20) ? null : r.GetString(20),
+                r.IsDBNull(21) ? null : r.GetString(21), r.IsDBNull(22) ? null : r.GetInt64(22), r.IsDBNull(23) ? null : r.GetString(23)));
         }
         return list;
     }
@@ -260,7 +297,7 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
         var fi = Field(input);
         var fo = Field(output);
         using var c = Open();
-        var open = Scalar(c, "SELECT id FROM script_run_steps WHERE run_id = $r AND kind = 'step' AND step_id = $s AND status = 'running' ORDER BY id DESC LIMIT 1;",
+        var open = Scalar(c, "SELECT id FROM script_run_steps WHERE run_id = $r AND kind = 'step' AND step_id = $s AND status IN ('running', 'waiting') ORDER BY id DESC LIMIT 1;",
             null, ("$r", runId), ("$s", stepId)) as long?;
         if (open is { } id)
             Exec(c, "UPDATE script_run_steps SET input = $in, output = $out, status = $st, truncated = $tr, started_at = $sa, ended_at = $e WHERE id = $id;",
@@ -278,7 +315,28 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
     public void CloseOpenSteps(long runId, string status)
     {
         using var c = Open();
-        Exec(c, "UPDATE script_run_steps SET status = $s, ended_at = $t WHERE run_id = $r AND status = 'running';", ("$s", status), ("$t", Now()), ("$r", runId));
+        Exec(c, "UPDATE script_run_steps SET status = $s, ended_at = $t WHERE run_id = $r AND status IN ('running', 'waiting');", ("$s", status), ("$t", Now()), ("$r", runId));
+    }
+
+    // ------------------------------------------------------------------ the app's scripts settings (app_defaults)
+
+    public const string TellOtherTeamsKey = "scripts.tellOtherTeams";
+
+    /// <summary>Settings > Scripts: whether a script's tell may go to another team (on unless the person turned it off).</summary>
+    public bool TellOtherTeams()
+    {
+        using var c = Open();
+        return Scalar(c, "SELECT value FROM app_defaults WHERE key = $k;", ("$k", TellOtherTeamsKey)) is not string v
+               || !string.Equals(v.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void SetTellOtherTeams(bool on)
+    {
+        using var c = Open();
+        Exec(c, """
+            INSERT INTO app_defaults (key, value, updated_at) VALUES ($k, $v, $t)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+            """, ("$k", TellOtherTeamsKey), ("$v", on ? "true" : "false"), ("$t", Now()));
     }
 
     public void Log(long runId, string line)
@@ -375,12 +433,12 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
         return v is DBNull ? null : v;
     }
 
-    private static void Exec(SqliteConnection c, string sql, params (string, object?)[] args) => Exec(c, null, sql, args);
+    private static int Exec(SqliteConnection c, string sql, params (string, object?)[] args) => Exec(c, null, sql, args);
 
-    private static void Exec(SqliteConnection c, SqliteTransaction? tx, string sql, params (string, object?)[] args)
+    private static int Exec(SqliteConnection c, SqliteTransaction? tx, string sql, params (string, object?)[] args)
     {
         using var cmd = Cmd(c, sql, args);
         cmd.Transaction = tx;
-        cmd.ExecuteNonQuery();
+        return cmd.ExecuteNonQuery();
     }
 }
