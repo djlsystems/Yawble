@@ -18,13 +18,14 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
     public static readonly string[] Reads =
     [
         "scripts.list", "scripts.get", "scripts.check", "scripts.versions", "scripts.export", "scripts.runs", "scripts.run",
-        "scripts.memberGet", "scripts.memberState", "scripts.memberFiles", "scripts.catalog", "scripts.useRealNames",
+        "scripts.memberGet", "scripts.memberState", "scripts.memberFiles", "scripts.catalog", "scripts.useRealNames", "scripts.settings",
         "schemas.list", "schemas.get", "schemas.check", "schemas.versions", "schemas.export", "schemas.usage",
     ];
 
     public static readonly string[] Changes =
     [
         "scripts.save", "scripts.import", "scripts.delete", "scripts.testRun", "scripts.memberAdd", "scripts.memberUpdate", "scripts.memberResetVariable",
+        "scripts.setSettings", "scripts.cancelRun",
         "schemas.save", "schemas.import",
     ];
 
@@ -46,7 +47,10 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
                 "scripts.export" => File(library.Export(ScriptOf(p), OptInt(p, "version"))),
                 "scripts.import" => Saved(library.Import(Str(p, "json"))),
                 "scripts.delete" => Deleted(ScriptOf(p)),
-                "scripts.catalog" => Catalog(OptLong(p, "teamId")),
+                "scripts.catalog" => await CatalogAsync(OptLong(p, "teamId"), ct),
+                "scripts.settings" => ScriptAppSettings(),
+                "scripts.setSettings" => SetScriptAppSettings(p),
+                "scripts.cancelRun" => new JsonObject { ["cancelled"] = runner.CancelWaiting(Long(p, "id")) },
                 "scripts.useRealNames" => RealNames(p),
 
                 "schemas.list" => new JsonArray(library.Schemas().Select(s => (JsonNode?)new JsonObject
@@ -61,7 +65,8 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
                 "schemas.usage" => Usage(Str(p, "name")),
 
                 "scripts.testRun" => TestRun(await runner.TestRunAsync(new ScriptTestRun(ScriptOf(p), OptInt(p, "version"), p?["input"]?.DeepClone(),
-                    OptObject(p, "settings"), OptObject(p, "bindings"), Long(p, "teamId"), p?["dryRun"] is JsonValue d && d.TryGetValue<bool>(out var dry) ? dry : true), ct)),
+                    OptObject(p, "settings"), OptObject(p, "bindings"), Long(p, "teamId"), p?["dryRun"] is JsonValue d && d.TryGetValue<bool>(out var dry) ? dry : true,
+                    OptObject(p, "tellReplies")), ct)),
                 "scripts.runs" => new JsonArray(store.RecentRuns(OptLong(p, "teamId"), OptLong(p, "memberId"), (int)(OptLong(p, "limit") ?? 100))
                     .Select(r => (JsonNode?)Run(r)).ToArray()),
                 "scripts.run" => RunInFull(Long(p, "id")),
@@ -105,11 +110,12 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
         var settings = OptObject(p, "settings") ?? [];
         var bindings = OptObject(p, "bindings") ?? [];
         var timeout = OptInt(p, "timeoutMinutes");
-        CheckMember(scriptId, version, settings, bindings, timeout, teamId);
+        var maxTells = OptInt(p, "maxTells");
+        CheckMember(scriptId, version, settings, bindings, timeout, teamId, maxTells);
         var row = await bus.AddScriptMemberAsync(teamId, Str(p, "name"), ct);
         try
         {
-            store.SetScriptMember(row.Id, scriptId, version, settings, bindings, timeout);
+            store.SetScriptMember(row.Id, scriptId, version, settings, bindings, timeout, maxTells);
         }
         catch
         {
@@ -126,8 +132,9 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
         var settings = p is not null && p.ContainsKey("settings") ? OptObject(p, "settings") ?? [] : member.Settings;
         var bindings = p is not null && p.ContainsKey("bindings") ? OptObject(p, "bindings") ?? [] : member.Bindings;
         var timeout = p is not null && p.ContainsKey("timeoutMinutes") ? OptInt(p, "timeoutMinutes") : member.TimeoutMinutes;
-        CheckMember(member.ScriptId, version, settings, bindings, timeout, member.TeamId);
-        store.SetScriptMember(member.MemberId, member.ScriptId, version, settings, bindings, timeout);
+        var maxTells = p is not null && p.ContainsKey("maxTells") ? OptInt(p, "maxTells") : member.MaxTells;
+        CheckMember(member.ScriptId, version, settings, bindings, timeout, member.TeamId, maxTells);
+        store.SetScriptMember(member.MemberId, member.ScriptId, version, settings, bindings, timeout, maxTells);
         return Member(store.Member(member.MemberId)!);
     }
 
@@ -135,9 +142,10 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
     /// A member runs only a version that passes its check; its settings and bindings must fit the script, and each integration it uses (the
     /// one the steps name, or the member's override) must be turned on for its team (an override also of the same kind).
     /// </summary>
-    private void CheckMember(long scriptId, int? version, JsonObject settings, JsonObject bindings, int? timeout, long teamId)
+    private void CheckMember(long scriptId, int? version, JsonObject settings, JsonObject bindings, int? timeout, long teamId, int? maxTells = null)
     {
         if (timeout is < 1 or > 24 * 60) throw new RpcException("bad_script", "timeoutMinutes is 1 to 1440");
+        if (maxTells is < 0 or > ScriptTell.MaxTellsLimit) throw new RpcException("bad_script", $"maxTells is 0 to {ScriptTell.MaxTellsLimit}");
         var runs = version ?? library.RunnableVersion(scriptId)
             ?? throw new ScriptRunRefused("not_runnable", $"the script {library.Get(scriptId).Key} has no version that passes its check (only drafts)");
         var row = library.Get(scriptId, runs);
@@ -154,6 +162,39 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
     /// parameters; an API: its allowed and ask operations), turned on for the team or not (null without a team), and every function of the
     /// expression language.
     /// </summary>
+    /// <summary>
+    /// The catalog, and with a team where its tell steps can go: <c>tellTargets</c> [{ teamId, team, members }] (agent members only,
+    /// the Manager first), the team itself first and other teams only while Settings > Scripts lets scripts tell them
+    /// (<c>tellOtherTeams</c>).
+    /// </summary>
+    private async Task<JsonObject> CatalogAsync(long? teamId, CancellationToken ct)
+    {
+        var catalog = Catalog(teamId);
+        if (teamId is not { } own) return catalog;
+        var others = store.TellOtherTeams();
+        var targets = (await bus.ScriptTellTargetsAsync(ct)).Where(t => t.TeamId == own || others).OrderBy(t => t.TeamId == own ? 0 : 1)
+            .ThenBy(t => t.Team, StringComparer.OrdinalIgnoreCase);
+        catalog["tellTargets"] = new JsonArray(targets.Select(t => (JsonNode?)new JsonObject
+        {
+            ["teamId"] = t.TeamId, ["team"] = t.Team, ["members"] = new JsonArray(t.Members.Select(m => (JsonNode?)m).ToArray()),
+        }).ToArray());
+        catalog["tellOtherTeams"] = others;
+        return catalog;
+    }
+
+    /// <summary>Settings > Scripts: { tellOtherTeams } (app_defaults key scripts.tellOtherTeams, on by default).</summary>
+    private JsonObject ScriptAppSettings() => new() { ["tellOtherTeams"] = store.TellOtherTeams() };
+
+    private JsonObject SetScriptAppSettings(JsonObject? p)
+    {
+        if (p?["tellOtherTeams"] is not null)
+        {
+            if (p["tellOtherTeams"] is not JsonValue v || !v.TryGetValue<bool>(out var on)) throw new RpcException("bad_params", "tellOtherTeams is true or false");
+            store.SetTellOtherTeams(on);
+        }
+        return ScriptAppSettings();
+    }
+
     private JsonObject Catalog(long? teamId)
     {
         var integrations = new JsonArray();
@@ -278,6 +319,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
             ["bindings"] = m.Bindings.DeepClone(),
             ["integrations"] = integrations,
             ["timeoutMinutes"] = m.TimeoutMinutes,
+            ["maxTells"] = m.MaxTells,
             ["consecutiveFailures"] = state.ConsecutiveFailures,
             ["running"] = runner.IsRunning(m.MemberId),
             ["lastRun"] = last is null ? null : Run(last),
@@ -374,7 +416,7 @@ public sealed class ScriptsRpc(BusEngine bus, ScriptLibrary library, ScriptRunSt
         ["id"] = r.Id, ["teamId"] = r.TeamId, ["team"] = r.Team, ["memberId"] = r.MemberId, ["member"] = r.Member, ["scriptId"] = r.ScriptId,
         ["script"] = r.Script, ["version"] = r.Version, ["trigger"] = r.Trigger, ["status"] = r.Status, ["dryRun"] = r.DryRun, ["test"] = r.Test,
         ["input"] = r.Input?.DeepClone(), ["outputs"] = r.Outputs?.DeepClone(), ["failedStepId"] = r.FailedStepId, ["reason"] = r.Reason,
-        ["startedAt"] = r.StartedAt, ["endedAt"] = r.EndedAt,
+        ["startedAt"] = r.StartedAt, ["endedAt"] = r.EndedAt, ["waitWorkflowId"] = r.WaitWorkflowId,
     };
 
     private static JsonArray Steps(IReadOnlyList<ScriptStepRow> steps) => new(steps.Select(s => (JsonNode?)new JsonObject
