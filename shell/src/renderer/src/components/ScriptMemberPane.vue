@@ -8,7 +8,7 @@ import BusyLabel from './BusyLabel.vue';
 import ScriptMemberIntegrations from './ScriptMemberIntegrations.vue';
 import ScriptEditor from './scripts/ScriptEditor.vue';
 import RunWaitLink from './scripts/RunWaitLink.vue';
-import { scriptAtVersion, scriptsApi, shortValue, type ScriptMember, type ScriptMemberFile, type ScriptMemberState, type ScriptRun } from '../scriptMembers';
+import { MAX_TELLS_DEFAULT, MAX_TELLS_LIMIT, scriptAtVersion, scriptsApi, shortValue, type ScriptMember, type ScriptMemberFile, type ScriptMemberState, type ScriptRun } from '../scriptMembers';
 
 // A script member's tile on the team page: its name, script@version (on latest: the version it runs),
 // the last run's status and time and the next scheduled trigger; under it the last runs (scripts.runs) and the saved
@@ -71,6 +71,29 @@ function reset(name: string) {
   });
 }
 
+// Tells per run (scripts.memberUpdate maxTells): a whole number from 0 to the limit; anything else is refused here and the
+// field goes back to the member's value.
+function setMaxTells(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const n = Number(input.value);
+  const was = member.value?.maxTells ?? MAX_TELLS_DEFAULT;
+  if (!Number.isInteger(n) || n < 0 || n > MAX_TELLS_LIMIT) {
+    error.value = `Tells per run is a whole number from 0 to ${MAX_TELLS_LIMIT}.`;
+    input.value = String(was);
+    return;
+  }
+  if (n === was) return;
+  return busy.run('max-tells', async () => {
+    error.value = null;
+    try {
+      member.value = await rpc.memberUpdate({ memberId: id.value, maxTells: n });
+    } catch (err) {
+      error.value = errorText(err);
+      input.value = String(was);
+    }
+  });
+}
+
 // Edit script: the script editor on this member's script, opened from the member, so the designer shows the member's
 // overrides ("Real name → Other") and Use real names resolves through its bindings. Save makes a new version of the
 // script, as the library does; the member's pin and bindings stay as they are. A Visitor gets the editor read-only.
@@ -105,6 +128,12 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
         <template v-else-if="member">never</template>
       </span>
       <span data-test="script-member-next">Next trigger: {{ member ? (member.nextTriggerAt ? when(member.nextTriggerAt) : 'none scheduled') : '…' }}</span>
+      <label v-if="member" class="tells" data-test="script-member-tells"
+        :title="`A Tell step starts agent work: a run may tell at most this many times (at most ${MAX_TELLS_LIMIT}); the next tell fails the run.`">Tells per run:
+        <input v-if="!readOnly" type="number" min="0" :max="MAX_TELLS_LIMIT" step="1" :value="member.maxTells ?? MAX_TELLS_DEFAULT" :disabled="busy.is('max-tells')"
+          data-test="script-member-max-tells" @change="setMaxTells" />
+        <span v-else data-test="script-member-max-tells-text">{{ member.maxTells ?? MAX_TELLS_DEFAULT }}</span>
+      </label>
     </div>
     <p v-if="error" class="error small" data-test="script-member-pane-error">{{ error }}</p>
     <div class="body">
@@ -162,6 +191,8 @@ const triggerLabel = (t: string) => (t.startsWith('trigger:') ? `trigger ${t.sli
 @media (prefers-reduced-motion: reduce) { .trig .dot { animation: none; } }
 .chip { font-size: 11.5px; background: var(--chip); color: var(--ink-soft); border-radius: 10px; padding: 1px 8px; }
 .facts { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--ink-soft); }
+.tells { display: inline-flex; gap: 6px; align-items: center; }
+.tells input { width: 56px; font-size: 12px; padding: 1px 4px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: auto; }
 .log { list-style: none; margin: 0; padding: 4px 6px; background: var(--code-bg, var(--chip)); border-radius: 4px; font-size: 11.5px; max-height: 160px; overflow: auto; gap: 1px; }
