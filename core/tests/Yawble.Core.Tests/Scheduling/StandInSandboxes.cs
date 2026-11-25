@@ -55,7 +55,13 @@ internal sealed class StandInSandboxes : IAsyncDisposable
     {
         // This test program itself, told to only wait (see WaitIfStandIn): a fake with no network and no system
         // program (a ping of loopback, say, ends at once inside an agent's sandbox, which has no IP driver).
-        var start = new ProcessStartInfo(Environment.ProcessPath!) { ArgumentList = { StandInArgument } };
+        // Run as the test exe, that exe is the host; run as `dotnet Yawble.Core.Tests.dll`, the host is dotnet and the
+        // test dll goes first (else the stand-in is `dotnet --stand-in-sandbox`, which exits at once).
+        var host = Environment.ProcessPath!;
+        var start = new ProcessStartInfo(host);
+        if (string.Equals(Path.GetFileNameWithoutExtension(host), "dotnet", StringComparison.OrdinalIgnoreCase))
+            start.ArgumentList.Add(typeof(StandInSandboxes).Assembly.Location);
+        start.ArgumentList.Add(StandInArgument);
         start.UseShellExecute = false;
         start.CreateNoWindow = true;
         start.RedirectStandardOutput = true;
