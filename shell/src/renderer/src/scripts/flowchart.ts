@@ -4,12 +4,12 @@
 // (`layout.nodes[stepId] = { x, y }`, top-left corner); a step without one is placed by dagre.
 //
 // Step types and their successors follow the core's checker and engine (Yawble.Core.Scripts.Language):
-// if: then / else; switch: cases (by value) / default; forEach: body / then; end: none; every other step: next.
-// A null successor ends the run, or, inside a forEach body, ends that pass of the body.
+// if: then / else; switch: cases (by value) / default; forEach and while: body / then; end: none; every other step: next.
+// A null successor ends the run, or, inside a loop body (forEach or while), ends that pass of the body.
 import dagre from '@dagrejs/dagre';
 import type { Check, ScriptDocument, ScriptStep } from './types';
 
-export type FlowKind = 'start' | 'end' | 'integration' | 'if' | 'switch' | 'forEach' | 'set' | 'file' | 'agent' | 'other';
+export type FlowKind = 'start' | 'end' | 'integration' | 'if' | 'switch' | 'forEach' | 'while' | 'set' | 'file' | 'tell' | 'code' | 'other';
 export type EdgeKind = 'next' | 'then' | 'else' | 'case' | 'default' | 'body';
 
 export interface FlowNode {
@@ -18,7 +18,7 @@ export interface FlowNode {
   /** The step's `type` ('' for the start and end nodes). */
   stepType: string;
   title: string;
-  /** integration: use.action; if: the condition; switch: the value it branches on; forEach: "items as x". */
+  /** integration: use.action; if: the condition; switch: the value it branches on; forEach: "items as x"; while: the condition; tell: "tell Ava (waits)"; code: "code → Type". */
   detail: string;
   position: { x: number; y: number };
   /** The check's messages for this step (the start node carries the document-wide ones). */
@@ -34,7 +34,7 @@ export interface FlowEdge {
   label: string | null;
   /** kind 'case': the case's value. */
   caseValue?: string;
-  /** A forEach body. */
+  /** A loop body (forEach or while). */
   dashed: boolean;
 }
 
@@ -57,6 +57,7 @@ export const STEP_TYPES: readonly { type: string; kind: FlowKind; label: string;
   { type: 'if', kind: 'if', label: 'If', template: { type: 'if', when: { left: '', op: 'eq', right: '' }, then: null, else: null } },
   { type: 'switch', kind: 'switch', label: 'Switch', template: { type: 'switch', on: '', cases: {}, default: null } },
   { type: 'forEach', kind: 'forEach', label: 'For each', template: { type: 'forEach', items: '', as: 'item', body: null, then: null } },
+  { type: 'while', kind: 'while', label: 'Loop', template: { type: 'while', when: { left: '', op: 'eq', right: '' }, body: null, then: null } },
   { type: 'set', kind: 'set', label: 'Set a variable', template: { type: 'set', var: '', value: '', next: null } },
   { type: 'log', kind: 'other', label: 'Log a line', template: { type: 'log', text: '', next: null } },
   { type: 'file.writeAllText', kind: 'file', label: 'Write a file', template: { type: 'file.writeAllText', path: '', text: '', next: null } },
@@ -65,13 +66,55 @@ export const STEP_TYPES: readonly { type: string; kind: FlowKind; label: string;
   { type: 'file.readLines', kind: 'file', label: "Read a file's lines", template: { type: 'file.readLines', path: '', next: null } },
   { type: 'file.exists', kind: 'file', label: 'Check a file exists', template: { type: 'file.exists', path: '', next: null } },
   { type: 'file.delete', kind: 'file', label: 'Delete a file', template: { type: 'file.delete', path: '', next: null } },
+  { type: 'tell', kind: 'tell', label: 'Tell a team member', template: { type: 'tell', member: 'Manager', text: '', next: null } },
+  { type: 'code', kind: 'code', label: 'Code', template: { type: 'code', inputs: {}, code: '', returns: 'any', next: null } },
   { type: 'end', kind: 'end', label: 'End', template: { type: 'end' } },
 ];
 
+/** The file step types: one File block on the palette, the operation picked on its form. */
+export const FILE_OPERATIONS: readonly { type: string; label: string; writes: boolean; reads: boolean }[] = [
+  { type: 'file.readAllText', label: 'Read the text', writes: false, reads: true },
+  { type: 'file.readLines', label: 'Read the lines', writes: false, reads: true },
+  { type: 'file.writeAllText', label: 'Write the text', writes: true, reads: false },
+  { type: 'file.appendLine', label: 'Append a line', writes: true, reads: false },
+  { type: 'file.exists', label: 'Check it exists', writes: false, reads: true },
+  { type: 'file.delete', label: 'Delete it', writes: false, reads: false },
+];
+
+/** The palette: the blocks in groups. Each block adds a step of its type (File adds a read; its form picks the operation). */
+export const PALETTE: readonly { group: string; blocks: readonly { key: string; type: string; kind: FlowKind; label: string }[] }[] = [
+  { group: 'Flow', blocks: [
+    { key: 'if', type: 'if', kind: 'if', label: 'If / else' },
+    { key: 'switch', type: 'switch', kind: 'switch', label: 'Switch' },
+    { key: 'forEach', type: 'forEach', kind: 'forEach', label: 'For each' },
+    { key: 'while', type: 'while', kind: 'while', label: 'Loop' },
+    { key: 'end', type: 'end', kind: 'end', label: 'End' },
+  ] },
+  { group: 'Data', blocks: [
+    { key: 'set', type: 'set', kind: 'set', label: 'Set a variable' },
+  ] },
+  { group: 'Do', blocks: [
+    { key: 'integration', type: 'integration', kind: 'integration', label: 'Integration' },
+    { key: 'file', type: 'file.readAllText', kind: 'file', label: 'File' },
+    { key: 'log', type: 'log', kind: 'other', label: 'Log' },
+    { key: 'tell', type: 'tell', kind: 'tell', label: 'Tell' },
+    { key: 'code', type: 'code', kind: 'code', label: 'Code' },
+  ] },
+];
+
+/** A file step switched to another operation: the path stays; text only where it writes, into only where it reads. */
+export function withFileOperation(step: ScriptStep, type: string): ScriptStep {
+  const op = FILE_OPERATIONS.find((o) => o.type === type);
+  if (!op || step.type === type) return step;
+  const next: ScriptStep = { ...step, type };
+  if (op.writes) { if (!('text' in next)) next.text = ''; } else delete next.text;
+  if (!op.reads) delete next.into;
+  return next;
+}
+
 function kindOf(type: string): FlowKind {
   const known = STEP_TYPES.find((t) => t.type === type);
-  if (known) return known.kind;
-  return type === 'agent' ? 'agent' : 'other';
+  return known ? known.kind : 'other';
 }
 
 // ---- helpers
@@ -105,14 +148,29 @@ function conditionText(c: unknown): string {
   return show(c);
 }
 
+/** "tell Manager", "tell Ava (waits)"; another team adds it: "tell Manager of Billing". */
+export function tellDetail(step: ScriptStep): string {
+  const member = text(step.member)?.trim() || 'Manager';
+  const team = text(step.team)?.trim();
+  return `tell ${member}${team ? ` of ${team}` : ''}${step.wait === true ? ' (waits)' : ''}`;
+}
+
+/** "code → Staleness": the type the code returns (any when none is given). */
+export function codeDetail(step: ScriptStep): string {
+  return `code → ${text(step.returns)?.trim() || 'any'}`;
+}
+
 function detailOf(step: ScriptStep): string {
   switch (step.type) {
     case 'integration': return `${text(step.use) ?? ''}.${text(step.action) ?? ''}`;
     case 'if': return conditionText(step.when);
     case 'switch': return show(step.on);
     case 'forEach': return `${show(step.items)} as ${text(step.as) ?? ''}`;
+    case 'while': return conditionText(step.when);
     case 'set': return `${text(step.var) ?? ''} = ${show(step.value)}`;
     case 'log': return show(step.text);
+    case 'tell': return tellDetail(step);
+    case 'code': return codeDetail(step);
     case 'end': return step.outputs && typeof step.outputs === 'object' ? Object.keys(step.outputs).join(', ') : '';
     default: return kindOf(step.type) === 'file' ? show(step.path) : '';
   }
@@ -131,7 +189,8 @@ function successors(step: ScriptStep): Successor[] {
         { kind: 'default', target: text(step.default) },
       ];
     }
-    case 'forEach': return [{ kind: 'body', target: text(step.body) }, { kind: 'then', target: text(step.then) }];
+    case 'forEach':
+    case 'while': return [{ kind: 'body', target: text(step.body) }, { kind: 'then', target: text(step.then) }];
     case 'end': return [];
     default: return [{ kind: 'next', target: text(step.next) }];
   }
@@ -139,11 +198,11 @@ function successors(step: ScriptStep): Successor[] {
 
 function labelOf(step: ScriptStep, s: Successor): string | null {
   switch (s.kind) {
-    case 'then': return step.type === 'forEach' ? 'done' : 'yes';
+    case 'then': return isLoop(step.type) ? 'done' : 'yes';
     case 'else': return 'no';
     case 'case': return s.caseValue ?? '';
     case 'default': return 'default';
-    case 'body': return 'each';
+    case 'body': return step.type === 'while' ? 'repeat' : 'each';
     default: return null;
   }
 }
@@ -152,7 +211,12 @@ function edgeId(source: string, s: { kind: EdgeKind; caseValue?: string }): stri
   return s.kind === 'case' ? `${source}->case:${s.caseValue}` : `${source}->${s.kind}`;
 }
 
-/** The ids of steps that run inside a forEach body (reached first through a body from start, as the checker walks it). */
+/** A loop step: forEach or while (body / then). */
+function isLoop(type: string): boolean {
+  return type === 'forEach' || type === 'while';
+}
+
+/** The ids of steps that run inside a loop body (reached first through a body from start, as the checker walks it). */
 function stepsInBodies(doc: ScriptDocument, byId: Map<string, ScriptStep>): Set<string> {
   const inBody = new Map<string, boolean>();
   const queue: string[] = [];
@@ -162,7 +226,7 @@ function stepsInBodies(doc: ScriptDocument, byId: Map<string, ScriptStep>): Set<
     const step = byId.get(id)!;
     for (const s of successors(step)) {
       if (!s.target || !byId.has(s.target) || inBody.has(s.target)) continue;
-      inBody.set(s.target, inBody.get(id)! || (step.type === 'forEach' && s.kind === 'body'));
+      inBody.set(s.target, inBody.get(id)! || (isLoop(step.type) && s.kind === 'body'));
       queue.push(s.target);
     }
   }
@@ -201,7 +265,7 @@ export function docToGraph(
   const accepts = doc.trigger?.accepts ?? [];
   const nodes: FlowNode[] = [
     {
-      id: START_ID, kind: 'start', stepType: '', title: 'Start', detail: accepts.join(', '), position: at,
+      id: START_ID, kind: 'start', stepType: '', title: 'Start', detail: accepts.length ? `on ${accepts.join(', ')}` : 'no trigger yet', position: at,
       problems: issues.filter((i) => i.stepId === null).map((i) => i.message), run: run ? 'taken' : null,
     },
     ...[...byId.values()].map((s): FlowNode => ({
@@ -286,7 +350,8 @@ export function branchesOf(doc: ScriptDocument, stepId: string): Branch[] {
   switch (step.type) {
     case 'if': return [{ kind: 'then' }, { kind: 'else' }];
     case 'switch': return [...Object.keys(step.cases ?? {}).map((value) => ({ kind: 'case' as const, value })), { kind: 'default' }];
-    case 'forEach': return [{ kind: 'body' }, { kind: 'then' }];
+    case 'forEach':
+    case 'while': return [{ kind: 'body' }, { kind: 'then' }];
     case 'end': return [];
     default: return [{ kind: 'next' }];
   }

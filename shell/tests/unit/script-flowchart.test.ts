@@ -178,7 +178,7 @@ describe('the Flowchart tab', () => {
 
   it('the palette adds a step of the chosen type with a unique id and opens it', async () => {
     const w = await editor(fakeApi().api);
-    expect(w.findAll('[data-test=flow-palette] button')).toHaveLength(13);
+    expect(w.findAll('[data-test=flow-palette] button')).toHaveLength(11);
     await w.get('[data-test=palette-log]').trigger('click');
     await w.get('[data-test=palette-if]').trigger('click');
     await flushPromises();
@@ -187,6 +187,42 @@ describe('the Flowchart tab', () => {
     expect(new Set(steps.map((s) => s.id)).size).toBe(steps.length);
     expect(node(w, 'step13').classes()).toContain('diamond');
     expect(w.get('[data-test=flow-panel]').attributes('data-node')).toBe('step13');
+  });
+
+  it('the palette groups its blocks as Flow, Data and Do, and has one File block', async () => {
+    const w = await editor(fakeApi().api);
+    const group = (g: string) => w.get(`[data-test=palette-group-${g}]`).findAll('button').map((b) => b.attributes('data-test'));
+    expect(group('flow')).toEqual(['palette-if', 'palette-switch', 'palette-forEach', 'palette-while', 'palette-end']);
+    expect(group('data')).toEqual(['palette-set']);
+    expect(group('do')).toEqual(['palette-integration', 'palette-file', 'palette-log', 'palette-tell', 'palette-code']);
+  });
+
+  it('the File block adds a read; its Operation picks another file step type and keeps the path', async () => {
+    const w = await editor(fakeApi().api);
+    await w.get('[data-test=palette-file]').trigger('click');
+    await flushPromises();
+    const id = docOf(w).steps!.at(-1)!.id;
+    expect(docOf(w).steps!.at(-1)!.type).toBe('file.readAllText');
+    const op = w.get('[data-test=form-file-op]');
+    expect(op.findAll('option')).toHaveLength(6);
+    await op.setValue('file.appendLine');
+    await flushPromises();
+    const step = docOf(w).steps!.find((s) => s.id === id)!;
+    expect(step).toMatchObject({ type: 'file.appendLine', path: '', text: '' });
+    expect(node(w, id).attributes('data-kind')).toBe('file');
+  });
+
+  it('the Start node opens its triggers, with a way to the whole script', async () => {
+    const w = await editor(fakeApi().api);
+    await w.get('.vf-node[data-id="__start"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=start-pane]').exists()).toBe(true);
+    expect(w.find('[data-test=script-accepts]').exists()).toBe(true);
+    expect(w.find('[data-test=script-name]').exists()).toBe(false);
+    await w.get('[data-test=start-pane-script]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=start-pane]').exists()).toBe(false);
+    expect(w.find('[data-test=script-name]').exists()).toBe(true);
   });
 
   it('undo and redo cover more than 20 edits, from the toolbar and with Ctrl+Z / Ctrl+Y', async () => {

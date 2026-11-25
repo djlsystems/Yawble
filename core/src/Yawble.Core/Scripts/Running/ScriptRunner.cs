@@ -59,6 +59,12 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
 
     public IScriptDecisions? Decisions { get; set; }
 
+    /// <summary>Who a run's tell steps give work to (the bus, in the app); null: a tell step fails (no team to tell).</summary>
+    public IScriptTellers? Tellers { get; set; }
+
+    /// <summary>What tells the runner a waiting run's wait ended, by kind (a tell's workflow: the bus, in the app).</summary>
+    public IReadOnlyList<IScriptWaitSource> WaitSources { get; set; } = [];
+
     public bool IsScriptMember(long memberId) => _store.IsScriptMember(memberId);
 
     /// <summary>Whether the member has a run going now.</summary>
@@ -122,7 +128,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         catch (ScriptRunRefused e) { return RunResult.Fail(e.Message); }
         return outcome.Run.Status switch
         {
-            ScriptRunStatus.Succeeded => RunResult.Ok,
+            ScriptRunStatus.Succeeded or ScriptRunStatus.Waiting => RunResult.Ok,
             ScriptRunStatus.Skipped => RunResult.Fail(outcome.Run.Reason ?? "a run was going"),
             _ => RunResult.Fail($"script run {outcome.Run.Id} {outcome.Run.Status}" + (outcome.Run.FailedStepId is { } s ? $" at step {s}" : "")
                 + (outcome.Run.Reason is { } r ? ": " + r : "")),
@@ -176,6 +182,10 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
             AllowedFolders = [],
             DryRun = test.DryRun,
             DryRunFolder = test.DryRun ? DryRunFolder(runId) : null,
+            DryTells = true, // a Test run never sends a tell
+            TellReplies = (JsonObject?)test.TellReplies?.DeepClone(),
+            Team = team,
+            Clock = _clock,
             Timeout = TimeSpan.FromMinutes(ScriptRunStore.DefaultTimeoutMinutes),
             StepBudget = StepBudget,
             LoopCap = LoopCap,
@@ -229,16 +239,118 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         return resumed;
     }
 
+    // ------------------------------------------------------------------ waiting runs
+
+    public static readonly TimeSpan WaitSweepEvery = TimeSpan.FromSeconds(15);
+    private ITimer? _waitSweep;
+    private int _sweeping;
+
+    /// <summary>Checks waiting runs now and then every <paramref name="every"/> (default 15 seconds), until the runner stops.</summary>
+    public void StartWaitSweep(TimeSpan? every = null)
+    {
+        var period = every ?? WaitSweepEvery;
+        _waitSweep?.Dispose();
+        _waitSweep = _clock.CreateTimer(_ => _ = SweepOnceAsync(), null, TimeSpan.Zero, period);
+    }
+
+    private async Task SweepOnceAsync()
+    {
+        if (Interlocked.Exchange(ref _sweeping, 1) == 1) return;
+        try { await ResolveWaitsAsync(_stopping.Token); }
+        catch (OperationCanceledException) { /* stopping */ }
+        catch (Exception e) when (e is not OutOfMemoryException) { _log?.Invoke($"the waiting runs could not be checked: {e.Message}"); }
+        finally { Volatile.Write(ref _sweeping, 0); }
+    }
+
+    /// <summary>
+    /// Every waiting run whose wait ended (its source says how, or its timeout passed: timedOut) resumes from its checkpoint in the
+    /// background, the step that waited completing with the outcome. A run whose member is gone, or a Test run, is recorded
+    /// interrupted. Runs whose wait goes on are left as they are. The resumed runs.
+    /// </summary>
+    public async Task<IReadOnlyList<long>> ResolveWaitsAsync(CancellationToken ct = default)
+    {
+        var resumed = new List<long>();
+        foreach (var run in _store.Waiting())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (run.Test || run.MemberId is not { } memberId || _store.Member(memberId) is null)
+            {
+                _store.CloseOpenSteps(run.Id, ScriptRunStatus.Interrupted);
+                _store.Finish(run.Id, ScriptRunStatus.Interrupted, null, null, "interrupted: the member is no longer a script member");
+                continue;
+            }
+            ScriptRunCheckpoint? checkpoint = null;
+            try { checkpoint = run.Checkpoint is { } cp ? ScriptRunCheckpoint.FromJson(cp) : null; }
+            catch (Exception e) when (e is JsonException or FormatException) { /* below */ }
+            if (checkpoint?.Wait is not { } wait)
+            {
+                _store.CloseOpenSteps(run.Id, ScriptRunStatus.Failed);
+                _store.Finish(run.Id, ScriptRunStatus.Failed, null, null, "the run's wait could not be read from its checkpoint");
+                continue;
+            }
+            ScriptWaitResult? result = null;
+            if (wait.Until is { } until && _clock.GetUtcNow() >= until) result = new ScriptWaitResult(ScriptTell.Outcomes.TimedOut);
+            else if (WaitSources.FirstOrDefault(s => s.Kind == wait.Kind) is { } source)
+            {
+                try { result = await source.CheckAsync(wait, ct); }
+                catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
+                {
+                    _log?.Invoke($"script run {run.Id}: its wait could not be checked: {e.Message}");
+                }
+            }
+            if (result is null) continue;
+            if (!TryClaim(memberId, run.Trigger, out var release, out _, resuming: run.Id, note: false)) continue;
+            if (!_store.Unpark(run.Id))
+            {
+                release();
+                continue;
+            }
+            _store.Log(run.Id, result.Outcome == ScriptTell.Outcomes.TimedOut
+                ? "the wait timed out: the run goes on"
+                : $"the wait ended ({result.Outcome}): the run goes on");
+            var resume = new Resume(run, checkpoint, result);
+            var task = Task.Run(async () =>
+            {
+                try { await ExecuteMemberRunAsync(memberId, run.Id, resume, _stopping.Token); }
+                catch (Exception e) { Warn(memberId, run.Id, run.Trigger, e, "the run that waited stopped with an error"); }
+                finally { release(); }
+            }, CancellationToken.None);
+            Track(run.Id, task);
+            resumed.Add(run.Id);
+        }
+        return resumed;
+    }
+
+    /// <summary>
+    /// Cancels a waiting run: it ends interrupted, and the workflow its tell started goes on (nothing is told to the team). False when
+    /// the run is not waiting.
+    /// </summary>
+    public bool CancelWaiting(long runId)
+    {
+        var run = _store.Run(runId);
+        if (run is null || run.Status != ScriptRunStatus.Waiting) return false;
+        lock (_claim)
+        {
+            if (!_store.Unpark(runId)) return false;
+            _store.CloseOpenSteps(runId, ScriptRunStatus.Interrupted);
+            _store.Log(runId, "cancelled while it waited" + (run.WaitWorkflowId is { } w ? $"; workflow {w} goes on" : ""));
+            _store.Finish(runId, ScriptRunStatus.Interrupted, null, null,
+                "cancelled while it waited" + (run.WaitWorkflowId is { } w2 ? $" on workflow {w2}; the workflow goes on" : ""));
+        }
+        return true;
+    }
+
     /// <summary>The app is stopping: runs going are cut off and left running in the store, so the next start resumes them.</summary>
     public async Task StopAsync()
     {
+        _waitSweep?.Dispose();
         await _stopping.CancelAsync();
         try { await WhenIdleAsync(); } catch { /* each run logs its own end */ }
     }
 
     // ------------------------------------------------------------------ one member run
 
-    private sealed record Resume(ScriptRunRow Run, ScriptRunCheckpoint? Checkpoint);
+    private sealed record Resume(ScriptRunRow Run, ScriptRunCheckpoint? Checkpoint, ScriptWaitResult? WaitResult = null);
 
     /// <summary>Records the run's row (the version the member runs now) and returns its id. Throws ScriptRunRefused.</summary>
     private long BeginMemberRun(long memberId, string trigger, JsonNode? input)
@@ -301,9 +413,15 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
             StepBudget = StepBudget,
             LoopCap = LoopCap,
             ResumeFrom = resume?.Checkpoint,
+            WaitResult = resume?.WaitResult,
+            Teller = Tellers?.For(caller, version.Key),
+            Team = member.Team,
+            MaxTells = Math.Clamp(member.MaxTells, 0, ScriptTell.MaxTellsLimit),
+            Clock = _clock,
         };
         var result = await RunEngineAsync(runId, request, timeout, ct);
         if (result is null) return; // the app is stopping: left running, resumed at the next start
+        if (result.Value.Waiting) return; // parked on its wait: no failure count, no saved variables; it goes on when the wait ends
         if (result.Value.Succeeded)
         {
             // Saved variables move only when a run succeeds (a failed poll never moves lastSeen).
@@ -333,7 +451,7 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         }
     }
 
-    private readonly record struct EngineEnd(bool Succeeded, string? Reason, JsonObject? SavedVariables);
+    private readonly record struct EngineEnd(bool Succeeded, string? Reason, JsonObject? SavedVariables, bool Waiting = false);
 
     /// <summary>
     /// One pass through the engine with the journal; the run's row is finished here. Null when the app is stopping (the row
@@ -361,6 +479,14 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             result = new ScriptRunResult(EngineRunStatus.Failed, journal.CurrentStep, e.Message, null, null);
+        }
+        if (result.Status == EngineRunStatus.Waiting && result.Wait is { } wait)
+        {
+            // The checkpoint (with the wait) is written; the row says waiting, with what it waits on. No run slot is held from here.
+            _store.Park(runId, wait.Kind, wait.Workflow, wait.Until);
+            _store.Log(runId, (wait.Workflow is { } w ? $"waiting on workflow {w}" : $"waiting ({wait.Kind})")
+                + (wait.Until is { } u ? $" until {u.UtcDateTime:yyyy-MM-dd HH:mm} UTC" : ""));
+            return new EngineEnd(false, null, null, Waiting: true);
         }
         var succeeded = result.Status == EngineRunStatus.Succeeded;
         var status = succeeded ? ScriptRunStatus.Succeeded : ScriptRunStatus.Failed;
@@ -423,15 +549,22 @@ public sealed class ScriptRunner : IScriptMemberHost, Launch.IScriptMemberRuns
 
     // ------------------------------------------------------------------ plumbing
 
-    private bool TryClaim(long memberId, string trigger, out Action release, out ScriptFireOutcome? skipped)
+    /// <summary>
+    /// Claims the member's one run. A run going in memory, or a run of the member waiting on its tell (it counts as the member's run,
+    /// though it holds no slot), refuses the claim; the refused start is noted as a skipped run unless <paramref name="note"/> is false.
+    /// <paramref name="resuming"/>: the waiting run that is being resumed (its own wait does not refuse it).
+    /// </summary>
+    private bool TryClaim(long memberId, string trigger, out Action release, out ScriptFireOutcome? skipped, long? resuming = null, bool note = true)
     {
         lock (_claim)
         {
-            if (_running.ContainsKey(memberId))
+            var waiting = _running.ContainsKey(memberId) ? null : _store.WaitingRunOf(memberId);
+            if (_running.ContainsKey(memberId) || (waiting is not null && waiting.Id != resuming))
             {
                 release = () => { };
-                var reason = "a run of this member was going (one run at a time)";
-                skipped = Skip(memberId, trigger, reason);
+                var reason = waiting is null ? "a run of this member was going (one run at a time)"
+                    : $"a run of this member (script run {waiting.Id}) was waiting" + (waiting.WaitWorkflowId is { } w ? $" on workflow {w}" : "") + " (one run at a time)";
+                skipped = note ? Skip(memberId, trigger, reason) : new ScriptFireOutcome(false, null, reason);
                 return false;
             }
             var gate = new TaskCompletionSource();

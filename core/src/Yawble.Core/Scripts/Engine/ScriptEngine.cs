@@ -20,9 +20,12 @@ public static class ScriptEngine
     public static async Task<ScriptRunResult> RunAsync(ScriptRunRequest request, IScriptRunJournal journal, CancellationToken ct)
     {
         var clock = request.Clock ?? TimeProvider.System;
-        using var timeout = new CancellationTokenSource(request.Timeout, clock);
+        // The run timeout counts only the time the run went (a resumed run's ActiveMs), not the time it waited or the app was closed.
+        var active = TimeSpan.FromMilliseconds(Math.Max(0, request.ResumeFrom?.ActiveMs ?? 0));
+        var left = request.Timeout - active;
+        using var timeout = new CancellationTokenSource(left > TimeSpan.Zero ? left : TimeSpan.FromMilliseconds(1), clock);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-        var run = new Run(clock, request, journal, linked.Token, clock.GetUtcNow());
+        var run = new Run(clock, request, journal, linked.Token, clock.GetUtcNow() - active);
         try
         {
             return await run.ExecuteAsync();
@@ -55,7 +58,12 @@ public static class ScriptEngine
         private JsonObject? _outputs;
         private int _stepsRun;
         private bool _ended;
+        private int _tells;
+        private ScriptWait? _wait;
         private ScriptRunCheckpoint? _last;
+
+        /// <summary>Set by a step that parks the run (a tell that waits); the loop saves the wait and returns.</summary>
+        private ScriptWait? _parking;
 
         public string? CurrentStep { get; private set; }
 
@@ -85,7 +93,7 @@ public static class ScriptEngine
                 case "steps": value = _steps; return true;
             }
             for (var i = _frames.Count - 1; i >= 0; i--)
-                if (_frames[i].As == name)
+                if (!_frames[i].IsWhile && _frames[i].As == name)
                 {
                     var f = _frames[i];
                     value = f.Index < f.Items.Count ? f.Items[f.Index] : null;
@@ -102,6 +110,8 @@ public static class ScriptEngine
 
             if (_req.ResumeFrom is { } cp) Restore(cp);
             else if (await StartAsync() is { } failed) return failed;
+
+            if (_wait is { } parked && await EndWaitAsync(parked) is { } afterWait) return afterWait;
 
             while (!_ended && !(_next is null && _frames.Count == 0))
             {
@@ -122,6 +132,16 @@ public static class ScriptEngine
                     input = Input(step);
                     await _journal.StepStartedAsync(step.Id, step.Type, input?.DeepClone());
                     var (output, next) = await ExecuteStepAsync(step, input);
+                    if (_parking is { } wait)
+                    {
+                        // The step parks the run: saved at this step, with what it waits on; it completes when the wait ends.
+                        _parking = null;
+                        _wait = wait;
+                        _last = Snapshot();
+                        await _journal.StepWaitingAsync(new ScriptStepRecord(step.Id, step.Type, input, output, "waiting", started, Now), _last);
+                        CurrentStep = null;
+                        return Parked(wait);
+                    }
                     _stepsRun++;
                     _next = next;
                     Advance();
@@ -162,6 +182,42 @@ public static class ScriptEngine
             var line = stepId is null ? $"run failed: {reason}" : $"run failed at step '{stepId}': {reason}";
             await LogAsync(line);
             return new ScriptRunResult(ScriptRunStatus.Failed, stepId, reason, null, null) { Log = _log.ToList(), StepsRun = _stepsRun };
+        }
+
+        private ScriptRunResult Parked(ScriptWait wait) =>
+            new(ScriptRunStatus.Waiting, null, null, null, null) { Wait = wait, Log = _log.ToList(), StepsRun = _stepsRun };
+
+        /// <summary>
+        /// A run resumed while parked: with the wait's result (or its timeout passed) the waiting step completes and the run goes on
+        /// (null); otherwise it stays parked. A result the step refuses (a reply that does not match) fails the run.
+        /// </summary>
+        private async Task<ScriptRunResult?> EndWaitAsync(ScriptWait parked)
+        {
+            var result = _req.WaitResult
+                         ?? (parked.Until is { } until && Now >= until ? new ScriptWaitResult(ScriptTell.Outcomes.TimedOut) : null);
+            if (result is null) return Parked(parked);
+            CurrentStep = parked.StepId;
+            var step = _doc.Step(parked.StepId);
+            try
+            {
+                if (step is null) throw new ScriptStepException($"step '{parked.StepId}' does not exist");
+                var output = step.Type switch
+                {
+                    ScriptTell.StepType when parked.Kind == ScriptWait.WorkflowKind => EndTell(step, parked, result),
+                    _ => throw new ScriptStepException($"a {step.Type} step does not wait on {parked.Kind}"),
+                };
+                _wait = null;
+                _stepsRun++;
+                _next = step.Text("next");
+                Advance();
+                await Checkpoint(new ScriptStepRecord(step.Id, step.Type, parked.Input?.DeepClone(), output, "succeeded", parked.Since, Now));
+                return null;
+            }
+            catch (Exception e) when (e is ScriptStepException or ScriptValueException)
+            {
+                _wait = null;
+                return await FailAsync(parked.StepId, e.Message, step?.Type, parked.Input?.DeepClone(), parked.Since);
+            }
         }
 
         // ---- start, checkpoints, loops --------------------------------------------------------------------------------
@@ -224,6 +280,9 @@ public static class ScriptEngine
             Outputs = (JsonObject?)_outputs?.DeepClone(),
             StepsRun = _stepsRun,
             Ended = _ended,
+            Tells = _tells,
+            ActiveMs = (long)Math.Max(0, (Now - _began).TotalMilliseconds),
+            Wait = _wait,
         };
 
         private void Restore(ScriptRunCheckpoint cp)
@@ -239,18 +298,28 @@ public static class ScriptEngine
             _outputs = cp.Outputs;
             _stepsRun = cp.StepsRun;
             _ended = cp.Ended;
+            _tells = cp.Tells;
+            _wait = cp.Wait;
             _last = Snapshot();
             // A variable the script declares that the checkpoint lacks (it cannot, unless the script changed): its initial value.
             foreach (var v in _doc.Variables.Where(v => !_vars.ContainsKey(v.Name)))
                 _vars[v.Name] = ScriptValues.Convert(ScriptValues.FromNode(v.Initial), _varTypes[v.Name], Find);
         }
 
-        /// <summary>After a step: a null successor ends the innermost body, which moves its loop to the next item or past it.</summary>
+        /// <summary>
+        /// After a step: a null successor ends the innermost body, which moves its loop to the next item or past it. A while's pass
+        /// ends by going back to the while step, which checks its condition again (a step of its own, saved like any other).
+        /// </summary>
         private void Advance()
         {
             while (_next is null && _frames.Count > 0)
             {
                 var frame = _frames[^1];
+                if (frame.IsWhile)
+                {
+                    _next = frame.StepId;
+                    return;
+                }
                 var loop = _doc.Step(frame.StepId)!;
                 frame.Index++;
                 if (frame.Index < frame.Items.Count)
@@ -292,6 +361,8 @@ public static class ScriptEngine
                 ScriptStepTypes.FileWriteAllText or ScriptStepTypes.FileAppendLine => Pick("path", "text"),
                 ScriptStepTypes.FileReadAllText or ScriptStepTypes.FileReadLines or ScriptStepTypes.FileExists or ScriptStepTypes.FileDelete => Pick("path"),
                 "log" => Pick("text"),
+                ScriptTell.StepType => Pick("member", "team", "text", "wait", "timeout", "reply"),
+                ScriptCode.StepType => new JsonObject { ["inputs"] = ev.EvaluateValue(step["inputs"]) ?? new JsonObject() },
                 "end" => step["outputs"] is { } o ? new JsonObject { ["outputs"] = ev.EvaluateValue(o) } : null,
                 _ => null,
             };
@@ -332,6 +403,10 @@ public static class ScriptEngine
                     _frames.Add(new ScriptLoopFrame { StepId = step.Id, As = name, Items = (JsonArray)items.DeepClone(), Index = 0 });
                     return (output, body);
                 }
+                case ScriptLoop.StepType:
+                    return While(step);
+                case ScriptCode.StepType:
+                    return (await CodeAsync(step, input as JsonObject ?? []), next);
                 case "integration":
                     return (await IntegrationAsync(step, (JsonObject)input!), next);
                 case ScriptStepTypes.FileWriteAllText or ScriptStepTypes.FileAppendLine:
@@ -380,6 +455,8 @@ public static class ScriptEngine
                 case "log":
                     await LogAsync(Text(input, "text"));
                     return (null, next);
+                case ScriptTell.StepType:
+                    return (await TellAsync(step, input as JsonObject ?? []), next);
                 case "end":
                 {
                     if (input?["outputs"] is JsonObject outputs)
@@ -424,6 +501,162 @@ public static class ScriptEngine
             _steps[step.Id] = stored?.DeepClone();
             return stored?.DeepClone();
         }
+
+        /// <summary>
+        /// A tell: the cap first (the next tell past maxTells fails the run), then a dry run logs what it would tell and sends nothing;
+        /// otherwise the teller starts the workflow. Without wait, into gets { outcome: sent, workflow }; with wait the run parks on the
+        /// workflow until it ends or the timeout passes.
+        /// </summary>
+        private async Task<JsonNode?> TellAsync(ScriptStep step, JsonObject input)
+        {
+            var member = OptText(input, "member") ?? ScriptTell.DefaultMember;
+            var team = OptText(input, "team");
+            var text = Text(input, "text");
+            if (text.Trim().Length == 0) throw new ScriptStepException("tell has no text to send");
+            var wait = input["wait"] is JsonValue w && w.TryGetValue<bool>(out var b) && b;
+            var timeout = ScriptTell.DefaultTimeout;
+            if (wait && input["timeout"] is { } t)
+            {
+                if (!ScriptTell.TryParseTimeout(t, out timeout) || timeout <= TimeSpan.Zero)
+                    throw new ScriptStepException($"tell's timeout '{t.ToJsonString()}' is not a duration");
+                if (timeout > ScriptTell.MaxTimeout) throw new ScriptStepException("tell's timeout is over 7 days");
+            }
+            var replyName = wait ? step.Text("reply") : null;
+            var replySchema = replyName is null ? null : Find(replyName) ?? throw new ScriptStepException($"reply: no schema named '{replyName}'");
+
+            if (_tells >= _req.MaxTells)
+                throw new ScriptStepException($"a run may tell at most {_req.MaxTells} time{(_req.MaxTells == 1 ? "" : "s")} (the member's maxTells is {_req.MaxTells}); this would be tell {_tells + 1}");
+            _tells++;
+
+            if (_req.DryRun || _req.DryTells)
+            {
+                await LogAsync($"would tell {member} of {team ?? _req.Team ?? "its team"}: {text}");
+                string reply = "";
+                JsonNode? data = null;
+                if (wait && _req.TellReplies is { } replies && replies.TryGetPropertyValue(step.Id, out var madeUp))
+                    (reply, data) = MadeUpReply(madeUp, replyName, replySchema);
+                return Result(step, ScriptTell.Result(ScriptTell.Outcomes.DryRun, 0, reply, data));
+            }
+
+            var teller = _req.Teller ?? throw new ScriptStepException("this run has no team to tell");
+            ScriptTellSent sent;
+            try { sent = await teller.TellAsync(new ScriptTellCall(step.Id, member, team, text, wait, replyName, (JsonObject?)replySchema?.Schema.DeepClone()), _ct); }
+            catch (Exception e) when (e is not OperationCanceledException and not ScriptActionException)
+            {
+                throw new ScriptActionException($"tell {member}: {e.Message}");
+            }
+            if (!wait) return Result(step, ScriptTell.Result(ScriptTell.Outcomes.Sent, sent.Workflow, "", null));
+
+            var now = Now;
+            _parking = new ScriptWait
+            {
+                Kind = ScriptWait.WorkflowKind,
+                StepId = step.Id,
+                Workflow = sent.Workflow,
+                Since = now,
+                Until = now + timeout,
+                Data = new JsonObject { ["member"] = sent.Member, ["team"] = sent.Team, ["reply"] = replyName },
+                Input = input.DeepClone(),
+            };
+            return new JsonObject { ["waiting"] = true, ["workflow"] = sent.Workflow, ["member"] = sent.Member, ["team"] = sent.Team };
+        }
+
+        /// <summary>A waiting tell's end: its outcome, the closing summary, and for done with a reply schema the reply's checked data.</summary>
+        private JsonNode? EndTell(ScriptStep step, ScriptWait wait, ScriptWaitResult result)
+        {
+            if (!ScriptTell.Outcomes.All.Contains(result.Outcome)) throw new ScriptStepException($"'{result.Outcome}' is not how a tell ends");
+            var replyName = wait.Data?["reply"] is JsonValue r && r.TryGetValue<string>(out var n) ? n : null;
+            JsonNode? data = null;
+            if (result.Outcome == ScriptTell.Outcomes.Done && replyName is not null)
+            {
+                var schema = Find(replyName) ?? throw new ScriptStepException($"reply: no schema named '{replyName}'");
+                data = CheckedReply(ScriptTell.ReplyJson(result.Text), replyName, schema);
+            }
+            return Result(step, ScriptTell.Result(result.Outcome, wait.Workflow ?? 0, result.Text, data));
+        }
+
+        /// <summary>A Test run's made-up reply: text (its JSON, when it ends with some, is the data) or JSON (the data itself).</summary>
+        private (string Reply, JsonNode? Data) MadeUpReply(JsonNode? madeUp, string? replyName, ScriptSchema? schema)
+        {
+            string reply;
+            JsonNode? json;
+            if (madeUp is JsonValue v && v.TryGetValue<string>(out var s))
+            {
+                reply = s;
+                json = ScriptTell.ReplyJson(s);
+            }
+            else
+            {
+                reply = madeUp?.ToJsonString() ?? "";
+                json = madeUp?.DeepClone();
+            }
+            return (reply, replyName is null || schema is null ? null : CheckedReply(json, replyName, schema));
+        }
+
+        private JsonNode CheckedReply(JsonNode? json, string replyName, ScriptSchema schema)
+        {
+            if (json is null) throw new ScriptStepException($"the reply does not end with JSON of {replyName}");
+            var errors = schema.Validate(json, Find);
+            if (errors.Count > 0) throw new ScriptStepException($"the reply does not match {replyName}: {string.Join("; ", errors.Take(3))}");
+            return json;
+        }
+
+        /// <summary>
+        /// A while: reached from outside it starts at pass 0; reached again at the end of a pass (its frame on top) it counts that
+        /// pass. Its condition false goes to then (the frame gone); true runs the body again, unless the passes reached max or the
+        /// loop cap, which fails the run.
+        /// </summary>
+        private (JsonNode? Output, string? Next) While(ScriptStep step)
+        {
+            var frame = _frames.Count > 0 && _frames[^1] is { IsWhile: true } top && top.StepId == step.Id ? top : null;
+            if (frame is not null) frame.Index++;
+            var passes = frame?.Index ?? 0;
+            var max = step["max"] is { } m && ScriptValues.FromNode(m) is long l ? (int)Math.Clamp(l, 1, ScriptLoop.MaxLimit) : ScriptLoop.DefaultMax;
+            var holds = ScriptCondition.Parse(step["when"]).Evaluate(Evaluator());
+            var output = new JsonObject { ["result"] = holds, ["passes"] = passes };
+            if (!holds)
+            {
+                if (frame is not null) _frames.RemoveAt(_frames.Count - 1);
+                return (output, step.Text("then"));
+            }
+            if (passes >= max) throw new ScriptStepException(ScriptLoop.RanMax(step.Id, max));
+            if (passes >= _req.LoopCap) throw new ScriptStepException($"the loop '{step.Id}' reached the loop cap of {_req.LoopCap} passes");
+            var body = step.Text("body") ?? throw new ScriptStepException("while has no body");
+            if (frame is null) _frames.Add(new ScriptLoopFrame { StepId = step.Id, IsWhile = true, Index = 0 });
+            return (output, body);
+        }
+
+        /// <summary>
+        /// A code step: runs the function on its evaluated inputs under the code limits (off the run's thread, so the run's
+        /// cancellation reaches it), writes what it logged, then checks the returned value against returns and keeps it.
+        /// </summary>
+        private async Task<JsonNode?> CodeAsync(ScriptStep step, JsonObject input)
+        {
+            var code = step.Text("code") ?? throw new ScriptStepException("code has no code");
+            var inputs = input["inputs"] as JsonObject ?? [];
+            ScriptCodeOutcome outcome;
+            try
+            {
+                outcome = await Task.Run(() => ScriptCode.Run(code, inputs, _req.CodeLimits, _ct), _ct);
+            }
+            catch (ScriptCodeException e)
+            {
+                foreach (var line in ScriptCode.LogOf(e)) await LogAsync(line);
+                throw new ScriptStepException(e.Message);
+            }
+            foreach (var line in outcome.Log) await LogAsync(line);
+
+            var returns = step.Text("returns") is { Length: > 0 } text
+                ? ScriptType.Parse(text, Find, out var why) ?? throw new ScriptStepException($"returns: {why}")
+                : ScriptType.Any;
+            JsonNode? value;
+            try { value = ScriptValues.Convert(ScriptValues.FromNode(outcome.Result), returns, Find); }
+            catch (ScriptValueException e) { throw new ScriptStepException($"the code returned {ScriptValues.Describe(ScriptValues.FromNode(outcome.Result))}, not {returns}: {e.Message}"); }
+            return Result(step, value);
+        }
+
+        private static string? OptText(JsonNode? input, string name) =>
+            input?[name] is null ? null : Text(input, name).Trim() is { Length: > 0 } s ? s : null;
 
         private async Task<JsonNode?> IntegrationAsync(ScriptStep step, JsonObject input)
         {

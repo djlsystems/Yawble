@@ -215,7 +215,22 @@ public static class BuiltInSchemas
           "required": ["status"] }
         """);
 
-    public static readonly IReadOnlyList<ScriptSchema> All = [TriggerFired, FolderChange, EventItem, EmailAddress, EmailMessage, EmailList, ApiResponse];
+    /// <summary>
+    /// What a <c>tell</c> step gives back. Its <c>data</c> is the reply's JSON: the checker types it by the step's <c>reply</c>
+    /// schema (<see cref="ScriptTell.ResultType"/>); a variable declared <c>TellResult</c> holds any data.
+    /// </summary>
+    public static readonly ScriptSchema TellResult = Make("TellResult", """
+        { "type": "object", "description": "What a tell step gives back: how the work it gave went, its workflow and the agent's reply.",
+          "properties": {
+            "outcome": { "type": "string", "enum": ["sent", "done", "failed", "blocked", "timedOut", "dryRun"],
+                         "description": "sent (it did not wait), done, failed, blocked, timedOut (the wait passed its timeout) or dryRun (a dry run or Test run sends nothing)." },
+            "workflow": { "type": "integer", "description": "The workflow the tell started (0 in a dry run)." },
+            "reply": { "type": "string", "description": "The closing summary the agent wrote (empty when it did not wait or nothing came)." },
+            "data": { "description": "The reply's JSON, of the step's reply schema; null without a reply schema or when the work did not finish." } },
+          "required": ["outcome", "workflow", "reply"] }
+        """);
+
+    public static readonly IReadOnlyList<ScriptSchema> All = [TriggerFired, FolderChange, EventItem, EmailAddress, EmailMessage, EmailList, ApiResponse, TellResult];
 
     public static ScriptSchema? Find(string name) => All.FirstOrDefault(s => s.Name == name);
 
