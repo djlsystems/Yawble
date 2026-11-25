@@ -519,6 +519,28 @@ public class CompanionServerTests : IDisposable
         ControlDiscovery.RemoveIfOurs(home, "a"); // no throw either
     }
 
+    /// <summary>Whether setting a DACL on an existing folder here takes effect (POSIX: always; the mode is the rule).</summary>
+    private bool ExistingFolderRulesCanChange()
+    {
+        if (!OperatingSystem.IsWindows()) return true;
+        var probe = Path.Combine(_home, "rules-probe");
+        Directory.CreateDirectory(probe);
+        try
+        {
+            var user = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+            var rules = new System.Security.AccessControl.DirectorySecurity();
+            rules.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            rules.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(user,
+                System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+            new DirectoryInfo(probe).SetAccessControl(rules);
+            return new DirectoryInfo(probe).GetAccessControl().AreAccessRulesProtected;
+        }
+        finally
+        {
+            Directory.Delete(probe);
+        }
+    }
+
     [Fact]
     public void APopulatedExistingHomeIsNotReAcled_AnEmptyOneIsSecured()
     {
@@ -532,6 +554,11 @@ public class CompanionServerTests : IDisposable
         Assert.Equal(before, Snapshot(populated));
         Assert.False(File.Exists(ControlDiscovery.FilePath(populated)));
         Assert.False(UserOnlyFile.IsUserOnly(populated));
+
+        // The rest re-secures existing folders. Yawble's agent sandbox on Windows accepts a new DACL on an existing folder
+        // without an error but keeps the old one (a folder created with its DACL does get it), so there it cannot be checked.
+        Assert.SkipUnless(ExistingFolderRulesCanChange(),
+            "this Windows sandbox (Yawble's agent sandbox) keeps an existing folder's DACL when a new one is set; run it outside the sandbox");
 
         var empty = Path.Combine(_home, "empty");
         Directory.CreateDirectory(empty);

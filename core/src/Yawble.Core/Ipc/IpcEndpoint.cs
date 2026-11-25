@@ -5,7 +5,7 @@ namespace Yawble.Core.Ipc;
 
 /// <summary>
 /// The core's listening end: a named pipe on Windows, a Unix domain socket on Linux and macOS.
-/// Only the current user can connect (pipe: PipeOptions.CurrentUserOnly; socket: 0700 folder, 0600 file),
+/// Only the current user can connect (pipe: a DACL of the current user only, see <see cref="PipeAcl"/>; socket: 0700 folder, 0600 file),
 /// and the first frame must still carry the per-launch token.
 /// </summary>
 public abstract class IpcEndpoint : IAsyncDisposable
@@ -101,8 +101,10 @@ internal sealed class NamedPipeEndpoint : IpcEndpoint
     private const int BufferSize = 64 * 1024;
 
     private NamedPipeServerStream NewInstance(PipeOptions extra = PipeOptions.None) =>
-        new(_name, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances, PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly | extra, BufferSize, BufferSize);
+        OperatingSystem.IsWindows()
+            ? NamedPipeServerStreamAcl.Create(_name, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous | extra, BufferSize, BufferSize, PipeAcl.CurrentUserOnly())
+            : throw new PlatformNotSupportedException("a named pipe endpoint is Windows only");
 
     public override async Task<Stream> AcceptAsync(CancellationToken ct)
     {

@@ -947,9 +947,12 @@ public class ConciergeActionTests : IDisposable
         {
             int before;
             lock (launched) before = launched.Count;
+            // This turn has ended when its own answer is stored (after its launch). Not "as many answers as messages": a
+            // review turn answers with no message from the person, so after one that holds as soon as the message is in.
+            var answered = id is null ? 0 : store.Messages(id).Count(m => m.Role == "assistant");
             using (Yawble.Core.Provenance.Actor.Use(who))
                 id = (await service.DispatchAsync("concierge.send", new JsonObject { ["id"] = id, ["text"] = "hello" }, Ct))!["id"]!.GetValue<string>();
-            await Wait.UntilAsync(() => store.Messages(id).Count(m => m.Role == "assistant") == store.Messages(id).Count(m => m.Role == "user"), "the turn ended");
+            await Wait.UntilAsync(() => store.Messages(id).Count(m => m.Role == "assistant") == answered + 1, "the turn ended");
             lock (launched) return (launched[before], id);
         }
 
