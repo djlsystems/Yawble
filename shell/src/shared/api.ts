@@ -293,7 +293,19 @@ export interface TeamDefaults {
   countries: { code: string; label: string }[];
   /** How many names on the list a member of some team already has. */
   usedCount: number;
+  /** The hire list new teams start with (absent from an older core). */
+  hireList?: HireRow[];
 }
+
+/** roles.list: a role of the catalog (Settings > Teams > Roles). name is one word, also the name word on hire;
+ *  job becomes the hire's standing instructions; agent and model are the suggestion (model null: the agent's default). */
+export interface RoleRow { name: string; job: string; agent: string; model: string | null }
+
+/** A row of a hire list (who the Manager may hire): a role, its agent and model (null: the agent's default). */
+export interface HireRow { role: string; agent: string; model: string | null }
+
+/** teams.hireList: a team's rows (role, agent, model) with the role's job. There is no count or maximum per role. */
+export interface TeamHireRow extends HireRow { job: string }
 
 /** teams.setDefaults: what was saved, and the member-name lines that were not (with why). */
 export interface TeamDefaultsSaved { saved: unknown; rejected: { line: string; reason: string }[] }
@@ -317,7 +329,7 @@ export interface UpdateStatus {
 export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
-export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'workflows.', 'scripts.', 'schemas.'] as const;
+export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'workflows.', 'scripts.', 'schemas.', 'roles.'] as const;
 
 export function isUiMethod(method: unknown): method is string {
   return typeof method === 'string' && UI_METHOD_PREFIXES.some((p) => method.startsWith(p)) && /^[a-zA-Z.]+$/.test(method);
@@ -346,7 +358,7 @@ export interface CommandLines {
   cli: string;
   /** The custom agent's name, or the built-in's id. */
   agent?: string;
-  model: { model: string; source: 'member' | 'agent' | 'cli' | string; label: string };
+  model: { model: string; source: 'member' | 'agent' | 'settings' | 'cli' | string; label: string }; // label shown as the core says it
   headless: CommandLineKind;
   interactive: CommandLineKind;
 }
@@ -355,7 +367,10 @@ export interface CommandLineKind { argv: string[]; env: string[]; launch?: strin
 /** One built-in argument (flag + value): locked = the app depends on it (reason says why); tail = it carries the prompt and stays last;
  *  removed = the customization described removes it. Per-run values are placeholders (<prompt>, <session id>, <workspace>/…). */
 export interface ArgGroup { tokens: string[]; locked: boolean; tail: boolean; removed: boolean; reason?: string | null }
-export interface AgentModelList { models: string[]; source: 'app' | string } // the app's own list: no CLI is run for it
+/** One model of agents.models and where the app found it; fromLabel is the hint shown beside it ("your Codex settings"). */
+export interface AgentModelItem { model: string; from: 'cli' | 'settings' | 'runs' | 'builtin' | string; fromLabel: string }
+/** agents.models: the models (no CLI is run for it); items, when the core sends them, says where each comes from. */
+export interface AgentModelList { models: string[]; source: 'cli' | 'settings' | 'runs' | 'builtin' | string; items?: AgentModelItem[] }
 export interface AgentVersionStatus { cli: string; detected: string | null; lastRun: string | null; changed: boolean }
 /** agentProfiles.list: every agent one can choose (built-ins with their default model, then the custom ones). */
 export interface AgentProfileRow {
@@ -1024,11 +1039,13 @@ export interface DeletePreview {
 export interface MemberRow {
   id: number; teamId: number; team: string; name: string; role: 'manager' | 'member'; cli: 'claude' | 'grok' | 'codex' | 'copilot' | 'antigravity';
   instructions: string; model: string; credential: string;
+  /** The role from the team's hire list the member was hired as (Developer, Tester...); null or absent when none. */
+  hireRole?: string | null;
 }
 
 /** teams.agents' agentModel: the model a member runs and where its name comes from: set on the member, the agent's default,
  *  observed (the CLI's own default; the model its last run used most, at = that run's last request), or cli (not run yet; name ''). */
-export interface AgentModelShown { name: string; source: 'member' | 'agent' | 'observed' | 'cli' | string; at: string | null }
+export interface AgentModelShown { name: string; source: 'member' | 'agent' | 'settings' | 'observed' | 'cli' | string; at: string | null }
 
 export interface AgentCard {
   /** Besides running and idle, the WorkerWaitState of work not started (an older core sends only queued). */
