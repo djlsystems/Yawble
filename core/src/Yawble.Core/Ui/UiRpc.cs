@@ -81,6 +81,8 @@ public sealed class UiRpc(
                 "docs.mkdir" => Docs().MakeFolder(await TeamNameOf(Long(p, "teamId"), ct), OptStr(p, "path"), Str(p, "name")),
                 "docs.rename" => Docs().Rename(await TeamNameOf(Long(p, "teamId"), ct), Str(p, "path"), Str(p, "name")),
                 "docs.delete" => await DeleteDocAsync(Long(p, "teamId"), Str(p, "path"), ct),
+                // { teamId, path }: a text document becomes a pending backlog item (backlog.add's answer) and is removed, all or nothing.
+                "docs.moveToBacklog" => await MoveDocToBacklogAsync(Long(p, "teamId"), Str(p, "path"), ct),
                 "docs.folder" => new JsonObject { ["path"] = Docs().Root(await TeamNameOf(Long(p, "teamId"), ct)) },
                 "teams.pause" => await Then(bus.PauseTeamAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
                 "teams.resume" => await Then(bus.ResumeTeamAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
@@ -1026,8 +1028,61 @@ public sealed class UiRpc(
 
     private async Task<JsonNode?> DeleteDocAsync(long teamId, string path, CancellationToken ct)
     {
-        Docs().Delete(await TeamNameOf(teamId, ct), path);
+        DeleteDoc(await TeamNameOf(teamId, ct), path);
         return new JsonObject { ["ok"] = true };
+    }
+
+    /// <summary>How docs.delete (and docs.moveToBacklog after its add) removes a document. Tests set a failing one.</summary>
+    internal Action<string, string>? DeleteDocument { get; set; }
+
+    private void DeleteDoc(string team, string path) => (DeleteDocument ?? Docs().Delete)(team, path);
+
+    /// <summary>
+    /// docs.moveToBacklog: reads the text document, adds it as a pending backlog item of the document's team through
+    /// backlog.add (title: its first Markdown heading, else the file name without extension; body: the whole text), then
+    /// removes the document as docs.delete does. A folder, a non-text or missing file is refused before anything changes;
+    /// when the removal fails the item is taken back and the call fails with the reason.
+    /// </summary>
+    private async Task<JsonNode?> MoveDocToBacklogAsync(long teamId, string path, CancellationToken ct)
+    {
+        var board = bus.Board ?? throw new RpcException("unavailable", "the backlog is not available in this core");
+        var team = await TeamNameOf(teamId, ct);
+        var doc = Docs().Read(team, path);
+        var kind = doc["kind"]?.GetValue<string>();
+        if (kind == "large")
+            throw new RpcException("not_text", $"'{path}' is too large to become a backlog item (over {Teams.TeamDocuments.MaxInlineBytes / (1024 * 1024)} MB)");
+        if (kind is not ("markdown" or "text") || doc["text"]?.GetValue<string>() is not { } text)
+            throw new RpcException("not_text", $"'{path}' is not a text document; only a text document can become a backlog item");
+        var name = doc["name"]?.GetValue<string>() ?? Path.GetFileName(path);
+        var item = await board.DispatchAsync("backlog.add", new JsonObject { ["title"] = BacklogTitle(name, text), ["body"] = text, ["team"] = team }, ct) as JsonObject
+            ?? throw new RpcException("failed", "the backlog item was not added");
+        try
+        {
+            DeleteDoc(team, path);
+        }
+        catch (Exception e) when (e is Teams.DocumentsException or IOException or UnauthorizedAccessException)
+        {
+            if (item["id"] is JsonValue id && id.TryGetValue<long>(out var itemId)) board.TakeBackItem(itemId);
+            throw new RpcException("io", $"'{path}' could not be removed, so it was not moved to the backlog: {e.Message}");
+        }
+        return item;
+    }
+
+    /// <summary>A moved document's backlog title: its first Markdown heading's text (any level, outside code fences), else its file name without extension.</summary>
+    internal static string BacklogTitle(string fileName, string text)
+    {
+        var fenced = false;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal)) { fenced = !fenced; continue; }
+            if (fenced || line.Length - trimmed.Length > 3) continue;
+            var m = System.Text.RegularExpressions.Regex.Match(trimmed, @"^#{1,6}(?:\s+(.*?))?(?:\s+#+)?\s*$");
+            if (m.Success && m.Groups[1].Value.Trim() is { Length: > 0 } heading) return heading;
+        }
+        var stem = Path.GetFileNameWithoutExtension(fileName).Trim();
+        return stem.Length > 0 ? stem : fileName.Trim();
     }
 
     private static async Task<JsonNode?> Then(Task work)
