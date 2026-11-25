@@ -19,6 +19,7 @@ import { outputHeight } from '../agentOutputHeight';
 import { errorText, resolveApi } from '../api';
 import { getMemberView, MemberViews, setMemberView, type MemberView } from '../memberPaneView';
 import { useNarrow } from '../narrowScreen';
+import { openWorkflowsPage } from '../workflows/page';
 
 // One member on the team page, in one frame: a title bar (face, name, role and CLI chips, state, "more waiting", and a
 // ☰ menu with every action), a row of tabs - Report (what the member last said), Activity, Terminal - with the run's
@@ -62,6 +63,10 @@ const stateLine = computed(() => {
 const lease = computed(() => leaseText(props.card));
 // Tells that arrived while the member runs wait behind this run (the core counts undelivered work for every state).
 const moreWaiting = computed(() => (props.card.state === 'running' && props.card.queuedInstructions > 0 ? props.card.queuedInstructions : 0));
+// The workflows this run works on: a "#N" link each, to that workflow on the Workflows page (read only, so a Visitor too).
+const runWorkflows = computed(() => (props.card.state === 'running'
+  ? (props.card.runWorkflows ?? []).filter((n) => Number.isInteger(n) && n > 0) : []));
+function openRunWorkflow(n: number) { openWorkflowsPage({ teamId: m.value.teamId, workflow: n }); }
 const moreWaitingTitle = computed(() =>
   `${moreWaiting.value} instruction${moreWaiting.value === 1 ? '' : 's'} waiting; they run after this one (oldest workflow first)`);
 // While the member has an open decision its report is "Waiting on you" (memberReport), never an earlier
@@ -155,6 +160,9 @@ defineExpose({ el: () => root.value });
         <span class="chip" data-test="agent-role" :title="hireRoleOf(m) ? `${m.role}, hired as ${hireRoleOf(m)}` : undefined">{{ hireRoleOf(m) ?? m.role }}</span>
         <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
         <span class="label" data-test="agent-face-state">{{ stateLabel }}</span>
+        <span v-if="runWorkflows.length" class="runs" data-test="agent-run-workflows"><template v-for="(n, i) in runWorkflows" :key="n"><template v-if="i">, </template><a
+          href="#" class="run-link" data-test="agent-run-workflow" :data-id="n" :title="`Open workflow #${n} on the Workflows page`"
+          @click.prevent="openRunWorkflow(n)">#{{ n }}</a></template></span>
         <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
       </span>
       <span ref="menuWrap" class="menu-wrap">
@@ -237,7 +245,10 @@ defineExpose({ el: () => root.value });
 .title > .menu-wrap { grid-area: menu; justify-self: end; }
 .title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
 .pills { grid-area: pills; display: flex; align-items: center; gap: 8px; min-width: 0; height: 20px; overflow: hidden; }
-.title strong, .title .chip, .title .label, .title .more { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runs { font-size: 12px; color: var(--muted); margin-left: -4px; }
+.run-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.run-link:hover { color: var(--ink); }
+.title strong, .title .chip, .title .label, .title .runs, .title .more { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .label { font-weight: 600; font-size: 12px; color: var(--card-state); }
 .more { font-size: 12px; color: var(--muted); }
 .menu-wrap { position: relative; display: inline-flex; flex: none; }
