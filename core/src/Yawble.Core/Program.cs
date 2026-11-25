@@ -171,8 +171,13 @@ scriptRunner = new Yawble.Core.Scripts.Running.ScriptRunner(scriptRuns, scriptLi
 {
     Decisions = new Yawble.Core.Scripts.Running.BusScriptDecisions(bus),
 };
+// A script's tell steps give work to the team's agents through the bus, and a run that waits on one goes on when its workflow ends.
+var scriptTells = new Yawble.Core.Scripts.Running.BusScriptTells(bus, scriptRuns);
+scriptRunner.Tellers = scriptTells;
+scriptRunner.WaitSources = [scriptTells];
 bus.ScriptMembers = scriptRunner;
 scriptRunner.ResumeInterrupted();
+scriptRunner.StartWaitSweep();
 
 // A member's cli is a built-in's id or a custom agent's name: every site resolves it through this (base CLI, argv changes, default model).
 var agentResolver = Yawble.Core.Agents.Profiles.AgentProfileStore.ForReading($"Data Source={dbPath}");

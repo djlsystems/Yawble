@@ -78,6 +78,8 @@ public static class ScriptCheckCodes
     public const string TypeMismatch = "type-mismatch";
     /// <summary>An integration step passes an argument its action does not take (a catalog that knows the action's signature).</summary>
     public const string UnknownArgument = "unknown-argument";
+    /// <summary>A step's option is out of range or does not go with the others (a tell's timeout over 7 days, a reply without wait).</summary>
+    public const string BadValue = "bad-value";
 }
 
 /// <summary>
@@ -88,7 +90,7 @@ public static class ScriptChecker
 {
     public static readonly IReadOnlyList<string> StepTypes =
     [
-        "set", "if", "switch", "forEach", "integration", "log", "end",
+        "set", "if", "switch", "forEach", ScriptLoop.StepType, "integration", "log", "end", ScriptTell.StepType, ScriptCode.StepType,
         ScriptStepTypes.FileWriteAllText, ScriptStepTypes.FileAppendLine, ScriptStepTypes.FileReadAllText, ScriptStepTypes.FileReadLines, ScriptStepTypes.FileExists, ScriptStepTypes.FileDelete,
     ];
 
@@ -199,6 +201,13 @@ public static class ScriptChecker
                 _vars.TryAdd(v.Name, type);
                 LiteralFits(v.Initial, type, null, $"the initial value of variable '{v.Name}'");
             }
+            // A TellResult variable that only tells with one reply schema fill: its data is typed by that schema (vars.x.data.field).
+            foreach (var (name, type) in _vars.ToList())
+            {
+                if (type.Kind != ScriptTypeKind.Object || type.Name != BuiltInSchemas.TellResult.Name) continue;
+                var replies = doc.Steps.Where(s => s.Type == ScriptTell.StepType && s.Text("into") == name).Select(s => s.Text("reply")).Distinct().ToList();
+                if (replies is [{ Length: > 0 } reply] && Find(reply) is not null) _vars[name] = ScriptTell.ResultType(reply);
+            }
             foreach (var o in doc.Outputs) DeclaredType(o.Type, $"output '{o.Name}'");
             foreach (var r in doc.Requires)
             {
@@ -243,8 +252,8 @@ public static class ScriptChecker
                 foreach (var (prop, target) in s.Successors())
                     if (target is not null && !_steps.ContainsKey(target))
                         Issue(s.Id, ScriptCheckCodes.UnknownStep, $"{prop} names step '{target}', which does not exist");
-                if (s.Type == "forEach" && s.Text("body") is null)
-                    Issue(s.Id, ScriptCheckCodes.MissingField, "a forEach needs a body");
+                if (ScriptLoop.IsLoop(s.Type) && s.Text("body") is null)
+                    Issue(s.Id, ScriptCheckCodes.MissingField, $"a {s.Type} needs a body");
             }
 
             if (!_steps.ContainsKey(doc.Start))
@@ -253,7 +262,7 @@ public static class ScriptChecker
                 return;
             }
 
-            // Breadth first from start; each step's context is the loops (forEach ids, outermost first) it runs inside.
+            // Breadth first from start; each step's context is the loops (forEach and while ids, outermost first) it runs inside.
             var queue = new Queue<string>();
             _context[doc.Start] = [];
             queue.Enqueue(doc.Start);
@@ -266,7 +275,7 @@ public static class ScriptChecker
                 foreach (var (prop, target) in step.Successors())
                 {
                     if (target is null || !_steps.ContainsKey(target)) continue;
-                    var next = step.Type == "forEach" && prop == "body" ? ctx.Add(id) : ctx;
+                    var next = ScriptLoop.IsLoop(step.Type) && prop == "body" ? ctx.Add(id) : ctx;
                     if (next.Contains(target))
                     {
                         if (conflicts.Add(target)) Issue(id, ScriptCheckCodes.LoopStructure, $"{prop} goes back to the loop '{target}' it is inside (a body ends with null)");
@@ -384,6 +393,15 @@ public static class ScriptChecker
                 case "log":
                     Text(step, "text", ctx);
                     break;
+                case ScriptTell.StepType:
+                    Tell(step, ctx);
+                    break;
+                case ScriptLoop.StepType:
+                    While(step, ctx);
+                    break;
+                case ScriptCode.StepType:
+                    Code(step, ctx);
+                    break;
                 case "end":
                     if (step["outputs"] is null) break;
                     if (step["outputs"] is not JsonObject outputs) { Issue(step.Id, ScriptCheckCodes.InvalidDocument, "outputs is an object"); break; }
@@ -399,6 +417,108 @@ public static class ScriptChecker
             }
             _currentStep = null;
         }
+
+        /// <summary>
+        /// A tell: member and team are text (optional), text is required, wait is true or false, timeout and reply go only with wait
+        /// (timeout a duration up to 7 days, reply a schema that exists), and into takes a TellResult.
+        /// </summary>
+        private void Tell(ScriptStep step, ImmutableList<string> ctx)
+        {
+            foreach (var optional in new[] { "member", "team" })
+                if (step.Has(optional))
+                {
+                    if (step[optional] is not JsonValue v || v.GetValueKind() != JsonValueKind.String || v.GetValue<string>().Trim().Length == 0)
+                        Issue(step.Id, ScriptCheckCodes.InvalidDocument, $"tell's '{optional}' is a name (text)");
+                    else Text(step, optional, ctx);
+                }
+            Text(step, "text", ctx);
+
+            var wait = false;
+            if (step.Has("wait"))
+            {
+                if (step["wait"] is JsonValue w && w.GetValueKind() is JsonValueKind.True or JsonValueKind.False) wait = w.GetValue<bool>();
+                else Issue(step.Id, ScriptCheckCodes.InvalidDocument, "tell's 'wait' is true or false");
+            }
+
+            if (step.Has("timeout"))
+            {
+                if (!wait) Issue(step.Id, ScriptCheckCodes.BadValue, "a timeout goes with wait: true (a tell that does not wait has nothing to time out)");
+                if (!ScriptTell.TryParseTimeout(step["timeout"], out var timeout))
+                    Issue(step.Id, ScriptCheckCodes.TypeMismatch, $"tell's timeout '{step["timeout"]?.ToJsonString()}' is not a duration (e.g. 30m, 4h, 2d)");
+                else if (timeout <= TimeSpan.Zero) Issue(step.Id, ScriptCheckCodes.BadValue, "tell's timeout must be more than zero");
+                else if (timeout > ScriptTell.MaxTimeout)
+                    Issue(step.Id, ScriptCheckCodes.BadValue, $"tell's timeout is {ScriptValues.FormatDuration(timeout)}; the most is 7 days");
+            }
+
+            if (step.Has("reply"))
+            {
+                if (!wait) Issue(step.Id, ScriptCheckCodes.BadValue, "a reply goes with wait: true (a tell that does not wait gets no reply)");
+                if (step.Text("reply") is not { Length: > 0 } reply) Issue(step.Id, ScriptCheckCodes.InvalidDocument, "tell's 'reply' names a schema");
+                else if (Find(reply) is null) Issue(step.Id, ScriptCheckCodes.UnknownType, $"reply: no schema named '{reply}'");
+                else _refs.Add(new(reply, "", step.Id));
+            }
+
+            Into(step, TellResultOf(step));
+        }
+
+        /// <summary>The tell's result type: TellResult with data typed by its reply schema, when that schema exists.</summary>
+        private ScriptType TellResultOf(ScriptStep tell) =>
+            ScriptTell.ResultType(tell.Text("reply") is { Length: > 0 } reply && Find(reply) is not null ? reply : null);
+
+        /// <summary>A while: a when (a condition, as if has; body and then were checked with the graph) and max a whole number from 1 to 10,000.</summary>
+        private void While(ScriptStep step, ImmutableList<string> ctx)
+        {
+            if (!step.Has("when")) Issue(step.Id, ScriptCheckCodes.MissingField, "while needs a when");
+            else Condition(step["when"], ctx);
+            if (step["max"] is null) return;
+            if (step["max"] is not JsonValue m || m.GetValueKind() != JsonValueKind.Number || ScriptValues.FromNode(m) is not long max)
+            {
+                Issue(step.Id, ScriptCheckCodes.InvalidDocument, "while's 'max' is a whole number");
+                return;
+            }
+            if (max < 1 || max > ScriptLoop.MaxLimit)
+                Issue(step.Id, ScriptCheckCodes.BadValue, $"while's max is {max}; it is from 1 to {ScriptLoop.MaxLimit.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}");
+        }
+
+        /// <summary>
+        /// A code step: inputs an object of named values (each typed from its expression), code a function body that parses
+        /// (a syntax error is a problem with its line and column), returns a type that exists (default any), typed into <c>into</c>.
+        /// </summary>
+        private void Code(ScriptStep step, ImmutableList<string> ctx)
+        {
+            if (step["inputs"] is { } inputs)
+            {
+                if (inputs is not JsonObject o) Issue(step.Id, ScriptCheckCodes.InvalidDocument, "inputs is an object of named values");
+                else
+                    foreach (var (name, value) in o)
+                    {
+                        if (!ScriptType.IsName(name)) Issue(step.Id, ScriptCheckCodes.InvalidDocument, $"'{name}' cannot name an input (letters, digits and _)");
+                        ValueType(value, ctx);
+                    }
+            }
+
+            if (step["code"] is not JsonValue c || c.GetValueKind() != JsonValueKind.String || c.GetValue<string>().Trim().Length == 0)
+                Issue(step.Id, ScriptCheckCodes.MissingField, "code needs 'code' (the body of a JavaScript function)");
+            else if (ScriptCode.Parse(c.GetValue<string>()) is { } error)
+                Issue(step.Id, ScriptCheckCodes.BadExpression, $"the code does not parse: {error.Message} (line {error.Line}, column {error.Column})");
+
+            var returns = ScriptType.Any;
+            if (step.Has("returns"))
+            {
+                if (step.Text("returns") is not { Length: > 0 } text) Issue(step.Id, ScriptCheckCodes.InvalidDocument, "returns names a type or schema");
+                else if (ScriptType.Parse(text, Find, out var why) is { } t)
+                {
+                    returns = t;
+                    ReferenceTypeSchemas(t, step.Id);
+                }
+                else Issue(step.Id, ScriptCheckCodes.UnknownType, $"returns: {why}");
+            }
+            Into(step, returns);
+        }
+
+        /// <summary>A code step's result type: its returns (any when not given or not a type).</summary>
+        private ScriptType ReturnsOf(ScriptStep code) =>
+            code.Text("returns") is { Length: > 0 } text ? ScriptType.Parse(text, Find, out _) ?? ScriptType.Any : ScriptType.Any;
 
         private string? Required(ScriptStep step, string property)
         {
@@ -710,6 +830,8 @@ public static class ScriptChecker
             ScriptStepTypes.FileReadAllText => ScriptType.String,
             ScriptStepTypes.FileReadLines => ScriptType.ListOf(ScriptType.String),
             ScriptStepTypes.FileExists => ScriptType.Bool,
+            ScriptTell.StepType => TellResultOf(step),
+            ScriptCode.StepType => ReturnsOf(step),
             _ => null,
         };
 

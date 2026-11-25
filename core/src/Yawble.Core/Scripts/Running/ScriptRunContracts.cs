@@ -45,6 +45,25 @@ public sealed class SeamScriptEngine : IScriptRunEngine
         ScriptEngine.RunAsync(request, journal, ct);
 }
 
+/// <summary>The tell steps of a member's runs (the bus, in the app: <see cref="BusScriptTells"/>; tests fake it).</summary>
+public interface IScriptTellers
+{
+    /// <summary>The teller for one run of <paramref name="script"/> (its key) by <paramref name="caller"/>.</summary>
+    IScriptTeller For(ScriptCaller caller, string script);
+}
+
+/// <summary>
+/// Tells when a run's wait of one <see cref="Kind"/> has ended (a tell's workflow: <see cref="ScriptWait.WorkflowKind"/>; a later
+/// step that waits, such as askPerson, adds its own source). The runner asks each waiting run's source on its sweep.
+/// </summary>
+public interface IScriptWaitSource
+{
+    string Kind { get; }
+
+    /// <summary>How the wait ended, or null while it goes on (the runner handles the wait's timeout itself).</summary>
+    Task<ScriptWaitResult?> CheckAsync(ScriptWait wait, CancellationToken ct);
+}
+
 /// <summary>Opens the one decision card for a member whose runs failed three times in a row (the bus, in the app).</summary>
 public interface IScriptDecisions
 {
@@ -88,8 +107,12 @@ public sealed record ScriptRunOutcome(ScriptRunRow Run, IReadOnlyList<ScriptStep
     public bool Succeeded => Run.Status == ScriptRunStatus.Succeeded;
 }
 
-/// <summary>scripts.testRun: a version of a script (null: the latest, a draft too) on a sample input, dry run by default.</summary>
-public sealed record ScriptTestRun(long ScriptId, int? Version, JsonNode? Input, JsonObject? Settings, JsonObject? Bindings, long TeamId, bool DryRun = true);
+/// <summary>
+/// scripts.testRun: a version of a script (null: the latest, a draft too) on a sample input, dry run by default. A Test run never
+/// sends a tell; <paramref name="TellReplies"/> gives its waiting tells made-up replies by step id (text or JSON).
+/// </summary>
+public sealed record ScriptTestRun(long ScriptId, int? Version, JsonNode? Input, JsonObject? Settings, JsonObject? Bindings, long TeamId, bool DryRun = true,
+    JsonObject? TellReplies = null);
 
 /// <summary>A run that could not start: the script has no runnable version, the member is gone, ...</summary>
 public sealed class ScriptRunRefused(string code, string message) : Exception(message)

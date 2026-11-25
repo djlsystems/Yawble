@@ -131,7 +131,7 @@ public static class RemoteAccess
             "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo", "teams.setRepo",
             "teams.setDefaults", "teams.generateNames", "concierge.setDefaults",
             "roles.save", "roles.remove", "teams.setHireList",
-            "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
+            "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete", "docs.moveToBacklog",
             "members.add", "members.remove", "members.update",
             "bus.tellManager", "bus.answer", "bus.closeWorkflow", "bus.stopWorkflow", "bus.nudgeWorkflow",
             "bus.workflowExtend",

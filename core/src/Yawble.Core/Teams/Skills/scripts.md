@@ -8,7 +8,7 @@ roles: [concierge]
 A script is a JSON document (`yawble-script/1`): settings, the integrations it needs, variables, and a graph of
 steps. It is global (every team can use it) and every save keeps a new version. A team runs it as a **script
 member**: the core's script engine runs it on that member's triggers. It never runs a program and never calls a
-model. You build scripts for the person with your script tools; the person sees the same scripts in the
+model; a `tell` step gives work to the team's agents instead. You build scripts for the person with your script tools; the person sees the same scripts in the
 **Scripts** place.
 
 ## Your tools for scripts
@@ -105,7 +105,10 @@ and say in plain words when it would fire ("every 5 minutes, starting now", "wee
 - `variables`: `run` variables live for one run; `saved` ones are kept for the member and written back only when a
   run succeeds (a failed poll does not move its place).
 - Types: `int float string bool date datetime duration any`, `enum(a, b)`, `list<T>`, or a schema's name. Built-in
-  schemas: `TriggerFired`, `FolderChange`, `EventItem`, `EmailAddress`, `EmailMessage`, `EmailList`, `ApiResponse`.
+  schemas: `TriggerFired`, `FolderChange`, `EventItem`, `EmailAddress`, `EmailMessage`, `EmailList`, `ApiResponse`, `TellResult`.
+- `TellResult` is what a `tell` step gives back: `outcome` (`enum(sent, done, failed, blocked, timedOut, dryRun)`),
+  `workflow` (int, 0 in a dry run), `reply` (string, the agent's closing summary) and `data`, which takes the type of
+  the tell's `reply` schema (null without one or when the work did not finish).
 
 ## Steps
 
@@ -118,11 +121,14 @@ top level). Every step must be reachable from `start`; a loop body must end with
 | `if` | `when` (a condition), `then`, `else` | branches |
 | `switch` | `on`, `cases` `{ "value": "stepId" }`, `default` | branches on a value |
 | `forEach` | `items`, `as`, `body`, `then` | runs `body` once per item, the item named by `as`; `then` after the last |
+| `while` | `when` (a condition), `body`, `then`, `max` | runs `body` again while `when` is true; `then` when it is false (section Loop) |
+| `code` | `inputs`, `code`, `returns`, `into`, `next` | runs a small JavaScript function on named inputs; its result goes `into` a variable (section Code) |
 | `integration` | `use`, `action`, `args`, `into`, `next` | calls one action of an integration (by its name); the result goes `into` a variable |
 | `file.writeAllText`, `file.appendLine` | `path`, `text`, `next` | writes a text file |
 | `file.readAllText`, `file.readLines`, `file.exists` | `path`, `into`, `next` | reads (string, `list<string>`, bool) |
 | `file.delete` | `path`, `next` | deletes a file |
 | `log` | `text`, `next` | a line in the run's log |
+| `tell` | `member`, `team`, `text`, `wait`, `timeout`, `reply`, `into`, `next` | gives work to an agent member of a team (section Tell) |
 | `end` | `outputs` (optional) | ends the run, setting declared outputs |
 
 - File paths: relative ones are in the member's data folder; an absolute path must be in a folder the team granted
@@ -134,6 +140,72 @@ top level). Every step must be reachable from `start`; a loop body must end with
   the Connection fills (an account id) are left out of `args`; a form body's fields go in `args` by name.
 - Limits: a run timeout (10 minutes by default), a step budget, a cap on a loop's items. One run at a time per
   member.
+
+## Loop
+
+A `while` step repeats its body while a condition holds.
+
+```json
+{ "id": "page", "type": "while", "when": { "left": "{vars.cursor}", "op": "exists" },
+  "body": "fetch", "then": "done", "max": 50 }
+```
+
+- `when`: a condition, as `if` has. It is checked before each pass; when it is false the run goes to `then`.
+- `body` and `then` follow the `forEach` rules: the body's last step has `null` as its successor, which ends that pass.
+  The body changes what `when` reads (a `set` of a variable), or the loop runs until `max`.
+- `max`: the most passes, default 100, at most 10000. A loop that passes `max` fails the run. The run's step budget
+  and timeout still apply.
+
+## Code
+
+A `code` step runs a small function in JavaScript (strict mode) for what expressions cannot do: arithmetic over
+several fields, reshaping a list, parsing a text.
+
+```json
+{ "id": "score", "type": "code",
+  "inputs": { "msg": "{m}", "max": "{settings.maxAge}" },
+  "code": "const age = (Date.now() - Date.parse(inputs.msg.receivedAt)) / 36e5;\nreturn { stale: age > inputs.max, age };",
+  "returns": "Staleness", "into": "staleness", "next": "check" }
+```
+
+- `inputs`: named values (expressions). In the code they are `inputs.<name>`, as plain JSON.
+- `code`: the body of a function; `return` gives the result. `log(text)` writes a line to the run's log. The code has
+  only `inputs` and `log`: no `require` or `import`, no files, network, timers or host objects.
+- `returns`: a type (native or a schema's name), default `any`. A returned value that does not match it fails the
+  step. `into` takes the value, typed.
+- Limits per step: 2 seconds, 64 MB, a statement count and a recursion depth. Hitting one fails the step.
+- The check parses the code: a syntax error is a problem on the step, with its line and column. The input types
+  come from their expressions; the code itself is not type-checked.
+- A dry run runs the code (it changes nothing).
+
+## Tell
+
+A script never runs an agent. A `tell` step gives work to an agent member of a team, as the person's tell does.
+
+```json
+{ "id": "triage", "type": "tell", "member": "Manager", "team": "Support",
+  "text": "A customer wrote about {m.subject}. Read it and decide if it is a refund request.",
+  "wait": true, "timeout": "4h", "reply": "TriageResult", "into": "triage", "next": "route" }
+```
+
+- `member`: an agent member's name, default `Manager`. Telling the Manager starts a workflow it plans. Telling another
+  agent member gives that member one card directly, in a workflow the Manager sees but does not plan. Script members
+  and the person cannot be told; a name that is not an agent member of the team when the step runs fails the step.
+- `team`: default the script member's own team. Another team is named here. Settings > Scripts **Scripts may tell
+  other teams** (on by default) turned off fails such a step with that reason.
+- `text`: the instruction, a template. The workflow says which script, member and run it came from.
+- `wait`: `false` (default) goes on at once. `true` parks the run (state `waiting`) until the workflow is done, fails
+  or is blocked, or `timeout` passes: `30m`, `4h`, `2d`; default `24h`, at most `7d`. A waiting run holds no run slot,
+  its run timeout stops, and it resumes after an app restart. It is still the member's run, so its triggers that fire
+  meanwhile are skipped: a poller that tells should not wait. Cancelling the run leaves the workflow alone.
+- `reply` (only with `wait`): a schema's name. The instruction asks the agent to end its answer with JSON of that
+  schema; a reply that does not match fails the step.
+- `into`: a variable of type `TellResult { outcome, workflow, reply, data }`. `outcome` is one of `sent` (`wait`
+  false), `done`, `failed`, `blocked`, `timedOut` or `dryRun`; `reply` is the agent's closing summary; `data` is the
+  reply's JSON (of the `reply` schema), or null.
+- A run tells at most 5 times (a member setting, at most 50); the next tell fails the run.
+- A dry run or a test run never sends a tell: the log says `would tell <member> of <team>: ...` and `into` gets
+  outcome `dryRun`. The Scripts place's Test run takes a made-up reply for each tell that waits.
 
 ## Values and expressions
 
@@ -156,7 +228,9 @@ top level). Every step must be reachable from `start`; a loop body must end with
 ## Patterns
 
 - **Fixed rules before agent steps.** Sort what you can with conditions (a known sender, a subject that
-  `matches`), and leave only the rest to judgment. Agent steps come later; until then a script has none.
+  `matches`), and `tell` an agent only about the rest. Each tell starts paid agent work.
+- **A poller tells without waiting.** A script on a short `every` trigger tells with `wait: false`; a waiting run
+  skips the member's triggers until it resumes.
 - **One item at a time for anything an agent writes that is sent.** Loop over the items with `forEach` and send each
   on its own, so one customer's text never ends up in another's message. Recipients come from settings or the
   data, never from what an agent wrote.
