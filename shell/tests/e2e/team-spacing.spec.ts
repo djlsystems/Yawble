@@ -268,8 +268,7 @@ async function hoverAll(page: Page): Promise<{ ids: number[]; full: number[]; by
       const g = squaresOf(await lastFrame(page)).find((q) => (s.id !== null ? q.id === s.id : Math.hypot(q.x - s.x, q.y - s.y) < 6)) ?? s;
       const q = toScreen(g.op, g.x, g.y);
       await page.mouse.move(box.x + q.x, box.y + q.y);
-      await page.waitForTimeout(200);
-      t = await tipText(page);
+      t = await tipWhen(page, (x) => /^#\d+/.test(x));
     }
     const id = Number(/^#(\d+)/.exec(t)?.[1] ?? NaN);
     bySquare.push(Number.isFinite(id) ? id : null);
@@ -290,8 +289,7 @@ async function squareOnScreen(page: Page, id: number): Promise<Pt | null> {
   for (const q of sqs.filter((x) => !x.label)) {
     const p = toScreen(q.op, q.x, q.y);
     await page.mouse.move(box.x + p.x, box.y + p.y);
-    await page.waitForTimeout(200);
-    if ((await tipText(page)).includes(`#${id} `)) return p;
+    if ((await tipWhen(page, (x) => /^#\d+ /.test(x), 800)).includes(`#${id} `)) return p;
   }
   return null;
 }
@@ -375,8 +373,7 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
       const box = await canvasBox(page);
       const q = toScreen(p.s.op, p.s.x, p.s.y);
       await page.mouse.move(box.x + q.x, box.y + q.y);
-      await page.waitForTimeout(200);
-      p.id = Number(/#(\d+)/.exec(await tipText(page))?.[1] ?? NaN);
+      p.id = Number(/#(\d+)/.exec(await tipWhen(page, (x) => /#\d+/.test(x)))?.[1] ?? NaN);
       dropped.push(p.id);
       if (Number.isFinite(p.id)) p.texts = [...new Set([expectLabel(p.id, k, windowPx), `#${p.id}`])];
     }
@@ -484,23 +481,51 @@ async function gotoMonitor(page: Page, phone: boolean) {
   await expect(page.locator('[data-test=monitor-loading]')).toHaveCount(0, { timeout: 30_000 });
 }
 
-/** Waits until every team's hub, its 5 workflow squares and its map are drawn and the hubs stop moving (under 1 px in 600 ms). */
+/**
+ * Waits for the wall to come to rest: the canvas's data-settled (the forces cooled, the hubs home, the map in place, the
+ * spacing measured) and data-camera-idle (the camera where it aims), both set by the scene.
+ */
+async function still(page: Page, timeout = 20_000) {
+  // Two frames first: the scene sets the attributes in its frame, so one drawn since the last action is read.
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
+  const wall = page.locator('[data-test=monitor-canvas]');
+  await expect(wall).toHaveAttribute('data-settled', 'true', { timeout });
+  await expect(wall).toHaveAttribute('data-camera-idle', 'true', { timeout });
+}
+/**
+ * A frame drawn after now. The recorder keeps a frame when the next one starts, so the first kept after now may have
+ * been drawn before it: the second is the first surely drawn after.
+ */
+async function freshFrame(page: Page): Promise<Frame> {
+  const t0 = await page.evaluate(() => performance.now());
+  await page.waitForFunction((t) => (window as any).__frames.filter((f: Frame) => f.at > t).length >= 2, t0, { timeout: 8000 });
+  return page.evaluate(() => (window as any).__frames.at(-1));
+}
+/**
+ * After a pointer move: waits for a frame drawn since (the move seen, the tip of the last place gone), then until the
+ * hover tip's text matches `want` (at most `timeout`); returns the text then (or as it is at the end).
+ */
+async function tipWhen(page: Page, want: (t: string) => boolean, timeout = 1500): Promise<string> {
+  await freshFrame(page);
+  let t = '';
+  await expect.poll(async () => want((t = await tipText(page))), { timeout, intervals: [50] }).toBe(true).catch(() => {});
+  return t;
+}
+/** A screenshot once the fonts are in and the layout is at rest (data-settled). */
+async function snap(page: Page, file: string) {
+  await page.evaluate(() => document.fonts.ready.then(() => true));
+  if (await page.locator('[data-test=monitor-canvas]').count()) await expect(page.locator('[data-test=monitor-canvas]')).toHaveAttribute('data-settled', 'true', { timeout: 20_000 });
+  await page.screenshot({ path: file });
+}
+
+/** Waits until every team's hub, its 5 workflow squares and its map are drawn and the wall is at rest; returns a frame then. */
 async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
-  const end = Date.now() + timeout;
-  let prev: Pt[] | null = null;
-  let f = await lastFrame(page);
-  while (Date.now() < end) {
-    f = await lastFrame(page);
-    const hubs = TEAMS.slice(0, n).map((t) => hubAt(f, t));
-    const ready = hubs.every(Boolean) && squaresOf(f).length >= n * 5 && mapThings(f).length >= n * (FOLDERS + FOLDERS * FILES);
-    // The hubs are held at their homes, so they stand still from the start; the members and the workflow
-    // squares settle after them (and the teams' homes are measured once those come to rest), so they are watched too.
-    const pts: Pt[] = ready ? [...(hubs as Pt[]), ...membersOf(f).map((m) => ({ x: m.x, y: m.y })), ...squaresOf(f).map((s) => ({ x: s.x, y: s.y }))] : [];
-    if (ready && prev && prev.length === pts.length && pts.every((h, i) => Math.hypot(h.x - prev![i]!.x, h.y - prev![i]!.y) < 1)) return f;
-    prev = ready ? pts : null;
-    await page.waitForTimeout(600);
-  }
-  return f;
+  await expect.poll(async () => {
+    const f = await lastFrame(page);
+    return TEAMS.slice(0, n).every((t) => hubAt(f, t)) && squaresOf(f).length >= n * 5 && mapThings(f).length >= n * (FOLDERS + FOLDERS * FILES);
+  }, { timeout, intervals: [100], message: 'every hub, workflow square and map drawn' }).toBe(true);
+  await still(page, timeout);
+  return freshFrame(page);
 }
 
 /** The hub distances, the cluster gap and the empty middle (see the header). */
@@ -577,13 +602,13 @@ for (const theme of ['dark', 'light'] as const) for (const w of [1280, 375]) for
     const m = measure(f, n, await labelWidthMap(page, f));
     const screen = await hubsOnScreen(page, f, n);
     // Steady: measured again 4 s later; a late settleSpacing move shows here (hubs moved, gap changed).
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(4000); // a window: a late move would show in it (the result records it as "later")
     const f2 = await lastFrame(page);
     const m2 = measure(f2, n, await labelWidthMap(page, f2));
     const hubMove = Math.round(Math.max(...TEAMS.slice(0, n).map((t) => { const a = hubAt(f, t)!, b = hubAt(f2, t)!; return Math.hypot(a.x - b.x, a.y - b.y); })));
     results.spacing[`${theme}-${w}-${n}`] = { ...m, hubsOnScreen: screen, later: { gap: m2.gap, zoom: m2.zoom, hubMove } };
     console.log(`spacing ${theme} ${w} ${n} teams:`, JSON.stringify({ ...m }));
-    await page.screenshot({ path: path.join(SPACING_DIR, 'screens', `spacing-${theme}-${w}-${n}teams.png`) });
+    await snap(page, path.join(SPACING_DIR, 'screens', `spacing-${theme}-${w}-${n}teams.png`));
     expect(m.mapCount, 'each team gets exactly its own map (6 folders + 24 files) by nearest hub').toEqual(Array(n).fill(FOLDERS * (FILES + 1)));
     expect(m.gap, 'clusters do not overlap').toBeGreaterThan(0);
     expect(m.gap, 'clusters sit close').toBeLessThan(160);
@@ -617,19 +642,19 @@ test('the spacing setting: the cog shows Team spacing (0.25-3, step 0.05, defaul
     min: await input.getAttribute('min'), max: await input.getAttribute('max'), step: await input.getAttribute('step'), value: await input.inputValue(), shown: await label.locator('.val').innerText(),
   };
   expect(r.dialog).toEqual({ name: 'Team spacing', help: 'How far apart the teams sit.', min: '0.25', max: '3', step: '0.05', value: '1', shown: '1.00×' });
-  await page.screenshot({ path: path.join(SPACING_DIR, 'screens', 'cog-1280-dark.png') });
+  await snap(page, path.join(SPACING_DIR, 'screens', 'cog-1280-dark.png'));
 
   // Live: 2x, under Auto fit.
   await expect(page.locator('[data-test=monitor-autofit]')).toHaveAttribute('aria-pressed', 'true');
   const t0 = Date.now();
   await sliderSet(page, 2);
   let moved = 0;
-  while (Date.now() - t0 < 3000) {
+  await expect.poll(async () => {
     const g = await lastFrame(page);
     const d = Math.hypot(hubAt(g, 'alpha')!.x - hubAt(f, 'alpha')!.x, hubAt(g, 'alpha')!.y - hubAt(f, 'alpha')!.y);
-    if (d > 50) { moved = Date.now() - t0; break; }
-    await page.waitForTimeout(100);
-  }
+    if (d > 50) moved = Date.now() - t0;
+    return d > 50;
+  }, { timeout: 3000, intervals: [100] }).toBe(true).catch(() => {});
   r.liveMoveMs = moved;
   expect(moved, 'the teams move within 3 s of the slider').toBeGreaterThan(0);
   f = await settle(page, 3);
@@ -641,36 +666,36 @@ test('the spacing setting: the cog shows Team spacing (0.25-3, step 0.05, defaul
   for (const k of Object.keys(at1.dist)) expect(at2.dist[k]! / at1.dist[k]!, `${k} about twice as far`).toBeGreaterThan(1.6);
   r.stored2 = await page.evaluate(() => localStorage.getItem('yawble.monitor.layout'));
   expect(JSON.parse(r.stored2).spacing).toBe(2);
-  await page.screenshot({ path: path.join(SPACING_DIR, 'screens', 'spacing-2x-autofit-1280-dark.png') });
+  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-2x-autofit-1280-dark.png'));
 
   // Pinned (Fit once, then pinned): 3x moves the teams off; Fit brings them back.
   await page.locator('[data-test=monitor-fit]').click();
-  await page.waitForTimeout(2000);
   await expect(page.locator('[data-test=monitor-autofit]')).toHaveAttribute('aria-pressed', 'false');
-  const zPinned = zoomOf(await lastFrame(page));
+  await still(page); // the one-off fit done
+  const zPinned = zoomOf(await freshFrame(page));
   await sliderSet(page, 3);
   f = await settle(page, 3);
   r.pinned3 = { zoom: +zoomOf(f).toFixed(3), zoomBefore: +zPinned.toFixed(3), hubs: await hubsOnScreen(page, f, 3), ...measure(f, 3) };
-  await page.screenshot({ path: path.join(SPACING_DIR, 'screens', 'spacing-3x-pinned-1280-dark.png') });
+  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-3x-pinned-1280-dark.png'));
   await page.locator('[data-test=monitor-fit]').click();
-  await page.waitForTimeout(2500);
-  f = await lastFrame(page);
+  await still(page);
+  f = await freshFrame(page);
   r.fitAfter3 = { zoom: +zoomOf(f).toFixed(3), hubs: await hubsOnScreen(page, f, 3) };
   expect(r.fitAfter3.hubs.every((h: any) => h.inside), 'Fit refits to the 3x layout').toBe(true);
   expect(r.fitAfter3.zoom, 'Fit zoomed out for 3x').toBeLessThan(r.pinned3.zoomBefore);
-  await page.screenshot({ path: path.join(SPACING_DIR, 'screens', 'spacing-3x-fit-1280-dark.png') });
+  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-3x-fit-1280-dark.png'));
 
   // 0.25: the tightest.
   await sliderSet(page, 0.25);
   f = await settle(page, 3);
   r.at025 = measure(f, 3);
   await page.locator('[data-test=monitor-fit]').click();
-  await page.waitForTimeout(2500);
-  await page.screenshot({ path: path.join(SPACING_DIR, 'screens', 'spacing-0.25x-fit-1280-dark.png') });
+  await still(page);
+  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-0.25x-fit-1280-dark.png'));
 
   // Kept over a reload.
   await sliderSet(page, 1.5);
-  await page.waitForTimeout(300);
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('yawble.monitor.layout') ?? '{}').spacing)).toBe(1.5);
   await page.reload();
   await gotoMonitor(page, false);
   await openCog(page);
@@ -708,14 +733,14 @@ test('the spacing setting at 375 light: the phone cog shows Team spacing and mov
   const a = measure(f, 3);
   await openCog(page);
   await expect(page.locator('[data-test=monitor-layout] label.force').filter({ hasText: 'Team spacing' })).toBeVisible();
-  await page.screenshot({ path: path.join(SPACING_DIR, 'screens', 'cog-375-light.png') });
+  await snap(page, path.join(SPACING_DIR, 'screens', 'cog-375-light.png'));
   await sliderSet(page, 2);
   await page.locator('[data-test=monitor-layout-close]').click();
   f = await settle(page, 3);
   const b = measure(f, 3);
   const hubs = await hubsOnScreen(page, f, 3);
   results.spacing.phone = { at1: a, at2: b, hubs };
-  await page.screenshot({ path: path.join(SPACING_DIR, 'screens', 'spacing-2x-375-light.png') });
+  await snap(page, path.join(SPACING_DIR, 'screens', 'spacing-2x-375-light.png'));
   expect(b.dist['alpha-bravo']! / a.dist['alpha-bravo']!).toBeGreaterThan(1.6);
   expect.soft(hubs.every((h) => h.inside), 'Auto fit keeps the hubs on the phone wall').toBe(true);
   expect(errors).toEqual([]);
@@ -747,7 +772,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     r.maxLen = Math.max(...labels.map((l) => l.text.length));
     r.panelWords = f.ops.filter((o) => o.op === 'text' && /workflows/i.test(o.text!)).map((o) => o.text);
     r.check = await labelCheck(page, f, 3, w);
-    await page.screenshot({ path: path.join(NODES_DIR, 'screens', `labels-${tag}.png`) });
+    await snap(page, path.join(NODES_DIR, 'screens', `labels-${tag}.png`));
     // Every workflow keeps at least its hover title.
     const hv = await hoverAll(page);
     r.hover = { squares: hv.bySquare.length, ids: hv.ids.length, fullTitles: hv.full.length, missing: ALL_WFS.map((x) => x.id).filter((id) => !hv.full.includes(id)), misses: hv.misses };
@@ -773,10 +798,10 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       const s = toScreen(h.op, wp.x, wp.y);
       if (s.x < 5 || s.y < 5 || s.x > box.width - 5 || s.y > box.height - 5) { r.panelSpot.push({ off: true }); continue; }
       await page.mouse.move(box.x + s.x, box.y + s.y);
-      await page.waitForTimeout(250);
+      await freshFrame(page); // the move seen: a tip there would show now
       const tip = (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : null;
       await page.mouse.down(); await page.mouse.up();
-      await page.waitForTimeout(300);
+      await freshFrame(page); // the click seen: a workflow it opened would be on its way
       const opened = await page.locator('[data-test=workflows-view], [data-test=workflow-pane], [role=dialog]').count();
       r.panelSpot.push({ x: Math.round(s.x), y: Math.round(s.y), tip, opened });
       if (opened) await page.keyboard.press('Escape');
@@ -791,31 +816,30 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     for (let i = 0; i < 5 && !tip.includes(titleOf(target)); i++) {
       const s = await node();
       await page.mouse.move(box.x + s.x, box.y + s.y);
-      await page.waitForTimeout(250);
-      tip = (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : '';
+      tip = await tipWhen(page, (t) => t.includes(titleOf(target)));
     }
     r.hoverTip = tip;
     expect(tip, 'the hover shows the full title').toContain(`#${target} ${titleOf(target)}`);
-    await page.screenshot({ path: path.join(NODES_DIR, 'screens', `hover-${tag}.png`) });
+    await snap(page, path.join(NODES_DIR, 'screens', `hover-${tag}.png`));
     {
       const s = await node();
       await page.mouse.move(box.x + s.x, box.y + s.y);
       await page.mouse.down();
       for (let i = 1; i <= 8; i++) await page.mouse.move(box.x + s.x + i * 8, box.y + s.y + i * 4);
       await page.mouse.up();
-      await page.waitForTimeout(500);
+      await freshFrame(page); // the release seen: a workflow it opened would be on its way
       r.dragOpened = await page.locator('[data-test=workflows-view], [data-test=workflow-pane]').count();
       expect(r.dragOpened, 'a drag opens nothing').toBe(0);
     }
-    await page.waitForTimeout(800);
     let opened = 0;
     for (let i = 0; i < 5 && !opened; i++) {
+      await still(page); // the dragged node back at rest
       const s = await node();
       await page.mouse.move(box.x + s.x, box.y + s.y);
-      await page.waitForTimeout(120);
+      await tipWhen(page, (t) => t.includes(`#${target} `), 1000);
       await page.mouse.down(); await page.mouse.up();
-      await page.waitForTimeout(400);
-      opened = (await page.locator('[data-test=workflows-view]').count()) || (await page.locator('[data-test=monitor-canvas]').count() ? 0 : 1); // left the Monitor
+      // Left the Monitor: the Workflows page shows, or the wall is gone.
+      opened = await page.waitForFunction(() => !!document.querySelector('[data-test=workflows-view]') || !document.querySelector('[data-test=monitor-canvas]'), null, { timeout: 1500 }).then(() => 1, () => 0);
     }
     r.clickOpened = opened > 0;
     expect(r.clickOpened, 'a click opens the workflow').toBe(true);
@@ -824,7 +848,7 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     await expect(wfOpened(page, target)).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue('2');
     await expect(page.locator('[role=dialog]')).toHaveCount(0);
-    await page.screenshot({ path: path.join(NODES_DIR, 'screens', `click-opens-${tag}.png`) });
+    await snap(page, path.join(NODES_DIR, 'screens', `click-opens-${tag}.png`));
     console.log(`nodes ${tag}:`, JSON.stringify(r));
     expect(errors).toEqual([]);
     await ctx.close();
@@ -838,11 +862,11 @@ test('labels: 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels s
   // Zoom out with the wheel (pins the camera).
   const box = await canvasBox(page);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 300); await page.waitForTimeout(80); }
-  await page.waitForTimeout(600);
-  f = await lastFrame(page);
+  for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 300); await freshFrame(page); }
+  await still(page); // the labels placed at the new zoom
+  f = await freshFrame(page);
   r.out = { zoom: +zoomOf(f).toFixed(3), labels: wfLabels(f).map((l) => l.text), px: wfLabels(f).map((l) => +(l.font * zoomOf(f)).toFixed(2)) };
-  await page.screenshot({ path: path.join(NODES_DIR, 'screens', 'phone-zoomed-out.png') });
+  await snap(page, path.join(NODES_DIR, 'screens', 'phone-zoomed-out.png'));
   r.outCheck = await labelCheck(page, f, 3, 375);
   expect.soft(r.outCheck.overlaps, 'phone zoomed out: no overlaps').toEqual([]);
   expect.soft(r.outCheck.roomMissed, 'phone zoomed out: nothing left out that had room').toEqual([]);
@@ -851,11 +875,11 @@ test('labels: 375 zoomed out: only "#id"; zoomed in: "#id title" again; labels s
   expect(r.out.zoom).toBeLessThan(0.6);
   expect(r.out.labels.every((t: string) => /^#\d+$/.test(t)), 'only "#id" zoomed out on a phone').toBe(true);
   expect(Math.min(...r.out.px)).toBeGreaterThanOrEqual(7.99);
-  for (let i = 0; i < 14; i++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(80); }
-  await page.waitForTimeout(600);
-  f = await lastFrame(page);
+  for (let i = 0; i < 14; i++) { await page.mouse.wheel(0, -300); await freshFrame(page); }
+  await still(page);
+  f = await freshFrame(page);
   r.in = { zoom: +zoomOf(f).toFixed(3), labels: wfLabels(f).map((l) => l.text) };
-  await page.screenshot({ path: path.join(NODES_DIR, 'screens', 'phone-zoomed-in.png') });
+  await snap(page, path.join(NODES_DIR, 'screens', 'phone-zoomed-in.png'));
   expect(r.in.zoom).toBeGreaterThanOrEqual(0.6);
   if (r.in.labels.length) expect(r.in.labels.some((t: string) => t.includes(' ')), 'titles back zoomed in').toBe(true);
   results.nodes.phoneZoom = r;
@@ -874,14 +898,14 @@ test('labels: 1280 wide zoomed out (Activity hidden, wall over 760): titles stay
   const steps: any[] = [];
   for (let i = 0; i < 6; i++) {
     await page.mouse.wheel(0, 300);
-    await page.waitForTimeout(700);
-    const f = await lastFrame(page);
+    await still(page); // the zoom applied (the camera jumps there) and the labels placed
+    const f = await freshFrame(page);
     const labels = wfLabels(f);
     const check = await labelCheck(page, f, 3, 1280);
     const zoom = zoomOf(f);
     steps.push({ zoom: +zoom.toFixed(3), squares: check.squares, drawn: labels.length, withTitle: labels.filter((l) => l.text.includes(' ')).length, wrongTitle: labels.filter((l) => l.text.includes(' ') && l.text !== expectLabel(l.id, zoom, 1280)).map((l) => l.text), idOnly: labels.filter((l) => !l.text.includes(' ')).map((l) => l.id), dropped: check.dropped, overlaps: check.overlaps, ownMap: check.ownMapOverlaps, roomMissed: check.roomMissed, px: Math.min(...labels.map((l) => +(l.font * zoomOf(f)).toFixed(2))) });
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    if (i === 5) await page.screenshot({ path: path.join(NODES_DIR, 'screens', 'wide-zoomed-out.png') });
+    if (i === 5) await snap(page, path.join(NODES_DIR, 'screens', 'wide-zoomed-out.png'));
   }
   const fit = steps.find((s) => s.zoom < 0.6)!;
   const far = steps.at(-1)!;
@@ -917,19 +941,19 @@ test('labels: focus: the other teams\' labels dim; the focused team\'s stay full
   const before = wfLabels(f).map((l) => l.alpha);
   let ok = false;
   for (let i = 0; i < 8 && !ok; i++) {
-    f = await lastFrame(page);
+    await still(page);
+    f = await freshFrame(page);
     const h = hubAt(f, 'alpha')!;
     const box = await canvasBox(page);
     const s = toScreen(h.op, h.x, h.y);
     await page.mouse.move(box.x + s.x, box.y + s.y); await page.mouse.down(); await page.mouse.up();
-    await page.waitForTimeout(150);
-    ok = (await page.locator('[data-test=monitor-focus]').count()) > 0;
-    if (!ok) await page.waitForTimeout(300);
+    ok = await page.locator('[data-test=monitor-focus]').waitFor({ timeout: 1000 }).then(() => true, () => false);
   }
   expect(ok, 'alpha focused').toBe(true);
   await page.mouse.move(2, 2); // off the hub: a hover dims what is not its neighbour (0.28), which is not the focus
-  await page.waitForTimeout(3000);
-  f = await lastFrame(page);
+  await expect(page.locator('[data-test=monitor-tip]')).toHaveCount(0);
+  await still(page); // zoomed to alpha
+  f = await freshFrame(page);
   const mineL = wfLabels(f).filter((l) => wfsOf(0).some((w) => w.id === l.id));
   const mine = mineL.map((l) => l.alpha);
   const others = wfLabels(f).filter((l) => !wfsOf(0).some((w) => w.id === l.id)).map((l) => l.alpha);
@@ -941,7 +965,7 @@ test('labels: focus: the other teams\' labels dim; the focused team\'s stay full
   };
   results.nodes.focus = r;
   console.log('nodes focus:', JSON.stringify(r));
-  await page.screenshot({ path: path.join(NODES_DIR, 'screens', 'focus-dims.png') });
+  await snap(page, path.join(NODES_DIR, 'screens', 'focus-dims.png'));
   expect(Math.min(...mine)).toBeGreaterThan(0.9);
   if (others.length) expect(Math.max(...others), 'other teams dimmed').toBeLessThan(0.6);
   expect(errors).toEqual([]);
@@ -951,9 +975,8 @@ test('labels: focus: the other teams\' labels dim; the focused team\'s stay full
 test('labels: reduced motion: the labels and nodes do not animate (no turning arc, still labels)', async ({ browser }) => {
   const { page, ctx, errors } = await open(browser, { w: 1280, teams: 3, reduced: true });
   await settle(page, 3);
-  await page.waitForTimeout(1500);
   const fs1 = await recent(page, 1);
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(1500); // a window: the labels must not move in it
   const fs2 = await recent(page, 1);
   const a = wfLabels(fs1[0]!), b = wfLabels(fs2[0]!);
   const moved = a.map((l) => { const m = b.find((x) => x.id === l.id); return m ? Math.hypot(m.x - l.x, m.y - l.y) + Math.abs(m.alpha - l.alpha) + Math.abs(m.font - l.font) : 99; });
@@ -962,7 +985,7 @@ test('labels: reduced motion: the labels and nodes do not animate (no turning ar
   const r = { maxMove: +Math.max(...moved).toFixed(3), turningArcs: arcs(fs2[0]!), sameText: a.every((l) => b.some((x) => x.id === l.id && x.text === l.text)) };
   results.nodes.reduced = r;
   console.log('nodes reduced:', JSON.stringify(r));
-  await page.screenshot({ path: path.join(NODES_DIR, 'screens', 'reduced-motion.png') });
+  await snap(page, path.join(NODES_DIR, 'screens', 'reduced-motion.png'));
   expect(r.maxMove, 'labels still').toBeLessThan(0.5);
   expect(r.turningArcs, 'no turning arc').toBe(0);
   expect(r.sameText).toBe(true);
@@ -980,18 +1003,16 @@ test('labels: a workflow that completes flashes green and leaves, one closed fad
   feed.row('done', 'alpha', null, 'Manager', done.id, 'Delivered the refunds');
   feed.wf(2, closed.id, 'closed', [], closed.title);
   feed.row('done', 'bravo', null, 'Manager', closed.id, 'Closed: not needed');
-  const end = Date.now() + 12_000;
   let greens = 0, greys = 0, gone = false;
-  while (Date.now() < end) {
+  await expect.poll(async () => {
     for (const f of await recent(page, 20)) { greens = Math.max(greens, wfBoxCount(f, DONE)); greys = Math.max(greys, wfBoxCount(f, INK_DIM)); }
     const f = await lastFrame(page);
     gone = !wfLabels(f).some((l) => l.id === done.id || l.id === closed.id);
-    if (gone && greens && greys) break;
-    await page.waitForTimeout(150);
-  }
+    return !!(gone && greens && greys);
+  }, { timeout: 12_000, intervals: [150] }).toBe(true).catch(() => {});
   const all: Frame[] = await page.evaluate(() => (window as any).__frames);
   const flashFrames = all.filter((f) => f.ops.some((o) => o.op === 'stroke' && o.style === DONE && o.items?.some((i) => i.t === 'arc' && Math.abs(i.a1 - i.a0 - Math.PI * 2) < 0.01))).length;
-  await page.screenshot({ path: path.join(NODES_DIR, 'screens', 'completed-and-closed.png') });
+  await snap(page, path.join(NODES_DIR, 'screens', 'completed-and-closed.png'));
   const rows = (await page.locator('[data-test=monitor-row]').allInnerTexts()).map((t) => t.replace(/\s+/g, ' '));
   const r = { greenBox: greens, greyBox: greys, flashFrames, labelsGone: gone, rowsBefore, rowsAfter: rows.length, doneRows: rows.filter((t) => /finished the work/.test(t)).slice(0, 4) };
   results.nodes.ends = r;
