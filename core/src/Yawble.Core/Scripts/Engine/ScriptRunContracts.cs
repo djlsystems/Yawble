@@ -101,8 +101,11 @@ public sealed record ScriptRunRequest
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(10);
     public int StepBudget { get; init; } = 10_000;
 
-    /// <summary>The most items one forEach may loop over.</summary>
+    /// <summary>The most items one forEach may loop over, and the most passes one while may make (whatever its max).</summary>
     public int LoopCap { get; init; } = 1_000;
+
+    /// <summary>The limits each code step runs under (time, memory, statements, call depth).</summary>
+    public ScriptCodeLimits CodeLimits { get; init; } = ScriptCodeLimits.Default;
 
     /// <summary>The last checkpoint of a run that was cut off; the run goes on from there.</summary>
     public ScriptRunCheckpoint? ResumeFrom { get; init; }
@@ -195,15 +198,20 @@ public sealed class NullScriptRunJournal : IScriptRunJournal
     public Task LogAsync(string line) => Task.CompletedTask;
 }
 
-/// <summary>A forEach being run: its step, the item name, the items and the index of the current one.</summary>
+/// <summary>
+/// A loop being run: its step. For a forEach, the item name, the items and the index of the current one. For a while
+/// (<see cref="IsWhile"/>), no items: <see cref="Index"/> is the passes it has finished, and the end of a pass goes back to the
+/// while step, which checks its condition again.
+/// </summary>
 public sealed class ScriptLoopFrame
 {
     public required string StepId { get; init; }
-    public required string As { get; init; }
-    public required JsonArray Items { get; init; }
+    public string? As { get; init; }
+    public JsonArray Items { get; init; } = [];
     public int Index { get; set; }
+    public bool IsWhile { get; init; }
 
-    public ScriptLoopFrame Clone() => new() { StepId = StepId, As = As, Items = (JsonArray)Items.DeepClone(), Index = Index };
+    public ScriptLoopFrame Clone() => new() { StepId = StepId, As = As, Items = (JsonArray)Items.DeepClone(), Index = Index, IsWhile = IsWhile };
 }
 
 /// <summary>
