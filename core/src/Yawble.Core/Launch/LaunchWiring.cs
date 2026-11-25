@@ -29,6 +29,9 @@ public sealed class LaunchWiring : IAsyncDisposable
     private readonly GrokKeeper? _keeper;
 
     /// <summary>Where every run's gateway reports a host refused for not being on the allowlist (the network asks); set once the ask store is up.</summary>
+    /// <summary>The gateway's latest Grok sign-in outcome (the Agents tile); null when the launcher is off.</summary>
+    public GrokSignInWatch? GrokSignIn => _gatewayHost?.GrokSignIn;
+
     public Gateway.IHostRefusals? HostRefusals
     {
         get => _gatewayHost?.Refusals;
@@ -64,6 +67,12 @@ public sealed class LaunchWiring : IAsyncDisposable
     /// <summary>The app-private Grok home's keeper for the Settings screens: none from here (the gateway's keeper
     /// renews the person's own Grok home and is not shared).</summary>
     public GrokKeeper? Keeper => null;
+
+    /// <summary>What the gateway keeper's last <c>grok models</c> printed, for the model pickers (it is never run for them).</summary>
+    public string? GrokModelsOutput() => _keeper?.ModelsOutput;
+
+    /// <summary>The person's own CLI settings (read only), whose model a member with none and no agent default is launched with.</summary>
+    public Agents.ICliModelSettings? ModelSettings { get; private init; }
 
     public string? Problem { get; }
 
@@ -103,28 +112,42 @@ public sealed class LaunchWiring : IAsyncDisposable
             : null;
 
         // Claude's sign-in is held by the gateway: read from the person's own host sign-in at every request,
-        // renewed by the person's own claude on the host when it is about to expire.
-        var claudeHost = new ClaudeHostSession(ClaudeHostSession.DefaultCredentialsFile(env), () => Agents.HostCli.Path(clis, "claude"), log);
+        // renewed by the person's own claude on the host when it is about to expire (macOS: from the login Keychain).
+        var claudeHost = ClaudeHostSession.ForThisHost(env, () => Agents.HostCli.Path(clis, "claude"), log);
         var gatewayHost = new GatewayHost(new GatewayCredentials(credentials, personsGrok, keeper, claudeHost: claudeHost,
             codexHost: new CodexHostSession(CodexHostSession.DefaultAuthFile(env), () => Agents.HostCli.Path(clis, "codex"), log)), new GatewayLog(connectionString),
             new RunTokenRegistry());
         ISandboxBackend backend = OperatingSystem.IsWindows()
             ? new WxcExecBackend(Path.Combine(AppContext.BaseDirectory, "wxc-exec.exe"), Path.Combine(data, "requests"))
             : new NativeSandboxBackend();
+        // macOS: the per-user temp folder each run's own short folder goes in; what a crash or restart left there is
+        // removed now (no run of this core is live yet). Another app instance of the same user shares that folder: the
+        // owner marker beside each run folder (this core's data folder, pid and start time) keeps a live core's folders.
+        var userTemp = Sandboxing.RunTempFolder.DarwinUserTempDir() is { } t ? HostPathCanonicalizer.Canonicalize(t) : null;
+        var runTempOwner = userTemp is not null ? Sandboxing.RunTempOwner.ForThisProcess(data) : null;
+        if (userTemp is not null)
+        {
+            var swept = Sandboxing.RunTempFolder.Sweep(userTemp, name => registry.All().Any(r => Sandboxing.RunTempFolder.Name(r.RunKey) == name), runTempOwner);
+            if (swept.Count > 0) log?.Invoke($"removed {swept.Count} leftover run temp folder(s) from {userTemp}");
+        }
         var host = new LaunchHost(TargetOsExtensions.Host, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             appRoot, Path.GetFullPath(install), clis, HostPathCanonicalizer.Canonicalize,
-            ToolFoldersNow: () => HostTools.Detect(appRoot)); // read at every run: a git installed while the app runs is on the next run's PATH
+            ToolFoldersNow: () => HostTools.Detect(appRoot), // read at every run: a git installed while the app runs is on the next run's PATH
+            UserTempDir: userTemp, RunTempOwner: runTempOwner);
         // Paths are canonicalised (symlinks resolved) before they are compared or handed to the sandbox.
         var agentDefaults = new Agents.AgentDefaultsStore(connectionString);
+        var modelSettings = Agents.CliModelSettings.ForThisComputer();
         var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(connectionString),
             new PolicyStore(connectionString, canonicalize: HostPathCanonicalizer.Canonicalize),
             // Each CLI's own sign-in on this host; the app's credential store is not a source for runs.
             new HostSignInModes(), new GatewayRunFactory(gatewayHost), backend,
             new RunRecordStore(connectionString), registry,
-            transcripts: new StoreTranscripts(new TranscriptStore(data, connectionString)), agentDefaults: agentDefaults);
+            transcripts: new StoreTranscripts(new TranscriptStore(data, connectionString)), agentDefaults: agentDefaults,
+            log: log, cliSettings: modelSettings);
         return new LaunchWiring(new SandboxAgentRunner(launcher), launcher, gatewayHost, keeper, null)
         {
             AgentDefaults = agentDefaults,
+            ModelSettings = modelSettings,
             Credentials = credentials,
             GrokHome = grokHome,
         };
@@ -145,4 +168,24 @@ public sealed class LaunchWiring : IAsyncDisposable
         if (_keeper is not null) await _keeper.DisposeAsync();
         _gatewayHost?.Dispose();
     }
+}
+
+/// <summary>What runs a script member's bus run (a tell to it): the script runner.</summary>
+public interface IScriptMemberRuns
+{
+    bool IsScriptMember(long memberId);
+    Task<RunResult> RunForBusAsync(RunContext run, CancellationToken ct);
+}
+
+/// <summary>
+/// The bus's runner, dispatching by member kind: a script member's run goes to the script engine (through
+/// <see cref="IScriptMemberRuns"/>), an agent's to the runner it always had (the sandbox launcher, wrapped as before),
+/// unchanged. With no script runner set every run is an agent's.
+/// </summary>
+public sealed class ScriptDispatchRunner(IAgentRunner agents, Func<IScriptMemberRuns?> scripts) : IAgentRunner
+{
+    public IAgentRunner Agents { get; } = agents;
+
+    public Task<RunResult> RunAsync(RunContext run, CancellationToken ct) =>
+        scripts() is { } s && s.IsScriptMember(run.Member.Id) ? s.RunForBusAsync(run, ct) : Agents.RunAsync(run, ct);
 }

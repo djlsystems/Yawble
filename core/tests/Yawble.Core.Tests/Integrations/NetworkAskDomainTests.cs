@@ -12,7 +12,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// Domain allows and grouped asks (B018, card 184): "All of *.digicert.com" at each scope closes only the waiting asks it
+/// Domain allows and grouped asks: "All of *.digicert.com" at each scope closes only the waiting asks it
 /// covers at that scope; one member's asks with one registrable domain are answered together; the per-member cap still
 /// counts hosts. Fakes only: a temporary database, fake timers and a recording tell.
 /// </summary>

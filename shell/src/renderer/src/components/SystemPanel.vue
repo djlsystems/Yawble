@@ -79,7 +79,7 @@ pre { background: var(--surface-sunken); padding: 6px 8px; font-size: 12px; whit
 .ok { color: var(--ok); margin: 0 8px; }
 .missing { color: var(--warn-ink); margin: 0 8px; }
 code { font-size: 12px; color: var(--muted); }
-/* A phone (B054): each backend is a stacked block of labelled lines (no table wider than the screen, no sideways
+/* A phone: each backend is a stacked block of labelled lines (no table wider than the screen, no sideways
    scroller), so Capabilities and Warnings are in view. Its selector outweighs Settings' phone rule for tables. */
 @media (max-width: 759.98px) {
   section table.backends, section table.backends tbody, section table.backends tr, section table.backends td { display: block; width: auto; overflow-x: visible; }

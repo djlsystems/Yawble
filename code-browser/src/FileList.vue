@@ -56,7 +56,7 @@ const openable = (e: CodeEntry) => !e.hidden && e.kind !== 'link';
 .cb-dot.branch { border: 1.5px solid var(--ok); }
 @keyframes cb-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running) 55%, transparent); } 50% { box-shadow: 0 0 0 4px transparent; opacity: .6; } }
 @media (prefers-reduced-motion: reduce) { .cb-dot.live { animation: none; } }
-/* A phone (B037): 44 px rows; the size drops, the age stays. */
+/* A phone: 44 px rows; the size drops, the age stays. */
 @media (max-width: 759.98px) {
   .cb-open { min-height: 44px; grid-template-columns: 12px 18px minmax(0, 1fr) auto auto; font-size: 14px; }
   .cb-size { display: none; }

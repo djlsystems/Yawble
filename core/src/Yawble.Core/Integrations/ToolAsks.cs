@@ -9,7 +9,7 @@ using Yawble.Core.Teams;
 namespace Yawble.Core.Integrations;
 
 /// <summary>
-/// One developer tool the app can install for the person (B013). Agents name it (<see cref="Name"/>); everything else
+/// One developer tool the app can install for the person. Agents name it (<see cref="Name"/>); everything else
 /// is the app's own: an agent never supplies a winget id, a command or an argument.
 /// </summary>
 /// <param name="Name">What request_tool takes, e.g. "dotnet-sdk-10".</param>
@@ -243,7 +243,10 @@ public sealed class SystemToolHost(IGitHost git, string appDataRoot) : IToolHost
             return HostTools.Detect(appDataRoot).Select(d => Path.Combine(d, program + ".exe")).FirstOrDefault(File.Exists);
         // Linux: only the system folders a run's PATH has (HostTools.LinuxRunPath), which every sandbox reads: a program
         // the core's own PATH finds under the home folder is one a run cannot use (FoundOnlyInHome).
-        var dirs = OperatingSystem.IsLinux() ? HostTools.LinuxRunPath : CorePath();
+        // macOS: the folders a run gets (HostTools.DetectMac, then the system ones), not the core's PATH: started from the
+        // Dock that is launchd's /usr/bin:/bin:/usr/sbin:/sbin, and a Homebrew or installer .NET SDK was never found.
+        IEnumerable<string> dirs = OperatingSystem.IsLinux() ? HostTools.LinuxRunPath
+            : OperatingSystem.IsMacOS() ? [.. HostTools.Detect(appDataRoot), .. HostTools.MacRunPath] : CorePath();
         return dirs.Select(d => Path.Combine(d, program)).FirstOrDefault(File.Exists);
     }
 
@@ -294,13 +297,13 @@ public sealed record ToolAskRow(long Id, string At, long TeamId, string Team, st
 }
 
 /// <summary>
-/// Host tool asks (B013): an agent's request_tool names a tool from <see cref="ToolCatalog"/>; the person is asked once
+/// Host tool asks: an agent's request_tool names a tool from <see cref="ToolCatalog"/>; the person is asked once
 /// per (team, package) in Needs you: catalog names that install the same winget package are one tool for the ask and Not now. Install runs exactly the catalog's winget command in the app's process (the person, in
 /// the window on this computer, only: never over the Cloud Link, from the companion, by an agent or the Concierge); the
 /// program is looked for again afterwards, and when it is found every open ask for the tool closes and each team's
 /// Manager is told to retry. A failed install leaves the ask open with winget's message (Try again). Not now: the team is
 /// not asked about that tool again for 24 hours. On Linux, with pkexec, a graphical session and a recognised distribution,
-/// Install runs "pkexec &lt;package manager&gt; ..." instead (B017); Check again (tools.checkAgain) looks for the program again
+/// Install runs "pkexec &lt;package manager&gt; ..." instead; Check again (tools.checkAgain) looks for the program again
 /// after the person installed it themselves. Each ask, answer and result is in the Approvals log (tool_ask_events).
 /// The network asks' plumbing is shared: the same tell (as the person, in the ask's workflow), the same Needs you count
 /// and Concierge status, the same Approvals log.
@@ -464,8 +467,9 @@ public sealed class ToolAskService
     /// <summary>One catalog entry as the window reads it.</summary>
     public JsonObject ToJson(ToolEntry t) => new()
     {
-        ["name"] = t.Name, ["displayName"] = t.DisplayName, ["publisher"] = t.Publisher, ["wingetId"] = t.WingetId,
-        ["scope"] = t.UserScope ? "user" : "machine", ["program"] = t.Program,
+        // winget's package id and its install scope mean something only on Windows (the card said "Windows may ask" on a Mac).
+        ["name"] = t.Name, ["displayName"] = t.DisplayName, ["publisher"] = t.Publisher, ["wingetId"] = _host.IsWindows ? t.WingetId : null,
+        ["scope"] = _host.IsWindows ? t.UserScope ? "user" : "machine" : null, ["program"] = t.Program,
         ["command"] = CommandFor(t, _host.IsWindows, _host.IsWindows ? null : _host.LinuxInstall),
     };
 
@@ -479,8 +483,8 @@ public sealed class ToolAskService
         return new JsonObject
         {
             ["id"] = a.Id, ["at"] = a.At, ["teamId"] = a.TeamId, ["team"] = a.Team, ["member"] = a.Member, ["memberName"] = a.MemberName,
-            ["tool"] = a.Tool, ["displayName"] = t?.DisplayName ?? a.Tool, ["publisher"] = t?.Publisher, ["wingetId"] = t?.WingetId,
-            ["scope"] = t is null ? null : t.UserScope ? "user" : "machine",
+            ["tool"] = a.Tool, ["displayName"] = t?.DisplayName ?? a.Tool, ["publisher"] = t?.Publisher, ["wingetId"] = _host.IsWindows ? t?.WingetId : null,
+            ["scope"] = t is null || !_host.IsWindows ? null : t.UserScope ? "user" : "machine",
             ["reason"] = a.Reason, ["count"] = a.Count, ["lastSeen"] = a.LastSeen, ["workflow"] = a.Workflow,
             ["state"] = a.State, ["attempts"] = a.Attempts, ["error"] = a.Error,
             // The result code of the last Install or Check again (0042), beside error: failed, cancelled, notAuthorized,

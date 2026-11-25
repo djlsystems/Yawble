@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { YawbleApi } from '../../src/shared/api';
 import type { Effect } from '../../src/renderer/src/monitor/model';
 
-// Card 374 (B080): the Monitor view's focus on a team, density, You-node click and sound. The wall is a fake scene with
-// DeveloperTomas's setFocus / setDensity / hitYouNode (card 373); a scene picks on its own pointerdown, as the real one.
+// The Monitor view's focus on a team, density, You-node click and sound. The wall is a fake scene with
+// the scene's setFocus / setDensity / hitYouNode; a scene picks on its own pointerdown, as the real one.
 type Fake = {
   onPick?: (k: string | null) => void; onOpenWorkflow?: (team: string, id?: number) => void;
   focus: (number | null)[]; density: string[]; you: { x: number; y: number; r: number } | null; nextPick: string | null;
@@ -248,7 +248,7 @@ describe('sound', () => {
     expect(snd.soundOf({ kind: 'comet', from: 'a', to: 'b', color: 'handback', label: null, at: 0 })).toBe('handback');
     expect(snd.soundOf({ kind: 'comet', from: 'a', to: 'b', color: 'tell', label: null, at: 0 })).toBeNull();
     expect(snd.soundOf(burst('done', false))).toBeNull();
-    // B088: needs you sounds for a need-you item flying to the You node, not for the question's burst on its member.
+    // Needs you sounds for a need-you item flying to the You node, not for the question's burst on its member.
     expect(snd.soundOf(you('q:a'))).toBe('needsYou');
     expect(snd.soundOf(burst('decision'))).toBeNull();
     expect(snd.soundOf(burst('blocked', true))).toBe('failed');

@@ -32,12 +32,12 @@ const lane = ref<LaneId>('todo');
 const note = ref('');
 const comment = ref('');
 const settable: CardStatus[] = ['queued', 'running', 'blocked', 'needs-decision', 'failed', 'completed', 'handback', 'done'];
-// 'stopped' (B097) is set by the core when the person stops a run; it is offered only on a card that already has it,
+// 'stopped' is set by the core when the person stops a run; it is offered only on a card that already has it,
 // so the select shows "Stopped" instead of a blank.
 const statuses = computed<CardStatus[]>(() => (card.value?.status === 'stopped' ? [...settable, 'stopped'] : settable));
 
 const body = computed(() => (card.value?.body ? renderMarkdown(card.value.body) : ''));
-// The status chip: a run the person stopped reads "Stopped" in the neutral colour, not "Failed" in red (B097).
+// The status chip: a run the person stopped reads "Stopped" in the neutral colour, not "Failed" in red.
 const look = computed(() => (card.value ? cardStatusLook(card.value) : null));
 
 async function load() {
@@ -181,7 +181,7 @@ h4 { margin: 6px 0; font-size: 13px; }
 .txt { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-soft); }
 .muted { color: var(--muted); font-weight: 400; }
 .error { color: var(--bad); font-size: 13px; }
-/* A phone (B037): the card takes the whole board (the board hides behind it), one column, tap targets 44 px. */
+/* A phone: the card takes the whole board (the board hides behind it), one column, tap targets 44 px. */
 @media (max-width: 759.98px) {
   .panel { width: auto; flex: 1 1 auto; min-width: 0; border-left: 0; padding: 8px 12px 16px; }
   header { flex-wrap: wrap; }

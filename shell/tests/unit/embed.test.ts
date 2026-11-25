@@ -14,7 +14,7 @@ import {
 import { REMOTE_THEME_KEY } from '../../src/renderer/src/theme';
 import { confirmState } from '../../src/renderer/src/confirm';
 
-// B115 Part B (card 518): the remote view embedded in the cloud page. The sidebar as data (yawble.nav), the cloud's
+// The remote view embedded in the cloud page. The sidebar as data (yawble.nav), the cloud's
 // navigate and theme messages, the origin and source checks, and that the viewer's own remote theme is never used.
 // Fakes only: a fake window and parent, fake handlers, the real Sidebar.vue for the "same as the click" checks.
 
@@ -72,17 +72,29 @@ describe('buildNav: the sidebar as data', () => {
     expect(nav.places.map((p) => [p.id, p.label, p.icon])).toEqual([
       ['newChat', 'New chat', 'newChat'], ['concierge', 'Concierge', 'concierge'], ['teams', 'Teams', 'teams'],
       ['backlog', 'Backlog', 'backlog'], ['workflows', 'Workflows', 'workflows'], ['board', 'Kanban board', 'kanban'],
-      ['documents', 'Documents', 'documents'], ['monitor', 'Monitor', 'monitor'], ['logs', 'Logs', 'logs'],
+      ['documents', 'Documents', 'documents'], ['monitor', 'Monitor', 'monitor'], ['scripts', 'Scripts', 'scripts'], ['logs', 'Logs', 'logs'],
+
     ]);
     expect(EMBED_PLACE_IDS).toEqual(nav.places.map((p) => p.id));
     expect(nav.places.every((p) => p.disabled === false)).toBe(true);
   });
-  it('the same order and labels as Sidebar.vue draws (New chat, then the places nav)', () => {
+  it('the same order and labels as Sidebar.vue draws (New chat, then the places nav), and nothing more', () => {
     const w = mount(Sidebar, { props: { ...base(), remote: true } as any });
     const drawn = [w.get('[data-test=new-chat]').text(), ...w.findAll('nav.places button').map((b) => b.text().replace(/\d+$/, ''))];
     expect(drawn).toEqual(buildNav(base()).places.map((p) => p.label));
     const ids = w.findAll('nav.places button').map((b) => b.attributes('data-test')!.replace(/^nav-/, ''));
     expect(['newChat', ...ids]).toEqual(EMBED_PLACE_IDS);
+  });
+  it('no Terminal and no Help: an agent\'s terminal is in its pane on the team page, Help is in Settings', () => {
+    const states: Partial<EmbedNavState>[] = [{}, { readOnly: true }, { view: 'settings' }];
+    for (const st of states) {
+      const ids = buildNav({ ...base(), ...st }).places.map((p) => p.id as string);
+      expect(ids).not.toContain('terminal');
+      expect(ids).not.toContain('help');
+    }
+    const app = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
+    expect(app).not.toContain("terminal: () => command('terminal')");
+    expect(app).not.toContain("help: () => command('about')");
   });
   it('badges: Teams counts the teams, Workflows the open ones; none when 0 or not known', () => {
     const nav = buildNav(base());
@@ -97,7 +109,7 @@ describe('buildNav: the sidebar as data', () => {
     expect(badge(buildNav({ ...base(), openWorkflows: undefined }), 'workflows')).toBeNull();
   });
   it('the active place is the view; New chat, Logs and Settings never light a place', () => {
-    for (const v of ['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor']) {
+    for (const v of ['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'scripts']) {
       expect(buildNav({ ...base(), view: v }).places.filter((p) => p.active).map((p) => p.id)).toEqual([v]);
     }
     expect(buildNav({ ...base(), view: 'settings' }).places.some((p) => p.active)).toBe(false);
@@ -112,6 +124,10 @@ describe('buildNav: the sidebar as data', () => {
     ]);
     // Another screen: no team is active even with a teamId kept.
     expect(buildNav({ ...base(), view: 'board', teamId: 2 }).teams.some((t) => t.active)).toBe(false);
+  });
+  it('a team with an open decision has the waiting dot; running still wins', () => {
+    const nav = buildNav({ ...base(), teams: [team(1, 'asks', { waiting: 1 }), team(2, 'busy', { waiting: 1, running: 1 }), team(3, 'held', { waiting: 1, paused: true })] });
+    expect(nav.teams.map((t) => t.dot)).toEqual(['waiting', 'running', 'waiting']);
   });
   it('the same dots as Sidebar.vue draws', () => {
     const w = mount(Sidebar, { props: { ...base(), remote: true } as any });
@@ -132,12 +148,12 @@ describe('buildNav: the sidebar as data', () => {
     const w = mount(Sidebar, { props: { ...base(), remote: true } as any });
     expect(w.get('[data-test=slots]').text()).toBe(runSlotsLine(base().slots));
   });
-  it('read-only: no New team and no chat actions; places stay', () => {
+  it('read-only: no New team, no chat actions; every place stays', () => {
     const nav = buildNav({ ...base(), readOnly: true });
     expect(nav.readOnly).toBe(true);
     expect(nav.canNewTeam).toBe(false);
     expect(nav.chats.every((c) => c.actions.length === 0)).toBe(true);
-    expect(nav.places).toHaveLength(9);
+    expect(nav.places.map((p) => p.id)).toEqual(EMBED_PLACE_IDS);
     expect(buildNav(base()).canNewTeam).toBe(true);
     expect(buildNav(base()).readOnly).toBe(false);
   });
@@ -155,13 +171,15 @@ describe('parsing the cloud\'s messages', () => {
   it('navigate: every kind, and malformed ones refused', () => {
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'place', id: 'board' } })).toEqual({ kind: 'place', id: 'board' });
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'team', id: 2 } })).toEqual({ kind: 'team', id: 2 });
+    // The cloud keeps every nav id as text: a decimal string is the same team.
+    expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'team', id: '2' } })).toEqual({ kind: 'team', id: 2 });
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'chat', id: 'c1' } })).toEqual({ kind: 'chat', id: 'c1' });
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'newTeam' } })).toEqual({ kind: 'newTeam' });
     expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'delete' } })).toEqual({ kind: 'chatAction', id: 'c1', action: 'delete' });
     for (const bad of [
       null, 'yawble.navigate', { type: 'yawble.navigate' }, { type: 'yawble.nav', to: { kind: 'newTeam' } },
       { type: 'yawble.navigate', to: { kind: 'place', id: 'settings' } }, { type: 'yawble.navigate', to: { kind: 'place', id: 'kanban' } },
-      { type: 'yawble.navigate', to: { kind: 'team', id: '2' } }, { type: 'yawble.navigate', to: { kind: 'team', id: 1.5 } },
+      { type: 'yawble.navigate', to: { kind: 'team', id: '2x' } }, { type: 'yawble.navigate', to: { kind: 'team', id: 1.5 } },
       { type: 'yawble.navigate', to: { kind: 'chat', id: '' } }, { type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'archive' } },
       { type: 'yawble.navigate', to: { kind: 'open', id: 'x' } },
     ]) expect(parseNavigate(bad)).toBeNull();
@@ -192,7 +210,7 @@ describe('navigate does what the same sidebar click does', () => {
   const s = base();
   const cases: [string, unknown, (w: ReturnType<typeof mount>) => Promise<void>][] = [
     ['newChat', { kind: 'place', id: 'newChat' }, async (w) => { await w.get('[data-test=new-chat]').trigger('click'); }],
-    ...(['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor'] as const).map((v) =>
+    ...(['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'scripts'] as const).map((v) =>
       [v, { kind: 'place', id: v }, async (w: ReturnType<typeof mount>) => { await w.get(`[data-test=nav-${v}]`).trigger('click'); }] as [string, unknown, (w: ReturnType<typeof mount>) => Promise<void>]),
     ['logs', { kind: 'place', id: 'logs' }, async (w) => { await w.get('[data-test=nav-logs]').trigger('click'); }],
     ['team', { kind: 'team', id: 2 }, async (w) => { await w.findAll('[data-test=team-item]')[1].trigger('click'); }],
@@ -278,6 +296,11 @@ describe('navigate does what the same sidebar click does', () => {
     // Places still work for a reader, as in the sidebar.
     await dispatchNavigate({ kind: 'place', id: 'board' }, ro, h);
     expect(calls).toEqual([['go', 'board']]);
+  });
+  it('a navigate to terminal, help or about is not a place: it is ignored', () => {
+    for (const id of ['terminal', 'help', 'about']) {
+      expect(parseNavigate({ type: 'yawble.navigate', to: { kind: 'place', id } }), id).toBeNull();
+    }
   });
 });
 

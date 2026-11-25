@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace Yawble.Core.Teams;
 
-/// <summary>The hosting service of a repository's origin (B075). None: plain git, no links, no pull requests.</summary>
+/// <summary>The hosting service of a repository's origin. None: plain git, no links, no pull requests.</summary>
 public enum RepoProviderKind { None, GitHub, GitLab, Bitbucket, AzureDevOps, Gitea }
 
 /// <summary>What a web link points at (git.webLink's kind).</summary>
@@ -23,7 +23,7 @@ public sealed record RepoHostSetting(RepoProviderKind? Provider, string? LinkPat
 public sealed record WebLinkRequest(WebLinkKind Kind, string? Commit = null, string? Branch = null, string? File = null, string? From = null, string? To = null, long? Pr = null);
 
 /// <summary>
-/// The provider layer's plain part (B075): which service an origin is on, read from its address, and the web links of
+/// The provider layer's plain part: which service an origin is on, read from its address, and the web links of
 /// a commit, branch, file, compare or pull request there. Everything else in the app stays plain git.
 /// </summary>
 public static class RepoProviders

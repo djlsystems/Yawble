@@ -8,7 +8,7 @@ public static class Lanes
 {
     public const string Todo = "todo", InProgress = "in-progress", NeedsYou = "blocked", Done = "done";
     public static readonly (string Id, string Label)[] All = [(Todo, "To Do"), (InProgress, "In Progress"), (NeedsYou, "Needs You"), (Done, "Done")];
-    /// <summary>B097 (card 437): the card's run was stopped by the person. Not a failure: In Progress, never Needs You.</summary>
+    /// <summary>The card's run was stopped by the person. Not a failure: In Progress, never Needs You.</summary>
     public const string Stopped = "stopped";
 
     public static readonly string[] Statuses = ["queued", "running", Stopped, "blocked", "needs-decision", "failed", "completed", "handback", "done"];
@@ -27,7 +27,7 @@ public static class Lanes
     public static int Loudness(string status) => status switch { "failed" => 3, "blocked" => 2, "needs-decision" => 1, _ => 0 };
 
     /// <summary>
-    /// B097: whether a stopped run leaves the card's status as it is: a card in Done (its work was delivered), or one
+    /// Whether a stopped run leaves the card's status as it is: a card in Done (its work was delivered), or one
     /// louder than "stopped" (a question, a block or a failure still waits on the person).
     /// </summary>
     public static bool StopKeeps(string status, string lane) => lane == Done || Loudness(status) > 0;
@@ -42,7 +42,7 @@ public static class Lanes
 /// <item>A member's reports move its card: progress to In Progress, blocked / a question / a failed run to Needs You,
 ///   a finished run or a hand-back to Done. A louder status (failed, blocked, needs a decision) is not overwritten by a
 ///   quieter one until new work arrives. A card a person or the Manager placed keeps its lane, except for a give-up.
-///   A run the person stopped (failure class "stopped", B097) is not a failure: the card's status is "stopped" and it
+///   A run the person stopped (failure class "stopped") is not a failure: the card's status is "stopped" and it
 ///   stays in its lane; its trail says "stopped". New work re-queues it as usual.</item>
 /// <item>The workflow declared complete sends its cards to Done, except those waiting on a person, and marks the backlog
 ///   item dispatched as that workflow "declared".</item>
@@ -51,7 +51,7 @@ public static class Lanes
 /// </summary>
 public sealed class BoardProjector(BoardStore store)
 {
-    /// <summary>The team's testers (B019/B027); set by the board before each page of messages. None by default.</summary>
+    /// <summary>The team's testers; set by the board before each page of messages. None by default.</summary>
     public Func<string, IReadOnlySet<string>> TestersOf { get; set; } = _ => NoTesters;
     private static readonly IReadOnlySet<string> NoTesters = new HashSet<string>();
 
@@ -79,7 +79,7 @@ public sealed class BoardProjector(BoardStore store)
         var exact = store.CardOf(team, sender, m.CorrelationId);
         var card = exact ?? store.OpenCardOf(team, sender);
         var p = Payload(m);
-        // B086: the time of this workflow's work goes on the member's card in it, or, with none (the Manager's own runs),
+        // The time of this workflow's work goes on the member's card in it, or, with none (the Manager's own runs),
         // on the member's card-less work in the workflow. Read before the report moves the card.
         var lastActivity = exact is null || m.Type != MessageTypes.Failed ? null : store.Trail(exact.Id).LastOrDefault()?.At;
         if (card is not null)
@@ -95,7 +95,7 @@ public sealed class BoardProjector(BoardStore store)
                 case MessageTypes.NeedsDecision:
                     Report(card, sender, "needs-decision", Text(p, "question"), "asked", giveUp: true);
                     break;
-                // B097: a run the person stopped is not a failure: the card says "stopped" (nothing runs it any more) but
+                // A run the person stopped is not a failure: the card says "stopped" (nothing runs it any more) but
                 // keeps its lane (no Needs You), and the trail says "stopped".
                 case MessageTypes.Failed when Text(p, "failureClass") == FailureClasses.Stopped:
                     Stopped(card, sender, Text(p, "reason"));
@@ -115,10 +115,10 @@ public sealed class BoardProjector(BoardStore store)
     }
 
     /// <summary>
-    /// B086: what a report adds to the timeline. A hand-back and a question are markers. A run's end carries its stalls and
+    /// What a report adds to the timeline. A hand-back and a question are markers. A run's end carries its stalls and
     /// lease waits (payload activity); a run the idle watchdog ended is a marker, and when its payload has no stalls (a run
-    /// from before B086), it was Stalled from its last sign of activity. A member's run that ends asking to be woken is
-    /// Scheduled until the wake. A run the person stopped (B097) keeps its stalls and lease waits but is no watchdog end,
+    /// from before stalls were recorded), it was Stalled from its last sign of activity. A member's run that ends asking to be woken is
+    /// Scheduled until the wake. A run the person stopped keeps its stalls and lease waits but is no watchdog end,
     /// and its card's status "stopped" is Idle time (not Blocked, not Agent working).
     /// </summary>
     private void Time(Message m, JsonObject? p, CardRow? card, string sender, string? lastActivity)
@@ -181,11 +181,11 @@ public sealed class BoardProjector(BoardStore store)
         }
         if (store.CardOf(team, member, m.CorrelationId) is { } card)
         {
-            // B086: the person's word to a member that asked them something answers it.
+            // The person's word to a member that asked them something answers it.
             if (m.Source == MessageTypes.PersonSource && card.Status == "needs-decision")
                 store.AddMarker(card.Id, card.Workflow, member, TimeMarkers.DecisionAnswered, _at!);
             store.Save(card with { Status = "queued", Lane = card.Placed && card.Lane != Lanes.Done ? card.Lane : Lanes.Todo }, _at);
-            store.Unend(card.Id); // new work: a card its workflow's end ended is live again (B085)
+            store.Unend(card.Id); // new work: a card its workflow's end ended is live again
             store.AddTrail(card.Id, from, "told", text, _at);
             return;
         }
@@ -209,7 +209,7 @@ public sealed class BoardProjector(BoardStore store)
         var next = louder ? status : card.Status;
         var lane = card.Placed && !giveUp ? card.Lane : Lanes.Of(next);
         store.AddTrail(card.Id, sender, kind, text ?? kind, _at);
-        // B027 item 3: someone else's hand-back or finished run does not put a tester's card in Done.
+        // Someone else's hand-back or finished run does not put a tester's card in Done.
         string? untested = null;
         if (lane == Lanes.Done && card.Lane != Lanes.Done
             && (untested = TesterRule.UntestedTester(card, store.Trail(card.Id), TestersOf(card.Team))) is not null)
@@ -222,7 +222,7 @@ public sealed class BoardProjector(BoardStore store)
     }
 
     /// <summary>
-    /// B097 (card 437): the person stopped the member's run. The card says "stopped" and stays in its lane (To Do or In
+    /// The person stopped the member's run. The card says "stopped" and stays in its lane (To Do or In
     /// Progress; never Needs You, no give-up). A card in Done, or one that calls louder for the person (a question, a
     /// block, a failure), keeps its status: <see cref="Lanes.StopKeeps"/>.
     /// </summary>
@@ -239,7 +239,7 @@ public sealed class BoardProjector(BoardStore store)
     /// <summary>
     /// The workflow ended. Completed: its cards go to Done, except those waiting on a person and a tester's untested card.
     /// Closed (by the person) or expired (by the app): every card of it goes to Done, a waiting one too: nobody works
-    /// it any more. Either way every card not ended yet records the end (B085): when, and how (completed, closed or
+    /// it any more. Either way every card not ended yet records the end: when, and how (completed, closed or
     /// expired); an expired workflow's end is its last real activity, so the expiry adds no time to a card.
     /// </summary>
     private void WorkflowDone(Message m)
@@ -247,12 +247,22 @@ public sealed class BoardProjector(BoardStore store)
         var how = m.Type switch { MessageTypes.WorkflowClosed => "closed", MessageTypes.WorkflowExpired => "expired", _ => "completed" };
         var p = Payload(m);
         var lastActivity = m.Type == MessageTypes.WorkflowExpired && Text(p, "endedAt") is { } la ? la : null;
+        // The cards the person accepted closing over a tester's FAIL go to Done whatever their status and the tester rule.
+        var overFail = m.Type == MessageTypes.WorkflowCompleted
+            ? ClosedOverFail.Read(p).GroupBy(e => e.Card).ToDictionary(g => g.Key, g => g.Last())
+            : [];
+        var team = Split(m.Source).Team;
         foreach (var card in store.CardsOfWorkflow(m.CorrelationId))
         {
+            if (overFail.Remove(card.Id, out var accepted))
+            {
+                AcceptedOverFail(card, accepted);
+                continue;
+            }
             if (m.Type == MessageTypes.WorkflowExpired)
             {
                 if (card.Lane == Lanes.Done && card.EndedAt is not null) continue;
-                // B086: the card's time ends at the workflow's last activity, not at the expiry.
+                // The card's time ends at the workflow's last activity, not at the expiry.
                 if (card.Lane != Lanes.Done) store.Save(card with { Status = "done", Lane = Lanes.Done }, _at, lastActivity);
                 store.AddTrail(card.Id, Who(m.Source), "workflow expired", Text(p, "detail") ?? "expired: nothing happened in it for too long", _at);
                 store.AddMarker(card.Id, card.Workflow, card.Member, TimeMarkers.Expired, _at!);
@@ -265,7 +275,7 @@ public sealed class BoardProjector(BoardStore store)
                 continue;
             }
             if (Lanes.Loudness(card.Status) > 0) continue;
-            // B027 item 1: declaring the workflow complete leaves out a tester's card the tester has not tested, and says why.
+            // Declaring the workflow complete leaves out a tester's card the tester has not tested, and says why.
             if (m.Type == MessageTypes.WorkflowCompleted && card.Lane != Lanes.Done
                 && TesterRule.UntestedTester(card, store.Trail(card.Id), TestersOf(card.Team)) is { } untested)
             {
@@ -279,9 +289,23 @@ public sealed class BoardProjector(BoardStore store)
             else
                 store.AddTrail(card.Id, Who(m.Source), "workflow done", Text(Payload(m), "delivered") ?? "the work is declared complete", _at);
         }
+        // A listed card of another workflow of the same team (claimed elsewhere since) is closed the same way.
+        foreach (var accepted in overFail.Values)
+            if (store.Card(accepted.Card) is { } other && (team is null || string.Equals(other.Team, team, StringComparison.OrdinalIgnoreCase)))
+                AcceptedOverFail(other, accepted);
         var endedAt = m.Type == MessageTypes.WorkflowExpired && Text(p, "endedAt") is { } last ? last : _at!;
         store.EndCardsOf(m.CorrelationId, how, endedAt);
         if (m.Type == MessageTypes.WorkflowCompleted && store.ItemDispatchedAs(m.CorrelationId) is { State: "ready" } item) store.SaveItem(item with { State = "declared" });
+    }
+
+    /// <summary>
+    /// The person accepted closing the card over a tester's FAIL (or as won't do): it goes to Done, and its trail says
+    /// so from the board ("Closed over a FAIL, accepted by the person: ..." / "Won't do, accepted by the person: ...").
+    /// </summary>
+    private void AcceptedOverFail(CardRow card, ClosedOverFailEntry accepted)
+    {
+        store.Save(card with { Status = "done", Lane = Lanes.Done }, _at);
+        store.AddTrail(card.Id, BoardSource, accepted.TrailKind, accepted.Line, _at);
     }
 
     /// <summary>A card's title from an instruction: its first line, without markdown markers.</summary>

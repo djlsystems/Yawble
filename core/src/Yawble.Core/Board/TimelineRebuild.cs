@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace Yawble.Core.Board;
 
 /// <summary>
-/// Fills in the timeline of a card made before 0047 from its board_trail lines (B086), replaying them the way
+/// Fills in the timeline of a card made before 0047 from its board_trail lines, replaying them the way
 /// <see cref="BoardProjector"/> moved the card: planned, assigned, told, progress, blocked, asked, failed, run ended, handed
 /// back, moved, edited, and the workflow's end (done, closed, expired). A run the idle watchdog ended ("failed" with
 /// "idle: no progress for N s") was Stalled from the line before it (its last sign of activity) to its end, and is a
@@ -107,7 +107,7 @@ public static partial class TimelineRebuild
                     }
                     break;
                 case "stopped":
-                    // B097: a run the person stopped is not a failure: the card says "stopped" (Idle time) in its lane,
+                    // A run the person stopped is not a failure: the card says "stopped" (Idle time) in its lane,
                     // unless it is in Done or louder (as BoardProjector).
                     if (!Lanes.StopKeeps(status, lane)) status = Lanes.Stopped;
                     break;
@@ -119,7 +119,7 @@ public static partial class TimelineRebuild
                     lines.Add(Mark(TimeMarkers.Handback, t.At, member));
                     break;
                 case "comment" when t.Source == BoardProjector.BoardSource && t.Text.StartsWith("Not Done yet", StringComparison.Ordinal):
-                    // B027: someone else's hand-back did not put a tester's card in Done.
+                    // Someone else's hand-back did not put a tester's card in Done.
                     lane = laneBeforeReport == Lanes.Todo ? Lanes.InProgress : laneBeforeReport;
                     break;
                 case "moved":
@@ -138,14 +138,14 @@ public static partial class TimelineRebuild
                         placed = false;
                     }
                     break;
-                case "done" or "workflow done" or "workflow closed":
+                case "done" or "workflow done" or "workflow closed" or ClosedOverFail.AcceptedTrailKind or ClosedOverFail.WontDoTrailKind:
                     status = "done";
                     lane = Lanes.Done;
                     break;
                 case "workflow expired":
                     status = "done";
                     lane = Lanes.Done;
-                    // B085: an expired workflow's cards end at its last activity, not at the expiry.
+                    // An expired workflow's cards end at its last activity, not at the expiry.
                     if (card.EndedHow == "expired" && card.EndedAt is { } endedAt && BoardStore.Time(endedAt) <= BoardStore.Time(t.At)) stateAt = endedAt;
                     lines.Add(Mark(TimeMarkers.Expired, t.At, member));
                     break;

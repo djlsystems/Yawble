@@ -15,7 +15,10 @@ namespace Yawble.Core.Launch;
 /// on the host is the one the next run gets. <paramref name="Folders"/> lists the host's folders for the CLI's config
 /// denials (tests pass a fake). <paramref name="ToolFoldersNow"/>, when set, is read at every launch in place of
 /// <paramref name="ToolFolders"/>. <paramref name="RealPath"/> finds the Linux resolver paths to mask
-/// (<see cref="LinuxResolverMasks.Present"/>; the real disk when null, tests pass a fake).
+/// (<see cref="LinuxResolverMasks.Present"/>; the real disk when null, tests pass a fake). <paramref name="UserTempDir"/> is
+/// macOS's per-user temp folder (DARWIN_USER_TEMP_DIR), where each run gets its own short folder
+/// (<see cref="RunTempFolder"/>); read from the system when null. <paramref name="RunTempOwner"/> is this core, written in
+/// the owner marker beside each run's folder so another app instance's sweep keeps it.
 /// </summary>
 public sealed record LaunchHost(
     TargetOs Os,
@@ -27,7 +30,9 @@ public sealed record LaunchHost(
     IHostFolders? Folders = null,
     IReadOnlyList<string>? ToolFolders = null,
     Func<IReadOnlyList<string>>? ToolFoldersNow = null,
-    Func<string, string?>? RealPath = null);
+    Func<string, string?>? RealPath = null,
+    string? UserTempDir = null,
+    RunTempOwner? RunTempOwner = null);
 
 /// <summary>Host tools every run gets on PATH, read-only (<see cref="RunLayout.HostToolFolders"/>).</summary>
 public static class HostTools
@@ -43,10 +48,13 @@ public static class HostTools
     /// (Git for Windows: ...\Git\cmd, which runs without MSYS2; its sh-based parts cannot start in a ProcessContainer,
     /// microsoft/mxc#1061), the .NET SDK, Node.js and Python, as the person installed them. Never a folder inside the app's own
     /// root, never the person's home itself, and never WindowsApps (its python.exe is a Store alias, not Python).
-    /// Linux and macOS: none (the tools are in the system folders every sandbox reads).
+    /// macOS: see <see cref="DetectMac"/>. Linux: none (the tools are in the system folders every sandbox reads).
     /// </summary>
     public static IReadOnlyList<string> Detect(string appDataRoot, string? pathVariable = null, string? home = null)
     {
+        if (OperatingSystem.IsMacOS())
+            return DetectMac(appDataRoot, MacCandidateFolders(pathVariable), home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                File.Exists, RealPath);
         if (!OperatingSystem.IsWindows()) return [];
         var root = Path.GetFullPath(appDataRoot).TrimEnd('\\') + "\\";
         var profile = (home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)).TrimEnd('\\');
@@ -68,6 +76,75 @@ public static class HostTools
             if (dir is not null && !found.Contains(dir, StringComparer.OrdinalIgnoreCase)) found.Add(dir);
         }
         return found;
+    }
+
+    /// <summary>macOS: the system folders at the end of every run's PATH (SandboxRequestCompiler), which each sandbox reads.</summary>
+    public static IReadOnlyList<string> MacRunPath { get; } = ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+
+    /// <summary>
+    /// macOS: the developer tools a member may run from where the person installed them, outside the system folders.
+    /// Only the .NET SDK: its install folder (sdk/, host/, shared/ beside the dotnet program) is the whole tool, so the
+    /// program's own folder is enough to grant. A Homebrew Node.js or Python needs more of its prefix than that.
+    /// </summary>
+    public static IReadOnlyList<string> MacTools { get; } = ["dotnet"];
+
+    /// <summary>Where Microsoft's installer and the dotnet-sdk cask put the SDK, and Homebrew's links on Apple silicon and Intel.</summary>
+    public static IReadOnlyList<string> MacKnownFolders { get; } = ["/usr/local/share/dotnet", "/opt/homebrew/bin", "/usr/local/bin"];
+
+    /// <summary>
+    /// macOS: for each of <see cref="MacTools"/>, the real folder of the first such program in <paramref name="folders"/>
+    /// (after links: /opt/homebrew/bin/dotnet is /usr/local/share/dotnet/dotnet). A run is granted that folder read-only
+    /// and has it on its PATH. The app started from the Dock has launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin), so the
+    /// folders come from the core's PATH, then /etc/paths and /etc/paths.d (what Terminal's PATH is made from), then the
+    /// known install folders. Never a folder inside the app's own root, the person's home itself or the root.
+    /// </summary>
+    public static IReadOnlyList<string> DetectMac(string appDataRoot, IEnumerable<string> folders, string home,
+        Func<string, bool> exists, Func<string, string?> realPath)
+    {
+        var root = appDataRoot.TrimEnd('/') + "/";
+        var profile = home.TrimEnd('/');
+        var dirs = folders.Select(d => d.Trim()).Where(d => d.StartsWith('/')).Select(d => d.Length > 1 ? d.TrimEnd('/') : d).Distinct(StringComparer.Ordinal).ToList();
+        var found = new List<string>();
+        foreach (var tool in MacTools)
+        {
+            foreach (var dir in dirs)
+            {
+                var program = dir + "/" + tool;
+                if (!exists(program)) continue;
+                var real = realPath(program) ?? program;
+                var folder = Path.GetDirectoryName(real)?.Replace('\\', '/');
+                if (string.IsNullOrEmpty(folder) || folder == "/" || folder == profile || (folder + "/").StartsWith(root, StringComparison.Ordinal)) continue;
+                if (!found.Contains(folder, StringComparer.Ordinal)) found.Add(folder);
+                break;
+            }
+        }
+        return found;
+    }
+
+    /// <summary>macOS: the core's PATH (or <paramref name="pathVariable"/>), /etc/paths, /etc/paths.d/*, then <see cref="MacKnownFolders"/>.</summary>
+    private static IEnumerable<string> MacCandidateFolders(string? pathVariable)
+    {
+        foreach (var d in (pathVariable ?? Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries)) yield return d;
+        foreach (var d in ReadLines("/etc/paths")) yield return d;
+        string[] files;
+        try { files = Directory.Exists("/etc/paths.d") ? Directory.GetFiles("/etc/paths.d").Order(StringComparer.Ordinal).ToArray() : []; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { files = []; }
+        foreach (var f in files)
+            foreach (var d in ReadLines(f)) yield return d;
+        foreach (var d in MacKnownFolders) yield return d;
+    }
+
+    private static IEnumerable<string> ReadLines(string file)
+    {
+        try { return File.Exists(file) ? File.ReadAllLines(file) : []; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    /// <summary>The path after every link, or null when it is no link or cannot be followed.</summary>
+    private static string? RealPath(string path)
+    {
+        try { return File.ResolveLinkTarget(path, returnFinalTarget: true)?.FullName; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>
@@ -92,8 +169,9 @@ public sealed record AgentCommandLines(CommandLineDescription Headless, CommandL
 /// <param name="Agent">The agent profile's name when it is a custom agent (recorded on the run); null = the built-in, named by its CLI.</param>
 /// <param name="Custom">The custom agent's argument changes; null for a built-in.</param>
 /// <param name="AgentModel">The custom agent's own default model; null for a built-in (its default is in agent_defaults).</param>
+/// <param name="AllowLocalhost">The team's "Allow localhost (macOS)" (0054; off by default): given to the run's request input.</param>
 public sealed record LaunchMember(long Id, string Team, string Name, AgentCli Cli, IReadOnlyDictionary<string, string>? TeamEnv = null,
-    string? Model = null, string? Agent = null, ArgvCustomization? Custom = null, string? AgentModel = null);
+    string? Model = null, string? Agent = null, ArgvCustomization? Custom = null, string? AgentModel = null, bool AllowLocalhost = false);
 
 public interface IMemberDirectory
 {
@@ -118,7 +196,7 @@ public sealed class SqliteMemberDirectory(string connectionString, Agents.Profil
         using var c = new SqliteConnection(connectionString);
         c.Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = $"SELECT m.id, t.name, m.name, m.cli, t.env, s.model FROM members m JOIN teams t ON t.id = m.team_id LEFT JOIN member_settings s ON s.member_id = m.id {where} ORDER BY m.id;";
+        cmd.CommandText = $"SELECT m.id, t.name, m.name, m.cli, t.env, s.model, t.allow_localhost FROM members m JOIN teams t ON t.id = m.team_id LEFT JOIN member_settings s ON s.member_id = m.id {where} ORDER BY m.id;";
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v);
         using var r = cmd.ExecuteReader();
         var list = new List<LaunchMember>();
@@ -127,7 +205,8 @@ public sealed class SqliteMemberDirectory(string connectionString, Agents.Profil
             // members.cli is a built-in's id or a custom agent's name: the custom one brings its argv changes and default model.
             var agent = Agents.Profiles.AgentResolvers.Resolve(_agents, r.GetString(3));
             list.Add(new LaunchMember(r.GetInt64(0), r.GetString(1), r.GetString(2), agent.Cli, Teams.TeamEnv.Parse(r.IsDBNull(4) ? null : r.GetString(4)),
-                r.IsDBNull(5) ? null : r.GetString(5), agent.RecordedAgent, agent.Argv, agent.Custom ? agent.DefaultModel : null));
+                r.IsDBNull(5) ? null : r.GetString(5), agent.RecordedAgent, agent.Argv, agent.Custom ? agent.DefaultModel : null,
+                AllowLocalhost: !r.IsDBNull(6) && r.GetInt64(6) != 0));
         }
         return list;
     }
@@ -190,13 +269,36 @@ public sealed class SandboxLauncher(
     TimeProvider? clock = null,
     SupervisorOptions? supervisorOptions = null,
     IRunTranscripts? transcripts = null,
-    Agents.AgentDefaultsStore? agentDefaults = null)
+    Agents.AgentDefaultsStore? agentDefaults = null,
+    Func<int, RunTree?>? runTrees = null,
+    IRunFolderHolders? runFolderHolders = null,
+    Action<string>? log = null,
+    Agents.ICliModelSettings? cliSettings = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
-    /// <summary>The model a member's run uses: member override > the agent's default > the CLI's own default.</summary>
+    /// <summary>
+    /// macOS has no PID namespace around a run, so the core follows and ends the run's processes itself
+    /// (<see cref="RunTree"/>). Linux (bwrap's PID namespace) and Windows (the sandbox's own containment) need none.
+    /// </summary>
+    private RunTree? TreeFor(int sandboxPid) =>
+        runTrees is not null ? runTrees(sandboxPid)
+        : host.Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? new RunTree(MacProcessTable.Instance, sandboxPid) : null;
+
+    /// <summary>
+    /// The backstop: what still holds a run's temp folder after its tree is reaped is the run's too (a build that left
+    /// the tree and its group). The given one, else macOS's libproc walk where the launcher follows the real tree.
+    /// </summary>
+    private IRunFolderHolders? Holders =>
+        runFolderHolders ?? (runTrees is null && host.Os == TargetOs.MacOS && OperatingSystem.IsMacOS() ? MacRunFolderHolders.Instance : null);
+
+    /// <summary>
+    /// The model a member's run uses: member override > the agent's default > the model the person's own CLI settings name
+    /// (~/.codex/config.toml's model and the like: the member's sandbox home has its own settings without it, so it is
+    /// passed on the command line) > the CLI's own default.
+    /// </summary>
     public Agents.ModelResolution ResolveModel(LaunchMember member) =>
-        Agents.AgentModels.Resolve(member.Model, member.Agent is not null ? member.AgentModel : agentDefaults?.Get(member.Cli));
+        Agents.AgentModels.Resolve(member.Model, member.Agent is not null ? member.AgentModel : agentDefaults?.Get(member.Cli), member.Cli, cliSettings);
 
     /// <summary>The credential mode a run of this CLI and kind uses (the one place it is decided; Describe uses it too).</summary>
     private CredentialMode ModeFor(AgentCli cli, RunKind kind, CredentialMode? configured)
@@ -209,7 +311,10 @@ public sealed class SandboxLauncher(
         };
         // Codex's TUI requires an HTTPS ChatGPT backend, which the gateway's plain-HTTP
         // codex.yawble.internal is not: an interactive session keeps the host sign-in; headless runs stay gateway-held.
-        return mode == CredentialMode.CodexGatewaySignIn && kind == RunKind.Interactive ? CredentialMode.CodexHostSignIn : mode;
+        if (mode == CredentialMode.CodexGatewaySignIn && kind == RunKind.Interactive) return CredentialMode.CodexHostSignIn;
+        // macOS: Claude's sign-in is in the login Keychain, which no sandbox is given; only the gateway-held mode exists there.
+        if (mode == CredentialMode.ClaudeHostSignIn && host.Os == TargetOs.MacOS) return CredentialMode.ClaudeGatewaySignIn;
+        return mode;
     }
 
     /// <summary>
@@ -246,6 +351,9 @@ public sealed class SandboxLauncher(
     }
 
     public RunRegistry Registry => registry;
+
+    /// <summary>Tests only: sees each run's input to the request compiler just before it is compiled.</summary>
+    internal Action<RunSpec>? Compiling { get; set; }
 
     /// <summary>The host facts every run's layout is built from (the guardrail check reports on the same layout).</summary>
     public LaunchHost Host => host;
@@ -378,6 +486,13 @@ public sealed class SandboxLauncher(
                     // Looked at every launch: a resolver started or stopped on the host since the last run counts.
                     ResolverMasks = host.Os == TargetOs.Linux ? LinuxResolverMasks.Present(host.RealPath ?? LinuxResolverMasks.RealPath) : [],
                 };
+            // macOS: each run's own short temp folder lives under the per-user temp folder.
+            if (host.Os == TargetOs.MacOS)
+            {
+                if ((host.UserTempDir ?? RunTempFolder.DarwinUserTempDir()) is not { } userTemp)
+                    return Fail("cannot lay out this run: the per-user temp folder (DARWIN_USER_TEMP_DIR) could not be read");
+                layout = layout with { UserTempDir = Root(userTemp) };
+            }
             // The team's shared view, once the host has made it (a member's first run makes it).
             if (synthetic is null && (host.Folders ?? DiskFolders.Instance).Exists(layout.SharedRepoCandidate))
                 layout = layout with { SharedRepo = layout.SharedRepoCandidate };
@@ -425,139 +540,162 @@ public sealed class SandboxLauncher(
             return Fail("the run's gateway did not start: " + ex.Message);
         }
 
-        await using (gateway)
+        // macOS: the run's own temp folder, made below once the request is compiled, removed however the run ends
+        // (a crash or restart of the core leaves it to the sweep at the next start, LaunchWiring).
+        string? runTemp = null;
+        try
         {
-            var token = gateway.RunToken;
-            CompiledRun compiled;
-            string requestJson;
-            LaunchProbeContext? probeContext = null;
-            SignInCopy? signInCopy = null;
-            try
+            await using (gateway)
             {
-                compiled = SandboxRequestCompiler.Compile(policy, new RunSpec
-                {
-                    Layout = layout,
-                    Credential = mode,
-                    Kind = kind,
-                    Prompt = request.Prompt,
-                    Model = string.IsNullOrEmpty(resolvedModel.Model) ? null : resolvedModel.Model,
-                    Custom = member.Custom,
-                    RunId = runKey,
-                    SessionId = Guid.NewGuid().ToString(),
-                    RunToken = token,
-                    GatewayPort = gateway.Port,
-                    TeamEnv = member.TeamEnv,
-                }, host.Canonicalize);
-                // What this run really ran with, for the run's record (and cost over time): agent, resolved model, CLI version, argv.
-                records.RanWith(runKey, member.Agent ?? cliName, resolvedModel.Model, resolvedModel.Source, cliInstall.Version,
-                    Agents.RunArgv.ForRecord(compiled.Argv, request.Prompt, [token, .. layout.CliInstall.SecretEnvironment.Values, AgentPresets.CopilotPlaceholder(token)]));
-                if (request.Bus?.Checkout?.CloneBaseCommit is { } cloneBase) records.BaseCommit(runKey, cloneBase);
-                gateway.Configure(compiled.Gateway);
-                RunFolders.Prepare(layout, compiled.Seeds);
-                // Codex, gateway-held: the placeholder replaces whatever is there (an earlier run's copy of the real sign-in).
-                if (mode == CredentialMode.CodexGatewaySignIn)
-                {
-                    var placeholder = codexHostAuth is null ? null : new Credentials.CodexHostSession(codexHostAuth, () => null).PlaceholderAuthJson(token)
-                        ?? throw new InvalidOperationException("Codex's sign-in on this computer could not be read: run 'codex login' in your own terminal");
-                    var file = AgentPresets.CodexAuthFile(layout);
-                    Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-                    File.WriteAllText(file, placeholder ?? "{}");
-                }
-                // Codex: a copy of the person's sign-in in the member's own Codex home (copied back if refreshed).
-                if (probe is null && layout.CliInstall.SignInCopies.Count > 0)
-                    signInCopy = await SignInCopy.PrepareAsync(layout, _clock, null, ct);
-                // Antigravity: the person's sign-in where agy reads it when the OS store is denied (the member's own home).
-                if (antigravitySignIn is not null)
-                {
-                    var file = AgentPresets.AntigravityTokenFile(layout);
-                    Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-                    File.WriteAllText(file, antigravitySignIn);
-                }
-                var submitted = compiled.Request;
-                if (probe is not null)
-                {
-                    probeContext = new LaunchProbeContext(runKey, runNumber, layout, policy, mode, credentialReady, gateway.Port,
-                        (JsonObject)compiled.Request.DeepClone());
-                    submitted = probe.Rewrite(probeContext);
-                }
-                requestJson = submitted.ToJsonString(SandboxJson.Compact);
-            }
-            catch (LaunchProbeRefusedException ex)
-            {
-                if (signInCopy is not null) await signInCopy.DisposeAsync();
-                return Fail(ex.Message);
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PolicyException or IOException or UnauthorizedAccessException)
-            {
-                if (signInCopy is not null) await signInCopy.DisposeAsync();
-                return Fail("the run could not be prepared: " + ex.Message);
-            }
-            // After the run (or a failed start): a refreshed sign-in goes back to the host, and the lease is released.
-            await using var signInCopyBack = signInCopy;
-
-            // A credentials file left by an earlier, crashed run is removed before this one starts.
-            var guardrails = new List<GuardrailEvent>(PostRunChecks.PreRun(layout, mode));
-
-            ISandboxProcess process;
-            try
-            {
-                activity.Touch();
-                process = kind == RunKind.Headless
-                    ? backend.Spawn(requestJson)
-                    : backend.SpawnWithPty(requestJson, request.Size ?? PtySize.Default);
-            }
-            catch (SandboxStartException ex)
-            {
-                return Finish(runKey, RunEnd.StartFailed, ex.Message, null, guardrails);
-            }
-
-            using (process)
-            // A probe's output is its result, not the member's terminal: no transcript for it.
-            await using (var transcript = probe is null ? OpenTranscript(runNumber, member) : null)
-            {
-                records.Spawned(runKey, process.Id);
-                var output = new RunOutputBuffer();
-                if (transcript is not null) output.Data += transcript.Write;
-                // A probe keeps stderr apart; an agent run's two streams are one terminal.
-                var errors = probe is null ? null : new RunOutputBuffer();
-                // An interactive session waits on the person, not on progress calls: no idle watchdog for it. A probe
-                // makes no progress calls and is bounded by its own wall clock instead.
-                var idle = kind == RunKind.Headless && probe is null ? compiled.Compute.IdleTimeoutSec : 0;
-                var wall = probe is null
-                    ? compiled.Compute.WallTimeoutSec
-                    : Math.Min(compiled.Compute.WallTimeoutSec, (int)Math.Ceiling(probe.MaxWall.TotalSeconds));
-                // A headless agent run ends once the CLI's final answer is out, even if a leftover process keeps the CLI
-                // waiting (FinalAnswer). Not for a probe (its script is not a CLI) nor an interactive session.
-                var answer = kind == RunKind.Headless && probe is null && FinalAnswer.Detects(member.Cli) ? new FinalAnswer(member.Cli, _clock) : null;
-                if (answer is not null) output.Data += answer.Write;
-                var supervisor = new RunSupervisor(process, wall, idle, activity, output, _clock, supervisorOptions, errors,
-                    answer is null ? null : () => answer.At);
-                var live = new LiveRun(runKey, request.Bus?.RunId, member.Team, member.Name, kind, process, supervisor, output);
-                registry.Add(live);
-                SupervisedExit exit;
+                var token = gateway.RunToken;
+                CompiledRun compiled;
+                string requestJson;
+                LaunchProbeContext? probeContext = null;
+                SignInCopy? signInCopy = null;
                 try
                 {
-                    exit = await supervisor.RunAsync(ct);
+                    var spec = new RunSpec
+                    {
+                        Layout = layout,
+                        Credential = mode,
+                        Kind = kind,
+                        Prompt = request.Prompt,
+                        Model = string.IsNullOrEmpty(resolvedModel.Model) ? null : resolvedModel.Model,
+                        Custom = member.Custom,
+                        RunId = runKey,
+                        SessionId = Guid.NewGuid().ToString(),
+                        RunToken = token,
+                        GatewayPort = gateway.Port,
+                        TeamEnv = member.TeamEnv,
+                        // The team's "Allow localhost (macOS)"; the compiler uses it for macOS requests only.
+                        AllowLocalhost = member.AllowLocalhost,
+                    };
+                    Compiling?.Invoke(spec);
+                    compiled = SandboxRequestCompiler.Compile(policy, spec, host.Canonicalize);
+                    // What this run really ran with, for the run's record (and cost over time): agent, resolved model, CLI version, argv.
+                    records.RanWith(runKey, member.Agent ?? cliName, resolvedModel.Model, resolvedModel.Source, cliInstall.Version,
+                        Agents.RunArgv.ForRecord(compiled.Argv, request.Prompt, [token, .. layout.CliInstall.SecretEnvironment.Values, AgentPresets.CopilotPlaceholder(token)]));
+                    if (request.Bus?.Checkout?.CloneBaseCommit is { } cloneBase) records.BaseCommit(runKey, cloneBase);
+                    gateway.Configure(compiled.Gateway);
+                    RunFolders.Prepare(layout, compiled.Seeds);
+                    if (spec.RunTemp is { } folder)
+                    {
+                        runTemp = folder;
+                        RunTempFolder.Create(folder, host.RunTempOwner);
+                    }
+                    // Codex, gateway-held: the placeholder replaces whatever is there (an earlier run's copy of the real sign-in).
+                    if (mode == CredentialMode.CodexGatewaySignIn)
+                    {
+                        var placeholder = codexHostAuth is null ? null : new Credentials.CodexHostSession(codexHostAuth, () => null).PlaceholderAuthJson(token)
+                            ?? throw new InvalidOperationException("Codex's sign-in on this computer could not be read: run 'codex login' in your own terminal");
+                        var file = AgentPresets.CodexAuthFile(layout);
+                        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                        File.WriteAllText(file, placeholder ?? "{}");
+                    }
+                    // Codex: a copy of the person's sign-in in the member's own Codex home (copied back if refreshed).
+                    if (probe is null && layout.CliInstall.SignInCopies.Count > 0)
+                        signInCopy = await SignInCopy.PrepareAsync(layout, _clock, null, ct);
+                    // Antigravity: the person's sign-in where agy reads it when the OS store is denied (the member's own home).
+                    if (antigravitySignIn is not null)
+                    {
+                        var file = AgentPresets.AntigravityTokenFile(layout);
+                        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+                        File.WriteAllText(file, antigravitySignIn);
+                    }
+                    var submitted = compiled.Request;
+                    if (probe is not null)
+                    {
+                        probeContext = new LaunchProbeContext(runKey, runNumber, layout, policy, mode, credentialReady, gateway.Port,
+                            (JsonObject)compiled.Request.DeepClone());
+                        submitted = probe.Rewrite(probeContext);
+                    }
+                    requestJson = submitted.ToJsonString(SandboxJson.Compact);
                 }
-                finally
+                catch (LaunchProbeRefusedException ex)
                 {
-                    registry.Remove(live);
+                    if (signInCopy is not null) await signInCopy.DisposeAsync();
+                    return Fail(ex.Message);
+                }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PolicyException or IOException or UnauthorizedAccessException)
+                {
+                    if (signInCopy is not null) await signInCopy.DisposeAsync();
+                    return Fail("the run could not be prepared: " + ex.Message);
+                }
+                // After the run (or a failed start): a refreshed sign-in goes back to the host, and the lease is released.
+                await using var signInCopyBack = signInCopy;
+
+                // A credentials file left by an earlier, crashed run is removed before this one starts.
+                var guardrails = new List<GuardrailEvent>(PostRunChecks.PreRun(layout, mode));
+
+                ISandboxProcess process;
+                try
+                {
+                    activity.Touch();
+                    process = kind == RunKind.Headless
+                        ? backend.Spawn(requestJson)
+                        : backend.SpawnWithPty(requestJson, request.Size ?? PtySize.Default);
+                }
+                catch (SandboxStartException ex)
+                {
+                    return Finish(runKey, RunEnd.StartFailed, ex.Message, null, guardrails);
                 }
 
-                guardrails.AddRange(PostRunChecks.Run(layout, mode, token));
-                var verdict = gateway.Verdict();
-                var end = exit.End;
-                // grok -p exits 0 on a revoked credential: the gateway's log decides, not the exit code.
-                if (end is RunEnd.Completed or RunEnd.Failed && verdict.CredentialRejected) end = RunEnd.Credential;
-                var outcome = Finish(runKey, end, ReasonFor(end, exit, compiled.Compute with { WallTimeoutSec = wall }, verdict.Reason), exit, guardrails)
-                    with { RateLimitedUntil = end == RunEnd.Failed ? verdict.RateLimitedUntil : null };
-                return probeContext is null ? outcome : outcome with
+                using (process)
+                // A probe's output is its result, not the member's terminal: no transcript for it.
+                await using (var transcript = probe is null ? OpenTranscript(runNumber, member) : null)
                 {
-                    ProbeOutput = new LaunchProbeOutput(runNumber, mode, credentialReady,
-                        System.Text.Encoding.UTF8.GetString(output.Snapshot()), System.Text.Encoding.UTF8.GetString(errors!.Snapshot()),
-                        JsonNode.Parse(requestJson)!.AsObject()),
-                };
+                    records.Spawned(runKey, process.Id);
+                    var output = new RunOutputBuffer();
+                    if (transcript is not null) output.Data += transcript.Write;
+                    // A probe keeps stderr apart; an agent run's two streams are one terminal.
+                    var errors = probe is null ? null : new RunOutputBuffer();
+                    // An interactive session waits on the person, not on progress calls: no idle watchdog for it. A probe
+                    // makes no progress calls and is bounded by its own wall clock instead.
+                    var idle = kind == RunKind.Headless && probe is null ? compiled.Compute.IdleTimeoutSec : 0;
+                    var wall = probe is null
+                        ? compiled.Compute.WallTimeoutSec
+                        : Math.Min(compiled.Compute.WallTimeoutSec, (int)Math.Ceiling(probe.MaxWall.TotalSeconds));
+                    // A headless agent run ends once the CLI's final answer is out, even if a leftover process keeps the CLI
+                    // waiting (FinalAnswer). Not for a probe (its script is not a CLI) nor an interactive session.
+                    var answer = kind == RunKind.Headless && probe is null && FinalAnswer.Detects(member.Cli) ? new FinalAnswer(member.Cli, _clock) : null;
+                    if (answer is not null) output.Data += answer.Write;
+                    // The run's temp folder goes only once its processes are gone (a live build holds sockets in it), and
+                    // before the run is reported done.
+                    var supervisor = new RunSupervisor(process, wall, idle, activity, output, _clock, supervisorOptions, errors,
+                        answer is null ? null : () => answer.At, TreeFor(process.Id),
+                        () => { if (runTemp is not null) RunTempFolder.Remove(runTemp); },
+                        Holders, runTemp, log is null ? null : line => log($"{runKey}: {line}"));
+                    var live = new LiveRun(runKey, request.Bus?.RunId, member.Team, member.Name, kind, process, supervisor, output);
+                    registry.Add(live);
+                    SupervisedExit exit;
+                    try
+                    {
+                        exit = await supervisor.RunAsync(ct);
+                    }
+                    finally
+                    {
+                        registry.Remove(live);
+                    }
+
+                    guardrails.AddRange(PostRunChecks.Run(layout, mode, token));
+                    var verdict = gateway.Verdict();
+                    var end = exit.End;
+                    // grok -p exits 0 on a revoked credential: the gateway's log decides, not the exit code.
+                    if (end is RunEnd.Completed or RunEnd.Failed && verdict.CredentialRejected) end = RunEnd.Credential;
+                    var outcome = Finish(runKey, end, ReasonFor(end, exit, compiled.Compute with { WallTimeoutSec = wall }, verdict.Reason), exit, guardrails)
+                        with { RateLimitedUntil = end == RunEnd.Failed ? verdict.RateLimitedUntil : null };
+                    return probeContext is null ? outcome : outcome with
+                    {
+                        ProbeOutput = new LaunchProbeOutput(runNumber, mode, credentialReady,
+                            System.Text.Encoding.UTF8.GetString(output.Snapshot()), System.Text.Encoding.UTF8.GetString(errors!.Snapshot()),
+                            JsonNode.Parse(requestJson)!.AsObject()),
+                    };
+                }
             }
+        }
+        finally
+        {
+            if (runTemp is not null) RunTempFolder.Remove(runTemp);
         }
     }
 
@@ -594,8 +732,10 @@ public sealed class SandboxLauncher(
         };
         if (exit.EndedAfterAnswer)
             reason = "the agent gave its final answer but did not exit (a leftover process kept it waiting), so its sandbox was ended";
-        if (exit.TreeSurvived)
-            reason = (reason is null ? "" : reason + "; ") + "the sandbox was not gone within 5 s of the kill, so its handle was freed";
+        if (exit.LeftBehind > 0)
+            reason = (reason is null ? "" : reason + "; ") + $"{exit.LeftBehind} of the run's processes were still running after SIGTERM and SIGKILL";
+        else if (exit.TreeSurvived)
+            reason =(reason is null ? "" : reason + "; ") + "the sandbox was not gone within 5 s of the kill, so its handle was freed";
         return reason;
     }
 

@@ -1,4 +1,4 @@
-// B037 verify (card 169): a FAKE instance core for remote.html. It answers the screens' JSON-RPC over the page's
+// A FAKE instance core for remote.html. It answers the screens' JSON-RPC over the page's
 // WebSocket with canned data only: no core, no sandbox, no real programs, no network. A method it does not know fails
 // with method_not_found (the screens keep going without it) and is recorded, so a test can say what was not faked.
 
@@ -12,7 +12,7 @@ const teamRows = [
   { id: 1, name: 'payments', repoPath: 'C:/repos/payments', members: 3, running: 1, queued: 1 },
   { id: 2, name: 'checkout-web-with-a-rather-long-team-name', repoPath: 'C:/repos/checkout', members: 2, running: 0, queued: 0 },
 ];
-/** Like the core's TeamsAsync (teams.list and app.overview): each team with its workflowExpiryDays (B085, default 3). */
+/** Like the core's TeamsAsync (teams.list and app.overview): each team with its workflowExpiryDays (default 3). */
 const teamList = () => teamRows.map((t) => ({ ...t, workflowExpiryDays: expiryDays(t.id) }));
 
 const member = (id: number, teamId: number, team: string, name: string, role: 'manager' | 'member') =>
@@ -28,7 +28,7 @@ const agents: Record<number, unknown[]> = {
   2: [agent(4, 2, teamRows[1].name, 'Manager', 'manager', 'idle'), agent(5, 2, teamRows[1].name, 'DeveloperCleo', 'member', 'idle')],
 };
 
-/** B086 (core card 429's wire contract): each card's stretches, back to back from its creation, as minutes; the last one
+/** On the core's wire contract for time: each card's stretches, back to back from its creation, as minutes; the last one
  *  of an open card runs on to now. From them the fake builds BoardCard.time, timeline.get's rows and bands, workflow #10's
  *  summary row (the core's priority merge) and its time, so every figure adds up like the core's. */
 type Cat = 'agent-working' | 'stalled' | 'waiting-on-you' | 'waiting-for-slot' | 'waiting-on-teammate' | 'blocked' | 'scheduled' | 'not-started' | 'idle' | 'was-done';
@@ -120,14 +120,14 @@ const toolAsk = {
   lastSeen: iso(5), workflow: 10, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
   canInstall: true, command: 'winget install --id Microsoft.DotNet.SDK.10 --exact --silent', choices: ['install', 'checkAgain', 'notNow'], installer: 'winget',
 };
-/** B111 (card 497): a read-write folder ask; listed only after setFolderAsks(true), so the other phone tests see no extra banner. */
+/** A read-write folder ask; listed only after setFolderAsks(true), so the other phone tests see no extra banner. */
 const folderAsk = {
   id: 21, at: iso(6), teamId: 1, team: 'payments', memberId: 2, member: 'payments/TesterBen', memberName: 'TesterBen', askedBy: 'payments/TesterBen',
   path: 'Z:\\smokesessions', access: 'readwrite', reason: 'read the smoke session recordings and write the results next to them', exists: true,
   existedWhenAsked: true, state: 'pending', grantedAccess: null, decidedBy: null, decidedVia: null, decidedAt: null, note: null, workflow: 10,
   choices: ['readwrite', 'read', 'deny'],
 };
-/** Card 507: the Manager asks for DeveloperAda (askedBy is not member); listed only with setFolderAsks(true, true). */
+/** The Manager asks for DeveloperAda (askedBy is not member); listed only with setFolderAsks(true, true). */
 const managerFolderAsk = {
   ...folderAsk, id: 22, at: iso(5), memberId: 1, member: 'payments/DeveloperAda', memberName: 'DeveloperAda', askedBy: 'payments/Manager',
   path: 'Z:\\shared\\fixtures', access: 'read', reason: 'read the payment fixtures for card 1', choices: ['read', 'deny'],
@@ -162,7 +162,7 @@ const logSources = [{
 const logRows = Array.from({ length: 12 }, (_, i) => ({ _id: String(i + 1), at: iso(i * 7), member: i % 2 ? 'payments/DeveloperAda' : 'payments/Manager', event: `run ${40 - i}`, details: i === 0 ? 'a-very-long-unbroken-detail-string-'.repeat(4) : 'completed in 2m' }));
 
 const workflows = [{ id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', undeclared: false, busy: ['DeveloperAda'], ending: null, startedAt: iso(120), lastAt: iso(2), messages: 14, endedAt: null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null, time: timeline.workflow.time }];
-/** B085 (card 389), shown with setExpiry(true): an open workflow waiting on question 3 that expires in 20 h (Needs you,
+/** Shown with setExpiry(true): an open workflow waiting on question 3 that expires in 20 h (Needs you,
  *  Extend), and one the app closed as expired (endedAt: its last activity, 3 days before expiredAt). */
 const expiryWorkflows = () => [
   { id: 12, title: 'Refund limits per country', owner: 'Manager', state: 'open', undeclared: true, busy: [], ending: null, startedAt: iso(4000), lastAt: iso(2 * 1440 + 240), messages: 6,
@@ -173,7 +173,7 @@ const expiryWorkflows = () => [
   { id: 9, title: 'Old refund export', owner: 'Manager', state: 'expired', undeclared: false, busy: [], ending: 'no activity for 3 days', startedAt: iso(9000), lastAt: iso(4 * 1440), messages: 4,
     endedAt: iso(4 * 1440), expiredAt: iso(1440), expiresAt: null, expiryWarning: null, question: null, time: idleTime(9000, 4 * 1440, 'expired') },
 ];
-/** B086: a quiet workflow's time: 40 minutes worked after its first message, then idle to its end (or now, open). */
+/** A quiet workflow's time: 40 minutes worked after its first message, then idle to its end (or now, open). */
 function idleTime(createdAgo: number, endedAgo: number | null, how: string | null) {
   const overallMs = (createdAgo - (endedAgo ?? 0)) * 60_000;
   return { createdAt: iso(createdAgo), startedAt: iso(createdAgo - 5), endedAt: endedAgo == null ? null : iso(endedAgo), endedHow: how, open: endedAgo == null,
@@ -187,14 +187,16 @@ function quietTimeline(time: ReturnType<typeof idleTime>) {
 }
 /** The core's BusEngine.WarningText. */
 const warningText = (workflow: number, question: number) => `#${workflow} will expire tomorrow; it waits on your answer to question ${question}`;
-/** B085: the expiry fixtures on or off, the workflows extended (id -> their new expiresAt), and each team's workflowExpiryDays. */
+/** The expiry fixtures on or off, the workflows extended (id -> their new expiresAt), and each team's workflowExpiryDays. */
 const expiry = { on: false, extended: new Map<number, string>(), days: new Map<number, number>() };
 const expiryDays = (teamId: number) => expiry.days.get(teamId) ?? 3;
+/** The teams whose "Allow localhost (macOS)" is on (off by default; a new fake core starts with none). */
+const localhostOn = new Set<number>();
 
-/** B104 (card 477): the Workflows page's rows (workflows.list / workflows.get, YAWBLE_TEAM_DOCS/B104/contract.md), across
- *  both teams: #10 running (B011, Ada on it), #12 waiting on you, #15 waiting for the lease, #16 idle (expires in 20 h),
- *  and ended ones: #9 expired, #14 completed today (B013, archived), #8 closed. */
-function b104Rows() {
+/** The Workflows page's rows (workflows.list / workflows.get, as the core's contract has them), across
+ *  both teams: #10 running (item "B011", Ada on it), #12 waiting on you, #15 waiting for the lease, #16 idle (expires in 20 h),
+ *  and ended ones: #9 expired, #14 completed today (item "B013", archived), #8 closed. */
+function workflowRows() {
   const wfTime = (createdAgo: number, endedAgo: number | null, how: string | null, segs: [Cat, number][]) => {
     const overallMs = (createdAgo - (endedAgo ?? 0)) * 60_000;
     const known = segs.reduce((a, [, m]) => a + m * 60_000, 0);
@@ -221,7 +223,7 @@ function b104Rows() {
       time: wfTime(6000, 3000, 'closed', [['not-started', 5], ['agent-working', 15]]) },
   ];
 }
-const b104Chip: Record<string, (s: string) => boolean> = {
+const workflowChip: Record<string, (s: string) => boolean> = {
   all: () => true, open: (s) => ['running', 'needs-you', 'waiting', 'idle', 'stopped'].includes(s), 'needs-you': (s) => s === 'needs-you', done: (s) => s === 'completed', closed: (s) => s === 'closed' || s === 'expired',
 };
 function workflowsList(p: any) {
@@ -230,7 +232,7 @@ function workflowsList(p: any) {
   for (const k of Object.keys(p ?? {})) if (!['teamId', 'q', 'state', 'limit'].includes(k)) throw bad(`unknown parameter ${k}`);
   if (p?.limit != null && !Number.isInteger(p.limit)) throw bad('limit must be a number');
   const limit = Math.min(1000, Math.max(1, p?.limit ?? 200));
-  let rows = b104Rows();
+  let rows = workflowRows();
   if (p?.teamId != null) {
     if (!teamRows.some((t) => t.id === Number(p.teamId))) throw Object.assign(new Error('no such team'), { code: 'no_such_team' });
     rows = rows.filter((w) => w.teamId === Number(p.teamId));
@@ -239,10 +241,10 @@ function workflowsList(p: any) {
   rows = rows.filter((w) => words.every((x) => [`#${w.id}`, String(w.id), w.title, (w.item as any)?.label ?? '', (w.item as any)?.title ?? '', w.team, w.owner, ...w.members.map((m: any) => m.name)]
     .some((f) => f.toLowerCase().includes(x))));
   const n = (f: (s: string) => boolean) => rows.filter((w) => f(w.status)).length;
-  const counts = { all: rows.length, open: n(b104Chip.open), needsYou: n(b104Chip['needs-you']), done: n(b104Chip.done), closed: n(b104Chip.closed),
+  const counts = { all: rows.length, open: n(workflowChip.open), needsYou: n(workflowChip['needs-you']), done: n(workflowChip.done), closed: n(workflowChip.closed),
     running: n((s) => s === 'running'), waiting: n((s) => s === 'waiting'), idle: n((s) => s === 'idle'), stopped: n((s) => s === 'stopped'), completed: n((s) => s === 'completed'), expired: n((s) => s === 'expired'), completedToday: n((s) => s === 'completed') };
   const st = String(p?.state ?? 'all').toLowerCase();
-  const keep = b104Chip[st] ?? (['running', 'waiting', 'idle', 'stopped', 'completed', 'expired'].includes(st) ? (s: string) => s === st : undefined);
+  const keep = workflowChip[st] ?? (['running', 'waiting', 'idle', 'stopped', 'completed', 'expired'].includes(st) ? (s: string) => s === st : undefined);
   if (!keep) throw bad('state: not a chip or a status');
   // Newest activity first; the newest `limit` plus every open row however old.
   const matching = rows.filter((w) => keep(w.status)).sort((a, b) => Date.parse(b.lastAt) - Date.parse(a.lastAt));
@@ -250,7 +252,7 @@ function workflowsList(p: any) {
   return { workflows: shown, counts, truncated: shown.length < matching.length, backlog: true, now: new Date().toISOString() };
 }
 function workflowsGet(p: any) {
-  const w = b104Rows().find((x) => x.id === Number(p?.workflow));
+  const w = workflowRows().find((x) => x.id === Number(p?.workflow));
   if (!w) throw Object.assign(new Error('no such workflow'), { code: 'no_such_workflow' });
   const own = w.id === 10 ? cards : [];
   return {
@@ -289,7 +291,7 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'companion.status': () => ({ endpoint: null, controlFile: null, binaryPath: null, claudeCommand: null }),
   'bus.decisions': (p) => !needsYou ? [] : (p?.teamId === 1 || p?.team === 'payments' || p?.teamId === undefined ? [decision] : []),
   'bus.workflows': () => (expiry.on ? [...workflows, ...expiryWorkflows()] : workflows),
-  // B085: Extend resets the workflow's clock to now + the team's workflowExpiryDays (its warning goes); teams.workflowExpiry
+  // Extend resets the workflow's clock to now + the team's workflowExpiryDays (its warning goes); teams.workflowExpiry
   // reads, or sets with days. Like the core: returns the updated list item; an ended workflow is refused with already_ended.
   'bus.workflowExtend': (p) => {
     const id = Number(p?.workflow);
@@ -307,6 +309,16 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
     }
     return { days: expiryDays(Number(p?.teamId)) };
   },
+  // { teamId } reads "Allow localhost (macOS)", { teamId, on } sets it (a Visitor's set is refused, as the core does).
+  'teams.localhost': (p, access) => {
+    const id = Number(p?.teamId);
+    if (p?.on !== undefined) {
+      if (access === 'read') throw Object.assign(new Error('Read-only (Visitor): refused by the fake'), { code: 'remote_refused' });
+      if (typeof p.on !== 'boolean') throw Object.assign(new Error('on must be true or false'), { code: 'bad_request' });
+      if (p.on) localhostOn.add(id); else localhostOn.delete(id);
+    }
+    return { on: localhostOn.has(id) };
+  },
   'teams.agents': (p) => agents[p?.teamId ?? p?.id ?? 1] ?? [],
   'teams.quiet': () => ({ quiet: false, working: ['DeveloperAda'], openWorkflows: [10] }),
   'teams.approvals': () => [],
@@ -314,15 +326,15 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'agentProfiles.list': () => [],
   'board.list': () => ({ lanes, cards, teams: teamRows.map((t) => ({ id: t.id, name: t.name })), clearedCount: 0 }),
   'board.card': (p) => ({ ...cards.find((c) => c.id === p?.id)!, trail: [{ id: 1, at: iso(30), source: 'Manager', kind: 'planned', text: 'Planned the card.' }, { id: 2, at: iso(20), source: 'Manager', kind: 'assigned', text: 'Assigned to DeveloperAda.' },
-    // B072: a hand-back naming commits (card 5 only): one the repository has, one git no longer has.
+    // A hand-back naming commits (card 5 only): one the repository has, one git no longer has.
     ...(p?.id === 5 ? [{ id: 3, at: iso(10), source: 'TesterBen', kind: 'handback', text: `Handed back: committed ${COMMIT_ADA.slice(0, 7)} on members/payments/developerada (the earlier ${COMMIT_GONE} is gone).` }] : [])], itemTitle: 'Partial refunds' }),
-  // B072 (card 444): the Commit view against the contract DeveloperTomas builds in core (git.commitShow, git.commitDiff).
+  // The Commit view against the core's contract (git.commitShow, git.commitDiff).
   'git.commitShow': (p) => commitShow(String(p?.sha ?? '')),
   'git.commitDiff': (p) => commitDiff(String(p?.sha ?? ''), String(p?.path ?? '')),
-  // B074 (card 471): which IDs on a screen are commits, as the card's contract says (B074/contract.md): per ID its
+  // Which IDs on a screen are commits, as the core's contract says: per ID its
   // commits; one git no longer has is none (it stays text).
   'git.commitsResolve': (p) => ({ max: 200, results: ((p?.ids ?? []) as string[]).map((id) => ({ id: id.toLowerCase(), valid: true, matches: commitsResolve(id) })) }),
-  // B086: a card's own row, or workflow #10's rows and summary; an unknown one is refused like the core (not_found).
+  // A card's own row, or workflow #10's rows and summary; an unknown one is refused like the core (not_found).
   'timeline.get': (p) => {
     if (p?.workflow != null) { const quiet = (expiry.on ? expiryWorkflows() : []).find((w) => w.id === Number(p.workflow));
       if (quiet) return quietTimeline(quiet.time);
@@ -340,11 +352,11 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'logs.values': () => [],
   'logs.query': () => ({ rows: logRows, total: logRows.length, asOf: iso(0), next: null }),
   'docs.list': (p) => ({ path: p?.path ?? '', entries: [
-    { name: 'B037-report.md', path: 'B037-report.md', folder: false, size: 2048, modified: iso(30) },
+    { name: 'phone-report.md', path: 'phone-report.md', folder: false, size: 2048, modified: iso(30) },
     { name: 'a-document-with-a-very-long-file-name-that-should-be-cut-off-on-a-phone.md', path: 'long.md', folder: false, size: 10, modified: iso(60) },
     { name: 'specs', path: 'specs', folder: true, size: null, modified: iso(90) },
   ] }),
-  'docs.read': (p) => ({ path: p?.path, name: 'B037-report.md', size: 2048, modified: iso(30), kind: 'markdown', text: '# B037 report\n\n| Screen | 390 | 360 |\n|---|---|---|\n| Teams | ok | ok |\n\nA paragraph of text.' }),
+  'docs.read': (p) => ({ path: p?.path, name: 'phone-report.md', size: 2048, modified: iso(30), kind: 'markdown', text: '# Phone report\n\n| Screen | 390 | 360 |\n|---|---|---|\n| Teams | ok | ok |\n\nA paragraph of text.' }),
   'code.open': () => ({ session: 's1', root: 'C:/fake/clone', latest: { path: 'src/refund.ts', line: 3 }, clonePresent: true }),
   'code.list': (p) => ({ path: p?.path ?? '', entries: [
     { name: 'src', path: 'src', kind: 'dir', size: null, mtime: iso(5), marker: null, hidden: false },
@@ -353,40 +365,40 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   ] }),
   'code.read': (p) => ({ path: p?.path, type: 'text', size: 80, content: 'export function refund(amount: number, limitDays = 30): boolean {\n  return amount > 0 && limitDays <= 90; // a long comment that runs past the edge of a phone screen\n}\n', lines: [], removed: [], linesUnknown: false }),
   'code.close': () => ({}),
-  // A team's Git dialog asks with its teamId (a TeamGitStatus); without one, the computer's git (B054 verify: the Git
+  // A team's Git dialog asks with its teamId (a TeamGitStatus); without one, the computer's git (a fix: the Git
   // sheet behind the team page's ⋯ rendered nothing with the computer's answer).
-  'git.status': (p) => (p?.teamId == null ? { installed: true, version: '2.50', path: 'C:/fake/git.exe' } : b073.on ? b073Status() : {
+  'git.status': (p) => (p?.teamId == null ? { installed: true, version: '2.50', path: 'C:/fake/git.exe' } : gitPreview.on ? gitPreviewStatus() : {
     repoPath: 'C:/repos/payments', managed: true, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: null, baseSha: 'abc1234', originBaseSha: null,
     baseAheadOfOrigin: null, baseBehindOrigin: null, teamBranch: 'team/payments', teamSha: 'def5678', teamAheadOfBase: 2, teamBehindBase: 0, merge: 'fast-forward',
     conflictFiles: [], members: [{ branch: 'members/payments/developerada', sha: COMMIT_ADA, aheadOfBase: 2, inTeamBranch: true }], oldBranches: [], blockingBranches: [],
   }),
-  // B067 (card 362): the Git dialog's Tidy… against the contract DeveloperMarlo builds in core (git.tidyPlan,
+  // The Git dialog's Tidy… against the core's contract (git.tidyPlan,
   // git.branchRealign; delete through git.deleteBranches, plan then token). DeveloperAda runs, so realigning her
   // branch is refused; TesterBen's goes through.
   'git.tidyPlan': () => tidyPlan(),
   'git.deleteBranches': (p) => {
     const names: string[] = p?.branches ?? [];
     if (!p?.confirm) return { plan: names.map((n) => `Delete ${n}${p?.remote ? ' here and on origin' : ' here'} (merged into main).`).join('\n'), token: `tok:${names.join(',')}`, empty: names.length === 0 };
-    for (const n of names) { tidy.deleted.add(n); b073.deleted.add(n); }
+    for (const n of names) { tidy.deleted.add(n); gitPreview.deleted.add(n); }
     return { result: `Deleted ${names.join(', ')}.` };
   },
-  // B073 (card 465): the Git dialog's counts and previews, as the contract in YAWBLE_TEAM_DOCS\B073\contract.md proposes.
+  // The Git dialog's counts and previews, as the core's contract has them.
   'git.commitRange': (p) => commitRange(String(p?.from ?? ''), String(p?.to ?? '')),
   'git.mergePreview': () => mergePreview(),
   'git.mergeDiff': (p) => commitDiff(COMMIT_ADA, String(p?.path ?? '')),
   'git.deletePreview': (p) => deletePreview(String(p?.branch ?? '')),
   'git.merge': (p) => {
-    b073.merged = true;
-    return { outcome: 'merge', message: 'Merged team/payments into main and pushed main to origin.', changed: true, sha: COMMIT_MERGE, files: null, status: b073Status(),
+    gitPreview.merged = true;
+    return { outcome: 'merge', message: 'Merged team/payments into main and pushed main to origin.', changed: true, sha: COMMIT_MERGE, files: null, status: gitPreviewStatus(),
       commits: [R.merge(), R.ada()], commitCount: 2, commitsTruncated: false, range: pair(COMMIT_BASE, COMMIT_MERGE) };
   },
   'git.bringCurrent': () => {
-    b073.broughtCurrent = true;
-    return { outcome: 'fast-forward', message: 'main fast-forwarded to origin/main.', changed: true, sha: B073_ORIGIN_SHA, files: null, status: b073Status(),
-      commits: [R.feature()], commitCount: 1, commitsTruncated: false, range: pair(COMMIT_BASE, B073_ORIGIN_SHA) };
+    gitPreview.broughtCurrent = true;
+    return { outcome: 'fast-forward', message: 'main fast-forwarded to origin/main.', changed: true, sha: PREVIEW_ORIGIN_SHA, files: null, status: gitPreviewStatus(),
+      commits: [R.feature()], commitCount: 1, commitsTruncated: false, range: pair(COMMIT_BASE, PREVIEW_ORIGIN_SHA) };
   },
   'git.sync': () => {
-    b073.synced = true;
+    gitPreview.synced = true;
     return { outcome: 'synced', baseBranch: 'main', baseSha: COMMIT_BASE, behind: 0, moved: ['team/payments'], conflicts: [], note: null,
       incoming: [R.base()], incomingCount: 1, incomingTruncated: false, incomingRange: pair(COMMIT_MERGE, COMMIT_BASE) };
   },
@@ -401,7 +413,7 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'updates.status': () => ({ state: 'idle', current: '0.0.0+dev.fake', available: null, auto: false }),
   'credentials.status': () => ({ mode: 'subscription', claude: { connected: true, addedAt: iso(1000), expiresAt: null, lastUsedAt: iso(5), renewSoon: false, problem: null } }),
   'triggers.list': () => [],
-  // B054 verify (card 270): skills to pick on a phone, and a Guardrails page long enough to scroll to its bottom.
+  // Skills to pick on a phone, and a Guardrails page long enough to scroll to its bottom.
   'skills.list': () => Array.from({ length: 12 }, (_, i) => ({
     name: `skill-${i}`, description: `When to load skill ${i}: a one-line description that wraps on a phone.`, roles: ['member'],
     body: `# Skill ${i}\n\n${'What to do, step by step. '.repeat(30)}`, kind: i < 6 ? 'builtin' : 'custom', teamId: null, team: null, id: i < 6 ? null : i, updatedAt: iso(i * 10),
@@ -412,15 +424,15 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
     compute: { wallTimeoutSec: 7200, idleTimeoutSec: 1800, memoryMb: null, cpuPercent: null, maxProcesses: null },
     ui: { clipboard: 'read' }, app: { maxConcurrentAgents: 4, backend: 'sandbox', heavyWorkAtOnce: 1 },
   }),
-  // B073: with setB073(true), team/payments is 1 behind main until Sync now or Merge, with the contract's from / to.
-  'teams.syncToBase': () => (b073.on ? { on: true, note: null, baseBranch: 'main',
-    behind: b073.synced || b073.merged ? null : { teamBranch: 'team/payments', count: 1, text: '1 commit behind main', from: COMMIT_MERGE, to: COMMIT_BASE } }
+  // With setGitPreview(true) (the Git previews fixture), team/payments is 1 behind main until Sync now or Merge, with the contract's from / to.
+  'teams.syncToBase': () => (gitPreview.on ? { on: true, note: null, baseBranch: 'main',
+    behind: gitPreview.synced || gitPreview.merged ? null : { teamBranch: 'team/payments', count: 1, text: '1 commit behind main', from: COMMIT_MERGE, to: COMMIT_BASE } }
     : syncBehind ? { on: true, note: null, baseBranch: 'main', behind: { teamBranch: 'team/payments', count: 3, text: '3 commits behind main' } } : { on: true, note: null, baseBranch: 'main', behind: null }),
   'tasks.list': () => [],
   'members.get': (p) => (agents[1] as any[]).map((a) => a.member).find((m) => m.id === p?.id) ?? (agents[1] as any)[0].member,
 };
 
-/** B067: what Tidy… deleted and realigned (resetTidy puts the plan back). */
+/** What Tidy… deleted and realigned (resetTidy puts the plan back). */
 const tidy = { deleted: new Set<string>(), realigned: new Set<string>() };
 const TIDY_TEAM_SHA = '5bbb6ba450df8fe26f82';
 const TIDY_CLONE_SHA = 'e0f2a18c0ffee1234567';
@@ -450,12 +462,12 @@ function tidyPlan() {
     { repo: 'payments-cloud', baseBranch: 'main', branches: cloud.filter(keep), notes: ["TesterBen's clone was not read: its .git is a file (a gitdir pointer)"] }] };
 }
 
-/** B072: the commits the fake repository has (any prefix of 7+ finds one), as the core's git.commitShow answers them. */
+/** The commits the fake repository has (any prefix of 7+ finds one), as the core's git.commitShow answers them. */
 const COMMIT_ADA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
 const COMMIT_MERGE = 'def5678a9b0c1d2e3f405162738495a6b7c8d9e0';
 const COMMIT_BASE = 'abc1234f5e6d7c8b9a0f1e2d3c4b5a6978695a4b';
 const COMMIT_GONE = '0dead00b1';
-/** Card 459: a commit only on the person's own feature/x branch (not a team or member branch, not in main). */
+/** A commit only on the person's own feature/x branch (not a team or member branch, not in main). */
 const COMMIT_FEATURE = 'fea7c0de1a2b3c4d5e6f708192a3b4c5d6e7f809';
 const commitState = { codeShown: true };
 const person = (name: string, mins: number) => ({ name, email: `${name.toLowerCase()}@yawble.local`, date: iso(mins) });
@@ -479,7 +491,7 @@ function commitShow(sha: string) {
     made: { member: 'Manager', workflow: 10 }, where: { inMain: false, branches: ['team/payments'], otherBranches: [], pushed: false, tags: [] },
     files: [{ path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false }] };
   if (pick === COMMIT_FEATURE) return { ...common, title: 'Try a new receipt layout', body: '', author: person('Owner', 20), isMerge: false, parents: [COMMIT_BASE],
-    where: { inMain: false, branches: [], otherBranches: ['feature/x'], pushed: false, tags: [], ...(b073.deleted.has(B073_BO) ? { deletedFrom: B073_BO } : {}) },
+    where: { inMain: false, branches: [], otherBranches: ['feature/x'], pushed: false, tags: [], ...(gitPreview.deleted.has(PREVIEW_BO_BRANCH) ? { deletedFrom: PREVIEW_BO_BRANCH } : {}) },
     files: [{ path: 'src/payments/receipt.ts', status: 'modified', added: 3, deleted: 1, binary: false }] };
   return { ...common, title: 'Release 2026.11.18.1', body: '', author: person('Owner', 600), isMerge: false, parents: [],
     where: { inMain: true, branches: ['team/payments'], otherBranches: [], pushed: true, tags: ['v2026.11.18.1'] },
@@ -507,14 +519,14 @@ function commitDiff(sha: string, path: string) {
   return { ...head, binary: false, tooLarge: false, hunks: [{ header: '@@ -1,3 +1,4 @@ export function refund', oldStart: 1, oldCount: 3, newStart: 1, newCount: 4, lines }] };
 }
 
-/** B073 (card 465): with setB073(true), git.status is a repository with an origin, shaped as DeveloperTomas's contract
- *  (YAWBLE_TEAM_DOCS\B073\contract.md): main 1 behind origin's, team/payments 2 ahead and 1 behind main (a merge), not
+/** With setGitPreview(true), git.status is a repository with an origin, shaped as the core's contract
+ *  has it: main 1 behind origin's, team/payments 2 ahead and 1 behind main (a merge), not
  *  pushed; DeveloperAda's branch pushed, DeveloperBo's not and not in the team branch (one commit of its own, one already
  *  in main). Each count carries its full-ID pair; Merge, Bring main current and Sync now move it on and list what came in. */
-const b073 = { on: false, merged: false, broughtCurrent: false, synced: false, deleted: new Set<string>() };
-const B073_BO = 'members/payments/developerbo';
-const B073_ORIGIN_SHA = '0f1e2d3c4b5a69788796a5b4c3d2e1f0a9b8c7d6';
-const B073_SYNCED_SHA = '5ce0d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7a8b';
+const gitPreview = { on: false, merged: false, broughtCurrent: false, synced: false, deleted: new Set<string>() };
+const PREVIEW_BO_BRANCH = 'members/payments/developerbo';
+const PREVIEW_ORIGIN_SHA = '0f1e2d3c4b5a69788796a5b4c3d2e1f0a9b8c7d6';
+const PREVIEW_SYNCED_SHA = '5ce0d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7a8b';
 const commitRow = (sha: string, subject: string, author: string, notPushed: boolean, isMerge = false) =>
   ({ sha, shortSha: sha.slice(0, 12), subject, author: { name: author, email: `${author.toLowerCase()}@yawble.local` }, date: iso(30), isMerge, notPushed });
 const R = {
@@ -525,37 +537,37 @@ const R = {
 };
 const pair = (from: string, to: string) => ({ from, to });
 /** The commits behind each pair the fake hands out (git rev-list to ^from). */
-const B073_RANGES: Record<string, () => ReturnType<typeof commitRow>[]> = {
+const PREVIEW_RANGES: Record<string, () => ReturnType<typeof commitRow>[]> = {
   [`${COMMIT_BASE}..${COMMIT_MERGE}`]: () => [R.merge(), R.ada()],
   [`${COMMIT_MERGE}..${COMMIT_BASE}`]: () => [R.base()],
   [`${COMMIT_BASE}..${COMMIT_ADA}`]: () => [R.ada()],
   [`${COMMIT_BASE}..${COMMIT_FEATURE}`]: () => [R.feature(), R.ada()],
-  [`${COMMIT_BASE}..${B073_ORIGIN_SHA}`]: () => [R.feature()],
-  [`${COMMIT_MERGE}..${B073_SYNCED_SHA}`]: () => [R.base()],
+  [`${COMMIT_BASE}..${PREVIEW_ORIGIN_SHA}`]: () => [R.feature()],
+  [`${COMMIT_MERGE}..${PREVIEW_SYNCED_SHA}`]: () => [R.base()],
 };
-function b073Status() {
+function gitPreviewStatus() {
   const members = [
     { branch: 'members/payments/developerada', sha: COMMIT_ADA, aheadOfBase: 1, inTeamBranch: true, aheadRange: pair(COMMIT_BASE, COMMIT_ADA),
       push: { branch: 'members/payments/developerada', onOrigin: true, notPushed: 0 } },
-    { branch: B073_BO, sha: COMMIT_FEATURE, aheadOfBase: 2, inTeamBranch: false, aheadRange: pair(COMMIT_BASE, COMMIT_FEATURE),
-      push: { branch: B073_BO, onOrigin: false, notPushed: 1 } },
-  ].filter((m) => !b073.deleted.has(m.branch));
-  const behindBase = b073.synced || b073.merged ? 0 : 1;
+    { branch: PREVIEW_BO_BRANCH, sha: COMMIT_FEATURE, aheadOfBase: 2, inTeamBranch: false, aheadRange: pair(COMMIT_BASE, COMMIT_FEATURE),
+      push: { branch: PREVIEW_BO_BRANCH, onOrigin: false, notPushed: 1 } },
+  ].filter((m) => !gitPreview.deleted.has(m.branch));
+  const behindBase = gitPreview.synced || gitPreview.merged ? 0 : 1;
   return {
     repoPath: 'C:/repos/payments', managed: true, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: 'https://example.invalid/payments.git',
-    baseSha: b073.broughtCurrent ? B073_ORIGIN_SHA : COMMIT_BASE, originBaseSha: B073_ORIGIN_SHA, baseAheadOfOrigin: 0, baseBehindOrigin: b073.broughtCurrent ? 0 : 1,
-    teamBranch: 'team/payments', teamSha: b073.synced ? B073_SYNCED_SHA : COMMIT_MERGE,
-    teamAheadOfBase: b073.merged ? 0 : 2, teamBehindBase: behindBase,
-    merge: b073.merged ? 'up-to-date' : b073.synced ? 'fast-forward' : 'merge', conflictFiles: [], members, oldBranches: [], blockingBranches: [],
+    baseSha: gitPreview.broughtCurrent ? PREVIEW_ORIGIN_SHA : COMMIT_BASE, originBaseSha: PREVIEW_ORIGIN_SHA, baseAheadOfOrigin: 0, baseBehindOrigin: gitPreview.broughtCurrent ? 0 : 1,
+    teamBranch: 'team/payments', teamSha: gitPreview.synced ? PREVIEW_SYNCED_SHA : COMMIT_MERGE,
+    teamAheadOfBase: gitPreview.merged ? 0 : 2, teamBehindBase: behindBase,
+    merge: gitPreview.merged ? 'up-to-date' : gitPreview.synced ? 'fast-forward' : 'merge', conflictFiles: [], members, oldBranches: [], blockingBranches: [],
     ranges: {
-      baseAheadOfOrigin: null, baseBehindOrigin: b073.broughtCurrent ? null : pair(COMMIT_BASE, B073_ORIGIN_SHA),
-      teamAheadOfBase: b073.merged ? null : pair(COMMIT_BASE, COMMIT_MERGE), teamBehindBase: behindBase ? pair(COMMIT_MERGE, COMMIT_BASE) : null,
+      baseAheadOfOrigin: null, baseBehindOrigin: gitPreview.broughtCurrent ? null : pair(COMMIT_BASE, PREVIEW_ORIGIN_SHA),
+      teamAheadOfBase: gitPreview.merged ? null : pair(COMMIT_BASE, COMMIT_MERGE), teamBehindBase: behindBase ? pair(COMMIT_MERGE, COMMIT_BASE) : null,
     },
   };
 }
 function commitRange(from: string, to: string) {
   if (!/^[0-9a-f]{4,64}$/i.test(from) && !/^refs\/(heads|remotes\/origin)\//.test(from)) throw Object.assign(new Error(`bad ref ${from}`), { code: 'bad_params' });
-  const list = B073_RANGES[`${from}..${to}`]?.() ?? [];
+  const list = PREVIEW_RANGES[`${from}..${to}`]?.() ?? [];
   return { from, to, fromSha: from, toSha: to, count: list.length, truncated: false, hasOrigin: true, commits: list };
 }
 function mergePreview() {
@@ -569,19 +581,19 @@ function mergePreview() {
   };
 }
 function deletePreview(branch: string) {
-  const push = { branch, onOrigin: branch !== B073_BO, notPushed: branch === B073_BO ? 1 : 0 };
-  if (branch === B073_BO) return { branch, baseBranch: 'main', exists: true, sha: COMMIT_FEATURE, merged: false, own: 1, inBase: 1, truncated: false,
+  const push = { branch, onOrigin: branch !== PREVIEW_BO_BRANCH, notPushed: branch === PREVIEW_BO_BRANCH ? 1 : 0 };
+  if (branch === PREVIEW_BO_BRANCH) return { branch, baseBranch: 'main', exists: true, sha: COMMIT_FEATURE, merged: false, own: 1, inBase: 1, truncated: false,
     commits: [{ ...R.feature(), state: 'own' }, { ...R.ada(), state: 'in-base' }],
     lost: `Deleting it loses 1 commit of its own (${COMMIT_FEATURE.slice(0, 12)}); it is not on origin either.`, text: '', hasOrigin: true, push };
   return { branch, baseBranch: 'main', exists: true, sha: COMMIT_ADA, merged: false, own: 0, inBase: 1, truncated: false, commits: [{ ...R.ada(), state: 'in-base' }],
     lost: 'Nothing is lost: each of its 1 commits not in main already has the same change there.', text: '', hasOrigin: true, push };
 }
-/** B054: with true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */
+/** With true, teams.syncToBase says the team branch is behind (the team page shows its sync bar). */
 let syncBehind = false;
-/** B054: with false, no integration ask and no Manager decision is pending (the team page shows its members under Tell). */
+/** With false, no integration ask and no Manager decision is pending (the team page shows its members under Tell). */
 let needsYou = true;
 
-/** Methods a viewer with "read" access may not call (the fake refuses them, like the Cloud Link). Card 305: the workflows
+/** Methods a viewer with "read" access may not call (the fake refuses them, like the Cloud Link). Also the workflows
  *  dialog's bus.nudgeWorkflow and bus.closeWorkflow too (bus.stopWorkflow already matched "stop"), as core's
  *  RemoteAccess lists them. */
 const isChange = (m: string) => /\.(send|answer|save|delete|remove|create|add|update|install|run|stop|move|rename|tellManager|approve|decline|nudgeWorkflow|closeWorkflow|workflowExtend)/.test(m);
@@ -591,27 +603,28 @@ export function createFakeCore() {
   const calls: string[] = [];
   let access: Access = 'full';
   let asks = true;
+  localhostOn.clear();
   return {
     unknown, calls,
     setAccess(a: Access) { access = a; },
     /** With false, no network or tool asks are pending (the global Needs-you banners stay away). */
     setAsks(on: boolean) { asks = on; },
-    /** B111: with true, one read-write folder ask is pending (off by default); manager (card 507) adds the Manager's read-only ask for DeveloperAda; answers are forgotten. */
+    /** With true, one read-write folder ask is pending (off by default); manager adds the Manager's read-only ask for DeveloperAda; answers are forgotten. */
     setFolderAsks(on: boolean, manager = false) { folder.on = on; folder.manager = manager; folder.answered.clear(); },
-    /** B111: the folder answers given, by ask id (the choice). */
+    /** The folder answers given, by ask id (the choice). */
     folderAnswers() { return new Map(folder.answered); },
-    /** B054: the team branch behind its base (the team page's sync bar shows). */
+    /** The team branch behind its base (the team page's sync bar shows). */
     setSync(behind: boolean) { syncBehind = behind; },
-    /** B054: with false, no integration ask and no decision is pending. */
+    /** With false, no integration ask and no decision is pending. */
     setNeedsYou(on: boolean) { needsYou = on; },
-    /** B085: the expiring and expired workflows listed (off: only #10), Extend forgotten, workflowExpiryDays back to 3. */
+    /** The expiring and expired workflows listed (off: only #10), Extend forgotten, workflowExpiryDays back to 3. */
     setExpiry(on: boolean) { expiry.on = on; expiry.extended.clear(); expiry.days.clear(); },
-    /** B067: put the Tidy… plan back (nothing deleted or realigned). */
+    /** Put the Tidy… plan back (nothing deleted or realigned). */
     resetTidy() { tidy.deleted.clear(); tidy.realigned.clear(); },
-    /** B072: with false, git.commitShow says codeShown=false (Show members' code to cloud viewers off). */
+    /** With false, git.commitShow says codeShown=false (Show members' code to cloud viewers off). */
     setCodeShown(on: boolean) { commitState.codeShown = on; },
-    /** B073: the Git dialog's repository with an origin, counts and previews (off: the plain status); resets what moved. */
-    setB073(on: boolean) { b073.on = on; b073.merged = false; b073.broughtCurrent = false; b073.synced = false; b073.deleted.clear(); },
+    /** The Git previews fixture: the Git dialog's repository with an origin, counts and previews (off: the plain status); resets what moved. */
+    setGitPreview(on: boolean) { gitPreview.on = on; gitPreview.merged = false; gitPreview.broughtCurrent = false; gitPreview.synced = false; gitPreview.deleted.clear(); },
     answer(text: string): string | null {
       const msg = JSON.parse(text) as { id: number; method: string; params: any };
       calls.push(msg.method);

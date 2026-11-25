@@ -112,8 +112,19 @@ public static class SandboxRequestInvariants
             if (sb.ContainsKey("profileOverride")) Fail("seatbelt.profileOverride is never emitted (it drops all policy)");
             if (sb.ContainsKey("guiAccess")) Fail("seatbelt.guiAccess is never emitted");
             if (Bool(sb["keychainAccess"]) != false) Fail("seatbelt.keychainAccess must be false");
+            if (sb["extraMachLookups"] is { } lookups)
+            {
+                var names = lookups is JsonArray a ? a.Select(n => n?.GetValueKind() == System.Text.Json.JsonValueKind.String ? n.GetValue<string>() : null).ToList() : [null];
+                foreach (var n in names)
+                    if (n is null || !SandboxRequestCompiler.MacMachLookups.Contains(n, StringComparer.Ordinal))
+                        Fail($"seatbelt.extraMachLookups: {n ?? "(not a name)"} is not one of the certificate and group-lookup services");
+                // SecurityServer serves any keychain whose file the run can read: the login keychain's folder must be denied.
+                if (names.Contains("com.apple.SecurityServer")
+                    && !((request["filesystem"]?["deniedPaths"] as JsonArray)?.Select(x => Str(x) ?? "") ?? []).Any(d => new PolicyPaths(os, l.Home, canonicalize).Same(d, new PolicyPaths(os, l.Home).Combine(l.Home, "Library", "Keychains"))))
+                    Fail("seatbelt.extraMachLookups names com.apple.SecurityServer, so ~/Library/Keychains must be in deniedPaths");
+            }
             foreach (var key in sb.Select(p => p.Key))
-                if (key != "keychainAccess") Fail($"seatbelt.{key} is never emitted");
+                if (key is not ("keychainAccess" or "extraMachLookups")) Fail($"seatbelt.{key} is never emitted");
         }
         else if (os == TargetOs.MacOS) Fail("seatbelt.keychainAccess: false must be explicit on macOS");
         if (os == TargetOs.Windows)
@@ -132,11 +143,17 @@ public static class SandboxRequestInvariants
         {
             if (ingress != "allow" || loopback != "allow") Fail("Windows (unpackaged) needs ingress.default and hostLoopback allow with the proxy");
         }
+        else if (os == TargetOs.MacOS)
+            problems.AddRange(MacLocalhostProblems(request, run));
         else
         {
             if (loopback != "deny") Fail($"network.ingress.hostLoopback: allow is never emitted on {os}");
             if (ingress != "deny") Fail($"network.ingress.default must be deny on {os}");
         }
+        if (net?["ingress"] is JsonObject ingressSection)
+            foreach (var key in ingressSection.Select(p => p.Key))
+                if (key is "allow" or "rules") Fail($"network.ingress.{key}: ingress allow rules are never emitted");
+                else if (key is not ("default" or "hostLoopback")) Fail($"network.ingress.{key} is never emitted");
         if (Str(request["runtimeConfig"]?["networkProxy"]) != $"http://127.0.0.1:{run.GatewayPort}")
             Fail("runtimeConfig.networkProxy must be this run's gateway on 127.0.0.1");
 
@@ -246,7 +263,95 @@ public static class SandboxRequestInvariants
                     var allowed = l.CliInstall.ReadOnlyFolders.Concat(l.CliInstall.SignInReadOnly).Concat(l.CliInstall.SignInReadWrite).Select(R);
                     if (!allowed.Any(a => paths.Same(a, g))) Fail($"grant '{g}' reaches into the CLI's config folder '{config}' and is not one of its install folders or sign-in files");
                 }
+        // macOS: no sign-in file and no part of a Keychain is ever granted (Claude's sign-in is held by the gateway, which
+        // reads the login Keychain on the host), and Claude's file-grant mode is never used.
+        if (os == TargetOs.MacOS)
+        {
+            if (run.Credential == CredentialMode.ClaudeHostSignIn) Fail("macOS never uses ClaudeHostSignIn: Claude's sign-in is held by the gateway");
+            var keychains = new[] { paths.Combine(l.Home, "Library", "Keychains"), "/Library/Keychains", "/System/Library/Keychains" };
+            foreach (var g in ro.Concat(rw))
+            {
+                var name = g.TrimEnd('/').Split('/').Last();
+                if (keychains.Any(k => paths.Overlaps(g, k) || paths.Overlaps(g, R(k))) || name.EndsWith(".keychain-db", StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith(".keychain", StringComparison.OrdinalIgnoreCase))
+                    Fail($"grant '{g}' reaches a Keychain; a macOS sandbox is never given one");
+                if (name is ".credentials.json")
+                    Fail($"grant '{g}' is a sign-in file; a macOS sandbox is never given one");
+            }
+            if (env.ContainsKey(SignInCatalog.ClaudeStoreVariable)) Fail($"env {SignInCatalog.ClaudeStoreVariable} is never set on macOS");
+            problems.AddRange(RunTempProblems(run, paths, ro, rw, env));
+        }
         return problems;
+    }
+
+    /// <summary>
+    /// macOS: the run's own short temp folder (<see cref="RunTempFolder"/>) is under the per-user temp folder, named for this
+    /// run, short enough for a pipe, granted read-write, and what TMPDIR and TMPPREFIX point at. Nothing else in the per-user
+    /// temp folder is granted (not T/ itself, not another run's folder), nor any run folder anywhere but this run's.
+    /// </summary>
+    public static IEnumerable<string> RunTempProblems(RunSpec run, PolicyPaths paths, IReadOnlyList<string> ro, IReadOnlyList<string> rw,
+        IReadOnlyDictionary<string, string> env)
+    {
+        string R(string p) => paths.Resolve(p) ?? p;
+        if (run.Layout.UserTempDir is not { } userTempRaw || run.RunTemp is not { } runTempRaw)
+        {
+            yield return "a macOS run needs its own temp folder under DARWIN_USER_TEMP_DIR";
+            yield break;
+        }
+        var userTemp = R(userTempRaw);
+        var runTemp = R(runTempRaw);
+        var name = runTemp.TrimEnd('/').Split('/').Last();
+        if (!paths.IsWithin(runTemp, userTemp) || paths.Same(runTemp.TrimEnd('/'), userTemp.TrimEnd('/')))
+            yield return $"the run's temp folder '{runTemp}' is not under DARWIN_USER_TEMP_DIR '{userTemp}'";
+        if (name != RunTempFolder.Name(run.RunId) || !paths.Same(runTemp, paths.Combine(userTemp, name)))
+            yield return $"the run's temp folder '{runTemp}' is not named for this run ({RunTempFolder.Name(run.RunId)})";
+        if (!RunTempFolder.Fits(runTemp))
+            yield return $"the run's temp folder '{runTemp}' is too long: with \"{RunTempFolder.PipePrefix}\" and a {RunTempFolder.PipeNameBudget}-character pipe name it passes {RunTempFolder.SocketPathMax} bytes";
+        if (!rw.Any(g => paths.Same(g, runTemp))) yield return $"readwritePaths must contain the run's temp folder '{runTemp}'";
+        foreach (var g in ro.Concat(rw))
+        {
+            if (paths.Same(g, runTemp)) continue;
+            if (paths.IsWithin(g, userTemp) || paths.IsWithin(userTemp, g))
+                yield return $"grant '{g}' reaches the per-user temp folder; only this run's own folder there is granted";
+            else if (RunTempFolder.IsRunFolderName(g.TrimEnd('/').Split('/').Last()))
+                yield return $"grant '{g}' is another run's temp folder";
+        }
+        if (!paths.Same(env.GetValueOrDefault("TMPDIR") ?? "", runTemp)) yield return "env TMPDIR must be the run's own temp folder";
+        if (!paths.Same(env.GetValueOrDefault("TMPPREFIX") ?? "", paths.Combine(runTemp, "zsh"))) yield return "env TMPPREFIX must be <the run's temp folder>/zsh";
+    }
+
+    /// <summary>
+    /// macOS, the team's "Allow localhost". Off (RunSpec.AllowLocalhost false, the default): the request has no ingress
+    /// allow at all - ingress.default is deny, hostLoopback is deny, and there are no ingress allow rules. On: exactly the
+    /// SDK's pair (ingress.default allow and hostLoopback allow, the one loopback form Seatbelt accepts) and nothing more;
+    /// egress stays deny with no rules and the run's gateway the only proxy.
+    /// </summary>
+    public static IEnumerable<string> MacLocalhostProblems(JsonObject request, RunSpec run)
+    {
+        static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+        var net = request["network"] as JsonObject;
+        var ingress = net?["ingress"] as JsonObject;
+        var ingressDefault = Str(ingress?["default"]);
+        var loopback = Str(ingress?["hostLoopback"]);
+        var rules = ingress?.Where(p => p.Key is "allow" or "rules").Select(p => p.Key).ToList() ?? [];
+        if (!run.AllowLocalhost)
+        {
+            if (loopback != "deny")
+                yield return "network.ingress.hostLoopback: allow is emitted on macOS only with the team's Allow localhost (it must be deny)";
+            if (ingressDefault != "deny")
+                yield return "network.ingress.default must be deny on MacOS without the team's Allow localhost";
+            foreach (var key in rules)
+                yield return $"network.ingress.{key}: no ingress allow rule is emitted on macOS without the team's Allow localhost";
+            yield break;
+        }
+        if (ingressDefault != "allow" || loopback != "allow")
+            yield return "macOS with Allow localhost needs ingress.default and hostLoopback allow";
+        if (ingress is not null && ingress.Any(p => p.Key is not ("default" or "hostLoopback")))
+            yield return "macOS with Allow localhost has exactly ingress.default and hostLoopback, nothing more in network.ingress";
+        if (Str(net?["egress"]?["default"]) != "deny" || net?["egress"]?["allow"] is not null || net?["egress"]?["deny"] is not null)
+            yield return "macOS with Allow localhost keeps network.egress deny with no rules";
+        if (Str(request["runtimeConfig"]?["networkProxy"]) != $"http://127.0.0.1:{run.GatewayPort}")
+            yield return "macOS with Allow localhost keeps this run's gateway as the only proxy";
     }
 
     /// <summary>No credential variable except the placeholder; never two Claude tiers; Grok's rules.</summary>

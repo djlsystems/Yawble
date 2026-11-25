@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.AgentCommands;
 
-/// <summary>Card 46 (a): the shown command line is the launched one (one function), custom changes are validated.</summary>
+/// <summary>The shown command line is the launched one (one function), custom changes are validated.</summary>
 public class CommandLineTests
 {
     public static IEnumerable<object[]> Cases()

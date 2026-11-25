@@ -17,7 +17,7 @@ import { groupAsks } from '../networkAskGroups';
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number; banner?: boolean; team?: string; member?: string }>();
 const emit = defineEmits<{ count: [n: number] }>();
-/** A phone (B037): the banner's cards edge to edge; App.vue's .banners box holds every banner in at most 40% of the screen (it scrolls). */
+/** A phone: the banner's cards edge to edge; App.vue's .banners box holds every banner in at most 40% of the screen (it scrolls). */
 const phone = usePhone();
 
 const asks = ref<NetworkAsk[]>([]);

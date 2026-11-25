@@ -6,13 +6,23 @@ namespace Yawble.Core.Credentials;
 
 /// <summary>
 /// macOS Keychain: a generic password in the login keychain under the app's OWN service name (never
-/// "Claude Code-credentials"), account = the slot key. Uses the SecKeychain generic-password calls, which take
-/// plain buffers (no CFDictionary building) and are still shipped in macOS 15.
+/// "Claude Code-credentials"), account = the slot key. Another program's item (Claude Code's own sign-in) is never looked
+/// up here: <see cref="MacHostCredentialReader"/> reads it through macOS's <c>security</c> tool, and this store refuses
+/// such a service name (<see cref="ForeignKeychainItems"/>), so nothing writes, modifies or deletes it. Uses the
+/// SecKeychain generic-password calls, which take plain buffers (no CFDictionary building) and are still shipped in macOS 15.
 /// NOT exercised on the Linux build host; owed to a macOS run.
 /// </summary>
 [SupportedOSPlatform("macos")]
-public sealed partial class MacKeychainStore(string service = CredentialService.ServiceName) : ICredentialStore, Ops.ICredentialIndex
+public sealed partial class MacKeychainStore : ICredentialStore, Ops.ICredentialIndex
 {
+    private readonly string service;
+
+    public MacKeychainStore(string service = CredentialService.ServiceName)
+    {
+        ForeignKeychainItems.EnsureWritable(service, "a credential store");
+        this.service = service;
+    }
+
     /// <summary>The legacy SecKeychain calls here look entries up by exact account only; the doctor asks <see cref="Has"/> for each issued key.</summary>
     public IReadOnlyList<string> KeysWithPrefix(string prefix) => throw new NotSupportedException("the macOS keychain store cannot list its keys");
 
@@ -57,6 +67,7 @@ public sealed partial class MacKeychainStore(string service = CredentialService.
     public void Set(string key, string value)
     {
         ArgumentException.ThrowIfNullOrEmpty(value);
+        ForeignKeychainItems.EnsureWritable(service, "a write");
         var s = Encoding.UTF8.GetBytes(service);
         var a = Encoding.UTF8.GetBytes(key);
         var v = Encoding.UTF8.GetBytes(value);
@@ -89,6 +100,7 @@ public sealed partial class MacKeychainStore(string service = CredentialService.
 
     public bool Delete(string key)
     {
+        ForeignKeychainItems.EnsureWritable(service, "a delete");
         var s = Encoding.UTF8.GetBytes(service);
         var a = Encoding.UTF8.GetBytes(key);
         var status = SecKeychainFindGenericPassword(IntPtr.Zero, (uint)s.Length, s, (uint)a.Length, a, out _, out var data, out var item);
@@ -109,7 +121,7 @@ public sealed partial class MacKeychainStore(string service = CredentialService.
 
     [LibraryImport(Security)]
     private static partial int SecKeychainFindGenericPassword(IntPtr keychainOrArray, uint serviceNameLength, byte[] serviceName,
-        uint accountNameLength, byte[] accountName, out uint passwordLength, out IntPtr passwordData, out IntPtr itemRef);
+        uint accountNameLength, byte[]? accountName, out uint passwordLength, out IntPtr passwordData, out IntPtr itemRef);
 
     [LibraryImport(Security)]
     private static partial int SecKeychainAddGenericPassword(IntPtr keychain, uint serviceNameLength, byte[] serviceName,

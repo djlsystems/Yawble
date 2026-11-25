@@ -111,7 +111,7 @@ describe('the Monitor model', () => {
     m.apply(row(1, 'instruction', 'DeveloperPriya', 'Manager', 'Add a README'), 0);
     m.apply(row(2, 'decision', 'DeveloperPriya', 'payments/DeveloperPriya', 'MIT or Apache?'), 10);
     m.apply(row(3, 'done', 'Manager', 'Manager', 'README'), 20);
-    // (B080: a question also flies to the You node.)
+    // (A question also flies to the You node.)
     expect(m.effects.map((e) => e.kind)).toEqual(['comet', 'burst', 'float', 'you', 'burst']);
     expect(m.effects[0]).toMatchObject({ from: memberKey('payments', 'Manager'), to: memberKey('payments', 'DeveloperPriya'), label: 'Add a README' });
     expect(m.effects[4]).toMatchObject({ node: teamKey('payments'), big: true });
@@ -168,10 +168,10 @@ describe('the workflows on the wall', () => {
     expect(entryTime('not a time', now)).toBe('');
   });
 
-  it('labels a workflow node "#id title", cut, with "Backlog item " dropped (B090)', () => {
+  it('labels a workflow node "#id title", cut, with "Backlog item " dropped', () => {
     expect(workflowNodeLabel(wf(12, at(0), 'open', [], 'Add a README'))).toBe('#12 Add a README');
-    const backlog = workflowNodeLabel(wf(3848, at(0), 'open', [], "Backlog item B081 Remote UI: xterm's link handler asks first"));
-    expect(backlog).toBe("#3848 B081 Remote UI: xterm's…"); // the docs' example (card 409)
+    const backlog = workflowNodeLabel(wf(3848, at(0), 'open', [], "Backlog item B008 Remote UI: xterm's link handler asks first"));
+    expect(backlog).toBe("#3848 B008 Remote UI: xterm's…"); // the docs' example
     expect(backlog).not.toContain('Backlog item');
     expect(backlog.endsWith('…')).toBe(true);
     expect(backlog.length).toBe(NodeLabelMax);
@@ -179,14 +179,14 @@ describe('the workflows on the wall', () => {
     expect(NodeLabelMax).toBeLessThanOrEqual(32);
     expect(workflowNodeLabel(wf(5, at(0), 'open', [], '  '))).toBe('#5');
     // A phone zoomed out: only "#id"; zoomed in, or a desktop window at any zoom (whatever its canvas), the title too.
-    const t = wf(3848, at(0), 'open', [], 'Backlog item B081 Remote UI');
+    const t = wf(3848, at(0), 'open', [], 'Backlog item B008 Remote UI');
     expect(workflowNodeLabel(t, { phone: true, zoom: 0.4 })).toBe('#3848');
-    expect(workflowNodeLabel(t, { phone: true, zoom: 1 })).toBe('#3848 B081 Remote UI');
-    expect(workflowNodeLabel(t, { phone: false, zoom: 0.25 })).toBe('#3848 B081 Remote UI');
-    expect(workflowNodeLabel(t, { zoom: 0.39 })).toBe('#3848 B081 Remote UI');
+    expect(workflowNodeLabel(t, { phone: true, zoom: 1 })).toBe('#3848 B008 Remote UI');
+    expect(workflowNodeLabel(t, { phone: false, zoom: 0.25 })).toBe('#3848 B008 Remote UI');
+    expect(workflowNodeLabel(t, { zoom: 0.39 })).toBe('#3848 B008 Remote UI');
   });
 
-  it('places workflow labels so that none covers another or a member (card 409)', () => {
+  it('places workflow labels so that none covers another or a member', () => {
     const measure = (s: string) => s.length * 5;
     const h = 11;
     const ask = (key: string, x: number, y: number, rank: number, full = `${key} a long title here`) => ({ key, x, y, r: 10, full, short: key, rank });
@@ -383,7 +383,7 @@ describe('the Monitor view', () => {
     const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
     await flushPromises();
     // The cog sits in the camera controls, right after the Auto fit | Fit | Pinned group, then the sound
-    // (card 374; the density moved into the cog's settings panel); the panel is closed.
+    // (the density moved into the cog's settings panel); the panel is closed.
     const controls = w.get('.controls');
     const order = Array.from(controls.element.children).map((el) => el.getAttribute('data-test')).filter(Boolean);
     expect(order.slice(-2)).toEqual(['monitor-layout-toggle', 'monitor-sound']);
@@ -449,7 +449,7 @@ describe('the Monitor view', () => {
   });
 });
 
-describe('Team spacing (B089)', () => {
+describe('Team spacing', () => {
   it('is a sixth layout setting, clamped, stored and reset like the other five', () => {
     expect(LayoutFields.map((f) => f.key)).toEqual(['distance', 'strength', 'repulsion', 'gravity', 'friction', 'spacing']);
     expect(LayoutFields.at(-1)).toEqual({ key: 'spacing', label: 'Team spacing', help: 'How far apart the teams sit.' });
@@ -482,7 +482,7 @@ describe('Team spacing (B089)', () => {
       expect(nearest(hubs(count, room))).toBeCloseTo(Math.max(2 * (ClusterCore + room) + ClusterGap, 140 * nearestPair(count))); // the oval's x radius is never under 140
     expect(nearestPair(2)).toBeCloseTo(2);
     expect(nearestPair(3)).toBeLessThan(nearestPair(2)); // three on the flat oval: the two on the right sit nearest
-    // No map, no room. A map's arc points away from the others: only what wraps back toward them counts (card 409). A
+    // No map, no room. A map's arc points away from the others: only what wraps back toward them counts. A
     // narrow map (two folders) and a half-round one (six) stay behind the members; a wide one (eleven) wraps round past them.
     const m = new MonitorModel();
     m.logNow = () => Date.now();
@@ -504,7 +504,7 @@ describe('Team spacing (B089)', () => {
     expect(mapRoomFor([])).toBe(0);
   });
 
-  it('a map is measured toward the neighbours, not across: its nodes past the core reach no further than the room (card 409)', () => {
+  it('a map is measured toward the neighbours, not across: its nodes past the core reach no further than the room', () => {
     const m = new MonitorModel();
     m.logNow = () => Date.now();
     for (const folders of [1, 3, 6, 9, 11]) for (let i = 0; i < folders * 6; i++)
@@ -523,7 +523,7 @@ describe('Team spacing (B089)', () => {
   /** A scene on a stub canvas with count teams of four, each with a wide code map and five open workflow nodes, settled. */
   const scenes: MonitorScene[] = [];
   afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-  /** stagger: frames run between each team's map and each team's workflows arriving (as a live wall gets them, card 411). */
+  /** stagger: frames run between each team's map and each team's workflows arriving (as a live wall gets them). */
   function settledWall(count: number, spacing = LayoutDefaults.spacing, frames = 700, opts: { seed?: number; stagger?: number } = {}) {
     // The test runs the frames itself: the scene's own requestAnimationFrame loop must not run too.
     vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {});
@@ -576,7 +576,7 @@ describe('Team spacing (B089)', () => {
     return hs.flatMap((p, i) => hs.slice(i + 1).map((q) => Math.round(Math.hypot(p.x - q.x, p.y - q.y))));
   };
 
-  /** The least distance between two teams' drawn things (each part's box), for every pair of teams: as card 403 measured it. */
+  /** The least distance between two teams' drawn things (each part's box), for every pair of teams: as the team-spacing e2e spec measures it. */
   const partGaps = (scene: MonitorScene) => {
     const cl = scene.clusters();
     const apart = (a: { x0: number; y0: number; x1: number; y1: number }, b: typeof a) => {
@@ -591,8 +591,8 @@ describe('Team spacing (B089)', () => {
     const cl = scene.clusters();
     expect(cl).toHaveLength(2);
     for (const c of cl) expect(c.box.x1 - c.box.x0).toBeGreaterThan(300); // the map is in the boxes
-    // Card 411: the oval is measured from the clusters drawn (settleSpacing), so the homes are what puts them ClusterGap
-    // apart: 440 by the estimate (card 409), 580 and 816 before.
+    // The oval is measured from the clusters drawn (settleSpacing), so the homes are what puts them ClusterGap
+    // apart: 440 by the estimate, 580 and 816 before.
     expect(homeDistances(scene)[0]).toBeLessThan(440);
     for (const g of gaps(scene)) expect(g).toBeLessThan(300);
     for (const g of scene.drawnGaps()) { expect(g).toBeGreaterThan(ClusterGap - 12); expect(g).toBeLessThan(ClusterGap + 12); }
@@ -601,15 +601,15 @@ describe('Team spacing (B089)', () => {
 
   it('at the default, three teams\' clusters sit close and do not overlap either', () => {
     const scene = settledWall(3);
-    expect(Math.max(...homeDistances(scene))).toBeLessThan(771); // were 771, 771, 520 (card 409), 860, 860, 580 before
+    expect(Math.max(...homeDistances(scene))).toBeLessThan(771); // were 771, 771, 520, 860, 860, 580 before
     const g = scene.drawnGaps();
     for (const d of g) expect(d).toBeGreaterThan(0);
-    expect(Math.min(...g)).toBeGreaterThan(ClusterGap - 12); // the nearest two: ClusterGap apart (154 in card 409)
+    expect(Math.min(...g)).toBeGreaterThan(ClusterGap - 12); // the nearest two: ClusterGap apart (154 when first measured)
     expect(Math.min(...g)).toBeLessThan(ClusterGap + 12);
   });
 
-  it('settles to the same gap every run, whatever the birth spots and the order things arrive in (card 411, F6)', () => {
-    // Card 410 measured 3 teams' nearest gap at 4-248 and 2 teams' at -23 to 157 from run to run.
+  it('settles to the same gap every run, whatever the birth spots and the order things arrive in', () => {
+    // Before the fix, 3 teams' nearest gap measured at 4-248 and 2 teams' at -23 to 157 from run to run.
     for (const count of [2, 3]) {
       const nearest: number[] = [];
       for (const seed of [1, 42, 555]) for (const stagger of [0, 37]) {
@@ -623,7 +623,7 @@ describe('Team spacing (B089)', () => {
     }
   }, 60_000);
 
-  it('a workflow label keeps off its own hub\'s name pill and its own team\'s map (card 411, F3 and F5)', () => {
+  it('a workflow label keeps off its own hub\'s name pill and its own team\'s map', () => {
     for (const count of [2, 3]) {
       const scene = settledWall(count);
       const s = scene as unknown as { nodes: Map<string, { kind: string; team: string }>; mapNodes: { x: number; y: number; kind: string; team: { team: string } }[]; pillBox: (n: unknown) => { x: number; y: number; w: number; h: number } };
@@ -639,7 +639,7 @@ describe('Team spacing (B089)', () => {
     }
   });
 
-  it('the workflow labels on a settled wall do not overlap, and most show their title (card 409)', () => {
+  it('the workflow labels on a settled wall do not overlap, and most show their title', () => {
     for (const count of [2, 3]) {
       const scene = settledWall(count);
       const nodes = scene.workflowNodes();

@@ -377,7 +377,7 @@ public sealed partial class CompanionServer : IAsyncDisposable
                 var status = wait > 0
                     ? await _service.WaitAsync(client, id, TimeSpan.FromSeconds(wait), ct).ConfigureAwait(false)
                     : _service.Status(client, id);
-                if (status is null) throw new RpcException("not_found", $"there is no request '{id}' of this client");
+                if (status is null) throw new RpcException("not_found", CompanionService.NoSuchRequest(id));
                 return new JsonObject
                 {
                     ["id"] = status.Id, ["state"] = status.State.ToString().ToLowerInvariant(), ["plan"] = status.Plan,

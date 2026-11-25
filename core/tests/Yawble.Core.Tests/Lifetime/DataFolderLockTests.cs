@@ -80,7 +80,7 @@ public sealed class DataFolderLockTests : IDisposable
         Assert.Null(second.HeldByPid);
     }
 
-    // B033: a just-killed core's handle on core.lock can still be closing for a few ms after WaitForExit (Windows).
+    // A just-killed core's handle on core.lock can still be closing for a few ms after WaitForExit (Windows).
 
     [Fact]
     public void ALockThatFreesWithinTheBudgetIsTaken_AfterRetrying()

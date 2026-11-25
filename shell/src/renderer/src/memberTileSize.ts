@@ -2,7 +2,7 @@ import { computed, ref } from 'vue';
 import type { GripStore } from './gripStore';
 
 /**
- * The size of every member tile on a team page (B076): one width and height for all of them (and the "New member"
+ * The size of every member tile on a team page: one width and height for all of them (and the "New member"
  * tile), dragged by the width and height handles in the gaps. The team page's own size, kept apart from the Teams
  * list's (teamTileSize.ts) the same way: a reactive shared value, a preview while dragging, saved on release in this
  * viewer's storage (the desktop app and every Cloud Link browser keep their own; a blocked storage just means the

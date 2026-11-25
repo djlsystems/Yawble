@@ -4,6 +4,7 @@ import { PaneHeaderKey } from '../terminalPane';
 import { isStoppedRun, type AgentCard, type YawbleApi } from '../../../shared/api';
 import type { ActivityRow } from '../monitor/model';
 import { agentPillText, agentPillTitle } from '../memberModel';
+import { hireRoleOf } from '../agentModels';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import Icon from './Icon.vue';
 import MemberActivity from './MemberActivity.vue';
@@ -11,8 +12,9 @@ import FolderAsks from './FolderAsks.vue';
 import TerminalApp from '../TerminalApp.vue';
 import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
 import { renderMarkdown } from '../markdown';
-import { splitReport } from '../reportFormat';
+import { memberReport, WaitingLabel } from '../reportFormat';
 import { leaseText } from '../heavyLease';
+import { cardState, waitSays } from '../waiting';
 import { outputHeight } from '../agentOutputHeight';
 import { errorText, resolveApi } from '../api';
 import { getMemberView, MemberViews, setMemberView, type MemberView } from '../memberPaneView';
@@ -26,7 +28,7 @@ import { useNarrow } from '../narrowScreen';
 // The terminal here is never interactive: it shows the member's runs (and mirrors a session opened elsewhere) with no
 // input. Open interactive CLI opens the agent's own terminal window, where the session runs; the remote view has no
 // such window, so it has no Open interactive CLI.
-// A phone stacks it the same way; its terminal is the whole screen with one header row (B057).
+// A phone stacks it the same way; its terminal is the whole screen with one header row.
 /** pending: Stop or Remove was clicked and the core has not answered yet (that menu item is held). */
 const props = withDefaults(defineProps<{
   card: AgentCard; pending?: 'stop' | 'remove' | null; api?: YawbleApi; pollMs?: number;
@@ -40,13 +42,18 @@ const emit = defineEmits<{ code: []; settings: []; logs: []; stop: []; remove: [
 const m = computed(() => props.card.member);
 const face = computed(() => memberStateOf(props.card));
 const phone = useNarrow();
+// The wait state in either shape (in `state`, or `waitState` beside a queued / idle `state`).
+const state = computed(() => cardState(props.card));
 // The details after the state's own word (the label says Running, Needs you, Idle...); what the agent said is the Report.
 const stateLine = computed(() => {
-  const c = props.card;
-  if (c.attention === 'decision') return 'a question is waiting for your answer';
-  if (c.state === 'queued') return `position ${c.queuePosition} of ${c.queueLength} for a global run slot · ${c.queuedInstructions} instruction${c.queuedInstructions === 1 ? '' : 's'}`;
+  const c = { ...props.card, state: state.value };
+  if (c.attention === 'decision' || c.decisionId != null) return 'a question is waiting for your answer';
+  const instructions = `${c.queuedInstructions} instruction${c.queuedInstructions === 1 ? '' : 's'}`;
+  if (c.state === 'queued') return `position ${c.queuePosition} of ${c.queueLength} for a global run slot · ${instructions}`;
+  // Work held for another run, a paused team or anything else is no place in the run queue.
+  if (c.state === 'waits-for-run' || c.state === 'held' || c.state === 'pending') return `${waitSays(c.state, c.waitsFor)} · ${instructions}`;
   if (c.state === 'running') return '';
-  // B097: a run the person stopped (class "stopped", recorded failed) is no failure: it says who stopped it.
+  // A run the person stopped (class "stopped", recorded failed) is no failure: it says who stopped it.
   if (c.lastRunState !== 'completed' && c.lastRunState !== 'interrupted' && isStoppedRun({ state: c.lastRunState, failureClass: c.lastRunFailureClass, attention: c.attention })) return 'last run stopped by you';
   if (c.lastRunState === 'failed' || c.lastRunState === 'interrupted') return `last run ${c.lastRunState}: ${c.lastRunReason ?? ''}`;
   if (c.lastRunState === 'completed') return 'last run completed';
@@ -57,16 +64,28 @@ const lease = computed(() => leaseText(props.card));
 const moreWaiting = computed(() => (props.card.state === 'running' && props.card.queuedInstructions > 0 ? props.card.queuedInstructions : 0));
 const moreWaitingTitle = computed(() =>
   `${moreWaiting.value} instruction${moreWaiting.value === 1 ? '' : 's'} waiting; they run after this one (oldest workflow first)`);
-const said = computed(() => props.card.statusLine?.trim() || '');
-const report = computed(() => splitReport(said.value));
+// While the member has an open decision its report is "Waiting on you" (memberReport), never an earlier
+// "Declared complete"; the chip and the Report link to the decision card on the team page.
+const report = computed(() => memberReport(props.card));
+const waiting = computed(() => report.value.kind === 'waiting');
+const said = computed(() => (waiting.value ? report.value.body : props.card.statusLine?.trim() || ''));
 const saidHtml = computed(() => (said.value ? renderMarkdown(report.value.body) : ''));
+/** The title's state word: "Waiting on you" while a decision is open. */
+const stateLabel = computed(() => (waiting.value ? WaitingLabel : MemberStateLabel[face.value]));
+/** Scrolls the team page to the decision this member waits on (its card, or the first decision card). */
+function openDecision() {
+  const id = report.value.decisionId;
+  const el = (id != null ? document.querySelector(`[data-decision-seq="${id}"]`) : null) ?? document.querySelector('[data-test=decision]');
+  el?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  (el?.querySelector('button:not([disabled])') as HTMLElement | null)?.focus?.();
+}
 // The core keeps what a member said only while it runs (and seeds it from the log at start); a member that has run
 // but shows nothing has not reported since then.
 const emptyText = computed(() => (props.card.lastRunState ? 'No report since the app started.' : 'Nothing said yet.'));
 const hasDetails = computed(() => !!(report.value.label || stateLine.value || lease.value || props.card.policyProblems?.length));
 
 // Report, Activity or Terminal, per member (shared with the entry points: the Monitor, the palette, the remote view).
-// A phone (B064, card 310) has its own choice: one member's terminal at a time, none when the page opens (memberPaneView.ts).
+// A phone has its own choice: one member's terminal at a time, none when the page opens (memberPaneView.ts).
 const view = computed<MemberView>(() => getMemberView(m.value.team, m.value.name, phone.value));
 const show = (v: MemberView) => setMemberView(m.value.team, m.value.name, v, phone.value);
 const TabLabel: Record<MemberView, string> = { report: 'Report', activity: 'Activity', terminal: 'Terminal' };
@@ -75,9 +94,10 @@ const TabLabel: Record<MemberView, string> = { report: 'Report', activity: 'Acti
 const termLive = ref(false);
 watch(view, (v) => { if (v !== 'terminal') termLive.value = false; });
 const remote = computed(() => !!resolveApi(props.api)?.remote);
-/** B111: the folder asks read through the same api; none in a view without one. */
+/** The folder asks read through the same api; none in a view without one. */
 const folderApi = computed(() => resolveApi(props.api) as YawbleApi | undefined);
-const canOpen = computed(() => props.card.state === 'idle' && !termLive.value);
+// Work that waits but is not queued for a slot (held, pending, waits for a run) leaves the CLI free to open, as idle did.
+const canOpen = computed(() => state.value !== 'running' && state.value !== 'queued' && !termLive.value);
 const canStop = computed(() => props.card.state === 'running' || termLive.value);
 const opening = ref(false);
 const error = ref<string | null>(null);
@@ -107,10 +127,10 @@ watch(menuOpen, (open) => {
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', onDocDown, true); document.removeEventListener('keydown', onKey); });
 const menuBtn = ref<HTMLButtonElement | null>(null);
 // A pick hands the focus back to the ⋯ button before the menu (v-if) goes: the item clicked is removed from the page,
-// and a confirm it opens (Remove agent, card 355) returns the focus to where it was, the ⋯ button, not <body>.
+// and a confirm it opens (Remove agent) returns the focus to where it was, the ⋯ button, not <body>.
 function pick(f: () => void) { menuBtn.value?.focus(); menuOpen.value = false; f(); }
 
-// A phone (B057, card 307): the member's terminal is the whole screen over the page with one 44 px header row - the
+// A phone: the member's terminal is the whole screen over the page with one 44 px header row - the
 // title, a ⋯ holding the terminal's state line and Stop, and ✕ (back to the Report) - and the terminal fills the rest.
 // The terminal puts its bar there (PaneHeaderKey).
 const termFull = computed(() => phone.value && view.value === 'terminal');
@@ -126,15 +146,17 @@ defineExpose({ el: () => root.value });
 </script>
 
 <template>
-  <section ref="root" class="pane" :class="[card.state, `is-${face}`, `view-${view}`, { phone }]" :data-test="`agent-${m.name}`" :aria-label="displayName(m.name)">
+  <section ref="root" class="pane" :class="[state, `is-${face}`, `view-${view}`, { phone }]" :data-test="`agent-${m.name}`" :aria-label="displayName(m.name)">
     <div class="title" data-test="agent-title">
-      <MemberAvatar class="avatar" :team="m.team" :member="m.name" :state="face" :size="26" :title="MemberStateLabel[face]" />
+      <MemberAvatar class="avatar" :team="m.team" :member="m.name" :state="face" :size="26" :title="stateLabel" />
       <strong data-test="agent-name" :title="m.name">{{ displayName(m.name) }}</strong>
-      <span class="chip">{{ m.role }}</span>
-      <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
-      <span class="label" data-test="agent-face-state">{{ MemberStateLabel[face] }}</span>
-      <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
-      <span class="spacer" />
+      <!-- The pills sit on their own row under the name, so the name gets the whole first row (the ☰ stays on it). -->
+      <span class="pills" data-test="agent-pills">
+        <span class="chip" data-test="agent-role" :title="hireRoleOf(m) ? `${m.role}, hired as ${hireRoleOf(m)}` : undefined">{{ hireRoleOf(m) ?? m.role }}</span>
+        <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
+        <span class="label" data-test="agent-face-state">{{ stateLabel }}</span>
+        <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
+      </span>
       <span ref="menuWrap" class="menu-wrap">
         <button ref="menuBtn" class="icon menu-button" :class="{ on: menuOpen }" title="Actions" :aria-label="`${displayName(m.name)}: actions`" aria-haspopup="menu" :aria-expanded="menuOpen"
           data-test="member-more" @click="menuOpen = !menuOpen"><Icon name="menu" :size="16" /></button>
@@ -159,7 +181,8 @@ defineExpose({ el: () => root.value });
           @click="show(v)">{{ TabLabel[v] }}</button>
       </span>
       <div v-if="hasDetails" class="state" data-test="agent-state">
-        <span v-if="report.label" class="kind" :class="report.kind" data-test="agent-report-kind">{{ report.label }}</span>
+        <a v-if="waiting" href="#" class="kind waiting" data-test="agent-report-kind" title="Go to the decision" @click.prevent="openDecision">{{ report.label }}</a>
+        <span v-else-if="report.label" class="kind" :class="report.kind" data-test="agent-report-kind">{{ report.label }}</span>
         <!-- The network / timeout summary is in the member's settings (Policy tab); only what needs action stays here. -->
         <template v-if="stateLine">{{ stateLine }}</template>
         <template v-if="stateLine && lease"> · </template>
@@ -168,13 +191,17 @@ defineExpose({ el: () => root.value });
       </div>
       <span v-if="error" class="error small" data-test="member-pane-error">{{ error }}</span>
     </div>
-    <!-- B111: this member's folder asks (a folder outside its clone), answered here as in Needs you. -->
+    <!-- This member's folder asks (a folder outside its clone), answered here as in Needs you. -->
     <FolderAsks v-if="folderApi" style="flex: none; margin: 2px 0 4px" :api="folderApi" :poll-ms="pollMs" :team="m.team" :member="m.name" />
 
     <div class="body" :class="`body-${view}`" :style="phone ? undefined : { height: `${height}px` }" data-test="member-pane-body">
       <template v-if="view === 'report'">
         <!-- Agent-written markdown: renderMarkdown never lets raw HTML through. -->
-        <div v-if="said" class="output md scrolls" data-test="agent-output" :data-commit-team="m.team" v-html="saidHtml" />
+        <div v-if="waiting" class="output md scrolls" data-test="agent-output">
+          <p class="waiting-note"><a href="#" data-test="agent-open-decision" @click.prevent="openDecision">{{ WaitingLabel }}: answer the decision</a></p>
+          <div class="md" v-html="saidHtml" />
+        </div>
+        <div v-else-if="said" class="output md scrolls" data-test="agent-output" :data-commit-team="m.team" v-html="saidHtml" />
         <div v-else class="output md scrolls" data-test="agent-output">
           <p class="muted" data-test="agent-output-empty">{{ emptyText }}</p>
         </div>
@@ -197,16 +224,20 @@ defineExpose({ el: () => root.value });
 </template>
 
 <style scoped>
-/* A tile in the team page's grid (B076, card 366): the pane fills its cell (the grid sets the height) as a column - the
+/* A tile in the team page's grid: the pane fills its cell (the grid sets the height) as a column - the
    title bar and the tabs at their own height, the view taking the rest and scrolling inside it - and never wider than
    the cell: what the title bar holds shrinks and ellipsizes. Outside a grid (no set height) it is as tall as its rows. */
 .pane { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 4px 10px 4px;
   display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
-.title { display: flex; align-items: center; gap: 8px; height: 30px; white-space: nowrap; flex: none; min-width: 0; }
-.title > .avatar { flex: none; }
+/* Two rows: the avatar, the name and the ☰ on the first; the pills (role, CLI, state, more waiting) under the name. */
+.title { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 30px 20px; height: 54px;
+  grid-template-areas: "avatar name menu" ". pills pills"; column-gap: 8px; align-items: center; white-space: nowrap; flex: none; min-width: 0; }
+.title > .avatar { flex: none; grid-area: avatar; }
+.title > strong { grid-area: name; }
+.title > .menu-wrap { grid-area: menu; justify-self: end; }
 .title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.pills { grid-area: pills; display: flex; align-items: center; gap: 8px; min-width: 0; height: 20px; overflow: hidden; }
 .title strong, .title .chip, .title .label, .title .more { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.spacer { flex: 1; }
 .label { font-weight: 600; font-size: 12px; color: var(--card-state); }
 .more { font-size: 12px; color: var(--muted); }
 .menu-wrap { position: relative; display: inline-flex; flex: none; }
@@ -248,6 +279,8 @@ defineExpose({ el: () => root.value });
 .kind.complete { --k: var(--ok); }
 .kind.blocked { --k: var(--state-blocked); }
 .kind.decision { --k: var(--state-decision); }
+.kind.waiting { --k: var(--state-decision); text-decoration: none; cursor: pointer; }
+.waiting-note { margin: 0 0 6px; font-weight: 600; }
 .body > .member-activity { flex: 1; min-width: 0; min-height: 0; }
 .member-terminal { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--term-line, var(--line)); border-radius: 6px; overflow: hidden; }
 .member-terminal > .term-window { flex: 1; min-height: 0; height: auto; }
@@ -268,13 +301,13 @@ defineExpose({ el: () => root.value });
 .is-blocked { --card-state: var(--state-blocked); border-left-color: var(--state-blocked); }
 .is-failed { --card-state: var(--state-failed); border-left-color: var(--state-failed); }
 .is-stopped { --card-state: var(--state-stopped); border-left-color: var(--state-stopped); }
-/* A phone (B061): stacked - the title (☰ a 44 px target), the tabs (44 px) with the details under them, then the
+/* A phone: stacked - the title (☰ a 44 px target), the tabs (44 px) with the details under them, then the
    chosen view at its own height (the page is the one scroller); the terminal is the whole screen over the page. */
 @media (max-width: 759.98px) {
   /* Not a tile: a block as tall as its rows, the view at its own height (the page scrolls). */
   .pane { padding: 4px 8px 8px; display: block; height: auto; }
   .pane > .body { overflow: visible; }
-  .title { height: 44px; }
+  .title { grid-template-rows: 44px 20px; height: 68px; }
   .menu-button { height: 44px; min-width: 44px; }
   .menu button { min-height: 44px; font-size: 14px; }
   .tabs { flex-wrap: wrap; gap: 6px; }
@@ -283,7 +316,7 @@ defineExpose({ el: () => root.value });
   .body { height: auto; }
   .output { flex: none; height: auto; overflow-y: visible; }
   .body-terminal { height: auto; }
-  /* The member's terminal (B057, card 307): the whole screen, one 44 px header row, the terminal filling the rest and
+  /* The member's terminal: the whole screen, one 44 px header row, the terminal filling the rest and
      never past the bottom (dvh: what the browser really shows). */
   .member-terminal.full { position: fixed; inset: 0; z-index: 9; width: auto; min-width: 0; max-width: none; height: 100dvh;
     border: 0; border-radius: 0; overflow: hidden; background: var(--term-bg); }

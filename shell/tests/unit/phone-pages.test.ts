@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B054 (card 268): on a phone (below 760 px) Backlog, the Team page and Documents give the screen to their content: the
+// On a phone (below 760 px) Backlog, the Team page and Documents give the screen to their content: the
 // page header is one compact row that scrolls away with the page (one scroller, no pinned header stack, no nested list
 // scrollers), and the first content row is within about 120 px of the top of the instance frame (375x501 portrait) and on
 // screen in landscape (667x263). At 1280 px nothing changes.
@@ -30,7 +30,7 @@ function screen(width: number) {
     return { matches: max ? width <= Number(max[1]) : false, media: query, addEventListener: () => {}, removeEventListener: () => {} };
   }));
 }
-/** The instance frame of the iPhone SE (B054), below the cloud site's bar. */
+/** The instance frame of the iPhone SE, below the cloud site's bar. */
 const Portrait = { width: 375, height: 501 };
 const Landscape = { width: 667, height: 263 };
 const Frames = [Portrait, Landscape];
@@ -172,27 +172,33 @@ function topOf(el: Element, root: Element, st: Styles, hostPad = 0) {
 }
 const fits = (top: number, frame: { height: number }) => (frame === Portrait ? top <= PortraitTarget : top + Row <= frame.height);
 
-/** The desktop rules outside each phone block, as they were at the base (8b39e07): a desktop change must be on purpose. */
+/**
+ * The desktop rules outside each phone block, as they were at the base (8b39e07): a desktop change must be on purpose.
+ * Fingerprinted with the comments taken out, so rewording a comment is not a desktop change.
+ */
 const DesktopCss: Record<string, string> = {
   // Backlog item pane: the Dispatches list went (only each team's Open team / Its board links stay), so the spec gets the height.
-  'board/BacklogView.vue': '6d5636200392cf67',
-  // B061 (card 286): the member's card and activity became one pane (MemberPane.vue): the team page's member-row rules went.
-  // Card 342: one rule centres the Tell buttons' svg icons (.tell .ticon); card 344: a desktop rule keeps the 29 px buttons' size.
-  // B076 (card 365): the members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)
-  // ending with the New member tile (.new-tile, its form .add); the old add row's rule went. Card 368: the pane clips
+  'board/BacklogView.vue': '6975c6ee16a2e64d',
+  // The member's card and activity are one pane (MemberPane.vue): the team page's member-row rules went.
+  // One rule centres the Tell buttons' svg icons (.tell .ticon); a desktop rule keeps the 29 px buttons' size.
+  // The members are equal tiles in a wrapping grid (.member-grid, the pane filling its .member-cell)
+  // ending with the New member tile (.new-tile, its form .add); the old add row's rule went. The pane clips
   // sideways only (overflow-x clip, y visible) so its ☰ menu draws past a short tile; the focused cell is raised.
-  'components/TeamView.vue': '5f8d83d315b69e96',
-  // B073 (card 465): the sync banner's "N commits behind" is a link (.count, as in the Git dialog) opening a list (.list).
-  'components/TeamSyncBanner.vue': '72abffaf508279af',
+  // The decision card's option notes (.choice, .choice .note) and its collapsed Details (.details).
+  'components/TeamView.vue': 'ca073551f01704f8',
+  // The sync banner's "N commits behind" is a link (.count, as in the Git dialog) opening a list (.list).
+  'components/TeamSyncBanner.vue': '797660ee174a3937',
   // The member tile: one title bar with a ☰ menu for every action, Report | Activity | Terminal tabs and one view (no
-  // toolbar, no two areas side by side, no width bar, no loosened marker). B076 (card 366): a tile in the team grid - the
+  // toolbar, no two areas side by side, no width bar, no loosened marker). A tile in the team grid - the
   // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
-  // Card 439 (B097): .is-stopped, a stopped run's neutral left edge and label colour.
-  'components/MemberPane.vue': 'a6f21a2cbead0e25',
-  'components/MemberActivity.vue': '5b65b8b04e4b41c1',
-  'components/DocumentsView.vue': '66dcab6b89792c38',
+  // .is-stopped, a stopped run's neutral left edge and label colour.
+  // The "Waiting on you" chip link (.kind.waiting) and the Report's note (.waiting-note). The pills
+  // row under the name (two-row title grid).
+  'components/MemberPane.vue': '084a856ccdf2c295',
+  'components/MemberActivity.vue': '89ae98395143684a',
+  'components/DocumentsView.vue': '30090ebf288b8c9e',
   // The documents list's Modified column: a wider list and the size / modified cells.
-  'components/DocumentsBrowser.vue': '5adcd20e83bad36c',
+  'components/DocumentsBrowser.vue': 'aeb000688d6975ab',
 };
 
 /** Selectors that scroll vertically on the desktop (overflow / overflow-y auto or scroll). */
@@ -218,7 +224,7 @@ async function teamPage(width: number, behind = false, of = team) {
   await settle();
   return w;
 }
-/** Card 342: Attach and Send draw a monochrome line icon (an aria-hidden svg in currentColor), never an emoji. */
+/** Attach and Send draw a monochrome line icon (an aria-hidden svg in currentColor), never an emoji. */
 function expectSvgIcons(w: VueWrapper) {
   for (const sel of ['[data-test=tell-attach]', '[data-test=tell-send]']) {
     const b = w.get(sel);
@@ -243,7 +249,7 @@ async function documentsFolder(width: number) {
   return w;
 }
 
-describe('the first content row is near the top on a phone (B054)', () => {
+describe('the first content row is near the top on a phone', () => {
   for (const frame of Frames) {
     const at = `${frame.width}x${frame.height}`;
 
@@ -276,7 +282,7 @@ describe('the first content row is near the top on a phone (B054)', () => {
       const st = new Styles('components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/MemberPane.vue', 'components/MemberActivity.vue');
       expect(w.get('[data-test=team-behind]').text()).toContain('3 commits behind main');
       const root = w.get('section.team').element;
-      // Card 282: the bar sat between the header and Tell (Tell at 156 px in portrait); now Tell is where it is without it.
+      // The bar is not between the header and Tell (that put Tell at 156 px in portrait): Tell is where it is without it.
       const tell = topOf(w.get('.tell').element, root, st, teamsPlacePad);
       expect(tell.above).toEqual(['teamhead']);
       expect(fits(tell.top, frame), `Tell at ${tell.top}`).toBe(true);
@@ -315,7 +321,7 @@ describe('the first content row is near the top on a phone (B054)', () => {
   }
 });
 
-describe('one scroller per page on a phone (B054)', () => {
+describe('one scroller per page on a phone', () => {
   const pages: Record<string, { files: string[]; root: string[] }> = {
     Backlog: { files: ['board/BacklogView.vue'], root: ['.backlog-place'] },
     Team: { files: ['components/TeamView.vue', 'components/TeamSyncBanner.vue', 'components/MemberPane.vue', 'components/MemberActivity.vue'], root: [] },
@@ -374,7 +380,7 @@ describe('one scroller per page on a phone (B054)', () => {
   });
 });
 
-describe('no sideways overflow on a phone (B054)', () => {
+describe('no sideways overflow on a phone', () => {
   // The header rows do not wrap: their icon buttons are fixed (44 px), the title or breadcrumb gives way (min-width 0).
   const Char = 8.8; // a 16 px font's average glyph, generous
   const content = (width: number, pad: number) => width - 2 * pad;
@@ -391,7 +397,7 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(tabs + icons.length * 44 + 3 * px(st.value(head, 'gap'))).toBeLessThanOrEqual(content(Portrait.width, 10));
   });
 
-  it('the Team page: the title gives way to ⋯ (Documents and Workflows are in the drawer, card 316); the Tell placeholder is whole at 375 px', async () => {
+  it('the Team page: the title gives way to ⋯ (Documents and Workflows are in the drawer); the Tell placeholder is whole at 375 px', async () => {
     const w = await teamPage(Portrait.width);
     const st = new Styles('components/TeamView.vue');
     const head = w.get('.teamhead').element;
@@ -406,7 +412,7 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(placeholder).toBe('Tell the Manager…');
     expect(st.value(w.get('.tell').element, 'flex-wrap')).toBe('nowrap');
     expect(st.value(tell.element, 'min-width')).toBe('0');
-    expect(w.get('[data-test=tell-send]').text()).toBe(''); // card 342: the paper plane only
+    expect(w.get('[data-test=tell-send]').text()).toBe(''); // the paper plane only
     expect(w.get('[data-test=tell-attach]').attributes('title')).toBe('Attach an image');
     expectSvgIcons(w);
     expect(w.get('[data-test=tell-send]').attributes('aria-label')).toBe('Tell Manager');
@@ -415,7 +421,7 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect('Tell the Manager… (paste an image to attach it)'.length * Char).toBeGreaterThan(room); // why the phone has a short one
   });
 
-  it('the Team page of a running team at 375 px: the name is whole beside the state chip (card 282: it read "Tea…")', async () => {
+  it('the Team page of a running team at 375 px: the name is whole beside the state chip (not cut to "Tea…")', async () => {
     const w = await teamPage(Portrait.width, false, { ...team, running: 1 });
     const st = new Styles('components/TeamView.vue');
     const line = w.get('.titleline').element;
@@ -446,7 +452,7 @@ describe('no sideways overflow on a phone (B054)', () => {
     expect(st.value(h2, 'flex')).toBe('0 1 auto');
   });
 
-  it('the Team page: Documents, Workflows, Triggers, Git and Settings are in the ⋯ menu (card 331), and each opens what it did', async () => {
+  it('the Team page: Documents, Workflows, Triggers, Git and Settings are in the ⋯ menu, and each opens what it did', async () => {
     const w = await teamPage(Portrait.width);
     expect(w.find('[data-test=open-triggers]').exists()).toBe(false);
     await w.get('[data-test=team-more]').trigger('click');
@@ -495,9 +501,9 @@ describe('no sideways overflow on a phone (B054)', () => {
   });
 });
 
-describe('at 1280 px the desktop is as it was (B054)', () => {
+describe('at 1280 px the desktop is as it was', () => {
   it('the desktop rules of every touched component are unchanged', () => {
-    for (const [f, hash] of Object.entries(DesktopCss)) expect(createHash('sha256').update(desktopCss(read(f))).digest('hex').slice(0, 16), f).toBe(hash);
+    for (const [f, hash] of Object.entries(DesktopCss)) expect(createHash('sha256').update(desktopCss(read(f)).replace(/\/\*[\s\S]*?\*\//g, '')).digest('hex').slice(0, 16), f).toBe(hash);
   });
 
   it('Backlog: the header with its title, tabs, search, team filter, Upload document and + Add item, then the intro', async () => {
@@ -534,7 +540,7 @@ describe('at 1280 px the desktop is as it was (B054)', () => {
     for (const a of w.findAll('[data-test=member-activity]')) expect(a.classes()).not.toContain('capped');
   });
 
-  it('the Team page: the "commits behind" bar is still above Tell (card 282 moves it on a phone only)', async () => {
+  it('the Team page: the "commits behind" bar is still above Tell (only a phone moves it)', async () => {
     const w = await teamPage(Desktop, true);
     const order = [...w.get('section.team').element.children].map((e) => e.getAttribute('data-test') ?? e.classList[0]);
     expect(order.indexOf('team-sync')).toBeGreaterThan(order.indexOf('teamhead'));

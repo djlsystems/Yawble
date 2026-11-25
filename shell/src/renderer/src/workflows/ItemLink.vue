@@ -3,7 +3,7 @@ import type { WorkflowItem } from '../../../shared/api';
 import { highlight, openBacklogItem } from './page';
 
 /**
- * B104 / B098: the backlog item a workflow came from, as a link that opens the Backlog with that item selected (an
+ * The backlog item a workflow came from, as a link that opens the Backlog with that item selected (an
  * archived one in the archive view). Plain text when the session may not read the backlog (`backlog: false`, the
  * core's flag); "—" when the workflow was not dispatched from the backlog (unless `dash` is false). `nested`: inside a
  * row that is itself a button (a team tile's workflow), a focusable span with role=link instead of a nested button.

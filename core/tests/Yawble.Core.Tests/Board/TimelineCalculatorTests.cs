@@ -7,7 +7,7 @@ using C = Yawble.Core.Board.TimeCategories;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// B086: the arithmetic of a card's and a workflow's time. Fixed times only: "now" is always given.
+/// The arithmetic of a card's and a workflow's time. Fixed times only: "now" is always given.
 /// </summary>
 public class TimelineCalculatorTests
 {

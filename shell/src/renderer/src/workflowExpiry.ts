@@ -2,7 +2,7 @@ import type { WorkflowSummary } from '../../shared/api';
 import { errorCode, errorText } from './api';
 
 /**
- * WORKFLOW EXPIRY (B085): an open workflow nobody touches for the team's workflowExpiryDays (default 3) is closed by
+ * WORKFLOW EXPIRY: an open workflow nobody touches for the team's workflowExpiryDays (default 3) is closed by
  * the app as "expired". The core says when an idle one would expire (expiresAt; null while a run, a wake or a trigger
  * is pending). One that waits on the person's answer is warned about a day before: a Needs-you item with Extend.
  */

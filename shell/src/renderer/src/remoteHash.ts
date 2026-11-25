@@ -1,4 +1,4 @@
-// Where a link into the remote view asks it to open (B052). The cloud site's org dashboard opens a row as
+// Where a link into the remote view asks it to open. The cloud site's org dashboard opens a row as
 // remote.html#workflow={wf} (that workflow's thread in its team) and a "Needs attention" row as #team={id} (that team).
 // Both may be given (#workflow=12&team=3): the team is then a hint, looked at first. #terminal/<memberId> is an agent's
 // terminal window, picked by main.ts before anything here runs: this module leaves it alone. Pure: no window, no api.

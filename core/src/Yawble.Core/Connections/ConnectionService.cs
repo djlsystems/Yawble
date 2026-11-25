@@ -98,12 +98,13 @@ public sealed class ConnectionService
         : value.Length >= 8 ? "••••••" + value[^2..]
         : "••••••";
 
-    /// <param name="kind">'secret' (the default for a new one), 'oauth' (a browser sign-in) or 'website' (a login kept in the app window's own session; no secret here); null on an edit keeps the kind it has.</param>
+    /// <param name="kind">'secret' (the default for a new one), 'oauth' (a browser sign-in), 'website' (a login kept in the app window's own session; no secret here)
+    /// or 'email' (a mailbox over IMAP and SMTP, Email/EmailConnection.cs); null on an edit keeps the kind it has.</param>
     /// <param name="keepStatus">New secret values normally reset the status to untested; a refreshed sign-in keeps it.</param>
     public ConnectionView Save(long? id, string name, IReadOnlyList<ConnectionField> fields, IReadOnlyDictionary<string, string> secrets,
         string? kind = null, bool keepStatus = false)
     {
-        if (kind is not (null or "secret" or "oauth" or "website")) throw new ArgumentException($"unknown connection kind '{kind}'");
+        if (kind is not (null or "secret" or "oauth" or "website" or "email")) throw new ArgumentException($"unknown connection kind '{kind}'");
         name = name.Trim();
         if (name.Length == 0) throw new ArgumentException("a connection needs a name");
         if (fields.Select(f => f.Key).Distinct(StringComparer.Ordinal).Count() != fields.Count)
@@ -347,7 +348,7 @@ public sealed class ConnectionService
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT name FROM apis WHERE connection_id = $i UNION ALL SELECT 'MCP: ' || name FROM mcp_servers WHERE connection_id = $i ORDER BY 1 COLLATE NOCASE;";
+        cmd.CommandText = "SELECT name FROM apis WHERE connection_id = $i UNION ALL SELECT 'MCP: ' || name FROM mcp_servers WHERE connection_id = $i UNION ALL SELECT 'Email: ' || name FROM email_integrations WHERE connection_id = $i ORDER BY 1 COLLATE NOCASE;";
         cmd.Parameters.AddWithValue("$i", id);
         using var r = cmd.ExecuteReader();
         var list = new List<string>();

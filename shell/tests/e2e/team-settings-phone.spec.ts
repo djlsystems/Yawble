@@ -1,10 +1,10 @@
-// Card 346 (was card 328): the team Settings dialog on a phone, in a real browser (headless Chrome) against the FAKE core
+// The team Settings dialog on a phone, in a real browser (headless Chrome) against the FAKE core
 // of phone-remote.spec.ts (remote.html, canned answers). At 390x844 (an iPhone) it is laid out like the app's Settings on
 // a phone: it opens at the list of its eight sections (full-width rows, one line each, at least 44 px tall, a › chevron);
 // a tap opens that section alone under a Back + title head; Back returns to the list. Nothing is wider than the screen.
-// The sheet's Close keeps its 44 px tap target (card 328). At 1280x800 the tab row is as before.
+// The sheet's Close keeps its 44 px tap target. At 1280x800 the tab row is as before.
 //
-//   npx playwright test team-settings-phone      (B037_SKIP_BUILD=1 reuses out/b037/renderer)
+//   npx playwright test team-settings-phone      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -43,7 +43,7 @@ async function openSettings(browser: Browser, w: number, h: number) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${s.url}#team=1`);
   await expect(page.locator('[data-test=team-title]')).toBeVisible({ timeout: 30_000 });
-  // On a phone Settings is in the team page's ⋯ menu (B054).
+  // On a phone Settings is in the team page's ⋯ menu.
   const manage = page.locator('[data-test=open-manage]').first();
   if (!(await manage.isVisible().catch(() => false))) {
     await page.locator('[data-test=team-more]').click();
@@ -85,7 +85,7 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
   const root = page.locator('.manage');
   await expect(root).toHaveAttribute('data-phone-screen', 'list');
 
-  // The sheet's Close: a 44 px tap target (card 328).
+  // The sheet's Close: a 44 px tap target.
   const close = await page.locator('[role=dialog] header button').last().boundingBox();
   expect(close && Math.round(close.width)).toBe(44);
   expect(close && Math.round(close.height)).toBe(44);

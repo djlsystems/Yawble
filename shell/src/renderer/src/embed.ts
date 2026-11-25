@@ -7,14 +7,14 @@ import {
 import { confirmDialog, type ConfirmOptions } from './confirm';
 import { teamState } from './teamState';
 
-// B115 Part B: the remote view embedded in the cloud page (remote.html?embed=1&theme=light|dark, in a frame). The
+// Embed mode: the remote view embedded in the cloud page (remote.html?embed=1&theme=light|dark, in a frame). The
 // desktop's own sidebar and theme switch are not drawn; the sidebar is published to the parent window as yawble.nav and
 // the parent's yawble.navigate / yawble.theme messages are followed (contract: shared/embedContract.ts and
 // docs/cloud-link.md). This module never imports theme.ts and never touches the browser's storage: the viewer's own
 // stored remote theme (theme.ts) is neither read nor written in embed mode.
 
 /** The screens a place opens (Sidebar.vue's View, less Settings, which is not in the sidebar's places). */
-export type EmbedView = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor';
+export type EmbedView = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'scripts';
 
 /** True when the page was opened with embed=1 (the cloud's frame). */
 export function isEmbed(search: string = typeof location !== 'undefined' ? location.search : ''): boolean {
@@ -51,6 +51,7 @@ export interface EmbedNavState {
   openWorkflows?: number | null;
 }
 
+// The order of the sidebar's places. No Terminal and no Help (embedContract.ts EmbedPlaceId).
 const PLACES: readonly { id: EmbedPlaceId; label: string; icon: EmbedIcon }[] = [
   { id: 'newChat', label: 'New chat', icon: 'newChat' },
   { id: 'concierge', label: 'Concierge', icon: 'concierge' },
@@ -60,6 +61,7 @@ const PLACES: readonly { id: EmbedPlaceId; label: string; icon: EmbedIcon }[] = 
   { id: 'board', label: 'Kanban board', icon: 'kanban' },
   { id: 'documents', label: 'Documents', icon: 'documents' },
   { id: 'monitor', label: 'Monitor', icon: 'monitor' },
+  { id: 'scripts', label: 'Scripts', icon: 'scripts' },
   { id: 'logs', label: 'Logs', icon: 'logs' },
 ];
 
@@ -77,8 +79,8 @@ export function buildNav(s: EmbedNavState): EmbedNav {
     if (id === 'workflows') return s.openWorkflows || null;
     return null;
   };
-  // New chat and Logs open something rather than show a place: never highlighted, as in the sidebar.
-  const activeOf = (id: EmbedPlaceId) => id !== 'newChat' && id !== 'logs' && s.view === id;
+  // New chat opens something rather than show a place: never highlighted, as in the sidebar.
+  const activeOf = (id: EmbedPlaceId) => id !== 'newChat' && s.view === id;
   return {
     places: PLACES.map((p) => ({ ...p, badge: badgeOf(p.id), active: activeOf(p.id), disabled: false })),
     teams: s.teams.map((t) => ({
@@ -133,7 +135,11 @@ export function parseNavigate(data: unknown): EmbedNavigateTarget | null {
   if (!to || typeof to !== 'object') return null;
   switch (to.kind) {
     case 'place': return typeof to.id === 'string' && PLACE_SET.has(to.id) ? { kind: 'place', id: to.id as EmbedPlaceId } : null;
-    case 'team': return typeof to.id === 'number' && Number.isInteger(to.id) ? { kind: 'team', id: to.id } : null;
+    case 'team': {
+      // A number, or its decimal string (a parent that keeps every id as text).
+      const id = typeof to.id === 'string' && /^\d+$/.test(to.id) ? Number(to.id) : to.id;
+      return typeof id === 'number' && Number.isInteger(id) ? { kind: 'team', id } : null;
+    }
     case 'chat': return typeof to.id === 'string' && to.id ? { kind: 'chat', id: to.id } : null;
     case 'newTeam': return { kind: 'newTeam' };
     case 'chatAction':
@@ -152,7 +158,7 @@ export function parseTheme(data: unknown): EmbedTheme | null {
 
 /**
  * Does what the same click in the sidebar does. Returns a promise for a chat action (its dialog), else undefined.
- * Ignored, as the sidebar's disabled or missing buttons are: a team or chat not in the state, New team and a chat's
+ * Ignored, as the sidebar's disabled or missing buttons are: a team or chat not in the state, New team, a chat's
  * actions for a read-only viewer, Delete while a chat is being deleted.
  */
 export function dispatchNavigate(to: EmbedNavigateTarget, s: EmbedNavState, h: EmbedHandlers, d: EmbedDialogs = {}): Promise<void> | undefined {

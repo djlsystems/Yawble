@@ -74,7 +74,10 @@ const found = computed(() => !!props.detected?.found);
         · installed with <span data-test="cli-kind">{{ kinds[detected.installKind] ?? detected.installKind }}</span>
         <template v-if="detected.launcherPath && detected.launcherPath !== detected.executablePath"> · started as <span class="mono">{{ detected.launcherPath }}</span></template>
       </div>
-      <div v-else-if="detected" data-test="cli-install-help">{{ custom ? `${baseTitle} is not installed: ` : '' }}<template v-for="(part, i) in linkParts(detected.installHelp)" :key="i"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></div>
+      <!-- The core's sign-in check, in its own words: signed in (and how agents use it), or how to sign in. -->
+      <div v-if="found && !custom && detected?.signIn?.detail" :class="detected.signIn.status === 'signed-in' ? 'muted' : 'warn'"
+        :data-status="detected.signIn.status" data-test="cli-signin">{{ detected.signIn.detail }}</div>
+      <div v-else-if="detected && !found" data-test="cli-install-help">{{ custom ? `${baseTitle} is not installed: ` : '' }}<template v-for="(part, i) in linkParts(detected.installHelp)" :key="i"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></div>
       <div v-if="!remote && loading" class="muted faint" data-test="tile-default-model-loading" aria-label="Loading the default model">Default model: …</div>
       <div v-else-if="!remote" class="muted" data-test="tile-default-model">Default model: {{ defaultModel || "the CLI's default" }}</div>
       <ul v-if="detected?.problems.length" class="problems" data-test="cli-problems">
@@ -104,7 +107,7 @@ h3 { margin: 0; font-size: 14px; }
 .small { font-size: 12px; }
 .faint { opacity: 0.6; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }
-/* A phone (B037): the buttons wrap onto their own rows at 44 px; a custom agent is not indented. */
+/* A phone: the buttons wrap onto their own rows at 44 px; a custom agent is not indented. */
 @media (max-width: 759.98px) {
   .tile.custom { margin-left: 0; }
   .grow { flex-basis: 100%; height: 0; }

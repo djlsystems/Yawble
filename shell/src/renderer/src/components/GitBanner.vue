@@ -81,7 +81,7 @@ defineExpose({ check });
 .git-banner .actions { display: inline-flex; gap: 8px; align-items: center; }
 .git-banner .error { flex-basis: 100%; color: var(--bad); }
 .ok-line { padding: 6px 18px; margin: 0; color: var(--ok); }
-/* A phone (B037): the text over the actions, which wrap; tap targets 44 px. */
+/* A phone: the text over the actions, which wrap; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .git-banner { padding: 8px 12px; }
   .git-banner .text { flex-basis: 100%; }

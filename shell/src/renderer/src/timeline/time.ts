@@ -1,7 +1,7 @@
 import { onBeforeUnmount, readonly, ref, shallowRef, type Ref } from 'vue';
 import type { ItemTime, TimeCategory, TimeEndedHow, TimelineBand, TimelineMarkerKind } from '../../../shared/api';
 
-// B086: a card's or workflow's overall time, said in words. The core computes every time (BoardCard.time, a workflow
+// A card's or workflow's overall time, said in words. The core computes every time (BoardCard.time, a workflow
 // item's time, timeline.get); the screens only format them. The one thing the screens add is the tick of an OPEN item:
 // its overallMs is as of the core's answer, so it is shown plus the seconds since that answer arrived, from ONE shared
 // 1 s timer (useNow) however many cards and rows show a time.
@@ -211,7 +211,7 @@ export const TickGapPx = 6;
  * Where each break label goes on the tick row (its left edge in px), or null to hide it. A label is centred under
  * its break mark, then slid inside the room between the start label's right edge and the end label's left edge
  * (and after the previous break label). One that does not fit there is hidden rather than drawn over another
- * (card 433, F3: "≈ 2d 17h" over "now" read "≈ 2d 1now").
+ * (otherwise "≈ 2d 17h" over "now" read "≈ 2d 1now").
  */
 export function placeBreakLabels(width: number, startRight: number, endLeft: number, labels: { x: number; w: number }[], gap = TickGapPx): (number | null)[] {
   let min = startRight + gap;

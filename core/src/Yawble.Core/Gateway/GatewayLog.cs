@@ -66,7 +66,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     private readonly Dictionary<(long, string), long> _hostDenied = [];
 
     /// <summary>
-    /// The run's connect-denied row per CONNECT authority (host:port, gateway_events.id), which a repeat counts on (B105).
+    /// The run's connect-denied row per CONNECT authority (host:port, gateway_events.id), which a repeat counts on.
     /// Its own map, so a host's plain-http (host-denied) and https (connect-denied) refusals stay separate rows.
     /// </summary>
     private readonly Dictionary<(long, string), long> _connectDenied = [];
@@ -80,8 +80,50 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     /// <summary>A model vhost: one of the gateway's virtual hosts that forward to a model API (not the bus).</summary>
     public static bool IsModelVhost(string? vhost) => vhost is not null && Vhosts.ProductionUpstreams.ContainsKey(vhost);
 
+    /// <summary>
+    /// Refusals a CLI makes on its own, every run, that say nothing (its telemetry and suggestion calls): the Codex
+    /// analytics-events and plugins/suggested paths refused (403), and /backend-api/ps/mcp answered 401. Matched on the
+    /// path (query apart).
+    /// </summary>
+    public static readonly IReadOnlyList<string> RoutinePaths = ["/analytics-events", "/plugins/suggested", "/backend-api/ps/mcp"];
+
+    /// <summary>How long one row counts the routine refusals of a member (across its runs) before a new row is written.</summary>
+    public static readonly TimeSpan RoutineWindow = TimeSpan.FromHours(1);
+
+    /// <summary>The row a member's routine refusal (kind, vhost, method, path, status) is counted on, and when it was written.</summary>
+    private readonly Dictionary<(string, string, string, string, string, int), (long Id, DateTimeOffset Start)> _routine = [];
+
+    /// <summary>Whether <paramref name="e"/> is a routine refusal (<see cref="RoutinePaths"/>), and its key.</summary>
+    private static (string, string, string, string, string, int)? RoutineKey(GatewayEvent e)
+    {
+        if (e.Status is not (401 or 403) || e.Kind is not (GatewayEventKinds.PathDenied or GatewayEventKinds.Forward or GatewayEventKinds.Unauthorized))
+            return null;
+        var target = e.Target ?? "";
+        var q = target.IndexOf('?');
+        var path = (q < 0 ? target : target[..q]).TrimEnd('/');
+        if (!RoutinePaths.Any(r => path.Contains(r, StringComparison.OrdinalIgnoreCase))) return null;
+        return ((e.Member ?? "").ToLowerInvariant(), e.Kind, (e.Vhost ?? "").ToLowerInvariant(), (e.Method ?? "").ToUpperInvariant(),
+            path.ToLowerInvariant(), e.Status.Value);
+    }
+
     public void Write(GatewayEvent e)
     {
+        // A routine refusal is counted on the member's row for it from the last hour (any of its runs), not a row each.
+        if (RoutineKey(e) is { } routine)
+        {
+            lock (_lock)
+            {
+                if (_routine.TryGetValue(routine, out var row) && e.At - row.Start < RoutineWindow && Increment(row.Id))
+                {
+                    Written?.Invoke(e);
+                    return;
+                }
+                if (_routine.Count > 10_000) _routine.Clear();
+                _routine[routine] = (Insert(e), e.At);
+            }
+            return;
+        }
+
         if (e.Kind == GatewayEventKinds.ConnectDenied && e.RunId is { } connectRun)
         {
             // The same CONNECT refused again in the run (a tool retrying https to a host off the allowlist): one row, its

@@ -15,7 +15,7 @@ public static class RemoteAccess
         .. Ui.UiRpc.Prefixes,
         "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
         "guardrail.", "agents.", "runs.", "concierge.", "board.", "backlog.", "integrations.", "tasks.",
-        // B086: a card's or a workflow's timeline (the cloud's detail dialog).
+        // A card's or a workflow's timeline (the cloud's detail dialog).
         "timeline.get",
         "ops.backups",
         // Network asks: listed and answered like the other policy changes (policy. is a screen prefix above).
@@ -23,7 +23,7 @@ public static class RemoteAccess
         // Host tool asks: listed and answered Not now like the network asks; Install is the window's alone (below).
         // Check again only looks for the program again (it runs no installer): a remote viewer may use it after installing by hand.
         "tools.catalog", "tools.asks", "tools.notNow", "tools.checkAgain",
-        // Folder asks (B111): exactly as the network asks, listed by any viewer and answered by a full one.
+        // Folder asks: exactly as the network asks, listed by any viewer and answered by a full one.
         "folder.",
         // Whether git is installed (the banner's text); installing it is git.install, refused below.
         "git.check",
@@ -33,7 +33,7 @@ public static class RemoteAccess
         "updates.status",
         // The read-only code browser (members' clones), unless the person turned it off (Settings > Cloud Link).
         "code.",
-        // The cloud org dashboard (B048): this computer's summary, and its live changes while a viewer watches.
+        // The cloud org dashboard: this computer's summary, and its live changes while a viewer watches.
         "org.",
     ];
 
@@ -72,26 +72,28 @@ public static class RemoteAccess
             "teams.list", "teams.agents", "teams.quiet", "teams.env", "teams.approvals", "teams.repos",
             // Settings > Teams and Settings > Concierge as saved (saving them and Generate are changes).
             "teams.defaults", "concierge.defaults",
+            // The role catalog and a team's hire list as shown (saving and removing them are changes).
+            "roles.list", "teams.hireList",
             "docs.list", "docs.read", "docs.folder",
             "members.get",
             "bus.decisions", "bus.workflows",
-            // B104, the Workflows page: every team's workflows, and one in full (its spec only when the viewer may read the backlog; ShapeResult).
+            // The Workflows page: every team's workflows, and one in full (its spec only when the viewer may read the backlog; ShapeResult).
             "workflows.list", "workflows.get",
             "policy.getGlobal", "policy.getMember", "policy.previewLoosen", "policy.teamHosts", "policy.checkHosts",
             "credentials.status",
             "terminal.banner",
             "skills.list",
-            // B100: a team skill's versions and Team settings' "Lessons" line (Restore, skills.restore, is a change).
+            // A team skill's versions and Team settings' "Lessons" line (Restore, skills.restore, is a change).
             "skills.versions", "teams.lessons",
             "triggers.list", "triggers.preview",
             "git.status", "git.check", "git.tidyPlan",
-            // B075: the web address of a commit, branch, file, compare or pull request (reads only).
+            // The web address of a commit, branch, file, compare or pull request (reads only).
             "git.webLink",
-            // B072, the commit view: a commit and its file list; a file's diff only while members' code is shown (below).
+            // The commit view: a commit and its file list; a file's diff only while members' code is shown (below).
             "git.commitShow", "git.commitDiff",
-            // B074: which hex words in text are commits (IDs, titles, pushed; no code).
+            // Which hex words in text are commits (IDs, titles, pushed; no code).
             "git.commitsResolve",
-            // B073: the commits behind a count and the Merge / Delete previews; a preview's file diff only while members' code is shown.
+            // The commits behind a count and the Merge / Delete previews; a preview's file diff only while members' code is shown.
             "git.commitRange", "git.mergePreview", "git.deletePreview", "git.mergeDiff",
             "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
             "guardrail.get",
@@ -101,30 +103,34 @@ public static class RemoteAccess
             // concierge.read only clears the chat's unread marker: opening a chat is a read.
             "concierge.list", "concierge.get", "concierge.read",
             "board.list", "board.card", "backlog.list", "backlog.item",
-            // B086: a card's or a workflow's timeline (the detail dialog); a Visitor may view it.
+            // A card's or a workflow's timeline (the detail dialog); a Visitor may view it.
             "timeline.get",
             "integrations.list", "integrations.asks", "integrations.calls", "integrations.checklist", "integrations.connectionAttention",
             "integrations.connections", "integrations.discoverStatus", "integrations.mcpList", "integrations.apiList", "integrations.watches",
-            "integrations.taskRuns", "integrations.mcpParse",
+            "integrations.taskRuns", "integrations.mcpParse", "integrations.emailList",
             "tasks.list", "tasks.asks", "tasks.runs",
             "ops.backups",
             "network.asks",
             "tools.catalog", "tools.asks",
             "folder.asks",
             "logs.query", "logs.sources", "logs.values", "logs.who", "logs.prunePreview",
-            // Live logs (B048): watching new entries, and stopping, change nothing.
+            // Live logs: watching new entries, and stopping, change nothing.
             "logs.tail", "logs.untail",
-            // The org dashboard's summary (B048); watching and unwatching it only start and stop its pushes.
+            // The org dashboard's summary; watching and unwatching it only start and stop its pushes.
             "org.summary", "org.summary.watch", "org.summary.unwatch",
             "updates.status",
             "code.list", "code.open", "code.read", "code.close", "code.download",
+            // The script library, schemas, script runs and script members: reads (saving, importing, Test run and member changes are changes).
+            .. Ui.ScriptsRpc.Reads,
         ],
-        readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry"],
+        // teams.localhost ("Allow localhost (macOS)") is read by any viewer and set only by a full one.
+        readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry", "teams.localhost"],
         changes:
         [
             "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",
             "teams.addApproval", "teams.removeApproval", "teams.addRepo", "teams.removeRepo", "teams.setRepo",
             "teams.setDefaults", "teams.generateNames", "concierge.setDefaults",
+            "roles.save", "roles.remove", "teams.setHireList",
             "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete",
             "members.add", "members.remove", "members.update",
             "bus.tellManager", "bus.answer", "bus.closeWorkflow", "bus.stopWorkflow", "bus.nudgeWorkflow",
@@ -143,7 +149,7 @@ public static class RemoteAccess
             "board.clearDone", "board.restore", "board.move", "board.edit", "board.comment",
             "backlog.add", "backlog.archive", "backlog.delete", "backlog.dispatch", "backlog.dispatchNew", "backlog.edit", "backlog.move",
             "backlog.position", "backlog.restore",
-            "integrations.apiDeleteRule", "integrations.apiEnable", "integrations.apiRemove", "integrations.apiSave", "integrations.approve",
+            "integrations.apiDeleteRule", "integrations.apiEnable", "integrations.emailSave", "integrations.emailEnable", "integrations.emailRemove", "integrations.apiRemove", "integrations.apiSave", "integrations.apiPeek", "integrations.approve",
             "integrations.decline", "integrations.connectionRemove", "integrations.connectionSave", "integrations.connectionTest",
             "integrations.deleteRule", "integrations.deleteWatch", "integrations.detect", "integrations.discover", "integrations.discoverCancel",
             "integrations.enable", "integrations.mcpCheck", "integrations.mcpDeleteRule", "integrations.mcpEnable", "integrations.mcpImport",
@@ -157,6 +163,7 @@ public static class RemoteAccess
             "tools.notNow", "tools.checkAgain",
             "folder.answer",
             "logs.prune", "logs.setRetention",
+            .. Ui.ScriptsRpc.Changes,
         ]);
 
     private static Dictionary<string, Kind> Table(string[] reads, string[] readsUnlessOn, string[] changes)
@@ -176,17 +183,17 @@ public static class RemoteAccess
     public static bool Reads(string method, JsonObject? parameters) =>
         Kinds.TryGetValue(method, out var kind) && (kind == Kind.Reads || kind == Kind.ReadsUnlessOn && parameters?[SetKey(method)] is null);
 
-    /// <summary>The field a get-or-set call carries when it sets its setting (B085 teams.workflowExpiry: "days"; the rest "on").</summary>
+    /// <summary>The field a get-or-set call carries when it sets its setting (teams.workflowExpiry: "days"; the rest "on").</summary>
     public static string SetKey(string method) => method == "teams.workflowExpiry" ? "days" : "on";
 
     /// <summary>What a cloud viewer reads when members' code is not shown (Settings > Cloud Link) and a call would show it.</summary>
     public const string CodeHidden = "members' code is not shown to cloud viewers; the person can turn it on in the app on the computer (Settings > Cloud Link)";
 
     /// <summary>
-    /// A relayed call's answer as a cloud viewer may see it. B072: with members' code not shown, git.commitShow keeps the
+    /// A relayed call's answer as a cloud viewer may see it. With members' code not shown, git.commitShow keeps the
     /// commit and its file list and says codeShown = false (its diffs, git.commitDiff, are refused above).
     /// </summary>
-    /// <remarks>B104: workflows.list and workflows.get say whether this viewer may read the backlog (<c>backlog</c>; the shell
+    /// <remarks>workflows.list and workflows.get say whether this viewer may read the backlog (<c>backlog</c>; the shell
     /// links item labels only then), and workflows.get drops the item's spec when it may not.</remarks>
     public static void ShapeResult(string method, JsonNode? result, bool showCode, string access = Full)
     {
@@ -253,7 +260,7 @@ public static class RemoteAccess
         // OAuth sign-ins (and finding a provider's addresses, which makes this computer fetch URLs) are for the person at the computer
         if (method is "integrations.websiteSignIn" or "integrations.websiteSignInDone" || method.StartsWith("integrations.oauth", StringComparison.Ordinal))
             return "sign-ins happen on the computer itself";
-        if (method is "integrations.apiSave" or "integrations.apiRemove"
+        if (method is "integrations.apiSave" or "integrations.apiRemove" or "integrations.apiPeek"
             || method == "integrations.discover" && (parameters?["kind"] as JsonValue)?.TryGetValue<string>(out var kind) == true && kind == "api")
             return "setting up an API happens on the computer itself";
         // Remote MCP servers: sign-ins, imports (they read config files on this computer) and secrets are for the person at the computer, host terminals or not.

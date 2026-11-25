@@ -43,7 +43,7 @@ public sealed record CommitFileChange(string Path, string? OldPath, string Statu
 }
 
 /// <summary>
-/// git.commitShow (B072): a commit of the team's repository, read with plain git. <see cref="Found"/> false: git does not
+/// git.commitShow: a commit of the team's repository, read with plain git. <see cref="Found"/> false: git does not
 /// have it (<see cref="GoneReason"/> says why, in plain words), and only <see cref="Sha"/> is set.
 /// </summary>
 public sealed record CommitInfo(
@@ -107,7 +107,7 @@ public sealed record CommitDiffLine(string Kind, int? Old, int? New, string Text
 public sealed record CommitDiffHunk(string Header, int OldStart, int OldCount, int NewStart, int NewCount, IReadOnlyList<CommitDiffLine> Lines);
 
 /// <summary>
-/// git.commitDiff (B072): one file's diff in a commit (a merge: against its first parent). Binary or too large: a
+/// git.commitDiff: one file's diff in a commit (a merge: against its first parent). Binary or too large: a
 /// <see cref="Summary"/> line and no hunks.
 /// </summary>
 public sealed record CommitFileDiff(string Path, string? OldPath, string Status, bool Binary, bool TooLarge, string? Summary, int Added, int Deleted,
@@ -147,7 +147,7 @@ public sealed record CommitFileDiff(string Path, string? OldPath, string Status,
 }
 
 /// <summary>
-/// B072, the commit view: any commit ID explained from plain git on the TEAM's repository (never a member's clone):
+/// The commit view: any commit ID explained from plain git on the TEAM's repository (never a member's clone):
 /// what it is (message, author, merge or not, the member, card and workflow that made it from the app's records),
 /// where it is (base, team branch, member branches, origin, tags) and what it changed (files and their diffs; a
 /// merge against its first parent). Reads only, outside the team's lock: nothing here moves a ref. Works the same
@@ -218,7 +218,7 @@ public sealed partial class TeamRepos
 
         return new CommitInfo(true, null, full, full[..Math.Min(12, full.Length)], f[8].Trim(), f[9].Trim(), author, differs ? committer : null,
             parents, merge, made, new CommitWhere(inMain, branches, onlyOn, origin.Count > 0, tags, others,
-                // B073: on no branch now, and the app recorded the branch it was on when the person deleted it.
+                // On no branch now, and the app recorded the branch it was on when the person deleted it.
                 !inMain && heads.Count == 0 ? DeletedFromOf(team, full) : null), files);
     }
 
@@ -444,7 +444,7 @@ public sealed partial class TeamRepos
         return new RecordedEvent(r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.GetString(2), r.IsDBNull(3) ? null : r.GetInt64(3), into);
     }
 
-    /// <summary>B073: the branch the commit was on when the person deleted it (the newest such record), or null.</summary>
+    /// <summary>The branch the commit was on when the person deleted it (the newest such record), or null.</summary>
     private string? DeletedFromOf(string team, string sha)
     {
         using var c = Open();

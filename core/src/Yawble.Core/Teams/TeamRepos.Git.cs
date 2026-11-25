@@ -3,7 +3,7 @@ namespace Yawble.Core.Teams;
 /// <summary>One branch the team made, as the Git dialog shows it.</summary>
 public sealed record TeamGitBranch(string Branch, string Sha, int AheadOfBase, bool InTeamBranch, CommitRangeRef? AheadRange = null, BranchPush? Push = null);
 
-/// <summary>B073: the exact from/to each of the Git dialog's counts stands for (git.commitRange opens the matching list); null when an end is missing.</summary>
+/// <summary>The exact from/to each of the Git dialog's counts stands for (git.commitRange opens the matching list); null when an end is missing.</summary>
 public sealed record TeamGitRanges(CommitRangeRef? BaseAheadOfOrigin, CommitRangeRef? BaseBehindOrigin, CommitRangeRef? TeamAheadOfBase, CommitRangeRef? TeamBehindBase);
 
 /// <summary>
@@ -18,16 +18,16 @@ public sealed record TeamGitStatus(
     string TeamBranch, string? TeamSha, int TeamAheadOfBase, int TeamBehindBase,
     string Merge, IReadOnlyList<string> ConflictFiles, IReadOnlyList<TeamGitBranch> Members)
 {
-    /// <summary>Old-style <c>members/&lt;member&gt;</c> branches (no team segment, B016) here and/or on origin (as of the last
+    /// <summary>Old-style <c>members/&lt;member&gt;</c> branches (no team segment) here and/or on origin (as of the last
     /// fetch), for the person to delete; empty when none.</summary>
     public IReadOnlyList<TeamGitOldBranch> OldBranches { get; init; } = [];
 
-    /// <summary>B020: branches here or on origin (as of the last fetch) that block this team's members/&lt;team&gt;/&lt;name&gt;
+    /// <summary>Branches here or on origin (as of the last fetch) that block this team's members/&lt;team&gt;/&lt;name&gt;
     /// branches (members/&lt;team&gt;, or members), for the dialog's Delete; empty when none. An old-style one is
     /// also in <see cref="OldBranches"/>.</summary>
     public IReadOnlyList<TeamGitBlockingBranch> BlockingBranches { get; init; } = [];
 
-    /// <summary>B073: the from/to of each count above.</summary>
+    /// <summary>The from/to of each count above.</summary>
     public TeamGitRanges Ranges { get; init; } = new(null, null, null, null);
 }
 
@@ -48,14 +48,14 @@ public sealed record TeamGitResult(string Outcome, string Message, bool Changed,
 {
     public TeamGitStatus? Status { get; init; }
 
-    /// <summary>B073: what came in (brought-current) or landed (fast-forward, merged), newest first; null otherwise.</summary>
+    /// <summary>What came in (brought-current) or landed (fast-forward, merged), newest first; null otherwise.</summary>
     public IReadOnlyList<CommitRow>? Commits { get; init; }
 
     public int CommitCount { get; init; }
 
     public bool CommitsTruncated { get; init; }
 
-    /// <summary>B073: the from/to of <see cref="Commits"/> (git.commitRange gives the whole list).</summary>
+    /// <summary>The from/to of <see cref="Commits"/> (git.commitRange gives the whole list).</summary>
     public CommitRangeRef? Range { get; init; }
 
     /// <summary>This result with the commits on <paramref name="to"/> that <paramref name="from"/> lacks.</summary>
@@ -173,7 +173,7 @@ public sealed partial class TeamRepos
     {
         if (string.IsNullOrWhiteSpace(repoName)) return await EnsureTeamRepoAsync(teamId, team, ct);
         var extra = ExtrasOf(teamId).FirstOrDefault(e => string.Equals(e.Name, repoName.Trim(), StringComparison.OrdinalIgnoreCase));
-        // B067: "main" (the tidy plan's and the Concierge's name for it) is the main repository, unless an extra has that name.
+        // "main" (the tidy plan's and the Concierge's name for it) is the main repository, unless an extra has that name.
         if (extra is null && string.Equals(repoName.Trim(), MainRepoName, StringComparison.OrdinalIgnoreCase)) return await EnsureTeamRepoAsync(teamId, team, ct);
         if (extra is null) throw new ArgumentException($"team {team} has no repository named {repoName}");
         if (!extra.Writable) throw new ArgumentException($"{extra.Name} is a read-only reference: the team has no branch in it to merge");
@@ -234,7 +234,7 @@ public sealed partial class TeamRepos
         }
         var members = new List<TeamGitBranch>();
         // This team's: members/<team>/*, and an old-style members/<name> one only while a member is still on it (not moved
-        // yet). Every other old-style branch is in OldBranches alone, so the dialog shows each branch once (card 75).
+        // yet). Every other old-style branch is in OldBranches alone, so the dialog shows each branch once.
         var legacyInUse = LegacyBranchesInUse(repo.TeamId);
         foreach (var (branch, sha) in await TeamMemberBranchesAsync(repo.TeamId, team, path, legacyInUseOnly: true, ct))
         {
@@ -309,7 +309,7 @@ public sealed partial class TeamRepos
         var extra = string.IsNullOrWhiteSpace(repoName) ? null
             : ExtrasOf(teamId).FirstOrDefault(e => string.Equals(e.Name, repoName.Trim(), StringComparison.OrdinalIgnoreCase)); // none: "main"
         var name = extra?.Name ?? "main";
-        // Card 104: every team on this repository, not only this one. Their clones count for what is checked out, and a
+        // Every team on this repository, not only this one. Their clones count for what is checked out, and a
         // branch another team's member is recorded on (its live branch, an old-style members/<name> one before its move
         // too) is refused here, naming that team and member, whatever the person ticked.
         var users = RepoUsers(repo.Path);
@@ -317,7 +317,7 @@ public sealed partial class TeamRepos
             .Concat(users.Select(u => u.ClonePath)).Distinct(StringComparer.FromComparison(PathComparison)).ToList();
         var action = new Concierge.ActionRepo(name, repo.Path, repo.BaseBranch, clones);
         var git = new Concierge.ConciergeGit(Git, Pusher);
-        // Card 106 (F4): git on Windows and macOS finds a loose ref whatever its case, so the refusal below, the plan, its
+        // Git on Windows and macOS finds a loose ref whatever its case, so the refusal below, the plan, its
         // token and the delete all work on the exact ref name each requested one resolves to (an ambiguous one is refused).
         var (exact, refusals) = await git.ResolveBranchNamesAsync(repo.Path, branches.Distinct(), remote, ct);
         string? HeldElsewhere(string b) =>
@@ -339,7 +339,7 @@ public sealed partial class TeamRepos
                 var only = $"{name} ({repo.Path}), base {repo.BaseBranch}:\n{string.Join('\n', refusals)}";
                 return new TeamGitDelete(only, "", true, confirm is null ? null : "Nothing to delete.", false);
             }
-            // Card 171: with no names ("every merged branch") the same in-use check applies to each branch the plan considers.
+            // With no names ("every merged branch") the same in-use check applies to each branch the plan considers.
             var plan = await git.PlanDeleteAsync(action, allowed.Count > 0 ? allowed : branches, unmergedOk, remote, ct, HeldElsewhere,
                 (b, sha, token) => RecordBranchDeletedAsync(teamId, team, repo.Path, repo.BaseBranch, b, sha, token));
             if (refusals.Count > 0)

@@ -8,6 +8,7 @@ import { confirmDialog } from '../confirm';
 import FolderAccess from './FolderAccess.vue';
 import { agentClis } from '../agentClis';
 import { agentDefaultLabel } from '../agentArgs';
+import { modelOptions, modelOptionText, type ModelOption } from '../modelOptions';
 import GuardrailPanel from './GuardrailPanel.vue';
 import TeamNetworkAllows from './TeamNetworkAllows.vue';
 import Modal from './Modal.vue';
@@ -17,7 +18,7 @@ import { useBusy } from '../busy';
 import { useHostProblems } from '../hostChecks';
 
 // ⚙ Settings: General (CLI preset, model, credential, instructions) and Policy, and Guardrails (the guardrail check
-// under this agent's effective policy; the card's 🛡 opens it directly). Policy (B110), top to bottom: Folder access (the
+// under this agent's effective policy; the card's 🛡 opens it directly). Policy, top to bottom: Folder access (the
 // effective folders with their sources; Add folder is a confirmed loosening), the Effective policy per field (rows a save
 // changed are highlighted), "Advanced: tighten this member (override)" (collapsed; inherit toggles), and Loosen… for hosts
 // and limits. Each save says what it changed or "Nothing changed"; unsaved boxes say so, and closing asks "Discard?".
@@ -39,7 +40,7 @@ const busy = computed(() => work.any());
 const general = reactive({ cli: 'claude', model: '', credential: 'default', instructions: '' });
 const rows = reactive<Record<string, { inherit: boolean; text: string }>>({});
 const loosenText = reactive<Record<string, string>>({});
-// The Loosen… boxes: hosts and compute. Folders are added in the Folder access block (B110: one place to type a path).
+// The Loosen… boxes: hosts and compute. Folders are added in the Folder access block (one place to type a path).
 const LOOSEN_FIELDS = POLICY_FIELDS.filter((f) => f.loosen && !f.path.startsWith('filesystem.'));
 /** "Advanced: tighten this member (override)": open when the member has an override. */
 const advancedOpen = ref(false);
@@ -48,7 +49,8 @@ const preview = ref<string[] | null>(null);
 const loosenHostProblems = useHostProblems(api, () => (loosenText['network.allowHosts'] ?? '').split(/[\r\n,]+/));
 // The agents one can choose (built-ins then custom), the picked agent's default model and known models, and a live command line.
 const agentChoices = ref<AgentProfileRow[]>([]);
-const modelList = ref<string[]>([]);
+const modelOpts = ref<ModelOption[]>([]);
+const modelList = computed(() => modelOpts.value.map((o) => o.model));
 const cmdLines = ref<CommandLines | null>(null);
 const CUSTOM_MODEL = '__custom__';
 const modelPick = ref('');
@@ -64,8 +66,8 @@ function syncPick() {
 async function refreshAgentInfo() {
   try {
     const l = await api.call<AgentModelList>('agents.models', { cli: baseCli.value });
-    modelList.value = l.models;
-  } catch { modelList.value = []; }
+    modelOpts.value = modelOptions(l);
+  } catch { modelOpts.value = []; }
   syncPick();
   await refreshPreview();
 }
@@ -131,7 +133,7 @@ const loosenFieldDirty = (v: MemberPolicyView, f: FieldDef) => (loosenText[f.pat
 
 /**
  * Shows a view the core answered. `saved` names the section the save came from, whose boxes take the saved values; the
- * other sections keep what the person typed and did not save yet (B110: no edit is silently dropped).
+ * other sections keep what the person typed and did not save yet (no edit is silently dropped).
  */
 function applyView(v: MemberPolicyView, saved: 'all' | 'override' | 'loosen' | 'folders' = 'all') {
   const old = view.value;
@@ -146,7 +148,7 @@ function applyView(v: MemberPolicyView, saved: 'all' | 'override' | 'loosen' | '
   if (saved === 'all') advancedOpen.value = canon(v.override) !== canon({});
 }
 
-// B110: the save model. What is typed and not saved, per section; closing with any of it asks "Discard?".
+// The save model. What is typed and not saved, per section; closing with any of it asks "Discard?".
 const overrideDirty = computed(() => !!view.value && POLICY_FIELDS.some((f) => rowDirty(view.value!, f)));
 const loosenDirty = computed(() => !!view.value && LOOSEN_FIELDS.some((f) => loosenFieldDirty(view.value!, f)));
 // The Folder access block's typed path and pending confirm live here, not in the block: the Policy tab is v-if, and a
@@ -296,7 +298,7 @@ const loosenChanged = () => { preview.value = null; };
       <label>Model
         <select v-model="modelPick" data-test="member-model-pick" @change="onModelPick">
           <option value="">{{ agentDefaultLabel(agentDefault) }}</option>
-          <option v-for="m in modelList" :key="m" :value="m">{{ m }}</option>
+          <option v-for="o in modelOpts" :key="o.model" :value="o.model" :data-from="o.from || undefined">{{ modelOptionText(o) }}</option>
           <option :value="CUSTOM_MODEL">Custom…</option>
         </select>
         <input v-if="modelPick === CUSTOM_MODEL" v-model="general.model" placeholder="model name" data-test="member-model" @input="refreshPreview" />

@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Teams;
 
-/// <summary>Where a remote is hosted, read from its address: pull requests need a supported provider (B075), everything else works with any host.</summary>
+/// <summary>Where a remote is hosted, read from its address: pull requests need a supported provider, everything else works with any host.</summary>
 public class RepoHostTests
 {
     [Theory]
@@ -41,7 +41,7 @@ public class RepoHostTests
     {
         Assert.Null(RepoHost.PullRequestsUnavailable("main", "https://github.com/acme/app.git"));
         Assert.Contains("no remote", RepoHost.PullRequestsUnavailable("main", null));
-        // B075: GitLab and Azure DevOps have pull requests here too (glab, az repos); Bitbucket does not.
+        // GitLab and Azure DevOps have pull requests here too (glab, az repos); Bitbucket does not.
         Assert.Null(RepoHost.PullRequestsUnavailable("main", "https://gitlab.com/acme/app.git"));
         Assert.Null(RepoHost.PullRequestsUnavailable("main", "https://dev.azure.com/acme/proj/_git/app"));
         var bitbucket = RepoHost.PullRequestsUnavailable("main", "https://bitbucket.org/acme/app.git");

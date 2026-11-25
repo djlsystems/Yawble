@@ -39,7 +39,8 @@ public sealed class ConciergeReadTools(
     public static readonly IReadOnlyList<string> LocalOnly = ["backup_now"];
 
     public static readonly IReadOnlyList<string> Names =
-        ["backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "git_merge_preview", "integrations_status", "usage", "doctor", "backup_now"];
+        ["backlog_list", "backlog_item", "board_list", "board_card", "system_status", "team_git", "git_tidy_plan", "git_merge_preview", "integrations_status", "usage", "doctor", "backup_now",
+         "skills_list", "skills_get"];
 
     public static bool Handles(string name) => Names.Contains(name);
 
@@ -63,9 +64,36 @@ public sealed class ConciergeReadTools(
             "usage" => await UsageAsync(Optional(args, "team"), Int(args, "days") ?? 7, ct),
             "doctor" => await DoctorAsync(ct),
             "backup_now" => await BackupNowAsync(ct),
+            "skills_list" => SkillsList(),
+            "skills_get" => SkillGet(Required(args, "name")),
             _ => throw new ArgumentException($"unknown tool: {name}"),
         };
         return Scrub(text);
+    }
+
+    // ------------------------------------------------------------------------------------------------ skills
+
+    /// <summary>The skills offered to the Concierge: the built-ins that name it, and the person's global ones that do.</summary>
+    private IReadOnlyList<Skills.Skill> ConciergeSkills() => connectionString is null
+        ? Skills.SkillCatalog.BuiltInsForConcierge()
+        : new Skills.SkillCatalog(connectionString).OfferedToConcierge();
+
+    private string SkillsList()
+    {
+        var skills = ConciergeSkills();
+        if (skills.Count == 0) return "No skills are offered to you.";
+        var sb = new StringBuilder("Skills you can load with skills_get (load one before the work it describes):\n");
+        foreach (var s in skills) sb.AppendLine($"- {s.Name}: {s.Description}{(s.Kind == Skills.SkillKinds.Custom ? " (the person's own)" : "")}");
+        return sb.ToString().TrimEnd();
+    }
+
+    private string SkillGet(string name)
+    {
+        var wanted = name.Trim();
+        var skills = ConciergeSkills();
+        var skill = skills.FirstOrDefault(s => string.Equals(s.Name, wanted, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException($"no skill named '{wanted}' is offered to you. Offered: {(skills.Count == 0 ? "none" : string.Join(", ", skills.Select(s => s.Name)))}");
+        return skill.Body;
     }
 
     // ------------------------------------------------------------------------------------------------ doctor and backups
@@ -205,7 +233,7 @@ public sealed class ConciergeReadTools(
         sb.AppendLine($"Team {S(o, "team")}{(S(o, "member") is { Length: > 0 } m ? $", member {m}" : "")}; lane {S(o, "lane")}, status {S(o, "status")}" +
                       $"{(S(o, "item") is { Length: > 0 } item ? $"; from backlog {item}" : "")}{(S(o, "workflow") is { Length: > 0 } w ? $"; workflow {w}" : "")}");
         sb.AppendLine($"Created {S(o, "createdAt")}, updated {S(o, "updatedAt")}");
-        // B086: its overall time (created to its last Done) and where that time went, as the board shows it.
+        // Its overall time (created to its last Done) and where that time went, as the board shows it.
         if (o["time"] is JsonObject time)
         {
             var overall = time["overallMs"] is JsonValue ms && ms.TryGetValue<long>(out var n) ? n : 0;
@@ -264,7 +292,7 @@ public sealed class ConciergeReadTools(
         sb.AppendLine(toolLines.Count == 0 ? "Tool requests (tools agents asked the person to install): none."
             : $"Tool requests waiting for the person ({toolLines.Count}; Install is in Needs you in the app's window on this computer, not from here or the Cloud Link):");
         foreach (var l in toolLines) sb.AppendLine(l);
-        // Folders agents asked to read or write (B111): answered in Needs you, in the window or over the Cloud Link.
+        // Folders agents asked to read or write: answered in Needs you, in the window or over the Cloud Link.
         var folderLines = bus.FolderAsks?.PendingLines() ?? [];
         sb.AppendLine(folderLines.Count == 0 ? "Folder requests (folders agents asked to read or write): none."
             : $"Folder requests waiting for the person ({folderLines.Count}; they are answered in Needs you, in the window or over the Cloud Link, not from here):");
@@ -490,7 +518,7 @@ public sealed class ConciergeReadTools(
         (TidyClasses.Scratch, "scratch: only in a member's clone (the member's to delete; the app never changes a clone)"),
     ];
 
-    /// <summary>git_merge_preview (B073): the Git dialog's git.mergePreview text, built by the same function.</summary>
+    /// <summary>git_merge_preview: the Git dialog's git.mergePreview text, built by the same function.</summary>
     private async Task<string> MergePreviewAsync(string team, string? repo, CancellationToken ct)
     {
         var repos = bus.Repos ?? throw new ArgumentException("this app has no team repositories, so there is nothing to merge");
@@ -505,7 +533,7 @@ public sealed class ConciergeReadTools(
         }
     }
 
-    /// <summary>git_tidy_plan (B067): <see cref="TeamRepos.GitTidyPlanAsync"/> for the team (or every team), as text.</summary>
+    /// <summary>git_tidy_plan: <see cref="TeamRepos.GitTidyPlanAsync"/> for the team (or every team), as text.</summary>
     private async Task<string> TidyPlanAsync(string? team, CancellationToken ct)
     {
         var repos = bus.Repos ?? throw new ArgumentException("this app has no team repositories, so there is nothing to tidy");
@@ -584,7 +612,7 @@ public sealed class ConciergeReadTools(
         var compare = originBase ?? baseSha;
         var compareName = originBase is not null ? $"origin/{t.BaseBranch}" : t.BaseBranch;
 
-        // Pull requests are a hosting service's, not git's (B075): read for GitHub (gh), GitLab (glab) and Azure DevOps (az repos).
+        // Pull requests are a hosting service's, not git's: read for GitHub (gh), GitLab (glab) and Azure DevOps (az repos).
         var host = Yawble.Core.Teams.RepoHost.HostOf(origin);
         var provider = bus.Repos?.HostSettingOf(t.Team, t.Repo)?.Provider ?? Yawble.Core.Teams.RepoProviders.Detect(origin);
         var supported = Yawble.Core.Teams.PullRequestProviders.Supports(provider);
@@ -775,14 +803,14 @@ public sealed class ConciergeReadTools(
                ?? throw new ArgumentException($"there is no team '{name}'. Teams: {string.Join(", ", teams.Select(t => t.Name))}");
     }
 
+    /// <summary>A decision as the Concierge reads it: the summary or question, then the options' labels and replies.
+    /// An option with an action is answered by the person in the app (bus.answer optionIndex), never by the Concierge.</summary>
     private static string DecisionText(Message m)
     {
-        try
-        {
-            if (JsonNode.Parse(m.Payload) is JsonObject o && o["question"] is JsonValue v && v.TryGetValue<string>(out var s)) return s;
-        }
-        catch (JsonException) { }
-        return m.Payload;
+        var ask = Bus.DecisionAsk.Read(m.Payload);
+        if (ask.Options is not { Count: > 0 } options) return ask.Headline;
+        return ask.Headline + " Options: " + string.Join("; ", options.Select(o =>
+            $"\"{o.Label}\" (replies: {o.Reply}{(o.Action is null ? "" : "; changes a setting: the person picks this in the app")})"));
     }
 
     private static bool SecretKey(string key) =>
@@ -871,6 +899,9 @@ public sealed class ConciergeReadTools(
             ("team", "string", "Only this team (optional).", false), ("days", "integer", "How many days back (default 7, at most 365).", false));
         yield return Tool("doctor", "The app's health check (the list in Settings > Health): database, disk, sandbox, agent CLIs, Cloud Link, Connections, teams, logs; each OK, warning or failing, with its detail and the fixes it offers. Reads only; doctor_fix runs a fix when the person asks.");
         yield return Tool("backup_now", "Makes a backup of the app's database now (not over the Cloud Link). The person restores in Settings > General; you cannot restore.");
+        yield return Tool("skills_list", "The skills you can load: procedures for work you do now and then (e.g. 'scripts': building, checking, test-running and setting up scripts). Reads only.");
+        yield return Tool("skills_get", "Loads one skill's text (see skills_list). Load 'scripts' before you build, check, test-run, fix or add a script, or set up its Connections.",
+            ("name", "string", "The skill's name, e.g. scripts.", true));
     }
 
     private static JsonObject Tool(string name, string description, params (string Name, string Type, string Description, bool Required)[] parameters)

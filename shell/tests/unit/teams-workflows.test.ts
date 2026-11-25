@@ -2,6 +2,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it } from 'vitest';
 import App from '../../src/renderer/src/App.vue';
+import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
 import type { YawbleApi } from '../../src/shared/api';
 
 const wf = (id: number, state: string, busy: string[], lastAt: string) =>
@@ -84,7 +85,23 @@ describe("each team's card lists its recent workflows", () => {
     const w = await teamsPage();
     const pill = w.get('[data-test=nav-teams-count]');
     expect(pill.text()).toBe('2'); // two teams; one agent is running
-    expect(pill.attributes('title')).toBe('2 teams');
+    expect(pill.attributes('title')).toBe('2 teams, 1 running');
+    expect(pill.classes()).toContain('live'); // green and pulsing while a team has work running
+    w.unmount();
+  });
+
+  it('the Teams and Workflows badges go back to the usual colour when every team is idle', async () => {
+    const base = { view: 'teams', conversations: [], conversationId: null, teamId: null, slots: null, remote: false };
+    const w = mount(Sidebar, { props: { ...base, teams: [
+      { id: 1, name: 'a', repoPath: null, members: 2, running: 0, queued: 0 },
+      { id: 2, name: 'b', repoPath: null, members: 1, running: 0, queued: 1 },
+    ], openWorkflows: 3 } as any });
+    expect(w.get('[data-test=nav-teams-count]').classes()).not.toContain('live');
+    expect(w.get('[data-test=nav-teams-count]').attributes('title')).toBe('2 teams, all idle');
+    expect(w.get('[data-test=nav-workflows-count]').classes()).not.toContain('live');
+    await w.setProps({ teams: [{ id: 1, name: 'a', repoPath: null, members: 2, running: 1, queued: 0 }] });
+    expect(w.get('[data-test=nav-workflows-count]').classes()).toContain('live');
+    expect(w.get('[data-test=nav-workflows-count]').attributes('title')).toBe('3 open workflows, work running');
     w.unmount();
   });
 

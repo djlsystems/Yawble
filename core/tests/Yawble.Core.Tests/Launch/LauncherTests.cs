@@ -53,7 +53,8 @@ internal sealed class LaunchKit : IAsyncDisposable
     public static async Task<LaunchKit> StartAsync(int limit = 4, int idleSec = 60, int wallSec = 120, ICredentialModes? credentials = null,
         TempDb? db = null, IRunGatewayFactory? gateways = null, IRunTranscripts? transcripts = null, ISandboxBackend? realBackend = null,
         double speed = Speed, IReadOnlyList<string>? allowHosts = null, Func<IAgentRunner, LaunchHost, string, IAgentRunner>? wrapRunner = null,
-        ICliDetector? clis = null, Func<string, string?>? realPath = null)
+        ICliDetector? clis = null, Func<string, string?>? realPath = null, Func<int, RunTree?>? runTrees = null,
+        Yawble.Core.Agents.ICliModelSettings? cliSettings = null)
     {
         var ownsDb = db is null;
         db ??= new TempDb();
@@ -79,7 +80,10 @@ internal sealed class LaunchKit : IAsyncDisposable
         var defaults = new AgentDefaultsStore(db.ConnectionString);
         var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(db.ConnectionString), policies,
             credentials ?? new FakeCredentialModes(), gateways ?? fakeGateways, realBackend ?? backend, records, new RunRegistry(), clock,
-            transcripts: transcripts, agentDefaults: defaults);
+            transcripts: transcripts, agentDefaults: defaults,
+            // The scripted backend's pids are not real processes: never the real macOS process table behind them (a real
+            // backend keeps the launcher's own default).
+            runTrees: runTrees ?? (realBackend is null ? _ => null : null), cliSettings: cliSettings);
         // The app wraps the launcher's runner (TeamRepoRunner: the member's clone of the team repository).
         IAgentRunner runner = new SandboxAgentRunner(launcher);
         if (wrapRunner is not null) runner = wrapRunner(runner, host, db.ConnectionString);
@@ -144,6 +148,35 @@ public class LauncherTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static JsonElement Run(Message m) => JsonDocument.Parse(m.Payload).RootElement.GetProperty("run");
+
+    /// <summary>macOS: the run's own temp folder exists while the run runs and is gone after, however it ended.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public async Task AMacRunsTempFolderLivesExactlyAsLongAsTheRun(int exitCode)
+    {
+        if (!OperatingSystem.IsMacOS()) Assert.Skip("macOS: the per-user temp folder");
+        await using var kit = await LaunchKit.StartAsync();
+        string? tmpdir = null;
+        var existed = false;
+        kit.Backend.Script = (req, p) =>
+        {
+            if (LaunchKit.IsFor(req.ToJsonString(), "dev1"))
+            {
+                tmpdir = LaunchKit.Env(req)["TMPDIR"];
+                existed = Directory.Exists(tmpdir) && !Directory.EnumerateFileSystemEntries(tmpdir).Any();
+                File.WriteAllText(Path.Combine(tmpdir, "CoreFxPipe_left"), "");
+            }
+            p.Exit(exitCode);
+            return Task.CompletedTask;
+        };
+        await kit.Bus.PersonTellAsync("alpha", "dev1", "build it", ct: Ct);
+        await kit.OutcomeAsync("dev1");
+        Assert.NotNull(tmpdir);
+        Assert.Matches("/yr-[0-9a-f]{8}$", tmpdir);
+        Assert.True(existed, "made, empty, before the run");
+        Assert.False(Directory.Exists(tmpdir), "removed when the run ended");
+    }
 
     [Fact]
     public async Task AClaudeMemberRunsHeadlessWithOnlyThePlaceholderAndTheSeed()

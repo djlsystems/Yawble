@@ -4,8 +4,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Tester's gap tests for B028's detector (card 121): pure text only, no git and no real CLI.
-/// The rule (card 134): a hit is a LINE starting, after optional spaces and case-insensitive, with Co-Authored-By naming
+/// Tester's gap tests for the AI attribution detector: pure text only, no git and no real CLI.
+/// The rule: a hit is a LINE starting, after optional spaces and case-insensitive, with Co-Authored-By naming
 /// an AI, Claude-Session:, or an optional robot then "Generated with" an AI tool. Prose mid-line is not a hit.
 /// </summary>
 public class CommitAttributionGapTests
@@ -56,7 +56,7 @@ public class CommitAttributionGapTests
         Assert.Empty(CommitAttribution.Find("Subject\n\nCo-Authored-By: Devin Smith <devin.smith@example.com>\n"));
     }
 
-    // Card 121 re-check (0f8aa52): humans whose first name is shared with a tool pass; the tool's own accounts and
+    // Re-check (0f8aa52): humans whose first name is shared with a tool pass; the tool's own accounts and
     // names are caught. "Claude Dupont" is caught on purpose: the spec names Claude (the person accepted this).
     [Theory]
     [InlineData("Co-Authored-By: Devin Smith <devin.smith@example.com>")]

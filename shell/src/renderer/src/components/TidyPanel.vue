@@ -9,7 +9,7 @@ import BusyLabel from './BusyLabel.vue';
 import LocalMark from './LocalMark.vue';
 import { tidyLocalOnly } from '../localMark';
 
-// B067 (card 362): the Git dialog's "Tidy…". One plan (git.tidyPlan) of every branch of the team's repositories, grouped
+// The Git dialog's "Tidy…". One plan (git.tidyPlan) of every branch of the team's repositories, grouped
 // by class; the merged and contained ones are pre-selected, and one yes deletes them through git.deleteBranches (its own
 // plan shown first, its token confirms exactly that plan). A branch the member's clone moved (reset or rebased) has
 // Realign: old -> new commit, one yes, git.branchRealign (refused while the member runs, the reason shown). After each
@@ -31,7 +31,7 @@ const selectedCount = computed(() => requests.value.reduce((n, q) => n + q.branc
 const multiRepo = computed(() => (plan.value?.repos.length ?? 0) > 1);
 const short = (sha: string | null | undefined) => (sha ? sha.slice(0, 10) : '—');
 const baseOf = (repo: string) => plan.value?.repos.find((x) => x.repo === repo)?.baseBranch || null;
-/** B073: a repository has an origin when any of its branches is on origin; only then is a local-only branch "not pushed". */
+/** A repository has an origin when any of its branches is on origin; only then is a local-only branch "not pushed". */
 const withOrigin = computed(() => new Set((plan.value?.repos ?? []).filter((r) => r.branches.some((b) => b.where.includes('origin'))).map((r) => r.repo)));
 const notPushed = (r: TidyRow) => tidyLocalOnly(r.branch.where, withOrigin.value.has(r.repo));
 

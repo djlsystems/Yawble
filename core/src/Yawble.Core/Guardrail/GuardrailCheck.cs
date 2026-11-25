@@ -193,7 +193,7 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
 
     /// <summary>
     /// The check's own guard: the gateway forwarded nothing to a model vhost, so no credential was swapped in. The text
-    /// names the vhosts, not a number of requests: the log writes a run's successful model request once per vhost (B103),
+    /// names the vhosts, not a number of requests: the log writes a run's successful model request once per vhost,
     /// and usage_events has a row only for a POST whose response had a body, so neither counts every request.
     /// </summary>
     internal static GuardrailResult NoModelCall(IReadOnlyList<GatewayEvent> events)
@@ -381,7 +381,7 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
                 unix.Add(new JsonObject { ["id"] = id, ["category"] = "network", ["path"] = path });
                 plan.Expect[id] = new Expectation(Verdicts.Blocked);
             }
-        // Linux (B038): the nameservers slirp4netns gives the sandbox's network, asked directly by a raw DNS query, around
+        // Linux: the nameservers slirp4netns gives the sandbox's network, asked directly by a raw DNS query, around
         // resolv.conf: its forwarder 10.0.2.3 (which forwards to the host's own resolver) over UDP and TCP, and 10.0.2.2:53
         // (the host's loopback). The sandbox's proxy-only firewall must drop all three. Then the user's session bus: a
         // route to the host's systemd user manager and the Secret Service, even if nothing inside names it.

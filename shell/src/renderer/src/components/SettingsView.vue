@@ -33,7 +33,7 @@ const props = defineProps<{
 const emit = defineEmits<{ tab: [tab: SettingsTab]; connections: []; changed: []; link: [status: unknown] }>();
 const api = resolveApi(props.api);
 
-// A phone (B037): one section per screen. Settings opens at the list of its sections; a tap opens that section with a
+// A phone: one section per screen. Settings opens at the list of its sections; a tap opens that section with a
 // Back to the list above it. A link to a section (Settings → Agents, Needs You's reconnect) opens it at once.
 const phone = usePhone();
 const sectionOpen = ref(!(props.landing ?? true));
@@ -60,7 +60,7 @@ const tabs = computed(() => [
   { id: 'system' as const, label: 'System', test: 'open-system' },
 ]);
 /** Skills fills the page's height (its list and text scroll on their own); every other tab scrolls as a page. On a
- *  phone Skills scrolls as a page too (one scroll level, B054): the list, or the picked skill, in normal flow. */
+ *  phone Skills scrolls as a page too (one scroll level): the list, or the picked skill, in normal flow. */
 const fill = computed(() => props.tab === 'skills' && !phone.value);
 
 // General: the app's own settings, kept by the desktop app (not the core), so a cloud viewer has none to change.
@@ -167,7 +167,7 @@ async function set(patch: Partial<ShellSettings>) {
 .section-head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 10px; }
 .back { display: inline-flex; align-items: center; gap: 2px; border: 0; background: transparent; color: var(--accent); padding: 0 8px 0 0; font-size: 15px; }
 .back-icon { font-size: 22px; line-height: 1; margin-right: 2px; }
-/* B054: on a phone the section's header is one slim row that sticks to the top of the page's scroller (the only one),
+/* On a phone the section's header is one slim row that sticks to the top of the page's scroller (the only one),
    so "‹ Settings" stays in reach at the bottom of a long section (Guardrails). Its background hides what scrolls under. */
 .phone .section-head { position: sticky; top: 0; z-index: 2; flex-direction: row; align-items: center; gap: 6px; min-height: 44px;
   margin: 0 0 8px; background: var(--surface); border-bottom: 1px solid var(--line-soft); }

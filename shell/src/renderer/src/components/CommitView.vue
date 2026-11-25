@@ -8,11 +8,11 @@ import { differentCommitter, fileStatusWord, gitRequest, itsBranch, mergeLine, s
 import LoadingNote from './LoadingNote.vue';
 import LocalMark from './LocalMark.vue';
 
-// B072: one commit, explained (git.commitShow): what it is, where it is, the files it changed and their diffs
+// One commit, explained (git.commitShow): what it is, where it is, the files it changed and their diffs
 // (git.commitDiff, shown by the code browser's read-only DiffView), and three read-only actions. teams: where to look,
 // in order (the first whose repository has it). A commit git no longer has says so and why. A cloud viewer with
 // members' code hidden (codeShown=false) gets the commit and its file list only: no diff opens.
-// repo (B074): the repository a confirmed link named, in teams[0]; the other teams are asked about their main repository.
+// repo: the repository a confirmed link named, in teams[0]; the other teams are asked about their main repository.
 const props = defineProps<{ api?: YawbleApi; teams: string[]; sha: string; repo?: string | null }>();
 const repoOf = (t: string) => (props.repo && t === props.teams[0] ? { repo: props.repo } : {});
 const emit = defineEmits<{ done: [] }>();

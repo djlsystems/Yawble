@@ -68,7 +68,7 @@ public class SignInTests
     public void TheDetectedClaudeSignInIsTheFileTheGatewayReads(bool withConfigDir)
     {
         // The gateway's path is built for this OS (Path.Combine, the real home), so the detection runs as this OS too;
-        // macOS is the Keychain (pending, above). Linux is what the Fedora host ran.
+        // macOS is the Keychain (below). Linux is what the Fedora host ran.
         Assert.SkipWhen(OperatingSystem.IsMacOS(), "Claude Code on macOS keeps its sign-in in the Keychain");
         var os = OperatingSystem.IsWindows() ? TargetOs.Windows : TargetOs.Linux;
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -83,15 +83,183 @@ public class SignInTests
         Assert.False(AgentPresets.IsHostSignIn(CredentialMode.ClaudeGatewaySignIn)); // no sign-in grant in this mode
     }
 
+    /// <summary>
+    /// macOS Claude keeps its sign-in in the login Keychain item "Claude Code-credentials". Signed in = the item
+    /// exists; detection checks only that (no read of the secret, so no Keychain prompt), and nothing of it is a file to grant.
+    /// </summary>
     [Fact]
-    public void ClaudeOnMacOsIsPendingNotSilentlyMissing()
+    public void ClaudeOnMacOsIsSignedInWhenTheKeychainItemExists_CheckedWithoutReadingIt()
     {
-        // Even a fallback file on disk is not used: macOS Claude keeps its sign-in in the Keychain, which the app does not read.
+        var host = new FakeHost(TargetOs.MacOS, "/Users/alice");
+        host.Keychain.Set(ClaudeHostSession.KeychainService, "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-FAKE\"}}");
+        var s = SignInCatalog.Claude(host.Host());
+        Assert.Equal(SignInStatus.SignedIn, s.Status);
+        var entry = Assert.Single(s.Files);
+        Assert.Equal(("Claude Code-credentials", SignInAccess.HostStore, true), (entry.Path, entry.Access, entry.Present));
+        Assert.Empty(s.Environment); // no CLAUDE_SECURESTORAGE_CONFIG_DIR: nothing points a sandbox at it
+        Assert.Contains("login Keychain item \"Claude Code-credentials\"", s.Detail);
+        Assert.Contains("gateway", s.Detail);
+        Assert.DoesNotContain("sk-ant", s.Detail);
+        Assert.Equal(["Claude Code-credentials"], host.Keychain.Checks);
+        Assert.Empty(host.Keychain.Reads); // existence only
+        Assert.Empty(host.Reads);
+    }
+
+    /// <summary>
+    /// On a Mac the existence check is macOS's own tool, `/usr/bin/security find-generic-password -s
+    /// "Claude Code-credentials"` without -w: the password is never requested. Exit 44 is not signed in; another failure
+    /// (or a timeout) reads as not signed in too, without a throw. A fake tool here.
+    /// </summary>
+    [Fact]
+    public void ClaudeOnMacOsIsCheckedWithTheSecurityToolWithoutW()
+    {
+        var fake = new FakeHost(TargetOs.MacOS, "/Users/alice");
+        var env = new HostEnvironment(TargetOs.MacOS, "/Users/alice", [], [], new Dictionary<string, string>());
+        var tool = new Credentials.FakeSecurityTool().Set(ClaudeHostSession.KeychainService, "{\"claudeAiOauth\":{\"accessToken\":\"sk-ant-oat01-FAKE\"}}");
+        string Status() => SignInCatalog.Claude(new DetectionHost(env, fake, fake) { CredentialStore = new MacHostCredentialReader(tool) }).Status;
+
+        Assert.Equal(SignInStatus.SignedIn, Status());
+        Assert.Equal(["find-generic-password", "-s", "Claude Code-credentials"], Assert.Single(tool.Calls));
+        Assert.Equal(0, tool.Reads);
+
+        Assert.Equal(SignInStatus.NotSignedIn, SignInCatalog.Claude(new DetectionHost(env, fake, fake)
+            { CredentialStore = new MacHostCredentialReader(new Credentials.FakeSecurityTool()) }).Status); // exit 44
+        tool.Fails = (51, "");
+        Assert.Equal(SignInStatus.NotSignedIn, Status());
+        tool.Fails = null;
+        tool.TimesOut = true;
+        Assert.Equal(SignInStatus.NotSignedIn, Status());
+        Assert.Equal(0, tool.Reads);
+    }
+
+    [Fact]
+    public void ClaudeOnMacOsWithoutTheKeychainItemIsNotSignedIn_AndSaysHowToSignIn()
+    {
+        // A file on disk does not count: Claude Code on macOS keeps its sign-in in the Keychain.
         var host = new FakeHost(TargetOs.MacOS, "/Users/alice").File("/Users/alice/.claude/.credentials.json", "{}");
         var s = SignInCatalog.Claude(host.Host());
-        Assert.Equal(SignInStatus.Pending, s.Status);
-        Assert.Empty(s.Files);
-        Assert.Contains("Keychain", s.Detail);
+        Assert.Equal(SignInStatus.NotSignedIn, s.Status);
+        Assert.False(Assert.Single(s.Files).Present);
+        Assert.Contains("run 'claude' in your own terminal and sign in (/login)", s.Detail);
+        Assert.DoesNotContain("cannot run", s.Detail);
+        Assert.Empty(host.Keychain.Reads);
+    }
+
+    [Fact]
+    public void ClaudeOnMacOsDetectedOffAMac_NeverTouchesThisComputersStore()
+    {
+        // No fake given: off a Mac nothing real is looked up, so it reads as not signed in (on a Mac it would be the real Keychain).
+        Assert.SkipWhen(OperatingSystem.IsMacOS(), "on a Mac the default is the real login Keychain");
+        var fake = new FakeHost(TargetOs.MacOS, "/Users/alice");
+        var env = new HostEnvironment(TargetOs.MacOS, "/Users/alice", [], [], new Dictionary<string, string>());
+        var s = SignInCatalog.Claude(new DetectionHost(env, fake, fake));
+        Assert.Equal(SignInStatus.NotSignedIn, s.Status);
+        Assert.IsType<NoHostCredentialReader>(new DetectionHost(env, fake, fake).Keychain);
+    }
+
+    /// <summary>A fake auth.json as grok writes it: one entry keyed by issuer, an access token and a refresh token.</summary>
+    internal const string GrokAuthJson =
+        """{"https://auth.x.ai::00000000-0000-0000-0000-000000000000":{"access_token":"FAKE-grok-access","refresh_token":"FAKE-grok-refresh","auth_mode":"oauth"}}""";
+
+    private static readonly DateTimeOffset GrokNow = new(2026, 11, 22, 15, 0, 0, TimeSpan.Zero);
+
+    private static string GrokEntry(string fields) => """{"https://auth.x.ai::00000000-0000-0000-0000-000000000000":""" + fields + "}";
+
+    [Fact]
+    public void Grok_AuthJsonWithNoUsableToken_ReadsNotSignedIn_WithTheFix()
+    {
+        const string file = "/home/alice/.grok/auth.json";
+        var past = GrokNow.AddHours(-1).ToUnixTimeSeconds();
+        foreach (var (text, why) in new[]
+                 {
+                     ("{}", "holds no sign-in"),                                   // what grok has been seen to leave behind
+                     ("", "is empty or not a sign-in"),
+                     ("   ", "is empty or not a sign-in"),
+                     ("{not json", "is empty or not a sign-in"),
+                     ("[]", "is empty or not a sign-in"),
+                     (GrokEntry("""{"auth_mode":"oauth"}"""), "holds no sign-in"),  // an entry with no token
+                     (GrokEntry("""{"access_token":"","auth_mode":"oauth"}"""), "holds no sign-in"),
+                     (GrokEntry($$"""{"access_token":"FAKE-grok-old","expires_at":{{past}}}"""), "has expired and cannot be renewed"),
+                 })
+        {
+            var s = SignInCatalog.Grok(new FakeHost(TargetOs.Linux, "/home/alice").File(file, text).Host(), GrokNow);
+            Assert.Equal(SignInStatus.NotSignedIn, s.Status);
+            Assert.StartsWith(SignInCatalog.GrokNotSignedIn + ".", s.Detail);
+            Assert.Equal("Not signed in: run `grok` in your own terminal and sign in", SignInCatalog.GrokNotSignedIn);
+            Assert.Contains(why, s.Detail);
+            Assert.DoesNotContain("FAKE-grok", s.Detail);
+            Assert.True(Assert.Single(s.Files).Present); // the file is there; it just holds no sign-in
+            Assert.Equal(file, s.Environment["GROK_AUTH_PATH"]);
+        }
+        var missing = SignInCatalog.Grok(new FakeHost(TargetOs.Linux, "/home/alice").Host(), GrokNow);
+        Assert.Equal(SignInStatus.NotSignedIn, missing.Status);
+        Assert.StartsWith(SignInCatalog.GrokNotSignedIn + ". " + file + " is missing", missing.Detail);
+    }
+
+    [Fact]
+    public void Grok_AuthJsonWithAUsableToken_ReadsSignedIn()
+    {
+        const string file = "/home/alice/.grok/auth.json";
+        var past = GrokNow.AddHours(-1).ToUnixTimeSeconds();
+        var future = GrokNow.AddHours(1).ToUnixTimeSeconds();
+        foreach (var text in new[]
+                 {
+                     GrokAuthJson,
+                     GrokEntry($$"""{"access_token":"FAKE-grok-access","expires_at":{{future}}}"""),         // unexpired, no refresh token
+                     GrokEntry($$"""{"key":"FAKE-grok-key","expires_at":{{future}}}"""),                     // grok's "key" spelling
+                     GrokEntry($$"""{"access_token":"FAKE-grok-old","refresh_token":"FAKE-r","expires_at":{{past}}}"""), // renewable
+                     GrokEntry("""{"refresh_token":"FAKE-grok-refresh"}"""),                                 // a refresh token alone
+                     """{"access_token":"FAKE-grok-flat"}""",                                              // a flat file
+                 })
+        {
+            var s = SignInCatalog.Grok(new FakeHost(TargetOs.Linux, "/home/alice").File(file, text).Host(), GrokNow);
+            Assert.Equal(SignInStatus.SignedIn, s.Status);
+            Assert.StartsWith("Signed in on this computer (" + file + ")", s.Detail);
+            Assert.DoesNotContain("FAKE-", s.Detail);
+        }
+    }
+
+    [Fact]
+    public async Task Grok_TheGatewaysLastRefusal_ShowsOnTheTile_UntilASuccessOrANewSignIn()
+    {
+        const string file = "/home/alice/.grok/auth.json";
+        var auth = GrokAuthJson;
+        var inner = new FixedDetector(() => TestClis.Found("grok", Exe, ["/home/alice/.grok/downloads"], ["/home/alice/.grok"]) with
+        {
+            SignIn = SignInCatalog.Grok(new FakeHost(TargetOs.Linux, "/home/alice").File(file, auth).Host(), GrokNow),
+        });
+        var watch = new GrokSignInWatch();
+        var overlay = new GatewaySignInOverlay(inner, watch, path => path == file ? auth : null);
+        async Task<CliSignIn> Tile() => (await overlay.DetectAllAsync(Ct)).Single().SignIn!;
+
+        Assert.Equal(SignInStatus.SignedIn, (await Tile()).Status); // nothing refused yet
+
+        const string reason = "the Grok sign-in on this computer was refused by xAI: the app asked grok to renew it; if this repeats, run 'grok' in your own terminal and sign in";
+        watch.Refused(GrokNow, reason, GrokHome.Parse(auth));
+        var refused = await Tile();
+        Assert.Equal(SignInStatus.NotSignedIn, refused.Status);
+        Assert.StartsWith(SignInCatalog.GrokNotSignedIn + ". The app's last Grok request (", refused.Detail);
+        Assert.Contains("was refused: " + reason, refused.Detail);
+        Assert.DoesNotContain("FAKE-", refused.Detail);
+        Assert.Equal(file, Assert.Single(refused.Files).Path); // the rest of the sign-in is as detected
+        Assert.Equal(SignInStatus.NotSignedIn, (await overlay.DetectOneAsync("grok", Ct))!.SignIn!.Status); // one CLI's detection too
+
+        // A later success clears it.
+        watch.Succeeded();
+        Assert.Equal(SignInStatus.SignedIn, (await Tile()).Status);
+
+        // A refusal about a session auth.json no longer holds (the person signed in again) is not shown.
+        watch.Refused(GrokNow, reason, GrokHome.Parse(auth));
+        auth = GrokEntry("""{"access_token":"FAKE-grok-new","refresh_token":"FAKE-r2"}""");
+        Assert.Equal(SignInStatus.SignedIn, (await Tile()).Status);
+
+        // No gateway (the launcher is off): the detection as it is.
+        Assert.Equal(SignInStatus.SignedIn, (await new GatewaySignInOverlay(inner, null).DetectAllAsync(Ct)).Single().SignIn!.Status);
+    }
+
+    private sealed class FixedDetector(Func<DetectedCli> cli) : ICliDetector
+    {
+        public Task<IReadOnlyList<DetectedCli>> DetectAllAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<DetectedCli>>([cli()]);
     }
 
     [Fact]
@@ -104,7 +272,7 @@ public class SignInTests
                      (TargetOs.Windows, @"C:\Users\alice", @"C:\Users\alice\.grok\auth.json"),
                  })
         {
-            var s = SignInCatalog.Grok(new FakeHost(os, home).File(file, "{}").Host());
+            var s = SignInCatalog.Grok(new FakeHost(os, home).File(file, GrokAuthJson).Host());
             Assert.Equal(SignInStatus.SignedIn, s.Status);
             Assert.Equal(file, s.Environment["GROK_AUTH_PATH"]);
             Assert.Equal(SignInAccess.ReadOnly, Assert.Single(s.Files).Access);
@@ -117,7 +285,7 @@ public class SignInTests
         var host = new FakeHost(TargetOs.Linux, "/home/alice")
             .File("/home/alice/.grok/downloads/grok-1.0.77-linux-x86_64", FakeHost.Elf)
             .Link("/home/alice/.grok/bin/grok", "../downloads/grok-1.0.77-linux-x86_64")
-            .File("/home/alice/.grok/auth.json", "{}")
+            .File("/home/alice/.grok/auth.json", GrokAuthJson)
             .OnPath("/home/alice/.grok/bin");
         host.VersionOutput = "grok 1.0.77 (abc)";
         var grok = await new GrokDetector().DetectAsync(host.Host(), Ct);
@@ -126,7 +294,9 @@ public class SignInTests
         var claude = await new ClaudeDetector().DetectAsync(host.Host(), Ct);
         Assert.False(claude.Found);
         Assert.Equal(SignInStatus.NotSignedIn, claude.SignIn!.Status); // shown even when not installed
-        Assert.DoesNotContain(host.Reads, r => r.EndsWith("auth.json") || r.EndsWith(".credentials.json"));
+        // Grok's auth.json is read for whether it holds a token; Claude's sign-in never is.
+        Assert.DoesNotContain(host.Reads, r => r.EndsWith(".credentials.json"));
+        Assert.DoesNotContain("FAKE-grok", grok.SignIn.Detail);
     }
 
     // ------------------------------------------------------------------ grants
@@ -310,7 +480,7 @@ public class SignInTests
         var home = Path.Combine(root, "home");
         var auth = Path.Combine(home, ".grok", "auth.json"); // never created: grok is not signed in
         var clis = Clis(root, home,
-            claude: c => c with { SignIn = new CliSignIn(SignInStatus.Pending, SignInCatalog.MacClaudePending, [], new Dictionary<string, string>()) },
+            claude: c => c with { SignIn = new CliSignIn(SignInStatus.Pending, "The sandbox cannot use this CLI's sign-in on this OS (it is in the system keychain).", [], new Dictionary<string, string>()) },
             grok: g => g with { SignIn = FileSignIn(auth, "GROK_AUTH_PATH", auth) });
         await using var kit = await LaunchKit.StartAsync(db: db, clis: clis, credentials: new HostSignInModes());
         kit.Backend.Script = (_, p) => { p.Exit(0); return Task.CompletedTask; };
@@ -319,7 +489,7 @@ public class SignInTests
         var claude = await kit.OutcomeAsync("dev1");
         Assert.Equal(MessageTypes.Failed, claude.Type);
         Assert.Contains("cannot run here yet", claude.Payload);
-        Assert.Contains("Keychain", claude.Payload);
+        Assert.Contains("system keychain", claude.Payload);
         await kit.Bus.PersonTellAsync("alpha", "dev2", "hello", ct: Ct); // grok
         var grok = await kit.OutcomeAsync("dev2");
         Assert.Equal(MessageTypes.Failed, grok.Type);

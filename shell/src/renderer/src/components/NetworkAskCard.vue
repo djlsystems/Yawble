@@ -22,7 +22,7 @@ import { usePhone } from '../phone';
  */
 const props = defineProps<{ ask: NetworkAsk; api: YawbleApi; group?: NetworkAsk[] }>();
 const emit = defineEmits<{ answered: [answer: NetworkAnswer] }>();
-// A phone (B037): the card takes the full width and its buttons stack, each a full-width tap target.
+// A phone: the card takes the full width and its buttons stack, each a full-width tap target.
 const phone = usePhone();
 
 const CHOICES: { choice: NetworkAskChoice; label: string; busy: string; title: string }[] = [

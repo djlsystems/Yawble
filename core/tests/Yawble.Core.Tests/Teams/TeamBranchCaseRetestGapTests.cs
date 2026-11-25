@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B020 re-test / card 107 (tester's gap tests on card 106's F4 fix: Delete resolves each name to its exact ref, ignoring
+/// The tester's re-test of the F4 fix (Delete resolves each name to its exact ref, ignoring
 /// case, before every guard). None needs git's local transport: origin's side is a remote-tracking ref written with
 /// update-ref, origin itself is a path that does not exist (a tried push fails at once), and clones are folders whose
 /// .git/HEAD is a file.

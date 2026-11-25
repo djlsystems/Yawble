@@ -27,7 +27,7 @@ back, and what to do instead. Each one:
 
 - concrete and checkable: "Run `npm run build` in shell/ before any e2e spec: the specs load shell/out." - not
   "be careful with builds";
-- one sentence of why, with the reference: the workflow and the card, e.g. "(workflow 4568, card 467: the e2e
+- one sentence of why, with the reference: the workflow and the card, e.g. "(workflow 4568, card 46: the e2e
   specs failed 4 times on a stale shell/out)";
 - about this team's repository, tools and way of working, not about one member's mistake.
 

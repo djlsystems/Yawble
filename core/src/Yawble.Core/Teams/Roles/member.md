@@ -60,8 +60,9 @@ team (developer, tester, ...) is in your prompt when the Manager or the person g
   and the full path of anything the person may want to run. Also say the base commit your work was built on (the prompt
   names it; see `team-git`), and merge the base into your branch first when you are told it is behind.
 - If you cannot finish, call `blocked` with the reason. That is giving up, not finishing.
-- If the person must decide something, call `needs_decision` with the question; the answer arrives as a new
-  instruction.
+- If the person must decide something, call `needs_decision`: a `summary` first (the decision in one plain
+  sentence), the answers as `options` (2 to 4, each a `label` and the `reply` it sends), your findings in `details`.
+  Never number findings so they read as choices. The answer arrives as a new instruction.
 - You may `tell` only your Manager. Declare `workflow_complete` only if the person gave the instruction to you
   directly; otherwise hand back.
 

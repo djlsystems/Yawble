@@ -14,7 +14,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Guardrail;
 
 /// <summary>
-/// B038 (card 173): the routes to a resolver that slirp4netns opens and the user's session bus. On Linux the plan asks
+/// The routes to a resolver that slirp4netns opens and the user's session bus. On Linux the plan asks
 /// for a raw DNS query to slirp's forwarder 10.0.2.3:53 by UDP (dns.slirp-udp) and TCP (dns.slirp-tcp), to 10.0.2.2:53
 /// by UDP (dns.gateway-udp), and a connect to /run/user/&lt;uid&gt;/bus (dbus.user); each must be BLOCKED. The first
 /// tests use a scripted sandbox; the last ones run the real yawble-guardcheck against the test's own listeners.
@@ -106,7 +106,7 @@ public class GuardrailSlirpDnsProbeTests
             .ToList();
         var unix = Ids(seen, "unix").ToList();
         // The fake answers every attempt the way the plan expects on this OS, so the check passes wherever it runs.
-        // Card 209: on Fedora the older fake (a09113a) failed Passed without naming a probe. It answered only the wire
+        // On Fedora the older fake (a09113a) failed Passed without naming a probe. It answered only the wire
         // plan's lists, and those blocked/allowed without regard to the plan. So every attempt the probe makes on its
         // own (gateway.*, proc.host-*, credstore.dbus-*, display.*, secrets.scan) came back MISSING. The positive
         // controls (cli.read-program, cli.list-install:*) came back BLOCKED, and write.cli-program came back ALLOWED.

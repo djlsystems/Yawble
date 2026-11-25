@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 317 (verify card 316): gaps in phone-team-drawer.test.ts. The drawer's "Team <name>" group goes when the team
+// What phone-team-drawer.test.ts leaves out. The drawer's "Team <name>" group goes when the team
 // page is left for the Teams list (from a team page, not only before one opens) and for the Monitor / Documents pages;
 // it follows the open team when another team's page opens; widening to the desktop drops it and brings the header's
 // Documents and Workflows back. A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
@@ -81,7 +81,7 @@ async function groupInDrawer(w: VueWrapper): Promise<string | null> {
   return name;
 }
 
-describe('card 316 gaps: the drawer team group follows the open team page', () => {
+describe('the drawer team group follows the open team page', () => {
   it('goes when the team page is left for the Teams list, the Monitor or Documents', async () => {
     setWidth(375);
     const w = await mountApp();

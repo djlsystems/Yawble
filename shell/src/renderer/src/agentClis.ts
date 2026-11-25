@@ -13,3 +13,6 @@ export type AgentCliId = (typeof agentClis)[number]['id'];
 export const installable: readonly string[] = ['claude', 'grok', 'codex', 'copilot'];
 
 export const cliLabel = (id: string): string => agentClis.find((c) => c.id === id)?.label ?? id;
+
+/** The CLI's name without its maker ("Codex", "Claude Code"), as the core's DisplayName says it in "Your Codex settings". */
+export const cliName = (id: string): string => cliLabel(id).replace(/\s*\([^)]*\)\s*$/, '');

@@ -32,4 +32,22 @@ public class BusToolTextTests
 
     [Fact]
     public void ProgressStaysOneShortLine() => Assert.Contains("One short line", Param("progress", "status"));
+
+    /// <summary>needs_decision ties a question to a tester's FAIL (card, kind, reason); workflow_complete says it is refused over one.</summary>
+    [Fact]
+    public void NeedsDecisionTakesCardKindAndReason_AndWorkflowCompleteSaysAFailIsRefused()
+    {
+        Assert.Contains("tester's FAIL", Param("needs_decision", "card"));
+        Assert.Contains(Yawble.Core.Bus.DecisionActions.CloseOverFail, Param("needs_decision", "card"));
+        Assert.Contains("accept-fail", Param("needs_decision", "kind"));
+        Assert.Contains("wont-do", Param("needs_decision", "kind"));
+        Assert.Contains("Required for wont-do", Param("needs_decision", "reason"));
+        var nd = McpBusServer.ToolList().Select(n => n!.AsObject()).Single(o => o["name"]!.GetValue<string>() == "needs_decision");
+        var props = nd["inputSchema"]!["properties"]!;
+        Assert.Equal("integer", props["card"]!["type"]!.GetValue<string>());
+        Assert.Equal(["accept-fail", "wont-do"], props["kind"]!["enum"]!.AsArray().Select(a => a!.GetValue<string>()));
+        Assert.Empty(nd["inputSchema"]!["required"]!.AsArray());
+        var wc = McpBusServer.ToolList().Select(n => n!.AsObject()).Single(o => o["name"]!.GetValue<string>() == "workflow_complete");
+        Assert.Contains("tester hand-back is a FAIL unless the person said yes", wc["description"]!.GetValue<string>());
+    }
 }

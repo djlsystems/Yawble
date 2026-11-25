@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { askedAgo } from '../../src/renderer/src/companionAge';
 import { COMPANION_LEVEL_TEXT, levelsUpTo } from '../../src/renderer/src/companionLevels';
 import CompanionAsks from '../../src/renderer/src/components/CompanionAsks.vue';
 import CompanionPanel from '../../src/renderer/src/components/CompanionPanel.vue';
@@ -523,5 +524,50 @@ describe('companion styles', () => {
 describe('companion methods', () => {
   it('TheWindowMayCallCompanionMethods', () => {
     for (const m of ['companion.list', 'companion.status', 'companion.decidePairing', 'companion.decideAction', 'companion.actionStatus', 'companion.revoke']) expect(isUiMethod(m)).toBe(true);
+  });
+});
+
+// Each pending request shows how long ago it was asked; an old one is still listed, never hidden for its age.
+describe('CompanionAsks asked age', () => {
+  const now = Date.parse('2026-11-24T12:00:00Z');
+  const before = (ms: number) => new Date(now - ms).toISOString();
+
+  it('AgeText_MinutesHoursDaysAndAbsent', () => {
+    expect(askedAgo(before(20_000), now)).toBe('asked just now');
+    expect(askedAgo(before(3 * 60_000), now)).toBe('asked 3 min ago');
+    expect(askedAgo(before(2 * 3_600_000 + 5 * 60_000), now)).toBe('asked 2 h ago');
+    expect(askedAgo(before(26 * 3_600_000), now)).toBe('asked 1 day ago');
+    expect(askedAgo(before(2 * 86_400_000), now)).toBe('asked 2 days ago');
+    expect(askedAgo(undefined, now)).toBeNull();
+    expect(askedAgo('', now)).toBeNull();
+    expect(askedAgo('not a date', now)).toBeNull();
+  });
+
+  it('ARequestAskedTwoDaysAgoIsStillListedWithItsAge_AndCanBeApproved', async () => {
+    const asked = new Date(Date.now() - 2 * 86_400_000 - 60_000).toISOString();
+    const { api, calls } = fakeApi({
+      'companion.list': () => list({ actions: [{ ...action(), asked, expires: new Date(Date.now() - 86_400_000).toISOString() }] }),
+      'companion.decideAction': () => ({ id: 'a1', state: 'done', plan: 'x', result: null, nextId: null }),
+    });
+    const w = mount(CompanionAsks, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    const card = w.get('[data-test=companion-action]');
+    expect(card.get('[data-test=companion-asked]').text()).toBe('asked 2 days ago');
+    expect(card.get('[data-test=companion-asked]').attributes('title')).toBe(asked);
+    expect(card.text()).not.toMatch(/expire|in time/i);
+    const approve = card.get('[data-test=companion-approve]');
+    expect(approve.attributes('disabled')).toBeUndefined();
+    await approve.trigger('click');
+    await flushPromises();
+    expect(calls.find(c => c.method === 'companion.decideAction')?.params).toEqual({ id: 'a1', approve: true });
+    w.unmount();
+  });
+
+  it('NoAskedField_ShowsNoAge', async () => {
+    const { api } = fakeApi({ 'companion.list': () => list({ actions: [action()] }) });
+    const w = mount(CompanionAsks, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    expect(w.get('[data-test=companion-action]').find('[data-test=companion-asked]').exists()).toBe(false);
+    w.unmount();
   });
 });

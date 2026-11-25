@@ -334,6 +334,7 @@ public sealed class CloudLink : IAsyncDisposable
     private async Task ConnectLoopAsync(CancellationToken ct)
     {
         var delay = TimeSpan.FromSeconds(1);
+        var attempt = 0; // connections made by this loop, said when one ends
         while (!ct.IsCancellationRequested)
         {
             LinkSettings? s;
@@ -370,8 +371,9 @@ public sealed class CloudLink : IAsyncDisposable
                 continue;
             }
             delay = TimeSpan.FromSeconds(1);
+            attempt++;
             SetState("connected", null);
-            await ServeAsync(ws, s, ct).ConfigureAwait(false);
+            await ServeAsync(ws, s, ct, attempt, delay).ConfigureAwait(false);
             lock (_lock) { _viewers = []; _cloudVersion = null; }
             _sessionAccess.Clear();
             if (ct.IsCancellationRequested) return;
@@ -380,8 +382,18 @@ public sealed class CloudLink : IAsyncDisposable
         }
     }
 
-    private async Task ServeAsync(ClientWebSocket ws, LinkSettings s, CancellationToken ct)
+    /// <summary>
+    /// The Diagnostics line for a connection that ended: the exception, how long it lasted, which connection of this loop it was and
+    /// when the next is tried ("Cloud Link: connection ended (WebSocketException) after 42s, connection 3, reconnecting in 1s: reset").
+    /// <paramref name="reconnectIn"/> null: the app is stopping, nothing is retried.
+    /// </summary>
+    public static string ConnectionEndedText(Exception e, TimeSpan connected, int attempt, TimeSpan? reconnectIn) =>
+        FormattableString.Invariant($"Cloud Link: connection ended ({e.GetType().Name}) after {connected.TotalSeconds:0}s, connection {attempt}, ")
+        + (reconnectIn is { } d ? FormattableString.Invariant($"reconnecting in {d.TotalSeconds:0.#}s") : "not reconnecting (stopping)") + ": " + e.Message;
+
+    private async Task ServeAsync(ClientWebSocket ws, LinkSettings s, CancellationToken ct, int attempt = 1, TimeSpan? reconnectDelay = null)
     {
+        var connected = System.Diagnostics.Stopwatch.StartNew();
         var sendLock = new SemaphoreSlim(1, 1);
         var watching = 0;
         async Task Send(JsonObject message)
@@ -457,7 +469,13 @@ public sealed class CloudLink : IAsyncDisposable
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or JsonException or IOException)
         {
-            _log?.Invoke($"Cloud Link: connection ended: {e.Message}");
+            // the exception, how long the connection lasted, which connection it was and when the next is tried.
+            var delay = reconnectDelay ?? TimeSpan.FromSeconds(1);
+            var level = e is OperationCanceledException && ct.IsCancellationRequested ? Logs.LogLevels.Info : Logs.LogLevels.Warning;
+            var next = ct.IsCancellationRequested ? (TimeSpan?)null : delay;
+            Logs.Diag.Write(level, "link", ConnectionEndedText(e, connected.Elapsed, attempt, next),
+                ("exception", e.GetType().Name), ("ms", (long)connected.Elapsed.TotalMilliseconds), ("attempt", attempt),
+                ("delay_ms", next is { } d ? (long)d.TotalMilliseconds : null));
         }
         finally
         {
@@ -485,7 +503,7 @@ public sealed class CloudLink : IAsyncDisposable
     /// This computer's hello on the link: who it is, and what it understands. "caps": "access" says it enforces each
     /// call's "access" (a read-only viewer's change calls are refused here), so the site lets a Visitor open it;
     /// "summary" that it answers org.summary and pushes org.summaryChanged while watched; "logsTail" that it answers
-    /// logs.tail with logs.tailEntry pushes (B048). The site shows a computer without them as "update Yawble to appear here".
+    /// logs.tail with logs.tailEntry pushes. The site shows a computer without them as "update Yawble to appear here".
     /// </summary>
     internal static JsonObject Hello() => new()
     {
@@ -538,7 +556,7 @@ public sealed class CloudLink : IAsyncDisposable
             {
                 parameters?.Parent?.AsObject().Remove("params");
                 // The call runs as this viewer: what it records says the cloud, and who.
-                using var acting = Provenance.Actor.Use(Provenance.Actor.CloudViewer(user));
+                using var acting = Provenance.Actor.Use(Provenance.Actor.CloudViewer(user, access));
                 var result = await _dispatch(method, parameters, ct).ConfigureAwait(false);
                 // The remote view learns its access from the app info it already asks for (the window never sees this field).
                 if (method == "core.getInfo" && result is JsonObject info) info["remoteAccess"] = access;

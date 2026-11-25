@@ -44,7 +44,7 @@ public static class SignInStatus
     public const string SignedIn = "signed-in";
     public const string NotSignedIn = "not-signed-in";
 
-    /// <summary>The sandbox has no way to use this sign-in (macOS Claude: it is in the Keychain). Runs refuse with Detail.</summary>
+    /// <summary>The sandbox has no way to use this sign-in (Copilot and Antigravity off Windows: the system keychain). Runs refuse with Detail.</summary>
     public const string Pending = "pending";
 }
 
@@ -61,8 +61,10 @@ public static class SignInStatus
 /// &lt;dir&gt;/.credentials.json and nothing else from that folder; CLAUDE_CONFIG_DIR stays the member's own
 /// (settings, sessions, ~/.claude.json state). A prompt runs with only that file visible, read-only.
 /// ~/.claude.json (oauthAccount) is not needed for the sign-in.</item>
-/// <item>Claude Code (macOS): the sign-in is in the login Keychain ("Claude Code-credentials"); the sandbox has no
-/// Keychain access (seatbelt keychainAccess false), so Claude members do not run on macOS.</item>
+/// <item>Claude Code (macOS): the sign-in is in the login Keychain ("Claude Code-credentials", account = the user
+/// name). The sandbox has no Keychain access (seatbelt keychainAccess false) and is granted nothing of it: the gateway
+/// reads the item on the host with /usr/bin/security and keeps the token in memory (ClaudeGatewaySignIn, the only Claude
+/// sign-in mode on macOS). Detection checks only that the item exists (security find-generic-password without -w).</item>
 /// <item>Grok (all OS): GROK_AUTH_PATH = ~/.grok/auth.json (or $GROK_HOME/auth.json). GROK_HOME stays the member's
 /// own. grok keeps auth.json.lock beside it; it is not granted.</item>
 /// </list>
@@ -87,17 +89,28 @@ public static class SignInCatalog
     public const string ClaudeStoreVariable = "CLAUDE_SECURESTORAGE_CONFIG_DIR";
     public const string GrokAuthVariable = "GROK_AUTH_PATH";
 
-    public const string MacClaudePending =
-        "Claude Code keeps its sign-in in the macOS Keychain, which the sandbox cannot use without opening the whole login "
-        + "Keychain to every agent, so Claude members cannot run on macOS; Grok members can.";
+    public const string ClaudeSignInHow = "run 'claude' in your own terminal and sign in (/login)";
 
     public static CliSignIn Claude(DetectionHost h)
     {
+        // macOS: Claude Code keeps its sign-in in the login Keychain. Only the gateway uses it (it reads the item with /usr/bin/security,
+        // outside the sandbox); here only whether the item exists is checked, without reading the secret.
         if (h.Os == TargetOs.MacOS)
-            return new CliSignIn(SignInStatus.Pending, MacClaudePending, [], new Dictionary<string, string>());
+        {
+            var service = Credentials.ClaudeHostSession.KeychainService;
+            var present = h.Keychain.Targets(service).Any(t => string.Equals(t, service, StringComparison.Ordinal));
+            var entry = new CliSignInFile(service, SignInAccess.HostStore, present, "Claude Code's sign-in (macOS login Keychain)");
+            var where = $"the login Keychain item \"{service}\"";
+            return present
+                ? new CliSignIn(SignInStatus.SignedIn, $"Signed in on this computer ({where}). Agents use this sign-in through the app's gateway, "
+                    + "which reads it from the Keychain and adds it to each model request: agents never see it, and your own claude renews it.",
+                    [entry], new Dictionary<string, string>())
+                : new CliSignIn(SignInStatus.NotSignedIn, $"Not signed in: {where} is missing. To sign in, {ClaudeSignInHow}, then reopen this dialog.",
+                    [entry], new Dictionary<string, string>());
+        }
         var dir = h.FromVar("CLAUDE_CONFIG_DIR") ?? h.Combine(h.Home, ".claude");
         var file = h.Combine(dir, ".credentials.json");
-        var how = "run 'claude' in your own terminal and sign in (/login)";
+        var how = ClaudeSignInHow;
         // Claude Code on Windows moves the sign-in into Windows Credential Manager when Anthropic's rollout flag is on,
         // and deletes the file. The sandbox cannot use that store.
         if (h.Os == TargetOs.Windows)
@@ -108,14 +121,55 @@ public static class SignInCatalog
             "claude", how, gatewayHeld: true);
     }
 
-    public static CliSignIn Grok(DetectionHost h)
+    /// <summary>
+    /// Grok's tile when it is not signed in (auth.json missing, empty, `{}`, no token, or the gateway's last Grok request
+    /// refused): the start of <see cref="CliSignIn.Detail"/>, so the Grok Terminal can show the same words.
+    /// </summary>
+    public const string GrokNotSignedIn = "Not signed in: run `grok` in your own terminal and sign in";
+
+    /// <summary>auth.json is read at most this far (a real one is well under 4 KB).</summary>
+    public const int GrokAuthReadLimit = 256 * 1024;
+
+    /// <summary>
+    /// Grok: ~/.grok/auth.json (or $GROK_HOME/auth.json). Signed in only when the file holds a usable token: grok
+    /// leaves `{}` behind when xAI refuses its refresh, so a file that exists says nothing. The file is read here for
+    /// that alone; no value from it is kept or shown.
+    /// </summary>
+    public static CliSignIn Grok(DetectionHost h) => Grok(h, DateTimeOffset.UtcNow);
+
+    public static CliSignIn Grok(DetectionHost h, DateTimeOffset now)
     {
         var dir = h.FromVar("GROK_HOME") ?? h.Combine(h.Home, ".grok");
         var file = h.Combine(dir, "auth.json");
-        return Make([new CliSignInFile(file, GrokAuthAccess, h.Fs.FileExists(file), "Grok's sign-in (auth.json)")],
-            new Dictionary<string, string> { [GrokAuthVariable] = file },
-            "grok", "run 'grok login' in your own terminal", gatewayHeld: true);
+        var present = h.Fs.FileExists(file);
+        var entry = new CliSignInFile(file, GrokAuthAccess, present, "Grok's sign-in (auth.json)");
+        var env = new Dictionary<string, string> { [GrokAuthVariable] = file };
+        var state = present ? Credentials.GrokHome.Inspect(GrokAuthText(h, file), now) : Credentials.GrokAuthState.Missing;
+        if (state == Credentials.GrokAuthState.Usable)
+            return Make([entry], env, "grok", "", gatewayHeld: true);
+        var why = state switch
+        {
+            Credentials.GrokAuthState.Missing => $"{file} is missing",
+            Credentials.GrokAuthState.Unreadable => $"{file} is empty or not a sign-in grok can read",
+            Credentials.GrokAuthState.Expired => $"the sign-in in {file} has expired and cannot be renewed",
+            _ => $"{file} holds no sign-in (grok clears it when xAI refuses to renew it)",
+        };
+        return new CliSignIn(SignInStatus.NotSignedIn, $"{GrokNotSignedIn}. {Capital(why)}; then reopen this dialog.", [entry], env);
     }
+
+    /// <summary>The gateway's last Grok request was refused (<see cref="Gateway.GrokSignInWatch"/>): the tile says so, with the same fix.</summary>
+    public static CliSignIn GrokRefused(CliSignIn signIn, Gateway.GrokRefusal refusal) =>
+        signIn with
+        {
+            Status = SignInStatus.NotSignedIn,
+            Detail = $"{GrokNotSignedIn}. The app's last Grok request "
+                     + $"({refusal.At.ToLocalTime():yyyy-MM-dd HH:mm}) was refused: {refusal.Reason}.",
+        };
+
+    private static string? GrokAuthText(DetectionHost h, string file) =>
+        h.Fs.ReadHead(file, GrokAuthReadLimit) is { } bytes ? System.Text.Encoding.UTF8.GetString(bytes) : "";
+
+    private static string Capital(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
     /// <summary>The host's credential store, for the CLIs that keep their sign-in there (tests replace it).</summary>
     public static Credentials.IHostCredentialReader Store { get; set; } = Credentials.HostCredentials.ForThisHost();

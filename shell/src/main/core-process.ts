@@ -33,6 +33,19 @@ export function locateCore(repoRoot: string, resourcesPath: string | undefined, 
   return found.endsWith('.dll') ? { command: 'dotnet', args: [found] } : { command: found, args: [] };
 }
 
+/**
+ * The app's install folder (bin/ with yawble-bridge, roles/), passed to the core as --install-dir. YAWBLE_INSTALL_DIR
+ * wins; a packaged app uses its resources folder; in development it is <repo>/.devinstall/resources when that holds
+ * bin/yawble-bridge, so a dev app started at sign-in (without run-dev.cmd) still has its launcher.
+ */
+export function locateInstallDir(repoRoot: string, resourcesPath: string | undefined, env = process.env): string | undefined {
+  if (env.YAWBLE_INSTALL_DIR) return env.YAWBLE_INSTALL_DIR;
+  if (resourcesPath) return resourcesPath;
+  const dev = path.join(repoRoot, '.devinstall', 'resources');
+  const bridge = path.join(dev, 'bin', process.platform === 'win32' ? 'yawble-bridge.exe' : 'yawble-bridge');
+  return existsSync(bridge) ? dev : undefined;
+}
+
 /** A fresh per-launch address: a socket in a new 0700 folder, or a random pipe name on Windows. */
 export function newIpcAddress(): string {
   const id = randomBytes(8).toString('hex');

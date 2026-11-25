@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OUTPUT_MIN, followWindowHeight, outputHeight, setOutputHeight } from '../../src/renderer/src/agentOutputHeight';
 
-// Card 334: the remote view fits the screen after a rotation on iOS Safari. Playwright's WebKit keeps 100vh equal to the
+// The remote view fits the screen after a rotation on iOS Safari. Playwright's WebKit keeps 100vh equal to the
 // visible height, so what only iOS does is checked here in the sources: every full-height frame says 100dvh after its
 // 100vh (iOS's 100vh is the height with its toolbars hidden, taller than what shows), and the page keeps its text size
 // in landscape. The output boxes' limit (70% of the window's height) follows a resize.

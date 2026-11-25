@@ -97,13 +97,13 @@ desktop's side in `shell/src/renderer/src/embed.ts`):
 ```text
 CONTRACT (window.postMessage, both sides check event.origin === location.origin and event.source; anything else is ignored)
 Desktop to cloud: {type:'yawble.nav', version:1, nav} each time anything in it changes, and once on load. nav =
-  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Logs: the same ids/order as Sidebar.vue
-    teams:  [{id, name, dot:'idle'|'running'|'attention'|..., badge|null, active}],
+  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Scripts, Logs: the same ids/order as Sidebar.vue
+    teams:  [{id, name, dot:'idle'|'running'|'waiting'|'queued'|'paused'|'attention', badge|null, active}],
     canNewTeam: bool,
     chats:  [{id, title, active, busy:'deleting'|null, actions:[{id, label, danger}]}],
     runSlots: string|null,           // the line under the sidebar today
     readOnly: bool }                 // a Visitor's view
-  icon is a short key: newChat, concierge, teams, backlog, workflows, kanban, documents, monitor, logs; the cloud draws its own icon for a key it knows.
+  icon is a short key: newChat, concierge, teams, backlog, workflows, kanban, documents, monitor, scripts, logs; the cloud draws its own icon for a key it knows.
 Cloud to desktop: {type:'yawble.navigate', to:{kind:'place', id} | {kind:'team', id} | {kind:'chat', id} | {kind:'newTeam'} | {kind:'chatAction', id, action}} does exactly what the same click in the desktop sidebar does (including the confirm dialogs for a chat's actions, drawn inside the frame).
 Cloud to desktop: {type:'yawble.theme', theme}.
 Desktop to cloud: {type:'yawble.ready', version:1} once it listens.
@@ -113,7 +113,9 @@ The values the desktop sends:
 
 - **Places**, in this order, as `id` / `icon`: `newChat` / `newChat`, `concierge` / `concierge`, `teams` / `teams`,
   `backlog` / `backlog`, `workflows` / `workflows`, `board` / `kanban` (label Kanban board), `documents` /
-  `documents`, `monitor` / `monitor`, `logs` / `logs`. Settings is not a place. `badge` is a number: Teams has the
+  `documents`, `monitor` / `monitor`, `scripts` / `scripts` (the Scripts dialog; a Visitor reads the scripts, schemas and runs, and is not offered save, import, delete, schema save or test run), `logs` / `logs`. There is no Terminal and no Help place: an agent's terminal is in
+  its pane on the team page, and the version and help links are in Settings, which the cloud's own settings button
+  opens. Settings itself is not a place. `badge` is a number: Teams has the
   number of teams, Workflows the number of open workflows; otherwise, or when it is 0, `null`. `active` is the screen
   shown now; New chat and Logs are never active. `disabled` is `false`.
 - **Teams**: `id` is the team's number. `dot` is `running`, `queued`, `paused` or `idle`, as the sidebar's dot; the
@@ -182,8 +184,12 @@ still an agent's terminal window.
   "teams": [
     {
       "name": "web", "paused": false, "archived": false,
-      "agents": { "total": 4, "running": 1, "queued": 1, "idle": 1, "errored": 1, "stopped": 0 },
-      "running": [ { "member": "Manager", "role": "Manager", "doing": "card 7: plan the login page", "since": "2026-11-16T11:55:00Z" } ]
+      "agents": { "total": 5, "running": 1, "queued": 1, "waitsForRun": 1, "held": 0, "pending": 0, "idle": 1, "errored": 1, "stopped": 0, "waitingOnYou": 1 },
+      "running": [ { "member": "Manager", "role": "Manager", "doing": "card 7: plan the login page", "since": "2026-11-16T11:55:00Z" } ],
+      "waiting": [
+        { "member": "Ines", "state": "queued", "waitsFor": null },
+        { "member": "Wren", "state": "waits-for-run", "waitsFor": "Ines" }
+      ]
     }
   ],
   "workflows": [
@@ -214,11 +220,17 @@ still an agent's terminal window.
 
 - **computer**: the computer's name, `label` (its name on the cloud site; null when not attached), the Yawble version,
   the OS, when the core started and its uptime, the run slots in use and in total, and the runs waiting for a slot.
-- **teams**: every team, by name, paused or archived. `agents` counts its agents: `running`, `queued`, `idle`, and
+- **teams**: every team, by name, paused or archived. `agents` counts its agents: `running`; work not started, by why it waits
+  (`queued` only in the run queue, for a run slot; `waitsForRun` a hand-back held until the run that sent it ends; `held`
+  the team is paused or archived; `pending` anything else); `idle`, and
   `errored` (idle, and its last run failed; not also counted as idle), and `stopped` (idle agents whose last run the
-  person stopped: also counted in `idle`, never in `errored`; B097). `running` lists each running agent: member
+  person stopped: also counted in `idle`, never in `errored`). `waitingOnYou` counts the agents with an
+  open `needs_decision` for the person, whatever their state (older cores leave it out: read absent as 0). `running`
+  lists each running agent: member
   name, role (`Manager` or `Member`), what it is doing (its open card on the board, else its last status line) and
-  since when.
+  since when. `waiting` lists each agent with work not started: `member`, `state` (`queued` | `waits-for-run` |
+  `held` | `pending`, the agent card's state) and `waitsFor` (the member whose run must end first; only with
+  `waits-for-run`, else null).
 - **workflows**: every open workflow, and those that ended in the last 24 hours, newest activity first. `item` is the
   backlog item it came from (null when none). `cards` counts its cards on the board, done and in total. `owner` is
   the agent that owns it (its Manager). `state` is one of:
@@ -236,7 +248,7 @@ still an agent's terminal window.
   `completed` and `closed` are the ended states. Every other state, `failed` included, is open, so the workflow is
   listed however long ago its last activity was.
 
-  `time` (B086) is the workflow's overall time and where it went, the same object as on the `bus.workflows` item:
+  `time` is the workflow's overall time and where it went, the same object as on the `bus.workflows` item:
   `createdAt`, `startedAt`, `endedAt` and `endedHow` (null while open), `open`, `overallMs`, `rebuilt` (from history,
   for workflows from before time accounting) and `breakdown` (`[{ "category", "ms" }]`, whose ms add up to `overallMs`).
   It is null when the app has no board. The timeline itself is `timeline.get { "workflow": id }` (or `{ "card": id }`),
@@ -248,7 +260,7 @@ still an agent's terminal window.
   refused network calls, and the app's own diagnostics lines that report an error or a warning. Each has its source,
   team and member (null when the entry names none), time, `level` (`warning` or `error`) and a one-line message.
 
-Times are UTC, ISO 8601. A later version adds fields; it changes `summaryVersion` only when a field changes meaning
+Times are UTC, ISO 8601. New fields may be added; `summaryVersion` changes only when a field changes meaning
 or goes away.
 
 ### `org.summary.watch`, `org.summary.unwatch` and `org.summaryChanged`
@@ -282,17 +294,20 @@ The event carries the sections that changed, each in full:
 
 ### `logs.tail`, `logs.untail` and `logs.tailEntry`
 
-- `logs.tail {level: "default" | "all", team?: string, member?: string, app?: boolean}` starts pushing this computer's
+- `logs.tail {level: "default" | "all" | "debug", team?: string, member?: string, app?: boolean}` starts pushing this computer's
   new log entries, as they are written, to this viewer. `default` sends warning and error entries and workflow events;
-  `all` sends every level. `team` and `member` narrow it to one team or one member; `app: true` to the entries about
+  `all` sends every level but debug; `debug` sends debug entries (the Diagnostics log's routine lines) too. `team` and `member` narrow it to one team or one member; `app: true` to the entries about
   no team and no member.
-- The activity log carries every audit entry (B101). An entry about a member has its `team` and `member`; one about a
+- The activity log carries every audit entry. An entry about a member has its `team` and `member`; one about a
   whole team has `member: "<Team>"` (the team's name in angle brackets) and its `team`; one about the app itself
   (backlog, settings, the link, backups...) has `team: null, member: "app"`. A member filter takes that member's own
   entries only; a team filter takes its members' entries and its `<Team>` entries. `logs.query {source: "activity"}`
-  takes the same `team`, `member` and `app: true`, and `logs.sources` says which source offers `app`.
+  takes the same `team`, `member` and `app: true`, and `logs.sources` says which source offers `app`. Its rows carry
+  the `level` the tail gives the same entry, and `logs.query` takes `level` (`default`: every level but debug, `all`,
+  or one of `error`, `warning`, `info`, `debug`) for each source whose `logs.sources` entry says `levels: true`
+  (All activity and Diagnostics).
 - Each entry that passes the filter is pushed as the event `logs.tailEntry`, carrying one entry. `logs.query` rows
-  and `logs.tailEntry` entries are redacted the same way, by the same code as the window's Logs dialog: known secrets
+  and `logs.tailEntry` entries are redacted the same way, by the same code as the window's Logs page: known secrets
   and token-shaped text become `[redacted]`.
 - The filtering happens on the computer. Nothing is kept for the cloud beyond the logs the app already keeps, and with
   no viewer tailing nothing is done.

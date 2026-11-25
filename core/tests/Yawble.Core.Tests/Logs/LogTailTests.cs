@@ -267,7 +267,9 @@ public sealed class LogTailTests : IDisposable
     {
         using var db = new TempDb();
         var rpc = new LogRpc(new LogService(db.Dir, db.ConnectionString), NewTail());
-        var e = await Assert.ThrowsAsync<RpcException>(() => Call(rpc, Ada, "logs.tail", new JsonObject { ["level"] = "debug" }));
+        // "debug" is a level of its own now (every entry, debug too); anything else is refused.
+        Assert.Equal("debug", (await Call(rpc, Ada, "logs.tail", new JsonObject { ["level"] = "debug" }))!["level"]!.GetValue<string>());
+        var e = await Assert.ThrowsAsync<RpcException>(() => Call(rpc, Ada, "logs.tail", new JsonObject { ["level"] = "verbose" }));
         Assert.Equal("bad_params", e.Code);
         e = await Assert.ThrowsAsync<RpcException>(() => Call(rpc, Ada, "logs.tail", new JsonObject { ["member"] = "DeveloperAda" }));
         Assert.Equal("bad_params", e.Code);

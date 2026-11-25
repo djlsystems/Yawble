@@ -501,25 +501,28 @@ public class CompanionServiceTests : IDisposable
         var r = await rig.Service.CallAsync(cc, "team_archive", new JsonObject { ["team"] = "alpha", ["confirm"] = "0123456789abcdef" }, Ct);
         Assert.NotNull(r.RequestId);
         Assert.DoesNotContain(rig.Methods, m => m == "teams.archive");
-        var token = rig.Service.TokenOf(r.RequestId)!;
-        Assert.Matches("^[0-9a-f]{16}$", token);
-        Assert.DoesNotContain(token, r.Text);
+        // A request keeps the key its list was worked out from, never a token: the token is issued when the person approves.
+        Assert.NotNull(rig.Service.ListKeyOf(r.RequestId));
+        // A token of the companion's own book, for this tool: still nothing the client can use.
+        var token = rig.Service.Book.Issue(new ConciergeTurn("external:cc:" + r.RequestId, byPerson: true, remote: false), "team_archive", rig.Service.ListKeyOf(r.RequestId)!);
         Assert.DoesNotContain(token, rig.Service.ListForWindow().ToJsonString());
-        Assert.DoesNotContain(token, rig.Service.Status(cc, r.RequestId)!.ToString());
 
-        // Even with the real token, every path the client has makes a new request or is refused; nothing runs.
+        // Even with a real token, every path the client has makes a new request or is refused; nothing runs.
         var again = await rig.Service.CallAsync(cc, "team_archive", new JsonObject { ["team"] = "alpha", ["confirm"] = token }, Ct);
         Assert.NotNull(again.RequestId);
         Assert.NotEqual(r.RequestId, again.RequestId);
-        var status = await rig.Service.CallAsync(cc, "request_status", new JsonObject { ["id"] = r.RequestId, ["confirm"] = token }, Ct);
+        Assert.DoesNotContain(token, again.Text);
+        // The same tool and target: the newer request replaced the older one.
+        Assert.Equal(again.RequestId, rig.Service.Status(cc, r.RequestId)!.NextId);
+        var status = await rig.Service.CallAsync(cc, "request_status", new JsonObject { ["id"] = again.RequestId, ["confirm"] = token }, Ct);
         Assert.Contains("pending", status.Text);
         Assert.DoesNotContain(rig.Methods, m => m == "teams.archive");
         await Assert.ThrowsAsync<RpcException>(async () =>
         {
-            using (Actor.Use(Actor.ExternalClient("cc"))) await rig.Service.DecideActionAsync(r.RequestId, true, Ct);
+            using (Actor.Use(Actor.ExternalClient("cc"))) await rig.Service.DecideActionAsync(again.RequestId!, true, Ct);
         });
         Assert.DoesNotContain(rig.Methods, m => m == "teams.archive");
-        Assert.Equal(ActionState.Pending, rig.Service.Status(cc, r.RequestId)!.State);
+        Assert.Equal(ActionState.Pending, rig.Service.Status(cc, again.RequestId!)!.State);
         // The stored args never kept the client's confirm.
         Assert.DoesNotContain("0123456789abcdef", rig.Service.ListForWindow().ToJsonString());
     }
@@ -602,20 +605,28 @@ public class CompanionServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task AnExpiredRequestRunsNothing()
+    public async Task ARequestUndecidedForSevenDaysExpires_AndRunsNothing()
     {
         var rig = await MakeRigAsync();
         var cc = rig.Client("cc", CompanionLevel.Destructive);
+        Assert.Equal(TimeSpan.FromDays(7), CompanionService.ActionCap);
         var r = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
         Assert.Equal(1, rig.Service.PendingCount);
 
-        rig.Clock.Now += CompanionService.ActionLife + TimeSpan.FromSeconds(1);
+        // Long past a token's life, short of the cap: still pending, still in the window's list.
+        rig.Clock.Now += CompanionService.ActionCap - TimeSpan.FromSeconds(1);
+        Assert.Equal(1, rig.Service.PendingCount);
+        Assert.Single(rig.Service.ListForWindow()["actions"]!.AsArray());
+        Assert.Equal(ActionState.Pending, rig.Service.Status(cc, r.RequestId!)!.State);
+
+        rig.Clock.Now += TimeSpan.FromSeconds(1);
         Assert.Equal(0, rig.Service.PendingCount);
         Assert.Empty(rig.Service.ListForWindow()["actions"]!.AsArray());
-        Assert.Equal(ActionState.Expired, rig.Service.Status(cc, r.RequestId!)!.State);
+        var expired = rig.Service.Status(cc, r.RequestId!)!;
+        Assert.Equal(ActionState.Expired, expired.State);
+        Assert.Equal("expired: not decided within 7 days", expired.Result);
         Assert.Equal(ActionState.Expired, (await rig.Approve(r.RequestId!)).State);
         Assert.DoesNotContain(rig.Methods, m => m == "teams.delete");
-        Assert.Equal(ConfirmationBook.Life - TimeSpan.FromSeconds(5), CompanionService.ActionLife);
     }
 
     [Fact]
@@ -1425,12 +1436,13 @@ public class CompanionServiceTests : IDisposable
         var entered = 0;
         rig.OnRoute = async (method, _) =>
         {
-            if (method != "ops.backups") return;
+            if (method != "git.status") return;
             Interlocked.Increment(ref entered);
             await gate.Task;
         };
+        // Each on its own target (a request of the same tool and target would replace the older one instead).
         var calls = Enumerable.Range(0, 15)
-            .Select(_ => Task.Run(() => rig.Service.CallAsync(cc, "backup_restore", new JsonObject { ["backup"] = "daily-20261110.db" }, Ct))).ToList();
+            .Select(i => Task.Run(() => rig.Service.CallAsync(cc, "git_push_branch", new JsonObject { ["team"] = "alpha", ["branch"] = $"members/m{i}" }, Ct))).ToList();
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
         while (Volatile.Read(ref entered) < 15 && DateTime.UtcNow < deadline) await Task.Delay(10, Ct);
         Assert.Equal(15, Volatile.Read(ref entered)); // every call passed the first check while none was stored
@@ -1442,31 +1454,217 @@ public class CompanionServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ARequestExpiresBeforeItsToken_SoALateApprovalSaysExpiredNotChanged()
+    public async Task ALateApprovalRunsWhenNothingChanged_TheTokenIsIssuedAtApproval()
     {
         var rig = await MakeRigAsync();
         var cc = rig.Client("cc", CompanionLevel.Destructive);
-        Assert.Equal(ConfirmationBook.Life - TimeSpan.FromSeconds(5), CompanionService.ActionLife);
 
-        // At its last moment the request is still pending, and an approval then still redeems its token (Done, not Changed).
-        var edge = await rig.Service.CallAsync(cc, "team_archive", new JsonObject { ["team"] = "alpha" }, Ct);
-        rig.Clock.Now += CompanionService.ActionLife - TimeSpan.FromMilliseconds(1);
-        Assert.Equal(ActionState.Pending, rig.Service.Status(cc, edge.RequestId!)!.State);
-        rig.OnActions = () => rig.Clock.Now += TimeSpan.FromSeconds(3); // the run starts: a slow one, before it redeems the token
-        var ran = await rig.Approve(edge.RequestId!);
-        rig.OnActions = null;
+        // Approved after 10 minutes (past a token's life) and after 2 days: the list is worked out again, it is the same, it runs.
+        var archive = await rig.Service.CallAsync(cc, "team_archive", new JsonObject { ["team"] = "alpha" }, Ct);
+        rig.Clock.Now += TimeSpan.FromMinutes(10);
+        Assert.True(TimeSpan.FromMinutes(10) >= ConfirmationBook.Life);
+        Assert.Equal(ActionState.Pending, rig.Service.Status(cc, archive.RequestId!)!.State);
+        var ran = await rig.Approve(archive.RequestId!);
         Assert.Equal(ActionState.Done, ran.State);
         Assert.Null(ran.NextId);
         Assert.Single(rig.Ui, u => u.Method == "teams.archive");
 
-        // Inside the token's life but past the request's: the request has expired; nothing runs, no new list is made.
-        var late = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
-        rig.Clock.Now += ConfirmationBook.Life - TimeSpan.FromSeconds(2);
-        Assert.Equal(ActionState.Expired, rig.Service.Status(cc, late.RequestId!)!.State);
-        var s = await rig.Approve(late.RequestId!);
-        Assert.Equal(ActionState.Expired, s.State);
-        Assert.Null(s.NextId);
+        var delete = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
+        rig.Clock.Now += TimeSpan.FromDays(2);
+        Assert.Equal(1, rig.Service.PendingCount);
+        var made = 0;
+        rig.OnActions = () => Interlocked.Increment(ref made);
+        var deleted = await rig.Approve(delete.RequestId!);
+        rig.OnActions = null;
+        Assert.Equal(2, made); // the approval worked the list out again (its token issued then), then redeemed it in a later turn
+        Assert.Equal(ActionState.Done, deleted.State);
+        Assert.Null(deleted.NextId);
+        Assert.Equal("alpha", Assert.Single(rig.Ui, u => u.Method == "teams.delete").P!["confirm"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ALateApprovalAfterTheTeamMovedNeverRunsTheOldPlan_WithoutGit()
+    {
+        var rig = await MakeRigAsync();
+        var cc = rig.Client("cc", CompanionLevel.Destructive);
+        foreach (var wait in new[] { TimeSpan.FromMinutes(10), TimeSpan.FromDays(2) })
+        {
+            var before = (await rig.Bus.TeamsAsync(Ct)).Single(t => t.Name == "alpha");
+            var r = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
+            rig.Clock.Now += wait;
+            // While it waited, alpha was deleted and a new team of that name made: the plan was for the old team.
+            await rig.Bus.DeleteTeamAsync("alpha", Ct);
+            await rig.Bus.CreateTeamAsync("alpha", "Manager", "claude", null, Ct);
+            Assert.NotEqual(before.Id, (await rig.Bus.TeamsAsync(Ct)).Single(t => t.Name == "alpha").Id);
+
+            var changed = await rig.Approve(r.RequestId!);
+            Assert.Equal(ActionState.Changed, changed.State);
+            Assert.Equal($"the list changed before approval; request {changed.NextId} shows the new list", changed.Result);
+            Assert.DoesNotContain(rig.Methods, m => m == "teams.delete");
+            Assert.Equal(ActionState.Pending, rig.Service.Status(cc, changed.NextId!)!.State);
+            Assert.NotEqual(rig.Service.ListKeyOf(r.RequestId!), rig.Service.ListKeyOf(changed.NextId!));
+            // Denied, so the next round starts clean.
+            Assert.Equal(ActionState.Denied, (await rig.Approve(changed.NextId!, approve: false)).State);
+        }
+    }
+
+    [Fact]
+    public async Task ALateApprovalOfAListThatMovedNeverRunsTheOldList_ItBecomesANewRequest()
+    {
+        var rig = await MakeRigAsync(git: true);
+        var cc = rig.Client("cc", CompanionLevel.Destructive);
+        var n = 0;
+        foreach (var wait in new[] { TimeSpan.FromMinutes(10), TimeSpan.FromDays(2) })
+        {
+            n++;
+            Branch($"members/a{n}", merged: true);
+            var r = await rig.Service.CallAsync(cc, "git_branches_delete", new JsonObject { ["team"] = "alpha" }, Ct);
+            Assert.Contains($"members/a{n}", r.Text);
+            rig.Clock.Now += wait;
+            Branch($"members/b{n}", merged: true); // the state moved while the request waited
+
+            var changed = await rig.Approve(r.RequestId!);
+            Assert.Equal(ActionState.Changed, changed.State);
+            Assert.Equal($"the list changed before approval; request {changed.NextId} shows the new list", changed.Result);
+            Assert.True(Has($"members/a{n}") && Has($"members/b{n}")); // the old list never ran
+            var next = rig.Service.Status(cc, changed.NextId!)!;
+            Assert.Equal(ActionState.Pending, next.State);
+            Assert.Contains($"members/b{n}", next.Plan);
+
+            // The new request, approved later while nothing moves, runs.
+            rig.Clock.Now += wait;
+            Assert.Equal(ActionState.Done, (await rig.Approve(changed.NextId!)).State);
+            Assert.False(Has($"members/a{n}") || Has($"members/b{n}"));
+        }
+
+        // A SHA-bound plan approved 2 days later after its branch moved: a new request, nothing pushed.
+        var sha1 = Branch("members/ines", merged: false);
+        rig.GitStatus["members"] = new JsonArray(new JsonObject { ["branch"] = "members/ines", ["sha"] = sha1, ["aheadOfBase"] = 1, ["inTeamBranch"] = false });
+        var push = await rig.Service.CallAsync(cc, "git_push_branch", new JsonObject { ["team"] = "alpha", ["branch"] = "members/ines" }, Ct);
+        rig.Clock.Now += TimeSpan.FromDays(2);
+        rig.GitStatus["members"]![0]!["sha"] = "3333333333333333333333333333333333333333";
+        var pushed = await rig.Approve(push.RequestId!);
+        Assert.Equal(ActionState.Changed, pushed.State);
+        Assert.Equal("", Run(Origin, "branch", "--list", "members/ines"));
+    }
+
+    [Fact]
+    public async Task ANewerRequestOfTheSameToolAndTargetReplacesTheOlder()
+    {
+        var rig = await MakeRigAsync();
+        var cc = rig.Client("cc", CompanionLevel.Destructive);
+        var other = rig.Client("other", CompanionLevel.Destructive);
+        await rig.Bus.CreateTeamAsync("beta", "Manager", "claude", null, Ct);
+
+        var first = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
+        var archive = await rig.Service.CallAsync(cc, "team_archive", new JsonObject { ["team"] = "alpha" }, Ct); // another tool
+        var beta = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "beta" }, Ct); // another target
+        var theirs = await rig.Service.CallAsync(other, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct); // another client
+        Assert.Equal(4, rig.Service.PendingCount);
+
+        var second = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "ALPHA" }, Ct);
+        Assert.NotNull(second.RequestId);
+        var old = rig.Service.Status(cc, first.RequestId!)!;
+        Assert.Equal(ActionState.Changed, old.State);
+        Assert.Equal($"replaced by {second.RequestId}", old.Result);
+        Assert.Equal(second.RequestId, old.NextId);
+        Assert.Contains($"the new request is {second.RequestId}", (await rig.Service.CallAsync(cc, "request_status", new JsonObject { ["id"] = first.RequestId }, Ct)).Text);
+        Assert.Equal(4, rig.Service.PendingCount);
+        foreach (var kept in new[] { archive, beta })
+            Assert.Equal(ActionState.Pending, rig.Service.Status(cc, kept.RequestId!)!.State);
+        Assert.Equal(ActionState.Pending, rig.Service.Status(other, theirs.RequestId!)!.State);
+        Assert.Contains(AuditRows(rig), x => x.Method == "companion.team_delete" && x.Outcome == $"replaced (request {first.RequestId}) by request {second.RequestId}");
+
+        // The replaced one cannot be approved into a run; the window's list shows only the newer one.
+        Assert.Equal(ActionState.Changed, (await rig.Approve(first.RequestId!)).State);
         Assert.DoesNotContain(rig.Methods, m => m == "teams.delete");
+        Assert.DoesNotContain(rig.Service.ListForWindow()["actions"]!.AsArray(), a => a!["id"]!.GetValue<string>() == first.RequestId);
+
+        // At the cap, a call that replaces one of its own is still taken (the cap counts what stays waiting).
+        for (var i = 0; i < CompanionService.MaxPendingPerClient - 3; i++)
+            Assert.NotNull((await rig.Service.CallAsync(cc, "team_create", new JsonObject { ["name"] = $"g{i}" }, Ct)).RequestId);
+        var full = await rig.Service.CallAsync(cc, "team_create", new JsonObject { ["name"] = "gamma" }, Ct);
+        Assert.True(full.IsError);
+        Assert.Contains("request_cancel", full.Text);
+        var third = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
+        Assert.False(third.IsError, third.Text);
+        Assert.Equal(second.RequestId, rig.Service.Status(cc, second.RequestId!)!.Id);
+        Assert.Equal(third.RequestId, rig.Service.Status(cc, second.RequestId!)!.NextId);
+    }
+
+    [Fact]
+    public async Task TheClientCancelsItsOwnPendingRequest_NothingRuns()
+    {
+        var rig = await MakeRigAsync();
+        var cc = rig.Client("cc", CompanionLevel.Destructive);
+        var other = rig.Client("other", CompanionLevel.Destructive);
+        var r = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
+
+        // Another client cannot cancel it.
+        var refused = await rig.Service.CallAsync(other, "request_cancel", new JsonObject { ["id"] = r.RequestId }, Ct);
+        Assert.True(refused.IsError);
+        Assert.Equal(ActionState.Pending, rig.Service.Status(cc, r.RequestId!)!.State);
+
+        var cancelled = await rig.Service.CallAsync(cc, "request_cancel", new JsonObject { ["id"] = r.RequestId }, Ct);
+        Assert.False(cancelled.IsError, cancelled.Text);
+        Assert.Contains("denied", cancelled.Text);
+        Assert.Contains("cancelled by the client", cancelled.Text);
+        Assert.Equal(0, rig.Service.PendingCount);
+        Assert.Equal(ActionState.Denied, (await rig.Approve(r.RequestId!)).State);
+        Assert.DoesNotContain(rig.Methods, m => m == "teams.delete");
+        Assert.Contains(AuditRows(rig), x => x.Method == "companion.team_delete" && x.Client == "cc" && x.Outcome == $"cancelled by the client (request {r.RequestId})");
+
+        // A request already decided is left as it is.
+        var done = await rig.Service.CallAsync(cc, "team_archive", new JsonObject { ["team"] = "alpha" }, Ct);
+        Assert.Equal(ActionState.Done, (await rig.Approve(done.RequestId!)).State);
+        Assert.Contains("done", (await rig.Service.CallAsync(cc, "request_cancel", new JsonObject { ["id"] = done.RequestId }, Ct)).Text);
+        Assert.Equal(ActionState.Done, rig.Service.Status(cc, done.RequestId!)!.State);
+        // request_cancel is offered at every level (it only withdraws the client's own request).
+        Assert.Contains("request_cancel", Names(CompanionTools.Definitions(CompanionLevel.Read)));
+    }
+
+    [Fact]
+    public async Task CompanionListShowsWhenEachRequestWasAsked_AndAnUnknownIdSaysTheAppRestarted()
+    {
+        var rig = await MakeRigAsync();
+        var cc = rig.Client("cc", CompanionLevel.Destructive);
+        var asked = rig.Clock.Now;
+        var first = await rig.Service.CallAsync(cc, "team_delete", new JsonObject { ["team"] = "alpha" }, Ct);
+        rig.Clock.Now += TimeSpan.FromHours(3);
+        var later = rig.Clock.Now;
+        var second = await rig.Service.CallAsync(cc, "team_archive", new JsonObject { ["team"] = "alpha" }, Ct);
+        rig.Clock.Now += TimeSpan.FromDays(1);
+
+        JsonObject listed;
+        using (Actor.Use(Actor.Window)) listed = (JsonObject)(await new CompanionRpc(rig.Service, () => []).DispatchAsync("companion.list", null, Ct))!;
+        var actions = listed["actions"]!.AsArray();
+        Assert.Equal(new[] { first.RequestId, second.RequestId }, actions.Select(a => a!["id"]!.GetValue<string>()));
+        string Iso(DateTimeOffset t) => t.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(Iso(asked), actions[0]!["asked"]!.GetValue<string>());
+        Assert.Equal(Iso(asked + CompanionService.ActionCap), actions[0]!["expires"]!.GetValue<string>());
+        Assert.Equal(Iso(later), actions[1]!["asked"]!.GetValue<string>());
+        Assert.Equal(2, rig.Service.PendingCount); // a day old: still waiting on the person
+
+        // Requests are in memory: after a restart the client is told so.
+        var gone = await rig.Service.CallAsync(cc, "request_status", new JsonObject { ["id"] = "r0123456789ab" }, Ct);
+        Assert.True(gone.IsError);
+        Assert.Contains("ended: the app restarted", gone.Text);
+        Assert.Equal(CompanionService.RestartedResult, "ended: the app restarted");
+    }
+
+    [Fact]
+    public void NoToolDescriptionGivesExpiryAsTheNormalOutcome()
+    {
+        foreach (var level in new[] { CompanionLevel.Read, CompanionLevel.Destructive })
+            foreach (var def in CompanionTools.Definitions(level))
+            {
+                var description = def!["description"]!.GetValue<string>();
+                Assert.DoesNotContain("nobody approved it in time", description);
+            }
+        var status = CompanionTools.Definitions(CompanionLevel.Read).Single(d => d!["name"]!.GetValue<string>() == "request_status")!["description"]!.GetValue<string>();
+        Assert.Contains("pending until the person approves or denies it", status);
+        Assert.Contains("7 days", status);
+        Assert.Contains("the app restarts", status);
     }
 
     [Fact]

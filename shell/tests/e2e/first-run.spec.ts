@@ -209,7 +209,7 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     await expect(main.locator('[data-test=team-item]')).toHaveCount(2);
 
     // Add and remove an agent.
-    // B076: the New member tile, last in the member grid, opens the add form.
+    // The New member tile, last in the member grid, opens the add form.
     await main.locator('[data-test=member-card-new]').click();
     await main.locator('[data-test=add-agent-name]').fill('Temp');
     await main.locator('[data-test=add-agent]').click();
@@ -220,7 +220,7 @@ test('first run: credentials, two teams, one agent\'s policy, a live terminal an
     // ---- Change one agent's policy: Ben (Grok) gets a 15-minute timeout, and a confirmed loosening.
     await memberAction(main, 'Ben', 'open-settings');
     await main.locator('[data-test=tab-policy]').click();
-    // B110: the tighten-only override table is under Advanced (collapsed while the member has no override).
+    // The tighten-only override table is under Advanced (collapsed while the member has no override).
     await main.locator('[data-test=policy-advanced-toggle]').click();
     await main.locator('[data-test=inherit-compute-wallTimeoutSec]').uncheck();
     await main.locator('[data-test=override-compute-wallTimeoutSec]').fill('900');

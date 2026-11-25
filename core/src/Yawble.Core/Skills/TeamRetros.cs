@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 namespace Yawble.Core.Skills;
 
 /// <summary>
-/// B100: a team's lessons, the team-scoped custom skill team_retros (roles: any). The Manager writes it with
+/// A team's lessons, the team-scoped custom skill team_retros (roles: any). The Manager writes it with
 /// team_retros_write after a workflow's retrospective; the person reads and edits it in Settings > Skills; every run of the
 /// team gets it in its prompt (Teams/TeamPrompt.cs). Every write is a version (skill_versions, 0052).
 /// </summary>

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Yawble.Core.Board;
 using Yawble.Core.Bus;
 using Yawble.Core.Monitor;
 
@@ -39,7 +40,7 @@ public sealed record DigestCounts(
     int Cards, int Runs, int RunsNotCompleted, int FailedCommands, int Retold, int SendBacks, int Blocked, int Questions, int NetworkAsks, int ToolAsks)
 {
     /// <summary>
-    /// The retro rule (B100): a workflow is worth a retrospective unless it was small and uneventful: at most one piece of
+    /// The retro rule: a workflow is worth a retrospective unless it was small and uneventful: at most one piece of
     /// work, every run completed, no command failed in a transcript, nothing told twice or sent back, nobody blocked, and no
     /// question, host or tool asked of the person. Lease waits and long runs alone do not make a workflow eventful: they are
     /// not something a later run can act on.
@@ -51,7 +52,7 @@ public sealed record DigestCounts(
 public sealed record WorkflowDigestResult(string Text, DigestCounts Counts);
 
 /// <summary>
-/// workflow_digest (B100): a compact, factual account of one workflow for its team's Manager, grouped by member and card:
+/// workflow_digest: a compact, factual account of one workflow for its team's Manager, grouped by member and card:
 /// the runs (how long, how each ended, exit codes), what the transcripts show (failed and repeated commands, files edited
 /// many times, a test or build that failed and then passed and what changed between), and what the bus knows (lease
 /// holds and waits, host and tool asks, blocked reports, questions to the person and their wait, work sent back).
@@ -132,6 +133,20 @@ public static partial class WorkflowDigest
             $"Counts: runs not completed {counts.RunsNotCompleted}; failed commands {counts.FailedCommands}; told again {counts.Retold}; " +
             $"sent back {counts.SendBacks}; blocked {counts.Blocked}; questions to the person {counts.Questions}; host asks {counts.NetworkAsks}; tool asks {counts.ToolAsks}.",
         };
+
+        // The cards the person accepted closing over a tester's FAIL, in the board's own words (the text quoted).
+        if (ends is { Type: MessageTypes.WorkflowCompleted } && ClosedOverFail.Read(ends.Payload) is { Count: > 0 } overFail)
+        {
+            lines.Add("");
+            lines.Add("== closed over a FAIL (accepted by the person) ==");
+            foreach (var e in overFail)
+            {
+                var (prefix, said) = e.Kind == ClosedOverFail.WontDo
+                    ? (ClosedOverFail.WontDoPrefix, e.Reason ?? e.FailLine ?? "no reason given")
+                    : (ClosedOverFail.AcceptedPrefix, e.FailLine ?? "FAIL");
+                lines.Add($"- card {e.Card}{(e.Tester is { } t ? $" (tester {NameOf(t)})" : "")}: {prefix}{Quote(said)}");
+            }
+        }
 
         var members = input.Runs.Select(r => r.Member)
             .Concat(tells.Select(t => t.Member))

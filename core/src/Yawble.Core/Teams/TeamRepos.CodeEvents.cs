@@ -6,7 +6,7 @@ using Yawble.Core.Monitor;
 namespace Yawble.Core.Teams;
 
 /// <summary>
-/// B079: the Monitor's code events, recorded when the host moves a branch in the TEAM repository (its primary one): a
+/// The Monitor's code events, recorded when the host moves a branch in the TEAM repository (its primary one): a
 /// fetch-back that lands a member's work (its new commits; on the team branch, the Manager's merges and own commits),
 /// a Merge to main (landed) and a publish (push). Git runs only in the team repository, never in a member's clone; a
 /// failure to record is logged and never fails the fetch-back, merge or push it describes.

@@ -1,4 +1,4 @@
--- 0052 skill versions (B100): every write of a team's team_retros skill, kept so the person can see what changed and go back.
+-- 0052 skill versions: every write of a team's team_retros skill, kept so the person can see what changed and go back.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --
 -- Keyed by team and skill name (not skills.id: saving a skill replaces its row). version counts 1, 2, ... per team and name.

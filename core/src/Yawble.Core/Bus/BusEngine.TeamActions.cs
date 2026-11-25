@@ -127,6 +127,22 @@ public sealed partial class BusEngine
             return TeamEnv.Parse(_store.TeamEnvJson(id));
         }, ct);
 
+    /// <summary>
+    /// Reads, or sets when <paramref name="on"/> is given, the team's "Allow localhost (macOS)" (0054; off by default):
+    /// whether its macOS runs may open local ports and reach any service on the Mac's loopback. The value now.
+    /// </summary>
+    public Task<bool> TeamLocalhostAsync(string team, bool? on, CancellationToken ct = default) =>
+        WithGate(() =>
+        {
+            var id = TeamId(team);
+            if (on is { } v && v != _store.TeamAllowsLocalhost(id))
+            {
+                _store.SetTeamAllowsLocalhost(id, v);
+                Log($"team {team}: Allow localhost (macOS) turned {(v ? "on" : "off")}");
+            }
+            return _store.TeamAllowsLocalhost(id);
+        }, ct);
+
     // ------------------------------------------------------------------ standing approvals (0024)
 
     public Task<IReadOnlyList<TeamApproval>> TeamApprovalsAsync(string team, CancellationToken ct = default) =>
