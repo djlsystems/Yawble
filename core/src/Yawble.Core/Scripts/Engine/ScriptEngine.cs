@@ -512,7 +512,7 @@ public static class ScriptEngine
             var replySchema = replyName is null ? null : Find(replyName) ?? throw new ScriptStepException($"reply: no schema named '{replyName}'");
 
             if (_tells >= _req.MaxTells)
-                throw new ScriptStepException($"the run has told {_tells} time{(_tells == 1 ? "" : "s")}, the most one run may (the member's maxTells is {_req.MaxTells})");
+                throw new ScriptStepException($"a run may tell at most {_req.MaxTells} time{(_req.MaxTells == 1 ? "" : "s")} (the member's maxTells is {_req.MaxTells}); this would be tell {_tells + 1}");
             _tells++;
 
             if (_req.DryRun || _req.DryTells)
