@@ -121,6 +121,8 @@ top level). Every step must be reachable from `start`; a loop body must end with
 | `if` | `when` (a condition), `then`, `else` | branches |
 | `switch` | `on`, `cases` `{ "value": "stepId" }`, `default` | branches on a value |
 | `forEach` | `items`, `as`, `body`, `then` | runs `body` once per item, the item named by `as`; `then` after the last |
+| `while` | `when` (a condition), `body`, `then`, `max` | runs `body` again while `when` is true; `then` when it is false (section Loop) |
+| `code` | `inputs`, `code`, `returns`, `into`, `next` | runs a small JavaScript function on named inputs; its result goes `into` a variable (section Code) |
 | `integration` | `use`, `action`, `args`, `into`, `next` | calls one action of an integration (by its name); the result goes `into` a variable |
 | `file.writeAllText`, `file.appendLine` | `path`, `text`, `next` | writes a text file |
 | `file.readAllText`, `file.readLines`, `file.exists` | `path`, `into`, `next` | reads (string, `list<string>`, bool) |
@@ -138,6 +140,43 @@ top level). Every step must be reachable from `start`; a loop body must end with
   the Connection fills (an account id) are left out of `args`; a form body's fields go in `args` by name.
 - Limits: a run timeout (10 minutes by default), a step budget, a cap on a loop's items. One run at a time per
   member.
+
+## Loop
+
+A `while` step repeats its body while a condition holds.
+
+```json
+{ "id": "page", "type": "while", "when": { "left": "{vars.cursor}", "op": "exists" },
+  "body": "fetch", "then": "done", "max": 50 }
+```
+
+- `when`: a condition, as `if` has. It is checked before each pass; when it is false the run goes to `then`.
+- `body` and `then` follow the `forEach` rules: the body's last step has `null` as its successor, which ends that pass.
+  The body changes what `when` reads (a `set` of a variable), or the loop runs until `max`.
+- `max`: the most passes, default 100, at most 10000. A loop that passes `max` fails the run. The run's step budget
+  and timeout still apply.
+
+## Code
+
+A `code` step runs a small function in JavaScript (strict mode) for what expressions cannot do: arithmetic over
+several fields, reshaping a list, parsing a text.
+
+```json
+{ "id": "score", "type": "code",
+  "inputs": { "msg": "{m}", "max": "{settings.maxAge}" },
+  "code": "const age = (Date.now() - Date.parse(inputs.msg.receivedAt)) / 36e5;\nreturn { stale: age > inputs.max, age };",
+  "returns": "Staleness", "into": "staleness", "next": "check" }
+```
+
+- `inputs`: named values (expressions). In the code they are `inputs.<name>`, as plain JSON.
+- `code`: the body of a function; `return` gives the result. `log(text)` writes a line to the run's log. The code has
+  only `inputs` and `log`: no `require` or `import`, no files, network, timers or host objects.
+- `returns`: a type (native or a schema's name), default `any`. A returned value that does not match it fails the
+  step. `into` takes the value, typed.
+- Limits per step: 2 seconds, 64 MB, a statement count and a recursion depth. Hitting one fails the step.
+- The check parses the code: a syntax error is a problem on the step, with its line and column. The input types
+  come from their expressions; the code itself is not type-checked.
+- A dry run runs the code (it changes nothing).
 
 ## Tell
 

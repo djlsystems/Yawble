@@ -178,7 +178,7 @@ describe('the Flowchart tab', () => {
 
   it('the palette adds a step of the chosen type with a unique id and opens it', async () => {
     const w = await editor(fakeApi().api);
-    expect(w.findAll('[data-test=flow-palette] button')).toHaveLength(9);
+    expect(w.findAll('[data-test=flow-palette] button')).toHaveLength(11);
     await w.get('[data-test=palette-log]').trigger('click');
     await w.get('[data-test=palette-if]').trigger('click');
     await flushPromises();
@@ -192,9 +192,9 @@ describe('the Flowchart tab', () => {
   it('the palette groups its blocks as Flow, Data and Do, and has one File block', async () => {
     const w = await editor(fakeApi().api);
     const group = (g: string) => w.get(`[data-test=palette-group-${g}]`).findAll('button').map((b) => b.attributes('data-test'));
-    expect(group('flow')).toEqual(['palette-if', 'palette-switch', 'palette-forEach', 'palette-end']);
+    expect(group('flow')).toEqual(['palette-if', 'palette-switch', 'palette-forEach', 'palette-while', 'palette-end']);
     expect(group('data')).toEqual(['palette-set']);
-    expect(group('do')).toEqual(['palette-integration', 'palette-file', 'palette-log', 'palette-tell']);
+    expect(group('do')).toEqual(['palette-integration', 'palette-file', 'palette-log', 'palette-tell', 'palette-code']);
   });
 
   it('the File block adds a read; its Operation picks another file step type and keeps the path', async () => {

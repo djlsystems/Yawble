@@ -45,9 +45,9 @@ function pickFileOp(e: Event) {
   if (props.readonly) return;
   emit('change', withFileOperation(copy(props.step), (e.target as HTMLSelectElement).value));
 }
-const hasNext = computed(() => !['if', 'switch', 'forEach', 'end'].includes(props.step.type));
+const hasNext = computed(() => !['if', 'switch', 'forEach', 'while', 'end'].includes(props.step.type));
 /** The steps whose result can be saved into a variable from this form (a new one too). */
-const hasInto = computed(() => props.step.type === 'integration' || props.step.type === 'tell');
+const hasInto = computed(() => ['integration', 'tell', 'code'].includes(props.step.type));
 
 const setRef = (key: string) => (e: Event) => change((s) => { const v = (e.target as HTMLSelectElement).value; s[key] = v === '' ? null : v; });
 
@@ -180,7 +180,62 @@ function pickReply(e: Event) {
   change((s) => { if (name) s.reply = name; else delete s.reply; });
 }
 
-// ---- if
+// ---- code
+// The inputs (a name and an expression each; in the code they are inputs.<name>), the function body, the type it
+// returns (none given: any) and save into.
+const codeInputs = computed(() => Object.entries(obj(props.step.inputs)));
+function setInputs(list: [string, unknown][]) {
+  change((s) => { s.inputs = Object.fromEntries(list); });
+}
+const inputNameOk = (name: string, i: number) => /^[A-Za-z_$][\w$]*$/.test(name) && !codeInputs.value.some(([k], j) => j !== i && k === name);
+function renameInput(i: number, e: Event) {
+  const name = (e.target as HTMLInputElement).value.trim();
+  if (!inputNameOk(name, i)) { (e.target as HTMLInputElement).value = codeInputs.value[i]?.[0] ?? ''; return; }
+  setInputs(codeInputs.value.map(([k, v], j) => [j === i ? name : k, v]));
+}
+function addInput() {
+  let n = codeInputs.value.length + 1;
+  while (codeInputs.value.some(([k]) => k === `input${n}`)) n++;
+  setInputs([...codeInputs.value, [`input${n}`, '']]);
+}
+const removeInput = (i: number) => setInputs(codeInputs.value.filter((_, j) => j !== i));
+const INDENT = '  ';
+/** Tab in the code area indents at the cursor (or the selection) instead of leaving the field; Shift+Tab still leaves it. */
+function codeKey(e: KeyboardEvent) {
+  if (e.key !== 'Tab' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || props.readonly) return;
+  e.preventDefault();
+  const area = e.target as HTMLTextAreaElement;
+  const { selectionStart: a, selectionEnd: b, value } = area;
+  area.value = value.slice(0, a) + INDENT + value.slice(b);
+  area.selectionStart = area.selectionEnd = a + INDENT.length;
+  change((s) => { s.code = area.value; });
+}
+function setReturns(e: Event) {
+  const t = (e.target as HTMLInputElement).value.trim();
+  change((s) => { if (t) s.returns = t; else delete s.returns; });
+}
+
+// ---- while
+/** The default and the largest number of passes a loop may make. */
+const LOOP_MAX_DEFAULT = 100;
+const LOOP_MAX_LIMIT = 10000;
+const maxText = ref<string | null>(null);
+const maxShown = computed(() => maxText.value ?? (typeof props.step.max === 'number' ? String(props.step.max) : ''));
+const maxProblem = computed(() => {
+  const t = maxShown.value.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 1 && n <= LOOP_MAX_LIMIT ? null : `Max is a whole number from 1 to ${LOOP_MAX_LIMIT}.`;
+});
+function setMax(e: Event) {
+  maxText.value = (e.target as HTMLInputElement).value;
+  if (maxProblem.value) return;
+  const t = maxText.value.trim();
+  maxText.value = null;
+  change((s) => { if (t) s.max = Number(t); else delete s.max; });
+}
+
+// ---- if (and the condition of while)
 const when = computed(() => obj(props.step.when));
 /**
  * A side of the comparison as its field takes it: the blank If's '' is no value yet, so 0 typed there is the number 0 (as on a
@@ -332,8 +387,31 @@ function addOutput() {
       </template>
     </template>
 
-    <!-- if -->
-    <template v-else-if="step.type === 'if'">
+    <!-- code -->
+    <template v-else-if="step.type === 'code'">
+      <fieldset class="group" data-test="form-code-inputs">
+        <legend>Inputs</legend>
+        <p v-if="!codeInputs.length" class="muted small">No inputs: the code gets an empty inputs.</p>
+        <div v-for="([k, v], i) in codeInputs" :key="i" class="output" data-test="form-code-input" :data-name="k">
+          <input :value="k" :readonly="readonly" spellcheck="false" aria-label="Input name" data-test="form-code-input-name" @change="renameInput(i, $event)" />
+          <ExpressionField :name="`input-${k}`" label="Value" :model-value="v" :suggestions="suggestions" :readonly="readonly"
+            @update:model-value="(x) => setInputs(codeInputs.map(([a, b], j) => [a, j === i ? x : b]))" />
+          <button v-if="!readonly" type="button" class="mini" data-test="form-code-input-remove" @click="removeInput(i)">Remove</button>
+        </div>
+        <button v-if="!readonly" type="button" class="mini" data-test="form-code-input-add" @click="addInput">Add an input</button>
+      </fieldset>
+      <label class="field">Code (JavaScript: the body of a function; it returns the result)
+        <textarea class="code" :value="str(step.code)" :readonly="readonly" spellcheck="false" rows="8" data-test="form-code"
+          @keydown="codeKey" @input="change((s) => { s.code = ($event.target as HTMLTextAreaElement).value; })" />
+      </label>
+      <p class="muted small">The code has inputs.&lt;name&gt; and log(text), nothing else. It may run 2 seconds and use 64 MB.</p>
+      <label class="field">Returns
+        <input :value="str(step.returns)" :readonly="readonly" list="step-form-types" placeholder="any" spellcheck="false" data-test="form-code-returns" @change="setReturns" />
+      </label>
+    </template>
+
+    <!-- if, and while's condition -->
+    <template v-else-if="step.type === 'if' || step.type === 'while'">
       <template v-if="simpleWhen">
         <ExpressionField name="when-left" label="Left value" :model-value="side(when.left)" :suggestions="suggestions" :readonly="readonly" @update:model-value="(v) => setWhen('left', v)" />
         <label class="field">Operator
@@ -345,6 +423,25 @@ function addOutput() {
           @update:model-value="(v) => setWhen('right', v)" />
       </template>
       <p v-else class="muted small" data-test="form-when-combined">This condition combines others (all, any or not): edit it on the JSON tab.</p>
+      <template v-if="step.type === 'while'">
+        <p class="muted small">Checked before each pass: while it is true the body runs again; when it is false the run goes to Then.</p>
+        <label class="field">Max passes
+          <input type="number" min="1" :max="LOOP_MAX_LIMIT" step="1" :value="maxShown" :readonly="readonly" :placeholder="`${LOOP_MAX_DEFAULT}`" data-test="form-while-max" @change="setMax" />
+        </label>
+        <p v-if="maxProblem" class="warn small" data-test="form-while-max-problem">{{ maxProblem }}</p>
+        <p v-else class="muted small">Empty: {{ LOOP_MAX_DEFAULT }}. At most {{ LOOP_MAX_LIMIT }}; a loop that passes it fails the run.</p>
+        <label class="field">Body (each pass)
+          <select :value="str(step.body)" :disabled="readonly" data-test="form-body" @change="setRef('body')($event)">
+            <option value="">(none)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </label>
+        <label class="field">Then (when done)
+          <select :value="str(step.then)" :disabled="readonly" data-test="form-then" @change="setRef('then')($event)">
+            <option value="">(end)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </label>
+      </template>
+      <template v-else>
       <label class="field">Then (yes)
         <select :value="str(step.then)" :disabled="readonly" data-test="form-then" @change="setRef('then')($event)">
           <option value="">(end)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
@@ -355,6 +452,7 @@ function addOutput() {
           <option value="">(end)</option><option v-for="t in targets" :key="t" :value="t">{{ t }}</option>
         </select>
       </label>
+      </template>
     </template>
 
     <!-- switch -->
@@ -500,6 +598,7 @@ function addOutput() {
 .override { color: var(--accent); margin: 0; }
 .io { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 5px; background: var(--surface-2); font-size: 11.5px; }
 .io code { word-break: break-word; }
+.field textarea.code { font-family: ui-monospace, monospace; font-size: 12px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--ink); resize: vertical; tab-size: 2; white-space: pre; }
 .mini { font-size: 11.5px; padding: 1px 8px; align-self: flex-start; }
 .small { font-size: 12px; margin: 0; }
 .warn { color: var(--warn-ink); }

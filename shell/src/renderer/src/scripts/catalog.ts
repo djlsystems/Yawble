@@ -169,13 +169,14 @@ function successorRefs(s: ScriptStep): (string | null)[] {
   switch (s.type) {
     case 'if': return [str(s.then), str(s.else)];
     case 'switch': return [...Object.values(s.cases && typeof s.cases === 'object' ? s.cases : {}).map(str), str(s.default)];
-    case 'forEach': return [str(s.body), str(s.then)];
+    case 'forEach':
+    case 'while': return [str(s.body), str(s.then)];
     case 'end': return [];
     default: return [str(s.next)];
   }
 }
 
-/** The steps that run inside this forEach's body. */
+/** The steps that run inside this loop's body (forEach or while). */
 function bodyOf(doc: ScriptDocument, loop: ScriptStep): Set<string> {
   const byId = new Map(steps(doc).map((s) => [s.id, s]));
   const seen = new Set<string>();
@@ -283,7 +284,8 @@ export function stepIO(ctx: DesignContext, step: ScriptStep): StepIO {
       const t = type(step.items);
       return { in: [{ name: 'items', type: t }], out: { type: elementType(t) ?? 'any', into: str(step.as) } };
     }
-    case 'if': {
+    case 'if':
+    case 'while': {
       const w = step.when && typeof step.when === 'object' ? (step.when as Record<string, unknown>) : null;
       if (!w || !('left' in w)) return { in: [], out: null };
       return { in: [{ name: 'left', type: type(w.left) }, ...(isUnaryOp(String(w.op ?? '')) ? [] : [{ name: 'right', type: type(w.right) }])], out: null };
@@ -291,6 +293,10 @@ export function stepIO(ctx: DesignContext, step: ScriptStep): StepIO {
     case 'switch': return { in: [{ name: 'on', type: type(step.on) }], out: null };
     case 'log': return { in: [{ name: 'text', type: 'string' }], out: null };
     case 'tell': return { in: [{ name: 'text', type: 'string', required: true }], out: { type: TELL_RESULT, into } };
+    case 'code': {
+      const inputs = step.inputs && typeof step.inputs === 'object' && !Array.isArray(step.inputs) ? Object.entries(step.inputs as Record<string, unknown>) : [];
+      return { in: inputs.map(([name, v]) => ({ name, type: type(v) })), out: { type: str(step.returns)?.trim() || 'any', into } };
+    }
     case 'end': {
       const outs = step.outputs && typeof step.outputs === 'object' ? Object.entries(step.outputs as Record<string, unknown>) : [];
       return { in: outs.map(([name, v]) => ({ name, type: type(v) })), out: null };
