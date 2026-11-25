@@ -1,6 +1,6 @@
-// Card 665 (B152 verify): every workflows entry point opens the Workflows page, in headless Chrome against the
+﻿// Card 665 (B152 verify): every workflows entry point opens the Workflows page, in headless Chrome against the
 // phone-remote fake core (remote.html, tests/e2e/phone): the Teams-list chip, the Team page's Workflows button and its
-// ⋯ menu item, the Monitor's screen-reader list (a team's header and a workflow), the phone drawer's Workflows item and
+// â‹¯ menu item, the Monitor's screen-reader list (a team's header and a workflow), the phone drawer's Workflows item and
 // #workflow=N (a known one, one outside the loaded rows, an unknown one). Each lands on the page with the right team
 // filter, the named workflow selected and its pane open, no dialog; Esc and the phone pane's Back close the pane. In
 // ?embed=1 yawble.nav reports Workflows as the active place. A Visitor switch while a confirm is open closes it and sends
@@ -71,7 +71,7 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
     await ctx.close();
   });
 
-  test(`${w}: Team page Workflows (button at 1280, ⋯ menu at 375) opens the page filtered to the team, no pane, no dialog`, async ({ browser }) => {
+  test(`${w}: Team page Workflows (button at 1280, â‹¯ menu at 375) opens the page filtered to the team, no pane, no dialog`, async ({ browser }) => {
     const { page, ctx, errors } = await open(browser, w, h);
     await navTo(page, 'teams');
     await page.locator('[data-test=team-open-checkout-web-with-a-rather-long-team-name], [data-test=team-open-payments]').last().click();
@@ -212,10 +212,16 @@ for (const [w, h] of [[1280, 800], [375, 740]] as const) {
     const lastNav = () => page.evaluate(() => (window as any).got.filter((m: any) => m.type === 'yawble.nav').at(-1)?.nav);
     await expect.poll(async () => (await lastNav())?.teams?.length ?? 0, { timeout: 15_000 }).toBeGreaterThan(0);
     await page.evaluate(() => (window as any).send({ type: 'yawble.navigate', to: { kind: 'place', id: 'teams' } }));
-    await frame.locator('[data-test=team-workflow][data-id="12"]').first().click();
+    await expect(frame.locator('[data-test=team-open-payments]')).toBeVisible({ timeout: 15_000 });
+    const chip = frame.locator('[data-test=team-workflow][data-id="10"]').first();
+    await expect(chip).toBeAttached({ timeout: 15_000 });
+    await chip.click();
+    await page.waitForTimeout(1500);
+    const f = page.frames().find((x) => x.url().includes('remote.html'));
+    console.log(`EMBED ${w} after chip: frame url=${f?.url()} app=${await frame.locator('.app').count()} view=${await frame.locator('[data-test=workflows-view]').count()} errors=${JSON.stringify(errors)}`);
     await expect(frame.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 });
     await expect(frame.locator('[data-test=workflows-team-filter]')).toHaveValue('1');
-    await expect(frame.locator('[data-test=workflow-pane]')).toHaveAttribute('data-id', '12');
+    await expect(frame.locator('[data-test=workflow-pane]')).toHaveAttribute('data-id', '10');
     await expect(frame.locator('[role=dialog]')).toHaveCount(0);
     await expect.poll(async () => (await lastNav())?.places?.find((p: any) => p.active)?.id, { timeout: 10_000 }).toBe('workflows');
     if (shots) await page.screenshot({ path: path.join(shots, `embed-${w}.png`) });
