@@ -80,7 +80,7 @@ describe("a member's Loosen… block takes a domain allow", () => {
       'members.get': () => member,
       'agentProfiles.list': () => [],
       'agents.commandLine': () => ({ cli: 'claude', model: { model: 'opus', source: 'agent', label: 'Agent default (opus)' }, headless: { argv: [], env: [] }, interactive: { argv: [], env: [] } }),
-      'agents.models': () => ({ models: [], source: 'app' }),
+      'agents.models': () => ({ models: [], source: 'builtin' }),
       'credentials.status': () => ({ claude: { mode: 'subscription' } }),
       'policy.getMember': view,
       'policy.teamHosts': () => ({ teamId: 1, hosts: [] }),
