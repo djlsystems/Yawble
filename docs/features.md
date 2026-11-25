@@ -489,6 +489,9 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   size and when it was last modified.
   - Every member reads and writes it as plain files.
   - You can browse, read, edit, upload (up to 25 MB), rename and delete there.
+  - **Move to Backlog** (in a text document's preview, beside Edit): after you confirm, the document becomes a backlog
+    item for that team and leaves the team's documents; a note "Moved to the backlog as B…" links to the item in the
+    Backlog. A Visitor can't use it.
 
 ## Monitor
 
