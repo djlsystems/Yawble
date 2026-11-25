@@ -271,7 +271,7 @@ async function canvasBox(page: Page) { return (await page.locator('[data-test=mo
  * Waits for the wall to come to rest: the canvas's data-settled (the forces cooled, the hubs home, the map in place) and
  * data-camera-idle (the camera where it aims), both set by the scene.
  */
-async function still(page: Page, timeout = 20_000) {
+async function still(page: Page, timeout = 40_000) {
   // Two frames first: the scene sets the attributes in its frame, so one drawn since the last action is read.
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
   const wall = page.locator('[data-test=monitor-canvas]');

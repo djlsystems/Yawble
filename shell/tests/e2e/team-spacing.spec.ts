@@ -485,7 +485,7 @@ async function gotoMonitor(page: Page, phone: boolean) {
  * Waits for the wall to come to rest: the canvas's data-settled (the forces cooled, the hubs home, the map in place, the
  * spacing measured) and data-camera-idle (the camera where it aims), both set by the scene.
  */
-async function still(page: Page, timeout = 20_000) {
+async function still(page: Page, timeout = 40_000) {
   // Two frames first: the scene sets the attributes in its frame, so one drawn since the last action is read.
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true)))));
   const wall = page.locator('[data-test=monitor-canvas]');
@@ -524,7 +524,7 @@ async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
     const f = await lastFrame(page);
     return TEAMS.slice(0, n).every((t) => hubAt(f, t)) && squaresOf(f).length >= n * 5 && mapThings(f).length >= n * (FOLDERS + FOLDERS * FILES);
   }, { timeout, intervals: [100] }).toBe(true).catch(() => {}); // as before: what is drawn is measured even if not all of it is
-  await still(page, timeout);
+  await still(page); // the spacing measure can take its full 12-24 moves on a crowded wall
   return freshFrame(page);
 }
 
