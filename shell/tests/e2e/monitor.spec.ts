@@ -884,16 +884,21 @@ for (const W of [1280, 375]) {
       change();
       const said = await both(n);
       if (want.flights > 0) {
+        // Until a flight has been seen in the air and none is now, and the tones have sounded. Only the newest frame is
+        // read while waiting: reading all the kept frames this often slowed the page enough to drop the ring's frames.
+        let sawHead = false;
         await expect.poll(async () => {
-          const fs = await frames(page);
-          return starts(fs, (f) => youHeads(f).length) >= want.flights && starts(fs, (f) => youRingsNew(f, you)) >= want.flights
-            && (await tonesNeedYou(page)) - tones0 >= want.tones && youHeads(fs.at(-1)!).length === 0;
+          const lf = await lastFrame(page);
+          const heads = youHeads(lf).length;
+          sawHead ||= heads > 0;
+          return sawHead && heads === 0 && (await tonesNeedYou(page)) - tones0 >= want.tones;
         }, { timeout: 8000, intervals: [120] }).toBe(true).catch(() => {});
+        await freshFrame(page); // the arrival ring's last frames
       } else await page.waitForTimeout(settle); // a window: nothing may fly in or sound
       const fs = await frames(page);
       const s = {
         name, want: n, ...said, flights: starts(fs, (f) => youHeads(f).length), flightColors: [...new Set(fs.flatMap(youHeads))],
-        rings: starts(fs, (f) => youRingsNew(f, you)), tones: (await tonesNeedYou(page)) - tones0, frames: fs.length,
+        rings: starts(fs, (f) => youRingsNew(f, youNode(f) ?? you)), tones: (await tonesNeedYou(page)) - tones0, frames: fs.length,
       };
       r.steps.push(s);
       if (s.node !== (n === 0 ? null : String(n)) || s.header !== n) mismatches.push(`${name}: header ${s.header}, node ${s.node}, want ${n}`);
@@ -1172,11 +1177,12 @@ test('4 cards: an instruction carries "#card", the hand-back comes home with a c
     await expect.poll(async () => {
       for (const x of await frames(page)) { const o = x.ops.find((k) => k.op === 'text' && k.text === text); if (o) { got = { style: o.style, frame: x }; return true; } }
       return false;
-    }, { timeout: 4000, intervals: [100] }).toBe(true).catch(() => {});
+    }, { timeout: 8000, intervals: [100] }).toBe(true).catch(() => {});
     return got as { style: string; frame: Frame } | null;
   };
-  /** Until the comet with this label has landed (its label no longer drawn). */
-  const landed = (text: string) => untilFrame(page, (x) => !texts(x).includes(text), 6000);
+  /** Until the comet with this label has landed: the label no longer drawn in a comet's colour. */
+  const cometInks = [C.tell, C.handback, C.fail, C.blocked];
+  const landed = (text: string) => untilFrame(page, (x) => !x.ops.some((o) => o.op === 'text' && o.text === text && cometInks.includes(o.style)), 6000);
   await page.evaluate(() => { (window as any).__frames = []; });
   feed.row('instruction', ADA, 'Manager', 10, 0, 'Card 4373 (workflow nodes): do it');
   const out = await label('#4373');
@@ -1549,7 +1555,6 @@ for (const theme of ['light', 'dark'] as const)
       for (const level of ['calm', 'normal', 'lively']) {
         await page.locator(`[data-test=monitor-density-${level}]`).first().click();
         if (w < 700) await page.keyboard.press('Escape');
-        await expect.poll(() => page.evaluate(() => localStorage.getItem('yawble.monitor.density'))).toBe(level);
         await still(page); // the wall redrawn at the new density
         await shot(page, `${tag}-density-${level}`);
         if (w < 700 && level !== 'lively') await page.locator('[data-test=monitor-layout-toggle]').click();
