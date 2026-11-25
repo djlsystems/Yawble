@@ -839,6 +839,25 @@ masked in the log and never reaches an agent. See
     when Wait is on, then **Save result into**. Its node reads "tell Manager", "tell Ava (waits)", or "tell Manager of
     Billing" for another team.
   - A waiting run shows **waiting** with a link to its workflow in the Runs tab, the run view and the member's card.
+- **Loop** (`while`) repeats its body while a condition holds. `when` is a condition, as an If has; it is checked
+  before each pass, and when it is false the run goes to `then`. `body` and `then` follow the For each rules: a step
+  in the body with no successor ends that pass. `max` is the most passes, 100 by default and at most 10,000; a loop
+  that passes it fails the run. The run's step budget and timeout still apply.
+  - In the flowchart, **Loop** is in the palette's **Flow** group after **For each** and is drawn as For each is, with
+    its body edge dashed. Its node shows the condition. Its form has the If's condition builder, **Max passes** (empty
+    is 100), Body and Then.
+- **Code** runs a small function in JavaScript (strict mode) for what expressions cannot do. `inputs` are named values
+  (expressions), `inputs.<name>` in the code, as plain JSON. `code` is the body of a function and returns the result;
+  `log(text)` writes a line to the run's log. The code has only `inputs` and `log`: no `require` or `import`, no
+  files, network, timers or host objects. `returns` is a type (native or a schema, `any` by default); a returned value
+  that does not match it fails the step, and `into` takes the value, typed.
+  - Each code step may run 2 seconds and use 64 MB, with a limit on statements and recursion depth. Hitting one fails
+    the step.
+  - The check parses the code: a syntax error is a problem on the step, with its line and column. The code itself is
+    not type-checked. A dry run runs the code (it changes nothing).
+  - In the flowchart, **Code** is in the palette's **Do** group; its node reads "code → Staleness" (the type it
+    returns). Its form has Inputs (a name and a value each, added and removed), the code in a monospace area where Tab
+    indents, **Returns** (a native type or a schema) and **Save result into**.
 - Script runs are listed with their state, steps and log, and recorded with the agents' runs. A Visitor on the Cloud
   Link can read scripts, schemas, script members and runs, and cannot change or run any of them.
 - **Building with the Concierge.** The Concierge (and a program paired through the companion) builds, checks, saves
