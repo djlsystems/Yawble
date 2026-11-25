@@ -12,7 +12,7 @@ public sealed record GrokRefusal(DateTimeOffset At, string Reason);
 /// <summary>
 /// The outcome of the gateway's latest Grok sign-in request (grok.yawble.internal), across every run's gateway: a 401
 /// credential-problem (the gateway had no usable session, or xAI refused the one it sent) or a success. The Agents tile
-/// shows a refusal while it is the latest outcome (B128), with the same fix as a signed-out auth.json.
+/// shows a refusal while it is the latest outcome, with the same fix as a signed-out auth.json.
 /// <para>
 /// A refusal is tied to the session it was about (a SHA-256 of its access token, in memory only; none for "no
 /// session"): once auth.json holds a different session (the person signed in again, or the keeper renewed it) the

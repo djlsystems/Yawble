@@ -45,7 +45,7 @@ public sealed class RpcDispatcher(
     public async Task<JsonNode?> DispatchAsAsync(Provenance.Actor actor, string method, JsonObject? parameters, CancellationToken ct)
     {
         using var acting = Provenance.Actor.Use(actor);
-        // The names the call's ids stand for, read before it runs: a delete removes what it names (B101).
+        // The names the call's ids stand for, read before it runs: a delete removes what it names.
         var names = audit?.Names(method, parameters);
         try
         {
@@ -100,7 +100,7 @@ public sealed class RpcDispatcher(
             // Settings > Cloud Link, "Show members' code to cloud viewers" (the window only: link. is refused remotely).
             "link.setShowCode" => Task.FromResult<JsonNode?>(Then(() => Link().SetShowCode(parameters?["show"]?.GetValue<bool>() ?? true))),
             "runs.stop" => StopRunAsync(parameters, ct),
-            // The cloud org dashboard's summary of this computer, and its live changes (Link/OrgSummaryService.cs, B048).
+            // The cloud org dashboard's summary of this computer, and its live changes (Link/OrgSummaryService.cs).
             _ when orgSummary is not null && Yawble.Core.Link.OrgSummaryService.Handles(method) => orgSummary.DispatchAsync(method, parameters, ct),
             // The git on this computer: the check, and installing or updating it (Teams/GitRpc.cs).
             _ when git is not null && Teams.GitRpc.Handles(method) => git.DispatchAsync(method, parameters, ct),
@@ -116,7 +116,7 @@ public sealed class RpcDispatcher(
             // yawble-companion (Companion/CompanionRpc.cs): pairings, approvals and revocations, the window on this computer only.
             _ when companion is not null && Companion.CompanionRpc.Handles(method) => companion.DispatchAsync(method, parameters, ct),
             // The Board: cards in four lanes and the backlog (Board/BoardService.cs). Before the screens: timeline.get is
-            // the Board's, though timeline. is a screen prefix (UiRpc.Prefixes, the shell's UI_METHOD_PREFIXES; B086).
+            // the Board's, though timeline. is a screen prefix (UiRpc.Prefixes, the shell's UI_METHOD_PREFIXES).
             _ when board is not null && Board.BoardService.Handles(method) => board.DispatchAsync(method, parameters, ct),
             _ when ui is not null && Ui.UiRpc.Handles(method) => ui.DispatchAsync(method, parameters, ct),
             // The Concierge: the person's chats with an agent that knows every team (Concierge/ConciergeService.cs).
@@ -129,7 +129,7 @@ public sealed class RpcDispatcher(
             _ when networkAsks is not null && Integrations.NetworkAskService.Handles(method) => networkAsks.DispatchAsync(method, parameters, ct),
             // Host tool asks: tools from the app's catalog agents asked for; Install runs winget for the person at the window (Integrations/ToolAsks.cs).
             _ when toolAsks is not null && Integrations.ToolAskService.Handles(method) => toolAsks.DispatchAsync(method, parameters, ct),
-            // Folder asks (B111): folders agents asked to read or write; the person's answer writes the loosen block (Integrations/FolderAsks.cs).
+            // Folder asks: folders agents asked to read or write; the person's answer writes the loosen block (Integrations/FolderAsks.cs).
             _ when folderAsks is not null && Integrations.FolderAskService.Handles(method) => folderAsks.DispatchAsync(method, parameters, ct),
             // Integrations: the person's CLIs, their rules, and the calls waiting for approval.
             _ when integrations is not null && Integrations.IntegrationService.Handles(method) => integrations.DispatchAsync(method, parameters, ct),

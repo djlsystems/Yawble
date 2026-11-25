@@ -12,7 +12,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Logs;
 
 /// <summary>
-/// B051 F1: a run's Activity row is dated by its end once it has ended (by its start while it runs), so a run that started
+/// A run's Activity row is dated by its end once it has ended (by its start while it runs), so a run that started
 /// two hours ago and failed just now is one of org.summary's problems of the last hour, and an open logs.tail pushes it
 /// once. Over a real migrated database; the runs are made up here.
 /// </summary>

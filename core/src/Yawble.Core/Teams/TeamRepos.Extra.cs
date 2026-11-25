@@ -160,7 +160,7 @@ public sealed partial class TeamRepos
     /// date, the member's clone of each writable one made if missing. A repository that cannot be prepared is left out
     /// of the run, with the reason logged, rather than failing the member's work on the primary.
     /// </summary>
-    /// <param name="moves">The B016 moves this start made so far (card 171): a refusal here says what moved, and each extra
+    /// <param name="moves">The old-style branch moves this start made so far: a refusal here says what moved, and each extra
     /// clone moved here is added.</param>
     private async Task<IReadOnlyList<ExtraCheckout>> PrepareExtrasLockedAsync(MemberRef member, string branch, List<string> moves, CancellationToken ct)
     {
@@ -180,7 +180,7 @@ public sealed partial class TeamRepos
                 var shared = ExtraSharedPath(member.Team, extra.Name);
                 var row = ExtraRow(member.Id, extra.Name);
                 var clone = ExtraClonePath(member.Team, member.Name, extra.Name);
-                // A rehired member reusing a pre-B016 extra clone left on disk (no row): record the branch it is on first.
+                // A rehired member reusing an old-style extra clone (on members/<name>) left on disk (no row): record the branch it is on first.
                 if (row is null && member.Role != MemberRole.Manager && AdoptLegacyClone(member, clone) is { } adopted)
                 {
                     Exec("INSERT OR REPLACE INTO member_extra_clones (member_id, repo_name, path, branch, created_at) VALUES ($m, $n, $p, $b, $c);",
@@ -188,7 +188,7 @@ public sealed partial class TeamRepos
                     _log?.Invoke($"{member.Qualified}: {extra.Name}: reusing the clone on disk, on {adopted}");
                     row = ExtraRow(member.Id, extra.Name);
                 }
-                // B016: an extra clone still on members/<name> moves too, before the shared view is updated.
+                // An extra clone still on members/<name> moves too, before the shared view is updated.
                 if (row is not null)
                 {
                     var before = row.Branch;
@@ -196,7 +196,7 @@ public sealed partial class TeamRepos
                     if (row is not null && row.Branch != before) moves.Add(MoveLine(member.Name, $"repository {extra.Name}", before, row.Branch));
                 }
                 var cloneBranch = row?.Branch ?? branch;
-                // B020, again after the refresh from origin: a blocker fails the member's start (not caught here).
+                // Again after the refresh from origin: a blocker fails the member's start (not caught here).
                 try
                 {
                     await CheckMemberBranchFreeAsync(member, cloneBranch, $"repository {extra.Name}", extra.Path, clone, ct);
@@ -228,7 +228,7 @@ public sealed partial class TeamRepos
     }
 
     /// <summary>
-    /// B020, before anything of the member's start changes: every writable extra repository the member's branch would be
+    /// Before anything of the member's start changes: every writable extra repository the member's branch would be
     /// made in is checked for a blocking ref (<see cref="CheckMemberBranchFreeAsync"/>). A repository that cannot be read
     /// is left to <see cref="PrepareExtrasLockedAsync"/>, which leaves it out of the run with the reason.
     /// </summary>

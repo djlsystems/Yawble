@@ -80,7 +80,7 @@ public sealed class ScriptRunStore(string connectionString, TimeProvider? clock 
     }
 
     /// <summary>
-    /// B134: when the member's next scheduled trigger fires (the soonest next_due_at of its enabled every, cron and once
+    /// When the member's next scheduled trigger fires (the soonest next_due_at of its enabled every, cron and once
     /// triggers, as stored: UTC ISO); null when it has none (folder and event triggers are not a schedule).
     /// </summary>
     public string? NextTriggerAt(long memberId)

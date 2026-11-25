@@ -22,7 +22,7 @@ public sealed record LogPrune(string Table, string TimeColumn, int? DefaultDays,
 /// A log in the database. <paramref name="From"/> is its FROM clause with the alias t; <paramref name="TeamWhere"/> and
 /// <paramref name="MemberWhere"/> are predicates over the parameters @team, @teamId, @member ("Team/Name"), @name and
 /// @memberId. <paramref name="Prune"/> null: kept, because <paramref name="KeptBecause"/>. <paramref name="AppWhere"/>: the
-/// rows about no team and no member (the app filter, B101); null: the source has none to offer. <paramref name="LevelSql"/>:
+/// rows about no team and no member (the app filter); null: the source has none to offer. <paramref name="LevelSql"/>:
 /// each row's level (<see cref="LogLevels"/>), for the Level filter and the rows' "level"; null: the source has no levels.
 /// </summary>
 public sealed record LogSource(
@@ -327,12 +327,12 @@ public static class LogSources
 
     /// <summary>
     /// The combined view: one row per thing that happened to or by a member, with its member as "Team/Name", and every
-    /// audit entry (B101): about a member when its target names one (memberId=…, member=Team/Name, or team=… member=…),
+    /// audit entry: about a member when its target names one (memberId=…, member=Team/Name, or team=… member=…),
     /// else about a team as "Team/&lt;Team&gt;" (teamId=…, team=…, or the name= of teams.create), else about the app as
     /// "/app" (<see cref="Provenance.AuditLog.WhoOf"/>). An id whose name is lost leaves the member null.
     /// A run's row is dated by its end once it has ended (what it says, "run failed", happened then), by its start while it
     /// runs: so a run that started hours ago and failed just now is in the last hour (org.summary problems) and is new to an
-    /// open logs.tail (B051).
+    /// open logs.tail.
     /// </summary>
     private const string ActivityFrom = """
         (

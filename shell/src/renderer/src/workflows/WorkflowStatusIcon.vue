@@ -4,7 +4,7 @@ import type { WorkflowRow } from '../../../shared/api';
 import { statusLook } from './page';
 
 /**
- * B104: a workflow's status mark. While a run is on it (`working`) the mark breathes gently; when it completes the old
+ * A workflow's status mark. While a run is on it (`working`) the mark breathes gently; when it completes the old
  * mark shrinks away and the check grows in (once). Under prefers-reduced-motion (read once, as the Monitor does) both
  * are off: the mark is still and simply changes.
  */

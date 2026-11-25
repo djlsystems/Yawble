@@ -677,7 +677,7 @@ public class CompanionCliTests : IDisposable
         await bus.CreateTeamAsync("alpha", "Manager", "claude", null, Ct);
         Task<JsonNode?> Route(string method, JsonObject? p, CancellationToken ct) => Task.FromResult<JsonNode?>(method switch
         {
-            "backlog.list" => JsonNode.Parse("""[{"label":"B042","state":"ready","title":"Fix the login form","team":"alpha"}]"""),
+            "backlog.list" => JsonNode.Parse("""[{"label":"B004","state":"ready","title":"Fix the login form","team":"alpha"}]"""),
             _ => new JsonObject(),
         });
         var service = new CompanionService(bus, new ConciergeStore(db.ConnectionString), Route, (_, _) => null,
@@ -714,7 +714,7 @@ public class CompanionCliTests : IDisposable
         // then a read over the same pipe, with the saved key
         var list = await RunAsync(connector, "backlog", "list");
         Assert.Equal(Y.ExitCodes.Ok, list.Exit);
-        Assert.Contains("B042", list.Out);
+        Assert.Contains("B004", list.Out);
         Assert.Contains("Fix the login form", list.Out);
 
         // the read level refuses an act call

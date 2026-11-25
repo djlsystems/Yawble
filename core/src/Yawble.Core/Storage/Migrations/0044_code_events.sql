@@ -1,4 +1,4 @@
--- 0044 the Monitor's code events (B079): what really reached the team repository, read by monitor.codeEvents.
+-- 0044 the Monitor's code events: what really reached the team repository, read by monitor.codeEvents.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --
 -- One row per event: kind commit (a member's new commit on its branch, or the Manager's own on the team branch),

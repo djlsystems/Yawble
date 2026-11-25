@@ -70,7 +70,7 @@ public class ConciergeActionTests : IDisposable
             turn: turn ?? new ConciergeTurn("c1", byPerson: true, remote: false),
             cli: (tool, _, a, _) => { CliCalls.Add((tool, [.. a])); return Task.FromResult(CliAnswer(tool, a)); });
 
-        /// <summary>B075: the other providers' CLIs (glab, az), faked; never a real one.</summary>
+        /// <summary>The other providers' CLIs (glab, az), faked; never a real one.</summary>
         public List<(string Cli, string[] Args)> CliCalls { get; } = [];
         public Func<string, IReadOnlyList<string>, GitResult> CliAnswer = (_, _) => new GitResult(0, "{}", "");
 
@@ -1007,7 +1007,7 @@ public class ConciergeActionTests : IDisposable
     public async Task OpenPullRequestsAreReadThroughGh_AndNotAtAllWithoutIt()
     {
         var rig = await MakeRigAsync();
-        Run(Work, "remote", "set-url", "origin", "https://github.com/acme/app.git"); // read through gh for a GitHub origin (B075)
+        Run(Work, "remote", "set-url", "origin", "https://github.com/acme/app.git"); // read through gh for a GitHub origin
         var target = new GitRepoTarget("alpha", "main", Work, "main", []);
         var prs = await rig.Actions().OpenPullRequestsAsync(target, Ct);
         Assert.NotNull(prs);

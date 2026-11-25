@@ -26,7 +26,7 @@ public sealed class FakeMessage(string raw, DateTimeOffset internalDate)
 public sealed record FakeEntry(uint Uid, FakeMessage Message);
 
 /// <summary>
-/// The read-actions half of the fake IMAP server (card 590): SELECT, EXAMINE, CLOSE, UNSELECT, UID SEARCH, UID FETCH, UID STORE and UID MOVE
+/// The read-actions half of the fake IMAP server: SELECT, EXAMINE, CLOSE, UNSELECT, UID SEARCH, UID FETCH, UID STORE and UID MOVE
 /// over <see cref="FakeFolder.Messages"/> (each a <see cref="FakeEntry"/>), with Gmail's X-GM-MSGID, X-GM-THRID, X-GM-RAW and X-GM-LABELS when
 /// the server offers X-GM-EXT-1. On Gmail a label is a folder: adding the label puts the message in that folder, taking it off removes it.
 /// SEARCH knows ALL, SEEN, UNSEEN, SINCE, TEXT, BODY, SUBJECT, FROM, HEADER, UID, OR, NOT, parentheses and the X-GM-* keys.

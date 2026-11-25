@@ -420,7 +420,7 @@ public sealed class ConciergeService
     }
 
     /// <summary>
-    /// An Update the app itself has for the person about a team (B085's expiry warning): posted once, in the newest chat
+    /// An Update the app itself has for the person about a team (a workflow's expiry warning): posted once, in the newest chat
     /// about that team, else the newest chat. False when there is no chat at all (Needs you still shows it).
     /// </summary>
     public bool PostAppUpdate(long teamId, string team, string text, string kind)

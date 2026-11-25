@@ -53,7 +53,7 @@ public sealed class ConciergeTools(
     /// <summary>
     /// The tools here only for the person at this computer (as <see cref="ConciergeActions.LocalOnly"/>): a new team or
     /// repository makes the host clone a folder or address for a sandboxed agent, closing a workflow ends work, a host
-    /// task runs a program on this computer, and a script member acts for the team (B135). A live script run is refused by its
+    /// task runs a program on this computer, and a script member acts for the team. A live script run is refused by its
     /// arguments as well (<see cref="ScriptTools.RemoteRefused"/>); a dry run stays allowed.
     /// </summary>
     public static readonly IReadOnlyList<string> LocalOnly = ["team_create", "team_repo_add", "team_repo_remove", "workflow_close", ConciergeHostTasks.RunTool, .. ScriptTools.LocalOnly];
@@ -67,7 +67,7 @@ public sealed class ConciergeTools(
     private readonly ConciergeReadTools _read = new(bus, ui, store.ConnectionString,
         openPrs: actions is null ? null : actions.OpenPullRequestsAsync, remote: Remote(remote));
 
-    /// <summary>B135: the script and schema tools, onto the scripts.* / schemas.* RPC.</summary>
+    /// <summary>The script and schema tools, onto the scripts.* / schemas.* RPC.</summary>
     private readonly ScriptTools _scripts = new(bus, ui);
 
     public const int NotesLimit = 16_000;
@@ -200,7 +200,7 @@ public sealed class ConciergeTools(
     }
 
     /// <summary>
-    /// One script tool (B135). Building, checking and dry runs run at once; adding a script member and a script's first live run
+    /// One script tool. Building, checking and dry runs run at once; adding a script member and a script's first live run
     /// on a team go through the actions' confirmation flow (the list first, the person's yes in a later turn).
     /// </summary>
     private async Task<string> ScriptToolAsync(string name, JsonObject args, CancellationToken ct)
@@ -256,7 +256,7 @@ public sealed class ConciergeTools(
             (w.State == "expired" && w.EndedAt is { } end ? $" (last activity {end:yyyy-MM-dd HH:mm} UTC; telling its team something reopens it)" : "") +
             (w.ExpiresAt is { } at ? $" - expires {at:yyyy-MM-dd HH:mm} UTC unless something happens in it (workflow_extend resets the clock)" : "") +
             (w.ExpiryWarning is { } warn ? $" - {warn}" : "") +
-            // B086: its overall time and where it went (the same numbers as the Workflows list).
+            // Its overall time and where it went (the same numbers as the Workflows list).
             (w.Time is { } time ? $" - time {Board.BoardTimeline.Describe(time)}" : "")));
     }
 

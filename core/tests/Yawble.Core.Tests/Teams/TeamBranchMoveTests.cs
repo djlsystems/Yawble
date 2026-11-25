@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B016: member branches carry the team (members/&lt;team&gt;/&lt;name&gt;), and a member still on an old-style
+/// Member branches carry the team (members/&lt;team&gt;/&lt;name&gt;), and a member still on an old-style
 /// members/&lt;name&gt; moves to the new name at its next start, with its commits; the old branch is never deleted or
 /// forced. Local repositories and bare origins in temp folders only, no network.
 /// </summary>
@@ -46,7 +46,7 @@ public class TeamBranchMoveTests
         return r.ExitCode == 0 ? r.Stdout : null;
     }
 
-    /// <summary>Puts a freshly prepared member back as a pre-B016 member: its clone and its record on members/&lt;name&gt;.</summary>
+    /// <summary>Puts a freshly prepared member back as an old-style member (without the team in its branch): its clone and its record on members/&lt;name&gt;.</summary>
     private static string MakeOldStyle(TeamsFixture f, MemberRef member, MemberCheckout checkout)
     {
         var old = TeamRepos.LegacyBranchFor(member.Name);
@@ -127,7 +127,7 @@ public class TeamBranchMoveTests
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
         var old = MakeOldStyle(f, ada, checkout);
 
-        // Ada's pre-B016 life: work fetched back and pushed on members/ada; then one more commit in the clone.
+        // Ada's old-style life: work fetched back and pushed on members/ada; then one more commit in the clone.
         var fetched = Commit(checkout.ClonePath, checkout.Workspace, "old.txt");
         Assert.True((await f.Repos.FetchBackAsync(ada, Ct)).Fetched);
         Assert.Equal(["members/ada"], (await f.Repos.PublishAsync(ada, Ct)).Branches);
@@ -234,7 +234,7 @@ public class TeamBranchMoveTests
     [Fact]
     public async Task AMemberNamedLikeItsTeam_MovesThroughItsOwnOldBranch()
     {
-        // Team "Ada" with a member "Ada": members/ada/ada cannot exist beside members/ada, so (B020) the member's own old
+        // Team "Ada" with a member "Ada": members/ada/ada cannot exist beside members/ada, so the member's own old
         // branch is moved through: members/ada becomes members/ada/ada, its work and HEAD with it.
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team("Ada");

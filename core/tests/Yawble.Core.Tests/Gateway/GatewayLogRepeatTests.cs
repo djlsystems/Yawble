@@ -7,7 +7,7 @@ namespace Yawble.Core.Tests.Gateway;
 
 /// <summary>
 /// A refusal retried in a loop is not written once per try: a refused path is logged a few times a minute and then
-/// counted; a refused host (plain http, host-denied) or CONNECT (https, connect-denied, card 504 / B105) is counted on
+/// counted; a refused host (plain http, host-denied) or CONNECT (https, connect-denied) is counted on
 /// the run's first row for it.
 /// </summary>
 public class GatewayLogRepeatTests
@@ -40,13 +40,13 @@ public class GatewayLogRepeatTests
         Assert.Equal(GatewayLog.RepeatLimit + 3, Rows(db)); // the count of the last window, then the new one
         Assert.Contains($"and {1000 - GatewayLog.RepeatLimit} more like it", Details(db));
 
-        // Failed forwards are never thinned: each is what a run reached (successful ones are, B103: GatewayLogThinningTests).
+        // Failed forwards are never thinned: each is what a run reached (successful ones are: GatewayLogThinningTests).
         for (var i = 0; i < 20; i++) log.Write(new GatewayEvent(7, "alpha/Wren", clock.Now, GatewayEventKinds.Forward, false, "model.yawble.internal", "POST", "/v1/messages", 500));
         Assert.Equal(GatewayLog.RepeatLimit + 23, Rows(db));
     }
 
     [Fact]
-    public void Card504_FiveConnectRefusalsOfOneHostInARun_AreOneRow_CountFive()
+    public void ConnectRefused_FiveConnectRefusalsOfOneHostInARun_AreOneRow_CountFive()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();
@@ -61,7 +61,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_ARetryLoop_IsOneRow_NotSummarisedByTheWindow()
+    public void ConnectRefused_ARetryLoop_IsOneRow_NotSummarisedByTheWindow()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();
@@ -78,7 +78,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_TwoHosts_AreTwoRows_AndAnotherRunIsANewRow()
+    public void ConnectRefused_TwoHosts_AreTwoRows_AndAnotherRunIsANewRow()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();
@@ -94,7 +94,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_AHostsHttpAndHttpsRefusals_AreTwoRows()
+    public void ConnectRefused_AHostsHttpAndHttpsRefusals_AreTwoRows()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();
@@ -114,7 +114,7 @@ public class GatewayLogRepeatTests
     }
 
     [Fact]
-    public void Card504_OtherKinds_AreUnchanged()
+    public void ConnectRefused_OtherKinds_AreUnchanged()
     {
         using var db = new TempDb();
         db.OpenStore().Dispose();

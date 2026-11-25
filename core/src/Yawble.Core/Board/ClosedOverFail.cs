@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 
 namespace Yawble.Core.Board;
 
-/// <summary>One card a completed workflow closed over a tester's FAIL, as the person accepted it (B142).</summary>
+/// <summary>One card a completed workflow closed over a tester's FAIL, as the person accepted it.</summary>
 /// <param name="Kind"><see cref="ClosedOverFail.Accepted"/> or <see cref="ClosedOverFail.WontDo"/>.</param>
 public sealed record ClosedOverFailEntry(long Card, string? Tester, string? FailLine, string Kind, string? Reason)
 {
@@ -14,7 +14,7 @@ public sealed record ClosedOverFailEntry(long Card, string? Tester, string? Fail
 }
 
 /// <summary>
-/// B142: the WorkflowCompleted payload's <c>closedOverFail</c> (card 620 writes it): an array of
+/// The WorkflowCompleted payload's <c>closedOverFail</c> (workflow_complete writes it): an array of
 /// <c>{ card, tester, failLine, kind: "accepted" | "wont-do", reason }</c>, absent or null when nothing was closed over a FAIL.
 /// </summary>
 public static class ClosedOverFail

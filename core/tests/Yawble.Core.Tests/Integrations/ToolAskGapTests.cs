@@ -16,7 +16,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// B013 end-to-end checks the developers' ToolAskTests leave open (card 65): Python's Install line with --scope user,
+/// End-to-end checks of host tool asks that the developers' ToolAskTests leave open: Python's Install line with --scope user,
 /// nothing outside the catalog installable (argument smuggling, a row whose tool is not in the catalog, a closed ask),
 /// one install at a time, Not now across a restart and only on a waiting ask, a tool found at Install time, the Concierge
 /// and the companion offering no install, the installed result in the logs, and the same package under two names.
@@ -246,7 +246,7 @@ public sealed class ToolAskGapTests : IDisposable
         Assert.Equal(2, ask.Count);
     }
 
-    // ---- card 65 re-check of the B013 fix (ToolCatalog.SamePackage)
+    // ---- re-check of the same-package fix (ToolCatalog.SamePackage)
 
     [Fact]
     public async Task AskingDotnetSdkLts_ThenDotnetSdk10_IsOnePendingAsk_WithCountTwo()

@@ -61,9 +61,9 @@ public sealed class FakeKeychain : IHostCredentialReader
 }
 
 /// <summary>
-/// B118 Part A: on macOS the gateway reads Claude Code's own sign-in from the login Keychain item "Claude Code-credentials"
+/// On macOS the gateway reads Claude Code's own sign-in from the login Keychain item "Claude Code-credentials"
 /// (through the reader seam; a fake here), not from a file; renewal is still the host's own claude. The value is never
-/// logged. B124: the item is read through /usr/bin/security (<see cref="MacHostCredentialReader"/>, a fake tool here) and the
+/// logged. The item is read through /usr/bin/security (<see cref="MacHostCredentialReader"/>, a fake tool here) and the
 /// token is kept in memory: read again only near expiry, during a renewal or after a 401. Fakes only: no real Keychain,
 /// `security` or `claude` is used.
 /// </summary>
@@ -235,7 +235,7 @@ public class ClaudeKeychainSignInTests
         else Assert.Equal(ClaudeHostSession.DefaultCredentialsFile(_ => null), session.Source);
     }
 
-    // ---- B124: the token is kept in memory; the item is read again only near expiry, during a renewal, or after a 401.
+    // ---- The token is kept in memory; the item is read again only near expiry, during a renewal, or after a 401.
 
     [Fact]
     public async Task TwoRequestsInARow_ReadTheItemOnce()

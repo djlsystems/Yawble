@@ -203,7 +203,7 @@ describe('the remote view opens where the link says', () => {
   });
 });
 
-// ---- the Workflows dialog alone, as TesterKofi checked it on card 272: focus over a long list ----
+// ---- the Workflows dialog alone: focus over a long list ----
 
 describe('WorkflowsDialog opened at a workflow', () => {
   beforeEach(() => { document.body.innerHTML = ''; limits.length = 0; });

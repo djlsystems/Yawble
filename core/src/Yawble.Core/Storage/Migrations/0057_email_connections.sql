@@ -1,4 +1,4 @@
--- 0057 email Connections (B133): connections.kind may be 'email', a mailbox signed in over IMAP and SMTP (Email/EmailConnection.cs).
+-- 0057 email Connections: connections.kind may be 'email', a mailbox signed in over IMAP and SMTP (Email/EmailConnection.cs).
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --
 -- The kind's CHECK cannot be altered in place, so the table is rebuilt with every row, column and id kept. apis and

@@ -283,7 +283,7 @@ describe('Teams list tiles: the button row', () => {
     sw.mockRestore(); cw.mockRestore();
   });
 
-  it('keeps the actions on one row on a phone, so an overflowing row switches to 44 px icons; the Delete confirm keeps its words (card 319)', async () => {
+  it('keeps the actions on one row on a phone, so an overflowing row switches to 44 px icons; the Delete confirm keeps its words', async () => {
     // A wrapping row never overflows (its scrollWidth stays its clientWidth), so fit() never went icons-only on an iPhone
     // and Delete wrapped onto a second row. The phone @media rule must not wrap the row.
     const src = readFileSync(resolve(__dirname, '../../src/renderer/src/components/TeamsList.vue'), 'utf8');

@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CoreEvent, CoreInfo, YawbleApi } from '../../src/shared/api';
 
-// B025: a remote view's access. Fakes only: no core, no link, no network.
+// A remote view's access. Fakes only: no core, no link, no network.
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80;

@@ -248,10 +248,10 @@ describe('LogsDialog', () => {
   });
 });
 
-// B101 (card 440): the Member filter picks a member, a team as a whole or the app. The core (card 438) answers
+// The Member filter picks a member, a team as a whole or the app. The core answers
 // logs.query source=activity on this contract: member="team/Name" -> that member only; team="X" and no member -> X's
 // members plus X's team rows (member column "<X>"); app=true -> the app's own rows only (team empty, member "app").
-describe('LogsDialog: the Member filter on a member, a team or the app (B101)', () => {
+describe('LogsDialog: the Member filter on a member, a team or the app', () => {
   const opts = (w: ReturnType<typeof mount>) => w.findAll('[data-test=logs-member] option').map((o) => [(o.element as HTMLOptionElement).value, o.text()]);
 
   it('OffersEachMember_EachTeamAsAWhole_AndTheApp', async () => {
@@ -381,8 +381,8 @@ describe('LogsDialog: the Member filter on a member, a team or the app (B101)', 
     w.unmount();
   });
 
-  it('Card451_PickingATeamOrClearFilters_AfterApp_WidensTheSourceValuesAgain', async () => {
-    // TesterWren, card 451 (B101 F1 re-check): the other two ways app goes away.
+  it('PickingATeamOrClearFilters_AfterApp_WidensTheSourceValuesAgain', async () => {
+    // The other two ways app goes away.
     const { api, calls } = fakeApi();
     const inner = api.call;
     api.call = (async (method: string, params?: Record<string, unknown>) => {

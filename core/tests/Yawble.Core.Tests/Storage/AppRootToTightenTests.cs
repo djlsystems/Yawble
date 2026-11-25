@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Storage;
 
 /// <summary>
-/// B031 finding 7a: which folder above the data folder is made user-only. Only the shell's own app folder (named as
+/// Which folder above the data folder is made user-only. Only the shell's own app folder (named as
 /// shell/src/main/app-folder.ts makes it) is; a custom --data-dir named "data" in the home or a shared folder tightens
 /// only itself. A pure decision, so it runs on every OS.
 /// </summary>

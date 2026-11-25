@@ -14,7 +14,7 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// B017: on Linux, Install for a tool ask runs exactly "pkexec &lt;package manager at its fixed path&gt; ..." with the
+/// On Linux, Install for a tool ask runs exactly "pkexec &lt;package manager at its fixed path&gt; ..." with the
 /// catalog's packages, when pkexec, a graphical session and a recognised distribution are there; pkexec's 126 and 127
 /// keep the ask open in plain words; the program is looked for again afterwards, and Check again looks for it after a
 /// manual install. Fakes only: the fake tool host records what would run; no test runs pkexec, a package manager or any
@@ -317,7 +317,7 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Equal("bad_params", (await Assert.ThrowsAsync<RpcException>(() => CheckAgain(id + 100))).Code);
     }
 
-    // ------------------------------------------------------------------ B017 gap tests (card 84, TesterWren)
+    // ------------------------------------------------------------------ gap tests (TesterWren)
 
     [Fact]
     public async Task Gap_AnApprovedCompanionCall_IsStillRefusedInstallAndCheckAgain()
@@ -423,7 +423,7 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Empty(_asks.Asks());
     }
 
-    // ------------------------------------------------------------------ lastResult (card 85)
+    // ------------------------------------------------------------------ lastResult
 
     [Fact]
     public async Task TheAsk_KeepsTheLastResultCode_SoAFreshCardKnowsACancelFromAFailure()
@@ -468,7 +468,7 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Null(_asks.Asks(openOnly: false).Single(a => a.Id == id).LastResult);
     }
 
-    // ------------------------------------------------------------------ lastResult gap tests (card 84 re-check, TesterWren)
+    // ------------------------------------------------------------------ lastResult gap tests
 
     private long Scalar(string sql)
     {

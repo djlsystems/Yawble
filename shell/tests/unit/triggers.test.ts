@@ -127,7 +127,7 @@ describe('triggers dialog', () => {
     expect(w.find('[data-test=triggers-note]').text()).toContain('Saved hourly sweep');
   });
 
-  // B125: Folder > Fire on.
+  // Folder > Fire on.
   const folder = (fireOn?: WatchFireOn): Trigger => ({
     ...nightly, id: 9, name: 'inbox',
     schedule: { kind: 'folder', intervalSec: 30, cron: null, timezone: null, fireAt: null },

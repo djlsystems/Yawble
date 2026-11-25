@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// B037: the phone layout (a window below 760 px wide) of Teams, the Kanban board, Backlog, Monitor, Logs, Documents
+// The phone layout (a window below 760 px wide) of Teams, the Kanban board, Backlog, Monitor, Logs, Documents
 // and the Code browser. matchMedia is a fake whose width the tests set: below 760 px the screens change what CSS
 // cannot (one board lane at a time with tabs and swipe, the list or the file, entries as cards, menus); at 760 px
 // and wider each screen is as it was. The scoped styles carry the same width as @media (max-width: 759.98px).
@@ -269,7 +269,7 @@ describe('the Backlog on a phone', () => {
     // The opening of a row is not triggered by its menu.
     expect(w.find('[data-test=backlog-item]').exists()).toBe(false);
 
-    // The sort is in the header's fold (B054), closed at first.
+    // The sort is in the header's fold, closed at first.
     expect(w.find('[data-test=backlog-sort-key]').exists()).toBe(false);
     await w.get('[data-test=backlog-tools-toggle]').trigger('click');
     await w.get('[data-test=backlog-sort-key]').setValue('title');
@@ -334,7 +334,7 @@ describe('Teams on a phone', () => {
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
     await settle();
-    // B076: the member tiles, one per row, then the New member tile last.
+    // The member tiles, one per row, then the New member tile last.
     const cells = w.findAll('.member-cell:not(.new-cell)');
     expect(cells).toHaveLength(2);
     expect(w.findAll('.member-cell').at(-1)!.find('[data-test=member-card-new-tile]').exists()).toBe(true);
@@ -354,7 +354,7 @@ describe('Teams on a phone', () => {
     expect(w.get('section.team').classes()).toContain('phone');
   });
 
-  it('at desktop width: one view per member, the member tiles with their width and height handles (B076)', async () => {
+  it('at desktop width: one view per member, the member tiles with their width and height handles', async () => {
     screen(Desktop);
     const { api } = teamApi();
     const w = keep(mount(TeamView, { props: { team, api, pollMs: 100_000 }, global: { stubs: { TeamSyncBanner: true } } }));
@@ -431,7 +431,7 @@ describe('the Monitor on a phone', () => {
     expect(w.get('[data-test=monitor-activity]').classes()).not.toContain('collapsed');
     expect(w.get('.controls').find('[data-test=monitor-legend-toggle]').exists()).toBe(false);
     expect(w.findAll('[data-test=monitor-legend-toggle]')).toHaveLength(1);
-    // The forces cog stays beside Pinned, as main has it; the sound follows it (card 374); the density is in its panel.
+    // The forces cog stays beside Pinned, as main has it; the sound follows it; the density is in its panel.
     const order = [...w.get('.controls').element.children].map((e) => (e as HTMLElement).dataset.test);
     expect(order).toEqual(['monitor-camera', 'monitor-layout-toggle', 'monitor-sound']);
   });
@@ -668,7 +668,7 @@ describe('the Code browser on a phone', () => {
 // ---------------------------------------------------------------- every screen's phone styles
 
 describe('the phone width in the scoped styles', () => {
-  it('each screen of B037 has a @media (max-width: 759.98px) block, and none uses another phone width', () => {
+  it('each phone screen has a @media (max-width: 759.98px) block, and none uses another phone width', () => {
     const root = resolve(__dirname, '../..');
     const files = [
       'src/renderer/src/board/BoardView.vue', 'src/renderer/src/board/BoardCardItem.vue', 'src/renderer/src/board/CardPanel.vue', 'src/renderer/src/board/BacklogView.vue',

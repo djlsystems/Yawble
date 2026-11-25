@@ -14,7 +14,7 @@ import {
 import { REMOTE_THEME_KEY } from '../../src/renderer/src/theme';
 import { confirmState } from '../../src/renderer/src/confirm';
 
-// B115 Part B (card 518): the remote view embedded in the cloud page. The sidebar as data (yawble.nav), the cloud's
+// The remote view embedded in the cloud page. The sidebar as data (yawble.nav), the cloud's
 // navigate and theme messages, the origin and source checks, and that the viewer's own remote theme is never used.
 // Fakes only: a fake window and parent, fake handlers, the real Sidebar.vue for the "same as the click" checks.
 
@@ -125,7 +125,7 @@ describe('buildNav: the sidebar as data', () => {
     // Another screen: no team is active even with a teamId kept.
     expect(buildNav({ ...base(), view: 'board', teamId: 2 }).teams.some((t) => t.active)).toBe(false);
   });
-  it('B130: a team with an open decision has the waiting dot; running still wins', () => {
+  it('a team with an open decision has the waiting dot; running still wins', () => {
     const nav = buildNav({ ...base(), teams: [team(1, 'asks', { waiting: 1 }), team(2, 'busy', { waiting: 1, running: 1 }), team(3, 'held', { waiting: 1, paused: true })] });
     expect(nav.teams.map((t) => t.dot)).toEqual(['waiting', 'running', 'waiting']);
   });

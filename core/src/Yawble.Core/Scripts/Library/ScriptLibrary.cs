@@ -213,7 +213,7 @@ public sealed class ScriptLibrary : IScriptSchemaLookup
     }
 
     /// <summary>
-    /// B134: deletes a script and every version (its runs go with it). Refused with in_use while any member uses it; the
+    /// Deletes a script and every version (its runs go with it). Refused with in_use while any member uses it; the
     /// message names each team and member.
     /// </summary>
     public void Delete(long scriptId)

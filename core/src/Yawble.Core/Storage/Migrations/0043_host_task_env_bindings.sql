@@ -1,4 +1,4 @@
--- 0043 a host task can take environment variables from Connections (B023).
+-- 0043 a host task can take environment variables from Connections.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.
 --
 -- env_from_connections: a JSON array of {name, connectionId, field, connectionName}: which variable comes from which

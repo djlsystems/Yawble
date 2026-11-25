@@ -279,7 +279,7 @@ public class GuardrailServiceTests
             // The running core's own launcher ran it (LaunchWiring). Host sign-in: the kit's fake home holds a dummy sign-in for
             // the CLI, so the member counts as signed in on this computer. The gateway holds that sign-in, so the sandbox is
             // granted none of it: the check emits no signin.* probe (those are only for a granted sign-in file), and the
-            // home probes it always emits for the sign-in files are BLOCKED (B038).
+            // home probes it always emits for the sign-in files are BLOCKED.
             Assert.Equal("yawble-ffi", report["run"]!["backend"]!.GetValue<string>());
             Assert.True(report["run"]!["credentialConfigured"]!.GetValue<bool>());
             var results = report["results"]!.AsArray();

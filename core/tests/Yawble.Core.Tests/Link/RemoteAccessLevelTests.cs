@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// Read-only Cloud Link viewers (B025): each call's access ("full" | "read"), the read/change table next to the allow
+/// Read-only Cloud Link viewers: each call's access ("full" | "read"), the read/change table next to the allow
 /// list, the Visitor refusal and its audit line, the hello's capability, and core.getInfo's remoteAccess. Fakes only:
 /// the link's call handler is driven directly with a fake dispatcher and a fake send (no socket, no network).
 /// </summary>
@@ -108,7 +108,7 @@ public class RemoteAccessLevelTests
     [Fact]
     public void TheWorkflowExpirySetting_ReadsWithoutDays_ChangesWithThem_AndExtendIsAChange()
     {
-        // B085 (card 388/389): teams.workflowExpiry is a get-or-set on "days"; bus.workflowExtend changes the workflow.
+        // teams.workflowExpiry is a get-or-set on "days"; bus.workflowExtend changes the workflow.
         Assert.True(RemoteAccess.OnAllowList("teams.workflowExpiry"));
         Assert.Null(RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1 }, allowHostTerminals: false, RemoteAccess.Read));
         Assert.Null(RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["on"] = true }, allowHostTerminals: false, RemoteAccess.Read));

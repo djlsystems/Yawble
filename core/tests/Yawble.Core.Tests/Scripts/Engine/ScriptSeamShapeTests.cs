@@ -6,7 +6,7 @@ using Yawble.Core.Scripts.Language;
 
 namespace Yawble.Core.Tests.Scripts.Engine;
 
-/// <summary>The seam shapes card 584 codes against: static entry points, the built-in lookup, the checkpoint as plain JSON.</summary>
+/// <summary>The seam shapes the script runner codes against: static entry points, the built-in lookup, the checkpoint as plain JSON.</summary>
 public sealed class ScriptSeamShapeTests : IDisposable
 {
     private readonly TempFolder _temp = new();
@@ -49,7 +49,7 @@ public sealed class ScriptSeamShapeTests : IDisposable
         var first = await ScriptEngine.RunAsync(request, journal, TestContext.Current.CancellationToken);
         Assert.Equal("succeeded", first.Status.ToString(), ignoreCase: true);
 
-        // The checkpoint after the first loop item, stored the way card 584 stores it (System.Text.Json defaults).
+        // The checkpoint after the first loop item, stored the way the script runner stores it (System.Text.Json defaults).
         var cp = ScriptRunCheckpoint.FromJson(journal.Completed[2].Checkpoint);
         var stored = JsonSerializer.Serialize(cp);
         var back = JsonSerializer.Deserialize<ScriptRunCheckpoint>(stored)!;

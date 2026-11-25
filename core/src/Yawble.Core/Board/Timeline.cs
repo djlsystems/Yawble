@@ -5,7 +5,7 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Board;
 
 /// <summary>
-/// B086's time categories. Every moment of a card or a workflow is in exactly one, so they add up to its overall time.
+/// The board's time categories. Every moment of a card or a workflow is in exactly one, so they add up to its overall time.
 /// For a workflow, a moment takes the highest category among its open cards (and its card-less runs), in
 /// <see cref="ByPriority"/> order.
 /// </summary>
@@ -43,7 +43,7 @@ public static class TimeCategories
             "needs-decision" => WaitingOnYou,
             "blocked" or "failed" => Blocked,
             "handback" or "completed" => WaitingOnTeammate,
-            // B097 (card 437): the person stopped the run; nothing works the card and nothing blocks it until new work.
+            // The person stopped the run; nothing works the card and nothing blocks it until new work.
             Lanes.Stopped => Idle,
             _ => Idle,
         };
@@ -60,7 +60,7 @@ public static class TimeMarkers
 public sealed record TimeShare(string Category, long Ms);
 
 /// <summary>
-/// The wire contract's <c>time</c> on a BoardCard and on a workflow item (B086). <see cref="EndedHow"/>: done (a card),
+/// The wire contract's <c>time</c> on a BoardCard and on a workflow item. <see cref="EndedHow"/>: done (a card),
 /// completed, closed, stopped or expired; null while open. The breakdown's ms add up to <see cref="OverallMs"/> exactly.
 /// </summary>
 public sealed record TimeSummary(
@@ -118,13 +118,13 @@ public sealed record TimelineRow(long? Card, string? Member, string? Title, IRea
 public sealed record WorkflowTimeline(long Id, TimeSummary Time, IReadOnlyList<TimelineRow> Rows, IReadOnlyList<TimeBand> Summary, IReadOnlyList<TimeMarker> Markers);
 
 /// <summary>
-/// Computes B086's times. Pure: every input, "now" included, is given, so tests use fixed times only.
+/// Computes the board's times. Pure: every input, "now" included, is given, so tests use fixed times only.
 /// <list type="bullet">
 /// <item>A card: created (planned) to the last time it entered Done, or now while it is not in Done. Its stored states
 ///   give the category; while a run of its member is active the time is Agent working, except the run's stalls (Stalled)
 ///   and its waits for the heavy-work lease (Waiting for a slot); a run in the run queue (queued to started, or still
 ///   queued now: a live queue entry) is Waiting for a slot. A card with work for its member that is not in the run queue
-///   (busy elsewhere, team held, a hand-back waiting for its sender's run) is Waiting on a teammate (B126). Time in Done
+///   (busy elsewhere, team held, a hand-back waiting for its sender's run) is Waiting on a teammate. Time in Done
 ///   before a reopen is Was done.</item>
 /// <item>A workflow: created (its first message) to its last end (completed, closed, expired: an expired one's last
 ///   activity), or now while open. Each moment takes the highest category of its cards not in Done and of its card-less
@@ -165,7 +165,7 @@ public static class TimelineCalculator
                 else if (In(c.Stalls, a)) category = TimeCategories.Stalled;
                 else if (runs.Any(r => Ms(r.Started) <= a && a < (r.Ended is { } e ? Ms(e) : last))) category = TimeCategories.AgentWorking;
                 else if (runs.Any(r => Ms(r.Queued) <= a && a < Ms(r.Started))) category = TimeCategories.WaitingForSlot;
-                // B126: a card with work for its member (stored queued) waits for a slot only while a run of it is in the
+                // A card with work for its member (stored queued) waits for a slot only while a run of it is in the
                 // run queue (the span above); otherwise its member is busy elsewhere, its team is held, or a hand-back
                 // waits for its sender's run: it waits on a teammate.
                 else if (category == TimeCategories.WaitingForSlot) category = TimeCategories.WaitingOnTeammate;

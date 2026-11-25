@@ -92,7 +92,7 @@ public class PolicyMergeTests
     [InlineData("grok.com")]
     [InlineData("bus.yawble.internal")]
     [InlineData("127.0.0.1")]
-    [InlineData("*.com")] // a domain allow over a public suffix (B018)
+    [InlineData("*.com")] // a domain allow over a public suffix
     [InlineData("*.github.io")]
     [InlineData("*.anthropic.com")]
     [InlineData("a.*.example.com")]
@@ -250,7 +250,7 @@ public class PolicyMergeTests
     [InlineData(TargetOs.MacOS)]
     public void ThePersonalFoldersReachTheCompiledDenyList(TargetOs os)
     {
-        // macOS Claude is gateway-held only (B118); Linux and Windows keep the file-grant mode here.
+        // macOS Claude is gateway-held only; Linux and Windows keep the file-grant mode here.
         var run = PolicyFixtures.Run(os, os == TargetOs.MacOS ? CredentialMode.ClaudeGatewaySignIn : CredentialMode.ClaudeHostSignIn);
         var compiled = SandboxRequestCompiler.Compile(GlobalPolicy.Default, null, null, run);
         var denied = ((System.Text.Json.Nodes.JsonArray)compiled.Request["filesystem"]!["deniedPaths"]!).Select(n => n!.GetValue<string>()).ToList();

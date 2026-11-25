@@ -109,7 +109,7 @@ public class NeverEmitTests
             foreach (var n in denied.Where(n => n!.GetValue<string>().EndsWith("/Library/Keychains", StringComparison.Ordinal)).ToList()) denied.Remove(n);
         }, "~/Library/Keychains");
 
-    // ---- B118: macOS Claude is held by the gateway (it reads the login Keychain on the host); a Mac sandbox gets no sign-in.
+    // ---- macOS Claude is held by the gateway (it reads the login Keychain on the host); a Mac sandbox gets no sign-in.
 
     [Fact]
     public void AMacClaudeRunWithTheFileGrantModeIsRefused()
@@ -159,7 +159,7 @@ public class NeverEmitTests
     }
 
     /// <summary>
-    /// B124: what /usr/bin/security prints for Claude Code's item (the sign-in JSON, or anything it echoes when it fails)
+    /// What /usr/bin/security prints for Claude Code's item (the sign-in JSON, or anything it echoes when it fails)
     /// never reaches a log line, an error, an exception or a result's text, whatever the tool answers.
     /// </summary>
     [Fact]

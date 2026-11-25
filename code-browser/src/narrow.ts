@@ -1,6 +1,6 @@
 import { getCurrentInstance, onBeforeUnmount, readonly, ref, type Ref } from 'vue';
 
-/** The host's phone layout (B037): a window below 760 px wide. At 760 px and wider nothing changes. */
+/** The host's phone layout: a window below 760 px wide. At 760 px and wider nothing changes. */
 export const NarrowQuery = '(max-width: 759.98px)';
 
 type Media = Pick<MediaQueryList, 'matches'> & Partial<Pick<MediaQueryList, 'addEventListener' | 'removeEventListener' | 'addListener' | 'removeListener'>>;

@@ -4,7 +4,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Code;
 
 /// <summary>
-/// B031 finding 1a: the canonicaliser's POSIX walk, where a ".." after a link goes to the link's real parent (as Linux
+/// The canonicaliser's POSIX walk, where a ".." after a link goes to the link's real parent (as Linux
 /// and macOS resolve it), driven on every OS through the internal physicalDotDot switch with real links. Skips where
 /// links cannot be made.
 /// </summary>

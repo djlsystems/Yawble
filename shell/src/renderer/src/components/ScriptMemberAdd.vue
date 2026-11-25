@@ -9,7 +9,7 @@ import {
   settingValue, type KnownIntegration, type ScriptRequire, type ScriptSettingDecl, type ScriptSummary, type ScriptVersionInfo,
 } from '../scriptMembers';
 
-// B134 (card 598): Add member as "Script member": the script (a runnable one), its version (latest, or a pinned clean
+// Add member as "Script member": the script (a runnable one), its version (latest, or a pinned clean
 // version), a settings form made from the script's own settings (types and defaults from its document), and its
 // integrations: one the script names by its real name is used as it is ("Use <name>") or replaced by another of the
 // team's of the same kind; an alias the script names needs one of the team's integrations. Add calls scripts.memberAdd; a

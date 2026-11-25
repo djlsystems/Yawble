@@ -84,7 +84,7 @@ public class SignInTests
     }
 
     /// <summary>
-    /// B118: macOS Claude keeps its sign-in in the login Keychain item "Claude Code-credentials". Signed in = the item
+    /// macOS Claude keeps its sign-in in the login Keychain item "Claude Code-credentials". Signed in = the item
     /// exists; detection checks only that (no read of the secret, so no Keychain prompt), and nothing of it is a file to grant.
     /// </summary>
     [Fact]
@@ -106,7 +106,7 @@ public class SignInTests
     }
 
     /// <summary>
-    /// B124: on a Mac the existence check is macOS's own tool, `/usr/bin/security find-generic-password -s
+    /// On a Mac the existence check is macOS's own tool, `/usr/bin/security find-generic-password -s
     /// "Claude Code-credentials"` without -w: the password is never requested. Exit 44 is not signed in; another failure
     /// (or a timeout) reads as not signed in too, without a throw. A fake tool here.
     /// </summary>
@@ -172,7 +172,7 @@ public class SignInTests
         var past = GrokNow.AddHours(-1).ToUnixTimeSeconds();
         foreach (var (text, why) in new[]
                  {
-                     ("{}", "holds no sign-in"),                                   // what grok left behind (B128)
+                     ("{}", "holds no sign-in"),                                   // what grok has been seen to leave behind
                      ("", "is empty or not a sign-in"),
                      ("   ", "is empty or not a sign-in"),
                      ("{not json", "is empty or not a sign-in"),
@@ -294,7 +294,7 @@ public class SignInTests
         var claude = await new ClaudeDetector().DetectAsync(host.Host(), Ct);
         Assert.False(claude.Found);
         Assert.Equal(SignInStatus.NotSignedIn, claude.SignIn!.Status); // shown even when not installed
-        // Grok's auth.json is read for whether it holds a token (B128); Claude's sign-in never is.
+        // Grok's auth.json is read for whether it holds a token; Claude's sign-in never is.
         Assert.DoesNotContain(host.Reads, r => r.EndsWith(".credentials.json"));
         Assert.DoesNotContain("FAKE-grok", grok.SignIn.Detail);
     }

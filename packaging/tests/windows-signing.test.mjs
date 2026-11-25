@@ -1,4 +1,4 @@
-// B077: where packaging/windows-signing.cjs finds signtool.exe and Azure.CodeSigning.Dlib.dll. The new names SIGNTOOL and
+// Where packaging/windows-signing.cjs finds signtool.exe and Azure.CodeSigning.Dlib.dll. The new names SIGNTOOL and
 // SIGNING_DLIB (which a host task can be given) win over the old YAWBLE_ names, the old names still work, and with neither
 // it falls back to the Windows SDK and the Artifact Signing client tools' folder. Fakes only: empty files in a temp folder
 // stand in for the tools, and ProgramFiles(x86) / LOCALAPPDATA point there. Nothing is signed, no real signtool runs.

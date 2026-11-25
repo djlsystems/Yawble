@@ -6,7 +6,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Lifetime;
 
 /// <summary>
-/// B032 verify (card 151): the data folder's lock goes with the process that holds it, as real core processes. A killed
+/// The data folder's lock goes with the process that holds it, as real core processes. A killed
 /// core (a crash) and a core that exits cleanly both leave the folder free for the next core, which then owns
 /// core.lock and core.pid.
 /// </summary>
@@ -105,7 +105,7 @@ public class CoreLockReleaseTests
         }
     }
 
-    // B033 verify (card 153): a real core whose core.lock is still held when it starts (as by a just-killed core whose handle
+    // A real core whose core.lock is still held when it starts (as by a just-killed core whose handle
     // is still closing) waits for it within the ~1 s budget instead of being refused at once.
     [Fact]
     public async Task ACoreLockLetGoWithinTheBudget_IsTakenByTheStartingCore()
@@ -140,7 +140,7 @@ public class CoreLockReleaseTests
         }
     }
 
-    // B033 verify (card 153): a genuine second core on a folder a running core holds is still refused, after the retry
+    // A genuine second core on a folder a running core holds is still refused, after the retry
     // budget (about 1 s) and not much longer: exit 5, the holder's pid on stderr, nothing on stdout.
     [Fact]
     public async Task AGenuineSecondCore_IsRefusedWithExit5AfterAboutTheBudget()

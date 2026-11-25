@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// B085: an open workflow nobody works expires after the team's workflowExpiryDays (default 3); what keeps one from being
+/// An open workflow nobody works expires after the team's workflowExpiryDays (default 3); what keeps one from being
 /// idle; the warn-then-close path for one waiting on the person's answer; Extend; its cards end; the recorded end is the
 /// last real activity; new activity reopens it. Fake clock only: the store's clock and SweepExpiryAsync's now.
 /// </summary>

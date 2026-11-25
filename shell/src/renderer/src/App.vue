@@ -26,7 +26,7 @@ import TerminalPane from './components/TerminalPane.vue';
 import { terminalPane } from './terminalPane';
 import { openMemberTerminal, registerTeamPage } from './memberTerminal';
 import BacklogView from './board/BacklogView.vue';
-// The Workflows page (B104) is loaded when first opened: the window's first paint does not wait for it.
+// The Workflows page is loaded when first opened: the window's first paint does not wait for it.
 // A page loaded on first use: when its file is gone (the app was rebuilt or updated while this window stayed open), it
 // says so with a Reload button instead of leaving the page blank.
 const WorkflowsView = defineAsyncComponent({ loader: () => import('./workflows/WorkflowsView.vue'), errorComponent: PageLoadFailed });
@@ -63,7 +63,7 @@ import PageLoadFailed from './components/PageLoadFailed.vue';
 // Cloud Link (remote.html), where the computer-only parts are hidden.
 const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
 const api = resolveApi(props.api);
-/** B115: the remote view embedded in the cloud page (?embed=1): no sidebar and no theme switch; the cloud draws the
+/** The remote view embedded in the cloud page (?embed=1): no sidebar and no theme switch; the cloud draws the
  *  sidebar from yawble.nav and sends yawble.navigate / yawble.theme back (embed.ts, the bridge started below). */
 const embed = isEmbed();
 
@@ -74,7 +74,7 @@ interface Place { view: View; conversationId: string | null; teamId: number | nu
 const read = (s: () => Storage): Partial<Place> => { try { return JSON.parse(s().getItem('yawble.place') ?? '{}'); } catch { return {}; } };
 const kept = read(() => localStorage);
 const saved = read(() => sessionStorage);
-// A #workflows hash (a link to the Workflows page, B104) opens that page.
+// A #workflows hash (a link to the Workflows page) opens that page.
 const view = ref<View>(typeof location !== 'undefined' && isWorkflowsHash(location.hash) ? 'workflows' : saved.view ?? 'concierge');
 const prefTab = ref<SettingsTab>('general');
 const conversationId = ref<string | null>(saved.view ? saved.conversationId ?? null : null);
@@ -86,7 +86,7 @@ watch([view, conversationId, selected, collapsed], () => {
   try { localStorage.setItem('yawble.place', JSON.stringify({ collapsed: collapsed.value })); } catch { /* likewise */ }
 });
 
-// ---- the phone layout (B037, phone.ts): below 760 px wide the sidebar is a drawer, opened by the top bar's menu button
+// ---- the phone layout (phone.ts): below 760 px wide the sidebar is a drawer, opened by the top bar's menu button
 // and closed by a tap on the scrim, Escape, or going anywhere. The folded rail is a desktop thing: a phone never shows it.
 const phone = usePhone();
 const drawerOpen = ref(false);
@@ -144,7 +144,7 @@ const allTeams = computed(() => overview.value?.teams ?? []);
 const teams = computed(() => allTeams.value.filter((t) => !t.archived));
 const archivedTeams = computed(() => allTeams.value.filter((t) => t.archived));
 const team = computed(() => allTeams.value.find((t) => t.id === selected.value) ?? null);
-/** The team whose page is open: on a phone the drawer offers its Documents and Workflows (card 316). */
+/** The team whose page is open: on a phone the drawer offers its Documents and Workflows. */
 const openTeamName = computed(() => (view.value === 'teams' && team.value ? team.value.name : null));
 /** The drawer's Documents / Workflows of the open team: the drawer closes and the team page opens that dialog. */
 function openTeamDialog(which: 'documents' | 'workflows') {
@@ -226,7 +226,7 @@ function openTeam(id: number, panel?: 'workflows', workflow?: number) {
   if (panel === 'workflows') void nextTick(() => teamView.value?.openWorkflows(workflow));
 }
 
-// B104: the Workflows page opened from elsewhere (the board's button, a team's "All workflows", a Backlog item's
+// The Workflows page opened from elsewhere (the board's button, a team's "All workflows", a Backlog item's
 // "workflow #N"), and the Backlog opened at an item (an Item link). The page / the Backlog take the request as a prop.
 watch(workflowsRequest, (r) => { if (!r) return; monitorWorkflows.value = null; view.value = 'workflows'; });
 watch(backlogRequest, (r) => { if (!r) return; monitorWorkflows.value = null; view.value = 'backlog'; });
@@ -285,7 +285,7 @@ const manageTeam = ref<TeamSummary | null>(null);
 const conciergeDraft = ref<string | null>(null);
 function discuss(teamId: number, d: { from: string; question: string; summary?: string | null; options?: { label: string }[] | null; details?: string | null }) {
   const name = allTeams.value.find((t) => t.id === teamId)?.name ?? 'the team';
-  // B123: a decision with a summary quotes the ask, the answers offered and the details (not the old question text).
+  // A decision with a summary quotes the ask, the answers offered and the details (not the old question text).
   const text = d.summary?.trim()
     ? [d.summary.trim(), d.options?.length ? `Answers offered: ${d.options.map((o) => `"${o.label}"`).join(', ')}.` : '', (d.details ?? '').trim()]
       .filter(Boolean).join('\n\n')
@@ -344,7 +344,7 @@ function menu(item: SettingsTab) {
   integrationsTab.value = null;
   view.value = 'settings';
 }
-// B100: Team settings' "Lessons" link opens Settings at Skills, where the linked skill is selected (SkillsDialog).
+// Team settings' "Lessons" link opens Settings at Skills, where the linked skill is selected (SkillsDialog).
 watch(skillLink, (l) => { if (l) { manageTeam.value = null; menu('skills'); } });
 /** Which Integrations tab Settings opens at (Needs You's "reconnect" link opens Connections). */
 const integrationsTab = ref<'cli' | 'api' | 'mcp' | 'connections' | null>(null);
@@ -397,10 +397,10 @@ let offTapTitles: (() => void) | null = null;
 onMounted(() => { offTapTitles = installTapTitles(() => phone.value); });
 onBeforeUnmount(() => { offTapTitles?.(); releaseDrawerEscape?.(); });
 
-// B072: a commit ID in rendered text opens the Commit view, looked for in the team on screen first, then every team.
+// A commit ID in rendered text opens the Commit view, looked for in the team on screen first, then every team.
 // Its Compare with main / Show its branch open that team's page, whose Git dialog takes the request (TeamView).
 let offCommitLinks: (() => void) | null = null;
-// B074: an ID is a link only once git.commitsResolve confirms it; every rendered candidate on screen is asked in one call.
+// An ID is a link only once git.commitsResolve confirms it; every rendered candidate on screen is asked in one call.
 let offCommitResolve: (() => void) | null = null;
 onMounted(() => { offCommitLinks = installCommitLinks(); offCommitResolve = installCommitResolve(teamsFor); });
 onBeforeUnmount(() => { offCommitLinks?.(); offCommitResolve?.(); });
@@ -435,7 +435,7 @@ const menus = computed<Menu[]>(() => [
   { label: 'View', items: [
     // No Terminal here: a member's terminal is in its pane on the team page, and Settings > Agents opens its Terminal /
     // Test sessions in the right-hand pane itself (terminalPane.ts showChannelTerminal).
-    // Embedded (B115): the cloud page has the sidebar and the theme, so neither is offered here.
+    // Embedded: the cloud page has the sidebar and the theme, so neither is offered here.
     ...(embed ? [] : [
       { id: 'sidebar', label: 'Sidebar', keys: `${mod}B`, checked: !collapsed.value },
       { separator: true } as const,
@@ -511,7 +511,7 @@ function shortcut(e: KeyboardEvent) {
 }
 window.addEventListener('keydown', shortcut);
 
-// ---- B115: embedded in the cloud page. The bridge publishes what the sidebar would draw (yawble.ready, then yawble.nav
+// ---- Embedded in the cloud page. The bridge publishes what the sidebar would draw (yawble.ready, then yawble.nav
 // on load and on every change) and follows the parent's yawble.navigate through the sidebar's own handlers below, and its
 // yawble.theme through theme.ts, which keeps nothing in embed mode (pageThemeEnv).
 // shallowRef: resolve compares the request itself (a ref would hold a proxy of it, never === r, and the dialog stayed open).
@@ -549,7 +549,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 <template>
   <div class="app" :class="{ collapsed: collapsed && !phone && !embed, 'own-bar': ownBar, mac, phone, embed, 'drawer-open': phone && drawerOpen && !embed }" :data-embed="embed ? '1' : undefined">
     <div v-if="phone && drawerOpen && !embed" class="scrim" data-test="drawer-scrim" @click="drawerOpen = false" />
-    <!-- Embedded in the cloud page (B115): no sidebar at all, wide or phone; the cloud draws it from yawble.nav. -->
+    <!-- Embedded in the cloud page: no sidebar at all, wide or phone; the cloud draws it from yawble.nav. -->
     <Sidebar v-if="!embed" id="app-drawer":rail="collapsed && !phone" :drawer="phone" :open="drawerOpen" :menu="drawerMenu" @command="command":view="view" :conversations="conversations" :teams="teams" :conversation-id="conversationId"
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
@@ -572,9 +572,9 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           <span class="cdot" />
           <span v-if="link?.state === 'connected' && link.viewers.length" class="cnum" data-test="cloud-link-viewers">{{ link.viewers.length }}</span>
         </button>
-        <!-- Embedded (B115): the cloud page's theme is shown (yawble.theme), so there is no switch here; the gear stays. -->
+        <!-- Embedded: the cloud page's theme is shown (yawble.theme), so there is no switch here; the gear stays. -->
         <ThemeToggle v-if="!embed" />
-        <!-- B115: Settings is this gear at the top right, just right of the theme switch (desktop window, remote view, phone). -->
+        <!-- Settings is this gear at the top right, just right of the theme switch (desktop window, remote view, phone). -->
         <button class="ghost gear" :class="{ on: view === 'settings' }" type="button" data-testid="settings-gear" data-test="settings-gear" title="Settings" aria-label="Settings"
           :aria-current="view === 'settings' ? 'page' : undefined" @click="go('settings')"><Icon name="settings" :size="18" /></button>
       </header>
@@ -592,7 +592,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <NetworkAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
       <!-- Developer tools agents asked for (request_tool): Install in the window only, Not now anywhere; on the Board, its Needs You lane. -->
       <ToolAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
-      <!-- Folders outside a clone agents asked for (B111): Approve / Deny, in a remote view too; on the Board, its Needs You lane. -->
+      <!-- Folders outside a clone agents asked for: Approve / Deny, in a remote view too; on the Board, its Needs You lane. -->
       <FolderAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
       </div>
 
@@ -637,7 +637,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
     <LinkDialog v-if="dialog === 'link'" :api="api" @close="dialog = null" @changed="link = $event" />
     <MemberSettingsDialog v-if="settingsFor !== null" :key="`${settingsFor}-${settingsTab}`" :member-id="settingsFor" :initial-tab="settingsTab" :api="api" :poll-ms="pollMs" @close="settingsFor = null" @changed="changed" />
     <TimelineDialog :api="api" />
-    <!-- B072: any commit ID clicked anywhere opens here, over whatever dialog showed it. -->
+    <!-- Any commit ID clicked anywhere opens here, over whatever dialog showed it. -->
     <CommitDialog :api="api" />
     <CommitChooser />
     <ConfirmDialog />
@@ -646,7 +646,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 </template>
 
 <style scoped>
-/* dvh after vh (card 334): the height the browser really shows. iOS Safari's 100vh is the height with its toolbars hidden,
+/* dvh after vh: the height the browser really shows. iOS Safari's 100vh is the height with its toolbars hidden,
    so a desktop-width remote view (an iPad, a phone in landscape) ran past the bottom of the screen, worst after a rotation.
    In Electron dvh and vh are the same. minmax(0, 1fr): wide content never makes the page column wider than the window,
    nor the sidebar's content the row taller than it (a phone turned to landscape: 380 px; the sidebar then scrolls). */
@@ -670,7 +670,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .cloud-ind.connecting .cdot, .cloud-ind.pairing .cdot { display: block; background: var(--dot-wait); }
 .cloud-ind.offline .cdot { display: block; background: var(--dot-bad); }
 .cnum { font-size: 12px; font-weight: 600; }
-/* The Settings gear (B115): as the theme switch beside it (ThemeToggle.vue). */
+/* The Settings gear: as the theme switch beside it (ThemeToggle.vue). */
 .gear { display: inline-flex; align-items: center; padding: 6px 8px; border-radius: 8px; color: var(--muted); }
 .gear:hover { background: var(--hover); color: var(--ink); }
 .gear.on { background: var(--selected); color: var(--ink); }
@@ -694,7 +694,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 /* ---- a phone (below 760 px; phone.ts): one column, a slim top bar with the menu button, the sidebar a drawer over the
    page (Sidebar.vue) with a scrim behind it. dvh: the height a phone browser really shows, its own bars left out. */
 .app.phone { grid-template-columns: minmax(0, 1fr); height: 100dvh; }
-/* Embedded in the cloud page (B115): no sidebar column, the screens take the full width. */
+/* Embedded in the cloud page: no sidebar column, the screens take the full width. */
 .app.embed { grid-template-columns: minmax(0, 1fr); }
 .phone .bar { gap: 2px; min-height: 52px;
   padding: calc(4px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) 4px calc(4px + env(safe-area-inset-left, 0px)); }

@@ -27,7 +27,7 @@ const toolAsk: ToolAsk = {
   decidedBy: null, decidedVia: null, decidedAt: null, canInstall: true, command: 'winget install --id Microsoft.DotNet.SDK.10', choices: ['install', 'notNow'],
 };
 const detail: BoardCardDetail = {
-  id: 91, team: 'Alpha', teamId: 3, member: 'TesterWren', item: 'B019', title: 'Test the verify-card rule', body: 'Check it end to end.',
+  id: 91, team: 'Alpha', teamId: 3, member: 'TesterWren', item: 'B009', title: 'Test the verify-card rule', body: 'Check it end to end.',
   status: 'needs-decision', lane: 'blocked', placed: false, awaitingManager: false, workflow: 926, createdAt: '2026-11-14T10:00:00Z',
   updatedAt: '2026-11-14T10:05:00Z', trailCount: 1, trail: [{ id: 1, at: '2026-11-14T10:05:00Z', source: 'TesterWren', kind: 'decision', text: 'Which branch should I test?' }],
 };
@@ -71,7 +71,7 @@ describe('Discuss with the Concierge', () => {
     const r = discussRequest.value!;
     expect(r.teamId).toBe(3);
     expect(r.text).toContain('card 91 on Alpha\'s Kanban board: "Test the verify-card rule", assigned to Tester Wren');
-    expect(r.text).toContain('in Needs You, from backlog item B019, workflow #926');
+    expect(r.text).toContain('in Needs You, from backlog item B009, workflow #926');
     expect(r.text).toContain('> Check it end to end.');
     expect(r.text).toContain('Tester Wren (decision): Which branch should I test?');
   });

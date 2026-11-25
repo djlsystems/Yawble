@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Card 470 (B074 core): git.commitsResolve on temp repositories. Short and full IDs resolve with repo, full ID, title and
+/// git.commitsResolve on temp repositories. Short and full IDs resolve with repo, full ID, title and
 /// pushed; a hex word that is no commit, a branch or tag named like hex and a tree's ID give no match; the same commit
 /// in two repositories (main and a writable extra) gives two matches, a read-only reference is not looked at; a batch
 /// of any size costs the same few git processes per repository.

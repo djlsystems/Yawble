@@ -14,7 +14,7 @@ public sealed record AttributedCommit(string Sha, IReadOnlyList<string> Lines);
 public static partial class CommitAttribution
 {
     // Vendors, models, tools and their domains, caught on the word. Word-bounded, so "Ivan Grokhov" or "Codexia" are not
-    // caught. Claude is here by the spec (card 134, item 3) although it is also a first name: "Claude Dupont" is caught.
+    // caught. Claude is here on purpose although it is also a first name: "Claude Dupont" is caught.
     private const string Ai = @"(?:claude|anthropic|openai|chatgpt|gpt-?\d[\w.-]*|codex|copilot|github\s+copilot|grok|xai|x\.ai|gemini|"
         + @"antigravity|deepmind|mistral|cursor|aider|windsurf|codeium|tabnine|amazon\s+q|codewhisperer|llama|"
         + @"opus|sonnet|haiku|claude\.(?:ai|com)|cognition\.ai|cognition-labs\.com)";

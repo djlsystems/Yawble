@@ -11,10 +11,10 @@ import { hasTime } from '../timeline/time';
 // which team, the status in its colour, and what is waiting (the Manager, the person).
 const props = defineProps<{ card: BoardCard; selected?: boolean }>();
 const emit = defineEmits<{ open: [] }>();
-// A run the person stopped reads "Stopped" in the neutral colour, not "Failed" in red (B097).
+// A run the person stopped reads "Stopped" in the neutral colour, not "Failed" in red.
 const look = computed(() => cardStatusLook(props.card));
 const color = computed(() => look.value.color);
-// B086: its overall time (the core's BoardCard.time), the quiet last thing in the bottom row; clicking it opens the
+// Its overall time (the core's BoardCard.time), the quiet last thing in the bottom row; clicking it opens the
 // timeline. An older core sends none: nothing shows.
 const time = computed(() => (hasTime(props.card.time) ? props.card.time : null));
 // The heavy-work lease (one full test suite, build or image build at a time on this computer), when this card's member
@@ -79,7 +79,7 @@ const leaseTitle = computed(() => {
 .lease.queued { --k: var(--state-waiting); }
 .muted { color: var(--muted); }
 .small { font-size: 11px; }
-/* A phone (B037): a roomier card, at least a 44 px tap target. */
+/* A phone: a roomier card, at least a 44 px tap target. */
 @media (max-width: 759.98px) {
   .card { min-height: 44px; padding: 10px 12px; }
   .title { font-size: 14px; }

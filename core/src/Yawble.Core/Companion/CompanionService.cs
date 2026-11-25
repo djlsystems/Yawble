@@ -69,7 +69,7 @@ public sealed partial class CompanionService(
     private const string CodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
-    /// <summary>B135: the script and schema tools, onto the app's scripts.* / schemas.* calls.</summary>
+    /// <summary>The script and schema tools, onto the app's scripts.* / schemas.* calls.</summary>
     private readonly ScriptTools _scripts = new(bus, route);
     private readonly ConfirmationBook _book = new(clock);
     private readonly Lock _gate = new();
@@ -131,7 +131,7 @@ public sealed partial class CompanionService(
 
     /// <summary>The arguments that name what a call acts on (its team, repository and branch, or its item, and the name it acts on).</summary>
     private static readonly string[] TargetArguments = ["branch", "item", "card", "name", "member", "pr", "fix", "workflow", "backup", "task", "script", "id",
-        // B139: integration_action_allow's own target, so allowing two actions are two requests, not one replacing the other.
+        // integration_action_allow's own target, so allowing two actions are two requests, not one replacing the other.
         "integration", "action"];
 
     /// <summary>A call's target: the team (any case), the repository (default main) and the identifying arguments.</summary>
@@ -264,7 +264,7 @@ public sealed partial class CompanionService(
     }
 
     /// <summary>
-    /// A script tool (B135). A call the person must say yes to (adding a script member, a script's first live run on a team)
+    /// A script tool. A call the person must say yes to (adding a script member, a script's first live run on a team)
     /// becomes a request with the plan <see cref="ScriptTools.YesNeededAsync"/> gives, bound to its key: approved, it runs
     /// only if the same call still means the same thing, else it is a new request. Every other call runs now (a dry run, a
     /// later live run, a build or a check); acts and live runs are audited.

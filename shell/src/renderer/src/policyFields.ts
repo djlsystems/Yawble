@@ -71,7 +71,7 @@ export function toText(value: unknown): string {
   return Array.isArray(value) ? value.join('\n') : String(value);
 }
 
-// ---------------------------------------------------------------- B110: the Folder access block, honest save results
+// ---------------------------------------------------------------- The Folder access block, honest save results
 
 export type FolderList = 'readwrite' | 'readonly' | 'denied';
 export const FOLDER_LISTS: { list: FolderList; label: string }[] = [
@@ -173,7 +173,7 @@ export function folderRows(view: MemberPolicyView, list: FolderList, resolved?: 
 
 /**
  * What the Folder access block has typed and not saved: the path, its mode and the step waiting for Confirm. The Member
- * settings dialog keeps it, so leaving the Policy tab (which unmounts the block) drops nothing (B110).
+ * settings dialog keeps it, so leaving the Policy tab (which unmounts the block) drops nothing.
  */
 export interface FolderPending {
   kind: 'add' | 'remove';

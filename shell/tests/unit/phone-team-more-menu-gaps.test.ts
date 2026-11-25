@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Card 332 (verify card 331): gaps in phone-team-more-menu.test.ts, through the whole App at 375 px. Each of the five
+// Gaps in phone-team-more-menu.test.ts, through the whole App at 375 px. Each of the five
 // ⋯ items (Documents, Workflows, Triggers, Git, Settings) closes the menu on the tap and opens its own dialog, one at a
 // time; the drawer's Team group still offers Documents/Workflows and they still open the dialogs; widening to 1280 px
 // shows the desktop header unchanged with no ⋯. A fake matchMedia gives the width; the API is a scripted fake.
@@ -86,7 +86,7 @@ const ITEMS: [string, string][] = [
   ['open-manage', 'Settings · payments'],
 ];
 
-describe('the team ⋯ menu in the App at 375 px (card 332, verify 331)', () => {
+describe('the team ⋯ menu in the App at 375 px', () => {
   it('each of the five items closes the menu on the tap and opens its own dialog, one after another', async () => {
     const w = await openTeamPage();
     for (const [id, title] of ITEMS) {

@@ -1,5 +1,5 @@
 /**
- * B141: how long ago a companion request was made, for its row in the pending list: "asked 3 min ago", "asked 2 h ago",
+ * How long ago a companion request was made, for its row in the pending list: "asked 3 min ago", "asked 2 h ago",
  * "asked 2 days ago". `asked` is the core's ISO UTC time (companion.list actions[].asked); absent (an older core) or
  * unreadable: null, and the row shows no age. An old request is never hidden or greyed for its age.
  */

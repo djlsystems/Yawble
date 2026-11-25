@@ -121,7 +121,7 @@ public class RealSandboxDotnetBuildTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// macOS (B119 Part A): in a member's real Seatbelt sandbox, TMPDIR is the run's own short folder, a .NET
+    /// macOS: in a member's real Seatbelt sandbox, TMPDIR is the run's own short folder, a .NET
     /// NamedPipeServerStream (a Unix socket at $TMPDIR/CoreFxPipe_&lt;name&gt;) binds and a client connects, and a parallel
     /// build's out-of-proc MSBuild node starts and finishes. After the run the folder is gone.
     /// </summary>
@@ -151,7 +151,7 @@ public class RealSandboxDotnetBuildTests(ITestOutputHelper output)
         [
             "cd \"$HOME\" || exit 1",
             "echo \"@tmpdir=$TMPDIR\"",
-            "rm -rf b119 && mkdir b119 && cd b119 || exit 1",
+            "rm -rf pipebuild && mkdir pipebuild && cd pipebuild || exit 1",
             "dotnet new sln -n Two >/dev/null 2>&1",
             "dotnet new console -n P -o P >/dev/null 2>&1",
             "dotnet new classlib -n A -o A >/dev/null 2>&1",

@@ -7,7 +7,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Tasks;
 
 /// <summary>
-/// B023 verify (card 114): gap tests on card 112's core. Fakes only: the in-memory credential store and the temp checkout of
+/// The tester's gap tests of host task Connection variables. Fakes only: the in-memory credential store and the temp checkout of
 /// <see cref="TaskFixture"/>; no real gh and no network.
 /// </summary>
 public class HostTaskEnvBindingGapTests
@@ -19,7 +19,7 @@ public class HostTaskEnvBindingGapTests
     private static long AddConnection(TaskFixture f) =>
         f.Conns!.Save(null, ConnName, [new ConnectionField("token", "Token", true, null)], new Dictionary<string, string> { ["token"] = Token }).Id;
 
-    /// <summary>Card 112 rewrote HostTaskStore.Clip's "…" as mis-decoded bytes ("â€¦"): a clipped reason must end in the one ellipsis character and keep the cap.</summary>
+    /// <summary>An earlier change rewrote HostTaskStore.Clip's "…" as mis-decoded bytes ("â€¦"): a clipped reason must end in the one ellipsis character and keep the cap.</summary>
     [Fact]
     public void ClipEndsInAnEllipsisAndKeepsTheCap()
     {

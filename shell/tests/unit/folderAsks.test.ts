@@ -13,9 +13,9 @@ import { MonitorModel, needYouSummary } from '../../src/renderer/src/monitor/mod
 import type { AgentCard, YawbleApi } from '../../src/shared/api';
 
 /**
- * Card 497 (B111, shell): folder asks - an agent asks for a folder outside its clone - shown wherever network and tool
+ * Folder asks - an agent asks for a folder outside its clone - shown wherever network and tool
  * asks show: Needs you (the window's banner, the Board's lane), the member's pane, and the Monitor's You node. Fakes
- * only: no core. The FolderAsk shape is shared/api.ts's (card 496), re-exported by folderAsks.ts (card 507).
+ * only: no core. The FolderAsk shape is shared/api.ts's, re-exported by folderAsks.ts.
  */
 
 vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
@@ -27,7 +27,7 @@ vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
   return { ...real, MonitorScene: FakeScene };
 });
 
-// The full shared/api.ts shape (card 507: folderAsks.ts re-exports it). reason is null in one case: older/odd data.
+// The full shared/api.ts shape (folderAsks.ts re-exports it). reason is null in one case: older/odd data.
 const ask = (o: Partial<Omit<FolderAsk, 'reason' | 'choices'>> & { reason?: string | null; choices?: FolderAsk['choices'] | null } = {}): FolderAsk => ({
   id: 9, at: '2026-11-19T10:00:00Z', teamId: 1, team: 'Smoke-sessions', memberId: 7, member: 'Smoke-sessions/OperatorClifford', memberName: 'OperatorClifford',
   askedBy: 'Smoke-sessions/OperatorClifford', path: 'Z:\\smokesessions', access: 'readwrite', reason: 'write the smoke results next to the recordings',
@@ -86,7 +86,7 @@ describe('FolderAskCard: what it says', () => {
   });
 });
 
-describe('FolderAskCard: when the Manager asked for the member (card 507)', () => {
+describe('FolderAskCard: when the Manager asked for the member', () => {
   const managerAsk = (o: Parameters<typeof ask>[0] = {}) => ask({ askedBy: 'Smoke-sessions/Manager', ...o });
 
   it('says the Manager asks, for the member, the access, the path and the reason', () => {
@@ -137,7 +137,7 @@ describe('FolderAskCard: when the Manager asked for the member (card 507)', () =
   });
 });
 
-describe('folderAsks.ts re-exports the shared/api.ts types (card 507)', () => {
+describe('folderAsks.ts re-exports the shared/api.ts types', () => {
   it('declares no FolderAsk / FolderAskChoice of its own', () => {
     const src = readFileSync(resolve(__dirname, '../../src/renderer/src/folderAsks.ts'), 'utf8');
     expect(src).toContain("export type { FolderAsk, FolderAskChoice } from '../../shared/api';");
@@ -254,7 +254,7 @@ describe('FolderAsks: Needs you', () => {
   it('App shows the banner over every view but the Board (whose Needs You lane lists them)', () => {
     const app = readFileSync(resolve(__dirname, '../../src/renderer/src/App.vue'), 'utf8');
     expect(app).toMatch(/<FolderAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" \/>/);
-    // Inside the one banners box (the phone's 40% cap, B037 F1), after the tool asks.
+    // Inside the one banners box (the phone's 40% cap), after the tool asks.
     const box = app.slice(app.indexOf('<div class="banners"'), app.indexOf('</div>', app.indexOf('<div class="banners"')));
     expect(box).toContain('<FolderAsks');
   });

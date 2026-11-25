@@ -11,7 +11,7 @@ namespace Yawble.Core.Integrations;
 public sealed record EmailIntegrationView(long Id, string Name, long? ConnectionId, string? Connection, bool EnabledAll, IReadOnlyList<long> TeamIds);
 
 /// <summary>
-/// The built-in Email integration (B133, card 590): a mailbox, an email Connection, offered to teams like the other integrations
+/// The built-in Email integration: a mailbox, an email Connection, offered to teams like the other integrations
 /// (to every team, or to some), whose scripts read it through the actions in <see cref="Scripts.Actions.EmailScriptActions"/>. The password
 /// stays in the credential store under the Connection; nothing here reads or writes it except to sign in. Every script call is logged to
 /// integration_calls as "email:&lt;name&gt;" with the script member as the caller, the action and its arguments (no message content).

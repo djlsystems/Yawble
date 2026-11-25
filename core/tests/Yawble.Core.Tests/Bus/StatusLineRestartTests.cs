@@ -50,7 +50,7 @@ public class StatusLineRestartTests
     [Fact]
     public async Task AnOpenQuestionShowsTheSameLineAfterARestartAsOnTheLiveEngine()
     {
-        // B123: the live engine shows a member's open needs_decision as "Waiting on you: ..."; the engine seeded from
+        // The live engine shows a member's open needs_decision as "Waiting on you: ..."; the engine seeded from
         // the log after a restart must show the very same line (card and status), not the old "needs decision: ...".
         using var db = new TempDb();
         long teamId;

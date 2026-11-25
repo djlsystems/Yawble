@@ -8,7 +8,7 @@ using Yawble.Core.Tests.Bus;
 
 namespace Yawble.Core.Tests.Scripts;
 
-/// <summary>Card 584 (B131): migration 0056, the script library (save, draft, versions, export/import) and schemas (break refusal).</summary>
+/// <summary>Migration 0056, the script library (save, draft, versions, export/import) and schemas (break refusal).</summary>
 public class ScriptLibraryTests
 {
     private static ScriptLibrary Library(TempDb db, FakeActionCatalog? catalog = null) =>

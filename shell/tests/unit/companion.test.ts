@@ -527,8 +527,8 @@ describe('companion methods', () => {
   });
 });
 
-// B141: each pending request shows how long ago it was asked; an old one is still listed, never hidden for its age.
-describe('CompanionAsks asked age (B141)', () => {
+// Each pending request shows how long ago it was asked; an old one is still listed, never hidden for its age.
+describe('CompanionAsks asked age', () => {
   const now = Date.parse('2026-11-24T12:00:00Z');
   const before = (ms: number) => new Date(now - ms).toISOString();
 

@@ -98,7 +98,7 @@ public sealed partial class TeamRepos
     public string MemberRoot(string team, string member) => Path.Combine(TeamRoot(team), "members", Segment(member));
 
     /// <summary>
-    /// The member's one branch: members/&lt;team&gt;/&lt;name&gt; (B016), both parts as <see cref="SlugOf"/> makes them, the
+    /// The member's one branch: members/&lt;team&gt;/&lt;name&gt;, both parts as <see cref="SlugOf"/> makes them, the
     /// team's the same as in <see cref="TeamBranchFor"/>. Two teams sharing a repository or an origin never share a member branch.
     /// </summary>
     public static string BranchFor(string team, string memberName) => MemberBranchPrefix(team) + SlugOf(memberName);
@@ -106,7 +106,7 @@ public sealed partial class TeamRepos
     /// <summary>members/&lt;team&gt;/: where every branch of the team's members is.</summary>
     public static string MemberBranchPrefix(string team) => BranchPrefix + SlugOf(team) + "/";
 
-    /// <summary>The branch a member had before B016: members/&lt;name&gt;, without the team. Moved at the member's next start.</summary>
+    /// <summary>The old-style member branch: members/&lt;name&gt;, without the team. Moved at the member's next start.</summary>
     public static string LegacyBranchFor(string memberName) => BranchPrefix + SlugOf(memberName);
 
     /// <summary>Whether a branch is an old-style member branch (members/&lt;name&gt;, one level, no team).</summary>
@@ -341,13 +341,13 @@ public sealed partial class TeamRepos
         try
         {
             if (AppCloned(repo.Path)) await RefreshFromOriginAsync(repo.Path, repo.BaseBranch, ct);
-            // B016: a member still on members/<name> moves to members/<team>/<name> (the old branch is kept).
+            // A member still on members/<name> moves to members/<team>/<name> (the old branch is kept).
             // Before the shared view is updated, so its bundle already has the new branch.
             var moves = new List<string>();
             if (await MoveLegacyBranchLockedAsync(member, repo, ct) is { } movedFrom)
                 moves.Add(MoveLine(member.Name, "the team's repository", movedFrom, BranchFor(member.Team, member.Name)));
-            // B020: a members/<team> ref (here, on origin or in the clone) blocks the member's branch: a plain refusal
-            // before anything is made, never git's "cannot lock ref" later. Card 171: every repository is checked here, and a
+            // A members/<team> ref (here, on origin or in the clone) blocks the member's branch: a plain refusal
+            // before anything is made, never git's "cannot lock ref" later. Every repository is checked here, and a
             // refusal after the move above says what moved.
             var planned = CheckoutOf(member, repo);
             try
@@ -629,7 +629,7 @@ public sealed partial class TeamRepos
                 AddSyncNote(member.TeamId, landed);
                 return Fail(landed, landed.Contains("does not merge cleanly", StringComparison.Ordinal) ? "conflict" : "failed");
             }
-            // B079: what the branch gained is the Monitor's truth about the member's files.
+            // What the branch gained is the Monitor's truth about the member's files.
             if (recordEvents && await RevAsync(repoPath, refName, ct) is { } after && after != before)
                 await RecordFetchedAsync(member, repoPath, baseBranch, branch, before, after, workflowId, ct);
             Logs.Diag.Debug("teams", $"{member.Qualified}: fetched {branch} at {sha[..Math.Min(12, sha.Length)]} into {repoPath}",
@@ -893,7 +893,7 @@ public sealed partial class TeamRepos
     /// <summary>
     /// Pushes every branch of the member's team repository that origin does not have yet: members' branches and the
     /// team branch, never the base branch or main/master. A member branch origin has behind the team's copy (its commits
-    /// reached origin through another branch, a merge into main) is fast-forwarded too (B067). Called after each run's fetch-back (and so after the
+    /// reached origin through another branch, a merge into main) is fast-forwarded too. Called after each run's fetch-back (and so after the
     /// Manager's run in which it declared the workflow complete). Never forced; a refused branch does not stop the
     /// others; the first transport failure stops the push and names what did not go. Never throws for git: a failed
     /// push is reported, never the run's failure (a transport problem, not an agent fault).
@@ -904,7 +904,7 @@ public sealed partial class TeamRepos
         if (repo is null || !Directory.Exists(repo.Path)) return TeamPublishReport.None;
         if (!PushesToOrigin(member.TeamId)) return TeamPublishReport.None; // the person turned pushing off for this team
         var report = await PublishRepoAsync(member, repo.Path, repo.BaseBranch, ct);
-        // B079: what reached origin is a Monitor code event (the primary repository's branches).
+        // What reached origin is a Monitor code event (the primary repository's branches).
         if (report.Result is TeamPublishResult.Published or TeamPublishResult.Rejected or TeamPublishResult.PushFailed)
             await RecordPushedAsync(member, repo.Path, report.Result == TeamPublishResult.Published ? report.Branches : report.Published ?? [], workflowId, ct);
         // The team's other writable repositories are pushed the same way; their outcome is folded into the report.
@@ -934,12 +934,12 @@ public sealed partial class TeamRepos
                 var isAhead = ahead.ExitCode != 0 || ahead.Stdout != "0";
                 // The team branch is also compared with origin's copy: a fast-forward to a member's tip adds no commit,
                 // yet origin's team branch has not moved. So is a member branch: one moved to members/<team>/<name>
-                // (B016) holds only commits origin has on the old name, yet origin does not have the new one.
+                // holds only commits origin has on the old name, yet origin does not have the new one.
                 if (!isAhead && (branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal) || branch.StartsWith(BranchPrefix, StringComparison.Ordinal)))
                 {
                     var local = await Git.TryRunAsync(repo.Path, ["rev-parse", "refs/heads/" + branch], ct);
                     var remote = await Git.TryRunAsync(repo.Path, ["rev-parse", "--verify", "-q", "refs/remotes/origin/" + branch], ct);
-                    // A member branch when origin lacks it, or (B067) when origin's copy is behind the team's: a fast-forward,
+                    // A member branch when origin lacks it, or when origin's copy is behind the team's: a fast-forward,
                     // never forced. One origin has at a commit the team's copy does not contain is not ours to move (Realign).
                     isAhead = remote.ExitCode != 0 || (remote.Stdout != local.Stdout && (branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal)
                         || (await Git.TryRunAsync(repo.Path, ["merge-base", "--is-ancestor", remote.Stdout, local.Stdout], ct)).ExitCode == 0));
@@ -958,7 +958,7 @@ public sealed partial class TeamRepos
             string? rejection = null;
             for (var i = 0; i < unpublished.Count; i++)
             {
-                // B020: origin has a branch at one of this one's parent paths (members/<team> for members/<team>/<name>):
+                // Origin has a branch at one of this one's parent paths (members/<team> for members/<team>/<name>):
                 // not pushed, said plainly, never git's "cannot lock ref".
                 var blockers = (await BlockersOnOriginAsync(repo.Path, unpublished[i], ct)).ToList();
                 // A branch on origin is never deleted here, not even a member's own old branch that its new one is under

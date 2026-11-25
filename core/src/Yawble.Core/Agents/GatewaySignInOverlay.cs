@@ -6,7 +6,7 @@ namespace Yawble.Core.Agents;
 
 /// <summary>
 /// What the Agents dialog sees (agents.detect): the detection, with Grok's sign-in turned to not signed in while the
-/// gateway's latest Grok request was refused as a credential problem (B128). Only the window's view gets this: the
+/// gateway's latest Grok request was refused as a credential problem. Only the window's view gets this: the
 /// launcher keeps the plain detection, so a refusal never stops a run that could clear it once the person signs in again.
 /// The shell reads it in the fields it already has: signIn.status ("not-signed-in") and signIn.detail (starting with
 /// <see cref="SignInCatalog.GrokNotSignedIn"/>).

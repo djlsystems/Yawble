@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { LOCAL_MARK } from '../localMark';
 
-// B073: the one "not pushed" mark (localMark.ts). long: the sentence (the Commit view's where list); else a small chip.
+// The one "not pushed" mark (localMark.ts). long: the sentence (the Commit view's where list); else a small chip.
 // title: a more precise hover (a branch's count of commits origin lacks).
 defineProps<{ long?: boolean; title?: string }>();
 </script>

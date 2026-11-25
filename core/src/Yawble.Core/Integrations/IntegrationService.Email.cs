@@ -4,7 +4,7 @@ using Yawble.Core.Email;
 namespace Yawble.Core.Integrations;
 
 /// <summary>
-/// Email accounts as Connections (kind "email", B133): saving one from the form, Test (signs in to IMAP and lists the folders, then
+/// Email accounts as Connections (kind "email"): saving one from the form, Test (signs in to IMAP and lists the folders, then
 /// authenticates to SMTP; nothing is sent), and the host-side way in for the Email integration: <see cref="OpenEmailImapAsync"/> and
 /// <see cref="OpenEmailSmtpAsync"/> open a signed-in session through the <see cref="IMailClientFactory"/> seam.
 /// </summary>

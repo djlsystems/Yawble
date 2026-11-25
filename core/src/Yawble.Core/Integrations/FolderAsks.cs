@@ -38,7 +38,7 @@ public static class FolderAccess
 }
 
 /// <summary>
-/// Which folders an agent may ask for at all (B111). Pure: every rule reads the member's run layout (the app's own folders,
+/// Which folders an agent may ask for at all. Pure: every rule reads the member's run layout (the app's own folders,
 /// the implicit denials, other teams' roots), the global policy's denied list and the other teams' folders the caller
 /// names. A refusal is said to the agent at once and no ask is raised. None of this changes a policy rule: what may be
 /// granted is still decided by the policy merger when the person approves (<see cref="PolicyStore.PreviewLoosen"/>).
@@ -130,7 +130,7 @@ public static class FolderAskRules
 }
 
 /// <summary>
-/// Folder asks (B111): an agent's request_folder names a folder and read or read-write access, for itself or (a Manager)
+/// Folder asks: an agent's request_folder names a folder and read or read-write access, for itself or (a Manager)
 /// for a member of its own team. Paths an agent may never have are refused at once (<see cref="FolderAskRules"/>, then
 /// the policy merger's own checks), so the person is only asked about a folder that can be granted. The person answers
 /// in Needs you (folder.answer): read-write (only when asked), read-only, or deny. An approval writes the path into the

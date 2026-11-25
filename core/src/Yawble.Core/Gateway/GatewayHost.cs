@@ -223,7 +223,7 @@ public sealed class GatewayHost : IDisposable
     public GatewayHostOptions Options { get; }
     internal HttpClient Upstream { get; }
 
-    /// <summary>The latest Grok sign-in outcome across every run's gateway (the Agents tile shows a refusal, B128).</summary>
+    /// <summary>The latest Grok sign-in outcome across every run's gateway (the Agents tile shows a refusal).</summary>
     public GrokSignInWatch GrokSignIn { get; } = new();
 
     /// <summary>The network asks: a host refused for not being on the allowlist is reported here (null: plain refusals only). Set by the host at start.</summary>

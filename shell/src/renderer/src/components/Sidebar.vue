@@ -13,7 +13,7 @@ import type { MenuItem as MenuBarItem } from './MenuBar.vue';
 
 // The app's left pane, like the chat apps people know: New chat, the places (Concierge, Teams, and what comes next),
 // the teams, and the person's chats with the Concierge; the run slots at the bottom. Settings is the gear at the top right (App.vue).
-// B115: embedded in the cloud page (remote.html?embed=1) this pane is not drawn at all; the same content goes to the cloud as
+// Embedded in the cloud page (remote.html?embed=1) this pane is not drawn at all; the same content goes to the cloud as
 // data (embed.ts buildNav, yawble.nav) and the cloud's clicks come back to App.vue's handlers for this pane's emits. A
 // place, a badge or a chat action added here goes into buildNav too (tests/unit/embed.test.ts compares the two).
 export type View = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'scripts' | 'logs' | 'settings';
@@ -33,16 +33,16 @@ const props = defineProps<{
   loading?: { teams: boolean; chats: boolean };
   /** The chat being deleted (its row shows Deleting… until the core answers). */
   removing?: string | null;
-  /** A phone (B037): the sidebar is a drawer over the page, shown while `open`; its rows are tap-sized and a chat's
+  /** A phone: the sidebar is a drawer over the page, shown while `open`; its rows are tap-sized and a chat's
    *  Rename and Delete always show (no hover on a phone). */
   drawer?: boolean;
   open?: boolean;
   /** A remote view on a phone has no menu bar: these of its items (theme, terminal, Help) sit at the drawer's bottom. */
   menu?: MenuBarItem[];
-  /** The team whose page is open (card 316): on a phone its Documents and Workflows sit near the drawer's top, not in
+  /** The team whose page is open: on a phone its Documents and Workflows sit near the drawer's top, not in
    *  the team page's header. Null with no team page open; ignored on the desktop. */
   openTeamName?: string | null;
-  /** B104: how many workflows are open across the teams (the Workflows badge); null: not known. */
+  /** How many workflows are open across the teams (the Workflows badge); null: not known. */
   openWorkflows?: number | null;
 }>();
 /** Any team with work running now: the Teams and Workflows badges turn green and pulse until every team is idle. */
@@ -165,7 +165,7 @@ function finishRename(id: string) {
     </div>
 
     <div class="foot">
-      <!-- Folded by default (B037 F2): seven items open would leave the Teams and Chats lists no room on a phone. -->
+      <!-- Folded by default: seven items open would leave the Teams and Chats lists no room on a phone. -->
       <div v-if="menu?.length" class="drawer-menu" data-test="drawer-menu">
         <button class="item small more" data-test="drawer-more" :aria-expanded="menuOpen" aria-controls="drawer-menu-items" @click="menuOpen = !menuOpen">
           <span class="check" aria-hidden="true">{{ menuOpen ? '▾' : '▸' }}</span>Theme, terminal and help
@@ -193,7 +193,7 @@ function finishRename(id: string) {
 .logo-btn { height: 44px; margin-bottom: 4px; }
 .logo-btn img { width: 28px; height: 28px; object-fit: contain; }
 .rail-badge { position: absolute; top: 2px; right: 1px; font-size: 10px; background: var(--brand); color: var(--on-accent); border-radius: 8px; padding: 0 5px; line-height: 15px; }
-/* overflow-y (card 334): a window shorter than the sidebar's fixed rows (a phone in landscape at a desktop width) scrolls
+/* overflow-y: a window shorter than the sidebar's fixed rows (a phone in landscape at a desktop width) scrolls
    the sidebar, its run slots reachable; a taller one shows no scrollbar (the Teams and Chats lists scroll). */
 .side { background: var(--side); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 8px 8px 6px; }
 .brand { display: flex; align-items: center; gap: 8px; padding: 6px 6px 10px; }

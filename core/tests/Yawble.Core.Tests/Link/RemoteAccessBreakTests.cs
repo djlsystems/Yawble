@@ -7,7 +7,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// B025 verify (card 156): the tester's break tests for read-only Cloud Link viewers. Fakes only: CloudLink's call
+/// The tester's break tests for read-only Cloud Link viewers. Fakes only: CloudLink's call
 /// handler is driven directly with a fake dispatcher and a fake send (no socket, no network, no system programs).
 /// </summary>
 public class RemoteAccessBreakTests

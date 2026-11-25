@@ -193,7 +193,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                     : string.Join(" | ", new[] { "text", "status", "delivered", "reason", "question", "answer" }
                         .Select(k => o[k] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null).Where(s => s is not null))
                       is { Length: > 0 } joined ? joined : m.Payload;
-                // B142: the cards the person accepted closing over a tester's FAIL, in the board's words.
+                // The cards the person accepted closing over a tester's FAIL, in the board's words.
                 if (m.Type == MessageTypes.WorkflowCompleted && Board.ClosedOverFail.Read(o) is { Count: > 0 } overFail)
                     body += " | " + string.Join(" | ", overFail.Select(e => $"card {e.Card}: {e.Line}"));
             }
@@ -320,7 +320,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         "one item per line, with real line breaks between them (never one long paragraph).";
 
     /// <summary>
-    /// B123: needs_decision with summary (one plain sentence), options (2-4 answers as buttons, one may carry an allowlisted
+    /// needs_decision with summary (one plain sentence), options (2-4 answers as buttons, one may carry an allowlisted
     /// action the app applies when the person picks it), details (the findings, Markdown). question stays accepted.
     /// </summary>
     private static JsonObject NeedsDecisionTool()

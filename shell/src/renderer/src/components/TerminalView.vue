@@ -109,7 +109,7 @@ onMounted(async () => {
     fontSize: 13,
     scrollback: 5000,
     // No theme: xterm's own defaults, whatever the window's theme (terminalPane.ts XTERM_SCREEN_BG).
-    // Card 393: links ask through the window's own dialog, not xterm's default (the browser's confirm()).
+    // Links ask through the window's own dialog, not xterm's default (the browser's confirm()).
     linkHandler: terminalLinkHandler,
   });
   fit = new FitAddon();

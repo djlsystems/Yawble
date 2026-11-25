@@ -7,7 +7,7 @@ using Yawble.Core.Ipc;
 namespace Yawble.Core.Code;
 
 /// <summary>
-/// B011: the code browser's RPCs (code.open / list / read / download / close) and its code.changed push, wired to the
+/// The code browser's RPCs (code.open / list / read / download / close) and its code.changed push, wired to the
 /// members' clones. The work is in the Yawble.CodeBrowser library; this maps its refusals to RPC errors and lets
 /// only the person's window and cloud viewers (RemoteAccess, and the Cloud Link's "Show members' code" setting) call.
 /// </summary>

@@ -1,7 +1,7 @@
-// B115: the contract between the remote view opened by the cloud (remote.html?embed=1&theme=light|dark, in a frame)
+// The contract between the remote view opened by the cloud (remote.html?embed=1&theme=light|dark, in a frame)
 // and the cloud page around it. window.postMessage both ways; both sides check event.origin === location.origin and
 // event.source (the frame's parent window, or the frame's window), and ignore anything else. The text of the contract is
-// in docs/cloud-link.md ("Embedded in the cloud"); the cloud team has the same text in B116. No backward compatibility:
+// in docs/cloud-link.md ("Embedded in the cloud"); the cloud team keeps the same text. No backward compatibility:
 // a change here is a new version.
 
 export const EMBED_VERSION = 1;

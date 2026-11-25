@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// B067 (card 361): the tidy plan (every branch in one class), "contained in base" deleting like a merged branch, the realign
+/// The tidy plan (every branch in one class), "contained in base" deleting like a merged branch, the realign
 /// of a member branch whose clone was reset, and publish fast-forwarding origin's member branches that are behind. Local
 /// repositories and bare origins in temp folders only, no network.
 /// </summary>

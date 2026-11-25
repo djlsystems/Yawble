@@ -5,7 +5,7 @@ using Yawble.Core.Provenance;
 namespace Yawble.Core.Link;
 
 /// <summary>
-/// B048: org.summary (one snapshot, <see cref="OrgSummary"/>), org.summary.watch and org.summary.unwatch (all reads).
+/// org.summary (one snapshot, <see cref="OrgSummary"/>), org.summary.watch and org.summary.unwatch (all reads).
 /// While at least one viewer watches, the snapshot is rebuilt every <see cref="PushEvery"/> and, when a section changed,
 /// <see cref="ChangedEvent"/> is pushed with the changed sections: at most one push per 2 s, however much changes. With
 /// nobody watching nothing is built and nothing is pushed. A viewer is the caller's sign-in (cloud:&lt;user&gt;, or the

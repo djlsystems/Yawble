@@ -9,7 +9,7 @@ import { usePhone } from '../phone';
 import { accessWords, askerWords, folderAnswerText, folderAskAskedBy, folderAskChoices, folderAskMember, type FolderAsk, type FolderAskChoice } from '../folderAsks';
 
 /**
- * One folder ask in Needs you (B111): an agent asks for a folder outside its clone, read-only or read-write, with its
+ * One folder ask in Needs you: an agent asks for a folder outside its clone, read-only or read-write, with its
  * reason and whether the folder exists. Approve grants what was asked; a read-write ask also offers Approve read-only
  * (never wider than asked); Deny closes it. Each calls folder.answer; an approval applies from the member's next run,
  * which the card then says. Everything shown is agent-influenced text: always plain text ({{ }}), never HTML. A remote
@@ -17,7 +17,7 @@ import { accessWords, askerWords, folderAnswerText, folderAskAskedBy, folderAskC
  */
 const props = defineProps<{ ask: FolderAsk; api: YawbleApi }>();
 const emit = defineEmits<{ answered: [ask: FolderAsk, choice: FolderAskChoice] }>();
-// A phone (B037): the card takes the full width and its buttons stack, each a full-width tap target.
+// A phone: the card takes the full width and its buttons stack, each a full-width tap target.
 const phone = usePhone();
 
 const LABELS: Record<FolderAskChoice, { label: string; busy: string; title: string }> = {
@@ -31,7 +31,7 @@ const choices = computed(() => folderAskChoices(props.ask).map((c) => ({
   label: c === 'read' && props.ask.access === 'readwrite' ? 'Approve read-only' : LABELS[c].label,
 })));
 const member = computed(() => folderAskMember(props.ask));
-/** Card 507: the Manager asked for this member (askedBy is not member); null for the member's own ask. */
+/** The Manager asked for this member (askedBy is not member); null for the member's own ask. */
 const asker = computed(() => folderAskAskedBy(props.ask));
 const access = computed(() => accessWords(props.ask.access));
 

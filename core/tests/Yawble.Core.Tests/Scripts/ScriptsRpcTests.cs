@@ -10,7 +10,7 @@ using Yawble.Core.Ui;
 
 namespace Yawble.Core.Tests.Scripts;
 
-/// <summary>Card 584 (B131): every scripts. and schemas. RPC method, and a Visitor's refusal of every change.</summary>
+/// <summary>Every scripts. and schemas. RPC method, and a Visitor's refusal of every change.</summary>
 public class ScriptsRpcTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

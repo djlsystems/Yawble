@@ -1,4 +1,4 @@
--- 0055 folder trigger "Fire on" (B125): which settled changes fire a folder trigger. 'added' (files added; a new
+-- 0055 folder trigger "Fire on": which settled changes fire a folder trigger. 'added' (files added; a new
 -- trigger's default), 'added-or-changed' (added, or changed in size), 'any' (added, removed or changed: the behaviour
 -- before this step). Folder triggers saved before this keep 'any'; other kinds leave it NULL.
 -- Append-only: never edit this file once shipped; change the schema in a later numbered step.

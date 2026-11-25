@@ -38,7 +38,7 @@ public sealed record Skill(
 public sealed partial class SkillCatalog(string connectionString)
 {
     /// <summary>
-    /// The Concierge's role: a skill offered to it names it (B135: the built-in "scripts"). It is not a team role, so "any" (every
+    /// The Concierge's role: a skill offered to it names it (the built-in "scripts"). It is not a team role, so "any" (every
     /// team agent) does not include it, and a team's Manager or members are never offered a Concierge skill.
     /// </summary>
     public const string ConciergeRole = "concierge";
@@ -86,7 +86,7 @@ public sealed partial class SkillCatalog(string connectionString)
 
     /// <summary>
     /// Adds or replaces a custom skill (by name, in its scope). The name is a lower-case slug. The person's save of a
-    /// team's team_retros is kept as a version (B100), like the Manager's writes.
+    /// team's team_retros is kept as a version, like the Manager's writes.
     /// </summary>
     public Skill Save(string name, string description, IEnumerable<string> roles, string body, long? teamId) =>
         Save(name, description, roles, body, teamId, new VersionStamp(TeamRetros.PersonWriter, null, null));
@@ -148,7 +148,7 @@ public sealed partial class SkillCatalog(string connectionString)
     public static string CheckName(string name)
     {
         var n = (name ?? "").Trim();
-        if (n == TeamRetros.Name) return n; // B100: the one name with an underscore, the team's lessons
+        if (n == TeamRetros.Name) return n; // The one name with an underscore, the team's lessons
         if (n.Length is 0 or > 64 || !n.All(ch => ch is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-') || n.StartsWith('-') || n.EndsWith('-'))
             throw new ArgumentException("a skill name is 1-64 lower-case letters, digits and hyphens, e.g. 'release-notes'");
         return n;

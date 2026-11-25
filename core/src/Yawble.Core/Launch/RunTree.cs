@@ -41,7 +41,7 @@ public sealed class RunTreeOptions
 
 /// <summary>
 /// What the end of the run did to the tree: how many processes it signalled, and which outlived SIGKILL.
-/// <c>SignalledPids</c> (B129): the pids it signalled, in order (<c>Signalled</c> is their count).
+/// <c>SignalledPids</c>: the pids it signalled, in order (<c>Signalled</c> is their count).
 /// </summary>
 public sealed record RunTreeResult(int Signalled, IReadOnlyList<int> Survivors)
 {
@@ -49,12 +49,12 @@ public sealed record RunTreeResult(int Signalled, IReadOnlyList<int> Survivors)
 }
 
 /// <summary>
-/// macOS (B122): every process a run started, and their end. The sandbox there has no PID namespace (Linux's bwrap takes
+/// macOS: every process a run started, and their end. The sandbox there has no PID namespace (Linux's bwrap takes
 /// its whole namespace down), so a process the agent CLI started - its shell wrapper, a build under it - is reparented to
 /// launchd when the CLI ends, and lives on in a group or session of its own. While the run is live this reads the
 /// process list (throttled) and records every descendant of the sandbox's process by ppid, with its start time, so one
 /// that has since been reparented, or left the group, is still known. The group of every recorded process is recorded
-/// too (B127) and stays the run's while one of its recorded members lives, its leader alive or not: its other members
+/// too and stays the run's while one of its recorded members lives, its leader alive or not: its other members
 /// are recorded as they show up. At the end <see cref="Reap"/> SIGTERMs them all (and their groups), waits a grace,
 /// SIGKILLs what is left and reports whatever still runs. Never the core itself, its own group, pid 1, or a process
 /// that started before the run (a pid or group id reused by another process).
@@ -135,7 +135,7 @@ public sealed class RunTree
                     }
                 }
                 // A process in a recorded group whose parent ended before it was seen, even when the group's leader has
-                // ended too (B127: the shell backgrounds the build and exits; the build is launchd's, in the shell's group).
+                // ended too (the shell backgrounds the build and exits; the build is launchd's, in the shell's group).
                 foreach (var p in list)
                 {
                     if (!_groups.Contains(p.GroupId) || !Allowed(p) || IsSame(byPid, p.Pid)) continue;
@@ -150,7 +150,7 @@ public sealed class RunTree
     }
 
     /// <summary>
-    /// The backstop (B127): processes found to be the run's some other way (they hold its folder) are tracked too, and
+    /// The backstop: processes found to be the run's some other way (they hold its folder) are tracked too, and
     /// their groups recorded, so the next <see cref="Reap"/> ends them. The same guard as the tree's own: only a process
     /// that started at or after the run, never the core, its group or pid 1. Returns how many it took on.
     /// </summary>

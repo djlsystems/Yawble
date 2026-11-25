@@ -8,7 +8,7 @@ import { memberReport } from '../../src/renderer/src/reportFormat';
 import { memberStateOf } from '../../src/renderer/src/faces/faces';
 import type { AgentCard, Decision, DecisionOption, YawbleApi } from '../../src/shared/api';
 
-// B123: the decision card (plain ask first, the asker's answers as buttons, Details collapsed), the one-click action
+// The decision card (plain ask first, the asker's answers as buttons, Details collapsed), the one-click action
 // option, and the member tile's "Waiting on you". Fakes only.
 function fakeApi(answers: Record<string, (params: any) => unknown>) {
   const calls: { method: string; params: any }[] = [];
@@ -30,8 +30,8 @@ function fakeApi(answers: Record<string, (params: any) => unknown>) {
 
 const team = { id: 3, name: 'hello-world', repoPath: null, members: 2, running: 0, queued: 0, paused: false, archived: false } as any;
 
-// The B123 card's question as the Manager wrote it (findings list, then the closing question).
-const oldQuestion = 'B119 part 2 verify: build, isolation and outbound checks behaved as expected, but `dotnet test` cannot run on macOS '
+// A long question as a Manager wrote one (findings list, then the closing question).
+const oldQuestion = 'Part 2 verify: build, isolation and outbound checks behaved as expected, but `dotnet test` cannot run on macOS '
   + 'in the sandbox: SocketException (13) Permission denied.\n\nResults:\n\n1. Build: succeeded.\n2. dotnet test (VSTest): failed.\n'
   + '3. MTP variant (dotnet exec): failed.\n4. Isolation and outbound (writes, api.nuget.org): blocked as expected.\n5. Loopback to host port 9999: refused.\n\n'
   + 'Do you want to turn on **Allow localhost (macOS)** in Team settings > Network? Reply **approve** once it is on and I will have the '
@@ -47,7 +47,7 @@ const newDecision = (over: Partial<DecisionOption> = {}): Decision => ({
   ],
 });
 
-describe('decisionLayout (B123)', () => {
+describe('decisionLayout', () => {
   it('a decision with a summary: summary first, its options in order with their index, details apart', () => {
     const l = decisionLayout(newDecision());
     expect(l.summary).toBe('Tests can\'t run: the sandbox blocks localhost. Turn it on for this team?');
@@ -67,12 +67,12 @@ describe('decisionLayout (B123)', () => {
   it('an old question (no summary): the paragraph that asks first, the rest under Details, Approve + Skip', () => {
     const l = decisionLayout({ question: oldQuestion });
     expect(l.summary.startsWith('Do you want to turn on **Allow localhost (macOS)**')).toBe(true);
-    expect(l.details.startsWith('B119 part 2 verify')).toBe(true);
+    expect(l.details.startsWith('Part 2 verify')).toBe(true);
     expect(l.details).toContain('5. Loopback to host port 9999: refused.');
     expect(l.buttons.map((b) => b.kind)).toEqual(['approve', 'skip']);
   });
 
-  it('card 555: options without a summary are still the buttons, the asking paragraph first, the rest and details under Details', () => {
+  it('options without a summary are still the buttons, the asking paragraph first, the rest and details under Details', () => {
     const l = decisionLayout({ question: 'Build passed, tests blocked.\n\nTurn on Allow localhost?', summary: null, details: 'VSTest needs a port.', options: newDecision().options });
     expect(l.summary).toBe('Turn on Allow localhost?');
     expect(l.buttons.map((b) => [b.kind, b.label, b.optionIndex])).toEqual([['option', 'Allow localhost & re-run tests', 0], ['option', 'Skip tests', 1]]);
@@ -88,7 +88,7 @@ describe('decisionLayout (B123)', () => {
   });
 });
 
-describe('the decision card (B123)', () => {
+describe('the decision card', () => {
   const mountView = (d: Decision) => {
     const { api, calls } = fakeApi({
       'teams.agents': () => [], 'bus.decisions': () => [d], 'integrations.asks': () => [], 'bus.answer': () => ({}),
@@ -123,7 +123,7 @@ describe('the decision card (B123)', () => {
     expect(calls.find((c) => c.method === 'bus.answer')?.params).toEqual({ teamId: 3, seq: 41, optionIndex: 0, text: '' });
   });
 
-  it('card 555: an option with words typed sends only the typed words; the core puts the reply first, once', async () => {
+  it('an option with words typed sends only the typed words; the core puts the reply first, once', async () => {
     const { w, calls } = mountView(newDecision());
     await flushPromises();
     await w.get('[data-test=decision-answer]').setValue('  Then close the card.  ');
@@ -134,7 +134,7 @@ describe('the decision card (B123)', () => {
     expect(params.text).not.toContain('Skip the test run');
   });
 
-  it('card 555: options without a summary show the asking paragraph, the option buttons and a collapsed Details', async () => {
+  it('options without a summary show the asking paragraph, the option buttons and a collapsed Details', async () => {
     const { w } = mountView({ ...newDecision(), summary: null, details: 'VSTest needs a port.', question: 'The tests could not run.\n\nTurn on Allow localhost for this team?' });
     await flushPromises();
     const card = w.get('[data-test=decision]');
@@ -160,7 +160,7 @@ describe('the decision card (B123)', () => {
     expect(calls.some((c) => c.method === 'bus.answer')).toBe(false);
   });
 
-  it('the old B123 question: the ask first, Approve and Skip (no "1. Build" buttons), findings under Details', async () => {
+  it('the long question: the ask first, Approve and Skip (no "1. Build" buttons), findings under Details', async () => {
     const { w, calls } = mountView({ seq: 40, from: 'Manager', workflow: 7, at: '', question: oldQuestion });
     await flushPromises();
     expect(w.get('[data-test=decision-question]').text().startsWith('Do you want to turn on Allow localhost (macOS)')).toBe(true);
@@ -173,7 +173,7 @@ describe('the decision card (B123)', () => {
   });
 });
 
-describe('"Waiting on you" on the member tile (B123)', () => {
+describe('"Waiting on you" on the member tile', () => {
   const member = { id: 1, teamId: 3, team: 'hello-world', name: 'Manager', role: 'manager', cli: 'claude', instructions: '', model: '', credential: 'default' } as const;
   const card = (over: Partial<AgentCard> = {}): AgentCard => ({
     member: { ...member }, state: 'idle', queuePosition: null, queueLength: 0, queuedInstructions: 0, statusLine: null, runId: null,

@@ -5,7 +5,7 @@ namespace Yawble.Core.Bus;
 /// <summary>A workflow's expiry bookkeeping (0045_workflow_expiry.sql): the person's last Extend and its one warning.</summary>
 public sealed record WorkflowExpiryRow(long Workflow, DateTimeOffset? ExtendedAt, DateTimeOffset? WarnedFor, DateTimeOffset? WarnedAt, long? WarnedQuestion);
 
-/// <summary>Workflow expiry (B085): the team's setting, and the Extend and warning rows.</summary>
+/// <summary>Workflow expiry: the team's setting, and the Extend and warning rows.</summary>
 public sealed partial class BusStore
 {
     /// <summary>The team's workflowExpiryDays as stored; null when it was never set (the default applies).</summary>

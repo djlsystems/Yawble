@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Yawble.Core.Tests.Email;
 
-/// <summary>The email Connection kind (B133): save, Gmail preset, Test over IMAP and SMTP against <see cref="FakeMailServer"/>, secrets kept out of the DB.</summary>
+/// <summary>The email Connection kind: save, Gmail preset, Test over IMAP and SMTP against <see cref="FakeMailServer"/>, secrets kept out of the DB.</summary>
 public class EmailConnectionTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

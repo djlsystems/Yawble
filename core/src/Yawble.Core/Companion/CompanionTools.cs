@@ -33,7 +33,7 @@ public static class CompanionTools
         "git_branches_delete", "git_branch_realign", "git_prune", "git_push_branch", "git_sync_branch", "git_pr_open", "git_pr_merge",
         "team_archive", "team_delete", "team_env_set", "doctor_fix", "team_create", "team_repo_add", "team_repo_remove", "workflow_close",
         "backup_now", "git_merge_team", "backup_restore", "host_task_run", ScriptTools.ScriptMemberAdd,
-        // B139: the same level as script_member_add. Their yes is a request the window approves (CompanionService.ScriptCallAsync).
+        // The same level as script_member_add. Their yes is a request the window approves (CompanionService.ScriptCallAsync).
         ScriptTools.ScriptTriggerSet, ScriptTools.IntegrationActionAllow,
     ];
 
@@ -57,7 +57,7 @@ public static class CompanionTools
     public static CompanionLevel? LevelOf(string tool, JsonObject args)
     {
         if (tool == "backlog_dispatch" && NewTeam(args)) return CompanionLevel.Destructive;
-        // A live script run really sends and writes through the team's integrations (B135); a dry run is an act.
+        // A live script run really sends and writes through the team's integrations; a dry run is an act.
         if (ScriptTools.IsLiveRun(tool, args)) return CompanionLevel.Destructive;
         if (Read.Contains(tool)) return CompanionLevel.Read;
         if (Act.Contains(tool)) return CompanionLevel.Act;

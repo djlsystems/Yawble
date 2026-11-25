@@ -1,20 +1,25 @@
 <script setup lang="ts">
-import { STEP_TYPES } from '../../scripts/flowchart';
+import { PALETTE } from '../../scripts/flowchart';
 
-// The flowchart's palette: one button per step type the checker accepts; a click adds a blank step of that type.
+// The flowchart's palette: the blocks in groups (Flow, Data, Do); a click adds a blank step of that block's type.
+// The Start node is the trigger, so it is not on the palette.
 const emit = defineEmits<{ add: [type: string] }>();
 </script>
 
 <template>
-  <div class="palette" data-test="flow-palette" aria-label="Add a step">
-    <span class="muted small">Add a step</span>
-    <button v-for="t in STEP_TYPES" :key="t.type" type="button" class="item" :data-kind="t.kind" :data-test="`palette-${t.type}`"
-      :title="t.type" @click="emit('add', t.type)">{{ t.label }}</button>
+  <div class="palette" data-test="flow-palette" aria-label="Blocks">
+    <span class="muted small">Blocks</span>
+    <div v-for="g in PALETTE" :key="g.group" class="group" role="group" :aria-label="g.group" :data-test="`palette-group-${g.group.toLowerCase()}`">
+      <span class="muted tiny">{{ g.group }}</span>
+      <button v-for="b in g.blocks" :key="b.key" type="button" class="item" :data-kind="b.kind" :data-test="`palette-${b.key}`"
+        :title="b.type" @click="emit('add', b.type)">{{ b.label }}</button>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.palette { display: flex; flex-direction: column; gap: 3px; width: 150px; flex: 0 0 auto; overflow: auto; }
+.palette { display: flex; flex-direction: column; gap: 8px; width: 150px; flex: 0 0 auto; overflow: auto; }
+.group { display: flex; flex-direction: column; gap: 3px; }
 .item { text-align: left; font-size: 12px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink); }
 .item:hover { background: var(--hover); }
 .item[data-kind=integration] { border-left: 4px solid var(--pill-blue-ink); }
@@ -25,4 +30,5 @@ const emit = defineEmits<{ add: [type: string] }>();
 .item[data-kind=end] { border-left: 4px solid var(--pill-green-ink); }
 .item[data-kind=other] { border-left: 4px solid var(--pill-neutral-ink); }
 .small { font-size: 11.5px; }
+.tiny { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
 </style>

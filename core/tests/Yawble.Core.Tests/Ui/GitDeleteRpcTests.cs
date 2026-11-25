@@ -11,7 +11,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Ui;
 
 /// <summary>
-/// Card 75: git.deleteBranches and git.status's oldBranches through the real dispatcher, as the Git dialog calls them:
+/// git.deleteBranches and git.status's oldBranches through the real dispatcher, as the Git dialog calls them:
 /// the shapes ({plan, token, empty}, {result}), error code "stale", and oldBranches always present. Local repositories only.
 /// </summary>
 public sealed class GitDeleteRpcTests : IAsyncLifetime
@@ -98,7 +98,7 @@ public sealed class GitDeleteRpcTests : IAsyncLifetime
         Assert.Empty((await Call("git.status", new JsonObject { ["teamId"] = teamId }))["oldBranches"]!.AsArray());
     }
 
-    /// <summary>B020 / card 92: git.status's blockingBranches, the contract the Git dialog reads: always present, each
+    /// <summary>git.status's blockingBranches, the contract the Git dialog reads: always present, each
     /// { name, repo, location: "local" | "remote" }, and deleted through git.deleteBranches like any other branch.</summary>
     [Fact]
     public async Task BlockingBranches_AreListedWithNameRepoAndLocation_AndDeleteThroughTheUsualPath()

@@ -246,7 +246,7 @@ public class CliDetectionTests
         var probe = Assert.Single(f.Probes);
         Assert.Equal(["--no-auto-update", "--version"], probe.Arguments);
         Assert.Equal("1", probe.Environment["GROK_DISABLE_AUTOUPDATER"]);
-        // auth.json is the one file of ~/.grok read: whether it holds a token (B128).
+        // auth.json is the one file of ~/.grok read: whether it holds a token.
         NoConfigReads(f, g, "/home/u/.grok/downloads", "/home/u/.grok/auth.json");
         Assert.Equal(SignInStatus.SignedIn, g.SignIn!.Status);
     }

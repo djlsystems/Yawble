@@ -18,9 +18,9 @@ const state = ref<TeamSyncState | null>(null);
 const error = ref<string | null>(null);
 const done = ref<string | null>(null);
 const busy = ref(false);
-// B073: the commits Sync now brought into the team branch (the core's incoming; empty or absent: none listed).
+// The commits Sync now brought into the team branch (the core's incoming; empty or absent: none listed).
 const cameIn = ref<{ heading: string; commits: CommitRow[]; total: number; hasOrigin: boolean } | null>(null);
-// B073: "N commits behind" opens those commits (git.commitRange with the pair teams.syncToBase gave; an older core
+// "N commits behind" opens those commits (git.commitRange with the pair teams.syncToBase gave; an older core
 // sends none and the count stays text). The same link again closes the list.
 const range = ref<{ data: CommitRange | null; error: string | null } | null>(null);
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -120,15 +120,15 @@ defineExpose({ load });
 .discuss { flex: none; font-size: 12px; }
 .files { margin: 2px 0 0 18px; padding: 0; }
 .behind { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
-/* B073: the count is a link, as in the Git dialog. */
+/* The count is a link, as in the Git dialog. */
 .count { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; border-radius: 3px; }
 .count:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .list { margin: 2px 0 6px; }
-/* A phone (B037): the heading over its button, the text over Sync now; tap targets 44 px. */
+/* A phone: the heading over its button, the text over Sync now; tap targets 44 px. */
 @media (max-width: 759.98px) {
   .note .head { flex-wrap: wrap; }
   .sync button { min-height: 44px; }
-  /* B054: "N commits behind" is one compact row, the text beside Sync now (the off-for-this-team aside left out). */
+  /* On a phone "N commits behind" is one compact row, the text beside Sync now (the off-for-this-team aside left out). */
   .sync { margin: 4px 0; }
   .behind { flex-wrap: nowrap; justify-content: space-between; margin: 0; min-height: 44px; }
   .behind > .muted { display: none; }

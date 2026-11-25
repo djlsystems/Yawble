@@ -95,7 +95,7 @@ public class ConciergeReadToolsTests : IDisposable
     [Fact]
     public async Task BacklogToolsRefuseAnUnknownItem_AndAMissingBoard()
     {
-        Assert.Contains("B099", await Refused(Tools(), "backlog_item", new() { ["item"] = "B099" }));
+        Assert.Contains("B009", await Refused(Tools(), "backlog_item", new() { ["item"] = "B009" }));
         Assert.Contains("'item' is required", await Refused(Tools(), "backlog_item"));
         Assert.Contains("not a backlog item", await Refused(Tools(), "backlog_item", new() { ["item"] = "soon" }));
         _bus.Board = null;
@@ -141,7 +141,7 @@ public class ConciergeReadToolsTests : IDisposable
     public async Task BoardToolsRefuseAnUnknownTeamAndCard()
     {
         Assert.Contains("there is no team 'nope'", await Refused(Tools(), "board_list", new() { ["team"] = "nope" }));
-        Assert.Contains("no card 999", await Refused(Tools(), "board_card", new() { ["card"] = 999 }));
+        Assert.Contains("no card 9999", await Refused(Tools(), "board_card", new() { ["card"] = 9999 }));
         Assert.Contains("not a card number", await Refused(Tools(), "board_card", new() { ["card"] = "x" }));
     }
 

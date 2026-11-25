@@ -421,7 +421,7 @@ public sealed class LogServiceTests : IDisposable
             Assert.True(AuditLog.IsReadOnly(read, null), read);
         Assert.True(AuditLog.IsReadOnly("teams.push", new JsonObject { ["teamId"] = 1 }));
         Assert.False(AuditLog.IsReadOnly("teams.push", new JsonObject { ["teamId"] = 1, ["on"] = false }));
-        // B085: teams.workflowExpiry is audited when it sets the days, not when it reads them; an Extend is audited.
+        // teams.workflowExpiry is audited when it sets the days, not when it reads them; an Extend is audited.
         Assert.True(AuditLog.IsReadOnly("teams.workflowExpiry", new JsonObject { ["teamId"] = 1 }));
         Assert.False(AuditLog.IsReadOnly("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }));
         Assert.False(AuditLog.IsReadOnly("bus.workflowExtend", new JsonObject { ["teamId"] = 1, ["workflow"] = 4 }));
@@ -429,10 +429,10 @@ public sealed class LogServiceTests : IDisposable
         Assert.False(AuditLog.IsReadOnly("logs.prune", null));
     }
 
-    // ------------------------------------------------------------------ B015 tester probes (card 70)
+    // ------------------------------------------------------------------ tester probes
 
     [Fact]
-    public void Probe_B015_ADenialAndANotNowAt23h59AreKept_At24h01Pruned()
+    public void Probe_ADenialAndANotNowAt23h59AreKept_At24h01Pruned()
     {
         static string Before(TimeSpan t) => (Now - t).ToString("O");
         var in24 = Before(TimeSpan.FromHours(23) + TimeSpan.FromMinutes(59));
@@ -463,7 +463,7 @@ public sealed class LogServiceTests : IDisposable
     }
 
     [Fact]
-    public void Probe_B015_ThePreviewCountIsWhatIsDeleted_MixedNetworkAndToolAsks_AtEachCutoff()
+    public void Probe_ThePreviewCountIsWhatIsDeleted_MixedNetworkAndToolAsks_AtEachCutoff()
     {
         Exec("""
             INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state, scope, decided_by, decided_at) VALUES
