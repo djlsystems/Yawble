@@ -4,7 +4,7 @@
 // time; the drawer's Team group still offers Documents/Workflows and they still open the dialogs; widening to 1280 px
 // shows the desktop header unchanged with no ⋯. A fake matchMedia gives the width; the API is a scripted fake.
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import App from '../../src/renderer/src/App.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
@@ -110,16 +110,20 @@ describe('the team ⋯ menu in the App at 375 px', () => {
     expect(dialogTitles()).toEqual([]);
   });
 
-  it('the drawer Team group still offers Documents and Workflows, and they open the dialogs', async () => {
+  it('the drawer Team group still offers Documents and Workflows: the Documents dialog, the Workflows page', async () => {
     const w = await openTeamPage();
-    for (const [id, title] of [['drawer-team-documents', 'payments · documents'], ['drawer-team-workflows', 'payments · workflows']]) {
-      await w.get('[data-test=drawer-toggle]').trigger('click');
-      expect(w.get('[data-test=drawer-team] .team-name').text()).toBe('Team payments');
-      await w.get(`[data-test=${id}]`).trigger('click');
-      await flushPromises();
-      expect(dialogTitles(), id).toEqual([title]);
-      await closeDialog(w);
-    }
+    await w.get('[data-test=drawer-toggle]').trigger('click');
+    expect(w.get('[data-test=drawer-team] .team-name').text()).toBe('Team payments');
+    await w.get('[data-test=drawer-team-documents]').trigger('click');
+    await flushPromises();
+    expect(dialogTitles()).toEqual(['payments · documents']);
+    await closeDialog(w);
+    await w.get('[data-test=drawer-toggle]').trigger('click');
+    expect(w.get('[data-test=drawer-team] .team-name').text()).toBe('Team payments');
+    await w.get('[data-test=drawer-team-workflows]').trigger('click');
+    for (let i = 0; i < 6; i++) await flushPromises();
+    expect(dialogTitles()).toEqual([]);
+    await vi.waitFor(() => expect(w.find('[data-test=workflows-view]').exists()).toBe(true)); // loaded when first opened
   });
 
   it('at 1280 px the header is the desktop one: five labelled buttons, no ⋯, no phone menu', async () => {

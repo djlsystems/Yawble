@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { workflowTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type WorkflowItem, type WorkflowSummary } from '../../../shared/api';
-import { workflowItems } from '../workflows/page';
+import { openWorkflowsPage, workflowItems } from '../workflows/page';
 import { groupAsks, hostsLabel } from '../networkAskGroups';
 import { FOLDER_ASKS_CHANGED, folderAskMember, pendingFolderAsks, type FolderAsk } from '../folderAsks';
 import { resolveApi } from '../api';
@@ -48,7 +48,7 @@ import { entryTime, workflowLabel, workflowLook, WorkflowIconPath, WorkflowLooks
  *
  * Each team's newest workflows (bus.workflows) sit in one panel hung off its hub, live only: they are fetched when the bus brings that
  * team something and otherwise every WorkflowPollMs, and a replay shows none (it would be faking their history).
- * Clicking one opens the team at its Workflows dialog.
+ * Clicking one opens the Workflows page at that workflow (no dialog over the Monitor).
  *
  * A click on a team's hub focuses it (the scene zooms to it and dims the rest); Esc, a click on the empty wall or the
  * chip's × shows every team again. A click on the You node opens Needs you (emit openNeedsYou). Beside the camera:
@@ -57,7 +57,7 @@ import { entryTime, workflowLabel, workflowLook, WorkflowIconPath, WorkflowLooks
  */
 const props = defineProps<{ api?: YawbleApi; pollMs?: number }>();
 const emit = defineEmits<{
-  openTeam: [teamId: number, panel?: 'workflows']; openWorkflow: [teamId: number, workflow: number]; openTerminal: [teamId: number, memberId: number];
+  openTeam: [teamId: number]; openTerminal: [teamId: number, memberId: number];
   /** The You node was clicked: the app opens what needs the person (the Board's Needs You). */
   openNeedsYou: [];
 }>();
@@ -420,10 +420,9 @@ async function workflowFeed(first: boolean, news: Set<string>): Promise<void> {
     .filter((r) => r.list.length);
 }
 
-/** The panel's header opens the team's workflows; a row opens that workflow (the Backlog item it came from, if any). */
+/** The panel's header opens the Workflows page at the team's workflows; a row (a workflow node) at that workflow. */
 function openWorkflow(teamId: number, workflow?: number) {
-  if (workflow !== undefined) emit('openWorkflow', teamId, workflow);
-  else emit('openTeam', teamId, 'workflows');
+  openWorkflowsPage(workflow !== undefined ? { teamId, workflow } : { teamId });
 }
 
 /** The bus feed: new rows animate live (not those read at the start), and all join the timeline. */

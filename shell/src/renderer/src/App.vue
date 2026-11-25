@@ -2,9 +2,8 @@
 import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
 import { skillLink } from './skillLink';
-import WorkflowsDialog from './components/WorkflowsDialog.vue';
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import type { AgentProfileRow, ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary, WorkflowSummary } from '../../shared/api';
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import type { AgentProfileRow, ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary } from '../../shared/api';
 import { errorText, resolveApi } from './api';
 import { cliLabel } from './agentClis';
 import HostChecksBanner from './components/HostChecksBanner.vue';
@@ -30,8 +29,8 @@ import BacklogView from './board/BacklogView.vue';
 // A page loaded on first use: when its file is gone (the app was rebuilt or updated while this window stayed open), it
 // says so with a Reload button instead of leaving the page blank.
 const WorkflowsView = defineAsyncComponent({ loader: () => import('./workflows/WorkflowsView.vue'), errorComponent: PageLoadFailed });
-import { backlogRequest, isWorkflowsHash, workflowsRequest } from './workflows/page';
-import { WORKFLOWS_LIST, type WorkflowsListAnswer } from '../../shared/api';
+import { backlogRequest, isWorkflowsHash, openWorkflowsPage, workflowsRequest } from './workflows/page';
+import { WORKFLOWS_GET, WORKFLOWS_LIST, type WorkflowDetail, type WorkflowsListAnswer } from '../../shared/api';
 import Sidebar, { type View } from './components/Sidebar.vue';
 import SettingsView, { type SettingsTab } from './components/SettingsView.vue';
 import Icon from './components/Icon.vue';
@@ -51,7 +50,7 @@ import { theme } from './theme';
 import type { AgentOption } from './components/Composer.vue';
 import { installTapTitles, usePhone } from './phone';
 import { pushEscape } from './escapeClose';
-import { findWorkflowTeam, parseRemoteHash } from './remoteHash';
+import { parseRemoteHash } from './remoteHash';
 import { loadConciergeDefault, newChatAgent, savedConciergeAgent } from './conciergeDefault';
 import { isEmbed, startEmbedBridge, type EmbedNavState } from './embed';
 import { readOnly } from './remoteAccess';
@@ -131,8 +130,8 @@ const linkState = computed(() => link.value?.state ?? 'off');
 const linkTitle = computed(() => {
   const l = link.value;
   switch (l?.state) {
-    case 'connected': return `Cloud Link: connected to ${l.url}${l.viewers.length ? ` · viewing now: ${l.viewers.join(', ')}` : ''}`;
-    case 'connecting': return 'Cloud Link: connecting…';
+    case 'connected': return `Cloud Link: connected to ${l.url}${l.viewers.length ? ` Â· viewing now: ${l.viewers.join(', ')}` : ''}`;
+    case 'connecting': return 'Cloud Link: connectingâ€¦';
     case 'offline': return `Cloud Link: not connected, retrying${l.error ? ` (${l.error})` : ''}`;
     case 'pairing': return 'Cloud Link: waiting for the pairing code to be entered on the site';
     default: return 'Cloud Link: off. Attach this computer to a cloud site to see and drive it from a browser.';
@@ -146,11 +145,15 @@ const archivedTeams = computed(() => allTeams.value.filter((t) => t.archived));
 const team = computed(() => allTeams.value.find((t) => t.id === selected.value) ?? null);
 /** The team whose page is open: on a phone the drawer offers its Documents and Workflows. */
 const openTeamName = computed(() => (view.value === 'teams' && team.value ? team.value.name : null));
-/** The drawer's Documents / Workflows of the open team: the drawer closes and the team page opens that dialog. */
-function openTeamDialog(which: 'documents' | 'workflows') {
+/** The drawer's Documents of the open team: the drawer closes and the team page opens that dialog. */
+function openTeamDocuments() {
   drawerOpen.value = false;
-  if (which === 'documents') teamView.value?.openDocuments();
-  else teamView.value?.openWorkflows();
+  teamView.value?.openDocuments();
+}
+/** The drawer's Workflows of the open team: the drawer closes and the Workflows page opens, filtered to that team. */
+function openTeamWorkflows() {
+  drawerOpen.value = false;
+  openWorkflowsPage({ teamId: selected.value });
 }
 // A new chat starts on the saved Concierge default when that agent is ready, else on the first ready agent.
 const defaultCli = computed(() => newChatAgent(agents.value, savedConciergeAgent.value, customAgents.value));
@@ -205,31 +208,22 @@ function openConversation(id: string) {
   conversationId.value = id;
 }
 
-// A workflow chosen on the Monitor (or its team's workflows header): the team's workflows dialog opens over the
-// Monitor, with that workflow selected; closing it stays on the Monitor.
-const monitorWorkflows = ref<{ team: TeamSummary; id: number | null } | null>(null);
-function openWorkflow(teamId: number, workflow?: number) {
-  const t = allTeams.value.find((x) => x.id === teamId);
-  if (t) monitorWorkflows.value = { team: t, id: workflow ?? null };
-  else openTeam(teamId, 'workflows', workflow);
-}
-function openFromMonitor(teamId: number, panel?: 'workflows') {
-  if (panel === 'workflows') openWorkflow(teamId);
-  else openTeam(teamId);
-}
-
-function openTeam(id: number, panel?: 'workflows', workflow?: number) {
+function openTeam(id: number) {
   view.value = 'teams';
   selected.value = id;
   focusTeamId.value = id;
-  // The Monitor's workflow nodes open the team at its workflows.
-  if (panel === 'workflows') void nextTick(() => teamView.value?.openWorkflows(workflow));
+}
+/** The Teams list's card: the team, or (its workflows) the Workflows page at the team, at a workflow when it names one. */
+function openFromTeams(id: number, panel?: 'workflows', workflow?: number) {
+  if (panel === 'workflows') openWorkflowsPage(workflow !== undefined ? { teamId: id, workflow } : { teamId: id });
+  else openTeam(id);
 }
 
-// The Workflows page opened from elsewhere (the board's button, a team's "All workflows", a Backlog item's
-// "workflow #N"), and the Backlog opened at an item (an Item link). The page / the Backlog take the request as a prop.
-watch(workflowsRequest, (r) => { if (!r) return; monitorWorkflows.value = null; view.value = 'workflows'; });
-watch(backlogRequest, (r) => { if (!r) return; monitorWorkflows.value = null; view.value = 'backlog'; });
+// The Workflows page opened from elsewhere (the Monitor's workflow nodes, the board's button, a team's "All workflows",
+// the phone drawer, a Backlog item's "workflow #N", a #workflow= link), and the Backlog opened at an item (an Item
+// link). The page / the Backlog take the request as a prop.
+watch(workflowsRequest, (r) => { if (!r) return; view.value = 'workflows'; });
+watch(backlogRequest, (r) => { if (!r) return; view.value = 'backlog'; });
 /** The sidebar's Workflows badge: how many are open, across the teams (an older core without workflows.list: none). */
 const openWorkflows = ref<number | null>(null);
 async function loadOpenWorkflows() {
@@ -241,26 +235,22 @@ onMounted(() => { void loadOpenWorkflows(); workflowsTimer = setInterval(loadOpe
 onBeforeUnmount(() => { if (workflowsTimer) clearInterval(workflowsTimer); });
 
 /**
- * A link into the remote view (remoteHash.ts): #team={id} opens that team, #workflow={wf} that workflow's thread in its
- * team (found by asking each team's newest 200 workflows, core's most). An unknown or malformed id leaves the view where it
- * is, no error; a well-formed workflow no team lists is named in a short note (in its hinted team's Workflows, if any).
+ * A link into the remote view (remoteHash.ts): #team={id} opens that team (an unknown or malformed id leaves the view
+ * where it is, no error); #workflow={wf} opens the Workflows page at that workflow, whatever its age, filtered to its team
+ * when the core names it (workflows.get) or else to the link's team hint when that team is known. A workflow the core
+ * does not know: the page says "Workflow #N was not found" and opens no pane.
  */
-const hashNote = ref<string | null>(null);
 async function openFromHash() {
-  hashNote.value = null;
   const target = parseRemoteHash(window.location.hash);
   if (!target) return;
   const ids = allTeams.value.map((t) => t.id);
   if (target.kind === 'team') { if (ids.includes(target.team)) openTeam(target.team); return; }
-  const teamId = await findWorkflowTeam(target.workflow, ids, async (t) => {
-    const list = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: t, limit: 200 });
-    return Array.isArray(list) ? list.map((w) => w.id) : [];
-  }, target.team);
-  // Straight to the team's page with its workflows open (not openWorkflow: that is the Monitor's dialog over the
-  // Monitor, shown only while the Monitor is the place, and a link may arrive on any place).
-  if (teamId !== null) openTeam(teamId, 'workflows', target.workflow);
-  else if (target.team !== null && ids.includes(target.team)) openTeam(target.team, 'workflows', target.workflow);
-  else hashNote.value = `Workflow #${target.workflow} was not found in any team's newest 200 workflows.`;
+  let teamId: number | null = target.team !== null && ids.includes(target.team) ? target.team : null;
+  try {
+    const d = await api.call<WorkflowDetail>(WORKFLOWS_GET, { workflow: target.workflow });
+    if (d?.workflow?.id === target.workflow && typeof d.workflow.teamId === 'number') teamId = d.workflow.teamId;
+  } catch { /* not known (the page says so) or an older core: the hint, if any */ }
+  openWorkflowsPage({ teamId, workflow: target.workflow });
 }
 
 // A member's terminal (memberTerminal.ts: the Monitor, View > Terminal, the remote view, an agent's >_) opens here: its
@@ -275,7 +265,7 @@ async function findMember(memberId: number, teamId?: number): Promise<{ teamId: 
   }
   return null;
 }
-const unregisterTeamPage = registerTeamPage((teamId) => { monitorWorkflows.value = null; openTeam(teamId); }, findMember);
+const unregisterTeamPage = registerTeamPage((teamId) => { openTeam(teamId); }, findMember);
 onBeforeUnmount(unregisterTeamPage);
 
 // The team settings opened from a card in the Teams list (the same dialog as the team page's Settings).
@@ -313,7 +303,7 @@ async function rename(id: string, t: string) {
   void loadConversations();
 }
 
-// The chat being deleted: its row in the sidebar keeps "Deleting…" until the core answers.
+// The chat being deleted: its row in the sidebar keeps "Deletingâ€¦" until the core answers.
 const removingChat = ref<string | null>(null);
 async function remove(id: string) {
   if (removingChat.value) return;
@@ -327,7 +317,6 @@ async function remove(id: string) {
 
 /** A place in the sidebar. Teams always opens the list of teams, not the team last looked at. */
 function go(place: View) {
-  monitorWorkflows.value = null;
   // A place chosen here opens as it was left, not at what a link last asked for.
   workflowsRequest.value = null;
   backlogRequest.value = null;
@@ -336,7 +325,7 @@ function go(place: View) {
   if (place === 'teams') selected.value = null;
 }
 
-/** Opens Settings at a tab (the hint "Settings → Agents", a member's link to the global guardrails). */
+/** Opens Settings at a tab (the hint "Settings â†’ Agents", a member's link to the global guardrails). */
 function menu(item: SettingsTab) {
   // File > Settings opens the list of sections on a phone; a link to one section (Agents, About) opens that section.
   settingsLanding.value = item === 'general';
@@ -412,22 +401,22 @@ watch(gitRequest, (r) => {
 onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); window.removeEventListener('hashchange', openFromHash); });
 
 // The window's own title (taskbar, Alt+Tab) follows the place; the page shows its own heading.
-watch(title, (t) => { document.title = t ? `${t} · Yawble` : 'Yawble'; }, { immediate: true });
+watch(title, (t) => { document.title = t ? `${t} Â· Yawble` : 'Yawble'; }, { immediate: true });
 
 // ---- the menu bar (File, Edit, View, Help) and its shortcuts
 const desktop = typeof api.windowCommand === 'function';
 const isMac = api.platform === 'darwin';
-const mod = isMac ? '⌘' : 'Ctrl+';
+const mod = isMac ? 'âŒ˜' : 'Ctrl+';
 const menus = computed<Menu[]>(() => [
   { label: 'File', items: [
     { id: 'newChat', label: 'New chat', keys: `${mod}N` },
-    { id: 'newTeam', label: 'New team…' },
+    { id: 'newTeam', label: 'New teamâ€¦' },
     { separator: true },
     { id: 'settings', label: 'Settings', keys: `${mod},` },
-    ...(desktop ? [{ separator: true } as const, { id: 'quit', label: isMac ? 'Quit Yawble' : 'Exit', keys: isMac ? '⌘Q' : undefined }] : []),
+    ...(desktop ? [{ separator: true } as const, { id: 'quit', label: isMac ? 'Quit Yawble' : 'Exit', keys: isMac ? 'âŒ˜Q' : undefined }] : []),
   ] },
   ...(desktop ? [{ label: 'Edit', items: [
-    { id: 'undo', label: 'Undo', keys: `${mod}Z` }, { id: 'redo', label: 'Redo', keys: isMac ? '⇧⌘Z' : 'Ctrl+Y' },
+    { id: 'undo', label: 'Undo', keys: `${mod}Z` }, { id: 'redo', label: 'Redo', keys: isMac ? 'â‡§âŒ˜Z' : 'Ctrl+Y' },
     { separator: true } as const,
     { id: 'cut', label: 'Cut', keys: `${mod}X` }, { id: 'copy', label: 'Copy', keys: `${mod}C` }, { id: 'paste', label: 'Paste', keys: `${mod}V` },
     { id: 'selectAll', label: 'Select all', keys: `${mod}A` },
@@ -451,7 +440,7 @@ const menus = computed<Menu[]>(() => [
     ...(desktop ? [
       { separator: true } as const,
       { id: 'zoomIn', label: 'Zoom in', keys: `${mod}=` }, { id: 'zoomOut', label: 'Zoom out', keys: `${mod}-` }, { id: 'zoomReset', label: 'Actual size', keys: `${mod}0` },
-      // Developer tools is not on the menu; Ctrl+Shift+I / ⌥⌘I still opens them (shortcut below), for diagnosing.
+      // Developer tools is not on the menu; Ctrl+Shift+I / âŒ¥âŒ˜I still opens them (shortcut below), for diagnosing.
       { separator: true } as const,
       { id: 'reload', label: 'Reload', keys: `${mod}R` },
     ] : []),
@@ -554,7 +543,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
       @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
-      @logs="drawerOpen = false; go('logs')" :open-team-name="openTeamName" :open-workflows="openWorkflows" @team-documents="openTeamDialog('documents')" @team-workflows="openTeamDialog('workflows')" />
+      @logs="drawerOpen = false; go('logs')" :open-team-name="openTeamName" :open-workflows="openWorkflows" @team-documents="openTeamDocuments" @team-workflows="openTeamWorkflows" />
 
     <main class="main">
       <header class="bar">
@@ -582,8 +571,6 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
            below keeps its share and the Concierge's composer stays on screen however many banners there are. -->
       <div class="banners" data-test="banners">
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
-      <p v-if="hashNote" class="muted banner" data-test="hash-note">{{ hashNote }}
-        <button data-test="hash-note-dismiss" @click="hashNote = null">Dismiss</button></p>
       <HostChecksBanner :api="api" />
       <GitBanner :api="api" />
       <UpdateBanner ref="updateBanner" :api="api" />
@@ -607,15 +594,15 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 @changed="refresh" @deleted="selected = null; refresh()"
             @discuss="discuss(team.id, $event)" />
           <TeamsList v-else-if="overview" class="team-grid-wrap" :teams="teams" :archived="archivedTeams" :api="api" :poll-ms="pollMs" :refresh="refresh"
-            @open="openTeam" @settings="manageTeam = $event" @new-team="dialog = 'newTeam'" />
+            @open="openFromTeams" @settings="manageTeam = $event" @new-team="dialog = 'newTeam'" />
           <p v-else-if="error" class="error pad" data-test="teams-error">The teams could not be loaded: {{ error }}</p>
-          <div v-else class="pad" data-test="loading"><LoadingNote text="Loading teams (starting the core)…" /></div>
+          <div v-else class="pad" data-test="loading"><LoadingNote text="Loading teams (starting the core)â€¦" /></div>
         </section>
 
         <DocumentsView v-else-if="view === 'documents'" :teams="teams" :archived="archivedTeams" :api="api" :loading="!overview && !error" />
         <LogsDialog v-else-if="view === 'logs'" page :api="api" />
         <ScriptsDialog v-else-if="view === 'scripts'" page :api="api" :teams="teams" />
-        <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openFromMonitor" @open-workflow="openWorkflow" @open-terminal="openMemberTerminal"
+        <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openTeam" @open-terminal="openMemberTerminal"
           @open-needs-you="focusTeamId = null; go('board')" />
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />
         <BacklogView v-else-if="view === 'backlog'" :teams="teams" :teams-loading="!overview && !error" :api="api" :poll-ms="pollMs" :focus="backlogRequest" @open-team="openTeam"
@@ -630,8 +617,6 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
     </main>
 
     <NewTeamDialog v-if="dialog === 'newTeam'" :api="api" @close="dialog = null" @created="created" />
-    <WorkflowsDialog v-if="monitorWorkflows && view === 'monitor'" :key="`${monitorWorkflows.team.id}:${monitorWorkflows.id ?? 0}`" :api="api"
-      :team="monitorWorkflows.team" :poll-ms="pollMs" :focus="monitorWorkflows.id" @close="monitorWorkflows = null" />
     <TeamManageDialog v-if="manageTeam" :api="api" :team="manageTeam" @close="manageTeam = null" @changed="refresh"
       @deleted="manageTeam = null; refresh()" />
     <LinkDialog v-if="dialog === 'link'" :api="api" @close="dialog = null" @changed="link = $event" />

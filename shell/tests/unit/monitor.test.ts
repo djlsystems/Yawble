@@ -9,6 +9,7 @@ import { clampLayout, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, 
 import { collapse, DefaultLimits, layoutTeamMap, MapMembersReach, MapPastMembers, mapRoomOf } from '../../src/renderer/src/monitor/codemap';
 import type { TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import type { YawbleApi, WorkflowSummary } from '../../src/shared/api';
+import { workflowsRequest } from '../../src/renderer/src/workflows/page';
 import { entryTime, latestWorkflows, nodeLabelFont, NodeLabelMax, placeWorkflowLabels, workflowLabel, workflowLook, WorkflowLooks, workflowNodeLabel, WorkflowsShown } from '../../src/renderer/src/monitor/workflows';
 import { readStep, stepCaption, stepDoing, type StepKind, type StepRow } from '../../src/renderer/src/monitor/steps';
 import { MaxGapMs, mergeByTime, ReplayClock, ReplayRunningMs, ReplayStates, toneOfRow, trimByTime } from '../../src/renderer/src/monitor/timeline';
@@ -309,15 +310,19 @@ describe('the Monitor view', () => {
     expect(w.get('[data-test=monitor-legend-toggle]').attributes('aria-expanded')).toBe('true');
     const legend = w.get('[data-test=monitor-legend-workflows]').text();
     for (const words of ['completed', 'being worked', 'waiting', 'closed']) expect(legend.toLowerCase()).toContain(words);
-    // Opening one asks for that workflow (the app shows the Backlog item it came from, or the team's workflows).
+    // Opening one opens the Workflows page at that workflow, filtered to its team (no dialog, no emit).
+    workflowsRequest.value = null;
     await items[0]!.trigger('click');
-    expect(w.emitted('openWorkflow')?.[0]).toEqual([1, Number(items[0]!.attributes('data-id'))]);
-    // One panel per team: its header opens the team's workflows too.
+    expect(workflowsRequest.value).toMatchObject({ teamId: 1, workflow: Number(items[0]!.attributes('data-id')) });
+    // One panel per team: its header opens the page at the team's workflows, nothing selected.
     const headers = w.findAll('[data-test=monitor-workflows-team]');
     expect(headers).toHaveLength(1);
     expect(headers[0]!.text()).toContain('payments');
     await headers[0]!.trigger('click');
-    expect(w.emitted('openTeam')?.[0]).toEqual([1, 'workflows']);
+    expect(workflowsRequest.value).toMatchObject({ teamId: 1 });
+    expect(workflowsRequest.value?.workflow).toBeUndefined();
+    expect(w.emitted('openTeam')).toBeUndefined();
+    workflowsRequest.value = null;
     // A replay shows no workflows (the wall would be faking their history).
     w.findComponent(Timeline).vm.$emit('seek', Date.now() - 60_000);
     await flushPromises();
