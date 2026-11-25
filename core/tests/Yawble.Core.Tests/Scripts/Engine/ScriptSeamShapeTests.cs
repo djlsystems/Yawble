@@ -16,7 +16,7 @@ public sealed class ScriptSeamShapeTests : IDisposable
     [Fact]
     public void BuiltInSchemas_LookupFindsEveryBuiltIn_AndNamesListsThem()
     {
-        Assert.Equal(["TriggerFired", "FolderChange", "EventItem", "EmailAddress", "EmailMessage", "EmailList", "ApiResponse"], BuiltInSchemas.Names);
+        Assert.Equal(["TriggerFired", "FolderChange", "EventItem", "EmailAddress", "EmailMessage", "EmailList", "ApiResponse", "TellResult"], BuiltInSchemas.Names);
         foreach (var name in BuiltInSchemas.Names)
             Assert.True(BuiltInSchemas.Lookup.Find(name) is { BuiltIn: true } s && s.Name == name, name);
         Assert.Null(BuiltInSchemas.Lookup.Find("Nope"));
