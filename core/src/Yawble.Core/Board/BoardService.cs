@@ -78,8 +78,12 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
                 if (page.Count == 0) return read;
                 var testers = TesterRule.ByTeam(await bus.AllMemberRowsAsync(ct));
                 _projector.TestersOf = team => testers.TryGetValue(team, out var s) ? s : NoTesters;
-                foreach (var m in page) _projector.Apply(m);
-                store.SetCursor(page[^1].Seq);
+                // One transaction per page: one disk flush for the page, and the cursor moves with what it read.
+                store.InBatch(() =>
+                {
+                    foreach (var m in page) _projector.Apply(m);
+                    store.SetCursor(page[^1].Seq);
+                });
                 read += page.Count;
             }
         }

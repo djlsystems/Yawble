@@ -200,6 +200,7 @@ public sealed class HostTaskGapTests : IAsyncLifetime
     {
         var script = Script("hang", "Write-Output 'started'; Start-Sleep -Seconds 120", "echo started; sleep 120");
         await SaveDeploy(script, timeout: 10);
+        _f.Svc.SecondLength = TimeSpan.FromMilliseconds(300); // the 10 s limit runs out after 3 real seconds (PowerShell is up and has said "started")
         await Call(ConciergeHostTasks.RunTool, RunArgs());
         var run = await _f.Finish(await Approve());
         Assert.True(run.TimedOut);

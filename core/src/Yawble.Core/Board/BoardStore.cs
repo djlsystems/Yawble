@@ -185,14 +185,16 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
     /// </summary>
     public void EnsureTimeline(long cardId)
     {
-        using var c = Open();
+        using var lease = Use();
+        var c = lease.Connection;
         using (var probe = Command(c, "SELECT timeline_rebuild FROM board_cards WHERE id = $id;", [("$id", cardId)]))
             if (probe.ExecuteScalar() is not long pending || pending == 0) return;
-        using var tx = c.BeginTransaction();
+        using var work = lease.Begin("ensure_timeline");
+        var tx = work.Transaction;
         using (var claim = Command(c, "UPDATE board_cards SET timeline_rebuild = 0, timeline_rebuilt = 1 WHERE id = $id AND timeline_rebuild = 1;", [("$id", cardId)]))
         {
             claim.Transaction = tx;
-            if (claim.ExecuteNonQuery() == 0) { tx.Rollback(); return; }
+            if (claim.ExecuteNonQuery() == 0) { work.Rollback(); return; }
         }
         CardRow? card;
         using (var read = Command(c, $"SELECT {CardColumns} FROM board_cards WHERE id = $id;", [("$id", cardId)]))
@@ -208,7 +210,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
             using var r = read.ExecuteReader();
             while (r.Read()) trail.Add(new TrailRow(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4)));
         }
-        if (card is null) { tx.Rollback(); return; }
+        if (card is null) { work.Rollback(); return; }
         var rebuilt = TimelineRebuild.FromTrail(card, trail);
         foreach (var l in rebuilt.Lines)
         {
@@ -225,7 +227,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
                 set.Transaction = tx;
                 set.ExecuteNonQuery();
             }
-        tx.Commit();
+        work.Commit();
     }
 
     /// <summary>The runs of a workflow: who, queued, started, ended (null while running; an interrupted one ends where it started).</summary>
@@ -423,6 +425,71 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         return c;
     }
 
+    // A batch: one connection and one transaction for many writes (the projector's page of bus messages), so the page
+    // is one commit and one disk flush instead of one per statement. Only the thread that opened it uses it; every
+    // other caller keeps opening its own connection, as before.
+    private SqliteConnection? _batch;
+    private SqliteTransaction? _batchTx;
+    private int _batchThread;
+
+    /// <summary>
+    /// Runs <paramref name="work"/> with every statement this store runs on this thread in one transaction, committed
+    /// at the end (rolled back if it throws). A batch inside a batch joins it.
+    /// </summary>
+    public void InBatch(Action work)
+    {
+        if (InThisBatch) { work(); return; }
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        _batch = c; _batchTx = tx; _batchThread = Environment.CurrentManagedThreadId;
+        try
+        {
+            work();
+            tx.Commit();
+        }
+        finally { _batch = null; _batchTx = null; _batchThread = 0; }
+    }
+
+    private bool InThisBatch => _batch is not null && _batchThread == Environment.CurrentManagedThreadId;
+
+    /// <summary>The connection a statement runs on: this thread's batch, or a new one of its own.</summary>
+    private Lease Use() => InThisBatch ? new Lease(_batch!, _batchTx, false) : new Lease(Open(), null, true);
+
+    private readonly struct Lease(SqliteConnection connection, SqliteTransaction? batch, bool owned) : IDisposable
+    {
+        public SqliteConnection Connection => connection;
+
+        /// <summary>A unit of work: its own transaction, or a savepoint on the batch's (so it can still roll back alone).</summary>
+        public Work Begin(string name) => batch is null ? new Work(connection.BeginTransaction(), null) : new Work(batch, name);
+
+        public void Dispose() { if (owned) connection.Dispose(); }
+    }
+
+    private sealed class Work : IDisposable
+    {
+        private readonly string? _savepoint;
+        private bool _done;
+
+        public Work(SqliteTransaction tx, string? savepoint)
+        {
+            Transaction = tx;
+            _savepoint = savepoint;
+            if (savepoint is not null) tx.Save(savepoint);
+        }
+
+        public SqliteTransaction Transaction { get; }
+
+        public void Commit() { if (_savepoint is null) Transaction.Commit(); else Transaction.Release(_savepoint); _done = true; }
+
+        public void Rollback() { if (_savepoint is null) Transaction.Rollback(); else Transaction.Rollback(_savepoint); _done = true; }
+
+        public void Dispose()
+        {
+            if (_savepoint is null) Transaction.Dispose();
+            else if (!_done) Transaction.Rollback(_savepoint);
+        }
+    }
+
     private long _queries;
 
     /// <summary>How many statements this store has run (tests count a read's queries: the no-N+1 check).</summary>
@@ -432,6 +499,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
     {
         Interlocked.Increment(ref _queries);
         var cmd = c.CreateCommand();
+        if (_batch is not null && ReferenceEquals(c, _batch)) cmd.Transaction = _batchTx;
         cmd.CommandText = sql;
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v);
         return cmd;
@@ -439,29 +507,29 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     private int Exec(string sql, params (string, object)[] args)
     {
-        using var c = Open();
-        using var cmd = Command(c, sql, args);
+        using var lease = Use();
+        using var cmd = Command(lease.Connection, sql, args);
         return cmd.ExecuteNonQuery();
     }
 
     private long Scalar(string sql, params (string, object)[] args)
     {
-        using var c = Open();
-        using var cmd = Command(c, sql, args);
+        using var lease = Use();
+        using var cmd = Command(lease.Connection, sql, args);
         return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private double ScalarDouble(string sql, params (string, object)[] args)
     {
-        using var c = Open();
-        using var cmd = Command(c, sql, args);
+        using var lease = Use();
+        using var cmd = Command(lease.Connection, sql, args);
         return Convert.ToDouble(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     private IReadOnlyList<T> Query<T>(string sql, Func<SqliteDataReader, T> read, params (string, object)[] args)
     {
-        using var c = Open();
-        using var cmd = Command(c, sql, args);
+        using var lease = Use();
+        using var cmd = Command(lease.Connection, sql, args);
         using var r = cmd.ExecuteReader();
         var list = new List<T>();
         while (r.Read()) list.Add(read(r));
