@@ -5,6 +5,7 @@ import { errorText } from '../../api';
 import { runScript, scriptsApi } from '../../scripts/api';
 import type { Run, RunDetail } from '../../scripts/types';
 import LoadingNote from '../LoadingNote.vue';
+import RunWaitLink from './RunWaitLink.vue';
 import ScriptRunView from './ScriptRunView.vue';
 
 // The Runs tab: every script run across the teams (scripts.runs with no teamId), newest first: team, member,
@@ -48,7 +49,8 @@ async function show(r: Run) {
             <td>{{ r.member ?? '' }}<span v-if="!r.member" class="muted">(test)</span></td>
             <td><code>{{ runScript(r) }}</code></td>
             <td>{{ r.trigger }}<span v-if="r.dryRun" class="chip">dry run</span></td>
-            <td><span class="status" :data-status="r.status">{{ r.status }}</span></td>
+            <td><span class="status" :data-status="r.status">{{ r.status }}</span>
+              <RunWaitLink v-if="r.status === 'waiting'" :workflow="r.waitWorkflowId ?? null" /></td>
             <td class="muted">{{ new Date(r.startedAt).toLocaleString() }}</td>
           </tr>
         </tbody>
@@ -70,5 +72,6 @@ async function show(r: Run) {
 .status[data-status=succeeded] { background: var(--pill-green-bg); color: var(--pill-green-ink); }
 .status[data-status=failed] { background: var(--pill-red-bg); color: var(--pill-red-ink); }
 .status[data-status=running] { background: var(--pill-blue-bg); color: var(--pill-blue-ink); }
+.status[data-status=waiting] { background: var(--pill-violet-bg); color: var(--pill-violet-ink); }
 .status[data-status=skipped], .status[data-status=interrupted] { background: var(--pill-yellow-bg); color: var(--pill-yellow-ink); }
 </style>

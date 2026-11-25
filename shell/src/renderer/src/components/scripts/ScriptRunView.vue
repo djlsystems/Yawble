@@ -4,6 +4,7 @@ import type { YawbleApi } from '../../../../shared/api';
 import { errorText } from '../../api';
 import { pretty, runScript, scriptsApi, showValue, took, writtenFiles } from '../../scripts/api';
 import type { RunDetail, ScriptDocument, TestRunResult } from '../../scripts/types';
+import RunWaitLink from './RunWaitLink.vue';
 import ScriptFlowchart from './ScriptFlowchart.vue';
 
 // The run view: each step with its input, output, time and status, the run's log, and the files it wrote. Shown
@@ -53,6 +54,7 @@ async function toggleChart() {
   <div class="run-view" data-test="script-run-view">
     <div class="head">
       <span class="status" :data-status="status" data-test="run-status">{{ status }}</span>
+      <RunWaitLink v-if="status === 'waiting'" :workflow="detail?.waitWorkflowId ?? null" />
       <template v-if="detail">
         <span><code>{{ runScript(detail) }}</code></span>
         <span class="muted">{{ detail.team }}<template v-if="detail.member"> / {{ detail.member }}</template></span>
@@ -134,6 +136,7 @@ pre { margin: 0; padding: 6px 8px; background: var(--surface-sunken); border-rad
 .status[data-status=succeeded], .status[data-status=done] { background: var(--pill-green-bg); color: var(--pill-green-ink); }
 .status[data-status=failed] { background: var(--pill-red-bg); color: var(--pill-red-ink); }
 .status[data-status=running] { background: var(--pill-blue-bg); color: var(--pill-blue-ink); }
+.status[data-status=waiting] { background: var(--pill-violet-bg); color: var(--pill-violet-ink); }
 .status[data-status=skipped], .status[data-status=interrupted] { background: var(--pill-yellow-bg); color: var(--pill-yellow-ink); }
 .files { margin: 0; padding-left: 18px; }
 .files a { color: var(--accent); }

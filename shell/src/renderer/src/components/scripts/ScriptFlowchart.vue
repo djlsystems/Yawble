@@ -124,7 +124,7 @@ function onEdgeClick(e: EdgeMouseEvent) { selectedEdge.value = e.edge.id; select
 /** A click on the empty canvas: nothing selected, so the Script pane shows. */
 function onPaneClick() { selectedEdge.value = null; selected.value = null; }
 
-/** The Script pane shows when no step is selected (or the start node is). */
+/** The Script pane shows when no step is selected; with the start node selected it shows only the triggers. */
 const showScriptPane = computed(() => !selected.value || selected.value === START_ID || !selectedNode.value);
 
 function onPanelChange(s: ScriptStep, variable?: ScriptVariable) {
@@ -272,7 +272,8 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
         </div>
       </div>
       <aside v-if="showScriptPane && ctx" class="side" data-test="flow-script-side">
-        <ScriptPane :ctx="ctx" :readonly="!!readonly" :integrations="integrations" @change="onScriptChange" @step="onScriptStep" />
+        <ScriptPane :key="selected === START_ID ? 'start' : 'script'" :ctx="ctx" :readonly="!!readonly" :integrations="integrations" :start="selected === START_ID"
+          @change="onScriptChange" @step="onScriptStep" @script="selected = null" />
       </aside>
       <FlowStepPanel v-else-if="selectedNode && ctx" :key="selectedNode.id" :node="selectedNode" :step="selectedStep" :readonly="!!readonly"
         :ctx="ctx" :integrations="integrations" @change="onPanelChange" @remove="deleteNode" @close="selected = null" />
@@ -303,7 +304,7 @@ const shape = (n: FlowNode) => (n.kind === 'if' || n.kind === 'switch' ? 'diamon
 .node[data-kind=forEach] { background: var(--pill-violet-bg); color: var(--pill-violet-ink); border-style: dashed; }
 .node[data-kind=set] { background: var(--pill-info-bg); color: var(--pill-info-ink); }
 .node[data-kind=file] { background: var(--chip-claude-bg); color: var(--chip-claude-ink); border-radius: 2px 14px 2px 2px; }
-.node[data-kind=agent] { background: var(--chip-grok-bg); color: var(--chip-grok-ink); border-radius: 14px; }
+.node[data-kind=tell] { background: var(--chip-grok-bg); color: var(--chip-grok-ink); border-radius: 14px; }
 /* if / switch: a diamond drawn behind the text */
 .node.diamond { background: transparent; border: 0; color: var(--pill-yellow-ink); }
 .node.diamond::before { content: ''; position: absolute; inset: 0; background: var(--warn-line-strong); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }

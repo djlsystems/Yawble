@@ -772,7 +772,9 @@ masked in the log and never reaches an agent. See
   imported as `.json` files. A document's top-level `layout` section (the editor's node positions) is kept unchanged
   through save, get, export and import.
 - **Schemas** are named object types (a JSON Schema subset), also global and versioned. The built-in schemas
-  (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse) are read-only. A schema save that
+  (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse, TellResult) are read-only.
+  TellResult is what a Tell step gives back: `outcome` (sent, done, failed, blocked, timedOut or dryRun), `workflow`,
+  `reply` (the agent's closing summary) and `data`, typed by the tell's reply schema. A schema save that
   removes or retypes a field a saved script uses is refused, listing each script, version and step it would break.
 - The **Schemas** tab shows each schema as a tree of its fields: type, required, description, enum values, and the
   schemas a field refers to (as an item of a list too). A built-in schema is read-only. Your own schema has a
@@ -802,7 +804,7 @@ masked in the log and never reaches an agent. See
 - A script member runs one run at a time: a trigger that fires during a run is skipped and the skip is listed in its
   runs. The limit is per member: the same script runs at the same time as members of different teams, or as two
   members of one team. Each member has its own saved variables, data folder, settings, bindings and runs. A trigger's
-  run starts no team workflow and wakes no Manager.
+  run starts no team workflow and wakes no Manager; only a Tell step gives the team work.
 - A run uses the version of the script it started with, including when it resumes after a restart, even if the script
   is saved again or the member's pinned version changes meanwhile.
 - A run has a timeout (a member setting, 10 minutes by default), a budget of 10,000 steps and a loop cap. Each step's
@@ -814,6 +816,31 @@ masked in the log and never reaches an agent. See
 - **Test run** runs a version of a script (a draft too) on a sample input and settings for a team, as a dry run by
   default: changing actions are not performed and are logged as "would ...", and file writes go to a dry-run folder.
   A test run keeps no saved variables.
+- **Tell** gives work to a team's agents; a script never runs an agent itself. A `tell` step names an agent member
+  (`member`, the Manager by default) and a team (`team`, the script member's own team by default), and its `text` is the
+  instruction (a template). Telling the Manager starts a workflow it plans; telling another agent member gives that
+  member one card, in a workflow the Manager sees but does not plan. The workflow says which script, member and run it
+  came from. Script members and the person cannot be told, and a name that is not an agent member of the team when the
+  step runs fails the step.
+  - `wait: false` (the default) goes on at once. `wait: true` saves the run at the step with the state **waiting** until
+    the workflow is done, fails or is blocked, or the step's `timeout` passes (`24h` by default, at most `7d`). A
+    waiting run holds no run slot, its run timeout stops while it waits, and it resumes after the app restarts. It is
+    still the member's run: triggers that fire meanwhile are skipped and listed. Cancelling the run leaves the workflow
+    alone.
+  - With `wait`, `reply` names a schema: the agent is asked to end its answer with JSON of that schema, and a reply that
+    does not match fails the step.
+  - `into` gets a `TellResult { outcome, workflow, reply, data }`: outcome `sent`, `done`, `failed`, `blocked`,
+    `timedOut` or `dryRun`; `reply` is the agent's closing summary; `data` is the reply's JSON, or null.
+  - A run tells at most 5 times by default; **Tells per run** on the member's card sets it (at most 50), and the next
+    tell fails the run. **Settings > Scripts > Scripts may tell other teams** (on by default) turned off fails a tell
+    to another team with that reason.
+  - A dry run or a test run never sends a tell: the log says "would tell Manager of Support: ..." and `into` gets
+    outcome `dryRun`. **Test run** has a **Made-up reply** field for each tell that waits.
+  - In the flowchart, **Tell** is in the palette's **Do** group. Its form has Team (the own team first), Member (the
+    team's agent members, the Manager first), Text and **Wait for the outcome**; Timeout and Reply schema show only
+    when Wait is on, then **Save result into**. Its node reads "tell Manager", "tell Ava (waits)", or "tell Manager of
+    Billing" for another team.
+  - A waiting run shows **waiting** with a link to its workflow in the Runs tab, the run view and the member's card.
 - Script runs are listed with their state, steps and log, and recorded with the agents' runs. A Visitor on the Cloud
   Link can read scripts, schemas, script members and runs, and cannot change or run any of them.
 - **Building with the Concierge.** The Concierge (and a program paired through the companion) builds, checks, saves
@@ -927,6 +954,7 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 | Skills | Skills and which roles and teams they are offered to |
 | Guardrails | The global policy and the global run limit |
 | Integrations | CLIs, APIs, MCP servers, Connections, host tasks |
+| Scripts | **Scripts may tell other teams** (on by default): off, a script's Tell step to another team fails |
 | Cloud Link | Pairing and remote access; see [Cloud Link](cloud-link.md) |
 | Health | The doctor |
 | Companion | `yawble-companion`: the line to add it to Claude Code, paired programs |

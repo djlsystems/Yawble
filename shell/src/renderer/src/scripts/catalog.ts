@@ -9,7 +9,15 @@ export interface CatalogParam { name: string; type: string; required: boolean; d
 export interface CatalogAction { name: string; description?: string; params: CatalogParam[]; result: string; ask?: boolean }
 export interface CatalogIntegration { name: string; kind: 'email' | 'api'; enabledForTeam: boolean | null; actions: CatalogAction[] }
 export interface CatalogFunction { name: string; signature: string; description: string }
-export interface ScriptCatalog { integrations: CatalogIntegration[]; functions: CatalogFunction[] }
+/** A team a tell can go to and its agent members, the Manager first (scripts.catalog with a teamId). */
+export interface TellTarget { teamId: number; team: string; members: string[] }
+export interface ScriptCatalog {
+  integrations: CatalogIntegration[]; functions: CatalogFunction[];
+  /** With a teamId: the own team first, then the others; without one (or an older core) left out. */
+  tellTargets?: TellTarget[];
+  /** Settings > Scripts "Scripts may tell other teams". */
+  tellOtherTeams?: boolean;
+}
 export interface UseRealNamesResult { document: ScriptDocument; renamed: Record<string, string>; unresolved: string[] }
 export interface MemberIntegration { name: string; kind: 'email' | 'api'; uses: string; overridden: boolean }
 
@@ -282,6 +290,7 @@ export function stepIO(ctx: DesignContext, step: ScriptStep): StepIO {
     }
     case 'switch': return { in: [{ name: 'on', type: type(step.on) }], out: null };
     case 'log': return { in: [{ name: 'text', type: 'string' }], out: null };
+    case 'tell': return { in: [{ name: 'text', type: 'string', required: true }], out: { type: TELL_RESULT, into } };
     case 'end': {
       const outs = step.outputs && typeof step.outputs === 'object' ? Object.entries(step.outputs as Record<string, unknown>) : [];
       return { in: outs.map(([name, v]) => ({ name, type: type(v) })), out: null };
@@ -300,6 +309,57 @@ export function stepIO(ctx: DesignContext, step: ScriptStep): StepIO {
 export const ioInText = (io: StepIO) => io.in.map((p) => `${p.name}: ${p.type}`).join(', ');
 /** "EmailList → res", or just the type when it is not saved. */
 export const ioOutText = (io: StepIO) => (io.out ? (io.out.into ? `${io.out.type} → ${io.out.into}` : io.out.type) : '');
+
+// ---- tell
+
+/** The type a tell step's into gets. */
+export const TELL_RESULT = 'TellResult';
+/** The member a tell goes to when the step names none. */
+export const TELL_DEFAULT_MEMBER = 'Manager';
+/** A waiting tell's timeout when the step gives none, and the longest it may be, in hours. */
+export const TELL_DEFAULT_TIMEOUT = '24h';
+export const TELL_MAX_TIMEOUT_HOURS = 7 * 24;
+/** The timeouts the form suggests. */
+export const TELL_TIMEOUTS: readonly string[] = ['30m', '1h', '4h', '24h', '3d', '7d'];
+
+/** The script member's own team: the catalog's first tell target, or null when the catalog has none. */
+export function ownTellTeam(catalog: ScriptCatalog | null | undefined): TellTarget | null {
+  return catalog?.tellTargets?.[0] ?? null;
+}
+
+/** The team a tell step goes to: its team, or the own team when it names none (or names the own team). */
+export function tellTeamOf(catalog: ScriptCatalog | null | undefined, step: ScriptStep): TellTarget | null {
+  const team = str(step.team)?.trim();
+  const targets = catalog?.tellTargets ?? [];
+  if (!team) return targets[0] ?? null;
+  return targets.find((t) => t.team.toLowerCase() === team.toLowerCase()) ?? null;
+}
+
+/** The agent members a tell step can name in its team, the Manager first (it is always there). */
+export function tellMembers(catalog: ScriptCatalog | null | undefined, step: ScriptStep): string[] {
+  const listed = tellTeamOf(catalog, step)?.members ?? [];
+  const rest = listed.filter((m) => m !== TELL_DEFAULT_MEMBER);
+  return [TELL_DEFAULT_MEMBER, ...rest];
+}
+
+/** A tell's timeout in hours ("30m", "4h", "2d", "1.5h"), or null when it is not one. */
+export function timeoutHours(text: string): number | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(m|h|d)\s*$/i.exec(text);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2]!.toLowerCase();
+  return unit === 'm' ? n / 60 : unit === 'd' ? n * 24 : n;
+}
+
+/** What is wrong with a tell's timeout text, or null ('' is the default, 24h). */
+export function timeoutProblem(text: string): string | null {
+  if (!text.trim()) return null;
+  const h = timeoutHours(text);
+  if (h === null) return 'A timeout is a number and m, h or d, e.g. 4h.';
+  if (h <= 0) return 'A timeout is more than 0.';
+  if (h > TELL_MAX_TIMEOUT_HOURS) return 'A tell waits at most 7d.';
+  return null;
+}
 
 // ---- expression suggestions
 
