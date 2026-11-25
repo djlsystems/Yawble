@@ -212,7 +212,13 @@ public class WorkflowsLiveStatesVerifyTests
         if (Ids(benPage).Count != 1) foreach (var x in benPage["workflows"]!.AsArray())
             Console.WriteLine($"WORKFLOWS q=ben extra:{x!.ToJsonString()} ROOT {rig.Store.Workflow(x["id"]!.GetValue<long>())[0].Type} {rig.Store.Workflow(x["id"]!.GetValue<long>())[0].Payload}");
         Assert.Equal([lead], Ids(await rig.List(new { q = "ben" })));
-        Assert.Equal([lead], Ids(await rig.List(new { q = lead.ToString(System.Globalization.CultureInfo.InvariantCulture), state = "open" })));
+        // Its number finds it. The lead's seq races the start-up messages (7, 8 or 10), so a bare "7" also finds #17 (Eve's) as a
+        // substring: any other row it finds must be one whose #id holds the number, never a text match. "#<id>" finds it alone.
+        var leadId = lead.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var byNumber = Ids(await rig.List(new { q = leadId, state = "open" }));
+        Assert.Contains(lead, byNumber);
+        Assert.All(byNumber.Where(id => id != lead), id => Assert.Contains(leadId, "#" + id.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal));
+        Assert.Equal([lead], Ids(await rig.List(new { q = "#" + leadId, state = "open" })));
 
         // workflows.get: the running workflow's cards (Manager's and Ben's) and its messages in words, newest first.
         var got = await rig.Call("workflows.get", new { workflow = lead });
