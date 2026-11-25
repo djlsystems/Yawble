@@ -67,7 +67,7 @@ public sealed class ScriptStep
                     foreach (var (value, target) in cases) yield return ($"cases.{value}", target is JsonValue t && t.GetValueKind() == JsonValueKind.String ? t.GetValue<string>() : null);
                 yield return ("default", Text("default"));
                 break;
-            case "forEach":
+            case "forEach" or ScriptLoop.StepType:
                 yield return ("body", Text("body"));
                 yield return ("then", Text("then"));
                 break;
