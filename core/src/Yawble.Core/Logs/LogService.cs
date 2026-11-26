@@ -393,7 +393,15 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
 
     private static string PruneWhere(LogPrune p) => $"{p.TimeColumn} < @cutoff" + (p.Where is null ? "" : $" AND ({p.Where})");
 
-    /// <summary>Deletes the entries of <paramref name="source"/> before <paramref name="cutoff"/>; how many went.</summary>
+    /// <summary>How many rows one delete statement of a prune takes.</summary>
+    public const int PruneChunk = 5000;
+
+    /// <summary>
+    /// Deletes the entries of <paramref name="source"/> before <paramref name="cutoff"/>; how many went. A source's
+    /// tables are pruned in one transaction, so a log that reads several tables loses its old entries from all of them
+    /// or from none. Each table is deleted <see cref="PruneChunk"/> rows at a time, so no single statement holds a
+    /// year of rows.
+    /// </summary>
     public long Prune(string source, string cutoff)
     {
         if (FileLogs.Find(source) is { } f) return f.Prune(dataDir, cutoff);
@@ -401,12 +409,14 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         var p = s.Prune ?? throw new ArgumentException($"{s.Title} is kept: {s.KeptBecause}");
         var quietSince = QuietSince();
         using var c = Open();
+        using var tx = c.BeginTransaction();
         long deleted = 0;
         foreach (var t in p.Tables)
         {
             if (t.FileColumn is not null)
             {
                 using var files = c.CreateCommand();
+                files.Transaction = tx;
                 files.CommandText = $"SELECT {t.FileColumn} FROM {t.Table} WHERE {PruneWhere(t)} AND {t.FileColumn} IS NOT NULL;";
                 files.Parameters.AddWithValue("@cutoff", cutoff);
                 files.Parameters.AddWithValue("@quietSince", quietSince);
@@ -414,11 +424,18 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
                 while (r.Read()) DeleteFile(r.GetString(0));
             }
             using var cmd = c.CreateCommand();
-            cmd.CommandText = $"DELETE FROM {t.Table} WHERE {PruneWhere(t)};";
+            cmd.Transaction = tx;
+            cmd.CommandText = $"DELETE FROM {t.Table} WHERE rowid IN (SELECT rowid FROM {t.Table} WHERE {PruneWhere(t)} LIMIT {PruneChunk});";
             cmd.Parameters.AddWithValue("@cutoff", cutoff);
             cmd.Parameters.AddWithValue("@quietSince", quietSince);
-            deleted += cmd.ExecuteNonQuery();
+            int n;
+            do
+            {
+                n = cmd.ExecuteNonQuery();
+                deleted += n;
+            } while (n > 0);
         }
+        tx.Commit();
         return deleted;
     }
 
@@ -514,13 +531,17 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             while (r.Read())
                 if (r.IsDBNull(1) || !File.Exists(r.GetString(1))) gone.Add(r.GetInt64(0));
         }
-        foreach (var id in gone)
+        if (gone.Count == 0) return 0;
+        // One commit for all of them, a few hundred ids per statement.
+        using var tx = c.BeginTransaction();
+        foreach (var ids in gone.Chunk(500))
         {
             using var del = c.CreateCommand();
-            del.CommandText = "DELETE FROM transcripts WHERE run_id = @id;";
-            del.Parameters.AddWithValue("@id", id);
+            del.Transaction = tx;
+            del.CommandText = $"DELETE FROM transcripts WHERE run_id IN ({string.Join(", ", ids.Select(id => id.ToString(CultureInfo.InvariantCulture)))});";
             del.ExecuteNonQuery();
         }
+        tx.Commit();
         return gone.Count;
     }
 

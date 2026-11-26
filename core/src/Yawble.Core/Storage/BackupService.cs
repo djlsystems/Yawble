@@ -265,6 +265,16 @@ public sealed class BackupService
         }
     }
 
+    /// <summary>
+    /// True when a backup under 20 hours old exists, making the daily one first when it is due. False when there is
+    /// none and it could not be made.
+    /// </summary>
+    public bool EnsureRecent()
+    {
+        DailyIfDue();
+        return List().FirstOrDefault() is { } newest && _now() - newest.Time < DailySkipWithin;
+    }
+
     /// <summary>First start of the day, then an hourly check, until cancelled.</summary>
     public async Task RunDailyAsync(CancellationToken ct, TimeSpan? every = null)
     {

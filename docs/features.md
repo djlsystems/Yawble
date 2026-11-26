@@ -985,6 +985,8 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
   values.
 - **Restore…** returns teams, cards and messages to that moment. It is applied at the next start.
 - Old log entries are deleted daily, by each log's retention (see [Logs](#logs)).
+  The disk space they took is given back at a later start of the app, when more than a fifth of a database file over
+  50 MB is free. A backup is made first when none is recent.
 - **Settings > Health** runs the doctor. Its checks are Database, Disk space, Sandbox, Git, Agent CLIs, Cloud Link,
   Connections, Teams and Logs.
 - Fixes it offers: open a Connection to reconnect it, remove unused credentials, sync a team that is behind, archive
