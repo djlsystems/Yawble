@@ -145,7 +145,8 @@ scripts/test-all.sh
 ```
 
 That builds, runs every .NET test project, the sandbox release gate (`core/tools/Yawble.SandboxCheck`), the release
-script tests, and in `shell/` the typecheck, build, unit tests (vitest) and window tests (Playwright + Electron).
+script and packaging tests, the code browser's unit tests (vitest, in `code-browser/`), and in `shell/` the typecheck,
+build, unit tests (vitest) and window tests (Playwright + Electron).
 On Linux without a display the window tests run under `xvfb-run`; where Chromium's own sandbox cannot start
 (containers, Ubuntu 24.04's AppArmor default) set `YAWBLE_E2E_NO_SANDBOX=1`. That switch exists only in the test
 harness.
