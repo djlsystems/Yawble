@@ -6,16 +6,15 @@ using Xunit;
 namespace Yawble.Core.Tests.Code;
 
 /// <summary>
-/// The tester's attempts to get past the code browser's deny list through links: dangling links, a missing tail
-/// under a linked parent on either side, a file link, a loop on either side, a canonicaliser that returns null or throws,
-/// and the whole code browser (SafeTree) on a clone reached through a linked parent. Every failure must deny.
-/// Skips where links cannot be made.
+/// The code browser's deny list holds through links: dangling links, a missing tail under a linked parent on either
+/// side, a file link, a loop on either side, a canonicaliser that returns null or throws, and the whole code browser
+/// (SafeTree) on a clone reached through a linked parent. Every failure denies. Skips where links cannot be made.
 /// </summary>
-public sealed class DeniedPathsBreakTests : IDisposable
+public sealed class DeniedPathsLinkTests : IDisposable
 {
     private readonly string _tmp = Path.Combine(Path.GetTempPath(), "yawble-dpb-" + Guid.NewGuid().ToString("N")[..10]);
 
-    public DeniedPathsBreakTests() => Directory.CreateDirectory(_tmp);
+    public DeniedPathsLinkTests() => Directory.CreateDirectory(_tmp);
 
     public void Dispose()
     {

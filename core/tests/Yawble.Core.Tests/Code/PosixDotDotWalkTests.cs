@@ -32,7 +32,7 @@ public sealed class PosixDotDotWalkTests : IDisposable
     private static string? Windows(string path) => HostPathCanonicalizer.TryCanonicalize(path, physicalDotDot: false);
 
     /// <summary>deep/dir, deep/y, a/s -> deep/dir and a/l -> s/../y (relative).</summary>
-    private void MakeTheTesterLayout()
+    private void MakeTheLinkedLayout()
     {
         Directory.CreateDirectory(P("deep", "dir"));
         Directory.CreateDirectory(P("deep", "y"));
@@ -44,7 +44,7 @@ public sealed class PosixDotDotWalkTests : IDisposable
     [Fact]
     public void ARelativeTargetWithDotDotAfterALink_GoesToTheLinksRealParent()
     {
-        MakeTheTesterLayout();
+        MakeTheLinkedLayout();
         var deepY = Posix(P("deep", "y"));
         Assert.NotNull(deepY);
         Assert.Equal(deepY, Posix(P("a", "l")));
@@ -54,7 +54,7 @@ public sealed class PosixDotDotWalkTests : IDisposable
     [Fact]
     public void TheWindowsRule_StillCollapsesDotDotFirst()
     {
-        MakeTheTesterLayout();
+        MakeTheLinkedLayout();
         // Lexically s/../y from a is a/y, which does not exist: the missing tail is kept under the real a.
         Assert.Equal(Path.Combine(Windows(P("a"))!, "y"), Windows(P("a", "l")));
     }
@@ -105,5 +105,47 @@ public sealed class PosixDotDotWalkTests : IDisposable
         Directory.CreateDirectory(P("plain", "sub"));
         Assert.Equal(Windows(P("plain", "sub")), Posix(P("plain", "sub")));
         Assert.Equal(Windows(P("plain", "missing", "f")), Posix(P("plain", "missing", "f")));
+    }
+
+    [Fact]
+    public void AnAbsoluteTargetWithDotDotThroughALink_GoesToTheRealParent()
+    {
+        // a/l -> <tmp>/a/s/../y (absolute), a/s -> deep/dir: the ".." is taken after s is followed, so deep/y.
+        Directory.CreateDirectory(P("deep", "dir"));
+        Directory.CreateDirectory(P("deep", "y"));
+        Directory.CreateDirectory(P("a"));
+        DirLink(P("a", "s"), P("deep", "dir"));
+        DirLink(P("a", "l"), P("a", "s") + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + "y");
+        var stored = new DirectoryInfo(P("a", "l")).LinkTarget ?? "";
+        Assert.SkipUnless(stored.Contains(".."), $"the OS stored the absolute target collapsed: {stored}");
+        Assert.Equal(Posix(P("deep", "y")), Posix(P("a", "l")));
+    }
+
+    [Fact]
+    public void ALinkToALink_ThenDotDot_GoesToTheLastRealParent()
+    {
+        // a/m -> a/s -> deep/dir; a/m/../secret is deep/secret, not a/secret.
+        Directory.CreateDirectory(P("deep", "dir"));
+        Directory.CreateDirectory(P("deep", "secret"));
+        Directory.CreateDirectory(P("a", "secret"));
+        DirLink(P("a", "s"), P("deep", "dir"));
+        DirLink(P("a", "m"), "s");
+        var raw = P("a", "m") + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + "secret";
+        Assert.Equal(Posix(P("deep", "secret")), Posix(raw));
+        Assert.NotEqual(Posix(P("a", "secret")), Posix(raw));
+    }
+
+    [Fact]
+    public void ADeniedFolderReachedThroughDotDotAfterALink_CanonicalisesToTheDeniedFolder()
+    {
+        // The deny list holds deep/secret canonicalised; a query for a/s/../secret/key must compare equal under it.
+        Directory.CreateDirectory(P("deep", "dir"));
+        Directory.CreateDirectory(P("deep", "secret"));
+        File.WriteAllText(P("deep", "secret", "key"), "x");
+        Directory.CreateDirectory(P("a"));
+        DirLink(P("a", "s"), P("deep", "dir"));
+        var denied = Posix(P("deep", "secret"))!;
+        var q = Posix(P("a", "s") + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + Path.Combine("secret", "key"));
+        Assert.Equal(Path.Combine(denied, "key"), q);
     }
 }
