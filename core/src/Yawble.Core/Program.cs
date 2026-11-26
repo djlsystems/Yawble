@@ -23,7 +23,8 @@ if (args.Length > 0 && args[0] == "detect-agents")
 // The core sidecar. Electron main starts it with:
 //   yawble-core --ipc <socket path | pipe name> --data-dir <dir> [--install-dir <dir>]
 // and the IPC token in YAWBLE_IPC_TOKEN. The core exits when its stdin closes, so it never outlives the shell.
-var options = CoreOptions.Parse(args, Environment.GetEnvironmentVariable);
+// The token's variable is removed from this process as it is read: the programs the core starts do not inherit it.
+var options = CoreOptions.Parse(args, Environment.GetEnvironmentVariable, Environment.SetEnvironmentVariable);
 if (options.PrintVersion)
 {
     Console.WriteLine(CoreInfo.Version);

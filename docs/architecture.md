@@ -48,7 +48,9 @@ sandbox.lock.json           the pinned sandbox release, request contract and tel
   0700 folder (socket 0600) on macOS and Linux. No TCP.
 - **Frames.** `[u32 big-endian length][u8 kind][payload]`; kind 1 is JSON, kind 2 carries terminal bytes.
 - **Auth.** The shell starts the core with a 256-bit token in `YAWBLE_IPC_TOKEN`. The first request on every
-  connection must be `auth` with that token, or the core closes the connection.
+  connection must be `auth` with that token, or the core closes the connection. The core removes the variable from
+  its own environment as soon as it has read it, so no program it starts (a CLI integration, an MCP server, a host
+  task, a terminal) inherits the token.
 - **Lifetime.** The core prints `YAWBLE-READY <address>` when it listens and exits when its stdin closes, so it never
   outlives the shell.
 - **One core per data folder.** First the core takes `<data>/core.lock` with FileShare.None (flock `LOCK_EX|LOCK_NB` on

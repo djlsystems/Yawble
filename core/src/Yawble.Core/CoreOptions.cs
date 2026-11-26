@@ -17,7 +17,13 @@ public sealed record CoreOptions
     public bool Control { get; init; } = true;
     public string? Error { get; init; }
 
-    public static CoreOptions Parse(IReadOnlyList<string> args, Func<string, string?> env)
+    /// <summary>The variable the shell hands the window's IPC token in.</summary>
+    public const string TokenVariable = "YAWBLE_IPC_TOKEN";
+
+    /// <param name="setEnv">Sets a variable of this process (null removes it). The token's variable is removed through it as
+    /// soon as it is read, so no program the core starts later (a CLI integration, an MCP server, a host task, a terminal)
+    /// inherits the window's token.</param>
+    public static CoreOptions Parse(IReadOnlyList<string> args, Func<string, string?> env, Action<string, string?>? setEnv = null)
     {
         string? ipc = null, data = null, installDir = null;
         var stdinWatch = true;
@@ -36,7 +42,8 @@ public sealed record CoreOptions
                 default: return new CoreOptions { Error = $"unknown argument: {args[i]}" };
             }
         }
-        var token = env("YAWBLE_IPC_TOKEN");
+        var token = env(TokenVariable);
+        setEnv?.Invoke(TokenVariable, null);
         string? error = ipc is null ? "--ipc is required"
             : data is null ? "--data-dir is required"
             : string.IsNullOrEmpty(token) || token.Length < 32 ? "YAWBLE_IPC_TOKEN must be set (at least 32 characters)"
