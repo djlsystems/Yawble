@@ -194,7 +194,7 @@ public static class LogSources
             ],
             "(t.subject LIKE 'member:%' AND substr(t.subject, 8, length(@team) + 1) = @team || '/' OR t.subject = 'manager:' || @team)",
             "(t.subject = 'member:' || @member OR (@name = 'Manager' AND t.subject = 'manager:' || @team))",
-            new("agent_changes", "at", 365, "the history of which CLI and model each agent used before the cutoff (Settings > Agents, History).")),
+            null, "it is the lasting record of which CLI and model each agent used (Settings > Agents, History); it is only ever added to"),
 
         new("tasks", "Host tasks", "Accountability",
             "Each run of a host task: which program, for which team, who asked, how it ended, and where its output went.",

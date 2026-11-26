@@ -32,6 +32,7 @@ and who is viewing.
 - The site relays each viewer's calls over that connection. The app answers them with the same handlers as the
   desktop window, after the checks below.
 - While someone is viewing, the app sends its live updates (terminal output, state changes) up the same connection.
+  Each one says the least access a viewer needs to receive it (below).
 - The computer's id and secret from pairing are kept in the app's data folder. They are never shown.
 - When the connection drops, the app reconnects on its own, waiting a little longer each time (up to 30 seconds).
   The status reads **Not connected (retrying)** meanwhile.
@@ -47,14 +48,18 @@ changing agents and teams. A network request shows in the remote view's **Needs 
 the computer refuses the answer, the item says why and to answer it in the window. A tool request shows there too,
 with **Not now** only: it says to install it in the Yawble window on the computer.
 
+A team's environment variables show their names only. Each value reads **set on the computer** and never leaves it,
+for a full viewer and a Visitor alike. A full viewer can add a variable, remove one, or type a new value over a hidden
+one; a variable saved untouched keeps its value.
+
 Calls from a viewer run as that viewer. Every remote call that changes something, and every refused call, is
 written to `cloud-link-audit.log` in the app's data folder, with the time, the viewer and the method.
 
 ## Read-only viewers (Visitors)
 
 The site marks each call with the viewer's access: `full` for an Owner or a workgroup Member, `read` for a workgroup
-Visitor. The app checks it on every call. A call with no access, or any value other than `read`, is full, so an
-older site works as before. The app's hello on the connection lists `"access"` in its `caps`; the site lets a Visitor
+Visitor. The app checks it on every call. A call with no access, or any value other than exactly `full` or `read`,
+is refused and nothing runs. The app's hello on the connection lists `"access"` in its `caps`; the site lets a Visitor
 open only a computer that says it.
 
 A read-only viewer sees the same screens and gets the same live updates. The remote view shows a
@@ -78,6 +83,24 @@ read-only terminal view) are all refused with:
 Each refusal is written to `cloud-link-audit.log` like other refusals. Every method the Cloud Link allows is listed in
 `RemoteAccess` as a read or a change; a method that is not listed counts as a change, so a new one is refused for
 read-only viewers until it is listed as a read.
+
+### Live updates and access
+
+Each live update the app sends up is `{"type": "event", "event": "<name>", "data": ..., "access": "read" | "full"}`.
+`access` is the least access a viewer needs to receive it. The site delivers an update marked `full` to full viewers
+only, and one marked `read` to every viewer. An update with no `access`, or any other value, is for full viewers only.
+
+These updates are marked `read`; every other one, and any the list does not name, is `full`:
+
+| Event | What it is |
+|---|---|
+| `board.changed`, `lease.changed`, `network.asksChanged`, `tools.asksChanged`, `folder.asksChanged` | "Ask again": no data. |
+| `concierge.turn`, `concierge.update` | A Concierge chat's reply as it streams, and updates posted to it. |
+| `org.summaryChanged`, `logs.tailEntry` | The org dashboard's summary and live logs (below). |
+| `code.changed` | A change in a member's code, for a code browser a cloud viewer opened. |
+
+Terminal output and terminal state (`terminal.output`, `terminal.state`) are `full`: a Visitor has no terminal. So are
+the Cloud Link's own state (`link.state`), `connections.changed` and `tools.installProgress`.
 
 The remote view learns its access from `core.getInfo`: over the Cloud Link the answer carries
 `"remoteAccess": "full"` or `"remoteAccess": "read"`. In the window on the computer the field is absent.

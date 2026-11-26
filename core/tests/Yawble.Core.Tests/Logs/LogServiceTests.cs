@@ -329,6 +329,27 @@ public sealed class LogServiceTests : IDisposable
     }
 
     [Fact]
+    public void AgentChangesAreKept_AndASweepOverOldOnesReportsNoFailure()
+    {
+        Exec("INSERT INTO agent_changes (at, kind, subject, from_agent, to_agent, from_model, to_model, effective_model, actor_via, actor_user, how) VALUES (@a, 'member-model', 'member:web/DeveloperAda', 'claude', 'claude', 'opus', 'sonnet', 'sonnet', 'app', 'pat', 'settings');", ("@a", Ago(900)));
+        var before = Q(new LogQuery("changes"))["total"]!.GetValue<long>();
+        var failures = new List<string>();
+        var logs = new LogService(_db.Dir, _db.ConnectionString, _clock, failures.Add);
+
+        var swept = logs.Sweep();
+
+        Assert.DoesNotContain(failures, l => l.Contains("failed"));
+        Assert.False(swept.ContainsKey("changes"));
+        Assert.Equal(before, Q(new LogQuery("changes"))["total"]!.GetValue<long>()); // the 900-day-old change stays
+        // It is listed as kept, with why; it has no retention to set and nothing to prune.
+        var source = LogSources.Find("changes")!;
+        Assert.Null(source.Prune);
+        Assert.False(string.IsNullOrWhiteSpace(source.KeptBecause));
+        Assert.Throws<ArgumentException>(() => logs.SetRetention("changes", 30));
+        Assert.Throws<ArgumentException>(() => logs.Prune("changes", logs.CutoffFor(365)));
+    }
+
+    [Fact]
     public void Retention_DefaultsSetAndSweep()
     {
         Assert.Equal(365, _logs.RetentionDays("audit"));

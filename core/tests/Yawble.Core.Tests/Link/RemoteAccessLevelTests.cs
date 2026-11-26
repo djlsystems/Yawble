@@ -129,12 +129,12 @@ public class RemoteAccessLevelTests
     [InlineData("Read")]
     [InlineData("readonly")]
     [InlineData("")]
-    public void OnlyTheTextRead_IsReadOnly(string? sent)
+    public void OnlyTheTextsFullAndRead_AreAnAccess(string? sent)
     {
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(sent is null ? null : JsonValue.Create(sent)));
+        Assert.Equal(sent == "full" ? RemoteAccess.Full : null, RemoteAccess.AccessOf(sent is null ? null : JsonValue.Create(sent)));
         Assert.Equal(RemoteAccess.Read, RemoteAccess.AccessOf(JsonValue.Create("read")));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonValue.Create(5)));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(new JsonArray("read")));
+        Assert.Null(RemoteAccess.AccessOf(JsonValue.Create(5)));
+        Assert.Null(RemoteAccess.AccessOf(new JsonArray("read")));
     }
 
     [Theory]
@@ -178,15 +178,16 @@ public class RemoteAccessLevelTests
     }
 
     [Fact]
-    public async Task AMissingAccess_BehavesAsFull()
+    public async Task AMissingAccess_IsRefused_AndNothingRuns()
     {
         await using var fx = new Fixture();
         var reply = await fx.CallAsync("v1", 1, "bus.tellManager", new JsonObject { ["teamId"] = 2, ["text"] = "hi" }, access: null);
-        Assert.Null(reply["error"]);
-        Assert.Equal(["bus.tellManager"], fx.Calls);
-        Assert.Equal(RemoteAccess.Full, fx.Link.SessionAccess("v1"));
+        Assert.Equal("remote_refused", reply["error"]!["code"]!.GetValue<string>());
+        Assert.Equal(RemoteAccess.NoAccessRefusal, reply["error"]!["message"]!.GetValue<string>());
+        Assert.Empty(fx.Calls);
+        Assert.Null(fx.Link.SessionAccess("v1"));
         var audit = await File.ReadAllLinesAsync(fx.Link.AuditFile, Ct);
-        Assert.Contains(audit, l => l.Contains("\tvisitor@example.com\tbus.tellManager\tdone"));
+        Assert.Contains(audit, l => l.Contains("\tvisitor@example.com\tbus.tellManager\trefused: "));
     }
 
     [Fact]
@@ -197,18 +198,24 @@ public class RemoteAccessLevelTests
         await fx.CallAsync("member", 1, "app.overview", null, "full");
         Assert.Equal(RemoteAccess.Read, fx.Link.SessionAccess("visitor"));
         Assert.Equal(RemoteAccess.Full, fx.Link.SessionAccess("member"));
-        Assert.Equal(RemoteAccess.Full, fx.Link.SessionAccess("never-called"));
+        Assert.Null(fx.Link.SessionAccess("never-called"));
     }
 
     [Theory]
     [InlineData("read", "read")]
     [InlineData("full", "full")]
-    [InlineData(null, "full")]
-    [InlineData("owner", "full")]
-    public async Task CoreGetInfo_OverTheLink_SaysTheViewersAccess(string? sent, string expected)
+    [InlineData(null, null)]
+    [InlineData("owner", null)]
+    public async Task CoreGetInfo_OverTheLink_SaysTheViewersAccess_AndIsRefusedWithoutOne(string? sent, string? expected)
     {
         await using var fx = new Fixture();
         var reply = await fx.CallAsync("v1", 7, "core.getInfo", null, sent);
+        if (expected is null)
+        {
+            Assert.Null(reply["result"]);
+            Assert.Equal(RemoteAccess.NoAccessRefusal, reply["error"]!["message"]!.GetValue<string>());
+            return;
+        }
         Assert.Equal(expected, reply["result"]!["remoteAccess"]!.GetValue<string>());
         Assert.Equal("Yawble", reply["result"]!["product"]!.GetValue<string>());
         // The window's own answer (the dispatcher's) carries no remoteAccess.

@@ -18,28 +18,32 @@ public class RemoteAccessBreakTests
 
     // ------------------------------------------------------------------ access values
 
-    public static TheoryData<string> NotQuiteRead() => ["READ", "Read", "", " read", "read ", "read\n", "rea", "readonly", "visitor", "full", "FULL", "null"];
+    public static TheoryData<string> NotQuiteAnAccess() =>
+        ["READ", "Read", "", " read", "read ", "read\n", "rea", "readonly", "visitor", "FULL", "Full", " full", "full ", "ful", "fullest", "admin", "owner", "null"];
 
     [Theory]
-    [MemberData(nameof(NotQuiteRead))]
-    public void AnyTextOtherThanExactRead_IsFull(string sent) =>
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonValue.Create(sent)));
+    [MemberData(nameof(NotQuiteAnAccess))]
+    public void AnyTextOtherThanExactFullOrRead_IsNoAccess(string sent) =>
+        Assert.Null(RemoteAccess.AccessOf(JsonValue.Create(sent)));
 
     [Fact]
-    public void NonTextAccessValues_AreFull()
+    public void NonTextAccessValues_AreNoAccess()
     {
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(null));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonValue.Create(0)));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonValue.Create(1)));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonValue.Create(1.5)));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonValue.Create(true)));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(new JsonObject { ["access"] = "read" }));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(new JsonArray("read")));
+        Assert.Null(RemoteAccess.AccessOf(null));
+        Assert.Null(RemoteAccess.AccessOf(JsonValue.Create(0)));
+        Assert.Null(RemoteAccess.AccessOf(JsonValue.Create(1)));
+        Assert.Null(RemoteAccess.AccessOf(JsonValue.Create(1.5)));
+        Assert.Null(RemoteAccess.AccessOf(JsonValue.Create(true)));
+        Assert.Null(RemoteAccess.AccessOf(new JsonObject { ["access"] = "read" }));
+        Assert.Null(RemoteAccess.AccessOf(new JsonArray("read")));
+        Assert.Null(RemoteAccess.AccessOf(new JsonArray("full")));
         // As parsed off the wire, too (a JsonElement-backed value, not a created one).
         Assert.Equal(RemoteAccess.Read, RemoteAccess.AccessOf(JsonNode.Parse("""{"a":"read"}""")!["a"]));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonNode.Parse("""{"a":"READ"}""")!["a"]));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonNode.Parse("""{"a":null}""")!["a"]));
-        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonNode.Parse("""{"a":42}""")!["a"]));
+        Assert.Equal(RemoteAccess.Full, RemoteAccess.AccessOf(JsonNode.Parse("""{"a":"full"}""")!["a"]));
+        Assert.Null(RemoteAccess.AccessOf(JsonNode.Parse("""{"a":"READ"}""")!["a"]));
+        Assert.Null(RemoteAccess.AccessOf(JsonNode.Parse("""{"a":"FULL"}""")!["a"]));
+        Assert.Null(RemoteAccess.AccessOf(JsonNode.Parse("""{"a":null}""")!["a"]));
+        Assert.Null(RemoteAccess.AccessOf(JsonNode.Parse("""{"a":42}""")!["a"]));
     }
 
     [Theory]
@@ -48,16 +52,38 @@ public class RemoteAccessBreakTests
     [InlineData("""{"access":null}""")]
     [InlineData("""{"access":5}""")]
     [InlineData("""{"access":["read"]}""")]
+    [InlineData("""{"access":"FULL"}""")]
+    [InlineData("""{"access":"owner"}""")]
+    [InlineData("""{"access":true}""")]
     [InlineData("""{}""")]
-    public async Task OverTheLink_AChangeCall_RunsWhenAccessIsNotExactlyRead(string extra)
+    public async Task OverTheLink_ACallWhoseAccessIsNotExactlyFullOrRead_IsRefused_AChangeAndARead(string extra)
     {
         await using var fx = new Fixture();
-        var call = fx.Call("s1", 1, "board.move", new JsonObject { ["id"] = 3, ["lane"] = "done" });
-        foreach (var kv in (JsonObject)JsonNode.Parse(extra)!) call[kv.Key] = kv.Value?.DeepClone();
-        var reply = await fx.AnswerAsync(call);
-        Assert.Null(reply["error"]);
-        Assert.Equal(["board.move"], fx.Calls);
-        Assert.Equal(RemoteAccess.Full, fx.Link.SessionAccess("s1"));
+        var id = 0;
+        foreach (var method in new[] { "board.move", "board.list", "core.getInfo" })
+        {
+            var call = fx.Call("s1", ++id, method, new JsonObject { ["id"] = 3, ["lane"] = "done" });
+            foreach (var kv in (JsonObject)JsonNode.Parse(extra)!) call[kv.Key] = kv.Value?.DeepClone();
+            var reply = await fx.AnswerAsync(call);
+            Assert.Equal("remote_refused", reply["error"]!["code"]!.GetValue<string>());
+            Assert.Equal(RemoteAccess.NoAccessRefusal, reply["error"]!["message"]!.GetValue<string>());
+            Assert.Null(reply["result"]);
+        }
+        Assert.Empty(fx.Calls);
+        Assert.Null(fx.Link.SessionAccess("s1"));
+        // Written down like any other refusal.
+        var audit = await File.ReadAllLinesAsync(fx.Link.AuditFile, Ct);
+        Assert.Contains(audit, l => l.Contains("\tboard.move\trefused: ") && l.Contains("full or read"));
+    }
+
+    [Fact]
+    public async Task OverTheLink_ACallWithNoValidAccess_DoesNotChangeWhatTheSessionSaid()
+    {
+        await using var fx = new Fixture();
+        await fx.AnswerAsync(fx.Call("s1", 1, "app.overview", null, "read"));
+        await fx.AnswerAsync(fx.Call("s1", 2, "board.move", null));
+        Assert.Equal(RemoteAccess.Read, fx.Link.SessionAccess("s1"));
+        Assert.Equal(["app.overview"], fx.Calls);
     }
 
     [Fact]
@@ -242,7 +268,7 @@ public class RemoteAccessBreakTests
         await fx.AnswerAsync(fx.Call("visitor", 1, "app.overview", null, "read"));
         await fx.AnswerAsync(fx.Call("visitor", 2, "board.move", null, "read"));
         Assert.Equal(RemoteAccess.Read, fx.Link.SessionAccess("visitor"));
-        // The push filter takes no access at all: a read session's pushes are the same as everyone's.
+        // Whether a push goes up does not depend on who is viewing: each push says the least access that receives it instead.
         Assert.Equal(before, pushes.Select(p => CloudLink.Forwards(p)).ToArray());
         Assert.Equal(before, pushes.Select(p => CloudLink.Forwards(p, showCode: true)).ToArray());
     }
@@ -274,7 +300,7 @@ public class RemoteAccessBreakTests
         numberSession["session"] = 5;
         await fx.AnswerAsync(numberSession, checkSession: false);
         Assert.Equal(RemoteAccess.Read, fx.Link.SessionAccess("visitor"));
-        Assert.Equal(RemoteAccess.Full, fx.Link.SessionAccess("5"));
+        Assert.Null(fx.Link.SessionAccess("5"));
 
         // Each call is checked by its own access, not the session's last one.
         var r = await fx.AnswerAsync(fx.Call("member", 4, "board.move", null, "read", user: "member@example.com"));
@@ -289,10 +315,11 @@ public class RemoteAccessBreakTests
         await using var fx = new Fixture();
         var a = await fx.AnswerAsync(fx.Call("visitor", 1, "core.getInfo", null, "read"));
         var b = await fx.AnswerAsync(fx.Call("member", 1, "core.getInfo", null, "full"));
-        var c = await fx.AnswerAsync(fx.Call("old-site", 1, "core.getInfo", null, null));
+        var c = await fx.AnswerAsync(fx.Call("says-nothing", 1, "core.getInfo", null, null));
         Assert.Equal("read", a["result"]!["remoteAccess"]!.GetValue<string>());
         Assert.Equal("full", b["result"]!["remoteAccess"]!.GetValue<string>());
-        Assert.Equal("full", c["result"]!["remoteAccess"]!.GetValue<string>());
+        Assert.Null(c["result"]);
+        Assert.Equal(RemoteAccess.NoAccessRefusal, c["error"]!["message"]!.GetValue<string>());
         // The wire form is exactly the string, as the shell's CoreInfo.remoteAccess reads it.
         Assert.Contains("\"remoteAccess\":\"read\"", a["result"]!.ToJsonString());
     }

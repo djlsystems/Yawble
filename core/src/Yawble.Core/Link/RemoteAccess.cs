@@ -37,7 +37,7 @@ public static class RemoteAccess
         "org.",
     ];
 
-    /// <summary>A viewer who may change things: an Owner or a workgroup Member (the site's "full"; also a site that does not say).</summary>
+    /// <summary>A viewer who may change things: an Owner or a workgroup Member (the site's "full").</summary>
     public const string Full = "full";
 
     /// <summary>A viewer who may only look: a workgroup Visitor (the site's "read").</summary>
@@ -46,9 +46,15 @@ public static class RemoteAccess
     /// <summary>What a read-only viewer reads when a call would change something.</summary>
     public const string ReadOnlyRefusal = "You have read-only access to this computer (Visitor). Ask a workgroup Member or an Owner for more.";
 
-    /// <summary>A call's access as the site sent it (call["access"]): only "read" is read-only; missing or anything else is full (an older site).</summary>
-    public static string AccessOf(JsonNode? value) =>
-        value is JsonValue v && v.TryGetValue<string>(out var s) && s == Read ? Read : Full;
+    /// <summary>What a caller reads when its call does not say "full" or "read".</summary>
+    public const string NoAccessRefusal = "This call does not say what access its viewer has (full or read), so the computer refuses it. The cloud site sends it with every call.";
+
+    /// <summary>
+    /// A call's access as the site sent it (call["access"]): exactly the text "full" or "read". Missing, or anything else
+    /// (other text, another case, a number, a list), is null: the call is refused, never treated as full.
+    /// </summary>
+    public static string? AccessOf(JsonNode? value) =>
+        value is JsonValue v && v.TryGetValue<string>(out var s) ? s switch { Full => Full, Read => Read, _ => null } : null;
 
     public enum Kind
     {

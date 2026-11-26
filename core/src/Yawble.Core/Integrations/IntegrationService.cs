@@ -418,9 +418,10 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
                 ("repo", "string", RepoParameter, false)));
         }
         tools.AddRange(mcp);
-        tools.Add(Tool("cli_help", "Read the help of an integration's command (always allowed, nothing changes): cli_help(cli: \"gh\", args: [\"pr\", \"create\"]).",
+        tools.Add(Tool("cli_help", "Read the help of an integration's command: cli_help(cli: \"gh\", args: [\"pr\", \"create\"]). " +
+            "It takes the command's words only (letters, digits and dashes; no options, no values), and a command the rules refuse has no help.",
             ("cli", "string", $"One of: {string.Join(", ", enabled.Select(r => r.Name))}.", true),
-            ("args", "array", "The command to read the help of (empty for the top level).", false)));
+            ("args", "array", $"The command's words, one per item, at most {CliRules.HelpPathMax} (empty for the top level). No options: the help flag is added for you.", false)));
         tools.Add(Tool("cli_commands", "List the commands of an integration the person has discovered (their checklist), and what each does for YOUR team right now: " +
             "run (runs at once), ask (asks the person first, give a reason), refused (never allowed; do not try), or never (reveals a sign-in; never allowed). Read this before guessing a command. " +
             "Empty when the CLI was not discovered yet; then use cli_help. cli_commands(cli: \"gh\", prefix: [\"pr\"]).",
@@ -455,7 +456,22 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         {
             var cli = enabled.FirstOrDefault(r => string.Equals(r.Name, args["cli"]?.GetValue<string>(), StringComparison.OrdinalIgnoreCase))
                 ?? throw new ArgumentException($"no integration named '{args["cli"]}' is enabled for your team");
-            var helpArgs = Strings(args["args"]).Append((CliCatalog.Of(cli.Name) ?? CliCatalog.Generic(cli.Name)).HelpFlag).ToList();
+            // Only a command path is accepted, and the program gets that path plus its help flag: an option, a "--" or any
+            // other text could make the program do something else than print help.
+            var path = Strings(args["args"]);
+            if (CliRules.HelpPathProblem(path) is { } problem)
+            {
+                Log(cli.Name, run, path, Decisions.Deny, null, null);
+                return $"refused: {problem}";
+            }
+            var entry = CliCatalog.Of(cli.Name) ?? CliCatalog.Generic(cli.Name);
+            // A command the floors or a rule refuse has no help run either.
+            if (CliRules.Decide(path, entry, Rules(cli.Id, run.Member.TeamId), Rules(cli.Id, null)) is { Decision: Decisions.Deny } refused)
+            {
+                Log(cli.Name, run, path, Decisions.Deny, refused.Rule, null);
+                return $"refused: `{cli.Name} {CliRules.Join(path)}` is not allowed, so its help is not read. Do not try to work around it.";
+            }
+            var helpArgs = path.Append(entry.HelpFlag).ToList();
             var help = await RunAsync(cli, helpArgs, run.Member.TeamId, ct);
             Log(cli.Name, run, helpArgs, "help", null, help);
             return Show(help);

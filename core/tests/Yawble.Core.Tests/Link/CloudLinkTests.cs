@@ -337,6 +337,7 @@ public class CloudLinkTests
         });
         Assert.False(sawCompanion);
         Assert.Equal("member:1", pushed["data"]!["channel"]!.GetValue<string>());
+        Assert.Equal("full", pushed["access"]!.GetValue<string>()); // terminal output is for full viewers only
 
         var audit = await File.ReadAllLinesAsync(link.AuditFile, Ct);
         Assert.Contains(audit, l => l.Contains("person@example.com\tteams.create\tdone"));
@@ -350,7 +351,7 @@ public class CloudLinkTests
 
     private static JsonObject Call(string session, int id, string method, JsonObject? p) => new()
     {
-        ["type"] = "call", ["session"] = session, ["id"] = id, ["method"] = method, ["params"] = p, ["user"] = "person@example.com",
+        ["type"] = "call", ["session"] = session, ["id"] = id, ["method"] = method, ["params"] = p, ["user"] = "person@example.com", ["access"] = "full",
     };
 
     private static async Task WaitFor(Func<bool> condition)

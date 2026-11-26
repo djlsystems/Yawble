@@ -30,9 +30,10 @@ public sealed record LinkSettings(
 ///   instance's id and secret, kept in the data folder.</item>
 /// <item>Connected: ONE outbound WebSocket (no listening port). The site relays each viewer's JSON-RPC call
 ///   ({type:"call", session, id, method, params, user, access}); the core answers it through the same dispatcher as the
-///   desktop window, after <see cref="RemoteAccess"/>. "access" is the viewer's: "read" (a workgroup Visitor) may only
-///   call reads; anything else, or none, is full. While anyone is viewing, the core's pushes (terminal output,
-///   state) go up as {type:"event"}.</item>
+///   desktop window, after <see cref="RemoteAccess"/>. "access" is the viewer's: "full", or "read" (a workgroup Visitor), who may only
+///   call reads; a call with any other value, or none, is refused. While anyone is viewing, the core's pushes (terminal output,
+///   state) go up as {type:"event", event, data, access}: "access" is the least access a viewer needs to receive that
+///   push (<see cref="PushAccess"/>), "read" or "full", for the site to deliver it by.</item>
 /// <item>Every remote call that changes something is written to cloud-link-audit.log with who made it.</item>
 /// </list>
 /// </summary>
@@ -414,9 +415,7 @@ public sealed class CloudLink : IAsyncDisposable
         using var subscription = _events.Subscribe(async message =>
         {
             if (Volatile.Read(ref watching) == 0 || ws.State != WebSocketState.Open) return;
-            if (!Forwards(message, ShowCode)) return;
-            message["type"] = "event";
-            await Send(message).ConfigureAwait(false);
+            if (PushMessage(message, ShowCode) is { } push) await Send(push).ConfigureAwait(false);
         });
         try
         {
@@ -526,8 +525,8 @@ public sealed class CloudLink : IAsyncDisposable
     /// <summary>Each viewer session's access (full | read) as its latest call said, while the link is connected.</summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _sessionAccess = new(StringComparer.Ordinal);
 
-    /// <summary>A viewer session's access as its latest call said; full for a session that has not called yet.</summary>
-    internal string SessionAccess(string session) => _sessionAccess.TryGetValue(session, out var a) ? a : RemoteAccess.Full;
+    /// <summary>A viewer session's access as its latest call said; null for a session with no call that stated one.</summary>
+    internal string? SessionAccess(string session) => _sessionAccess.TryGetValue(session, out var a) ? a : null;
 
     /// <summary>One relayed call: checked against <see cref="RemoteAccess"/> for this viewer's access, run, audited and answered.</summary>
     internal async Task AnswerAsync(JsonObject call, Func<JsonObject, Task> send, CancellationToken ct)
@@ -535,10 +534,17 @@ public sealed class CloudLink : IAsyncDisposable
         var method = call["method"]?.GetValue<string>() ?? "";
         var parameters = call["params"] as JsonObject;
         var user = call["user"]?.GetValue<string>() ?? "unknown";
-        // "full" (Owner, workgroup Member) or "read" (workgroup Visitor); a site that does not say means full.
-        var access = RemoteAccess.AccessOf(call["access"]);
-        if ((call["session"] as JsonValue)?.TryGetValue<string>(out var session) == true) _sessionAccess[session] = access;
         var reply = new JsonObject { ["type"] = "result", ["session"] = call["session"]?.DeepClone(), ["id"] = call["id"]?.DeepClone() };
+        // "full" (Owner, workgroup Member) or "read" (workgroup Visitor). A call that says neither is refused: nothing
+        // runs for a caller whose access is not known.
+        if (RemoteAccess.AccessOf(call["access"]) is not { } access)
+        {
+            reply["error"] = new JsonObject { ["code"] = "remote_refused", ["message"] = RemoteAccess.NoAccessRefusal };
+            Audit(user, method, RemoteAccess.NoAccessRefusal);
+            try { await send(reply).ConfigureAwait(false); } catch (Exception e) when (e is WebSocketException or OperationCanceledException or ObjectDisposedException) { }
+            return;
+        }
+        if ((call["session"] as JsonValue)?.TryGetValue<string>(out var session) == true) _sessionAccess[session] = access;
         bool allowHost, showCode;
         lock (_lock)
         {
@@ -637,6 +643,18 @@ public sealed class CloudLink : IAsyncDisposable
         && (message["event"]?.GetValue<string>()?.StartsWith("code.", StringComparison.Ordinal) != true
             || (showCode && (message["data"] as JsonObject)?["cloud"] is JsonValue cloud && cloud.TryGetValue<bool>(out var up) && up))
         && !((message["data"] as JsonObject)?["channel"] is JsonValue v && v.TryGetValue<string>(out var channel) && RemoteAccess.IsWindowOnlyChannel(channel));
+
+    /// <summary>
+    /// A push as it goes up to the site, or null when it stays on this computer (<see cref="Forwards(JsonObject, bool)"/>):
+    /// the message marked {type:"event"} and with the least access a viewer needs to receive it (<see cref="PushAccess"/>).
+    /// </summary>
+    internal static JsonObject? PushMessage(JsonObject message, bool showCode = true)
+    {
+        if (!Forwards(message, showCode)) return null;
+        message["type"] = "event";
+        message[PushAccess.Field] = PushAccess.Of((message["event"] as JsonValue)?.TryGetValue<string>(out var name) == true ? name : null);
+        return message;
+    }
 
     /// <summary>The site's version from its welcome message: a short string, or null when missing or not a string.</summary>
     internal static string? WelcomeVersion(JsonObject message) =>

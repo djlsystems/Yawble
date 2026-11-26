@@ -44,6 +44,35 @@ public static partial class TeamEnv
         return problems;
     }
 
+    /// <summary>
+    /// What a viewer through the Cloud Link gets in place of every value: the names are shown, the values stay on the
+    /// computer. Sent back unchanged on a save, it means "keep the value this variable has".
+    /// </summary>
+    public const string HiddenValue = "(set on the computer)";
+
+    /// <summary>The variables as a Cloud Link viewer sees them: every name, each value replaced by <see cref="HiddenValue"/>.</summary>
+    public static IReadOnlyDictionary<string, string> Hidden(IReadOnlyDictionary<string, string> env) =>
+        env.ToDictionary(e => e.Key, _ => HiddenValue, StringComparer.Ordinal);
+
+    /// <summary>
+    /// A Cloud Link viewer's save, with the values it never saw put back: an entry whose value is <see cref="HiddenValue"/>
+    /// keeps the stored value of the same name. One with no stored value under that name (a new or renamed variable) is a
+    /// problem: the hidden text is never saved as a value, and a hidden value is never copied to another name.
+    /// </summary>
+    public static (List<KeyValuePair<string, string>> Entries, List<string> Problems) KeepHidden(
+        IReadOnlyList<KeyValuePair<string, string>> entries, IReadOnlyDictionary<string, string> stored)
+    {
+        var kept = new List<KeyValuePair<string, string>>();
+        var problems = new List<string>();
+        foreach (var (name, value) in entries)
+        {
+            if (value != HiddenValue) kept.Add(new(name, value));
+            else if (stored.TryGetValue(name, out var real)) kept.Add(new(name, real));
+            else problems.Add($"'{name}' has no value yet: its value is hidden here, so give it a new one");
+        }
+        return (kept, problems);
+    }
+
     public static IReadOnlyDictionary<string, string> Parse(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, string>();

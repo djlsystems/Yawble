@@ -16,8 +16,9 @@ public sealed record CliRule(string Pattern, string Decision, string Layer, long
 /// <param name="Preset">The default rules the person starts from (read-only commands allowed, changes asking).</param>
 /// <param name="LoginArgs">The arguments of the CLI's own sign-in, run in a terminal window the person opens (never by an agent); null: none known.</param>
 /// <param name="HelpFlag">How the CLI prints its help (never one that opens a browser: git --help does, on Windows).</param>
+/// <param name="ArgsFloor">A floor a pattern cannot say: given the arguments, what in them is never run (shown as the rule), or null. It wins over every rule, as <paramref name="Floors"/> do.</param>
 public sealed record CliEntry(string Name, string Label, string Description, string[] StatusArgs, string[] Floors, (string Pattern, string Decision)[] Preset,
-    IReadOnlyDictionary<string, string>? Env = null, string HelpFlag = "--help", string[]? LoginArgs = null);
+    IReadOnlyDictionary<string, string>? Env = null, string HelpFlag = "--help", string[]? LoginArgs = null, Func<IReadOnlyList<string>, string?>? ArgsFloor = null);
 
 /// <summary>
 /// The rules of a call: floors first (deny, never loosened), then the team's
@@ -36,6 +37,7 @@ public static class CliRules
         {
             foreach (var floor in entry.Floors)
                 if (Matches(floor, line)) return (Decisions.Deny, new CliRule(floor, Decisions.Deny, "floor"));
+            if (entry.ArgsFloor?.Invoke(args) is { } never) return (Decisions.Deny, new CliRule(never, Decisions.Deny, "floor"));
         }
         foreach (var layer in new[] { team, global, (IReadOnlyList<CliRule>)(entry?.Preset.Select(p => new CliRule(p.Pattern, p.Decision, "preset")).ToList() ?? []) })
         {
@@ -79,6 +81,21 @@ public static class CliRules
         return Regex.IsMatch(line, regex, RegexOptions.IgnoreCase | RegexOptions.Singleline, TimeSpan.FromMilliseconds(200));
     }
 
+    /// <summary>The most words a command path has when its help is read.</summary>
+    public const int HelpPathMax = 6;
+
+    private static readonly Regex CommandWord = new("^[a-z][a-z0-9-]*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Why these words cannot be a command path to read the help of, or null. A path is command words only: an option
+    /// ("-c", "--"), a value ("alias.x=!cmd") or a long list could make the program run something instead of printing help.
+    /// </summary>
+    public static string? HelpPathProblem(IReadOnlyList<string> words) =>
+        words.Count > HelpPathMax ? $"cli_help takes a command of at most {HelpPathMax} words, e.g. [\"pr\", \"create\"]"
+        : words.FirstOrDefault(w => !CommandWord.IsMatch(w)) is { } bad
+            ? $"cli_help takes a command's words only (letters, digits and dashes, starting with a letter), e.g. [\"pr\", \"create\"]: \"{(bad.Length > 40 ? bad[..40] + "..." : bad)}\" is not one. Options and values are not accepted; the help flag is added for you."
+        : null;
+
     /// <summary>A rule the person may save: the pattern as below; an allow rule may not name a credential word (the floor would refuse the call anyway).</summary>
     public static string? Problem(string pattern, string decision) =>
         Problem(pattern) ?? (decision == Decisions.Allow && CredentialFloor.CheckPattern(pattern) is { } word
@@ -89,6 +106,63 @@ public static class CliRules
         string.IsNullOrWhiteSpace(pattern) ? "a rule needs a pattern, e.g. pr merge*"
         : pattern.Length > 200 ? "a pattern is at most 200 characters"
         : pattern.IndexOfAny(['\r', '\n']) >= 0 ? "a pattern is one line" : null;
+}
+
+/// <summary>
+/// git options that are never run for an agent, whatever the command and whatever any rule says: each one makes git start
+/// a program of the caller's choice, or read or write a file outside the repository. Options are read up to a lone "--"
+/// (what follows are paths). An option's value that looks like one of these is refused too: a floor errs on the safe side.
+/// </summary>
+public static class GitFloor
+{
+    /// <summary>
+    /// Long options, matched whole or as "--name=value", and by any shortened spelling (git accepts an unambiguous prefix of
+    /// a long option): --output writes a file anywhere; --open-files-in-pager, --extcmd, --exec, --upload-pack and
+    /// --receive-pack name a program to start; --ext-diff and --textconv run configured helper programs; --no-index and
+    /// --contents read files outside the repository.
+    /// </summary>
+    private static readonly string[] Long =
+    [
+        "--output", "--open-files-in-pager", "--no-index", "--contents", "--ext-diff", "--textconv", "--extcmd", "--exec", "--upload-pack", "--receive-pack",
+    ];
+
+    /// <summary>Real, harmless options that are also the start of a name above ("--text" of "--textconv").</summary>
+    private static readonly string[] HarmlessPrefixes = ["--text"];
+
+    /// <summary>branch's long options that delete, rename, copy or move a branch, or change what it tracks or its description.</summary>
+    private static readonly string[] BranchChanges = ["--delete", "--move", "--copy", "--force", "--set-upstream-to", "--unset-upstream", "--edit-description"];
+
+    /// <summary>What in these arguments is never run (the option, as the rule shown), or null.</summary>
+    public static string? Check(IReadOnlyList<string> args)
+    {
+        var verb = args.Select(a => (a ?? "").Trim()).FirstOrDefault(a => a.Length > 0 && !a.StartsWith('-')) ?? "";
+        foreach (var raw in args)
+        {
+            var arg = (raw ?? "").Trim();
+            if (arg == "--") break;
+            if (!arg.StartsWith('-') || arg.Length < 2) continue;
+            if (arg.StartsWith("--", StringComparison.Ordinal))
+            {
+                var name = arg.Split('=', 2)[0];
+                if (Shortens(name, Long) is { } option) return option;
+                if (verb == "branch" && Shortens(name, BranchChanges) is { } change) return $"branch {change}";
+                continue;
+            }
+            // Short options, alone or bundled ("-nO", "-vD"): the letters after the dash.
+            // -O: grep's pager program, diff's order file (a file read from anywhere).
+            if (arg.StartsWith("-O", StringComparison.Ordinal) || (verb == "grep" && arg.Contains('O'))) return "-O";
+            // -x: difftool's program.
+            if (verb == "difftool" && arg.Contains('x')) return "difftool -x";
+            // -d -D -m -M -c -C -f -u: branch's delete, rename, copy, force and set-upstream.
+            if (verb == "branch" && arg.IndexOfAny(['d', 'D', 'm', 'M', 'c', 'C', 'f', 'u']) is >= 0 and var at) return $"branch -{arg[at]}";
+        }
+        return null;
+    }
+
+    /// <summary>The option of the list this name is, or shortens (at least one letter after the dashes), or null.</summary>
+    private static string? Shortens(string name, string[] options) =>
+        name.Length < 3 || HarmlessPrefixes.Contains(name, StringComparer.Ordinal) ? null
+        : options.FirstOrDefault(o => o.StartsWith(name, StringComparison.Ordinal));
 }
 
 /// <summary>The CLIs the app knows well. Others can be enabled by name; they start from "ask for everything".</summary>
@@ -121,18 +195,23 @@ public static class CliCatalog
         // git on the host runs in the PERSON's checkout of a team repository (its base branch): reading it is useful (which
         // commit main is at, what changed), changing it is never the team's: the Git dialog lands work on main, and every
         // agent has git in its own clone for its own work. So reads run, every write is refused, and nothing that reaches
-        // for a credential or a config can run at all.
+        // for a credential or a config can run at all. An allowed command is its whole word ("diff *" is diff, never difftool;
+        // "show *" never show-branch), and GitFloor refuses the options that turn a read into running a program or reading or
+        // writing a file outside the repository.
         new("git", "Git", "Read the person's own checkout of a team repository: its commit, log, status and diffs. It never changes it.",
             ["--version"],
             Floors: ["credential*", "config*", "*credential.helper*", "-c *", "* -c *", "--config-env*", "*--exec-path*", "*core.sshCommand*",
                      "*core.hooksPath*", "*-C *", "--git-dir*", "--work-tree*", "*askpass*"],
             Preset:
             [
-                ("rev-parse*", Decisions.Allow), ("log*", Decisions.Allow), ("status*", Decisions.Allow), ("show*", Decisions.Allow),
-                ("diff*", Decisions.Allow), ("ls-files*", Decisions.Allow), ("describe*", Decisions.Allow), ("rev-list*", Decisions.Allow),
-                ("merge-base*", Decisions.Allow), ("cat-file*", Decisions.Allow), ("blame*", Decisions.Allow), ("shortlog*", Decisions.Allow),
-                ("for-each-ref*", Decisions.Allow), ("branch --list*", Decisions.Allow), ("branch -a*", Decisions.Allow), ("branch -v*", Decisions.Allow),
-                ("branch", Decisions.Allow), ("grep*", Decisions.Allow), ("version*", Decisions.Allow), ("--version", Decisions.Allow),
+                ("rev-parse *", Decisions.Allow), ("log *", Decisions.Allow), ("status *", Decisions.Allow), ("show *", Decisions.Allow),
+                ("diff *", Decisions.Allow), ("ls-files *", Decisions.Allow), ("describe *", Decisions.Allow), ("rev-list *", Decisions.Allow),
+                ("merge-base *", Decisions.Allow), ("cat-file *", Decisions.Allow), ("blame *", Decisions.Allow), ("shortlog *", Decisions.Allow),
+                ("for-each-ref *", Decisions.Allow), ("grep *", Decisions.Allow), ("version *", Decisions.Allow), ("--version", Decisions.Allow),
+                // Listing branches, as exact lines: a name after -v or -a would create a branch ("branch -v x"), so only --list takes more words.
+                ("branch", Decisions.Allow), ("branch --list *", Decisions.Allow), ("branch -a", Decisions.Allow), ("branch -r", Decisions.Allow),
+                ("branch -v", Decisions.Allow), ("branch -vv", Decisions.Allow), ("branch -av", Decisions.Allow), ("branch -avv", Decisions.Allow),
+                ("branch -a -v", Decisions.Allow), ("branch -a -vv", Decisions.Allow), ("branch -r -v", Decisions.Allow), ("branch --show-current", Decisions.Allow),
                 // Everything that changes the checkout, its refs or a remote: the person's (the Git dialog), never the team's.
                 ("push*", Decisions.Deny), ("pull*", Decisions.Deny), ("fetch*", Decisions.Deny), ("commit*", Decisions.Deny),
                 ("merge*", Decisions.Deny), ("rebase*", Decisions.Deny), ("reset*", Decisions.Deny), ("checkout*", Decisions.Deny),
@@ -145,7 +224,7 @@ public static class CliCatalog
                 ("bisect*", Decisions.Deny), ("init*", Decisions.Deny), ("clone*", Decisions.Deny), ("archive*", Decisions.Deny),
             ],
             Env: new Dictionary<string, string> { ["GIT_TERMINAL_PROMPT"] = "0", ["GIT_PAGER"] = "cat", ["PAGER"] = "cat", ["GCM_INTERACTIVE"] = "never" },
-            HelpFlag: "-h"),
+            HelpFlag: "-h", ArgsFloor: GitFloor.Check),
         new("az", "Azure CLI", "Azure resources with your own Azure sign-in: list and show, deployments and logs.",
             ["account", "show", "--output", "json"],
             Floors: ["account get-access-token*", "*keys list*", "*list-keys*", "*keyvault secret show*", "*keyvault secret download*", "*credential*",

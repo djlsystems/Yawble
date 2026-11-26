@@ -48,7 +48,9 @@ sandbox.lock.json           the pinned sandbox release, request contract and tel
   0700 folder (socket 0600) on macOS and Linux. No TCP.
 - **Frames.** `[u32 big-endian length][u8 kind][payload]`; kind 1 is JSON, kind 2 carries terminal bytes.
 - **Auth.** The shell starts the core with a 256-bit token in `YAWBLE_IPC_TOKEN`. The first request on every
-  connection must be `auth` with that token, or the core closes the connection.
+  connection must be `auth` with that token, or the core closes the connection. The core removes the variable from
+  its own environment as soon as it has read it, so no program it starts (a CLI integration, an MCP server, a host
+  task, a terminal) inherits the token.
 - **Requests.** The core runs the requests of a connection side by side and answers each when it is done; a reply
   carries its request's id, so replies can come in another order than the requests. The calls of one terminal
   (`terminal.*` with the same `channel`) take effect in the order sent. At most 32 requests of a connection run at
