@@ -66,7 +66,7 @@ public class TeamBehindTests
         var main = TeamSyncTests.Commit(repo, "new.txt", "new\n", "base moves on");
         f.Repos.SetSyncsToBase(id, false);
 
-        // Off: a new workflow's sync does nothing, the warning is all there is.
+        // Off: a new deliverable's sync does nothing, the warning is all there is.
         Assert.Equal("off", (await f.Repos.SyncBranchesAsync(id, "Alpha", "1", Ct)).Outcome);
         Assert.Equal(own, AgentGit.Host(repo, "rev-parse", "team/alpha"));
         var line = await f.Repos.BehindLineAsync(id, "Alpha", Ct);
@@ -182,7 +182,7 @@ public class TeamBehindTests
         var done = new List<Message>();
         var runner = new ScriptedRunner().On("Alpha/Manager", async (run, ct) =>
         {
-            var m = await run.WorkflowCompleteAsync("all delivered", ct);
+            var m = await run.DeliverableCompleteAsync("all delivered", ct);
             lock (done) done.Add(m);
             return RunResult.Ok;
         });

@@ -48,7 +48,7 @@ async function load() {
   finally { loaded.value = true; }
 }
 
-// ---- An email account's mailbox, turned on per team: the built-in Email integration scripts on that team read
+// ---- An email account's mailbox, turned on per team: the built-in Email integration workflows on that team read
 const emails = ref<EmailIntegration[]>([]);
 async function loadEmails() {
   try { emails.value = await api.call<EmailIntegration[]>('integrations.emailList', {}); } catch { emails.value = []; }
@@ -159,7 +159,7 @@ onBeforeUnmount(() => off?.());
             <div class="small status" :class="c.status === 'works' ? 'ok' : c.status === 'needs_reconnect' ? 'bad' : 'muted'" data-test="connection-status"><Icon v-if="!checking.has(c.id) && c.status !== 'untested'" :name="c.status === 'works' ? 'check' : 'alert'" :size="14" class="status-icon" />{{ statusText(c) }}</div>
             <div v-if="serverBound(c)" class="muted small" :data-test="`connection-mcp-note-${c.id}`">Sign in again from Settings → Integrations → MCP servers (Sign in).</div>
             <div v-if="c.kind === 'email' && (teams ?? []).length" class="small mailbox" :data-test="`connection-mailbox-${c.id}`">
-              <span class="muted">Scripts can read this mailbox on</span>
+              <span class="muted">Workflows can read this mailbox on</span>
               <label v-for="t in teams" :key="t.id" class="check"><input type="checkbox" :checked="mailboxOn(c, t.id)" :disabled="busy !== null"
                 :data-test="`connection-mailbox-${c.id}-team-${t.id}`" @change="setMailboxTeam(c, t.id, ($event.target as HTMLInputElement).checked)" /> {{ t.name }}</label>
             </div>

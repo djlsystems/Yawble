@@ -1,15 +1,15 @@
 // @vitest-environment happy-dom
 // The real waiting state, not always "queued for a run slot". The core's worker states
-//: queued | waits-for-run (waitsFor: the sender) | held | pending, on workflows.list members and teams.agents.
+//: queued | waits-for-run (waitsFor: the sender) | held | pending, on deliverables.list members and teams.agents.
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentCard, WorkflowRow, WorkflowsListAnswer, YawbleApi } from '../../src/shared/api';
+import type { AgentCard, DeliverableRow, DeliverablesListAnswer, YawbleApi } from '../../src/shared/api';
 import { cardState, waitSays, workerSays } from '../../src/renderer/src/waiting';
-import { statusTip } from '../../src/renderer/src/workflows/page';
+import { statusTip } from '../../src/renderer/src/deliverables/page';
 import { memberStateOf } from '../../src/renderer/src/faces/faces';
-import WorkflowsView from '../../src/renderer/src/workflows/WorkflowsView.vue';
+import DeliverablesView from '../../src/renderer/src/deliverables/DeliverablesView.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
 
 enableAutoUnmount(afterEach);
@@ -37,8 +37,8 @@ describe('each worker state in words', () => {
   });
 });
 
-describe('the Status tooltip of a waiting workflow', () => {
-  const row = (members: WorkflowRow['members'], waitingFor: WorkflowRow['waitingFor'] = 'slot') =>
+describe('the Status tooltip of a waiting deliverable', () => {
+  const row = (members: DeliverableRow['members'], waitingFor: DeliverableRow['waitingFor'] = 'slot') =>
     ({ status: 'waiting', state: 'open', waitingFor, expiresAt: null, working: false, members }) as const;
   it('a queued worker: waiting for a run slot', () => {
     expect(statusTip(row([{ id: 1, name: 'Eve', state: 'queued' }]))).toBe('Waiting for a run slot');
@@ -57,17 +57,17 @@ describe('the Status tooltip of a waiting workflow', () => {
   });
 });
 
-describe('the Workflows page Who column', () => {
-  const real = JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'workflows', 'list-open.json'), 'utf8')) as WorkflowsListAnswer;
+describe('the Deliverables page Who column', () => {
+  const real = JSON.parse(readFileSync(path.join(__dirname, 'fixtures', 'deliverables', 'list-open.json'), 'utf8')) as DeliverablesListAnswer;
   const EVE = 17;
-  async function page(members: WorkflowRow['members']) {
+  async function page(members: DeliverableRow['members']) {
     const answer = structuredClone(real);
-    answer.workflows.find((w) => w.id === EVE)!.members = members;
-    const api = { call: async (m: string) => (m === 'workflows.list' ? structuredClone(answer) : {}) } as unknown as YawbleApi;
-    const w = mount(WorkflowsView, { props: { teams: [{ id: 1, name: 'Web' }, { id: 2, name: 'Cloud' }], api, pollMs: 600_000 }, attachTo: document.body });
+    answer.deliverables.find((w) => w.id === EVE)!.members = members;
+    const api = { call: async (m: string) => (m === 'deliverables.list' ? structuredClone(answer) : {}) } as unknown as YawbleApi;
+    const w = mount(DeliverablesView, { props: { teams: [{ id: 1, name: 'Web' }, { id: 2, name: 'Cloud' }], api, pollMs: 600_000 }, attachTo: document.body });
     await flushPromises();
-    const r = w.find(`[data-test=workflows-row][data-wf="${EVE}"]`);
-    return { who: r.findAll('[data-test=workflows-who] > .face').map((f) => f.attributes('title')), tip: r.find('td.st').attributes('title') };
+    const r = w.find(`[data-test=deliverables-row][data-wf="${EVE}"]`);
+    return { who: r.findAll('[data-test=deliverables-who] > .face').map((f) => f.attributes('title')), tip: r.find('td.st').attributes('title') };
   }
   it.each([
     [{ state: 'queued' }, 'Eve: queued for a run slot', 'Waiting for a run slot'],
@@ -103,7 +103,7 @@ describe('the member pane state line', () => {
 // Core 564 sends waitingFor slot only for a queued member, else waits-for-run, held or
 // pending; and agent cards may carry waitState + waitsFor beside a queued / idle state.
 describe('the row waitingFor alone', () => {
-  const row = (waitingFor: WorkflowRow['waitingFor'], members: WorkflowRow['members'] = []) =>
+  const row = (waitingFor: DeliverableRow['waitingFor'], members: DeliverableRow['members'] = []) =>
     ({ status: 'waiting', state: 'open', waitingFor, expiresAt: null, working: false, members }) as const;
   it('slot keeps its words', () => expect(statusTip(row('slot'))).toBe('Waiting for a run slot'));
   it('waits-for-run without a sender: another member\'s run', () => {

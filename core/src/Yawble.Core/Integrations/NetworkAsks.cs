@@ -15,7 +15,7 @@ namespace Yawble.Core.Integrations;
 /// <param name="State">pending, allowed, denied, or closed (the member was removed from the team while it waited).</param>
 /// <param name="MemberId">The asking member's id (0041); null for an ask from before it whose member is gone.</param>
 public sealed record NetworkAskRow(long Id, string At, long TeamId, string Team, string Member, string Host, string? Reason, string? Method,
-    string? PathSample, int Count, string LastSeen, long? Workflow, long? CausationSeq, string State, string? Scope, string? DecidedBy,
+    string? PathSample, int Count, string LastSeen, long? Deliverable, long? CausationSeq, string State, string? Scope, string? DecidedBy,
     string? DecidedVia, string? DecidedAt, string? Note, long? MemberId = null)
 {
     public string MemberName => Member[(Member.IndexOf('/') + 1)..];
@@ -95,7 +95,7 @@ public interface INetworkPolicy
     Task AllowEverywhereAsync(string host, CancellationToken ct);
 }
 
-/// <summary>Tells a member something as the person (the bus's PersonTellAsync): joins the workflow of <paramref name="causation"/> when given.</summary>
+/// <summary>Tells a member something as the person (the bus's PersonTellAsync): joins the deliverable of <paramref name="causation"/> when given.</summary>
 public delegate Task NetworkAskTell(string team, string member, string text, long? causation, CancellationToken ct);
 
 /// <summary>
@@ -160,15 +160,15 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         return Raise(who, host, null, method, Sample(path), null, null).Outcome;
     }
 
-    /// <summary>The request_host tool: the same ask, with the agent's reason and its workflow.</summary>
-    public string RequestFromAgent(Bus.MemberRef member, string host, string reason, long workflow, long causation)
+    /// <summary>The request_host tool: the same ask, with the agent's reason and its deliverable.</summary>
+    public string RequestFromAgent(Bus.MemberRef member, string host, string reason, long deliverable, long causation)
     {
         // A URL is read as its host (https://api.nuget.org/v3/index.json → api.nuget.org); anything else is checked as given.
         var h = NetworkAskFilter.Normalize(host.Contains("://", StringComparison.Ordinal) && Uri.TryCreate(host.Trim(), UriKind.Absolute, out var uri) && uri.Host.Length > 0
             ? uri.Host : host);
         if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("give a reason: one line on what you need the host for");
         var who = new Who(member.Id, member.TeamId, member.Team, member.Name);
-        var r = Raise(who, h, Clip(reason.Trim(), 500), null, null, workflow, causation);
+        var r = Raise(who, h, Clip(reason.Trim(), 500), null, null, deliverable, causation);
         return r.Outcome switch
         {
             HostAskOutcome.Asked or HostAskOutcome.Pending =>
@@ -184,7 +184,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         };
     }
 
-    private Raised Raise(Who who, string host, string? reason, string? method, string? sample, long? workflow, long? causation)
+    private Raised Raise(Who who, string host, string? reason, string? method, string? sample, long? deliverable, long? causation)
     {
         var h = NetworkAskFilter.Normalize(host);
         if (NetworkAskFilter.Problem(host) is { } problem) return new Raised(HostAskOutcome.None, null, h, problem);
@@ -211,7 +211,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
             // A plain-http refusal's method wins over CONNECT's or none, so the card can say only https is forwarded.
             using var cmd = Command(c,
                 """
-                INSERT INTO network_asks (at, team_id, member, member_id, host, reason, method, path_sample, count, last_seen, workflow, causation_seq)
+                INSERT INTO network_asks (at, team_id, member, member_id, host, reason, method, path_sample, count, last_seen, deliverable, causation_seq)
                 VALUES ($now, $t, $m, $mid, $h, $r, $method, $p, 1, $now, $w, $c)
                 ON CONFLICT (team_id, member, host) WHERE state = 'pending' DO UPDATE SET
                     count = count + 1, last_seen = excluded.last_seen,
@@ -220,11 +220,11 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                     method = CASE WHEN excluded.method IS NOT NULL AND excluded.method <> 'CONNECT' AND (method IS NULL OR method = 'CONNECT')
                                   THEN excluded.method ELSE COALESCE(method, excluded.method) END,
                     path_sample = COALESCE(path_sample, excluded.path_sample),
-                    workflow = COALESCE(excluded.workflow, workflow), causation_seq = COALESCE(excluded.causation_seq, causation_seq)
+                    deliverable = COALESCE(excluded.deliverable, deliverable), causation_seq = COALESCE(excluded.causation_seq, causation_seq)
                 RETURNING id, count;
                 """,
                 ("$now", Stamp(now)), ("$t", who.TeamId), ("$m", who.Qualified), ("$mid", who.MemberId), ("$h", h), ("$r", reason), ("$method", method), ("$p", sample),
-                ("$w", workflow), ("$c", causation));
+                ("$w", deliverable), ("$c", causation));
             using var r = cmd.ExecuteReader();
             r.Read();
             id = r.GetInt64(0);
@@ -266,7 +266,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     {
         using var c = Open();
         using var cmd = Command(c,
-            "SELECT a.id, a.at, a.team_id, COALESCE(t.name, ''), a.member, a.host, a.reason, a.method, a.path_sample, a.count, a.last_seen, a.workflow, a.causation_seq, " +
+            "SELECT a.id, a.at, a.team_id, COALESCE(t.name, ''), a.member, a.host, a.reason, a.method, a.path_sample, a.count, a.last_seen, a.deliverable, a.causation_seq, " +
             "a.state, a.scope, a.decided_by, a.decided_via, a.decided_at, a.note, a.member_id FROM network_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
             (pendingOnly ? " AND a.state = 'pending'" : "") + (teamId is null ? "" : " AND a.team_id = $t") + " ORDER BY a.id;",
             ("$t", teamId));
@@ -284,7 +284,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     {
         ["id"] = a.Id, ["at"] = a.At, ["teamId"] = a.TeamId, ["team"] = a.Team, ["member"] = a.Member, ["memberName"] = a.MemberName,
         ["host"] = a.Host, ["reason"] = a.Reason, ["method"] = a.Method, ["pathSample"] = a.PathSample, ["count"] = a.Count, ["lastSeen"] = a.LastSeen,
-        ["hint"] = NetworkAskFilter.Hint(a.Host), ["workflow"] = a.Workflow, ["state"] = a.State, ["scope"] = a.Scope,
+        ["hint"] = NetworkAskFilter.Hint(a.Host), ["deliverable"] = a.Deliverable, ["state"] = a.State, ["scope"] = a.Scope,
         ["decidedBy"] = a.DecidedBy, ["decidedAt"] = a.DecidedAt,
         // A plain-http refusal: the card says only https is forwarded, even once the host is allowed.
         ["plainHttp"] = a.PlainHttp,
@@ -319,7 +319,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         {
             return method switch
             {
-                // [{ id, at, teamId, team, member, memberName, host, reason, method, pathSample, count, lastSeen, hint, workflow, state, scope, decidedBy, decidedAt, plainHttp, choices, domain, domainPattern }]
+                // [{ id, at, teamId, team, member, memberName, host, reason, method, pathSample, count, lastSeen, hint, deliverable, state, scope, decidedBy, decidedAt, plainHttp, choices, domain, domainPattern }]
                 "network.asks" => new JsonArray(Asks(p?["all"]?.GetValue<bool>() != true, OptLong(p, "teamId")).Select(a => (JsonNode?)ToJson(a)).ToArray()),
                 // { id, choice, note?, domain?: bool (allow the ask's "*.<domain>"), ids?: [..] (a grouped item: every listed ask) }
                 "network.answer" => await AnswerGroupAsync(
@@ -612,7 +612,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         }
         try
         {
-            // The window outlives the answer, so the answer's token does not apply; it joins the first ask's workflow that has one.
+            // The window outlives the answer, so the answer's token does not apply; it joins the first ask's deliverable that has one.
             await TellAsync(batch.Team, batch.Manager, AllowedText(items), items.Select(i => i.Causation).FirstOrDefault(c => c is not null), CancellationToken.None);
         }
         catch (Exception e) { Console.Error.WriteLine($"network asks: telling {batch.Team}/{batch.Manager} a host is allowed failed: {e.Message}"); }
@@ -644,7 +644,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     private static string JoinAnd(IReadOnlyList<string> parts) =>
         parts.Count == 1 ? parts[0] : $"{string.Join(", ", parts.Take(parts.Count - 1))} and {parts[^1]}";
 
-    /// <summary>Tells, in the ask's workflow when it has one (else a new one); false when the member or team is gone.</summary>
+    /// <summary>Tells, in the ask's deliverable when it has one (else a new one); false when the member or team is gone.</summary>
     private async Task<bool> TellAsync(string team, string member, string text, long? causation, CancellationToken ct)
     {
         try

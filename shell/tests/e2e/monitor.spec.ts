@@ -1,12 +1,12 @@
 // The livelier Monitor (with its code map) end to end, in headless Chrome
 // against the phone-remote fake core (remote.html, tests/e2e/phone). The fake serves monitor.messages, monitor.steps
-// (with StepRow.exit when the test gives one), monitor.codeEvents and bus.workflows from a feed the test changes while
+// (with StepRow.exit when the test gives one), monitor.codeEvents and bus.deliverables from a feed the test changes while
 // the page polls, and patches teams.agents with the attention the test sets (a member that needs the person).
 //
-// The wall is a canvas, so the spec reads what the scene draws (the code-map spec's recorder): an init script wraps the
+// The wall is a canvas, so the spec reads what the scene draws (the code-map spec's recorder): an init workflow wraps the
 // monitor canvas's 2D context and keeps the last frames' arcs, paths and texts with their transform and alpha. What
 // the scene draws (scene.ts, rhythm.ts):
-//   a workflow node   - a rounded square (moveTo x-r+4, y-r; r 10) filled rgba(7, 11, 20, 0.95), stroked in its tone
+//   a deliverable node   - a rounded square (moveTo x-r+4, y-r; r 10) filled rgba(7, 11, 20, 0.95), stroked in its tone
 //                       (working #22d3ee, waiting #fbbf24, blocked #fb923c, width 2.2), "#id" under it; dashed lines
 //                       to the members working it (to its hub while nobody is); completed: a #34d399 flash ring and the
 //                       square drifts out; closed: a #94a3b8 square with a cross, fading.
@@ -43,14 +43,14 @@ const FILE_COLORS = [C.read, C.edit, C.create];
 // ---------------------------------------------------------------------------------------------------------------------
 // The feed behind the fake core.
 
-type Row = { seq: number; kind: string; team: string; member: string | null; from: string; text: string | null; workflow: number; at: string };
+type Row = { seq: number; kind: string; team: string; member: string | null; from: string; text: string | null; deliverable: number; at: string };
 type Step = { id: number; at: string; team: string; member: string; run: number; kind: string; tool: string; target: string | null; exit?: number | null };
-type Ev = { id: number; kind: string; team: string; member: string | null; branch: string; sha: string; message: string; files: { path: string; status: string }[]; at: string; recordedAt: string; workflowId: number | null };
+type Ev = { id: number; kind: string; team: string; member: string | null; branch: string; sha: string; message: string; files: { path: string; status: string }[]; at: string; recordedAt: string; deliverableId: number | null };
 type Wf = { id: number; title: string; owner: string; state: 'open' | 'completed' | 'closed'; undeclared: boolean; busy: string[]; ending: null; startedAt: string; lastAt: string; messages: number };
 
 class Feed {
   rows: Row[] = []; steps: Step[] = []; events: Ev[] = [];
-  /** Each team's workflows (bus.workflows), by team id. */
+  /** Each team's deliverables (bus.deliverables), by team id. */
   wfs = new Map<number, Wf[]>();
   /** A member's attention (teams.agents), by "teamId/name". */
   attn = new Map<string, string>();
@@ -59,14 +59,14 @@ class Feed {
   netAsks: any[] | null = null;
   toolAsks: any[] | null = null;
   netAsk(id: number, member: string, host: string, state = 'pending', team = TEAM) {
-    return { id, at: this.iso(60_000), teamId: 1, team, member: `${team}/${member}`, memberName: member, host, reason: 'restore', method: 'CONNECT', pathSample: null, count: 1, lastSeen: this.iso(30_000), hint: null, workflow: 10, state, scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'] };
+    return { id, at: this.iso(60_000), teamId: 1, team, member: `${team}/${member}`, memberName: member, host, reason: 'restore', method: 'CONNECT', pathSample: null, count: 1, lastSeen: this.iso(30_000), hint: null, deliverable: 10, state, scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'] };
   }
   toolAsk(id: number, member: string, tool: string, displayName: string, state = 'pending', team = TEAM) {
-    return { id, at: this.iso(60_000), teamId: 1, team, member: `${team}/${member}`, memberName: member, tool, displayName, publisher: 'Microsoft', wingetId: null, scope: 'machine', reason: 'build', count: 1, lastSeen: this.iso(30_000), workflow: 10, state, attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null };
+    return { id, at: this.iso(60_000), teamId: 1, team, member: `${team}/${member}`, memberName: member, tool, displayName, publisher: 'Microsoft', wingetId: null, scope: 'machine', reason: 'build', count: 1, lastSeen: this.iso(30_000), deliverable: 10, state, attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null };
   }
   iso(msAgo = 0) { return new Date(Date.now() - msAgo).toISOString(); }
-  row(kind: string, member: string | null, from: string, workflow = 10, msAgo = 0, text: string | null = null, team = TEAM) {
-    this.rows.push({ seq: ++this.seq, kind, team, member, from, text, workflow, at: this.iso(msAgo) });
+  row(kind: string, member: string | null, from: string, deliverable = 10, msAgo = 0, text: string | null = null, team = TEAM) {
+    this.rows.push({ seq: ++this.seq, kind, team, member, from, text, deliverable, at: this.iso(msAgo) });
   }
   step(member: string, kind: string, target: string | null, msAgo = 0, team = TEAM, exit?: number | null) {
     const tool = kind === 'read' ? 'Read' : kind === 'edit' ? 'Edit' : kind === 'create' ? 'Write' : kind === 'think' ? 'thinking' : 'Bash';
@@ -76,9 +76,9 @@ class Feed {
   }
   event(e: Partial<Ev> & { kind: string; sha: string }, msAgo = 0) {
     const at = this.iso(msAgo);
-    this.events.push({ id: this.eid++, team: TEAM, member: null, branch: 'members/payments/developerada', message: '', files: [], at, recordedAt: at, workflowId: 10, ...e });
+    this.events.push({ id: this.eid++, team: TEAM, member: null, branch: 'members/payments/developerada', message: '', files: [], at, recordedAt: at, deliverableId: 10, ...e });
   }
-  wf(teamId: number, id: number, state: Wf['state'], busy: string[], title = `Workflow ${id}`) {
+  wf(teamId: number, id: number, state: Wf['state'], busy: string[], title = `Deliverable ${id}`) {
     const list = this.wfs.get(teamId) ?? [];
     const old = list.find((w) => w.id === id);
     const w: Wf = { id, title, owner: 'Manager', state, undeclared: false, busy, ending: null, startedAt: this.iso(600_000), lastAt: this.iso(0), messages: 3 };
@@ -86,7 +86,7 @@ class Feed {
     this.wfs.set(teamId, list);
   }
   answer(method: string, p: any): unknown | undefined {
-    if (method.startsWith('monitor.') || method === 'network.asks' || method === 'tools.asks' || method === 'bus.workflows') this.calls.push({ method, params: p });
+    if (method.startsWith('monitor.') || method === 'network.asks' || method === 'tools.asks' || method === 'bus.deliverables') this.calls.push({ method, params: p });
     if (method === 'monitor.messages') {
       const after = p?.after ?? 0;
       return { end: Math.max(after, ...this.rows.map((r) => r.seq), 0), messages: this.rows.filter((r) => r.seq > after) };
@@ -99,7 +99,7 @@ class Feed {
       const since = p?.since ? Date.parse(p.since) : -Infinity;
       return this.events.filter((e) => Date.parse(e.at) >= since && (!p?.team || e.team.toLowerCase() === String(p.team).toLowerCase()));
     }
-    if (method === 'bus.workflows') return JSON.parse(JSON.stringify(this.wfs.get(p?.teamId) ?? []));
+    if (method === 'bus.deliverables') return JSON.parse(JSON.stringify(this.wfs.get(p?.teamId) ?? []));
     // The waiting network and tool asks, when the test sets them (else the fake core answers).
     if (method === 'network.asks' && this.netAsks) return JSON.parse(JSON.stringify(this.netAsks));
     if (method === 'tools.asks' && this.toolAsks) return JSON.parse(JSON.stringify(this.toolAsks));
@@ -215,7 +215,7 @@ function arcsAt(f: Frame, p: Pt, r: number, style?: string, tol = 0.05) {
 function sparks(f: Frame, p: Pt, color: string) {
   return discs(f, (o, a) => o.style === color && a.r <= 2.01 && Math.hypot(a.x - p.x, a.y - p.y) > 10 && Math.hypot(a.x - p.x, a.y - p.y) < 90).length;
 }
-/** The workflow node squares (and leaving ones): a fill rgba(7, 11, 20, 0.95) with one moveTo, then its stroke. */
+/** The deliverable node squares (and leaving ones): a fill rgba(7, 11, 20, 0.95) with one moveTo, then its stroke. */
 function wfBoxes(f: Frame) {
   const out: { x: number; y: number; color: string; lw: number; alpha: number; at: number }[] = [];
   f.ops.forEach((o, i) => {
@@ -227,8 +227,8 @@ function wfBoxes(f: Frame) {
   return out;
 }
 /**
- * A workflow node by its "#id" label: the square drawn last before the label (scene drawWorkflowNode draws the square, its
- * icon, then its label). The label is not always 13 under the centre - placeWorkflowLabels moves a label above or
+ * A deliverable node by its "#id" label: the square drawn last before the label (scene drawDeliverableNode draws the square, its
+ * icon, then its label). The label is not always 13 under the centre - placeDeliverableLabels moves a label above or
  * beside its node when the place under it is taken (by #11's or #12's label, as the graph drifts), so finding the square by
  * the label's place missed about half the runs of 1b.
  */
@@ -291,8 +291,8 @@ async function freshFrame(page: Page): Promise<Frame> {
 async function readAfter(feed: Feed, method: string, from: number, timeout = 8000) {
   await expect.poll(() => feed.calls.slice(from).some((c) => c.method === method), { timeout, message: `the page reads ${method}` }).toBe(true);
 }
-/** Whether a click left the Monitor: the Workflows page shows, or the wall is gone, within 1.5 s. */
-const leftMonitor = (page: Page) => page.waitForFunction(() => !!document.querySelector('[data-test=workflows-view]') || !document.querySelector('[data-test=monitor-canvas]'), null, { timeout: 1500 }).then(() => true, () => false);
+/** Whether a click left the Monitor: the Deliverables page shows, or the wall is gone, within 1.5 s. */
+const leftMonitor = (page: Page) => page.waitForFunction(() => !!document.querySelector('[data-test=deliverables-view]') || !document.querySelector('[data-test=monitor-canvas]'), null, { timeout: 1500 }).then(() => true, () => false);
 /** Waits until the hover tip shows (true) or not within `timeout` (false). */
 const tipShown = (page: Page, timeout = 2000) => page.locator('[data-test=monitor-tip]').waitFor({ state: 'visible', timeout }).then(() => true, () => false);
 
@@ -466,7 +466,7 @@ test.afterAll(() => {
   writeFileSync(file, JSON.stringify({ ...old, ...result }, null, 2));
 });
 
-/** The usual scene: payments with three workflows (10 worked by Ada, 11 nobody on, 12 worked by Ben). */
+/** The usual scene: payments with three deliverables (10 worked by Ada, 11 nobody on, 12 worked by Ben). */
 function seed(feed: Feed) {
   feed.row('instruction', ADA, 'Manager', 10, 120_000, 'Card 1: partial refunds');
   feed.row('instruction', BEN, 'Manager', 12, 119_000, 'Card 2: test partial refunds');
@@ -476,18 +476,18 @@ function seed(feed: Feed) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// 1. Workflow nodes
+// 1. Deliverable nodes
 
-/** A workflow node click opens the Workflows page (no dialog): the page shown, filtered to the team, the workflow's pane open. */
-const wfPaneOpen = (page: Page, id: number) => page.locator(`[data-test=workflows-view] [data-test=workflow-pane][data-id="${id}"]`);
-async function expectWorkflowsPage(page: Page, id: number, team = '1') {
-  await expect(page.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 });
+/** A deliverable node click opens the Deliverables page (no dialog): the page shown, filtered to the team, the deliverable's pane open. */
+const wfPaneOpen = (page: Page, id: number) => page.locator(`[data-test=deliverables-view] [data-test=deliverable-pane][data-id="${id}"]`);
+async function expectDeliverablesPage(page: Page, id: number, team = '1') {
+  await expect(page.locator('[data-test=deliverables-view]')).toBeVisible({ timeout: 15_000 });
   await expect(wfPaneOpen(page, id)).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue(team);
+  await expect(page.locator('[data-test=deliverables-team-filter]')).toHaveValue(team);
   await expect(page.locator('[role=dialog]')).toHaveCount(0);
 }
 
-test('1 workflow nodes: open ones tied to their members (or hub), blocked look, completed flashes green and drifts, closed fades with a cross; a click opens it', async ({ browser }) => {
+test('1 deliverable nodes: open ones tied to their members (or hub), blocked look, completed flashes green and drifts, closed fades with a cross; a click opens it', async ({ browser }) => {
   const feed = new Feed();
   seed(feed);
   const { page, ctx, errors } = await open(browser, { feed });
@@ -508,7 +508,7 @@ test('1 workflow nodes: open ones tied to their members (or hub), blocked look, 
   expect(dashedBetween(f, n11, ada).length).toBe(0);
   await shot(page, 'wf-01-open-nodes');
 
-  // Blocked: a "blocked" row in workflow 12.
+  // Blocked: a "blocked" row in deliverable 12.
   feed.row('blocked', BEN, BEN, 12, 0, 'Needs the refund limit');
   f = await untilFrame(page, (x) => wfNode(x, 12)?.color === C.blocked);
   const b12 = wfNode(f, 12)!;
@@ -538,7 +538,7 @@ test('1 workflow nodes: open ones tied to their members (or hub), blocked look, 
   expect(greys.at(-1)!, 'fading').toBeLessThan(greys[0]! - 0.2);
   await shot(page, 'wf-03-after-ends');
 
-  // A click on the workflow node #12 opens that workflow.
+  // A click on the deliverable node #12 opens that deliverable.
   await unhover(page);
   for (let i = 0; i < 4; i++) {
     await still(page);
@@ -547,15 +547,15 @@ test('1 workflow nodes: open ones tied to their members (or hub), blocked look, 
     await clickWorld(page, n.op, n);
     if (await leftMonitor(page)) break;
   }
-  await expectWorkflowsPage(page, 12);
-  r.clickOpens = 'the Workflows page with workflow 12 open (team payments)';
-  await shot(page, 'wf-04-click-opens-workflow');
-  result.workflowNodes = r;
+  await expectDeliverablesPage(page, 12);
+  r.clickOpens = 'the Deliverables page with deliverable 12 open (team payments)';
+  await shot(page, 'wf-04-click-opens-deliverable');
+  result.deliverableNodes = r;
   expect(errors).toEqual([]);
   await ctx.close();
 });
 
-test('1b a workflow node click with a team focused: the workflow opens; is the focus left?', async ({ browser }) => {
+test('1b a deliverable node click with a team focused: the deliverable opens; is the focus left?', async ({ browser }) => {
   const feed = new Feed();
   seed(feed);
   const { page, ctx, errors } = await open(browser, { feed });
@@ -570,12 +570,12 @@ test('1b a workflow node click with a team focused: the workflow opens; is the f
     await clickWorld(page, n.op, n);
     if (await leftMonitor(page)) break;
   }
-  await expectWorkflowsPage(page, 10);
+  await expectDeliverablesPage(page, 10);
   const focusAfter = await page.locator('[data-test=monitor-focus]').count();
-  result.wfClickFocused = { workflowOpened: true, focusChipAfterClick: focusAfter };
+  result.wfClickFocused = { deliverableOpened: true, focusChipAfterClick: focusAfter };
   await shot(page, 'wf-05-click-while-focused');
   // Recorded, not asserted either way: the card expects the focus to be left.
-  console.log('FOCUS after a workflow-node click:', focusAfter ? 'still focused' : 'left');
+  console.log('FOCUS after a deliverable-node click:', focusAfter ? 'still focused' : 'left');
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -1182,7 +1182,7 @@ test('4 cards: an instruction carries "#card", the hand-back comes home with a c
   const cometInks = [C.tell, C.handback, C.fail, C.blocked];
   const landed = (text: string) => untilFrame(page, (x) => !x.ops.some((o) => o.op === 'text' && o.text === text && cometInks.includes(o.style)), 6000);
   await page.evaluate(() => { (window as any).__frames = []; });
-  feed.row('instruction', ADA, 'Manager', 10, 0, 'Card 4373 (workflow nodes): do it');
+  feed.row('instruction', ADA, 'Manager', 10, 0, 'Card 4373 (deliverable nodes): do it');
   const out = await label('#4373');
   r.instruction = out && { style: out.style, heads: cometHeads(out.frame).length };
   expect(out?.style, 'the card number rides the comet in the tell colour').toBe(C.tell);
@@ -1264,7 +1264,7 @@ test('5 focus: a hub click zooms and dims the rest, its code events only; Esc, t
   feed.event({ kind: 'commit', team: TEAM, member: ADA, sha: 'a'.repeat(40), message: 'Refund commit', files: [{ path: 'src/refund/f0.ts', status: 'M' }] });
   feed.event({ kind: 'commit', team: TEAM2, member: 'DeveloperCleo', sha: 'b'.repeat(40), message: 'Cart commit', files: [{ path: 'web/cart/c0.ts', status: 'M' }] });
   feed.event({ kind: 'merge-team', team: TEAM2, member: null, sha: 'c'.repeat(40), message: 'Merge', files: [] });
-  // The instruction text has no "#10": focused, the zoom passes 0.5 and payments' own workflow #10 is labelled "#10",
+  // The instruction text has no "#10": focused, the zoom passes 0.5 and payments' own deliverable #10 is labelled "#10",
   // so a text with "#10" in it would match that label.
   const fromCalls = feed.calls.length;
   feed.row('instruction', 'DeveloperCleo', 'Manager', 20, 0, 'Card 77: other team comet', TEAM2);
@@ -1637,11 +1637,11 @@ test('9c remote view as a Visitor (read access) at 375 and 1280: the wall draws 
     const feed = busyFeed();
     const { page, ctx, errors } = await open(browser, { feed, w, access: 'read' });
     const load = liveLoad(feed);
-    // The You node, workflow #10 and the map drawn, and the wall at rest.
+    // The You node, deliverable #10 and the map drawn, and the wall at rest.
     await until(page, (x) => !!youNode(x) && wfBoxes(x).some((b) => b.color === C.start) && fileDots(x).length > 0, Boolean, 12_000);
     await still(page);
     const f = await freshFrame(page);
-    const r = { you: !!youNode(f), wfNode10: wfBoxes(f).some((b) => b.color === C.start), wfCalls: feed.calls.filter((c) => c.method === 'bus.workflows').length, comets: (await frames(page)).some((x) => cometHeads(x).length > 0), files: fileDots(f).length };
+    const r = { you: !!youNode(f), wfNode10: wfBoxes(f).some((b) => b.color === C.start), wfCalls: feed.calls.filter((c) => c.method === 'bus.deliverables').length, comets: (await frames(page)).some((x) => cometHeads(x).length > 0), files: fileDots(f).length };
     result[`visitor-${w}`] = r;
     await shot(page, `visitor-${w}`);
     clearInterval(load);
@@ -1657,7 +1657,7 @@ test('9c remote view as a Visitor (read access) at 375 and 1280: the wall draws 
 // 10. A busy multi-team scene stays smooth
 
 for (const level of ['normal', 'lively'] as const)
-  test(`10 performance (${level}): 6 teams with workflow nodes, steps, commands, comets, commits and asks, live`, async ({ browser }) => {
+  test(`10 performance (${level}): 6 teams with deliverable nodes, steps, commands, comets, commits and asks, live`, async ({ browser }) => {
     test.setTimeout(150_000);
     const feed = new Feed();
     const teams = [TEAM, TEAM2, 'team-3', 'team-4', 'team-5', 'team-6'];

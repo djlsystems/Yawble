@@ -44,24 +44,24 @@ public sealed partial class TeamRepos
 
     /// <summary>After a fetch-back moved <paramref name="branch"/> from <paramref name="before"/> to <paramref name="after"/>.</summary>
     internal Task RecordFetchedAsync(MemberRef member, string repoPath, string baseBranch, string branch, string? before, string after,
-        long? workflowId, CancellationToken ct) =>
+        long? deliverableId, CancellationToken ct) =>
         SafeRecordAsync(member.Team, async () => branch == TeamBranchFor(member.Team)
-            ? await TeamBranchEventsAsync(member, repoPath, baseBranch, branch, before, after, workflowId, ct)
-            : await MemberCommitEventsAsync(member, repoPath, branch, before, after, workflowId, ct), $"{member.Qualified}'s {branch}");
+            ? await TeamBranchEventsAsync(member, repoPath, baseBranch, branch, before, after, deliverableId, ct)
+            : await MemberCommitEventsAsync(member, repoPath, branch, before, after, deliverableId, ct), $"{member.Qualified}'s {branch}");
 
     /// <summary>
     /// A member branch's new commits: those on <paramref name="after"/> that no other branch (the base, a teammate's
     /// merged in, the team branch) and not <paramref name="before"/> has. Merge commits are not new work and are skipped.
     /// </summary>
     private async Task<IReadOnlyList<CodeEvent>> MemberCommitEventsAsync(MemberRef member, string repoPath, string branch, string? before, string after,
-        long? workflowId, CancellationToken ct)
+        long? deliverableId, CancellationToken ct)
     {
         var revs = new List<string> { "--no-merges", after };
         if (before is not null) revs.Add("^" + before);
         revs.AddRange(["--not", "--exclude=" + branch, "--branches", "--exclude=origin/" + branch, "--remotes=origin"]);
         var list = new List<CodeEvent>();
         foreach (var c in await LogAsync(repoPath, revs, ct))
-            list.Add(new CodeEvent(CodeEvent.Commit, member.Team, member.Name, branch, c.Sha, c.Subject, await CommitFilesAsync(repoPath, c, ct), c.At, workflowId));
+            list.Add(new CodeEvent(CodeEvent.Commit, member.Team, member.Name, branch, c.Sha, c.Subject, await CommitFilesAsync(repoPath, c, ct), c.At, deliverableId));
         return list;
     }
 
@@ -73,7 +73,7 @@ public sealed partial class TeamRepos
     /// never the team's.
     /// </summary>
     private async Task<IReadOnlyList<CodeEvent>> TeamBranchEventsAsync(MemberRef manager, string repoPath, string baseBranch, string branch,
-        string? before, string after, long? workflowId, CancellationToken ct)
+        string? before, string after, long? deliverableId, CancellationToken ct)
     {
         var events = new List<CodeEvent>();
         var memberPrefix = "refs/heads/" + MemberBranchPrefix(manager.Team);
@@ -85,7 +85,7 @@ public sealed partial class TeamRepos
 
         async Task MergedAsync(string memberBranch, string? from, string to, string message, DateTimeOffset at) =>
             events.Add(new CodeEvent(CodeEvent.MergeTeam, manager.Team, MemberForBranch(manager.TeamId, memberBranch), memberBranch, to, message,
-                await RangeFilesAsync(repoPath, from, to, ct), at, workflowId, Into: branch));
+                await RangeFilesAsync(repoPath, from, to, ct), at, deliverableId, Into: branch));
 
         async Task WalkAsync(string tip, IReadOnlyList<string> exclude, int depth)
         {
@@ -126,10 +126,10 @@ public sealed partial class TeamRepos
                     var merged = (await HoldersAsync(c.Parents[1])).FirstOrDefault() ?? MemberBranchIn(c.Subject, manager.Team);
                     if (merged is not null) await MergedAsync(merged, c.Parents[0], c.Sha, c.Subject, c.At);
                     else events.Add(new CodeEvent(CodeEvent.Commit, manager.Team, manager.Name, branch, c.Sha, c.Subject,
-                        await RangeFilesAsync(repoPath, c.Parents[0], c.Sha, ct), c.At, workflowId));
+                        await RangeFilesAsync(repoPath, c.Parents[0], c.Sha, ct), c.At, deliverableId));
                     continue;
                 }
-                events.Add(new CodeEvent(CodeEvent.Commit, manager.Team, manager.Name, branch, c.Sha, c.Subject, await CommitFilesAsync(repoPath, c, ct), c.At, workflowId));
+                events.Add(new CodeEvent(CodeEvent.Commit, manager.Team, manager.Name, branch, c.Sha, c.Subject, await CommitFilesAsync(repoPath, c, ct), c.At, deliverableId));
             }
             await FlushAsync();
         }
@@ -180,7 +180,7 @@ public sealed partial class TeamRepos
         }, "a merge into " + repo.BaseBranch);
 
     /// <summary>After a publish pushed <paramref name="published"/> to origin: one push event per branch.</summary>
-    internal Task RecordPushedAsync(MemberRef member, string repoPath, IReadOnlyList<string> published, long? workflowId, CancellationToken ct) =>
+    internal Task RecordPushedAsync(MemberRef member, string repoPath, IReadOnlyList<string> published, long? deliverableId, CancellationToken ct) =>
         SafeRecordAsync(member.Team, async () =>
         {
             if (published.Count == 0 || !IsPrimaryRepo(member.TeamId, repoPath)) return [];
@@ -190,7 +190,7 @@ public sealed partial class TeamRepos
             {
                 if (await RevAsync(repoPath, "refs/heads/" + b, ct) is not { } sha) continue;
                 var who = b == TeamBranchFor(member.Team) ? null : MemberForBranch(member.TeamId, b);
-                list.Add(new CodeEvent(CodeEvent.Push, member.Team, who, b, sha, $"Pushed {b} to origin", [], now, workflowId, Branches: published));
+                list.Add(new CodeEvent(CodeEvent.Push, member.Team, who, b, sha, $"Pushed {b} to origin", [], now, deliverableId, Branches: published));
             }
             return list;
         }, "a push to origin");

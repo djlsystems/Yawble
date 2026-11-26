@@ -78,7 +78,7 @@ public sealed class DoctorHostTeams(BusEngine bus, string connectionString, Time
         {
             var last = (await bus.RecentTeamMessagesAsync(t.Name, 1, ct).ConfigureAwait(false)).FirstOrDefault()?.OccurredAt;
             var created = Created(t.Id);
-            var workflows = await bus.WorkflowsAsync(t.Name, 200, ct, time: false).ConfigureAwait(false);
+            var deliverables = await bus.DeliverablesAsync(t.Name, 200, ct, time: false).ConfigureAwait(false);
             Teams.TeamBehind? behind = null;
             if (!t.Archived && bus.Repos is { } repos)
             {
@@ -86,7 +86,7 @@ public sealed class DoctorHostTeams(BusEngine bus, string connectionString, Time
                 catch (Exception e) when (e is not OperationCanceledException) { } // a repository git cannot read is not this check's to report
             }
             result.Add(new DoctorTeam(t.Name, t.Paused, t.Archived, last ?? created,
-                workflows.Count(w => w.Undeclared), stuck.TryGetValue(t.Id, out var s) ? s : [],
+                deliverables.Count(w => w.Undeclared), stuck.TryGetValue(t.Id, out var s) ? s : [],
                 behind?.Behind ?? 0, behind?.Age, behind?.TeamBranch ?? "", behind?.BaseBranch ?? ""));
         }
         return result;

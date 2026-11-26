@@ -39,7 +39,7 @@ public class ConciergeImageTests
             var tools = new ConciergeTools(bus, store, (method, p, _) =>
             {
                 sent = p;
-                return Task.FromResult<JsonNode?>(new JsonObject { ["seq"] = 1L, ["workflow"] = 1L });
+                return Task.FromResult<JsonNode?>(new JsonObject { ["seq"] = 1L, ["deliverable"] = 1L });
             }, () => null, "c1");
 
             var ok = await Call(tools, new JsonObject { ["team"] = "alpha", ["instruction"] = "Fix the layout bug in the screenshot", ["images"] = shot });

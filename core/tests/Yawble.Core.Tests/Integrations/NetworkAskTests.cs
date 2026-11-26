@@ -338,7 +338,7 @@ public sealed class NetworkAskTests : IDisposable
     {
         Assert.Equal(HostAskOutcome.Asked, _asks.Refused("Alpha/Priya", "api.nuget.org", "CONNECT", null));
         var text = _asks.RequestFromAgent(Ref(_priya, _alpha, "Alpha", "Priya"), "https://api.nuget.org/v3/index.json",
-            "restore NuGet packages for the xUnit test project", workflow: 40, causation: 41);
+            "restore NuGet packages for the xUnit test project", deliverable: 40, causation: 41);
 
         Assert.StartsWith("asked: the person is asked to allow api.nuget.org", text);
         Assert.Contains("blocked on api.nuget.org", text);
@@ -346,14 +346,14 @@ public sealed class NetworkAskTests : IDisposable
         var ask = Assert.Single(_asks.Asks());
         Assert.Equal("restore NuGet packages for the xUnit test project", ask.Reason);
         Assert.Equal(2, ask.Count);
-        Assert.Equal((40L, 41L), (ask.Workflow, ask.CausationSeq));
+        Assert.Equal((40L, 41L), (ask.Deliverable, ask.CausationSeq));
         Assert.Contains("restore NuGet packages", Assert.Single(_asks.PendingLines()));
     }
 
     [Fact]
-    public async Task RequestHost_ItsWorkflowGetsTheManagersMessage()
+    public async Task RequestHost_ItsDeliverableGetsTheManagersMessage()
     {
-        _asks.RequestFromAgent(Ref(_priya, _alpha, "Alpha", "Priya"), "api.nuget.org", "dotnet restore", workflow: 7, causation: 9);
+        _asks.RequestFromAgent(Ref(_priya, _alpha, "Alpha", "Priya"), "api.nuget.org", "dotnet restore", deliverable: 7, causation: 9);
         await _asks.AnswerAsync(_asks.Asks().Single().Id, NetworkAskChoices.Agent, null, Ct);
         Assert.Equal(9, Assert.Single(_told).Causation);
     }

@@ -105,7 +105,7 @@ public sealed partial class NameLeakTests
         try
         {
             File.WriteAllText(Path.Combine(root, "notes.md"), "intro\nfixed in B118 (card 586)\n");
-            File.WriteAllText(Path.Combine(root, "tests", "B135Tests.cs"), "class ScriptToolsTests { }\n");
+            File.WriteAllText(Path.Combine(root, "tests", "B135Tests.cs"), "class WorkflowToolsTests { }\n");
             File.WriteAllText(Path.Combine(root, "colours.css"), "a { color: #B100FF; }\n/* the item, e.g. B006; no card 9999 */\n");
 
             var flagged = Scan(root, ["notes.md", "tests/B135Tests.cs", "colours.css"]);

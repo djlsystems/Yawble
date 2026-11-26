@@ -138,11 +138,11 @@ describe('embed mode in the window (App.vue)', { timeout: 30_000 }, () => {
     expect(navs().at(-1)!.places.find((p: any) => p.active)?.id).toBe('concierge');
     await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'logs' } });
     expect(document.querySelector('[data-test=logs]')).not.toBeNull();
-    // The Scripts place opens the Scripts dialog drawn as the page, and lights the place.
-    await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'scripts' } });
-    expect(document.querySelector('[data-test=scripts]')).not.toBeNull();
-    expect(navs().at(-1)!.places.find((p: any) => p.active)?.id).toBe('scripts');
-    expect(calls.some((c) => c.method === 'scripts.list')).toBe(true);
+    // The Workflows place opens the Workflows dialog drawn as the page, and lights the place.
+    await send({ type: 'yawble.navigate', to: { kind: 'place', id: 'workflows' } });
+    expect(document.querySelector('[data-test=workflows]')).not.toBeNull();
+    expect(navs().at(-1)!.places.find((p: any) => p.active)?.id).toBe('workflows');
+    expect(calls.some((c) => c.method === 'workflows.list')).toBe(true);
     await send({ type: 'yawble.navigate', to: { kind: 'chatAction', id: 'c1', action: 'delete' } });
     const ok = document.querySelector<HTMLButtonElement>('[data-test=confirm-ok]');
     expect(document.querySelector('[data-test=confirm-message]')?.textContent).toBe('Delete this chat?');

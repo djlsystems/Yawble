@@ -60,7 +60,7 @@ interface FolderAsk {
   exists: boolean /* exists now while pending; when asked, once answered */; existedWhenAsked: boolean;
   state: 'pending' | 'approved' | 'denied' | 'closed'; grantedAccess: 'read' | 'readwrite' | null;
   decidedBy: string | null; decidedVia: string | null; decidedAt: string | null; note: string | null;
-  workflow: number | null;
+  deliverable: number | null;
   choices: FolderAskChoice[] /* pending: ['readwrite','read','deny'] for a read-write ask, ['read','deny'] for a read ask; [] once answered */;
 }
 type FolderAskChoice = 'readwrite' | 'read' | 'deny';
@@ -81,7 +81,7 @@ interface FolderAnswer { ok: boolean; id: number; choice: FolderAskChoice; path:
   `PolicyStore.PreviewLoosen` and `PolicyStore.SaveLoosen` - the same code as `policy.saveLoosen` - confirmed as exactly
   that one added line, so `loosen_summary` and `loosen_approved_at` are set. The rules above are checked again first.
   The member's effective policy is checked to have the path with that access; otherwise nothing closes
-  (`policy_refused`). Then the ask is `approved` and the team's Manager is told, in the ask's workflow:
+  (`policy_refused`). Then the ask is `approved` and the team's Manager is told, in the ask's deliverable:
   "`<member> can now read and write <path> (folder request N); retry what was blocked. It applies to runs that start
   from now on.`" (a read-only grant of a read-write ask says so).
 - **Deny**: the policy is not touched; the ask is `denied` and the asker (the member, or the Manager that asked) is
@@ -123,4 +123,4 @@ The org summary (`org.summary`) counts them as `needsYou.folderRequests` (per te
 - A member removed from its team has its waiting asks closed (`closed`); a team deleted has its asks deleted.
 - Role texts (member.md, manager.md) and the tool's description: "ask with request_folder; never ask the person to
   edit policy by hand".
-- Not done here: the Logs page's Approvals log and `workflow_digest` do not list folder asks yet.
+- Not done here: the Logs page's Approvals log and `deliverable_digest` do not list folder asks yet.

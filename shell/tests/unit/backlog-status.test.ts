@@ -6,14 +6,14 @@ import type { YawbleApi } from '../../src/shared/api';
 
 const item = (id: number, over: Record<string, unknown>) => ({
   id, label: `B00${id}`, team: 'payments', title: `Item ${id}`, body: '', state: 'ready', position: id, createdAt: '', updatedAt: '',
-  archivedAt: null, dispatchedTeam: null, dispatchedWorkflow: null, dispatchedAt: null, inFlight: false, dispatchCount: 0, ...over,
+  archivedAt: null, dispatchedTeam: null, dispatchedDeliverable: null, dispatchedAt: null, inFlight: false, dispatchCount: 0, ...over,
 });
 const items = [
   item(1, { state: 'pending' }),
   item(2, { state: 'ready' }),
-  item(3, { state: 'ready', dispatchedTeam: 'payments', dispatchedWorkflow: 9, dispatchedAt: '2026-11-11T10:00:00Z', dispatchCount: 1 }),
-  item(4, { state: 'ready', dispatchedTeam: 'payments', dispatchedWorkflow: 10, dispatchedAt: '2026-11-11T10:00:00Z', dispatchCount: 1, inFlight: true }),
-  item(5, { state: 'declared', dispatchedTeam: 'payments', dispatchedWorkflow: 11, dispatchedAt: '2026-11-11T10:00:00Z', dispatchCount: 1 }),
+  item(3, { state: 'ready', dispatchedTeam: 'payments', dispatchedDeliverable: 9, dispatchedAt: '2026-11-11T10:00:00Z', dispatchCount: 1 }),
+  item(4, { state: 'ready', dispatchedTeam: 'payments', dispatchedDeliverable: 10, dispatchedAt: '2026-11-11T10:00:00Z', dispatchCount: 1, inFlight: true }),
+  item(5, { state: 'declared', dispatchedTeam: 'payments', dispatchedDeliverable: 11, dispatchedAt: '2026-11-11T10:00:00Z', dispatchCount: 1 }),
 ];
 const api = { call: async (m: string) => (m === 'backlog.list' ? items : []), onEvent: () => () => {} } as unknown as YawbleApi;
 

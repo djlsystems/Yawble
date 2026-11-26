@@ -165,7 +165,7 @@ public class ConciergeTests
             (method, p, ct) =>
             {
                 lock (uiCalls) uiCalls.Add((method, p));
-                return Task.FromResult<JsonNode?>(new JsonObject { ["seq"] = 42, ["workflow"] = 42 });
+                return Task.FromResult<JsonNode?>(new JsonObject { ["seq"] = 42, ["deliverable"] = 42 });
             },
             _ => Task.FromResult("claude"));
 

@@ -246,8 +246,8 @@ async function askTeam() {
   busy.value = 'ask';
   error.value = null;
   try {
-    const r = await api.call<{ seq: number; workflow: number }>('git.askTeam', which());
-    result.value = { outcome: 'asked', message: `Told the Manager to bring ${status.value?.teamBranch} current (workflow ${r.workflow}).`, changed: false, sha: null, files: null, status: null };
+    const r = await api.call<{ seq: number; deliverable: number }>('git.askTeam', which());
+    result.value = { outcome: 'asked', message: `Told the Manager to bring ${status.value?.teamBranch} current (deliverable ${r.deliverable}).`, changed: false, sha: null, files: null, status: null };
   } catch (e) {
     error.value = errorText(e);
   } finally {

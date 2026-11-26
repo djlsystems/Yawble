@@ -13,11 +13,11 @@ public static class DecisionActions
     public const string AllowLocalhostMac = "team.allowLocalhostMac";
 
     /// <summary>
-    /// The person says yes to closing the workflow over a tester's FAIL on the decision's card (accepted,
+    /// The person says yes to closing the deliverable over a tester's FAIL on the decision's card (accepted,
     /// or won't-do). Only on a decision with <c>card</c> and <c>kind</c>; the app changes no setting, the bus records the
-    /// yes on the answer (<c>closeOverFail</c>) and workflow_complete then goes through, listing the card in closedOverFail.
+    /// yes on the answer (<c>closeOverFail</c>) and deliverable_complete then goes through, listing the card in closedOverFail.
     /// </summary>
-    public const string CloseOverFail = "workflow.closeOverFail";
+    public const string CloseOverFail = "deliverable.closeOverFail";
 
     public static readonly IReadOnlyList<string> All = [AllowLocalhostMac, CloseOverFail];
 
@@ -47,9 +47,9 @@ public sealed record DecisionAsk(string Question, string? Summary = null, IReadO
     /// <paramref name="options"/> may be the array itself or a string holding it as JSON (some CLIs send arrays as text).
     /// </summary>
     /// <remarks>
-    /// With <paramref name="card"/>, the decision asks the person to close the workflow over that card's
+    /// With <paramref name="card"/>, the decision asks the person to close the deliverable over that card's
     /// tester FAIL: <paramref name="kind"/> is required (accept-fail or wont-do), and a won't-do needs a
-    /// <paramref name="reason"/>. Exactly one option must then carry the action workflow.closeOverFail (the yes); with no
+    /// <paramref name="reason"/>. Exactly one option must then carry the action deliverable.closeOverFail (the yes); with no
     /// options the core gives two (the yes, and "fix it first"). The action is refused on a decision without a card.
     /// </remarks>
     public static DecisionAsk Parse(string? question, string? summary, JsonNode? options, string? details,
@@ -78,9 +78,9 @@ public sealed record DecisionAsk(string Question, string? Summary = null, IReadO
     }
 
     private static IReadOnlyList<DecisionOption> DefaultCloseOptions(CloseOverFail c) => c.Kind == CloseOverFail.WontDo
-        ? [new("Yes, won't do it", $"Yes: card {c.Card} is won't-do. Close the workflow.", DecisionActions.CloseOverFail),
+        ? [new("Yes, won't do it", $"Yes: card {c.Card} is won't-do. Close the deliverable.", DecisionActions.CloseOverFail),
            new("No, do the card", $"No: card {c.Card} is to be done. Fix it and have the tester verify it again.")]
-        : [new("Accept and close", $"Yes: accept the FAIL on card {c.Card} and close the workflow.", DecisionActions.CloseOverFail),
+        : [new("Accept and close", $"Yes: accept the FAIL on card {c.Card} and close the deliverable.", DecisionActions.CloseOverFail),
            new("No, fix it first", $"No: fix card {c.Card} and have the tester verify it again.")];
 
     private static IReadOnlyList<DecisionOption>? ParseOptions(JsonNode? node)

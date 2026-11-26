@@ -2,7 +2,7 @@
 // What phone-team-drawer.test.ts leaves out. The drawer's "Team <name>" group goes when the team
 // page is left for the Teams list (from a team page, not only before one opens) and for the Monitor / Documents pages;
 // it follows the open team when another team's page opens; widening to the desktop drops it and brings the header's
-// Documents and Workflows back. A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
+// Documents and Deliverables back. A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { nextTick } from 'vue';
@@ -108,18 +108,18 @@ describe('the drawer team group follows the open team page', () => {
     expect([...document.querySelectorAll('[role=dialog]')].map((d) => d.getAttribute('aria-label'))).toEqual(['search · documents']);
   });
 
-  it('widening to the desktop with a team page open: no group, the header has Documents and Workflows again', async () => {
+  it('widening to the desktop with a team page open: no group, the header has Documents and Deliverables again', async () => {
     setWidth(375);
     const w = await mountApp();
     await openTeam(w, 0);
     expect(w.find('[data-test=open-documents]').exists()).toBe(false);
-    expect(w.find('[data-test=open-workflows]').exists()).toBe(false);
+    expect(w.find('[data-test=open-deliverables]').exists()).toBe(false);
     setWidth(1280);
     await nextTick();
     await flushPromises();
     expect(w.find('[data-test=drawer-team]').exists()).toBe(false);
     expect(w.find('[data-test=open-documents]').text()).toBe('Documents');
-    expect(w.find('[data-test=open-workflows]').text()).toBe('Workflows');
+    expect(w.find('[data-test=open-deliverables]').text()).toBe('Deliverables');
     setWidth(375);
     await nextTick();
     expect(w.find('[data-test=open-documents]').exists()).toBe(false);

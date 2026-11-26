@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-// @ts-ignore: a plain .mjs in the repository's scripts, without types
+// @ts-ignore: a plain .mjs in the repository's workflows, without types
 import { buildVersion, csharpSource, isBuildVersion, readBuildVersion, UNKNOWN } from '../../../scripts/build-version.mjs';
 
 // scripts/build-version.mjs, the one source of the build's version (core and shell). Pure cases: git's answers are

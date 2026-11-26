@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Concierge;
 /// <summary>
 /// The Concierge (and the companion) list, run and check a team's host tasks. A run is asked for exactly as an agent's
 /// (the person's Run once / Always, pinned to the files); it is refused on review turns and over the Cloud Link like
-/// workflow_close; its end is one Update in the chat it was asked from.
+/// deliverable_close; its end is one Update in the chat it was asked from.
 /// </summary>
 public sealed class ConciergeHostTaskTests : IAsyncLifetime
 {
@@ -207,7 +207,7 @@ public sealed class ConciergeHostTaskTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Run_IsRefusedOnAReviewTurn_AndOverTheCloudLink_LikeWorkflowClose()
+    public async Task Run_IsRefusedOnAReviewTurn_AndOverTheCloudLink_LikeDeliverableClose()
     {
         await SaveDeploy();
         var (review, reviewError) = await Tools(byPerson: false).CallToolAsync(ConciergeHostTasks.RunTool, RunArgs(), Ct);
@@ -216,10 +216,10 @@ public sealed class ConciergeHostTaskTests : IAsyncLifetime
         var (remote, remoteError) = await Tools(remote: true).CallToolAsync(ConciergeHostTasks.RunTool, RunArgs(), Ct);
         Assert.True(remoteError);
         Assert.Equal(ConciergeActions.RemoteRefusal(ConciergeHostTasks.RunTool), remote);
-        // workflow_close is refused the same way, by the same lists
-        Assert.Contains("workflow_close", ConciergeTools.Acting);
+        // deliverable_close is refused the same way, by the same lists
+        Assert.Contains("deliverable_close", ConciergeTools.Acting);
         Assert.Contains(ConciergeHostTasks.RunTool, ConciergeTools.Acting);
-        Assert.Contains("workflow_close", ConciergeTools.LocalOnly);
+        Assert.Contains("deliverable_close", ConciergeTools.LocalOnly);
         Assert.Contains(ConciergeHostTasks.RunTool, ConciergeTools.LocalOnly);
 
         Assert.Empty(_f.Svc.Store.PendingAsks(_f.TeamId));

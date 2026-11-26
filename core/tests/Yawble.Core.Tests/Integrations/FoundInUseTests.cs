@@ -89,7 +89,7 @@ public class FoundInUseTests
         private async Task<RunResult> Handle(RunContext run, CancellationToken ct)
         {
             // Every item of the batch: a call told while the member's previous run is still ending waits and can be batched
-            // behind another pending message of the workflow (an approval notice, say).
+            // behind another pending message of the deliverable (an approval notice, say).
             foreach (var (id, call) in _calls)
             {
                 if (!run.Items.Any(m => m.Payload.Contains($"call#{id}#", StringComparison.Ordinal))) continue;
@@ -135,11 +135,11 @@ public class FoundInUseTests
 
         public ChecklistNode Node(string cli, long? team, string path) => Integrations.Discover.GetChecklist(cli, team).Nodes.Single(n => n.Path == path);
 
-        /// <summary>Whether Ada was told a text containing this, in the workflow of her first ask.</summary>
+        /// <summary>Whether Ada was told a text containing this, in the deliverable of her first ask.</summary>
         public bool Told(Func<Message, bool> match)
         {
             using var s = Db.OpenStore();
-            return s.Workflow(Integrations.Asks(Alpha, false).First().Workflow).Any(match);
+            return s.Deliverable(Integrations.Asks(Alpha, false).First().Deliverable).Any(match);
         }
 
         public long Scalar(string sql)

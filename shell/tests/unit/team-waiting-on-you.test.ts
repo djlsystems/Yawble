@@ -2,7 +2,7 @@
 // A team whose member has an open needs_decision reads "Waiting on you" in the team header chip,
 // the team list card and the sidebar dot, and the embed sends dot 'waiting'. The teams are fed in the shape the core's
 // teams.list / app.overview really serializes TeamSummary (camelCase, every field: id, name, repoPath, members, running,
-// queued, paused, archived, workflowExpiryDays, waiting), plus an older core's shape with no 'waiting' at all.
+// queued, paused, archived, deliverableExpiryDays, waiting), plus an older core's shape with no 'waiting' at all.
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it } from 'vitest';
 import App from '../../src/renderer/src/App.vue';
@@ -15,7 +15,7 @@ enableAutoUnmount(afterEach);
 
 /** TeamSummary as System.Text.Json writes the core record (camelCase, all fields). */
 const core = (id: number, name: string, o: { running?: number; queued?: number; paused?: boolean; waiting?: number } = {}) =>
-  ({ id, name, repoPath: null, members: 2, running: 0, queued: 0, paused: false, archived: false, workflowExpiryDays: 3, waiting: 0, ...o });
+  ({ id, name, repoPath: null, members: 2, running: 0, queued: 0, paused: false, archived: false, deliverableExpiryDays: 3, waiting: 0, ...o });
 /** An older core: no 'waiting' field. */
 const older = (id: number, name: string) => {
   const { waiting: _w, ...rest } = core(id, name);
@@ -89,7 +89,7 @@ describe('the app reads a waiting team as Waiting on you', () => {
   it('embed: buildNav sends dot waiting, the same as Sidebar.vue draws', () => {
     const s: EmbedNavState = {
       view: 'teams', conversations: [], teams: teams as unknown as TeamSummary[], conversationId: null, teamId: 1,
-      slots: { running: 1, limit: 8, queued: 2 }, readOnly: false, removing: null, openWorkflows: 0,
+      slots: { running: 1, limit: 8, queued: 2 }, readOnly: false, removing: null, openDeliverables: 0,
     };
     const nav = buildNav(s);
     expect(nav.teams.map((t) => t.dot)).toEqual(states);

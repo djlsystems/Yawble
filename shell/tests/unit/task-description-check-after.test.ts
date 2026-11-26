@@ -24,10 +24,10 @@ function fakeApi(answers: Record<string, (params: any) => unknown>) {
 }
 
 const teams = [{ id: 3, name: 'ops', repoPath: null, members: 2, running: 0, queued: 0 }];
-const baseDef: HostTaskDef = { name: 'deploy', repo: 'yawble-cloud', program: 'pwsh', args: ['-File', 'scripts/deploy.ps1'], workdir: '.', timeoutSeconds: 1800, envNames: [], watch: [], pinMode: 'files', commandLineOnly: false };
+const baseDef: HostTaskDef = { name: 'deploy', repo: 'yawble-cloud', program: 'pwsh', args: ['-File', 'workflows/deploy.ps1'], workdir: '.', timeoutSeconds: 1800, envNames: [], watch: [], pinMode: 'files', commandLineOnly: false };
 const info = (def: HostTaskDef): HostTaskInfo => ({
-  id: 1, def, commandLine: 'pwsh -File scripts/deploy.ps1', approval: 'asks', approvedAt: null, approvedCommit: null, approvedBy: null,
-  programResolved: 'C:\\pwsh.exe', commit: 'abcdef1234567890', pinned: ['scripts/deploy.ps1'], warnings: [], problem: null, runningRunId: null, pendingAskId: null, lastRun: null,
+  id: 1, def, commandLine: 'pwsh -File workflows/deploy.ps1', approval: 'asks', approvedAt: null, approvedCommit: null, approvedBy: null,
+  programResolved: 'C:\\pwsh.exe', commit: 'abcdef1234567890', pinned: ['workflows/deploy.ps1'], warnings: [], problem: null, runningRunId: null, pendingAskId: null, lastRun: null,
   updatedAt: '2026-11-17T10:00:00Z', updatedBy: 'me',
 });
 const preview = () => ({ problem: null, programResolved: 'C:\\pwsh.exe', commit: 'abcdef1234567890', pinned: [], warnings: [], commandLineOnly: false });
@@ -100,7 +100,7 @@ describe('host task description and check-after', () => {
     const cleared = lastSave(calls);
     expect('description' in cleared).toBe(false);
     expect('checkAfter' in cleared).toBe(false);
-    expect(cleared).toMatchObject({ name: 'deploy', program: 'pwsh', args: ['-File', 'scripts/deploy.ps1'] });
+    expect(cleared).toMatchObject({ name: 'deploy', program: 'pwsh', args: ['-File', 'workflows/deploy.ps1'] });
   });
 
   it('the task row shows the description and what to check after, and nothing when they are empty', async () => {

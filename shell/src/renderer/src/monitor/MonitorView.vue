@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { workflowTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type WorkflowItem, type WorkflowSummary } from '../../../shared/api';
-import { openWorkflowsPage, workflowItems } from '../workflows/page';
+import { deliverableTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type DeliverableItem, type DeliverableSummary } from '../../../shared/api';
+import { openDeliverablesPage, deliverableItems } from '../deliverables/page';
 import { groupAsks, hostsLabel } from '../networkAskGroups';
 import { FOLDER_ASKS_CHANGED, folderAskMember, pendingFolderAsks, type FolderAsk } from '../folderAsks';
 import { resolveApi } from '../api';
@@ -28,7 +28,7 @@ import {
   DefaultSpeed, DefaultWindowMinutes, inTimeOrder, MaxWindowMinutes, mergeByTime, ReplayClock, ReplayStates, Speeds, timeOf, trimByTime, Windows,
 } from './timeline';
 import { codeEventKey, readCodeEvents, type CodeEvent } from './codemap';
-import { entryTime, workflowLabel, workflowLook, WorkflowIconPath, WorkflowLooks, WorkflowsShown } from './workflows';
+import { entryTime, deliverableLabel, deliverableLook, DeliverableIconPath, DeliverableLooks, DeliverablesShown } from './deliverables';
 
 /**
  * THE MONITOR: every team and its members live on one dark wall (scene.ts), the counts across the top, the state
@@ -46,9 +46,9 @@ import { entryTime, workflowLabel, workflowLook, WorkflowIconPath, WorkflowLooks
  * the same way and build each team's code map with the steps (codemap.ts); a core without the read leaves the map to
  * the steps alone. The replay plays them at their times with the rest.
  *
- * Each team's newest workflows (bus.workflows) sit in one panel hung off its hub, live only: they are fetched when the bus brings that
- * team something and otherwise every WorkflowPollMs, and a replay shows none (it would be faking their history).
- * Clicking one opens the Workflows page at that workflow (no dialog over the Monitor).
+ * Each team's newest deliverables (bus.deliverables) sit in one panel hung off its hub, live only: they are fetched when the bus brings that
+ * team something and otherwise every DeliverablePollMs, and a replay shows none (it would be faking their history).
+ * Clicking one opens the Deliverables page at that deliverable (no dialog over the Monitor).
  *
  * A click on a team's hub focuses it (the scene zooms to it and dims the rest); Esc, a click on the empty wall or the
  * chip's × shows every team again. A click on the You node opens Needs you (emit openNeedsYou). Beside the camera:
@@ -208,7 +208,7 @@ function toggleSound(): void {
  * there is not kept, so the desktop's choice stands), and the camera and legend controls sit in one compact row.
  */
 const phone = useNarrow();
-// The workflow nodes' labels go by the window being phone-wide, not by the wall's canvas.
+// The deliverable nodes' labels go by the window being phone-wide, not by the wall's canvas.
 watch(phone, (on) => scene?.setPhone?.(on));
 const activityOpen = ref(phone.value ? false : (() => { try { return localStorage.getItem('yawble.monitor.activity') !== 'collapsed'; } catch { return true; } })());
 function toggleActivity(): void {
@@ -229,14 +229,14 @@ function publishCounts(): void {
 /** The heavy-work lease line under the counts (null: hidden, the lease is free and nobody waits). */
 const heavy = ref<string | null>(null);
 const hover = ref<SceneHover | null>(null);
-// A workflow node's panel names the backlog item it came from. Looked up (workflows.list) when a workflow
-// is first hovered, once per workflow; an older core without workflows.list names none.
-const itemOf = shallowRef(new Map<number, WorkflowItem | null>());
-const hoverItem = computed(() => (hover.value?.kind === 'workflow' && hover.value.workflow ? itemOf.value.get(hover.value.workflow.id) ?? null : null));
-watch(() => (hover.value?.kind === 'workflow' ? hover.value.workflow?.id ?? null : null), async (id) => {
+// A deliverable node's panel names the backlog item it came from. Looked up (deliverables.list) when a deliverable
+// is first hovered, once per deliverable; an older core without deliverables.list names none.
+const itemOf = shallowRef(new Map<number, DeliverableItem | null>());
+const hoverItem = computed(() => (hover.value?.kind === 'deliverable' && hover.value.deliverable ? itemOf.value.get(hover.value.deliverable.id) ?? null : null));
+watch(() => (hover.value?.kind === 'deliverable' ? hover.value.deliverable?.id ?? null : null), async (id) => {
   if (id == null || itemOf.value.has(id)) return;
   itemOf.value = new Map(itemOf.value).set(id, null);
-  const got = await workflowItems(api, { q: `#${id}`, limit: 20 });
+  const got = await deliverableItems(api, { q: `#${id}`, limit: 20 });
   if (got?.items.has(id)) itemOf.value = new Map(itemOf.value).set(id, got.items.get(id)!);
 });
 // The You node's breakdown: shown while it is hovered (a desktop) or after a tap on it (a phone, until the next tap).
@@ -329,11 +329,11 @@ let replayStates: ReplayStates | null = null;
 /** A step read live counts as happening now when it is this recent (an older one only joins the timeline). */
 const FreshStepMs = 20_000;
 
-/** A team's workflows are fetched again after this long even when the bus brings it nothing. */
-const WorkflowPollMs = 5000;
-const workflowsAt = new Map<number, number>();
-/** The workflows the wall shows, per team, for the list read aloud (and the tests): the canvas draws the same. */
-const workflowRows = shallowRef<{ teamId: number; team: string; list: WorkflowSummary[] }[]>([]);
+/** A team's deliverables are fetched again after this long even when the bus brings it nothing. */
+const DeliverablePollMs = 5000;
+const deliverablesAt = new Map<number, number>();
+/** The deliverables the wall shows, per team, for the list read aloud (and the tests): the canvas draws the same. */
+const deliverableRows = shallowRef<{ teamId: number; team: string; list: DeliverableSummary[] }[]>([]);
 
 const states: MemberState[] = ['running', 'waiting', 'decision', 'blocked', 'failed', 'stopped', 'idle'];
 const stateColor = (s: MemberState) => `color-mix(in srgb, var(--state-${s}) 60%, white)`;
@@ -402,27 +402,27 @@ async function snapshot() {
 }
 
 /**
- * The workflows of each team the bus brought something (`news`, team names in lower case), or not fetched for
- * WorkflowPollMs, or all at the start. A team whose call fails keeps what it showed.
+ * The deliverables of each team the bus brought something (`news`, team names in lower case), or not fetched for
+ * DeliverablePollMs, or all at the start. A team whose call fails keeps what it showed.
  */
-async function workflowFeed(first: boolean, news: Set<string>): Promise<void> {
+async function deliverableFeed(first: boolean, news: Set<string>): Promise<void> {
   const wall = Date.now();
-  const due = teams.value.filter((t) => first || news.has(t.name.toLowerCase()) || wall - (workflowsAt.get(t.id) ?? -Infinity) >= WorkflowPollMs);
+  const due = teams.value.filter((t) => first || news.has(t.name.toLowerCase()) || wall - (deliverablesAt.get(t.id) ?? -Infinity) >= DeliverablePollMs);
   await Promise.all(due.map(async (t) => {
     try {
-      const list = await api.call<WorkflowSummary[]>('bus.workflows', { teamId: t.id, limit: WorkflowsShown });
-      workflowsAt.set(t.id, Date.now());
-      live.setWorkflows(t.name, Array.isArray(list) ? list : []);
-    } catch { workflowsAt.set(t.id, Date.now()); }
+      const list = await api.call<DeliverableSummary[]>('bus.deliverables', { teamId: t.id, limit: DeliverablesShown });
+      deliverablesAt.set(t.id, Date.now());
+      live.setDeliverables(t.name, Array.isArray(list) ? list : []);
+    } catch { deliverablesAt.set(t.id, Date.now()); }
   }));
-  workflowRows.value = teams.value
-    .map((t) => ({ teamId: t.id, team: t.name, list: live.workflows.get(teamKey(t.name)) ?? [] }))
+  deliverableRows.value = teams.value
+    .map((t) => ({ teamId: t.id, team: t.name, list: live.deliverables.get(teamKey(t.name)) ?? [] }))
     .filter((r) => r.list.length);
 }
 
-/** The panel's header opens the Workflows page at the team's workflows; a row (a workflow node) at that workflow. */
-function openWorkflow(teamId: number, workflow?: number) {
-  openWorkflowsPage(workflow !== undefined ? { teamId, workflow } : { teamId });
+/** The panel's header opens the Deliverables page at the team's deliverables; a row (a deliverable node) at that deliverable. */
+function openDeliverable(teamId: number, deliverable?: number) {
+  openDeliverablesPage(deliverable !== undefined ? { teamId, deliverable } : { teamId });
 }
 
 /** The bus feed: new rows animate live (not those read at the start), and all join the timeline. */
@@ -559,7 +559,7 @@ async function tick(first = false) {
     const fr = await feed(first);
     const fs = await stepFeed(first);
     const fe = await codeFeed(first);
-    await workflowFeed(first, new Set(fr.map((r) => r.team.toLowerCase())));
+    await deliverableFeed(first, new Set(fr.map((r) => r.team.toLowerCase())));
     if (first) catchUp(live, [...fr].sort((a, b) => timeOf(a) - timeOf(b)), fs, fe);
     // The need-you items new since the last look fly to the You node and sound, once each; those there when the
     // Monitor opens are counted, not flown.
@@ -693,10 +693,10 @@ onMounted(async () => {
     if (layoutChanged.value) scene.setLayout(layout.value);
     scene.onHover = (h) => { hover.value = h; };
     scene.onPick = onScenePick;
-    scene.onOpenWorkflow = (team, id) => {
+    scene.onOpenDeliverable = (team, id) => {
       pickSeq++;
       const t = teams.value.find((x) => x.name.toLowerCase() === team.toLowerCase());
-      if (t) openWorkflow(t.id, id);
+      if (t) openDeliverable(t.id, id);
     };
     if (density.value !== DefaultDensity) setDensity(density.value);
   }
@@ -828,25 +828,25 @@ onBeforeUnmount(() => {
           <span><i class="tone" :style="{ background: Palette.tell }" />pushed</span>
           <template v-if="mode === 'live'">
             <span class="sep" />
-            <span class="wfl" data-test="monitor-legend-workflows">
-              <span>workflows:</span>
-              <span v-for="l in WorkflowLooks" :key="l.status">
+            <span class="wfl" data-test="monitor-legend-deliverables">
+              <span>deliverables:</span>
+              <span v-for="l in DeliverableLooks" :key="l.status">
                 <svg class="wfi" :class="l.status" viewBox="0 0 16 16" aria-hidden="true" :style="{ color: Palette[l.tone] }">
                   <circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.4" :stroke-dasharray="l.status === 'working' ? '10 4.5' : undefined" />
-                  <path :d="WorkflowIconPath[l.icon]" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                  <path :d="DeliverableIconPath[l.icon]" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>{{ l.label.toLowerCase() }}
               </span>
             </span>
           </template>
         </div>
-        <ul v-if="mode === 'live' && workflowRows.length" class="sr-only" aria-label="Workflows" data-test="monitor-workflows">
-          <template v-for="r in workflowRows" :key="r.teamId">
+        <ul v-if="mode === 'live' && deliverableRows.length" class="sr-only" aria-label="Deliverables" data-test="monitor-deliverables">
+          <template v-for="r in deliverableRows" :key="r.teamId">
             <li>
-              <button type="button" data-test="monitor-workflows-team" @click="openWorkflow(r.teamId)">{{ r.team }}: workflows, last updated first</button>
+              <button type="button" data-test="monitor-deliverables-team" @click="openDeliverable(r.teamId)">{{ r.team }}: deliverables, last updated first</button>
             </li>
             <li v-for="w in r.list" :key="w.id">
-              <button type="button" data-test="monitor-workflow" :data-id="w.id" @click="openWorkflow(r.teamId, w.id)">
-                {{ r.team }}: {{ workflowLabel(w) }} · {{ workflowLook(w).label }} · {{ w.state === 'open' ? 'last entry' : 'ended' }} {{ entryTime(workflowTime(w)) }}
+              <button type="button" data-test="monitor-deliverable" :data-id="w.id" @click="openDeliverable(r.teamId, w.id)">
+                {{ r.team }}: {{ deliverableLabel(w) }} · {{ deliverableLook(w).label }} · {{ w.state === 'open' ? 'last entry' : 'ended' }} {{ entryTime(deliverableTime(w)) }}
               </button>
             </li>
           </template>
@@ -881,14 +881,14 @@ onBeforeUnmount(() => {
             <span :style="{ color: Palette.commit }">{{ hover.sha }} · {{ hover.touches }} file{{ hover.touches === 1 ? '' : 's' }}</span>
             <span class="dim">{{ spaced(hover.name) }} · {{ hover.team }}</span>
           </template>
-          <template v-else-if="hover.kind === 'workflow' && hover.workflow">
-            <strong>#{{ hover.workflow.id }} {{ hover.workflow.title }}</strong>
+          <template v-else-if="hover.kind === 'deliverable' && hover.deliverable">
+            <strong>#{{ hover.deliverable.id }} {{ hover.deliverable.title }}</strong>
             <span v-if="hoverItem" class="dim" data-test="monitor-tip-item">Backlog item <b>{{ hoverItem.label }}</b>{{ hoverItem.archived ? ' (archived)' : '' }}</span>
-            <span :style="{ color: Palette[workflowLook(hover.workflow).tone] }">{{ workflowLook(hover.workflow).label }}</span>
-            <span v-if="hover.workflow.busy.length" class="dim">{{ hover.workflow.busy.join(' · ') }}</span>
-            <span v-else-if="hover.workflow.ending" class="dim">{{ hover.workflow.state === 'closed' ? 'Closed' : hover.workflow.state === 'expired' ? 'Expired' : 'Delivered' }}: {{ hover.workflow.ending }}</span>
-            <span class="dim">started {{ entryTime(hover.workflow.startedAt) }} · last entry {{ entryTime(hover.workflow.lastAt) }}</span>
-            <span class="dim">{{ hover.workflow.messages }} message{{ hover.workflow.messages === 1 ? '' : 's' }} · {{ hover.team }} · click to open</span>
+            <span :style="{ color: Palette[deliverableLook(hover.deliverable).tone] }">{{ deliverableLook(hover.deliverable).label }}</span>
+            <span v-if="hover.deliverable.busy.length" class="dim">{{ hover.deliverable.busy.join(' · ') }}</span>
+            <span v-else-if="hover.deliverable.ending" class="dim">{{ hover.deliverable.state === 'closed' ? 'Closed' : hover.deliverable.state === 'expired' ? 'Expired' : 'Delivered' }}: {{ hover.deliverable.ending }}</span>
+            <span class="dim">started {{ entryTime(hover.deliverable.startedAt) }} · last entry {{ entryTime(hover.deliverable.lastAt) }}</span>
+            <span class="dim">{{ hover.deliverable.messages }} message{{ hover.deliverable.messages === 1 ? '' : 's' }} · {{ hover.team }} · click to open</span>
           </template>
           <template v-else>
             <strong>{{ hover.kind === 'team' ? hover.name : spaced(hover.name) }}</strong>
@@ -897,7 +897,7 @@ onBeforeUnmount(() => {
             <span v-if="hover.statusLine" class="dim">"{{ hover.statusLine }}"</span>
           </template>
         </div>
-        <div v-if="!loaded" class="empty" data-test="monitor-loading"><LoadingNote text="Loading the Monitor (teams, workflows and the last hour)…" /></div>
+        <div v-if="!loaded" class="empty" data-test="monitor-loading"><LoadingNote text="Loading the Monitor (teams, deliverables and the last hour)…" /></div>
         <div v-if="loaded && !error && !teams.length" class="empty">No teams yet. Create one from Teams, and its members appear here as they work.</div>
         <div v-if="error" class="empty err">{{ error }}</div>
       </div>

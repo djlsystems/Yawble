@@ -1,6 +1,6 @@
 ---
 name: recovery
-description: How to pick work back up after an interruption - a run cut off by the app closing, a failed run, a nudge, or the reminder that an open workflow has nobody working it.
+description: How to pick work back up after an interruption - a run cut off by the app closing, a failed run, a nudge, or the reminder that an open deliverable has nobody working it.
 roles: [manager, member]
 ---
 # Recovery
@@ -12,11 +12,11 @@ Work stopped part-way. Your job is to resume it, not to start it again.
 - The app closed or restarted mid-run: the run-ended message says the run "was interrupted", or you are woken
   once after a restart because your run was cut off.
 - A run failed: "... run failed: <reason>". A failure is the run not finishing, not a verdict on the work.
-- The person nudged you, or the app reminded you that a workflow is open with nobody working it.
+- The person nudged you, or the app reminded you that a deliverable is open with nobody working it.
 
 ## Read the state before you touch anything
 
-1. `workflow_show` for the workflow you were woken about: the instruction, every tell, hand-back, block and
+1. `deliverable_show` for the deliverable you were woken about: the instruction, every tell, hand-back, block and
    decision so far. Find the last step that really finished.
 2. `status`: who is running, who is queued, who is idle. (Manager.)
 3. `board` with `action: show`: which cards are done, in progress, or waiting on the person. (Manager.)

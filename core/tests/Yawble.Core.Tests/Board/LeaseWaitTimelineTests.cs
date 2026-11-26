@@ -12,7 +12,7 @@ namespace Yawble.Core.Tests.Board;
 /// <summary>
 /// A run's time in the heavy-work lease's queue is Waiting for a slot, not Agent working, on its card and
 /// on a card-less member's row, while it still waits (live) and after it is given the lease (and after the run ended).
-/// A REAL lease queue on a started engine; the runs are scripted fakes with no idle clock (as in WorkflowsLiveStatesVerifyTests,
+/// A REAL lease queue on a started engine; the runs are scripted fakes with no idle clock (as in DeliverablesLiveStatesVerifyTests,
 /// where Ben's card 4 counted its wait as Agent working), and one fake clock for the bus and the board.
 /// </summary>
 public class LeaseWaitTimelineTests
@@ -57,7 +57,7 @@ public class LeaseWaitTimelineTests
             managerEnd = new(TaskCreationOptions.RunContinuationsAsynchronously);
         string? adaLease = null, adaLease2 = null, benLease = null, managerLease = null;
         var managerRuns = 0;
-        long? managerWorkflow = null;
+        long? managerDeliverable = null;
         runner.On("Web/Ada", async (run, ct) =>
         {
             adaLease = await Tool(run, "lease", new { action = "acquire", what = "full test suite" });
@@ -67,7 +67,7 @@ public class LeaseWaitTimelineTests
             adaLease2 = await Tool(run, "lease", new { action = "acquire", what = "full test suite again" });
             await adaRelease2.Task.WaitAsync(ct);
             await Tool(run, "lease", new { action = "release" });
-            await Task.Delay(Timeout.Infinite, ct); // runs on: its end would wake the Manager in Ada's workflow
+            await Task.Delay(Timeout.Infinite, ct); // runs on: its end would wake the Manager in Ada's deliverable
             return RunResult.Ok;
         })
         .On("Web/Ben", async (run, ct) =>
@@ -79,7 +79,7 @@ public class LeaseWaitTimelineTests
         .On("Web/Manager", async (run, ct) =>
         {
             if (Interlocked.Increment(ref managerRuns) > 1) return RunResult.Ok;
-            managerWorkflow = run.Correlation;
+            managerDeliverable = run.Correlation;
             managerLease = await Tool(run, "lease", new { action = "acquire", what = "merge build" });
             await managerEnd.Task.WaitAsync(ct);
             return RunResult.Ok;
@@ -98,15 +98,15 @@ public class LeaseWaitTimelineTests
 
         async Task<string[]> Holders() => [.. (await engine.LeaseSnapshotAsync(Ct)).Holders.Select(h => h.Member)];
         async Task<string[]> Queue() => [.. (await engine.LeaseSnapshotAsync(Ct)).Queue.Select(h => h.Member)];
-        async Task<CardTimeline> BenCard(long workflow)
+        async Task<CardTimeline> BenCard(long deliverable)
         {
             await service.ProjectAsync(Ct);
-            return timeline.OfCard(board.CardOf("Web", "Ben", workflow)!, await engine.LiveActivityAsync(Ct), clock.Now);
+            return timeline.OfCard(board.CardOf("Web", "Ben", deliverable)!, await engine.LiveActivityAsync(Ct), clock.Now);
         }
-        async Task<Dictionary<string, long>> ManagerRow(long workflow)
+        async Task<Dictionary<string, long>> ManagerRow(long deliverable)
         {
             await service.ProjectAsync(Ct);
-            var w = timeline.OfWorkflow(workflow, await engine.WorkflowThreadAsync(workflow, Ct), await engine.LiveActivityAsync(Ct), clock.Now)!;
+            var w = timeline.OfDeliverable(deliverable, await engine.DeliverableThreadAsync(deliverable, Ct), await engine.LiveActivityAsync(Ct), clock.Now)!;
             Assert.DoesNotContain(w.Rows, r => r.Card is not null && r.Member == "Manager"); // the Manager has no card in it
             return Sums(w.Rows.Single(r => r.Card is null && r.Member == "Manager").Bands);
         }
@@ -118,13 +118,13 @@ public class LeaseWaitTimelineTests
 
         // 09:01 Ben is told; his run asks for the lease and waits in its queue (his card stays queued: no progress).
         clock.Advance(Min);
-        var benWorkflow = (await engine.PersonTellAsync("Web", "Ben", "build the page", ct: Ct)).Seq;
+        var benDeliverable = (await engine.PersonTellAsync("Web", "Ben", "build the page", ct: Ct)).Seq;
         await Wait.UntilAsync(() => benLease is not null, "Ben asks for the lease");
         Assert.StartsWith("queued, position 1", benLease);
 
         // 09:06, still waiting: all of the card's time so far is Waiting for a slot (live).
         clock.Advance(5 * Min);
-        var live = await BenCard(benWorkflow);
+        var live = await BenCard(benDeliverable);
         Assert.True(live.Time.Open);
         Assert.Equal(Expect((TimeCategories.WaitingForSlot, 5 * Min)), Sums(live.Time));
 
@@ -132,43 +132,43 @@ public class LeaseWaitTimelineTests
         adaRelease.SetResult();
         await Wait.UntilAsync(async () => (await Holders()).SequenceEqual(["Ben"]), "Ben is given the lease");
         clock.Advance(3 * Min);
-        var granted = await BenCard(benWorkflow);
+        var granted = await BenCard(benDeliverable);
         Assert.Equal(Expect((TimeCategories.WaitingForSlot, 5 * Min), (TimeCategories.AgentWorking, 3 * Min)), Sums(granted.Time));
         Assert.Equal([TimeCategories.WaitingForSlot, TimeCategories.AgentWorking], granted.Bands.Select(b => b.Category));
         Assert.Equal(clock.Now - 3 * Min, granted.Bands[0].End);
 
         // 09:09 Ada asks again and queues behind Ben. Ben's run ends (his card is done, the lease goes to Ada) without handing
-        // back, which wakes the Manager in Ben's workflow, where it has no card: its run asks for the lease and waits.
+        // back, which wakes the Manager in Ben's deliverable, where it has no card: its run asks for the lease and waits.
         adaAgain.SetResult();
         await Wait.UntilAsync(() => adaLease2 is not null, "Ada asks for the lease again");
         Assert.StartsWith("queued, position 1", adaLease2);
         benEnd.SetResult();
         await Wait.UntilAsync(() => managerLease is not null, "the Manager asks for the lease");
-        Assert.Equal(benWorkflow, managerWorkflow);
+        Assert.Equal(benDeliverable, managerDeliverable);
         Assert.StartsWith("queued, position 1", managerLease);
         Assert.Equal(["Ada"], await Holders());
 
         // 09:13, the Manager still waiting: its card-less row is Waiting for a slot (live). Ben's card ended at 09:09.
         clock.Advance(4 * Min);
-        var done = await BenCard(benWorkflow);
+        var done = await BenCard(benDeliverable);
         Assert.False(done.Time.Open);
         Assert.Equal(Expect((TimeCategories.WaitingForSlot, 5 * Min), (TimeCategories.AgentWorking, 3 * Min)), Sums(done.Time));
-        Assert.Equal(Expect((TimeCategories.WaitingForSlot, 4 * Min)), await ManagerRow(benWorkflow));
+        Assert.Equal(Expect((TimeCategories.WaitingForSlot, 4 * Min)), await ManagerRow(benDeliverable));
 
         // 09:13 Ada releases: the Manager is given the lease. 09:15: the wait stays Waiting for a slot.
         adaRelease2.SetResult();
         await Wait.UntilAsync(async () => (await Holders()).SequenceEqual(["Manager"]) && (await Queue()).Length == 0, "the Manager is given the lease");
         clock.Advance(2 * Min);
-        Assert.Equal(Expect((TimeCategories.WaitingForSlot, 4 * Min), (TimeCategories.AgentWorking, 2 * Min)), await ManagerRow(benWorkflow));
+        Assert.Equal(Expect((TimeCategories.WaitingForSlot, 4 * Min), (TimeCategories.AgentWorking, 2 * Min)), await ManagerRow(benDeliverable));
 
         // 09:15 the Manager's run ends: what is stored from its end (no live run any more) says the same, and so does Ben's card.
         managerEnd.SetResult();
         await Wait.UntilAsync(async () => (await Holders()).Length == 0, "the Manager's run ends and gives the lease back");
-        await Wait.UntilAsync(async () => (await engine.WorkflowThreadAsync(benWorkflow, Ct))
+        await Wait.UntilAsync(async () => (await engine.DeliverableThreadAsync(benDeliverable, Ct))
             .Count(m => m.Type == MessageTypes.Completed && m.Source == "Web/Manager") >= 1, "the Manager's run end is published");
         clock.Advance(Min);
-        Assert.Equal(Expect((TimeCategories.WaitingForSlot, 4 * Min), (TimeCategories.AgentWorking, 2 * Min)), await ManagerRow(benWorkflow));
-        Assert.Equal(Expect((TimeCategories.WaitingForSlot, 5 * Min), (TimeCategories.AgentWorking, 3 * Min)), Sums((await BenCard(benWorkflow)).Time));
+        Assert.Equal(Expect((TimeCategories.WaitingForSlot, 4 * Min), (TimeCategories.AgentWorking, 2 * Min)), await ManagerRow(benDeliverable));
+        Assert.Equal(Expect((TimeCategories.WaitingForSlot, 5 * Min), (TimeCategories.AgentWorking, 3 * Min)), Sums((await BenCard(benDeliverable)).Time));
     }
 
     [Fact]

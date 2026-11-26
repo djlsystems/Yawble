@@ -40,9 +40,10 @@ public class AuditClassificationTests
         "board.move",
         "board.restore",
         "bus.answer",
-        "bus.closeWorkflow",
-        "bus.nudgeWorkflow",
-        "bus.stopWorkflow",
+        "bus.closeDeliverable",
+        "goals.save", "goals.delete", "goals.assign",
+        "bus.nudgeDeliverable",
+        "bus.stopDeliverable",
         "bus.tellManager",
         "companion.decideAction",
         "companion.decidePairing",
@@ -137,9 +138,9 @@ public class AuditClassificationTests
         "skills.delete",
         "skills.restore",
         "skills.save",
-        // The script library, schemas, Test run and script members.
-        "schemas.import", "schemas.save", "scripts.delete", "scripts.import", "scripts.memberAdd", "scripts.memberResetVariable", "scripts.memberUpdate",
-        "scripts.save", "scripts.testRun", "scripts.setSettings", "scripts.cancelRun",
+        // The workflow library, schemas, Test run and workflow members.
+        "schemas.import", "schemas.save", "workflows.delete", "workflows.import", "workflows.memberAdd", "workflows.memberResetVariable", "workflows.memberUpdate",
+        "workflows.save", "workflows.testRun", "workflows.setSettings", "workflows.cancelRun",
         "tasks.approve",
         "tasks.cancel",
         "tasks.decline",
@@ -166,7 +167,7 @@ public class AuditClassificationTests
         "teams.setRepo",
         "teams.syncToBase",
         "teams.unarchive",
-        "teams.workflowExpiry",
+        "teams.deliverableExpiry",
         "terminal.openInteractive",
         "terminal.stop",
         "tools.checkAgain",
@@ -219,8 +220,8 @@ public class AuditClassificationTests
     [InlineData("integrations.mcpImportScan")]
     [InlineData("integrations.mcpCheck")]
     [InlineData("agents.resolveModel")]
-    [InlineData("workflows.list")]
-    [InlineData("workflows.get")]
+    [InlineData("deliverables.list")]
+    [InlineData("deliverables.get")]
     public void TheScreensPollsAndLookups_AreNotAudited(string method)
     {
         var dir = Directory.CreateTempSubdirectory("yawble-audit-").FullName;

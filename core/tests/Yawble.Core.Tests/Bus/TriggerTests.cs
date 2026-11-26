@@ -69,7 +69,7 @@ public class TriggerTests
         new(null, member, "nightly check", new TriggerSchedule(TriggerKinds.Every, seconds, null, null, null), "Check the build.", onlyWhenIdle, true);
 
     [Fact]
-    public async Task ADueTriggerTellsItsMemberAsANewWorkflow_AndArmsTheNextFire()
+    public async Task ADueTriggerTellsItsMemberAsANewDeliverable_AndArmsTheNextFire()
     {
         var (db, engine, ada) = await Team();
         using (db)
@@ -86,7 +86,7 @@ public class TriggerTests
             var m = store.Find(told.LastSeq!.Value)!;
             Assert.Equal(MessageTypes.Instruction(ada), m.Type);
             Assert.Equal($"trigger:{t.Id}", m.Source);
-            Assert.Null(m.CausationSeq); // a new workflow
+            Assert.Null(m.CausationSeq); // a new deliverable
             Assert.Contains("Check the build.", m.Payload);
         }
     }
@@ -170,7 +170,7 @@ public class TriggerTests
     }
 
     [Fact]
-    public async Task WakeMe_TellsTheSameMemberItsNote_InsideTheSameWorkflow()
+    public async Task WakeMe_TellsTheSameMemberItsNote_InsideTheSameDeliverable()
     {
         var runner = new ScriptedRunner();
         DateTimeOffset? due = null;

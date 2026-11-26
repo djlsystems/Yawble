@@ -6,9 +6,9 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// A hand-back waits only for the run that sent it (not the sender's next run in another workflow), and the
+/// A hand-back waits only for the run that sent it (not the sender's next run in another deliverable), and the
 /// undelivered work's real waiting states: queued (run queue) | waits-for-run (waitsFor: the sender) | held | pending,
-/// on the Workflows page's members, in team status and the agent cards, the companion's text and the timeline (only a
+/// on the Deliverables page's members, in team status and the agent cards, the companion's text and the timeline (only a
 /// real run-queue wait is Waiting for a slot). Fake runners only.
 /// </summary>
 public class HandbackOwnRunTests
@@ -35,8 +35,8 @@ public class HandbackOwnRunTests
         lock (runner.Admitted) return [.. runner.Admitted.Where(r => r.Member.Role == MemberRole.Manager)];
     }
 
-    private static async Task<WorkflowWorker?> Worker(BusEngine engine, long workflow, string name) =>
-        (await engine.WorkflowRowAsync(workflow, Ct))?.Members.FirstOrDefault(m => m.Name == name);
+    private static async Task<DeliverableWorker?> Worker(BusEngine engine, long deliverable, string name) =>
+        (await engine.DeliverableRowAsync(deliverable, Ct))?.Members.FirstOrDefault(m => m.Name == name);
 
     private static async Task<MemberStatus> Status(BusEngine engine, string name) =>
         (await engine.TeamStatusAsync("Alpha", Ct)).Single(s => s.Name == name);
@@ -44,7 +44,7 @@ public class HandbackOwnRunTests
     // ---------------------------------------------------------------- bug 1: the hand-back's own run
 
     [Fact]
-    public async Task AHandbackWhoseRunEnded_ReachesTheManager_WithoutWaitingForTheSendersNextRunInAnotherWorkflow()
+    public async Task AHandbackWhoseRunEnded_ReachesTheManager_WithoutWaitingForTheSendersNextRunInAnotherDeliverable()
     {
         var second = new TaskCompletionSource();
         var firstGo = new TaskCompletionSource();
@@ -57,7 +57,7 @@ public class HandbackOwnRunTests
                 await run.HandbackAsync("committed on members/ada", ct);
                 return RunResult.Ok;
             }
-            await second.Task.WaitAsync(ct); // Ada's run in workflow 2 goes on and on
+            await second.Task.WaitAsync(ct); // Ada's run in deliverable 2 goes on and on
             return RunResult.Ok;
         });
         using var db = new TempDb();
@@ -67,7 +67,7 @@ public class HandbackOwnRunTests
         var other = (await engine.PersonTellAsync("Alpha", "Ada", "and the other thing", ct: Ct)).CorrelationId;
         Assert.NotEqual(first, other);
 
-        firstGo.SetResult(); // Ada hands back, its run ends, and its run in workflow 2 starts at once
+        firstGo.SetResult(); // Ada hands back, its run ends, and its run in deliverable 2 starts at once
         await Wait.UntilAsync(() => ManagerRuns(runner).Length == 1, "the Manager's run while Ada's second run is still going");
         Assert.Contains(runner.Admitted, r => r.Member.Name == "Ada" && r.Correlation == other);
         Assert.False(second.Task.IsCompleted);
@@ -106,11 +106,11 @@ public class HandbackOwnRunTests
             Assert.Equal(adaRun.RunId, JsonDocument.Parse(handback.Payload).RootElement.GetProperty("runId").GetInt64());
         }
 
-        // waits-for-run, with the sender's name, on the Workflows page, in team status and on the agent card.
+        // waits-for-run, with the sender's name, on the Deliverables page, in team status and on the agent card.
         await Wait.UntilAsync(async () => (await Worker(engine, wf, "Manager"))?.State == WaitStates.WaitsForRun, "the Manager waits for Ada's run");
         var worker = (await Worker(engine, wf, "Manager"))!;
         Assert.Equal("Ada", worker.WaitsFor);
-        Assert.Equal(BusEngine.WorkflowStatuses.Running, (await engine.WorkflowRowAsync(wf, Ct))!.Status); // Ada's run still works it
+        Assert.Equal(BusEngine.DeliverableStatuses.Running, (await engine.DeliverableRowAsync(wf, Ct))!.Status); // Ada's run still works it
         var status = await Status(engine, "Manager");
         Assert.Equal((1, WaitStates.WaitsForRun, "Ada", "idle"), (status.QueuedInstructions, status.WaitState, status.WaitsFor, status.State));
         var card = (await engine.AgentCardsAsync((await engine.TeamsAsync(Ct)).Single().Id, Ct)).Single(c => c.Member.Name == "Manager");
@@ -150,7 +150,7 @@ public class HandbackOwnRunTests
             // held: the team is paused.
             await Wait.UntilAsync(async () => (await Worker(engine, wf, "Manager"))?.State == WaitStates.Held, "the Manager's delivery held");
             Assert.Null((await Worker(engine, wf, "Manager"))!.WaitsFor);
-            Assert.Equal(WaitStates.Held, (await engine.WorkflowRowAsync(wf, Ct))!.WaitingFor);
+            Assert.Equal(WaitStates.Held, (await engine.DeliverableRowAsync(wf, Ct))!.WaitingFor);
             Assert.Equal(WaitStates.Held, (await Status(engine, "Manager")).WaitState);
             var held = await Card(engine, "Manager");
             Assert.Equal((WaitStates.Held, (string?)null), (held.State, held.WaitsFor));
@@ -182,17 +182,17 @@ public class HandbackOwnRunTests
 
         await Wait.UntilAsync(async () => (await Worker(engine, wf, "Manager"))?.State == WaitStates.Queued, "the Manager queued for the slot");
         Assert.Null((await Worker(engine, wf, "Manager"))!.WaitsFor);
-        var row = (await engine.WorkflowRowAsync(wf, Ct))!;
-        Assert.Equal((BusEngine.WorkflowStatuses.Waiting, "slot"), (row.Status, row.WaitingFor));
+        var row = (await engine.DeliverableRowAsync(wf, Ct))!;
+        Assert.Equal((BusEngine.DeliverableStatuses.Waiting, "slot"), (row.Status, row.WaitingFor));
         var status = await Status(engine, "Manager");
         Assert.Equal(("queued", 1, WaitStates.Queued), (status.State, status.QueuedInstructions, status.WaitState));
         Assert.Equal(WaitStates.Queued, (await Card(engine, "Manager")).State);
         Assert.Equal("running", (await Card(engine, "Ada")).State);
 
-        // The timeline's live wait: a member in the run queue now is Waiting for a slot for that workflow.
+        // The timeline's live wait: a member in the run queue now is Waiting for a slot for that deliverable.
         var live = await engine.LiveActivityAsync(Ct);
         var entry = Assert.Single(live, a => a.Member == "Manager");
-        Assert.Equal(wf, entry.Workflow);
+        Assert.Equal(wf, entry.Deliverable);
         Assert.NotNull(entry.QueuedSince);
 
         release.SetResult();
@@ -216,8 +216,8 @@ public class HandbackOwnRunTests
         var wf = (await engine.PersonTellAsync("Alpha", "Ada", "the next one", ct: Ct)).CorrelationId;
 
         await Wait.UntilAsync(async () => (await Worker(engine, wf, "Ada"))?.State == WaitStates.Pending, "Ada's second delivery pending");
-        var row = (await engine.WorkflowRowAsync(wf, Ct))!;
-        Assert.Equal((BusEngine.WorkflowStatuses.Waiting, WaitStates.Pending), (row.Status, row.WaitingFor));
+        var row = (await engine.DeliverableRowAsync(wf, Ct))!;
+        Assert.Equal((BusEngine.DeliverableStatuses.Waiting, WaitStates.Pending), (row.Status, row.WaitingFor));
         var status = await Status(engine, "Ada");
         Assert.Equal(("running", 1, WaitStates.Pending), (status.State, status.QueuedInstructions, status.WaitState));
         Assert.Equal("running", (await Card(engine, "Ada")).State); // running wins over its own work waiting

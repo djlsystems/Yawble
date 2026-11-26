@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// No way around the tester rule. Declaring the workflow complete (item 1), a developer's move (item 2)
+/// No way around the tester rule. Declaring the deliverable complete (item 1), a developer's move (item 2)
 /// and someone else's hand-back (item 3) do not put an untested tester's card in Done; only the tester's own hand-back
 /// or finished run after the card's latest assignment counts as tested (item 4); and who is a tester (item 5).
 /// Fakes only: the projector fed hand-made messages, and the scripted runner's bus.
@@ -18,12 +18,12 @@ public class BoardTesterRuleTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private long _seq = 100;
 
-    private Message M(string type, object payload, string source, long workflow) =>
-        new(++_seq, type, JsonSerializer.Serialize(payload), source, workflow, null, 0, DateTimeOffset.UtcNow);
+    private Message M(string type, object payload, string source, long deliverable) =>
+        new(++_seq, type, JsonSerializer.Serialize(payload), source, deliverable, null, 0, DateTimeOffset.UtcNow);
 
-    private Message Claim(string member, long card, long workflow) =>
+    private Message Claim(string member, long card, long deliverable) =>
         new(++_seq, "agent.instruction.payments/" + member, new JsonObject { ["text"] = "work card " + card, ["card"] = card }.ToJsonString(),
-            "payments/Manager", workflow, null, 0, DateTimeOffset.UtcNow);
+            "payments/Manager", deliverable, null, 0, DateTimeOffset.UtcNow);
 
     private static (TempDb Db, BoardStore Store, BoardProjector P) Board(params string[] testers)
     {
@@ -33,10 +33,10 @@ public class BoardTesterRuleTests
         return (db, store, new BoardProjector(store) { TestersOf = team => team == "payments" ? set : new HashSet<string>() });
     }
 
-    // ---------------------------------------------------------------- item 1: workflow_complete
+    // ---------------------------------------------------------------- item 1: deliverable_complete
 
     [Fact]
-    public void Item1_DeclaringTheWorkflowComplete_LeavesOutTheUntestedTesterCard_WithAComment()
+    public void Item1_DeclaringTheDeliverableComplete_LeavesOutTheUntestedTesterCard_WithAComment()
     {
         var (db, store, p) = Board("TesterWren");
         using var _ = db;
@@ -46,7 +46,7 @@ public class BoardTesterRuleTests
         p.Apply(Claim("DeveloperPriya", fix.Id, 20));
         p.Apply(M(MessageTypes.Handback, new { delivered = "fixed" }, "payments/DeveloperPriya", 20));
 
-        p.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "all done" }, "payments/Manager", 20));
+        p.Apply(M(MessageTypes.DeliverableCompleted, new { delivered = "all done" }, "payments/Manager", 20));
 
         Assert.Equal(Lanes.Done, store.Card(fix.Id)!.Lane);
         var left = store.Card(verify.Id)!;
@@ -56,7 +56,7 @@ public class BoardTesterRuleTests
         Assert.Contains("Left out of Done", comment.Text);
         Assert.Contains("TesterWren has not tested it", comment.Text);
         Assert.Contains($"tell (card: {verify.Id})", comment.Text);
-        Assert.DoesNotContain(store.Trail(verify.Id), t => t.Kind == "workflow done");
+        Assert.DoesNotContain(store.Trail(verify.Id), t => t.Kind == "deliverable done");
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class BoardTesterRuleTests
         p.Apply(Claim("TesterWren", verify.Id, 21));
         p.Apply(M(MessageTypes.Progress, new { status = "testing" }, "payments/TesterWren", 21));
         p.Apply(M(MessageTypes.Handback, new { delivered = "12 passed" }, "payments/TesterWren", 21));
-        p.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "done" }, "payments/Manager", 21));
+        p.Apply(M(MessageTypes.DeliverableCompleted, new { delivered = "done" }, "payments/Manager", 21));
         Assert.Equal(Lanes.Done, store.Card(verify.Id)!.Lane);
         Assert.DoesNotContain(store.Trail(verify.Id), t => t.Kind == "comment");
 
@@ -76,7 +76,7 @@ public class BoardTesterRuleTests
         using var __ = db2;
         var card = store2.AddCard("payments", null, null, "Verify", "spec", "queued", Lanes.Todo, 22);
         p2.Apply(Claim("TesterWren", card.Id, 22));
-        p2.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "done" }, "payments/Manager", 22));
+        p2.Apply(M(MessageTypes.DeliverableCompleted, new { delivered = "done" }, "payments/Manager", 22));
         Assert.Equal(Lanes.Done, store2.Card(card.Id)!.Lane);
     }
 
@@ -140,7 +140,7 @@ public class BoardTesterRuleTests
     }
 
     /// <summary>A tester's run that ended without handing back (stopped, or cut off after its final answer:
-    /// completed with exit -1) is not a test; workflow_complete leaves the card out. One that handed back is.</summary>
+    /// completed with exit -1) is not a test; deliverable_complete leaves the card out. One that handed back is.</summary>
     [Theory]
     [InlineData("""{"reason":"ok","handedBack":false}""")]
     [InlineData("""{"reason":"stopped","handedBack":false,"run":{"end":"stopped","exitCode":-1}}""")]
@@ -158,7 +158,7 @@ public class BoardTesterRuleTests
         Assert.Equal("TesterWren", TesterRule.UntestedTester(store.Card(card.Id)!, store.Trail(card.Id), Set("TesterWren")));
         Assert.NotEqual(Lanes.Done, store.Card(card.Id)!.Lane);
 
-        p.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "done" }, "payments/Manager", 44));
+        p.Apply(M(MessageTypes.DeliverableCompleted, new { delivered = "done" }, "payments/Manager", 44));
         Assert.NotEqual(Lanes.Done, store.Card(card.Id)!.Lane);
         Assert.Contains(store.Trail(card.Id), t => t.Kind == "comment" && t.Text.StartsWith("Left out of Done") && t.Text.Contains("TesterWren has not tested it"));
     }

@@ -7,7 +7,7 @@ import type { Decision, YawbleApi } from '../../src/shared/api';
 // A decision with a summary and two options renders summary, the two option buttons,
 // Discuss with the Concierge and a collapsed Details, with no Approve / Always approve. Fakes only.
 const decision: Decision = {
-  seq: 77, from: 'Manager', workflow: 9, at: '',
+  seq: 77, from: 'Manager', deliverable: 9, at: '',
   question: 'Tests can\'t run: the sandbox blocks localhost.',
   summary: 'Tests can\'t run: the sandbox blocks localhost.',
   details: '1. Build: succeeded.\n2. dotnet test: SocketException (13).',

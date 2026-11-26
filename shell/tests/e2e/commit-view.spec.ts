@@ -68,7 +68,7 @@ test('1280 x 800: a member branch commit from the Git dialog: what, where, files
   const view = page.locator('[data-test=commit-view]');
   await expect(view.locator('[data-test=commit-title]')).toHaveText('Partial refunds: refund part of a payment');
   await expect(view.locator('[data-test=commit-sha]')).toHaveText(ADA);
-  await expect(view.locator('[data-test=commit-made]')).toHaveText('Developer Ada · card 3 · workflow #10');
+  await expect(view.locator('[data-test=commit-made]')).toHaveText('Developer Ada · card 3 · deliverable #10');
   await expect(view.locator('[data-test=commit-where-team]')).toHaveText('In the team branch only, not in main yet');
   await expect(view.locator('[data-test=commit-where-unpushed]')).toHaveText('Not pushed: only on this computer');
   await expect(view.locator('[data-test=commit-file]')).toHaveCount(3);

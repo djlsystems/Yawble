@@ -901,8 +901,8 @@ public class ConciergeActionTests : IDisposable
             ("team_create", new() { ["name"] = "beta", ["repo_path"] = other }),
             ("team_pause", new() { ["team"] = "alpha" }),
             ("team_resume", new() { ["team"] = "alpha" }),
-            ("workflow_nudge", new() { ["team"] = "alpha", ["workflow"] = 1 }),
-            ("workflow_close", new() { ["team"] = "alpha", ["workflow"] = 1 }),
+            ("deliverable_nudge", new() { ["team"] = "alpha", ["deliverable"] = 1 }),
+            ("deliverable_close", new() { ["team"] = "alpha", ["deliverable"] = 1 }),
             ("backlog_add", new() { ["title"] = "steered" }),
             ("team_repo_add", new() { ["team"] = "alpha", ["name"] = "docs", ["repo_path"] = other }),
             ("team_repo_remove", new() { ["team"] = "alpha", ["name"] = "docs" }),
@@ -925,9 +925,9 @@ public class ConciergeActionTests : IDisposable
         Assert.StartsWith("ok: watch", await CallTool(Tools(review), "watch", new() { ["team"] = "alpha", ["what"] = "x", ["hours"] = 1 }));
         Assert.Empty(calls);
 
-        // Through the Cloud Link: making a team, adding or removing a repository and closing a workflow stay on the computer.
+        // Through the Cloud Link: making a team, adding or removing a repository and closing a deliverable stay on the computer.
         var remote = new ConciergeTurn("c1", byPerson: true, remote: true);
-        foreach (var tool in new[] { "team_create", "team_repo_add", "team_repo_remove", "workflow_close" })
+        foreach (var tool in new[] { "team_create", "team_repo_add", "team_repo_remove", "deliverable_close" })
             Assert.Contains("only for the person at this computer", await CallTool(Tools(remote), tool, acting.Single(a => a.Tool == tool).Args));
         Assert.Empty(calls);
         // ... while tell, answer, pause/resume and backlog_add stay allowed for a remote person.
@@ -938,8 +938,8 @@ public class ConciergeActionTests : IDisposable
         // At the computer, the person's own turn runs the local-only ones.
         var local = new ConciergeTurn("c1", byPerson: true, remote: false);
         Assert.StartsWith("ok", await CallTool(Tools(local), "team_repo_remove", new() { ["team"] = "alpha", ["name"] = "docs" }));
-        Assert.StartsWith("ok", await CallTool(Tools(local), "workflow_close", new() { ["team"] = "alpha", ["workflow"] = 1 }));
-        Assert.Equal(["teams.removeRepo", "bus.closeWorkflow"], calls.Skip(5));
+        Assert.StartsWith("ok", await CallTool(Tools(local), "deliverable_close", new() { ["team"] = "alpha", ["deliverable"] = 1 }));
+        Assert.Equal(["teams.removeRepo", "bus.closeDeliverable"], calls.Skip(5));
     }
 
     [Fact]

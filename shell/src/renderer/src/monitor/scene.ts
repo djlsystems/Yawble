@@ -1,15 +1,15 @@
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Force, type Simulation, type SimulationNodeDatum } from 'd3-force';
 import { LayoutDefaults, type LayoutSettings } from './layout';
 import { avatarSheet, initials, loadAvatarSheet, memberAvatar, tileSource, type MemberState } from '../faces/faces';
-import { DoingMs, memberKey, RunEndShowMs, teamKey, spaced, workflowKey, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
-import { workflowTime, type WorkflowSummary } from '../../../shared/api';
-import { drawHandbackMark, drawStepIcon, drawWorkflowIcon } from './icons';
+import { DoingMs, memberKey, RunEndShowMs, teamKey, spaced, deliverableKey, type Effect, type MonitorModel, type TeamSnapshot, type Tone } from './model';
+import { deliverableTime, type DeliverableSummary } from '../../../shared/api';
+import { drawHandbackMark, drawStepIcon, drawDeliverableIcon } from './icons';
 import { StepLook } from './steps';
 import {
   commitPhase, CommitLifeMs, DefaultLimits, fileLight, idleFade, layoutTeamMap, LightMs, MapPastMembers, mapRoomOf, MaxMapNodes, popScale, shortSha,
   type MapFile, type TeamMapView,
 } from './codemap';
-import { busyMembers, nodeLabelFont, placeWorkflowLabels, workflowNodeLabel, workflowNodeLook, type LabelAsk, type LabelBox, type LabelObstacle, type PlacedLabel } from './workflows';
+import { busyMembers, nodeLabelFont, placeDeliverableLabels, deliverableNodeLabel, deliverableNodeLook, type LabelAsk, type LabelBox, type LabelObstacle, type PlacedLabel } from './deliverables';
 import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt, type Density, type KeepOut } from './rhythm';
 
 /**
@@ -38,10 +38,10 @@ import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodM
  * Under reduced motion nothing turns or throbs.
  *
  * Livelier and easier to follow:
- *   workflow nodes - every open workflow is a small node tied by dashed lines to the members working it (to its hub
+ *   deliverable nodes - every open deliverable is a small node tied by dashed lines to the members working it (to its hub
  *     while nobody is on it); completed, it flashes green and drifts away; closed, it fades with a cross; blocked, it
- *     wears the blocked colour and a "!". Under it, "#id title" (there is no WORKFLOWS panel); hover gives the
- *     whole title, a click opens the workflow.
+ *     wears the blocked colour and a "!". Under it, "#id title" (there is no DELIVERABLES panel); hover gives the
+ *     whole title, a click opens the deliverable.
  *   work rhythm - a member's disc pulses faster the more steps it takes; a command shows a ring filling round it
  *     while it runs, then a green or red burst by its exit code when that is known; thinking shimmers softly.
  *   the You node - at the right edge: what waits for the person flies to it and it glows with the count.
@@ -54,18 +54,18 @@ import { capEffects, DensityCaps, focusAlpha, isDensity, onYouNode, pulsePeriodM
 interface Node extends SimulationNodeDatum {
   key: string; kind: 'team' | 'member' | 'wf'; team: string; name: string; r: number; hue: number;
   role?: 'manager' | 'member'; state?: MemberState; queued?: number; statusLine?: string | null; homeX: number; homeY: number;
-  /** A workflow node's workflow. */
-  wf?: WorkflowSummary;
+  /** A deliverable node's deliverable. */
+  wf?: DeliverableSummary;
 }
-/** A workflow node that has left (completed or closed): where it was, drawn by its wfdone effect. */
-/** A workflow node that left: where it was, its way out from its hub, and (to follow the hub) its hub and offset from it. */
+/** A deliverable node that has left (completed or closed): where it was, drawn by its wfdone effect. */
+/** A deliverable node that left: where it was, its way out from its hub, and (to follow the hub) its hub and offset from it. */
 interface WfGhost { x: number; y: number; hue: number; id: number; outX: number; outY: number; gone: number; hub: string | null; dx: number; dy: number }
 interface Link { source: Node; target: Node }
 /** A world box by its corners. */
 interface Box { x0: number; y0: number; x1: number; y1: number }
 
 export interface SceneHover {
-  key: string; kind: 'team' | 'member' | 'file' | 'folder' | 'commit' | 'workflow' | 'you'; team: string; name: string; state?: MemberState; statusLine?: string | null; queued?: number; x: number; y: number;
+  key: string; kind: 'team' | 'member' | 'file' | 'folder' | 'commit' | 'deliverable' | 'you'; team: string; name: string; state?: MemberState; statusLine?: string | null; queued?: number; x: number; y: number;
   /**
    * A map node's: a file's path, how often it was touched, whether it is new, changed or only read, whether a commit
    * confirmed it (its short sha) and who touched it; a folder's or a "+N" node's files.
@@ -73,8 +73,8 @@ export interface SceneHover {
   path?: string; touches?: number; fileKind?: 'edit' | 'create' | 'read'; sha?: string | null; members?: string[]; more?: string[];
   /** A commit dot's message. */
   message?: string;
-  /** The hovered workflow node's workflow. */
-  workflow?: WorkflowSummary;
+  /** The hovered deliverable node's deliverable. */
+  deliverable?: DeliverableSummary;
 }
 
 /** A map node as drawn this frame: a file, a folder, a folder's "+N" or a team's "+N folders". */
@@ -94,7 +94,7 @@ const Life: Record<Effect['kind'], number> = {
 };
 /** Under reduced motion a comet does not travel: its still line and label stay this long. */
 const StillCometMs = 2200;
-/** A workflow node's radius, and how far a member's workflow line reaches. */
+/** A deliverable node's radius, and how far a member's deliverable line reaches. */
 const WfR = 10;
 const WfMemberDist = 58;
 const StepIconGap = 20;
@@ -102,8 +102,8 @@ const StepIconGap = 20;
 const OvalY = 0.62;
 /**
  * How far a team's cluster reaches from its hub toward the other teams before its code map: the members, their names
- * and the workflow nodes with their labels; and the room left between two clusters at Team spacing 1. 130
- * (was 100): with the map's room counted only toward the neighbours, two teams at 100 apart settled with their workflow
+ * and the deliverable nodes with their labels; and the room left between two clusters at Team spacing 1. 130
+ * (was 100): with the map's room counted only toward the neighbours, two teams at 100 apart settled with their deliverable
  * labels and members touching in 1 run of 8.
  */
 export const ClusterCore = 130;
@@ -171,7 +171,7 @@ export function boxesGap(a: readonly Box[], b: readonly Box[]): number {
 /**
  * A force that acts only between nodes of the same team: one `make()` per team, each given only its
  * team's nodes. The teams' repulsion used to push whole clusters apart as well, so where they settled depended on the
- * start (the random birth spots and the order the teams, workflows and maps arrived in): 3 teams' nearest gap ran 4-248.
+ * start (the random birth spots and the order the teams, deliverables and maps arrived in): 3 teams' nearest gap ran 4-248.
  * Now a cluster's own forces only shape it, and its place comes from its home alone (measuredOvalRx).
  */
 function perTeam(make: () => Force<Node, undefined>): Force<Node, undefined> {
@@ -248,7 +248,7 @@ export const MinHitPx = 22;
 /**
  * The map node a world point (wx, wy) is on at zoom k, or null: each node reaches its own world reach (a team hub 14, others
  * their radius + 8) or MinHitPx on screen, whichever is more, and of the nodes in reach the nearest wins, so close nodes do
- * not steal each other's taps. Workflow nodes are hit like the rest; there is no 'workflows' panel to pick.
+ * not steal each other's taps. Deliverable nodes are hit like the rest; there is no 'deliverables' panel to pick.
  */
 export function nearestNodeAt<N extends { kind: string; r: number; x?: number; y?: number }>(
   nodes: Iterable<N>, wx: number, wy: number, k: number,
@@ -256,7 +256,7 @@ export function nearestNodeAt<N extends { kind: string; r: number; x?: number; y
   const floor = MinHitPx / Math.max(k, 1e-6);
   let best: N | null = null, bestD = Infinity;
   for (const n of nodes) {
-    if (n.kind === 'workflows') continue;
+    if (n.kind === 'deliverables') continue;
     const d = Math.hypot(n.x! - wx, n.y! - wy);
     const reach = Math.max(n.kind === 'team' ? 14 : n.r + 8, floor);
     if (d < reach && d < bestD) { best = n; bestD = d; }
@@ -265,11 +265,11 @@ export function nearestNodeAt<N extends { kind: string; r: number; x?: number; y
 }
 
 /**
- * Whether a map node mapD (world px) from the pointer at (wx, wy) takes the hover and the click over the workflow node
- * in reach there (nearestNodeAt over the workflow nodes, or null): only when the point is off the workflow's square and
+ * Whether a map node mapD (world px) from the pointer at (wx, wy) takes the hover and the click over the deliverable node
+ * in reach there (nearestNodeAt over the deliverable nodes, or null): only when the point is off the deliverable's square and
  * the map node is the nearer (otherwise a square under its map's folder could not be hovered or clicked).
  */
-export function mapBeatsWorkflow(mapD: number, wf: { r: number; x?: number; y?: number } | null, wx: number, wy: number): boolean {
+export function mapBeatsDeliverable(mapD: number, wf: { r: number; x?: number; y?: number } | null, wx: number, wy: number): boolean {
   if (!wf) return true;
   const d = Math.hypot(wf.x! - wx, wf.y! - wy);
   return d > wf.r && mapD < d;
@@ -335,7 +335,7 @@ export class MonitorScene {
   private nodes = new Map<string, Node>();
   private links: Link[] = [];
   private teamList: TeamSnapshot[] = [];
-  /** Which model's workflows, at which rev, the nodes were last built from. */
+  /** Which model's deliverables, at which rev, the nodes were last built from. */
   private wfFrom: { model: MonitorModel | null; rev: number } = { model: null, rev: -1 };
   private sim: Simulation<Node, undefined>;
   private cam = { x: 0, y: 0, k: 1 };
@@ -370,9 +370,9 @@ export class MonitorScene {
   private hoverCommit: Extract<Effect, { kind: 'commit' }> | null = null;
   /** Each step icon's place in its member's stack, eased so the stack slides up rather than jumps. */
   private stepSlots = new WeakMap<Effect, number>();
-  /** The workflow nodes' lines to the members working them (or to their hub). */
+  /** The deliverable nodes' lines to the members working them (or to their hub). */
   private wfmLinks: Link[] = [];
-  /** Workflow nodes that have left, by key, so their wfdone effect knows where to flash and drift from. */
+  /** Deliverable nodes that have left, by key, so their wfdone effect knows where to flash and drift from. */
   private wfGhosts = new Map<string, WfGhost>();
   private reducedMotion: boolean;
   private density: Density = 'lively';
@@ -387,8 +387,8 @@ export class MonitorScene {
   stateOf: ((key: string) => MemberState) | null = null;
   onHover: (h: SceneHover | null) => void = () => {};
   onPick: (key: string | null) => void = () => {};
-  /** A workflow node was clicked (not dragged): its team and its workflow's id. */
-  onOpenWorkflow: (team: string, id?: number) => void = () => {};
+  /** A deliverable node was clicked (not dragged): its team and its deliverable's id. */
+  onOpenDeliverable: (team: string, id?: number) => void = () => {};
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -496,10 +496,10 @@ export class MonitorScene {
     this.rebuild();
   }
 
-  /** The nodes from the teams and the model's workflows (none in a replay): new ones born near their hub. */
+  /** The nodes from the teams and the model's deliverables (none in a replay): new ones born near their hub. */
   private rebuild(wake = 0.3): void {
     const teams = this.teamList;
-    this.wfFrom = { model: this.model, rev: this.model?.workflowsRev ?? -1 };
+    this.wfFrom = { model: this.model, rev: this.model?.deliverablesRev ?? -1 };
     const keep = new Set<string>();
     const count = teams.length;
     this.mapRoom = this.wantedRoom;
@@ -519,9 +519,9 @@ export class MonitorScene {
           role: m.role, state: m.state, queued: m.queued, statusLine: m.statusLine,
         }, (team.x ?? homeX) + Math.cos(a) * 60, (team.y ?? homeY) + Math.sin(a) * 60);
       });
-      // The workflow nodes: each open workflow, born beside the first member working it (or its hub).
+      // The deliverable nodes: each open deliverable, born beside the first member working it (or its hub).
       for (const w of this.model?.openWfs.get(tk) ?? []) {
-        const wk = workflowKey(t.name, w.id);
+        const wk = deliverableKey(t.name, w.id);
         keep.add(wk);
         const first = busyMembers(w).map((b) => this.nodes.get(memberKey(t.name, b))).find((n) => n);
         const near = first ?? team;
@@ -532,7 +532,7 @@ export class MonitorScene {
     const now = typeof performance === 'object' ? performance.now() : 0;
     for (const [k, n] of [...this.nodes]) {
       if (keep.has(k)) continue;
-      // A workflow node that leaves keeps where it was beside its hub a while, for its flash or fade (its wfdone
+      // A deliverable node that leaves keeps where it was beside its hub a while, for its flash or fade (its wfdone
       // effect): it goes with the hub while the graph settles without it, so it drifts away from its own team.
       if (n.kind === 'wf') {
         const hub = this.nodes.get(teamKey(n.team));
@@ -542,7 +542,7 @@ export class MonitorScene {
       this.nodes.delete(k);
     }
     for (const [k, g] of this.wfGhosts) if (now - g.gone > 10_000) this.wfGhosts.delete(k);
-    // Which member works which workflow is part of the shape: a new line wakes the forces.
+    // Which member works which deliverable is part of the shape: a new line wakes the forces.
     const wfm: Link[] = [];
     for (const n of this.nodes.values()) {
       if (n.kind !== 'wf' || !n.wf) continue;
@@ -667,7 +667,7 @@ export class MonitorScene {
 
   /**
    * Each team's things as drawn now, as world boxes: its hub and name pill, its members' discs and names, its
-   * workflow squares (not their labels) and its code map's folders, files and "+N" nodes. With its hub, by team in lower case.
+   * deliverable squares (not their labels) and its code map's folders, files and "+N" nodes. With its hub, by team in lower case.
    */
   private drawnParts(): Map<string, { hub: { x: number; y: number }; boxes: Box[] }> {
     const out = new Map<string, { hub: { x: number; y: number }; boxes: Box[] }>();
@@ -714,14 +714,14 @@ export class MonitorScene {
     return { x: n.x! - nw / 2, y: n.y! + ring + 6, w: nw, h: 13 };
   }
 
-  /** The workflow nodes on the wall now (for the tests): key, its workflow's id, the members it is tied to, and its label as drawn now. */
-  workflowNodes(): { key: string; id: number; to: string[]; status: string; label: string; box: LabelBox | null; x: number; y: number }[] {
+  /** The deliverable nodes on the wall now (for the tests): key, its deliverable's id, the members it is tied to, and its label as drawn now. */
+  deliverableNodes(): { key: string; id: number; to: string[]; status: string; label: string; box: LabelBox | null; x: number; y: number }[] {
     const { labels } = this.wfLabelPlan();
     return [...this.nodes.values()].filter((n) => n.kind === 'wf').map((n) => {
       const l = labels.get(n.key) ?? null;
       return {
         key: n.key, id: n.wf!.id, to: this.wfmLinks.filter((k) => k.source === n).map((k) => k.target.key),
-        status: workflowNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key)).status, label: l?.text ?? '',
+        status: deliverableNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key)).status, label: l?.text ?? '',
         box: l && { x: l.x, y: l.y, w: l.w, h: l.h }, x: n.x!, y: n.y!,
       };
     });
@@ -729,7 +729,7 @@ export class MonitorScene {
 
   /**
    * Each team's cluster as drawn now (for the tests and Team spacing): its hub and home, and the world box round its hub,
-   * members (with their name labels), workflow nodes (with their labels) and code map (with its labels), by team in lower case.
+   * members (with their name labels), deliverable nodes (with their labels) and code map (with its labels), by team in lower case.
    */
   clusters(): { team: string; hub: { x: number; y: number }; home: { x: number; y: number }; box: Box; parts: Box[] }[] {
     const out = new Map<string, { team: string; hub: { x: number; y: number }; home: { x: number; y: number }; box: Box }>();
@@ -798,7 +798,7 @@ export class MonitorScene {
     this.last = now;
     this.dt = dt;
     this.model?.tidy(now);
-    if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.workflowsRev ?? -1) || this.mapRoom !== this.wantedRoom) this.rebuild();
+    if (this.wfFrom.model !== this.model || this.wfFrom.rev !== (this.model?.deliverablesRev ?? -1) || this.mapRoom !== this.wantedRoom) this.rebuild();
     this.resize();
     this.applyShifts(dt);
     if (this.sim.alpha() > RestAlpha) { this.sim.tick(); this.spacingStill = false; } // at rest the nodes stay put (a wake: new nodes, a drag, new homes)
@@ -843,8 +843,8 @@ export class MonitorScene {
   }
 
   /**
-   * The workflow nodes' labels as drawn now: workflowNodeLabel at the zoom (only "#id" on a phone zoomed out), each
-   * placed by placeWorkflowLabels so none covers another or a member (under its node, above it, shortened to "#id", or
+   * The deliverable nodes' labels as drawn now: deliverableNodeLabel at the zoom (only "#id" on a phone zoomed out), each
+   * placed by placeDeliverableLabels so none covers another or a member (under its node, above it, shortened to "#id", or
    * none), and their font size: the camera's size, never under 8 px on screen.
    */
   private wfLabelPlan(): { font: number; labels: Map<string, PlacedLabel | null> } {
@@ -880,19 +880,19 @@ export class MonitorScene {
     const asks: LabelAsk[] = [];
     for (const n of this.nodes.values()) {
       if (n.kind !== 'wf' || !n.wf) continue;
-      const status = workflowNodeLook(n.wf, !!this.model?.blockedWfs.has(n.key)).status;
+      const status = deliverableNodeLook(n.wf, !!this.model?.blockedWfs.has(n.key)).status;
       const order = status === 'blocked' ? 0 : status === 'working' ? 1 : 2;
       const at = Date.parse(n.wf.lastAt);
       asks.push({
         key: n.key, x: n.x!, y: n.y!, r: n.r, short: `#${n.wf.id}`, owner: n.team.toLowerCase(), rank: order * 1e14 - (Number.isFinite(at) ? at : 0),
-        full: workflowNodeLabel(n.wf, { zoom: k, phone: this.phone }),
+        full: deliverableNodeLabel(n.wf, { zoom: k, phone: this.phone }),
       });
     }
     c.font = `600 ${font}px ${family}`;
-    return { font, labels: placeWorkflowLabels(asks, (t) => c.measureText(t).width, font * 1.2, obstacles) };
+    return { font, labels: placeDeliverableLabels(asks, (t) => c.measureText(t).width, font * 1.2, obstacles) };
   }
 
-  /** On a phone (the window phone-wide, narrowScreen.ts), zoomed out, the workflow nodes say only "#id". */
+  /** On a phone (the window phone-wide, narrowScreen.ts), zoomed out, the deliverable nodes say only "#id". */
   private phone = false;
   setPhone(on: boolean): void { this.phone = on; }
 
@@ -958,7 +958,7 @@ export class MonitorScene {
     const dim = (key: string) => (near && !near.has(key) ? 0.28 : 1) * focusAlpha(key, focus);
 
     for (const n of this.nodes.values()) if (n.kind === 'team') this.drawTerritory(c, n, now, motion, dim(n.key));
-    this.drawWorkflowLines(c, now, motion, dim);
+    this.drawDeliverableLines(c, now, motion, dim);
     for (const l of this.links) {
       c.globalAlpha = 0.35 * Math.min(dim(l.source.key), dim(l.target.key));
       c.strokeStyle = `hsl(${l.source.hue} 70% 60%)`;
@@ -974,9 +974,9 @@ export class MonitorScene {
     c.globalCompositeOperation = 'source-over';
     for (const n of this.nodes.values()) if (n.kind === 'member') this.drawMember(c, n, now, motion, dim(n.key));
     this.drawMapNodes(c, now, dim, view);
-    // The workflow nodes over the maps: a square that sits on its map's folder still shows, and is hit first.
+    // The deliverable nodes over the maps: a square that sits on its map's folder still shows, and is hit first.
     const plan = this.wfLabelPlan();
-    for (const n of this.nodes.values()) if (n.kind === 'wf') this.drawWorkflowNode(c, n, now, motion, dim(n.key), plan.font, plan.labels.get(n.key) ?? null);
+    for (const n of this.nodes.values()) if (n.kind === 'wf') this.drawDeliverableNode(c, n, now, motion, dim(n.key), plan.font, plan.labels.get(n.key) ?? null);
     this.drawCommits(c, now);
     for (const n of this.nodes.values()) if (n.kind === 'team') this.drawTeamPill(c, n, dim(n.key));
     const icons = this.drawSteps(c, now, motion, dim);
@@ -995,14 +995,14 @@ export class MonitorScene {
     this.drawYouNode(c, now, motion);
   }
 
-  // ---------- the workflow nodes ----------
+  // ---------- the deliverable nodes ----------
 
-  /** The dashed lines from each workflow node to the members working it (or its hub), a dot running along when worked. */
-  private drawWorkflowLines(c: CanvasRenderingContext2D, now: number, motion: number, dim: (k: string) => number): void {
+  /** The dashed lines from each deliverable node to the members working it (or its hub), a dot running along when worked. */
+  private drawDeliverableLines(c: CanvasRenderingContext2D, now: number, motion: number, dim: (k: string) => number): void {
     c.lineWidth = 1;
     c.setLineDash([2, 4]);
     for (const l of this.wfmLinks) {
-      const look = workflowNodeLook(l.source.wf!, !!this.model?.blockedWfs.has(l.source.key));
+      const look = deliverableNodeLook(l.source.wf!, !!this.model?.blockedWfs.has(l.source.key));
       const color = Palette[look.tone];
       c.globalAlpha = (l.target.kind === 'team' ? 0.22 : 0.5) * Math.min(dim(l.source.key), dim(l.target.key));
       c.strokeStyle = color;
@@ -1014,9 +1014,9 @@ export class MonitorScene {
     c.globalAlpha = 1;
   }
 
-  /** A workflow node: a rounded square in its state's colour with its mark, and its label where wfLabelPlan put it. */
-  private drawWorkflowNode(c: CanvasRenderingContext2D, n: Node, now: number, motion: number, alpha: number, font: number, label: PlacedLabel | null): void {
-    const look = workflowNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key));
+  /** A deliverable node: a rounded square in its state's colour with its mark, and its label where wfLabelPlan put it. */
+  private drawDeliverableNode(c: CanvasRenderingContext2D, n: Node, now: number, motion: number, alpha: number, font: number, label: PlacedLabel | null): void {
+    const look = deliverableNodeLook(n.wf!, !!this.model?.blockedWfs.has(n.key));
     const color = Palette[look.tone];
     const x = n.x!, y = n.y!, r = n.r;
     c.globalAlpha = alpha;
@@ -1030,7 +1030,7 @@ export class MonitorScene {
       c.beginPath(); c.arc(x, y, r + 4, a, a + Math.PI * 0.6); c.stroke();
     }
     c.fillStyle = color; c.strokeStyle = color;
-    drawWorkflowIcon(c, look.icon, x, y, r * 1.1);
+    drawDeliverableIcon(c, look.icon, x, y, r * 1.1);
     if (label) {
       c.font = `600 ${font}px ${this.family()}`;
       c.textAlign = 'center'; c.textBaseline = 'top';
@@ -1040,8 +1040,8 @@ export class MonitorScene {
     c.globalAlpha = 1;
   }
 
-  /** A workflow node leaving: completed, a green flash and it drifts away fading; closed, a grey cross that fades; expired, a grey clock. */
-  private drawWorkflowEnd(c: CanvasRenderingContext2D, e: Extract<Effect, { kind: 'wfdone' }>, now: number, motion: number): void {
+  /** A deliverable node leaving: completed, a green flash and it drifts away fading; closed, a grey cross that fades; expired, a grey clock. */
+  private drawDeliverableEnd(c: CanvasRenderingContext2D, e: Extract<Effect, { kind: 'wfdone' }>, now: number, motion: number): void {
     const node = this.nodes.get(e.key);
     const ghost = this.wfGhosts.get(e.key);
     if (!node && !ghost) return;
@@ -1068,7 +1068,7 @@ export class MonitorScene {
     c.strokeStyle = color; c.lineWidth = 1.5;
     roundRect(c, x - WfR, y - WfR, WfR * 2, WfR * 2, 4); c.fill(); c.stroke();
     c.fillStyle = color;
-    drawWorkflowIcon(c, done ? 'check' : e.status === 'expired' ? 'clock' : 'cross', x, y, WfR * 1.1);
+    drawDeliverableIcon(c, done ? 'check' : e.status === 'expired' ? 'clock' : 'cross', x, y, WfR * 1.1);
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'lighter';
   }
@@ -1693,7 +1693,7 @@ export class MonitorScene {
     // Steps and floating lines are drawn above the members (drawSteps, drawFloat).
     // Commits are drawn by drawCommits, what waits for the person by drawToYou.
     if (e.kind === 'step' || e.kind === 'float' || e.kind === 'you' || e.kind === 'commit') return;
-    if (e.kind === 'wfdone') { this.drawWorkflowEnd(c, e, now, motion); return; }
+    if (e.kind === 'wfdone') { this.drawDeliverableEnd(c, e, now, motion); return; }
     const t = (now - e.at) / this.life(e);
     if (e.kind === 'merge' || e.kind === 'push') { if (motion) this.drawCodeBurst(c, e, t); return; }
     const color = Palette[e.color];
@@ -1853,8 +1853,8 @@ export class MonitorScene {
 
   /**
    * The map node under a screen point, if any (they are small, so the reach is a few pixels on screen). Not
-   * when a workflow node in reach is nearer the point, so a square that sits on its map's folder can still be hovered and
-   * clicked (mapBeatsWorkflow).
+   * when a deliverable node in reach is nearer the point, so a square that sits on its map's folder can still be hovered and
+   * clicked (mapBeatsDeliverable).
    */
   private mapAt(sx: number, sy: number): MapNode | null {
     const [x, y] = this.toWorld(sx, sy);
@@ -1866,7 +1866,7 @@ export class MonitorScene {
     }
     if (!best) return null;
     const wfs = [...this.nodes.values()].filter((n) => n.kind === 'wf');
-    return mapBeatsWorkflow(bestD, nearestNodeAt(wfs, x, y, this.cam.k), x, y) ? best : null;
+    return mapBeatsDeliverable(bestD, nearestNodeAt(wfs, x, y, this.cam.k), x, y) ? best : null;
   }
 
   /** The commit dot under a screen point, if any. */
@@ -1955,7 +1955,7 @@ export class MonitorScene {
       cv.style.cursor = n ? 'pointer' : 'grab';
       if (!n) { this.onHover(null); return; }
       const [hx, hy] = this.toScreen(n.x!, n.y!);
-      if (n.kind === 'wf') { this.onHover({ key: n.key, kind: 'workflow', team: n.team, name: n.team, workflow: n.wf, x: hx, y: hy - n.r * this.cam.k }); return; }
+      if (n.kind === 'wf') { this.onHover({ key: n.key, kind: 'deliverable', team: n.team, name: n.team, deliverable: n.wf, x: hx, y: hy - n.r * this.cam.k }); return; }
       this.onHover({ key: n.key, kind: n.kind, team: n.team, name: n.name, state: n.state, statusLine: n.statusLine, queued: n.queued, x: hx, y: hy - n.r * this.cam.k });
     };
     const down = (e: PointerEvent) => {
@@ -1977,7 +1977,7 @@ export class MonitorScene {
       const n = file ? null : this.nodeAt(sx, sy);
       cv.setPointerCapture(e.pointerId);
       this.drag = { node: n, x: sx, y: sy, cx: this.target.x, cy: this.target.y };
-      // A workflow node opens on the click's release (a drag only moves it); it does not take the pick.
+      // A deliverable node opens on the click's release (a drag only moves it); it does not take the pick.
       if (n && n.kind !== 'wf') { this.picked = n.key; this.onPick(n.key); }
     };
     const up = (e: PointerEvent) => {
@@ -1985,7 +1985,7 @@ export class MonitorScene {
       const node = this.drag?.node;
       if (node?.kind === 'wf') {
         const [sx, sy] = local(e);
-        if (Math.hypot(sx - this.drag!.x, sy - this.drag!.y) < 5) this.onOpenWorkflow(node.team, node.wf?.id);
+        if (Math.hypot(sx - this.drag!.x, sy - this.drag!.y) < 5) this.onOpenDeliverable(node.team, node.wf?.id);
       }
       if (this.drag?.node) { this.drag.node.fx = null; this.drag.node.fy = null; }
       this.drag = null;

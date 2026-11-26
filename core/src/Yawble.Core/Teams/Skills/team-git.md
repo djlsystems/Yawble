@@ -41,7 +41,7 @@ say so with `blocked` (or tell your Manager) rather than guessing.
 
 ## Start from the synced branch, and say what you built on
 
-- Before a workflow starts, the app brings the team branch and the member branches up to the base branch (main, say) in
+- Before a deliverable starts, the app brings the team branch and the member branches up to the base branch (main, say) in
   the team's repository and refreshes the bundle, unless the person turned that off for the team. **Work always starts from
   the synced branch.** A new clone is made from it; an existing clone is not touched by the app, so at the start of your
   work fetch your own branch from the bundle and fast-forward: `git fetch "$env:YAWBLE_TEAM_BUNDLE" <your branch>` then

@@ -6,10 +6,10 @@ import Modal from './Modal.vue';
 import BusyLabel from './BusyLabel.vue';
 import LoadingNote from './LoadingNote.vue';
 import { useNarrow } from '../narrowScreen';
-import { scriptsApi } from '../scripts/api';
-import type { RunDetail } from '../scripts/types';
+import { workflowsApi } from '../workflows/api';
+import type { RunDetail } from '../workflows/types';
 // Loaded when a run is opened: the run view brings the flowchart library with it.
-const ScriptRunView = defineAsyncComponent(() => import('./scripts/ScriptRunView.vue').then((m) => m.default));
+const WorkflowRunView = defineAsyncComponent(() => import('./workflows/WorkflowRunView.vue').then((m) => m.default));
 
 /**
  * Logs: every log the app keeps, one at a time, as a table. The source is chosen from a list; the team, the member,
@@ -243,10 +243,10 @@ function when(iso: string): string {
 
 function memberLabel(key: string) { return key.slice(key.indexOf('/') + 1); }
 
-// ------------------------------------------------------------------ a script run's view (Script runs)
+// ------------------------------------------------------------------ a workflow run's view (Workflow runs)
 
-/** The Script runs log: its 'run' column is the script run's id, which opens that run's view. */
-const runLinks = computed(() => sourceId.value === 'scripts' && columns.value.some((c) => c.key === 'run'));
+/** The Workflow runs log: its 'run' column is the workflow run's id, which opens that run's view. */
+const runLinks = computed(() => sourceId.value === 'workflows' && columns.value.some((c) => c.key === 'run'));
 function runIdOf(row: LogPage['rows'][number], c: LogColumn): number | null {
   if (!runLinks.value || c.key !== 'run') return null;
   const id = Number(row[c.key]);
@@ -256,7 +256,7 @@ const runView = ref<RunDetail | null>(null);
 const runError = ref<string | null>(null);
 async function openRun(id: number) {
   runError.value = null;
-  try { runView.value = await scriptsApi(props.api).run(id); }
+  try { runView.value = await workflowsApi(props.api).run(id); }
   catch (e) { runError.value = errorText(e); }
 }
 watch(sourceId, () => { runView.value = null; runError.value = null; });
@@ -444,8 +444,8 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
 
       <p v-if="runError" class="error small" data-test="logs-run-error">{{ runError }}</p>
       <section v-if="runView" class="run" data-test="logs-run">
-        <div class="row"><button type="button" class="ghost" data-test="logs-run-back" @click="runView = null">← Script runs</button></div>
-        <ScriptRunView :run="runView" :api="api" />
+        <div class="row"><button type="button" class="ghost" data-test="logs-run-back" @click="runView = null">← Workflow runs</button></div>
+        <WorkflowRunView :run="runView" :api="api" />
       </section>
       <div v-show="!runView" ref="scroller" class="scroll" data-test="logs-scroll" @scroll.passive="onScroll">
         <div :id="phoneToolsId" class="phone-tools" data-test="logs-phone-tools"></div>
@@ -459,7 +459,7 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
                   <template v-if="open === String(r._id) || cell(r, c)">
                     <dt>{{ c.label }}</dt>
                     <dd :class="c.kind">
-                      <button v-if="runIdOf(r, c)" type="button" class="link" :data-test="`logs-run-link-${runIdOf(r, c)}`" :aria-label="`Open script run ${runIdOf(r, c)}`"
+                      <button v-if="runIdOf(r, c)" type="button" class="link" :data-test="`logs-run-link-${runIdOf(r, c)}`" :aria-label="`Open workflow run ${runIdOf(r, c)}`"
                         @click.stop="openRun(runIdOf(r, c)!)" @keydown.enter.stop>{{ cell(r, c) }}</button>
                       <template v-else>{{ open === String(r._id) ? (r[c.key] ?? '') : cell(r, c) }}</template>
                     </dd>
@@ -483,7 +483,7 @@ function keepLabel(days: number | null) { return !days ? 'Keep forever' : days %
             <template v-for="r in rows" :key="String(r._id)">
               <tr class="entry" :class="{ open: open === String(r._id) }" data-test="logs-row" @click="open = open === String(r._id) ? null : String(r._id)">
                 <td v-for="c in columns" :key="c.key" :class="c.kind" :title="r[c.key] === null ? '' : String(r[c.key])">
-                  <button v-if="runIdOf(r, c)" type="button" class="link" :data-test="`logs-run-link-${runIdOf(r, c)}`" :aria-label="`Open script run ${runIdOf(r, c)}`"
+                  <button v-if="runIdOf(r, c)" type="button" class="link" :data-test="`logs-run-link-${runIdOf(r, c)}`" :aria-label="`Open workflow run ${runIdOf(r, c)}`"
                     @click.stop="openRun(runIdOf(r, c)!)">{{ cell(r, c) }}</button>
                   <template v-else>{{ cell(r, c) }}</template>
                 </td>

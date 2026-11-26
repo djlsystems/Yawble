@@ -94,7 +94,7 @@ public class WebsiteToolTests
         private async Task<RunResult> Handle(RunContext run, CancellationToken ct)
         {
             // Every item of the batch, not just the first: a call told to Ada while her previous run is still ending (slow
-            // under a loaded full suite) waits and is batched with whatever else is pending for her in that workflow, e.g.
+            // under a loaded full suite) waits and is batched with whatever else is pending for her in that deliverable, e.g.
             // the "approved: call screenshot again" notice, which then comes first.
             foreach (var (id, call) in _calls)
             {
@@ -131,8 +131,8 @@ public class WebsiteToolTests
             return await done.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
         }
 
-        /// <summary>Ada's screenshot call, made in a run of the given workflow (a person's message to her joins it).</summary>
-        public async Task<Got> CallInWorkflow(long causation)
+        /// <summary>Ada's screenshot call, made in a run of the given deliverable (a person's message to her joins it).</summary>
+        public async Task<Got> CallInDeliverable(long causation)
         {
             var id = Interlocked.Increment(ref _next);
             var done = new TaskCompletionSource<Got>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -141,14 +141,14 @@ public class WebsiteToolTests
             return await done.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
         }
 
-        public async Task<string> CallInWorkflowText(long causation) => (await CallInWorkflow(causation)).Text;
+        public async Task<string> CallInDeliverableText(long causation) => (await CallInDeliverable(causation)).Text;
 
         public async Task<string> Ada(object args) => (await CallAs("Alpha", "Ada", args)).Text;
 
-        public bool Told(long workflow, string text)
+        public bool Told(long deliverable, string text)
         {
             using var s = Db.OpenStore();
-            return s.Workflow(workflow).Any(m => m.Payload.Contains(text, StringComparison.Ordinal));
+            return s.Deliverable(deliverable).Any(m => m.Payload.Contains(text, StringComparison.Ordinal));
         }
 
         public long Scalar(string sql)
@@ -281,7 +281,7 @@ public class WebsiteToolTests
         r.Host.Script = _ => new WebsiteReply(true, null, "https://example.com/app/sent", "Sent", "Draft sent", null, null);
         var approved = await r.Rpc("integrations.approve", new JsonObject { ["id"] = ask.Id });
         Assert.True(approved!["started"]!.GetValue<bool>());
-        await Wait.UntilAsync(() => r.Told(ask.Workflow, "Draft sent"), "Ada told the result");
+        await Wait.UntilAsync(() => r.Told(ask.Deliverable, "Draft sent"), "Ada told the result");
         var sent = Assert.Single(r.Host.Seen());
         Assert.Equal("click", sent.Op);
         Assert.Equal("#send", sent.Args["selector"]!.GetValue<string>());
@@ -305,16 +305,16 @@ public class WebsiteToolTests
         await using var r = await Rig.Make();
         var ask = await AskForScreenshot(r);
         await r.Rpc("integrations.approve", new JsonObject { ["id"] = ask.Id });
-        await Wait.UntilAsync(() => r.Told(ask.Workflow, "approved: call screenshot again now (within 10 minutes) to get the picture"), "Ada told");
+        await Wait.UntilAsync(() => r.Told(ask.Deliverable, "approved: call screenshot again now (within 10 minutes) to get the picture"), "Ada told");
         Assert.Empty(r.Host.Seen());
 
         r.Host.Script = _ => new WebsiteReply(true, null, "https://example.com/app/", "Home", null, Png, null);
-        var got = await r.CallInWorkflow(ask.CausationSeq);
+        var got = await r.CallInDeliverable(ask.CausationSeq);
         Assert.Equal(1, got.Images);
         Assert.Single(r.Host.Seen());
         Assert.Equal(1, r.Scalar($"SELECT count(*) FROM integration_calls WHERE decision = 'allow' AND rule = 'approved request {ask.Id}'"));
         // the grant is used up: the next picture asks again
-        Assert.StartsWith("asked:", await r.CallInWorkflowText(ask.CausationSeq));
+        Assert.StartsWith("asked:", await r.CallInDeliverableText(ask.CausationSeq));
     }
 
     [Fact]
@@ -323,9 +323,9 @@ public class WebsiteToolTests
         await using var r = await Rig.Make();
         var ask = await AskForScreenshot(r);
         await r.Rpc("integrations.approve", new JsonObject { ["id"] = ask.Id });
-        await Wait.UntilAsync(() => r.Told(ask.Workflow, "within 10 minutes"), "Ada told");
+        await Wait.UntilAsync(() => r.Told(ask.Deliverable, "within 10 minutes"), "Ada told");
         r.Clock.Advance(TimeSpan.FromMinutes(11));
-        Assert.StartsWith("asked:", await r.CallInWorkflowText(ask.CausationSeq));
+        Assert.StartsWith("asked:", await r.CallInDeliverableText(ask.CausationSeq));
         Assert.Empty(r.Host.Seen());
     }
 

@@ -164,11 +164,11 @@ public sealed class NetworkAskNoticeTests : IDisposable
     }
 
     [Fact]
-    public async Task TheMergedWake_JoinsTheFirstAsksWorkflow_ThatHasOne()
+    public async Task TheMergedWake_JoinsTheFirstAsksDeliverable_ThatHasOne()
     {
-        await AllowAsync("Alpha/Priya", "api.nuget.org"); // a refusal: no workflow
+        await AllowAsync("Alpha/Priya", "api.nuget.org"); // a refusal: no deliverable
         var priya = new MemberRef(_priya, _alpha, "Alpha", "Priya", MemberRole.Member);
-        _asks.RequestFromAgent(priya, "crl3.digicert.com", "NuGet's signature revocation check", workflow: 40, causation: 41);
+        _asks.RequestFromAgent(priya, "crl3.digicert.com", "NuGet's signature revocation check", deliverable: 40, causation: 41);
         var id = _asks.Asks().Single(a => a.Host == "crl3.digicert.com").Id;
         await _asks.AnswerAsync(id, NetworkAskChoices.Agent, null, Ct);
         _time.Advance(TimeSpan.FromSeconds(5));

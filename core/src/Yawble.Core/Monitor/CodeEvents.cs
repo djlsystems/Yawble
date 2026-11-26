@@ -23,7 +23,7 @@ public sealed record CodeFile(string Path, string Status, string? OldPath = null
 /// </summary>
 public sealed record CodeEvent(
     string Kind, string Team, string? Member, string Branch, string Sha, string Message, IReadOnlyList<CodeFile> Files,
-    DateTimeOffset At, long? WorkflowId = null, string? Into = null, IReadOnlyList<string>? Branches = null)
+    DateTimeOffset At, long? DeliverableId = null, string? Into = null, IReadOnlyList<string>? Branches = null)
 {
     public const string Commit = "commit";
     public const string MergeTeam = "merge-team";
@@ -56,7 +56,7 @@ public sealed record CodeEvent(
             ["files"] = files,
             ["at"] = At.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
             ["recordedAt"] = RecordedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
-            ["workflowId"] = WorkflowId,
+            ["deliverableId"] = DeliverableId,
         };
         if (Into is not null) o["into"] = Into;
         if (Branches is not null) o["branches"] = new JsonArray([.. Branches.Select(b => (JsonNode?)b)]);
@@ -91,7 +91,7 @@ public sealed class CodeEvents(string connectionString, TimeProvider? clock = nu
             using var cmd = c.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = """
-                INSERT OR IGNORE INTO code_events (kind, team, member, branch, sha, message, files, at, recorded_at, workflow_id, extra)
+                INSERT OR IGNORE INTO code_events (kind, team, member, branch, sha, message, files, at, recorded_at, deliverable_id, extra)
                 VALUES ($k, $t, $m, $b, $s, $msg, $f, $at, $r, $w, $x);
                 """;
             var extra = new JsonObject();
@@ -106,7 +106,7 @@ public sealed class CodeEvents(string connectionString, TimeProvider? clock = nu
             cmd.Parameters.AddWithValue("$f", new JsonArray([.. e.Files.Select(f => (JsonNode)f.ToJson())]).ToJsonString());
             cmd.Parameters.AddWithValue("$at", Text(e.At));
             cmd.Parameters.AddWithValue("$r", now);
-            cmd.Parameters.AddWithValue("$w", (object?)e.WorkflowId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$w", (object?)e.DeliverableId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$x", extra.Count == 0 ? DBNull.Value : extra.ToJsonString());
             added += cmd.ExecuteNonQuery();
         }
@@ -132,7 +132,7 @@ public sealed class CodeEvents(string connectionString, TimeProvider? clock = nu
         if (since is { } s) { where.Add("at >= $since"); cmd.Parameters.AddWithValue("$since", Text(s)); }
         if (until is { } u) { where.Add("at <= $until"); cmd.Parameters.AddWithValue("$until", Text(u)); }
         cmd.CommandText = $"""
-            SELECT id, kind, team, member, branch, sha, message, files, at, recorded_at, workflow_id, extra FROM code_events
+            SELECT id, kind, team, member, branch, sha, message, files, at, recorded_at, deliverable_id, extra FROM code_events
             WHERE {string.Join(" AND ", where)} ORDER BY at, id LIMIT $limit;
             """;
         cmd.Parameters.AddWithValue("$limit", limit);

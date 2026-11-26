@@ -17,7 +17,7 @@ namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
 /// The tester's checks of closing over a FAIL, end to end on a real BusEngine with fake runners: the Manager works only through the MCP bus
-/// tools (tell with card, needs_decision with card/kind/reason, workflow_complete, workflow_show, workflow_digest), the
+/// tools (tell with card, needs_decision with card/kind/reason, deliverable_complete, deliverable_show, deliverable_digest), the
 /// person answers through the window's bus.answer (optionIndex) on a real UiRpc, the Concierge's answer is bus.answer with
 /// text only as the Concierge actor, and the board is a real BoardService reading the bus. Strings are core/src's own
 /// (TesterVerdicts.Refusal, Board.ClosedOverFail).
@@ -40,7 +40,7 @@ public class ClosedOverFailBusVerifyTests
         public long TeamId;
         public long Build, Verify;
         public long Root;
-        public readonly List<string> Declares = [];   // every workflow_complete tool reply except busy
+        public readonly List<string> Declares = [];   // every deliverable_complete tool reply except busy
         public string? Show, Digest;
         public int TesterRuns;
         private int _handledTester;
@@ -79,16 +79,16 @@ public class ClosedOverFailBusVerifyTests
             return result["isError"]?.GetValue<bool>() == true ? "ERROR: " + text : text;
         }
 
-        /// <summary>workflow_complete through the tool; null when busy (a run still ending), else the reply (recorded). On ok, reads workflow_show and workflow_digest.</summary>
+        /// <summary>deliverable_complete through the tool; null when busy (a run still ending), else the reply (recorded). On ok, reads deliverable_show and deliverable_digest.</summary>
         public async Task<string?> Declare(RunContext run, CancellationToken ct)
         {
-            var text = await Tool(run, "workflow_complete", new { delivered = "the Save button shipped" }, ct);
+            var text = await Tool(run, "deliverable_complete", new { delivered = "the Save button shipped" }, ct);
             if (text.StartsWith("ERROR: refused (busy)", StringComparison.Ordinal)) return null;
             lock (Declares) Declares.Add(text);
             if (!text.StartsWith("ERROR", StringComparison.Ordinal))
             {
-                Show = await Tool(run, "workflow_show", new { }, ct);
-                Digest = await Tool(run, "workflow_digest", new { }, ct);
+                Show = await Tool(run, "deliverable_show", new { }, ct);
+                Digest = await Tool(run, "deliverable_digest", new { }, ct);
             }
             return text;
         }
@@ -107,9 +107,9 @@ public class ClosedOverFailBusVerifyTests
 
         public int Refusals(string code) { lock (Declares) return Declares.Count(d => d.StartsWith($"ERROR: refused ({code})", StringComparison.Ordinal)); }
 
-        public bool Declared() { using var s = Db.OpenStore(); return s.WorkflowDeclared(Root); }
+        public bool Declared() { using var s = Db.OpenStore(); return s.DeliverableDeclared(Root); }
 
-        public Message Completed() { using var s = Db.OpenStore(); return s.Workflow(Root).Single(m => m.Type == MessageTypes.WorkflowCompleted); }
+        public Message Completed() { using var s = Db.OpenStore(); return s.Deliverable(Root).Single(m => m.Type == MessageTypes.DeliverableCompleted); }
 
         public async Task<(Message Ask, DecisionAsk Parsed)> OpenDecision(long? notSeq = null)
         {
@@ -146,7 +146,7 @@ public class ClosedOverFailBusVerifyTests
     private static bool Answered(RunContext run) => run.Items.Any(i => i.Source == MessageTypes.PersonSource && i.CausationSeq is not null);
 
     private static string RefusalStart(long card, string failLine) =>
-        $"ERROR: refused (tester_fail): workflow completion refused: card {card}'s latest test is a FAIL: TesterGary handed back \"{failLine}\"";
+        $"ERROR: refused (tester_fail): deliverable completion refused: card {card}'s latest test is a FAIL: TesterGary handed back \"{failLine}\"";
 
     /// <summary>The Manager's usual opening: Ada builds the build card; on her hand-back the tester verifies the verify card.</summary>
     private static async Task<bool> Opening(Rig rig, RunContext run, CancellationToken ct)
@@ -227,7 +227,7 @@ public class ClosedOverFailBusVerifyTests
                 card = rig.Verify, kind = "accept-fail", reason = "Save is out of scope here",
             }, ct);
             // The question open, no yes yet: still refused.
-            stillRefused = await Rig.Tool(run, "workflow_complete", new { delivered = "the Save button shipped" }, ct);
+            stillRefused = await Rig.Tool(run, "deliverable_complete", new { delivered = "the Save button shipped" }, ct);
             return RunResult.Ok;
         });
         await Ship(rig);
@@ -352,7 +352,7 @@ public class ClosedOverFailBusVerifyTests
     }
 
     [Fact]
-    public async Task AWorkflowWithNoTesterAtAll_IsUnaffected()
+    public async Task ADeliverableWithNoTesterAtAll_IsUnaffected()
     {
         await using var rig = new Rig();
         await rig.StartAsync("Ada", "Bea");

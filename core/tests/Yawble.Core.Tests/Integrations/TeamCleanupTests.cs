@@ -44,7 +44,7 @@ public class TeamCleanupTests
             INSERT INTO mcp_rules (server_id, team_id, pattern, decision, created_at) VALUES (1, {alpha}, 'echo', 'allow', 'x');
             INSERT INTO integration_choices (integration_id, team_id, path, decision, chosen_at) VALUES (1, {alpha}, 'run', 'allow', 'x'), (1, NULL, 'run', 'ask', 'x'), (1, {beta}, 'run', 'deny', 'x');
             INSERT INTO mcp_choices (server_id, team_id, path, decision, chosen_at) VALUES (1, {alpha}, 'echo', 'allow', 'x'), (1, NULL, 'echo', 'ask', 'x');
-            INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq) VALUES
+            INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq) VALUES
                 ('x', 'node', {alpha}, 'Alpha/Ada', '["run","one"]', 'why', 0, 0),
                 ('x', 'mcp:fake', {alpha}, 'Alpha/Ada', '["fake__echo"]', 'why', 0, 0),
                 ('x', 'node', {beta}, 'Beta/Bo', '["run","two"]', 'why', 0, 0);

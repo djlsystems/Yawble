@@ -5,7 +5,7 @@ import type { BacklogItem, DocEntry, DocFile, DocList, YawbleApi, TeamSummary } 
 import { errorText, resolveApi } from '../api';
 import { confirmDialog } from '../confirm';
 import { vChange } from '../remoteAccess';
-import { openBacklogItem } from '../workflows/page';
+import { openBacklogItem } from '../deliverables/page';
 import { renderMarkdown } from '../markdown';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';

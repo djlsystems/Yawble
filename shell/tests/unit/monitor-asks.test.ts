@@ -10,7 +10,7 @@ import { MonitorModel } from '../../src/renderer/src/monitor/model';
 vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
   const real = await orig<typeof import('../../src/renderer/src/monitor/scene')>();
   class FakeScene {
-    model: unknown; onHover?: unknown; onPick?: unknown; onOpenWorkflow?: unknown; effects: unknown[] = [];
+    model: unknown; onHover?: unknown; onPick?: unknown; onOpenDeliverable?: unknown; effects: unknown[] = [];
     setPinned() {} setLayout() {} setTeams() {} setPicked() {} destroy() {} fit() {} clearFiles() {}
   }
   return { ...real, MonitorScene: FakeScene };
@@ -19,13 +19,13 @@ const { default: MonitorView } = await import('../../src/renderer/src/monitor/Mo
 
 const net = (o: Partial<NetworkAsk>): NetworkAsk => ({
   id: 1, at: '2026-11-17T10:00:00Z', teamId: 1, team: 'payments', member: 'payments/Ana', memberName: 'Ana', host: 'api.nuget.org',
-  reason: null, method: null, pathSample: null, count: 1, lastSeen: '2026-11-17T10:00:00Z', hint: null, workflow: null,
+  reason: null, method: null, pathSample: null, count: 1, lastSeen: '2026-11-17T10:00:00Z', hint: null, deliverable: null,
   state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'deny'], ...o,
 } as NetworkAsk);
 const tool = (o: Partial<ToolAsk>): ToolAsk => ({
   id: 7, at: '2026-11-17T10:00:00Z', teamId: 2, team: 'alpha', member: 'alpha/Bo', memberName: 'Bo', tool: 'dotnet',
   displayName: '.NET SDK', publisher: null, wingetId: null, scope: null, reason: null, count: 1, lastSeen: '2026-11-17T10:00:00Z',
-  workflow: null, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
+  deliverable: null, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
   canInstall: true, command: null, choices: [], ...o,
 } as ToolAsk);
 

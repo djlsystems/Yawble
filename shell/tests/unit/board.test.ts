@@ -6,7 +6,7 @@ import type { BoardCard, YawbleApi } from '../../src/shared/api';
 
 const card = (id: number, lane: BoardCard['lane'], status: BoardCard['status'], member: string | null, title: string, team = 'payments'): BoardCard => ({
   id, team, teamId: 1, member, item: id === 3 ? 'B007' : null, title, body: `${title} in full`, status, lane, placed: false,
-  awaitingManager: id === 2, workflow: 10 + id, createdAt: '2026-11-08T10:00:00Z', updatedAt: `2026-11-08T10:0${id}:00Z`, trailCount: id,
+  awaitingManager: id === 2, deliverable: 10 + id, createdAt: '2026-11-08T10:00:00Z', updatedAt: `2026-11-08T10:0${id}:00Z`, trailCount: id,
 });
 
 function fakeApi() {
@@ -101,7 +101,7 @@ describe('the Board: Needs You', () => {
     const call = api.call.bind(api);
     let pending = [{ id: 5, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperPriya', memberName: 'DeveloperPriya',
       host: 'registry.npmjs.org', reason: 'npm ci for the site', method: null, pathSample: null, count: 2, lastSeen: '2026-11-13T21:01:00Z',
-      hint: 'npm: Node.js packages (npm install, npm ci)', workflow: 11, state: 'pending', scope: null, decidedBy: null, decidedAt: null,
+      hint: 'npm: Node.js packages (npm install, npm ci)', deliverable: 11, state: 'pending', scope: null, decidedBy: null, decidedAt: null,
       choices: ['agent', 'team', 'everywhere', 'deny'] }];
     (api as any).call = async (method: string, params?: any) => {
       if (method === 'network.asks') { calls.push({ method, params }); return pending; }
@@ -135,7 +135,7 @@ describe('the Board: Needs You', () => {
     const call = api.call.bind(api);
     let pending = [{ id: 3, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperPriya', memberName: 'DeveloperPriya',
       tool: 'nodejs-lts', displayName: 'Node.js LTS', publisher: 'OpenJS Foundation', wingetId: 'OpenJS.NodeJS.LTS', scope: 'machine',
-      reason: 'build the site', count: 1, lastSeen: '2026-11-13T21:00:00Z', workflow: 11, state: 'pending', attempts: 0, error: null,
+      reason: 'build the site', count: 1, lastSeen: '2026-11-13T21:00:00Z', deliverable: 11, state: 'pending', attempts: 0, error: null,
       decidedBy: null, decidedVia: null, decidedAt: null, canInstall: true, command: 'winget install --id OpenJS.NodeJS.LTS --exact', choices: ['install', 'notNow'] }];
     (api as any).call = async (method: string, params?: any) => {
       if (method === 'tools.asks') { calls.push({ method, params }); return pending; }

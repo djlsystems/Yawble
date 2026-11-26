@@ -98,7 +98,7 @@ defineExpose({ load });
         <div v-if="card" class="sub">
           {{ card.member ? displayName(card.member) : 'Unassigned' }} ·
           <a href="#" @click.prevent="card.teamId && emit('openTeam', card.teamId)">{{ card.team }}</a>
-          · card {{ card.id }}<template v-if="card.workflow"> · workflow #{{ card.workflow }}</template>
+          · card {{ card.id }}<template v-if="card.deliverable"> · deliverable #{{ card.deliverable }}</template>
         </div>
         <button v-if="card" class="discuss" title="Talk this card through with the Concierge" data-test="card-discuss"
           @click="discussWithConcierge(card.teamId, cardPrompt(card, lanes.find((l) => l.id === card!.lane)?.label ?? card.lane, look?.label ?? StatusLabel[card.status]))">Discuss with the Concierge</button>

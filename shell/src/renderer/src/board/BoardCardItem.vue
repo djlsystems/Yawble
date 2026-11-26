@@ -49,7 +49,7 @@ const leaseTitle = computed(() => {
     </div>
     <div class="meta">
       <span>{{ card.member ? displayName(card.member) : 'Unassigned' }}</span> · <span>{{ card.team }}</span>
-      <span class="muted"> · card {{ card.id }}<template v-if="card.workflow"> · #{{ card.workflow }}</template></span>
+      <span class="muted"> · card {{ card.id }}<template v-if="card.deliverable"> · #{{ card.deliverable }}</template></span>
     </div>
     <div class="foot">
       <span class="status" data-test="card-status" :data-stopped="look.stopped || undefined">{{ look.label }}</span>

@@ -271,7 +271,7 @@ onMounted(load);
           <p class="muted">{{ selected.description }}</p>
           <p v-if="selected.name === TEAM_RETROS && selected.teamId !== null" class="muted small" data-test="skill-lessons-note">
             The team's lessons: every run of team {{ selected.team }} gets this text in its prompt. The Manager rewrites it after each completed
-            workflow's retrospective, starting from the text here, so your edits are kept.</p>
+            deliverable's retrospective, starting from the text here, so your edits are kept.</p>
           <p v-if="lastWrite" class="muted small" data-test="skill-last-writer">Last written by {{ writerText(lastWrite) }}, {{ when(lastWrite.writtenAt) }} (version {{ lastWrite.version }}).</p>
           <!-- eslint-disable-next-line vue/no-v-html : markdown-it with html disabled (markdown.ts) -->
           <div class="body md" data-test="skill-view" @click="copyCodeFrom" v-html="bodyHtml"></div>

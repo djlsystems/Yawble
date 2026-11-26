@@ -6,7 +6,7 @@ using Yawble.Core.Bus;
 using Yawble.Core.Concierge;
 using Yawble.Core.Ipc;
 using Yawble.Core.Provenance;
-using Yawble.Core.Scripts;
+using Yawble.Core.Workflows;
 
 namespace Yawble.Core.Companion;
 
@@ -69,8 +69,8 @@ public sealed partial class CompanionService(
     private const string CodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
-    /// <summary>The script and schema tools, onto the app's scripts.* / schemas.* calls.</summary>
-    private readonly ScriptTools _scripts = new(bus, route);
+    /// <summary>The workflow and schema tools, onto the app's workflows.* / schemas.* calls.</summary>
+    private readonly WorkflowTools _workflows = new(bus, route);
     private readonly ConfirmationBook _book = new(clock);
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Pairing> _pairings = [];
@@ -130,7 +130,7 @@ public sealed partial class CompanionService(
     private sealed record Prepared(string? Immediate, string Plan, string? ListKey, string? Bound);
 
     /// <summary>The arguments that name what a call acts on (its team, repository and branch, or its item, and the name it acts on).</summary>
-    private static readonly string[] TargetArguments = ["branch", "item", "card", "name", "member", "pr", "fix", "workflow", "backup", "task", "script", "id",
+    private static readonly string[] TargetArguments = ["branch", "item", "card", "name", "member", "pr", "fix", "deliverable", "backup", "task", "workflow", "id",
         // integration_action_allow's own target, so allowing two actions are two requests, not one replacing the other.
         "integration", "action"];
 
@@ -210,7 +210,7 @@ public sealed partial class CompanionService(
         using var acting = Actor.Use(actor);
         try
         {
-            var result = ScriptTools.Handles(tool) ? await ScriptCallAsync(client, tool, args, needs.Value, ct)
+            var result = WorkflowTools.Handles(tool) ? await WorkflowCallAsync(client, tool, args, needs.Value, ct)
                 : needs == CompanionLevel.Destructive ? await RequestAsync(client, tool, args, ct) : await ReadOrActAsync(client, tool, args, ct);
             return result with { Text = needs == CompanionLevel.Destructive ? RequestSafe(result.Text) : ClientSafe(result.Text) };
         }
@@ -264,24 +264,24 @@ public sealed partial class CompanionService(
     }
 
     /// <summary>
-    /// A script tool. A call the person must say yes to (adding a script member, a script's first live run on a team)
-    /// becomes a request with the plan <see cref="ScriptTools.YesNeededAsync"/> gives, bound to its key: approved, it runs
+    /// A workflow tool. A call the person must say yes to (adding a workflow member, a workflow's first live run on a team)
+    /// becomes a request with the plan <see cref="WorkflowTools.YesNeededAsync"/> gives, bound to its key: approved, it runs
     /// only if the same call still means the same thing, else it is a new request. Every other call runs now (a dry run, a
     /// later live run, a build or a check); acts and live runs are audited.
     /// </summary>
-    private async Task<CompanionResult> ScriptCallAsync(CompanionClient client, string tool, JsonObject args, CompanionLevel needs, CancellationToken ct)
+    private async Task<CompanionResult> WorkflowCallAsync(CompanionClient client, string tool, JsonObject args, CompanionLevel needs, CancellationToken ct)
     {
         args.Remove("confirm"); // a client never supplies a yes
-        if (ScriptTools.ApprovalOf(tool) != ScriptToolApproval.None && await _scripts.YesNeededAsync(tool, args, ct) is { } yes)
+        if (WorkflowTools.ApprovalOf(tool) != WorkflowToolApproval.None && await _workflows.YesNeededAsync(tool, args, ct) is { } yes)
             return await RequestAsync(client, tool, args, ct, yes);
-        var text = await _scripts.CallAsync(tool, args, ct);
+        var text = await _workflows.CallAsync(tool, args, ct);
         if (needs != CompanionLevel.Read) audit.Record(Actor.ExternalClient(client.Name), "companion." + tool, SafeParams(args), "ok");
         return new CompanionResult(text, false);
     }
 
     /// <summary>A destructive call: never run now. The exact plan becomes a request the window approves or denies.</summary>
-    /// <param name="yes">For a script tool: the plan and key its call needs a yes for.</param>
-    private async Task<CompanionResult> RequestAsync(CompanionClient client, string tool, JsonObject args, CancellationToken ct, ScriptToolYes? yes = null)
+    /// <param name="yes">For a workflow tool: the plan and key its call needs a yes for.</param>
+    private async Task<CompanionResult> RequestAsync(CompanionClient client, string tool, JsonObject args, CancellationToken ct, WorkflowToolYes? yes = null)
     {
         var name = client.Name;
         args.Remove("confirm"); // a client never supplies a yes
@@ -327,12 +327,12 @@ public sealed partial class CompanionService(
     }
 
     /// <summary>
-    /// For an approved script request: the new request when the same call now needs a yes to something else (the script's
+    /// For an approved workflow request: the new request when the same call now needs a yes to something else (the workflow's
     /// runnable version moved, the team's name points elsewhere); null when it still means what was shown, or needs no yes now
     /// (a live run happened since, so this is no longer the first).
     /// </summary>
-    private async Task<Request?> ScriptChangedAsync(Request r, CancellationToken ct) =>
-        await _scripts.YesNeededAsync(r.Tool, r.Args, ct) is { } yes && yes.Key != r.Bound
+    private async Task<Request?> WorkflowChangedAsync(Request r, CancellationToken ct) =>
+        await _workflows.YesNeededAsync(r.Tool, r.Args, ct) is { } yes && yes.Key != r.Bound
             ? new Request(NewId("r"), r.ClientId, r.Client, r.Tool, r.Args.DeepClone().AsObject(), RequestSafe(yes.Plan), null, yes.Key, r.Conversation, Now)
             : null;
 
@@ -574,7 +574,7 @@ public sealed partial class CompanionService(
         {
             using (Actor.Use(actor))
             {
-                if (ScriptTools.Handles(r.Tool) && await ScriptChangedAsync(r, ct) is { } changed)
+                if (WorkflowTools.Handles(r.Tool) && await WorkflowChangedAsync(r, ct) is { } changed)
                 {
                     // What was shown is not what the call would do now: approving the old plan must not run it. Shown again instead.
                     next = changed;
@@ -728,7 +728,7 @@ public sealed partial class CompanionService(
     /// <param name="token">For a list: the token issued at this approval.</param>
     private async Task<(string Text, bool IsError)> ExecuteAsync(Request r, string? token, ConciergeTurn turn, Actor actor, CancellationToken ct)
     {
-        if (ScriptTools.Handles(r.Tool)) return (await _scripts.CallAsync(r.Tool, r.Args.DeepClone().AsObject(), ct), false);
+        if (WorkflowTools.Handles(r.Tool)) return (await _workflows.CallAsync(r.Tool, r.Args.DeepClone().AsObject(), ct), false);
         switch (r.Tool)
         {
             case "git_merge_team":
@@ -1030,7 +1030,7 @@ public sealed partial class CompanionService(
     private static JsonObject SafeParams(JsonObject args)
     {
         var o = new JsonObject();
-        foreach (var k in new[] { "team", "item", "card", "lane", "repo", "branch", "name", "member", "pr", "fix", "workflow", "backup", "id" })
+        foreach (var k in new[] { "team", "item", "card", "lane", "repo", "branch", "name", "member", "pr", "fix", "deliverable", "backup", "id" })
             if (args[k] is JsonValue v) o[k] = v.ToString();
         return o;
     }

@@ -5,8 +5,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// 0048 rebuilds board_cards so its status may be 'stopped'. Run again over a database with cards and
-/// trail lines (its schema_migrations row removed), it keeps every card, trail line, id and counter, and the trail still
+/// 0048 rebuilds board_cards so its status may be 'stopped'. Run over a database at 0047 with cards and
+/// trail lines, it keeps every card, trail line, id and counter, and the trail still
 /// cascades with its card.
 /// </summary>
 public class Migration0048Tests
@@ -18,9 +18,15 @@ public class Migration0048Tests
         var cs = $"Data Source={Path.Combine(dir, "t.db")};Pooling=False";
         try
         {
-            SchemaMigrator.Migrate(cs);
             using (var c = Open(cs))
             {
+                Exec(c, "CREATE TABLE schema_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL) STRICT;");
+                foreach (var name in SchemaMigrator.Available.Where(n => string.CompareOrdinal(n, "0048") < 0))
+                {
+                    using var stream = typeof(SchemaMigrator).Assembly.GetManifestResourceStream("Yawble.Core.Migrations." + name + ".sql")!;
+                    Exec(c, new StreamReader(stream).ReadToEnd());
+                    Exec(c, $"INSERT INTO schema_migrations (name, applied_at) VALUES ('{name}', 't');");
+                }
                 Exec(c, """
                     INSERT INTO board_cards (team, member, title, status, lane, created_at, updated_at, started_at, timeline_rebuild)
                         VALUES ('web', 'Tomas', 'A', 'running', 'in-progress', 't0', 't1', 't0', 1),
@@ -30,7 +36,6 @@ public class Migration0048Tests
                         (1, 't1', 'Tomas', 'progress', 'coding'), (2, 't1', 'Ines', 'failed', 'timeout'), (3, 't0', 'Manager', 'told', 'Test');
                     DELETE FROM board_trail WHERE card_id = 3;
                     DELETE FROM board_cards WHERE id = 3;
-                    DELETE FROM schema_migrations WHERE name = '0048_board_card_stopped';
                     """);
             }
 

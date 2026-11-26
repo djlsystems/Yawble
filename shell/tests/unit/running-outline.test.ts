@@ -79,7 +79,7 @@ describe('a running card has a dotted outline whose dots move clockwise', () => 
   it('on the board, only a running card has it, and its border gives way to it', async () => {
     const boardCard = (over: Partial<BoardCard> = {}): BoardCard => ({
       id: 7, team: 'payments', teamId: 1, member: 'DeveloperPriya', item: null, title: 'Run the suite', body: '', status: 'running',
-      lane: 'in-progress', placed: false, awaitingManager: false, workflow: 12, createdAt: '2026-11-08T10:00:00Z', updatedAt: '2026-11-08T10:00:00Z',
+      lane: 'in-progress', placed: false, awaitingManager: false, deliverable: 12, createdAt: '2026-11-08T10:00:00Z', updatedAt: '2026-11-08T10:00:00Z',
       trailCount: 0, ...over,
     });
     const w = mount(BoardCardItem, { props: { card: boardCard() } });

@@ -83,7 +83,7 @@ public class McpServerTests
         await integrations.DispatchAsync("integrations.approve", new JsonObject { ["id"] = ask.Id }, Ct);
         await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "Ada told the result");
         using var store = db.OpenStore();
-        var told = store.Workflow(root.Seq).Last(m => m.Type == MessageTypes.InstructionPrefix + "Alpha/Ada");
+        var told = store.Deliverable(root.Seq).Last(m => m.Type == MessageTypes.InstructionPrefix + "Alpha/Ada");
         Assert.Contains("would delete everything", Payload.Field(told, "text"));
     }
 }

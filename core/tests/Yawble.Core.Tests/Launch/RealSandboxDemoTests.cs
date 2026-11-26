@@ -15,7 +15,7 @@ namespace Yawble.Core.Tests.Launch;
 /// <summary>
 /// An end-to-end walk through the agent-run features under a REAL sandbox
 /// on Linux, without the UI: two teams under a global run limit of 3, each agent in its own sandbox through its
-/// per-run gateway and the real bridge, Managers telling members and completing workflows over the bus, a guardrail
+/// per-run gateway and the real bridge, Managers telling members and completing deliverables over the bus, a guardrail
 /// check that takes a run slot while the teams work, an interactive terminal on the sandbox's PTY, and Stop. The agent CLIs
 /// are the stand-in (Launch/RealSandbox/standin-cli.py) and the model upstream is the fake; every secret is a fake.
 /// </summary>
@@ -34,7 +34,7 @@ public class RealSandboxDemoTests
         busByRun = new object[]
         {
             members.Select(m => Call("tell", new { member = m, instruction = $"{m}: take your part of the task" })).ToArray(),
-            new[] { Call("workflow_complete", new { delivered = "the team's task" }) },
+            new[] { Call("deliverable_complete", new { delivered = "the team's task" }) },
         },
     };
 
@@ -111,10 +111,10 @@ public class RealSandboxDemoTests
         var check = new GuardrailCheck(kit.Launch.Launcher, kit.Gateway.Db.ConnectionString, slot: GuardrailRunSlots.From(bus));
         var checkTask = check.RunAsync("alpha", "dev2", Ct);
 
-        // Steps 2-3: both workflows complete.
+        // Steps 2-3: both deliverables complete.
         IReadOnlyList<Message> All() => kit.Launch.Messages();
-        await Wait.UntilAsync(() => All().Count(m => m.Type == MessageTypes.WorkflowCompleted) == 2, "both workflows to complete", TimeSpan.FromMinutes(3));
-        var workflowsMs = sw.ElapsedMilliseconds;
+        await Wait.UntilAsync(() => All().Count(m => m.Type == MessageTypes.DeliverableCompleted) == 2, "both deliverables to complete", TimeSpan.FromMinutes(3));
+        var deliverablesMs = sw.ElapsedMilliseconds;
         var report = await checkTask.WaitAsync(TimeSpan.FromMinutes(2), Ct);
         await Wait.UntilAsync(() => bus.IsQuiescentAsync(Ct), "the bus to settle", TimeSpan.FromMinutes(1));
         sampling.Cancel();
@@ -138,7 +138,7 @@ public class RealSandboxDemoTests
         Assert.Equal("yawble-ffi", report.Run!.Backend);
         // Each agent ran in its own sandbox with its own gateway; each run token is revoked now.
         Assert.All(kit.Started, s => Assert.Equal(Yawble.Core.Gateway.TokenCheck.Revoked, kit.Gateway.Tokens.Check(s.Run.RunNumber, s.Gateway.RunToken)));
-        RealSandbox.Report($"end to end: 2 workflows complete in {workflowsMs} ms; {sandboxes} sandboxes ({outcomes.Count} agent runs + 1 guardrail check); " +
+        RealSandbox.Report($"end to end: 2 deliverables complete in {deliverablesMs} ms; {sandboxes} sandboxes ({outcomes.Count} agent runs + 1 guardrail check); " +
                        $"max {maxLive} live at once (limit 3), max {maxQueued} queued; guardrail check {(report.Passed ? "PASSED" : "FAILED")} " +
                        $"{report.Counts.Blocked} blocked / {report.Counts.Allowed} allowed in {report.DurationMs} ms");
 

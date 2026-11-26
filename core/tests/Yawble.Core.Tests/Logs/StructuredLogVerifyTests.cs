@@ -6,26 +6,26 @@ using Yawble.Core.Email;
 using Yawble.Core.Integrations;
 using Yawble.Core.Launch;
 using Yawble.Core.Logs;
-using Yawble.Core.Scripts.Actions;
-using Yawble.Core.Scripts.Engine;
-using Yawble.Core.Scripts.Language;
-using Yawble.Core.Scripts.Library;
-using Yawble.Core.Scripts.Running;
+using Yawble.Core.Workflows.Actions;
+using Yawble.Core.Workflows.Engine;
+using Yawble.Core.Workflows.Language;
+using Yawble.Core.Workflows.Library;
+using Yawble.Core.Workflows.Running;
 using Yawble.Core.Tests.Bus;
 using Yawble.Core.Tests.Connections;
 using Yawble.Core.Tests.Email;
-using Yawble.Core.Tests.Scripts;
+using Yawble.Core.Tests.Workflows;
 using Yawble.Core.Tests.Teams;
-using IntegrationCaller = Yawble.Core.Integrations.ScriptCaller;
-using RunCaller = Yawble.Core.Scripts.Running.ScriptCaller;
-using RunStatus = Yawble.Core.Scripts.Running.ScriptRunStatus;
+using IntegrationCaller = Yawble.Core.Integrations.WorkflowCaller;
+using RunCaller = Yawble.Core.Workflows.Running.WorkflowCaller;
+using RunStatus = Yawble.Core.Workflows.Running.WorkflowRunStatus;
 
 namespace Yawble.Core.Tests.Logs;
 
 /// <summary>
 /// Structured logs end to end with fakes. A real Diagnostics file holding old 3-column lines and new 4-column lines,
 /// read back through logs.query (the RPC) with the Level filter and the team+member filter on two teams that both have a
-/// DeveloperInes; two start-up fetch-backs; a failing script run whose warning line goes into a real Diagnostics file and
+/// DeveloperInes; two start-up fetch-backs; a failing workflow run whose warning line goes into a real Diagnostics file and
 /// is read back; the email login failure as the Tool calls log shows it.
 /// </summary>
 public sealed class StructuredLogVerifyTests : IDisposable
@@ -192,55 +192,55 @@ public sealed class StructuredLogVerifyTests : IDisposable
         Assert.All(second.Where(e => e.Text.Contains(": fetched members/", StringComparison.Ordinal)), e => Assert.Equal(LogLevels.Debug, e.Level));
     }
 
-    // ------------------------------------------------------------------ bullet 3: a failing script run, into a real file
+    // ------------------------------------------------------------------ bullet 3: a failing workflow run, into a real file
 
-    private sealed class Actions : IScriptActionsProvider, IScriptActions
+    private sealed class Actions : IWorkflowActionsProvider, IWorkflowActions
     {
-        public IScriptActionCatalog Catalog { get; } = FakeCatalog.MailAndSms();
+        public IWorkflowActionCatalog Catalog { get; } = FakeCatalog.MailAndSms();
         public string? SmsFailure { get; set; }
-        public IScriptActions For(RunCaller caller) => this;
+        public IWorkflowActions For(RunCaller caller) => this;
 
-        public Task<JsonNode?> InvokeAsync(ScriptActionCall call, CancellationToken ct)
+        public Task<JsonNode?> InvokeAsync(WorkflowActionCall call, CancellationToken ct)
         {
-            if (call.Use == "sms" && SmsFailure is { } why) throw new ScriptActionException(why);
+            if (call.Use == "sms" && SmsFailure is { } why) throw new WorkflowActionException(why);
             return Task.FromResult<JsonNode?>(call.Use == "mail"
-                ? new JsonArray(ScriptSamples.Email("m7", "Quarterly invoice 4471", "billing@vendor.example", "2026-11-24T08:00:00Z"))
+                ? new JsonArray(WorkflowSamples.Email("m7", "Quarterly invoice 4471", "billing@vendor.example", "2026-11-24T08:00:00Z"))
                 : new JsonObject { ["status"] = 201 });
         }
     }
 
     [Fact]
-    public async Task AFailingScriptRun_WritesOneWarningLineWithEveryField_IntoTheFile_AndTheRunsRowSaysWhatFailed()
+    public async Task AFailingWorkflowRun_WritesOneWarningLineWithEveryField_IntoTheFile_AndTheRunsRowSaysWhatFailed()
     {
         var actions = new Actions
         {
             SmsFailure = "twilio CreateMessage (POST /2010-04-01/Accounts/{AccountSid}/Messages.json): HTTP 400: auth tok_verify_9f8e7d6c5b4a3210 rejected",
         };
-        ScriptRunner? runner = null;
-        await using var bus = new BusEngine(_db.OpenStore(), new ScriptDispatchRunner(new ScriptedRunner(), () => runner), new BusOptions { IdleOffer = false });
+        WorkflowRunner? runner = null;
+        await using var bus = new BusEngine(_db.OpenStore(), new WorkflowDispatchRunner(new ScriptedRunner(), () => runner), new BusOptions { IdleOffer = false });
         var teamId = await bus.CreateTeamAsync("Alpha", ct: Ct);
-        var library = new ScriptLibrary(_db.ConnectionString, () => actions.Catalog);
-        var store = new ScriptRunStore(_db.ConnectionString);
-        runner = new ScriptRunner(store, library, actions, SeamScriptEngine.Instance, Path.Combine(_db.Dir, "scripts"));
-        bus.ScriptMembers = runner;
-        var saved = library.Save(ScriptSamples.InboxSmsAlert);
+        var library = new WorkflowLibrary(_db.ConnectionString, () => actions.Catalog);
+        var store = new WorkflowRunStore(_db.ConnectionString);
+        runner = new WorkflowRunner(store, library, actions, SeamWorkflowEngine.Instance, Path.Combine(_db.Dir, "workflows"));
+        bus.WorkflowMembers = runner;
+        var saved = library.Save(WorkflowSamples.InboxSmsAlert);
         Assert.True(saved.Ok, saved.Check.ToJsonString());
         await bus.StartAsync(Ct);
-        var bot = await bus.AddScriptMemberAsync(teamId, "Poller", Ct);
-        store.SetScriptMember(bot.Id, saved.Id, null,
+        var bot = await bus.AddWorkflowMemberAsync(teamId, "Poller", Ct);
+        store.SetWorkflowMember(bot.Id, saved.Id, null,
             new JsonObject { ["recipients"] = new JsonArray("+15551230001"), ["fromNumber"] = "+15559990000" },
             new JsonObject { ["mail"] = "mailbox", ["sms"] = "twilio" }, null);
 
         var log = new DiagnosticLog(_db.Dir, "core", _clock);
         var owner = new object();
         SecretScrubber.Set(owner, 1, ["tok_verify_9f8e7d6c5b4a3210"]);
-        ScriptRunOutcome outcome;
+        WorkflowRunOutcome outcome;
         try
         {
             // What Diag does once attached: the entry is written to the Diagnostics log (here: a real file of this test's own).
             using (Diag.Capture(e => log.Write(e.Level, e.Area, e.Text, e.Fields)))
                 outcome = await runner.RunMemberAsync(bot.Id, "trigger:12",
-                    ScriptPayloads.TriggerFired(12, "every", DateTimeOffset.Parse("2026-11-24T11:00:00Z", System.Globalization.CultureInfo.InvariantCulture)), Ct);
+                    WorkflowPayloads.TriggerFired(12, "every", DateTimeOffset.Parse("2026-11-24T11:00:00Z", System.Globalization.CultureInfo.InvariantCulture)), Ct);
         }
         finally { SecretScrubber.Forget(owner, 1); }
         await runner.StopAsync();
@@ -248,15 +248,15 @@ public sealed class StructuredLogVerifyTests : IDisposable
         Assert.Equal(RunStatus.Failed, outcome.Run.Status);
         var step = outcome.Run.FailedStepId!;
         var fileLines = Directory.GetFiles(Path.Combine(_db.Dir, FileLogs.DiagnosticsFolder)).SelectMany(File.ReadAllLines).Where(l => l.Length > 0).ToList();
-        var line = Assert.Single(fileLines, l => l.Split('\t') is { Length: 4 } c && c[3].Contains("area=scripts", StringComparison.Ordinal) && c[3].Contains("level=warning", StringComparison.Ordinal));
+        var line = Assert.Single(fileLines, l => l.Split('\t') is { Length: 4 } c && c[3].Contains("area=workflows", StringComparison.Ordinal) && c[3].Contains("level=warning", StringComparison.Ordinal));
         var cols = line.Split('\t');
         var pairs = DiagFields.Parse(cols[3]);
         string? F(string k) => DiagFields.Get(pairs, k);
         var runId = outcome.Run.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        Assert.Equal(runId, F("scriptRun"));
+        Assert.Equal(runId, F("workflowRun"));
         Assert.Equal("Alpha", F("team"));
         Assert.Equal("Alpha/Poller", F("member"));
-        Assert.Equal("inbox-sms-alert@1", F("script"));
+        Assert.Equal("inbox-sms-alert@1", F("workflow"));
         Assert.Equal("trigger:12", F("trigger"));
         Assert.Equal(step, F("step"));
         Assert.Equal("integration", F("stepType"));
@@ -265,7 +265,7 @@ public sealed class StructuredLogVerifyTests : IDisposable
         Assert.Contains("HTTP 400", F("reason"));
         Assert.True(long.TryParse(F("ms"), out _), F("ms"));
         Assert.Equal("failed", F("status"));
-        Assert.StartsWith($"script run {runId} failed: Alpha/Poller, inbox-sms-alert@1, started by trigger:12, at step {step} (", cols[2]);
+        Assert.StartsWith($"workflow run {runId} failed: Alpha/Poller, inbox-sms-alert@1, started by trigger:12, at step {step} (", cols[2]);
         Assert.Contains("twilio CreateMessage (POST", cols[2]);
         // Scrubbed and no message content anywhere in the line: the token, the email's subject and sender, the phone numbers.
         foreach (var leak in new[] { "tok_verify_9f8e7d6c5b4a3210", "Quarterly invoice", "billing@vendor.example", "+15551230001", "+15559990000" })
@@ -273,15 +273,15 @@ public sealed class StructuredLogVerifyTests : IDisposable
 
         // And through logs.query: a warning, in the member's lines.
         var rows = await RpcQuery("warning", member: "Alpha/Poller");
-        Assert.Contains(rows, r => T(r).StartsWith($"script run {runId} failed", StringComparison.Ordinal));
+        Assert.Contains(rows, r => T(r).StartsWith($"workflow run {runId} failed", StringComparison.Ordinal));
 
         // The Runs row and the failed step.
         var stepRow = Assert.Single(store.Steps(outcome.Run.Id), s => s.StepId == step && s.Status == "failed");
         Assert.Contains("HTTP 400", (string?)stepRow.Output!["error"]);
         var runs = Rows(new LogService(_db.Dir, _db.ConnectionString).Query(new LogQuery("runs", Team: "Alpha")));
-        var script = Assert.Single(runs, x => (string?)x["kind"] == "script");
+        var workflow = Assert.Single(runs, x => (string?)x["kind"] == "workflow");
         Assert.Equal(("inbox-sms-alert@1", "trigger:12", step, outcome.Run.Id),
-            ((string?)script["script"], (string?)script["trigger"], (string?)script["failedStep"], (long?)script["scriptRun"]));
+            ((string?)workflow["workflow"], (string?)workflow["trigger"], (string?)workflow["failedStep"], (long?)workflow["workflowRun"]));
     }
 
     // ------------------------------------------------------------------ bullet 4: the email login failure in the Tool calls log
@@ -296,7 +296,7 @@ public sealed class StructuredLogVerifyTests : IDisposable
             new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero)));
         await using var engine = new BusEngine(_db.OpenStore(), new ScriptedRunner(), new BusOptions { IdleOffer = false });
         var conns = new ConnectionService(new MemoryCredentialStore(), _db.ConnectionString);
-        await using var svc = new IntegrationService(_db.ConnectionString, engine, clock: new Yawble.Core.Tests.Scripts.FakeClock(Now), connections: conns, mail: mail.Factory());
+        await using var svc = new IntegrationService(_db.ConnectionString, engine, clock: new Yawble.Core.Tests.Workflows.FakeClock(Now), connections: conns, mail: mail.Factory());
         engine.Integrations = svc;
         var alpha = await engine.CreateTeamAsync("Alpha", ct: Ct);
         var conn = (await svc.DispatchAsync("integrations.connectionSave", new JsonObject
@@ -308,7 +308,7 @@ public sealed class StructuredLogVerifyTests : IDisposable
         await svc.DispatchAsync("integrations.emailEnable", new JsonObject { ["name"] = "Sales inbox", ["teamId"] = alpha }, Ct);
 
         mail.Imap.Password = "a-different-password";
-        var e = await Assert.ThrowsAsync<MailException>(() => svc.UseEmailForScriptAsync<JsonNode?>(new IntegrationCaller("Alpha", "Reader", "77", false), "Sales inbox", "list",
+        var e = await Assert.ThrowsAsync<MailException>(() => svc.UseEmailForWorkflowAsync<JsonNode?>(new IntegrationCaller("Alpha", "Reader", "77", false), "Sales inbox", "list",
             new JsonObject { ["folder"] = "INBOX", ["max"] = 5 }, async m => (await m.ListAsync("INBOX", null, false, 5, null, Ct)).ToJson(), Ct));
 
         var tools = Rows(new LogService(_db.Dir, _db.ConnectionString).Query(new LogQuery("tools", Team: "Alpha")));
@@ -319,7 +319,7 @@ public sealed class StructuredLogVerifyTests : IDisposable
         Assert.Contains("host 127.0.0.1", text);
         Assert.Contains("failed: ", text);
         Assert.Contains("refused the user name or password", e.Message);
-        Assert.Equal("script", row["via"]?.ToString());
+        Assert.Equal("workflow", row["via"]?.ToString());
         foreach (var leak in new[] { password, "a-different-password", "Private subject 31", "Private body" })
             Assert.DoesNotContain(leak, text);
     }

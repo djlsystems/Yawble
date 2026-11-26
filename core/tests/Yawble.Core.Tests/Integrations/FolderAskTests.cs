@@ -81,7 +81,7 @@ public sealed class FolderAskTests : IDisposable
     private MemberRef Manager => new(_manager, _alpha, "alpha", "manager", MemberRole.Manager);
 
     private Task<string> Ask(MemberRef who, string path, string access = "readwrite", string? member = null) =>
-        _asks.RequestFromAgentAsync(who, path, access, "read the recorded smoke sessions the tests replay", member, workflow: 70, causation: 71, Ct);
+        _asks.RequestFromAgentAsync(who, path, access, "read the recorded smoke sessions the tests replay", member, deliverable: 70, causation: 71, Ct);
 
     private EffectivePolicy Effective(long memberId) =>
         _policies.Effective(memberId, PolicyFixtures.Layout(TargetOs.Windows, AgentCli.Claude, new Yawble.Core.Policy.MemberRef("alpha", _names[memberId]))).Policy;
@@ -97,7 +97,7 @@ public sealed class FolderAskTests : IDisposable
         var ask = Assert.Single(_asks.Asks());
         Assert.Equal(("alpha/dev1", "alpha/dev1", @"Z:\smokesessions", "readwrite"), (ask.Member, ask.AskedBy, ask.Path, ask.Access));
         Assert.True(ask.PathExisted);
-        Assert.Equal((70L, 71L), (ask.Workflow, ask.CausationSeq));
+        Assert.Equal((70L, 71L), (ask.Deliverable, ask.CausationSeq));
         Assert.Equal(1, _asks.PendingCount());
 
         var answer = await _asks.AnswerAsync(ask.Id, FolderAccess.ReadWrite, null, Ct);
@@ -110,7 +110,7 @@ public sealed class FolderAskTests : IDisposable
         var stored = _policies.GetMember(_dev1);
         Assert.Contains(@"filesystem.readwrite + Z:\smokesessions", stored.LoosenSummary);
         Assert.NotNull(stored.LoosenApprovedAt);
-        // The Manager is told to retry, in the ask's workflow.
+        // The Manager is told to retry, in the ask's deliverable.
         var told = Assert.Single(_told);
         Assert.Equal(("alpha", "manager", 71L), (told.Team, told.Member, told.Causation));
         Assert.Contains(@"dev1 can now read and write Z:\smokesessions", told.Text);
@@ -305,7 +305,7 @@ public sealed class FolderAskTests : IDisposable
         Assert.False(list[1]!["exists"]!.GetValue<bool>());
         Assert.Equal("pending", item["state"]!.GetValue<string>());
         Assert.Null(item["grantedAccess"]);
-        Assert.Equal(70, item["workflow"]!.GetValue<long>());
+        Assert.Equal(70, item["deliverable"]!.GetValue<long>());
         Assert.Equal(["readwrite", "read", "deny"], item["choices"]!.AsArray().Select(n => n!.GetValue<string>()));
 
         var bad = await Assert.ThrowsAsync<RpcException>(() => _asks.DispatchAsync("folder.answer", new JsonObject { ["id"] = item["id"]!.GetValue<long>(), ["choice"] = "everything" }, Ct));

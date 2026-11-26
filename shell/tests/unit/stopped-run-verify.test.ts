@@ -24,7 +24,7 @@ afterEach(() => { while (mounted.length) mounted.pop()!.unmount(); });
 // The board node as the core sends it after a stop (BoardService.ListAsync + BoardProjector).
 const coreStoppedCard = (status: BoardCard['status'], lane: string): BoardCard => ({
   id: 41, team: 'Alpha', teamId: 1, member: 'stop', item: 'B097', title: 'job stop', body: '', status, lane,
-  placed: false, awaitingManager: false, workflow: 5, createdAt: '2026-11-18T12:00:00Z', updatedAt: '2026-11-18T12:02:00Z', trailCount: 3,
+  placed: false, awaitingManager: false, deliverable: 5, createdAt: '2026-11-18T12:00:00Z', updatedAt: '2026-11-18T12:02:00Z', trailCount: 3,
   memberState: { state: 'idle', attention: 'stopped' },
 });
 
@@ -53,7 +53,7 @@ describe('the board card for a run the person stopped, as the core sends it', ()
   // Round 2: the member's attention says "stopped" on every card of that member; only the stopped run's card is marked.
   it.each([['running', 'in-progress', 'Running'], ['queued', 'todo', 'Queued'], ['handback', 'done', 'Handed back'], ['completed', 'done', 'Run finished']] as const)(
     "the member's older card (status %s) is not marked Stopped", (status, lane, label) => {
-      const older = { ...coreStoppedCard(status, lane), id: 40, workflow: 4 };
+      const older = { ...coreStoppedCard(status, lane), id: 40, deliverable: 4 };
       expect(cardStatusLook(older).label).toBe(label);
       const w = mount(BoardCardItem, { props: { card: older } });
       mounted.push(w);
@@ -90,7 +90,7 @@ describe('the stopped colour in both themes (styles.css)', () => {
 
 describe('the Monitor fed the core\'s rows', () => {
   const row = (seq: number, extra: Partial<FeedRow>): FeedRow =>
-    ({ seq, kind: 'failed', team: 'Alpha', member: 'stop', from: 'stop', text: null, workflow: 5, at: new Date().toISOString(), ...extra });
+    ({ seq, kind: 'failed', team: 'Alpha', member: 'stop', from: 'stop', text: null, deliverable: 5, at: new Date().toISOString(), ...extra });
 
   it('kind "stopped" + failureClass "stopped" is stopped; kind "failed" + "timeout" stays failed', () => {
     expect(feedKindOf(row(1, { kind: 'stopped', failureClass: 'stopped' }))).toBe('stopped');

@@ -167,7 +167,7 @@ public class OAuthConnectionTests
         private async Task<RunResult> Handle(RunContext run, CancellationToken ct)
         {
             // Every item of the batch: a call told while the member's previous run is still ending waits and can be batched
-            // behind another pending message of the workflow (an approval notice, say).
+            // behind another pending message of the deliverable (an approval notice, say).
             foreach (var (id, call) in _calls)
             {
                 if (!run.Items.Any(m => m.Payload.Contains($"call#{id}#", StringComparison.Ordinal))) continue;
@@ -200,10 +200,10 @@ public class OAuthConnectionTests
             return await done.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
         }
 
-        public bool Told(long workflow, string text)
+        public bool Told(long deliverable, string text)
         {
             using var s = Db.OpenStore();
-            return s.Workflow(workflow).Any(m => m.Payload.Contains(text, StringComparison.Ordinal));
+            return s.Deliverable(deliverable).Any(m => m.Payload.Contains(text, StringComparison.Ordinal));
         }
 
         public string Text(string sql)
@@ -357,7 +357,7 @@ public class OAuthConnectionTests
         Assert.StartsWith("asked:", asked);
         var ask = Assert.Single(r.Svc.Asks(r.Alpha, pendingOnly: true));
         await r.Rpc("integrations.approve", new JsonObject { ["id"] = ask.Id });
-        await Wait.UntilAsync(() => r.Told(ask.Workflow, "HTTP 201"), "Ada told the result");
+        await Wait.UntilAsync(() => r.Told(ask.Deliverable, "HTTP 201"), "Ada told the result");
         Assert.Equal("Bearer " + At1, r.ApiAuth[^1]);
     }
 

@@ -9,8 +9,8 @@ import { errorText, resolveApi } from '../api';
 import { type AgentCliId } from '../agentClis';
 import { useAgentOptions } from '../agentOptions';
 import MemberPane from './MemberPane.vue';
-import ScriptMemberPane from './ScriptMemberPane.vue';
-import ScriptMemberAdd from './ScriptMemberAdd.vue';
+import WorkflowMemberPane from './WorkflowMemberPane.vue';
+import WorkflowMemberAdd from './WorkflowMemberAdd.vue';
 import { useTeamActivity } from '../monitor/teamActivity';
 import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
@@ -32,7 +32,7 @@ import { renderMarkdown } from '../markdown';
 import { decisionLayout, questionMarkdown, type DecisionButton } from '../questionFormat';
 import { useImageAttachments } from '../imageAttachments';
 import { useNarrow } from '../narrowScreen';
-import { openWorkflowsPage } from '../workflows/page';
+import { openDeliverablesPage } from '../deliverables/page';
 
 // A team's agent list: the Tell Manager box, open needs_decision questions, the cards, and Add agent.
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number }>();
@@ -62,7 +62,7 @@ const error = ref<string | null>(null);
 /** The last refresh failed (cleared by the next one that works); action errors stay in `error`. */
 const refreshError = ref<string | null>(null);
 const showTriggers = ref(false);
-/** A script member's Triggers pill with one trigger opens the dialog on it. */
+/** A workflow member's Triggers pill with one trigger opens the dialog on it. */
 const triggerToEdit = ref<number | null>(null);
 const showGit = ref(false);
 // The Commit view's Compare with main / Show its branch open this team's Git dialog (at the commit's branch).
@@ -75,9 +75,9 @@ watch(gitRequest, (r) => {
 }, { immediate: true });
 const showManage = ref(false);
 const showDocs = ref(false);
-/** The Add form's CLI choice also offers a script member (its own form: script, version, settings, bindings). */
-const ScriptMemberChoice = 'script' as const;
-const newAgent = ref({ name: '', cli: 'claude' as AgentCliId | typeof ScriptMemberChoice });
+/** The Add form's CLI choice also offers a workflow member (its own form: workflow, version, settings, bindings). */
+const WorkflowMemberChoice = 'workflow' as const;
+const newAgent = ref({ name: '', cli: 'claude' as AgentCliId | typeof WorkflowMemberChoice });
 let timer: ReturnType<typeof setInterval> | null = null;
 
 // The first answer for this team has arrived (later polls keep what is shown: no loading flash).
@@ -120,8 +120,8 @@ const tellImages = useImageAttachments();
 const tellPicker = ref<HTMLInputElement | null>(null);
 const sendTell = busyFor('tell', async () => {
   const images = tellImages.payload();
-  const r = await api.call<{ workflow: number }>('bus.tellManager', { teamId: props.team.id, text: tell.value, ...(images.length ? { images } : {}) });
-  told.value = `Sent to the Manager · workflow ${r.workflow}${images.length ? ` · ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`;
+  const r = await api.call<{ deliverable: number }>('bus.tellManager', { teamId: props.team.id, text: tell.value, ...(images.length ? { images } : {}) });
+  told.value = `Sent to the Manager · deliverable ${r.deliverable}${images.length ? ` · ${images.length} image${images.length === 1 ? '' : 's'}` : ''}`;
   tell.value = '';
   tellImages.clear();
 });
@@ -193,14 +193,14 @@ function cancelAdd() {
   newAgent.value = { name: '', cli: 'claude' };
 }
 const addAgent = busyFor('add-agent', async () => {
-  if (newAgent.value.cli === ScriptMemberChoice) return; // the script member form adds it
+  if (newAgent.value.cli === WorkflowMemberChoice) return; // the workflow member form adds it
   await api.call('members.add', { teamId: props.team.id, name: newAgent.value.name.trim(), cli: newAgent.value.cli });
   newAgent.value = { name: '', cli: 'claude' };
   adding.value = false;
 });
-const canAdd = computed(() => newAgent.value.cli !== ScriptMemberChoice && !!newAgent.value.name.trim() && !busy.is('add-agent'));
-/** A script member was added by its form (scripts.memberAdd): close the form and show it. */
-function scriptAdded() {
+const canAdd = computed(() => newAgent.value.cli !== WorkflowMemberChoice && !!newAgent.value.name.trim() && !busy.is('add-agent'));
+/** A workflow member was added by its form (workflows.memberAdd): close the form and show it. */
+function workflowAdded() {
   newAgent.value = { name: '', cli: 'claude' };
   adding.value = false;
   void refresh();
@@ -278,7 +278,7 @@ defineExpose({ refresh, openDocuments });
         <span class="kpi" :class="{ live: team.running > 0 }" data-test="kpi-running"><span class="sep"> · </span><b>{{ team.running }}</b> running</span>
         <span class="kpi" data-test="kpi-queued"><span class="sep"> · </span><b>{{ team.queued }}</b> queued</span>
       </div>
-      <!-- A phone: the title and the actions are one row, the actions behind ⋯. Documents and Workflows are in the
+      <!-- A phone: the title and the actions are one row, the actions behind ⋯. Documents and Deliverables are in the
            ⋯ menu first and in the drawer, under the team's name (App.vue, Sidebar.vue). Every item
            has an icon of the same size, as the drawer has. -->
       <div v-if="phone" class="actions phone-actions" data-test="team-phone-actions">
@@ -286,7 +286,7 @@ defineExpose({ refresh, openDocuments });
           <button class="hbtn" data-test="team-more" title="More" aria-label="More team actions" aria-haspopup="menu" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen"><Icon name="more" :size="18" /></button>
           <span v-if="moreOpen" class="menu" role="menu" data-test="team-more-menu">
             <button role="menuitem" data-test="open-documents-menu" @click="moreOpen = false; openDocuments()"><Icon name="docs" :size="18" />Documents</button>
-            <button role="menuitem" data-test="open-workflows-menu" title="Opens the Workflows page with this team's workflows" @click="moreOpen = false; openWorkflowsPage({ teamId: team.id })"><Icon name="workflow" :size="18" />Workflows</button>
+            <button role="menuitem" data-test="open-deliverables-menu" title="Opens the Deliverables page with this team's deliverables" @click="moreOpen = false; openDeliverablesPage({ teamId: team.id })"><Icon name="deliverable" :size="18" />Deliverables</button>
             <button role="menuitem" data-test="open-triggers" @click="moreOpen = false; showTriggers = true"><Icon name="clock" :size="18" />Triggers</button>
             <button role="menuitem" data-test="open-git" @click="moreOpen = false; showGit = true"><Icon name="branch" :size="18" />Git</button>
             <button role="menuitem" data-test="open-manage" @click="moreOpen = false; showManage = true"><Icon name="settings" :size="18" />Settings</button>
@@ -295,7 +295,7 @@ defineExpose({ refresh, openDocuments });
       </div>
       <div v-else class="actions">
         <button data-test="open-documents" title="What the team writes for you, and what you add" @click="openDocuments"><Icon name="docs" :size="14" /> Documents</button>
-        <button data-test="open-workflows" title="Opens the Workflows page with this team's workflows" @click="openWorkflowsPage({ teamId: team.id })"><Icon name="workflow" :size="14" /> Workflows</button>
+        <button data-test="open-deliverables" title="Opens the Deliverables page with this team's deliverables" @click="openDeliverablesPage({ teamId: team.id })"><Icon name="deliverable" :size="14" /> Deliverables</button>
         <button data-test="open-triggers" title="Work on a schedule" @click="showTriggers = true">⏰ Triggers</button>
         <button data-test="open-git" title="The team's branches, merge to main" @click="showGit = true">⎇ Git</button>
         <button data-test="open-manage" title="The team's repositories, pause and archive, environment, reset, delete" @click="showManage = true">
@@ -393,7 +393,7 @@ defineExpose({ refresh, openDocuments });
          one full-width tile per row, as tall as its content, no handles. -->
     <div ref="grid" class="member-grid" :style="phone ? undefined : gridStyle" data-test="member-grid">
       <div v-for="c in cards" :key="c.member.id" class="member-cell" data-test="member-cell">
-        <ScriptMemberPane v-if="c.kind === 'script'" :card="c" :api="api" :poll-ms="pollMs"
+        <WorkflowMemberPane v-if="c.kind === 'workflow'" :card="c" :api="api" :poll-ms="pollMs"
           :pending="busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null" @remove="remove(c)"
           @triggers="(id) => { triggerToEdit = id; showTriggers = true; }" />
         <MemberPane v-else :ref="(p) => setPaneRef(c.member.name, p)" :card="c" :api="api" :poll-ms="pollMs"
@@ -413,9 +413,9 @@ defineExpose({ refresh, openDocuments });
             </label>
             <label>CLI
               <select v-model="newAgent.cli" data-test="add-agent-cli"><option v-for="o in agentOptions" :key="o.id" :value="o.id">{{ o.label }}</option>
-                <option :value="ScriptMemberChoice" data-test="add-agent-cli-script">Script member</option></select>
+                <option :value="WorkflowMemberChoice" data-test="add-agent-cli-workflow">Workflow member</option></select>
             </label>
-            <ScriptMemberAdd v-if="newAgent.cli === ScriptMemberChoice" :api="api" :team-id="team.id" :name="newAgent.name" @added="scriptAdded" @cancel="cancelAdd" />
+            <WorkflowMemberAdd v-if="newAgent.cli === WorkflowMemberChoice" :api="api" :team-id="team.id" :name="newAgent.name" @added="workflowAdded" @cancel="cancelAdd" />
             <div v-else class="add-buttons">
               <button type="submit" class="primary" v-change data-test="add-agent" :disabled="!canAdd" :aria-busy="busy.is('add-agent')"><BusyLabel :busy="busy.is('add-agent')" text="Adding…">Add</BusyLabel></button>
               <button type="button" data-test="add-agent-cancel" :disabled="busy.is('add-agent')" @click="cancelAdd">Cancel</button>

@@ -290,7 +290,7 @@ public sealed class SystemToolHost(IGitHost git, string appDataRoot) : IToolHost
 
 /// <summary>A tool ask (tool_asks, 0040). <paramref name="Member"/>: "Team/Name" of the latest member who asked.</summary>
 public sealed record ToolAskRow(long Id, string At, long TeamId, string Team, string Tool, string Member, string? Reason, int Count, string LastSeen,
-    long? Workflow, long? CausationSeq, string State, int Attempts, string? Error, string? DecidedBy, string? DecidedVia, string? DecidedAt, string? Note,
+    long? Deliverable, long? CausationSeq, string State, int Attempts, string? Error, string? DecidedBy, string? DecidedVia, string? DecidedAt, string? Note,
     string? LastResult = null)
 {
     public string MemberName => Member[(Member.IndexOf('/') + 1)..];
@@ -305,7 +305,7 @@ public sealed record ToolAskRow(long Id, string At, long TeamId, string Team, st
 /// not asked about that tool again for 24 hours. On Linux, with pkexec, a graphical session and a recognised distribution,
 /// Install runs "pkexec &lt;package manager&gt; ..." instead; Check again (tools.checkAgain) looks for the program again
 /// after the person installed it themselves. Each ask, answer and result is in the Approvals log (tool_ask_events).
-/// The network asks' plumbing is shared: the same tell (as the person, in the ask's workflow), the same Needs you count
+/// The network asks' plumbing is shared: the same tell (as the person, in the ask's deliverable), the same Needs you count
 /// and Concierge status, the same Approvals log.
 /// </summary>
 public sealed class ToolAskService
@@ -376,7 +376,7 @@ public sealed class ToolAskService
     // ------------------------------------------------------------------ request_tool
 
     /// <summary>The request_tool bus tool: the agent's answer, as text.</summary>
-    public async Task<string> RequestFromAgentAsync(MemberRef member, string tool, string reason, long workflow, long causation, CancellationToken ct)
+    public async Task<string> RequestFromAgentAsync(MemberRef member, string tool, string reason, long deliverable, long causation, CancellationToken ct)
     {
         var entry = ToolCatalog.Find(tool);
         if (entry is null)
@@ -410,20 +410,20 @@ public sealed class ToolAskService
             using (var cmd = open is { } openId
                        ? Command(c,
                            """
-                           UPDATE tool_asks SET count = count + 1, last_seen = $now, member = $m, reason = $r, workflow = $w, causation_seq = $c
+                           UPDATE tool_asks SET count = count + 1, last_seen = $now, member = $m, reason = $r, deliverable = $w, causation_seq = $c
                            WHERE id = $id RETURNING id, count;
                            """,
-                           ("$now", Stamp(now)), ("$m", qualified), ("$r", clean), ("$w", workflow), ("$c", causation), ("$id", openId))
+                           ("$now", Stamp(now)), ("$m", qualified), ("$r", clean), ("$w", deliverable), ("$c", causation), ("$id", openId))
                        : Command(c,
                        """
-                       INSERT INTO tool_asks (at, team_id, tool, member, reason, count, last_seen, workflow, causation_seq)
+                       INSERT INTO tool_asks (at, team_id, tool, member, reason, count, last_seen, deliverable, causation_seq)
                        VALUES ($now, $t, $tool, $m, $r, 1, $now, $w, $c)
                        ON CONFLICT (team_id, tool) WHERE state IN ('pending', 'installing') DO UPDATE SET
                            count = count + 1, last_seen = excluded.last_seen, member = excluded.member, reason = excluded.reason,
-                           workflow = excluded.workflow, causation_seq = excluded.causation_seq
+                           deliverable = excluded.deliverable, causation_seq = excluded.causation_seq
                        RETURNING id, count;
                        """,
-                       ("$now", Stamp(now)), ("$t", member.TeamId), ("$tool", entry.Name), ("$m", qualified), ("$r", clean), ("$w", workflow), ("$c", causation)))
+                       ("$now", Stamp(now)), ("$t", member.TeamId), ("$tool", entry.Name), ("$m", qualified), ("$r", clean), ("$w", deliverable), ("$c", causation)))
             {
                 cmd.Transaction = tx;
                 using var r = cmd.ExecuteReader();
@@ -451,7 +451,7 @@ public sealed class ToolAskService
     {
         using var c = Open();
         using var cmd = Command(c,
-            "SELECT a.id, a.at, a.team_id, COALESCE(t.name, ''), a.tool, a.member, a.reason, a.count, a.last_seen, a.workflow, a.causation_seq, a.state, " +
+            "SELECT a.id, a.at, a.team_id, COALESCE(t.name, ''), a.tool, a.member, a.reason, a.count, a.last_seen, a.deliverable, a.causation_seq, a.state, " +
             "a.attempts, a.error, a.decided_by, a.decided_via, a.decided_at, a.note, a.last_result FROM tool_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
             (openOnly ? " AND a.state IN ('pending', 'installing')" : "") + (teamId is null ? "" : " AND a.team_id = $t") + " ORDER BY a.id;",
             ("$t", teamId));
@@ -485,7 +485,7 @@ public sealed class ToolAskService
             ["id"] = a.Id, ["at"] = a.At, ["teamId"] = a.TeamId, ["team"] = a.Team, ["member"] = a.Member, ["memberName"] = a.MemberName,
             ["tool"] = a.Tool, ["displayName"] = t?.DisplayName ?? a.Tool, ["publisher"] = t?.Publisher, ["wingetId"] = _host.IsWindows ? t?.WingetId : null,
             ["scope"] = t is null || !_host.IsWindows ? null : t.UserScope ? "user" : "machine",
-            ["reason"] = a.Reason, ["count"] = a.Count, ["lastSeen"] = a.LastSeen, ["workflow"] = a.Workflow,
+            ["reason"] = a.Reason, ["count"] = a.Count, ["lastSeen"] = a.LastSeen, ["deliverable"] = a.Deliverable,
             ["state"] = a.State, ["attempts"] = a.Attempts, ["error"] = a.Error,
             // The result code of the last Install or Check again (0042), beside error: failed, cancelled, notAuthorized,
             // homeOnly or notFound; null before the first attempt. A fresh card reads cancelled/notAuthorized from it.
@@ -549,7 +549,7 @@ public sealed class ToolAskService
                 // [{ name, displayName, publisher, wingetId, scope, program, command }]
                 "tools.catalog" => new JsonArray(ToolCatalog.All.Select(t => (JsonNode?)ToJson(t)).ToArray()),
                 // [{ id, at, teamId, team, member, memberName, tool, displayName, publisher, wingetId, scope, reason, count, lastSeen,
-                //    workflow, state, attempts, error, lastResult, decidedBy, decidedVia, decidedAt, canInstall, command, choices }]
+                //    deliverable, state, attempts, error, lastResult, decidedBy, decidedVia, decidedAt, canInstall, command, choices }]
                 "tools.asks" => new JsonArray(Asks(p?["all"]?.GetValue<bool>() != true, OptLong(p, "teamId")).Select(a => (JsonNode?)ToJson(a)).ToArray()),
                 "tools.notNow" => await NotNowAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"), OptStr(p, "note"), ct),
                 "tools.install" => await InstallAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"), ct),

@@ -170,22 +170,22 @@ public sealed class LaunchWiring : IAsyncDisposable
     }
 }
 
-/// <summary>What runs a script member's bus run (a tell to it): the script runner.</summary>
-public interface IScriptMemberRuns
+/// <summary>What runs a workflow member's bus run (a tell to it): the workflow runner.</summary>
+public interface IWorkflowMemberRuns
 {
-    bool IsScriptMember(long memberId);
+    bool IsWorkflowMember(long memberId);
     Task<RunResult> RunForBusAsync(RunContext run, CancellationToken ct);
 }
 
 /// <summary>
-/// The bus's runner, dispatching by member kind: a script member's run goes to the script engine (through
-/// <see cref="IScriptMemberRuns"/>), an agent's to the runner it always had (the sandbox launcher, wrapped as before),
-/// unchanged. With no script runner set every run is an agent's.
+/// The bus's runner, dispatching by member kind: a workflow member's run goes to the workflow engine (through
+/// <see cref="IWorkflowMemberRuns"/>), an agent's to the runner it always had (the sandbox launcher, wrapped as before),
+/// unchanged. With no workflow runner set every run is an agent's.
 /// </summary>
-public sealed class ScriptDispatchRunner(IAgentRunner agents, Func<IScriptMemberRuns?> scripts) : IAgentRunner
+public sealed class WorkflowDispatchRunner(IAgentRunner agents, Func<IWorkflowMemberRuns?> workflows) : IAgentRunner
 {
     public IAgentRunner Agents { get; } = agents;
 
     public Task<RunResult> RunAsync(RunContext run, CancellationToken ct) =>
-        scripts() is { } s && s.IsScriptMember(run.Member.Id) ? s.RunForBusAsync(run, ct) : Agents.RunAsync(run, ct);
+        workflows() is { } s && s.IsWorkflowMember(run.Member.Id) ? s.RunForBusAsync(run, ct) : Agents.RunAsync(run, ct);
 }

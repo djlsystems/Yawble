@@ -9,7 +9,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// The org.summary snapshot built from fake teams, workflows, asks and log problems; the no
+/// The org.summary snapshot built from fake teams, deliverables, asks and log problems; the no
 /// token/cost/usage/price rule; the five dashboard methods as reads a Visitor may call; org.summaryChanged pushed only
 /// while watched and at most once per 2 s (a manual clock); a viewer leaving the link is unwatched; the hello's caps.
 /// Fakes only: no socket, no database, no system program.
@@ -35,10 +35,10 @@ public class OrgSummaryTests
             new OrgTeam("api", Paused: true, Archived: false, []),
         ],
         [
-            new OrgWorkflow(10, "web", "Build the login page", "B004", "Live org summary", OrgSummary.Running, 2, 5, Now.AddHours(-2), Now.AddMinutes(-1), "Manager"),
-            new OrgWorkflow(11, "web", "Old but still open", null, null, OrgSummary.NobodyWorking, 0, 0, Now.AddDays(-5), Now.AddDays(-3), "Manager"),
-            new OrgWorkflow(12, "web", "Done yesterday morning", null, null, OrgSummary.Completed, 3, 3, Now.AddDays(-2), Now.AddHours(-30), "Manager"),
-            new OrgWorkflow(13, "api", "Failed an hour ago", null, null, OrgSummary.Failed, 0, 1, Now.AddHours(-4), Now.AddHours(-1), "Manager"),
+            new OrgDeliverable(10, "web", "Build the login page", "B004", "Live org summary", OrgSummary.Running, 2, 5, Now.AddHours(-2), Now.AddMinutes(-1), "Manager"),
+            new OrgDeliverable(11, "web", "Old but still open", null, null, OrgSummary.NobodyWorking, 0, 0, Now.AddDays(-5), Now.AddDays(-3), "Manager"),
+            new OrgDeliverable(12, "web", "Done yesterday morning", null, null, OrgSummary.Completed, 3, 3, Now.AddDays(-2), Now.AddHours(-30), "Manager"),
+            new OrgDeliverable(13, "api", "Failed an hour ago", null, null, OrgSummary.Failed, 0, 1, Now.AddHours(-4), Now.AddHours(-1), "Manager"),
         ],
         [
             new OrgAsk("decision", "web", "Which login provider? " + Secret),
@@ -58,8 +58,8 @@ public class OrgSummaryTests
     public void TheSnapshot_IsBuiltFromTheFacts()
     {
         var s = OrgSummary.Build(Facts(), Now);
-        Assert.Equal(1, s["summaryVersion"]!.GetValue<int>());
-        Assert.Equal(["summaryVersion", "at", "computer", "teams", "workflows", "needsYou", "problems"], s.Select(p => p.Key));
+        Assert.Equal(2, s["summaryVersion"]!.GetValue<int>());
+        Assert.Equal(["summaryVersion", "at", "computer", "teams", "deliverables", "needsYou", "problems"], s.Select(p => p.Key));
 
         var c = s["computer"]!;
         Assert.Equal("DESK-1", c["name"]!.GetValue<string>());
@@ -86,10 +86,10 @@ public class OrgSummaryTests
         Assert.Equal("card 7: plan the login page", running["doing"]!.GetValue<string>());
         Assert.Equal("2026-11-16T11:55:00Z", running["since"]!.GetValue<string>());
 
-        // Open workflows however old; ended ones of the last 24 h only; newest activity first.
-        var workflows = s["workflows"]!.AsArray();
-        Assert.Equal([10L, 13L, 11L], workflows.Select(w => w!["id"]!.GetValue<long>()));
-        var first = workflows[0]!;
+        // Open deliverables however old; ended ones of the last 24 h only; newest activity first.
+        var deliverables = s["deliverables"]!.AsArray();
+        Assert.Equal([10L, 13L, 11L], deliverables.Select(w => w!["id"]!.GetValue<long>()));
+        var first = deliverables[0]!;
         Assert.Equal("web", first["team"]!.GetValue<string>());
         Assert.Equal("Build the login page", first["title"]!.GetValue<string>());
         Assert.Equal("B004", first["item"]!["id"]!.GetValue<string>());
@@ -100,8 +100,8 @@ public class OrgSummaryTests
         Assert.Equal("2026-11-16T10:00:00Z", first["startedAt"]!.GetValue<string>());
         Assert.Equal("2026-11-16T11:59:00Z", first["lastActivityAt"]!.GetValue<string>());
         Assert.Equal("Manager", first["owner"]!.GetValue<string>());
-        Assert.Null(workflows[2]!["item"]);
-        Assert.Equal("failed", workflows[1]!["state"]!.GetValue<string>());
+        Assert.Null(deliverables[2]!["item"]);
+        Assert.Equal("failed", deliverables[1]!["state"]!.GetValue<string>());
 
         var needs = s["needsYou"]!;
         Assert.Equal(4, needs["total"]!.GetValue<int>());
@@ -129,7 +129,7 @@ public class OrgSummaryTests
     }
 
     [Fact]
-    public void AFailedWorkflow_IsOpen_AndStaysListedAfter24hIdle_ButACompletedOrClosedOneDoesNot()
+    public void AFailedDeliverable_IsOpen_AndStaysListedAfter24hIdle_ButACompletedOrClosedOneDoesNot()
     {
         // docs/cloud-link.md calls failed open; only completed and closed are ended.
         Assert.False(OrgSummary.Ended(OrgSummary.Failed));
@@ -140,14 +140,14 @@ public class OrgSummaryTests
 
         var facts = Facts() with
         {
-            Workflows =
+            Deliverables =
             [
-                new OrgWorkflow(20, "web", "Failed 25 h ago", null, null, OrgSummary.Failed, 0, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
-                new OrgWorkflow(21, "web", "Completed 25 h ago", null, null, OrgSummary.Completed, 1, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
-                new OrgWorkflow(22, "web", "Closed 25 h ago", null, null, OrgSummary.Closed, 0, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
+                new OrgDeliverable(20, "web", "Failed 25 h ago", null, null, OrgSummary.Failed, 0, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
+                new OrgDeliverable(21, "web", "Completed 25 h ago", null, null, OrgSummary.Completed, 1, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
+                new OrgDeliverable(22, "web", "Closed 25 h ago", null, null, OrgSummary.Closed, 0, 1, Now.AddHours(-30), Now.AddHours(-25), "Manager"),
             ],
         };
-        var listed = Assert.Single(OrgSummary.Build(facts, Now)["workflows"]!.AsArray())!;
+        var listed = Assert.Single(OrgSummary.Build(facts, Now)["deliverables"]!.AsArray())!;
         Assert.Equal(20L, listed["id"]!.GetValue<long>());
         Assert.Equal("failed", listed["state"]!.GetValue<string>());
     }
@@ -197,7 +197,7 @@ public class OrgSummaryTests
     [Fact]
     public void NoFactRecord_HasATokenCostUsageOrPriceProperty()
     {
-        Type[] records = [typeof(OrgComputer), typeof(OrgRunningAgent), typeof(OrgAgent), typeof(OrgTeam), typeof(OrgWorkflow), typeof(OrgAsk), typeof(OrgProblem), typeof(OrgSummaryFacts)];
+        Type[] records = [typeof(OrgComputer), typeof(OrgRunningAgent), typeof(OrgAgent), typeof(OrgTeam), typeof(OrgDeliverable), typeof(OrgAsk), typeof(OrgProblem), typeof(OrgSummaryFacts)];
         string[] banned = ["token", "cost", "usage", "price"];
         var bad = records.SelectMany(r => r.GetProperties().Select(p => $"{r.Name}.{p.Name}"))
             .Where(n => banned.Any(b => n.Contains(b, StringComparison.OrdinalIgnoreCase))).ToList();
@@ -232,7 +232,7 @@ public class OrgSummaryTests
     {
         var fx = new Fixture();
         var s = (JsonObject)(await fx.CallAsCloud("alice", "org.summary"))!;
-        Assert.Equal(1, s["summaryVersion"]!.GetValue<int>());
+        Assert.Equal(2, s["summaryVersion"]!.GetValue<int>());
         Assert.Equal(0, fx.Service.Watching);
         Assert.False(await fx.Service.TickAsync(Ct));
     }
@@ -254,7 +254,7 @@ public class OrgSummaryTests
     {
         var fx = new Fixture();
         var watched = (JsonObject)(await fx.CallAsCloud("alice", "org.summary.watch"))!;
-        Assert.Equal(1, watched["summaryVersion"]!.GetValue<int>());
+        Assert.Equal(2, watched["summaryVersion"]!.GetValue<int>());
         Assert.Equal(1, fx.Service.Watching);
 
         // Nothing changed (the uptime alone ticks): no push.
@@ -274,7 +274,7 @@ public class OrgSummaryTests
         Assert.Equal(2, pushes.Count);
         Assert.All(pushes, p => Assert.Equal(OrgSummaryService.ChangedEvent, p["event"]!.GetValue<string>()));
         var one = pushes[0]["data"]!;
-        Assert.Equal(1, one["summaryVersion"]!.GetValue<int>());
+        Assert.Equal(2, one["summaryVersion"]!.GetValue<int>());
         Assert.False(one["full"]!.GetValue<bool>());
         Assert.Equal(["computer"], one["changed"]!.AsArray().Select(c => c!.GetValue<string>()));
         Assert.Equal(3, one["sections"]!["computer"]!["queuedRuns"]!.GetValue<int>());
@@ -338,13 +338,13 @@ public class OrgSummaryTests
         }, m => { reply = m; return Task.CompletedTask; }, Ct);
         Assert.NotNull(reply);
         Assert.Null(reply!["error"]);
-        Assert.Equal(1, reply["result"]!["summaryVersion"]!.GetValue<int>());
+        Assert.Equal(2, reply["result"]!["summaryVersion"]!.GetValue<int>());
     }
 
     [Fact]
-    public void AWorkflowsState_ComesFromTheBus_TheBoardAndTheAsks()
+    public void ADeliverablesState_ComesFromTheBus_TheBoardAndTheAsks()
     {
-        WorkflowSummary W(string state, bool undeclared = false, params string[] busy) =>
+        DeliverableSummary W(string state, bool undeclared = false, params string[] busy) =>
             new(1, "t", "Manager", state, undeclared, busy, null, Now, Now, 1);
         Assert.Equal("completed", AppOrgSummarySource.StateOf(W("completed"), true, true, true));
         Assert.Equal("closed", AppOrgSummarySource.StateOf(W("closed"), false, false, false));
@@ -353,7 +353,7 @@ public class OrgSummaryTests
         Assert.Equal("blocked", AppOrgSummarySource.StateOf(W("open", undeclared: true), false, true, false));
         Assert.Equal("failed", AppOrgSummarySource.StateOf(W("open", undeclared: true), false, false, true));
         Assert.Equal("nobodyWorking", AppOrgSummarySource.StateOf(W("open", undeclared: true), false, false, false));
-        Assert.All(OrgSummary.WorkflowStates, s => Assert.Matches("^[a-z][A-Za-z]+$", s));
+        Assert.All(OrgSummary.DeliverableStates, s => Assert.Matches("^[a-z][A-Za-z]+$", s));
     }
 
     [Theory]

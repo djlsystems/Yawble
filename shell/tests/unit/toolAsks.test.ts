@@ -31,7 +31,7 @@ const WINGET = 'winget install --id Microsoft.DotNet.SDK.10 --exact --source win
 const ask = (over: Partial<ToolAsk> = {}): ToolAsk => ({
   id: 4, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'Alpha', member: 'Alpha/DeveloperInes', memberName: 'DeveloperInes',
   tool: 'dotnet-sdk-10', displayName: '.NET SDK 10', publisher: 'Microsoft', wingetId: 'Microsoft.DotNet.SDK.10', scope: 'machine',
-  reason: 'build the API project', count: 2, lastSeen: '2026-11-13T21:05:00Z', workflow: 12, state: 'pending', attempts: 0, error: null,
+  reason: 'build the API project', count: 2, lastSeen: '2026-11-13T21:05:00Z', deliverable: 12, state: 'pending', attempts: 0, error: null,
   decidedBy: null, decidedVia: null, decidedAt: null, canInstall: true, command: WINGET, choices: ['install', 'notNow'], ...over,
 });
 const installed = { done: true, id: 4, tool: 'dotnet-sdk-10', message: '.NET SDK 10 is installed; runs that start from now on have it on PATH.', manual: false, closed: [4], told: ['Alpha/Manager'] };
@@ -57,10 +57,10 @@ describe('ToolAskCard', () => {
 
   it('APerUserTool_SaysItInstallsForYouOnly_AndTheReasonIsPlainText', () => {
     const { api } = fakeApi({});
-    const w = mount(ToolAskCard, { props: { ask: ask({ scope: 'user', displayName: 'Python 3', reason: '<b>run</b> the scripts', count: 1 }), api } });
+    const w = mount(ToolAskCard, { props: { ask: ask({ scope: 'user', displayName: 'Python 3', reason: '<b>run</b> the workflows', count: 1 }), api } });
     expect(w.get('[data-test=tool-ask-scope]').text()).toContain('for you only');
     expect(w.get('[data-test=tool-ask-scope]').text()).not.toContain('permission');
-    expect(w.get('[data-test=tool-ask-reason]').text()).toContain('<b>run</b> the scripts');
+    expect(w.get('[data-test=tool-ask-reason]').text()).toContain('<b>run</b> the workflows');
     expect(w.find('[data-test=tool-ask-reason] b').exists()).toBe(false);
     expect(w.get('[data-test=tool-ask-count]').text()).toContain('once');
   });

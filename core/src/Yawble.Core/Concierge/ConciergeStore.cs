@@ -12,9 +12,9 @@ public sealed record ConciergeMessageRow(
     long Id, string ConversationId, string Role, string Text, string At, string? State, string? Error,
     IReadOnlyList<ConciergeToolUse> Tools, string? Cli, string? RunKey, string? Team = null, string? Kind = null, long? Seq = null);
 
-/// <summary>A follow-up the Concierge keeps in a conversation: a workflow it dispatched, or a whole team (0013).</summary>
+/// <summary>A follow-up the Concierge keeps in a conversation: a deliverable it dispatched, or a whole team (0013).</summary>
 public sealed record WatchRow(
-    long Id, string ConversationId, string Team, long? Workflow, string What, bool FollowUp, long SinceSeq,
+    long Id, string ConversationId, string Team, long? Deliverable, string What, bool FollowUp, long SinceSeq,
     string CreatedAt, string ExpiresAt, string State, string? EndedAt);
 
 /// <summary>The Concierge's conversations, their messages, its notes (0012_concierge.sql) and its watches (0013).</summary>
@@ -105,12 +105,12 @@ public sealed class ConciergeStore(string connectionString, TimeProvider? clock 
 
     // ---------------------------------------------------------------- watches
 
-    public WatchRow AddWatch(string conversationId, string team, long? workflow, string what, bool followUp, long sinceSeq, DateTimeOffset expires) =>
+    public WatchRow AddWatch(string conversationId, string team, long? deliverable, string what, bool followUp, long sinceSeq, DateTimeOffset expires) =>
         Watches("WHERE id = $id", ("$id", Scalar("""
-            INSERT INTO concierge_watches (conversation_id, team, workflow, what, follow_up, since_seq, created_at, expires_at, state)
+            INSERT INTO concierge_watches (conversation_id, team, deliverable, what, follow_up, since_seq, created_at, expires_at, state)
             VALUES ($c, $team, $wf, $what, $fu, $since, $now, $exp, 'active') RETURNING id;
             """,
-            ("$c", conversationId), ("$team", team), ("$wf", (object?)workflow ?? DBNull.Value), ("$what", what), ("$fu", followUp ? 1 : 0),
+            ("$c", conversationId), ("$team", team), ("$wf", (object?)deliverable ?? DBNull.Value), ("$what", what), ("$fu", followUp ? 1 : 0),
             ("$since", sinceSeq), ("$now", Now()), ("$exp", expires.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture))))).Single();
 
     public WatchRow? Watch(long id) => Watches("WHERE id = $id", ("$id", id)).SingleOrDefault();
@@ -134,7 +134,7 @@ public sealed class ConciergeStore(string connectionString, TimeProvider? clock 
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = $"SELECT id, conversation_id, team, workflow, what, follow_up, since_seq, created_at, expires_at, state, ended_at FROM concierge_watches {where};";
+        cmd.CommandText = $"SELECT id, conversation_id, team, deliverable, what, follow_up, since_seq, created_at, expires_at, state, ended_at FROM concierge_watches {where};";
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v);
         using var r = cmd.ExecuteReader();
         var list = new List<WatchRow>();

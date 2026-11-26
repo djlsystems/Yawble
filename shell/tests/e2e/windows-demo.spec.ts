@@ -7,7 +7,7 @@ import { settled } from './settle';
 
 // The real demo on THIS machine (opt-in: YAWBLE_REAL_DEMO=1). It uses the person's own installed Claude Code and Grok
 // and their own sign-ins (the app only detects them), real sandboxes, and real model calls on the person's
-// accounts. It creates one team on a sample repository, tells the Manager a small task, and waits for the workflow
+// accounts. It creates one team on a sample repository, tells the Manager a small task, and waits for the deliverable
 // to finish, taking screenshots. The data folder is kept so the app can be reopened on it afterwards.
 //
 //   YAWBLE_REAL_DEMO=1 YAWBLE_DEMO_ROOT=<folder> YAWBLE_DEMO_REPO=<git repo> YAWBLE_INSTALL_DIR=<install> npx playwright test windows-demo
@@ -81,7 +81,7 @@ test('real demo: a Claude Manager splits a task between a Claude member and a Gr
       // This loop's own poll interval: the cards are read (and shot when they changed) every 2 s while the agents work.
       await main.waitForTimeout(2000);
     }
-    await shot(main, 'workflow-done');
+    await shot(main, 'deliverable-done');
 
     // Ben's terminal in his pane on the team page: his last run (replay).
     await main.locator('[data-test=agent-Ben] [data-test=member-view-terminal]').click();

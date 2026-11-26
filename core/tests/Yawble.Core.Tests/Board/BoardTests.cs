@@ -14,14 +14,14 @@ public class BoardTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private long _seq = 100;
 
-    private Message M(string type, object payload, string source, long workflow) =>
-        new(++_seq, type, JsonSerializer.Serialize(payload), source, workflow, null, 0, DateTimeOffset.UtcNow);
+    private Message M(string type, object payload, string source, long deliverable) =>
+        new(++_seq, type, JsonSerializer.Serialize(payload), source, deliverable, null, 0, DateTimeOffset.UtcNow);
 
-    private Message Tell(string member, string text, long workflow, string from = "payments/Manager", object? extra = null)
+    private Message Tell(string member, string text, long deliverable, string from = "payments/Manager", object? extra = null)
     {
         var payload = new JsonObject { ["text"] = text };
         if (extra is not null) foreach (var (k, v) in JsonSerializer.SerializeToNode(extra)!.AsObject()) payload[k] = v?.DeepClone();
-        return new(++_seq, "agent.instruction.payments/" + member, payload.ToJsonString(), from, workflow, null, 0, DateTimeOffset.UtcNow);
+        return new(++_seq, "agent.instruction.payments/" + member, payload.ToJsonString(), from, deliverable, null, 0, DateTimeOffset.UtcNow);
     }
 
     private static (TempDb Db, BoardStore Store, BoardProjector P) Board()
@@ -82,18 +82,18 @@ public class BoardTests
     }
 
     [Fact]
-    public void TheWorkflowDeclaredCompleteFinishesItsCards_AndItsBacklogItem()
+    public void TheDeliverableDeclaredCompleteFinishesItsCards_AndItsBacklogItem()
     {
         var (db, store, p) = Board();
         using var _ = db;
         var item = store.AddItem("README", "spec", null);
-        store.SaveItem(item with { State = "ready", DispatchedTeam = "payments", DispatchedWorkflow = 11 });
+        store.SaveItem(item with { State = "ready", DispatchedTeam = "payments", DispatchedDeliverable = 11 });
         p.Apply(Tell("Manager", "Backlog item B001 dispatched", 11, from: "person", extra: new { item = "B001" })); // makes no card
         Assert.Empty(store.Cards("payments"));
         p.Apply(Tell("DeveloperPriya", "Write it", 11));
         p.Apply(Tell("TesterWren", "Check it", 11));
         p.Apply(M(MessageTypes.Failed, new { reason = "timed out" }, "payments/TesterWren", 11));
-        p.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "README" }, "payments/Manager", 11));
+        p.Apply(M(MessageTypes.DeliverableCompleted, new { delivered = "README" }, "payments/Manager", 11));
         var cards = store.Cards("payments").ToDictionary(c => c.Member!);
         Assert.Equal("B001", cards["DeveloperPriya"].Item);
         Assert.Equal(Lanes.Done, cards["DeveloperPriya"].Lane);
@@ -209,24 +209,24 @@ public class BoardTests
     }
 
     [Fact]
-    public async Task EveryDispatchIsKept_InTheItemsHistory_WithItsWorkflow()
+    public async Task EveryDispatchIsKept_InTheItemsHistory_WithItsDeliverable()
     {
         await using var rig = await Rig.StartAsync();
         var id = (await rig.Call("backlog.add", new { title = "Health endpoint", body = "GET /health returns 200" }))!["id"]!.GetValue<long>();
         await rig.Call("backlog.edit", new { id, state = "ready" });
         var teamId = (await rig.Bus.TeamsAsync(Ct)).Single().Id;
-        var first = (await rig.Call("backlog.dispatch", new { id, teamId }))!["dispatchedWorkflow"]!.GetValue<long>();
+        var first = (await rig.Call("backlog.dispatch", new { id, teamId }))!["dispatchedDeliverable"]!.GetValue<long>();
         var second = (await rig.Call("backlog.dispatch", new { id, teamId, again = true }))!;
         Assert.Equal(2, second["dispatchCount"]!.GetValue<int>());
 
         var detail = (await rig.Call("backlog.item", new { id }))!;
         var dispatches = detail["dispatches"]!.AsArray();
         Assert.Equal(2, dispatches.Count);
-        Assert.Equal(second["dispatchedWorkflow"]!.GetValue<long>(), dispatches[0]!["workflow"]!.GetValue<long>()); // newest first
-        Assert.Equal(first, dispatches[1]!["workflow"]!.GetValue<long>());
+        Assert.Equal(second["dispatchedDeliverable"]!.GetValue<long>(), dispatches[0]!["deliverable"]!.GetValue<long>()); // newest first
+        Assert.Equal(first, dispatches[1]!["deliverable"]!.GetValue<long>());
         Assert.Equal("payments", dispatches[0]!["team"]!.GetValue<string>());
         Assert.False(dispatches[0]!["teamGone"]!.GetValue<bool>());
-        // The rig's runner fails at once, but the Manager's run is still the workflow's and is counted.
+        // The rig's runner fails at once, but the Manager's run is still the deliverable's and is counted.
         var runs = dispatches[0]!["runs"]!.GetValue<int>();
         Assert.True(runs <= 1, $"runs: {runs}");
         if (runs == 1) Assert.Equal(["Manager"], dispatches[0]!["members"]!.AsArray().Select(m => m!.GetValue<string>()));

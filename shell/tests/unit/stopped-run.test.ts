@@ -110,7 +110,7 @@ describe("MemberPane: the member's last run", () => {
 type State = TeamSnapshot['members'][number]['state'];
 const snap = (name: string, state: State) => ({ id: 1, name, role: 'member' as const, state, queued: 0, statusLine: null, cli: 'claude' });
 const row = (seq: number, kind: FeedRow['kind'], m: string, extra: Partial<FeedRow> = {}): FeedRow =>
-  ({ seq, kind, team: 'payments', member: m, from: m, text: null, workflow: 1, at: new Date().toISOString(), ...extra });
+  ({ seq, kind, team: 'payments', member: m, from: m, text: null, deliverable: 1, at: new Date().toISOString(), ...extra });
 
 describe('Monitor: a stopped run never needs you', () => {
   it('a stopped member raises no Needs you item; a failed one does', () => {
@@ -180,7 +180,7 @@ describe('Monitor: a stopped run never needs you', () => {
 // The board: the core sets a stopped run's card to status "stopped", in In Progress (or To Do), never Needs you.
 const boardCard = (over: Partial<BoardCard> = {}): BoardCard => ({
   id: 12, team: 'payments', teamId: 1, member: 'DeveloperMarlo', item: 'B097', title: 'Stop it', body: '', status: 'stopped', lane: 'in-progress',
-  placed: true, awaitingManager: false, workflow: 3, createdAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z', trailCount: 2, ...over,
+  placed: true, awaitingManager: false, deliverable: 3, createdAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z', trailCount: 2, ...over,
 });
 
 describe('Board: a stopped run line reads Stopped in a neutral colour', () => {

@@ -30,7 +30,7 @@ public static class EmailConnection
     public const string UserKey = "user";
     public const string PasswordKey = "password";
 
-    /// <summary>Gmail: IMAP on 993 and SMTP on 465, both TLS from the first byte. Gmail signs in a script only with an app password.</summary>
+    /// <summary>Gmail: IMAP on 993 and SMTP on 465, both TLS from the first byte. Gmail signs in a workflow only with an app password.</summary>
     public static readonly EmailPreset Gmail = new("gmail", "Gmail", "imap.gmail.com", 993, "smtp.gmail.com", 465,
         "Use a Google app password; it needs 2-Step Verification");
 

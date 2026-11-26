@@ -99,7 +99,7 @@ describe('CompanionAsks', () => {
     const outcome = w.get('[data-test=companion-outcome]');
     expect(outcome.attributes('data-state')).toBe('done');
     expect(outcome.text()).toContain('Merged <script>x</script>');
-    expect(outcome.element.querySelector('script')).toBeNull();
+    expect(outcome.element.querySelector('workflow')).toBeNull();
     w.unmount();
   });
 

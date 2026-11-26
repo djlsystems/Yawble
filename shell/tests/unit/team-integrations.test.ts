@@ -27,7 +27,7 @@ function fakeApi(answers: Record<string, (params: any) => unknown>) {
 const team = { id: 3, name: 'ops', repoPath: null, members: 2, running: 0, queued: 0, paused: false, archived: false } as any;
 const counts = { allowed: 4, ask: 2, off: 1, undecided: 0 };
 const manageApi = () => fakeApi({
-  'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }),
+  'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }),
   'teams.env': () => ({}),
   'teams.agents': () => [],
   'teams.push': () => ({ on: false, origin: null }),
@@ -65,7 +65,7 @@ describe('team Integrations tab', () => {
   });
 
   it('says so when nothing is offered to the team', async () => {
-    const { api } = fakeApi({ 'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
+    const { api } = fakeApi({ 'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
       'teams.push': () => ({ on: false, origin: null }), 'teams.repos': () => ({ main: null, extras: [] }), 'teams.approvals': () => [],
       'integrations.list': () => ({ integrations: [], pendingAsks: 0 }), 'integrations.mcpList': () => [] });
     const w = mount(TeamManageDialog, { props: { team, api }, global: { stubs: { IntegrationDialog: true, Modal: { template: '<div><slot /></div>' } } } });
@@ -76,7 +76,7 @@ describe('team Integrations tab', () => {
 });
 
 describe('remember-choice approvals', () => {
-  const ask = (o: Record<string, unknown> = {}) => ({ id: 12, at: 'now', integration: 'gh', teamId: 3, member: 'ops/dev', command: 'gh pr merge 4', reason: 'wants to merge', workflow: 1, repo: null, action: 'pr merge', canAlways: true, ...o });
+  const ask = (o: Record<string, unknown> = {}) => ({ id: 12, at: 'now', integration: 'gh', teamId: 3, member: 'ops/dev', command: 'gh pr merge 4', reason: 'wants to merge', deliverable: 1, repo: null, action: 'pr merge', canAlways: true, ...o });
   const mountView = (a: unknown) => {
     const { api, calls } = fakeApi({
       'teams.agents': () => [], 'bus.decisions': () => [], 'integrations.asks': () => [a],

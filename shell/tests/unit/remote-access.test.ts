@@ -38,7 +38,7 @@ const composerProps = { teams: [], agents: [], cli: 'claude', teamId: null, runn
 const networkAsk = {
   id: 7, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'Alpha', member: 'Alpha/DeveloperInes', memberName: 'DeveloperInes',
   host: 'api.nuget.org', reason: null, method: 'CONNECT', pathSample: null, count: 1, lastSeen: '2026-11-13T21:00:00Z',
-  hint: null, workflow: 12, state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'deny'],
+  hint: null, deliverable: 12, state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'deny'],
 } as any;
 
 function fakeApi(call: (method: string, params?: any) => unknown = () => ({})): { api: YawbleApi; calls: { method: string; params: any }[] } {

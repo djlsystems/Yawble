@@ -121,7 +121,7 @@ describe('useNarrow and useSwipe', () => {
 const lanes = [{ id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' }, { id: 'blocked', label: 'Needs You' }, { id: 'done', label: 'Done' }];
 const bcard = (id: number, lane: BoardCard['lane'], title: string): BoardCard => ({
   id, team: 'payments', teamId: 1, member: 'DeveloperPriya', item: null, title, body: title, status: 'running', lane, placed: false,
-  awaitingManager: false, workflow: 10, createdAt: '2026-11-08T10:00:00Z', updatedAt: `2026-11-08T10:0${id}:00Z`, trailCount: 0,
+  awaitingManager: false, deliverable: 10, createdAt: '2026-11-08T10:00:00Z', updatedAt: `2026-11-08T10:0${id}:00Z`, trailCount: 0,
 });
 function boardApi() {
   const cards = [bcard(1, 'todo', 'One'), bcard(2, 'todo', 'Two'), bcard(3, 'in-progress', 'Three'), bcard(4, 'done', 'Four')];
@@ -324,7 +324,7 @@ function teamApi() {
   return fakeApi({
     'teams.agents': () => [agent(1, 'Manager'), agent(2, 'DeveloperAda')], 'bus.decisions': () => [], 'integrations.asks': () => [],
     'monitor.messages': () => ({ end: 0, messages: [] }), 'monitor.steps': () => ({ end: 0, pending: false, steps: [] }),
-    'agentProfiles.list': () => [], 'bus.workflows': () => [],
+    'agentProfiles.list': () => [], 'bus.deliverables': () => [],
   });
 }
 
@@ -377,7 +377,7 @@ describe('Teams on a phone', () => {
     expect(phoneRules('components/MemberPane.vue')).toMatch(/\.body \{ height: auto; \}/);
     expect(src('components/TileGrip.vue')).toMatch(/@media \(max-width: 759\.98px\) \{ \.tile-grip \{ display: none; \} \}/);
     expect(phoneRules('components/MemberPane.vue')).toMatch(/min-width: 44px/);
-    for (const f of ['GitBanner', 'HostChecksBanner', 'TeamSyncBanner', 'UpdateBanner', 'TeamWorkflows', 'AgentTile', 'MemberActivity'])
+    for (const f of ['GitBanner', 'HostChecksBanner', 'TeamSyncBanner', 'UpdateBanner', 'TeamDeliverables', 'AgentTile', 'MemberActivity'])
       expect(src(`components/${f}.vue`), f).toContain('@media (max-width: 759.98px)');
   });
 
@@ -398,7 +398,7 @@ function monitorApi() {
     'teams.agents': () => [agent(1, 'Manager')],
     'monitor.messages': () => ({ end: 0, messages: [] }),
     'monitor.steps': () => ({ end: 0, pending: false, steps: [] }),
-    'bus.workflows': () => [],
+    'bus.deliverables': () => [],
   });
 }
 

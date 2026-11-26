@@ -24,14 +24,14 @@ describe('the core methods the window calls', () => {
   for (const file of sources(renderer)) {
     for (const m of readFileSync(file, 'utf8').matchAll(/\bcall\b[^(;]{0,80}\(\s*'([a-zA-Z]+\.[a-zA-Z.]+)'/g)) called.add(m[1]);
   }
-  // Screens also call through named constants in shared/api.ts (WORKFLOWS_LIST = 'workflows.list'); every exported
+  // Screens also call through named constants in shared/api.ts (DELIVERABLES_LIST = 'deliverables.list'); every exported
   // upper-case constant whose value is a dotted method name counts as called (storage keys start with 'yawble.').
   const shared = readFileSync(path.join(renderer, '..', 'shared', 'api.ts'), 'utf8');
   const constants = [...shared.matchAll(/export const [A-Z][A-Z_]+ = '([a-z][a-zA-Z]*\.[a-zA-Z.]+)'/g)].map((m) => m[1]).filter((m) => !m.startsWith('yawble.'));
   for (const m of constants) called.add(m);
 
   it('finds the methods named by constants', () => {
-    expect(constants).toContain('workflows.list');
+    expect(constants).toContain('deliverables.list');
     expect(constants).toContain('git.commitsResolve');
   });
 

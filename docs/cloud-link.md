@@ -60,7 +60,7 @@ open only a computer that says it.
 A read-only viewer sees the same screens and gets the same live updates. The remote view shows a
 **Read-only (Visitor)** chip and turns off the buttons that would change something. They can:
 
-- see the overview, teams, members, the Monitor, workflows and the questions waiting;
+- see the overview, teams, members, the Monitor, deliverables, goals and the questions waiting;
 - read the board, the backlog, cards and the team's documents;
 - see integrations, their requests and calls, host tasks and their runs, network and tool requests;
 - read the logs, the backup list, the agents and their versions, settings and policies as shown;
@@ -68,7 +68,7 @@ A read-only viewer sees the same screens and gets the same live updates. The rem
 - browse members' code (when **Show members' code to cloud viewers** is on).
 
 They cannot change anything. Telling a manager, answering a question, approving or declining a request, answering a
-network or tool request, creating, editing, moving or deleting anything, running the guardrail check, saving a
+network or tool request, creating, editing, moving or deleting anything (a goal too, or a deliverable's goal), running the guardrail check, saving a
 policy or a setting, git actions, and terminals (opening, attaching to - even just to watch - typing into, resizing
 or stopping a member's terminal or a host terminal: `terminal.attach` is refused like the others, so there is no
 read-only terminal view) are all refused with:
@@ -97,13 +97,13 @@ desktop's side in `shell/src/renderer/src/embed.ts`):
 ```text
 CONTRACT (window.postMessage, both sides check event.origin === location.origin and event.source; anything else is ignored)
 Desktop to cloud: {type:'yawble.nav', version:1, nav} each time anything in it changes, and once on load. nav =
-  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Scripts, Logs: the same ids/order as Sidebar.vue
+  { places: [{id, label, icon, badge|null, active, disabled}],   // New chat, Concierge, Teams, Goals, Deliverables, Backlog, Kanban board, Workflows, Documents, Monitor, Logs: the same ids/order as Sidebar.vue
     teams:  [{id, name, dot:'idle'|'running'|'waiting'|'queued'|'paused'|'attention', badge|null, active}],
     canNewTeam: bool,
     chats:  [{id, title, active, busy:'deleting'|null, actions:[{id, label, danger}]}],
     runSlots: string|null,           // the line under the sidebar today
     readOnly: bool }                 // a Visitor's view
-  icon is a short key: newChat, concierge, teams, backlog, workflows, kanban, documents, monitor, scripts, logs; the cloud draws its own icon for a key it knows.
+  icon is a short key: newChat, concierge, teams, goals, deliverables, backlog, kanban, workflows, documents, monitor, logs; the cloud draws its own icon for a key it knows.
 Cloud to desktop: {type:'yawble.navigate', to:{kind:'place', id} | {kind:'team', id} | {kind:'chat', id} | {kind:'newTeam'} | {kind:'chatAction', id, action}} does exactly what the same click in the desktop sidebar does (including the confirm dialogs for a chat's actions, drawn inside the frame).
 Cloud to desktop: {type:'yawble.theme', theme}.
 Desktop to cloud: {type:'yawble.ready', version:1} once it listens.
@@ -112,11 +112,11 @@ Desktop to cloud: {type:'yawble.ready', version:1} once it listens.
 The values the desktop sends:
 
 - **Places**, in this order, as `id` / `icon`: `newChat` / `newChat`, `concierge` / `concierge`, `teams` / `teams`,
-  `backlog` / `backlog`, `workflows` / `workflows`, `board` / `kanban` (label Kanban board), `documents` /
-  `documents`, `monitor` / `monitor`, `scripts` / `scripts` (the Scripts dialog; a Visitor reads the scripts, schemas and runs, and is not offered save, import, delete, schema save or test run), `logs` / `logs`. There is no Terminal and no Help place: an agent's terminal is in
+  `backlog` / `backlog`, `deliverables` / `deliverables`, `board` / `kanban` (label Kanban board), `documents` /
+  `documents`, `monitor` / `monitor`, `workflows` / `workflows` (the Workflows dialog; a Visitor reads the workflows, schemas and runs, and is not offered save, import, delete, schema save or test run), `logs` / `logs`. There is no Terminal and no Help place: an agent's terminal is in
   its pane on the team page, and the version and help links are in Settings, which the cloud's own settings button
   opens. Settings itself is not a place. `badge` is a number: Teams has the
-  number of teams, Workflows the number of open workflows; otherwise, or when it is 0, `null`. `active` is the screen
+  number of teams, Deliverables the number of open deliverables; otherwise, or when it is 0, `null`. `active` is the screen
   shown now; New chat and Logs are never active. `disabled` is `false`.
 - **Teams**: `id` is the team's number. `dot` is `running`, `queued`, `paused` or `idle`, as the sidebar's dot; the
   cloud draws a value it does not know as idle. `badge` is how many of its agents are running, or `null`. `active`
@@ -161,11 +161,11 @@ All five methods below are reads: a Visitor may call them, and anything a viewer
 text (titles, questions, log lines) is redacted the way the other reads redact it (known secrets and token-shaped text
 become `[redacted]`) and cut to one short line.
 
-A dashboard row links into the remote view: `/i/{id}/ui/remote.html#workflow={wf}` opens that workflow selected in
-its team's Workflows (the team is found from the workflow id; `&team={id}` is an optional hint), `#team={id}` opens that
-team, and an unknown or malformed id opens the usual start page. The workflow is looked for among each team's newest
-200 (the most `bus.workflows` returns); one older than that opens a short "Workflow #N was not found" note instead
-(in its `&team=` team's Workflows when that hint is given). A Visitor can open both. `#terminal/{memberId}` is
+A dashboard row links into the remote view: `/i/{id}/ui/remote.html#deliverable={wf}` opens that deliverable selected in
+its team's Deliverables (the team is found from the deliverable id; `&team={id}` is an optional hint), `#team={id}` opens that
+team, and an unknown or malformed id opens the usual start page. The deliverable is looked for among each team's newest
+200 (the most `bus.deliverables` returns); one older than that opens a short "Deliverable #N was not found" note instead
+(in its `&team=` team's Deliverables when that hint is given). A Visitor can open both. `#terminal/{memberId}` is
 still an agent's terminal window.
 
 ### `org.summary` (contract version 1)
@@ -174,7 +174,7 @@ still an agent's terminal window.
 
 ```json
 {
-  "summaryVersion": 1,
+  "summaryVersion": 2,
   "at": "2026-11-16T12:00:00Z",
   "computer": {
     "name": "DESK-1", "label": "Ada's desk", "yawbleVersion": "2026.11.15.1", "platform": "Microsoft Windows 10.0.26200",
@@ -192,7 +192,7 @@ still an agent's terminal window.
       ]
     }
   ],
-  "workflows": [
+  "deliverables": [
     {
       "id": 10, "team": "web", "title": "Build the login page",
       "item": { "id": "B048", "title": "Live org summary" },
@@ -231,7 +231,7 @@ still an agent's terminal window.
   since when. `waiting` lists each agent with work not started: `member`, `state` (`queued` | `waits-for-run` |
   `held` | `pending`, the agent card's state) and `waitsFor` (the member whose run must end first; only with
   `waits-for-run`, else null).
-- **workflows**: every open workflow, and those that ended in the last 24 hours, newest activity first. `item` is the
+- **deliverables**: every open deliverable, and those that ended in the last 24 hours, newest activity first. `item` is the
   backlog item it came from (null when none). `cards` counts its cards on the board, done and in total. `owner` is
   the agent that owns it (its Manager). `state` is one of:
 
@@ -245,13 +245,13 @@ still an agent's terminal window.
   | `completed` | Declared done. |
   | `closed` | Closed by a person. |
 
-  `completed` and `closed` are the ended states. Every other state, `failed` included, is open, so the workflow is
+  `completed` and `closed` are the ended states. Every other state, `failed` included, is open, so the deliverable is
   listed however long ago its last activity was.
 
-  `time` is the workflow's overall time and where it went, the same object as on the `bus.workflows` item:
+  `time` is the deliverable's overall time and where it went, the same object as on the `bus.deliverables` item:
   `createdAt`, `startedAt`, `endedAt` and `endedHow` (null while open), `open`, `overallMs`, `rebuilt` (from history,
-  for workflows from before time accounting) and `breakdown` (`[{ "category", "ms" }]`, whose ms add up to `overallMs`).
-  It is null when the app has no board. The timeline itself is `timeline.get { "workflow": id }` (or `{ "card": id }`),
+  for deliverables from before time accounting) and `breakdown` (`[{ "category", "ms" }]`, whose ms add up to `overallMs`).
+  It is null when the app has no board. The timeline itself is `timeline.get { "deliverable": id }` (or `{ "card": id }`),
   which a Visitor may call.
 
 - **needsYou**: what waits for the person: decisions (questions), tool-call approvals, network requests and tool
@@ -269,9 +269,9 @@ or goes away.
   `org.summary` does.
 - While at least one viewer watches, the app rebuilds the snapshot every 2 seconds. When a section changed, it pushes
   the event `org.summaryChanged` once, however much changed in those 2 seconds. The uptime ticking alone is not a
-  change, nor is an open workflow's `time` growing (its `overallMs` and breakdown ms; a new category is a change):
-  the workflows section then carries the current ms with its next real change, so a dashboard counts an open
-  workflow's time on from `overallMs` itself between pushes.
+  change, nor is an open deliverable's `time` growing (its `overallMs` and breakdown ms; a new category is a change):
+  the deliverables section then carries the current ms with its next real change, so a dashboard counts an open
+  deliverable's time on from `overallMs` itself between pushes.
 - `org.summary.unwatch` stops it for this viewer and answers `{"watching": false}`.
 - A viewer is a sign-in: each viewer's watch is its own. A viewer who leaves (the site's viewer list no longer names
   them) or a dropped connection counts as an unwatch.
@@ -283,7 +283,7 @@ The event carries the sections that changed, each in full:
 {
   "event": "org.summaryChanged",
   "data": {
-    "summaryVersion": 1, "at": "2026-11-16T12:00:02Z", "full": false,
+    "summaryVersion": 2, "at": "2026-11-16T12:00:02Z", "full": false,
     "changed": ["computer", "needsYou"],
     "sections": { "computer": { ... }, "needsYou": { ... } }
   }
@@ -295,7 +295,7 @@ The event carries the sections that changed, each in full:
 ### `logs.tail`, `logs.untail` and `logs.tailEntry`
 
 - `logs.tail {level: "default" | "all" | "debug", team?: string, member?: string, app?: boolean}` starts pushing this computer's
-  new log entries, as they are written, to this viewer. `default` sends warning and error entries and workflow events;
+  new log entries, as they are written, to this viewer. `default` sends warning and error entries and deliverable events;
   `all` sends every level but debug; `debug` sends debug entries (the Diagnostics log's routine lines) too. `team` and `member` narrow it to one team or one member; `app: true` to the entries about
   no team and no member.
 - The activity log carries every audit entry. An entry about a member has its `team` and `member`; one about a
@@ -355,7 +355,7 @@ from the site.
 A Concierge message sent from the site starts a turn that counts as remote. In such a turn the Concierge cannot:
 
 - create a team, or add or remove a team repository;
-- close a workflow;
+- close a deliverable;
 - delete, prune, push or sync branches, or open or merge a pull request;
 - archive or delete a team, or set team environment variables;
 - apply doctor fixes.

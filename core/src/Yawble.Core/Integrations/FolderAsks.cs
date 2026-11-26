@@ -11,7 +11,7 @@ namespace Yawble.Core.Integrations;
 /// <summary>A folder ask (folder_asks, 0053). <paramref name="Member"/> and <paramref name="AskedBy"/>: "Team/Name".</summary>
 public sealed record FolderAskRow(long Id, string At, long TeamId, string Team, long MemberId, string Member, string AskedBy, string Path, string Access,
     string Reason, bool PathExisted, string State, string? GrantedAccess, string? DecidedBy, string? DecidedVia, string? DecidedAt, string? Note,
-    long? Workflow, long? CausationSeq)
+    long? Deliverable, long? CausationSeq)
 {
     public string MemberName => Member[(Member.IndexOf('/') + 1)..];
 
@@ -184,7 +184,7 @@ public sealed class FolderAskService
     /// asks for the caller; a Manager may name a member of its own team ("Name" or "Team/Name").
     /// </summary>
     public async Task<string> RequestFromAgentAsync(MemberRef caller, string path, string access, string reason, string? forMember,
-        long workflow, long causation, CancellationToken ct)
+        long deliverable, long causation, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("give a reason: one line on what you need the folder for");
         var wanted = FolderAccess.Parse(access) ?? throw new ArgumentException($"access is read or readwrite, not '{access.Trim()}'");
@@ -237,11 +237,11 @@ public sealed class FolderAskService
             {
                 using (var cmd = Command(c,
                            """
-                           INSERT INTO folder_asks (at, team_id, member_id, member, asked_by, path, access, reason, path_exists, workflow, causation_seq)
+                           INSERT INTO folder_asks (at, team_id, member_id, member, asked_by, path, access, reason, path_exists, deliverable, causation_seq)
                            VALUES ($now, $t, $mid, $m, $by, $p, $a, $r, $e, $w, $c) RETURNING id;
                            """,
                            ("$now", Stamp(_clock.GetUtcNow())), ("$t", target.TeamId), ("$mid", target.Id), ("$m", target.Qualified), ("$by", caller.Qualified),
-                           ("$p", resolved), ("$a", wanted), ("$r", clean), ("$e", exists ? 1 : 0), ("$w", workflow), ("$c", causation)))
+                           ("$p", resolved), ("$a", wanted), ("$r", clean), ("$e", exists ? 1 : 0), ("$w", deliverable), ("$c", causation)))
                 {
                     cmd.Transaction = tx;
                     id = (long)cmd.ExecuteScalar()!;
@@ -334,7 +334,7 @@ public sealed class FolderAskService
     {
         using var cmd = Command(c,
             "SELECT a.id, a.at, a.team_id, COALESCE(t.name, ''), a.member_id, a.member, a.asked_by, a.path, a.access, a.reason, a.path_exists, a.state, " +
-            "a.granted_access, a.decided_by, a.decided_via, a.decided_at, a.note, a.workflow, a.causation_seq FROM folder_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
+            "a.granted_access, a.decided_by, a.decided_via, a.decided_at, a.note, a.deliverable, a.causation_seq FROM folder_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
             (openOnly ? " AND a.state = 'pending'" : "") + (teamId is null ? "" : " AND a.team_id = $t") + " ORDER BY a.id;",
             ("$t", teamId));
         using var r = cmd.ExecuteReader();
@@ -354,7 +354,7 @@ public sealed class FolderAskService
         // Whether the folder exists now (checked as the list is read); existedWhenAsked: when the agent asked.
         ["exists"] = a.State == "pending" ? SafeExists(a.Path) : a.PathExisted, ["existedWhenAsked"] = a.PathExisted,
         ["state"] = a.State, ["grantedAccess"] = a.GrantedAccess, ["decidedBy"] = a.DecidedBy, ["decidedVia"] = a.DecidedVia, ["decidedAt"] = a.DecidedAt,
-        ["note"] = a.Note, ["workflow"] = a.Workflow,
+        ["note"] = a.Note, ["deliverable"] = a.Deliverable,
         ["choices"] = new JsonArray((a.State == "pending" ? FolderAccess.ChoicesFor(a.Access) : []).Select(ch => (JsonNode?)ch).ToArray()),
     };
 

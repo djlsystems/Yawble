@@ -52,7 +52,7 @@ public class CodeEventsTests
             File.Delete(Path.Combine(dir, "README.md"));
         });
 
-        Assert.True((await f.Repos.FetchBackAsync(ada, Ct, workflowId: 42)).Fetched);
+        Assert.True((await f.Repos.FetchBackAsync(ada, Ct, deliverableId: 42)).Fetched);
 
         var events = f.Repos.CodeEvents.Read("Alpha");
         Assert.Equal(2, events.Count);
@@ -61,7 +61,7 @@ public class CodeEventsTests
             Assert.Equal(CodeEvent.Commit, e.Kind);
             Assert.Equal("Ada", e.Member);
             Assert.Equal("members/alpha/ada", e.Branch);
-            Assert.Equal(42, e.WorkflowId);
+            Assert.Equal(42, e.DeliverableId);
         });
         Assert.Equal([first, second], events.Select(e => e.Sha));
         Assert.Equal(["add a, touch readme", "rename a, drop readme"], events.Select(e => e.Message));
@@ -69,13 +69,13 @@ public class CodeEventsTests
         Assert.Equal("D README.md, R a.txt->b.txt", Files(events[1]));
 
         // A fetch-back with nothing new records nothing; the next commit is one more event, never a repeat.
-        await f.Repos.FetchBackAsync(ada, Ct, workflowId: 43);
+        await f.Repos.FetchBackAsync(ada, Ct, deliverableId: 43);
         Assert.Equal(2, f.Repos.CodeEvents.Read("Alpha").Count);
         var third = Commit(c, "c", dir => File.WriteAllText(Path.Combine(dir, "c.txt"), "c"));
-        await f.Repos.FetchBackAsync(ada, Ct, workflowId: 43);
+        await f.Repos.FetchBackAsync(ada, Ct, deliverableId: 43);
         var after = f.Repos.CodeEvents.Read("Alpha");
         Assert.Equal([first, second, third], after.Select(e => e.Sha));
-        Assert.Equal(43, after[2].WorkflowId);
+        Assert.Equal(43, after[2].DeliverableId);
         Assert.Equal("A c.txt", Files(after[2]));
     }
 
@@ -92,23 +92,23 @@ public class CodeEventsTests
 
         // A fast-forward of the team branch to Ada's tip: one merge-team event, no commit of the Manager's.
         var adaTip = Commit(a, "ada's work", dir => File.WriteAllText(Path.Combine(dir, "a.txt"), "a"));
-        await f.Repos.FetchBackAsync(ada, Ct, workflowId: 5);
+        await f.Repos.FetchBackAsync(ada, Ct, deliverableId: 5);
         AgentGit.Ok(m, "fetch", "-q", bundle, "members/alpha/ada");
         AgentGit.Ok(m, "merge", "-q", "--ff-only", "FETCH_HEAD");
-        await f.Repos.FetchBackAsync(manager, Ct, workflowId: 5);
+        await f.Repos.FetchBackAsync(manager, Ct, deliverableId: 5);
         var ff = f.Repos.CodeEvents.Read("Alpha").Where(e => e.Kind == CodeEvent.MergeTeam).ToList();
         var single = Assert.Single(ff);
         Assert.Equal(("members/alpha/ada", "Ada", adaTip, "team/alpha", "A a.txt", (long?)5),
-            (single.Branch, single.Member, single.Sha, single.Into, Files(single), single.WorkflowId));
+            (single.Branch, single.Member, single.Sha, single.Into, Files(single), single.DeliverableId));
 
         // A real merge of Ben's branch, then a commit of the Manager's own on the team branch.
         Commit(b, "ben's work", dir => File.WriteAllText(Path.Combine(dir, "b.txt"), "b"));
-        await f.Repos.FetchBackAsync(ben, Ct, workflowId: 6);
+        await f.Repos.FetchBackAsync(ben, Ct, deliverableId: 6);
         AgentGit.Ok(m, "fetch", "-q", bundle, "members/alpha/ben");
         AgentGit.Ok(m, "merge", "-q", "--no-ff", "-m", "Merge members/alpha/ben", "FETCH_HEAD");
         var merge = AgentGit.Ok(m, "rev-parse", "HEAD");
         var own = Commit(m, "manager's notes", dir => File.WriteAllText(Path.Combine(dir, "notes.md"), "n"));
-        await f.Repos.FetchBackAsync(manager, Ct, workflowId: 6);
+        await f.Repos.FetchBackAsync(manager, Ct, deliverableId: 6);
 
         var events = f.Repos.CodeEvents.Read("Alpha");
         var merged = events.Single(e => e.Kind == CodeEvent.MergeTeam && e.Sha == merge);
@@ -131,19 +131,19 @@ public class CodeEventsTests
         var a = await f.Repos.PrepareAsync(ada, Ct);
         var m = await f.Repos.PrepareAsync(manager, Ct);
         Commit(a, "ada's work", dir => File.WriteAllText(Path.Combine(dir, "a.txt"), "a"));
-        await f.Repos.FetchBackAsync(ada, Ct, workflowId: 9);
+        await f.Repos.FetchBackAsync(ada, Ct, deliverableId: 9);
         AgentGit.Ok(m, "fetch", "-q", Path.Combine(f.Repos.SharedRepoPath("Alpha"), TeamRepos.SharedBundleFile), "members/alpha/ada");
         AgentGit.Ok(m, "merge", "-q", "--no-ff", "-m", "Merge members/alpha/ada", "FETCH_HEAD");
-        await f.Repos.FetchBackAsync(manager, Ct, workflowId: 9);
+        await f.Repos.FetchBackAsync(manager, Ct, deliverableId: 9);
 
-        var report = await f.Repos.PublishAsync(manager, Ct, workflowId: 9);
+        var report = await f.Repos.PublishAsync(manager, Ct, deliverableId: 9);
         Assert.Equal(TeamPublishResult.Published, report.Result);
         var pushes = f.Repos.CodeEvents.Read("Alpha").Where(e => e.Kind == CodeEvent.Push).ToList();
         Assert.Equal(["members/alpha/ada", "team/alpha"], pushes.Select(p => p.Branch).Order(StringComparer.Ordinal));
         Assert.All(pushes, p =>
         {
             Assert.Equal(AgentGit.Host(bare, "rev-parse", "refs/heads/" + p.Branch), p.Sha);
-            Assert.Equal(9, p.WorkflowId);
+            Assert.Equal(9, p.DeliverableId);
             Assert.Equal(["members/alpha/ada", "team/alpha"], p.Branches!.Order(StringComparer.Ordinal));
             Assert.Empty(p.Files);
         });
@@ -234,7 +234,7 @@ public class CodeEventsTests
 
         var events = r.F.Repos.CodeEvents.Read("Alpha");
         Assert.Equal([first, second], events.Select(e => e.Sha));
-        Assert.All(events, e => Assert.Equal((CodeEvent.Commit, "Ada", "members/alpha/ada", (long?)42), (e.Kind, e.Member, e.Branch, e.WorkflowId)));
+        Assert.All(events, e => Assert.Equal((CodeEvent.Commit, "Ada", "members/alpha/ada", (long?)42), (e.Kind, e.Member, e.Branch, e.DeliverableId)));
         Assert.Equal("M README.md, A a.txt", Files(events[0]));
         Assert.Equal("D README.md, R a.txt->b.txt", Files(events[1]));
         Assert.Equal(DateTimeOffset.Parse(r.Git("show", "-s", "--format=%cI", first), System.Globalization.CultureInfo.InvariantCulture), events[0].At);
@@ -256,7 +256,7 @@ public class CodeEventsTests
         r.Git("branch", "team/alpha", adaTip);
         await r.F.Repos.RecordFetchedAsync(r.Manager, r.Repo, "trunk", "team/alpha", null, adaTip, 5, Ct);
         var ff = Assert.Single(r.F.Repos.CodeEvents.Read("Alpha"), e => e.Kind == CodeEvent.MergeTeam);
-        Assert.Equal(("members/alpha/ada", "Ada", adaTip, "team/alpha", "A a.txt", (long?)5), (ff.Branch, ff.Member, ff.Sha, ff.Into, Files(ff), ff.WorkflowId));
+        Assert.Equal(("members/alpha/ada", "Ada", adaTip, "team/alpha", "A a.txt", (long?)5), (ff.Branch, ff.Member, ff.Sha, ff.Into, Files(ff), ff.DeliverableId));
 
         // Ben's work merged with a merge commit, then the Manager's own commit.
         var benTip = r.CommitOn("members/alpha/ben", "ben's work", dir => File.WriteAllText(Path.Combine(dir, "b.txt"), "b"));
@@ -271,7 +271,7 @@ public class CodeEventsTests
         var events = r.F.Repos.CodeEvents.Read("Alpha");
         var merged = Assert.Single(events, e => e.Kind == CodeEvent.MergeTeam && e.Sha == merge);
         Assert.Equal(("members/alpha/ben", "Ben", "team/alpha", "A b.txt", "Merge members/alpha/ben", (long?)6),
-            (merged.Branch, merged.Member, merged.Into, Files(merged), merged.Message, merged.WorkflowId));
+            (merged.Branch, merged.Member, merged.Into, Files(merged), merged.Message, merged.DeliverableId));
         var mine = Assert.Single(events, e => e.Sha == own);
         Assert.Equal((CodeEvent.Commit, "Manager", "team/alpha", "A notes.md"), (mine.Kind, mine.Member, mine.Branch, Files(mine)));
         Assert.Equal(2, events.Count(e => e.Kind == CodeEvent.Commit && e.Branch.StartsWith("members/", StringComparison.Ordinal)));
@@ -305,7 +305,7 @@ public class CodeEventsTests
         Assert.All(pushes, p =>
         {
             Assert.Equal(r.Rev(p.Branch), p.Sha);
-            Assert.Equal(9, p.WorkflowId);
+            Assert.Equal(9, p.DeliverableId);
             Assert.Equal(["members/alpha/ada", "team/alpha"], p.Branches!);
             Assert.Empty(p.Files);
         });
@@ -343,7 +343,7 @@ public class CodeEventsTests
         Assert.Equal("2026-11-17T10:20:00.0000000+00:00", (string?)json["at"]);
         Assert.Equal("c.txt", (string?)json["files"]![0]!["path"]);
         Assert.Equal("A", (string?)json["files"]![0]!["status"]);
-        Assert.Equal(1, (long?)json["workflowId"]);
+        Assert.Equal(1, (long?)json["deliverableId"]);
     }
 
     [Fact]

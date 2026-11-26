@@ -86,7 +86,7 @@ describe('TeamNetworkAllows', () => {
   it('IsTheTeamSettingsNetworkTab', async () => {
     const { api } = fakeApi({
       'policy.teamHosts': () => ({ teamId: 4, hosts: [host('api.nuget.org')] }),
-      'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
+      'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
       'teams.push': () => ({ on: false, origin: null }), 'teams.syncToBase': () => ({ on: true, note: null }),
       'teams.repos': () => ({ main: null, extras: [] }), 'teams.approvals': () => [],
       'integrations.list': () => ({ integrations: [] }), 'integrations.mcpList': () => [], 'integrations.apiList': () => [],

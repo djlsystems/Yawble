@@ -19,7 +19,7 @@ public class MonitorFeedTests
         Assert.Equal("DeveloperPriya", row["member"]!.GetValue<string>());
         Assert.Equal("Manager", row["from"]!.GetValue<string>());
         Assert.Equal("Add a README", row["text"]!.GetValue<string>());
-        Assert.Equal(3, row["workflow"]!.GetValue<long>());
+        Assert.Equal(3, row["deliverable"]!.GetValue<long>());
     }
 
     [Theory]
@@ -28,7 +28,7 @@ public class MonitorFeedTests
     [InlineData(MessageTypes.NeedsDecision, """{"question":"MIT or Apache?"}""", "decision", "MIT or Apache?")]
     [InlineData(MessageTypes.Handback, """{"delivered":"README on members/developerpriya"}""", "handback", "README on members/developerpriya")]
     [InlineData(MessageTypes.Failed, """{"reason":"timed out"}""", "failed", "timed out")]
-    [InlineData(MessageTypes.WorkflowCompleted, """{"delivered":"done"}""", "done", "done")]
+    [InlineData(MessageTypes.DeliverableCompleted, """{"delivered":"done"}""", "done", "done")]
     public void AReportIsAboutItsSender(string type, string payload, string kind, string text)
     {
         var row = UiRpc.MonitorRow(M(type, payload, "payments/TesterWren"))!;

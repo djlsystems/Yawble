@@ -32,7 +32,7 @@ internal sealed class TempDb : IDisposable
 /// <summary>A fake runner whose behaviour per member is a script; everything else completes at once.</summary>
 internal sealed class ScriptedRunner : IAgentRunner
 {
-    private readonly Dictionary<string, Func<RunContext, CancellationToken, Task<RunResult>>> _scripts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Func<RunContext, CancellationToken, Task<RunResult>>> _workflows = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _lock = new();
     private int _running;
 
@@ -42,7 +42,7 @@ internal sealed class ScriptedRunner : IAgentRunner
 
     public ScriptedRunner On(string qualified, Func<RunContext, CancellationToken, Task<RunResult>> script)
     {
-        _scripts[qualified] = script;
+        _workflows[qualified] = script;
         return this;
     }
 
@@ -55,7 +55,7 @@ internal sealed class ScriptedRunner : IAgentRunner
         }
         try
         {
-            var script = _scripts.GetValueOrDefault(run.Member.Qualified) ?? Default;
+            var script = _workflows.GetValueOrDefault(run.Member.Qualified) ?? Default;
             return await script(run, ct);
         }
         finally

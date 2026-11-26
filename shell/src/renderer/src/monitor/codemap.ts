@@ -1,14 +1,14 @@
 import { fileName, type StepRow } from './steps';
 
 /**
- * THE CODE MAP: one tree per team - the repository, its folders, their files - built up over the life of a workflow
+ * THE CODE MAP: one tree per team - the repository, its folders, their files - built up over the life of a deliverable
  * from two sources.
  *   - The members' steps (monitor.steps) are immediate and provisional: a Write makes a file, an Edit lights it bright,
  *     a Read lights it faint. They are the only source for reads.
  *   - The code events (monitor.codeEvents, from the core) are the truth: a commit's files confirm, add or delete
  *     nodes and override what the steps said (a Write over a file the commit says was modified is an edit, not a new
  *     file; a file the commit deleted is gone, and a step older than that commit does not bring it back).
- * A file leaves when every workflow that touched it has ended, or when it has been idle for MapIdleMs (log time, so a
+ * A file leaves when every deliverable that touched it has ended, or when it has been idle for MapIdleMs (log time, so a
  * replay prunes as the past did), fading out over the last MapFadeMs of that (idleFade). A large map collapses to its busiest folders, each with a "+N" for the rest.
  * Everything here is plain data and arithmetic, so the scene can draw hundreds of files at 60 fps and the tests can
  * build it without a canvas.
@@ -22,7 +22,7 @@ export interface CodeFile { path: string; status: FileStatus; from: string | nul
 /** One event as monitor.codeEvents returns it (oldest first). */
 export interface CodeEvent {
   kind: CodeEventKind; team: string; member: string | null; branch: string; sha: string; message: string;
-  files: CodeFile[]; at: string; workflowId: number | null;
+  files: CodeFile[]; at: string; deliverableId: number | null;
 }
 
 const Kinds: readonly CodeEventKind[] = ['commit', 'merge-team', 'landed', 'push'];
@@ -56,10 +56,10 @@ export function readCodeEvent(raw: unknown): CodeEvent | null {
       if (!path) continue;
       files.push({ path: normPath(path), status: readStatus(r.status), from: from ? normPath(from) : null });
     }
-  const wf = e.workflowId;
+  const wf = e.deliverableId;
   return {
     kind, team: text(e.team), member: text(e.member) || null, branch: text(e.branch), sha: text(e.sha), message: text(e.message),
-    files, at: text(e.at), workflowId: typeof wf === 'number' && Number.isFinite(wf) ? wf : null,
+    files, at: text(e.at), deliverableId: typeof wf === 'number' && Number.isFinite(wf) ? wf : null,
   };
 }
 
@@ -106,8 +106,8 @@ export interface MapFile {
   sha: string | null;
   /** Who touched it, by member name in lower case. */
   members: Map<string, MemberTouch>;
-  /** The workflows it was touched in (it leaves when they have all ended). */
-  workflows: Set<number>;
+  /** The deliverables it was touched in (it leaves when they have all ended). */
+  deliverables: Set<number>;
   touches: number;
 }
 
@@ -142,7 +142,7 @@ export class CodeMap {
     const f: MapFile = {
       team: t.name, path, name: fileName(path), folder: folderOf(path),
       firstAt: at, lastAt: at, editAt: -Infinity, readAt: -Infinity, bornShown: shown, editShown: -Infinity, readShown: -Infinity,
-      created: false, confirmed: false, sha: null, members: new Map(), workflows: new Set(), touches: 0,
+      created: false, confirmed: false, sha: null, members: new Map(), deliverables: new Set(), touches: 0,
     };
     t.files.set(path, f);
     this.rev++;
@@ -163,7 +163,7 @@ export class CodeMap {
    * A step: a Write makes the file (new unless a commit has already said it exists), an Edit lights it bright, a Read
    * faint. `shown` is the display time when it is played, null when applied quietly (no pop, no light).
    */
-  touchStep(step: Pick<StepRow, 'team' | 'member' | 'kind' | 'target' | 'at'>, workflow: number | null, shown: number | null): MapFile | null {
+  touchStep(step: Pick<StepRow, 'team' | 'member' | 'kind' | 'target' | 'at'>, deliverable: number | null, shown: number | null): MapFile | null {
     if (!step.target || (step.kind !== 'read' && step.kind !== 'edit' && step.kind !== 'create')) return null;
     const path = normPath(step.target);
     if (!path || path.includes('…')) return null; // the core clips a very long path: it would never meet its commit
@@ -184,7 +184,7 @@ export class CodeMap {
       if (shown !== null) f.editShown = shown;
     }
     this.touchMember(f, step.member, step.kind, at);
-    if (workflow !== null && !f.workflows.has(workflow)) { f.workflows.add(workflow); }
+    if (deliverable !== null && !f.deliverables.has(deliverable)) { f.deliverables.add(deliverable); }
     return f;
   }
 
@@ -222,20 +222,20 @@ export class CodeMap {
       if (shown !== null) f.editShown = shown;
       f.touches++;
       if (ev.kind === 'commit') this.touchMember(f, ev.member, f.created ? 'create' : 'edit', at);
-      if (ev.workflowId !== null) f.workflows.add(ev.workflowId);
+      if (ev.deliverableId !== null) f.deliverables.add(ev.deliverableId);
       lit.push(f);
     }
     return lit;
   }
 
-  /** A workflow ended: the files only it touched leave the map. */
-  endWorkflow(team: string, workflow: number): void {
+  /** A deliverable ended: the files only it touched leave the map. */
+  endDeliverable(team: string, deliverable: number): void {
     const t = this.teams.get(lower(team));
     if (!t) return;
-    t.ended.add(workflow);
+    t.ended.add(deliverable);
     for (const [path, f] of t.files) {
-      if (!f.workflows.size || !f.workflows.has(workflow)) continue;
-      if ([...f.workflows].every((w) => t.ended.has(w))) { t.files.delete(path); this.rev++; }
+      if (!f.deliverables.size || !f.deliverables.has(deliverable)) continue;
+      if ([...f.deliverables].every((w) => t.ended.has(w))) { t.files.delete(path); this.rev++; }
     }
   }
 

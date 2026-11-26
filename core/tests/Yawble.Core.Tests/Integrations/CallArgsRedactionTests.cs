@@ -58,10 +58,10 @@ public class CallArgsRedactionTests
     [Fact]
     public void ForLog_RedactsApisEmailAndMcpArguments_AndLeavesTheOtherArgsAsTheyAre()
     {
-        string[] args = ["CreateMessage", """{"Body":"secret words"}""", "script run 4"];
-        Assert.Equal(["CreateMessage", """{"Body":"(12 chars)"}""", "script run 4"], CallArgsRedaction.ForLog("api:twilio", args));
+        string[] args = ["CreateMessage", """{"Body":"secret words"}""", "workflow run 4"];
+        Assert.Equal(["CreateMessage", """{"Body":"(12 chars)"}""", "workflow run 4"], CallArgsRedaction.ForLog("api:twilio", args));
         Assert.Equal("""{"Body":"(12 chars)"}""", CallArgsRedaction.ForLog("email:Sales inbox", args)[1]);
-        Assert.Equal(["CreateMessage", """{"Body":"(12 chars)"}""", "script run 4"], CallArgsRedaction.ForLog("mcp:fake", args));
+        Assert.Equal(["CreateMessage", """{"Body":"(12 chars)"}""", "workflow run 4"], CallArgsRedaction.ForLog("mcp:fake", args));
         string[] notJson = ["CreateMessage", "{\"cut by the scrubber"];
         Assert.Same(notJson, CallArgsRedaction.ForLog("api:twilio", notJson));
         string[] task = ["anything"];

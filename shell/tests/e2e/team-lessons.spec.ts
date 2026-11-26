@@ -1,6 +1,6 @@
 // A team's lessons in headless Chrome against the phone-remote fake core (remote.html,
 // tests/e2e/phone) with team_retros fixtures. Team settings > General reads "Lessons: 2, last updated <date> by the retro
-// of workflow 12" with a link; the link opens Settings > Skills at payments' team_retros, which says who last wrote it
+// of deliverable 12" with a link; the link opens Settings > Skills at payments' team_retros, which says who last wrote it
 // and lists its versions newest first; Restore on version 1 (after the confirm) sends skills.restore { id: 1 }.
 //
 //   npx playwright test team-lessons      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
@@ -16,18 +16,18 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
 
 const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results'), 'team-lessons');
-const BODY = '## Building and testing\n- Run `npm run build` in shell before any e2e spec: specs load shell/out (2026-11-18, workflow 12)\n' +
-  '## Git\n- Fetch the team branch before merging a member\'s branch (2026-11-17, workflow 9)\n\n```sh\nnpm run build\n```\nSee [the docs](https://example.com/docs).';
+const BODY = '## Building and testing\n- Run `npm run build` in shell before any e2e spec: specs load shell/out (2026-11-18, deliverable 12)\n' +
+  '## Git\n- Fetch the team branch before merging a member\'s branch (2026-11-17, deliverable 9)\n\n```sh\nnpm run build\n```\nSee [the docs](https://example.com/docs).';
 const retros = { name: 'team_retros', description: 'Lessons from this team\'s earlier work, kept by the Manager\'s retrospectives.', roles: ['any'], body: BODY,
   kind: 'custom', teamId: 1, team: 'payments', id: 31, updatedAt: '2026-11-18T09:00:00Z' };
-const version = (n: number, body: string, workflow: number, at: string) =>
-  ({ id: n, teamId: 1, name: 'team_retros', version: n, body, writer: 'Manager', workflow, restoredFrom: null, writtenAt: at });
-const VERSIONS = [version(2, BODY, 12, '2026-11-18T09:00:00Z'), version(1, '- Fetch the team branch before merging a member\'s branch (2026-11-17, workflow 9)', 9, '2026-11-17T09:00:00Z')];
+const version = (n: number, body: string, deliverable: number, at: string) =>
+  ({ id: n, teamId: 1, name: 'team_retros', version: n, body, writer: 'Manager', deliverable, restoredFrom: null, writtenAt: at });
+const VERSIONS = [version(2, BODY, 12, '2026-11-18T09:00:00Z'), version(1, '- Fetch the team branch before merging a member\'s branch (2026-11-17, deliverable 9)', 9, '2026-11-17T09:00:00Z')];
 
 const OVERRIDES: Record<string, (p?: any) => unknown> = {
   'teams.lessons': (p) => p?.teamId === 1
-    ? { count: 2, version: 2, updatedAt: '2026-11-18T09:00:00Z', writer: 'Manager', workflow: 12, skillId: 31 }
-    : { count: 0, version: 0, updatedAt: null, writer: null, workflow: null, skillId: null },
+    ? { count: 2, version: 2, updatedAt: '2026-11-18T09:00:00Z', writer: 'Manager', deliverable: 12, skillId: 31 }
+    : { count: 0, version: 0, updatedAt: null, writer: null, deliverable: null, skillId: null },
   'skills.versions': (p) => (p?.teamId === 1 && p?.name === 'team_retros' ? VERSIONS : []),
   'skills.restore': () => ({ ...retros, body: VERSIONS[1]!.body }),
 };
@@ -79,7 +79,7 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   await page.locator('[data-test=open-manage]').first().click();
 
   const line = page.locator('[data-test=team-lessons-line]');
-  await expect(line).toHaveText(/^Lessons: 2, last updated .+ by the retro of workflow 12$/);
+  await expect(line).toHaveText(/^Lessons: 2, last updated .+ by the retro of deliverable 12$/);
   expect(sent.find((s) => s.method === 'teams.lessons')!.params).toEqual({ teamId: 1 });
   await page.locator('[data-test=team-lessons]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(SHOTS, 'team-settings-lessons.png') });
@@ -102,12 +102,12 @@ test('Team settings reads the Lessons line; its link opens Settings > Skills at 
   await page.screenshot({ path: path.join(SHOTS, 'skill-markdown-dark.png') });
   await theme('light');
   await expect(page.locator('[data-test=skills-pane] h3')).toHaveText('team_retros');
-  await expect(page.locator('[data-test=skill-last-writer]')).toContainText('Last written by the retro of workflow 12');
+  await expect(page.locator('[data-test=skill-last-writer]')).toContainText('Last written by the retro of deliverable 12');
   await expect(page.locator('[data-test=skill-last-writer]')).toContainText('(version 2)');
   await expect(page.locator('[data-test=skill-lessons-note]')).toContainText('every run of team payments gets this text in its prompt');
   await page.locator('[data-test=skill-versions] summary').click();
   await expect(page.locator('[data-test=skill-versions] li')).toHaveCount(2);
-  await expect(page.locator('[data-test=skill-version-1]')).toContainText('the retro of workflow 9');
+  await expect(page.locator('[data-test=skill-version-1]')).toContainText('the retro of deliverable 9');
   await page.locator('[data-test=skill-version-show-1]').click();
   await expect(page.locator('[data-test=skill-version-body-1]')).toContainText('Fetch the team branch');
   await page.screenshot({ path: path.join(SHOTS, 'skills-versions.png') });

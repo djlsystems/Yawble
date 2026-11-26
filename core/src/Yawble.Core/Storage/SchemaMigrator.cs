@@ -51,17 +51,43 @@ public static class SchemaMigrator
         }
         foreach (var name in pending)
         {
-            using var tx = connection.BeginTransaction();
-            Execute(connection, tx, ReadMigration(name));
-            using var record = connection.CreateCommand();
-            record.Transaction = tx;
-            record.CommandText = "INSERT INTO schema_migrations (name, applied_at) VALUES ($n, $t);";
-            record.Parameters.AddWithValue("$n", name);
-            record.Parameters.AddWithValue("$t", DateTimeOffset.UtcNow.ToString("O"));
-            record.ExecuteNonQuery();
-            tx.Commit();
+            var sql = ReadMigration(name);
+            // A migration that rebuilds a table other tables point at (SQLite's 12-step table change) runs with foreign
+            // keys off, so dropping the old table cascades into nothing; the keys are checked before it commits.
+            var keysOff = sql.StartsWith(ForeignKeysOffMarker, StringComparison.Ordinal);
+            if (keysOff) Execute(connection, null, "PRAGMA foreign_keys=OFF;");
+            try
+            {
+                using var tx = connection.BeginTransaction();
+                Execute(connection, tx, sql);
+                if (keysOff) CheckForeignKeys(connection, tx, name);
+                using var record = connection.CreateCommand();
+                record.Transaction = tx;
+                record.CommandText = "INSERT INTO schema_migrations (name, applied_at) VALUES ($n, $t);";
+                record.Parameters.AddWithValue("$n", name);
+                record.Parameters.AddWithValue("$t", DateTimeOffset.UtcNow.ToString("O"));
+                record.ExecuteNonQuery();
+                tx.Commit();
+            }
+            finally
+            {
+                if (keysOff) Execute(connection, null, "PRAGMA foreign_keys=ON;");
+            }
         }
         return Applied(connection).Order(StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>The first line of a migration that runs with foreign keys off (see <see cref="Migrate(string, Action{SqliteConnection, string}?)"/>).</summary>
+    public const string ForeignKeysOffMarker = "-- yawble:foreign-keys-off";
+
+    private static void CheckForeignKeys(SqliteConnection connection, SqliteTransaction tx, string name)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "PRAGMA foreign_key_check;";
+        using var reader = cmd.ExecuteReader();
+        if (reader.Read())
+            throw new InvalidOperationException($"migration {name} left a broken foreign key in {reader.GetString(0)}");
     }
 
     private static HashSet<string> Applied(SqliteConnection connection)

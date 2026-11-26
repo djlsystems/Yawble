@@ -159,7 +159,7 @@ describe('Website login and Add website', () => {
 
   it('TeamDialogOpensAWebsiteAsAWebsite', async () => {
     const { api } = fakeApi({
-      'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
+      'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
       'teams.push': () => ({ on: false, origin: null }), 'teams.repos': () => ({ main: null, extras: [] }), 'teams.approvals': () => [],
       'integrations.list': () => ({ integrations: [], pendingAsks: 0 }), 'integrations.mcpList': () => [],
       'integrations.apiList': () => [siteRow()],

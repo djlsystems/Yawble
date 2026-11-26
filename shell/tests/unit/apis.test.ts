@@ -414,7 +414,7 @@ describe('APIs and Connections', () => {
   it('TeamIntegrationsTab_ListsApisOfferedToTheTeam', async () => {
     const team = { id: 3, name: 'ops', repoPath: null, members: 2, running: 0, queued: 0, paused: false, archived: false } as any;
     const { api } = fakeApi({
-      'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [], 'teams.push': () => ({ on: false, origin: null }),
+      'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }), 'teams.env': () => ({}), 'teams.agents': () => [], 'teams.push': () => ({ on: false, origin: null }),
       'teams.repos': () => ({ main: null, extras: [] }), 'teams.approvals': () => [],
       'integrations.list': () => ({ integrations: [], pendingAsks: 0 }),
       'integrations.mcpList': () => [],

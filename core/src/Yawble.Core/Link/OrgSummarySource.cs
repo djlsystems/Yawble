@@ -6,8 +6,8 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Link;
 
 /// <summary>
-/// org.summary's facts from the running app: the bus (teams, agents, run slots, workflows, decisions), the board (cards and
-/// the backlog item a workflow came from), the asks waiting for the person (tool-call approvals, network and tool requests)
+/// org.summary's facts from the running app: the bus (teams, agents, run slots, deliverables, decisions), the board (cards and
+/// the backlog item a deliverable came from), the asks waiting for the person (tool-call approvals, network and tool requests)
 /// and the logs (warnings and errors of the last hour). It reads; it never changes anything. Never read: the model usage
 /// log and the token counts on run records (no tokens, cost or usage in the summary).
 /// </summary>
@@ -30,7 +30,7 @@ public sealed class AppOrgSummarySource(
         var computer = new OrgComputer(Environment.MachineName, label(), CoreInfo.Version,
             System.Runtime.InteropServices.RuntimeInformation.OSDescription, startedAt, slots.Running, slots.Limit, slots.Queued);
         var teams = new List<OrgTeam>();
-        var workflows = new List<OrgWorkflow>();
+        var deliverables = new List<OrgDeliverable>();
         var asks = new List<OrgAsk>();
         foreach (var t in await bus.TeamsAsync(ct).ConfigureAwait(false))
         {
@@ -40,20 +40,20 @@ public sealed class AppOrgSummarySource(
                 c.LastRunFailed, c.State == "running" ? Doing(t.Name, c) : null,
                 c.State == "running" ? ParseTime(c.RunStartedAt) : null, c.LastRunStopped,
                 // The card's state already says why work waits; waitsFor goes with waits-for-run only.
-                c.State == Bus.WaitStates.WaitsForRun ? c.WaitsFor : null)).ToList(), t.WorkflowExpiryDays, t.Waiting));
+                c.State == Bus.WaitStates.WaitsForRun ? c.WaitsFor : null)).ToList(), t.DeliverableExpiryDays, t.Waiting));
 
             var decisions = await bus.OpenDecisionsAsync(t.Name, ct).ConfigureAwait(false);
             asks.AddRange(decisions.Select(d => new OrgAsk("decision", t.Name, Field(d, "question") ?? Field(d, "text") ?? "a decision")));
             var reports = await bus.LatestReportsAsync(t.Name, ct).ConfigureAwait(false);
             var failedOwners = cards.Where(c => c.State != "running" && c.LastRunFailed).Select(c => c.Member.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var w in await bus.WorkflowsAsync(t.Name, 50, ct).ConfigureAwait(false))
+            foreach (var w in await bus.DeliverablesAsync(t.Name, 50, ct).ConfigureAwait(false))
             {
                 var state = StateOf(w, decisions.Any(d => d.CorrelationId == w.Id),
                     reports.Values.Any(r => r.CorrelationId == w.Id && r.Type == MessageTypes.Blocked), w.Owner is { } o && failedOwners.Contains(o));
-                var onBoard = board?.CardsOfWorkflow(w.Id) ?? [];
+                var onBoard = board?.CardsOfDeliverable(w.Id) ?? [];
                 var item = board?.ItemDispatchedAs(w.Id)
                     ?? (onBoard.Select(c => Board.BoardStore.ItemId(c.Item)).FirstOrDefault(i => i is not null) is { } id ? board?.Item(id) : null);
-                workflows.Add(new OrgWorkflow(w.Id, t.Name, w.Title, item?.Label, item?.Title, state,
+                deliverables.Add(new OrgDeliverable(w.Id, t.Name, w.Title, item?.Label, item?.Title, state,
                     onBoard.Count(c => c.Lane == "done"), onBoard.Count, w.StartedAt, w.LastAt, w.Owner, w.EndedAt, w.ExpiredAt, w.ExpiresAt, w.Time));
             }
             if (integrations is not null)
@@ -65,7 +65,7 @@ public sealed class AppOrgSummarySource(
             if (bus.FolderAsks is { } folderAsks)
                 asks.AddRange(folderAsks.Asks(openOnly: true, teamId: t.Id).Select(a => new OrgAsk("folder", t.Name, $"{a.MemberName}: folder {FolderName(a.Path)}")));
         }
-        return new OrgSummaryFacts(computer, teams, workflows, asks, Problems());
+        return new OrgSummaryFacts(computer, teams, deliverables, asks, Problems());
     }
 
     /// <summary>A folder ask's title on the org dashboard: the folder's own name only, never the full path (it can name the person's account).</summary>
@@ -84,8 +84,8 @@ public sealed class AppOrgSummarySource(
     private string? Doing(string team, AgentCard c) =>
         board?.OpenCardOf(team, c.Member.Name) is { } card ? $"card {card.Id}: {card.Title}" : c.StatusLine;
 
-    /// <summary>The summary's state of a workflow (OrgSummary.WorkflowStates).</summary>
-    internal static string StateOf(WorkflowSummary w, bool askingThePerson, bool blocked, bool ownerFailed) => w.State switch
+    /// <summary>The summary's state of a deliverable (OrgSummary.DeliverableStates).</summary>
+    internal static string StateOf(DeliverableSummary w, bool askingThePerson, bool blocked, bool ownerFailed) => w.State switch
     {
         "completed" => OrgSummary.Completed,
         "closed" => OrgSummary.Closed,

@@ -5,7 +5,7 @@ roles: [manager]
 ---
 # The board
 
-The board is how the person watches the team: one card per member per workflow, in To Do, In Progress, Needs
+The board is how the person watches the team: one card per member per deliverable, in To Do, In Progress, Needs
 You and Done. Cards follow what you and the members do (a tell, a hand-back, a block, a question); you shape
 them with the `board` tool.
 
@@ -35,7 +35,7 @@ them with the `board` tool.
   are leaving undone on purpose, a card you are holding back. Give a `note` saying why.
 - Comment rather than move silently. A decision, a changed plan, a fault the tester found and who is fixing it:
   one line in the card's trail saves the person reading the whole thread.
-- Before `workflow_complete`, every card is Done or carries a comment saying why it is not.
+- Before `deliverable_complete`, every card is Done or carries a comment saying why it is not.
 
 ## Verify cards go to the tester
 

@@ -11,9 +11,9 @@ using Xunit;
 namespace Yawble.Core.Tests.Link;
 
 /// <summary>
-/// Wren's finding F5: org.summary, as the core sends it over the Cloud Link, carries teams[].workflowExpiryDays
-/// (the team's setting, default 3) and workflows[].expiresAt (the same instant as the bus.workflows item's expiresAt; null
-/// while the workflow is worked and once it ended). Built from the real app source over a real bus with a fake clock, and
+/// Wren's finding F5: org.summary, as the core sends it over the Cloud Link, carries teams[].deliverableExpiryDays
+/// (the team's setting, default 3) and deliverables[].expiresAt (the same instant as the bus.deliverables item's expiresAt; null
+/// while the deliverable is worked and once it ended). Built from the real app source over a real bus with a fake clock, and
 /// read as JSON, the way yawble-cloud's OrgWire reads it.
 /// </summary>
 public class OrgSummaryExpiryTests
@@ -24,7 +24,7 @@ public class OrgSummaryExpiryTests
     private sealed class Rig : IAsyncDisposable
     {
         public TempDb Db { get; } = new();
-        public WorkflowExpiryTests.ManualClock Clock { get; } = new(Start);
+        public DeliverableExpiryTests.ManualClock Clock { get; } = new(Start);
         public BusEngine Engine { get; private set; } = null!;
         public RpcDispatcher Rpc { get; private set; } = null!;
         public long TeamId { get; private set; }
@@ -58,16 +58,16 @@ public class OrgSummaryExpiryTests
             return JsonNode.Parse(OrgSummary.Build(facts, Clock.GetUtcNow()).ToJsonString())!.AsObject();
         }
 
-        public async Task<JsonObject> SummaryWorkflow(long id) =>
-            (await Summary())["workflows"]!.AsArray().Single(w => w!["id"]!.GetValue<long>() == id)!.AsObject();
+        public async Task<JsonObject> SummaryDeliverable(long id) =>
+            (await Summary())["deliverables"]!.AsArray().Single(w => w!["id"]!.GetValue<long>() == id)!.AsObject();
 
         public async Task<JsonObject> BusItem(long id) =>
-            (await Call("bus.workflows", new { teamId = TeamId }))!.AsArray().Single(w => w!["id"]!.GetValue<long>() == id)!.AsObject();
+            (await Call("bus.deliverables", new { teamId = TeamId }))!.AsArray().Single(w => w!["id"]!.GetValue<long>() == id)!.AsObject();
 
         public DateTimeOffset LastActivity(long id)
         {
             using var s = Db.OpenStore();
-            return s.Workflow(id).Where(m => m.Type is not (MessageTypes.WorkflowExpired or BusEngine.WorkflowExpiring)).Max(m => m.OccurredAt);
+            return s.Deliverable(id).Where(m => m.Type is not (MessageTypes.DeliverableExpired or BusEngine.DeliverableExpiring)).Max(m => m.OccurredAt);
         }
 
         public async ValueTask DisposeAsync()
@@ -83,20 +83,20 @@ public class OrgSummaryExpiryTests
     private static DateTimeOffset? ToSecond(DateTimeOffset? t) => t is { } v ? new DateTimeOffset(v.UtcTicks - v.UtcTicks % TimeSpan.TicksPerSecond, TimeSpan.Zero) : null;
 
     [Fact]
-    public async Task Teams_CarryWorkflowExpiryDays_Default3_AndFollowTheSetting()
+    public async Task Teams_CarryDeliverableExpiryDays_Default3_AndFollowTheSetting()
     {
         await using var rig = await Rig.StartAsync(new ScriptedRunner());
         var team = Assert.Single((await rig.Summary())["teams"]!.AsArray())!.AsObject();
-        Assert.True(team.ContainsKey("workflowExpiryDays"));
-        Assert.Equal(3, team["workflowExpiryDays"]!.GetValue<int>());
+        Assert.True(team.ContainsKey("deliverableExpiryDays"));
+        Assert.Equal(3, team["deliverableExpiryDays"]!.GetValue<int>());
 
-        await rig.Call("teams.workflowExpiry", new { teamId = rig.TeamId, days = 5 });
-        Assert.Equal(5, Assert.Single((await rig.Summary())["teams"]!.AsArray())!["workflowExpiryDays"]!.GetValue<int>());
-        Assert.Equal(5, (await rig.Call("teams.list"))!.AsArray().Single()!["workflowExpiryDays"]!.GetValue<int>());
+        await rig.Call("teams.deliverableExpiry", new { teamId = rig.TeamId, days = 5 });
+        Assert.Equal(5, Assert.Single((await rig.Summary())["teams"]!.AsArray())!["deliverableExpiryDays"]!.GetValue<int>());
+        Assert.Equal(5, (await rig.Call("teams.list"))!.AsArray().Single()!["deliverableExpiryDays"]!.GetValue<int>());
     }
 
     [Fact]
-    public async Task Workflows_CarryExpiresAt_SameAsTheBusItem_NullWhileWorked_AndOnceExpired()
+    public async Task Deliverables_CarryExpiresAt_SameAsTheBusItem_NullWhileWorked_AndOnceExpired()
     {
         var release = new TaskCompletionSource<RunResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var first = true;
@@ -111,7 +111,7 @@ public class OrgSummaryExpiryTests
 
         // Worked: Ada's run is going, so nothing will expire it.
         await Wait.UntilAsync(async () => (await rig.BusItem(root.Seq))["busy"]!.AsArray().Count > 0, "Ada is running");
-        var worked = await rig.SummaryWorkflow(root.Seq);
+        var worked = await rig.SummaryDeliverable(root.Seq);
         Assert.True(worked.ContainsKey("expiresAt"));
         Assert.Null(worked["expiresAt"]);
         Assert.Null((await rig.BusItem(root.Seq))["expiresAt"]);
@@ -122,14 +122,14 @@ public class OrgSummaryExpiryTests
         var last = rig.LastActivity(root.Seq);
         var item = await rig.BusItem(root.Seq);
         Assert.Equal(last.AddDays(3), At(item["expiresAt"]));
-        var idle = await rig.SummaryWorkflow(root.Seq);
+        var idle = await rig.SummaryDeliverable(root.Seq);
         Assert.Equal(ToSecond(At(item["expiresAt"])), At(idle["expiresAt"]));
         Assert.Equal(ToSecond(last.AddDays(3)), At(idle["expiresAt"]));
 
         // Expired: ended, so no expiresAt; endedAt and expiredAt as before.
         rig.Clock.Now = last.AddDays(3).AddMinutes(1);
         Assert.Equal(1, await rig.Engine.SweepExpiryAsync(rig.Clock.Now, Ct));
-        var expired = await rig.SummaryWorkflow(root.Seq);
+        var expired = await rig.SummaryDeliverable(root.Seq);
         Assert.Equal(OrgSummary.Expired, expired["state"]!.GetValue<string>());
         Assert.True(expired.ContainsKey("expiresAt"));
         Assert.Null(expired["expiresAt"]);
@@ -142,18 +142,18 @@ public class OrgSummaryExpiryTests
     public void Build_WritesBothFields_FromTheFacts()
     {
         var facts = new OrgSummaryFacts(new OrgComputer("pc", null, "1.0", "os", Start, 0, 4, 0),
-            [new OrgTeam("web", false, false, [], WorkflowExpiryDays: 7), new OrgTeam("api", false, false, [])],
+            [new OrgTeam("web", false, false, [], DeliverableExpiryDays: 7), new OrgTeam("api", false, false, [])],
             [
-                new OrgWorkflow(1, "web", "idle", null, null, OrgSummary.NobodyWorking, 0, 0, Start, Start, "Manager", ExpiresAt: Start.AddDays(7)),
-                new OrgWorkflow(2, "web", "worked", null, null, OrgSummary.Running, 0, 0, Start, Start, "Manager"),
+                new OrgDeliverable(1, "web", "idle", null, null, OrgSummary.NobodyWorking, 0, 0, Start, Start, "Manager", ExpiresAt: Start.AddDays(7)),
+                new OrgDeliverable(2, "web", "worked", null, null, OrgSummary.Running, 0, 0, Start, Start, "Manager"),
             ], [], []);
         var s = OrgSummary.Build(facts, Start);
         var teams = s["teams"]!.AsArray();
-        Assert.Equal(3, teams.Single(t => t!["name"]!.GetValue<string>() == "api")!["workflowExpiryDays"]!.GetValue<int>());
-        Assert.Equal(7, teams.Single(t => t!["name"]!.GetValue<string>() == "web")!["workflowExpiryDays"]!.GetValue<int>());
-        var workflows = s["workflows"]!.AsArray();
-        Assert.Equal("2026-11-24T09:00:00Z", workflows.Single(w => w!["id"]!.GetValue<long>() == 1)!["expiresAt"]!.GetValue<string>());
-        var worked = workflows.Single(w => w!["id"]!.GetValue<long>() == 2)!.AsObject();
+        Assert.Equal(3, teams.Single(t => t!["name"]!.GetValue<string>() == "api")!["deliverableExpiryDays"]!.GetValue<int>());
+        Assert.Equal(7, teams.Single(t => t!["name"]!.GetValue<string>() == "web")!["deliverableExpiryDays"]!.GetValue<int>());
+        var deliverables = s["deliverables"]!.AsArray();
+        Assert.Equal("2026-11-24T09:00:00Z", deliverables.Single(w => w!["id"]!.GetValue<long>() == 1)!["expiresAt"]!.GetValue<string>());
+        var worked = deliverables.Single(w => w!["id"]!.GetValue<long>() == 2)!.AsObject();
         Assert.True(worked.ContainsKey("expiresAt"));
         Assert.Null(worked["expiresAt"]);
     }

@@ -1,7 +1,7 @@
 import { onBeforeUnmount, readonly, ref, shallowRef, type Ref } from 'vue';
 import type { ItemTime, TimeCategory, TimeEndedHow, TimelineBand, TimelineMarkerKind } from '../../../shared/api';
 
-// A card's or workflow's overall time, said in words. The core computes every time (BoardCard.time, a workflow
+// A card's or deliverable's overall time, said in words. The core computes every time (BoardCard.time, a deliverable
 // item's time, timeline.get); the screens only format them. The one thing the screens add is the tick of an OPEN item:
 // its overallMs is as of the core's answer, so it is shown plus the seconds since that answer arrived, from ONE shared
 // 1 s timer (useNow) however many cards and rows show a time.
@@ -224,8 +224,8 @@ export function placeBreakLabels(width: number, startRight: number, endLeft: num
   });
 }
 
-// ---- the one Timeline dialog: opened from a card or a workflow row, one at a time ----
-export interface TimelineTarget { kind: 'card' | 'workflow'; id: number; title?: string; team?: string | null }
+// ---- the one Timeline dialog: opened from a card or a deliverable row, one at a time ----
+export interface TimelineTarget { kind: 'card' | 'deliverable'; id: number; title?: string; team?: string | null }
 export const timelineTarget = shallowRef<TimelineTarget | null>(null);
 export function openTimeline(t: TimelineTarget): void { timelineTarget.value = t; }
 export function closeTimeline(): void { timelineTarget.value = null; }

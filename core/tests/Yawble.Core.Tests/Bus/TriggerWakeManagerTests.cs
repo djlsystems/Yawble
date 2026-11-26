@@ -48,7 +48,7 @@ public class TriggerWakeManagerTests
     }
 
     [Fact]
-    public async Task UnderTheDefault_AScheduledRunThatFinishesWithoutHandingBack_WakesNobody_AndTheAppClosesItsWorkflow()
+    public async Task UnderTheDefault_AScheduledRunThatFinishesWithoutHandingBack_WakesNobody_AndTheAppClosesItsDeliverable()
     {
         var runner = new ScriptedRunner();
         var (db, engine, ada) = await Team(runner);
@@ -63,10 +63,10 @@ public class TriggerWakeManagerTests
             using var store = db.OpenStore();
             var completed = Assert.Single(store.AllMessages(), m => m.Type == MessageTypes.Completed);
             Assert.Contains("\"wakeManager\":\"onHandbackOrFailure\"", completed.Payload);
-            var declared = Assert.Single(store.AllMessages(), m => m.Type == MessageTypes.WorkflowCompleted);
+            var declared = Assert.Single(store.AllMessages(), m => m.Type == MessageTypes.DeliverableCompleted);
             Assert.Equal(MessageTypes.HostSource, declared.Source);
             Assert.True(JsonDocument.Parse(declared.Payload).RootElement.GetProperty("declaredByPlatform").GetBoolean());
-            Assert.True(store.WorkflowDeclared(store.Trigger(t.Id)!.LastSeq!.Value));
+            Assert.True(store.DeliverableDeclared(store.Trigger(t.Id)!.LastSeq!.Value));
         }
     }
 
@@ -99,7 +99,7 @@ public class TriggerWakeManagerTests
             Assert.Contains(managerRun.Items, i => i.Type == MessageTypes.Handback);
             Assert.DoesNotContain(managerRun.Items, i => i.Type == MessageTypes.Completed); // passed over under the default
             using var store = db.OpenStore();
-            Assert.DoesNotContain(store.AllMessages(), m => m.Type == MessageTypes.WorkflowCompleted); // the Manager's to declare
+            Assert.DoesNotContain(store.AllMessages(), m => m.Type == MessageTypes.DeliverableCompleted); // the Manager's to declare
         }
     }
 
@@ -155,7 +155,7 @@ public class TriggerWakeManagerTests
             Assert.Equal(1, ManagerRuns(runner));
             using var store = db.OpenStore();
             Assert.DoesNotContain("wakeManager", Assert.Single(store.AllMessages(), m => m.Type == MessageTypes.Completed && m.Source == "Alpha/Ada").Payload);
-            Assert.DoesNotContain(store.AllMessages(), m => m.Type == MessageTypes.WorkflowCompleted);
+            Assert.DoesNotContain(store.AllMessages(), m => m.Type == MessageTypes.DeliverableCompleted);
         }
     }
 

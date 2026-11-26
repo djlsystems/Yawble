@@ -56,7 +56,7 @@ public sealed class LogPruneGapTests : IDisposable
             ("@by", state == "pending" ? null : "pat"), ("@d", state == "pending" ? null : decidedAt ?? at));
 
     private void Tool(string at, string args, string state, string? decidedAt = null) =>
-        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, state, decided_by, decided_at) VALUES (@at, 'az', 1, 'web/DeveloperAda', @a, 'r', 1, 1, @s, @by, @d);",
+        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, state, decided_by, decided_at) VALUES (@at, 'az', 1, 'web/DeveloperAda', @a, 'r', 1, 1, @s, @by, @d);",
             ("@at", at), ("@a", args), ("@s", state), ("@by", state == "pending" ? null : "pat"), ("@d", state == "pending" ? null : decidedAt ?? at));
 
     /// <summary>Old answered asks of both kinds, old waiting ones of both kinds, and recent answered ones.</summary>
@@ -188,8 +188,8 @@ public sealed class LogPruneGapTests : IDisposable
     {
         Exec("INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state) VALUES (@at, 1, 'web/DeveloperAda', 'old.example', 'CONNECT', @at, 'denied');", ("@at", Ago(400)));
         Exec("INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state) VALUES (@at, 1, 'web/DeveloperAda', 'new.example', 'CONNECT', @at, 'allowed');", ("@at", Ago(3)));
-        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, state) VALUES (@at, 'az', 1, 'web/DeveloperAda', '[\"x\"]', 'r', 1, 1, 'approved');", ("@at", Ago(390)));
-        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, state) VALUES (@at, 'az', 1, 'web/DeveloperAda', '[\"y\"]', 'r', 1, 1, 'pending');", ("@at", Ago(900)));
+        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, state) VALUES (@at, 'az', 1, 'web/DeveloperAda', '[\"x\"]', 'r', 1, 1, 'approved');", ("@at", Ago(390)));
+        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, state) VALUES (@at, 'az', 1, 'web/DeveloperAda', '[\"y\"]', 'r', 1, 1, 'pending');", ("@at", Ago(900)));
 
         var preview = _logs.PrunePreview("approvals", _logs.CutoffFor(365));
         Assert.Equal(2, preview.Count);

@@ -44,7 +44,7 @@ public interface ICredentialIndex
 /// <summary>A team as the doctor sees it.</summary>
 public sealed record DoctorTeam(
     string Name, bool Paused, bool Archived, DateTimeOffset LastActivityAt,
-    int UnattendedWorkflows, IReadOnlyList<StuckMember> Stuck,
+    int UnattendedDeliverables, IReadOnlyList<StuckMember> Stuck,
     int BehindBase = 0, TimeSpan? BehindAge = null, string TeamBranch = "", string BaseBranch = "");
 
 /// <summary>A member whose run has been going longer than the watchdog allows.</summary>

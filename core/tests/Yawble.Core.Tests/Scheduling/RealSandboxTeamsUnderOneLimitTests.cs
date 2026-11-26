@@ -49,13 +49,13 @@ public class RealSandboxTeamsUnderOneLimitTests
             new
             {
                 say = "declare",
-                bus = new object[] { new { tool = "workflow_complete", args = new { delivered = "both halves done" } } },
+                bus = new object[] { new { tool = "deliverable_complete", args = new { delivered = "both halves done" } } },
             },
         },
     };
 
     [Fact]
-    public async Task TwoTeamsOfThreeUnderLimitThreeNeverExceedThreeLiveSandboxesAndBothWorkflowsComplete()
+    public async Task TwoTeamsOfThreeUnderLimitThreeNeverExceedThreeLiveSandboxesAndBothDeliverablesComplete()
     {
         RealSandbox.SkipUnlessAvailable();
         const int Limit = 3;
@@ -81,8 +81,8 @@ public class RealSandboxTeamsUnderOneLimitTests
         var tellA = await bus.PersonTellAsync("teama", "MgrA", "build feature A with your team", ct: Ct);
         var tellB = await bus.PersonTellAsync("teamb", "MgrB", "build feature B with your team", ct: Ct);
 
-        await Wait.UntilAsync(() => kit.Launch.Messages().Count(m => m.Type == MessageTypes.WorkflowCompleted) == 2,
-            "both workflows to be declared complete", TimeSpan.FromMinutes(4));
+        await Wait.UntilAsync(() => kit.Launch.Messages().Count(m => m.Type == MessageTypes.DeliverableCompleted) == 2,
+            "both deliverables to be declared complete", TimeSpan.FromMinutes(4));
         await Wait.UntilAsync(() => bus.IsQuiescentAsync(Ct).GetAwaiter().GetResult(), "the bus to settle", TimeSpan.FromMinutes(1));
         await Wait.UntilAsync(() => SandboxSampler.Live(kit.App).Sandboxes == 0, "every sandbox to exit", TimeSpan.FromSeconds(30));
         await sampler.StopAsync();
@@ -115,13 +115,13 @@ public class RealSandboxTeamsUnderOneLimitTests
         // Both Managers were told first, so they hold the first two slots, in the person's order.
         Assert.Equal(["MgrA", "MgrB"], runs.Take(2).Select(Name));
 
-        // Every run completed in its sandbox; both members of each team handed back on its own workflow; both declared.
+        // Every run completed in its sandbox; both members of each team handed back on its own deliverable; both declared.
         Assert.All(runs, r => Assert.True(r.State == "completed", $"{Name(r)} run {r.Id}: {r.State} {r.Reason}"));
         foreach (var (team, tell, names) in new[] { ("teama", tellA, new[] { "ada", "ali" }), ("teamb", tellB, new[] { "bea", "ben" }) })
         {
             foreach (var name in names)
                 Assert.Contains(messages, m => m.Type == MessageTypes.Handback && m.Source == $"{team}/{name}" && m.CorrelationId == tell.CorrelationId);
-            Assert.Single(messages, m => m.Type == MessageTypes.WorkflowCompleted && m.CorrelationId == tell.CorrelationId);
+            Assert.Single(messages, m => m.Type == MessageTypes.DeliverableCompleted && m.CorrelationId == tell.CorrelationId);
         }
         // Mixed CLIs: each member's sandbox ran its own CLI (the stand-in installed as claude and as grok).
         foreach (var (team, name, cli) in new[] { ("teama", "ada", AgentCli.Claude), ("teama", "ali", AgentCli.Grok), ("teamb", "bea", AgentCli.Grok), ("teamb", "ben", AgentCli.Claude) })

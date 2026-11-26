@@ -15,7 +15,7 @@ public static class RemoteAccess
         .. Ui.UiRpc.Prefixes,
         "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
         "guardrail.", "agents.", "runs.", "concierge.", "board.", "backlog.", "integrations.", "tasks.",
-        // A card's or a workflow's timeline (the cloud's detail dialog).
+        // A card's or a deliverable's timeline (the cloud's detail dialog).
         "timeline.get",
         "ops.backups",
         // Network asks: listed and answered like the other policy changes (policy. is a screen prefix above).
@@ -56,7 +56,7 @@ public static class RemoteAccess
         Reads,
         /// <summary>Changes something: refused for a read-only viewer.</summary>
         Changes,
-        /// <summary>Reads a setting, or sets it when the call carries its value: "on" (teams.push, teams.syncToBase), "days" (teams.workflowExpiry).</summary>
+        /// <summary>Reads a setting, or sets it when the call carries its value: "on" (teams.push, teams.syncToBase), "days" (teams.deliverableExpiry).</summary>
         ReadsUnlessOn,
     }
 
@@ -76,9 +76,11 @@ public static class RemoteAccess
             "roles.list", "teams.hireList",
             "docs.list", "docs.read", "docs.folder",
             "members.get",
-            "bus.decisions", "bus.workflows",
-            // The Workflows page: every team's workflows, and one in full (its spec only when the viewer may read the backlog; ShapeResult).
-            "workflows.list", "workflows.get",
+            "bus.decisions", "bus.deliverables",
+            // The Deliverables page: every team's deliverables, and one in full (its spec only when the viewer may read the backlog; ShapeResult).
+            "deliverables.list", "deliverables.get",
+            // The Goals page (saving, deleting and assigning goals are changes).
+            "goals.list",
             "policy.getGlobal", "policy.getMember", "policy.previewLoosen", "policy.teamHosts", "policy.checkHosts",
             "credentials.status",
             "terminal.banner",
@@ -103,7 +105,7 @@ public static class RemoteAccess
             // concierge.read only clears the chat's unread marker: opening a chat is a read.
             "concierge.list", "concierge.get", "concierge.read",
             "board.list", "board.card", "backlog.list", "backlog.item",
-            // A card's or a workflow's timeline (the detail dialog); a Visitor may view it.
+            // A card's or a deliverable's timeline (the detail dialog); a Visitor may view it.
             "timeline.get",
             "integrations.list", "integrations.asks", "integrations.calls", "integrations.checklist", "integrations.connectionAttention",
             "integrations.connections", "integrations.discoverStatus", "integrations.mcpList", "integrations.apiList", "integrations.watches",
@@ -120,11 +122,11 @@ public static class RemoteAccess
             "org.summary", "org.summary.watch", "org.summary.unwatch",
             "updates.status",
             "code.list", "code.open", "code.read", "code.close", "code.download",
-            // The script library, schemas, script runs and script members: reads (saving, importing, Test run and member changes are changes).
-            .. Ui.ScriptsRpc.Reads,
+            // The workflow library, schemas, workflow runs and workflow members: reads (saving, importing, Test run and member changes are changes).
+            .. Ui.WorkflowsRpc.Reads,
         ],
         // teams.localhost ("Allow localhost (macOS)") is read by any viewer and set only by a full one.
-        readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.workflowExpiry", "teams.localhost"],
+        readsUnlessOn: ["teams.push", "teams.syncToBase", "teams.deliverableExpiry", "teams.localhost"],
         changes:
         [
             "teams.create", "teams.pause", "teams.resume", "teams.archive", "teams.unarchive", "teams.delete", "teams.reset", "teams.setEnv",
@@ -133,8 +135,9 @@ public static class RemoteAccess
             "roles.save", "roles.remove", "teams.setHireList",
             "docs.write", "docs.upload", "docs.mkdir", "docs.rename", "docs.delete", "docs.moveToBacklog",
             "members.add", "members.remove", "members.update",
-            "bus.tellManager", "bus.answer", "bus.closeWorkflow", "bus.stopWorkflow", "bus.nudgeWorkflow",
-            "bus.workflowExtend",
+            "bus.tellManager", "bus.answer", "bus.closeDeliverable", "bus.stopDeliverable", "bus.nudgeDeliverable",
+            "bus.deliverableExtend",
+            "goals.save", "goals.delete", "goals.assign",
             "policy.saveGlobal", "policy.saveOverride", "policy.saveLoosen", "policy.removeTeamHost",
             "credentials.setClaudeSetupToken", "credentials.setAnthropicApiKey", "credentials.setXaiApiKey", "credentials.remove", "credentials.setMode",
             "hostTerminal.start",
@@ -163,7 +166,7 @@ public static class RemoteAccess
             "tools.notNow", "tools.checkAgain",
             "folder.answer",
             "logs.prune", "logs.setRetention",
-            .. Ui.ScriptsRpc.Changes,
+            .. Ui.WorkflowsRpc.Changes,
         ]);
 
     private static Dictionary<string, Kind> Table(string[] reads, string[] readsUnlessOn, string[] changes)
@@ -183,8 +186,8 @@ public static class RemoteAccess
     public static bool Reads(string method, JsonObject? parameters) =>
         Kinds.TryGetValue(method, out var kind) && (kind == Kind.Reads || kind == Kind.ReadsUnlessOn && parameters?[SetKey(method)] is null);
 
-    /// <summary>The field a get-or-set call carries when it sets its setting (teams.workflowExpiry: "days"; the rest "on").</summary>
-    public static string SetKey(string method) => method == "teams.workflowExpiry" ? "days" : "on";
+    /// <summary>The field a get-or-set call carries when it sets its setting (teams.deliverableExpiry: "days"; the rest "on").</summary>
+    public static string SetKey(string method) => method == "teams.deliverableExpiry" ? "days" : "on";
 
     /// <summary>What a cloud viewer reads when members' code is not shown (Settings > Cloud Link) and a call would show it.</summary>
     public const string CodeHidden = "members' code is not shown to cloud viewers; the person can turn it on in the app on the computer (Settings > Cloud Link)";
@@ -193,16 +196,16 @@ public static class RemoteAccess
     /// A relayed call's answer as a cloud viewer may see it. With members' code not shown, git.commitShow keeps the
     /// commit and its file list and says codeShown = false (its diffs, git.commitDiff, are refused above).
     /// </summary>
-    /// <remarks>workflows.list and workflows.get say whether this viewer may read the backlog (<c>backlog</c>; the shell
-    /// links item labels only then), and workflows.get drops the item's spec when it may not.</remarks>
+    /// <remarks>deliverables.list and deliverables.get say whether this viewer may read the backlog (<c>backlog</c>; the shell
+    /// links item labels only then), and deliverables.get drops the item's spec when it may not.</remarks>
     public static void ShapeResult(string method, JsonNode? result, bool showCode, string access = Full)
     {
         if (method == "git.commitShow" && !showCode && result is JsonObject commit && commit.ContainsKey("codeShown")) commit["codeShown"] = false;
-        if (method is "workflows.list" or "workflows.get" && result is JsonObject page)
+        if (method is "deliverables.list" or "deliverables.get" && result is JsonObject page)
         {
             var backlog = Refusal("backlog.item", null, allowHostTerminals: false, access, showCode: showCode) is null;
             page["backlog"] = backlog;
-            if (!backlog && method == "workflows.get") page["spec"] = null;
+            if (!backlog && method == "deliverables.get") page["spec"] = null;
         }
     }
 

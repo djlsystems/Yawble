@@ -16,7 +16,7 @@ import type { MenuItem as MenuBarItem } from './MenuBar.vue';
 // Embedded in the cloud page (remote.html?embed=1) this pane is not drawn at all; the same content goes to the cloud as
 // data (embed.ts buildNav, yawble.nav) and the cloud's clicks come back to App.vue's handlers for this pane's emits. A
 // place, a badge or a chat action added here goes into buildNav too (tests/unit/embed.test.ts compares the two).
-export type View = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'scripts' | 'logs' | 'settings';
+export type View = 'concierge' | 'goals' | 'documents' | 'backlog' | 'deliverables' | 'teams' | 'board' | 'monitor' | 'workflows' | 'logs' | 'settings';
 export type MenuItem = 'agents' | 'skills' | 'globalPolicy' | 'integrations' | 'system' | 'link';
 
 const props = defineProps<{
@@ -39,26 +39,26 @@ const props = defineProps<{
   open?: boolean;
   /** A remote view on a phone has no menu bar: these of its items (theme, terminal, Help) sit at the drawer's bottom. */
   menu?: MenuBarItem[];
-  /** The team whose page is open: on a phone its Documents and Workflows sit near the drawer's top, not in
+  /** The team whose page is open: on a phone its Documents and Deliverables sit near the drawer's top, not in
    *  the team page's header. Null with no team page open; ignored on the desktop. */
   openTeamName?: string | null;
-  /** How many workflows are open across the teams (the Workflows badge); null: not known. */
-  openWorkflows?: number | null;
+  /** How many deliverables are open across the teams (the Deliverables badge); null: not known. */
+  openDeliverables?: number | null;
 }>();
-/** Any team with work running now: the Teams and Workflows badges turn green and pulse until every team is idle. */
+/** Any team with work running now: the Teams and Deliverables badges turn green and pulse until every team is idle. */
 const runningTeams = computed(() => props.teams.filter((t) => (t.running ?? 0) > 0).length);
 const anyRunning = computed(() => runningTeams.value > 0);
 const emit = defineEmits<{
   newChat: []; openConversation: [id: string]; openTeam: [id: number]; go: [view: View]; logs: [];
-  teamDocuments: []; teamWorkflows: [];
+  teamDocuments: []; teamDeliverables: [];
   rename: [id: string, title: string]; remove: [id: string]; newTeam: []; collapse: []; expand: []; command: [id: string];
 }>();
 
 const railPlaces: { view: View; label: string; icon: string }[] = [
-  { view: 'concierge', label: 'Concierge', icon: 'spark' }, { view: 'documents', label: 'Documents', icon: 'docs' },
-  { view: 'backlog', label: 'Backlog', icon: 'backlog' }, { view: 'workflows', label: 'Workflows', icon: 'workflow' }, { view: 'teams', label: 'Teams', icon: 'teams' },
-  { view: 'board', label: 'Kanban board', icon: 'board' }, { view: 'monitor', label: 'Monitor', icon: 'monitor' },
-  { view: 'scripts', label: 'Scripts', icon: 'scripts' },
+  { view: 'concierge', label: 'Concierge', icon: 'spark' }, { view: 'teams', label: 'Teams', icon: 'teams' },
+  { view: 'goals', label: 'Goals', icon: 'goals' }, { view: 'deliverables', label: 'Deliverables', icon: 'deliverable' }, { view: 'backlog', label: 'Backlog', icon: 'backlog' },
+  { view: 'board', label: 'Kanban board', icon: 'board' }, { view: 'workflows', label: 'Workflows', icon: 'workflows' },
+  { view: 'documents', label: 'Documents', icon: 'docs' }, { view: 'monitor', label: 'Monitor', icon: 'monitor' },
 ];
 
 const editing = ref<string | null>(null);
@@ -89,7 +89,7 @@ function finishRename(id: string) {
         @click="emit('go', p.view)">
         <Icon :name="p.icon" />
         <span v-if="p.view === 'teams' && slots?.running" class="rail-badge live" title="agents running">{{ slots.running }}</span>
-        <span v-else-if="p.view === 'workflows' && openWorkflows" class="rail-badge" :class="{ live: anyRunning }" data-test="rail-workflows-count" :title="`${openWorkflows} open`">{{ openWorkflows }}</span>
+        <span v-else-if="p.view === 'deliverables' && openDeliverables" class="rail-badge" :class="{ live: anyRunning }" data-test="rail-deliverables-count" :title="`${openDeliverables} open`">{{ openDeliverables }}</span>
       </button>
       <button class="rail-btn" :class="{ on: view === 'logs' }" title="Logs" data-test="rail-logs" @click="emit('logs')"><Icon name="logs" /></button>
     </nav>
@@ -106,23 +106,24 @@ function finishRename(id: string) {
 
     <button class="item new" data-test="new-chat" @click="emit('newChat')"><Icon name="newChat" />New chat</button>
 
-    <!-- A phone with a team page open: that team's Documents and Workflows (its header has no room for them). Workflows
-         opens the Workflows page filtered to the team (App.vue). -->
+    <!-- A phone with a team page open: that team's Documents and Deliverables (its header has no room for them). Deliverables
+         opens the Deliverables page filtered to the team (App.vue). -->
     <div v-if="drawer && openTeamName" class="team-group" data-test="drawer-team">
       <h3 class="team-name" :title="`Team ${openTeamName}`">Team {{ openTeamName }}</h3>
       <button class="item" data-test="drawer-team-documents" @click="emit('teamDocuments')"><Icon name="docs" />Documents</button>
-      <button class="item" data-test="drawer-team-workflows" @click="emit('teamWorkflows')"><Icon name="workflow" />Workflows</button>
+      <button class="item" data-test="drawer-team-deliverables" @click="emit('teamDeliverables')"><Icon name="deliverable" />Deliverables</button>
     </div>
 
     <nav class="places">
       <button class="item" :class="{ on: view === 'concierge' }" data-test="nav-concierge" @click="emit('go', 'concierge')"><Icon name="spark" />Concierge</button>
       <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="teams.length" class="badge" :class="{ live: anyRunning }" data-test="nav-teams-count" :title="`${teams.length} team${teams.length === 1 ? '' : 's'}${anyRunning ? `, ${runningTeams} running` : ', all idle'}`">{{ teams.length }}</span></button>
+      <button class="item" :class="{ on: view === 'goals' }" data-test="nav-goals" @click="emit('go', 'goals')"><Icon name="goals" />Goals</button>
+      <button class="item" :class="{ on: view === 'deliverables' }" data-test="nav-deliverables" @click="emit('go', 'deliverables')"><Icon name="deliverable" />Deliverables<span v-if="openDeliverables" class="badge" :class="{ live: anyRunning }" data-test="nav-deliverables-count" :title="`${openDeliverables} open deliverable${openDeliverables === 1 ? '' : 's'}${anyRunning ? ', work running' : ', nothing running'}`">{{ openDeliverables }}</span></button>
       <button class="item" :class="{ on: view === 'backlog' }" data-test="nav-backlog" @click="emit('go', 'backlog')"><Icon name="backlog" />Backlog</button>
-      <button class="item" :class="{ on: view === 'workflows' }" data-test="nav-workflows" @click="emit('go', 'workflows')"><Icon name="workflow" />Workflows<span v-if="openWorkflows" class="badge" :class="{ live: anyRunning }" data-test="nav-workflows-count" :title="`${openWorkflows} open workflow${openWorkflows === 1 ? '' : 's'}${anyRunning ? ', work running' : ', nothing running'}`">{{ openWorkflows }}</span></button>
       <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Kanban board</button>
+      <button class="item" :class="{ on: view === 'workflows' }" data-test="nav-workflows" @click="emit('go', 'workflows')"><Icon name="workflows" />Workflows</button>
       <button class="item" :class="{ on: view === 'documents' }" data-test="nav-documents" @click="emit('go', 'documents')"><Icon name="docs" />Documents</button>
       <button class="item" :class="{ on: view === 'monitor' }" data-test="nav-monitor" @click="emit('go', 'monitor')"><Icon name="monitor" />Monitor</button>
-      <button class="item" :class="{ on: view === 'scripts' }" data-test="nav-scripts" @click="emit('go', 'scripts')"><Icon name="scripts" />Scripts</button>
       <button class="item" :class="{ on: view === 'logs' }" data-test="nav-logs" @click="emit('logs')"><Icon name="logs" />Logs</button>
     </nav>
 
@@ -211,7 +212,7 @@ function finishRename(id: string) {
 .item.new { font-weight: 500; }
 .places { margin: 4px 0 6px; }
 .soon { margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: var(--chip); padding: 1px 6px; border-radius: 6px; }
-/* Teams and Workflows: green and pulsing while any team has work running; the usual blue when every team is idle. */
+/* Teams and Deliverables: green and pulsing while any team has work running; the usual blue when every team is idle. */
 .badge.live, .rail-badge.live { background: var(--ok); animation: badge-live 1.6s ease-in-out infinite; }
 @keyframes badge-live { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .badge.live, .rail-badge.live { animation: none; } }

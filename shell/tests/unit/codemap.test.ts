@@ -20,16 +20,16 @@ const step = (kind: StepKind, target: string, atMs: number, member = 'DeveloperI
   ({ id: ++ids, at: iso(atMs), team, member, run: 1, kind, tool: kind, target });
 const commit = (files: [string, string][], atMs: number, extra: Partial<Record<string, unknown>> = {}): Record<string, unknown> => ({
   kind: 'commit', team: 'Code', member: 'DeveloperInes', branch: 'members/code/developerines', sha: 'abcdef1234567890', message: 'Card 1: the map\n\nbody',
-  files: files.map(([status, path]) => ({ path, status })), at: iso(atMs), workflowId: 7, ...extra,
+  files: files.map(([status, path]) => ({ path, status })), at: iso(atMs), deliverableId: 7, ...extra,
 });
 const ev = (raw: Record<string, unknown>) => readCodeEvent(raw)!;
-const row = (seq: number, kind: FeedRow['kind'], member: string | null, workflow: number, atMs: number): FeedRow =>
-  ({ seq, kind, team: 'Code', member, from: 'Manager', text: null, workflow, at: iso(atMs) });
+const row = (seq: number, kind: FeedRow['kind'], member: string | null, deliverable: number, atMs: number): FeedRow =>
+  ({ seq, kind, team: 'Code', member, from: 'Manager', text: null, deliverable, at: iso(atMs) });
 
 describe('the code events off the wire', () => {
   it('reads the card\'s shape, never trusts it, and sorts oldest first', () => {
     const e = readCodeEvent(commit([['A', 'src/a.ts'], ['R100', 'src/old.ts\tsrc/new.ts'], ['M', './src\\b.ts']], t0));
-    expect(e).toMatchObject({ kind: 'commit', member: 'DeveloperInes', workflowId: 7 });
+    expect(e).toMatchObject({ kind: 'commit', member: 'DeveloperInes', deliverableId: 7 });
     expect(e!.files).toEqual([
       { path: 'src/a.ts', status: 'A', from: null },
       { path: 'src/new.ts', status: 'R', from: 'src/old.ts' },
@@ -37,7 +37,7 @@ describe('the code events off the wire', () => {
     ]);
     expect(readCodeEvent({ kind: 'rebase', team: 'Code', at: iso(t0) })).toBeNull();
     expect(readCodeEvent({ kind: 'push', team: 'Code', at: 'not a time' })).toBeNull();
-    expect(readCodeEvent({ kind: 'push', team: 'Code', at: iso(t0), files: 'x' })).toMatchObject({ files: [], member: null, workflowId: null });
+    expect(readCodeEvent({ kind: 'push', team: 'Code', at: iso(t0), files: 'x' })).toMatchObject({ files: [], member: null, deliverableId: null });
     const list = readCodeEvents({ events: [commit([], t0 + 5), commit([], t0), null, 3] });
     expect(list.map((x) => Date.parse(x.at))).toEqual([t0, t0 + 5]);
     expect(readCodeEvents([commit([], t0)])).toHaveLength(1);
@@ -67,7 +67,7 @@ describe('the map from the steps', () => {
     expect(fileLight(b, 250)).toBeGreaterThan(fileLight(b, 10_000));
   });
 
-  it('prunes a file after the idle time (log time) and when every workflow that touched it has ended', () => {
+  it('prunes a file after the idle time (log time) and when every deliverable that touched it has ended', () => {
     const m = new MonitorModel();
     m.map.idleMs = 10 * 60_000;
     m.apply(row(1, 'instruction', 'DeveloperInes', 7, t0), 0, false);
@@ -75,8 +75,8 @@ describe('the map from the steps', () => {
     m.applyStep(step('edit', 'src/only7.ts', t0 + 1000), 0, false);
     m.applyStep(step('edit', 'src/both.ts', t0 + 1000), 0, false);
     m.applyStep(step('read', 'src/both.ts', t0 + 2000, 'TesterKofi'), 0, false);
-    m.applyStep(step('edit', 'src/late.ts', t0 + 9 * 60_000, 'Unknown'), 0, false); // no workflow known: idle time only
-    // Workflow 7 ends: its only file leaves; the one workflow 8 touched too stays.
+    m.applyStep(step('edit', 'src/late.ts', t0 + 9 * 60_000, 'Unknown'), 0, false); // no deliverable known: idle time only
+    // Deliverable 7 ends: its only file leaves; the one deliverable 8 touched too stays.
     m.apply(row(3, 'done', null, 7, t0 + 3000), 0, false);
     expect(m.map.files('Code').map((f) => f.path).sort()).toEqual(['src/both.ts', 'src/late.ts']);
     m.apply(row(4, 'done', null, 8, t0 + 4000), 0, false);
@@ -350,7 +350,7 @@ describe('the Monitor with the code read', () => {
         if (method === 'teams.agents') return agents;
         if (method === 'monitor.messages') return { end: 0, messages: [] };
         if (method === 'monitor.steps') return { end: 1, pending: false, steps: [step('edit', 'src/a.ts', Date.now() - 5000, 'DeveloperInes', 'Code')] };
-        if (method === 'bus.workflows') return [];
+        if (method === 'bus.deliverables') return [];
         throw new Error(`unknown method ${method}`);
       },
       onEvent: () => () => {},
@@ -380,7 +380,7 @@ describe('the Monitor with the code read', () => {
         if (method === 'monitor.messages') return { end: 0, messages: [] };
         if (method === 'monitor.steps') return { end: 0, pending: false, steps: [] };
         if (method === 'monitor.codeEvents') { asked.push(params); return list; }
-        if (method === 'bus.workflows') return [];
+        if (method === 'bus.deliverables') return [];
         throw new Error(method);
       },
       onEvent: () => () => {},

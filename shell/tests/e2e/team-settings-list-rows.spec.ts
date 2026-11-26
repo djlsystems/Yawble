@@ -7,7 +7,7 @@
 //  - Back returns to the list from every section and from General's Repositories link; the head stays at the top of the
 //    sheet (and is what a tap hits) while a long section scrolls; Back still works after the scroll; the next section
 //    starts at its top.
-//  - Other phone sheets built on Modal (Settings, Triggers, Git, Documents, Workflows, Logs): Close is 44x44, shown, an
+//  - Other phone sheets built on Modal (Settings, Triggers, Git, Documents, Deliverables, Logs): Close is 44x44, shown, an
 //    18 px glyph inside its box, the title is not clipped, and Close closes the sheet.
 //  - 1280x800: the Settings tab row and the Modal Close (Settings and Triggers dialogs) have the same boxes and styles as
 //    main BASE_COMMIT (before the phone list of sections); both screenshots are saved.
@@ -224,7 +224,7 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
     test('other Modal sheets: Close 44x44, shown, 18 px glyph, title not clipped, Close closes', async ({ browser }) => {
       const { page, ctx, errors } = await openTeam(browser, w, h);
       const seen: Record<string, unknown> = {};
-      for (const id of ['open-manage', 'open-triggers', 'open-git', 'drawer-team-documents', 'drawer-team-workflows']) { // Logs is a page, not a sheet
+      for (const id of ['open-manage', 'open-triggers', 'open-git', 'drawer-team-documents', 'drawer-team-deliverables']) { // Logs is a page, not a sheet
         if (id.startsWith('drawer-') || id.startsWith('nav-')) {
           await page.goto(page.url().replace(/#.*/, '#team=1'));
           await expect(page.locator('[data-test=team-title]')).toBeVisible();
@@ -279,7 +279,7 @@ test(`desktop 1280x800: Settings tab row and Modal Close as on main ${BASE_COMMI
     for (const id of ['open-manage', 'open-triggers']) {
       await openFromTeam(page, id);
       await shot(page, `desktop-1280-${id}-${which}.png`);
-      // The Team settings dialog's height follows its General tab's content (the "Idle workflows" card made it
+      // The Team settings dialog's height follows its General tab's content (the "Idle deliverables" card made it
       // 316 -> 469 px), so for open-manage the dialog box is left, top and width only. Everything else is unchanged.
       out[id] = await page.evaluate((anyHeight) => {
         const box = (e: Element | null, withHeight = true) => { if (!e) return null; const r = e.getBoundingClientRect(); return (withHeight ? [r.left, r.top, r.width, r.height] : [r.left, r.top, r.width]).map((n) => Math.round(n * 10) / 10).join(','); };

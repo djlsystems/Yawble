@@ -18,7 +18,7 @@ public sealed class TeamRepoRunner(IAgentRunner inner, TeamRepos repos, Action<s
 
     public async Task<RunResult> RunAsync(RunContext run, CancellationToken ct)
     {
-        // A workflow's first run (its root instruction): bring the team's branches up to the base first, on the host. A
+        // A deliverable's first run (its root instruction): bring the team's branches up to the base first, on the host. A
         // failed sync never stops the work; a conflict is carried as a note at the top of the instruction.
         if (run.Items.Count > 0 && run.Items[0].Seq == run.Items[0].CorrelationId)
         {
@@ -28,7 +28,7 @@ public sealed class TeamRepoRunner(IAgentRunner inner, TeamRepos repos, Action<s
             }
             catch (Exception ex) when (ex is GitException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
             {
-                log?.Invoke($"team {run.Member.Team}: the branch sync before workflow {run.Correlation} failed: {ex.Message}");
+                log?.Invoke($"team {run.Member.Team}: the branch sync before deliverable {run.Correlation} failed: {ex.Message}");
             }
         }
         try

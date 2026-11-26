@@ -10,7 +10,7 @@ namespace Yawble.Core.Tests.Board;
 /// <summary>
 /// Gap tests beside BoardTesterRuleTests (its items 1-4). Fakes only: the projector fed hand-made messages.
 /// <list type="bullet">
-/// <item>Items 1 + 3 together: a tester's card re-told to a developer, the developer hands back, then the workflow is
+/// <item>Items 1 + 3 together: a tester's card re-told to a developer, the developer hands back, then the deliverable is
 ///   declared complete: the card stays out of Done.</item>
 /// <item>Item 4: the person's answer and the app's notice after the tester's hand-back are not a new assignment, so the
 ///   test still counts; new work told to the tester by the Manager is one, so it does not.</item>
@@ -21,16 +21,16 @@ public class BoardTesterRuleGapTests
 {
     private long _seq = 500;
 
-    private Message M(string type, object payload, string source, long workflow, long? causation = null) =>
-        new(++_seq, type, JsonSerializer.Serialize(payload), source, workflow, causation, 0, DateTimeOffset.UtcNow);
+    private Message M(string type, object payload, string source, long deliverable, long? causation = null) =>
+        new(++_seq, type, JsonSerializer.Serialize(payload), source, deliverable, causation, 0, DateTimeOffset.UtcNow);
 
-    private Message Claim(string member, long card, long workflow) =>
+    private Message Claim(string member, long card, long deliverable) =>
         new(++_seq, "agent.instruction.payments/" + member, new JsonObject { ["text"] = "work card " + card, ["card"] = card }.ToJsonString(),
-            "payments/Manager", workflow, null, 0, DateTimeOffset.UtcNow);
+            "payments/Manager", deliverable, null, 0, DateTimeOffset.UtcNow);
 
-    private Message Tell(string member, string text, string source, long workflow, long? causation = null) =>
+    private Message Tell(string member, string text, string source, long deliverable, long? causation = null) =>
         new(++_seq, "agent.instruction.payments/" + member, new JsonObject { ["text"] = text }.ToJsonString(),
-            source, workflow, causation, 0, DateTimeOffset.UtcNow);
+            source, deliverable, causation, 0, DateTimeOffset.UtcNow);
 
     private static (TempDb Db, BoardStore Store, BoardProjector P) Board(params string[] testers)
     {
@@ -52,11 +52,11 @@ public class BoardTesterRuleGapTests
         p.Apply(M(MessageTypes.Handback, new { delivered = "fixed" }, "payments/DeveloperPriya", 40));
         Assert.NotEqual(Lanes.Done, store.Card(card.Id)!.Lane);
 
-        p.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "done" }, "payments/Manager", 40));
+        p.Apply(M(MessageTypes.DeliverableCompleted, new { delivered = "done" }, "payments/Manager", 40));
 
         Assert.NotEqual(Lanes.Done, store.Card(card.Id)!.Lane);
         Assert.Contains(store.Trail(card.Id), t => t.Kind == "comment" && t.Source == BoardProjector.BoardSource && t.Text.StartsWith("Left out of Done"));
-        Assert.DoesNotContain(store.Trail(card.Id), t => t.Kind == "workflow done");
+        Assert.DoesNotContain(store.Trail(card.Id), t => t.Kind == "deliverable done");
     }
 
     [Fact]
@@ -68,12 +68,12 @@ public class BoardTesterRuleGapTests
         p.Apply(Claim("TesterWren", card.Id, 41));
         var handback = M(MessageTypes.Handback, new { delivered = "12 passed" }, "payments/TesterWren", 41);
         p.Apply(handback);
-        // The person's reply inside the workflow (it has a causation) and the app's idle reminder go on the trail only.
+        // The person's reply inside the deliverable (it has a causation) and the app's idle reminder go on the trail only.
         p.Apply(Tell("TesterWren", "thanks", MessageTypes.PersonSource, 41, causation: handback.Seq));
-        p.Apply(Tell("Manager", "an open workflow has nobody working it", MessageTypes.HostSource, 41));
+        p.Apply(Tell("Manager", "an open deliverable has nobody working it", MessageTypes.HostSource, 41));
         Assert.Contains(store.Trail(card.Id), t => t.Kind == "told" && t.Source == "you");
 
-        p.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "done" }, "payments/Manager", 41));
+        p.Apply(M(MessageTypes.DeliverableCompleted, new { delivered = "done" }, "payments/Manager", 41));
 
         Assert.Equal(Lanes.Done, store.Card(card.Id)!.Lane);
         Assert.DoesNotContain(store.Trail(card.Id), t => t.Kind == "comment");
@@ -89,7 +89,7 @@ public class BoardTesterRuleGapTests
         p.Apply(M(MessageTypes.Handback, new { delivered = "12 passed" }, "payments/TesterWren", 42));
         p.Apply(Tell("TesterWren", "also check the logout page", "payments/Manager", 42)); // new work on its card
 
-        p.Apply(M(MessageTypes.WorkflowCompleted, new { delivered = "done" }, "payments/Manager", 42));
+        p.Apply(M(MessageTypes.DeliverableCompleted, new { delivered = "done" }, "payments/Manager", 42));
 
         Assert.NotEqual(Lanes.Done, store.Card(card.Id)!.Lane);
         Assert.Contains(store.Trail(card.Id), t => t.Kind == "comment" && t.Text.StartsWith("Left out of Done"));

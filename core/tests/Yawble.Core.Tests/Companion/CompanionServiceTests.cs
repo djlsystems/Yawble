@@ -85,7 +85,7 @@ public class CompanionServiceTests : IDisposable
                 case "bus.tellManager":
                 {
                     var m = await Bus.PersonTellAsync("alpha", "Manager", p!["text"]!.GetValue<string>(), null, ct);
-                    return new JsonObject { ["seq"] = m.Seq, ["workflow"] = m.CorrelationId };
+                    return new JsonObject { ["seq"] = m.Seq, ["deliverable"] = m.CorrelationId };
                 }
                 case "teams.env": return Env.DeepClone();
                 case "docs.read": return new JsonObject { ["kind"] = "text", ["text"] = "Release notes: commit 0123456789abcdef shipped the login form." };
@@ -301,7 +301,7 @@ public class CompanionServiceTests : IDisposable
         Assert.Equal(CompanionLevel.Read, CompanionTools.LevelOf("team_list", []));
         Assert.Equal(CompanionLevel.Act, CompanionTools.LevelOf("tell", []));
         Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf("git_merge_team", []));
-        Assert.Equal(["git_branches_delete", "git_branch_realign", "git_prune", "git_pr_merge", "team_archive", "team_delete"], CompanionTools.SelfConfirming);
+        Assert.Equal(["git_branches_delete", "git_branch_realign", "git_prune", "git_pr_merge", "team_archive", "team_delete", "goal_delete"], CompanionTools.SelfConfirming);
     }
 
     [Fact]

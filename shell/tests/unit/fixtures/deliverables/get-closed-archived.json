@@ -1,0 +1,75 @@
+{
+  "deliverable": {
+    "id": 3,
+    "title": "Old export",
+    "owner": "Manager",
+    "state": "closed",
+    "undeclared": false,
+    "busy": [],
+    "ending": "Not now",
+    "startedAt": "2026-11-20T01:23:33.226635\u002B00:00",
+    "lastAt": "2026-11-20T01:23:33.2780216\u002B00:00",
+    "messages": 3,
+    "endedAt": "2026-11-20T01:23:33.2280085\u002B00:00",
+    "expiredAt": null,
+    "expiresAt": null,
+    "expiryWarning": null,
+    "question": null,
+    "time": {
+      "createdAt": "2026-11-20T01:23:33.2266350\u002B00:00",
+      "startedAt": null,
+      "endedAt": "2026-11-20T01:23:33.2280000\u002B00:00",
+      "endedHow": "closed",
+      "open": false,
+      "overallMs": 2,
+      "rebuilt": false,
+      "breakdown": [
+        {
+          "category": "idle",
+          "ms": 2
+        }
+      ]
+    },
+    "ownerId": 4,
+    "team": "Cloud",
+    "teamId": 2,
+    "status": "closed",
+    "waitingFor": null,
+    "working": false,
+    "item": {
+      "label": "B002",
+      "title": "Old export",
+      "archived": true
+    },
+    "members": []
+  },
+  "cards": [],
+  "messages": [
+    {
+      "seq": 7,
+      "at": "2026-11-20T01:23:33.2780216\u002B00:00",
+      "kind": "completed",
+      "from": "Manager",
+      "member": "Manager",
+      "text": null
+    },
+    {
+      "seq": 4,
+      "at": "2026-11-20T01:23:33.2280085\u002B00:00",
+      "kind": "closed",
+      "from": "person",
+      "member": null,
+      "text": "Not now"
+    },
+    {
+      "seq": 3,
+      "at": "2026-11-20T01:23:33.2266350\u002B00:00",
+      "kind": "instruction",
+      "from": "person",
+      "member": "Manager",
+      "text": "Backlog item B002 is dispatched to your team. It is a SPEC..."
+    }
+  ],
+  "spec": "the old spec",
+  "backlog": true
+}

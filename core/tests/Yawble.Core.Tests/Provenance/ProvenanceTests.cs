@@ -41,7 +41,7 @@ public class ProvenanceTests
 
         // Ada reports on it, and the app declares it done: neither is the person, both carry the person as origin.
         var progress = store.Append(new NewMessage(MessageTypes.Progress, "{\"status\":\"half\"}", "Alpha/Ada", root));
-        var declared = store.Append(new NewMessage(MessageTypes.WorkflowCompleted, "{}", MessageTypes.HostSource, progress.Seq));
+        var declared = store.Append(new NewMessage(MessageTypes.DeliverableCompleted, "{}", MessageTypes.HostSource, progress.Seq));
         var p = store.ProvenanceOf(progress.Seq)!;
         Assert.Equal(("agent", (string?)null), (p.Via, p.User));
         Assert.Equal((root, "cloud", "pat@example.test"), (p.OriginSeq, p.OriginVia, p.OriginUser));

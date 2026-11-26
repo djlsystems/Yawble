@@ -183,7 +183,7 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
         return new JsonObject
         {
             ["id"] = a.Id, ["at"] = a.At, ["integration"] = "task:" + a.TaskName, ["task"] = true, ["taskName"] = a.TaskName, ["teamId"] = a.TeamId, ["member"] = a.Member,
-            ["command"] = $"task {a.TaskName}", ["reason"] = a.Reason, ["workflow"] = a.Workflow, ["commit"] = a.CommitSha, ["detail"] = detail,
+            ["command"] = $"task {a.TaskName}", ["reason"] = a.Reason, ["deliverable"] = a.Deliverable, ["commit"] = a.CommitSha, ["detail"] = detail,
         };
     }
 

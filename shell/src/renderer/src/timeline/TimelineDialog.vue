@@ -11,10 +11,10 @@ import {
 } from './time';
 
 // The one Timeline dialog (mounted once in App.vue, like the Code dialog), opened by clicking an overall time on a
-// card or a workflow row (time.ts openTimeline). It asks the core for timeline.get { card } | { workflow } and shows:
+// card or a deliverable row (time.ts openTimeline). It asks the core for timeline.get { card } | { deliverable } and shows:
 // the overall time created -> ended (or open) and how it ended; the planned / started line; the breakdown, each
 // category's time and share, adding up; a "rebuilt from history" note; and the timeline itself - one row per card (a
-// workflow: a summary row on top), bands by category, markers, long quiet stretches compressed behind a break mark.
+// deliverable: a summary row on top), bands by category, markers, long quiet stretches compressed behind a break mark.
 // The core computes every time; this only lays them out. Read-only: a Visitor sees the same.
 const props = defineProps<{ api?: YawbleApi }>();
 const api = resolveApi(props.api);
@@ -34,7 +34,7 @@ async function load() {
   loading = true;
   loadedAt = Date.now();
   try {
-    const got = await api.call<Timeline>(TIMELINE_GET, t.kind === 'card' ? { card: t.id } : { workflow: t.id });
+    const got = await api.call<Timeline>(TIMELINE_GET, t.kind === 'card' ? { card: t.id } : { deliverable: t.id });
     if (timelineTarget.value !== t) return;
     data.value = got && typeof got === 'object' && got.time ? got : null;
     error.value = data.value ? '' : 'The core sent no timeline for it.';
@@ -63,7 +63,7 @@ const isCard = computed(() => target.value?.kind === 'card');
 const title = computed(() => {
   const t = target.value;
   if (!t) return '';
-  return `${t.kind === 'card' ? `Card ${t.id}` : `Workflow #${t.id}`} · time`;
+  return `${t.kind === 'card' ? `Card ${t.id}` : `Deliverable #${t.id}`} · time`;
 });
 const overall = computed(() => (time.value ? liveOverallMs(time.value, now.value) : 0));
 
@@ -94,7 +94,7 @@ const rows = computed<Row[]>(() => {
   const d = data.value;
   if (!d) return [];
   const out: Row[] = [];
-  if (!isCard.value && d.summary?.length) out.push({ key: 'summary', label: 'All cards', sub: 'what the workflow was doing', bands: d.summary, summary: true });
+  if (!isCard.value && d.summary?.length) out.push({ key: 'summary', label: 'All cards', sub: 'what the deliverable was doing', bands: d.summary, summary: true });
   d.rows.forEach((r, i) => {
     const who = r.member ? displayName(r.member) : 'Unassigned';
     const label = isCard.value ? (r.member ? who : 'This card') : `${r.card != null ? `card ${r.card}` : 'card'} · ${who}`;
@@ -190,7 +190,7 @@ const unpick = (key: string) => { if (picked.value?.key === key) picked.value = 
           <div class="small" data-test="timeline-started">
             {{ startLine.join(' · ') }}<span v-if="beforeStart" class="muted" data-test="timeline-before-start"> · {{ formatShort(beforeStart) }} before it started</span>
           </div>
-          <p v-if="time.rebuilt" class="note small" data-test="timeline-rebuilt">Rebuilt from history: this {{ isCard ? 'card' : 'workflow' }} is older than the timeline, so its times come from its trail lines and are close, not exact.</p>
+          <p v-if="time.rebuilt" class="note small" data-test="timeline-rebuilt">Rebuilt from history: this {{ isCard ? 'card' : 'deliverable' }} is older than the timeline, so its times come from its trail lines and are close, not exact.</p>
         </section>
 
         <section class="tl-break">

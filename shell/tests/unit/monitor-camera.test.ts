@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MonitorModel, teamKey, type TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import { MonitorScene } from '../../src/renderer/src/monitor/scene';
 import type { StepRow } from '../../src/renderer/src/monitor/steps';
-import type { WorkflowSummary } from '../../src/shared/api';
+import type { DeliverableSummary } from '../../src/shared/api';
 
 /**
  * With two teams' code maps the camera never settled (zoom 0.30-0.51, the hub moving 50-100 px in
- * 100 ms), so a hub click missed. The workflow panels (gone now) grew as the wall zoomed out and were bodies in the forces: each
+ * 100 ms), so a hub click missed. The deliverable panels (gone now) grew as the wall zoomed out and were bodies in the forces: each
  * size step moved the graph, the fit followed, the zoom changed, the panels stepped again; and the forces never cooled.
  */
 
@@ -43,11 +43,11 @@ type Inner = {
 
 const TEAM2 = 'checkout-web-with-a-rather-long-team-name';
 const member = (name: string, role: 'manager' | 'member' = 'member') => ({ id: 1, name, role, state: 'running' as const, queued: 0, statusLine: null, cli: 'claude' });
-const wf = (id: number, busy: string[] = []): WorkflowSummary =>
-  ({ id, title: `Workflow ${id}`, owner: null, state: 'open', undeclared: false, busy, ending: null, startedAt: new Date(0).toISOString(), lastAt: new Date(id * 1000).toISOString(), messages: 2 });
+const wf = (id: number, busy: string[] = []): DeliverableSummary =>
+  ({ id, title: `Deliverable ${id}`, owner: null, state: 'open', undeclared: false, busy, ending: null, startedAt: new Date(0).toISOString(), lastAt: new Date(id * 1000).toISOString(), messages: 2 });
 const edit = (id: number, team: string, m: string, target: string): StepRow => ({ id, at: new Date().toISOString(), team, member: m, run: 1, kind: 'edit', tool: 'Edit', target });
 
-/** The monitor e2e spec's test 5 wall: payments (three members, three workflows) and a second team, each with a small code map. */
+/** The monitor e2e spec's test 5 wall: payments (three members, three deliverables) and a second team, each with a small code map. */
 function wall(w: number, h: number) {
   const canvas = document.createElement('canvas');
   const ctx = stubContext();
@@ -63,7 +63,7 @@ function wall(w: number, h: number) {
   ];
   const m = new MonitorModel();
   m.reconcile(teams, 0);
-  m.setWorkflows('payments', [wf(10, ['DeveloperAda is running']), wf(11), wf(12, ['TesterBen is queued'])], 0);
+  m.setDeliverables('payments', [wf(10, ['DeveloperAda is running']), wf(11), wf(12, ['TesterBen is queued'])], 0);
   for (let i = 0; i < 6; i++) {
     m.applyStep(edit(i + 1, 'payments', 'DeveloperAda', `src/refund/f${i}.ts`), 0);
     m.applyStep(edit(i + 20, TEAM2, 'DeveloperCleo', `web/cart/c${i}.ts`), 0);

@@ -8,7 +8,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// The retro item a completed workflow queues for its Manager, and workflow_digest as the bus serves it (fakes only:
+/// The retro item a completed deliverable queues for its Manager, and deliverable_digest as the bus serves it (fakes only:
 /// a scripted runner calls the tools as an agent would).
 /// </summary>
 public class RetroTests
@@ -28,7 +28,7 @@ public class RetroTests
     private static Message[] Retros(BusStore store) =>
         [.. store.AllMessages().Where(m => BusStore.RetroOf(m) is not null)];
 
-    /// <summary>The Manager splits the work in two (an eventful workflow), declares it when both handed back, and declares its retro.</summary>
+    /// <summary>The Manager splits the work in two (an eventful deliverable), declares it when both handed back, and declares its retro.</summary>
     private static ScriptedRunner TwoPieces(Func<RunContext, Task>? onRetro = null)
     {
         var handbacks = 0;
@@ -38,12 +38,12 @@ public class RetroTests
                 if (run.Items.Any(m => BusStore.RetroOf(m) is not null))
                 {
                     if (onRetro is not null) await onRetro(run);
-                    await run.WorkflowCompleteAsync("nothing worth keeping", ct);
+                    await run.DeliverableCompleteAsync("nothing worth keeping", ct);
                     return RunResult.Ok;
                 }
                 if (run.Items.Any(m => m.Source == MessageTypes.PersonSource && m.CausationSeq is not null))
                 {
-                    await run.WorkflowCompleteAsync("the one more thing is done", ct); // the person reopened it
+                    await run.DeliverableCompleteAsync("the one more thing is done", ct); // the person reopened it
                     return RunResult.Ok;
                 }
                 if (run.Items.Any(m => m.Source == MessageTypes.PersonSource))
@@ -53,7 +53,7 @@ public class RetroTests
                     return RunResult.Ok;
                 }
                 handbacks += run.Items.Count(m => m.Type == MessageTypes.Handback);
-                if (handbacks >= 2) await run.WorkflowCompleteAsync("both parts done", ct);
+                if (handbacks >= 2) await run.DeliverableCompleteAsync("both parts done", ct);
                 return RunResult.Ok;
             })
             .On("Alpha/Ada", async (run, ct) => { await run.HandbackAsync("part one done", ct); return RunResult.Ok; })
@@ -61,7 +61,7 @@ public class RetroTests
     }
 
     [Fact]
-    public async Task AnEventfulWorkflow_QueuesOneRetroForTheManager_InItsOwnWorkflow_AndNeverASecond()
+    public async Task AnEventfulDeliverable_QueuesOneRetroForTheManager_InItsOwnDeliverable_AndNeverASecond()
     {
         var runner = TwoPieces();
         var (db, engine) = await Team(runner);
@@ -78,18 +78,18 @@ public class RetroTests
             Assert.Equal("agent.instruction.Alpha/Manager", retro.Type);
             Assert.Equal(MessageTypes.HostSource, retro.Source);
             Assert.Equal(BusEngine.RetroText(root.Seq), Payload.Field(retro, "text"));
-            Assert.Equal($"Workflow {root.Seq} is complete: do its retrospective (skills_get retrospective).", Payload.Field(retro, "text"));
-            Assert.Null(retro.CausationSeq); // its own workflow: the completed one stays completed
+            Assert.Equal($"Deliverable {root.Seq} is complete: do its retrospective (skills_get retrospective).", Payload.Field(retro, "text"));
+            Assert.Null(retro.CausationSeq); // its own deliverable: the completed one stays completed
             Assert.Equal(retro.Seq, retro.CorrelationId);
-            Assert.True(store.WorkflowEnded(root.Seq));
-            Assert.Equal(1, store.Workflow(root.Seq).Count(m => m.Type == MessageTypes.WorkflowCompleted));
-            // The Manager did the retro and declared it; a retro's own workflow gets no retro.
-            Assert.True(store.WorkflowDeclared(retro.Seq));
+            Assert.True(store.DeliverableEnded(root.Seq));
+            Assert.Equal(1, store.Deliverable(root.Seq).Count(m => m.Type == MessageTypes.DeliverableCompleted));
+            // The Manager did the retro and declared it; a retro's own deliverable gets no retro.
+            Assert.True(store.DeliverableDeclared(retro.Seq));
 
-            // The person reopens the workflow and the Manager declares it again: still one retro, ever.
+            // The person reopens the deliverable and the Manager declares it again: still one retro, ever.
             await engine.PersonTellAsync("Alpha", "Manager", "one more thing", root.Seq, Ct);
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet again");
-            Assert.Equal(2, store.Workflow(root.Seq).Count(m => m.Type == MessageTypes.WorkflowCompleted));
+            Assert.Equal(2, store.Deliverable(root.Seq).Count(m => m.Type == MessageTypes.DeliverableCompleted));
             Assert.Single(Retros(store));
         }
     }
@@ -104,8 +104,8 @@ public class RetroTests
         var runner = new ScriptedRunner()
             .On("Alpha/Manager", async (run, ct) =>
             {
-                if (run.Items.Any(m => BusStore.RetroOf(m) is not null)) { await run.WorkflowCompleteAsync("nothing worth keeping", ct); return RunResult.Ok; }
-                if (run.Items.Any(m => Payload.Field(m, "text") == "urgent")) { await run.WorkflowCompleteAsync("urgent done", ct); return RunResult.Ok; }
+                if (run.Items.Any(m => BusStore.RetroOf(m) is not null)) { await run.DeliverableCompleteAsync("nothing worth keeping", ct); return RunResult.Ok; }
+                if (run.Items.Any(m => Payload.Field(m, "text") == "urgent")) { await run.DeliverableCompleteAsync("urgent done", ct); return RunResult.Ok; }
                 if (run.Items.Any(m => m.Source == MessageTypes.PersonSource))
                 {
                     await run.TellAsync("Ada", "part one", ct);
@@ -114,7 +114,7 @@ public class RetroTests
                 }
                 handbacks += run.Items.Count(m => m.Type == MessageTypes.Handback);
                 if (handbacks < 2) return RunResult.Ok;
-                await run.WorkflowCompleteAsync("both parts done", ct);
+                await run.DeliverableCompleteAsync("both parts done", ct);
                 await engineRef!.PersonTellAsync("Alpha", "Manager", "urgent", ct: ct);
                 return RunResult.Ok;
             })
@@ -137,14 +137,14 @@ public class RetroTests
     }
 
     [Fact]
-    public async Task ASmallUneventfulWorkflow_GetsNoRetro()
+    public async Task ASmallUneventfulDeliverable_GetsNoRetro()
     {
         // One piece of work, every run completed, nothing failed, asked or sent back.
         var runner = new ScriptedRunner()
             .On("Alpha/Manager", async (run, ct) =>
             {
                 if (run.Items.Any(m => m.Source == MessageTypes.PersonSource)) await run.TellAsync("Ada", "fix the typo", ct);
-                else if (run.Items.Any(m => m.Type == MessageTypes.Handback)) await run.WorkflowCompleteAsync("typo fixed", ct);
+                else if (run.Items.Any(m => m.Type == MessageTypes.Handback)) await run.DeliverableCompleteAsync("typo fixed", ct);
                 return RunResult.Ok;
             })
             .On("Alpha/Ada", async (run, ct) => { await run.HandbackAsync("fixed", ct); return RunResult.Ok; });
@@ -156,15 +156,15 @@ public class RetroTests
             var root = await engine.PersonTellAsync("Alpha", "Manager", "fix the typo in the readme", ct: Ct);
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet");
             using var store = db.OpenStore();
-            Assert.True(store.WorkflowDeclared(root.Seq));
+            Assert.True(store.DeliverableDeclared(root.Seq));
             Assert.Empty(Retros(store));
         }
     }
 
     [Fact]
-    public async Task AClosedWorkflow_GetsNoRetro_HoweverEventful()
+    public async Task AClosedDeliverable_GetsNoRetro_HoweverEventful()
     {
-        // Two pieces of work and a failed run, then the person closes it: closed (and expired) workflows were not completed.
+        // Two pieces of work and a failed run, then the person closes it: closed (and expired) deliverables were not completed.
         var runner = new ScriptedRunner()
             .On("Alpha/Manager", async (run, ct) =>
             {
@@ -183,11 +183,11 @@ public class RetroTests
             await engine.StartAsync(Ct);
             var root = await engine.PersonTellAsync("Alpha", "Manager", "ship both parts", ct: Ct);
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet");
-            await engine.CloseWorkflowAsync("Alpha", root.Seq, "not needed", Ct);
+            await engine.CloseDeliverableAsync("Alpha", root.Seq, "not needed", Ct);
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet after close");
             using var store = db.OpenStore();
-            Assert.True(store.WorkflowEnded(root.Seq));
-            Assert.False(store.WorkflowDeclared(root.Seq));
+            Assert.True(store.DeliverableEnded(root.Seq));
+            Assert.False(store.DeliverableDeclared(root.Seq));
             Assert.Empty(Retros(store));
         }
     }
@@ -205,21 +205,21 @@ public class RetroTests
     }
 
     [Fact]
-    public async Task WorkflowDigest_IsTheManagersOwn_ForItsOwnTeamsWorkflows()
+    public async Task DeliverableDigest_IsTheManagersOwn_ForItsOwnTeamsDeliverables()
     {
         (string Text, bool IsError)? retroDigest = null, memberDigest = null, otherTeam = null;
-        long? alphaWorkflow = null;
-        var runner = TwoPieces(onRetro: async run => retroDigest = await Call(run, "workflow_digest", []));
+        long? alphaDeliverable = null;
+        var runner = TwoPieces(onRetro: async run => retroDigest = await Call(run, "deliverable_digest", []));
         runner.On("Alpha/Ada", async (run, ct) =>
         {
-            memberDigest = await Call(run, "workflow_digest", []);
+            memberDigest = await Call(run, "deliverable_digest", []);
             await run.HandbackAsync("part one done", ct);
             return RunResult.Ok;
         });
         runner.On("Beta/Manager", async (run, ct) =>
         {
-            otherTeam = await Call(run, "workflow_digest", new JsonObject { ["workflow"] = alphaWorkflow });
-            await run.WorkflowCompleteAsync("looked", ct);
+            otherTeam = await Call(run, "deliverable_digest", new JsonObject { ["deliverable"] = alphaDeliverable });
+            await run.DeliverableCompleteAsync("looked", ct);
             return RunResult.Ok;
         });
         var (db, engine) = await Team(runner);
@@ -229,23 +229,23 @@ public class RetroTests
             await engine.CreateTeamAsync("Beta", ct: Ct);
             await engine.StartAsync(Ct);
             var root = await engine.PersonTellAsync("Alpha", "Manager", "ship both parts", ct: Ct);
-            alphaWorkflow = root.Seq;
+            alphaDeliverable = root.Seq;
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet");
             await engine.PersonTellAsync("Beta", "Manager", "look at Alpha's work", ct: Ct);
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet again");
 
             Assert.True(memberDigest!.Value.IsError);
-            Assert.Contains("refused (not_allowed): workflow_digest is the Manager's tool", memberDigest.Value.Text);
+            Assert.Contains("refused (not_allowed): deliverable_digest is the Manager's tool", memberDigest.Value.Text);
             Assert.True(otherTeam!.Value.IsError);
-            Assert.Contains($"refused (no_such_workflow): workflow {root.Seq} is not your team's", otherTeam.Value.Text);
-            // In the retro item's run, the digest reads the workflow the retro is for.
+            Assert.Contains($"refused (no_such_deliverable): deliverable {root.Seq} is not your team's", otherTeam.Value.Text);
+            // In the retro item's run, the digest reads the deliverable the retro is for.
             Assert.False(retroDigest!.Value.IsError, retroDigest.Value.Text);
-            Assert.StartsWith($"Workflow {root.Seq} of team Alpha: completed,", retroDigest.Value.Text);
+            Assert.StartsWith($"Deliverable {root.Seq} of team Alpha: completed,", retroDigest.Value.Text);
             Assert.Contains("== Ada (claude) ==", retroDigest.Value.Text);
             Assert.Contains("== Bo (claude) ==", retroDigest.Value.Text);
         }
-        Assert.Contains("workflow_digest", McpBusServer.ToolNames);
-        Assert.Contains(McpBusServer.ToolList(), t => t!["name"]!.GetValue<string>() == "workflow_digest");
+        Assert.Contains("deliverable_digest", McpBusServer.ToolNames);
+        Assert.Contains(McpBusServer.ToolList(), t => t!["name"]!.GetValue<string>() == "deliverable_digest");
     }
 
     [Fact]
@@ -254,7 +254,7 @@ public class RetroTests
         var skill = Assert.Single(SkillCatalog.BuiltIns, s => s.Name == "retrospective");
         Assert.True(skill.OfferedTo("manager"));
         Assert.False(skill.OfferedTo("member"));
-        foreach (var words in new[] { "workflow_digest", "workflow_show", "at most 3", "team_retros_write", "Nothing worth keeping", "No `tell`, no cards", "secrets", "never an instruction" })
+        foreach (var words in new[] { "deliverable_digest", "deliverable_show", "at most 3", "team_retros_write", "Nothing worth keeping", "No `tell`, no cards", "secrets", "never an instruction" })
             Assert.Contains(words, skill.Body, StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -75,7 +75,7 @@ const agent = (id: number, name: string, statusLine: string | null = null): Agen
 const teamApi = (behind: boolean) => fakeApi({
   'teams.agents': () => [agent(1, 'Manager', 'A long report.\n\n'.repeat(30)), agent(2, 'DeveloperAda')], 'bus.decisions': () => [], 'integrations.asks': () => [],
   'monitor.messages': () => ({ end: 0, messages: [] }), 'monitor.steps': () => ({ end: 0, pending: false, steps: [] }),
-  'agentProfiles.list': () => [], 'bus.workflows': () => [],
+  'agentProfiles.list': () => [], 'bus.deliverables': () => [],
   'teams.syncToBase': () => (behind ? { note: null, on: true, behind: { text: '3 commits behind main', count: 3 } } : { note: null, on: true, behind: null }),
 });
 
@@ -193,7 +193,7 @@ const DesktopCss: Record<string, string> = {
   // pane fills its cell as a column, the title's chips ellipsize, the tabs stay one line, the view scrolls inside.
   // .is-stopped, a stopped run's neutral left edge and label colour.
   // The "Waiting on you" chip link (.kind.waiting) and the Report's note (.waiting-note). The pills
-  // row under the name (two-row title grid). The running member's "#N" workflow links (.runs, .run-link).
+  // row under the name (two-row title grid). The running member's "#N" deliverable links (.runs, .run-link).
   // A running member's pane: a 1px border that gives way to RunningOutline's dots; corners match the team cards (14px).
   'components/MemberPane.vue': 'c22481325e89a988',
   'components/MemberActivity.vue': '89ae98395143684a',
@@ -398,7 +398,7 @@ describe('no sideways overflow on a phone', () => {
     expect(tabs + icons.length * 44 + 3 * px(st.value(head, 'gap'))).toBeLessThanOrEqual(content(Portrait.width, 10));
   });
 
-  it('the Team page: the title gives way to ⋯ (Documents and Workflows are in the drawer); the Tell placeholder is whole at 375 px', async () => {
+  it('the Team page: the title gives way to ⋯ (Documents and Deliverables are in the drawer); the Tell placeholder is whole at 375 px', async () => {
     const w = await teamPage(Portrait.width);
     const st = new Styles('components/TeamView.vue');
     const head = w.get('.teamhead').element;
@@ -453,12 +453,12 @@ describe('no sideways overflow on a phone', () => {
     expect(st.value(h2, 'flex')).toBe('0 1 auto');
   });
 
-  it('the Team page: Documents, Workflows, Triggers, Git and Settings are in the ⋯ menu, and each opens what it did', async () => {
+  it('the Team page: Documents, Deliverables, Triggers, Git and Settings are in the ⋯ menu, and each opens what it did', async () => {
     const w = await teamPage(Portrait.width);
     expect(w.find('[data-test=open-triggers]').exists()).toBe(false);
     await w.get('[data-test=team-more]').trigger('click');
     expect(w.get('[data-test=team-more]').attributes('aria-expanded')).toBe('true');
-    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-documents-menu', 'open-workflows-menu', 'open-triggers', 'open-git', 'open-manage']);
+    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-documents-menu', 'open-deliverables-menu', 'open-triggers', 'open-git', 'open-manage']);
     await w.get('[data-test=open-git]').trigger('click');
     expect(w.find('[data-test=team-more-menu]').exists()).toBe(false); // the menu closes as the dialog opens
     expect(w.find('git-dialog-stub').exists()).toBe(true);
@@ -532,7 +532,7 @@ describe('at 1280 px the desktop is as it was', () => {
 
   it('the Team page: the five labelled actions, the long Tell placeholder and "Tell Manager" with the plane, the activity uncapped', async () => {
     const w = await teamPage(Desktop);
-    expect(w.findAll('.teamhead .actions > button').map((b) => b.text())).toEqual(['Documents', 'Workflows', '⏰ Triggers', '⎇ Git', 'Settings']);
+    expect(w.findAll('.teamhead .actions > button').map((b) => b.text())).toEqual(['Documents', 'Deliverables', '⏰ Triggers', '⎇ Git', 'Settings']);
     expect(w.find('[data-test=team-more]').exists()).toBe(false);
     expect(w.get('[data-test=tell-text]').attributes('placeholder')).toBe('Tell the Manager… (paste an image to attach it)');
     expect(w.get('[data-test=tell-send]').text()).toBe('Tell Manager');

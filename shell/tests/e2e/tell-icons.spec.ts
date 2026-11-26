@@ -39,7 +39,7 @@ async function open(browser: Browser, w: number, h: number, theme: 'light' | 'da
     ws.onMessage((m) => {
       const msg = JSON.parse(String(m));
       if (msg.method === 'bus.tellManager') {
-        const out = JSON.stringify({ id: msg.id, result: { workflow: 99 } });
+        const out = JSON.stringify({ id: msg.id, result: { deliverable: 99 } });
         if (holdTell) held = () => ws.send(out); else ws.send(out);
         return;
       }
@@ -134,7 +134,7 @@ for (const [w, h] of [[375, 812], [1280, 800]] as const) {
       await row.screenshot({ path: path.join(SHOTS, `tell-${w}-${theme}-sending.png`) });
       release();
       await expect(page.locator('[data-test=tell-send]')).not.toContainText('Sending…');
-      await expect(page.getByText('Sent to the Manager · workflow 99')).toBeVisible();
+      await expect(page.getByText('Sent to the Manager · deliverable 99')).toBeVisible();
       expect(errors).toEqual([]);
       await ctx.close();
     });

@@ -129,7 +129,7 @@ using var runTerminals = new Yawble.Core.Ui.RunTerminalBridge(runs, terminals, (
 var skillCatalog = new Yawble.Core.Skills.SkillCatalog($"Data Source={dbPath}");
 var fakePty = Environment.GetEnvironmentVariable(Yawble.Core.Bus.BusHost.RunnerVariable) == "fake-pty";
 Yawble.Core.Bus.BusEngine? busForRunner = null;
-Yawble.Core.Scripts.Running.ScriptRunner? scriptRunner = null;
+Yawble.Core.Workflows.Running.WorkflowRunner? workflowRunner = null;
 Yawble.Core.Bus.IAgentRunner? uiRunner = fakePty
     ? new Yawble.Core.Ui.FakePtyRunner(terminals,
         id => busForRunner?.MemberAsync(id).GetAwaiter().GetResult()?.Cli ?? "claude",
@@ -145,39 +145,41 @@ await using var bus = await Yawble.Core.Bus.BusHost.StartAsync(
     appDataRoot: Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!),
     skills: skillCatalog,
     availableAgents: ct => Yawble.Core.Agents.AgentReadiness.ChoicesAsync(clis, ct),
-    // Script members' runs go to the script engine, agents' to the launcher as before.
-    wrapRunner: r => new Yawble.Core.Launch.ScriptDispatchRunner(r, () => scriptRunner));
+    // Workflow members' runs go to the workflow engine, agents' to the launcher as before.
+    wrapRunner: r => new Yawble.Core.Launch.WorkflowDispatchRunner(r, () => workflowRunner));
 busForRunner = bus;
-// The global script and schema libraries and the script runner (members' data folders under <data>/scripts). Runs the
-// old core left going resume from their last completed step. SC-2: a script's integration steps are the team's web API operations
+// The global workflow and schema libraries and the workflow runner (members' data folders under <data>/workflows). Runs the
+// old core left going resume from their last completed step. SC-2: a workflow's integration steps are the team's web API operations
 // (kind "api"), through IntegrationService, which is made further down: its calls wait for it (integrationsReady).
 var integrationsReady = new TaskCompletionSource<Yawble.Core.Integrations.IntegrationService>(TaskCreationOptions.RunContinuationsAsynchronously);
-var scriptActions = new Yawble.Core.Scripts.Actions.ScriptActionKinds(new Dictionary<string, Yawble.Core.Scripts.Running.IScriptActionsProvider>
+var workflowActions = new Yawble.Core.Workflows.Actions.WorkflowActionKinds(new Dictionary<string, Yawble.Core.Workflows.Running.IWorkflowActionsProvider>
 {
-    [Yawble.Core.Scripts.Actions.ApiScriptActionsProvider.Kind] = new Yawble.Core.Scripts.Actions.ApiScriptActionsProvider(
-        new Yawble.Core.Scripts.Actions.IntegrationScriptApi($"Data Source={dbPath}", integrationsReady.Task)),
+    [Yawble.Core.Workflows.Actions.ApiWorkflowActionsProvider.Kind] = new Yawble.Core.Workflows.Actions.ApiWorkflowActionsProvider(
+        new Yawble.Core.Workflows.Actions.IntegrationWorkflowApi($"Data Source={dbPath}", integrationsReady.Task)),
     // SC-3: the built-in Email integration's read actions (kind "email")
-    [Yawble.Core.Scripts.Actions.EmailActions.Kind] = new Yawble.Core.Scripts.Actions.EmailScriptActionsProvider(
-        new Yawble.Core.Scripts.Actions.IntegrationScriptEmail(integrationsReady.Task)),
+    [Yawble.Core.Workflows.Actions.EmailActions.Kind] = new Yawble.Core.Workflows.Actions.EmailWorkflowActionsProvider(
+        new Yawble.Core.Workflows.Actions.IntegrationWorkflowEmail(integrationsReady.Task)),
 });
-// A script's steps name the person's integrations (Email integrations, web APIs) by their real names: the directory reads them.
-var scriptLibrary = new Yawble.Core.Scripts.Library.ScriptLibrary($"Data Source={dbPath}", () => scriptActions.Catalog,
-    integrations: new Yawble.Core.Scripts.Library.IntegrationScriptDirectory($"Data Source={dbPath}", integrationsReady.Task));
-var scriptRuns = new Yawble.Core.Scripts.Running.ScriptRunStore($"Data Source={dbPath}");
-scriptRunner = new Yawble.Core.Scripts.Running.ScriptRunner(scriptRuns, scriptLibrary, scriptActions,
-    Yawble.Core.Scripts.Running.SeamScriptEngine.Instance, Path.Combine(options.DataDir!, "scripts"),
+// A workflow's steps name the person's integrations (Email integrations, web APIs) by their real names: the directory reads them.
+var workflowLibrary = new Yawble.Core.Workflows.Library.WorkflowLibrary($"Data Source={dbPath}", () => workflowActions.Catalog,
+    integrations: new Yawble.Core.Workflows.Library.IntegrationWorkflowDirectory($"Data Source={dbPath}", integrationsReady.Task));
+var workflowRuns = new Yawble.Core.Workflows.Running.WorkflowRunStore($"Data Source={dbPath}");
+// Workflows were called scripts before migration 0060: their members' data folders move with them, once.
+Yawble.Core.Workflows.Running.WorkflowFolders.MoveOldFolder(options.DataDir!);
+workflowRunner = new Yawble.Core.Workflows.Running.WorkflowRunner(workflowRuns, workflowLibrary, workflowActions,
+    Yawble.Core.Workflows.Running.SeamWorkflowEngine.Instance, Path.Combine(options.DataDir!, "workflows"),
     grantedFolders: memberId => policies.GetMember(memberId).Loosen.Filesystem?.Readwrite ?? [],
-    log: line => Console.Error.WriteLine($"scripts: {line}"))
+    log: line => Console.Error.WriteLine($"workflows: {line}"))
 {
-    Decisions = new Yawble.Core.Scripts.Running.BusScriptDecisions(bus),
+    Decisions = new Yawble.Core.Workflows.Running.BusWorkflowDecisions(bus),
 };
-// A script's tell steps give work to the team's agents through the bus, and a run that waits on one goes on when its workflow ends.
-var scriptTells = new Yawble.Core.Scripts.Running.BusScriptTells(bus, scriptRuns);
-scriptRunner.Tellers = scriptTells;
-scriptRunner.WaitSources = [scriptTells];
-bus.ScriptMembers = scriptRunner;
-scriptRunner.ResumeInterrupted();
-scriptRunner.StartWaitSweep();
+// A workflow's tell steps give work to the team's agents through the bus, and a run that waits on one goes on when its deliverable ends.
+var workflowTells = new Yawble.Core.Workflows.Running.BusWorkflowTells(bus, workflowRuns);
+workflowRunner.Tellers = workflowTells;
+workflowRunner.WaitSources = [workflowTells];
+bus.WorkflowMembers = workflowRunner;
+workflowRunner.ResumeInterrupted();
+workflowRunner.StartWaitSweep();
 
 // A member's cli is a built-in's id or a custom agent's name: every site resolves it through this (base CLI, argv changes, default model).
 var agentResolver = Yawble.Core.Agents.Profiles.AgentProfileStore.ForReading($"Data Source={dbPath}");
@@ -219,7 +221,7 @@ var ui = new Yawble.Core.Ui.UiRpc(bus, policies, layouts,
     new Yawble.Core.Monitor.StepFeed($"Data Source={dbPath}"),
     // The Monitor's code events: commits, merges and pushes the host recorded in the team repositories.
     new Yawble.Core.Monitor.CodeEvents($"Data Source={dbPath}"));
-ui.Scripts = new Yawble.Core.Ui.ScriptsRpc(bus, scriptLibrary, scriptRuns, scriptRunner);
+ui.Workflows = new Yawble.Core.Ui.WorkflowsRpc(bus, workflowLibrary, workflowRuns, workflowRunner);
 // The guardrail check (runs a battery of escape attempts in a sandbox under a member's effective policy).
 // It rides on the launcher: the same layout, policy, per-run gateway and backend as the members' runs.
 // A member's check takes a global run slot through the bus, like a terminal session.
@@ -265,7 +267,7 @@ var concierge = new Yawble.Core.Concierge.ConciergeService(
 // (The saved default agent, Settings > Concierge, comes first when it still resolves: ConciergeService.DefaultAgentAsync.)
 // Settings > Teams' Generate: one headless run of the Concierge's default agent with no Yawble tools.
 bus.NameGenerator = concierge.GenerateNamesAsync;
-// A workflow that waits on the person's answer and will expire tomorrow is posted once as a Concierge Update.
+// A deliverable that waits on the person's answer and will expire tomorrow is posted once as a Concierge Update.
 bus.ExpiryWarned = w => concierge.PostAppUpdate(w.TeamId, w.Team, w.Text, "expiring");
 // The Cloud Link (optional): a remote viewer's calls go through this same dispatcher, after RemoteAccess.
 RpcDispatcher? dispatcherForLink = null;
@@ -281,7 +283,7 @@ await using var integrations = new Yawble.Core.Integrations.IntegrationService($
     connections: connections, browser: new Yawble.Core.Integrations.ShellBrowser(), redirect: () => new Yawble.Core.Integrations.LoopbackRedirectReceiver(),
     websites: websiteHost);
 bus.Integrations = integrations;
-integrationsReady.TrySetResult(integrations); // script runs waiting on an integration step go on
+integrationsReady.TrySetResult(integrations); // workflow runs waiting on an integration step go on
 // Network asks: a host a run's gateway refused (or an agent's request_host) waits for the person in Needs you; their answer
 // changes the policy through the policy store, with each member's layout for its checks.
 var networkAsks = new Yawble.Core.Integrations.NetworkAskService($"Data Source={dbPath}",
@@ -361,7 +363,7 @@ if (bus.Repos is { } taskRepos)
 var board = new Yawble.Core.Board.BoardService(new Yawble.Core.Board.BoardStore($"Data Source={dbPath}"), bus,
     line => Console.Error.WriteLine($"board: {line}"));
 bus.Board = board;
-// workflow_digest reads the runs' transcripts.
+// deliverable_digest reads the runs' transcripts.
 var digestTranscripts = new Yawble.Core.Transcripts.TranscriptStore(options.DataDir!, $"Data Source={dbPath}");
 bus.TranscriptOf = digestTranscripts.Read;
 board.Changed = () => events.Publish(Yawble.Core.Board.BoardService.ChangedEvent, null); // clear done / restore: open boards refresh

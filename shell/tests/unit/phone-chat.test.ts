@@ -237,7 +237,7 @@ describe.each(Phones)('a chat on a phone, $name', ({ width, height, portrait }) 
 describe('a chat with a watch on a phone in landscape, 667 x 263', () => {
   const height = 263;
   beforeEach(() => setScreen(667, height));
-  const watches = [{ id: 7, team: 'payments', what: 'partial refunds', followUp: false, workflow: null, createdAt: '', expiresAt: '' }];
+  const watches = [{ id: 7, team: 'payments', what: 'partial refunds', followUp: false, deliverable: null, createdAt: '', expiresAt: '' }];
   /** A max-height from computed CSS in px (a dvh value is a share of the frame). */
   const capPx = (v: string) => (v.endsWith('dvh') || v.endsWith('vh') ? (Number.parseFloat(v) * height) / 100 : len(v));
   /** The dock's rows down to the bottom of the text row, from the top of the dock. */

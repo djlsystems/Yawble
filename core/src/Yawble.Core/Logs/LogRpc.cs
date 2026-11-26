@@ -52,7 +52,7 @@ public sealed class LogRpc(LogService logs, LogTail? tail = null)
     {
         var t = tail ?? throw new RpcException("unavailable", "logs.tail is not wired in this core");
         var level = Text(p, "level") ?? "default";
-        if (level is not ("default" or "all" or "debug")) throw new ArgumentException("level is \"default\" (warnings, errors and workflow events), \"all\" (every level but debug) or \"debug\" (debug too)");
+        if (level is not ("default" or "all" or "debug")) throw new ArgumentException("level is \"default\" (warnings, errors and deliverable events), \"all\" (every level but debug) or \"debug\" (debug too)");
         var member = Text(p, "member");
         if (member is not null && (member.IndexOf('/') <= 0 || member.EndsWith('/'))) throw new ArgumentException("member is \"Team/Name\"");
         var team = Text(p, "team");

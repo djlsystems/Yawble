@@ -46,8 +46,8 @@ describe('main window', () => {
         card({ member: { ...member, id: 1, name: 'Manager', role: 'manager', cli: 'claude' }, state: 'running', statusLine: 'Split work' }),
         card({ state: 'queued', queuePosition: 1, queueLength: 2, queuedInstructions: 2, loosened: ['network.allowHosts + registry.npmjs.org'], net: 'model + bus + registry.npmjs.org' }),
       ],
-      'bus.decisions': () => [{ seq: 9, from: 'Ben', question: 'Use Postgres?', workflow: 3, at: '' },
-        { seq: 10, from: 'Manager', question: 'OK to hire a second tester?', workflow: 4, at: '' }],
+      'bus.decisions': () => [{ seq: 9, from: 'Ben', question: 'Use Postgres?', deliverable: 3, at: '' },
+        { seq: 10, from: 'Manager', question: 'OK to hire a second tester?', deliverable: 4, at: '' }],
     });
     const w = mount(App, { props: { api, pollMs: 60_000 } });
     await flushPromises();

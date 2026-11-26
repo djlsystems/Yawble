@@ -16,7 +16,7 @@ const tools: LogSourceInfo = {
   ...base, id: 'tools', title: 'Tool calls', group: 'Accountability', about: 'Each tool call.',
   columns: [col('at', 'Time', 'time'), col('team', 'Team', 'text', true), col('member', 'Member'), col('integration', 'Integration', 'text', true),
     col('args', 'Arguments'), col('decision', 'Decision', 'text', true), col('rule', 'Rule'), col('exit', 'Exit/HTTP', 'number'),
-    col('duration', 'Ms', 'number'), col('bytes', 'Bytes', 'number'), col('via', 'Via', 'text', true), col('workflow', 'Workflow', 'number')],
+    col('duration', 'Ms', 'number'), col('bytes', 'Bytes', 'number'), col('via', 'Via', 'text', true), col('deliverable', 'Deliverable', 'number')],
 };
 const diagnostics: LogSourceInfo = {
   ...base, id: 'diagnostics', title: 'Diagnostics', group: 'Diagnostics', about: 'What the app itself reported.',
@@ -36,8 +36,8 @@ function fakeApi() {
         case 'logs.values': return [] as any;
         case 'logs.query':
           return (params?.source === 'tools'
-            ? { rows: [{ _id: '0', at: '2026-11-24T10:05:00Z', team: 'Alpha', member: 'Reader', integration: 'email:Sales inbox', args: '["list","{}","script run 41","host 127.0.0.1","failed: the server refused the user name or password"]', decision: 'allow', rule: null, exit: 1, duration: 212, bytes: null, via: 'script', workflow: null }], total: 1, asOf: '2026-11-24T12:00:00Z', next: null }
-            : { rows: [{ _id: '0', at: '2026-11-24T10:00:00Z', origin: 'core', text: 'script run 5 failed: Alpha/Poller', fields: 'level=warning area=scripts', level: 'warning' }], total: 1, asOf: '2026-11-24T12:00:00Z', next: null }) as any;
+            ? { rows: [{ _id: '0', at: '2026-11-24T10:05:00Z', team: 'Alpha', member: 'Reader', integration: 'email:Sales inbox', args: '["list","{}","workflow run 41","host 127.0.0.1","failed: the server refused the user name or password"]', decision: 'allow', rule: null, exit: 1, duration: 212, bytes: null, via: 'workflow', deliverable: null }], total: 1, asOf: '2026-11-24T12:00:00Z', next: null }
+            : { rows: [{ _id: '0', at: '2026-11-24T10:00:00Z', origin: 'core', text: 'workflow run 5 failed: Alpha/Poller', fields: 'level=warning area=workflows', level: 'warning' }], total: 1, asOf: '2026-11-24T12:00:00Z', next: null }) as any;
         default: throw new Error(`unexpected ${method}`);
       }
     },
@@ -58,7 +58,7 @@ describe('Structured logs: Logs', () => {
     const w = mount(LogsDialog, { props: { api, source: 'tools' }, attachTo: document.body });
     await flushPromises();
     expect(w.findAll('thead th').map((t) => t.text().replace('▼', ''))).toEqual(
-      ['Time', 'Team', 'Member', 'Integration', 'Arguments', 'Decision', 'Rule', 'Exit/HTTP', 'Ms', 'Bytes', 'Via', 'Workflow']);
+      ['Time', 'Team', 'Member', 'Integration', 'Arguments', 'Decision', 'Rule', 'Exit/HTTP', 'Ms', 'Bytes', 'Via', 'Deliverable']);
     expect(w.text()).toContain('212');
     expect(w.text()).toContain('failed: the server refused the user name or password');
     expect(w.find('[data-test=logs-level]').exists()).toBe(false);

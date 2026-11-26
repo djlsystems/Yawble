@@ -12,7 +12,7 @@ const scenes: { onPick?: (k: string | null) => void }[] = [];
 vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
   const real = await orig<typeof import('../../src/renderer/src/monitor/scene')>();
   class FakeScene {
-    model: unknown; onHover?: unknown; onPick?: (k: string | null) => void; onOpenWorkflow?: unknown; effects: unknown[] = [];
+    model: unknown; onHover?: unknown; onPick?: (k: string | null) => void; onOpenDeliverable?: unknown; effects: unknown[] = [];
     constructor() { scenes.push(this); }
     setPinned() {} setLayout() {} setTeams() {} setPicked() {} destroy() {} fit() {}
   }

@@ -15,7 +15,7 @@ namespace Yawble.Core.Tests.Ui;
 /// A run the person stopped is recorded failed with failure class "stopped" (runs.state is left
 /// as it is), and everything the window and the Cloud Link get says "stopped", not "failed": the member's attention
 /// ("stopped", below failed), lastRunFailureClass on every member node, the feed kind, failureClass on a run's end row,
-/// the remote summary (not errored, not a failed workflow), and no Needs-you item (board, Concierge watch).
+/// the remote summary (not errored, not a failed deliverable), and no Needs-you item (board, Concierge watch).
 /// </summary>
 public class StoppedRunTests
 {
@@ -28,8 +28,8 @@ public class StoppedRunTests
         new(new MemberRow(1, 1, "web", name, "member", "claude", "", "", "default"), state, null, 0, 0, null, null, null, lastRun, null,
             LastRunFailureClass: failureClass);
 
-    private static Message M(string type, object payload, string source = "web/Tomas", long seq = 7, long workflow = 3) =>
-        new(seq, type, JsonSerializer.Serialize(payload), source, workflow, null, 0, DateTimeOffset.Parse("2026-11-18T12:00:00Z"));
+    private static Message M(string type, object payload, string source = "web/Tomas", long seq = 7, long deliverable = 3) =>
+        new(seq, type, JsonSerializer.Serialize(payload), source, deliverable, null, 0, DateTimeOffset.Parse("2026-11-18T12:00:00Z"));
 
     // ------------------------------------------------------------------ attention
 
@@ -91,11 +91,11 @@ public class StoppedRunTests
         using var db = new TempDb();
         var store = new BoardStore(db.ConnectionString);
         var p = new BoardProjector(store);
-        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, workflow: 5));
-        p.Apply(M("agent.instruction.web/Ines", new { text = "Test it" }, source: "web/Manager", seq: 2, workflow: 5));
-        p.Apply(M(MessageTypes.Progress, new { status = "coding" }, source: "web/Tomas", seq: 3, workflow: 5));
-        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/Tomas", seq: 4, workflow: 5));
-        p.Apply(M(MessageTypes.Failed, new { reason = "wall-clock timeout", failureClass = FailureClasses.Timeout }, source: "web/Ines", seq: 5, workflow: 5));
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, deliverable: 5));
+        p.Apply(M("agent.instruction.web/Ines", new { text = "Test it" }, source: "web/Manager", seq: 2, deliverable: 5));
+        p.Apply(M(MessageTypes.Progress, new { status = "coding" }, source: "web/Tomas", seq: 3, deliverable: 5));
+        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/Tomas", seq: 4, deliverable: 5));
+        p.Apply(M(MessageTypes.Failed, new { reason = "wall-clock timeout", failureClass = FailureClasses.Timeout }, source: "web/Ines", seq: 5, deliverable: 5));
 
         var cards = store.Cards("web").ToDictionary(c => c.Member!);
         Assert.Equal(("stopped", Lanes.InProgress), (cards["Tomas"].Status, cards["Tomas"].Lane));
@@ -122,8 +122,8 @@ public class StoppedRunTests
         using var db = new TempDb();
         var store = new BoardStore(db.ConnectionString);
         var p = new BoardProjector(store);
-        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, workflow: 5));
-        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/Tomas", seq: 2, workflow: 5));
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, deliverable: 5));
+        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/Tomas", seq: 2, deliverable: 5));
         var card = store.Cards("web").Single();
         Assert.Equal(("stopped", Lanes.Todo), (card.Status, card.Lane));
     }
@@ -134,15 +134,15 @@ public class StoppedRunTests
         using var db = new TempDb();
         var store = new BoardStore(db.ConnectionString);
         var p = new BoardProjector(store);
-        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, workflow: 5));
-        p.Apply(M(MessageTypes.Progress, new { status = "coding" }, source: "web/Tomas", seq: 2, workflow: 5));
-        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/Tomas", seq: 3, workflow: 5));
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, deliverable: 5));
+        p.Apply(M(MessageTypes.Progress, new { status = "coding" }, source: "web/Tomas", seq: 2, deliverable: 5));
+        p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/Tomas", seq: 3, deliverable: 5));
         Assert.Equal("stopped", store.Cards("web").Single().Status);
 
-        p.Apply(M("agent.instruction.web/Tomas", new { text = "Carry on" }, source: "web/Manager", seq: 4, workflow: 5));
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Carry on" }, source: "web/Manager", seq: 4, deliverable: 5));
         var card = store.Cards("web").Single();
         Assert.Equal(("queued", Lanes.Todo), (card.Status, card.Lane));
-        p.Apply(M(MessageTypes.Progress, new { status = "coding again" }, source: "web/Tomas", seq: 5, workflow: 5));
+        p.Apply(M(MessageTypes.Progress, new { status = "coding again" }, source: "web/Tomas", seq: 5, deliverable: 5));
         Assert.Equal(("running", Lanes.InProgress), (store.Cards("web").Single().Status, store.Cards("web").Single().Lane));
     }
 
@@ -152,12 +152,12 @@ public class StoppedRunTests
         using var db = new TempDb();
         var store = new BoardStore(db.ConnectionString);
         var p = new BoardProjector(store);
-        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, workflow: 5));
-        p.Apply(M("agent.instruction.web/Ines", new { text = "Test it" }, source: "web/Manager", seq: 2, workflow: 5));
-        p.Apply(M(MessageTypes.NeedsDecision, new { question = "MIT?" }, source: "web/Tomas", seq: 3, workflow: 5));
-        p.Apply(M(MessageTypes.Handback, new { delivered = "tested" }, source: "web/Ines", seq: 4, workflow: 5));
+        p.Apply(M("agent.instruction.web/Tomas", new { text = "Build it" }, source: "web/Manager", seq: 1, deliverable: 5));
+        p.Apply(M("agent.instruction.web/Ines", new { text = "Test it" }, source: "web/Manager", seq: 2, deliverable: 5));
+        p.Apply(M(MessageTypes.NeedsDecision, new { question = "MIT?" }, source: "web/Tomas", seq: 3, deliverable: 5));
+        p.Apply(M(MessageTypes.Handback, new { delivered = "tested" }, source: "web/Ines", seq: 4, deliverable: 5));
         foreach (var (who, seq) in new[] { ("Tomas", 5L), ("Ines", 6L) })
-            p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/" + who, seq: seq, workflow: 5));
+            p.Apply(M(MessageTypes.Failed, new { reason = BusEngine.StoppedReason, failureClass = FailureClasses.Stopped }, source: "web/" + who, seq: seq, deliverable: 5));
         var cards = store.Cards("web").ToDictionary(c => c.Member!);
         Assert.Equal(("needs-decision", Lanes.NeedsYou), (cards["Tomas"].Status, cards["Tomas"].Lane));
         Assert.Equal(("handback", Lanes.Done), (cards["Ines"].Status, cards["Ines"].Lane));
@@ -184,7 +184,7 @@ public class StoppedRunTests
     /// <summary>
     /// A real engine: one run stopped by the person, one timed out, one completed. The member cards carry the failure
     /// class; teams.agents' nodes say attention stopped / failed and lastRunFailureClass; the Cloud Link's summary
-    /// counts the stopped one as idle (stopped), never errored, and its workflow is not "failed".
+    /// counts the stopped one as idle (stopped), never errored, and its deliverable is not "failed".
     /// </summary>
     [Fact]
     public async Task AStoppedRunOnTheBus_IsStoppedOnTheCard_InTheNodes_AndInTheRemoteSummary()
@@ -224,7 +224,7 @@ public class StoppedRunTests
             Assert.Null(nodes["fine"]["lastRunFailureClass"]);
             Assert.False(nodes["stop"].ContainsKey("lastRunStopped")); // helpers stay off the wire
 
-            // The Cloud Link: stopped is not errored, not a failed workflow, and its summary says stopped.
+            // The Cloud Link: stopped is not errored, not a failed deliverable, and its summary says stopped.
             var facts = await new AppOrgSummarySource(engine, null, null, null, null, null, () => null, DateTimeOffset.UtcNow).ReadAsync(Ct);
             var agents = facts.Teams.Single().Agents.ToDictionary(a => a.Member);
             Assert.Equal((false, true), (agents["stop"].LastRunFailed, agents["stop"].LastRunStopped));
@@ -233,7 +233,7 @@ public class StoppedRunTests
             var counted = summary["teams"]![0]!["agents"]!;
             Assert.Equal(1, counted["errored"]!.GetValue<int>());
             Assert.Equal(1, counted["stopped"]!.GetValue<int>());
-            Assert.DoesNotContain(facts.Workflows, w => w.Owner == "stop" && w.State == OrgSummary.Failed);
+            Assert.DoesNotContain(facts.Deliverables, w => w.Owner == "stop" && w.State == OrgSummary.Failed);
         }
         finally
         {

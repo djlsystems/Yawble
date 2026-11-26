@@ -77,8 +77,8 @@ public sealed class ToolAskTests : IDisposable
         return (long)cmd.ExecuteScalar()!;
     }
 
-    private Task<string> Request(MemberRef m, string tool, string reason = "build the console app", long workflow = 1, long causation = 2) =>
-        _asks.RequestFromAgentAsync(m, tool, reason, workflow, causation, Ct);
+    private Task<string> Request(MemberRef m, string tool, string reason = "build the console app", long deliverable = 1, long causation = 2) =>
+        _asks.RequestFromAgentAsync(m, tool, reason, deliverable, causation, Ct);
 
     private async Task<T> AsWindow<T>(Func<Task<T>> f)
     {
@@ -167,10 +167,10 @@ public sealed class ToolAskTests : IDisposable
     [Fact]
     public async Task OneAskPerTeamAndTool_RepeatsCountUp()
     {
-        var first = await Request(Priya, "dotnet-sdk-10", "build the .NET 10 app", workflow: 40, causation: 41);
+        var first = await Request(Priya, "dotnet-sdk-10", "build the .NET 10 app", deliverable: 40, causation: 41);
         Assert.StartsWith("asked: the person is asked to install .NET SDK 10", first);
         Assert.Contains("blocked on .NET SDK 10", first);
-        var again = await Request(Bo, "dotnet-sdk-10", "run the tests", workflow: 50, causation: 51);
+        var again = await Request(Bo, "dotnet-sdk-10", "run the tests", deliverable: 50, causation: 51);
         Assert.Contains("already waiting", again);
         await Request(Wren, "dotnet-sdk-10");   // another team: its own ask
         await Request(Priya, "python-3");        // another tool: its own ask
@@ -237,7 +237,7 @@ public sealed class ToolAskTests : IDisposable
         Assert.Equal(FakeToolHost.Winget, run.Exe);
         Assert.Equal(ToolCatalog.WingetArgs(ToolCatalog.Find("dotnet-sdk-10")!), run.Args);
         Assert.Equal(["installing", "checking", "installed"], _progress.Select(p => p["phase"]!.GetValue<string>()));
-        // Every open ask for the tool closes; each team's Manager is told, in the ask's workflow.
+        // Every open ask for the tool closes; each team's Manager is told, in the ask's deliverable.
         Assert.Equal(2, r["closed"]!.AsArray().Count);
         Assert.Equal(["Alpha/Manager", "Beta/Manager"], r["told"]!.AsArray().Select(n => n!.GetValue<string>()).Order());
         Assert.Contains(_told, t => t is { Team: "Alpha", Member: "Manager", Causation: 41 } && t.Text.StartsWith(".NET SDK 10 is installed; retry what was blocked"));

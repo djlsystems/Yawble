@@ -1,9 +1,9 @@
 // The team page's ⋯ menu on an iPhone-wide screen, in a real browser (headless Chrome)
 // against the FAKE core (tests/e2e/phone/fake-core.ts). Measured, not guessed:
-//  - 375 x 812: the open menu's box is inside the viewport; five items Documents, Workflows, Triggers, Git, Settings,
+//  - 375 x 812: the open menu's box is inside the viewport; five items Documents, Deliverables, Triggers, Git, Settings,
 //    each 44 px tall, their icons (18 px) and labels at one left edge; the menu draws over the member panes
 //    (elementFromPoint at each item's centre is that item, and the menu overlaps a pane); nothing scrolls sideways.
-//  - each item closes the menu; Workflows opens the Workflows page filtered to the team, the others their dialog.
+//  - each item closes the menu; Deliverables opens the Deliverables page filtered to the team, the others their dialog.
 //  - 1280 x 900: no ⋯; the header's five buttons.
 //   npx playwright test team-more-menu     (measurements: test-results/team-more-menu-*.json; screenshots: test-results/team-more-menu-*.png)
 import { expect, test, type Browser } from './phone/fixtures';
@@ -46,7 +46,7 @@ async function teamPage(browser: Browser, w: number, h: number) {
   return { page, ctx, errors };
 }
 
-const ITEMS = ['open-documents-menu', 'open-workflows-menu', 'open-triggers', 'open-git', 'open-manage'];
+const ITEMS = ['open-documents-menu', 'open-deliverables-menu', 'open-triggers', 'open-git', 'open-manage'];
 
 test('375 x 812: the open ⋯ menu is on screen, its items line up, and it draws over the member panes', async ({ browser }) => {
   const { page, ctx, errors } = await teamPage(browser, 375, 812);
@@ -72,7 +72,7 @@ test('375 x 812: the open ⋯ menu is on screen, its items line up, and it draws
       vw: innerWidth, vh: innerHeight, docScrollW: document.documentElement.scrollWidth, panesUnderMenu: panes.length, items };
   });
   save('menu-375', m);
-  expect(m.items.map((i) => i.text)).toEqual(['Documents', 'Workflows', 'Triggers', 'Git', 'Settings']);
+  expect(m.items.map((i) => i.text)).toEqual(['Documents', 'Deliverables', 'Triggers', 'Git', 'Settings']);
   expect(m.items.map((i) => i.test)).toEqual(ITEMS);
   // inside the 375 px viewport
   expect(m.menu.l).toBeGreaterThanOrEqual(0);
@@ -102,7 +102,7 @@ test('375 x 812: the open ⋯ menu is on screen, its items line up, and it draws
 test('375 x 812: each ⋯ dialog item closes the menu and opens its dialog', async ({ browser }) => {
   const { page, ctx, errors } = await teamPage(browser, 375, 812);
   const titles: Record<string, string | null> = {};
-  for (const id of ITEMS.filter((i) => i !== 'open-workflows-menu')) {
+  for (const id of ITEMS.filter((i) => i !== 'open-deliverables-menu')) {
     await page.locator('[data-test=team-more]').click();
     await expect(page.locator('[data-test=team-more-menu]')).toBeVisible();
     await page.locator(`[data-test=team-more-menu] [data-test=${id}]`).click();
@@ -123,19 +123,19 @@ test('375 x 812: each ⋯ dialog item closes the menu and opens its dialog', asy
   await ctx.close();
 });
 
-test('375 x 812: the ⋯ Workflows item closes the menu and opens the Workflows page filtered to the team, no dialog', async ({ browser }) => {
+test('375 x 812: the ⋯ Deliverables item closes the menu and opens the Deliverables page filtered to the team, no dialog', async ({ browser }) => {
   const { page, ctx, errors } = await teamPage(browser, 375, 812);
   await page.locator('[data-test=team-more]').click();
-  const item = page.locator('[data-test=team-more-menu] [data-test=open-workflows-menu]');
-  await expect(item).toHaveText('Workflows');
-  await expect(item).toHaveAttribute('title', /Workflows page/);
+  const item = page.locator('[data-test=team-more-menu] [data-test=open-deliverables-menu]');
+  await expect(item).toHaveText('Deliverables');
+  await expect(item).toHaveAttribute('title', /Deliverables page/);
   await item.click();
   await expect(page.locator('[data-test=team-more-menu]')).toHaveCount(0);
-  await expect(page.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue('1');
+  await expect(page.locator('[data-test=deliverables-view]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-test=deliverables-team-filter]')).toHaveValue('1');
   await expect(page.locator('[data-test=team-title]')).toHaveCount(0);
   await expect(page.locator('[role=dialog]')).toHaveCount(0);
-  await page.screenshot({ path: path.join(OUT, 'team-more-menu-open-workflows-menu-375.png') });
+  await page.screenshot({ path: path.join(OUT, 'team-more-menu-open-deliverables-menu-375.png') });
   expect(errors).toEqual([]);
   await ctx.close();
 });
@@ -145,7 +145,7 @@ test('1280 x 900: the header has its five buttons and no ⋯', async ({ browser 
   await page.screenshot({ path: path.join(OUT, 'team-more-menu-header-1280.png') });
   await expect(page.locator('[data-test=team-more]')).toHaveCount(0);
   const ids = await page.locator('.teamhead .actions > button').evaluateAll((bs) => bs.map((b) => b.getAttribute('data-test')));
-  expect(ids).toEqual(['open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage']);
+  expect(ids).toEqual(['open-documents', 'open-deliverables', 'open-triggers', 'open-git', 'open-manage']);
   for (const id of ids) await expect(page.locator(`[data-test=${id}]`)).toBeVisible();
   expect(errors).toEqual([]);
   await ctx.close();

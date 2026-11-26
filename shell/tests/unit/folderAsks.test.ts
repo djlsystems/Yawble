@@ -21,7 +21,7 @@ import type { AgentCard, YawbleApi } from '../../src/shared/api';
 vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
   const real = await orig<typeof import('../../src/renderer/src/monitor/scene')>();
   class FakeScene {
-    model: unknown; onHover?: unknown; onPick?: unknown; onOpenWorkflow?: unknown; effects: unknown[] = [];
+    model: unknown; onHover?: unknown; onPick?: unknown; onOpenDeliverable?: unknown; effects: unknown[] = [];
     setPinned() {} setLayout() {} setTeams() {} setPicked() {} destroy() {} fit() {} clearFiles() {}
   }
   return { ...real, MonitorScene: FakeScene };
@@ -32,7 +32,7 @@ const ask = (o: Partial<Omit<FolderAsk, 'reason' | 'choices'>> & { reason?: stri
   id: 9, at: '2026-11-19T10:00:00Z', teamId: 1, team: 'Smoke-sessions', memberId: 7, member: 'Smoke-sessions/OperatorClifford', memberName: 'OperatorClifford',
   askedBy: 'Smoke-sessions/OperatorClifford', path: 'Z:\\smokesessions', access: 'readwrite', reason: 'write the smoke results next to the recordings',
   exists: true, existedWhenAsked: true, state: 'pending', grantedAccess: null, decidedBy: null, decidedVia: null, decidedAt: null, note: null,
-  workflow: 40, choices: [], ...o,
+  deliverable: 40, choices: [], ...o,
 } as FolderAsk);
 
 type Call = { method: string; params: any };

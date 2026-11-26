@@ -144,7 +144,7 @@ async function markRead() {
 function onUpdate(e: ConciergeUpdateEvent) {
   if (!props.conversationId || e.conversationId !== props.conversationId || !conversation.value) return;
   if (!conversation.value.messages.some((m) => m.id === e.message.id)) conversation.value.messages.push(e.message);
-  // A workflow watch ends with its workflow; reload the watches when one may have ended.
+  // A deliverable watch ends with its deliverable; reload the watches when one may have ended.
   if (e.message.kind === 'done' || e.message.kind === 'expired') void refreshWatches();
   void markRead();
   void scrollDown();
@@ -176,7 +176,7 @@ async function doToggleReview(w: ConciergeWatch) {
 }
 
 const watchTitle = (w: ConciergeWatch) =>
-  `${w.workflow ? `Workflow ${w.workflow} of ${w.team}` : `Team ${w.team}`}: ${w.what}\n` +
+  `${w.deliverable ? `Deliverable ${w.deliverable} of ${w.team}` : `Team ${w.team}`}: ${w.what}\n` +
   `Until ${new Date(w.expiresAt).toLocaleString()}.\n` +
   (w.followUp ? 'The Concierge reviews each update (an agent turn).' : 'Updates are posted here; the Concierge is not woken for them.');
 

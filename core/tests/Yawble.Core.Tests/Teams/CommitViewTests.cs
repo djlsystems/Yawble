@@ -91,7 +91,7 @@ public class CommitViewTests
         AgentGit.Host(repo, "remote", "add", "origin", bare);
         AgentGit.Host(repo, "update-ref", "refs/remotes/origin/trunk", root);
 
-        // The app's records: Ada's ordinary commit in workflow 41 (card on the board), Ben's in workflow 42, the merge in 43.
+        // The app's records: Ada's ordinary commit in deliverable 41 (card on the board), Ben's in deliverable 42, the merge in 43.
         f.Repos.CodeEvents.Add([
             new CodeEvent(CodeEvent.Commit, "Alpha", "Ada", "members/alpha/ada", ordinary, "Card 5: README line 2", [], DateTimeOffset.UtcNow, 41),
             new CodeEvent(CodeEvent.Commit, "Alpha", "Ben", "members/alpha/ben", benGone, "Ben's work", [], DateTimeOffset.UtcNow, 42),
@@ -102,8 +102,8 @@ public class CommitViewTests
             c.Open();
             using var cmd = c.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO board_cards (team, member, title, workflow, created_at, updated_at) VALUES ('Alpha', 'Ada', 'README', 41, '2026-01-01', '2026-01-01');
-                INSERT INTO board_cards (team, member, title, workflow, created_at, updated_at) VALUES ('Alpha', 'Ben', 'Ben', 42, '2026-01-01', '2026-01-01');
+                INSERT INTO board_cards (team, member, title, deliverable, created_at, updated_at) VALUES ('Alpha', 'Ada', 'README', 41, '2026-01-01', '2026-01-01');
+                INSERT INTO board_cards (team, member, title, deliverable, created_at, updated_at) VALUES ('Alpha', 'Ben', 'Ben', 42, '2026-01-01', '2026-01-01');
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -157,7 +157,7 @@ public class CommitViewTests
         Assert.True((bool)json["codeShown"]!);
         Assert.Equal("Reviewer", (string)json["committer"]!["name"]!);
         Assert.False(json["where"]!.AsObject().ContainsKey("onlyOnMember"));
-        Assert.Equal(41, (long)json["made"]!["workflow"]!);
+        Assert.Equal(41, (long)json["made"]!["deliverable"]!);
     }
 
     [Fact]
@@ -271,7 +271,7 @@ public class CommitViewTests
         Assert.Equal(new CommitMerge("team/alpha", "members/alpha/ada", "Ada", 3), m.Merge);
         // The Manager's fetch-back recorded it: the Manager made the merge.
         Assert.Equal("Manager", m.Made!.Member);
-        Assert.Equal(43, m.Made.Workflow);
+        Assert.Equal(43, m.Made.Deliverable);
         Assert.Equal(["team/alpha"], m.Where!.Branches);
         Assert.Equal(["v2.0"], m.Where.Tags);
         // Against trunk (the first parent): everything Ada's branch brought, a.txt's rename folded into b.txt added.

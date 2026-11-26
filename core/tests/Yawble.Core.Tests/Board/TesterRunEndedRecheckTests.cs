@@ -16,12 +16,12 @@ public class TesterRunEndedRecheckTests
 {
     private long _seq = 900;
 
-    private Message M(string type, string payloadJson, string source, long workflow) =>
-        new(++_seq, type, payloadJson, source, workflow, null, 0, DateTimeOffset.UtcNow);
+    private Message M(string type, string payloadJson, string source, long deliverable) =>
+        new(++_seq, type, payloadJson, source, deliverable, null, 0, DateTimeOffset.UtcNow);
 
-    private Message Claim(string member, long card, long workflow) =>
+    private Message Claim(string member, long card, long deliverable) =>
         new(++_seq, "agent.instruction.payments/" + member, new JsonObject { ["text"] = "work card " + card, ["card"] = card }.ToJsonString(),
-            "payments/Manager", workflow, null, 0, DateTimeOffset.UtcNow);
+            "payments/Manager", deliverable, null, 0, DateTimeOffset.UtcNow);
 
     private static (TempDb Db, BoardStore Store, BoardProjector P) Board(params string[] testers)
     {
@@ -109,7 +109,7 @@ public class TesterRunEndedRecheckTests
         p.Apply(M(MessageTypes.Completed, """{"runId":12,"reason":"ok","handedBack":false,"run":{"exitCode":-1}}""", "payments/TesterWren", 64));
 
         Assert.Contains(store.Trail(card.Id), t => t.Kind == "run ended" && t.Text == "run ended (no hand-back, exit -1)");
-        p.Apply(M(MessageTypes.WorkflowCompleted, """{"delivered":"done"}""", "payments/Manager", 64));
+        p.Apply(M(MessageTypes.DeliverableCompleted, """{"delivered":"done"}""", "payments/Manager", 64));
         Assert.NotEqual(Lanes.Done, store.Card(card.Id)!.Lane);
         Assert.Contains(store.Trail(card.Id), t => t.Kind == "comment" && t.Text.StartsWith("Left out of Done"));
     }

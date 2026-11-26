@@ -152,7 +152,7 @@ public sealed class ConciergeReadTools(
             sb.Append($"- {S(i, "label")} [{S(i, "state")}] {S(i, "title")}");
             if (S(i, "team") is { Length: > 0 } meant) sb.Append($" (meant for {meant})");
             if (S(i, "dispatchedTeam") is { Length: > 0 } sent)
-                sb.Append($"; dispatched to {sent} (workflow {S(i, "dispatchedWorkflow")}){(i["inFlight"]?.GetValue<bool>() == true ? ", in flight" : "")}, {S(i, "dispatchCount")} time(s)");
+                sb.Append($"; dispatched to {sent} (deliverable {S(i, "dispatchedDeliverable")}){(i["inFlight"]?.GetValue<bool>() == true ? ", in flight" : "")}, {S(i, "dispatchCount")} time(s)");
             if (archived && S(i, "archivedAt") is { Length: > 0 } at) sb.Append($"; archived {at}");
             sb.AppendLine();
         }
@@ -181,7 +181,7 @@ public sealed class ConciergeReadTools(
         sb.AppendLine().AppendLine(dispatches.Count == 0 ? "Never dispatched." : "Dispatch history (oldest first):");
         foreach (var d in dispatches)
         {
-            sb.Append($"- {S(d, "dispatchedAt")} to {S(d, "team")}{(d["teamGone"]?.GetValue<bool>() == true ? " (team removed)" : "")}, workflow {S(d, "workflow")}");
+            sb.Append($"- {S(d, "dispatchedAt")} to {S(d, "team")}{(d["teamGone"]?.GetValue<bool>() == true ? " (team removed)" : "")}, deliverable {S(d, "deliverable")}");
             if (S(d, "state") is { Length: > 0 } st) sb.Append($" [{st}]");
             sb.Append($"; cards {S(d, "cardsDone")}/{S(d, "cards")} done; {S(d, "runs")} run(s), {S(d, "inputTokens")} input / {S(d, "outputTokens")} output tokens");
             if (S(d, "ending") is { Length: > 0 } end) sb.Append($"; ended: {end}");
@@ -231,7 +231,7 @@ public sealed class ConciergeReadTools(
         var sb = new StringBuilder();
         sb.AppendLine($"Card {id}: {S(o, "title")}");
         sb.AppendLine($"Team {S(o, "team")}{(S(o, "member") is { Length: > 0 } m ? $", member {m}" : "")}; lane {S(o, "lane")}, status {S(o, "status")}" +
-                      $"{(S(o, "item") is { Length: > 0 } item ? $"; from backlog {item}" : "")}{(S(o, "workflow") is { Length: > 0 } w ? $"; workflow {w}" : "")}");
+                      $"{(S(o, "item") is { Length: > 0 } item ? $"; from backlog {item}" : "")}{(S(o, "deliverable") is { Length: > 0 } w ? $"; deliverable {w}" : "")}");
         sb.AppendLine($"Created {S(o, "createdAt")}, updated {S(o, "updatedAt")}");
         // Its overall time (created to its last Done) and where that time went, as the board shows it.
         if (o["time"] is JsonObject time)
@@ -871,7 +871,7 @@ public sealed class ConciergeReadTools(
     {
         yield return Tool("backlog_list", "The person's backlog: every item with its state, the team it is meant for and where it was dispatched. Reads only.",
             ("archived", "boolean", "true for the archive instead of the live items.", false));
-        yield return Tool("backlog_item", "One backlog item in full: its spec and its dispatch history (which team, workflow, cards done, runs and tokens).",
+        yield return Tool("backlog_item", "One backlog item in full: its spec and its dispatch history (which team, deliverable, cards done, runs and tokens).",
             ("item", "string", "The item's label, e.g. B006.", true));
         yield return Tool("board_list", "Every team's board cards by lane (or one team's), with each card's status and its member's state.",
             ("team", "string", "Only this team (optional).", false));
@@ -899,9 +899,9 @@ public sealed class ConciergeReadTools(
             ("team", "string", "Only this team (optional).", false), ("days", "integer", "How many days back (default 7, at most 365).", false));
         yield return Tool("doctor", "The app's health check (the list in Settings > Health): database, disk, sandbox, agent CLIs, Cloud Link, Connections, teams, logs; each OK, warning or failing, with its detail and the fixes it offers. Reads only; doctor_fix runs a fix when the person asks.");
         yield return Tool("backup_now", "Makes a backup of the app's database now (not over the Cloud Link). The person restores in Settings > General; you cannot restore.");
-        yield return Tool("skills_list", "The skills you can load: procedures for work you do now and then (e.g. 'scripts': building, checking, test-running and setting up scripts). Reads only.");
-        yield return Tool("skills_get", "Loads one skill's text (see skills_list). Load 'scripts' before you build, check, test-run, fix or add a script, or set up its Connections.",
-            ("name", "string", "The skill's name, e.g. scripts.", true));
+        yield return Tool("skills_list", "The skills you can load: procedures for work you do now and then (e.g. 'workflows': building, checking, test-running and setting up workflows). Reads only.");
+        yield return Tool("skills_get", "Loads one skill's text (see skills_list). Load 'workflows' before you build, check, test-run, fix or add a workflow, or set up its Connections.",
+            ("name", "string", "The skill's name, e.g. workflows.", true));
     }
 
     private static JsonObject Tool(string name, string description, params (string Name, string Type, string Description, bool Required)[] parameters)

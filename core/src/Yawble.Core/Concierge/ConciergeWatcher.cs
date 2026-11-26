@@ -8,15 +8,15 @@ public sealed record WatchHit(string ConversationId, ConciergeMessageRow Message
 
 /// <summary>
 /// Keeps the Concierge's promises between turns, with no agent running: it reads the bus for what a person waits on
-/// (a workflow finished, a decision asked, a run failed, an agent blocked), matches each event against the active
-/// watches (<see cref="WatchRow"/>), and posts each match into its conversation as an update. A workflow watch ends
-/// when its workflow is declared complete or expires; any watch ends when it expires. Restart-safe: each watch remembers how far
+/// (a deliverable finished, a decision asked, a run failed, an agent blocked), matches each event against the active
+/// watches (<see cref="WatchRow"/>), and posts each match into its conversation as an update. A deliverable watch ends
+/// when its deliverable is declared complete or expires; any watch ends when it expires. Restart-safe: each watch remembers how far
 /// it has read (since_seq), so events that arrived while the app was closed are posted at the next start.
 /// </summary>
 public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimeProvider? clock = null)
 {
     public static readonly IReadOnlyCollection<string> Types =
-        [MessageTypes.WorkflowCompleted, MessageTypes.WorkflowExpired, MessageTypes.NeedsDecision, MessageTypes.Failed, MessageTypes.Blocked];
+        [MessageTypes.DeliverableCompleted, MessageTypes.DeliverableExpired, MessageTypes.NeedsDecision, MessageTypes.Failed, MessageTypes.Blocked];
 
     public static readonly TimeSpan DefaultLife = TimeSpan.FromHours(48);
     public static readonly TimeSpan MaxLife = TimeSpan.FromDays(7);
@@ -53,7 +53,7 @@ public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimePr
             {
                 var team = await TeamOfAsync(m, roots, ct);
                 if (team is null) continue;
-                // One update per conversation per event, even when two of its watches match (a workflow and its team).
+                // One update per conversation per event, even when two of its watches match (a deliverable and its team).
                 foreach (var group in watches
                              .Where(w => !ended.Contains(w.Id) && m.Seq > w.SinceSeq && Matches(w, m, team))
                              .GroupBy(w => w.ConversationId))
@@ -61,8 +61,8 @@ public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimePr
                     if (Describe(m, team) is not { } update) continue;
                     var id = store.AddUpdate(group.Key, update.Text, team, update.Kind, m.Seq);
                     hits.Add(new WatchHit(group.Key, store.Message(id)!, group.Any(w => w.FollowUp)));
-                    if (m.Type is MessageTypes.WorkflowCompleted or MessageTypes.WorkflowExpired)
-                        foreach (var w in group.Where(w => w.Workflow == m.CorrelationId))
+                    if (m.Type is MessageTypes.DeliverableCompleted or MessageTypes.DeliverableExpired)
+                        foreach (var w in group.Where(w => w.Deliverable == m.CorrelationId))
                             if (store.EndWatch(w.Id, "done")) ended.Add(w.Id);
                 }
             }
@@ -75,11 +75,11 @@ public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimePr
         }
     }
 
-    private static bool Matches(WatchRow w, Message m, string team) => w.Workflow is { } wf
+    private static bool Matches(WatchRow w, Message m, string team) => w.Deliverable is { } wf
         ? m.CorrelationId == wf
         : string.Equals(w.Team, team, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>A member's message names its team in its source; the app's own (source "host") by its workflow's root instruction.</summary>
+    /// <summary>A member's message names its team in its source; the app's own (source "host") by its deliverable's root instruction.</summary>
     private async Task<string?> TeamOfAsync(Message m, Dictionary<long, string?> roots, CancellationToken ct)
     {
         var slash = m.Source.IndexOf('/');
@@ -104,12 +104,12 @@ public sealed class ConciergeWatcher(ConciergeStore store, BusEngine bus, TimePr
         var by = who is null ? "" : $" · {who}";
         return m.Type switch
         {
-            MessageTypes.WorkflowCompleted =>
-                // A workflow the person let close over a tester's FAIL says so.
+            MessageTypes.DeliverableCompleted =>
+                // A deliverable the person let close over a tester's FAIL says so.
                 ("done", $"**{team}** finished{(Board.ClosedOverFail.Read(p).Count > 0 ? ", " + Board.ClosedOverFail.ConciergeWords : "")}: " +
                          Clip(Str(p, "delivered") ?? "the work is declared complete")),
-            MessageTypes.WorkflowExpired =>
-                ("expired", $"**{team}**'s workflow #{m.CorrelationId} expired: {Clip(Str(p, "detail") ?? "nothing happened in it for too long")}. Telling the team something in it reopens it."),
+            MessageTypes.DeliverableExpired =>
+                ("expired", $"**{team}**'s deliverable #{m.CorrelationId} expired: {Clip(Str(p, "detail") ?? "nothing happened in it for too long")}. Telling the team something in it reopens it."),
             MessageTypes.NeedsDecision =>
                 ("decision", $"**{team}**{by} needs your decision (question {m.Seq}): {Clip(Str(p, "question") ?? "")}"),
             MessageTypes.Blocked =>

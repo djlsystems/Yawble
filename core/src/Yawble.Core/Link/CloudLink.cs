@@ -517,7 +517,7 @@ public sealed class CloudLink : IAsyncDisposable
     /// <summary>The capability the hello announces: this computer reads and enforces call["access"].</summary>
     public const string AccessCap = "access";
 
-    /// <summary>The capability: org.summary, org.summary.watch / unwatch and the org.summaryChanged push (summaryVersion 1).</summary>
+    /// <summary>The capability: org.summary, org.summary.watch / unwatch and the org.summaryChanged push (summaryVersion 2).</summary>
     public const string SummaryCap = "summary";
 
     /// <summary>The capability: logs.tail / logs.untail and the logs.tailEntry push.</summary>

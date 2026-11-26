@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { AgentCard, ApiRow, GitProvider, IntegrationInfo, McpServerInfo, RepoProviderInfo, YawbleApi, TeamQuiet, TeamSummary } from '../../../shared/api';
-import { TEAM_WORKFLOW_EXPIRY, TEAMS_SET_REPO, WorkflowExpiryDefaultDays, TEAM_RETROS, TEAMS_LESSONS, PERSON_WRITER } from '../../../shared/api';
+import { TEAM_DELIVERABLE_EXPIRY, TEAMS_SET_REPO, DeliverableExpiryDefaultDays, TEAM_RETROS, TEAMS_LESSONS, PERSON_WRITER } from '../../../shared/api';
 import { TEAM_LOCALHOST, TEAM_LOCALHOST_LABEL, TEAM_LOCALHOST_WARNING } from '../../../shared/api';
 import type { HireRow, RoleRow, TeamHireRow, TeamLessons } from '../../../shared/api';
 import HireListEditor from './HireListEditor.vue';
@@ -124,19 +124,19 @@ const setLocalhost = (on: boolean) => act(TEAM_LOCALHOST, { on }, (r: { on: bool
 // The warning's `code` spans (the text is kept word for word in TEAM_LOCALHOST_WARNING).
 const localhostWarning = TEAM_LOCALHOST_WARNING.split('`').map((text, i) => ({ text, code: i % 2 === 1 }));
 
-// ---- Expire idle workflows after N days (workflowExpiryDays, default 3). An older core without it: the field is not shown.
+// ---- Expire idle deliverables after N days (deliverableExpiryDays, default 3). An older core without it: the field is not shown.
 const expiry = ref<number | null>(null);
-const expiryDraft = ref<number>(WorkflowExpiryDefaultDays);
+const expiryDraft = ref<number>(DeliverableExpiryDefaultDays);
 const expirySaved = ref(false);
 async function loadExpiry() {
   try {
-    const r = await api.call<{ days: number }>(TEAM_WORKFLOW_EXPIRY, { teamId: props.team.id });
-    expiry.value = r?.days ?? WorkflowExpiryDefaultDays;
+    const r = await api.call<{ days: number }>(TEAM_DELIVERABLE_EXPIRY, { teamId: props.team.id });
+    expiry.value = r?.days ?? DeliverableExpiryDefaultDays;
     expiryDraft.value = expiry.value;
   } catch { expiry.value = null; } finally { ready.expiry = true; }
 }
 const expiryValid = computed(() => Number.isInteger(expiryDraft.value) && expiryDraft.value >= 1 && expiryDraft.value <= 365);
-const saveExpiry = () => act(TEAM_WORKFLOW_EXPIRY, { days: expiryDraft.value }, (r: { days?: number }) => {
+const saveExpiry = () => act(TEAM_DELIVERABLE_EXPIRY, { days: expiryDraft.value }, (r: { days?: number }) => {
   expiry.value = r?.days ?? expiryDraft.value;
   expiryDraft.value = expiry.value;
   expirySaved.value = true;
@@ -148,8 +148,8 @@ async function loadLessons() { try { lessons.value = await api.call<TeamLessons>
 const day = (iso: string | null) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(); };
 const lessonsText = computed(() => {
   const l = lessons.value;
-  if (!l || l.version === 0 && l.skillId === null) return 'Lessons: none yet. The Manager keeps them after each completed workflow.';
-  const by = l.writer === PERSON_WRITER ? 'by you' : l.workflow !== null ? `by the retro of workflow ${l.workflow}` : l.writer ? `by ${l.writer}` : '';
+  if (!l || l.version === 0 && l.skillId === null) return 'Lessons: none yet. The Manager keeps them after each completed deliverable.';
+  const by = l.writer === PERSON_WRITER ? 'by you' : l.deliverable !== null ? `by the retro of deliverable ${l.deliverable}` : l.writer ? `by ${l.writer}` : '';
   return `Lessons: ${l.count}` + (l.updatedAt ? `, last updated ${day(l.updatedAt)}${by ? ' ' + by : ''}` : '');
 });
 function showLessons() { openSkill(props.team.id, TEAM_RETROS); emit('close'); }
@@ -285,18 +285,18 @@ onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLesson
           <template v-if="lessons.skillId !== null"> · <a href="#" data-test="team-lessons-link" @click.prevent="showLessons">Read or edit them in Settings &gt; Skills</a></template></p>
         <p class="muted small">Every run of the team gets its lessons (the team_retros skill) in its prompt, at once.</p>
       </div>
-      <div v-if="!ready.expiry || expiry !== null" class="block" data-test="team-workflow-expiry">
-        <h4>Idle workflows</h4>
+      <div v-if="!ready.expiry || expiry !== null" class="block" data-test="team-deliverable-expiry">
+        <h4>Idle deliverables</h4>
         <LoadingNote v-if="!ready.expiry" text="Loading…" />
         <template v-else>
-          <label class="inline">Expire idle workflows after
-            <input v-model.number="expiryDraft" type="number" min="1" max="365" step="1" class="days" data-test="team-workflow-expiry-days" @input="expirySaved = false" />
+          <label class="inline">Expire idle deliverables after
+            <input v-model.number="expiryDraft" type="number" min="1" max="365" step="1" class="days" data-test="team-deliverable-expiry-days" @input="expirySaved = false" />
             days</label>
-          <p class="muted small">An open workflow with no message, run, hand-back or status change for this long is closed by the app as expired.
+          <p class="muted small">An open deliverable with no message, run, hand-back or status change for this long is closed by the app as expired.
             One that waits on your answer is shown in Needs you the day before, with Extend. Nothing expires while a run, a wake or a trigger is pending.</p>
           <div class="buttons"><span v-if="!expiryValid" class="warn small">A whole number of days, 1 to 365.</span><span class="grow" />
-            <span v-if="expirySaved" class="ok" data-test="team-workflow-expiry-saved">Saved.</span>
-            <button class="primary" data-test="team-workflow-expiry-save" :disabled="busy || !expiryValid || expiryDraft === expiry" @click="saveExpiry"><BusyLabel :busy="doing(TEAM_WORKFLOW_EXPIRY)" text="Saving…">Save</BusyLabel></button></div>
+            <span v-if="expirySaved" class="ok" data-test="team-deliverable-expiry-saved">Saved.</span>
+            <button class="primary" data-test="team-deliverable-expiry-save" :disabled="busy || !expiryValid || expiryDraft === expiry" @click="saveExpiry"><BusyLabel :busy="doing(TEAM_DELIVERABLE_EXPIRY)" text="Saving…">Save</BusyLabel></button></div>
         </template>
       </div>
     </section>
@@ -349,7 +349,7 @@ onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLesson
         <template v-if="!team.archived">
           <LoadingNote v-if="!ready.quiet" text="Checking whether the team is quiet…" />
           <p v-if="quiet && !quiet.quiet" class="warn" data-test="archive-not-quiet">Not quiet yet: {{ quiet.working.join('; ') }}. Wait for that work, or stop it.</p>
-          <p v-if="quiet?.openWorkflows.length" class="muted small">{{ quiet.openWorkflows.length }} open workflow{{ quiet.openWorkflows.length === 1 ? '' : 's' }} stay open.</p>
+          <p v-if="quiet?.openDeliverables.length" class="muted small">{{ quiet.openDeliverables.length }} open deliverable{{ quiet.openDeliverables.length === 1 ? '' : 's' }} stay open.</p>
           <button data-test="team-archive" :disabled="busy || !quiet?.quiet" @click="act('teams.archive', {}, () => emit('close'))"><BusyLabel :busy="doing('teams.archive')" text="Archiving…">Archive the team</BusyLabel></button>
           <button class="link" data-test="team-check-quiet" :disabled="work.is('quiet')" @click="checkAgain"><BusyLabel :busy="work.is('quiet')" text="Checking…">Check again</BusyLabel></button>
         </template>
@@ -379,7 +379,7 @@ onMounted(() => { void models.loadProfiles(); void loadHiring(); void loadLesson
         <h4>Keeping up with {{ baseName }}</h4>
         <label class="check"><input type="checkbox" :checked="sync.on" data-test="team-sync-to-base" :disabled="busy" @change="setSync(($event.target as HTMLInputElement).checked)" />
           Bring branches up to {{ baseName }} before new work</label>
-        <p class="muted small">Before a workflow's first run the app merges {{ baseName }} into the team branch and the members' branches, in the team's
+        <p class="muted small">Before a deliverable's first run the app merges {{ baseName }} into the team branch and the members' branches, in the team's
           repository (never a rebase, never forced; a merge that would conflict changes nothing and is reported). Off: you are only told when the
           team branch falls behind.</p>
       </div>

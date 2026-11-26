@@ -270,7 +270,7 @@ public sealed class ToolAskGapTests : IDisposable
         var ines = Insert("INSERT INTO members (team_id, name, role, created_at) VALUES ($t, 'Ines', 'member', '2026-11-13T00:00:00Z') RETURNING id;", ("$t", beta));
         var id = await Asked("dotnet-sdk-lts");
         Insert(
-            "INSERT INTO tool_asks (at, team_id, tool, member, reason, count, last_seen, workflow, causation_seq) " +
+            "INSERT INTO tool_asks (at, team_id, tool, member, reason, count, last_seen, deliverable, causation_seq) " +
             "VALUES ('2026-11-13T11:00:00Z', $t, 'dotnet-sdk-10', 'Alpha/Priya', 'old ask', 1, '2026-11-13T11:00:00Z', 1, 2) RETURNING id;", ("$t", _alpha));
         Assert.StartsWith("asked:", await _asks.RequestFromAgentAsync(new MemberRef(ines, beta, "Beta", "Ines", MemberRole.Member), "dotnet-sdk-10", "build", 1, 2, Ct));
         Assert.Equal(3, _asks.Asks().Count);

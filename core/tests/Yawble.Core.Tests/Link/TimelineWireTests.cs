@@ -12,8 +12,8 @@ namespace Yawble.Core.Tests.Link;
 
 /// <summary>
 /// The timeline's wire for the shell and the cloud: timeline. is a screen prefix, timeline.get still
-/// reaches the Board with the screens wired, a Visitor may call it over the Cloud Link, and org.summary's workflow rows
-/// carry the same <c>time</c> as the bus.workflows item (its ticking ms alone are not a change).
+/// reaches the Board with the screens wired, a Visitor may call it over the Cloud Link, and org.summary's deliverable rows
+/// carry the same <c>time</c> as the bus.deliverables item (its ticking ms alone are not a change).
 /// </summary>
 public class TimelineWireTests
 {
@@ -49,8 +49,8 @@ public class TimelineWireTests
         // The Board's own answers, not the screens' unknown_method.
         var noArgs = await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("timeline.get", new JsonObject(), Ct));
         Assert.Equal("bad_params", noArgs.Code);
-        var noFlow = await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("timeline.get", new JsonObject { ["workflow"] = 999 }, Ct));
-        Assert.Equal("no_such_workflow", noFlow.Code);
+        var noFlow = await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("timeline.get", new JsonObject { ["deliverable"] = 999 }, Ct));
+        Assert.Equal("no_such_deliverable", noFlow.Code);
         // A name under timeline. that nobody has is still unknown.
         var other = await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("timeline.zzzNew", null, Ct));
         Assert.Equal("unknown_method", other.Code);
@@ -60,7 +60,7 @@ public class TimelineWireTests
 
     [Theory]
     [InlineData("{\"card\":7}")]
-    [InlineData("{\"workflow\":3573}")]
+    [InlineData("{\"deliverable\":3573}")]
     public void TimelineGet_IsAVisitorRead(string args)
     {
         var p = JsonNode.Parse(args)!.AsObject();
@@ -73,7 +73,7 @@ public class TimelineWireTests
         Assert.False(RemoteAccess.Reads("timeline.zzzNew", null));
     }
 
-    // ---------------------------------------------------------------- 4. org.summary's workflow rows
+    // ---------------------------------------------------------------- 4. org.summary's deliverable rows
 
     private static TimeSummary Time(bool open, long working, long waiting) => new(
         "2026-11-18T10:00:00Z", "2026-11-18T10:01:00Z", open ? null : "2026-11-18T11:00:00Z", open ? null : "completed", open,
@@ -84,20 +84,20 @@ public class TimelineWireTests
         new OrgComputer("DESK-1", null, "2026.11.18.1", "Windows 11", Now.AddHours(-3), 0, 4, 0),
         [new OrgTeam("web", Paused: false, Archived: false, [])],
         [
-            new OrgWorkflow(3573, "web", "Timelines", null, null, OrgSummary.Running, 1, 3, Now.AddHours(-2), Now.AddMinutes(-1), "Manager", Time: openTime),
-            new OrgWorkflow(3574, "web", "Done one", null, null, OrgSummary.Completed, 2, 2, Now.AddHours(-2), Now.AddMinutes(-30), "Manager", Time: endedTime),
-            new OrgWorkflow(3575, "web", "No board", null, null, OrgSummary.Running, 0, 0, Now.AddHours(-1), Now.AddMinutes(-2), "Manager"),
+            new OrgDeliverable(3573, "web", "Timelines", null, null, OrgSummary.Running, 1, 3, Now.AddHours(-2), Now.AddMinutes(-1), "Manager", Time: openTime),
+            new OrgDeliverable(3574, "web", "Done one", null, null, OrgSummary.Completed, 2, 2, Now.AddHours(-2), Now.AddMinutes(-30), "Manager", Time: endedTime),
+            new OrgDeliverable(3575, "web", "No board", null, null, OrgSummary.Running, 0, 0, Now.AddHours(-1), Now.AddMinutes(-2), "Manager"),
         ],
         [], []);
 
     [Fact]
-    public void OrgSummaryWorkflowRows_CarryTheWireTime()
+    public void OrgSummaryDeliverableRows_CarryTheWireTime()
     {
         var open = Time(open: true, working: 60_000, waiting: 30_000);
         var s = OrgSummary.Build(Facts(open, Time(open: false, 3_000_000, 600_000)), Now);
-        var rows = s["workflows"]!.AsArray().ToDictionary(r => r!["id"]!.GetValue<long>(), r => r!.AsObject());
+        var rows = s["deliverables"]!.AsArray().ToDictionary(r => r!["id"]!.GetValue<long>(), r => r!.AsObject());
 
-        // Exactly the bus.workflows item's time (TimeSummary.ToJson, the wire contract on the card).
+        // Exactly the bus.deliverables item's time (TimeSummary.ToJson, the wire contract on the card).
         Assert.Equal(open.ToJson().ToJsonString(), rows[3573]["time"]!.ToJsonString());
         var t = rows[3573]["time"]!;
         Assert.Equal(["createdAt", "startedAt", "endedAt", "endedHow", "open", "overallMs", "rebuilt", "breakdown"], t.AsObject().Select(p => p.Key));
@@ -114,26 +114,26 @@ public class TimelineWireTests
     }
 
     [Fact]
-    public void AnOpenWorkflowsTickingTime_IsNotAChange_ButANewCategoryOrAnEndedOnesTimeIs()
+    public void AnOpenDeliverablesTickingTime_IsNotAChange_ButANewCategoryOrAnEndedOnesTimeIs()
     {
         var ended = Time(open: false, 3_000_000, 600_000);
         var last = OrgSummary.Build(Facts(Time(open: true, 60_000, 30_000), ended), Now);
 
         // Two seconds later: only the open one's ms grew.
         var tick = OrgSummary.Build(Facts(Time(open: true, 62_000, 30_000), ended), Now);
-        Assert.DoesNotContain("workflows", OrgSummary.Changed(last, tick));
+        Assert.DoesNotContain("deliverables", OrgSummary.Changed(last, tick));
 
         // A category it was not in before is a change.
         var moreOpen = Time(open: true, 62_000, 30_000) with
         {
             Breakdown = [new TimeShare(TimeCategories.AgentWorking, 62_000), new TimeShare(TimeCategories.WaitingOnYou, 30_000), new TimeShare(TimeCategories.Stalled, 1_000)],
         };
-        Assert.Contains("workflows", OrgSummary.Changed(last, OrgSummary.Build(Facts(moreOpen, ended), Now)));
+        Assert.Contains("deliverables", OrgSummary.Changed(last, OrgSummary.Build(Facts(moreOpen, ended), Now)));
 
-        // An ended workflow's time is compared in full (it does not tick).
-        Assert.Contains("workflows", OrgSummary.Changed(last, OrgSummary.Build(Facts(Time(open: true, 60_000, 30_000), Time(open: false, 3_000_001, 600_000)), Now)));
+        // An ended deliverable's time is compared in full (it does not tick).
+        Assert.Contains("deliverables", OrgSummary.Changed(last, OrgSummary.Build(Facts(Time(open: true, 60_000, 30_000), Time(open: false, 3_000_001, 600_000)), Now)));
 
         // The snapshot itself is untouched by the comparison.
-        Assert.Equal(60_000 + 30_000, last["workflows"]![0]!["time"]!["overallMs"]!.GetValue<long>());
+        Assert.Equal(60_000 + 30_000, last["deliverables"]![0]!["time"]!["overallMs"]!.GetValue<long>());
     }
 }

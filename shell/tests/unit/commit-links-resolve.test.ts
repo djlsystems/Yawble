@@ -13,7 +13,7 @@ import CommitText from '../../src/renderer/src/components/CommitText.vue';
 import ChatMessage from '../../src/renderer/src/components/ChatMessage.vue';
 import MemberActivity from '../../src/renderer/src/components/MemberActivity.vue';
 import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
-import { mountPane, paneRow } from './workflow-pane-fake';
+import { mountPane, paneRow } from './deliverable-pane-fake';
 import { GIT_COMMITS_RESOLVE, isUiMethod, type BoardCard, type CommitMatch, type TeamSummary, type YawbleApi } from '../../src/shared/api';
 
 // A commit-shaped ID is a link only once git.commitsResolve confirms it, against a fake core with the
@@ -313,7 +313,7 @@ describe('every place IDs appear renders a confirmed link', () => {
   it('a card\'s trail (CardPanel), with the trail\'s hand-back and comment lines', async () => {
     const card: BoardCard = {
       id: 5, team: 'payments', teamId: 1, member: 'DeveloperAda', item: 'B074', title: 'Links', body: `Body names ${LOCAL.slice(0, 7)}.`, status: 'done', lane: 'done',
-      placed: true, awaitingManager: false, workflow: 3, createdAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z', trailCount: 2,
+      placed: true, awaitingManager: false, deliverable: 3, createdAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z', trailCount: 2,
     } as BoardCard;
     const detail = { ...card, trail: [
       { id: 1, at: '2026-11-18T19:00:00Z', source: 'DeveloperAda', kind: 'handback', text: `Handed back: ${said}` },
@@ -341,15 +341,15 @@ describe('every place IDs appear renders a confirmed link', () => {
     expect(w.text()).toContain('abc1234');
   });
 
-  it('a workflow\'s handback (the Workflows page\'s pane: what was delivered)', async () => {
+  it('a deliverable\'s handback (the Deliverables page\'s pane: what was delivered)', async () => {
     const row = paneRow({ id: 10, title: 'Partial refunds', status: 'completed' });
     const handback = { seq: 4, at: '2026-11-18T19:00:00Z', kind: 'handback', from: 'DeveloperAda', member: 'DeveloperAda', text: said };
-    core = fakeCore({ 'workflows.get': () => ({ workflow: row, cards: [], messages: [handback], spec: null, backlog: true }) });
+    core = fakeCore({ 'deliverables.get': () => ({ deliverable: row, cards: [], messages: [handback], spec: null, backlog: true }) });
     configureCommitResolve({ api: core.api });
     const w = await mountPane(row, core.api);
     cleanup.push(() => w.unmount());
     await settle();
-    expect(confirmed(w.get('[data-test=workflow-pane-message]').element)).toEqual([ADA]);
+    expect(confirmed(w.get('[data-test=deliverable-pane-message]').element)).toEqual([ADA]);
   });
 
   it('plain text from anywhere (CommitText): text until confirmed, then a link; a click opens it in its team', async () => {

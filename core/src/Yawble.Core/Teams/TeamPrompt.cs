@@ -55,13 +55,13 @@ public static class TeamPrompt
     }
 
     /// <summary>
-    /// What the member already asked the person in this workflow and is waiting on. Said in every run of the workflow,
+    /// What the member already asked the person in this deliverable and is waiting on. Said in every run of the deliverable,
     /// so a run woken by something else (another hand-back) does not ask the same thing a second time.
     /// </summary>
     public static IReadOnlyList<string> OpenQuestionLines(IReadOnlyList<(long Seq, string Question)> open)
     {
         if (open.Count == 0) return [];
-        var lines = new List<string> { "You already asked the person in this workflow, and they have not answered yet. Do NOT ask it again with needs_decision or blocked: " +
+        var lines = new List<string> { "You already asked the person in this deliverable, and they have not answered yet. Do NOT ask it again with needs_decision or blocked: " +
             "carry on with anything that does not depend on the answer, or end your turn (the answer wakes you). If what you just learned changes the question, " +
             "say so in one progress line instead." };
         foreach (var (seq, q) in open)
@@ -79,7 +79,7 @@ public static class TeamPrompt
     public static IReadOnlyList<string> LessonLines(string? lessons)
     {
         if (string.IsNullOrWhiteSpace(lessons)) return [];
-        return [$"{Skills.TeamRetros.PromptHeading} (the team_retros skill: the Manager keeps it after each completed workflow, the person may edit it). " +
+        return [$"{Skills.TeamRetros.PromptHeading} (the team_retros skill: the Manager keeps it after each completed deliverable, the person may edit it). " +
                 "Act on them where they apply:", lessons.Trim()];
     }
 

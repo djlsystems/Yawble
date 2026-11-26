@@ -339,12 +339,12 @@ describe('Needs You on a phone: full-width cards, buttons stacked', () => {
   const networkAsk: NetworkAsk = {
     id: 7, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'Alpha', member: 'Alpha/DeveloperInes', memberName: 'DeveloperInes',
     host: 'api.nuget.org', reason: null, method: 'CONNECT', pathSample: null, count: 3, lastSeen: '2026-11-13T21:05:00Z',
-    hint: null, workflow: 12, state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'],
+    hint: null, deliverable: 12, state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'],
   } as NetworkAsk;
   const toolAsk: ToolAsk = {
     id: 4, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'Alpha', member: 'Alpha/DeveloperInes', memberName: 'DeveloperInes',
     tool: 'dotnet-sdk-10', displayName: '.NET SDK 10', publisher: 'Microsoft', wingetId: 'Microsoft.DotNet.SDK.10', scope: 'machine',
-    reason: 'build', count: 2, lastSeen: '2026-11-13T21:05:00Z', workflow: 12, state: 'pending', attempts: 0, error: null,
+    reason: 'build', count: 2, lastSeen: '2026-11-13T21:05:00Z', deliverable: 12, state: 'pending', attempts: 0, error: null,
     decidedBy: null, decidedVia: null, decidedAt: null, canInstall: true, command: 'winget install', choices: ['install', 'notNow'],
   } as ToolAsk;
   const taskAsk = { member: 'Alpha/DeveloperInes', taskName: 'deploy', commit: 'abcdef1234', reason: 'ship it', detail: null } as any;
@@ -449,7 +449,7 @@ describe('Settings on a phone: one section per screen', () => {
 describe('the Teams list on a phone', () => {
   const team = { id: 1, name: 'payments', repoPath: null, members: 2, running: 0, queued: 0, paused: false } as any;
   it('one column and no size grips below 760 px; the grips stay on the desktop', async () => {
-    const f = fakeApi({ 'workflows.list': () => [] , 'teams.workflows': () => [] });
+    const f = fakeApi({ 'deliverables.list': () => [] , 'teams.deliverables': () => [] });
     setWidth(390);
     const phone = keep(mount(TeamsList, { props: { teams: [team], archived: [], api: f.api, pollMs: 60_000, refresh: () => {} } }));
     await flushPromises();
@@ -494,11 +494,11 @@ describe('phone e2e faults F1 to F4', () => {
   const asks = {
     ...core,
     'network.asks': () => [{ id: 7, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperInes', memberName: 'DeveloperInes',
-      host: 'api.nuget.org', reason: null, method: 'CONNECT', pathSample: null, count: 1, lastSeen: '2026-11-13T21:00:00Z', hint: null, workflow: 1,
+      host: 'api.nuget.org', reason: null, method: 'CONNECT', pathSample: null, count: 1, lastSeen: '2026-11-13T21:00:00Z', hint: null, deliverable: 1,
       state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'deny'] }],
     'tools.asks': () => [{ id: 4, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperInes', memberName: 'DeveloperInes',
       tool: 'dotnet-sdk-10', displayName: '.NET SDK 10', publisher: 'Microsoft', wingetId: 'Microsoft.DotNet.SDK.10', scope: 'machine', reason: 'build',
-      count: 1, lastSeen: '2026-11-13T21:00:00Z', workflow: 1, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
+      count: 1, lastSeen: '2026-11-13T21:00:00Z', deliverable: 1, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
       canInstall: false, command: null, choices: ['notNow'] }],
   };
   async function mountWithAsks(width: number) {

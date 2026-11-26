@@ -23,7 +23,7 @@ public sealed record BranchSyncResult(string Outcome, string BaseBranch, string?
 }
 
 /// <summary>
-/// Sync before new work: before a workflow's first run the host brings the team branch, and every member
+/// Sync before new work: before a deliverable's first run the host brings the team branch, and every member
 /// branch, up to the base branch INSIDE THE HOST-OWNED team repository, then refreshes the shared view. Member clones
 /// are never touched (no git runs inside a clone): a clone fetches its synced branch from the bundle, or is made from it.
 /// The merge is computed in the object database (<c>merge-tree --write-tree</c>) and the branch moved with a
@@ -87,7 +87,7 @@ public sealed partial class TeamRepos
 
     /// <summary>
     /// Brings the team branch and the member branches up to the base branch (see the type's remarks).
-    /// <paramref name="label"/> names the workflow in the merge commit: "Sync main into team/x before workflow #N".
+    /// <paramref name="label"/> names the deliverable in the merge commit: "Sync main into team/x before deliverable #N".
     /// With the team's setting off (and not <paramref name="force"/>) nothing is touched.
     /// </summary>
     public async Task<BranchSyncResult> SyncBranchesAsync(long teamId, string team, string label, CancellationToken ct = default, bool force = false)
@@ -136,7 +136,7 @@ public sealed partial class TeamRepos
                 _log?.Invoke($"team {team}: {branch} is checked out in {path}; not synced");
                 continue;
             }
-            var (outcome, behind, files) = await BringBranchUpAsync(path, branch, target, $"Sync {baseName} into {branch} before workflow #{label}", ct);
+            var (outcome, behind, files) = await BringBranchUpAsync(path, branch, target, $"Sync {baseName} into {branch} before deliverable #{label}", ct);
             if (outcome == SyncStep.Moved) moved.Add(branch);
             if (branch == teamBranch && outcome == SyncStep.Conflict)
             {

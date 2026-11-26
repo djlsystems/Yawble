@@ -7,7 +7,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Teams;
 
 /// <summary>
-/// Before a workflow starts the host brings the team branch and the member branches up to the base branch, in the
+/// Before a deliverable starts the host brings the team branch and the member branches up to the base branch, in the
 /// team repository, with fakes only: local repositories in temp dirs, no network, no clone ever touched by git.
 /// </summary>
 public class TeamSyncTests
@@ -88,7 +88,7 @@ public class TeamSyncTests
     }
 
     [Fact]
-    public async Task ATeamBranchWithItsOwnWork_GetsAMergeCommit_NamedForTheWorkflow_AndBaseNeverMoves()
+    public async Task ATeamBranchWithItsOwnWork_GetsAMergeCommit_NamedForTheDeliverable_AndBaseNeverMoves()
     {
         var (f, _, ada, repo) = Ready();
         using var _f = f;
@@ -100,7 +100,7 @@ public class TeamSyncTests
         Assert.Equal("synced", r.Outcome);
         var tip = AgentGit.Host(repo, "rev-parse", "refs/heads/team/alpha");
         Assert.Equal(own + " " + main, AgentGit.Host(repo, "rev-list", "--parents", "-n1", tip)[(tip.Length + 1)..]);
-        Assert.Equal("Sync main into team/alpha before workflow #12", AgentGit.Host(repo, "log", "-1", "--format=%s", tip));
+        Assert.Equal("Sync main into team/alpha before deliverable #12", AgentGit.Host(repo, "log", "-1", "--format=%s", tip));
         Assert.Equal(main, AgentGit.Host(repo, "rev-parse", "refs/heads/main")); // the base is never moved or rewritten
         Assert.Equal("team", AgentGit.Host(repo, "show", "team/alpha:team.txt"));
         Assert.Equal("new", AgentGit.Host(repo, "show", "team/alpha:new.txt"));
@@ -200,7 +200,7 @@ public class TeamSyncTests
     }
 
     [Fact]
-    public async Task TheManagersFirstRunOfAWorkflow_SyncsFirst_AndAConflictIsAtTheTopOfItsInstruction()
+    public async Task TheManagersFirstRunOfADeliverable_SyncsFirst_AndAConflictIsAtTheTopOfItsInstruction()
     {
         SandboxGit.RequireLocalTransport();
         using var f = new TeamsFixture();
@@ -225,7 +225,7 @@ public class TeamSyncTests
         Assert.True(root.Seq > 0);
 
         // A clean team is not nagged: once the person resolves it (merges main into team/alpha in the team repository),
-        // the next workflow's sync clears the note. The Manager's clone still has the old team/alpha: its fetch-back
+        // the next deliverable's sync clears the note. The Manager's clone still has the old team/alpha: its fetch-back
         // (whenever it lands) must not put the branch back.
         var unresolved = AgentGit.Host(repo, "rev-parse", "refs/heads/team/alpha");
         var resolved = AgentGit.Host(repo, "-c", "user.name=Person", "-c", "user.email=p@example.invalid",
@@ -344,7 +344,7 @@ public class TeamSyncTests
         var note = Assert.Single(f.Repos.SyncNotes()).Note;
         Assert.Contains("members/alpha/ada", note);
         Assert.Contains("conflicts in: shared.txt", note);
-        // The next workflow's sync keeps saying so while the work is still parked.
+        // The next deliverable's sync keeps saying so while the work is still parked.
         var r = await f.Repos.SyncBranchesAsync(ada.TeamId, "Alpha", "7", Ct);
         Assert.Contains("members/alpha/ada", r.Note);
         Assert.Single(f.Repos.SyncNotes());

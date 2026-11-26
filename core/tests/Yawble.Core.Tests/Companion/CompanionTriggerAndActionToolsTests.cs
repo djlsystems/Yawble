@@ -3,7 +3,7 @@ using Yawble.Core.Bus;
 using Yawble.Core.Companion;
 using Yawble.Core.Concierge;
 using Yawble.Core.Provenance;
-using Yawble.Core.Scripts;
+using Yawble.Core.Workflows;
 using Yawble.Core.Tests.Concierge;
 using Yawble.Core.Ui;
 using Xunit;
@@ -11,8 +11,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Companion;
 
 /// <summary>
-/// script_trigger_set and integration_action_allow for a paired companion client, at the destructive level like
-/// script_member_add. A call that needs the person's yes becomes a request whose plan names the details; Approve in the window runs the
+/// workflow_trigger_set and integration_action_allow for a paired companion client, at the destructive level like
+/// workflow_member_add. A call that needs the person's yes becomes a request whose plan names the details; Approve in the window runs the
 /// stored call once (a second Approve runs nothing), Deny writes nothing. Turning a trigger off runs at once. The real pieces of
 /// <see cref="TriggerAndActionRig"/>; no credentials.
 /// </summary>
@@ -66,13 +66,13 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
     public async Task TriggerSet_IsARequestNamingTheDetails_ApproveRunsItOnce_ASecondApproveRunsNothing()
     {
         var cc = Client(CompanionLevel.Destructive);
-        var r = await _service.CallAsync(cc, ScriptTools.ScriptTriggerSet, Trigger(), Ct);
+        var r = await _service.CallAsync(cc, WorkflowTools.WorkflowTriggerSet, Trigger(), Ct);
 
         Assert.False(r.IsError, r.Text);
         Assert.NotNull(r.RequestId);
         Assert.StartsWith($"NOT DONE: waiting for the person's approval in the Yawble window (request {r.RequestId}): ", r.Text);
-        Assert.Contains("Turn on the trigger \"hourly\" of script member Poller of team Alpha (a new trigger): it fires every hour.", r.Text);
-        Assert.Contains("Each fire runs the script poller, the latest clean version (now 1", r.Text);
+        Assert.Contains("Turn on the trigger \"hourly\" of workflow member Poller of team Alpha (a new trigger): it fires every hour.", r.Text);
+        Assert.Contains("Each fire runs the workflow poller, the latest clean version (now 1", r.Text);
         Assert.Equal(0, _r.Count("triggers.save"));
         Assert.Contains("pending", await RequestStatus(cc, r.RequestId!));
 
@@ -83,7 +83,7 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
         var row = Assert.Single(await _r.TriggersListed());
         Assert.True(row["enabled"]!.GetValue<bool>());
         Assert.Equal(_r.PollerId, row["memberId"]!.GetValue<long>());
-        Assert.Contains("of script member Alpha/Poller: on, it fires every hour", await RequestStatus(cc, r.RequestId!));
+        Assert.Contains("of workflow member Alpha/Poller: on, it fires every hour", await RequestStatus(cc, r.RequestId!));
 
         await Decide(r.RequestId!, approve: true);
         Assert.Equal(1, _r.Count("triggers.save"));
@@ -94,25 +94,25 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
     public async Task TriggerSet_Denied_WritesNothing_AndTurningOneOffRunsAtOnce()
     {
         var cc = Client(CompanionLevel.Destructive);
-        var r = await _service.CallAsync(cc, ScriptTools.ScriptTriggerSet, Trigger(), Ct);
+        var r = await _service.CallAsync(cc, WorkflowTools.WorkflowTriggerSet, Trigger(), Ct);
         Assert.Equal(ActionState.Denied, (await Decide(r.RequestId!, approve: false)).State);
         Assert.Equal(0, _r.Count("triggers.save"));
         Assert.Empty(await _r.TriggersListed());
 
-        var off = await _service.CallAsync(cc, ScriptTools.ScriptTriggerSet, Trigger(enabled: false), Ct);
+        var off = await _service.CallAsync(cc, WorkflowTools.WorkflowTriggerSet, Trigger(enabled: false), Ct);
         Assert.False(off.IsError, off.Text);
         Assert.Null(off.RequestId);
         Assert.StartsWith("ok: saved trigger", off.Text);
         Assert.False(Assert.Single(await _r.TriggersListed())["enabled"]!.GetValue<bool>());
         Assert.Equal(0, _service.PendingCount);
-        Assert.Contains(_audit.Recent(100), a => a.Method == "companion.script_trigger_set" && a.Outcome == "ok");
+        Assert.Contains(_audit.Recent(100), a => a.Method == "companion.workflow_trigger_set" && a.Outcome == "ok");
     }
 
     [Fact]
     public async Task ActionAllow_IsARequestNamingTheDetails_ApproveRunsItOnce_ASecondApproveRunsNothing()
     {
         var cc = Client(CompanionLevel.Destructive);
-        var r = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, Allow(), Ct);
+        var r = await _service.CallAsync(cc, WorkflowTools.IntegrationActionAllow, Allow(), Ct);
 
         Assert.False(r.IsError, r.Text);
         Assert.NotNull(r.RequestId);
@@ -129,7 +129,7 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
         Assert.Single(_r.Rules());
 
         // Allowed now: answered at once, no request.
-        var again = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, Allow(), Ct);
+        var again = await _service.CallAsync(cc, WorkflowTools.IntegrationActionAllow, Allow(), Ct);
         Assert.Null(again.RequestId);
         Assert.StartsWith("already allowed", again.Text);
     }
@@ -138,7 +138,7 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
     public async Task ActionAllow_Denied_WritesNothing()
     {
         var cc = Client(CompanionLevel.Destructive);
-        var r = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, Allow(), Ct);
+        var r = await _service.CallAsync(cc, WorkflowTools.IntegrationActionAllow, Allow(), Ct);
         Assert.Equal(ActionState.Denied, (await Decide(r.RequestId!, approve: false)).State);
         Assert.Empty(_r.Rules());
         Assert.Equal(0, _r.Count("integrations.saveChecklist"));
@@ -151,7 +151,7 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
         var cc = Client(CompanionLevel.Destructive);
         var agent = Trigger();
         agent["member"] = "Ada";
-        var agentResult = await _service.CallAsync(cc, ScriptTools.ScriptTriggerSet, agent, Ct);
+        var agentResult = await _service.CallAsync(cc, WorkflowTools.WorkflowTriggerSet, agent, Ct);
         Assert.True(agentResult.IsError, agentResult.Text);
         foreach (var (team, integration, action) in new[]
         {
@@ -159,7 +159,7 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
         })
         {
             var args = new JsonObject { ["team"] = team, ["integration"] = integration, ["action"] = action };
-            var result = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, args, Ct);
+            var result = await _service.CallAsync(cc, WorkflowTools.IntegrationActionAllow, args, Ct);
             Assert.True(result.IsError, result.Text);
         }
         Assert.Equal(0, _r.Count("triggers.save") + _r.Count("integrations.saveChecklist"));
@@ -168,10 +168,10 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ApprovedActionAllowsLiveScriptCallOnlyForThatTeam()
+    public async Task ApprovedActionAllowsLiveWorkflowCallOnlyForThatTeam()
     {
         var cc = Client(CompanionLevel.Destructive);
-        var request = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, Allow(), Ct);
+        var request = await _service.CallAsync(cc, WorkflowTools.IntegrationActionAllow, Allow(), Ct);
         Assert.Equal(ActionState.Done, (await Decide(request.RequestId!, approve: true)).State);
         var sent = 0;
         _r.Http.Add(TriggerAndActionRig.Host + "/messages", req =>
@@ -181,11 +181,11 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
                 { Content = new System.Net.Http.StringContent("{}", System.Text.Encoding.UTF8, "application/json") };
         });
         var args = new JsonObject { ["body"] = new JsonObject { ["to"] = "placeholder" } };
-        var result = await _r.Svc.CallForScriptAsync(new Yawble.Core.Integrations.ScriptCaller("Alpha", "Poller", "run-live", DryRun: false), "sms", "CreateMessage", args, Ct);
+        var result = await _r.Svc.CallForWorkflowAsync(new Yawble.Core.Integrations.WorkflowCaller("Alpha", "Poller", "run-live", DryRun: false), "sms", "CreateMessage", args, Ct);
         Assert.True(result.Sent);
         Assert.Equal(1, sent);
-        var refused = await Assert.ThrowsAsync<Yawble.Core.Integrations.ScriptApiRefusedException>(() =>
-            _r.Svc.CallForScriptAsync(new Yawble.Core.Integrations.ScriptCaller("Beta", "Someone", "run-beta", DryRun: false), "sms", "CreateMessage", args, Ct));
+        var refused = await Assert.ThrowsAsync<Yawble.Core.Integrations.WorkflowApiRefusedException>(() =>
+            _r.Svc.CallForWorkflowAsync(new Yawble.Core.Integrations.WorkflowCaller("Beta", "Someone", "run-beta", DryRun: false), "sms", "CreateMessage", args, Ct));
         Assert.Contains("needs approval", refused.Message);
         Assert.Equal(1, sent);
     }
@@ -194,10 +194,10 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
     public async Task DistinctActionsForOneTeamRemainSeparateRequests()
     {
         var cc = Client(CompanionLevel.Destructive);
-        var first = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, Allow(), Ct);
+        var first = await _service.CallAsync(cc, WorkflowTools.IntegrationActionAllow, Allow(), Ct);
         var secondArgs = Allow();
         secondArgs["action"] = "ListMessages";
-        var second = await _service.CallAsync(cc, ScriptTools.IntegrationActionAllow, secondArgs, Ct);
+        var second = await _service.CallAsync(cc, WorkflowTools.IntegrationActionAllow, secondArgs, Ct);
         Assert.NotNull(first.RequestId);
         Assert.NotNull(second.RequestId);
         Assert.NotEqual(first.RequestId, second.RequestId);
@@ -210,20 +210,20 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
     [Fact]
     public async Task BothAreAbsentBelowTheDestructiveLevel()
     {
-        Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf(ScriptTools.ScriptTriggerSet, Trigger()));
-        Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf(ScriptTools.ScriptTriggerSet, Trigger(enabled: false)));
-        Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf(ScriptTools.IntegrationActionAllow, Allow()));
+        Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf(WorkflowTools.WorkflowTriggerSet, Trigger()));
+        Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf(WorkflowTools.WorkflowTriggerSet, Trigger(enabled: false)));
+        Assert.Equal(CompanionLevel.Destructive, CompanionTools.LevelOf(WorkflowTools.IntegrationActionAllow, Allow()));
         static HashSet<string> Names(CompanionLevel level) => [.. CompanionTools.Definitions(level).Select(d => d!["name"]!.GetValue<string>())];
         foreach (var level in new[] { CompanionLevel.Read, CompanionLevel.Act })
         {
-            Assert.DoesNotContain(ScriptTools.ScriptTriggerSet, Names(level));
-            Assert.DoesNotContain(ScriptTools.IntegrationActionAllow, Names(level));
+            Assert.DoesNotContain(WorkflowTools.WorkflowTriggerSet, Names(level));
+            Assert.DoesNotContain(WorkflowTools.IntegrationActionAllow, Names(level));
         }
-        Assert.Contains(ScriptTools.ScriptTriggerSet, Names(CompanionLevel.Destructive));
-        Assert.Contains(ScriptTools.IntegrationActionAllow, Names(CompanionLevel.Destructive));
+        Assert.Contains(WorkflowTools.WorkflowTriggerSet, Names(CompanionLevel.Destructive));
+        Assert.Contains(WorkflowTools.IntegrationActionAllow, Names(CompanionLevel.Destructive));
 
         var actor = Client(CompanionLevel.Act, "actor");
-        foreach (var (tool, args) in new[] { (ScriptTools.ScriptTriggerSet, Trigger(enabled: false)), (ScriptTools.IntegrationActionAllow, Allow()) })
+        foreach (var (tool, args) in new[] { (WorkflowTools.WorkflowTriggerSet, Trigger(enabled: false)), (WorkflowTools.IntegrationActionAllow, Allow()) })
         {
             var r = await _service.CallAsync(actor, tool, args, Ct);
             Assert.True(r.IsError);
@@ -235,7 +235,7 @@ public sealed class CompanionTriggerAndActionToolsTests : IAsyncLifetime
 
         // Offered without confirm, and without the Concierge's token wording; the window's approval is named.
         foreach (var def in CompanionTools.Definitions(CompanionLevel.Destructive).OfType<JsonObject>()
-                     .Where(d => d["name"]!.GetValue<string>() is ScriptTools.ScriptTriggerSet or ScriptTools.IntegrationActionAllow))
+                     .Where(d => d["name"]!.GetValue<string>() is WorkflowTools.WorkflowTriggerSet or WorkflowTools.IntegrationActionAllow))
         {
             Assert.False(def["inputSchema"]!["properties"]!.AsObject().ContainsKey("confirm"));
             Assert.DoesNotContain("token", def.ToJsonString(), StringComparison.OrdinalIgnoreCase);

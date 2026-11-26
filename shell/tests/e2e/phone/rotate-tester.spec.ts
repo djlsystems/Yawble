@@ -1,6 +1,6 @@
 // Rotations rotate.spec.ts does not cover, in WebKit on the remote view.
 //  - back and forth twice (portrait -> landscape -> portrait -> landscape -> portrait) on a phone and an iPad;
-//  - a rotation with a modal / phone sheet open (#workflow=10, the workflows dialog);
+//  - a rotation with a modal / phone sheet open (#deliverable=10, the deliverables dialog);
 //  - a rotation with the phone drawer open.
 // After every turn: no horizontal overflow, the app root exactly as tall as the viewport, the layout for the new width
 // (phone below PHONE_BREAKPOINT, the desktop sidebar from it), and an open modal inside the viewport.
@@ -86,8 +86,8 @@ for (const device of ['iPhone 13', 'iPhone 14 Pro Max', 'iPad Mini'] as const) {
 }
 
 for (const device of ['iPhone 13', 'iPhone 14 Pro Max', 'iPad Pro 11'] as const) {
-  test(`${device}: rotation with the workflows dialog (modal / phone sheet) open`, async ({ browser }) => {
-    const { ctx, page, errors } = await open(browser, device, '#workflow=10', '[data-test=workflow-10]');
+  test(`${device}: rotation with the deliverables dialog (modal / phone sheet) open`, async ({ browser }) => {
+    const { ctx, page, errors } = await open(browser, device, '#deliverable=10', '[data-test=deliverable-10]');
     await expect(page.locator('.modal')).toBeVisible();
     let v = devices[device].viewport;
     const m0 = await fits(page, v, 'start');
@@ -99,7 +99,7 @@ for (const device of ['iPhone 13', 'iPhone 14 Pro Max', 'iPad Pro 11'] as const)
       expect(m.modal, `the dialog stays open after turn ${i}`).not.toBeNull();
       // A phone sheet fills the width it now has (100%, not a stale 100vw).
       if (v.width < PHONE_BREAKPOINT) expect(Math.abs(m.modal!.width - v.width), `sheet width after turn ${i}`).toBeLessThanOrEqual(1);
-      await expect(page.locator('[data-test=workflow-10]').first()).toBeVisible();
+      await expect(page.locator('[data-test=deliverable-10]').first()).toBeVisible();
     }
     expect(errors).toEqual([]);
     await ctx.close();

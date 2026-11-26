@@ -7,7 +7,7 @@ import type { Effect } from '../../src/renderer/src/monitor/model';
 // The Monitor view's focus on a team, density, You-node click and sound. The wall is a fake scene with
 // the scene's setFocus / setDensity / hitYouNode; a scene picks on its own pointerdown, as the real one.
 type Fake = {
-  onPick?: (k: string | null) => void; onOpenWorkflow?: (team: string, id?: number) => void;
+  onPick?: (k: string | null) => void; onOpenDeliverable?: (team: string, id?: number) => void;
   focus: (number | null)[]; density: string[]; you: { x: number; y: number; r: number } | null; nextPick: string | null;
 };
 const scenes: Fake[] = [];
@@ -15,7 +15,7 @@ let withExtras = true;
 vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
   const real = await orig<typeof import('../../src/renderer/src/monitor/scene')>();
   class FakeScene {
-    model: unknown; onHover?: unknown; onPick?: (k: string | null) => void; onOpenWorkflow?: unknown; effects: unknown[] = [];
+    model: unknown; onHover?: unknown; onPick?: (k: string | null) => void; onOpenDeliverable?: unknown; effects: unknown[] = [];
     focus: (number | null)[] = []; density: string[] = []; you: { x: number; y: number; r: number } | null = null; nextPick: string | null = null;
     constructor(cv: HTMLCanvasElement) {
       scenes.push(this as unknown as Fake);

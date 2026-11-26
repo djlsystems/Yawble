@@ -73,7 +73,7 @@ public class CoreKillRestartTests
         }
 
         // The four killed runs are interrupted - not re-run - and each is reported once on the bus,
-        // caused by the instruction it was running, so it lands in that workflow at depth 1.
+        // caused by the instruction it was running, so it lands in that deliverable at depth 1.
         foreach (var m in new[] { "m1", "m2", "m3", "m4" })
         {
             var run = Assert.Single(runs, r => r.CausationSeq == roots[m]);

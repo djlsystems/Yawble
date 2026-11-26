@@ -38,7 +38,7 @@ public sealed record Skill(
 public sealed partial class SkillCatalog(string connectionString)
 {
     /// <summary>
-    /// The Concierge's role: a skill offered to it names it (the built-in "scripts"). It is not a team role, so "any" (every
+    /// The Concierge's role: a skill offered to it names it (the built-in "workflows"). It is not a team role, so "any" (every
     /// team agent) does not include it, and a team's Manager or members are never offered a Concierge skill.
     /// </summary>
     public const string ConciergeRole = "concierge";

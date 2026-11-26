@@ -341,7 +341,7 @@ public sealed class ConciergeActions(
     // ------------------------------------------------------------------ confirm flow
 
     /// <summary>
-    /// The same confirmation flow for a tool outside these actions (the script tools): the first call shows
+    /// The same confirmation flow for a tool outside these actions (the workflow tools): the first call shows
     /// <paramref name="plan"/> with a token; only a call with that token, for the same <paramref name="key"/>, in a later turn of
     /// this conversation started by the person at this computer runs <paramref name="run"/>. Answers "NOT DONE ..." or "ok: ...".
     /// </summary>

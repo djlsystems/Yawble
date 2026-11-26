@@ -11,7 +11,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 ## Teams and members
 
 - A team has one **Manager** and any number of **members**. You tell the Manager what you want. It splits the work,
-  tells members, and declares the workflow complete.
+  tells members, and declares the deliverable complete.
 - **New team** asks for a team name, a repository (a folder on this computer, a new one the app makes, or
   **Clone from an address**) and its agents, each with a role and a CLI. It starts from the defaults in
   **Settings > Teams**: the default Manager and the default members ticked **On new teams**; the others are offered as
@@ -68,13 +68,13 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - **Environment** holds team environment variables; the next runs get them.
   - On a phone it is laid out like the app's Settings on a phone: a list of its sections (one full-width row each, with a
     chevron); a tap opens that section alone under a Back and its title, and Back returns to the list.
-- **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**. Every open
-  workflow is listed however old, with the newest completed, closed and expired ones; the cloud dashboard, the Concierge and the
+- **Deliverables** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**. Every open
+  deliverable is listed however old, with the newest completed, closed and expired ones; the cloud dashboard, the Concierge and the
   companion list them the same way. Ask the Concierge to close the open ones whose work is done: it checks each one
   and closes only those with nothing left, saying why (on this computer: the remote view's Concierge cannot close
-  workflows).
-- Each team's tile on **Teams** lists its 50 newest workflows and every open one, last updated first, scrolling inside
-  the tile; a row opens that workflow.
+  deliverables).
+- Each team's tile on **Teams** lists its 50 newest deliverables and every open one, last updated first, scrolling inside
+  the tile; a row opens that deliverable.
 - On the team page each member is one framed pane:
   - A title bar: face, name, a role chip and an agent chip, its state and how many instructions wait behind its run,
     and at the right a **☰** menu with every action: Open interactive CLI, Code (when the member has a clone), Settings, Logs,
@@ -108,46 +108,46 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - One global run limit (default 4) covers every team. Runs and interactive sessions wait in one first-come,
   first-served queue.
 - After a model usage limit, the Manager is told to pick the work up again once the limit resets, up to 3 times per
-  workflow.
-- When a run ends with its workflow still open and nothing else working on it, the Manager gets one reminder.
-- **Workflow expiry.** An open workflow with no activity for the team's **workflowExpiryDays** (Team settings, 1 to 365,
+  deliverable.
+- When a run ends with its deliverable still open and nothing else working on it, the Manager gets one reminder.
+- **Deliverable expiry.** An open deliverable with no activity for the team's **deliverableExpiryDays** (Team settings, 1 to 365,
   default 3; settable from the cloud like the other team settings) is closed by the app as **expired**, distinct from
   closed by a person and from completed. Activity is any message in it (an instruction, a run's report, a hand-back, a
   status change, an answer) and the person's **Extend**.
-  - A workflow never expires while a run works it or waits in the queue for it, while a wake (wake_me) or an automatic
+  - A deliverable never expires while a run works it or waits in the queue for it, while a wake (wake_me) or an automatic
     resume after a usage limit is due in it.
-  - A workflow waiting on the person's answer to a question is warned first: after N-1 days of quiet the Concierge
+  - A deliverable waiting on the person's answer to a question is warned first: after N-1 days of quiet the Concierge
     posts one **Update** and Needs you shows "#<id> will expire tomorrow; it waits on your answer to question <n>" on
     that question. It expires at N days, and never sooner than a day after its warning (an app that was closed at
     warning time warns first).
-  - **Extend** (the workflow list, or the Concierge's workflow_extend) starts an open workflow's idle clock again.
-  - An open workflow's list row shows when it will expire (expiresAt; none while something works it) and the question it
+  - **Extend** (the deliverable list, or the Concierge's deliverable_extend) starts an open deliverable's idle clock again.
+  - An open deliverable's list row shows when it will expire (expiresAt; none while something works it) and the question it
     waits on the person's answer to (question; null when none). An expired one
-    reads **expired** in the Workflows dialog, on the Teams tiles, in the Concierge's team_workflows and on the cloud
+    reads **expired** in the Deliverables dialog, on the Teams tiles, in the Concierge's team_deliverables and on the cloud
     dashboard. Its recorded end (endedAt) is its last real activity, not the expiry; expiredAt is when the app expired it.
-  - New activity reopens an expired workflow, as it reopens a completed or closed one.
-  - Closing a workflow in any way (completed, closed by a person, expired) ends every card of it not ended yet, with
-    the time and how it ended (completed, closed or expired); an expired workflow's cards end at its last activity.
+  - New activity reopens an expired deliverable, as it reopens a completed or closed one.
+  - Closing a deliverable in any way (completed, closed by a person, expired) ends every card of it not ended yet, with
+    the time and how it ended (completed, closed or expired); an expired deliverable's cards end at its last activity.
     Closed and expired move every card to Done, a waiting one too; completed leaves a card waiting on a person where
-    it is. Telling the card's member something in the workflow makes the card live again.
+    it is. Telling the card's member something in the deliverable makes the card live again.
 - **Skills** (Settings > Skills) are instructions agents load through the app, offered to chosen roles and teams.
 - **How a team learns**. Agents keep no memory between runs, so a team keeps its lessons in one place: its
   **team_retros** skill, a team-scoped skill (offered to every role) with a short list of lessons, each
-  "- <lesson> (<date>, workflow <id>)", under a few headings (Building and testing, Git, Working with the person ...).
-  - After a workflow completes, the Manager looks back on it (a retrospective) and keeps at most a few lessons a later run
+  "- <lesson> (<date>, deliverable <id>)", under a few headings (Building and testing, Git, Working with the person ...).
+  - After a deliverable completes, the Manager looks back on it (a retrospective) and keeps at most a few lessons a later run
     should act on, merging them into team_retros with the Manager-only tool **team_retros_write** (the whole new text).
-    Only an eventful workflow gets one: a small, uneventful workflow gets no retrospective, and a workflow that was
-    closed or expired instead of completed never does (nor does a retrospective's own workflow).
+    Only an eventful deliverable gets one: a small, uneventful deliverable gets no retrospective, and a deliverable that was
+    closed or expired instead of completed never does (nor does a retrospective's own deliverable).
     The tool writes only its own team's team_retros, nothing else; it refuses a text over 4000 characters (saying its
     size), and refuses a write when the text changed since that run read it (the person edited it meanwhile), so the
     Manager reads it again and merges into the person's text: a person's edit is never reset.
   - Live at once, no approval: every run of that team, the Manager's and the members', gets the text in its prompt under
     "Lessons from this team's earlier work". No other team's runs get it, and the Concierge does not.
   - **Settings > Skills**: team_retros is an ordinary team skill there: read it, edit it (your edit is kept by the next
-    retro), see who last wrote it ("the retro of workflow <id>" or you) and its versions, newest first. Every write, the
-    Manager's or yours, is kept as a version (who, which workflow, when; the last 100); **Restore** brings an older text back
+    retro), see who last wrote it ("the retro of deliverable <id>" or you) and its versions, newest first. Every write, the
+    Manager's or yours, is kept as a version (who, which deliverable, when; the last 100); **Restore** brings an older text back
     as a new version.
-  - **Team settings > General** shows "Lessons: n, last updated <date> by the retro of workflow <id>" (or "by you"), with
+  - **Team settings > General** shows "Lessons: n, last updated <date> by the retro of deliverable <id>" (or "by you"), with
     a link that opens the skill in Settings > Skills; "Lessons: none yet" before the first.
 
 ## Agent CLIs
@@ -355,21 +355,21 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   (its findings, in Markdown, under the summary). A question in one Markdown text (`question`) still works and is
   shown as before.
   - At most one option may carry an **action**, from a fixed list the app knows: `team.allowLocalhostMac`
-    (turn on the team's Allow localhost (macOS)) and `workflow.closeOverFail` (below). The agent only names it; nothing changes when it asks. When you
+    (turn on the team's Allow localhost (macOS)) and `deliverable.closeOverFail` (below). The agent only names it; nothing changes when it asks. When you
     pick that option the app applies the action first, then sends the option's reply as your answer. Anything else
     named as an action is refused and the question is not asked.
-  - **Closing over a tester's FAIL**: `workflow_complete` is refused (`tester_fail`) while a card's latest
-    tester hand-back in the workflow starts with FAIL (a later PASS clears it). The refusal names the card, quotes the
+  - **Closing over a tester's FAIL**: `deliverable_complete` is refused (`tester_fail`) while a card's latest
+    tester hand-back in the deliverable starts with FAIL (a later PASS clears it). The refusal names the card, quotes the
     FAIL line and gives the ways forward: fix it and have the tester verify again; or ask you with `needs_decision`
     plus `card`, `kind` (`accept-fail`, or `wont-do` with a `reason`) and `reason`. The yes option carries
-    `workflow.closeOverFail` (the app adds a yes and a no when the agent gives no options). Only your pick of that
+    `deliverable.closeOverFail` (the app adds a yes and a no when the agent gives no options). Only your pick of that
     option counts as the yes (typed text or the Concierge's answer does not); the declaration then goes through and
     its payload lists the card in `closedOverFail: [{ card, tester, failLine, kind: "accepted" | "wont-do", reason }]`.
   - An option whose action you cannot apply is shown disabled with the reason: a Cloud Link Visitor ("Only a
     workgroup Member or an Owner can change this"), anything but the app or a cloud viewer ("Only the person can pick
     this, in the app"), a computer that is not a Mac ("Only on macOS").
   - While a member's question is open, its card and the team status say **Waiting on you** with a link to the
-    question, whatever it reported after asking (a hand-back, or the workflow declared complete). Once you answer it,
+    question, whatever it reported after asking (a hand-back, or the deliverable declared complete). Once you answer it,
     the card shows its last report again.
 - Floor rules nobody can loosen:
   - model vendors' API and sign-in hosts are never allowed hosts;
@@ -383,10 +383,10 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - Conversations are kept. Each reply is one sandboxed run of the conversation's agent CLI.
 - A new conversation starts on the default agent from Settings > Concierge while that agent still exists; otherwise
   on the first CLI that is installed and signed in. Existing conversations keep their own agent.
-- It can read teams, status, activity, workflows, documents, the backlog, the board, git state, integrations,
+- It can read teams, status, activity, deliverables, documents, the backlog, the board, git state, integrations,
   usage and the doctor.
 - It can tell a Manager, answer a team's question, create a team, pause or resume a team, nudge, close or extend a
-  workflow, and add, dispatch, move or comment on backlog items and cards.
+  deliverable, and add, dispatch, move or comment on backlog items and cards.
 - Git and team actions: delete, prune, push or sync branches, open or merge a pull request (GitHub with your `gh`,
   GitLab with your `glab`, Azure DevOps with your `az repos`; see [Repositories and git](#repositories-and-git)),
   archive or delete a team, set environment variables, change an agent.
@@ -395,9 +395,24 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - It keeps notes across conversations, and can watch teams and review their updates. A review it starts on its own
   can read and recommend, never act.
 - You can attach images to a message.
-- It builds scripts from a description and sets them up: it adds the script member, turns its trigger on
-  (`script_trigger_set`) and allows one API action a step needs (`integration_action_allow`), each after your yes in
-  the window (see [Scripts](#scripts)).
+- It builds workflows from a description and sets them up: it adds the workflow member, turns its trigger on
+  (`workflow_trigger_set`) and allows one API action a step needs (`integration_action_allow`), each after your yes in
+  the window (see [Workflows](#workflows)).
+
+## Goals
+
+- A **goal** is your own name for what some deliverables are for, with a description. Every deliverable has at most one
+  goal; one with none is **Unassigned**.
+- The **Goals** page (left navigation, under Teams) lists every goal with its deliverables (folded away until you open
+  them), how many are open, and its time, then the Unassigned deliverables. **New goal** and **Edit** open a dialog for
+  the name (unique, ignoring case) and description; deleting a goal keeps its deliverables and makes them Unassigned.
+- Each deliverable has a goal picker on the Deliverables page; change it any time and the Goals page follows.
+- A goal's time is the calendar time its deliverables cover together, each from its first message to its end (or now
+  while it is open): two deliverables worked side by side for an hour count one hour.
+- The Concierge can list goals, create and rename them, and assign deliverables to them when you ask (it may propose
+  goal names from what the teams work on). It deletes a goal only after your yes. Paired companion apps have the same
+  tools: listing at the read level, saving and assigning at the act level, deleting at the destructive level (you
+  approve it in the window).
 
 ## Board, Backlog and Documents
 
@@ -419,7 +434,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     need a reason.
   - If someone else's hand-back or finished run would put a tester's card in Done (for example after it was given
     back to a developer), the card stays In Progress. A comment says it is waiting for the tester.
-  - When the workflow is declared complete, a tester's card the tester has not tested stays out of Done. A comment
+  - When the deliverable is declared complete, a tester's card the tester has not tested stays out of Done. A comment
     says why.
   - The tester has tested a card only when it hands back, or one of its runs finishes having handed back, after the
     card was last assigned or given new work. A run that failed, a run that ended without a hand-back (for example one
@@ -430,12 +445,12 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     count, so "latest" or "contest" do not make a tester. "tests" and "tested" do not count either, so
     "Developer: writes the code and its unit tests" is not a tester.
   - Teams with no tester are not asked for a reason.
-- **Time accounting**: every card and every workflow has one overall time, from when it was created to when it was
-  last done, and a breakdown of where that time went. The core computes both; the board, the Workflows list, the
-  Concierge (team_workflows, board_card), the phone and the cloud show the same numbers.
-  - A card's overall time runs from when it was planned (created) to the last time it entered Done. A workflow's runs
-    from its first message to when it was completed, closed or expired; an expired workflow ends at its last activity.
-    While open, the time runs to now. A reopened card or workflow moves its end later, and the time it spent done
+- **Time accounting**: every card and every deliverable has one overall time, from when it was created to when it was
+  last done, and a breakdown of where that time went. The core computes both; the board, the Deliverables list, the
+  Concierge (team_deliverables, board_card), the phone and the cloud show the same numbers.
+  - A card's overall time runs from when it was planned (created) to the last time it entered Done. A deliverable's runs
+    from its first message to when it was completed, closed or expired; an expired deliverable ends at its last activity.
+    While open, the time runs to now. A reopened card or deliverable moves its end later, and the time it spent done
     before the reopen counts as **Was done**.
   - A card records its planned time and its started time: the first time it has a member and is queued or told.
     Every change of a card's state is recorded with its time and category.
@@ -445,30 +460,30 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     one, or to the run's end), **Waiting on you** (an open question to you),
     **Waiting for a slot** (its member is in the run queue for a run slot, or its run waits for the heavy-work lease),
     **Waiting on a teammate** (handed back, or its run ended, and it waits for the Manager or a tester; or it has work
-    whose member is not in the run queue: busy in another workflow, its team paused, or a hand-back waiting for its
+    whose member is not in the run queue: busy in another deliverable, its team paused, or a hand-back waiting for its
     sender's run to end), **Blocked** (blocked, or its run failed),
     **Scheduled** (parked until the wake it asked for), **Not started** (planned, no member yet), **Idle** (open,
     nobody working it, nothing scheduled) and **Was done**.
-  - A workflow's cards overlap, so they are not added up: each moment takes the highest category among its cards
+  - A deliverable's cards overlap, so they are not added up: each moment takes the highest category among its cards
     not in Done (and the Manager's own runs), in the order Agent working, Waiting on you, Stalled, Waiting for a slot,
     Waiting on a teammate, Blocked, Scheduled, Not started, Idle, Was done. Its categories add up to its wall-clock
     time.
-  - A card's or a workflow's timeline (timeline.get) gives one row of category bands per card, the workflow's summary
+  - A card's or a deliverable's timeline (timeline.get) gives one row of category bands per card, the deliverable's summary
     row, and markers for planned, started, reopen, hand-back, question asked and answered, a run ended by the idle
     watchdog, and expired. A Visitor can read it.
   - Cards from before time accounting have their timeline rebuilt from their history (planned, assigned, told,
     progress, handed back, done, moved, run ended, failed), marked "rebuilt from history"; a run the idle watchdog
     ended is Stalled from the line before it to its end.
-  - The overall time shows as one quiet line (like 1h 12m 05s) on a card's bottom row, under each workflow in the
-    Workflows dialog and on the workflow rows of the Teams-list tiles. An open card or workflow counts on each second.
+  - The overall time shows as one quiet line (like 1h 12m 05s) on a card's bottom row, under each deliverable in the
+    Deliverables dialog and on the deliverable rows of the Teams-list tiles. An open card or deliverable counts on each second.
   - Clicking or tapping the overall time (or Enter on it) opens the **Timeline** dialog; it does not open the card.
     The dialog shows:
     - the overall time, created → ended (or open, still counting) and how it ended;
-    - the planned and started line (for a workflow: first message and first card started), with how long it waited
+    - the planned and started line (for a deliverable: first message and first card started), with how long it waited
       before it started;
     - the breakdown table: each category with time, its share (the shares add up to 100%) and the total;
     - "rebuilt from history" when the timeline was rebuilt from an older card's history;
-    - the timeline: for a workflow an **All cards** summary row on top, then one row per card; for a card one row.
+    - the timeline: for a deliverable an **All cards** summary row on top, then one row per card; for a card one row.
       Each row is drawn as category bands on one time axis, with the start time on the left and the end time (or
       now) on the right.
   - Pointing at, tapping or tabbing to a band or a marker says it in the readout under the timeline (its category,
@@ -488,20 +503,20 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
   - Items can be archived and restored. **Dispatches** shows each dispatch with its token counts.
-  - An opened item lists each team it went to on one line: **Open team**, **Its board**, and **workflow #N** (that
-    team's latest workflow for the item), which opens the Workflows page with that workflow selected.
-- **Workflows**: every team's workflows in one table, in the sidebar directly below Backlog (its badge counts the
+  - An opened item lists each team it went to on one line: **Open team**, **Its board**, and **deliverable #N** (that
+    team's latest deliverable for the item), which opens the Deliverables page with that deliverable selected.
+- **Deliverables**: every team's deliverables in one table, in the sidebar directly below Backlog (its badge counts the
   open ones).
-  - **Ways in**: the sidebar; the board's **Workflows** button next to Backlog (filtered to the board's team when it
-    shows one, else all teams); **All workflows** in a team's Workflows dialog and on its tile in the Teams list; a
-    Backlog item's **workflow #N**. A link of the form `#workflows?t=3&s=open&q=…&sel=12` opens it filtered.
+  - **Ways in**: the sidebar; the board's **Deliverables** button next to Backlog (filtered to the board's team when it
+    shows one, else all teams); **All deliverables** in a team's Deliverables dialog and on its tile in the Teams list; a
+    Backlog item's **deliverable #N**. A link of the form `#deliverables?t=3&s=open&q=…&sel=12` opens it filtered.
   - **Filters**: a team (or all teams), free text over the id, title, item label, team and member names (filters as
     you type, the matches highlighted), and the status chips **Open**, **Needs you**, **Done**, **Closed/Expired** and
     **All**, each with its count. A summary line ("5 open · 1 needs you · 12 completed today") with a tiny sparkline of
     today's starts and completions per hour. The filters are remembered and kept in the page's address.
   - **Columns**: **Status** (an icon and a word: Running, Needs you, Waiting (for a slot, the lease or a wake-up),
-    Idle (its tooltip counts down to its expiry), Stopped, Completed, Closed, Expired; a workflow someone is working
-    breathes gently, and holds still when the system asks for reduced motion); **Workflow** (#id and the clean title: a dispatched item's own
+    Idle (its tooltip counts down to its expiry), Stopped, Completed, Closed, Expired; a deliverable someone is working
+    breathes gently, and holds still when the system asks for reduced motion); **Deliverable** (#id and the clean title: a dispatched item's own
     title); **Item** (the backlog label, a link to the Backlog with that item selected, an archived one in the
     archive; "—" when it was not dispatched from the backlog); **Team**; **Who** (the faces of the members working it
     now, then its owner); **Elapsed** (the overall time, ticking while open; it and the timeline icon beside it open
@@ -515,13 +530,13 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
     (commit IDs are links); the overall time with its breakdown and a **Timeline** button.
   - **Actions** in the pane, each asked in the app's confirm dialog: **Nudge** (nobody is working it), **Extend** (it
     will expire), **Stop** (what runs in it) and **Close**. A Visitor sees none of them.
-  - A new workflow's row eases in; a workflow that completes turns its mark into a check. With nothing open, a short
+  - A new deliverable's row eases in; a deliverable that completes turns its mark into a check. With nothing open, a short
     note and a button to the Backlog.
-  - On a phone the list comes first and an opened workflow takes the page (**← Workflows** goes back). Through the
+  - On a phone the list comes first and an opened deliverable takes the page (**← Deliverables** goes back). Through the
     Cloud Link a Visitor sees the page read-only; the item link and the spec show only when the viewer may read the
     backlog.
-  - The Workflows dialog and a team tile's workflows show each workflow's item label as the same link, and a
-    workflow node's panel on the Monitor names its backlog item.
+  - The Deliverables dialog and a team tile's deliverables show each deliverable's item label as the same link, and a
+    deliverable node's panel on the Monitor names its backlog item.
   - Time only: no tokens or cost.
 - **Documents**: each team has a shared documents folder for reports, specs and plans. The list shows each entry's
   size and when it was last modified.
@@ -536,18 +551,18 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 - A live wall of every team. **Nodes**: each team is a hub in its own colour; its members orbit it as discs with
   their face and a state ring (running turns, waiting creeps round, blocked, needs you and failed throb, idle is a
   thin line). The Manager wears an outer ring with ticks; queued instructions orbit a member as small dots.
-- **Workflow nodes**: each open workflow is a small node tied by dashed lines to the members working it (to its team
+- **Deliverable nodes**: each open deliverable is a small node tied by dashed lines to the members working it (to its team
   while nobody is on it). It flashes green and drifts away when it completes, fades with a cross when it is closed,
   and shows a "!" while it is blocked. Under it, its number and title ("#3848 Remote UI: xterm's link…"), cut to
-  30 characters, with a backlog workflow's "Backlog item " left out; hover it for the whole title, click it to open the
-  workflow. The label is never smaller than 8 px on screen and dims with its team. When the window is phone-wide
+  30 characters, with a backlog deliverable's "Backlog item " left out; hover it for the whole title, click it to open the
+  deliverable. The label is never smaller than 8 px on screen and dims with its team. When the window is phone-wide
   (under 760 px) and the wall is zoomed out, it shows only "#3848". A desktop window always shows the title, even
   when the sidebar and Activity leave the wall narrow. Labels never cover each other, a member's disc or name, a
-  team's name pill, or any team's code map (its folders, folder names and files). A workflow square drawn on its
+  team's name pill, or any team's code map (its folders, folder names and files). A deliverable square drawn on its
   team's map stays on top and takes the hover and the click.
   Where a label has no room, it moves above its node or off to one side. With no room there either, it shrinks to
-  "#3848", or it is left out and the hover still gives the title. Blocked and working workflows go first, then the
-  newest. There is no Workflows panel on the wall.
+  "#3848", or it is left out and the hover still gives the title. Blocked and working deliverables go first, then the
+  newest. There is no Deliverables panel on the wall.
 - **Rhythm**: each member shows its recent tool steps rising off it and what it is doing now; a busier member pulses
   faster, a command or test run shows a ring filling while it runs, then a green or red burst by its exit code when
   that is known, and thinking shimmers softly.
@@ -562,17 +577,17 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   message. Remembered. Calm also shows fewer code-map files (72 in all) and at most 3 resting commits per team.
   Reduced motion is respected at every density.
 - **Sound** (the speaker beside the density): off unless you turn it on, and remembered. Then a short, quiet tone
-  plays for needs you, a failure or block, a finished workflow, a hand-back, a commit, a merge, a landing on main and
+  plays for needs you, a failure or block, a finished deliverable, a hand-back, a commit, a merge, a landing on main and
   a push, each kind at most once every 1.5 s. Steps and messages make no sound, nor does a replay.
 - On a phone or in the remote view the camera, the cog and the legend share one row; the density and the sound sit
   at the top of the cog's panel, so nothing scrolls sideways at 375 px.
 - **Code map**: each team has one tree round its hub, past its members: the repository, then its folders, then their
-  files. It builds up over the life of a workflow.
+  files. It builds up over the life of a deliverable.
   - A new file pops in. An edit lights a file bright, a read lights it faint. A folder glows warmer the busier its
     files are.
   - A line runs from each member to every file it touched. A file two members touched wears a double ring. A file a
     commit confirmed wears a ring; hover a file for its path, who touched it and its commit.
-  - A file leaves when every workflow that touched it has ended, or after it has been idle for 2 minutes. It fades
+  - A file leaves when every deliverable that touched it has ended, or after it has been idle for 2 minutes. It fades
     out over the last 20 seconds.
   - A large map collapses to its busiest folders, each with **+N** for the rest, and a **+N folders** node. All the
     maps together show at most 240 files, and nodes off the screen are not drawn.
@@ -591,7 +606,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
   link strength, repulsion, gravity, friction and **Team spacing** (how far apart the teams sit), each a multiplier
   (0.25× to 3×) on the wall's own layout. They apply as you drag and are remembered; **Reset** goes back to the
   defaults: distance 0.3×, strength 2.75×, repulsion 0.35×, gravity 2.4×, friction 0.45×, team spacing 1×.
-- The teams sit on an oval sized so that, at team spacing 1×, the two nearest teams' clusters (members, workflow
+- The teams sit on an oval sized so that, at team spacing 1×, the two nearest teams' clusters (members, deliverable
   nodes and their labels, and the code maps actually drawn) are close but do not overlap. A code map fans out away from
   the other teams, so only the part of it that wraps back toward a neighbour adds to the room between them.
 - Under Auto fit at team spacing 1×, once the wall comes to rest it measures the clusters as drawn and slides them so
@@ -600,7 +615,7 @@ The window has light and dark themes: the sun or moon button right of the Cloud 
 
 **Code map sources.** The app records what really reaches the team repository: each new commit a member's run brings
 back (its files and whether each was added, modified, deleted or renamed), each merge into the team branch, each Merge
-to main and each push to origin, with the workflow it came from. It reads them in the team repository, never in a
+to main and each push to origin, with the deliverable it came from. It reads them in the team repository, never in a
 member's clone. Commit diffs are the truth for a file's existence and status. Transcript steps are only the immediate,
 provisional signal, and the only source for reads.
 
@@ -635,8 +650,8 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
     hour, across that member's runs. Every other row's Times is 1.
   - **Usage**: **Model usage**, tokens per model request (`usage_events`).
   - **Agent output**: **Transcripts**.
-  - **Work history**: **Team messages**, **Board history** and **Script runs**. A Script runs row's **Script run**
-    opens that run's view (each step with its input, output and status, the run's log and its files); **← Script runs**
+  - **Work history**: **Team messages**, **Board history** and **Workflow runs**. A Workflow runs row's **Workflow run**
+    opens that run's view (each step with its input, output and status, the run's log and its files); **← Workflow runs**
     goes back to the log.
   - **Diagnostics**: what the app itself reported (`<data>/logs/`). Each entry has a time, where it came from (core or
     shell), its message, a **Level** and **Fields**:
@@ -644,10 +659,10 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
       line the app writes without one (on standard error) get theirs from what they say.
     - Debug is for routine lines: a run admitted, the heavy-work lease held, queued for, handed on or released (a holder
       passing the 30-minute limit is a warning), each clone fetched at start-up, a Grok session check that changed nothing, a trigger that fired a
-      script member (with the script run it started), the daily prune, and the one line per push to origin (every
+      workflow member (with the workflow run it started), the daily prune, and the one line per push to origin (every
       branch it pushed). They are hidden unless the Level filter asks for them.
     - Fields are `key=value` pairs with the ids the line is about: `level`, `area` (`teams`, `bus`, `lease`, `grok`,
-      `logs`, `link`, `doctor`...) and, where known, `team`, `member`, `workflow`, `run`, `script`, `step`, `action`,
+      `logs`, `link`, `doctor`...) and, where known, `team`, `member`, `deliverable`, `run`, `workflow`, `step`, `action`,
       `integration`, `status`, `ms` and `attempt`. A value with a space in it is in double quotes.
     - At start-up one line says how many clones were fetched and how many were behind ("start-up fetch-back: fetched 23
       clones, 7 behind"). After that, a clone gets a line only when its state changes. A branch whose work does not merge
@@ -669,7 +684,7 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
   requests (installed, or Not now) with their history. A tool request still waiting or installing, a tool's Not now
   from the last 24 hours (for the team and that tool under any of its names, such as dotnet-sdk-10 and dotnet-sdk-lts),
   and a host denial from the last 24 hours are kept even when pruning all of it, so the 24-hour quiet holds. Team
-  messages and Board history are never pruned: the team pages, workflows and the Monitor's replay
+  messages and Board history are never pruned: the team pages, deliverables and the Monitor's replay
   are built from them.
 - **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
@@ -681,7 +696,7 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
   length, and a phone number keeps only its last 4 digits (`...0001`). Rows written before this are not rewritten.
 - Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
 - A Cloud Link viewer can tail the logs live (`logs.tail`): new entries are pushed as they are written, filtered on
-  this computer by level (warnings, errors and workflow events by default, everything but debug with `all`, or
+  this computer by level (warnings, errors and deliverable events by default, everything but debug with `all`, or
   everything with `debug`), team and member, and
   redacted as above. It stops when the viewer stops it or disconnects.
 
@@ -804,76 +819,76 @@ masked in the log and never reaches an agent. See
 - Options: **Only when the agent is idle**, **Enabled**, **Run now**.
 - **Wake the Manager when a run ends**: only on a hand-back or failure (the default), every time, or never.
 
-## Scripts
+## Workflows
 
-- A **script** is a JSON document (`yawble-script/1`): typed settings, variables, the integrations it requires and a
-  flowchart of steps. The script library is global: every script is available to every team.
-- Every save of a script is kept as a new version. A save is checked (references, types, reachable steps, the actions
-  it requires); one that fails the check is kept as a **draft**, which no member runs. Scripts are exported and
+- A **workflow** is a JSON document (`yawble-workflow/1`): typed settings, variables, the integrations it requires and a
+  flowchart of steps. The workflow library is global: every workflow is available to every team.
+- Every save of a workflow is kept as a new version. A save is checked (references, types, reachable steps, the actions
+  it requires); one that fails the check is kept as a **draft**, which no member runs. Workflows are exported and
   imported as `.json` files. A document's top-level `layout` section (the editor's node positions) is kept unchanged
   through save, get, export and import.
 - **Schemas** are named object types (a JSON Schema subset), also global and versioned. The built-in schemas
   (TriggerFired, FolderChange, EventItem, EmailMessage, EmailAddress, EmailList, ApiResponse, TellResult) are read-only.
-  TellResult is what a Tell step gives back: `outcome` (sent, done, failed, blocked, timedOut or dryRun), `workflow`,
+  TellResult is what a Tell step gives back: `outcome` (sent, done, failed, blocked, timedOut or dryRun), `deliverable`,
   `reply` (the agent's closing summary) and `data`, typed by the tell's reply schema. A schema save that
-  removes or retypes a field a saved script uses is refused, listing each script, version and step it would break.
+  removes or retypes a field a saved workflow uses is refused, listing each workflow, version and step it would break.
 - The **Schemas** tab shows each schema as a tree of its fields: type, required, description, enum values, and the
   schemas a field refers to (as an item of a list too). A built-in schema is read-only. Your own schema has a
   **Design** tab (add, remove and reorder fields; each field's name, type (a native type, `list<…>` or another schema),
   required, description and enum values) and a **JSON** tab; both edit one schema, checked when it is saved. **Used in**
-  lists the scripts whose latest version uses the schema, with the variables typed with it and the steps that read it.
-- A script's `integration` steps name the person's integrations as Settings > Integrations shows them: an Email
-  integration's name (`"use": "Support inbox"`) or a web API's name (`"use": "Twilio"`). The script's `requires` (each
+  lists the workflows whose latest version uses the schema, with the variables typed with it and the steps that read it.
+- A workflow's `integration` steps name the person's integrations as Settings > Integrations shows them: an Email
+  integration's name (`"use": "Support inbox"`) or a web API's name (`"use": "Twilio"`). The workflow's `requires` (each
   integration it uses, its kind and the actions its steps call) is derived from the steps on every save and check; a
   `requires` that does not match the steps is replaced and reported as a warning, never as a reason for a draft.
-- A **script member** is a team member whose runs are the core's script engine, never an agent CLI. It runs a pinned
-  version of its script or the newest version that passes its check, with its own settings. It uses the integrations
-  the script names, and each must be turned on for its team; the same integration serves every team it is turned on
-  for. Adding or changing a member whose script uses an integration that is not turned on for its team is refused
+- A **workflow member** is a team member whose runs are the core's workflow engine, never an agent CLI. It runs a pinned
+  version of its workflow or the newest version that passes its check, with its own settings. It uses the integrations
+  the workflow names, and each must be turned on for its team; the same integration serves every team it is turned on
+  for. Adding or changing a member whose workflow uses an integration that is not turned on for its team is refused
   with the reason.
-- **Per-member override**: a member may use another integration of the same kind in place of one the script names
+- **Per-member override**: a member may use another integration of the same kind in place of one the workflow names
   ("Support inbox → Other inbox"), for example a different mailbox for each team. The override is kept in the member's
   bindings (`{ "Support inbox": "Other inbox" }`), shown on the member's tile and in its settings, and used by every run
   of that member. An override to an integration of another kind, or to one not turned on for the member's team, is
   refused with the reason.
-- Scripts written before real names name each integration by an alias in `requires` (`mail`, `sms`), and each of their
+- Workflows written before real names name each integration by an alias in `requires` (`mail`, `sms`), and each of their
   members binds every alias to a real integration. They check and run as they always have. **Use real names** in the
-  editor (`scripts.useRealNames`) rewrites such a script to the real names, taken from a member's bindings.
-- Every trigger kind starts a script member's run, with a structured input: TriggerFired (every, cron, once),
+  editor (`workflows.useRealNames`) rewrites such a workflow to the real names, taken from a member's bindings.
+- Every trigger kind starts a workflow member's run, with a structured input: TriggerFired (every, cron, once),
   FolderChange (the folder and the added, removed and changed files) or EventItem (the event and its item). An
-  instruction told to a script member starts a run with its text. Agents' triggers are unchanged.
-- A script member runs one run at a time: a trigger that fires during a run is skipped and the skip is listed in its
-  runs. The limit is per member: the same script runs at the same time as members of different teams, or as two
+  instruction told to a workflow member starts a run with its text. Agents' triggers are unchanged.
+- A workflow member runs one run at a time: a trigger that fires during a run is skipped and the skip is listed in its
+  runs. The limit is per member: the same workflow runs at the same time as members of different teams, or as two
   members of one team. Each member has its own saved variables, data folder, settings, bindings and runs. A trigger's
-  run starts no team workflow and wakes no Manager; only a Tell step gives the team work.
-- A run uses the version of the script it started with, including when it resumes after a restart, even if the script
+  run starts no team deliverable and wakes no Manager; only a Tell step gives the team work.
+- A run uses the version of the workflow it started with, including when it resumes after a restart, even if the workflow
   is saved again or the member's pinned version changes meanwhile.
 - A run has a timeout (a member setting, 10 minutes by default), a budget of 10,000 steps and a loop cap. Each step's
   input, output, status and times are kept (shortened, with secrets masked), with the run's log. A run cut off by the
   app closing resumes from its last completed step when the app starts again.
-- Saved variables are kept per script member between runs and change only when a run succeeds; one saved variable
+- Saved variables are kept per workflow member between runs and change only when a run succeeds; one saved variable
   can be reset. Three failed runs in a row raise one decision card in Needs you; a run that succeeds, or the
   person's answer, starts the count again.
-- **Test run** runs a version of a script (a draft too) on a sample input and settings for a team, as a dry run by
+- **Test run** runs a version of a workflow (a draft too) on a sample input and settings for a team, as a dry run by
   default: changing actions are not performed and are logged as "would ...", and file writes go to a dry-run folder.
   A test run keeps no saved variables.
-- **Tell** gives work to a team's agents; a script never runs an agent itself. A `tell` step names an agent member
-  (`member`, the Manager by default) and a team (`team`, the script member's own team by default), and its `text` is the
-  instruction (a template). Telling the Manager starts a workflow it plans; telling another agent member gives that
-  member one card, in a workflow the Manager sees but does not plan. The workflow says which script, member and run it
-  came from. Script members and the person cannot be told, and a name that is not an agent member of the team when the
+- **Tell** gives work to a team's agents; a workflow never runs an agent itself. A `tell` step names an agent member
+  (`member`, the Manager by default) and a team (`team`, the workflow member's own team by default), and its `text` is the
+  instruction (a template). Telling the Manager starts a deliverable it plans; telling another agent member gives that
+  member one card, in a deliverable the Manager sees but does not plan. The deliverable says which workflow, member and run it
+  came from. Workflow members and the person cannot be told, and a name that is not an agent member of the team when the
   step runs fails the step.
   - `wait: false` (the default) goes on at once. `wait: true` saves the run at the step with the state **waiting** until
-    the workflow is done, fails or is blocked, or the step's `timeout` passes (`24h` by default, at most `7d`). A
+    the deliverable is done, fails or is blocked, or the step's `timeout` passes (`24h` by default, at most `7d`). A
     waiting run holds no run slot, its run timeout stops while it waits, and it resumes after the app restarts. It is
-    still the member's run: triggers that fire meanwhile are skipped and listed. Cancelling the run leaves the workflow
+    still the member's run: triggers that fire meanwhile are skipped and listed. Cancelling the run leaves the deliverable
     alone.
   - With `wait`, `reply` names a schema: the agent is asked to end its answer with JSON of that schema, and a reply that
     does not match fails the step.
-  - `into` gets a `TellResult { outcome, workflow, reply, data }`: outcome `sent`, `done`, `failed`, `blocked`,
+  - `into` gets a `TellResult { outcome, deliverable, reply, data }`: outcome `sent`, `done`, `failed`, `blocked`,
     `timedOut` or `dryRun`; `reply` is the agent's closing summary; `data` is the reply's JSON, or null.
   - A run tells at most 5 times by default; **Tells per run** on the member's card sets it (at most 50), and the next
-    tell fails the run. **Settings > Scripts > Scripts may tell other teams** (on by default) turned off fails a tell
+    tell fails the run. **Settings > Workflows > Workflows may tell other teams** (on by default) turned off fails a tell
     to another team with that reason.
   - A dry run or a test run never sends a tell: the log says "would tell Manager of Support: ..." and `into` gets
     outcome `dryRun`. **Test run** has a **Made-up reply** field for each tell that waits.
@@ -881,7 +896,7 @@ masked in the log and never reaches an agent. See
     team's agent members, the Manager first), Text and **Wait for the outcome**; Timeout and Reply schema show only
     when Wait is on, then **Save result into**. Its node reads "tell Manager", "tell Ava (waits)", or "tell Manager of
     Billing" for another team.
-  - A waiting run shows **waiting** with a link to its workflow in the Runs tab, the run view and the member's card.
+  - A waiting run shows **waiting** with a link to its deliverable in the Runs tab, the run view and the member's card.
 - **Loop** (`while`) repeats its body while a condition holds. `when` is a condition, as an If has; it is checked
   before each pass, and when it is false the run goes to `then`. `body` and `then` follow the For each rules: a step
   in the body with no successor ends that pass. `max` is the most passes, 100 by default and at most 10,000; a loop
@@ -901,13 +916,13 @@ masked in the log and never reaches an agent. See
   - In the flowchart, **Code** is in the palette's **Do** group; its node reads "code → Staleness" (the type it
     returns). Its form has Inputs (a name and a value each, added and removed), the code in a monospace area where Tab
     indents, **Returns** (a native type or a schema) and **Save result into**.
-- Script runs are listed with their state, steps and log, and recorded with the agents' runs. A Visitor on the Cloud
-  Link can read scripts, schemas, script members and runs, and cannot change or run any of them.
+- Workflow runs are listed with their state, steps and log, and recorded with the agents' runs. A Visitor on the Cloud
+  Link can read workflows, schemas, workflow members and runs, and cannot change or run any of them.
 - **Building with the Concierge.** The Concierge (and a program paired through the companion) builds, checks, saves
-  and dry-runs scripts with its script tools, and adds a script member with `script_member_add`. Two more tools turn
-  a script on:
-  - `script_trigger_set { team, member, name, schedule, enabled?, id?, only_when_idle? }` creates or changes a trigger
-    aimed at a script member. `schedule` is a trigger's schedule (every, cron, once, event or folder); `enabled` is
+  and dry-runs workflows with its workflow tools, and adds a workflow member with `workflow_member_add`. Two more tools turn
+  a workflow on:
+  - `workflow_trigger_set { team, member, name, schedule, enabled?, id?, only_when_idle? }` creates or changes a trigger
+    aimed at a workflow member. `schedule` is a trigger's schedule (every, cron, once, event or folder); `enabled` is
     `true` unless given. Turning a trigger on, or changing the schedule of one that is on, waits for your yes in the
     window; turning one off does not.
   - `integration_action_allow { team, integration, action }` adds a team allow rule for exactly one API action (its
@@ -933,8 +948,8 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
   requests are kept in memory only.
 - It talks only to the running app on this computer. Nothing of it is reachable over Cloud Link.
 - Paired programs are listed and revoked in Settings > Companion.
-- A paired program has the Concierge's script tools, `script_trigger_set` and `integration_action_allow` among them,
-  with the same yes in the window (see [Scripts](#scripts)).
+- A paired program has the Concierge's workflow tools, `workflow_trigger_set` and `integration_action_allow` among them,
+  with the same yes in the window (see [Workflows](#workflows)).
 - Setup is in the [README](../README.md).
 
 ## Updates
@@ -993,9 +1008,9 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 
 - The cloud site's org dashboard shows each attached computer live: the site stores nothing and asks the computers
   while someone is watching. See [Cloud Link](cloud-link.md#the-org-dashboard).
-- `org.summary` answers one snapshot of this computer (`summaryVersion` 1): the computer (name, label, version,
+- `org.summary` answers one snapshot of this computer (`summaryVersion` 2): the computer (name, label, version,
   platform, uptime, run slots, queued runs), each team's agents (running, queued, idle, errored, and what each running
-  agent is doing), the open workflows and those ended in the last 24 hours (state, including expired; backlog item,
+  agent is doing), the open deliverables and those ended in the last 24 hours (state, including expired; backlog item,
   cards done of total, owner, endedAt and expiredAt), what waits for the person per team (decisions, tool-call approvals, network and tool requests), and the
   last 20 warnings and errors of the last hour.
 - While a viewer watches (`org.summary.watch`), the app pushes `org.summaryChanged` with the changed sections, at most
@@ -1014,7 +1029,7 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 | Skills | Skills and which roles and teams they are offered to |
 | Guardrails | The global policy and the global run limit |
 | Integrations | CLIs, APIs, MCP servers, Connections, host tasks |
-| Scripts | **Scripts may tell other teams** (on by default): off, a script's Tell step to another team fails |
+| Workflows | **Workflows may tell other teams** (on by default): off, a workflow's Tell step to another team fails |
 | Cloud Link | Pairing and remote access; see [Cloud Link](cloud-link.md) |
 | Health | The doctor |
 | Companion | `yawble-companion`: the line to add it to Claude Code, paired programs |

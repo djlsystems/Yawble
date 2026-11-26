@@ -15,16 +15,16 @@ import BackupsSection from './BackupsSection.vue';
 import CompanionPanel from './CompanionPanel.vue';
 import ConciergeSettings from './ConciergeSettings.vue';
 import TeamsSettings from './TeamsSettings.vue';
-import ScriptsSettings from './ScriptsSettings.vue';
+import WorkflowsSettings from './WorkflowsSettings.vue';
 import type { MenuItem } from './Sidebar.vue';
 import LoadingNote from './LoadingNote.vue';
 
 /**
  * Settings, one page with tabs: General (how the app runs on this computer), Agents, Concierge (its default agent), Teams
  * (New Team defaults and the member-name list), Skills, Guardrails (the global
- * policy), Integrations, Scripts (what applies to every script member), Cloud Link, Health, Companion (yawble-companion; this computer only), System. Each tab shows its screen in place.
+ * policy), Integrations, Workflows (what applies to every workflow member), Cloud Link, Health, Companion (yawble-companion; this computer only), System. Each tab shows its screen in place.
  */
-export type SettingsTab = 'general' | 'health' | 'companion' | 'concierge' | 'teams' | 'scripts' | MenuItem;
+export type SettingsTab = 'general' | 'health' | 'companion' | 'concierge' | 'teams' | 'workflows' | MenuItem;
 
 const props = defineProps<{
   api?: YawbleApi; tab: SettingsTab; teams: TeamSummary[]; pollMs?: number; integrationsTab?: 'cli' | 'api' | 'mcp' | 'connections' | null;
@@ -55,7 +55,7 @@ const tabs = computed(() => [
   { id: 'skills' as const, label: 'Skills', test: 'open-skills' },
   { id: 'globalPolicy' as const, label: 'Guardrails', test: 'open-global-policy' },
   { id: 'integrations' as const, label: 'Integrations', test: 'open-integrations' },
-  { id: 'scripts' as const, label: 'Scripts', test: 'open-scripts' },
+  { id: 'workflows' as const, label: 'Workflows', test: 'open-workflows' },
   ...(api.remote ? [] : [{ id: 'link' as const, label: 'Cloud Link', test: 'open-link' }]),
   ...(api.remote ? [] : [{ id: 'health' as const, label: 'Health', test: 'open-health' }]),
   ...(api.remote ? [] : [{ id: 'companion' as const, label: 'Companion', test: 'open-companion' }]),
@@ -127,7 +127,7 @@ async function set(patch: Partial<ShellSettings>) {
       <AgentsDialog v-else-if="tab === 'agents'" inline :api="api" />
       <ConciergeSettings v-else-if="tab === 'concierge'" :api="api" />
       <TeamsSettings v-else-if="tab === 'teams'" :api="api" />
-      <ScriptsSettings v-else-if="tab === 'scripts'" :api="api" />
+      <WorkflowsSettings v-else-if="tab === 'workflows'" :api="api" />
       <SkillsDialog v-else-if="tab === 'skills'" inline :fill="fill" :api="api" :teams="teams" />
       <GlobalPolicyDialog v-else-if="tab === 'globalPolicy'" inline :api="api" :poll-ms="pollMs" @changed="emit('changed')" />
       <IntegrationsPanel v-else-if="tab === 'integrations'" :key="integrationsTab ?? 'cli'" :api="api" :teams="teams" :initial-tab="integrationsTab ?? null" />

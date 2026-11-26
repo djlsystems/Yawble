@@ -5,18 +5,18 @@ namespace Yawble.Core.Board;
 
 /// <summary>
 /// One card on a team's board (0014_board.sql). ClearedAt (0037): the person hid this Done card from the board view.
-/// EndedAt / EndedHow (0045): when its workflow's end ended it, and how (completed, closed or expired); null while it is live.
+/// EndedAt / EndedHow (0045): when its deliverable's end ended it, and how (completed, closed or expired); null while it is live.
 /// StartedAt / Rebuilt (0047): when it first had a member and was queued or told; its timeline was rebuilt from its trail.
 /// </summary>
 public sealed record CardRow(
     long Id, string Team, string? Member, string? Item, string Title, string Body, string Status, string Lane,
-    bool Placed, bool AwaitingManager, long? Workflow, string CreatedAt, string UpdatedAt, string? ClearedAt = null,
+    bool Placed, bool AwaitingManager, long? Deliverable, string CreatedAt, string UpdatedAt, string? ClearedAt = null,
     string? EndedAt = null, string? EndedHow = null, string? StartedAt = null, bool Rebuilt = false);
 
 /// <summary>
 /// A line of a card's (or a card-less member's) timeline (0047): a state, a stall, a hold or a marker.
 /// </summary>
-public sealed record TimelineLine(long Id, long? CardId, long? Workflow, string? Member, string Kind, string At, string? Until,
+public sealed record TimelineLine(long Id, long? CardId, long? Deliverable, string? Member, string Kind, string At, string? Until,
     string? Category, bool Done, string? Marker, bool Rebuilt);
 
 /// <summary>A line of a card's history: who did what, oldest first.</summary>
@@ -25,7 +25,7 @@ public sealed record TrailRow(long Id, string At, string Source, string Kind, st
 /// <summary>A backlog item; its label is B and the id, three digits at least (B007).</summary>
 public sealed record ItemRow(
     long Id, string? Team, string Title, string Body, string State, double Position, string? ArchivedAt,
-    string? DispatchedTeam, long? DispatchedWorkflow, string? DispatchedAt, string CreatedAt, string UpdatedAt)
+    string? DispatchedTeam, long? DispatchedDeliverable, string? DispatchedAt, string CreatedAt, string UpdatedAt)
 {
     public string Label => BoardStore.Label(Id);
 }
@@ -49,7 +49,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     // ---------------------------------------------------------------- cards
 
-    private const string CardColumns = "id, team, member, item, title, body, status, lane, placed, awaiting_manager, workflow, created_at, updated_at, cleared_at, ended_at, ended_how, started_at, timeline_rebuilt";
+    private const string CardColumns = "id, team, member, item, title, body, status, lane, placed, awaiting_manager, deliverable, created_at, updated_at, cleared_at, ended_at, ended_how, started_at, timeline_rebuilt";
 
     private static CardRow ReadCard(SqliteDataReader r) => new(
         r.GetInt64(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3),
@@ -64,29 +64,29 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     public CardRow? Card(long id) => Query($"SELECT {CardColumns} FROM board_cards WHERE id = $id;", ReadCard, ("$id", id)).FirstOrDefault();
 
-    /// <summary>The member's card in this workflow (the newest, when there are several).</summary>
-    public CardRow? CardOf(string team, string member, long workflow) =>
-        Query($"SELECT {CardColumns} FROM board_cards WHERE team = $t COLLATE NOCASE AND member = $m COLLATE NOCASE AND workflow = $w ORDER BY id DESC LIMIT 1;",
-            ReadCard, ("$t", team), ("$m", member), ("$w", workflow)).FirstOrDefault();
+    /// <summary>The member's card in this deliverable (the newest, when there are several).</summary>
+    public CardRow? CardOf(string team, string member, long deliverable) =>
+        Query($"SELECT {CardColumns} FROM board_cards WHERE team = $t COLLATE NOCASE AND member = $m COLLATE NOCASE AND deliverable = $w ORDER BY id DESC LIMIT 1;",
+            ReadCard, ("$t", team), ("$m", member), ("$w", deliverable)).FirstOrDefault();
 
     /// <summary>The member's card it is most likely working on: its newest card not in Done.</summary>
     public CardRow? OpenCardOf(string team, string member) =>
         Query($"SELECT {CardColumns} FROM board_cards WHERE team = $t COLLATE NOCASE AND member = $m COLLATE NOCASE AND lane <> 'done' ORDER BY updated_at DESC, id DESC LIMIT 1;",
             ReadCard, ("$t", team), ("$m", member)).FirstOrDefault();
 
-    public IReadOnlyList<CardRow> CardsOfWorkflow(long workflow) =>
-        Query($"SELECT {CardColumns} FROM board_cards WHERE workflow = $w;", ReadCard, ("$w", workflow));
+    public IReadOnlyList<CardRow> CardsOfDeliverable(long deliverable) =>
+        Query($"SELECT {CardColumns} FROM board_cards WHERE deliverable = $w;", ReadCard, ("$w", deliverable));
 
-    public CardRow AddCard(string team, string? member, string? item, string title, string body, string status, string lane, long? workflow, string? at = null)
+    public CardRow AddCard(string team, string? member, string? item, string title, string body, string status, string lane, long? deliverable, string? at = null)
     {
         var now = at ?? Now();
         var id = Scalar(
             """
-            INSERT INTO board_cards (team, member, item, title, body, status, lane, workflow, created_at, updated_at)
+            INSERT INTO board_cards (team, member, item, title, body, status, lane, deliverable, created_at, updated_at)
             VALUES ($t, $m, $i, $title, $body, $s, $l, $w, $now, $now) RETURNING id;
             """,
             ("$t", team), ("$m", (object?)member ?? DBNull.Value), ("$i", (object?)item ?? DBNull.Value), ("$title", Clip(title, 80)),
-            ("$body", body), ("$s", status), ("$l", lane), ("$w", (object?)workflow ?? DBNull.Value), ("$now", now));
+            ("$body", body), ("$s", status), ("$l", lane), ("$w", (object?)deliverable ?? DBNull.Value), ("$now", now));
         var card = Card(id)!;
         RecordState(card, now);
         return Card(id)!;
@@ -99,7 +99,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
     /// Writes a card's changeable fields back, and its updated time. A card leaving Done is live work again: it is no
     /// longer cleared from the board (whoever moved it: the person, an agent's board tool, or the projector), and
     /// <see cref="Uncleared"/> says so when it was. A change of the card's time category is a line of its timeline (0047),
-    /// at <paramref name="stateAt"/> when given (an expired workflow's cards end at its last activity), else at the save's time.
+    /// at <paramref name="stateAt"/> when given (an expired deliverable's cards end at its last activity), else at the save's time.
     /// </summary>
     public void Save(CardRow c, string? at = null, string? stateAt = null)
     {
@@ -109,18 +109,18 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         Exec(
             """
             UPDATE board_cards SET member = $m, item = $i, title = $title, body = $body, status = $s, lane = $l, placed = $p,
-                   awaiting_manager = $a, workflow = $w, updated_at = $now WHERE id = $id;
+                   awaiting_manager = $a, deliverable = $w, updated_at = $now WHERE id = $id;
             """,
             ("$m", (object?)c.Member ?? DBNull.Value), ("$i", (object?)c.Item ?? DBNull.Value), ("$title", Clip(c.Title, 80)), ("$body", c.Body),
             ("$s", c.Status), ("$l", c.Lane), ("$p", c.Placed ? 1 : 0), ("$a", c.AwaitingManager ? 1 : 0),
-            ("$w", (object?)c.Workflow ?? DBNull.Value), ("$now", at ?? Now()), ("$id", c.Id));
+            ("$w", (object?)c.Deliverable ?? DBNull.Value), ("$now", at ?? Now()), ("$id", c.Id));
         RecordState(c, stateAt ?? at ?? Now());
         if (uncleared) Uncleared?.Invoke();
     }
 
     // ---------------------------------------------------------------- timelines (0047)
 
-    private const string TimelineColumns = "id, card_id, workflow, member, kind, at, until, category, done, marker, rebuilt";
+    private const string TimelineColumns = "id, card_id, deliverable, member, kind, at, until, category, done, marker, rebuilt";
 
     private static TimelineLine ReadLine(SqliteDataReader r) => new(
         r.GetInt64(0), r.IsDBNull(1) ? null : r.GetInt64(1), r.IsDBNull(2) ? null : r.GetInt64(2), r.IsDBNull(3) ? null : r.GetString(3),
@@ -140,31 +140,31 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
             ReadLine, ("$c", c.Id), ("$s", TimeCategories.Scheduled)).FirstOrDefault();
         if (lastBase is null || lastBase.Category != category || lastBase.Done != done
             || !string.Equals(lastBase.Member, c.Member, StringComparison.OrdinalIgnoreCase))
-            AddLine(c.Id, c.Workflow, c.Member, "state", at, null, category, done, null, false);
+            AddLine(c.Id, c.Deliverable, c.Member, "state", at, null, category, done, null, false);
         if (c.Member is not null && c.Status == "queued")
             Exec("UPDATE board_cards SET started_at = $at WHERE id = $id AND started_at IS NULL;", ("$at", at), ("$id", c.Id));
     }
 
     /// <summary>The card waits for its wake (wake_me) until <paramref name="until"/>: Scheduled; then Done again when it is in Done.</summary>
     public void AddScheduled(CardRow c, string at, string until) =>
-        AddLine(c.Id, c.Workflow, c.Member, "state", at, until, TimeCategories.Scheduled, c.Lane == Lanes.Done, null, false);
+        AddLine(c.Id, c.Deliverable, c.Member, "state", at, until, TimeCategories.Scheduled, c.Lane == Lanes.Done, null, false);
 
-    /// <summary>A run's stall or lease wait (kind stall or hold), on a card or, with no card, on the member's work in the workflow.</summary>
-    public void AddSpan(long? cardId, long? workflow, string? member, string kind, string start, string end)
+    /// <summary>A run's stall or lease wait (kind stall or hold), on a card or, with no card, on the member's work in the deliverable.</summary>
+    public void AddSpan(long? cardId, long? deliverable, string? member, string kind, string start, string end)
     {
         if (cardId is { } id) EnsureTimeline(id);
-        AddLine(cardId, workflow, member, kind, start, end, null, false, null, false);
+        AddLine(cardId, deliverable, member, kind, start, end, null, false, null, false);
     }
 
-    public void AddMarker(long? cardId, long? workflow, string? member, string marker, string at)
+    public void AddMarker(long? cardId, long? deliverable, string? member, string marker, string at)
     {
         if (cardId is { } id) EnsureTimeline(id);
-        AddLine(cardId, workflow, member, "marker", at, null, null, false, marker, false);
+        AddLine(cardId, deliverable, member, "marker", at, null, null, false, marker, false);
     }
 
-    private void AddLine(long? cardId, long? workflow, string? member, string kind, string at, string? until, string? category, bool done, string? marker, bool rebuilt) =>
-        Exec("INSERT INTO board_timeline (card_id, workflow, member, kind, at, until, category, done, marker, rebuilt) VALUES ($c, $w, $m, $k, $at, $u, $cat, $d, $mk, $r);",
-            ("$c", (object?)cardId ?? DBNull.Value), ("$w", (object?)workflow ?? DBNull.Value), ("$m", (object?)member ?? DBNull.Value),
+    private void AddLine(long? cardId, long? deliverable, string? member, string kind, string at, string? until, string? category, bool done, string? marker, bool rebuilt) =>
+        Exec("INSERT INTO board_timeline (card_id, deliverable, member, kind, at, until, category, done, marker, rebuilt) VALUES ($c, $w, $m, $k, $at, $u, $cat, $d, $mk, $r);",
+            ("$c", (object?)cardId ?? DBNull.Value), ("$w", (object?)deliverable ?? DBNull.Value), ("$m", (object?)member ?? DBNull.Value),
             ("$k", kind), ("$at", at), ("$u", (object?)until ?? DBNull.Value), ("$cat", (object?)category ?? DBNull.Value),
             ("$d", done ? 1 : 0), ("$mk", (object?)marker ?? DBNull.Value), ("$r", rebuilt ? 1 : 0));
 
@@ -175,9 +175,9 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         return Query($"SELECT {TimelineColumns} FROM board_timeline WHERE card_id = $c ORDER BY at, id;", ReadLine, ("$c", cardId));
     }
 
-    /// <summary>The lines of members' work in the workflow that is on none of its cards (card_id NULL).</summary>
-    public IReadOnlyList<TimelineLine> LooseTimeline(long workflow) =>
-        Query($"SELECT {TimelineColumns} FROM board_timeline WHERE card_id IS NULL AND workflow = $w ORDER BY at, id;", ReadLine, ("$w", workflow));
+    /// <summary>The lines of members' work in the deliverable that is on none of its cards (card_id NULL).</summary>
+    public IReadOnlyList<TimelineLine> LooseTimeline(long deliverable) =>
+        Query($"SELECT {TimelineColumns} FROM board_timeline WHERE card_id IS NULL AND deliverable = $w ORDER BY at, id;", ReadLine, ("$w", deliverable));
 
     /// <summary>
     /// Fills in a card's timeline from its board_trail lines once, for a card made before 0047 (<see cref="TimelineRebuild"/>):
@@ -215,8 +215,8 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         foreach (var l in rebuilt.Lines)
         {
             using var insert = Command(c,
-                "INSERT INTO board_timeline (card_id, workflow, member, kind, at, until, category, done, marker, rebuilt) VALUES ($c, $w, $m, $k, $at, $u, $cat, $d, $mk, 1);",
-                [("$c", cardId), ("$w", (object?)card.Workflow ?? DBNull.Value), ("$m", (object?)l.Member ?? DBNull.Value), ("$k", l.Kind), ("$at", l.At),
+                "INSERT INTO board_timeline (card_id, deliverable, member, kind, at, until, category, done, marker, rebuilt) VALUES ($c, $w, $m, $k, $at, $u, $cat, $d, $mk, 1);",
+                [("$c", cardId), ("$w", (object?)card.Deliverable ?? DBNull.Value), ("$m", (object?)l.Member ?? DBNull.Value), ("$k", l.Kind), ("$at", l.At),
                  ("$u", (object?)l.Until ?? DBNull.Value), ("$cat", (object?)l.Category ?? DBNull.Value), ("$d", l.Done ? 1 : 0), ("$mk", (object?)l.Marker ?? DBNull.Value)]);
             insert.Transaction = tx;
             insert.ExecuteNonQuery();
@@ -230,8 +230,8 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         work.Commit();
     }
 
-    /// <summary>The runs of a workflow: who, queued, started, ended (null while running; an interrupted one ends where it started).</summary>
-    public IReadOnlyList<RunSpan> RunsOf(long workflow) =>
+    /// <summary>The runs of a deliverable: who, queued, started, ended (null while running; an interrupted one ends where it started).</summary>
+    public IReadOnlyList<RunSpan> RunsOf(long deliverable) =>
         Query(
             "SELECT m.name, r.queued_at, r.started_at, r.ended_at, r.state FROM runs r JOIN members m ON m.id = r.member_id WHERE r.correlation_id = $w ORDER BY r.id;",
             r =>
@@ -240,7 +240,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
                 var started = Time(r.GetString(2));
                 DateTimeOffset? ended = r.IsDBNull(3) ? (r.GetString(4) == "running" ? null : started) : Time(r.GetString(3));
                 return new RunSpan(r.GetString(0), queued < started ? queued : started, started, ended);
-            }, ("$w", workflow));
+            }, ("$w", deliverable));
 
     public DateTimeOffset UtcNow() => _clock.GetUtcNow();
 
@@ -250,13 +250,13 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
     // ---------------------------------------------------------------- a card's end (0045)
 
     /// <summary>
-    /// Its workflow ended: every card of it not ended yet records the end's time and how it ended (completed, closed
+    /// Its deliverable ended: every card of it not ended yet records the end's time and how it ended (completed, closed
     /// or expired). Returns how many were ended.
     /// </summary>
-    public int EndCardsOf(long workflow, string how, string at) =>
-        Exec("UPDATE board_cards SET ended_at = $at, ended_how = $how WHERE workflow = $w AND ended_at IS NULL;", ("$at", at), ("$how", how), ("$w", workflow));
+    public int EndCardsOf(long deliverable, string how, string at) =>
+        Exec("UPDATE board_cards SET ended_at = $at, ended_how = $how WHERE deliverable = $w AND ended_at IS NULL;", ("$at", at), ("$how", how), ("$w", deliverable));
 
-    /// <summary>New work on the card (it is told again in its workflow): it is live again.</summary>
+    /// <summary>New work on the card (it is told again in its deliverable): it is live again.</summary>
     public void Unend(long cardId) => Exec("UPDATE board_cards SET ended_at = NULL, ended_how = NULL WHERE id = $id AND ended_at IS NOT NULL;", ("$id", cardId));
 
     // ---------------------------------------------------------------- clear done (0037)
@@ -312,7 +312,7 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     // ---------------------------------------------------------------- backlog
 
-    private const string ItemColumns = "id, team, title, body, state, position, archived_at, dispatched_team, dispatched_workflow, dispatched_at, created_at, updated_at";
+    private const string ItemColumns = "id, team, title, body, state, position, archived_at, dispatched_team, dispatched_deliverable, dispatched_at, created_at, updated_at";
 
     private static ItemRow ReadItem(SqliteDataReader r) => new(
         r.GetInt64(0), r.IsDBNull(1) ? null : r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4), r.GetDouble(5),
@@ -324,8 +324,8 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     public ItemRow? Item(long id) => Query($"SELECT {ItemColumns} FROM backlog_items WHERE id = $id;", ReadItem, ("$id", id)).FirstOrDefault();
 
-    public ItemRow? ItemDispatchedAs(long workflow) =>
-        Query($"SELECT {ItemColumns} FROM backlog_items WHERE dispatched_workflow = $w;", ReadItem, ("$w", workflow)).FirstOrDefault();
+    public ItemRow? ItemDispatchedAs(long deliverable) =>
+        Query($"SELECT {ItemColumns} FROM backlog_items WHERE dispatched_deliverable = $w;", ReadItem, ("$w", deliverable)).FirstOrDefault();
 
     public ItemRow AddItem(string title, string body, string? team)
     {
@@ -340,11 +340,11 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
         Exec(
             """
             UPDATE backlog_items SET team = $t, title = $title, body = $b, state = $s, position = $p, archived_at = $ar,
-                   dispatched_team = $dt, dispatched_workflow = $dw, dispatched_at = $da, updated_at = $now WHERE id = $id;
+                   dispatched_team = $dt, dispatched_deliverable = $dw, dispatched_at = $da, updated_at = $now WHERE id = $id;
             """,
             ("$t", (object?)i.Team ?? DBNull.Value), ("$title", Clip(i.Title, 200)), ("$b", i.Body), ("$s", i.State), ("$p", i.Position),
             ("$ar", (object?)i.ArchivedAt ?? DBNull.Value), ("$dt", (object?)i.DispatchedTeam ?? DBNull.Value),
-            ("$dw", (object?)i.DispatchedWorkflow ?? DBNull.Value), ("$da", (object?)i.DispatchedAt ?? DBNull.Value), ("$now", Now()), ("$id", i.Id));
+            ("$dw", (object?)i.DispatchedDeliverable ?? DBNull.Value), ("$da", (object?)i.DispatchedAt ?? DBNull.Value), ("$now", Now()), ("$id", i.Id));
 
     public bool DeleteItem(long id)
     {
@@ -370,37 +370,37 @@ public sealed partial class BoardStore(string connectionString, TimeProvider? cl
 
     // ---------------------------------------------------------------- dispatch history (0023)
 
-    public sealed record DispatchRow(long Id, long ItemId, string Team, long Workflow, string DispatchedAt, string? DispatchedBy);
+    public sealed record DispatchRow(long Id, long ItemId, string Team, long Deliverable, string DispatchedAt, string? DispatchedBy);
 
-    public void AddDispatch(long itemId, string team, long workflow, string? by) =>
-        Exec("INSERT INTO backlog_dispatches (item_id, team, workflow, dispatched_at, dispatched_by) VALUES ($i, $t, $w, $at, $by);",
-            ("$i", itemId), ("$t", team), ("$w", workflow), ("$at", Now()), ("$by", (object?)by ?? DBNull.Value));
+    public void AddDispatch(long itemId, string team, long deliverable, string? by) =>
+        Exec("INSERT INTO backlog_dispatches (item_id, team, deliverable, dispatched_at, dispatched_by) VALUES ($i, $t, $w, $at, $by);",
+            ("$i", itemId), ("$t", team), ("$w", deliverable), ("$at", Now()), ("$by", (object?)by ?? DBNull.Value));
 
     public IReadOnlyList<DispatchRow> Dispatches(long itemId) =>
-        Query("SELECT id, item_id, team, workflow, dispatched_at, dispatched_by FROM backlog_dispatches WHERE item_id = $i ORDER BY id DESC;",
+        Query("SELECT id, item_id, team, deliverable, dispatched_at, dispatched_by FROM backlog_dispatches WHERE item_id = $i ORDER BY id DESC;",
             r => new DispatchRow(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetInt64(3), r.GetString(4), r.IsDBNull(5) ? null : r.GetString(5)),
             ("$i", itemId));
 
     public int DispatchCount(long itemId) => (int)Scalar("SELECT count(*) FROM backlog_dispatches WHERE item_id = $i;", ("$i", itemId));
 
-    /// <summary>What a workflow's runs used: runs, the members who ran, and model tokens (from the gateway's usage records).</summary>
-    public sealed record WorkflowUsage(int Runs, IReadOnlyList<string> Members, long InputTokens, long OutputTokens, string? FirstStart, string? LastEnd);
+    /// <summary>What a deliverable's runs used: runs, the members who ran, and model tokens (from the gateway's usage records).</summary>
+    public sealed record DeliverableUsage(int Runs, IReadOnlyList<string> Members, long InputTokens, long OutputTokens, string? FirstStart, string? LastEnd);
 
-    public WorkflowUsage UsageOf(long workflow)
+    public DeliverableUsage UsageOf(long deliverable)
     {
         var members = Query(
             "SELECT DISTINCT m.name FROM runs r JOIN members m ON m.id = r.member_id WHERE r.correlation_id = $w ORDER BY m.name;",
-            r => r.GetString(0), ("$w", workflow));
-        var runs = (int)Scalar("SELECT count(*) FROM runs WHERE correlation_id = $w;", ("$w", workflow));
+            r => r.GetString(0), ("$w", deliverable));
+        var runs = (int)Scalar("SELECT count(*) FROM runs WHERE correlation_id = $w;", ("$w", deliverable));
         var tokens = Query(
             """
             SELECT coalesce(sum(u.input_tokens), 0) + coalesce(sum(u.cache_read_tokens), 0) + coalesce(sum(u.cache_write_tokens), 0),
                    coalesce(sum(u.output_tokens), 0)
             FROM usage_events u JOIN runs r ON r.id = u.run_number WHERE r.correlation_id = $w;
-            """, r => (r.GetInt64(0), r.GetInt64(1)), ("$w", workflow)).FirstOrDefault();
+            """, r => (r.GetInt64(0), r.GetInt64(1)), ("$w", deliverable)).FirstOrDefault();
         var span = Query("SELECT min(started_at), max(ended_at) FROM runs WHERE correlation_id = $w;",
-            r => (r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1)), ("$w", workflow)).FirstOrDefault();
-        return new WorkflowUsage(runs, members, tokens.Item1, tokens.Item2, span.Item1, span.Item2);
+            r => (r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1)), ("$w", deliverable)).FirstOrDefault();
+        return new DeliverableUsage(runs, members, tokens.Item1, tokens.Item2, span.Item1, span.Item2);
     }
 
     // ---------------------------------------------------------------- the projector's cursor

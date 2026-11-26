@@ -331,7 +331,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             var text = Str(5);
             var message = source == "Messages";
             var level = LogLevels.OfActivity(source, ev, text);
-            list.Add((Str(0) ?? "", new LogTailEntry(Str(1) ?? "", source, level, team, member, ev, text, message && LogLevels.IsWorkflowEvent(ev))));
+            list.Add((Str(0) ?? "", new LogTailEntry(Str(1) ?? "", source, level, team, member, ev, text, message && LogLevels.IsDeliverableEvent(ev))));
         }
         return list;
     }

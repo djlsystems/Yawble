@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MonitorModel, teamKey, type TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import { cameraAtTarget, layoutAtRest, MonitorScene, RestAlpha } from '../../src/renderer/src/monitor/scene';
 import type { StepRow } from '../../src/renderer/src/monitor/steps';
-import type { WorkflowSummary } from '../../src/shared/api';
+import type { DeliverableSummary } from '../../src/shared/api';
 
 /**
  * The wall says when it is at rest: the canvas's data-settled is "true" once the forces cool, the hubs are home and the
@@ -34,8 +34,8 @@ afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.i
 type Inner = { frame: (t: number) => void; sim: { alpha: () => number } };
 
 const member = (name: string, role: 'manager' | 'member' = 'member') => ({ id: 1, name, role, state: 'running' as const, queued: 0, statusLine: null, cli: 'claude' });
-const wf = (id: number, busy: string[] = []): WorkflowSummary =>
-  ({ id, title: `Workflow ${id}`, owner: null, state: 'open', undeclared: false, busy, ending: null, startedAt: new Date(0).toISOString(), lastAt: new Date(id * 1000).toISOString(), messages: 2 });
+const wf = (id: number, busy: string[] = []): DeliverableSummary =>
+  ({ id, title: `Deliverable ${id}`, owner: null, state: 'open', undeclared: false, busy, ending: null, startedAt: new Date(0).toISOString(), lastAt: new Date(id * 1000).toISOString(), messages: 2 });
 const edit = (id: number, team: string, m: string, target: string): StepRow => ({ id, at: new Date().toISOString(), team, member: m, run: 1, kind: 'edit', tool: 'Edit', target });
 
 function wall(w = 1280, h = 800, teamCount = 2) {
@@ -53,7 +53,7 @@ function wall(w = 1280, h = 800, teamCount = 2) {
   ].slice(0, teamCount);
   const m = new MonitorModel();
   m.reconcile(teams, 0);
-  m.setWorkflows('payments', [wf(10, ['DeveloperAda is running']), wf(11)], 0);
+  m.setDeliverables('payments', [wf(10, ['DeveloperAda is running']), wf(11)], 0);
   for (let i = 0; i < 4; i++) m.applyStep(edit(i + 1, 'payments', 'DeveloperAda', `src/refund/f${i}.ts`), 0);
   scene.model = m;
   scene.setTeams(teams);

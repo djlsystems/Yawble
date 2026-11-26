@@ -11,15 +11,15 @@ import BusyLabel from '../components/BusyLabel.vue';
 import NetworkAsks from '../components/NetworkAsks.vue';
 import ToolAsks from '../components/ToolAsks.vue';
 import FolderAsks from '../components/FolderAsks.vue';
-import WorkflowExpiryAsks from '../components/WorkflowExpiryAsks.vue';
+import DeliverableExpiryAsks from '../components/DeliverableExpiryAsks.vue';
 import RunLimitDialog from '../components/RunLimitDialog.vue';
 import { useBusy } from '../busy';
 import { useNarrow, useSwipe } from '../narrowScreen';
-import { openWorkflowsPage } from '../workflows/page';
+import { openDeliverablesPage } from '../deliverables/page';
 
 /**
  * THE BOARD: every team's cards in four lanes - To Do, In Progress, Needs You, Done - newest change first in each.
- * A card is one member's piece of a workflow (or a piece the Manager planned and has not given out yet). Filters by
+ * A card is one member's piece of a deliverable (or a piece the Manager planned and has not given out yet). Filters by
  * team and member, a search box over what is shown, the backlog, and a card's panel on the right.
  * Done's Clear hides exactly the Done cards shown from the board; nothing is deleted, "Show cleared"
  * lists them dimmed with Restore, and a cleared card moved out of Done shows again by itself.
@@ -120,12 +120,12 @@ const networkAsks = ref(0);
 const toolAsks = ref(0);
 /** Folder asks shown in Needs You (FolderAsks loads and answers them; the lane's count adds them). */
 const folderAsks = ref(0);
-/** Workflows that wait on the person and will expire within a day, shown in Needs You with Extend. */
+/** Deliverables that wait on the person and will expire within a day, shown in Needs You with Extend. */
 const expiryAsks = ref(0);
 
 function clear() { team.value = ''; member.value = ''; search.value = ''; }
-/** The Workflows page, filtered to the team the board shows (all teams when it shows every team). */
-function openWorkflows() { openWorkflowsPage({ teamId: board.value?.teams.find((t) => t.name === team.value)?.id ?? null }); }
+/** The Deliverables page, filtered to the team the board shows (all teams when it shows every team). */
+function openDeliverables() { openDeliverablesPage({ teamId: board.value?.teams.find((t) => t.name === team.value)?.id ?? null }); }
 
 /** The global run limit, shown with In Progress's count ("3 of 8"); its number opens a small dialog to change it. */
 const runLimit = ref<number | null>(null);
@@ -177,7 +177,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
         <span class="grow" />
         <span class="muted small">{{ shown.length }} card{{ shown.length === 1 ? '' : 's' }}</span>
         <button data-test="board-backlog" @click="emit('backlog')">Backlog</button>
-        <button data-test="board-workflows" :title="team ? `${team}'s workflows` : 'Every team\'s workflows'" @click="openWorkflows">Workflows</button>
+        <button data-test="board-deliverables" :title="team ? `${team}'s deliverables` : 'Every team\'s deliverables'" @click="openDeliverables">Deliverables</button>
       </div>
       <p v-if="error" class="error" data-test="board-error">{{ error }}</p>
       <LoadingNote v-if="!board && !error" text="Loading the board…" />
@@ -206,7 +206,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
           <NetworkAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :poll-ms="pollMs" :team="team" :member="member" @count="networkAsks = $event" />
           <ToolAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :poll-ms="pollMs" :team="team" :member="member" @count="toolAsks = $event" />
           <FolderAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :poll-ms="pollMs" :team="team" :member="member" @count="folderAsks = $event" />
-          <WorkflowExpiryAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :cards="board.cards" :team="team" @count="expiryAsks = $event" />
+          <DeliverableExpiryAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :cards="board.cards" :team="team" @count="expiryAsks = $event" />
           <TransitionGroup tag="div" name="card" class="cards">
             <BoardCardItem v-for="c in inLane(shown, l.id)" :key="c.id" :card="c" :selected="openCard === c.id" @open="openCard = c.id" />
           </TransitionGroup>

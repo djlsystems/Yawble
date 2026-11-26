@@ -225,7 +225,7 @@ public sealed class ConciergeService
     {
         ["id"] = w.Id,
         ["team"] = w.Team,
-        ["workflow"] = w.Workflow,
+        ["deliverable"] = w.Deliverable,
         ["what"] = w.What,
         ["followUp"] = w.FollowUp,
         ["createdAt"] = w.CreatedAt,
@@ -400,7 +400,7 @@ public sealed class ConciergeService
 
     /// <summary>
     /// A host task's result, for a run the Concierge or a companion client asked for: posted as an Update in the chat it was
-    /// asked from (the same path as a watched workflow's), or, for a companion client, nowhere (it checks host_task_status).
+    /// asked from (the same path as a watched deliverable's), or, for a companion client, nowhere (it checks host_task_status).
     /// False when the run was an agent's: the caller wakes the agent instead. One Update at the end, none while it runs.
     /// </summary>
     public bool TryPostTaskUpdate(Tasks.TaskWake wake, string team)
@@ -420,7 +420,7 @@ public sealed class ConciergeService
     }
 
     /// <summary>
-    /// An Update the app itself has for the person about a team (a workflow's expiry warning): posted once, in the newest chat
+    /// An Update the app itself has for the person about a team (a deliverable's expiry warning): posted once, in the newest chat
     /// about that team, else the newest chat. False when there is no chat at all (Needs you still shows it).
     /// </summary>
     public bool PostAppUpdate(long teamId, string team, string text, string kind)

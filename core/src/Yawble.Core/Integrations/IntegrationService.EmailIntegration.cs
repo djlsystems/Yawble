@@ -12,9 +12,9 @@ public sealed record EmailIntegrationView(long Id, string Name, long? Connection
 
 /// <summary>
 /// The built-in Email integration: a mailbox, an email Connection, offered to teams like the other integrations
-/// (to every team, or to some), whose scripts read it through the actions in <see cref="Scripts.Actions.EmailScriptActions"/>. The password
-/// stays in the credential store under the Connection; nothing here reads or writes it except to sign in. Every script call is logged to
-/// integration_calls as "email:&lt;name&gt;" with the script member as the caller, the action and its arguments (no message content).
+/// (to every team, or to some), whose workflows read it through the actions in <see cref="Workflows.Actions.EmailWorkflowActions"/>. The password
+/// stays in the credential store under the Connection; nothing here reads or writes it except to sign in. Every workflow call is logged to
+/// integration_calls as "email:&lt;name&gt;" with the workflow member as the caller, the action and its arguments (no message content).
 /// RPCs: integrations.emailList, integrations.emailSave {id?, name, connectionId}, integrations.emailEnable {name, all?, teamId?, on?},
 /// integrations.emailRemove {name}.
 /// </summary>
@@ -123,7 +123,7 @@ public sealed partial class IntegrationService
     /// <summary>The Email integrations turned on for the team (by its name, any case), by name.</summary>
     public IReadOnlyList<string> EmailIntegrationsOfferedTo(string team)
     {
-        var (teamId, _) = ScriptTeam(team);
+        var (teamId, _) = WorkflowTeam(team);
         return EmailIntegrations().Where(e => e.EnabledAll || e.TeamIds.Contains(teamId)).Select(e => e.Name).ToList();
     }
 
@@ -146,29 +146,29 @@ public sealed partial class IntegrationService
         return list;
     }
 
-    // ------------------------------------------------------------------ a script's call
+    // ------------------------------------------------------------------ a workflow's call
 
     /// <summary>
-    /// Runs one Email action for a script: the integration <paramref name="integration"/> ("name" or "email:name") must exist and be turned on
+    /// Runs one Email action for a workflow: the integration <paramref name="integration"/> ("name" or "email:name") must exist and be turned on
     /// for the caller's team, and its email Connection be there with its password. Logs the call (the action and its arguments, never message
-    /// content) with the script member as the caller after it opened a signed-in IMAP session and ran <paramref name="work"/> on its mailbox.
-    /// Refusals throw <see cref="ScriptApiRefusedException"/>; a mail failure throws <see cref="MailException"/>; a bad argument
+    /// content) with the workflow member as the caller after it opened a signed-in IMAP session and ran <paramref name="work"/> on its mailbox.
+    /// Refusals throw <see cref="WorkflowApiRefusedException"/>; a mail failure throws <see cref="MailException"/>; a bad argument
     /// <see cref="ArgumentException"/>. There is no send or delete action.
     /// </summary>
-    public async Task<T> UseEmailForScriptAsync<T>(ScriptCaller caller, string integration, string action, JsonObject args,
+    public async Task<T> UseEmailForWorkflowAsync<T>(WorkflowCaller caller, string integration, string action, JsonObject args,
         Func<EmailMailbox, Task<T>> work, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(work);
-        var (teamId, teamName) = ScriptTeam(caller.Team);
+        var (teamId, teamName) = WorkflowTeam(caller.Team);
         var email = EmailIntegrationNamed(integration)
-            ?? throw new ScriptApiRefusedException($"refused: no Email integration named '{Clip(SecretScrubber.Scrub(integration ?? ""), 60)}'");
-        if (!email.EnabledAll && !email.TeamIds.Contains(teamId)) throw new ScriptApiRefusedException($"refused: {email.Name} is not turned on for {teamName}");
-        if (email.ConnectionId is not { } cid) throw new ScriptApiRefusedException($"refused: {email.Name} has no email account; choose one in Integrations");
+            ?? throw new WorkflowApiRefusedException($"refused: no Email integration named '{Clip(SecretScrubber.Scrub(integration ?? ""), 60)}'");
+        if (!email.EnabledAll && !email.TeamIds.Contains(teamId)) throw new WorkflowApiRefusedException($"refused: {email.Name} is not turned on for {teamName}");
+        if (email.ConnectionId is not { } cid) throw new WorkflowApiRefusedException($"refused: {email.Name} has no email account; choose one in Integrations");
 
         EmailAccount account;
         try { account = EmailAccountOf(cid); }
-        catch (ArgumentException e) { throw new ScriptApiRefusedException("refused: " + e.Message); }
+        catch (ArgumentException e) { throw new WorkflowApiRefusedException("refused: " + e.Message); }
 
         var member = caller.Member.Contains('/', StringComparison.Ordinal) ? caller.Member : $"{teamName}/{caller.Member}";
         var integrationName = EmailIntegrationPrefix + email.Name;
@@ -194,7 +194,7 @@ public sealed partial class IntegrationService
         finally
         {
             watch.Stop();
-            try { LogEmailCall(integrationName, teamName, member, action, args ?? [], caller.ScriptRunId, host, messages, failure, watch.Elapsed); }
+            try { LogEmailCall(integrationName, teamName, member, action, args ?? [], caller.WorkflowRunId, host, messages, failure, watch.Elapsed); }
             catch (SqliteException) { /* the call log is best effort here: the work's own outcome stands */ }
         }
     }
@@ -209,20 +209,20 @@ public sealed partial class IntegrationService
     };
 
     /// <summary>
-    /// One Email action's Tool-call row: args [action, argument names and plain values, "script run N", "host H", "N messages" or "failed: why"].
-    /// A script member's routine list (it succeeded) is folded into the member's list row of this hour when there is one: its args then say
-    /// "N calls", the messages they returned in all and the first and last script run, and its duration is the sum. A failure is always its own row.
+    /// One Email action's Tool-call row: args [action, argument names and plain values, "workflow run N", "host H", "N messages" or "failed: why"].
+    /// A workflow member's routine list (it succeeded) is folded into the member's list row of this hour when there is one: its args then say
+    /// "N calls", the messages they returned in all and the first and last workflow run, and its duration is the sum. A failure is always its own row.
     /// </summary>
-    private void LogEmailCall(string integration, string team, string member, string action, JsonObject args, string scriptRunId, string host,
+    private void LogEmailCall(string integration, string team, string member, string action, JsonObject args, string workflowRunId, string host,
         int? messages, string? failure, TimeSpan duration)
     {
-        var who = new Provenance.Actor(ScriptVia, null);
-        var run = Clip(scriptRunId, 100);
+        var who = new Provenance.Actor(WorkflowVia, null);
+        var run = Clip(workflowRunId, 100);
         var hostText = "host " + Clip(SecretScrubber.Scrub(host ?? ""), 200);
         var argsText = SecretScrubber.Scrub(args.ToJsonString());
         var ms = (long)duration.TotalMilliseconds;
         string Outcome(int? count) => count is { } n ? $"{n} message{(n == 1 ? "" : "s")}" : "done";
-        if (failure is null && action == Scripts.Actions.EmailActions.List)
+        if (failure is null && action == Workflows.Actions.EmailActions.List)
         {
             var now = _clock.GetUtcNow();
             var hourStart = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
@@ -238,9 +238,9 @@ public sealed partial class IntegrationService
                     """;
                 find.Parameters.AddWithValue("$i", integration);
                 find.Parameters.AddWithValue("$m", member);
-                find.Parameters.AddWithValue("$via", ScriptVia);
+                find.Parameters.AddWithValue("$via", WorkflowVia);
                 find.Parameters.AddWithValue("$hour", hourStart);
-                find.Parameters.AddWithValue("$list", Scripts.Actions.EmailActions.List);
+                find.Parameters.AddWithValue("$list", Workflows.Actions.EmailActions.List);
                 using var r = find.ExecuteReader();
                 if (r.Read())
                 {
@@ -250,7 +250,7 @@ public sealed partial class IntegrationService
                     r.Close();
                     var calls = earlier.Calls + 1;
                     var sum = (earlier.Messages ?? 0) + (messages ?? 0);
-                    var runs = earlier.FirstRun is { } first && first != run ? $"script runs {first} to {run}" : $"script run {run}";
+                    var runs = earlier.FirstRun is { } first && first != run ? $"workflow runs {first} to {run}" : $"workflow run {run}";
                     string[] folded = [action, argsText, runs, hostText, Outcome(sum), $"{calls} calls this hour"];
                     Exec(c, tx, "UPDATE integration_calls SET args = $a, duration_ms = $ms WHERE id = $id;",
                         ("$a", CliRunner.Redact(JsonSerializer.Serialize(CallArgsRedaction.ForLog(integration, folded)))), ("$ms", total), ("$id", id));
@@ -260,11 +260,11 @@ public sealed partial class IntegrationService
             }
             tx.Commit();
         }
-        string[] callArgs = [action, argsText, $"script run {run}", hostText, failure is null ? Outcome(messages) : "failed: " + Clip(SecretScrubber.Scrub(failure), 500)];
+        string[] callArgs = [action, argsText, $"workflow run {run}", hostText, failure is null ? Outcome(messages) : "failed: " + Clip(SecretScrubber.Scrub(failure), 500)];
         Insert(integration, team, member, null, callArgs, Decisions.Allow, null, new CliOutput(failure is null ? 0 : 1, "", "", 0, duration, false, false), who);
     }
 
-    /// <summary>What a folded list row already says: its calls (1 when not folded yet), messages and first script run.</summary>
+    /// <summary>What a folded list row already says: its calls (1 when not folded yet), messages and first workflow run.</summary>
     private static (int Calls, int? Messages, string? FirstRun) EmailRowFacts(string argsJson)
     {
         List<string>? parts;
@@ -278,7 +278,7 @@ public sealed partial class IntegrationService
         {
             if (System.Text.RegularExpressions.Regex.Match(p, @"^(\d+) calls this hour$") is { Success: true } mc) calls = int.Parse(mc.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
             else if (System.Text.RegularExpressions.Regex.Match(p, @"^(\d+) messages?$") is { Success: true } mm) messages = int.Parse(mm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            else if (System.Text.RegularExpressions.Regex.Match(p, @"^script runs? (\S+)") is { Success: true } mr) firstRun = mr.Groups[1].Value;
+            else if (System.Text.RegularExpressions.Regex.Match(p, @"^workflow runs? (\S+)") is { Success: true } mr) firstRun = mr.Groups[1].Value;
         }
         return (calls, messages, firstRun);
     }

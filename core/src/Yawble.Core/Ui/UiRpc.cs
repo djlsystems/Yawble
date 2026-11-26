@@ -26,7 +26,7 @@ public sealed class UiRpc(
     Monitor.StepFeed? steps = null,
     Monitor.CodeEvents? codeEvents = null)
 {
-    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "workflows.", "scripts.", "schemas.", "roles."];
+    public static readonly string[] Prefixes = ["app.", "monitor.", "teams.", "members.", "bus.", "policy.", "credentials.", "hostTerminal.", "terminal.", "skills.", "triggers.", "git.", "docs.", "timeline.", "deliverables.", "goals.", "workflows.", "schemas.", "roles."];
 
     /// <summary>Other things that need the person, counted in app.overview's needsYou (the doctor's failing checks).</summary>
     public Func<int>? ExtraNeedsYou { get; set; }
@@ -44,19 +44,19 @@ public sealed class UiRpc(
     /// <summary>Whether this computer is a Mac: "Allow localhost (macOS)" applies only there. Tests set it.</summary>
     public Func<bool> IsMacOS { get; set; } = OperatingSystem.IsMacOS;
 
-    /// <summary>The methods here, by prefix, and workflowExtend under its contract name (also bus.workflowExtend).</summary>
-    public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method is "workflowExtend";
+    /// <summary>The methods here, by prefix, and deliverableExtend under its contract name (also bus.deliverableExtend).</summary>
+    public static bool Handles(string method) => Prefixes.Any(p => method.StartsWith(p, StringComparison.Ordinal)) || method is "deliverableExtend";
 
     /// <summary>{ teamId, team (id or name), repo? (an extra's name; absent: main), kind, commit?, branch?, file?, from?, to?, pr? } -> { url: string|null }.</summary>
     public const string WebLinkMethod = "git.webLink";
 
-    /// <summary>The script library, schemas, runs and script members ("scripts." and "schemas."); null: not in this core.</summary>
-    public ScriptsRpc? Scripts { get; set; }
+    /// <summary>The workflow library, schemas, runs and workflow members ("workflows." and "schemas."); null: not in this core.</summary>
+    public WorkflowsRpc? Workflows { get; set; }
 
     public async Task<JsonNode?> DispatchAsync(string method, JsonObject? p, CancellationToken ct)
     {
-        if (ScriptsRpc.Handles(method))
-            return await (Scripts ?? throw new RpcException("unavailable", "scripts are not available in this core")).DispatchAsync(method, p, ct);
+        if (WorkflowsRpc.Handles(method))
+            return await (Workflows ?? throw new RpcException("unavailable", "workflows are not available in this core")).DispatchAsync(method, p, ct);
         try
         {
             return method switch
@@ -102,8 +102,8 @@ public sealed class UiRpc(
                     new TeamResetOptions(Flag(p, "dropWaiting"), Flag(p, "clearHome"), Flag(p, "removeClone"), Flag(p, "clearDocuments")), ct)),
                 "teams.syncToBase" => await SyncSettingAsync(Long(p, "teamId"), p?["on"] is JsonValue sv && sv.TryGetValue<bool>(out var son) ? son : null, ct),
                 "teams.push" => PushSetting(Long(p, "teamId"), p?["on"] is JsonValue pv && pv.TryGetValue<bool>(out var pon) ? pon : null),
-                // { teamId } reads the team's workflowExpiryDays (default 3), { teamId, days: 1-365 } sets it; both return { days }.
-                "teams.workflowExpiry" => await WorkflowExpiryAsync(p, ct),
+                // { teamId } reads the team's deliverableExpiryDays (default 3), { teamId, days: 1-365 } sets it; both return { days }.
+                "teams.deliverableExpiry" => await DeliverableExpiryAsync(p, ct),
                 // { teamId } reads "Allow localhost (macOS)" (off by default), { teamId, on } sets it; both return { on }.
                 "teams.localhost" => await LocalhostSettingAsync(p, ct),
                 "teams.env" => S(await bus.TeamEnvAsync(await TeamNameOf(Long(p, "teamId"), ct), ct)),
@@ -131,15 +131,20 @@ public sealed class UiRpc(
                 // also given, follows it), and its action, if any, is applied first as Team settings would (teams.localhost).
                 "bus.answer" => await AnswerAsync(Long(p, "teamId"), Long(p, "seq"), OptionIndex(p) is not null ? OptStr(p, "text") ?? "" : Str(p, "text"),
                     ct, Attachments.Read(p), OptionIndex(p)),
-                "bus.workflows" => S(await bus.WorkflowsAsync(await TeamNameOf(Long(p, "teamId"), ct), (int)(OptLong(p, "limit") ?? 30), ct)),
-                "bus.closeWorkflow" => S(await bus.CloseWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), OptStr(p, "reason"), ct)),
-                "bus.stopWorkflow" => new JsonObject { ["stopped"] = await bus.StopWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), ct) },
-                "bus.nudgeWorkflow" => S(await bus.NudgeWorkflowAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "workflow"), OptStr(p, "note"), ct)),
-                // Extend: resets an open workflow's idle clock. teamId is optional (the workflow names its team).
-                "workflowExtend" or "bus.workflowExtend" => S(await ExtendAsync(p, ct)),
-                // The Workflows page: every team's workflows, and one in full (reads only).
-                "workflows.list" => await WorkflowsListAsync(p, ct),
-                "workflows.get" => await WorkflowGetAsync(Long(p, "workflow"), ct),
+                "bus.deliverables" => S(await bus.DeliverablesAsync(await TeamNameOf(Long(p, "teamId"), ct), (int)(OptLong(p, "limit") ?? 30), ct)),
+                "bus.closeDeliverable" => S(await bus.CloseDeliverableAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "deliverable"), OptStr(p, "reason"), ct)),
+                "bus.stopDeliverable" => new JsonObject { ["stopped"] = await bus.StopDeliverableAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "deliverable"), ct) },
+                "bus.nudgeDeliverable" => S(await bus.NudgeDeliverableAsync(await TeamNameOf(Long(p, "teamId"), ct), Long(p, "deliverable"), OptStr(p, "note"), ct)),
+                // Extend: resets an open deliverable's idle clock. teamId is optional (the deliverable names its team).
+                "deliverableExtend" or "bus.deliverableExtend" => S(await ExtendAsync(p, ct)),
+                // The Deliverables page: every team's deliverables, and one in full (reads only).
+                "deliverables.list" => await DeliverablesListAsync(p, ct),
+                "deliverables.get" => await DeliverableGetAsync(Long(p, "deliverable"), ct),
+                // Goals: the person's names for what deliverables are for (the Goals page, a deliverable's goal picker).
+                "goals.list" => GoalsJson(await bus.GoalsOverviewAsync(ct)),
+                "goals.save" => GoalJson(await bus.SaveGoalAsync(OptLong(p, "id"), OptStr(p, "name"), OptStr(p, "description"), ct)),
+                "goals.delete" => await DeleteGoalAsync(Long(p, "id"), ct),
+                "goals.assign" => await AssignGoalAsync(p, ct),
 
                 "policy.getGlobal" => policies.GetGlobal().ToJson(),
                 "policy.saveGlobal" => await SaveGlobalAsync(p, ct),
@@ -243,7 +248,7 @@ public sealed class UiRpc(
 
     // ---------------------------------------------------------------- triggers
 
-    /// <summary>triggers.save's parameters as a draft (also read by the script_trigger_set tool, so both read one shape).</summary>
+    /// <summary>triggers.save's parameters as a draft (also read by the workflow_trigger_set tool, so both read one shape).</summary>
     internal static TriggerDraft TriggerDraftOf(JsonObject? p, bool preview = false)
     {
         long? OptLong(string name) => p?[name] is JsonValue v && v.TryGetValue<long>(out var l) ? l : null;
@@ -447,8 +452,8 @@ public sealed class UiRpc(
             var node = S(card)!.AsObject();
             node["attention"] = Attention(card, asking, reports);
             node["hasClone"] = Code.CodeHost.HasClone(bus.Repos, card.Member);
-            // A script member's tile is the script's (scripts.memberGet), not an agent's.
-            node["kind"] = bus.ScriptMembers?.IsScriptMember(card.Member.Id) == true ? "script" : "agent";
+            // A workflow member's tile is the workflow's (workflows.memberGet), not an agent's.
+            node["kind"] = bus.WorkflowMembers?.IsWorkflowMember(card.Member.Id) == true ? "workflow" : "agent";
             if (Models is { } models) node["agentModel"] = Agents.MemberModels.Json(models.For(card.Member));
             try
             {
@@ -484,7 +489,7 @@ public sealed class UiRpc(
     /// <summary>
     /// The Monitor's feed: bus messages in plain words. Each says its kind (instruction, completed, failed, handback,
     /// progress, blocked, decision, done), the team and member it is about (an instruction's addressee, a report's
-    /// sender), who sent it (person, host or a member), a short text, and its workflow.
+    /// sender), who sent it (person, host or a member), a short text, and its deliverable.
     /// </summary>
     private async Task<JsonNode?> MonitorMessagesAsync(long after, int limit, CancellationToken ct)
     {
@@ -512,7 +517,7 @@ public sealed class UiRpc(
     /// <summary>
     /// monitor.codeEvents {team?, since?, until?, after?, limit?}: what really reached the team repository (see
     /// Monitor/CodeEvents), oldest first: [{id, kind: commit|merge-team|landed|push, team, member?, branch, sha, message,
-    /// files: [{path, status, oldPath?}], at, recordedAt, workflowId?, into?, branches?}]. since/until are ISO times
+    /// files: [{path, status, oldPath?}], at, recordedAt, deliverableId?, into?, branches?}]. since/until are ISO times
     /// filtering <c>at</c>; after is an id cursor. Without a store there are none.
     /// </summary>
     private JsonArray MonitorCodeEvents(JsonObject? p)
@@ -558,7 +563,7 @@ public sealed class UiRpc(
                 MessageTypes.Progress => ("progress", Field("status")),
                 MessageTypes.Blocked => ("blocked", Field("reason")),
                 MessageTypes.NeedsDecision => ("decision", Field("question")),
-                MessageTypes.WorkflowCompleted => ("done", Field("delivered")),
+                MessageTypes.DeliverableCompleted => ("done", Field("delivered")),
                 _ => ("other", null),
             };
             if (kind == "other") return null;
@@ -570,7 +575,7 @@ public sealed class UiRpc(
         var row = new JsonObject
         {
             ["seq"] = m.Seq, ["kind"] = kind, ["team"] = about.team, ["member"] = about.member, ["from"] = from,
-            ["text"] = text, ["workflow"] = m.CorrelationId, ["at"] = m.OccurredAt.ToString("O"),
+            ["text"] = text, ["deliverable"] = m.CorrelationId, ["at"] = m.OccurredAt.ToString("O"),
         };
         // A run's end row says how it ended: failureClass is null for a completed run.
         if (m.Type is MessageTypes.Failed or MessageTypes.Completed)
@@ -604,7 +609,7 @@ public sealed class UiRpc(
             text = Attachments.WithImages(text, Attachments.Save(Path.Combine(repos.TeamRoot(manager.Team), Teams.TeamDocuments.Folder), images));
         }
         var message = await bus.PersonTellAsync(manager.Team, manager.Name, text.Trim(), null, ct);
-        return new JsonObject { ["seq"] = message.Seq, ["workflow"] = message.CorrelationId };
+        return new JsonObject { ["seq"] = message.Seq, ["deliverable"] = message.CorrelationId };
     }
 
     // ---------------------------------------------------------------- the Git dialog (the person's buttons only)
@@ -861,7 +866,7 @@ public sealed class UiRpc(
         }
     }
 
-    /// <summary>Tells the Manager to bring the team branch current with the base (Yawble ask-team), as a new workflow.</summary>
+    /// <summary>Tells the Manager to bring the team branch current with the base (Yawble ask-team), as a new deliverable.</summary>
     private async Task<JsonNode?> AskTeamAsync(long teamId, CancellationToken ct, string? repo = null)
     {
         var (repos, team) = await GitTeamAsync(teamId, ct);
@@ -1133,21 +1138,23 @@ public sealed class UiRpc(
             .Select(e => new KeyValuePair<string, string>((e["name"]?.GetValue<string>() ?? "").Trim(), e["value"]?.GetValue<string>() ?? ""))
             .Where(e => e.Key.Length > 0).ToList();
 
-    // ---------------------------------------------------------------- the Workflows page
+    // ---------------------------------------------------------------- the Deliverables page
 
-    /// <summary>How many of a workflow's messages workflows.get gives (newest first).</summary>
-    public const int WorkflowMessages = 30;
+    /// <summary>How many of a deliverable's messages deliverables.get gives (newest first).</summary>
+    public const int DeliverableMessages = 30;
 
-    /// <summary>workflows.list {teamId?, q?, state?, limit?}: {workflows, counts, truncated, backlog, now}.</summary>
-    private async Task<JsonNode> WorkflowsListAsync(JsonObject? p, CancellationToken ct)
+    /// <summary>deliverables.list {teamId?, q?, state?, goal? (a goal's id, or "none"), limit?}: {deliverables, counts, truncated, backlog, now}.</summary>
+    private async Task<JsonNode> DeliverablesListAsync(JsonObject? p, CancellationToken ct)
     {
         if (p?["limit"] is JsonValue lv && !WholeNumber(lv, out _)) throw new RpcException("bad_params", "limit must be a number");
         long? teamId = p?["teamId"] is null ? null : Long(p, "teamId");
         if (bus.Board is { } board) await board.ProjectAsync(ct); // the cards and times include everything said so far
-        var page = await bus.WorkflowsPageAsync(teamId, OptStr(p, "q"), OptStr(p, "state"), (int)(OptLong(p, "limit") ?? BusEngine.DefaultPageLimit), ct);
+        var (assigned, goals) = await bus.DeliverableGoalsAsync(ct);
+        var include = GoalFilter(p, assigned, goals);
+        var page = await bus.DeliverablesPageAsync(teamId, OptStr(p, "q"), OptStr(p, "state"), (int)(OptLong(p, "limit") ?? BusEngine.DefaultPageLimit), include, ct);
         return new JsonObject
         {
-            ["workflows"] = new JsonArray([.. page.Rows.Select(r => (JsonNode)WorkflowRowJson(r))]),
+            ["deliverables"] = new JsonArray([.. page.Rows.Select(r => (JsonNode)WithGoal(DeliverableRowJson(r), r.Summary.Id, assigned, goals))]),
             ["counts"] = new JsonObject([.. page.Counts.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, kv.Value))]),
             ["truncated"] = page.Truncated,
             // The window may always read the backlog; the Cloud Link sets this per viewer (RemoteAccess.ShapeResult).
@@ -1156,35 +1163,36 @@ public sealed class UiRpc(
         };
     }
 
-    /// <summary>workflows.get {workflow}: {workflow, cards, messages, spec, backlog}.</summary>
-    private async Task<JsonNode> WorkflowGetAsync(long workflow, CancellationToken ct)
+    /// <summary>deliverables.get {deliverable}: {deliverable, cards, messages, spec, backlog}.</summary>
+    private async Task<JsonNode> DeliverableGetAsync(long deliverable, CancellationToken ct)
     {
         var board = bus.Board;
         if (board is not null) await board.ProjectAsync(ct);
-        var row = await bus.WorkflowRowAsync(workflow, ct) ?? throw new RpcException("no_such_workflow", $"there is no workflow {workflow}");
+        var row = await bus.DeliverableRowAsync(deliverable, ct) ?? throw new RpcException("no_such_deliverable", $"there is no deliverable {deliverable}");
         var cards = new JsonArray();
         if (board is not null)
         {
             var live = await bus.LiveActivityAsync(ct);
             var now = board.Store.UtcNow();
             var lanes = Board.Lanes.All.Select(l => l.Id).ToList();
-            foreach (var c in board.Store.CardsOfWorkflow(workflow).OrderBy(c => lanes.IndexOf(c.Lane) is var i && i < 0 ? lanes.Count : i).ThenBy(c => c.Id))
+            foreach (var c in board.Store.CardsOfDeliverable(deliverable).OrderBy(c => lanes.IndexOf(c.Lane) is var i && i < 0 ? lanes.Count : i).ThenBy(c => c.Id))
                 cards.Add(new JsonObject
                 {
                     ["id"] = c.Id, ["title"] = c.Title, ["lane"] = c.Lane, ["member"] = c.Member, ["status"] = c.Status,
                     ["time"] = board.Timeline.OfCard(c, live, now).Time.ToJson(),
                 });
         }
-        var thread = await bus.WorkflowThreadAsync(workflow, ct);
+        var thread = await bus.DeliverableThreadAsync(deliverable, ct);
         var messages = new JsonArray();
         foreach (var m in thread.Reverse())
         {
-            if (messages.Count >= WorkflowMessages) break;
-            if (WorkflowMessageRow(m) is { } node) messages.Add(node);
+            if (messages.Count >= DeliverableMessages) break;
+            if (DeliverableMessageRow(m) is { } node) messages.Add(node);
         }
+        var (assigned, goals) = await bus.DeliverableGoalsAsync(ct);
         return new JsonObject
         {
-            ["workflow"] = WorkflowRowJson(row),
+            ["deliverable"] = WithGoal(DeliverableRowJson(row), deliverable, assigned, goals),
             ["cards"] = cards,
             ["messages"] = messages,
             ["spec"] = row.Item?.Spec,
@@ -1192,8 +1200,76 @@ public sealed class UiRpc(
         };
     }
 
-    /// <summary>A WorkflowRow on the wire: bus.workflows' summary fields, then the Workflows page's own.</summary>
-    internal static JsonObject WorkflowRowJson(WorkflowRow r)
+    /// <summary>A deliverable row with its goal: {id, name}, or null when it is Unassigned.</summary>
+    private static JsonObject WithGoal(JsonObject row, long deliverable, IReadOnlyDictionary<long, long> assigned, IReadOnlyDictionary<long, Goals.Goal> goals)
+    {
+        row["goal"] = assigned.TryGetValue(deliverable, out var g) && goals.TryGetValue(g, out var goal) ? new JsonObject { ["id"] = goal.Id, ["name"] = goal.Name } : null;
+        return row;
+    }
+
+    /// <summary>deliverables.list's goal filter: a goal's id (its deliverables), "none" (the Unassigned ones), or absent (all).</summary>
+    private static Func<long, bool>? GoalFilter(JsonObject? p, IReadOnlyDictionary<long, long> assigned, IReadOnlyDictionary<long, Goals.Goal> goals)
+    {
+        if (p?["goal"] is not JsonValue v) return null;
+        if (v.TryGetValue<string>(out var s))
+        {
+            if (string.Equals(s.Trim(), "none", StringComparison.OrdinalIgnoreCase)) return d => !assigned.ContainsKey(d);
+            if (!long.TryParse(s.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                throw new RpcException("bad_params", "goal must be a goal's id or \"none\"");
+            return ById(parsed);
+        }
+        return WholeNumber(v, out var id) ? ById(id) : throw new RpcException("bad_params", "goal must be a goal's id or \"none\"");
+
+        // A goal deleted since the page asked (another window, the Concierge): its deliverables are none, not an error.
+        Func<long, bool> ById(long id) => d => goals.ContainsKey(id) && assigned.TryGetValue(d, out var g) && g == id;
+    }
+
+    // ---------------------------------------------------------------- goals
+
+    /// <summary>goals.list: {goals: [Goal], unassigned: {deliverables, open, total, time}, now}.</summary>
+    internal static JsonObject GoalsJson(GoalsOverview o) => new()
+    {
+        ["goals"] = new JsonArray([.. o.Goals.Select(g => (JsonNode)GoalJson(g))]),
+        ["unassigned"] = new JsonObject
+        {
+            ["deliverables"] = new JsonArray([.. o.Unassigned.Deliverables.Select(d => (JsonNode)d)]),
+            ["open"] = (long)o.Unassigned.Open,
+            ["total"] = (long)o.Unassigned.Total,
+            ["time"] = o.Unassigned.Time.ToJson(),
+        },
+        ["now"] = o.Now.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+    };
+
+    /// <summary>A goal on the wire: {id, name, description, createdAt, updatedAt, deliverables, open, total, time}.</summary>
+    internal static JsonObject GoalJson(GoalEntry e) => new()
+    {
+        ["id"] = e.Goal.Id,
+        ["name"] = e.Goal.Name,
+        ["description"] = e.Goal.Description,
+        ["createdAt"] = e.Goal.CreatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+        ["updatedAt"] = e.Goal.UpdatedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+        ["deliverables"] = new JsonArray([.. e.Deliverables.Select(d => (JsonNode)d)]),
+        ["open"] = (long)e.Open,
+        ["total"] = (long)e.Total,
+        ["time"] = e.Time.ToJson(),
+    };
+
+    /// <summary>goals.delete {id}: {deleted, unassigned} (how many of its deliverables are Unassigned now).</summary>
+    private async Task<JsonNode> DeleteGoalAsync(long id, CancellationToken ct) =>
+        new JsonObject { ["deleted"] = id, ["unassigned"] = (long)await bus.DeleteGoalAsync(id, ct) };
+
+    /// <summary>goals.assign {deliverable, goal: id|null}: {deliverable, goal: {id, name}|null}.</summary>
+    private async Task<JsonNode> AssignGoalAsync(JsonObject? p, CancellationToken ct)
+    {
+        var deliverable = Long(p, "deliverable");
+        if (p is null || !p.ContainsKey("goal")) throw new RpcException("bad_params", "goal is required (a goal's id, or null for Unassigned)");
+        long? goal = p["goal"] is null ? null : Long(p, "goal");
+        var g = await bus.AssignGoalAsync(deliverable, goal, ct);
+        return new JsonObject { ["deliverable"] = deliverable, ["goal"] = g is null ? null : new JsonObject { ["id"] = g.Id, ["name"] = g.Name } };
+    }
+
+    /// <summary>A DeliverableRow on the wire: bus.deliverables' summary fields, then the Deliverables page's own.</summary>
+    internal static JsonObject DeliverableRowJson(DeliverableRow r)
     {
         var node = S(r.Summary)!.AsObject();
         node["ownerId"] = r.OwnerId;
@@ -1208,27 +1284,27 @@ public sealed class UiRpc(
         return node;
     }
 
-    /// <summary>One message of workflows.get in plain words (the Monitor's wording, plus a workflow's close and expiry); null for the rest.</summary>
-    internal static JsonObject? WorkflowMessageRow(Message m)
+    /// <summary>One message of deliverables.get in plain words (the Monitor's wording, plus a deliverable's close and expiry); null for the rest.</summary>
+    internal static JsonObject? DeliverableMessageRow(Message m)
     {
         if (MonitorRow(m) is { } row)
         {
             row.Remove("team");
-            row.Remove("workflow");
+            row.Remove("deliverable");
             row.Remove("failureClass");
             return Ordered(row["seq"]!.GetValue<long>(), row["at"]!.GetValue<string>(), row["kind"]!.GetValue<string>(),
                 row["from"]?.GetValue<string>(), row["member"]?.GetValue<string>(), row["text"]?.GetValue<string>());
         }
-        if (m.Type is not (MessageTypes.WorkflowClosed or MessageTypes.WorkflowExpired)) return null;
+        if (m.Type is not (MessageTypes.DeliverableClosed or MessageTypes.DeliverableExpired)) return null;
         string? text = null;
         try
         {
             if (JsonNode.Parse(m.Payload) is JsonObject p)
-                text = (m.Type == MessageTypes.WorkflowClosed ? p["reason"] : p["detail"] ?? p["reason"]) is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s.Trim() : null;
+                text = (m.Type == MessageTypes.DeliverableClosed ? p["reason"] : p["detail"] ?? p["reason"]) is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s.Trim() : null;
         }
         catch (JsonException) { }
         if (text is { Length: > 240 }) text = text[..240] + "…";
-        return Ordered(m.Seq, m.OccurredAt.ToString("O"), m.Type == MessageTypes.WorkflowClosed ? "closed" : "expired", m.Source, null, text);
+        return Ordered(m.Seq, m.OccurredAt.ToString("O"), m.Type == MessageTypes.DeliverableClosed ? "closed" : "expired", m.Source, null, text);
 
         static JsonObject Ordered(long seq, string at, string kind, string? from, string? member, string? text) => new()
         {
@@ -1239,17 +1315,17 @@ public sealed class UiRpc(
     private async Task<string> TeamNameOf(long teamId, CancellationToken ct) =>
         (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId)?.Name ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
 
-    /// <summary>workflowExtend({ workflow, teamId? }): the workflow as the list shows it after the Extend.</summary>
-    private async Task<WorkflowSummary> ExtendAsync(JsonObject? p, CancellationToken ct)
+    /// <summary>deliverableExtend({ deliverable, teamId? }): the deliverable as the list shows it after the Extend.</summary>
+    private async Task<DeliverableSummary> ExtendAsync(JsonObject? p, CancellationToken ct)
     {
-        var workflow = Long(p, "workflow");
+        var deliverable = Long(p, "deliverable");
         var team = OptLong(p, "teamId") is { } teamId ? await TeamNameOf(teamId, ct)
-            : await bus.WorkflowTeamAsync(workflow, ct) ?? throw new RpcException("no_such_workflow", $"there is no workflow {workflow}");
-        return await bus.ExtendWorkflowAsync(team, workflow, ct);
+            : await bus.DeliverableTeamAsync(deliverable, ct) ?? throw new RpcException("no_such_deliverable", $"there is no deliverable {deliverable}");
+        return await bus.ExtendDeliverableAsync(team, deliverable, ct);
     }
 
-    /// <summary>teams.workflowExpiry: a get-or-set like teams.push; "days" (a whole number 1-365) sets it.</summary>
-    private async Task<JsonObject> WorkflowExpiryAsync(JsonObject? p, CancellationToken ct)
+    /// <summary>teams.deliverableExpiry: a get-or-set like teams.push; "days" (a whole number 1-365) sets it.</summary>
+    private async Task<JsonObject> DeliverableExpiryAsync(JsonObject? p, CancellationToken ct)
     {
         var team = await TeamNameOf(Long(p, "teamId"), ct);
         var days = p?["days"] switch
@@ -1259,18 +1335,18 @@ public sealed class UiRpc(
             JsonValue v when v.TryGetValue<double>(out var x) && x == Math.Floor(x) && x is >= int.MinValue and <= int.MaxValue => (int)x,
             _ => throw new RpcException("bad_request", "days must be a whole number of days from 1 to 365"),
         };
-        if (days is < BusEngine.MinWorkflowExpiryDays or > BusEngine.MaxWorkflowExpiryDays)
-            throw new RpcException("bad_request", $"days must be {BusEngine.MinWorkflowExpiryDays} to {BusEngine.MaxWorkflowExpiryDays}");
+        if (days is < BusEngine.MinDeliverableExpiryDays or > BusEngine.MaxDeliverableExpiryDays)
+            throw new RpcException("bad_request", $"days must be {BusEngine.MinDeliverableExpiryDays} to {BusEngine.MaxDeliverableExpiryDays}");
         return new JsonObject
         {
-            ["days"] = days is { } set ? await bus.SetWorkflowExpiryDaysAsync(team, set, ct) : await bus.WorkflowExpiryDaysAsync(team, ct),
+            ["days"] = days is { } set ? await bus.SetDeliverableExpiryDaysAsync(team, set, ct) : await bus.DeliverableExpiryDaysAsync(team, ct),
         };
     }
 
     private async Task<JsonNode?> DecisionsAsync(long teamId, CancellationToken ct)
     {
         var team = (await bus.TeamsAsync(ct)).SingleOrDefault(t => t.Id == teamId) ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
-        // The question a workflow about to expire waits on carries the warning (its Needs-you line) and when it expires.
+        // The question a deliverable about to expire waits on carries the warning (its Needs-you line) and when it expires.
         var warnings = await bus.ExpiryWarningsAsync(team.Name, ct);
         var list = new JsonArray();
         foreach (var m in await bus.OpenDecisionsAsync(team.Name, ct))
@@ -1285,7 +1361,7 @@ public sealed class UiRpc(
                 // for a question-only ask.
                 ["summary"] = ask.Summary,
                 ["details"] = ask.Details,
-                ["workflow"] = m.CorrelationId,
+                ["deliverable"] = m.CorrelationId,
                 ["at"] = m.OccurredAt.ToString("O"),
                 ["expiresAt"] = warnings.TryGetValue(m.CorrelationId, out var warning) && warning.Question == m.Seq ? warning.ExpiresAt.ToString("O") : null,
                 ["expiryWarning"] = warning is not null && warning.Question == m.Seq ? warning.Text : null,
@@ -1348,7 +1424,7 @@ public sealed class UiRpc(
     };
 
     /// <summary>
-    /// The person's answer joins the asker's workflow: an instruction to the asker, caused by the question. With
+    /// The person's answer joins the asker's deliverable: an instruction to the asker, caused by the question. With
     /// <paramref name="optionIndex"/>, the answer is that option's reply (then <paramref name="text"/>, when given and
     /// different); an option with an action applies it through the app's dispatcher, the same call as Team settings
     /// (teams.localhost on, audited as that call), only after every check that can refuse the answer has passed and the

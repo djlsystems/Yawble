@@ -23,7 +23,7 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
 | MCP server, remote | A server at an `https` address | Called from this computer | One tool per server tool, named `server__tool` |
 | API | A web service described by an OpenAPI spec | Called from this computer, with a Connection's secret | One tool per API, named `api_<name>` |
 | Website | A site agents use in a browser window of this app | In the app's window on this computer | One tool per site, named `web_<name>` |
-| Email | A mailbox, signed in with an [Email account](#email-accounts) Connection | Read over IMAP from this computer | Nothing: scripts use it (see [Email](#email)) |
+| Email | A mailbox, signed in with an [Email account](#email-accounts) Connection | Read over IMAP from this computer | Nothing: workflows use it (see [Email](#email)) |
 
 ### CLIs
 
@@ -95,9 +95,9 @@ Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**
 ### Email
 
 The built-in **Email** integration is one mailbox (an [Email account](#email-accounts) Connection) that a team's
-scripts can read. It is offered to teams like the other integrations: to every team, or to some. A script's step names
-it by its name (`"use": "Support inbox"`); a script member uses it when it is turned on for the member's team, or
-another Email integration turned on for that team when the member overrides it (see [Scripts](features.md#scripts)).
+workflows can read. It is offered to teams like the other integrations: to every team, or to some. A workflow's step names
+it by its name (`"use": "Support inbox"`); a workflow member uses it when it is turned on for the member's team, or
+another Email integration turned on for that team when the member overrides it (see [Workflows](features.md#workflows)).
 
 - Setting up: `integrations.emailSave { id?, name, connectionId }` names it and picks the email account (only an
   email account); `integrations.emailEnable { name, all?, teamId?, on? }` offers it; `integrations.emailList` lists
@@ -105,8 +105,8 @@ another Email integration turned on for that team when the member overrides it (
   removes it and keeps the Connection. The Connection's **Used by** shows `Email: <name>`.
 - A call from a team the integration is not turned on for fails the step with
   `refused: <name> is not turned on for <team>`. With its Connection removed: `refused: <name> has no email account`.
-- Every call is logged in the call history as `email:<name>` once it is done, with the script member as the caller, the
-  action, the argument names and their plain values, the script run, the mail server's host, how long it took and how
+- Every call is logged in the call history as `email:<name>` once it is done, with the workflow member as the caller, the
+  action, the argument names and their plain values, the workflow run, the mail server's host, how long it took and how
   many messages came back, or the mail error when it failed (exit 1; a sign-in that was refused says so). Message
   content is never logged. A member's `list` calls that succeed are one row per member per hour (`N calls this hour`);
   a failure is always its own row. The password stays in the credential store; it is never in the database, a log, a
@@ -117,11 +117,11 @@ another Email integration turned on for that team when the member overrides it (
   only move by expunging the whole folder.
 - The Email integration has no send, reply or delete action.
 
-#### Email actions for scripts
+#### Email actions for workflows
 
 An `integration` step names the Email integration in `use` and calls an action by its plain name (`"action": "list"`,
-not `email.list`). The script's `requires` entry for it (kind `email`, the actions its steps call) is derived from the
-steps when the script is saved or checked:
+not `email.list`). The workflow's `requires` entry for it (kind `email`, the actions its steps call) is derived from the
+steps when the workflow is saved or checked:
 
 ```json
 "requires": [ { "name": "Support inbox", "kind": "email", "actions": ["list"] } ],
@@ -156,8 +156,8 @@ steps when the script is saved or checked:
 - **The poll pattern:** `list { folder, after: vars.lastId, since: <first-run time> }`. After each `list`, if
   `messages` is **not empty**, save the `id` of the **last** message returned (the newest) in a saved `string`
   variable and pass it as `after` on the next run. When `messages` is empty, keep the id you have. The first run has no
-  id (`null`), so `since` picks where it starts. On `cursorReset` the script keeps going from what it got: it saves the
-  last id of those messages as usual. **Once the script has a saved id** (every `list` with an `after` that applies),
+  id (`null`), so `since` picks where it starts. On `cursorReset` the workflow keeps going from what it got: it saves the
+  last id of those messages as usual. **Once the workflow has a saved id** (every `list` with an `after` that applies),
   this gets every message exactly once in arrival order, however small `max` is (even 1), when several messages share
   a second, and when mail arrives between polls. Marking a polled message read or moving it out of the folder does not
   disturb the saved id.
@@ -195,7 +195,7 @@ steps when the script is saved or checked:
 - `move`: on Gmail a label move: the folder's label is added and the inbox label taken off (moving to `INBOX` only
   adds the inbox label), found by the `X-GM-MSGID`. Elsewhere IMAP `MOVE`. Either way the result's `id` and `folder`
   are the new ones (on Gmail the same `X-GM-MSGID` with the new label's UIDVALIDITY and UID).
-- The script check knows these arguments: an argument the action does not take, a missing required one, or one of the
+- The workflow check knows these arguments: an argument the action does not take, a missing required one, or one of the
   wrong type is an issue (`unknown-argument`, `missing-field`, `type-mismatch`), and the step's result is typed (its
   `into` variable and `steps.<id>`). The same check runs again when the step runs, on the evaluated arguments.
 - A failure fails the step with its reason: `mail list: the mailbox has no folder named 'Nowhere'`,
@@ -291,8 +291,8 @@ A team publishes a build to each new GitHub release of a repository.
 Why this shape is safe:
 
 - The token can reach only that one repository, and only its contents.
-- Agents never see the token. They name the task; the app reads the token and starts the script on this computer.
-- A change to the script, its command line or the binding asks you again before the next run.
+- Agents never see the token. They name the task; the app reads the token and starts the workflow on this computer.
+- A change to the workflow, its command line or the binding asks you again before the next run.
 - Removing the Connection stops the job: the task refuses to start without it.
 
 ## Who gets an integration
@@ -325,7 +325,7 @@ matches `pr merge 12 --squash`. API actions and MCP tools are matched by their e
 
 ### A team allow rule from the Concierge or the companion
 
-A script member's run has nobody to ask, so an API action whose rule asks first fails its step with
+A workflow member's run has nobody to ask, so an API action whose rule asks first fails its step with
 `needs approval: allow <action> for <team>`. The Concierge, or a program paired through the companion, can then ask
 for that action with `integration_action_allow { team, integration, action }`:
 
@@ -365,12 +365,12 @@ ordinary rule, which you can edit or remove later. An approval is remembered for
 whole family of commands. Pass-through commands (`gh api`, `az rest`, anything named `api`, `rest` or `graphql`) are
 remembered only as the exact line. A tool that reveals a sign-in cannot be always allowed.
 
-The agent does not wait. It is woken in the same workflow with the result.
+The agent does not wait. It is woken in the same deliverable with the result.
 
 Every call is logged with its decision, the rule that decided it, the team and member, and who started the work. For a
- web API (an agent's or a script's) and for Email, the log keeps the action, the HTTP status (or exit code) and the
+ web API (an agent's or a workflow's) and for Email, the log keeps the action, the HTTP status (or exit code) and the
  argument names, with values only for fields that are not message content: a body, text, message or subject keeps only
- its length, and a phone number its last 4 digits. The request itself is sent whole. A script's failed API call says
+ its length, and a phone number its last 4 digits. The request itself is sent whole. A workflow's failed API call says
  the integration, the action, the HTTP method and route, and for no answer the host and how long it waited.
 
 ## Network requests are not integrations

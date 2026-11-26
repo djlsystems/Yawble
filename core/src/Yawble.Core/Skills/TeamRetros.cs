@@ -5,7 +5,7 @@ namespace Yawble.Core.Skills;
 
 /// <summary>
 /// A team's lessons, the team-scoped custom skill team_retros (roles: any). The Manager writes it with
-/// team_retros_write after a workflow's retrospective; the person reads and edits it in Settings > Skills; every run of the
+/// team_retros_write after a deliverable's retrospective; the person reads and edits it in Settings > Skills; every run of the
 /// team gets it in its prompt (Teams/TeamPrompt.cs). Every write is a version (skill_versions, 0052).
 /// </summary>
 public static class TeamRetros
@@ -30,11 +30,11 @@ public static class TeamRetros
         (body ?? "").ReplaceLineEndings("\n").Split('\n').Count(l => l.TrimStart().StartsWith("- ", StringComparison.Ordinal) || l.TrimStart().StartsWith("* ", StringComparison.Ordinal));
 }
 
-/// <summary>One kept write of a team skill: who (a member, or "person"), in which workflow, when.</summary>
-public sealed record SkillVersion(long Id, long TeamId, string Name, int Version, string Body, string Writer, long? Workflow, long? RestoredFrom, string WrittenAt);
+/// <summary>One kept write of a team skill: who (a member, or "person"), in which deliverable, when.</summary>
+public sealed record SkillVersion(long Id, long TeamId, string Name, int Version, string Body, string Writer, long? Deliverable, long? RestoredFrom, string WrittenAt);
 
 /// <summary>Team settings' line: how many lessons, and the last write.</summary>
-public sealed record TeamLessons(int Count, int Version, string? UpdatedAt, string? Writer, long? Workflow, long? SkillId);
+public sealed record TeamLessons(int Count, int Version, string? UpdatedAt, string? Writer, long? Deliverable, long? SkillId);
 
 /// <summary>The current team_retros of a team as a run reads it: its text (null when there is none) and its version.</summary>
 public sealed record TeamRetrosState(string? Body, int Version);
@@ -47,7 +47,7 @@ public sealed class TeamRetrosRefusal(string code, string message) : ArgumentExc
 
 public sealed partial class SkillCatalog
 {
-    private sealed record VersionStamp(string Writer, long? Workflow, long? RestoredFrom);
+    private sealed record VersionStamp(string Writer, long? Deliverable, long? RestoredFrom);
 
     /// <summary>The team's own team_retros skill (never a global one of that name), or null.</summary>
     public Skill? TeamRetrosSkill(long teamId) => Custom(teamId).FirstOrDefault(s => s.Name == TeamRetros.Name);
@@ -61,12 +61,12 @@ public sealed partial class SkillCatalog
 
     /// <summary>
     /// team_retros_write: the whole new text of the team's team_retros, written by <paramref name="writer"/> (the Manager)
-    /// in <paramref name="workflow"/>. Refused above <see cref="TeamRetros.MaxChars"/>, and when the text changed since the
+    /// in <paramref name="deliverable"/>. Refused above <see cref="TeamRetros.MaxChars"/>, and when the text changed since the
     /// writer read it (<paramref name="seenVersion"/>: the version in its prompt or its last skills_get), so a person's edit
     /// in Settings is never overwritten unread. Keeps the skill's description and roles when it exists (the person may have
     /// changed them), creates it (roles: any) on the first write.
     /// </summary>
-    public SkillVersion WriteTeamRetros(long teamId, string text, string writer, long? workflow, int? seenVersion)
+    public SkillVersion WriteTeamRetros(long teamId, string text, string writer, long? deliverable, int? seenVersion)
     {
         var body = (text ?? "").ReplaceLineEndings("\n").Trim();
         if (body.Length == 0)
@@ -76,7 +76,7 @@ public sealed partial class SkillCatalog
                 "Merge or drop lessons (keep the ones a later run should act on) and write it again.");
         var existing = TeamRetrosSkill(teamId);
         Save(TeamRetros.Name, existing?.Description ?? TeamRetros.Description, existing?.Roles ?? ["any"], body, teamId,
-            new VersionStamp(writer, workflow, null), (c, tx) =>
+            new VersionStamp(writer, deliverable, null), (c, tx) =>
             {
                 var now = CurrentVersion(c, tx, teamId, TeamRetros.Name);
                 if (now == 0 || seenVersion == now) return;
@@ -120,7 +120,7 @@ public sealed partial class SkillCatalog
         var skill = TeamRetrosSkill(teamId);
         var last = Versions(teamId, TeamRetros.Name, 1).FirstOrDefault();
         return new TeamLessons(TeamRetros.CountLessons(skill?.Body), last?.Version ?? 0, last?.WrittenAt ?? skill?.UpdatedAt,
-            last?.Writer, last?.Workflow, skill?.Id);
+            last?.Writer, last?.Deliverable, skill?.Id);
     }
 
     private int CurrentVersion(long teamId, string name)
@@ -139,7 +139,7 @@ public sealed partial class SkillCatalog
         return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
-    private const string VersionColumns = "SELECT id, team_id, name, version, body, writer, workflow_id, restored_from, written_at FROM skill_versions";
+    private const string VersionColumns = "SELECT id, team_id, name, version, body, writer, deliverable_id, restored_from, written_at FROM skill_versions";
 
     private static SkillVersion ReadVersion(SqliteDataReader r) => new(r.GetInt64(0), r.GetInt64(1), r.GetString(2), r.GetInt32(3), r.GetString(4),
         r.GetString(5), r.IsDBNull(6) ? null : r.GetInt64(6), r.IsDBNull(7) ? null : r.GetInt64(7), r.GetString(8));
@@ -164,14 +164,14 @@ public sealed partial class SkillCatalog
         using (var ins = c.CreateCommand())
         {
             ins.Transaction = tx;
-            ins.CommandText = "INSERT INTO skill_versions (team_id, name, version, body, writer, workflow_id, restored_from, written_at) " +
+            ins.CommandText = "INSERT INTO skill_versions (team_id, name, version, body, writer, deliverable_id, restored_from, written_at) " +
                               "VALUES ($t, $n, $v, $b, $w, $wf, $r, $at);";
             ins.Parameters.AddWithValue("$t", teamId);
             ins.Parameters.AddWithValue("$n", name);
             ins.Parameters.AddWithValue("$v", next);
             ins.Parameters.AddWithValue("$b", body);
             ins.Parameters.AddWithValue("$w", stamp.Writer);
-            ins.Parameters.AddWithValue("$wf", (object?)stamp.Workflow ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$wf", (object?)stamp.Deliverable ?? DBNull.Value);
             ins.Parameters.AddWithValue("$r", (object?)stamp.RestoredFrom ?? DBNull.Value);
             ins.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
             ins.ExecuteNonQuery();

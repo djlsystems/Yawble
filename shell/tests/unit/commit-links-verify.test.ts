@@ -20,7 +20,7 @@ import ChatMessage from '../../src/renderer/src/components/ChatMessage.vue';
 import MemberPane from '../../src/renderer/src/components/MemberPane.vue';
 import TranscriptView from '../../src/renderer/src/components/TranscriptView.vue';
 import CardPanel from '../../src/renderer/src/board/CardPanel.vue';
-import { mountPane, paneRow } from './workflow-pane-fake';
+import { mountPane, paneRow } from './deliverable-pane-fake';
 import MemberActivity from '../../src/renderer/src/components/MemberActivity.vue';
 import { GIT_COMMITS_RESOLVE, type AgentCard, type BoardCard, type TeamSummary, type YawbleApi } from '../../src/shared/api';
 
@@ -266,7 +266,7 @@ describe('a confirmed commit link renders in each place', () => {
 
   it('card body, comments and trail (CardPanel)', async () => {
     const card = { id: 5, team: 'cloud', teamId: 2, member: 'Ada', item: 'B074', title: 'Links', body: `Body ${S.cloudOnly.slice(0, 7)}.`, status: 'done', lane: 'done',
-      placed: true, awaitingManager: false, workflow: 3, createdAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z', trailCount: 2 } as unknown as BoardCard;
+      placed: true, awaitingManager: false, deliverable: 3, createdAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z', trailCount: 2 } as unknown as BoardCard;
     const detail = { ...card, trail: [
       { id: 1, at: '2026-11-18T19:00:00Z', source: 'Ada', kind: 'handback', text: `Handed back: ${said('cloud')}` },
       { id: 2, at: '2026-11-18T19:01:00Z', source: 'Manager', kind: 'comment', text: `Merged ${S.shared.slice(0, 8)}.` },
@@ -282,15 +282,15 @@ describe('a confirmed commit link renders in each place', () => {
     expect(core.resolves()).toHaveLength(1);
   });
 
-  it('workflow threads: a handback in the Workflows page\'s pane and a thread\'s messages (TranscriptView)', async () => {
+  it('deliverable threads: a handback in the Deliverables page\'s pane and a thread\'s messages (TranscriptView)', async () => {
     const row = paneRow({ id: 10, title: 'Partial refunds', status: 'completed', team: 'web' });
     const handback = { seq: 4, at: '2026-11-18T19:00:00Z', kind: 'handback', from: 'Ada', member: 'Ada', text: said() };
-    use(fakeCore({ 'workflows.get': () => ({ workflow: row, cards: [], messages: [handback], spec: null, backlog: true }) }));
+    use(fakeCore({ 'deliverables.get': () => ({ deliverable: row, cards: [], messages: [handback], spec: null, backlog: true }) }));
     const p = keep(await mountPane(row, core.api));
     const line = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: said() }] } });
     const t = keep(mount(TranscriptView, { props: { text: line }, attachTo: document.body }));
     await settle();
-    expect(confirmed(p.get('[data-test=workflow-pane-message]').element)).toEqual([S.pushed]);
+    expect(confirmed(p.get('[data-test=deliverable-pane-message]').element)).toEqual([S.pushed]);
     expect(confirmed(t.element)).toEqual([S.pushed]);
   });
 

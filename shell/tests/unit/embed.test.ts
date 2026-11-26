@@ -35,7 +35,7 @@ const base = (): EmbedNavState => ({
   slots: { running: 2, limit: 4, queued: 1 },
   readOnly: false,
   removing: null,
-  openWorkflows: 3,
+  openDeliverables: 3,
 });
 
 function fakeHandlers() {
@@ -70,9 +70,9 @@ describe('buildNav: the sidebar as data', () => {
   it('the places: ids, labels, icon keys and order', () => {
     const nav = buildNav(base());
     expect(nav.places.map((p) => [p.id, p.label, p.icon])).toEqual([
-      ['newChat', 'New chat', 'newChat'], ['concierge', 'Concierge', 'concierge'], ['teams', 'Teams', 'teams'],
-      ['backlog', 'Backlog', 'backlog'], ['workflows', 'Workflows', 'workflows'], ['board', 'Kanban board', 'kanban'],
-      ['documents', 'Documents', 'documents'], ['monitor', 'Monitor', 'monitor'], ['scripts', 'Scripts', 'scripts'], ['logs', 'Logs', 'logs'],
+      ['newChat', 'New chat', 'newChat'], ['concierge', 'Concierge', 'concierge'], ['teams', 'Teams', 'teams'], ['goals', 'Goals', 'goals'],
+      ['deliverables', 'Deliverables', 'deliverables'], ['backlog', 'Backlog', 'backlog'], ['board', 'Kanban board', 'kanban'],
+      ['workflows', 'Workflows', 'workflows'], ['documents', 'Documents', 'documents'], ['monitor', 'Monitor', 'monitor'], ['logs', 'Logs', 'logs'],
 
     ]);
     expect(EMBED_PLACE_IDS).toEqual(nav.places.map((p) => p.id));
@@ -96,20 +96,20 @@ describe('buildNav: the sidebar as data', () => {
     expect(app).not.toContain("terminal: () => command('terminal')");
     expect(app).not.toContain("help: () => command('about')");
   });
-  it('badges: Teams counts the teams, Workflows the open ones; none when 0 or not known', () => {
+  it('badges: Teams counts the teams, Deliverables the open ones; none when 0 or not known', () => {
     const nav = buildNav(base());
     const badge = (n: EmbedNav, id: string) => n.places.find((p) => p.id === id)!.badge;
     expect(badge(nav, 'teams')).toBe(4);
-    expect(badge(nav, 'workflows')).toBe(3);
-    expect(nav.places.filter((p) => p.id !== 'teams' && p.id !== 'workflows').every((p) => p.badge === null)).toBe(true);
-    const none = buildNav({ ...base(), teams: [], openWorkflows: 0 });
+    expect(badge(nav, 'deliverables')).toBe(3);
+    expect(nav.places.filter((p) => p.id !== 'teams' && p.id !== 'deliverables').every((p) => p.badge === null)).toBe(true);
+    const none = buildNav({ ...base(), teams: [], openDeliverables: 0 });
     expect(badge(none, 'teams')).toBeNull();
-    expect(badge(none, 'workflows')).toBeNull();
-    expect(badge(buildNav({ ...base(), openWorkflows: null }), 'workflows')).toBeNull();
-    expect(badge(buildNav({ ...base(), openWorkflows: undefined }), 'workflows')).toBeNull();
+    expect(badge(none, 'deliverables')).toBeNull();
+    expect(badge(buildNav({ ...base(), openDeliverables: null }), 'deliverables')).toBeNull();
+    expect(badge(buildNav({ ...base(), openDeliverables: undefined }), 'deliverables')).toBeNull();
   });
   it('the active place is the view; New chat, Logs and Settings never light a place', () => {
-    for (const v of ['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'scripts']) {
+    for (const v of ['concierge', 'teams', 'goals', 'backlog', 'deliverables', 'board', 'documents', 'monitor', 'workflows']) {
       expect(buildNav({ ...base(), view: v }).places.filter((p) => p.active).map((p) => p.id)).toEqual([v]);
     }
     expect(buildNav({ ...base(), view: 'settings' }).places.some((p) => p.active)).toBe(false);
@@ -210,7 +210,7 @@ describe('navigate does what the same sidebar click does', () => {
   const s = base();
   const cases: [string, unknown, (w: ReturnType<typeof mount>) => Promise<void>][] = [
     ['newChat', { kind: 'place', id: 'newChat' }, async (w) => { await w.get('[data-test=new-chat]').trigger('click'); }],
-    ...(['concierge', 'teams', 'backlog', 'workflows', 'board', 'documents', 'monitor', 'scripts'] as const).map((v) =>
+    ...(['concierge', 'teams', 'goals', 'backlog', 'deliverables', 'board', 'documents', 'monitor', 'workflows'] as const).map((v) =>
       [v, { kind: 'place', id: v }, async (w: ReturnType<typeof mount>) => { await w.get(`[data-test=nav-${v}]`).trigger('click'); }] as [string, unknown, (w: ReturnType<typeof mount>) => Promise<void>]),
     ['logs', { kind: 'place', id: 'logs' }, async (w) => { await w.get('[data-test=nav-logs]').trigger('click'); }],
     ['team', { kind: 'team', id: 2 }, async (w) => { await w.findAll('[data-test=team-item]')[1].trigger('click'); }],

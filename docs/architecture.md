@@ -98,14 +98,14 @@ homes and temp folders) and `grok-home/`.
 - **Runs.** A member with undelivered work joins the global run queue. The scheduler admits the oldest entry whenever
   fewer than `app.maxConcurrentAgents` sandboxes are open. Member runs, Manager runs and interactive terminal sessions
   all share that one limit, first come, first served across teams. One admission takes up to 16 deliveries of the
-  oldest workflow as one numbered batch.
+  oldest deliverable as one numbered batch.
 - **A run that cannot start.** When the host cannot get a run ready (the member's clone, the team's shared view), the
   agent never starts. The batch goes back to the member's queue and is tried again 20 seconds later, up to 3 tries in
   all. Nobody is told about a try; only the last failure is reported. Reading or fetching branches from a repository
   path on this computer is also tried again, up to 3 times, when only git's transport failed ("Could not read from
   remote repository").
 - **Tools.** Agents act on the bus through MCP tools (tell, progress, handback, blocked, needs_decision,
-  workflow_complete, status and more). Identity and causation come from the run, never from arguments. Members tell
+  deliverable_complete, status and more). Identity and causation come from the run, never from arguments. Members tell
   only their Manager; a chain of tells deeper than the limit is refused.
 - **Restart.** A run left open by a stopped core is recorded as interrupted and reported once; it is never re-run.
   Queued entries keep their order.

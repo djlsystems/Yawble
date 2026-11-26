@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 
 namespace Yawble.Core.Board;
 
-/// <summary>One card a completed workflow closed over a tester's FAIL, as the person accepted it.</summary>
+/// <summary>One card a completed deliverable closed over a tester's FAIL, as the person accepted it.</summary>
 /// <param name="Kind"><see cref="ClosedOverFail.Accepted"/> or <see cref="ClosedOverFail.WontDo"/>.</param>
 public sealed record ClosedOverFailEntry(long Card, string? Tester, string? FailLine, string Kind, string? Reason)
 {
@@ -14,7 +14,7 @@ public sealed record ClosedOverFailEntry(long Card, string? Tester, string? Fail
 }
 
 /// <summary>
-/// The WorkflowCompleted payload's <c>closedOverFail</c> (workflow_complete writes it): an array of
+/// The DeliverableCompleted payload's <c>closedOverFail</c> (deliverable_complete writes it): an array of
 /// <c>{ card, tester, failLine, kind: "accepted" | "wont-do", reason }</c>, absent or null when nothing was closed over a FAIL.
 /// </summary>
 public static class ClosedOverFail
@@ -25,14 +25,14 @@ public static class ClosedOverFail
     public const string AcceptedPrefix = "Closed over a FAIL, accepted by the person: ";
     public const string WontDoPrefix = "Won't do, accepted by the person: ";
 
-    /// <summary>What the Concierge's workflow watch says of such a workflow.</summary>
+    /// <summary>What the Concierge's deliverable watch says of such a deliverable.</summary>
     public const string ConciergeWords = "closed over a FAIL (accepted)";
 
     public static string LineOf(string kind, string? failLine, string? reason) => kind == WontDo
         ? WontDoPrefix + (reason ?? failLine ?? "no reason given")
         : AcceptedPrefix + (failLine ?? "FAIL");
 
-    /// <summary>The entries of a WorkflowCompleted payload; empty when the field is absent, null or malformed.</summary>
+    /// <summary>The entries of a DeliverableCompleted payload; empty when the field is absent, null or malformed.</summary>
     public static IReadOnlyList<ClosedOverFailEntry> Read(JsonObject? payload)
     {
         if (payload?[Field] is not JsonArray a) return [];

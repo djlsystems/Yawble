@@ -117,7 +117,7 @@ public class ApiCallTests
         private async Task<RunResult> Handle(RunContext run, CancellationToken ct)
         {
             // Every item of the batch: a call told while the member's previous run is still ending waits and can be batched
-            // behind another pending message of the workflow (an approval notice, say).
+            // behind another pending message of the deliverable (an approval notice, say).
             foreach (var (id, call) in _calls)
             {
                 if (!run.Items.Any(m => m.Payload.Contains($"call#{id}#", StringComparison.Ordinal))) continue;
@@ -152,11 +152,11 @@ public class ApiCallTests
 
         public Task<string> Ada(object args) => CallAs("Alpha", "Ada", "api_pets", args);
 
-        /// <summary>Whether the workflow holds a message containing this text (what the agent was told).</summary>
-        public bool Told(long workflow, string text)
+        /// <summary>Whether the deliverable holds a message containing this text (what the agent was told).</summary>
+        public bool Told(long deliverable, string text)
         {
             using var s = Db.OpenStore();
-            return s.Workflow(workflow).Any(m => m.Payload.Contains(text, StringComparison.Ordinal));
+            return s.Deliverable(deliverable).Any(m => m.Payload.Contains(text, StringComparison.Ordinal));
         }
 
         public void Exec(string sql)
@@ -323,7 +323,7 @@ public class ApiCallTests
         var approved = await r.Rpc("integrations.approve", new JsonObject { ["id"] = ask.Id, ["remember"] = "always" });
         Assert.Equal("createPet", approved!["remembered"]!.GetValue<string>());
         Assert.True(approved["started"]!.GetValue<bool>()); // sent in the background: the click returns at once
-        await Wait.UntilAsync(() => r.Told(ask.Workflow, "HTTP 201"), "Ada told the result");
+        await Wait.UntilAsync(() => r.Told(ask.Deliverable, "HTTP 201"), "Ada told the result");
         Assert.Equal("{\"name\":\"Rex\"}", body);
         Assert.Equal("Bearer " + Token, auth);
         Assert.Equal(1, r.Scalar("SELECT count(*) FROM integration_calls WHERE integration = 'api:pets' AND decision = 'approved' AND exit_code = 201"));
@@ -735,7 +735,7 @@ public class ApiCallTests
     {
         // no server row: the winning approval fails before anything could start, so no program ever runs
         await using var r = await Rig.Make();
-        r.Exec($"INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, action) " +
+        r.Exec($"INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, action) " +
                $"VALUES ('now', 'mcp:ghost', {r.Alpha}, 'Alpha/Ada', '[\"echo\",\"{{}}\"]', 'testing', 1, 1, 'echo');");
         var id = r.Scalar("SELECT id FROM integration_asks WHERE integration = 'mcp:ghost'");
         var both = new[] { 0, 1 }.Select(_ => Task.Run(async () =>
@@ -753,7 +753,7 @@ public class ApiCallTests
     public async Task ApproveAlways_OnASignInAction_LeavesTheRequestWaiting_AndSavesNothing()
     {
         await using var r = await Rig.Make();
-        r.Exec($"INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, action) " +
+        r.Exec($"INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, action) " +
                $"VALUES ('now', 'api:pets', {r.Alpha}, 'Alpha/Ada', '[\"listTokens\",\"{{}}\"]', 'testing', 1, 1, 'listTokens');");
         var id = r.Scalar("SELECT id FROM integration_asks WHERE action = 'listTokens'");
         var refused = await Assert.ThrowsAsync<RpcException>(() => r.Rpc("integrations.approve", new JsonObject { ["id"] = id, ["remember"] = "always" }));
@@ -778,7 +778,7 @@ public class ApiCallTests
         })).ToArray();
         var results = await Task.WhenAll(both);
         Assert.Single(results, ok => ok);
-        await Wait.UntilAsync(() => r.Told(ask.Workflow, "HTTP 201"), "Ada told the result");
+        await Wait.UntilAsync(() => r.Told(ask.Deliverable, "HTTP 201"), "Ada told the result");
         Assert.Equal(1, posts);
         // and after it was decided, approving again is refused without sending
         await Assert.ThrowsAsync<RpcException>(() => r.Rpc("integrations.approve", new JsonObject { ["id"] = ask.Id }));
@@ -794,7 +794,7 @@ public class ApiCallTests
         await r.Rpc("integrations.connectionRemove", new JsonObject { ["id"] = r.ConnectionId, ["confirm"] = true });
         var approved = await r.Rpc("integrations.approve", new JsonObject { ["id"] = ask.Id });
         Assert.True(approved!["ok"]!.GetValue<bool>());
-        await Wait.UntilAsync(() => r.Told(ask.Workflow, "pets needs a connection"), "Ada told it needs a connection");
+        await Wait.UntilAsync(() => r.Told(ask.Deliverable, "pets needs a connection"), "Ada told it needs a connection");
         Assert.DoesNotContain(r.Http.Requests, q => q.Method == HttpMethod.Post);
     }
 

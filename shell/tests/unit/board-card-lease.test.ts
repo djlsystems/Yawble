@@ -7,7 +7,7 @@ import type { BoardCard } from '../../src/shared/api';
 // The Kanban card shows the heavy-work lease of its member on the card it works on: held or waited for. Fakes only.
 const card = (lease?: BoardCard['lease']): BoardCard => ({
   id: 7, team: 'payments', teamId: 1, member: 'DeveloperPriya', item: 'B007', title: 'Run the suite', body: '', status: 'running',
-  lane: 'in-progress', placed: false, awaitingManager: false, workflow: 12, createdAt: '2026-11-08T10:00:00Z', updatedAt: '2026-11-08T10:00:00Z',
+  lane: 'in-progress', placed: false, awaitingManager: false, deliverable: 12, createdAt: '2026-11-08T10:00:00Z', updatedAt: '2026-11-08T10:00:00Z',
   trailCount: 0, ...(lease ? { lease } : {}),
 });
 

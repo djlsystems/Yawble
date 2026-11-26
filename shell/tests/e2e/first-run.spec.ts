@@ -11,7 +11,7 @@ import path from 'node:path';
 //
 // Credentials are the real credential service, here its 0600 file fallback in the test's own
 // data folder. The host panes run the CLIs the app detects (first on PATH), which here are STUB claude and grok
-// scripts in a temp folder put first on PATH: the stub `claude setup-token` prints a made-up token, the stub
+// workflows in a temp folder put first on PATH: the stub `claude setup-token` prints a made-up token, the stub
 // `grok login` writes a made-up session into GROK_HOME. Runs use the core's fake-pty runner
 // (YAWBLE_RUNNER=fake-pty). Every credential below is a made-up string; no real CLI or credential is used or read.
 const shellDir = path.resolve(__dirname, '..', '..');

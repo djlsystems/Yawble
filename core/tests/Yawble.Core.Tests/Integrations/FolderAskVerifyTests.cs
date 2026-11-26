@@ -95,7 +95,7 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
     }
 
     private Task<string> Ask(MemberRef who, string path, string access = "readwrite", string? member = null) =>
-        _asks.RequestFromAgentAsync(who, path, access, "replay the recorded smoke sessions", member, workflow: 9, causation: 10, Ct);
+        _asks.RequestFromAgentAsync(who, path, access, "replay the recorded smoke sessions", member, deliverable: 9, causation: 10, Ct);
 
     private async Task<JsonObject> MemberPolicy(long memberId) => (await Call("policy.getMember", new { memberId }))!.AsObject();
 

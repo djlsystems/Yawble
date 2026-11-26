@@ -150,9 +150,9 @@ describe('the Git dialog\'s pull request line', () => {
 
 describe('Team settings > Repositories: provider and link pattern', () => {
   const answers = (state: { main: RepoProviderInfo; tools: RepoProviderInfo }) => ({
-    'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
+    'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
     'teams.push': () => ({ on: false, origin: null }), 'teams.approvals': () => [], 'teams.syncToBase': () => ({ on: true, note: null }),
-    'teams.workflowExpiry': () => ({ days: 3 }),
+    'teams.deliverableExpiry': () => ({ days: 3 }),
     'integrations.list': () => ({ integrations: [], pendingAsks: 0 }), 'integrations.mcpList': () => [], 'integrations.apiList': () => [],
     'teams.repos': () => ({
       main: { path: 'C:/r', baseBranch: 'main', managed: false, origin: 'https://git.corp.example/acme/svc.git', name: 'svc', ...state.main },

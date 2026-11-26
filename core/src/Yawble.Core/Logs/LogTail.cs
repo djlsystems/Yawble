@@ -8,11 +8,11 @@ namespace Yawble.Core.Logs;
 /// <summary>
 /// One log entry as logs.tail pushes it: when, which log (<see cref="Source"/>: "diagnostics", or the activity log's
 /// source such as "Runs" or "Messages"), its level ("error", "warning" or "info"), the team and member it is about when
-/// the log says so, what happened (<see cref="Event"/>) and its text. <see cref="Workflow"/>: a workflow event (an
+/// the log says so, what happened (<see cref="Event"/>) and its text. <see cref="Deliverable"/>: a deliverable event (an
 /// instruction, hand-back, decision asked, completion). Facts only: no token, cost or usage field.
 /// </summary>
 public sealed record LogTailEntry(
-    string At, string Source, string Level, string? Team, string? Member, string? Event, string? Text, bool Workflow = false,
+    string At, string Source, string Level, string? Team, string? Member, string? Event, string? Text, bool Deliverable = false,
     bool MemberInText = false)
 {
     /// <summary>The entry as the event carries it, redacted the way logs.query redacts (<see cref="LogRedaction"/>).</summary>
@@ -25,12 +25,12 @@ public sealed record LogTailEntry(
         ["member"] = Member,
         ["event"] = LogRedaction.Text(Event),
         ["text"] = LogRedaction.Text(Text),
-        ["workflow"] = Workflow,
+        ["deliverable"] = Deliverable,
     };
 }
 
 /// <summary>
-/// What a tail lets through. <see cref="All"/> false (level "default"): warnings, errors and workflow events; true
+/// What a tail lets through. <see cref="All"/> false (level "default"): warnings, errors and deliverable events; true
 /// ("all"): every level but debug; <see cref="Debug"/> ("debug") lets debug entries through too. <see cref="Team"/> a team name, <see cref="Member"/> "Team/Name" (the member wins over the team).
 /// A member's own entries only: not its team's "&lt;Team&gt;" entries; a team's take those too. <see cref="App"/>:
 /// only the activity log's entries about no team and no member (team null, member "app").
@@ -39,7 +39,7 @@ public sealed record LogTailFilter(bool All = false, string? Team = null, string
 {
     public bool Matches(LogTailEntry e)
     {
-        if (!All && e.Level is not (LogLevels.Error or LogLevels.Warning) && !e.Workflow) return false;
+        if (!All && e.Level is not (LogLevels.Error or LogLevels.Warning) && !e.Deliverable) return false;
         if (!Debug && e.Level == LogLevels.Debug) return false;
         if (App && !(e.Team is null && e.Member == "app" && !e.MemberInText)) return false;
         if (Member is { } member)
@@ -105,10 +105,10 @@ public static partial class LogLevels
         _ => Info,
     };
 
-    /// <summary>Whether an activity-log message row is a workflow event: workflow.*, instructions, hand-backs, completion, failure, blocked, decisions.</summary>
-    public static bool IsWorkflowEvent(string? type) =>
+    /// <summary>Whether an activity-log message row is a deliverable event: deliverable.*, instructions, hand-backs, completion, failure, blocked, decisions.</summary>
+    public static bool IsDeliverableEvent(string? type) =>
         type is not null && type != Bus.MessageTypes.Progress
-        && (type.StartsWith("workflow.", StringComparison.Ordinal) || type.StartsWith("agent.", StringComparison.Ordinal)
+        && (type.StartsWith("deliverable.", StringComparison.Ordinal) || type.StartsWith("agent.", StringComparison.Ordinal)
             || type.StartsWith("instruction ", StringComparison.Ordinal));
 
     /// <summary>

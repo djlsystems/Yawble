@@ -13,7 +13,7 @@ public sealed record IntegrationRow(long Id, string Kind, string Name, string? P
 
 /// <summary>A call waiting for the person, or decided.</summary>
 public sealed record AskRow(long Id, string At, string Integration, long TeamId, string Member, IReadOnlyList<string> Args, string Reason,
-    long Workflow, long CausationSeq, string State, string? DecidedBy, string? Note, string? Repo = null, string? Action = null);
+    long Deliverable, long CausationSeq, string State, string? DecidedBy, string? Note, string? Repo = null, string? Action = null);
 
 /// <summary>What an agent's tool call returned: the text it reads and, for a website screenshot, a PNG.</summary>
 public sealed record ToolReply(string Text, byte[]? Png);
@@ -22,7 +22,7 @@ public sealed record ToolReply(string Text, byte[]? Png);
 /// Integrations: the person's own CLIs, enabled for every team or
 /// some, offered to those teams' agents as tools of the app's MCP server, and run on this computer under rules -
 /// allowed calls run at once; asking ones wait for the person, who approves (once, or always for the team) or declines,
-/// and the agent is woken with the result in its workflow; denied ones never run. Every call is logged with who
+/// and the agent is woken with the result in its deliverable; denied ones never run. Every call is logged with who
 /// started the work.
 /// </summary>
 public sealed partial class IntegrationService(string connectionString, BusEngine bus, TimeProvider? clock = null,
@@ -547,14 +547,14 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
                 if (reason is null) throw new ArgumentException("this call asks the person first: give a reason (one line) for it");
                 var id = Scalar(
                     """
-                    INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, repo, action)
+                    INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, repo, action)
                     VALUES ($at, $i, $t, $m, $a, $r, $w, $c, $repo, $action) RETURNING id;
                     """,
                     ("$at", Now()), ("$i", row.Name), ("$t", run.Member.TeamId), ("$m", run.Member.Qualified), ("$a", JsonSerializer.Serialize(list)),
                     ("$r", Clip(reason, 500)), ("$w", run.Correlation), ("$c", run.Causation), ("$repo", (object?)repo ?? DBNull.Value),
                     ("$action", action ?? Discover.FoundPathOf(row.Name, list)));
                 Log(row.Name, run, list, "asked", rule, null);
-                return $"asked: `{line}` waits for the person's approval (request {id}). You will be woken with the result in this workflow. Do other work or end your turn; do not ask again.";
+                return $"asked: `{line}` waits for the person's approval (request {id}). You will be woken with the result in this deliverable. Do other work or end your turn; do not ask again.";
             default:
                 var output = await RunAsync(row, list, run.Member.TeamId, ct, repo);
                 Log(row.Name, run, list, Decisions.Allow, rule, output);
@@ -660,7 +660,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
             ("$by", who.User), ("$now", Now()), ("$id", id));
         var note = decision is null ? "" : RememberedText(decision, path ?? CliRules.Join(ask.Args), all);
         // The decision is recorded; the call itself runs in the background (an image build takes minutes), so the person's
-        // click returns at once. The agent is told the result in its workflow when it ends.
+        // click returns at once. The agent is told the result in its deliverable when it ends.
         _ = RunApprovedAsync(row, ask, note, who);
         return new JsonObject { ["ok"] = true, ["started"] = true, ["remembered"] = path };
     }
@@ -752,7 +752,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id, at, integration, team_id, member, args, reason, workflow, causation_seq, state, decided_by, note, repo, action FROM integration_asks " +
+        cmd.CommandText = "SELECT id, at, integration, team_id, member, args, reason, deliverable, causation_seq, state, decided_by, note, repo, action FROM integration_asks " +
             $"WHERE 1 = 1 {(pendingOnly ? "AND state = 'pending'" : "")} {(teamId is null ? "" : "AND team_id = $t")} ORDER BY id;";
         if (teamId is not null) cmd.Parameters.AddWithValue("$t", teamId);
         using var r = cmd.ExecuteReader();
@@ -768,7 +768,7 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
         ? HostTasks.AskJson(t) : new JsonObject
     {
         ["id"] = a.Id, ["at"] = a.At, ["integration"] = a.Integration, ["teamId"] = a.TeamId, ["member"] = a.Member,
-        ["command"] = a.Integration.StartsWith("mcp:", StringComparison.Ordinal) || a.Integration.StartsWith("api:", StringComparison.Ordinal) ? $"{a.Integration[4..]} › {a.Args[0]} {(a.Args.Count > 1 ? a.Args[1] : "")}" : $"{a.Integration} {CliRules.Join(a.Args)}", ["reason"] = a.Reason, ["workflow"] = a.Workflow, ["repo"] = a.Repo,
+        ["command"] = a.Integration.StartsWith("mcp:", StringComparison.Ordinal) || a.Integration.StartsWith("api:", StringComparison.Ordinal) ? $"{a.Integration[4..]} › {a.Args[0]} {(a.Args.Count > 1 ? a.Args[1] : "")}" : $"{a.Integration} {CliRules.Join(a.Args)}", ["reason"] = a.Reason, ["deliverable"] = a.Deliverable, ["repo"] = a.Repo,
         ["action"] = ShownAction(a), ["canAlways"] = CanAlways(a),
     }).ToArray());
 
@@ -820,17 +820,17 @@ public sealed partial class IntegrationService(string connectionString, BusEngin
             output, Provenance.Actor.Current);
 
     private void LogFor(AskRow ask, string decision, CliOutput? output, Provenance.Actor who) =>
-        Insert(ask.Integration, ask.Member[..ask.Member.IndexOf('/')], ask.Member, ask.Workflow, ask.Args, decision, null, output, who);
+        Insert(ask.Integration, ask.Member[..ask.Member.IndexOf('/')], ask.Member, ask.Deliverable, ask.Args, decision, null, output, who);
 
-    private void Insert(string integration, string? team, string? member, long? workflow, IReadOnlyList<string> args, string decision, string? rule,
+    private void Insert(string integration, string? team, string? member, long? deliverable, IReadOnlyList<string> args, string decision, string? rule,
         CliOutput? output, Provenance.Actor? who, SqliteConnection? within = null, SqliteTransaction? tx = null) =>
         Exec(within, tx,
             """
-            INSERT INTO integration_calls (at, integration, team, member, workflow, args, decision, rule, exit_code, duration_ms, output_bytes, via, user_name)
+            INSERT INTO integration_calls (at, integration, team, member, deliverable, args, decision, rule, exit_code, duration_ms, output_bytes, via, user_name)
             VALUES ($at, $i, $team, $m, $w, $a, $d, $r, $x, $ms, $b, $via, $u);
             """,
             // every call's arguments keep their names and only the values that are not message content (CallArgsRedaction)
-            ("$at", Now()), ("$i", integration), ("$team", team), ("$m", member), ("$w", workflow),
+            ("$at", Now()), ("$i", integration), ("$team", team), ("$m", member), ("$w", deliverable),
             ("$a", CliRunner.Redact(JsonSerializer.Serialize(CallArgsRedaction.ForLog(integration, args)))),
             ("$d", decision), ("$r", rule), ("$x", output?.ExitCode), ("$ms", output is null ? null : (long)output.Duration.TotalMilliseconds),
             ("$b", output?.Bytes), ("$via", who?.Via), ("$u", who?.User));

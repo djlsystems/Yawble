@@ -16,13 +16,13 @@ public sealed class BusOptions
     /// <summary>The causation depth limit. 0 turns it off.</summary>
     public int DepthLimit { get; init; } = 200;
 
-    /// <summary>Tell a workflow's owner, once, when its run ends with the workflow open and nobody working it (on by default).</summary>
+    /// <summary>Tell a deliverable's owner, once, when its run ends with the deliverable open and nobody working it (on by default).</summary>
     public bool IdleOffer { get; init; } = true;
 
-    /// <summary>Queue a retro item for the team's Manager when a workflow_complete is accepted (on by default).</summary>
+    /// <summary>Queue a retro item for the team's Manager when a deliverable_complete is accepted (on by default).</summary>
     public bool Retros { get; init; } = true;
 
-    /// <summary>The most deliveries of one workflow in one run.</summary>
+    /// <summary>The most deliveries of one deliverable in one run.</summary>
     public int BatchLimit { get; init; } = 16;
 
     /// <summary>The pump is woken in process after every commit; this poll is only the safety net.</summary>
@@ -31,7 +31,7 @@ public sealed class BusOptions
     /// <summary>
     /// A run that ends before its agent started (<see cref="FailureClasses.NotStarted"/>) is tried again this many times,
     /// <see cref="NotStartedRetryDelay"/> apart, before it is reported failed. Its deliveries stay queued in between, so a
-    /// Manager's own run cannot leave its workflow with nobody working it.
+    /// Manager's own run cannot leave its deliverable with nobody working it.
     /// </summary>
     public int NotStartedRetries { get; init; } = 2;
 
@@ -63,7 +63,7 @@ public sealed record AgentChoice(string Cli, bool Ready, string Detail);
 ///
 /// Delivery: the pump writes a pending delivery in the same transaction that moves the cursor;
 /// a member with undelivered work enters the global run_queue; the scheduler admits the oldest entry whenever a
-/// slot is free; admission takes a batch of up to 16 deliveries of the oldest workflow and marks them started.
+/// slot is free; admission takes a batch of up to 16 deliveries of the oldest deliverable and marks them started.
 /// A restart reports every run left open as interrupted (at most once after a run starts) and re-offers
 /// deliveries that never started (at least once until then). The queue is a table, so it keeps its order.
 /// </summary>
@@ -175,7 +175,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             MessageTypes.Blocked => Field("reason") is { } r ? "blocked: " + r : null,
             MessageTypes.Progress => Field("status"),
             MessageTypes.NeedsDecision => Field("question") is { } q ? "needs decision: " + q : null,
-            MessageTypes.WorkflowCompleted => Field("delivered") is { } d ? "declared complete: " + d : null,
+            MessageTypes.DeliverableCompleted => Field("delivered") is { } d ? "declared complete: " + d : null,
             _ => null,
         };
     }
@@ -244,8 +244,8 @@ public sealed partial class BusEngine : IAsyncDisposable
     }
 
     /// <summary>
-    /// The person tells a member of a team. With no causation this roots a new workflow (depth 0); with one (a
-    /// needs_decision answer) it joins that workflow.
+    /// The person tells a member of a team. With no causation this roots a new deliverable (depth 0); with one (a
+    /// needs_decision answer) it joins that deliverable.
     /// </summary>
     public Task<Message> PersonTellAsync(string team, string member, string text, long? causation = null, CancellationToken ct = default,
         System.Text.Json.Nodes.JsonObject? extra = null) =>
@@ -359,7 +359,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             EnsureActive(run);
             if (run.Member.Role == MemberRole.Manager)
             {
-                throw new BusRefusal("not_allowed", "the Manager has nobody to hand back to; declare with workflow_complete");
+                throw new BusRefusal("not_allowed", "the Manager has nobody to hand back to; declare with deliverable_complete");
             }
             if (string.IsNullOrWhiteSpace(delivered)) throw new BusRefusal("empty", "say what you delivered");
             _statusLines[run.Member.Id] = "handed back: " + delivered;
@@ -398,16 +398,16 @@ public sealed partial class BusEngine : IAsyncDisposable
         }, ct);
 
     /// <summary>
-    /// The declaration rules: only the member the workflow's root instruction addressed, or its team's Manager on its behalf, may declare;
-    /// only once; and never while other work of the workflow is running or pending.
+    /// The declaration rules: only the member the deliverable's root instruction addressed, or its team's Manager on its behalf, may declare;
+    /// only once; and never while other work of the deliverable is running or pending.
     /// </summary>
-    internal async Task<Message> WorkflowCompleteAsync(RunContext run, string delivered, CancellationToken ct)
+    internal async Task<Message> DeliverableCompleteAsync(RunContext run, string delivered, CancellationToken ct)
     {
         // Before the declaration: does the team branch merge cleanly into the base? A conflict does not stop the
         // declaration; it rides on it, so the work is not reported as ready to land.
         var check = string.IsNullOrWhiteSpace(delivered) ? null : await MergeCheckForAsync(run.Member, ct);
         var completed = await CompleteAsync(run, delivered, check, ct);
-        await QueueRetroAsync(run.Member, completed, ct); // the Manager's look back, when the workflow was eventful
+        await QueueRetroAsync(run.Member, completed, ct); // the Manager's look back, when the deliverable was eventful
         return completed;
     }
 
@@ -434,19 +434,19 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (owner.Id != run.Member.Id && !onBehalf)
             {
                 throw new BusRefusal("not_owner",
-                    $"this workflow was addressed to '{owner.Qualified}', so only that member, or its team's Manager on its behalf, may declare it completed");
+                    $"this deliverable was addressed to '{owner.Qualified}', so only that member, or its team's Manager on its behalf, may declare it completed");
             }
-            if (_store.WorkflowEnded(correlation))
+            if (_store.DeliverableEnded(correlation))
             {
-                throw new BusRefusal("already_declared", "this workflow has already ended (declared complete, or closed by the person); end your turn, do not retry");
+                throw new BusRefusal("already_declared", "this deliverable has already ended (declared complete, or closed by the person); end your turn, do not retry");
             }
             var busy = Busy(run.Member, correlation, watcher: run.Member.Id == manager.Id ? null : manager);
             if (busy.Count != 0)
             {
-                throw new BusRefusal("busy", "workflow completion refused because work is still in flight under this workflow: " + string.Join("; ", busy));
+                throw new BusRefusal("busy", "deliverable completion refused because work is still in flight under this deliverable: " + string.Join("; ", busy));
             }
             // Never over a tester's FAIL, unless the person said yes to closing over it.
-            var fails = TesterVerdicts.Outstanding(_store.Workflow(correlation), run.Member.Team, TestersOf(run.Member.TeamId));
+            var fails = TesterVerdicts.Outstanding(_store.Deliverable(correlation), run.Member.Team, TestersOf(run.Member.TeamId));
             var open = fails.Where(f => f.Yes is null).ToList();
             if (open.Count != 0) throw TesterVerdicts.Refusal(open);
             var closedOverFail = fails.Count == 0 ? null
@@ -454,7 +454,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             _statusLines[run.Member.Id] = "declared complete: " + delivered;
             var conflict = check is { Clean: false } ? check : null;
             if (conflict is not null) delivered += $"\n\nNot ready to land: {conflict.Text}.";
-            return Publish(new NewMessage(MessageTypes.WorkflowCompleted,
+            return Publish(new NewMessage(MessageTypes.DeliverableCompleted,
                 JsonSerializer.Serialize(new
                 {
                     delivered, declaredBy = run.Member.Qualified, onBehalfOf = onBehalf ? owner.Qualified : null,
@@ -470,18 +470,18 @@ public sealed partial class BusEngine : IAsyncDisposable
 
     /// <summary>
     /// A needs_decision tied to a tester's FAIL (<see cref="DecisionAsk.Close"/>). Refused unless the card's
-    /// latest tester verdict in this workflow is a FAIL; otherwise stored like any decision.
+    /// latest tester verdict in this deliverable is a FAIL; otherwise stored like any decision.
     /// </summary>
     internal Task<Message> AskCloseOverFailAsync(RunContext run, DecisionAsk ask, CancellationToken ct) =>
         WithGate(() =>
         {
             EnsureActive(run);
             var close = ask.Close!;
-            var fails = TesterVerdicts.Outstanding(_store.Workflow(run.Correlation), run.Member.Team, TestersOf(run.Member.TeamId));
+            var fails = TesterVerdicts.Outstanding(_store.Deliverable(run.Correlation), run.Member.Team, TestersOf(run.Member.TeamId));
             if (!fails.Any(f => f.Card == close.Card))
             {
                 throw new BusRefusal("no_fail",
-                    $"card {close.Card} has no tester FAIL outstanding in this workflow, so there is nothing to close over; ask without card and kind");
+                    $"card {close.Card} has no tester FAIL outstanding in this deliverable, so there is nothing to close over; ask without card and kind");
             }
             _statusLines[run.Member.Id] = "needs decision: " + ask.Headline;
             return Publish(new NewMessage(MessageTypes.NeedsDecision, ask.ToPayload().ToJsonString(), run.Member.Qualified, run.Causation));
@@ -524,8 +524,8 @@ public sealed partial class BusEngine : IAsyncDisposable
 
     /// <summary>
     /// Each member's newest unanswered needs_decision in a team, by qualified name (BusStore.OpenDecisions: in any of
-    /// its workflows). The status line is the member's last report in memory, so a workflow_complete or a hand-back after
-    /// the question (another workflow, or the Manager declaring) used to replace "needs decision" while the person still
+    /// its deliverables). The status line is the member's last report in memory, so a deliverable_complete or a hand-back after
+    /// the question (another deliverable, or the Manager declaring) used to replace "needs decision" while the person still
     /// owed the answer; the open question wins until it is answered.
     /// </summary>
     private Dictionary<string, Message> OpenDecisionByMember(string team) =>
@@ -554,7 +554,7 @@ public sealed partial class BusEngine : IAsyncDisposable
         }
     }
 
-    /// <summary>The member a workflow's root instruction addressed (its owner); null when none was.</summary>
+    /// <summary>The member a deliverable's root instruction addressed (its owner); null when none was.</summary>
     private MemberRef? OwnerOf(long correlation)
     {
         var root = _store.Find(correlation);
@@ -562,7 +562,7 @@ public sealed partial class BusEngine : IAsyncDisposable
         return _store.MemberBySubscriber(root.Type[MessageTypes.InstructionPrefix.Length..]);
     }
 
-    /// <summary>What still works a workflow, from the team's runs and pending deliveries (one sentence each).</summary>
+    /// <summary>What still works a deliverable, from the team's runs and pending deliveries (one sentence each).</summary>
     private List<string> Busy(MemberRef declarer, long correlation, MemberRef? watcher) =>
         Busy(declarer, correlation, watcher, _store.TeamMembers(declarer.TeamId), _store.Pending());
 
@@ -585,7 +585,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             if (watcher is not null && holder.Id == watcher.Id && _store.Find(row.Seq) is { } m && Watching(m, declarer.TeamId, correlation, watcher)) continue;
             counts[holder.Name] = counts.GetValueOrDefault(holder.Name) + 1;
         }
-        busy.AddRange(counts.Select(kv => $"{kv.Key} has {kv.Value} pending deliver{(kv.Value == 1 ? "y" : "ies")} in this workflow"));
+        busy.AddRange(counts.Select(kv => $"{kv.Key} has {kv.Value} pending deliver{(kv.Value == 1 ? "y" : "ies")} in this deliverable"));
         return busy;
     }
 
@@ -607,7 +607,7 @@ public sealed partial class BusEngine : IAsyncDisposable
                 {
                     if (_stopping) return;
                     SweepTriggersIfDue();
-                    SweepExpiryIfDue(); // warn about, and expire, open workflows nobody works
+                    SweepExpiryIfDue(); // warn about, and expire, open deliverables nobody works
                     Pump();
                     if (OfferIdleReminders()) Pump();
                     Schedule();
@@ -656,7 +656,7 @@ public sealed partial class BusEngine : IAsyncDisposable
             {
                 foreach (var message in _store.MessagesAfter(position, end, types))
                 {
-                    if (Deliverable(subscriber, message)) _store.AddPending(subscriber, message.Seq);
+                    if (CanDeliver(subscriber, message)) _store.AddPending(subscriber, message.Seq);
                 }
                 _store.AdvanceCursor(subscriber, end);
             });
@@ -669,7 +669,7 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// cross teams, and a Manager is never woken by its own row. A trigger's run that ends under its wake choice
     /// (WakeManagerPolicy) passes over the Manager, the only subscriber of the run-ending types.
     /// </summary>
-    private static bool Deliverable(string subscriber, Message message)
+    private static bool CanDeliver(string subscriber, Message message)
     {
         if (message.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)) return true;
         if (string.Equals(message.Source, subscriber, StringComparison.OrdinalIgnoreCase)) return false;
@@ -724,7 +724,7 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// only after the run, so a Manager woken by the hand-back alone would find the work not yet in the shared view
     /// and spend a run learning to wait. Once the run ends, the hand-back and the run's ending row reach the Manager
     /// together, in one run. Only the run that SENT it holds it (its fetch-back is part of that run), not a later
-    /// run of the same member in another workflow.
+    /// run of the same member in another deliverable.
     /// </summary>
     private bool Ripe(BusStore.PendingRow row) => HeldBy(row) is null;
 
@@ -764,7 +764,7 @@ public sealed partial class BusEngine : IAsyncDisposable
         {
             Instructions = _store.MemberRows(memberId: member!.Id).SingleOrDefault()?.Instructions ?? "",
             Approvals = member.Role == MemberRole.Manager ? [.. _store.Approvals(member.TeamId).Select(a => a.Text)] : [],
-            // What this member already asked the person in this workflow and is still waiting on: a run woken by
+            // What this member already asked the person in this deliverable and is still waiting on: a run woken by
             // something else (a second member's hand-back) must not ask the same thing again.
             OpenQuestions = [.. _store.OpenDecisions(member.Team)
                 .Where(q => q.CorrelationId == items[0].CorrelationId && string.Equals(q.Source, member.Qualified, StringComparison.OrdinalIgnoreCase))
@@ -780,8 +780,8 @@ public sealed partial class BusEngine : IAsyncDisposable
         _active[runId] = new ActiveRun(context, cancel, task);
         started.SetResult();
         // Routine, at debug.
-        Logs.Diag.Debug("bus", $"run {runId} admitted: {member!.Qualified}, {items.Length} item(s), workflow {context.Correlation}",
-            ("team", member.Team), ("member", member.Qualified), ("run", runId), ("workflow", context.Correlation), ("items", items.Length));
+        Logs.Diag.Debug("bus", $"run {runId} admitted: {member!.Qualified}, {items.Length} item(s), deliverable {context.Correlation}",
+            ("team", member.Team), ("member", member.Qualified), ("run", runId), ("deliverable", context.Correlation), ("items", items.Length));
     }
 
     private async Task ExecuteAsync(RunContext run, CancellationTokenSource cancel)
@@ -839,7 +839,7 @@ public sealed partial class BusEngine : IAsyncDisposable
                     }), wakeManager),
                     run.Member.Qualified, run.Causation));
                 _store.RemovePendingOfRun(run.RunId);
-                if (wakeManager is not null && result.Succeeded) DeclareQuietTriggerWorkflow(run);
+                if (wakeManager is not null && result.Succeeded) DeclareQuietTriggerDeliverable(run);
                 if (!result.Succeeded) _store.SetFailureClass(run.RunId, result.FailureClass ?? FailureClasses.Failed);
             });
             // The idle reminder is decided in the next pump pass, after what the run published has been delivered.
@@ -880,20 +880,20 @@ public sealed partial class BusEngine : IAsyncDisposable
 
     /// <summary>
     /// A trigger's run that ends well without handing back, under a wake choice that does not wake the Manager for it,
-    /// leaves nobody to declare its workflow: the app declares it (declaredByPlatform), when nothing else is
-    /// working the workflow and nobody declared it in the run. A hand-back leaves it to the Manager it wakes.
+    /// leaves nobody to declare its deliverable: the app declares it (declaredByPlatform), when nothing else is
+    /// working the deliverable and nobody declared it in the run. A hand-back leaves it to the Manager it wakes.
     /// </summary>
-    private void DeclareQuietTriggerWorkflow(RunContext run)
+    private void DeclareQuietTriggerDeliverable(RunContext run)
     {
         var correlation = run.Correlation;
-        if (run.HandedBack || _store.WorkflowDeclared(correlation)) return;
+        if (run.HandedBack || _store.DeliverableDeclared(correlation)) return;
         if (Busy(run.Member, correlation, watcher: null).Count != 0) return;
-        var delivered = $"{run.Member.Name}'s scheduled run finished without handing anything back; the app closed this workflow " +
+        var delivered = $"{run.Member.Name}'s scheduled run finished without handing anything back; the app closed this deliverable " +
             "(the trigger wakes the Manager only for a hand-back or a failure).";
-        _store.Append(new NewMessage(MessageTypes.WorkflowCompleted,
+        _store.Append(new NewMessage(MessageTypes.DeliverableCompleted,
             JsonSerializer.Serialize(new { delivered, declaredBy = MessageTypes.HostSource, declaredByPlatform = true, onBehalfOf = run.Member.Qualified }),
             MessageTypes.HostSource, run.Causation));
-        Log($"workflow {correlation}: declared by the app after {run.Member.Qualified}'s quiet scheduled run");
+        Log($"deliverable {correlation}: declared by the app after {run.Member.Qualified}'s quiet scheduled run");
     }
 
     // ------------------------------------------------------------------ plumbing

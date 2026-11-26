@@ -14,12 +14,12 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// TesterKofi's check of the lease wait: WorkflowsLiveStatesVerifyTests' O1 scenario re-run against the fix. Web's
+/// TesterKofi's check of the lease wait: DeliverablesLiveStatesVerifyTests' O1 scenario re-run against the fix. Web's
 /// Manager holds the heavy-work lease and tells Ben "Card 1: build the page"; Ben's run asks for the lease and waits in
-/// its queue (in WorkflowsLiveStatesVerifyTests' get-running.json, Ben's card 4 counted that wait as agent-working). Cy, told by the person in her own workflow, queues
+/// its queue (in DeliverablesLiveStatesVerifyTests' get-running.json, Ben's card 4 counted that wait as agent-working). Cy, told by the person in her own deliverable, queues
 /// behind him. Everything is read the way the shell reads it, through the REAL dispatcher (UiRpc over RpcDispatcher):
-/// workflows.get (the pane's cards), workflows.list (the Workflows page's time bar) and timeline.get (the board's
-/// timeline, card and workflow rows). One fake clock for the bus and the board; the runs are scripted fakes (no idle clock).
+/// deliverables.get (the pane's cards), deliverables.list (the Deliverables page's time bar) and timeline.get (the board's
+/// timeline, card and deliverable rows). One fake clock for the bus and the board; the runs are scripted fakes (no idle clock).
 /// </summary>
 public class LeaseWaitTimelineVerifyTests
 {
@@ -67,7 +67,7 @@ public class LeaseWaitTimelineVerifyTests
             $"{what}: expected [{Show(expected)}] but was [{Show(actual)}]");
 
     [Fact]
-    public async Task LeaseQueueTime_IsWaitingForSlot_OnThePane_TheBoardTimeline_AndTheWorkflowsPage()
+    public async Task LeaseQueueTime_IsWaitingForSlot_OnThePane_TheBoardTimeline_AndTheDeliverablesPage()
     {
         using var db = new TempDb();
         var clock = new FakeClock(new DateTimeOffset(2026, 11, 19, 9, 0, 0, TimeSpan.Zero));
@@ -78,7 +78,7 @@ public class LeaseWaitTimelineVerifyTests
             manager2End = new(TaskCreationOptions.RunContinuationsAsynchronously),
             all = new(TaskCreationOptions.RunContinuationsAsynchronously);
         string? benLease = null, cyLease = null, managerLease2 = null;
-        long? cyWorkflow = null, manager2Workflow = null;
+        long? cyDeliverable = null, manager2Deliverable = null;
         var manager2Runs = 0;
         runner.On("Web/Manager", async (run, ct) =>
         {
@@ -91,10 +91,10 @@ public class LeaseWaitTimelineVerifyTests
                 await Tool(run, "lease", new { action = "release" });
                 return RunResult.Ok;
             }
-            // Woken card-less in Cy's workflow (her run ended without a hand-back): it asks for the lease and waits.
-            if (run.Correlation == cyWorkflow && Interlocked.Increment(ref manager2Runs) == 1)
+            // Woken card-less in Cy's deliverable (her run ended without a hand-back): it asks for the lease and waits.
+            if (run.Correlation == cyDeliverable && Interlocked.Increment(ref manager2Runs) == 1)
             {
-                manager2Workflow = run.Correlation;
+                manager2Deliverable = run.Correlation;
                 managerLease2 = (await Tool(run, "lease", new { action = "acquire", what = "merge build" })).Text;
                 await manager2End.Task.WaitAsync(ct);
                 return RunResult.Ok;
@@ -137,30 +137,30 @@ public class LeaseWaitTimelineVerifyTests
         }
         async Task<string[]> Holders() => [.. (await engine.LeaseSnapshotAsync(Ct)).Holders.Select(h => h.Member)];
         async Task<JsonObject> ListRow(long w) =>
-            (await Call("workflows.list", new { state = "all" }))["workflows"]!.AsArray().Single(r => r!["id"]!.GetValue<long>() == w)!.AsObject();
+            (await Call("deliverables.list", new { state = "all" }))["deliverables"]!.AsArray().Single(r => r!["id"]!.GetValue<long>() == w)!.AsObject();
         async Task<JsonObject> PaneCard(long w, string member) =>
-            (await Call("workflows.get", new { workflow = w }))["cards"]!.AsArray().Single(c => c!["member"]!.GetValue<string>() == member)!.AsObject();
+            (await Call("deliverables.get", new { deliverable = w }))["cards"]!.AsArray().Single(c => c!["member"]!.GetValue<string>() == member)!.AsObject();
         async Task<JsonNode> CardRow(long cardId) => (await Call("timeline.get", new { card = cardId }))["rows"]![0]!;
-        async Task<JsonObject> WorkflowTimeline(long w) => await Call("timeline.get", new { workflow = w });
+        async Task<JsonObject> DeliverableTimeline(long w) => await Call("timeline.get", new { deliverable = w });
         static JsonNode MemberRow(JsonObject timeline, string member, bool cardLess) =>
             timeline["rows"]!.AsArray().Single(r => r!["member"]?.GetValue<string>() == member && (r["card"] is null) == cardLess)!;
 
-        // Every view of one card agrees: the pane (workflows.get), the card's timeline and its row on the workflow's timeline.
+        // Every view of one card agrees: the pane (deliverables.get), the card's timeline and its row on the deliverable's timeline.
         async Task CardIs(long w, string member, Dictionary<string, long> expected, string when)
         {
             var pane = await PaneCard(w, member);
-            Same(expected, Breakdown(pane["time"]!), $"{when}: {member}'s card on the pane (workflows.get)");
+            Same(expected, Breakdown(pane["time"]!), $"{when}: {member}'s card on the pane (deliverables.get)");
             var cardId = pane["id"]!.GetValue<long>();
             Same(expected, Bands(await CardRow(cardId)), $"{when}: {member}'s card timeline bands (timeline.get card)");
             Same(expected, Breakdown((await Call("timeline.get", new { card = cardId }))["time"]!), $"{when}: {member}'s card time (timeline.get card)");
-            Same(expected, Bands(MemberRow(await WorkflowTimeline(w), member, cardLess: false)), $"{when}: {member}'s row on the workflow timeline");
+            Same(expected, Bands(MemberRow(await DeliverableTimeline(w), member, cardLess: false)), $"{when}: {member}'s row on the deliverable timeline");
         }
-        // The Workflows page's time bar is the row's time from workflows.list: the same as the workflow timeline's time.
+        // The Deliverables page's time bar is the row's time from deliverables.list: the same as the deliverable timeline's time.
         async Task PageBarIs(long w, Dictionary<string, long>? expected, string when)
         {
             var bar = Breakdown((await ListRow(w))["time"]!);
-            Same(Breakdown((await WorkflowTimeline(w))["time"]!), bar, $"{when}: the Workflows page bar vs timeline.get workflow time");
-            if (expected is not null) Same(expected, bar, $"{when}: the Workflows page time bar");
+            Same(Breakdown((await DeliverableTimeline(w))["time"]!), bar, $"{when}: the Deliverables page bar vs timeline.get deliverable time");
+            if (expected is not null) Same(expected, bar, $"{when}: the Deliverables page time bar");
         }
 
         await engine.StartAsync(Ct);
@@ -169,7 +169,7 @@ public class LeaseWaitTimelineVerifyTests
         var lead = (await engine.PersonTellAsync("Web", "Manager", "lead it", ct: Ct)).Seq;
         await Wait.UntilAsync(() => benLease is not null, "Ben asks for the lease");
         var cy = (await engine.PersonTellAsync("Web", "Cy", "build the image", ct: Ct)).Seq;
-        cyWorkflow = cy;
+        cyDeliverable = cy;
         await Wait.UntilAsync(() => cyLease is not null, "Cy asks for the lease");
         Assert.StartsWith("queued, position 1", benLease);
         Assert.StartsWith("queued, position 2", cyLease);
@@ -190,7 +190,7 @@ public class LeaseWaitTimelineVerifyTests
         await Wait.UntilAsync(async () => (await Holders()).SequenceEqual(["Ben"]), "Ben is given the lease");
         clock.Advance(3 * Min);
         await CardIs(lead, "Ben", Expect((Slot, 5 * Min), (Working, 3 * Min)), "09:08 after the grant");
-        var benBands = MemberRow(await WorkflowTimeline(lead), "Ben", cardLess: false)["bands"]!.AsArray()
+        var benBands = MemberRow(await DeliverableTimeline(lead), "Ben", cardLess: false)["bands"]!.AsArray()
             .Where(b => b!["start"]!.GetValue<string>() != b["end"]!.GetValue<string>()).Select(b => b!["category"]!.GetValue<string>());
         Assert.Equal([Slot, Working], benBands);
         await CardIs(cy, "Cy", Expect((Slot, 8 * Min)), "09:08 live");
@@ -198,14 +198,14 @@ public class LeaseWaitTimelineVerifyTests
         await PageBarIs(lead, null, "09:08");
 
         // 09:08 Cy's run ends while still queued, without a hand-back: her wait is ended by the run end (stored), and the
-        // Manager is woken card-less in her workflow; its run asks for the lease and waits behind Ben.
+        // Manager is woken card-less in her deliverable; its run asks for the lease and waits behind Ben.
         cyEnd.SetResult();
-        await Wait.UntilAsync(() => managerLease2 is not null, "the Manager asks for the lease in Cy's workflow");
-        Assert.Equal(cy, manager2Workflow);
+        await Wait.UntilAsync(() => managerLease2 is not null, "the Manager asks for the lease in Cy's deliverable");
+        Assert.Equal(cy, manager2Deliverable);
         Assert.StartsWith("queued, position 1", managerLease2);
         clock.Advance(4 * Min);
         await CardIs(cy, "Cy", Expect((Slot, 8 * Min)), "09:12 Cy's run ended while queued");
-        var cyTimeline = await WorkflowTimeline(cy);
+        var cyTimeline = await DeliverableTimeline(cy);
         Assert.DoesNotContain(cyTimeline["rows"]!.AsArray(), r => r!["member"]?.GetValue<string>() == "Manager" && r["card"] is not null);
         Same(Expect((Slot, 4 * Min)), Bands(MemberRow(cyTimeline, "Manager", cardLess: true)), "09:12 live: the Manager's card-less row");
         await PageBarIs(cy, Expect((Slot, 12 * Min)), "09:12 live");
@@ -214,19 +214,19 @@ public class LeaseWaitTimelineVerifyTests
         benEnd.SetResult();
         await Wait.UntilAsync(async () => (await Holders()).SequenceEqual(["Manager"]), "the Manager is given the lease");
         clock.Advance(2 * Min);
-        Same(Expect((Slot, 4 * Min), (Working, 2 * Min)), Bands(MemberRow(await WorkflowTimeline(cy), "Manager", cardLess: true)), "09:14 the card-less row after the grant");
+        Same(Expect((Slot, 4 * Min), (Working, 2 * Min)), Bands(MemberRow(await DeliverableTimeline(cy), "Manager", cardLess: true)), "09:14 the card-less row after the grant");
         await PageBarIs(cy, Expect((Slot, 12 * Min), (Working, 2 * Min)), "09:14");
 
         // 09:14 the Manager's run ends: what its run end stored (no live run now) says the same; so does the page bar.
         manager2End.SetResult();
         await Wait.UntilAsync(async () => (await Holders()).Length == 0, "the Manager gives the lease back");
-        await Wait.UntilAsync(async () => (await engine.WorkflowThreadAsync(cy, Ct))
+        await Wait.UntilAsync(async () => (await engine.DeliverableThreadAsync(cy, Ct))
             .Any(m => m.Type == MessageTypes.Completed && m.Source == "Web/Manager"), "the Manager's run end is published");
-        var stored = (await engine.WorkflowThreadAsync(cy, Ct)).Last(m => m.Type == MessageTypes.Completed && m.Source == "Web/Manager");
+        var stored = (await engine.DeliverableThreadAsync(cy, Ct)).Last(m => m.Type == MessageTypes.Completed && m.Source == "Web/Manager");
         var holds = JsonNode.Parse(stored.Payload)!["activity"]!["holds"]!.AsArray();
         Assert.Single(holds);
         clock.Advance(Min);
-        Same(Expect((Slot, 4 * Min), (Working, 2 * Min)), Bands(MemberRow(await WorkflowTimeline(cy), "Manager", cardLess: true)), "09:15 from the stored run end");
+        Same(Expect((Slot, 4 * Min), (Working, 2 * Min)), Bands(MemberRow(await DeliverableTimeline(cy), "Manager", cardLess: true)), "09:15 from the stored run end");
         await CardIs(cy, "Cy", Expect((Slot, 8 * Min)), "09:15 stored");
         await PageBarIs(cy, null, "09:15 stored");
         all.SetResult();

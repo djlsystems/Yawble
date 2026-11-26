@@ -11,7 +11,7 @@ import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
 
 // Triggers: tell a member an instruction on a schedule (every N, cron, once), each fire a
-// new workflow. Fires missed while the app was closed are recorded, not caught up. "Only when idle" skips a fire
+// new deliverable. Fires missed while the app was closed are recorded, not caught up. "Only when idle" skips a fire
 // while the member is busy.
 const props = defineProps<{ api?: YawbleApi; team: TeamSummary; agents: AgentCard[]; /** Open straight on this trigger's form. */ editId?: number | null }>();
 const emit = defineEmits<{ close: [] }>();
@@ -46,8 +46,8 @@ const wakeLabels: Record<WakeManager, string> = {
 const members = computed(() => props.agents.map((a) => a.member));
 // Opened before the team's agents arrived: a new trigger takes the Manager once they do.
 watch(members, (list) => { if (editing.value && !form.memberId && list.length) form.memberId = list.find((m) => m.role === 'manager')?.id ?? list[0].id; });
-/** The chosen member runs a script: it gets the fire's details as its run's input, so it needs no instruction and wakes no Manager. */
-const isScript = computed(() => props.agents.find((a) => a.member.id === form.memberId)?.kind === 'script');
+/** The chosen member runs a workflow: it gets the fire's details as its run's input, so it needs no instruction and wakes no Manager. */
+const isWorkflow = computed(() => props.agents.find((a) => a.member.id === form.memberId)?.kind === 'workflow');
 const nameOf = (id: number) => members.value.find((m) => m.id === id)?.name ?? `#${id}`;
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
 const describe = (t: Trigger) =>
@@ -70,7 +70,7 @@ function payload() {
     cron: form.kind === 'cron' ? form.cron.trim() : null,
     timezone: form.kind === 'cron' ? form.timezone.trim() : null,
     fireAt: form.kind === 'once' && form.fireAt ? new Date(form.fireAt).toISOString() : null,
-    instruction: isScript.value ? '' : form.instruction.trim(), onlyWhenIdle: form.onlyWhenIdle, enabled: form.enabled, wakeManager: form.wakeManager,
+    instruction: isWorkflow.value ? '' : form.instruction.trim(), onlyWhenIdle: form.onlyWhenIdle, enabled: form.enabled, wakeManager: form.wakeManager,
     ...(form.kind === 'event' ? { eventName: form.eventName.trim() } : {}),
     ...(form.kind === 'folder' ? { watchRoot: form.watchRoot, watchPath: form.watchPath.trim(), watchGlob: form.watchGlob.trim() || null, quietSec: Math.round(form.quietSec), fireOn: form.fireOn } : {}),
   };
@@ -167,7 +167,7 @@ onMounted(async () => {
 
 <template>
   <Modal :title="`Triggers · ${team.name}`" wide @close="emit('close')">
-    <p class="muted small">A trigger tells one agent an instruction on a schedule; each fire starts a new workflow. Every fire of an
+    <p class="muted small">A trigger tells one agent an instruction on a schedule; each fire starts a new deliverable. Every fire of an
       agent is a paid model run: prefer the longest schedule that does the job. Fires that pass while the app is closed are
       recorded as missed, not caught up.</p>
     <p v-if="error" class="error" data-test="triggers-error">{{ error }}</p>
@@ -199,7 +199,7 @@ onMounted(async () => {
       <label>Name <input v-model="form.name" placeholder="weekday status report" data-test="trigger-name" /></label>
       <label>Member
         <select v-model="form.memberId" data-test="trigger-member">
-          <option v-for="a in agents" :key="a.member.id" :value="a.member.id">{{ a.member.name }} ({{ a.kind === 'script' ? 'script' : a.member.role }})</option>
+          <option v-for="a in agents" :key="a.member.id" :value="a.member.id">{{ a.member.name }} ({{ a.kind === 'workflow' ? 'workflow' : a.member.role }})</option>
         </select>
       </label>
       <div class="row kinds">
@@ -255,10 +255,10 @@ onMounted(async () => {
         <template v-if="preview.error">{{ preview.error }}</template>
         <template v-else-if="preview.next.length">Next: {{ preview.next.map(when).join(' · ') }}</template>
       </p>
-      <p v-if="isScript" class="muted small" data-test="trigger-script-note">{{ nameOf(form.memberId) }} runs its script on each fire, with the trigger's details as its input. It needs no instruction, and a fire is not a paid model run.</p>
-      <label v-if="!isScript">Instruction <textarea v-model="form.instruction" rows="6" class="wide" data-test="trigger-instruction"
+      <p v-if="isWorkflow" class="muted small" data-test="trigger-workflow-note">{{ nameOf(form.memberId) }} runs its workflow on each fire, with the trigger's details as its input. It needs no instruction, and a fire is not a paid model run.</p>
+      <label v-if="!isWorkflow">Instruction <textarea v-model="form.instruction" rows="6" class="wide" data-test="trigger-instruction"
         placeholder="What the agent should do each time (it is told this as a new piece of work)." /></label>
-      <template v-if="!isScript">
+      <template v-if="!isWorkflow">
         <label>Wake the Manager when a run ends
           <select v-model="form.wakeManager" data-test="trigger-wake-manager">
             <option value="onHandbackOrFailure">Only if it hands back or fails (recommended)</option>
@@ -266,13 +266,13 @@ onMounted(async () => {
             <option value="never">Never (a hand-back still wakes it)</option>
           </select>
         </label>
-        <p class="muted small">Each Manager wake is a paid run. When it is not woken, a run that ends without handing back closes its own workflow.</p>
+        <p class="muted small">Each Manager wake is a paid run. When it is not woken, a run that ends without handing back closes its own deliverable.</p>
       </template>
-      <label class="check"><input v-model="form.onlyWhenIdle" type="checkbox" data-test="trigger-idle" /> Only when {{ isScript ? 'it' : 'the agent' }} is idle (skip a fire while it is busy)</label>
+      <label class="check"><input v-model="form.onlyWhenIdle" type="checkbox" data-test="trigger-idle" /> Only when {{ isWorkflow ? 'it' : 'the agent' }} is idle (skip a fire while it is busy)</label>
       <label class="check"><input v-model="form.enabled" type="checkbox" data-test="trigger-enabled" /> Enabled</label>
       <div class="row end">
         <button data-test="trigger-cancel" :disabled="work.is('save')" @click="editing = false">Cancel</button>
-        <button class="primary" data-test="trigger-save" :disabled="!form.name.trim() || (!isScript && !form.instruction.trim()) || work.is('save')" :aria-busy="work.is('save')" @click="save"><BusyLabel :busy="work.is('save')" text="Saving…">Save</BusyLabel></button>
+        <button class="primary" data-test="trigger-save" :disabled="!form.name.trim() || (!isWorkflow && !form.instruction.trim()) || work.is('save')" :aria-busy="work.is('save')" @click="save"><BusyLabel :busy="work.is('save')" text="Saving…">Save</BusyLabel></button>
       </div>
     </div>
     <WatchesSection v-if="!editing" :api="api" :team="team" />

@@ -11,7 +11,7 @@ const E2E = path.resolve(__dirname, '..', 'e2e');
 // The hand-kept list playwright.config.ts had before the specs were chosen by their imports.
 const OLD_PHONE_SPECS = [
   /[\\/]phone[\\/][^\\/]+\.spec\.ts$/,
-  /[\\/](teams-buttons|team-more-menu|team-settings-list-rows|team-grid|code-map|monitor|workflow-timeline|commit-view|workflows-page|member-pane-phone|phone-remote|team-settings-phone|tell-icons|workflows-visitor)\.spec\.ts$/,
+  /[\\/](teams-buttons|team-more-menu|team-settings-list-rows|team-grid|code-map|monitor|deliverable-timeline|commit-view|deliverables-page|member-pane-phone|phone-remote|team-settings-phone|tell-icons|deliverables-visitor)\.spec\.ts$/,
 ];
 
 const GOOD = `import { expect, test } from './phone/fixtures';\nimport { buildRenderer, fakeRemote } from './phone/server';\n`;
@@ -129,9 +129,9 @@ describe('checkPhoneSpecs: the check playwright.config.ts runs at load', () => {
 describe('the real tests/e2e', () => {
   // The specs that imported phone/server but were not on the old list, so they ran uncapped in `default`.
   const STRAYS = [
-    'confirm-dialog.spec.ts', 'confirm-dialog-sites.spec.ts', 'git-tidy.spec.ts', 'git-tidy-core-plan.spec.ts', 'workflow-expiry.spec.ts',
+    'confirm-dialog.spec.ts', 'confirm-dialog-sites.spec.ts', 'git-tidy.spec.ts', 'git-tidy-core-plan.spec.ts', 'deliverable-expiry.spec.ts',
     'terminal-links.spec.ts', 'team-spacing.spec.ts', 'settings-concierge-teams-defaults.spec.ts', 'overall-time-timeline-verify.spec.ts',
-    'provider-links.spec.ts', 'git-previews.spec.ts', 'team-lessons.spec.ts', 'workflows-page-verify.spec.ts',
+    'provider-links.spec.ts', 'git-previews.spec.ts', 'team-lessons.spec.ts', 'deliverables-page-verify.spec.ts',
   ];
 
   it('the old hand-kept list missed these phone specs', () => {

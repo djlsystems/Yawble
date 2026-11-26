@@ -16,8 +16,8 @@ export function discussWithConcierge(teamId: number | null, text: string): void 
   discussRequest.value = { teamId, text, seq: ++seq };
 }
 
-/** Scripts > New > Ask the Concierge: the first message, for the person to finish and send. */
-export const ASK_CONCIERGE_PROMPT = 'Help me build a script that ';
+/** Workflows > New > Ask the Concierge: the first message, for the person to finish and send. */
+export const ASK_CONCIERGE_PROMPT = 'Help me build a workflow that ';
 
 /** Agent-written text as a Markdown quote, clipped: the Concierge reads it as the agent's words, not the person's. */
 export function quoted(text: string, max = 1200): string {
@@ -56,7 +56,7 @@ export function cardPrompt(c: BoardCardDetail, laneLabel: string, statusLabel: s
   const who = c.member ? displayName(c.member) : 'nobody yet';
   const recent = c.trail.slice(-5).map((t) => `- ${t.source === 'you' ? 'You' : displayName(t.source)} (${t.kind}): ${t.text.replace(/\s+/g, ' ').slice(0, 300)}`);
   return [
-    `About card ${c.id} on ${c.team}'s Kanban board: "${c.title}", assigned to ${who}, ${statusLabel}, in ${laneLabel}${c.item ? `, from backlog item ${c.item}` : ''}${c.workflow ? `, workflow #${c.workflow}` : ''}.`,
+    `About card ${c.id} on ${c.team}'s Kanban board: "${c.title}", assigned to ${who}, ${statusLabel}, in ${laneLabel}${c.item ? `, from backlog item ${c.item}` : ''}${c.deliverable ? `, deliverable #${c.deliverable}` : ''}.`,
     ...(c.body.trim() ? [`The card says:\n\n${quoted(c.body)}`] : []),
     ...(recent.length ? [`Its latest updates:\n${recent.join('\n')}`] : []),
     'Help me understand where this stands, whether it needs anything from me, and what I should do next.',

@@ -277,7 +277,7 @@ public sealed class FakePtyRunner(TerminalHub hub, Func<long, string> cliOf, int
         var command = cli == "grok" ? "grok -p … --output-format json" : "claude -p … --output-format stream-json";
         hub.Begin(channel, new TerminalSession("headless", run.RunId, DateTimeOffset.UtcNow.ToString("O"), false, command),
             new StopOnly());
-        hub.Write(channel, $"\r\n\x1b[2m$ {cli} -p (batch of {run.Items.Count}, workflow {run.Correlation}) · run {run.RunId} · FAKE runner\x1b[0m\r\n");
+        hub.Write(channel, $"\r\n\x1b[2m$ {cli} -p (batch of {run.Items.Count}, deliverable {run.Correlation}) · run {run.RunId} · FAKE runner\x1b[0m\r\n");
         hub.Write(channel, $"\x1b[2m  {FirstLine(run.Prompt)}\x1b[0m\r\n");
         try
         {

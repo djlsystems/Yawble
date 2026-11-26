@@ -23,7 +23,7 @@ function monitorApi(heavy: () => LeaseSnapshot | undefined): YawbleApi {
       if (method === 'teams.agents') return [{ member: { id: 2, teamId: 1, team: 'payments', name: 'DeveloperPriya', role: 'member', cli: 'claude' }, state: 'running', attention: null, queuedInstructions: 0, statusLine: null }];
       if (method === 'monitor.messages') return { end: 0, messages: [] };
       if (method === 'monitor.steps') return { end: 0, pending: false, steps: [] };
-      if (method === 'bus.workflows') return [];
+      if (method === 'bus.deliverables') return [];
       throw new Error(method);
     },
     onEvent: () => () => {},

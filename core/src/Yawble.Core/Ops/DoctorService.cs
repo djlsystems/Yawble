@@ -281,10 +281,10 @@ public sealed class DoctorService(
                 status = DoctorStatus.Fail;
                 parts.Add($"{t.Name}/{m.Name} has been in one run for {Age(m.Running)}, longer than the watchdog allows");
             }
-            if (t.UnattendedWorkflows > 0)
+            if (t.UnattendedDeliverables > 0)
             {
                 status = DoctorStatus.Worst(status, DoctorStatus.Warn);
-                parts.Add($"{t.Name}: {t.UnattendedWorkflows} open workflow(s) nobody is working");
+                parts.Add($"{t.Name}: {t.UnattendedDeliverables} open deliverable(s) nobody is working");
             }
             if (t.BehindBase > 0 && (t.BehindBase > _o.BehindWarnCommits || t.BehindAge > _o.BehindWarnAge))
             {

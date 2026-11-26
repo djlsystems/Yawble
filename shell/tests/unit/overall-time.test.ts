@@ -1,18 +1,18 @@
 // @vitest-environment happy-dom
-// The overall time on cards and workflow rows and the Timeline dialog, against the core's
-// wire contract (BoardCard.time, the workflow item's time, timeline.get) as the phone fake core serves it. The shell
+// The overall time on cards and deliverable rows and the Timeline dialog, against the core's
+// wire contract (BoardCard.time, the deliverable item's time, timeline.get) as the phone fake core serves it. The shell
 // only formats: the open items tick on ONE shared 1 s timer. Fake timers throughout.
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BoardCardItem from '../../src/renderer/src/board/BoardCardItem.vue';
 import TimelineDialog from '../../src/renderer/src/timeline/TimelineDialog.vue';
-import TeamWorkflows from '../../src/renderer/src/components/TeamWorkflows.vue';
-import WorkflowPane from '../../src/renderer/src/workflows/WorkflowPane.vue';
+import TeamDeliverables from '../../src/renderer/src/components/TeamDeliverables.vue';
+import DeliverablePane from '../../src/renderer/src/deliverables/DeliverablePane.vue';
 import {
   BreakMinMs, buildAxis, clock, closeTimeline, formatDuration, formatShort, liveOverallMs, openTimeline, placeBreakLabels, shares, subscribeNow, tickerState,
 } from '../../src/renderer/src/timeline/time';
 import { createFakeCore } from '../e2e/phone/fake-core';
-import type { BoardCard, ItemTime, WorkflowsListAnswer, YawbleApi } from '../../src/shared/api';
+import type { BoardCard, ItemTime, DeliverablesListAnswer, YawbleApi } from '../../src/shared/api';
 
 const MIN = 60_000;
 
@@ -41,7 +41,7 @@ const openTime = (overallMs: number): ItemTime => ({ createdAt: new Date(Date.no
 const doneTime = (overallMs: number): ItemTime => ({ ...openTime(overallMs), open: false, endedAt: new Date().toISOString(), endedHow: 'done' });
 const card = (id: number, time?: ItemTime | null): BoardCard => ({
   id, team: 'payments', teamId: 1, member: null, item: 'B086', title: `Card ${id}`, body: '', status: 'running', lane: 'in-progress', placed: false,
-  awaitingManager: false, workflow: 10, createdAt: '', updatedAt: '', trailCount: 2, time,
+  awaitingManager: false, deliverable: 10, createdAt: '', updatedAt: '', trailCount: 2, time,
 });
 
 enableAutoUnmount(afterEach);
@@ -159,13 +159,13 @@ describe('overall time: the axis', () => {
 });
 
 describe('overall time: the fake cores carry the contract', () => {
-  it('every card and workflow #10 have a time whose breakdown adds up to overallMs exactly', async () => {
+  it('every card and deliverable #10 have a time whose breakdown adds up to overallMs exactly', async () => {
     const list = await callFake('board.list');
     for (const c of list.cards) expect(c.time.breakdown.reduce((a: number, b: any) => a + b.ms, 0)).toBe(c.time.overallMs);
-    const wfs = await callFake('bus.workflows', { teamId: 1 });
+    const wfs = await callFake('bus.deliverables', { teamId: 1 });
     const w = wfs.find((x: any) => x.id === 10);
     expect(w.time.breakdown.reduce((a: number, b: any) => a + b.ms, 0)).toBe(w.time.overallMs);
-    const tl = await callFake('timeline.get', { workflow: 10 });
+    const tl = await callFake('timeline.get', { deliverable: 10 });
     expect(tl.rows).toHaveLength(6);
     expect(tl.summary.length).toBeGreaterThan(0);
     expect(tl.time.overallMs).toBe(w.time.overallMs);
@@ -180,9 +180,9 @@ describe('overall time: the Timeline dialog', () => {
     return { w, api };
   }
 
-  it('a workflow: overall, open, a summary row on top and one row per card, a breakdown that adds up, legend and markers', async () => {
-    const { w, api } = await dialog({ kind: 'workflow', id: 10, title: 'Partial refunds' });
-    expect(api.asked.find((a) => a.method === 'timeline.get')!.params).toEqual({ workflow: 10 });
+  it('a deliverable: overall, open, a summary row on top and one row per card, a breakdown that adds up, legend and markers', async () => {
+    const { w, api } = await dialog({ kind: 'deliverable', id: 10, title: 'Partial refunds' });
+    expect(api.asked.find((a) => a.method === 'timeline.get')!.params).toEqual({ deliverable: 10 });
     expect(w.get('[data-test="timeline-overall-value"]').text()).toBe('2h 00m 00s');
     expect(w.find('[data-test="timeline-open"]').exists()).toBe(true);
     expect(w.get('[data-test="timeline-started"]').text()).toMatch(/^first message \d\d:\d\d · first card started \d\d:\d\d · 10m before it started$/);
@@ -245,11 +245,11 @@ describe('overall time: the Timeline dialog', () => {
     w.unmount();
   });
 
-  it('a long quiet stretch is drawn with a break mark (expired workflow #9: expired marker, axis to its end)', async () => {
+  it('a long quiet stretch is drawn with a break mark (expired deliverable #9: expired marker, axis to its end)', async () => {
     const core = fakeApi();
     // the expiry fixtures list #9; switch them on through the fake's own setter
     const c = createFakeCore(); c.setExpiry(true);
-    const { w } = await dialog({ kind: 'workflow', id: 9 }, core);
+    const { w } = await dialog({ kind: 'deliverable', id: 9 }, core);
     expect(w.get('[data-test="timeline-span"]').text()).toContain('(expired)');
     expect(w.findAll('[data-test="timeline-break"]').length).toBe(1);
     expect(w.findAll('[data-test="timeline-marker"]').map((m) => m.attributes('data-kind'))).toContain('expired');
@@ -258,7 +258,7 @@ describe('overall time: the Timeline dialog', () => {
   });
 
   it('a Visitor (read access) sees the same dialog', async () => {
-    const { w } = await dialog({ kind: 'workflow', id: 10 }, fakeApi('read'));
+    const { w } = await dialog({ kind: 'deliverable', id: 10 }, fakeApi('read'));
     expect(w.find('[data-test="timeline-error"]').exists()).toBe(false);
     expect(w.findAll('[data-test="timeline-row"]')).toHaveLength(7);
     w.unmount();
@@ -271,29 +271,29 @@ describe('overall time: the Timeline dialog', () => {
   });
 });
 
-describe('overall time: the workflow rows', () => {
-  it("the Teams list tile row and the Workflows page's pane show the overall time; clicking it opens the timeline, not the row", async () => {
+describe('overall time: the deliverable rows', () => {
+  it("the Teams list tile row and the Deliverables page's pane show the overall time; clicking it opens the timeline, not the row", async () => {
     const api = fakeApi();
-    const tile = mount(TeamWorkflows, { props: { teamId: 1, api } });
+    const tile = mount(TeamDeliverables, { props: { teamId: 1, api } });
     await flushPromises();
-    const row = tile.get('[data-test="team-workflow"][data-id="10"]');
+    const row = tile.get('[data-test="team-deliverable"][data-id="10"]');
     expect(row.get('[data-test="overall-time-value"]').text()).toBe('2h 00m 00s');
     await row.get('[data-test="overall-time"]').trigger('click');
     expect(tile.emitted('open')).toBeUndefined();
     const { timelineTarget } = await import('../../src/renderer/src/timeline/time');
-    expect(timelineTarget.value).toMatchObject({ kind: 'workflow', id: 10 });
+    expect(timelineTarget.value).toMatchObject({ kind: 'deliverable', id: 10 });
     closeTimeline();
 
-    const wf = (await api.call<WorkflowsListAnswer>('workflows.list', { teamId: 1, state: 'all' })).workflows.find((w) => w.id === 10)!;
-    const pane = mount(WorkflowPane, { props: { api, row: wf, pollMs: 600_000 }, attachTo: document.body });
+    const wf = (await api.call<DeliverablesListAnswer>('deliverables.list', { teamId: 1, state: 'all' })).deliverables.find((w) => w.id === 10)!;
+    const pane = mount(DeliverablePane, { props: { api, row: wf, pollMs: 600_000 }, attachTo: document.body });
     await flushPromises();
-    const time = pane.get('[data-test="workflow-pane-time"]');
+    const time = pane.get('[data-test="deliverable-pane-time"]');
     expect(time.get('[data-test="overall-time-value"]').text()).toBe('2h 00m 00s');
     vi.advanceTimersByTime(1000);
     await flushPromises();
     expect(time.get('[data-test="overall-time-value"]').text()).toBe('2h 00m 01s');
     await time.get('[data-test="overall-time"]').trigger('click');
-    expect(timelineTarget.value).toMatchObject({ kind: 'workflow', id: 10 });
+    expect(timelineTarget.value).toMatchObject({ kind: 'deliverable', id: 10 });
   });
 });
 

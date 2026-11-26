@@ -1,6 +1,6 @@
 ---
 name: wrap-up
-description: How a Manager finishes a workflow cleanly - cards settled, accepted work merged into the team branch, tests run, a report, then workflow_complete.
+description: How a Manager finishes a deliverable cleanly - cards settled, accepted work merged into the team branch, tests run, a report, then deliverable_complete.
 roles: [manager]
 ---
 # Wrap-up
@@ -12,9 +12,9 @@ Work in your own clone, on your branch `team/<team>`. Quote every path.
 
 ## Check first
 
-1. `status`: nobody is still running or queued on this workflow. If someone is, end your turn; you will be
+1. `status`: nobody is still running or queued on this deliverable. If someone is, end your turn; you will be
    woken when that run ends.
-2. `board` with `action: show`: every card of this workflow is Done, or you are leaving it undone on purpose
+2. `board` with `action: show`: every card of this deliverable is Done, or you are leaving it undone on purpose
    and will say why. A card in Needs You means the person still owes an answer: do not declare over it.
    On a team with a tester, every verify card was run by the tester; a developer's report does not close one.
    If you move one to Done that the tester did not run, give the reason in `note` on `board` `action: move`
@@ -46,7 +46,7 @@ in your clone, so nothing there is committed.
 
 ## Declare
 
-Call `workflow_complete` with:
+Call `deliverable_complete` with:
 
 - your branch `team/<team>` and its commit (`git rev-parse HEAD`), and each member branch it includes;
 - how it was checked (the test command and its result);
@@ -55,4 +55,4 @@ Call `workflow_complete` with:
   review a pull request on origin.
 
 Never commit to, merge into or move main, and never force anything: landing your branch on main is the
-person's job. If `workflow_complete` says the workflow is already declared, stop.
+person's job. If `deliverable_complete` says the deliverable is already declared, stop.

@@ -40,7 +40,7 @@ public class AutomaticResumeTests
     }
 
     [Fact]
-    public async Task AfterTheTimePasses_TheManagerIsToldOnce_PerFailure_AndAtMostThreeTimesAWorkflow()
+    public async Task AfterTheTimePasses_TheManagerIsToldOnce_PerFailure_AndAtMostThreeTimesADeliverable()
     {
         var retryAt = Now.AddMinutes(30);
         var details = new Dictionary<string, object?> { ["retryAfter"] = retryAt.ToString("O") };
@@ -58,7 +58,7 @@ public class AutomaticResumeTests
         var root = await engine.PersonTellAsync("Alpha", "Ada", "build it", ct: Ct);
         await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "Ada's limited run and the Manager's run");
 
-        int Resumes() { using var s = db.OpenStore(); return s.Workflow(root.Seq).Count(m => m.Payload.Contains($"\"{BusEngine.AutomaticResumeMarker}\":true")); }
+        int Resumes() { using var s = db.OpenStore(); return s.Deliverable(root.Seq).Count(m => m.Payload.Contains($"\"{BusEngine.AutomaticResumeMarker}\":true")); }
         await engine.SweepTriggersAsync(Now, Ct);
         Assert.Equal(0, Resumes()); // not yet: the provider said 03:30
         await engine.SweepTriggersAsync(retryAt.AddSeconds(1), Ct);
@@ -68,11 +68,11 @@ public class AutomaticResumeTests
 
         using (var s = db.OpenStore())
         {
-            var resume = s.Workflow(root.Seq).Single(m => m.Payload.Contains(BusEngine.AutomaticResumeMarker));
+            var resume = s.Deliverable(root.Seq).Single(m => m.Payload.Contains(BusEngine.AutomaticResumeMarker));
             Assert.Equal(MessageTypes.InstructionPrefix + "Alpha/Manager", resume.Type);
             Assert.Contains("automatic resume 1 of 3", JsonDocument.Parse(resume.Payload).RootElement.GetProperty("text").GetString());
 
-            // Two more limited failures of Ada in the workflow, each answered, then a fourth is not.
+            // Two more limited failures of Ada in the deliverable, each answered, then a fourth is not.
             for (var i = 0; i < 3; i++)
             {
                 var again = s.Append(new NewMessage(MessageTypes.Failed,

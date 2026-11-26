@@ -42,7 +42,7 @@ public class RealSandboxTeamFlowTests
             new
             {
                 say = "declare",
-                bus = new object[] { new { tool = "workflow_complete", args = new { delivered = "health() on members/acme/ada and its test on members/acme/ben" } } },
+                bus = new object[] { new { tool = "deliverable_complete", args = new { delivered = "health() on members/acme/ada and its test on members/acme/ben" } } },
             },
         },
     };
@@ -75,7 +75,7 @@ public class RealSandboxTeamFlowTests
     };
 
     [Fact]
-    public async Task TheManagerSplitsATask_TwoMembersCommitInsideRealSandboxes_AndTheWorkflowCompletes()
+    public async Task TheManagerSplitsATask_TwoMembersCommitInsideRealSandboxes_AndTheDeliverableCompletes()
     {
         RealSandbox.SkipUnlessAvailable();
         var outside = Path.Combine(Path.GetTempPath(), "yawble-p6-" + Guid.NewGuid().ToString("N")[..8]);
@@ -105,11 +105,11 @@ public class RealSandboxTeamFlowTests
 
             var root = await bus.PersonTellAsync("acme", "lead", "Add a health() endpoint and its test.", ct: Ct);
             using var reader = kit.Launch.Db.OpenStore();
-            await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "the workflow to be declared complete", TimeSpan.FromMinutes(4));
+            await Wait.UntilAsync(() => reader.DeliverableDeclared(root.Seq), "the deliverable to be declared complete", TimeSpan.FromMinutes(4));
             await Wait.UntilAsync(() => bus.IsQuiescentAsync(Ct).GetAwaiter().GetResult(), "the bus to settle", TimeSpan.FromMinutes(1));
 
             var output = TestContext.Current.TestOutputHelper!;
-            var wf = reader.Workflow(root.Seq);
+            var wf = reader.Deliverable(root.Seq);
             foreach (var m in wf) output.WriteLine($"seq {m.Seq,3} depth {m.Depth} cause {m.CausationSeq?.ToString() ?? "-",3} {m.Source,-10} {m.Type,-28} {BatchText.TextOf(m)}");
             lock (log) foreach (var line in log) output.WriteLine("core: " + line);
 
@@ -127,7 +127,7 @@ public class RealSandboxTeamFlowTests
             Assert.Equal(tellAda.Seq, adaBack.CausationSeq);
             Assert.Equal(tellBen.Seq, benBack.CausationSeq);
             Assert.Equal(2, benBack.Depth);
-            Assert.Equal("acme/lead", Assert.Single(wf, m => m.Type == MessageTypes.WorkflowCompleted).Source);
+            Assert.Equal("acme/lead", Assert.Single(wf, m => m.Type == MessageTypes.DeliverableCompleted).Source);
 
             // ---- inside each member's sandbox: its own CLI and model host, git on its branch, no way to push
             var h = kit.Launch.Host;

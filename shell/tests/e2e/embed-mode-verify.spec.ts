@@ -190,10 +190,10 @@ test('embedded: place logs opens Logs and newTeam opens New team, as the sidebar
   await expect(frame.locator('[data-test=logs]')).toHaveCount(0);
   await send(page, { type: 'yawble.navigate', to: { kind: 'newTeam' } });
   await expect(frame.locator('[data-test=team-name]')).toBeVisible();
-  for (const id of ['concierge', 'backlog', 'workflows']) {
+  for (const id of ['concierge', 'backlog', 'deliverables']) {
     await send(page, { type: 'yawble.navigate', to: { kind: 'place', id } });
   }
-  await expect.poll(async () => (await lastNav(page)).places.find((p: any) => p.active)?.id).toBe('workflows');
+  await expect.poll(async () => (await lastNav(page)).places.find((p: any) => p.active)?.id).toBe('deliverables');
   expect(errors).toEqual([]);
 });
 

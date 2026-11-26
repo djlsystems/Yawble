@@ -12,7 +12,7 @@ const paths: Record<string, string> = {
   image: 'M3 5h18v14H3Z M8.5 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z M21 15l-5-5L5 19',
   monitor: 'M22 12h-4l-3 9L9 3l-3 9H2',
   logs: 'M5 3h14v18H5Z M8 7h8 M8 11h8 M8 15h5',
-  scripts: 'M8 7l-5 5 5 5 M16 7l5 5-5 5 M13.5 4l-3 16',
+  workflows: 'M4 4h6.5v6.5H4Z M13.5 13.5H20V20h-6.5Z M7.25 10.5v6.25h6.25',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z',
   send: 'M12 19V5 M5 12l7-7 7 7',
   stop: 'M7 7h10v10H7Z',
@@ -39,8 +39,9 @@ const paths: Record<string, string> = {
   undo: 'M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
   checkAll: 'M2 12l5 5L18 6 M12 16l1.5 1.5L22 9',
   dispatch: 'M22 2 11 13 M22 2l-7 20-4-9-9-4Z',
-  // Two steps, one leading to the next: a workflow (the Monitor draws the same mark, monitor/workflows.ts WorkflowIconPath.flow).
-  workflow: 'M4 4h6.5v6.5H4Z M13.5 13.5H20V20h-6.5Z M7.25 10.5v6.25h6.25',
+  // Two steps, one leading to the next: a deliverable (the Monitor draws the same mark, monitor/deliverables.ts DeliverableIconPath.flow).
+  deliverable: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z M14 2v6h6 M8.5 15l2.5 2.5 4.5-4.5',
+  goals: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Z M12 12.01V12',
   clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 6v6l4 2',
   branch: 'M6 3v12 M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M18 9a9 9 0 0 1-9 9',
   close:'M18 6 6 18 M6 6l12 12',

@@ -1,9 +1,9 @@
 namespace Yawble.Core.Bus;
 
-/// <summary>The reads behind workflow_digest and the retro item.</summary>
+/// <summary>The reads behind deliverable_digest and the retro item.</summary>
 public sealed partial class BusStore
 {
-    /// <summary>The runs of one workflow, oldest first.</summary>
+    /// <summary>The runs of one deliverable, oldest first.</summary>
     public IReadOnlyList<RunRow> RunsOf(long correlation)
     {
         using var cmd = Command(
@@ -22,13 +22,13 @@ public sealed partial class BusStore
         return list;
     }
 
-    /// <summary>Whether a retro item was ever queued for this workflow (an instruction whose payload's retroOf names it).</summary>
+    /// <summary>Whether a retro item was ever queued for this deliverable (an instruction whose payload's retroOf names it).</summary>
     public bool RetroQueued(long correlation) =>
         Scalar<long>(
             "SELECT count(*) FROM messages WHERE type LIKE 'agent.instruction.%' AND json_valid(payload) AND json_extract(payload, '$.retroOf') = $c;",
             ("$c", correlation)) > 0;
 
-    /// <summary>The workflow a retro item is for, when this message is one (its payload's retroOf); null otherwise.</summary>
+    /// <summary>The deliverable a retro item is for, when this message is one (its payload's retroOf); null otherwise.</summary>
     public static long? RetroOf(Message m)
     {
         if (!m.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal) || !m.Payload.Contains("\"retroOf\"", StringComparison.Ordinal)) return null;

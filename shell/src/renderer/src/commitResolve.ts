@@ -7,7 +7,7 @@ import { LOCAL_MARK } from './localMark';
 //
 // Two ways in, one batch: rendered markdown (markdown.ts) marks each candidate as <span data-commit-id>, and the
 // document's observer (installCommitResolve, App.vue) collects every candidate a render pass adds; CommitText.vue (plain
-// text in a template: the card trail, activity lines, a workflow's ending) asks for its own. Both land in the same queue,
+// text in a template: the card trail, activity lines, a deliverable's ending) asks for its own. Both land in the same queue,
 // sent as ONE call a moment after the last request (one per screen, not one per ID; the core takes 200 IDs a call, so a\n// screen with more is split). Answers, "not a commit" included,
 // are kept for the session: a cached ID never asks again. The call goes through the window's API, so a remote view (a
 // Visitor too) asks over its socket exactly as the desktop does.

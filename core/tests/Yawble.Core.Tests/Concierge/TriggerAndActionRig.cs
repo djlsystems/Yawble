@@ -4,13 +4,13 @@ using Yawble.Core.Concierge;
 using Yawble.Core.Connections;
 using Yawble.Core.Integrations;
 using Yawble.Core.Policy;
-using Yawble.Core.Scripts.Library;
-using Yawble.Core.Scripts.Running;
+using Yawble.Core.Workflows.Library;
+using Yawble.Core.Workflows.Running;
 using Yawble.Core.Teams;
 using Yawble.Core.Tests.Bus;
 using Yawble.Core.Tests.Connections;
 using Yawble.Core.Tests.Integrations;
-using Yawble.Core.Tests.Scripts;
+using Yawble.Core.Tests.Workflows;
 using Yawble.Core.Tests.Teams;
 using Yawble.Core.Ui;
 using Xunit;
@@ -18,10 +18,10 @@ using Xunit;
 namespace Yawble.Core.Tests.Concierge;
 
 /// <summary>
-/// The real pieces behind script_trigger_set and integration_action_allow, with fakes only at the edges. A real bus,
-/// the real triggers.* (UiRpc), the real scripts.* (ScriptsRpc over a library whose directory is the real IntegrationService), and the
+/// The real pieces behind workflow_trigger_set and integration_action_allow, with fakes only at the edges. A real bus,
+/// the real triggers.* (UiRpc), the real workflows.* (WorkflowsRpc over a library whose directory is the real IntegrationService), and the
 /// real IntegrationService with the API "sms" read from a spec FakeHttp serves (no network, no sign-in, placeholder names only).
-/// Teams Alpha (agent Ada, script members Poller and Other), Beta and Gamma; sms is turned on for Alpha and Beta, not Gamma.
+/// Teams Alpha (agent Ada, workflow members Poller and Other), Beta and Gamma; sms is turned on for Alpha and Beta, not Gamma.
 /// sms: CreateMessage (POST /messages), ListMessages (GET /messages), GetToken (GET /tokens, a sign-in action: the floor).
 /// </summary>
 internal sealed class TriggerAndActionRig : IAsyncDisposable
@@ -49,8 +49,8 @@ internal sealed class TriggerAndActionRig : IAsyncDisposable
     public readonly FakeHttp Http = new();
     public BusEngine Bus = null!;
     public IntegrationService Svc = null!;
-    public ScriptRunner Runner = null!;
-    public ScriptsRpc Scripts = null!;
+    public WorkflowRunner Runner = null!;
+    public WorkflowsRpc Workflows = null!;
     public UiRpc Ui = null!;
     public readonly ConfirmationBook Book = new();
     public long Alpha, Beta, Gamma, PollerId, OtherId;
@@ -72,17 +72,17 @@ internal sealed class TriggerAndActionRig : IAsyncDisposable
         r.Gamma = await r.Bus.CreateTeamAsync("Gamma", ct: Ct);
 
         var catalog = new FakeActionCatalog();
-        var library = new ScriptLibrary(r.F.Db.ConnectionString, () => catalog, FakeChecker.Check,
-            integrations: new IntegrationScriptDirectory(r.F.Db.ConnectionString, Task.FromResult(r.Svc)));
-        var store = new ScriptRunStore(r.F.Db.ConnectionString);
-        r.Runner = new ScriptRunner(store, library, catalog, new FakeEngine(), Path.Combine(r.F.Db.Dir, "scripts"));
-        r.Bus.ScriptMembers = r.Runner;
-        r.Scripts = new ScriptsRpc(r.Bus, library, store, r.Runner);
+        var library = new WorkflowLibrary(r.F.Db.ConnectionString, () => catalog, FakeChecker.Check,
+            integrations: new IntegrationWorkflowDirectory(r.F.Db.ConnectionString, Task.FromResult(r.Svc)));
+        var store = new WorkflowRunStore(r.F.Db.ConnectionString);
+        r.Runner = new WorkflowRunner(store, library, catalog, new FakeEngine(), Path.Combine(r.F.Db.Dir, "workflows"));
+        r.Bus.WorkflowMembers = r.Runner;
+        r.Workflows = new WorkflowsRpc(r.Bus, library, store, r.Runner);
         var terminals = new TerminalHub(new AppEvents());
         var home = Path.Combine(r.F.Db.Dir, "home");
         r.Ui = new UiRpc(r.Bus, new PolicyStore(r.F.Db.ConnectionString), new MemberLayouts(Path.Combine(r.F.Db.Dir, "data"), Path.Combine(r.F.Db.Dir, "install"), home),
             new FakeModelCredentials(), new FakeHostTerminals(terminals, TimeSpan.FromMilliseconds(5)), new FakeInteractiveSessions(terminals, r.Bus), terminals, 16_384)
-        { Scripts = r.Scripts };
+        { Workflows = r.Workflows };
         await r.Bus.StartAsync(Ct);
 
         await r.Svc.DispatchAsync("integrations.apiSave", new JsonObject { ["name"] = "sms", ["baseUrl"] = Host, ["docsUrl"] = Host + "/openapi.json" }, Ct);
@@ -92,9 +92,9 @@ internal sealed class TriggerAndActionRig : IAsyncDisposable
         await r.Svc.DispatchAsync("integrations.apiEnable", new JsonObject { ["name"] = "sms", ["teamId"] = r.Alpha }, Ct);
         await r.Svc.DispatchAsync("integrations.apiEnable", new JsonObject { ["name"] = "sms", ["teamId"] = r.Beta }, Ct);
 
-        await r.Scripts.DispatchAsync("scripts.save", new JsonObject { ["document"] = Docs.Clean() }, Ct);
-        r.PollerId = (await r.Scripts.DispatchAsync("scripts.memberAdd", new JsonObject { ["teamId"] = r.Alpha, ["name"] = "Poller", ["script"] = "poller" }, Ct))!["memberId"]!.GetValue<long>();
-        r.OtherId = (await r.Scripts.DispatchAsync("scripts.memberAdd", new JsonObject { ["teamId"] = r.Alpha, ["name"] = "Other", ["script"] = "poller", ["version"] = 1 }, Ct))!["memberId"]!.GetValue<long>();
+        await r.Workflows.DispatchAsync("workflows.save", new JsonObject { ["document"] = Docs.Clean() }, Ct);
+        r.PollerId = (await r.Workflows.DispatchAsync("workflows.memberAdd", new JsonObject { ["teamId"] = r.Alpha, ["name"] = "Poller", ["workflow"] = "poller" }, Ct))!["memberId"]!.GetValue<long>();
+        r.OtherId = (await r.Workflows.DispatchAsync("workflows.memberAdd", new JsonObject { ["teamId"] = r.Alpha, ["name"] = "Other", ["workflow"] = "poller", ["version"] = 1 }, Ct))!["memberId"]!.GetValue<long>();
         return r;
     }
 
@@ -134,10 +134,10 @@ internal sealed class TriggerAndActionRig : IAsyncDisposable
         return list;
     }
 
-    /// <summary>scripts.catalog's decision on an sms action for a team: "ask" (marked ask), "allow" (listed, not marked), null (not listed).</summary>
+    /// <summary>workflows.catalog's decision on an sms action for a team: "ask" (marked ask), "allow" (listed, not marked), null (not listed).</summary>
     public async Task<string?> CatalogDecision(long team, string action)
     {
-        var catalog = (await Scripts.DispatchAsync("scripts.catalog", new JsonObject { ["teamId"] = team }, Ct))!.AsObject();
+        var catalog = (await Workflows.DispatchAsync("workflows.catalog", new JsonObject { ["teamId"] = team }, Ct))!.AsObject();
         var sms = catalog["integrations"]!.AsArray().OfType<JsonObject>().Single(i => i["name"]!.GetValue<string>() == "sms");
         var a = sms["actions"]!.AsArray().OfType<JsonObject>().FirstOrDefault(x => x["name"]?.GetValue<string>() == action);
         return a is null ? null : a["ask"] is JsonValue v && v.GetValue<bool>() ? "ask" : "allow";

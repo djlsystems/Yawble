@@ -122,15 +122,15 @@ public class IntegrationTests
 
         await integrations.DispatchAsync("integrations.approve", new JsonObject { ["id"] = ask.Id, ["always"] = true }, Ct);
         Assert.Equal(0, integrations.PendingCount());
-        // The approved call runs in the background (the click returns at once); the result reaches Ada in her workflow.
+        // The approved call runs in the background (the click returns at once); the result reaches Ada in her deliverable.
         await Wait.UntilAsync(() =>
         {
             using var s = db.OpenStore();
-            return Task.FromResult(s.Workflow(root.Seq).Any(m => m.Payload.Contains("approved your call")));
+            return Task.FromResult(s.Deliverable(root.Seq).Any(m => m.Payload.Contains("approved your call")));
         }, "the approved call's result");
         await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "Ada woken with the result");
         using var store = db.OpenStore();
-        var told = store.Workflow(root.Seq).Last(m => m.Type == MessageTypes.InstructionPrefix + "Alpha/Ada");
+        var told = store.Deliverable(root.Seq).Last(m => m.Type == MessageTypes.InstructionPrefix + "Alpha/Ada");
         Assert.Contains("The person approved your call `git count-objects -v`", Payload.Field(told, "text"));
         Assert.Contains("exit ", Payload.Field(told, "text"));
         // "Always" on a one-word guess of a CLI never discovered ("count-objects") remembers the exact line for the team, as before.

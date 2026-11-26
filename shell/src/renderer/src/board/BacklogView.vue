@@ -9,16 +9,16 @@ import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
 import Icon from '../components/Icon.vue';
 import { useNarrow } from '../narrowScreen';
-import { openWorkflowsPage, type BacklogRequest } from '../workflows/page';
+import { openDeliverablesPage, type BacklogRequest } from '../deliverables/page';
 
 /**
  * The Backlog: the person's list of work not yet given to a team, in priority order. An item
  * is a SPEC. It is pending until the person has read it and marks it ready; a ready item is dispatched to a team's
  * Manager (or to a new team made for it), which cuts it into cards. When that work is declared complete the item reads
- * "declared"; only the person marks it implemented. Every dispatch is kept with its workflow, cards and usage.
+ * "declared"; only the person marks it implemented. Every dispatch is kept with its deliverable, cards and usage.
  */
 // teamsLoading: the app's first overview (the teams to dispatch to) has not arrived yet.
-// focus: open with this item selected (an Item link on the Workflows page; an archived one in the archive).
+// focus: open with this item selected (an Item link on the Deliverables page; an archived one in the archive).
 const props = defineProps<{ teams: TeamSummary[]; teamsLoading?: boolean; api?: YawbleApi; pollMs?: number; focus?: BacklogRequest | null }>();
 const emit = defineEmits<{ openTeam: [id: number]; board: [teamId: number | null] }>();
 const api = resolveApi(props.api);
@@ -262,10 +262,10 @@ watch(() => props.teams, (ts) => { if (target.value !== 'new' && !ts.some((t) =>
 const teamLinks = computed(() => {
   if (detail.value?.id !== open.value?.id) return [];
   const seen = new Set<number>();
-  const out: { teamId: number; team: string; workflow: number }[] = [];
+  const out: { teamId: number; team: string; deliverable: number }[] = [];
   for (const d of detail.value?.dispatches ?? []) {
     if (d.teamId === null || d.teamGone || seen.has(d.teamId)) continue;
-    seen.add(d.teamId); out.push({ teamId: d.teamId, team: d.team, workflow: d.workflow });
+    seen.add(d.teamId); out.push({ teamId: d.teamId, team: d.team, deliverable: d.deliverable });
   }
   return out;
 });
@@ -470,8 +470,8 @@ const teamLinks = computed(() => {
             <span class="muted small">{{ t.team }}</span>
             <button class="link" @click="emit('openTeam', t.teamId)">Open team</button>
             <button class="link" @click="emit('board', t.teamId)">Its board</button>
-            <button class="link" data-test="backlog-team-workflow" :title="`${t.team}'s latest workflow for ${open.label}, on the Workflows page`"
-              @click="openWorkflowsPage({ teamId: t.teamId, workflow: t.workflow })">workflow #{{ t.workflow }}</button>
+            <button class="link" data-test="backlog-team-deliverable" :title="`${t.team}'s latest deliverable for ${open.label}, on the Deliverables page`"
+              @click="openDeliverablesPage({ teamId: t.teamId, deliverable: t.deliverable })">deliverable #{{ t.deliverable }}</button>
           </div>
         </section>
       </div>

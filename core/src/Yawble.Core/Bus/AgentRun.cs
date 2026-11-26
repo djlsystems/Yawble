@@ -48,7 +48,7 @@ public sealed class RunContext
     public long RunId { get; }
     public MemberRef Member { get; }
 
-    /// <summary>The batch: up to 16 deliveries of one workflow, oldest first. Item N in the prompt is Items[N-1].</summary>
+    /// <summary>The batch: up to 16 deliveries of one deliverable, oldest first. Item N in the prompt is Items[N-1].</summary>
     public IReadOnlyList<Message> Items { get; }
 
     /// <summary>The message that woke this run (the first item). Every message the run publishes is caused by it.</summary>
@@ -61,7 +61,7 @@ public sealed class RunContext
     /// </summary>
     public Teams.MemberCheckout? Checkout { get; internal set; }
 
-    /// <summary>Set on a workflow's first run when the branch sync before it conflicted: said at the top of the prompt.</summary>
+    /// <summary>Set on a deliverable's first run when the branch sync before it conflicted: said at the top of the prompt.</summary>
     public string? SyncNote { get; internal set; }
 
     /// <summary>What the run reported, carried in its agent.completed / agent.failed notice to the Manager.</summary>
@@ -80,10 +80,10 @@ public sealed class RunContext
 
     internal BusEngine Engine => _engine;
 
-    /// <summary>The workflow this run is part of (its first item's).</summary>
-    public long Workflow => Items.Count > 0 ? Items[0].CorrelationId : 0;
+    /// <summary>The deliverable this run is part of (its first item's).</summary>
+    public long Deliverable => Items.Count > 0 ? Items[0].CorrelationId : 0;
 
-    /// <summary>wake_me: be told the note again in this workflow after <paramref name="minutes"/>.</summary>
+    /// <summary>wake_me: be told the note again in this deliverable after <paramref name="minutes"/>.</summary>
     public Task<DateTimeOffset> WakeMeAsync(int minutes, string note, CancellationToken ct = default) =>
         _engine.WakeMeAsync(this, minutes, note, ct);
 
@@ -106,8 +106,8 @@ public sealed class RunContext
             ? NeedsDecisionAsync(ask.Question, ct)
             : _engine.ReportAsync(this, MessageTypes.NeedsDecision, ask.ToPayload(), ct, statusLine: "needs decision: " + ask.Headline);
 
-    public Task<Message> WorkflowCompleteAsync(string delivered, CancellationToken ct = default) =>
-        _engine.WorkflowCompleteAsync(this, delivered, ct);
+    public Task<Message> DeliverableCompleteAsync(string delivered, CancellationToken ct = default) =>
+        _engine.DeliverableCompleteAsync(this, delivered, ct);
 
     /// <summary>
     /// The run's idle watchdog, set by the launcher (null for a fake runner): the heavy-work lease holds it while the
@@ -118,9 +118,9 @@ public sealed class RunContext
     /// <summary>lease: the computer's heavy-work slots (acquire, release, status), with a queue.</summary>
     public Task<string> LeaseAsync(string action, string? what, CancellationToken ct = default) => _engine.LeaseAsync(this, action, what, ct);
 
-    /// <summary>workflow_show: one of the team's workflows, every message oldest first (none when it is not the team's).</summary>
-    public Task<IReadOnlyList<Message>> WorkflowShowAsync(long correlation, CancellationToken ct = default) =>
-        _engine.WorkflowShowAsync(this, correlation, ct);
+    /// <summary>deliverable_show: one of the team's deliverables, every message oldest first (none when it is not the team's).</summary>
+    public Task<IReadOnlyList<Message>> DeliverableShowAsync(long correlation, CancellationToken ct = default) =>
+        _engine.DeliverableShowAsync(this, correlation, ct);
 
     public Task<IReadOnlyList<MemberStatus>> StatusAsync(CancellationToken ct = default) =>
         _engine.TeamStatusAsync(Member.TeamId, ct);
@@ -162,7 +162,7 @@ public sealed class RunContext
     /// <summary>What the person approved for the team once and for all (0024); given to the Manager's runs only.</summary>
     public IReadOnlyList<string> Approvals { get; internal set; } = [];
 
-    /// <summary>The member's questions to the person in this workflow that are not answered yet (seq, question).</summary>
+    /// <summary>The member's questions to the person in this deliverable that are not answered yet (seq, question).</summary>
     public IReadOnlyList<(long Seq, string Question)> OpenQuestions { get; internal set; } = [];
 }
 
@@ -197,10 +197,10 @@ public sealed record RunActivitySpans(IReadOnlyList<ActivitySpan> Stalls, IReadO
 
 /// <summary>
 /// A run working now, and its quiet stretches so far (the board's live Stalled and Waiting-for-a-slot bands). Or a
-/// member waiting in the run queue now for work in <paramref name="Workflow"/>: <paramref name="QueuedSince"/> is when it
+/// member waiting in the run queue now for work in <paramref name="Deliverable"/>: <paramref name="QueuedSince"/> is when it
 /// joined (no run row exists before admission), so that wait is Waiting for a slot live; its Spans are none.
 /// </summary>
-public sealed record LiveRunActivity(string Team, string Member, long Workflow, RunActivitySpans Spans, DateTimeOffset? QueuedSince = null);
+public sealed record LiveRunActivity(string Team, string Member, long Deliverable, RunActivitySpans Spans, DateTimeOffset? QueuedSince = null);
 
 /// <summary>An item of a batch the member gave up on with blocked (item is null when it gave up the whole run).</summary>
 public sealed record BlockedItem(int? Item, string? Instruction, string Reason);
@@ -255,8 +255,8 @@ public static class BatchText
                 return $"{who} asks the person: {S("question")}";
             case MessageTypes.Blocked:
                 return $"{who} is blocked{ItemPart(root)}: {S("reason")}";
-            case MessageTypes.WorkflowCompleted:
-                return $"{who} declared the workflow complete: {S("delivered")}";
+            case MessageTypes.DeliverableCompleted:
+                return $"{who} declared the deliverable complete: {S("delivered")}";
             case MessageTypes.Completed:
             case MessageTypes.Failed:
             {

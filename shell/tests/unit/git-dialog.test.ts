@@ -204,7 +204,7 @@ describe('git dialog', () => {
   it('a conflict offers Ask the team, not Merge, and names the files', async () => {
     const { api, calls } = fakeApi({
       'git.status': () => ({ ...base, merge: 'conflict', teamBehindBase: 1, conflictFiles: ['README.md'] }),
-      'git.askTeam': () => ({ seq: 40, workflow: 40 }),
+      'git.askTeam': () => ({ seq: 40, deliverable: 40 }),
     });
     const w = mount(GitDialog, { props: { api, team } });
     await flushPromises();

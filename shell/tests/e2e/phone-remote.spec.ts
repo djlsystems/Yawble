@@ -419,14 +419,14 @@ for (const size of PHONES) {
       });
       // Openers: each sheet the team page and its first agent card offer (when shown). The app's Logs is a page.
       const openers: { name: string; go: (page: Page) => Promise<boolean> }[] = [
-        ...['open-code', 'open-settings', 'open-logs', 'open-documents', 'open-workflows', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
+        ...['open-code', 'open-settings', 'open-logs', 'open-documents', 'open-deliverables', 'open-triggers', 'open-git', 'open-manage'].map((id) => ({
           name: id.replace('open-', 'team-'),
           go: async (p: Page) => {
             await nav(p, 'nav-teams');
             await p.locator('[data-test=team-open-payments]').click();
             await expect(p.locator('[data-test=team-title]')).toBeVisible();
-            // On a phone the team's Documents and Workflows are in the drawer, not the header.
-            if (id === 'open-documents' || id === 'open-workflows') { await nav(p, id.replace('open-', 'drawer-team-')); return true; }
+            // On a phone the team's Documents and Deliverables are in the drawer, not the header.
+            if (id === 'open-documents' || id === 'open-deliverables') { await nav(p, id.replace('open-', 'drawer-team-')); return true; }
             const b = p.locator(`[data-test=${id}]`).first();
             // On a phone Triggers, Git and Settings are in the team page's ⋯ menu: open it first.
             const more = p.locator('[data-test=team-more]');

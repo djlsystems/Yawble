@@ -20,10 +20,10 @@ public class TeamsUnderOneLimitTests
     /// <summary>
     /// Done-when: two teams with three agents each (a Manager and two members), given work at the same time under a
     /// limit of 3, never have more than 3 sandboxes alive by the OS process list; the waiting agents show
-    /// "Queued · position N of M"; they are admitted oldest first across both teams; both workflows complete.
+    /// "Queued · position N of M"; they are admitted oldest first across both teams; both deliverables complete.
     /// </summary>
     [Fact]
-    public async Task TwoTeamsOfThreeUnderLimitThree_NeverExceedThreeSandboxes_AdmitOldestFirst_AndBothWorkflowsComplete()
+    public async Task TwoTeamsOfThreeUnderLimitThree_NeverExceedThreeSandboxes_AdmitOldestFirst_AndBothDeliverablesComplete()
     {
         using var db = new TempDb();
         await using var sandboxes = new StandInSandboxes();
@@ -71,7 +71,7 @@ public class TeamsUnderOneLimitTests
 
             await engine.StartAsync(Ct);
             using var probe = db.OpenStore();
-            await Wait.UntilAsync(() => probe.WorkflowDeclared(alpha.Seq) && probe.WorkflowDeclared(beta.Seq), "both workflows declared", TimeSpan.FromSeconds(60));
+            await Wait.UntilAsync(() => probe.DeliverableDeclared(alpha.Seq) && probe.DeliverableDeclared(beta.Seq), "both deliverables declared", TimeSpan.FromSeconds(60));
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "the bus to settle");
             await watching.CancelAsync();
             await watcher;
@@ -107,13 +107,13 @@ public class TeamsUnderOneLimitTests
             var teamsSeenInOrder = runs.Select(r => probe.Member(r.MemberId)!.Team).ToArray();
             Assert.Equal(["Alpha", "Beta"], teamsSeenInOrder.Take(2)); // the two Managers, in the order they were told
 
-            // Both workflows complete, with the right chain: tells at depth 1, handbacks at depth 2.
+            // Both deliverables complete, with the right chain: tells at depth 1, handbacks at depth 2.
             foreach (var root in new[] { alpha, beta })
             {
-                var flow = probe.Workflow(root.Seq);
+                var flow = probe.Deliverable(root.Seq);
                 Assert.Equal(2, flow.Count(m => m.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal) && m.Depth == 1));
                 Assert.Equal(2, flow.Count(m => m.Type == MessageTypes.Handback && m.Depth == 2));
-                Assert.Single(flow, m => m.Type == MessageTypes.WorkflowCompleted);
+                Assert.Single(flow, m => m.Type == MessageTypes.DeliverableCompleted);
             }
 
             var final = await engine.SchedulerSnapshotAsync(Ct);
@@ -142,7 +142,7 @@ public class TeamsUnderOneLimitTests
             }
             try
             {
-                await run.WorkflowCompleteAsync("both parts handed back", ct);
+                await run.DeliverableCompleteAsync("both parts handed back", ct);
             }
             catch (BusRefusal r) when (r.Code is "busy" or "already_declared")
             {

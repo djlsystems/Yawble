@@ -91,7 +91,7 @@ public class TeamRetrosTests
         }
     }
 
-    private const string Lessons = "## Building and testing\n- Run `npm run build` in shell before any e2e spec: specs load shell/out (2026-11-18, workflow 12)";
+    private const string Lessons = "## Building and testing\n- Run `npm run build` in shell before any e2e spec: specs load shell/out (2026-11-18, deliverable 12)";
 
     [Fact]
     public async Task OnlyTheManagerWrites_AndOnlyItsOwnTeamsTeamRetros()
@@ -110,8 +110,8 @@ public class TeamRetrosTests
         Assert.Null(kit.Skills.TeamRetrosSkill(alpha));
 
         (string Text, bool Error) manager = default;
-        long workflow = 0;
-        await kit.RunAsync("Alpha", "Manager", async run => { workflow = run.Workflow; manager = await Call(run, "team_retros_write", new { text = Lessons }); });
+        long deliverable = 0;
+        await kit.RunAsync("Alpha", "Manager", async run => { deliverable = run.Deliverable; manager = await Call(run, "team_retros_write", new { text = Lessons }); });
         Assert.False(manager.Error, manager.Text);
         Assert.Contains("team_retros version 1 saved", manager.Text);
 
@@ -122,7 +122,7 @@ public class TeamRetrosTests
         Assert.Equal("Write them short.", kit.Skills.All().Single(s => s.Name == "release-notes").Body); // nothing else in the skills table
         Assert.DoesNotContain(kit.Skills.All(), s => s.Name == TeamRetros.Name && s.TeamId is null);
         var v = Assert.Single(kit.Skills.Versions(alpha, TeamRetros.Name));
-        Assert.Equal(("Manager", (long?)workflow), (v.Writer, v.Workflow));
+        Assert.Equal(("Manager", (long?)deliverable), (v.Writer, v.Deliverable));
         Assert.Single(kit.Skills.Versions(beta, TeamRetros.Name)); // Beta's: only the person's save
     }
 
@@ -167,7 +167,7 @@ public class TeamRetrosTests
         var restored = kit.Skills.Restore(versions[1].Id);
         Assert.Equal("- first lesson", restored.Body);
         var now = kit.Skills.Versions(alpha, TeamRetros.Name)[0];
-        Assert.Equal((3, TeamRetros.PersonWriter, (long?)1, (long?)null), (now.Version, now.Writer, now.RestoredFrom, now.Workflow));
+        Assert.Equal((3, TeamRetros.PersonWriter, (long?)1, (long?)null), (now.Version, now.Writer, now.RestoredFrom, now.Deliverable));
 
         var lessons = kit.Skills.Lessons(alpha);
         Assert.Equal((1, 3, TeamRetros.PersonWriter), (lessons.Count, lessons.Version, lessons.Writer));
@@ -263,7 +263,7 @@ public class TeamRetrosTests
         var tool = McpBusServer.ToolList().Select(n => n!.AsObject()).Single(o => o["name"]!.GetValue<string>() == "team_retros_write");
         var description = tool["description"]!.GetValue<string>();
         Assert.StartsWith("The Manager:", description);
-        Assert.Contains("- <lesson> (<date>, workflow <id>)", description);
+        Assert.Contains("- <lesson> (<date>, deliverable <id>)", description);
         Assert.Contains($"{TeamRetros.MaxChars} characters", description);
         Assert.Equal(["text"], tool["inputSchema"]!["required"]!.AsArray().Select(n => n!.GetValue<string>()));
 

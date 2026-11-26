@@ -5,8 +5,8 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Board;
 
 /// <summary>
-/// The board's time categories. Every moment of a card or a workflow is in exactly one, so they add up to its overall time.
-/// For a workflow, a moment takes the highest category among its open cards (and its card-less runs), in
+/// The board's time categories. Every moment of a card or a deliverable is in exactly one, so they add up to its overall time.
+/// For a deliverable, a moment takes the highest category among its open cards (and its card-less runs), in
 /// <see cref="ByPriority"/> order.
 /// </summary>
 public static class TimeCategories
@@ -60,7 +60,7 @@ public static class TimeMarkers
 public sealed record TimeShare(string Category, long Ms);
 
 /// <summary>
-/// The wire contract's <c>time</c> on a BoardCard and on a workflow item. <see cref="EndedHow"/>: done (a card),
+/// The wire contract's <c>time</c> on a BoardCard and on a deliverable item. <see cref="EndedHow"/>: done (a card),
 /// completed, closed, stopped or expired; null while open. The breakdown's ms add up to <see cref="OverallMs"/> exactly.
 /// </summary>
 public sealed record TimeSummary(
@@ -78,7 +78,7 @@ public sealed record TimeSummary(
 /// <summary>A stretch of one category.</summary>
 public sealed record TimeBand(string Category, DateTimeOffset Start, DateTimeOffset End);
 
-/// <summary>A moment on the axis; <see cref="Card"/> says whose, on a workflow's timeline.</summary>
+/// <summary>A moment on the axis; <see cref="Card"/> says whose, on a deliverable's timeline.</summary>
 public sealed record TimeMarker(string Kind, DateTimeOffset At, long? Card = null);
 
 /// <summary>
@@ -98,24 +98,24 @@ public sealed record CardTimelineInput(
 
 /// <summary>
 /// A card's timeline: its time, its bands from created to its end (or now), and its markers. <see cref="Live"/>: the
-/// stretches it was not in Done, created to now, which a workflow merges.
+/// stretches it was not in Done, created to now, which a deliverable merges.
 /// </summary>
 public sealed record CardTimeline(long Id, string? Member, string Title, TimeSummary Time, IReadOnlyList<TimeBand> Bands,
     IReadOnlyList<TimeMarker> Markers, IReadOnlyList<TimeBand> Live);
 
-/// <summary>A member's work in a workflow that is on none of its cards (the Manager's own runs, its questions).</summary>
+/// <summary>A member's work in a deliverable that is on none of its cards (the Manager's own runs, its questions).</summary>
 public sealed record LooseInput(string Member, IReadOnlyList<RunSpan> Runs, IReadOnlyList<ActivitySpan> Stalls, IReadOnlyList<ActivitySpan> Holds,
     IReadOnlyList<ActivitySpan> Asks, IReadOnlyList<ActivitySpan> Wakes, IReadOnlyList<TimeMarker> Markers);
 
-/// <summary>One end of a workflow: when (an expired one's last activity), how, and when new work reopened it (null: it still is ended).</summary>
-public sealed record WorkflowEnd(DateTimeOffset EndAt, string How, DateTimeOffset? ReopenAt = null, DateTimeOffset? ExpiredAt = null);
+/// <summary>One end of a deliverable: when (an expired one's last activity), how, and when new work reopened it (null: it still is ended).</summary>
+public sealed record DeliverableEnd(DateTimeOffset EndAt, string How, DateTimeOffset? ReopenAt = null, DateTimeOffset? ExpiredAt = null);
 
-public sealed record WorkflowTimelineInput(long Id, DateTimeOffset Created, IReadOnlyList<WorkflowEnd> Ends, IReadOnlyList<CardTimeline> Cards, IReadOnlyList<LooseInput> Loose);
+public sealed record DeliverableTimelineInput(long Id, DateTimeOffset Created, IReadOnlyList<DeliverableEnd> Ends, IReadOnlyList<CardTimeline> Cards, IReadOnlyList<LooseInput> Loose);
 
-/// <summary>A row of a workflow's timeline: a card (with its member and title), or a member's card-less work.</summary>
+/// <summary>A row of a deliverable's timeline: a card (with its member and title), or a member's card-less work.</summary>
 public sealed record TimelineRow(long? Card, string? Member, string? Title, IReadOnlyList<TimeBand> Bands);
 
-public sealed record WorkflowTimeline(long Id, TimeSummary Time, IReadOnlyList<TimelineRow> Rows, IReadOnlyList<TimeBand> Summary, IReadOnlyList<TimeMarker> Markers);
+public sealed record DeliverableTimeline(long Id, TimeSummary Time, IReadOnlyList<TimelineRow> Rows, IReadOnlyList<TimeBand> Summary, IReadOnlyList<TimeMarker> Markers);
 
 /// <summary>
 /// Computes the board's times. Pure: every input, "now" included, is given, so tests use fixed times only.
@@ -126,7 +126,7 @@ public sealed record WorkflowTimeline(long Id, TimeSummary Time, IReadOnlyList<T
 ///   queued now: a live queue entry) is Waiting for a slot. A card with work for its member that is not in the run queue
 ///   (busy elsewhere, team held, a hand-back waiting for its sender's run) is Waiting on a teammate. Time in Done
 ///   before a reopen is Was done.</item>
-/// <item>A workflow: created (its first message) to its last end (completed, closed, expired: an expired one's last
+/// <item>A deliverable: created (its first message) to its last end (completed, closed, expired: an expired one's last
 ///   activity), or now while open. Each moment takes the highest category of its cards not in Done and of its card-less
 ///   runs; nothing at all is Idle; time between an end and the work that reopened it is Was done.</item>
 /// </list>
@@ -189,7 +189,7 @@ public static class TimelineCalculator
                 var k = segs.Count - 1;
                 while (k > 0 && segs[k - 1].Done) k--;
                 end = segs[k].Start; // the last time it entered Done
-                // A reopen that lasted no time (told again at the very moment an expired workflow's last activity ended it)
+                // A reopen that lasted no time (told again at the very moment an expired deliverable's last activity ended it)
                 // still moves the end to that moment: the time before it in Done was done before a reopen.
                 for (var i = 1; i < states.Count; i++)
                 {
@@ -244,7 +244,7 @@ public static class TimelineCalculator
         return [.. segs.Select(s => new TimeBand(s.Category, At(s.Start), At(s.End)))];
     }
 
-    public static WorkflowTimeline Workflow(WorkflowTimelineInput w, DateTimeOffset now)
+    public static DeliverableTimeline Deliverable(DeliverableTimelineInput w, DateTimeOffset now)
     {
         long created = Ms(w.Created), last = Math.Max(created, Ms(now));
         var final = w.Ends.LastOrDefault();
@@ -273,7 +273,7 @@ public static class TimelineCalculator
         var startedAt = w.Cards.Select(c => c.Time.StartedAt).Where(s => s is not null).Min(StringComparer.Ordinal);
         var time = new TimeSummary(Iso(w.Created), startedAt, open ? null : Iso(At(end)), open ? null : final!.How, open,
             end - created, w.Cards.Any(c => c.Time.Rebuilt), Breakdown(summary));
-        return new WorkflowTimeline(w.Id, time, rows, summary, [.. markers.OrderBy(m => m.At)]);
+        return new DeliverableTimeline(w.Id, time, rows, summary, [.. markers.OrderBy(m => m.At)]);
     }
 
     // ---------------------------------------------------------------- helpers

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import DocumentsBrowser from '../../src/renderer/src/components/DocumentsBrowser.vue';
 import ConfirmDialog from '../../src/renderer/src/components/ConfirmDialog.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
-import { backlogRequest } from '../../src/renderer/src/workflows/page';
+import { backlogRequest } from '../../src/renderer/src/deliverables/page';
 import type { BacklogItem, DocFile, YawbleApi, TeamSummary } from '../../src/shared/api';
 
 // The Documents preview's "Move to Backlog" button: shown for a text document the editor opens (not while editing),
@@ -20,7 +20,7 @@ const files: Record<string, DocFile> = {
 // What backlog.add answers (BoardService.ItemJson), with made-up values.
 const item: BacklogItem = {
   id: 41, label: 'B007', team: 'payments', title: 'A plan', body: 'Some text.', state: 'pending', archivedAt: null,
-  dispatchedTeam: null, dispatchedWorkflow: null, dispatchedAt: null, inFlight: false,
+  dispatchedTeam: null, dispatchedDeliverable: null, dispatchedAt: null, inFlight: false,
   createdAt: '2026-01-02T03:04:05Z', updatedAt: '2026-01-02T03:04:05Z', dispatchCount: 0,
 };
 

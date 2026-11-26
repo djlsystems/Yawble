@@ -20,7 +20,7 @@ import { outputHeight } from '../agentOutputHeight';
 import { errorText, resolveApi } from '../api';
 import { getMemberView, MemberViews, setMemberView, type MemberView } from '../memberPaneView';
 import { useNarrow } from '../narrowScreen';
-import { openWorkflowsPage } from '../workflows/page';
+import { openDeliverablesPage } from '../deliverables/page';
 
 // One member on the team page, in one frame: a title bar (face, name, role and CLI chips, state, "more waiting", and a
 // ☰ menu with every action), a row of tabs - Report (what the member last said), Activity, Terminal - with the run's
@@ -64,12 +64,12 @@ const stateLine = computed(() => {
 const lease = computed(() => leaseText(props.card));
 // Tells that arrived while the member runs wait behind this run (the core counts undelivered work for every state).
 const moreWaiting = computed(() => (props.card.state === 'running' && props.card.queuedInstructions > 0 ? props.card.queuedInstructions : 0));
-// The workflows this run works on: a "#N" link each, to that workflow on the Workflows page (read only, so a Visitor too).
-const runWorkflows = computed(() => (props.card.state === 'running'
-  ? (props.card.runWorkflows ?? []).filter((n) => Number.isInteger(n) && n > 0) : []));
-function openRunWorkflow(n: number) { openWorkflowsPage({ teamId: m.value.teamId, workflow: n }); }
+// The deliverables this run works on: a "#N" link each, to that deliverable on the Deliverables page (read only, so a Visitor too).
+const runDeliverables = computed(() => (props.card.state === 'running'
+  ? (props.card.runDeliverables ?? []).filter((n) => Number.isInteger(n) && n > 0) : []));
+function openRunDeliverable(n: number) { openDeliverablesPage({ teamId: m.value.teamId, deliverable: n }); }
 const moreWaitingTitle = computed(() =>
-  `${moreWaiting.value} instruction${moreWaiting.value === 1 ? '' : 's'} waiting; they run after this one (oldest workflow first)`);
+  `${moreWaiting.value} instruction${moreWaiting.value === 1 ? '' : 's'} waiting; they run after this one (oldest deliverable first)`);
 // While the member has an open decision its report is "Waiting on you" (memberReport), never an earlier
 // "Declared complete"; the chip and the Report link to the decision card on the team page.
 const report = computed(() => memberReport(props.card));
@@ -163,9 +163,9 @@ defineExpose({ el: () => root.value });
         <span class="chip" data-test="agent-role" :title="hireRoleOf(m) ? `${m.role}, hired as ${hireRoleOf(m)}` : undefined">{{ hireRoleOf(m) ?? m.role }}</span>
         <span class="chip" :class="`cli-${m.cli}`" data-test="agent-cli" :title="agentPillTitle(m.cli, card.agentModel)">{{ agentPillText(m.cli, card.agentModel) }}</span>
         <span class="label" data-test="agent-face-state">{{ stateLabel }}</span>
-        <span v-if="runWorkflows.length" class="runs" data-test="agent-run-workflows"><template v-for="(n, i) in runWorkflows" :key="n"><template v-if="i">, </template><a
-          href="#" class="run-link" data-test="agent-run-workflow" :data-id="n" :title="`Open workflow #${n} on the Workflows page`"
-          @click.prevent="openRunWorkflow(n)">#{{ n }}</a></template></span>
+        <span v-if="runDeliverables.length" class="runs" data-test="agent-run-deliverables"><template v-for="(n, i) in runDeliverables" :key="n"><template v-if="i">, </template><a
+          href="#" class="run-link" data-test="agent-run-deliverable" :data-id="n" :title="`Open deliverable #${n} on the Deliverables page`"
+          @click.prevent="openRunDeliverable(n)">#{{ n }}</a></template></span>
         <span v-if="moreWaiting" class="more" data-test="agent-more-waiting" :title="moreWaitingTitle">· {{ moreWaiting }} more waiting</span>
       </span>
       <span ref="menuWrap" class="menu-wrap">

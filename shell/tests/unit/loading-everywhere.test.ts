@@ -80,7 +80,7 @@ const team: TeamSummary = { id: 1, name: 'payments', repoPath: null, members: 1,
 const lanes = [{ id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' }, { id: 'blocked', label: 'Needs You' }, { id: 'done', label: 'Done' }];
 const item = (over: Partial<BacklogItem> = {}): BacklogItem => ({
   id: 7, label: 'B007', team: null, title: 'Dark mode', body: '# Dark mode', state: 'ready', archivedAt: null, dispatchedTeam: null,
-  dispatchedWorkflow: null, dispatchedAt: null, inFlight: false, createdAt: '2026-11-12T10:00:00Z', updatedAt: '2026-11-12T10:00:00Z', dispatchCount: 0, ...over,
+  dispatchedDeliverable: null, dispatchedAt: null, inFlight: false, createdAt: '2026-11-12T10:00:00Z', updatedAt: '2026-11-12T10:00:00Z', dispatchCount: 0, ...over,
 });
 
 let wrapper: VueWrapper | null = null;
@@ -197,7 +197,7 @@ describe('Board: first load', () => {
 
 describe('Teams list (the app window)', () => {
   beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
-  const quiet: Auto = { 'concierge.list': [], 'agents.detect': [], 'link.status': { state: 'off', viewers: [] }, 'companion.list': { pairings: [], actions: [], clients: [] }, 'bus.workflows': [] };
+  const quiet: Auto = { 'concierge.list': [], 'agents.detect': [], 'link.status': { state: 'off', viewers: [] }, 'companion.list': { pairings: [], actions: [], clients: [] }, 'bus.deliverables': [] };
 
   it('shows the note until the first overview, then the grid; a card action is busy and a poll does not flash the note', async () => {
     const f = fakeCore(quiet);
@@ -288,7 +288,7 @@ describe('Documents', () => {
 });
 
 describe('Monitor: first load', () => {
-  const rest: Auto = { 'monitor.messages': { end: 0, messages: [] }, 'monitor.steps': { end: 0, pending: false, steps: [] }, 'monitor.codeEvents': [], 'teams.agents': [], 'bus.workflows': [] };
+  const rest: Auto = { 'monitor.messages': { end: 0, messages: [] }, 'monitor.steps': { end: 0, pending: false, steps: [] }, 'monitor.codeEvents': [], 'teams.agents': [], 'bus.deliverables': [] };
   it('shows the note on the wall and in the activity until the first tick ends', async () => {
     const f = fakeCore(rest);
     const w = keep(mount(MonitorView, { props: { api: f.api, pollMs: 60_000 } }));
@@ -447,7 +447,7 @@ describe('review fixes: per-subject results', () => {
     const teamB = { ...team, id: 2, name: 'search' } as TeamSummary;
     const f = fakeCore({
       'concierge.list': [], 'agents.detect': [], 'link.status': { state: 'off', viewers: [] }, 'companion.list': { pairings: [], actions: [], clients: [] },
-      'bus.workflows': [], 'app.overview': { slots: { running: 0, limit: 4, queued: 0 }, teams: [team, teamB] },
+      'bus.deliverables': [], 'app.overview': { slots: { running: 0, limit: 4, queued: 0 }, teams: [team, teamB] },
       'teams.agents': [], 'bus.decisions': [], 'integrations.asks': [], 'teams.syncToBase': { on: true, note: null, behind: null },
     });
     const w = keep(mount(App, { props: { api: f.api, pollMs: 60_000 } }));
@@ -466,7 +466,7 @@ describe('review fixes: per-subject results', () => {
     await w.get('[data-test=tell-text]').setValue('For search');
     expect(w.get('[data-test=tell-send]').attributes('disabled')).toBeUndefined();
 
-    await f.answer('bus.tellManager', { workflow: 9 });
+    await f.answer('bus.tellManager', { deliverable: 9 });
     expect((w.get('[data-test=tell-text]').element as HTMLInputElement).value).toBe('For search');
     expect(w.find('[data-test=tell-sent]').exists()).toBe(false);
     expect(f.calls.find((c) => c.method === 'bus.tellManager')!.params.teamId).toBe(1);
@@ -496,7 +496,7 @@ describe('review fixes: per-subject results', () => {
 
   it('Card panel: a Move answered after the person opened another card leaves that card and its form alone', async () => {
     const card = (id: number, title: string) => ({ id, team: 'payments', teamId: 1, member: null, item: null, title, body: '', status: 'queued', lane: 'todo',
-      placed: false, awaitingManager: false, workflow: null, createdAt: '', updatedAt: '', trailCount: 0, trail: [] });
+      placed: false, awaitingManager: false, deliverable: null, createdAt: '', updatedAt: '', trailCount: 0, trail: [] });
     const f = fakeCore();
     const w = keep(mount(CardPanel, { props: { id: 1, lanes, api: f.api } }));
     await flushPromises();

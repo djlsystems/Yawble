@@ -14,7 +14,7 @@ import { teamState } from './teamState';
 // stored remote theme (theme.ts) is neither read nor written in embed mode.
 
 /** The screens a place opens (Sidebar.vue's View, less Settings, which is not in the sidebar's places). */
-export type EmbedView = 'concierge' | 'documents' | 'backlog' | 'workflows' | 'teams' | 'board' | 'monitor' | 'scripts';
+export type EmbedView = 'concierge' | 'goals' | 'documents' | 'backlog' | 'deliverables' | 'teams' | 'board' | 'monitor' | 'workflows';
 
 /** True when the page was opened with embed=1 (the cloud's frame). */
 export function isEmbed(search: string = typeof location !== 'undefined' ? location.search : ''): boolean {
@@ -47,8 +47,8 @@ export interface EmbedNavState {
   readOnly: boolean;
   /** The chat being deleted. */
   removing?: string | null;
-  /** How many workflows are open across the teams; null: not known. */
-  openWorkflows?: number | null;
+  /** How many deliverables are open across the teams; null: not known. */
+  openDeliverables?: number | null;
 }
 
 // The order of the sidebar's places. No Terminal and no Help (embedContract.ts EmbedPlaceId).
@@ -56,12 +56,13 @@ const PLACES: readonly { id: EmbedPlaceId; label: string; icon: EmbedIcon }[] = 
   { id: 'newChat', label: 'New chat', icon: 'newChat' },
   { id: 'concierge', label: 'Concierge', icon: 'concierge' },
   { id: 'teams', label: 'Teams', icon: 'teams' },
+  { id: 'goals', label: 'Goals', icon: 'goals' },
+  { id: 'deliverables', label: 'Deliverables', icon: 'deliverables' },
   { id: 'backlog', label: 'Backlog', icon: 'backlog' },
-  { id: 'workflows', label: 'Workflows', icon: 'workflows' },
   { id: 'board', label: 'Kanban board', icon: 'kanban' },
+  { id: 'workflows', label: 'Workflows', icon: 'workflows' },
   { id: 'documents', label: 'Documents', icon: 'documents' },
   { id: 'monitor', label: 'Monitor', icon: 'monitor' },
-  { id: 'scripts', label: 'Scripts', icon: 'scripts' },
   { id: 'logs', label: 'Logs', icon: 'logs' },
 ];
 
@@ -76,7 +77,7 @@ export function runSlotsLine(slots: RunSlots | null): string | null {
 export function buildNav(s: EmbedNavState): EmbedNav {
   const badgeOf = (id: EmbedPlaceId): number | null => {
     if (id === 'teams') return s.teams.length || null;
-    if (id === 'workflows') return s.openWorkflows || null;
+    if (id === 'deliverables') return s.openDeliverables || null;
     return null;
   };
   // New chat opens something rather than show a place: never highlighted, as in the sidebar.

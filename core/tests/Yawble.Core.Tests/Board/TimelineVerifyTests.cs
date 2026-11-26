@@ -8,7 +8,7 @@ using C = Yawble.Core.Board.TimeCategories;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// The tester's own checks of the timeline beside the developer's: seeded random workflows whose cards overlap
+/// The tester's own checks of the timeline beside the developer's: seeded random deliverables whose cards overlap
 /// (the priority merge is the highest open card per moment and everything adds up exactly, to the millisecond), a
 /// Visitor may read timeline.get, and no token or cost field is on the wire. Fixed times only.
 /// </summary>
@@ -46,18 +46,18 @@ public class TimelineVerifyTests
     [Theory]
     [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)] [InlineData(5)]
     [InlineData(6)] [InlineData(7)] [InlineData(8)] [InlineData(9)] [InlineData(10)]
-    public void ARandomWorkflowOfOverlappingCards_MergesByPriority_AndAddsUpExactly(int seed)
+    public void ARandomDeliverableOfOverlappingCards_MergesByPriority_AndAddsUpExactly(int seed)
     {
         var r = new Random(seed);
         var now = T0.AddHours(9).AddMilliseconds(r.Next(0, 1000));
         var cards = Enumerable.Range(1, r.Next(2, 6)).Select(i => RandomCard(r, i, now)).ToList();
         var created = T0.AddMilliseconds(-r.Next(0, 60_000));
-        var w = TimelineCalculator.Workflow(new WorkflowTimelineInput(431, created, [], cards, []), now);
+        var w = TimelineCalculator.Deliverable(new DeliverableTimelineInput(431, created, [], cards, []), now);
 
         // Each card: its breakdown adds up to its overall exactly.
         foreach (var c in cards) Assert.Equal(c.Time.OverallMs, c.Time.Breakdown.Sum(b => b.Ms));
 
-        // The workflow: open, created -> now, its breakdown adds up exactly.
+        // The deliverable: open, created -> now, its breakdown adds up exactly.
         Assert.True(w.Time.Open);
         Assert.Equal((long)(now - created).TotalMilliseconds, w.Time.OverallMs);
         Assert.Equal(w.Time.OverallMs, w.Time.Breakdown.Sum(b => b.Ms));
@@ -91,7 +91,7 @@ public class TimelineVerifyTests
 
     [Theory]
     [InlineData("{\"card\":375}")]
-    [InlineData("{\"workflow\":3573}")]
+    [InlineData("{\"deliverable\":3573}")]
     public void AVisitorMayReadTimelineGet(string parameters)
     {
         var p = JsonNode.Parse(parameters)!.AsObject();
@@ -108,7 +108,7 @@ public class TimelineVerifyTests
         var r = new Random(431);
         var now = T0.AddHours(9);
         var cards = Enumerable.Range(1, 3).Select(i => RandomCard(r, i, now)).ToList();
-        var w = TimelineCalculator.Workflow(new WorkflowTimelineInput(431, T0, [], cards, []), now);
+        var w = TimelineCalculator.Deliverable(new DeliverableTimelineInput(431, T0, [], cards, []), now);
         foreach (var json in new[] { BoardTimeline.Json(cards[0]).ToJsonString(), BoardTimeline.Json(w).ToJsonString() })
         {
             Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase);

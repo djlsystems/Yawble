@@ -16,7 +16,7 @@ const companion = '_companion/claude-code';
 
 const ask = (member: string): IntegrationAsk => ({
   id: 41, at: '2026-11-17T16:00:00Z', integration: 'task', teamId: 3, member, command: 'pwsh -File scripts/deploy.ps1', reason: 'the person asked to deploy',
-  workflow: 0, task: true, taskName: 'deploy', commit: 'abcdef1234567890', detail: null,
+  deliverable: 0, task: true, taskName: 'deploy', commit: 'abcdef1234567890', detail: null,
 });
 
 function fakeApi(answers: Record<string, (params: any) => unknown>) {

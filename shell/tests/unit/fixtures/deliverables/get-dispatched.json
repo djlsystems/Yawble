@@ -1,0 +1,98 @@
+{
+  "deliverable": {
+    "id": 1,
+    "title": "Deliverables page",
+    "owner": "Manager",
+    "state": "completed",
+    "undeclared": false,
+    "busy": [],
+    "ending": "page shipped at 1a2b3c4",
+    "startedAt": "2026-11-20T01:23:33.2089578\u002B00:00",
+    "lastAt": "2026-11-20T01:23:33.2835232\u002B00:00",
+    "messages": 3,
+    "endedAt": "2026-11-20T01:23:33.21346\u002B00:00",
+    "expiredAt": null,
+    "expiresAt": null,
+    "expiryWarning": null,
+    "question": null,
+    "time": {
+      "createdAt": "2026-11-20T01:23:33.2089578\u002B00:00",
+      "startedAt": "2026-11-20T01:23:33.2089578\u002B00:00",
+      "endedAt": "2026-11-20T01:23:33.2130000\u002B00:00",
+      "endedHow": "completed",
+      "open": false,
+      "overallMs": 5,
+      "rebuilt": false,
+      "breakdown": [
+        {
+          "category": "waiting-for-slot",
+          "ms": 5
+        }
+      ]
+    },
+    "ownerId": 1,
+    "team": "Web",
+    "teamId": 1,
+    "status": "completed",
+    "waitingFor": null,
+    "working": false,
+    "item": {
+      "label": "B001",
+      "title": "Deliverables page",
+      "archived": false
+    },
+    "members": []
+  },
+  "cards": [
+    {
+      "id": 1,
+      "title": "Backlog item B001 \u0022Deliverables page\u0022 is dispatched to your team. It is a SPEC: cu\u2026",
+      "lane": "done",
+      "member": "Manager",
+      "status": "completed",
+      "time": {
+        "createdAt": "2026-11-20T01:23:33.2089578\u002B00:00",
+        "startedAt": "2026-11-20T01:23:33.2089578\u002B00:00",
+        "endedAt": "2026-11-20T01:23:33.2130000\u002B00:00",
+        "endedHow": "completed",
+        "open": false,
+        "overallMs": 5,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "waiting-for-slot",
+            "ms": 5
+          }
+        ]
+      }
+    }
+  ],
+  "messages": [
+    {
+      "seq": 10,
+      "at": "2026-11-20T01:23:33.2835232\u002B00:00",
+      "kind": "completed",
+      "from": "Manager",
+      "member": "Manager",
+      "text": null
+    },
+    {
+      "seq": 2,
+      "at": "2026-11-20T01:23:33.2134600\u002B00:00",
+      "kind": "done",
+      "from": "Manager",
+      "member": "Manager",
+      "text": "page shipped at 1a2b3c4"
+    },
+    {
+      "seq": 1,
+      "at": "2026-11-20T01:23:33.2089578\u002B00:00",
+      "kind": "instruction",
+      "from": "person",
+      "member": "Manager",
+      "text": "Backlog item B001 \u0022Deliverables page\u0022 is dispatched to your team. It is a SPEC: cut it into cards."
+    }
+  ],
+  "spec": "**Why:** every team\u0027s work in one place.\n\n## Table\n- Status\n- Elapsed",
+  "backlog": true
+}

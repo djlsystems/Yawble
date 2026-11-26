@@ -542,7 +542,7 @@ onMounted(async () => { await load(); syncEdit(); });
             <div v-for="n in commonPaths" :key="n" class="fills" :data-test="`api-path-common-${n}`">
               <label class="check small"><input type="checkbox" :checked="fillFor(fillable[0]!.key) === n" :data-test="`api-path-common-check-${n}`"
                 @change="setFill(fillable[0]!.key, ($event.target as HTMLInputElement).checked ? n : '')" /> Fill <code class="mono">{{ n }}</code> in every address from the {{ fillable[0]!.label.toLowerCase() }}</label>
-              <p class="muted small indent">Nearly all of {{ apiName }}'s actions have <code class="mono">{{ '{' + n + '}' }}</code> in their address. Ticked, each call fills it in from the sign-in, so scripts and agents never have to give it.</p>
+              <p class="muted small indent">Nearly all of {{ apiName }}'s actions have <code class="mono">{{ '{' + n + '}' }}</code> in their address. Ticked, each call fills it in from the sign-in, so workflows and agents never have to give it.</p>
             </div>
           </template>
           <details v-else-if="fillable.length && pathNames.length" class="fills" data-test="api-path-fills">

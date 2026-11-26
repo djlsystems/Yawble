@@ -5,7 +5,7 @@ namespace Yawble.Core.Board;
 /// <summary>
 /// Fills in the timeline of a card made before 0047 from its board_trail lines, replaying them the way
 /// <see cref="BoardProjector"/> moved the card: planned, assigned, told, progress, blocked, asked, failed, run ended, handed
-/// back, moved, edited, and the workflow's end (done, closed, expired). A run the idle watchdog ended ("failed" with
+/// back, moved, edited, and the deliverable's end (done, closed, expired). A run the idle watchdog ended ("failed" with
 /// "idle: no progress for N s") was Stalled from the line before it (its last sign of activity) to its end, and is a
 /// watchdog-end marker.
 /// </summary>
@@ -138,14 +138,14 @@ public static partial class TimelineRebuild
                         placed = false;
                     }
                     break;
-                case "done" or "workflow done" or "workflow closed" or ClosedOverFail.AcceptedTrailKind or ClosedOverFail.WontDoTrailKind:
+                case "done" or "deliverable done" or "deliverable closed" or ClosedOverFail.AcceptedTrailKind or ClosedOverFail.WontDoTrailKind:
                     status = "done";
                     lane = Lanes.Done;
                     break;
-                case "workflow expired":
+                case "deliverable expired":
                     status = "done";
                     lane = Lanes.Done;
-                    // An expired workflow's cards end at its last activity, not at the expiry.
+                    // An expired deliverable's cards end at its last activity, not at the expiry.
                     if (card.EndedHow == "expired" && card.EndedAt is { } endedAt && BoardStore.Time(endedAt) <= BoardStore.Time(t.At)) stateAt = endedAt;
                     lines.Add(Mark(TimeMarkers.Expired, t.At, member));
                     break;

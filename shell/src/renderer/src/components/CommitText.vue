@@ -4,7 +4,7 @@ import type { CommitMatch } from '../../../shared/api';
 import { commitParts, commitTeams } from '../commitView';
 import { cachedMatches, chooseTitle, commitTitle, pickMatches, requestResolve, resolvedVersion } from '../commitResolve';
 
-// Plain text (not markdown) that may name commits: the card trail, activity lines, a workflow's ending. The same
+// Plain text (not markdown) that may name commits: the card trail, activity lines, a deliverable's ending. The same
 // treatment as rendered markdown (markdown.ts + commitResolve.ts): a commit-shaped ID is text until git.commitsResolve
 // confirms it (asked in the same one-per-screen batch), then a [data-commit] link that App.vue's click handler opens,
 // with the commit's title (and "not pushed") on hover; an ID naming several commits opens the chooser. team: the place's

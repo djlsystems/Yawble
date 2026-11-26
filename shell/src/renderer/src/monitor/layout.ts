@@ -4,7 +4,7 @@
  * low friction. Remembered in this app's storage, a convenience only: storage may be missing or refuse, and the defaults stand.
  */
 export interface LayoutSettings {
-  /** How long the links are: members (and the workflow panel) from their team. */
+  /** How long the links are: members (and the deliverable panel) from their team. */
   distance: number;
   /** How hard a link pulls its two ends back to that length. */
   strength: number;

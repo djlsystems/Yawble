@@ -20,7 +20,7 @@ const containment = /\bcontainer(-type)?\s*:|\bcontain\s*:|\btransform\s*:/;
 const team = { id: 1, name: 'payments' } as TeamSummary;
 const backlogItem = (over: Record<string, unknown> = {}) => ({
   id: 1, label: 'B001', team: 'payments', title: 'Item 1', body: '# Spec', state: 'pending', position: 1, createdAt: '', updatedAt: '',
-  archivedAt: null, dispatchedTeam: null, dispatchedWorkflow: null, dispatchedAt: null, inFlight: false, dispatchCount: 0, ...over,
+  archivedAt: null, dispatchedTeam: null, dispatchedDeliverable: null, dispatchedAt: null, inFlight: false, dispatchCount: 0, ...over,
 });
 const fake = (answers: Record<string, unknown>) => ({
   call: async (m: string) => { if (!(m in answers)) throw new Error(`unexpected ${m}`); return answers[m]; },

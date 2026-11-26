@@ -15,7 +15,7 @@ public sealed record Message(
     int Depth,
     DateTimeOffset OccurredAt);
 
-/// <summary>A message on the way in. Null causation roots a new workflow (only the person does that).</summary>
+/// <summary>A message on the way in. Null causation roots a new deliverable (only the person does that).</summary>
 /// <summary>How a message came in and who is behind it, and who started its chain (0015_provenance.sql).</summary>
 public sealed record MessageProvenance(string? Via, string? User, long? OriginSeq, string? OriginVia, string? OriginUser);
 
@@ -31,16 +31,16 @@ public static class MessageTypes
     public const string Progress = "agent.progress";
     public const string Blocked = "agent.blocked";
     public const string NeedsDecision = "agent.needsDecision";
-    public const string WorkflowCompleted = "workflow.completed";
+    public const string DeliverableCompleted = "deliverable.completed";
 
-    /// <summary>A person closed the workflow: it ends without being declared complete.</summary>
-    public const string WorkflowClosed = "workflow.closed";
+    /// <summary>A person closed the deliverable: it ends without being declared complete.</summary>
+    public const string DeliverableClosed = "deliverable.closed";
 
-    /// <summary>The app closed the workflow: nothing happened in it for the team's workflowExpiryDays (source host).</summary>
-    public const string WorkflowExpired = "workflow.expired";
+    /// <summary>The app closed the deliverable: nothing happened in it for the team's deliverableExpiryDays (source host).</summary>
+    public const string DeliverableExpired = "deliverable.expired";
 
-    /// <summary>The three ways a workflow ends; new activity (an instruction in it) reopens it after any of them.</summary>
-    public static readonly IReadOnlyList<string> WorkflowEnds = [WorkflowCompleted, WorkflowClosed, WorkflowExpired];
+    /// <summary>The three ways a deliverable ends; new activity (an instruction in it) reopens it after any of them.</summary>
+    public static readonly IReadOnlyList<string> DeliverableEnds = [DeliverableCompleted, DeliverableClosed, DeliverableExpired];
 
     public static string Instruction(MemberRef member) => InstructionPrefix + member.Qualified;
 

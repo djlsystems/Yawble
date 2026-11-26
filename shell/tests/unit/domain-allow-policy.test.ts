@@ -106,7 +106,7 @@ describe("a member's Loosen… block takes a domain allow", () => {
 describe('grouped asks: apex and Deny', () => {
   const ask = (id: number, host: string, over: Partial<NetworkAsk> = {}): NetworkAsk => ({
     id, at: '2026-11-15T10:00:00Z', teamId: 1, team: 'Alpha', member: 'Alpha/Priya', memberName: 'Priya', host, reason: null, method: 'CONNECT',
-    pathSample: null, count: 1, lastSeen: '2026-11-15T10:00:00Z', hint: null, workflow: null, state: 'pending', scope: null, decidedBy: null,
+    pathSample: null, count: 1, lastSeen: '2026-11-15T10:00:00Z', hint: null, deliverable: null, state: 'pending', scope: null, decidedBy: null,
     decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'], domain: 'digicert.com',
     domainPattern: host === 'digicert.com' ? null : '*.digicert.com', ...over,
   });

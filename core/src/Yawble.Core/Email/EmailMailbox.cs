@@ -39,7 +39,7 @@ public sealed class EmailMailbox(IImapSession session)
     /// <list type="bullet">
     /// <item><paramref name="after"/>, the <see cref="EmailMessage.Id"/> of a message from an earlier list of this folder, while the folder's
     /// UIDVALIDITY is still the one in it: the messages with a higher UID (UID SEARCH UID n+1:*), in UID order; <paramref name="since"/> is ignored.
-    /// The list is the first max of those, so a script that saves the last message's id of a non-empty list and passes it back as after is
+    /// The list is the first max of those, so a workflow that saves the last message's id of a non-empty list and passes it back as after is
     /// given each message of the folder once, whatever max is and whatever the dates: UIDs only grow as mail arrives. A message moved out and
     /// back has a new UID and is listed again; with unreadOnly, one read elsewhere before the list is never listed.</item>
     /// <item>after of another UIDVALIDITY (the server renumbered the folder): it no longer applies, <see cref="EmailList.CursorReset"/> is true, and

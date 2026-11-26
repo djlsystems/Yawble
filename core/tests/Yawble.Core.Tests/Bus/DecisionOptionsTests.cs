@@ -119,7 +119,7 @@ public class DecisionOptionsTests
         public List<string> AdaSaw { get; } = [];
 
         /// <summary>Ada's script: an instruction "ask" calls needs_decision with <paramref name="ask"/> through the MCP tool;
-        /// "finish" declares the workflow complete; anything else (an answer) is only recorded.</summary>
+        /// "finish" declares the deliverable complete; anything else (an answer) is only recorded.</summary>
         public static async Task<Rig> StartAsync(JsonObject? ask = null, bool mac = true)
         {
             var rig = new Rig();
@@ -128,7 +128,7 @@ public class DecisionOptionsTests
                 var text = Payload.Field(run.Items[0], "text") ?? "";
                 rig.AdaSaw.Add(text);
                 if (text == "ask") rig.ToolReplies.Add(await CallToolAsync(run, "needs_decision", ask!, ct));
-                else if (text == "finish") await run.WorkflowCompleteAsync("the flaky test is fixed", ct);
+                else if (text == "finish") await run.DeliverableCompleteAsync("the flaky test is fixed", ct);
                 return RunResult.Ok;
             });
             rig.Engine = new BusEngine(new BusStore(rig.Db.ConnectionString), runner,
@@ -520,9 +520,9 @@ public class DecisionOptionsTests
     }
 
     [Fact]
-    public async Task AnOpenQuestion_WinsOverADeclarationMadeAfterIt_InAnotherWorkflow()
+    public async Task AnOpenQuestion_WinsOverADeclarationMadeAfterIt_InAnotherDeliverable()
     {
-        // The bug: the card's line is the member's last report, so declaring another workflow complete after asking
+        // The bug: the card's line is the member's last report, so declaring another deliverable complete after asking
         // showed "declared complete" while the question still waited on the person.
         await using var rig = await Rig.StartAsync(LocalhostAsk());
         await rig.TellAdaAsync("ask");

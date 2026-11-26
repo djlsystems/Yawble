@@ -5,8 +5,8 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// Next to TeamWorkflowTests' declaration rules: workflow_complete is refused (tester_fail) while a card's
-/// latest tester hand-back in the workflow starts with FAIL. A later PASS clears it; so does the person's yes to a
+/// Next to TeamDeliverableTests' declaration rules: deliverable_complete is refused (tester_fail) while a card's
+/// latest tester hand-back in the deliverable starts with FAIL. A later PASS clears it; so does the person's yes to a
 /// needs_decision tied to the card (card, kind accept-fail or wont-do), and the declaration then lists the card in
 /// closedOverFail. Fake runners only.
 /// </summary>
@@ -16,7 +16,7 @@ public class TesterFailDeclarationTests
 
     private const string FailLine = "FAIL: card 61 the Save button does nothing";
 
-    /// <summary>One declaration try: "ok" with the WorkflowCompleted message, or the refusal.</summary>
+    /// <summary>One declaration try: "ok" with the DeliverableCompleted message, or the refusal.</summary>
     private sealed record Outcome(string Code, string Text, Message? Declared);
 
     private sealed class Rig : IAsyncDisposable
@@ -38,7 +38,7 @@ public class TesterFailDeclarationTests
         public async Task<Outcome?> TryDeclare(RunContext run, CancellationToken ct)
         {
             Outcome o;
-            try { o = new Outcome("ok", "", await run.WorkflowCompleteAsync("card 61 delivered", ct)); }
+            try { o = new Outcome("ok", "", await run.DeliverableCompleteAsync("card 61 delivered", ct)); }
             catch (BusRefusal r) when (r.Code == "busy") { return null; }
             catch (BusRefusal r) { o = new Outcome(r.Code, r.Message, null); }
             lock (Outcomes) Outcomes.Add(o);
@@ -81,7 +81,7 @@ public class TesterFailDeclarationTests
         await rig.StartAsync("TesterGary");
         var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 61", ct: Ct);
         using var reader = rig.Db.OpenStore();
-        await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "the declaration after the PASS");
+        await Wait.UntilAsync(() => reader.DeliverableDeclared(root.Seq), "the declaration after the PASS");
 
         Outcome refused;
         lock (rig.Outcomes) refused = rig.Outcomes.First(o => o.Code != "ok");
@@ -130,9 +130,9 @@ public class TesterFailDeclarationTests
 
         await rig.Engine.PersonAnswerAsync("Alpha", "Manager", ask.Options[0].Reply, open[0].Seq, ct: Ct, action: DecisionActions.CloseOverFail);
         using var reader = rig.Db.OpenStore();
-        await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "the declaration after the yes");
+        await Wait.UntilAsync(() => reader.DeliverableDeclared(root.Seq), "the declaration after the yes");
 
-        var answer = reader.Workflow(root.Seq).Single(m => m.Source == MessageTypes.PersonSource && m.CausationSeq == open[0].Seq);
+        var answer = reader.Deliverable(root.Seq).Single(m => m.Source == MessageTypes.PersonSource && m.CausationSeq == open[0].Seq);
         Assert.Equal(open[0].Seq, JsonNode.Parse(answer.Payload)!["closeOverFail"]!["decision"]!.GetValue<long>());
         var closed = Assert.Single(ClosedOverFail(rig.Declared().Declared!)!)!.AsObject();
         Assert.Equal(61, closed["card"]!.GetValue<long>());
@@ -180,16 +180,16 @@ public class TesterFailDeclarationTests
         await Wait.UntilAsync(async () => (open = await rig.Engine.OpenDecisionsAsync("Alpha", Ct)).Count == 1 && open[0].Seq != firstSeq, "the second question");
         Assert.Equal(2, rig.Count("tester_fail"));
         using var reader = rig.Db.OpenStore();
-        Assert.False(reader.WorkflowDeclared(root.Seq));
+        Assert.False(reader.DeliverableDeclared(root.Seq));
 
         // Text alone (as the Concierge answers) is not the yes either: only the picked yes option is.
-        await rig.Engine.PersonAnswerAsync("Alpha", "Manager", "Yes: card 61 is won't-do. Close the workflow.", open[0].Seq, ct: Ct);
+        await rig.Engine.PersonAnswerAsync("Alpha", "Manager", "Yes: card 61 is won't-do. Close the deliverable.", open[0].Seq, ct: Ct);
         var secondSeq = open[0].Seq;
         await Wait.UntilAsync(async () => (open = await rig.Engine.OpenDecisionsAsync("Alpha", Ct)).Count == 1 && open[0].Seq != secondSeq, "the third question");
         Assert.Equal(3, rig.Count("tester_fail"));
 
         await rig.Engine.PersonAnswerAsync("Alpha", "Manager", "Yes", open[0].Seq, ct: Ct, action: DecisionActions.CloseOverFail);
-        await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "the declaration after the yes");
+        await Wait.UntilAsync(() => reader.DeliverableDeclared(root.Seq), "the declaration after the yes");
         var closed = Assert.Single(ClosedOverFail(rig.Declared().Declared!)!)!.AsObject();
         Assert.Equal("wont-do", closed["kind"]!.GetValue<string>());
         Assert.Equal("Save moves to card 63", closed["reason"]!.GetValue<string>());
@@ -197,7 +197,7 @@ public class TesterFailDeclarationTests
     }
 
     [Fact]
-    public async Task AWorkflowWithNoTesterCardIsUnaffected()
+    public async Task ADeliverableWithNoTesterCardIsUnaffected()
     {
         await using var rig = new Rig();
         rig.Runner.Default = async (run, ct) => { await run.HandbackAsync(FailLine, ct); return RunResult.Ok; };
@@ -215,7 +215,7 @@ public class TesterFailDeclarationTests
         await rig.StartAsync("Ada", "TesterGary");
         var root = await rig.Engine.PersonTellAsync("Alpha", "Manager", "ship card 61", ct: Ct);
         using var reader = rig.Db.OpenStore();
-        await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "the declaration");
+        await Wait.UntilAsync(() => reader.DeliverableDeclared(root.Seq), "the declaration");
 
         Assert.Equal(0, rig.Count("tester_fail"));
         Assert.Null(ClosedOverFail(rig.Declared().Declared!));

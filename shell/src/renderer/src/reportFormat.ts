@@ -41,7 +41,7 @@ export const WaitingLabel = 'Waiting on you';
 /**
  * A member's report as its tile shows it: while it has an open decision (decisionId, or attention "decision"),
  * the chip says "Waiting on you" whatever it said before ("Declared complete" / "Nothing worth keeping" from an earlier
- * workflow_complete is not its state any more); the body is its question's words when its last report was that
+ * deliverable_complete is not its state any more); the body is its question's words when its last report was that
  * question, else a line that points to the decision card. Otherwise splitReport.
  */
 export function memberReport(card: { statusLine?: string | null; attention?: string | null; decisionId?: number | null }): Report & { decisionId: number | null } {

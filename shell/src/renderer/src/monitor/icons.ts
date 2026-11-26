@@ -1,5 +1,5 @@
 import type { StepKind } from './steps';
-import type { WorkflowIcon } from './workflows';
+import type { DeliverableIcon } from './deliverables';
 
 /**
  * THE STEP ICONS, drawn with canvas paths: a page for a read, a pencil for an edit, a page with a plus for a new
@@ -85,8 +85,8 @@ export function drawStepIcon(c: CanvasRenderingContext2D, kind: StepKind, x: num
   }
 }
 
-/** A workflow's mark, in a box of `s` px centred on (x, y): a check, the workflow mark (two linked steps), a pause, a cross. */
-export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon | 'bang', x: number, y: number, s: number): void {
+/** A deliverable's mark, in a box of `s` px centred on (x, y): a check, the deliverable mark (two linked steps), a pause, a cross. */
+export function drawDeliverableIcon(c: CanvasRenderingContext2D, icon: DeliverableIcon | 'bang', x: number, y: number, s: number): void {
   const u = s / 16;
   const P = (px: number, py: number): [number, number] => [x + (px - 8) * u, y + (py - 8) * u];
   const path = (close: boolean, ...pts: [number, number][]) => {
@@ -100,7 +100,7 @@ export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon
   switch (icon) {
     case 'check': path(false, [3, 8.5], [6.5, 12], [13, 4.5]); break;
     case 'flow':
-      // Two steps, one leading to the next: the workflow mark (WorkflowIconPath.flow, Icon.vue `workflow`).
+      // Two steps, one leading to the next: the deliverable mark (DeliverableIconPath.flow, Icon.vue `deliverable`).
       path(false, [3.5, 3.5], [7, 3.5], [7, 7], [3.5, 7], [3.5, 3.5]);
       path(false, [9, 9], [12.5, 9], [12.5, 12.5], [9, 12.5], [9, 9]);
       path(false, [5.25, 7], [5.25, 10.75], [9, 10.75]);
@@ -128,5 +128,5 @@ export function drawWorkflowIcon(c: CanvasRenderingContext2D, icon: WorkflowIcon
  * `s` px centred on (x, y).
  */
 export function drawHandbackMark(c: CanvasRenderingContext2D, mark: 'check' | 'cross', x: number, y: number, s: number): void {
-  drawWorkflowIcon(c, mark, x, y, s);
+  drawDeliverableIcon(c, mark, x, y, s);
 }

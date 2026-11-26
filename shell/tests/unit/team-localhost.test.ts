@@ -15,9 +15,9 @@ const team = { id: 4, name: 'payments', members: 1, running: 0, queued: 0, repoP
 function fakeApi(localhost: { on: boolean } | null) {
   const calls: { method: string; params: any }[] = [];
   const answers: Record<string, (p: any) => unknown> = {
-    'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
+    'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
     'teams.push': () => ({ on: false, origin: null }), 'teams.approvals': () => [], 'teams.syncToBase': () => ({ on: true, note: null, baseBranch: 'main', behind: null }),
-    'teams.repos': () => ({ main: null, extras: [] }), 'teams.workflowExpiry': () => ({ days: 3 }),
+    'teams.repos': () => ({ main: null, extras: [] }), 'teams.deliverableExpiry': () => ({ days: 3 }),
     'integrations.list': () => ({ integrations: [], pendingAsks: 0 }), 'integrations.mcpList': () => [], 'integrations.apiList': () => [],
   };
   if (localhost) answers[TEAM_LOCALHOST] = (p: any) => { if (p.on !== undefined) localhost.on = p.on; return { on: localhost.on }; };

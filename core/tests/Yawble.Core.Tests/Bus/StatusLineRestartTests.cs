@@ -29,7 +29,7 @@ public class StatusLineRestartTests
             store.Append(new NewMessage(MessageTypes.Progress, Json(new { status = "early" }), "Alpha/Ben"));
             store.Append(new NewMessage(MessageTypes.Blocked, Json(new { reason = "no key", item = (int?)null, instruction = (string?)null }), "Alpha/Ben"));
             store.Append(new NewMessage(MessageTypes.Completed, Json(new { runId = 1 }), "Alpha/Ben")); // not a status kind
-            store.Append(new NewMessage(MessageTypes.WorkflowCompleted, Json(new { delivered = "all done", declaredBy = "Alpha/Manager", onBehalfOf = (string?)null }), "Alpha/Manager"));
+            store.Append(new NewMessage(MessageTypes.DeliverableCompleted, Json(new { delivered = "all done", declaredBy = "Alpha/Manager", onBehalfOf = (string?)null }), "Alpha/Manager"));
             store.Append(new NewMessage(MessageTypes.Handback, Json(new { delivered = "the fix" }), "Alpha/Cy"));
             store.Append(new NewMessage(MessageTypes.NeedsDecision, Json(new { question = "which db?" }), "Alpha/Di"));
             store.Append(new NewMessage(MessageTypes.Progress, Json(new { status = "other team" }), "Beta/Ed"));

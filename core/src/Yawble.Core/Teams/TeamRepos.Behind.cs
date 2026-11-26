@@ -10,7 +10,7 @@ public sealed record TeamBehind(string TeamBranch, string BaseBranch, int Behind
     public string Text => $"{TeamBranch} is {Behind} commit{(Behind == 1 ? "" : "s")} behind {BaseBranch}";
 }
 
-/// <summary>Whether the team branch merges cleanly into the base branch (checked before a workflow is declared complete).</summary>
+/// <summary>Whether the team branch merges cleanly into the base branch (checked before a deliverable is declared complete).</summary>
 public sealed record TeamMergeCheck(string TeamBranch, string BaseBranch, bool Clean, IReadOnlyList<string> Files)
 {
     /// <summary>"team/x does not merge cleanly into main (a.txt, b.txt)".</summary>

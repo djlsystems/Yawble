@@ -14,7 +14,7 @@ namespace Yawble.Core.Board;
 ///   Manager, which is woken by it; the card is marked "awaiting manager" until the Manager next says anything.</item>
 /// <item>The backlog: items are pending until the person marks them ready; a ready item is dispatched to a team's
 ///   Manager as a spec, which it cuts into cards (<c>board plan</c>) and gives to members (<c>tell</c> with <c>card</c>).
-///   When that workflow is declared complete the item is "declared"; only the person marks it implemented.</item>
+///   When that deliverable is declared complete the item is "declared"; only the person marks it implemented.</item>
 /// </list>
 /// </summary>
 public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>? log = null)
@@ -42,10 +42,10 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     public static bool Handles(string method) =>
         method.StartsWith("board.", StringComparison.Ordinal) || method.StartsWith("backlog.", StringComparison.Ordinal) || method == "timeline.get";
 
-    /// <summary>The cards' and workflows' times (the bus asks it for its workflow items).</summary>
+    /// <summary>The cards' and deliverables' times (the bus asks it for its deliverable items).</summary>
     public BoardTimeline Timeline { get; } = new(store);
 
-    /// <summary>The board's store (the Workflows page reads cards, items and times of many workflows at once).</summary>
+    /// <summary>The board's store (the Deliverables page reads cards, items and times of many deliverables at once).</summary>
     public BoardStore Store => store;
 
     /// <summary>Reads the bus into the cards until stopped.</summary>
@@ -102,7 +102,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
             "board.move" => await MoveAsync(Long(p, "id"), Str(p, "lane"), OptStr(p, "note"), ct),
             "board.edit" => await EditAsync(Long(p, "id"), OptStr(p, "title"), OptStr(p, "status"), OptStr(p, "note"), ct),
             "board.comment" => await CommentAsync(Long(p, "id"), Str(p, "text"), ct),
-            "timeline.get" => await TimelineAsync(OptLong(p, "card"), OptLong(p, "workflow"), ct),
+            "timeline.get" => await TimelineAsync(OptLong(p, "card"), OptLong(p, "deliverable"), ct),
 
             "backlog.list" => Items(store.Items(p?["archived"] is JsonValue a && a.TryGetValue<bool>(out var ar) && ar)),
             "backlog.add" => ItemJson(store.AddItem(Required(Str(p, "title"), "a title"), OptStr(p, "body") ?? "", OptStr(p, "team"))),
@@ -215,26 +215,26 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         return node;
     }
 
-    /// <summary>A card's time, with the runs of its workflow read once per list.</summary>
+    /// <summary>A card's time, with the runs of its deliverable read once per list.</summary>
     private JsonObject TimeOf(CardRow card, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now, Dictionary<long, IReadOnlyList<RunSpan>> runs)
     {
         IReadOnlyList<RunSpan> mine = [];
-        if (card.Workflow is { } w && !runs.TryGetValue(w, out mine!)) runs[w] = mine = store.RunsOf(w);
+        if (card.Deliverable is { } w && !runs.TryGetValue(w, out mine!)) runs[w] = mine = store.RunsOf(w);
         return Timeline.OfCard(card, live, now, mine).Time.ToJson();
     }
 
     /// <summary>
-    /// timeline.get { card } | { workflow }: the time, a row of bands per card (one for a card), the workflow's summary
+    /// timeline.get { card } | { deliverable }: the time, a row of bands per card (one for a card), the deliverable's summary
     /// row (one category per moment) and the markers.
     /// </summary>
-    private async Task<JsonNode> TimelineAsync(long? cardId, long? workflow, CancellationToken ct)
+    private async Task<JsonNode> TimelineAsync(long? cardId, long? deliverable, CancellationToken ct)
     {
         var live = await bus.LiveActivityAsync(ct);
         var now = store.UtcNow();
         if (cardId is { } id) return BoardTimeline.Json(Timeline.OfCard(CardOr(id), live, now));
-        if (workflow is not { } w) throw new RpcException("bad_params", "timeline.get needs a card or a workflow");
-        var thread = await bus.WorkflowThreadAsync(w, ct);
-        var timeline = Timeline.OfWorkflow(w, thread, live, now) ?? throw new RpcException("no_such_workflow", $"there is no workflow {w}");
+        if (deliverable is not { } w) throw new RpcException("bad_params", "timeline.get needs a card or a deliverable");
+        var thread = await bus.DeliverableThreadAsync(w, ct);
+        var timeline = Timeline.OfDeliverable(w, thread, live, now) ?? throw new RpcException("no_such_deliverable", $"there is no deliverable {w}");
         return BoardTimeline.Json(timeline);
     }
 
@@ -280,7 +280,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         return await CardAsync(id, ct);
     }
 
-    /// <summary>The edit IS the message: the team's Manager is told, in the card's workflow when it has one.</summary>
+    /// <summary>The edit IS the message: the team's Manager is told, in the card's deliverable when it has one.</summary>
     private async Task WakeManagerAsync(CardRow card, string text, CancellationToken ct)
     {
         var manager = await ManagerOfAsync(card.Team, ct);
@@ -329,17 +329,17 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     {
         var item = ItemOr(id);
         if (item.State != "ready") throw new RpcException("not_ready", "only a ready item can be dispatched: read it and mark it ready first");
-        if (item.DispatchedWorkflow is { } w && !again && store.CardsOfWorkflow(w).Any(c => c.Lane != Lanes.Done))
+        if (item.DispatchedDeliverable is { } w && !again && store.CardsOfDeliverable(w).Any(c => c.Lane != Lanes.Done))
             throw new RpcException("in_flight", $"{item.Label} is in flight with {item.DispatchedTeam}; dispatch it again only on purpose (again: true)");
         var team = (await bus.TeamsAsync(ct)).FirstOrDefault(t => t.Id == teamId) ?? throw new RpcException("no_such_team", $"there is no team {teamId}");
         var manager = await ManagerOfAsync(team.Name, ct);
         var text = $"Backlog item {item.Label} \"{item.Title}\" is dispatched to your team. It is a SPEC, not a task: read it with " +
                    $"`backlog` (action show, item {item.Label}), cut it into a few cards with `board` (action plan, item {item.Label}) - " +
                    "three cards a person can read beat nine that restate the spec's headings - then `tell` each member with the card id. " +
-                   "Declare the work complete with workflow_complete when every card is done.";
+                   "Declare the work complete with deliverable_complete when every card is done.";
         var message = await bus.PersonTellAsync(team.Name, manager, text, null, ct, new JsonObject { ["item"] = item.Label });
         store.AddDispatch(item.Id, team.Name, message.CorrelationId, Provenance.Actor.Current?.User);
-        return ItemJson(Save(item with { DispatchedTeam = team.Name, DispatchedWorkflow = message.CorrelationId, DispatchedAt = store.Now() }));
+        return ItemJson(Save(item with { DispatchedTeam = team.Name, DispatchedDeliverable = message.CorrelationId, DispatchedAt = store.Now() }));
     }
 
     /// <summary>
@@ -374,33 +374,33 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         return Items(store.Items());
     }
 
-    /// <summary>An item with every dispatch: the team, the workflow's state and cards, who ran and what it used.</summary>
+    /// <summary>An item with every dispatch: the team, the deliverable's state and cards, who ran and what it used.</summary>
     private async Task<JsonNode> ItemDetailAsync(long id, CancellationToken ct)
     {
         var item = ItemOr(id);
         var node = ItemJson(item);
         var teams = await bus.TeamsAsync(ct);
-        var workflows = new Dictionary<string, IReadOnlyList<WorkflowSummary>>(StringComparer.OrdinalIgnoreCase);
+        var deliverables = new Dictionary<string, IReadOnlyList<DeliverableSummary>>(StringComparer.OrdinalIgnoreCase);
         var list = new JsonArray();
         foreach (var d in store.Dispatches(id))
         {
             var team = teams.FirstOrDefault(t => string.Equals(t.Name, d.Team, StringComparison.OrdinalIgnoreCase));
-            WorkflowSummary? wf = null;
+            DeliverableSummary? wf = null;
             if (team is not null)
             {
-                if (!workflows.TryGetValue(team.Name, out var known))
+                if (!deliverables.TryGetValue(team.Name, out var known))
                 {
-                    try { known = await bus.WorkflowsAsync(team.Name, 200, ct, time: false); }
+                    try { known = await bus.DeliverablesAsync(team.Name, 200, ct, time: false); }
                     catch (Exception e) when (e is BusRefusal or ArgumentException or InvalidOperationException) { known = []; }
-                    workflows[team.Name] = known;
+                    deliverables[team.Name] = known;
                 }
-                wf = known.FirstOrDefault(w => w.Id == d.Workflow);
+                wf = known.FirstOrDefault(w => w.Id == d.Deliverable);
             }
-            var cards = store.CardsOfWorkflow(d.Workflow);
-            var usage = store.UsageOf(d.Workflow);
+            var cards = store.CardsOfDeliverable(d.Deliverable);
+            var usage = store.UsageOf(d.Deliverable);
             list.Add(new JsonObject
             {
-                ["team"] = d.Team, ["teamId"] = team?.Id, ["teamGone"] = team is null, ["workflow"] = d.Workflow,
+                ["team"] = d.Team, ["teamId"] = team?.Id, ["teamGone"] = team is null, ["deliverable"] = d.Deliverable,
                 ["dispatchedAt"] = d.DispatchedAt, ["dispatchedBy"] = d.DispatchedBy,
                 ["state"] = wf?.State, ["ending"] = wf?.Ending, ["busy"] = wf is null ? null : new JsonArray([.. wf.Busy.Select(b => (JsonNode?)JsonValue.Create(b))]),
                 ["lastAt"] = wf?.LastAt.ToString("O"),
@@ -459,7 +459,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
                 if (run.Member.Role != MemberRole.Manager) throw new BusRefusal("not_allowed", "only the Manager plans cards");
                 var title = Required(OptStr(args, "title"), "a title");
                 var itemLabel = OptStr(args, "item") is { } l && BoardStore.ItemId(l) is { } iid ? BoardStore.Label(iid) : null;
-                var card = store.AddCard(team, null, itemLabel, title, OptStr(args, "body") ?? "", "queued", Lanes.Todo, run.Workflow == 0 ? null : run.Workflow);
+                var card = store.AddCard(team, null, itemLabel, title, OptStr(args, "body") ?? "", "queued", Lanes.Todo, run.Deliverable == 0 ? null : run.Deliverable);
                 store.AddTrail(card.Id, run.Member.Name, "planned", title);
                 return $"ok: planned card {card.Id} \"{card.Title}\" in To Do, unassigned. Give it to a member with tell (member, instruction, card: {card.Id}).";
             }
@@ -561,7 +561,7 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
     {
         ["id"] = c.Id, ["team"] = c.Team, ["teamId"] = teams.FirstOrDefault(t => string.Equals(t.Name, c.Team, StringComparison.OrdinalIgnoreCase))?.Id,
         ["member"] = c.Member, ["item"] = c.Item, ["title"] = c.Title, ["body"] = c.Body, ["status"] = c.Status, ["lane"] = c.Lane,
-        ["placed"] = c.Placed, ["awaitingManager"] = c.AwaitingManager, ["workflow"] = c.Workflow,
+        ["placed"] = c.Placed, ["awaitingManager"] = c.AwaitingManager, ["deliverable"] = c.Deliverable,
         ["createdAt"] = c.CreatedAt, ["updatedAt"] = c.UpdatedAt, ["trailCount"] = store.TrailCount(c.Id), ["clearedAt"] = c.ClearedAt,
         ["endedAt"] = c.EndedAt, ["endedHow"] = c.EndedHow,
     };
@@ -570,11 +570,11 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
 
     private JsonObject ItemJson(ItemRow i)
     {
-        var inFlight = i.DispatchedWorkflow is { } w && store.CardsOfWorkflow(w).Any(c => c.Lane != Lanes.Done);
+        var inFlight = i.DispatchedDeliverable is { } w && store.CardsOfDeliverable(w).Any(c => c.Lane != Lanes.Done);
         return new JsonObject
         {
             ["id"] = i.Id, ["label"] = i.Label, ["team"] = i.Team, ["title"] = i.Title, ["body"] = i.Body, ["state"] = i.State,
-            ["archivedAt"] = i.ArchivedAt, ["dispatchedTeam"] = i.DispatchedTeam, ["dispatchedWorkflow"] = i.DispatchedWorkflow,
+            ["archivedAt"] = i.ArchivedAt, ["dispatchedTeam"] = i.DispatchedTeam, ["dispatchedDeliverable"] = i.DispatchedDeliverable,
             ["dispatchedAt"] = i.DispatchedAt, ["inFlight"] = inFlight, ["createdAt"] = i.CreatedAt, ["updatedAt"] = i.UpdatedAt,
             ["dispatchCount"] = store.DispatchCount(i.Id),
         };

@@ -1,4 +1,4 @@
-// Shared helpers for the toolchain fetch scripts. Node 22, no dependencies.
+// Shared helpers for the toolchain fetch workflows. Node 22, no dependencies.
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';

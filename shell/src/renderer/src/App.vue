@@ -25,19 +25,20 @@ import TerminalPane from './components/TerminalPane.vue';
 import { terminalPane } from './terminalPane';
 import { openMemberTerminal, registerTeamPage } from './memberTerminal';
 import BacklogView from './board/BacklogView.vue';
-// The Workflows page is loaded when first opened: the window's first paint does not wait for it.
+// The Deliverables page is loaded when first opened: the window's first paint does not wait for it.
 // A page loaded on first use: when its file is gone (the app was rebuilt or updated while this window stayed open), it
 // says so with a Reload button instead of leaving the page blank.
-const WorkflowsView = defineAsyncComponent({ loader: () => import('./workflows/WorkflowsView.vue'), errorComponent: PageLoadFailed });
-import { backlogRequest, isWorkflowsHash, openWorkflowsPage, workflowsRequest } from './workflows/page';
-import { WORKFLOWS_GET, WORKFLOWS_LIST, type WorkflowDetail, type WorkflowsListAnswer } from '../../shared/api';
+const DeliverablesView = defineAsyncComponent({ loader: () => import('./deliverables/DeliverablesView.vue'), errorComponent: PageLoadFailed });
+const GoalsView = defineAsyncComponent({ loader: () => import('./goals/GoalsView.vue'), errorComponent: PageLoadFailed });
+import { backlogRequest, isDeliverablesHash, openDeliverablesPage, deliverablesRequest } from './deliverables/page';
+import { DELIVERABLES_GET, DELIVERABLES_LIST, type DeliverableDetail, type DeliverablesListAnswer } from '../../shared/api';
 import Sidebar, { type View } from './components/Sidebar.vue';
 import SettingsView, { type SettingsTab } from './components/SettingsView.vue';
 import Icon from './components/Icon.vue';
 import LoadingNote from './components/LoadingNote.vue';
 import GitBanner from './components/GitBanner.vue';
 import LogsDialog from './components/LogsDialog.vue';
-import ScriptsDialog from './components/scripts/ScriptsDialog.vue';
+import WorkflowsDialog from './components/workflows/WorkflowsDialog.vue';
 import UpdateBanner from './components/UpdateBanner.vue';
 import ThemeToggle from './components/ThemeToggle.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
@@ -73,8 +74,8 @@ interface Place { view: View; conversationId: string | null; teamId: number | nu
 const read = (s: () => Storage): Partial<Place> => { try { return JSON.parse(s().getItem('yawble.place') ?? '{}'); } catch { return {}; } };
 const kept = read(() => localStorage);
 const saved = read(() => sessionStorage);
-// A #workflows hash (a link to the Workflows page) opens that page.
-const view = ref<View>(typeof location !== 'undefined' && isWorkflowsHash(location.hash) ? 'workflows' : saved.view ?? 'concierge');
+// A #deliverables hash (a link to the Deliverables page) opens that page.
+const view = ref<View>(typeof location !== 'undefined' && isDeliverablesHash(location.hash) ? 'deliverables' : saved.view ?? 'concierge');
 const prefTab = ref<SettingsTab>('general');
 const conversationId = ref<string | null>(saved.view ? saved.conversationId ?? null : null);
 const selected = ref<number | null>(saved.view ? saved.teamId ?? null : null);
@@ -143,17 +144,17 @@ const allTeams = computed(() => overview.value?.teams ?? []);
 const teams = computed(() => allTeams.value.filter((t) => !t.archived));
 const archivedTeams = computed(() => allTeams.value.filter((t) => t.archived));
 const team = computed(() => allTeams.value.find((t) => t.id === selected.value) ?? null);
-/** The team whose page is open: on a phone the drawer offers its Documents and Workflows. */
+/** The team whose page is open: on a phone the drawer offers its Documents and Deliverables. */
 const openTeamName = computed(() => (view.value === 'teams' && team.value ? team.value.name : null));
 /** The drawer's Documents of the open team: the drawer closes and the team page opens that dialog. */
 function openTeamDocuments() {
   drawerOpen.value = false;
   teamView.value?.openDocuments();
 }
-/** The drawer's Workflows of the open team: the drawer closes and the Workflows page opens, filtered to that team. */
-function openTeamWorkflows() {
+/** The drawer's Deliverables of the open team: the drawer closes and the Deliverables page opens, filtered to that team. */
+function openTeamDeliverables() {
   drawerOpen.value = false;
-  openWorkflowsPage({ teamId: selected.value });
+  openDeliverablesPage({ teamId: selected.value });
 }
 // A new chat starts on the saved Concierge default when that agent is ready, else on the first ready agent.
 const defaultCli = computed(() => newChatAgent(agents.value, savedConciergeAgent.value, customAgents.value));
@@ -162,9 +163,10 @@ const title = computed(() => {
   if (view.value === 'teams') return team.value ? team.value.name : 'Teams';
   if (view.value === 'documents') return 'Documents';
   if (view.value === 'backlog') return 'Backlog';
-  if (view.value === 'workflows') return 'Workflows';
+  if (view.value === 'goals') return 'Goals';
+  if (view.value === 'deliverables') return 'Deliverables';
   if (view.value === 'logs') return 'Logs';
-  if (view.value === 'scripts') return 'Scripts';
+  if (view.value === 'workflows') return 'Workflows';
   return view.value === 'board' ? 'Kanban board' : view.value === 'settings' ? 'Settings' : 'Monitor';
 });
 
@@ -213,32 +215,32 @@ function openTeam(id: number) {
   selected.value = id;
   focusTeamId.value = id;
 }
-/** The Teams list's card: the team, or (its workflows) the Workflows page at the team, at a workflow when it names one. */
-function openFromTeams(id: number, panel?: 'workflows', workflow?: number) {
-  if (panel === 'workflows') openWorkflowsPage(workflow !== undefined ? { teamId: id, workflow } : { teamId: id });
+/** The Teams list's card: the team, or (its deliverables) the Deliverables page at the team, at a deliverable when it names one. */
+function openFromTeams(id: number, panel?: 'deliverables', deliverable?: number) {
+  if (panel === 'deliverables') openDeliverablesPage(deliverable !== undefined ? { teamId: id, deliverable } : { teamId: id });
   else openTeam(id);
 }
 
-// The Workflows page opened from elsewhere (the Monitor's workflow nodes, the board's button, a team's "All workflows",
-// the phone drawer, a Backlog item's "workflow #N", a #workflow= link), and the Backlog opened at an item (an Item
+// The Deliverables page opened from elsewhere (the Monitor's deliverable nodes, the board's button, a team's "All deliverables",
+// the phone drawer, a Backlog item's "deliverable #N", a #deliverable= link), and the Backlog opened at an item (an Item
 // link). The page / the Backlog take the request as a prop.
-watch(workflowsRequest, (r) => { if (!r) return; view.value = 'workflows'; });
+watch(deliverablesRequest, (r) => { if (!r) return; view.value = 'deliverables'; });
 watch(backlogRequest, (r) => { if (!r) return; view.value = 'backlog'; });
-/** The sidebar's Workflows badge: how many are open, across the teams (an older core without workflows.list: none). */
-const openWorkflows = ref<number | null>(null);
-async function loadOpenWorkflows() {
-  try { openWorkflows.value = (await api.call<WorkflowsListAnswer>(WORKFLOWS_LIST, { state: 'open', limit: 1 }))?.counts?.open ?? null; }
-  catch { openWorkflows.value = null; }
+/** The sidebar's Deliverables badge: how many are open, across the teams (an older core without deliverables.list: none). */
+const openDeliverables = ref<number | null>(null);
+async function loadOpenDeliverables() {
+  try { openDeliverables.value = (await api.call<DeliverablesListAnswer>(DELIVERABLES_LIST, { state: 'open', limit: 1 }))?.counts?.open ?? null; }
+  catch { openDeliverables.value = null; }
 }
-let workflowsTimer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => { void loadOpenWorkflows(); workflowsTimer = setInterval(loadOpenWorkflows, Math.max(5000, props.pollMs ?? 5000)); });
-onBeforeUnmount(() => { if (workflowsTimer) clearInterval(workflowsTimer); });
+let deliverablesTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => { void loadOpenDeliverables(); deliverablesTimer = setInterval(loadOpenDeliverables, Math.max(5000, props.pollMs ?? 5000)); });
+onBeforeUnmount(() => { if (deliverablesTimer) clearInterval(deliverablesTimer); });
 
 /**
  * A link into the remote view (remoteHash.ts): #team={id} opens that team (an unknown or malformed id leaves the view
- * where it is, no error); #workflow={wf} opens the Workflows page at that workflow, whatever its age, filtered to its team
- * when the core names it (workflows.get) or else to the link's team hint when that team is known. A workflow the core
- * does not know: the page says "Workflow #N was not found" and opens no pane.
+ * where it is, no error); #deliverable={wf} opens the Deliverables page at that deliverable, whatever its age, filtered to its team
+ * when the core names it (deliverables.get) or else to the link's team hint when that team is known. A deliverable the core
+ * does not know: the page says "Deliverable #N was not found" and opens no pane.
  */
 async function openFromHash() {
   const target = parseRemoteHash(window.location.hash);
@@ -247,10 +249,10 @@ async function openFromHash() {
   if (target.kind === 'team') { if (ids.includes(target.team)) openTeam(target.team); return; }
   let teamId: number | null = target.team !== null && ids.includes(target.team) ? target.team : null;
   try {
-    const d = await api.call<WorkflowDetail>(WORKFLOWS_GET, { workflow: target.workflow });
-    if (d?.workflow?.id === target.workflow && typeof d.workflow.teamId === 'number') teamId = d.workflow.teamId;
+    const d = await api.call<DeliverableDetail>(DELIVERABLES_GET, { deliverable: target.deliverable });
+    if (d?.deliverable?.id === target.deliverable && typeof d.deliverable.teamId === 'number') teamId = d.deliverable.teamId;
   } catch { /* not known (the page says so) or an older core: the hint, if any */ }
-  openWorkflowsPage({ teamId, workflow: target.workflow });
+  openDeliverablesPage({ teamId, deliverable: target.deliverable });
 }
 
 // A member's terminal (memberTerminal.ts: the Monitor, View > Terminal, the remote view, an agent's >_) opens here: its
@@ -318,7 +320,7 @@ async function remove(id: string) {
 /** A place in the sidebar. Teams always opens the list of teams, not the team last looked at. */
 function go(place: View) {
   // A place chosen here opens as it was left, not at what a link last asked for.
-  workflowsRequest.value = null;
+  deliverablesRequest.value = null;
   backlogRequest.value = null;
   if (place === 'settings') { settingsLanding.value = true; if (phone.value) settingsKey.value++; }
   view.value = place;
@@ -368,7 +370,7 @@ onMounted(() => {
       if (t.state !== 'running' || !conversations.value.find((c) => c.id === t.conversationId)?.running) void loadConversations();
     }
   }));
-  // The remote view opened from the cloud site's org dashboard (#workflow= / #team=, remoteHash.ts) opens at that place
+  // The remote view opened from the cloud site's org dashboard (#deliverable= / #team=, remoteHash.ts) opens at that place
   // once the teams are known; a later change of the hash (the dashboard reusing the tab) opens the new place.
   if (api.remote) {
     void refresh().then(openFromHash);
@@ -435,8 +437,8 @@ const menus = computed<Menu[]>(() => [
       { id: 'toggleTheme', label: 'Toggle theme' },
     ]),
     { separator: true },
-    { id: 'go:concierge', label: 'Concierge' }, { id: 'go:teams', label: 'Teams' }, { id: 'go:backlog', label: 'Backlog' }, { id: 'go:workflows', label: 'Workflows' },
-    { id: 'go:board', label: 'Kanban board' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:scripts', label: 'Scripts' }, { id: 'go:logs', label: 'Logs' },
+    { id: 'go:concierge', label: 'Concierge' }, { id: 'go:teams', label: 'Teams' }, { id: 'go:goals', label: 'Goals' }, { id: 'go:deliverables', label: 'Deliverables' }, { id: 'go:backlog', label: 'Backlog' },
+    { id: 'go:board', label: 'Kanban board' }, { id: 'go:workflows', label: 'Workflows' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
     ...(desktop ? [
       { separator: true } as const,
       { id: 'zoomIn', label: 'Zoom in', keys: `${mod}=` }, { id: 'zoomOut', label: 'Zoom out', keys: `${mod}-` }, { id: 'zoomReset', label: 'Actual size', keys: `${mod}0` },
@@ -514,7 +516,7 @@ function askEmbedTitle(current: string): Promise<string | null> {
 }
 const embedState = (): EmbedNavState => ({
   view: view.value, conversations: conversations.value, teams: teams.value, conversationId: conversationId.value, teamId: selected.value,
-  slots: overview.value?.slots ?? null, readOnly: readOnly.value, removing: removingChat.value, openWorkflows: openWorkflows.value,
+  slots: overview.value?.slots ?? null, readOnly: readOnly.value, removing: removingChat.value, openDeliverables: openDeliverables.value,
 });
 if (embed) {
   let bridge: { dispose(): void } | null = null;
@@ -543,7 +545,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
       @rename="rename" @remove="remove" @new-team="drawerOpen = false; dialog = 'newTeam'" @collapse="phone ? (drawerOpen = false) : (collapsed = true)" @expand="collapsed = false"
-      @logs="drawerOpen = false; go('logs')" :open-team-name="openTeamName" :open-workflows="openWorkflows" @team-documents="openTeamDocuments" @team-workflows="openTeamWorkflows" />
+      @logs="drawerOpen = false; go('logs')" :open-team-name="openTeamName" :open-deliverables="openDeliverables" @team-documents="openTeamDocuments" @team-deliverables="openTeamDeliverables" />
 
     <main class="main">
       <header class="bar">
@@ -599,15 +601,16 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           <div v-else class="pad" data-test="loading"><LoadingNote text="Loading teams (starting the core)…" /></div>
         </section>
 
+        <GoalsView v-else-if="view === 'goals'" :api="api" :poll-ms="pollMs" />
         <DocumentsView v-else-if="view === 'documents'" :teams="teams" :archived="archivedTeams" :api="api" :loading="!overview && !error" />
         <LogsDialog v-else-if="view === 'logs'" page :api="api" />
-        <ScriptsDialog v-else-if="view === 'scripts'" page :api="api" :teams="teams" />
+        <WorkflowsDialog v-else-if="view === 'workflows'" page :api="api" :teams="teams" />
         <MonitorView v-else-if="view === 'monitor'" :api="api" @open-team="openTeam" @open-terminal="openMemberTerminal"
           @open-needs-you="focusTeamId = null; go('board')" />
         <BoardView v-else-if="view === 'board'" :api="api" :poll-ms="pollMs" :team-id="focusTeamId" @open-team="openTeam" @backlog="go('backlog')" @connections="openConnections" />
         <BacklogView v-else-if="view === 'backlog'" :teams="teams" :teams-loading="!overview && !error" :api="api" :poll-ms="pollMs" :focus="backlogRequest" @open-team="openTeam"
           @board="focusTeamId = $event; go('board')" />
-        <WorkflowsView v-else-if="view === 'workflows'" :teams="teams" :api="api" :poll-ms="pollMs" :request="workflowsRequest" @open-team="openTeam"
+        <DeliverablesView v-else-if="view === 'deliverables'" :teams="teams" :api="api" :poll-ms="pollMs" :request="deliverablesRequest" @open-team="openTeam"
           @board="focusTeamId = $event; go('board')" @backlog="go('backlog')" />
         <SettingsView v-else-if="view === 'settings'" :key="settingsKey" :landing="settingsLanding" :api="api":tab="prefTab" :teams="teams" :poll-ms="pollMs" :integrations-tab="integrationsTab" @tab="prefTab = $event; integrationsTab = null" @connections="openConnections" @changed="changed" @link="link = $event as LinkStatus" />
 

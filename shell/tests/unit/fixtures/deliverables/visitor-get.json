@@ -1,0 +1,82 @@
+{
+  "deliverable": {
+    "id": 1,
+    "title": "Commit view",
+    "owner": "Ada",
+    "state": "open",
+    "undeclared": true,
+    "busy": [],
+    "ending": null,
+    "startedAt": "2026-11-20T01:23:35.001337\u002B00:00",
+    "lastAt": "2026-11-20T01:23:35.001337\u002B00:00",
+    "messages": 1,
+    "endedAt": null,
+    "expiredAt": null,
+    "expiresAt": "2026-11-23T01:23:35.001337\u002B00:00",
+    "expiryWarning": null,
+    "question": null,
+    "time": {
+      "createdAt": "2026-11-20T01:23:35.0013370\u002B00:00",
+      "startedAt": "2026-11-20T01:23:35.0013370\u002B00:00",
+      "endedAt": null,
+      "endedHow": null,
+      "open": true,
+      "overallMs": 49,
+      "rebuilt": false,
+      "breakdown": [
+        {
+          "category": "waiting-for-slot",
+          "ms": 49
+        }
+      ]
+    },
+    "ownerId": 2,
+    "team": "Web",
+    "teamId": 1,
+    "status": "idle",
+    "waitingFor": null,
+    "working": false,
+    "item": {
+      "label": "B001",
+      "title": "Commit view",
+      "archived": false
+    },
+    "members": []
+  },
+  "cards": [
+    {
+      "id": 1,
+      "title": "do it",
+      "lane": "todo",
+      "member": "Ada",
+      "status": "queued",
+      "time": {
+        "createdAt": "2026-11-20T01:23:35.0013370\u002B00:00",
+        "startedAt": "2026-11-20T01:23:35.0013370\u002B00:00",
+        "endedAt": null,
+        "endedHow": null,
+        "open": true,
+        "overallMs": 58,
+        "rebuilt": false,
+        "breakdown": [
+          {
+            "category": "waiting-for-slot",
+            "ms": 58
+          }
+        ]
+      }
+    }
+  ],
+  "messages": [
+    {
+      "seq": 1,
+      "at": "2026-11-20T01:23:35.0013370\u002B00:00",
+      "kind": "instruction",
+      "from": "person",
+      "member": "Ada",
+      "text": "do it"
+    }
+  ],
+  "spec": "the spec",
+  "backlog": true
+}

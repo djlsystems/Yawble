@@ -7,7 +7,7 @@ import { reactive } from 'vue';
  * colours on. The desktop window also tells Electron main (setTheme), which colours the title-bar overlay controls.
  * A remote view (Cloud Link) keeps its own choice under its own key.
  *
- * public/theme-boot.js (a classic script in each page's <head>) sets data-theme by the same rule before the stylesheet
+ * public/theme-boot.js (a classic workflow in each page's <head>) sets data-theme by the same rule before the stylesheet
  * paints; main.ts imports this module first, so it takes over before anything is mounted. A switch made in another
  * window of the app (same key in localStorage) arrives as a 'storage' event and is followed here.
  */

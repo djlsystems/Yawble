@@ -329,7 +329,7 @@ export interface UpdateStatus {
 export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
-export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'workflows.', 'scripts.', 'schemas.', 'roles.'] as const;
+export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.', 'folder.', 'timeline.', 'deliverables.', 'workflows.', 'schemas.', 'roles.', 'goals.'] as const;
 
 export function isUiMethod(method: unknown): method is string {
   return typeof method === 'string' && UI_METHOD_PREFIXES.some((p) => method.startsWith(p)) && /^[a-zA-Z.]+$/.test(method);
@@ -391,34 +391,34 @@ export interface TeamSummary {
   /** How many of its members have an open needs_decision (older cores: absent, read as 0). */
   waiting?: number;
 }
-/** Whether a team may be archived or deleted (teams.quiet): what is still working, and its open workflows. */
-export interface TeamQuiet { quiet: boolean; working: string[]; openWorkflows: number[] }
-/** A team's workflow (bus.workflows): one piece of work and everything it led to. */
-export interface WorkflowSummary {
-  id: number; title: string; owner: string | null; state: WorkflowState; undeclared: boolean;
+/** Whether a team may be archived or deleted (teams.quiet): what is still working, and its open deliverables. */
+export interface TeamQuiet { quiet: boolean; working: string[]; openDeliverables: number[] }
+/** A team's deliverable (bus.deliverables): one piece of work and everything it led to. */
+export interface DeliverableSummary {
+  id: number; title: string; owner: string | null; state: DeliverableState; undeclared: boolean;
   busy: string[]; ending: string | null; startedAt: string; lastAt: string; messages: number;
-  /** An ended workflow's recorded end; for an expired one its last real activity, not the expiry time (older cores: absent). */
+  /** An ended deliverable's recorded end; for an expired one its last real activity, not the expiry time (older cores: absent). */
   endedAt?: string | null;
   /** When the app closed it as expired; null otherwise. */
   expiredAt?: string | null;
-  /** When an open, idle workflow would expire; null when it is not idle (a run, a wake or a trigger is pending). */
+  /** When an open, idle deliverable would expire; null when it is not idle (a run, a wake or a trigger is pending). */
   expiresAt?: string | null;
-  /** The question an open workflow waits on the person for (its number), when the core names one. */
+  /** The question an open deliverable waits on the person for (its number), when the core names one. */
   question?: number | null;
   /** Its overall time and breakdown, computed by the core (older cores: absent). */
   time?: ItemTime | null;
 }
 
 // ---- Overall time and the timeline. The core computes every time; the screens only format. ----
-/** The categories, each moment of a card or workflow in exactly one (kebab-case on the wire). */
+/** The categories, each moment of a card or deliverable in exactly one (kebab-case on the wire). */
 export type TimeCategory = 'agent-working' | 'stalled' | 'waiting-on-you' | 'waiting-for-slot' | 'waiting-on-teammate'
   | 'blocked' | 'scheduled' | 'not-started' | 'idle' | 'was-done';
-/** How a card or workflow ended: a card is done; a workflow completed, closed, stopped or expired. */
+/** How a card or deliverable ended: a card is done; a deliverable completed, closed, stopped or expired. */
 export type TimeEndedHow = 'done' | 'completed' | 'closed' | 'stopped' | 'expired';
-/** BoardCard.time and a workflow item's time: created -> ended (or open, still counting), and where the time went. */
+/** BoardCard.time and a deliverable item's time: created -> ended (or open, still counting), and where the time went. */
 export interface ItemTime {
   createdAt: string;
-  /** A card: the first time it had a member and was queued or told. A workflow: its first card started. */
+  /** A card: the first time it had a member and was queued or told. A deliverable: its first card started. */
   startedAt?: string | null;
   endedAt?: string | null;
   endedHow?: TimeEndedHow | null;
@@ -435,78 +435,103 @@ export type TimelineMarkerKind = 'planned' | 'started' | 'reopen' | 'handback' |
 export interface TimelineBand { category: TimeCategory; start: string; end?: string | null }
 export interface TimelineRow { card?: number | null; member?: string | null; title?: string | null; bands: TimelineBand[] }
 export interface TimelineMarker { kind: TimelineMarkerKind; at: string; card?: number | null }
-/** timeline.get { card } | { workflow }: a card's own row, or a workflow's rows (one per card) and its summary row. */
+/** timeline.get { card } | { deliverable }: a card's own row, or a deliverable's rows (one per card) and its summary row. */
 export interface Timeline {
   time: ItemTime;
   rows: TimelineRow[];
-  /** A workflow only: the merged row (Agent working > Waiting on you > Stalled > ...). */
+  /** A deliverable only: the merged row (Agent working > Waiting on you > Stalled > ...). */
   summary?: TimelineBand[] | null;
   markers: TimelineMarker[];
 }
 export const TIMELINE_GET = 'timeline.get';
-/** A workflow's state (bus.workflows): "expired" is closed by the app after workflowExpiryDays without activity. */
-export type WorkflowState = 'open' | 'completed' | 'closed' | 'expired';
-/** The RPC that resets an open workflow's expiry clock ({ teamId, workflow }). */
-export const WORKFLOW_EXTEND = 'bus.workflowExtend';
-/** A team's "expire idle workflows after N days" setting ({ teamId, days? } -> { days }); default 3. */
-export const TEAM_WORKFLOW_EXPIRY = 'teams.workflowExpiry';
-export const WorkflowExpiryDefaultDays = 3;
+/** A deliverable's state (bus.deliverables): "expired" is closed by the app after deliverableExpiryDays without activity. */
+export type DeliverableState = 'open' | 'completed' | 'closed' | 'expired';
+/** The RPC that resets an open deliverable's expiry clock ({ teamId, deliverable }). */
+export const DELIVERABLE_EXTEND = 'bus.deliverableExtend';
+/** A team's "expire idle deliverables after N days" setting ({ teamId, days? } -> { days }); default 3. */
+export const TEAM_DELIVERABLE_EXPIRY = 'teams.deliverableExpiry';
+export const DeliverableExpiryDefaultDays = 3;
 /** A team's "Allow localhost (macOS)" ({ teamId, on? } -> { on }); off by default. Setting it is a full-access change. */
 export const TEAM_LOCALHOST = 'teams.localhost';
 export const TEAM_LOCALHOST_LABEL = 'Allow localhost (macOS)';
 /** The warning shown with the toggle, word for word. */
 export const TEAM_LOCALHOST_WARNING = "Agents on this team can open local ports and connect to any service listening on this Mac's localhost (your dev servers, local databases). Needed for classic `dotnet test` (VSTest) and some other test runners. While it is on, a server an agent starts on `0.0.0.0` can be reached from other machines on your network unless the macOS firewall blocks it. Keep the macOS firewall on. Outbound traffic still goes only through the gateway.";
-/** The time a workflow's row shows: its recorded end once ended (an expired one: its last activity), else its last entry. */
-export function workflowTime(w: Pick<WorkflowSummary, 'state' | 'lastAt' | 'endedAt'>): string {
+/** The time a deliverable's row shows: its recorded end once ended (an expired one: its last activity), else its last entry. */
+export function deliverableTime(w: Pick<DeliverableSummary, 'state' | 'lastAt' | 'endedAt'>): string {
   return w.state !== 'open' && w.endedAt ? w.endedAt : w.lastAt;
 }
-// ---- The Workflows page (the core's workflows.list / workflows.get contract): every team's workflows in one table ----
-export const WORKFLOWS_LIST = 'workflows.list';
-export const WORKFLOWS_GET = 'workflows.get';
-/** The Status column: an ended workflow's state, or how an open one stands (first match: needs-you, running, waiting, stopped, idle). */
-export type WorkflowRowStatus = 'running' | 'needs-you' | 'waiting' | 'idle' | 'stopped' | 'completed' | 'closed' | 'expired';
-/** The backlog item a workflow was dispatched from (archived: open it in the Backlog's archive). */
-export interface WorkflowItem { label: string; title: string; archived: boolean }
+// ---- The Deliverables page (the core's deliverables.list / deliverables.get contract): every team's deliverables in one table ----
+export const DELIVERABLES_LIST = 'deliverables.list';
+export const DELIVERABLES_GET = 'deliverables.get';
+/** The Status column: an ended deliverable's state, or how an open one stands (first match: needs-you, running, waiting, stopped, idle). */
+export type DeliverableRowStatus = 'running' | 'needs-you' | 'waiting' | 'idle' | 'stopped' | 'completed' | 'closed' | 'expired';
+/** The backlog item a deliverable was dispatched from (archived: open it in the Backlog's archive). */
+export interface DeliverableItem { label: string; title: string; archived: boolean }
 /**
  * Why a member's delivery has not started (the core's worker states). queued: in the run queue, waiting for a run
  * slot (the only one that counts as Waiting for a slot on the timeline); waits-for-run: a hand-back held until the run
  * that sent it ends (waitsFor: the sender's name); held: the team is paused or archived; pending: anything else.
  */
 export type WorkerWaitState = 'queued' | 'waits-for-run' | 'held' | 'pending';
-/** Who works a workflow now: its run is active, waits for the heavy-work lease, or a delivery waits (WorkerWaitState). */
-export interface WorkflowMember {
+/** Who works a deliverable now: its run is active, waits for the heavy-work lease, or a delivery waits (WorkerWaitState). */
+export interface DeliverableMember {
   id: number; name: string; state: 'running' | 'lease' | WorkerWaitState;
   /** waits-for-run: the member whose run must end first. */
   waitsFor?: string | null;
 }
-/** A workflows.list row: every WorkflowSummary field (title cleaned), plus the Workflows page's fields. No tokens, no cost. */
-export interface WorkflowRow extends WorkflowSummary {
+/** A deliverables.list row: every DeliverableSummary field (title cleaned), plus the Deliverables page's fields. No tokens, no cost. */
+export interface DeliverableRow extends DeliverableSummary {
   ownerId: number | null;
   team: string; teamId: number;
-  status: WorkflowRowStatus;
+  status: DeliverableRowStatus;
   /** slot only while a member is in the run queue; else what the undelivered work waits for (WorkerWaitState words). */
   waitingFor: 'slot' | 'lease' | 'wake' | 'waits-for-run' | 'held' | 'pending' | null;
   /** A run of it is active right now (the icon is animated), whatever the status. */
   working: boolean;
-  item: WorkflowItem | null;
-  members: WorkflowMember[];
+  item: DeliverableItem | null;
+  members: DeliverableMember[];
+  /** The goal it is linked to, or null (Unassigned). Older cores: absent. */
+  goal?: GoalRef | null;
 }
 /** The chips' numbers, over the team and text filters, before the state filter and the limit. */
-export interface WorkflowCounts {
+export interface DeliverableCounts {
   all: number; open: number; needsYou: number; done: number; closed: number;
   running: number; waiting: number; idle: number; stopped: number; completed: number; expired: number;
   completedToday: number;
 }
-export interface WorkflowsListAnswer {
-  workflows: WorkflowRow[]; counts: WorkflowCounts; truncated: boolean;
+export interface DeliverablesListAnswer {
+  deliverables: DeliverableRow[]; counts: DeliverableCounts; truncated: boolean;
   /** The session may read the backlog: the item label is a link (else plain text) and the spec is shown. */
   backlog: boolean;
   now: string;
 }
-export interface WorkflowCardRow { id: number; title: string; lane: LaneId; member: string | null; status: CardStatus | string; time?: ItemTime | null }
-export type WorkflowMessageKind = 'instruction' | 'progress' | 'handback' | 'blocked' | 'decision' | 'completed' | 'failed' | 'stopped' | 'done' | 'closed' | 'expired';
-export interface WorkflowMessage { seq: number; at: string; kind: WorkflowMessageKind | string; from: string | null; member: string | null; text: string | null }
-export interface WorkflowDetail { workflow: WorkflowRow; cards: WorkflowCardRow[]; messages: WorkflowMessage[]; spec: string | null; backlog: boolean }
+export interface DeliverableCardRow { id: number; title: string; lane: LaneId; member: string | null; status: CardStatus | string; time?: ItemTime | null }
+export type DeliverableMessageKind = 'instruction' | 'progress' | 'handback' | 'blocked' | 'decision' | 'completed' | 'failed' | 'stopped' | 'done' | 'closed' | 'expired';
+export interface DeliverableMessage { seq: number; at: string; kind: DeliverableMessageKind | string; from: string | null; member: string | null; text: string | null }
+export interface DeliverableDetail { deliverable: DeliverableRow; cards: DeliverableCardRow[]; messages: DeliverableMessage[]; spec: string | null; backlog: boolean }
+
+// ---- Goals (the core's goals.* contract): the person's goals, each linking deliverables; a deliverable has at most one ----
+export const GOALS_LIST = 'goals.list';
+export const GOALS_SAVE = 'goals.save';
+export const GOALS_DELETE = 'goals.delete';
+export const GOALS_ASSIGN = 'goals.assign';
+/** A deliverable's goal as its row names it. */
+export interface GoalRef { id: number; name: string }
+/** A goal's (or the Unassigned group's) time: the union of its deliverables' overall-time spans, overlaps counted once. */
+export interface GoalTime {
+  firstAt: string | null;
+  /** null while one of its deliverables is open (the time counts on from the answer's now). */
+  endAt: string | null;
+  elapsedMs: number;
+}
+export interface GoalTotals { deliverables: number[]; open: number; total: number; time: GoalTime }
+export interface Goal extends GoalTotals { id: number; name: string; description: string; createdAt: string; updatedAt: string }
+export interface GoalsListAnswer { goals: Goal[]; unassigned: GoalTotals; now: string }
+export interface GoalAssignAnswer { deliverable: number; goal: GoalRef | null }
+export interface GoalDeleteAnswer { deleted: number; unassigned: number }
+/** The longest goal name and description goals.save takes. */
+export const GoalNameMax = 80;
+export const GoalDescriptionMax = 2000;
 
 /** A team's documents (docs.list / docs.read): paths are relative to the team's documents folder. */
 export interface DocEntry { name: string; path: string; folder: boolean; size: number | null; modified: string }
@@ -600,7 +625,7 @@ export interface ApiRow {
   oauth?: { authorizeUrl: string | null; tokenUrl: string | null; openIdConnectUrl?: string | null; neededScopes: string[]; missingScopes: string[] } | null;
   status: string | null; all: boolean; teams: number[]; counts: DiscoverChecklistData['counts'] | null;
 }
-/** integrations.emailList: a mailbox (an email account Connection) that scripts on the teams it is turned on for can read. */
+/** integrations.emailList: a mailbox (an email account Connection) that workflows on the teams it is turned on for can read. */
 export interface EmailIntegration { id: number; name: string; kind: 'email'; connectionId: number | null; connection: unknown; enabledAll: boolean; teamIds: number[] }
 /** integrations.apiPeek { url }: what Add API fills in from one address (nothing is saved). */
 export type ApiPeekResult =
@@ -637,7 +662,7 @@ export interface TaskAskDetail {
 }
 /** A call waiting for the person's approval (integrations.asks). Host-task asks have task = true and a detail. */
 export interface IntegrationAsk {
-  id: number; at: string; integration: string; teamId: number; member: string; command: string; reason: string; workflow: number;
+  id: number; at: string; integration: string; teamId: number; member: string; command: string; reason: string; deliverable: number;
   repo?: string | null; action?: string | null; canAlways?: boolean; task?: boolean; taskName?: string; commit?: string; detail?: TaskAskDetail | null;
 }
 export interface HostTaskDef {
@@ -685,7 +710,7 @@ export interface FolderAsk {
   id: number; at: string; teamId: number; team: string; memberId: number; member: string; memberName: string; askedBy: string;
   path: string; access: 'read' | 'readwrite'; reason: string; exists: boolean; existedWhenAsked: boolean;
   state: 'pending' | 'approved' | 'denied' | 'closed'; grantedAccess: 'read' | 'readwrite' | null;
-  decidedBy: string | null; decidedVia: string | null; decidedAt: string | null; note: string | null; workflow: number | null;
+  decidedBy: string | null; decidedVia: string | null; decidedAt: string | null; note: string | null; deliverable: number | null;
   choices: FolderAskChoice[];
 }
 /** folder.answer {id, choice, note?}'s reply: told is who was told ("Team/Name": the Manager after an approval, the asker after a deny), or null. */
@@ -706,7 +731,7 @@ export type NetworkAskChoice = 'agent' | 'team' | 'everywhere' | 'deny';
 export interface NetworkAsk {
   id: number; at: string; teamId: number; team: string; member: string; memberName: string; host: string;
   reason: string | null; method: string | null; pathSample: string | null; count: number; lastSeen: string; hint: string | null;
-  workflow: number | null; state: 'pending' | 'allowed' | 'denied' | 'closed'; scope: Exclude<NetworkAskChoice, 'deny'> | null;
+  deliverable: number | null; state: 'pending' | 'allowed' | 'denied' | 'closed'; scope: Exclude<NetworkAskChoice, 'deny'> | null;
   decidedBy: string | null; decidedAt: string | null; plainHttp: boolean; choices: NetworkAskChoice[];
   /** The host's registrable domain (digicert.com): one member's waiting asks with the same one are one item in Needs you. Null or absent: the host alone. */
   domain?: string | null;
@@ -746,7 +771,7 @@ export type ToolAskChoice = 'install' | 'checkAgain' | 'notNow';
 export interface ToolAsk {
   id: number; at: string; teamId: number; team: string; member: string; memberName: string; tool: string;
   displayName: string | null; publisher: string | null; wingetId: string | null; scope: 'user' | 'machine' | null;
-  reason: string | null; count: number; lastSeen: string; workflow: number | null;
+  reason: string | null; count: number; lastSeen: string; deliverable: number | null;
   state: 'pending' | 'installing' | 'installed' | 'dismissed'; attempts: number; error: string | null;
   decidedBy: string | null; decidedVia: string | null; decidedAt: string | null;
   canInstall: boolean; command: string | null; choices: ToolAskChoice[];
@@ -800,20 +825,20 @@ export const PERSON_WRITER = 'person';
 /** One kept write of a team skill (core: Skills/TeamRetros.cs). */
 export interface SkillVersion {
   id: number; teamId: number; name: string; version: number; body: string;
-  writer: string; workflow: number | null; restoredFrom: number | null; writtenAt: string;
+  writer: string; deliverable: number | null; restoredFrom: number | null; writtenAt: string;
 }
 /** A team's lessons: how many (list lines), and the last write (version 0 and nulls: none yet). */
 export interface TeamLessons {
-  count: number; version: number; updatedAt: string | null; writer: string | null; workflow: number | null; skillId: number | null;
+  count: number; version: number; updatedAt: string | null; writer: string | null; deliverable: number | null; skillId: number | null;
 }
-/** Who wrote a version, as a person reads it: "you (Settings > Skills)", "the retro of workflow 12" or the writer's name. */
-export function writerText(v: { writer: string | null; workflow: number | null; restoredFrom?: number | null }): string {
+/** Who wrote a version, as a person reads it: "you (Settings > Skills)", "the retro of deliverable 12" or the writer's name. */
+export function writerText(v: { writer: string | null; deliverable: number | null; restoredFrom?: number | null }): string {
   if (v.writer === PERSON_WRITER) return v.restoredFrom ? `you (restored version ${v.restoredFrom})` : 'you (Settings > Skills)';
-  if (v.workflow !== null) return `the retro of workflow ${v.workflow}`;
+  if (v.deliverable !== null) return `the retro of deliverable ${v.deliverable}`;
   return v.writer ?? 'unknown';
 }
 
-/** A trigger (triggers.list / triggers.save): work a member is told on a schedule, as a new workflow. */
+/** A trigger (triggers.list / triggers.save): work a member is told on a schedule, as a new deliverable. */
 export interface TriggerSchedule {
   kind: 'every' | 'cron' | 'once' | 'folder' | 'event'; intervalSec: number | null; cron: string | null; timezone: string | null; fireAt: string | null;
 }
@@ -915,7 +940,7 @@ export interface BranchRealignResult { oldSha: string; newSha: string }
  * git.commitShow {team | teamId, sha, repo?} (core TeamRepos.CommitView.cs CommitInfo.ToJson): one commit of the
  * team's repository, from plain git (never an agent's clone). sha: 4 to 64 hex digits, else the error bad_params.
  * found=false: git no longer has it; the answer is then only {found, goneReason, sha} (goneReason is plain words and
- * may name the branch and member). made: the member, card and workflow that made it (the app's own records); absent
+ * may name the branch and member). made: the member, card and deliverable that made it (the app's own records); absent
  * when unknown; a merge recorded on the team branch is credited to the Manager. merge: what a merge brought in;
  * intoBranch / fromBranch are null when neither git nor the app's records can tell. where: inMain; branches: the team
  * branch first, then member branches, never main; otherBranches: the other local branches that hold it (not main, the team
@@ -933,7 +958,7 @@ export interface CommitFound {
   author: CommitPerson; committer?: CommitPerson | null;
   isMerge: boolean; parents: string[];
   merge?: { intoBranch: string | null; fromBranch: string | null; fromMember?: string | null; commitCount: number } | null;
-  made?: { member: string; card?: number | null; workflow?: number | null } | null;
+  made?: { member: string; card?: number | null; deliverable?: number | null } | null;
   /** deletedFrom: the deleted branch it was on (absent otherwise). */
   where: { inMain: boolean; branches: string[]; otherBranches?: string[]; onlyOnMember?: string | null; pushed: boolean; tags: string[]; deletedFrom?: string };
   files: CommitFile[];
@@ -1076,10 +1101,10 @@ export interface AgentCard {
   net?: string; wallTimeout?: string; loosened?: string[]; policyProblems?: string[];
   /** The member has a working copy (clone) on this computer: its card offers the Code browser (teams.agents). */
   hasClone?: boolean;
-  /** 'script' for a script member (its tile reads scripts.memberGet); absent from an older core: an agent. */
-  kind?: 'agent' | 'script';
-  /** The workflows the member's current run works on (their numbers), oldest first; [] when not running; absent from an older core. */
-  runWorkflows?: number[];
+  /** 'workflow' for a workflow member (its tile reads workflows.memberGet); absent from an older core: an agent. */
+  kind?: 'agent' | 'workflow';
+  /** The deliverables the member's current run works on (their numbers), oldest first; [] when not running; absent from an older core. */
+  runDeliverables?: number[];
 }
 
 /**
@@ -1098,7 +1123,7 @@ export interface DecisionOption {
  * them; an older decision has only question. bus.answer takes { teamId, seq, text, optionIndex? } (0-based).
  */
 export interface Decision {
-  seq: number; from: string; question: string; workflow: number; at: string;
+  seq: number; from: string; question: string; deliverable: number; at: string;
   summary?: string | null; options?: DecisionOption[] | null; details?: string | null;
 }
 
@@ -1203,11 +1228,11 @@ export interface ConversationSummary {
   watching: number;
 }
 
-/** A follow-up the Concierge keeps: a workflow it dispatched (workflow set) or a whole team. */
+/** A follow-up the Concierge keeps: a deliverable it dispatched (deliverable set) or a whole team. */
 export interface ConciergeWatch {
   id: number;
   team: string;
-  workflow: number | null;
+  deliverable: number | null;
   what: string;
   followUp: boolean;
   createdAt: string;
@@ -1254,7 +1279,7 @@ export type CardStatus = 'queued' | 'running' | 'blocked' | 'needs-decision' | '
 export type LaneId = 'todo' | 'in-progress' | 'blocked' | 'done';
 export interface BoardCard {
   id: number; team: string; teamId: number | null; member: string | null; item: string | null; title: string; body: string;
-  status: CardStatus; lane: LaneId; placed: boolean; awaitingManager: boolean; workflow: number | null;
+  status: CardStatus; lane: LaneId; placed: boolean; awaitingManager: boolean; deliverable: number | null;
   createdAt: string; updatedAt: string; trailCount: number;
   /** When the person cleared this Done card from the board view (0037); null or absent when it shows. */
   clearedAt?: string | null;
@@ -1273,13 +1298,13 @@ export interface BoardList {
 }
 export interface BacklogItem {
   id: number; label: string; team: string | null; title: string; body: string; state: 'pending' | 'ready' | 'declared' | 'implemented';
-  archivedAt: string | null; dispatchedTeam: string | null; dispatchedWorkflow: number | null; dispatchedAt: string | null; inFlight: boolean;
+  archivedAt: string | null; dispatchedTeam: string | null; dispatchedDeliverable: number | null; dispatchedAt: string | null; inFlight: boolean;
   createdAt: string; updatedAt: string; dispatchCount: number;
 }
-/** One dispatch of a backlog item (0023): its team and workflow, read live from the bus, the board and usage records. */
+/** One dispatch of a backlog item (0023): its team and deliverable, read live from the bus, the board and usage records. */
 export interface BacklogDispatch {
-  team: string; teamId: number | null; teamGone: boolean; workflow: number; dispatchedAt: string; dispatchedBy: string | null;
-  state: WorkflowState | null; ending: string | null; busy: string[] | null; lastAt: string | null;
+  team: string; teamId: number | null; teamGone: boolean; deliverable: number; dispatchedAt: string; dispatchedBy: string | null;
+  state: DeliverableState | null; ending: string | null; busy: string[] | null; lastAt: string | null;
   cards: number; cardsDone: number; runs: number; members: string[]; inputTokens: number; outputTokens: number;
   firstStart: string | null; lastEnd: string | null;
 }

@@ -8,7 +8,7 @@ namespace Yawble.Core.Gateway;
 /// The MCP tools for ONE run, served at bus.yawble.internal/mcp by that run's gateway. The caller's
 /// identity — member, run, causation — comes from the run the gateway was started for, never from arguments: a
 /// tool argument named "member" in tell is the recipient, nothing else can be addressed. The bus enforces the
-/// rules (members tell only the Manager, workflow ownership, depth limit) and refusals come back as tool errors.
+/// rules (members tell only the Manager, deliverable ownership, depth limit) and refusals come back as tool errors.
 /// MCP over Streamable HTTP, JSON responses only (no server-initiated stream).
 /// </summary>
 public sealed class McpBusServer(RunContext run) : IBusEndpoint
@@ -16,7 +16,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     public static readonly string[] SupportedProtocolVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
     public static readonly IReadOnlyList<string> ToolNames =
-        ["tell", "progress", "handback", "blocked", "needs_decision", "workflow_complete", "status", "hiring", "hire", "board", "backlog", "skills_get", "skills_list", "wake_me", "workflow_show", "workflow_digest", "lease", "repo", "request_host", "request_tool",
+        ["tell", "progress", "handback", "blocked", "needs_decision", "deliverable_complete", "status", "hiring", "hire", "board", "backlog", "skills_get", "skills_list", "wake_me", "deliverable_show", "deliverable_digest", "lease", "repo", "request_host", "request_tool",
          "request_folder", "team_retros_write"];
 
     public async Task<BusReply> HandleAsync(byte[] body, CancellationToken ct)
@@ -78,7 +78,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
             ["protocolVersion"] = version,
             ["capabilities"] = new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = false } },
             ["serverInfo"] = new JsonObject { ["name"] = "yawble-bus", ["version"] = CoreInfo.Version },
-            ["instructions"] = "The team bus. Your identity, run and workflow are set by the platform; tools act only for you.",
+            ["instructions"] = "The team bus. Your identity, run and deliverable are set by the platform; tools act only for you.",
         };
     }
 
@@ -100,7 +100,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                 "needs_decision" => Sent(await run.NeedsDecisionAsync(
                     DecisionAsk.Parse(Optional(args, "question"), Optional(args, "summary"), args["options"], Optional(args, "details"),
                         OptionalLong(args, "card"), Optional(args, "kind"), Optional(args, "reason")), ct)),
-                "workflow_complete" => Sent(await run.WorkflowCompleteAsync(Required(args, "delivered"), ct)),
+                "deliverable_complete" => Sent(await run.DeliverableCompleteAsync(Required(args, "delivered"), ct)),
                 "status" => await StatusTextAsync(ct),
                 "hiring" => HiringText(await run.HiringOfferAsync(ct)),
                 "hire" => Hired(await run.HireAsync(Optional(args, "name"), Optional(args, "cli"), Optional(args, "job"), Optional(args, "role"), ct)),
@@ -117,8 +117,8 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                     .RequestFromAgentAsync(run.Member, Required(args, "path"), Required(args, "access"), Required(args, "reason"), Optional(args, "member"),
                         run.Correlation, run.Causation, ct),
                 "team_retros_write" => await run.TeamRetrosWriteAsync(Required(args, "text"), ct),
-                "workflow_show" => WorkflowText(await run.WorkflowShowAsync(OptionalLong(args, "workflow") ?? run.Correlation, ct)),
-                "workflow_digest" => await run.Engine.WorkflowDigestAsync(run, OptionalLong(args, "workflow"), ct),
+                "deliverable_show" => DeliverableText(await run.DeliverableShowAsync(OptionalLong(args, "deliverable") ?? run.Correlation, ct)),
+                "deliverable_digest" => await run.Engine.DeliverableDigestAsync(run, OptionalLong(args, "deliverable"), ct),
                 _ when run.Engine.Integrations?.IsTool(name) == true => await CallIntegrationAsync(name, args, img => png = img, ct),
                 _ => throw new RpcError(-32602, $"unknown tool: {name}"),
             };
@@ -146,7 +146,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
 
     private static readonly JsonSerializerOptions RpcJson = new(JsonSerializerDefaults.Web);
 
-    private static string Sent(Message m) => $"ok: message {m.Seq} in workflow {m.CorrelationId}";
+    private static string Sent(Message m) => $"ok: message {m.Seq} in deliverable {m.CorrelationId}";
 
     private static string Woken(DateTimeOffset due) =>
         $"ok: you will be woken at {due:yyyy-MM-dd HH:mm} UTC with your note. End your turn now; do not wait.";
@@ -202,9 +202,9 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     }
 
     /// <summary>A thread as plain lines an agent reads: "#seq time  source  type: the text".</summary>
-    internal static string WorkflowText(IReadOnlyList<Message> thread)
+    internal static string DeliverableText(IReadOnlyList<Message> thread)
     {
-        if (thread.Count == 0) return "No such workflow on your team.";
+        if (thread.Count == 0) return "No such deliverable on your team.";
         var lines = thread.Select(m =>
         {
             string body;
@@ -216,7 +216,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                         .Select(k => o[k] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null).Where(s => s is not null))
                       is { Length: > 0 } joined ? joined : m.Payload;
                 // The cards the person accepted closing over a tester's FAIL, in the board's words.
-                if (m.Type == MessageTypes.WorkflowCompleted && Board.ClosedOverFail.Read(o) is { Count: > 0 } overFail)
+                if (m.Type == MessageTypes.DeliverableCompleted && Board.ClosedOverFail.Read(o) is { Count: > 0 } overFail)
                     body += " | " + string.Join(" | ", overFail.Select(e => $"card {e.Card}: {e.Line}"));
             }
             catch (JsonException) { body = m.Payload; }
@@ -259,7 +259,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
 
     private static JsonArray Tools() =>
     [
-        Tool("tell", "Instruct a member of your team (the Manager), or, as a member, the Manager. Joins your current workflow.",
+        Tool("tell", "Instruct a member of your team (the Manager), or, as a member, the Manager. Joins your current deliverable.",
             ("member", "string", "Who to tell, by name.", true), ("instruction", "string", "The full instruction.", true),
             ("card", "integer", "The Manager: the planned board card this is for (board plan's id); the member takes it.", false)),
         Tool("board", "Your team's board: show the cards by lane, or one card in full (show with card: its description and trail - read it before working a card); the Manager plans cards (one per piece of work, unassigned, then tell a member with card), edits, moves them, or comments.",
@@ -280,13 +280,13 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         Tool("repo", "The team repository's branches: the team branch against the base, each member's branch (ahead of the base, merged into the team branch or not), and the origin if any."),
         Tool("progress", "Say what you are doing right now. Shown on your card; resets your idle clock.",
             ("status", "string", "One short line of current state.", true)),
-        Tool("handback", "Hand finished work back to your Manager; wakes it in the same workflow.",
+        Tool("handback", "Hand finished work back to your Manager; wakes it in the same deliverable.",
             ("delivered", "string", ReportText("What you finished: the summary names the branch and commit; then what changed, the tests " +
                 "(what ran and passed, what could not run and why) and anything left open"), true)),
         Tool("blocked", "Stop without finishing, and say why. With item, blocks only that numbered item of your batch.",
             ("reason", "string", ReportText("Why you stopped: the summary says what is in the way; then what you tried and what would unblock it"), true), ("item", "integer", "Optional: the batch item number.", false)),
         NeedsDecisionTool(),
-        Tool("workflow_complete", "Declare the workflow done (its owner, or the Manager). Refused while other work in it is running or pending, " +
+        Tool("deliverable_complete", "Declare the deliverable done (its owner, or the Manager). Refused while other work in it is running or pending, " +
             "and while a card's latest tester hand-back is a FAIL unless the person said yes to closing over it (needs_decision with card and kind).",
             ("delivered", "string", ReportText("What was delivered: the summary names the branch and commit; then each item delivered, the tests " +
                 "and anything left open"), true)),
@@ -303,12 +303,12 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         Tool("skills_get", "Load a skill: your role text (manager or member) or any skill skills_list offers you.",
             ("name", "string", "The skill's name, e.g. manager, member, team-git.", true)),
         Tool("skills_list", "The skills offered to you: name and one line each. Load one with skills_get."),
-        Tool("workflow_show", "Read a workflow's whole thread, oldest first: who was told what, progress, hand-backs, questions, how it ended. Use it after a restart, a nudge or an idle reminder to see where the work stands.",
-            ("workflow", "integer", "The workflow's number (default: the one you are working in now).", false)),
-        Tool("workflow_digest", "The Manager: the facts of how one of your team's workflows went, by member and card: runs (time, how each ended, exit codes), " +
+        Tool("deliverable_show", "Read a deliverable's whole thread, oldest first: who was told what, progress, hand-backs, questions, how it ended. Use it after a restart, a nudge or an idle reminder to see where the work stands.",
+            ("deliverable", "integer", "The deliverable's number (default: the one you are working in now).", false)),
+        Tool("deliverable_digest", "The Manager: the facts of how one of your team's deliverables went, by member and card: runs (time, how each ended, exit codes), " +
                                 "failed and repeated commands, files edited many times, tests that failed then passed, lease waits, host and tool asks, " +
                                 "blocked reports, questions to the person, work sent back. For a retrospective (skills_get retrospective).",
-            ("workflow", "integer", "The workflow's number (default: the one you are working in now, or the one your retro item is for).", false)),
+            ("deliverable", "integer", "The deliverable's number (default: the one you are working in now, or the one your retro item is for).", false)),
         Tool("wake_me", "Be woken once, later, in the work you are doing now: after this many minutes you get a run with your note. Use it to check again later instead of waiting or sleeping; then end your turn.",
             ("minutes", "integer", "How long from now (1 to 10080, a week).", true),
             ("note", "string", "What to look at when you are woken.", true)),
@@ -333,13 +333,13 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         Tool("team_retros_write", "The Manager: write your team's lessons, the team_retros skill every run of your team gets in its prompt (live at once). " +
                                   "Give the WHOLE new text: start from the current text (in your prompt under \"" + Skills.TeamRetros.PromptHeading + "\", or skills_get team_retros), " +
                                   "keep the person's edits, merge, reword or drop lessons, add at most a few new ones. Layout: a short list under a few headings " +
-                                  "(e.g. ## Building and testing, ## Git, ## Working with the person), one lesson per line: \"- <lesson> (<date>, workflow <id>)\". " +
+                                  "(e.g. ## Building and testing, ## Git, ## Working with the person), one lesson per line: \"- <lesson> (<date>, deliverable <id>)\". " +
                                   $"At most {Skills.TeamRetros.MaxChars} characters. Refused when the text changed since you read it: read it again and merge. " +
                                   "Each write is kept as a version the person can see and restore. No secrets, tokens, personal data or command output.",
             ("text", "string", "The whole new text of team_retros (Markdown), at most " + Skills.TeamRetros.MaxChars + " characters.", true)),
     ];
 
-    /// <summary>A long report is shown formatted on the card and in the workflow: a summary line first, then Markdown.</summary>
+    /// <summary>A long report is shown formatted on the card and in the deliverable: a summary line first, then Markdown.</summary>
     private static string ReportText(string what) =>
         what + ". Write Markdown: a one-sentence summary on the first line, then the details as short bullet lists or short paragraphs, " +
         "one item per line, with real line breaks between them (never one long paragraph).";
@@ -353,12 +353,12 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         var tool = Tool("needs_decision",
             "Ask the person to decide something. Put the decision first in plain words (summary), the answers they can pick as options " +
             "(each one a button), and your findings in details. Never number findings so they read as choices: the choices are the options. " +
-            "The answer arrives as a new instruction in this workflow. Then end your turn: do not also call blocked for the same thing.",
+            "The answer arrives as a new instruction in this deliverable. Then end your turn: do not also call blocked for the same thing.",
             ("summary", "string", "The decision in one plain sentence a person reads first, e.g. 'Should the team's runs reach localhost on macOS?'.", false),
             ("details", "string", "What you found and why it matters, in Markdown (lists, tables). Shown under the summary.", false),
             ("question", "string", "Older form, still accepted: the whole decision as Markdown in one text. Prefer summary, options and details.", false),
-            ("card", "integer", "Only to close the workflow over a tester's FAIL: the card the tester failed. Then give kind, and the yes option carries action " +
-                                DecisionActions.CloseOverFail + " (with no options the app gives a yes and a no). workflow_complete goes through once the person picks the yes.", false),
+            ("card", "integer", "Only to close the deliverable over a tester's FAIL: the card the tester failed. Then give kind, and the yes option carries action " +
+                                DecisionActions.CloseOverFail + " (with no options the app gives a yes and a no). deliverable_complete goes through once the person picks the yes.", false),
             ("kind", "string", "With card: accept-fail (accept the FAIL as it is and close) or wont-do (the card will not be done; needs a reason).", false),
             ("reason", "string", "With card: why. Required for wont-do; for accept-fail, why the FAIL can be accepted.", false));
         tool["inputSchema"]!["properties"]!["kind"]!["enum"] = new JsonArray("accept-fail", "wont-do");

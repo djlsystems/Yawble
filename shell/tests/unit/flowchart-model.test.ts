@@ -1,15 +1,15 @@
-// The flowchart model: the script document as nodes and edges, and the designer's edits going back into the document.
+// The flowchart model: the workflow document as nodes and edges, and the designer's edits going back into the document.
 import { describe, expect, it } from 'vitest';
 import {
   END_ID, FILE_OPERATIONS, PALETTE, START_ID, STEP_TYPES, addStep, tellDetail, withFileOperation, autoLayout, branchesOf, clearLayout, connect, createHistory, docToGraph,
   moveNode, removeEdge, removeStep, replaceStep, type FlowEdge,
-} from '../../src/renderer/src/scripts/flowchart';
-import type { ScriptDocument } from '../../src/renderer/src/scripts/types';
+} from '../../src/renderer/src/workflows/flowchart';
+import type { WorkflowDocument } from '../../src/renderer/src/workflows/types';
 
-/** A fake script that uses every step type and every branch kind. */
-function sample(): ScriptDocument {
+/** A fake workflow that uses every step type and every branch kind. */
+function sample(): WorkflowDocument {
   return {
-    format: 'yawble-script/1',
+    format: 'yawble-workflow/1',
     id: 'sample-flow',
     name: 'Sample flow',
     trigger: { accepts: ['every', 'tell'] },
@@ -59,10 +59,10 @@ describe('docToGraph', () => {
 
   it('every STEP_TYPES entry maps to its kind, and an unknown type is other', () => {
     for (const t of STEP_TYPES) {
-      const doc: ScriptDocument = { start: 'a', steps: [{ id: 'a', ...t.template }] };
+      const doc: WorkflowDocument = { start: 'a', steps: [{ id: 'a', ...t.template }] };
       expect(docToGraph(doc).nodes.find((n) => n.id === 'a')?.kind).toBe(t.kind);
     }
-    // A type the checker does not know (an agent step is not one: a script tells the team instead) is other.
+    // A type the checker does not know (an agent step is not one: a workflow tells the team instead) is other.
     const odd = docToGraph({ start: 'a', steps: [{ id: 'a', type: 'mystery', next: null }, { id: 'b', type: 'agent', next: null }, { id: 'c', type: 'tell', text: 'x', next: null }] });
     expect(odd.nodes.find((n) => n.id === 'a')?.kind).toBe('other');
     expect(odd.nodes.find((n) => n.id === 'b')?.kind).toBe('other');
@@ -70,7 +70,7 @@ describe('docToGraph', () => {
   });
 
   it('a tell node says whom it tells, the team when it names one, and when it waits', () => {
-    const doc: ScriptDocument = { start: 'a', steps: [
+    const doc: WorkflowDocument = { start: 'a', steps: [
       { id: 'a', type: 'tell', text: 'Look at {input.text}', next: 'b' },
       { id: 'b', type: 'tell', member: 'Ava', text: 'x', wait: true, next: 'c' },
       { id: 'c', type: 'tell', member: 'Manager', team: 'Billing', text: 'x', wait: false, next: 'd' },
@@ -248,7 +248,7 @@ describe('edits', () => {
   });
 
   it('addStep gives an id unique in doc.steps', () => {
-    const doc: ScriptDocument = { start: 'step1', steps: [{ id: 'step1', type: 'log', next: 'step2' }, { id: 'step2', type: 'end' }] };
+    const doc: WorkflowDocument = { start: 'step1', steps: [{ id: 'step1', type: 'log', next: 'step2' }, { id: 'step2', type: 'end' }] };
     const a = addStep(doc, 'if');
     expect(a.id).toBe('step3');
     expect(a.doc.steps!.at(-1)).toEqual({ id: 'step3', type: 'if', when: { left: '', op: 'eq', right: '' }, then: null, else: null });

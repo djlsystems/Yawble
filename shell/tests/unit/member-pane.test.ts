@@ -373,9 +373,9 @@ describe("a member's pane: what waits, and no policy summary", () => {
     const w = pane({ card: card({ state: 'running', queuedInstructions: 2 }) });
     const more = w.get('[data-test=agent-title]').get('[data-test=agent-more-waiting]');
     expect(more.text()).toBe('· 2 more waiting');
-    expect(more.attributes('title')).toBe('2 instructions waiting; they run after this one (oldest workflow first)');
+    expect(more.attributes('title')).toBe('2 instructions waiting; they run after this one (oldest deliverable first)');
     const one = pane({ card: card({ state: 'running', queuedInstructions: 1 }) });
-    expect(one.get('[data-test=agent-more-waiting]').attributes('title')).toBe('1 instruction waiting; they run after this one (oldest workflow first)');
+    expect(one.get('[data-test=agent-more-waiting]').attributes('title')).toBe('1 instruction waiting; they run after this one (oldest deliverable first)');
     expect(pane({ card: card({ state: 'running', queuedInstructions: 0 }) }).find('[data-test=agent-more-waiting]').exists()).toBe(false);
     // A queued member already says its instructions in the state line.
     expect(pane({ card: card({ state: 'queued', queuePosition: 1, queueLength: 1, queuedInstructions: 2 }) })

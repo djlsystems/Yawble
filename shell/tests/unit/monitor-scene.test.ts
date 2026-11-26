@@ -1,23 +1,23 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { memberKey, MonitorModel, RunEndShowMs, RunStaleMs, teamKey, workflowKey, type Effect, type FeedRow, type TeamSnapshot } from '../../src/renderer/src/monitor/model';
+import { memberKey, MonitorModel, RunEndShowMs, RunStaleMs, teamKey, deliverableKey, type Effect, type FeedRow, type TeamSnapshot } from '../../src/renderer/src/monitor/model';
 import { MonitorScene } from '../../src/renderer/src/monitor/scene';
 import { capEffects, cardOf, DensityCaps, FocusDim, focusAlpha, onYouNode, pulsePeriodMs, runFill, teamOfKey, youNodeAt } from '../../src/renderer/src/monitor/rhythm';
-import { busyMembers, openWorkflows, workflowEnds, workflowNodeLook, WorkflowNodesEach } from '../../src/renderer/src/monitor/workflows';
+import { busyMembers, openDeliverables, deliverableEnds, deliverableNodeLook, DeliverableNodesEach } from '../../src/renderer/src/monitor/deliverables';
 import { readStep, type StepKind, type StepRow } from '../../src/renderer/src/monitor/steps';
-import type { WorkflowSummary } from '../../src/shared/api';
+import type { DeliverableSummary } from '../../src/shared/api';
 
 /**
- * The scene's workflow nodes, work rhythm, You node, card-numbered comets, density, focus and reduced
+ * The scene's deliverable nodes, work rhythm, You node, card-numbered comets, density, focus and reduced
  * motion, with a fake model (MonitorModel fed by hand) and, for the scene itself, a canvas whose 2D context is a stub.
  */
 
-const row = (seq: number, kind: FeedRow['kind'], member: string | null, from: string, text: string | null = null, workflow = 1): FeedRow =>
-  ({ seq, kind, team: 'payments', member, from, text, workflow, at: new Date().toISOString() });
+const row = (seq: number, kind: FeedRow['kind'], member: string | null, from: string, text: string | null = null, deliverable = 1): FeedRow =>
+  ({ seq, kind, team: 'payments', member, from, text, deliverable, at: new Date().toISOString() });
 const step = (id: number, kind: StepKind, target: string | null = null, extra: Partial<StepRow> = {}): StepRow =>
   ({ id, at: new Date().toISOString(), team: 'payments', member: 'DeveloperPriya', run: 1, kind, tool: kind === 'run' ? 'Bash' : 'Edit', target, ...extra });
-const wf = (id: number, state: WorkflowSummary['state'] = 'open', busy: string[] = [], lastAt = new Date(1_000_000 + id * 1000).toISOString()): WorkflowSummary =>
-  ({ id, title: `Workflow ${id}`, owner: null, state, undeclared: false, busy, ending: null, startedAt: lastAt, lastAt, messages: 2 });
+const wf = (id: number, state: DeliverableSummary['state'] = 'open', busy: string[] = [], lastAt = new Date(1_000_000 + id * 1000).toISOString()): DeliverableSummary =>
+  ({ id, title: `Deliverable ${id}`, owner: null, state, undeclared: false, busy, ending: null, startedAt: lastAt, lastAt, messages: 2 });
 const member = (name: string, state: TeamSnapshot['members'][number]['state'] = 'idle', role: 'manager' | 'member' = 'member', id = 1) =>
   ({ id, name, role, state, queued: 0, statusLine: null, cli: 'claude' });
 const team = (id: number, name: string, members = [member('Manager', 'idle', 'manager'), member('DeveloperPriya'), member('TesterWren')]): TeamSnapshot =>
@@ -98,37 +98,37 @@ describe('the You node', () => {
   });
 });
 
-describe('the workflow nodes', () => {
-  it('each open workflow is a node; completed and closed ones are not; the busy list says who works it', () => {
+describe('the deliverable nodes', () => {
+  it('each open deliverable is a node; completed and closed ones are not; the busy list says who works it', () => {
     const list = [wf(1, 'completed'), wf(2, 'open', ['DeveloperPriya is running']), wf(3, 'closed'), wf(4, 'open')];
-    expect(openWorkflows(list).map((w) => w.id)).toEqual([4, 2]);
-    expect(openWorkflows(Array.from({ length: 20 }, (_, i) => wf(i + 1)))).toHaveLength(WorkflowNodesEach);
+    expect(openDeliverables(list).map((w) => w.id)).toEqual([4, 2]);
+    expect(openDeliverables(Array.from({ length: 20 }, (_, i) => wf(i + 1)))).toHaveLength(DeliverableNodesEach);
     expect(busyMembers(wf(2, 'open', ['DeveloperPriya is running', ' TesterWren queued ', '']))).toEqual(['DeveloperPriya', 'TesterWren']);
-    expect(workflowNodeLook(wf(2, 'open', ['x']), false)).toMatchObject({ status: 'working', icon: 'flow' });
-    expect(workflowNodeLook(wf(4), false)).toMatchObject({ status: 'waiting', icon: 'pause' });
-    expect(workflowNodeLook(wf(4), true)).toMatchObject({ status: 'blocked', tone: 'blocked', icon: 'bang' });
+    expect(deliverableNodeLook(wf(2, 'open', ['x']), false)).toMatchObject({ status: 'working', icon: 'flow' });
+    expect(deliverableNodeLook(wf(4), false)).toMatchObject({ status: 'waiting', icon: 'pause' });
+    expect(deliverableNodeLook(wf(4), true)).toMatchObject({ status: 'blocked', tone: 'blocked', icon: 'bang' });
   });
 
-  it('a workflow that completes or closes leaves with its own effect; the model tracks the blocked look', () => {
-    expect(workflowEnds([wf(1), wf(2), wf(3, 'completed')], [wf(1, 'completed'), wf(2, 'closed'), wf(3, 'completed')]))
+  it('a deliverable that completes or closes leaves with its own effect; the model tracks the blocked look', () => {
+    expect(deliverableEnds([wf(1), wf(2), wf(3, 'completed')], [wf(1, 'completed'), wf(2, 'closed'), wf(3, 'completed')]))
       .toEqual([{ id: 1, status: 'completed' }, { id: 2, status: 'closed' }]);
     const m = new MonitorModel();
-    m.setWorkflows('Payments', [wf(1), wf(2, 'open', ['DeveloperPriya is running'])], 0);
+    m.setDeliverables('Payments', [wf(1), wf(2, 'open', ['DeveloperPriya is running'])], 0);
     expect(m.openWfs.get(teamKey('payments'))!.map((w) => w.id)).toEqual([2, 1]);
     expect(m.effects).toHaveLength(0); // the first list ends nothing
-    const rev = m.workflowsRev;
+    const rev = m.deliverablesRev;
     m.apply(row(1, 'blocked', 'DeveloperPriya', 'DeveloperPriya', 'stuck', 2), 5);
-    expect(m.blockedWfs.has(workflowKey('payments', 2))).toBe(true);
+    expect(m.blockedWfs.has(deliverableKey('payments', 2))).toBe(true);
     m.apply(row(2, 'progress', 'DeveloperPriya', 'DeveloperPriya', 'going again', 2), 6);
-    expect(m.blockedWfs.has(workflowKey('payments', 2))).toBe(false);
+    expect(m.blockedWfs.has(deliverableKey('payments', 2))).toBe(false);
     m.effects.length = 0;
-    m.setWorkflows('payments', [wf(1, 'closed'), wf(2, 'completed')], 50);
+    m.setDeliverables('payments', [wf(1, 'closed'), wf(2, 'completed')], 50);
     expect(m.effects).toEqual([
-      { kind: 'wfdone', key: workflowKey('payments', 1), team: 'payments', status: 'closed', at: 50 },
-      { kind: 'wfdone', key: workflowKey('payments', 2), team: 'payments', status: 'completed', at: 50 },
+      { kind: 'wfdone', key: deliverableKey('payments', 1), team: 'payments', status: 'closed', at: 50 },
+      { kind: 'wfdone', key: deliverableKey('payments', 2), team: 'payments', status: 'completed', at: 50 },
     ]);
     expect(m.openWfs.get(teamKey('payments'))).toEqual([]);
-    expect(m.workflowsRev).toBeGreaterThan(rev);
+    expect(m.deliverablesRev).toBeGreaterThan(rev);
   });
 });
 
@@ -231,12 +231,12 @@ describe('density and focus', () => {
 
   it('a focused team shows only its own effects (and comets that reach it); the rest is dimmed', () => {
     const mixed: Effect[] = [comet(1), comet(2, memberKey('b', 'manager'), memberKey('b', 'dev')), comet(3, teamKey('b'), memberKey('a', 'dev')),
-      { kind: 'wfdone', key: workflowKey('b', 4), team: 'b', status: 'completed', at: 4 }, { kind: 'you', from: memberKey('b', 'dev'), color: 'decision', label: null, at: 5 }];
+      { kind: 'wfdone', key: deliverableKey('b', 4), team: 'b', status: 'completed', at: 4 }, { kind: 'you', from: memberKey('b', 'dev'), color: 'decision', label: null, at: 5 }];
     expect(capEffects(mixed, 'normal', 'a').map((e) => e.at)).toEqual([1, 3]);
     expect(capEffects(mixed, 'normal', 'b').map((e) => e.at)).toEqual([2, 3, 4, 5]);
     expect(capEffects(mixed, 'normal', null)).toHaveLength(5);
     expect(teamOfKey(memberKey('Payments', 'Dev'))).toBe('payments');
-    expect(teamOfKey(workflowKey('payments', 3))).toBe('payments');
+    expect(teamOfKey(deliverableKey('payments', 3))).toBe('payments');
     expect(teamOfKey('w:payments')).toBe('payments');
     expect(teamOfKey('you')).toBeNull();
     expect(focusAlpha(memberKey('a', 'dev'), null)).toBe(1);
@@ -283,27 +283,27 @@ beforeEach(() => { vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGloba
 afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
 describe('the scene', () => {
-  it('draws a node per open workflow, tied to the members working it or to its hub', () => {
+  it('draws a node per open deliverable, tied to the members working it or to its hub', () => {
     const { scene } = makeScene();
     const m = new MonitorModel();
     const teams = [team(7, 'Payments')];
     m.reconcile(teams, 0);
-    m.setWorkflows('Payments', [wf(1, 'open', ['DeveloperPriya is running', 'TesterWren queued']), wf(2), wf(3, 'completed')], 0);
+    m.setDeliverables('Payments', [wf(1, 'open', ['DeveloperPriya is running', 'TesterWren queued']), wf(2), wf(3, 'completed')], 0);
     m.apply(row(1, 'blocked', 'TesterWren', 'TesterWren', 'no host', 2), 0, false);
     scene.model = m;
     scene.setTeams(teams);
     frame(scene, 16);
-    const nodes = scene.workflowNodes().sort((a, b) => a.id - b.id);
+    const nodes = scene.deliverableNodes().sort((a, b) => a.id - b.id);
     expect(nodes).toEqual([
-      expect.objectContaining({ key: workflowKey('payments', 1), id: 1, to: [memberKey('payments', 'DeveloperPriya'), memberKey('payments', 'TesterWren')], status: 'working' }),
-      expect.objectContaining({ key: workflowKey('payments', 2), id: 2, to: [teamKey('payments')], status: 'blocked' }),
+      expect.objectContaining({ key: deliverableKey('payments', 1), id: 1, to: [memberKey('payments', 'DeveloperPriya'), memberKey('payments', 'TesterWren')], status: 'working' }),
+      expect.objectContaining({ key: deliverableKey('payments', 2), id: 2, to: [teamKey('payments')], status: 'blocked' }),
     ]);
-    // Workflow 1 completes: its node leaves (drawn by its effect from where it was).
-    m.setWorkflows('Payments', [wf(1, 'completed'), wf(2), wf(3, 'completed')], 32);
+    // Deliverable 1 completes: its node leaves (drawn by its effect from where it was).
+    m.setDeliverables('Payments', [wf(1, 'completed'), wf(2), wf(3, 'completed')], 32);
     scene.effects.push(...m.effects.splice(0));
     frame(scene, 32);
-    expect(scene.workflowNodes().map((n) => n.id)).toEqual([2]);
-    expect(scene.drawn).toEqual([expect.objectContaining({ kind: 'wfdone', key: workflowKey('payments', 1), status: 'completed' })]);
+    expect(scene.deliverableNodes().map((n) => n.id)).toEqual([2]);
+    expect(scene.drawn).toEqual([expect.objectContaining({ kind: 'wfdone', key: deliverableKey('payments', 1), status: 'completed' })]);
   });
 
   it('setFocus takes a team id, zooms to it and leaves with null; setDensity takes the three levels only', () => {
@@ -392,7 +392,7 @@ describe('the scene', () => {
   });
 });
 
-describe('no WORKFLOWS panel; the workflow nodes say "#id title"', () => {
+describe('no DELIVERABLES panel; the deliverable nodes say "#id title"', () => {
   const title = "Backlog item B008 Remote UI: xterm's link handler asks through confirmDialog";
   type Inner = { nodes: Map<string, { kind: string; x?: number; y?: number }>; cam: { k: number }; toScreen: (x: number, y: number) => [number, number] };
   function wall(w = 1280, h = 800) {
@@ -402,18 +402,18 @@ describe('no WORKFLOWS panel; the workflow nodes say "#id title"', () => {
     const m = new MonitorModel();
     const teams = [team(7, 'Payments')];
     m.reconcile(teams, 0);
-    m.setWorkflows('Payments', [{ ...wf(3848, 'open', ['DeveloperPriya is running']), title }, wf(2), wf(3, 'completed')], 0);
+    m.setDeliverables('Payments', [{ ...wf(3848, 'open', ['DeveloperPriya is running']), title }, wf(2), wf(3, 'completed')], 0);
     scene.model = m;
     scene.setTeams(teams);
     for (let i = 1; i <= 60; i++) frame(scene, i * 16);
     const S = scene as unknown as Inner;
-    /** Where workflow `id`'s node is on the canvas, in CSS px. */
-    const at = (id: number) => { const n = scene.workflowNodes().find((x) => x.id === id)!; return S.toScreen(n.x, n.y); };
+    /** Where deliverable `id`'s node is on the canvas, in CSS px. */
+    const at = (id: number) => { const n = scene.deliverableNodes().find((x) => x.id === id)!; return S.toScreen(n.x, n.y); };
     const pointer = (type: string, [x, y]: [number, number]) => canvas.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse' }));
     return { ...made, S, at, pointer };
   }
 
-  it('has no panel node: only the hub, the members and a node per open workflow', () => {
+  it('has no panel node: only the hub, the members and a node per open deliverable', () => {
     const { S } = wall();
     expect(new Set([...S.nodes.values()].map((n) => n.kind))).toEqual(new Set(['team', 'member', 'wf']));
     expect([...S.nodes.keys()].some((k) => k.startsWith('w:'))).toBe(false);
@@ -421,28 +421,28 @@ describe('no WORKFLOWS panel; the workflow nodes say "#id title"', () => {
 
   it('labels a node with its id and its title, clipped, "Backlog item " dropped; the text drawn is that label', () => {
     const { scene, ctx } = wall();
-    const label = scene.workflowNodes().find((n) => n.id === 3848)!.label;
+    const label = scene.deliverableNodes().find((n) => n.id === 3848)!.label;
     expect(label.startsWith('#3848 B008 Remote UI')).toBe(true);
     expect(label).not.toContain('Backlog item');
     expect(label.endsWith('…')).toBe(true);
     expect(label.length).toBeLessThanOrEqual(32);
-    expect(scene.workflowNodes().find((n) => n.id === 2)!.label).toBe('#2 Workflow 2');
+    expect(scene.deliverableNodes().find((n) => n.id === 2)!.label).toBe('#2 Deliverable 2');
     const texts: string[] = [];
     (ctx as unknown as Record<string, unknown>).fillText = (s: string) => { texts.push(s); };
     frame(scene, 2000);
     expect(texts).toContain(label);
-    expect(texts).not.toContain('WORKFLOWS');
+    expect(texts).not.toContain('DELIVERABLES');
   });
 
-  it('hover gives the whole title; a click opens that workflow; a drag does not', () => {
+  it('hover gives the whole title; a click opens that deliverable; a drag does not', () => {
     const { scene, at, pointer } = wall();
     const tips: unknown[] = [];
     scene.onHover = (h) => tips.push(h);
     pointer('pointermove', at(3848));
-    expect(tips.at(-1)).toMatchObject({ kind: 'workflow', team: 'Payments', workflow: expect.objectContaining({ id: 3848, title }) });
+    expect(tips.at(-1)).toMatchObject({ kind: 'deliverable', team: 'Payments', deliverable: expect.objectContaining({ id: 3848, title }) });
     const opened: [string, number | undefined][] = [];
     const picks: (string | null)[] = [];
-    scene.onOpenWorkflow = (t, id) => opened.push([t, id]);
+    scene.onOpenDeliverable = (t, id) => opened.push([t, id]);
     scene.onPick = (k) => picks.push(k);
     pointer('pointerdown', at(3848));
     pointer('pointerup', at(3848));
@@ -459,15 +459,15 @@ describe('no WORKFLOWS panel; the workflow nodes say "#id title"', () => {
     const { scene, S } = wall(375, 700);
     scene.setPhone(true);
     S.cam.k = 0.4;
-    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe('#3848');
+    expect(scene.deliverableNodes().find((n) => n.id === 3848)!.label).toBe('#3848');
     S.cam.k = 1.2;
-    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label.startsWith('#3848 B008')).toBe(true);
+    expect(scene.deliverableNodes().find((n) => n.id === 3848)!.label.startsWith('#3848 B008')).toBe(true);
   });
 
   it('a desktop window whose wall is narrow (Activity open) still shows the title zoomed out', () => {
     const { scene, S } = wall(660, 700); // 1280 x 800 with the sidebar and Activity open
     S.cam.k = 0.4;
-    expect(scene.workflowNodes().find((n) => n.id === 3848)!.label).toBe("#3848 B008 Remote UI: xterm's…");
+    expect(scene.deliverableNodes().find((n) => n.id === 3848)!.label).toBe("#3848 B008 Remote UI: xterm's…");
   });
 
   it('draws the label at least 8 px on screen, dimmed when another team is focused', () => {

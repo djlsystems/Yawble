@@ -453,13 +453,13 @@ public sealed partial class IntegrationService : IAsyncDisposable
                 if (reason is null) throw new ArgumentException($"this call asks the person first: give a reason ({ReasonProperty}, one line)");
                 var id = Scalar(
                     """
-                    INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, action)
+                    INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, action)
                     VALUES ($at, $i, $t, $m, $a, $r, $w, $c, $action) RETURNING id;
                     """,
                     ("$at", Now()), ("$i", integration), ("$t", run.Member.TeamId), ("$m", run.Member.Qualified), ("$a", JsonSerializer.Serialize(callArgs)),
                     ("$r", Clip(reason, 500)), ("$w", run.Correlation), ("$c", run.Causation), ("$action", tool));
                 Insert(integration, run.Member.Team, run.Member.Qualified, run.Correlation, callArgs, "asked", rule?.Pattern, null, Provenance.Actor.Current);
-                return $"asked: {server.Name}'s {tool} waits for the person's approval (request {id}). You will be woken with the result in this workflow. Do other work or end your turn; do not ask again.";
+                return $"asked: {server.Name}'s {tool} waits for the person's approval (request {id}). You will be woken with the result in this deliverable. Do other work or end your turn; do not ask again.";
             default:
                 var text = await RunMcpAsync(server, tool, clean, ct);
                 Insert(integration, run.Member.Team, run.Member.Qualified, run.Correlation, callArgs, Decisions.Allow, rule?.Pattern, null, Provenance.Actor.Current);

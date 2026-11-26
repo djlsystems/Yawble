@@ -519,7 +519,7 @@ public sealed partial class IntegrationService
 
     /// <summary>
     /// What a call returned: the agent's text, the record for the log, and the HTTP status and status line (null when nothing answered);
-    /// and, when something answered, its media type and its scrubbed (and cut) body on their own, as a script reads them.
+    /// and, when something answered, its media type and its scrubbed (and cut) body on their own, as a workflow reads them.
     /// </summary>
     private sealed record ApiResult(string Text, CliOutput? Output, int? Status, string? Head, string? Media = null, string? Body = null);
 
@@ -658,13 +658,13 @@ public sealed partial class IntegrationService
             if (reason is null) throw new ArgumentException($"this call asks the person first: give a reason ({ReasonProperty}, one line)");
             var id = Scalar(
                 """
-                INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, action)
+                INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, action)
                 VALUES ($at, $i, $t, $m, $a, $r, $w, $c, $action) RETURNING id;
                 """,
                 ("$at", Now()), ("$i", integration), ("$t", run.Member.TeamId), ("$m", run.Member.Qualified), ("$a", JsonSerializer.Serialize(callArgs)),
                 ("$r", Clip(SecretScrubber.Scrub(reason), 500)), ("$w", run.Correlation), ("$c", run.Causation), ("$action", op.Id));
             Record("asked", ruleText, null);
-            return $"asked: {api.Name}'s {op.Id} waits for the person's approval (request {id}). You will be woken with the result in this workflow. Do other work or end your turn; do not ask again.";
+            return $"asked: {api.Name}'s {op.Id} waits for the person's approval (request {id}). You will be woken with the result in this deliverable. Do other work or end your turn; do not ask again.";
         }
         var result = await SendApiAsync(api, request, sign, view, run.Member.TeamId, ct);
         Record(Decisions.Allow, ruleText, result.Output);
@@ -722,7 +722,7 @@ public sealed partial class IntegrationService
     /// segments (never a URL or "..": "/" becomes %2F), query and header parameters by their names, the body as JSON or a form. Unknown or
     /// missing parameters are refused. The URL must stay on the service URL's scheme, host and port, and under its path.
     /// Path parameters the Connection fills (<paramref name="fills"/>) are taken from it: a caller's different value is refused. A form body's
-    /// fields may be given as parameters by name (a script's natural shape): they go into the body.
+    /// fields may be given as parameters by name (a workflow's natural shape): they go into the body.
     /// </summary>
     private static ApiRequest PlanApiRequest(ApiRecord api, ApiOp op, JsonObject given, ConnectionFills? fills = null)
     {

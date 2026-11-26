@@ -319,7 +319,7 @@ public class CompanionCliTests : IDisposable
             ("git sync alpha feature --repo web", "git_sync_branch", """{"team":"alpha","branch":"feature","repo":"web"}"""),
             ("git merge alpha", "git_merge_team", """{"team":"alpha"}"""),
             ("git merge alpha --repo web", "git_merge_team", """{"team":"alpha","repo":"web"}"""),
-            ("workflow close alpha 7", "workflow_close", """{"team":"alpha","workflow":7}"""),
+            ("deliverable close alpha 7", "deliverable_close", """{"team":"alpha","deliverable":7}"""),
             ("backup list", "backups_list", "{}"),
             ("backup restore daily-20261110.db", "backup_restore", """{"backup":"daily-20261110.db"}"""),
             ("call team_activity --arg team=alpha --arg limit=5", "team_activity", """{"team":"alpha","limit":"5"}"""),
@@ -341,7 +341,7 @@ public class CompanionCliTests : IDisposable
         foreach (var bad in new[]
                  {
                      "nope", "team", "backlog dispatch B6", "backlog show", "board move twelve done", "answer alpha x yes", "tell alpha",
-                     "git push alpha", "workflow close alpha seven", "backup restore", "call", "call usage --args-json [1]",
+                     "git push alpha", "deliverable close alpha seven", "backup restore", "call", "call usage --args-json [1]",
                      "call usage --args-json {\"a\":1,\"a\":2}", "call usage --arg nokey", "backlog list --nope", "git merge alpha extra",
                      "team show", "team delete alpha extra", "teams --help",
                      "backlog add Fix login --team alpha", "backlog add Fix --body x", "backlog add Fix -- x",

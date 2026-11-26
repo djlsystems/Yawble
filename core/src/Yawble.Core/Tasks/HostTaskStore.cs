@@ -6,7 +6,7 @@ using Yawble.Core.Integrations;
 namespace Yawble.Core.Tasks;
 
 /// <summary>A task ask as stored in integration_asks (integration = 'task:&lt;name&gt;'), with what the person was shown.</summary>
-public sealed record TaskAskRow(long Id, long TeamId, string TaskName, long TaskId, string Member, string Reason, long Workflow, long CausationSeq,
+public sealed record TaskAskRow(long Id, long TeamId, string TaskName, long TaskId, string Member, string Reason, long Deliverable, long CausationSeq,
     string State, string? Note, string At, string? CommitSha, string? DefinitionHash, string? FilesHash, string? DetailJson);
 
 /// <summary>The database side of host tasks: definitions, the one standing approval per task, asks, calls and run records.</summary>
@@ -90,7 +90,7 @@ public sealed class HostTaskStore(string connectionString, TimeProvider clock)
 
     // ------------------------------------------------------------------ asks
 
-    private const string AskColumns = "id, team_id, integration, task_id, member, reason, workflow, causation_seq, state, note, at, commit_sha, definition_hash, files_hash, detail_json";
+    private const string AskColumns = "id, team_id, integration, task_id, member, reason, deliverable, causation_seq, state, note, at, commit_sha, definition_hash, files_hash, detail_json";
 
     private static TaskAskRow ReadAsk(SqliteDataReader r) => new(r.GetInt64(0), r.GetInt64(1), r.GetString(2)["task:".Length..], r.GetInt64(3), r.GetString(4), r.GetString(5),
         r.GetInt64(6), r.GetInt64(7), r.GetString(8), S(r, 9), r.GetString(10), S(r, 11), S(r, 12), S(r, 13), S(r, 14));
@@ -104,11 +104,11 @@ public sealed class HostTaskStore(string connectionString, TimeProvider clock)
         Query($"SELECT {AskColumns} FROM integration_asks WHERE task_id IS NOT NULL AND state = 'pending' {(teamId is null ? "" : "AND team_id = $t")} ORDER BY id;",
             ReadAsk, ("$t", teamId));
 
-    public long InsertAsk(HostTask task, string member, string reason, long workflow, long causation, string commit, string defHash, string filesHash, string detailJson) =>
+    public long InsertAsk(HostTask task, string member, string reason, long deliverable, long causation, string commit, string defHash, string filesHash, string detailJson) =>
         Scalar("""
-            INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, task_id, commit_sha, definition_hash, files_hash, detail_json)
+            INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, task_id, commit_sha, definition_hash, files_hash, detail_json)
             VALUES ($at, $i, $t, $m, '[]', $r, $w, $c, $task, $commit, $dh, $fh, $d) RETURNING id;
-            """, ("$at", Now()), ("$i", "task:" + task.Def.Name), ("$t", task.TeamId), ("$m", member), ("$r", Clip(reason, 500)), ("$w", workflow), ("$c", causation),
+            """, ("$at", Now()), ("$i", "task:" + task.Def.Name), ("$t", task.TeamId), ("$m", member), ("$r", Clip(reason, 500)), ("$w", deliverable), ("$c", causation),
             ("$task", task.Id), ("$commit", commit), ("$dh", defHash), ("$fh", filesHash), ("$d", detailJson));
 
     /// <summary>Closes a pending ask. A closed-as-stale ask is 'declined' with a note starting "stale:" (the state column has no other word for it).</summary>
@@ -127,11 +127,11 @@ public sealed class HostTaskStore(string connectionString, TimeProvider clock)
 
     // ------------------------------------------------------------------ calls (the existing log)
 
-    public void Call(HostTask task, string? member, long? workflow, string decision, string? rule, TaskRunRow? run, Provenance.Actor? who) =>
+    public void Call(HostTask task, string? member, long? deliverable, string decision, string? rule, TaskRunRow? run, Provenance.Actor? who) =>
         Exec("""
-            INSERT INTO integration_calls (at, integration, team, member, workflow, args, decision, rule, exit_code, duration_ms, output_bytes, via, user_name)
+            INSERT INTO integration_calls (at, integration, team, member, deliverable, args, decision, rule, exit_code, duration_ms, output_bytes, via, user_name)
             VALUES ($at, $i, $team, $m, $w, '[]', $d, $r, $x, $ms, $b, $via, $u);
-            """, ("$at", Now()), ("$i", "task:" + task.Def.Name), ("$team", TeamName(task.TeamId)), ("$m", member), ("$w", workflow), ("$d", decision), ("$r", rule),
+            """, ("$at", Now()), ("$i", "task:" + task.Def.Name), ("$team", TeamName(task.TeamId)), ("$m", member), ("$w", deliverable), ("$d", decision), ("$r", rule),
             ("$x", run?.ExitCode), ("$ms", run?.EndedAt is { } e ? (long)(DateTimeOffset.Parse(e, CultureInfo.InvariantCulture) - DateTimeOffset.Parse(run.StartedAt, CultureInfo.InvariantCulture)).TotalMilliseconds : null),
             ("$b", run?.OutputBytes), ("$via", who?.Via), ("$u", who?.User));
 

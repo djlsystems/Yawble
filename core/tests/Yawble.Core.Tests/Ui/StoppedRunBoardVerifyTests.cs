@@ -43,7 +43,7 @@ public class StoppedRunBoardVerifyTests
         var runner = new ScriptedRunner();
         runner.On("Alpha/stop", async (run, ct) => { await Task.Delay(Timeout.Infinite, ct); return RunResult.Ok; })
             .On("Alpha/fine", (run, ct) => Task.FromResult(RunResult.Ok))
-            // The Manager, woken by the stop notice, tells the member again in the same workflow (once the test has looked).
+            // The Manager, woken by the stop notice, tells the member again in the same deliverable (once the test has looked).
             .On("Alpha/Manager", async (run, ct) =>
             {
                 if (run.Items.Any(i => i.Type == MessageTypes.Failed && i.Source == "Alpha/stop"))
@@ -78,7 +78,7 @@ public class StoppedRunBoardVerifyTests
             Assert.Equal("stopped", stopped["memberState"]!["attention"]!.GetValue<string>());
             await Wait.UntilAsync(async () => (await Of("fine"))["status"]!.GetValue<string>() is "completed" or "done", "fine finished");
 
-            // The Manager's new instruction, same workflow: the same card leaves "stopped" and runs again.
+            // The Manager's new instruction, same deliverable: the same card leaves "stopped" and runs again.
             gate.SetResult();
             await Wait.UntilAsync(() => runner.AdmittedNames().Count(n => n == "Alpha/stop") == 2, "stop running again", TimeSpan.FromSeconds(20));
             await Wait.UntilAsync(async () => (await Card(id))["status"]!.GetValue<string>() == "running", "card says running again", TimeSpan.FromSeconds(20));
@@ -197,6 +197,7 @@ public class StoppedRunBoardVerifyTests
                     tx.Commit();
                 }
                 // The old CHECK refuses 'stopped': this is the schema before the fix.
+                // (Its column is still named workflow here: 0060 renames it to deliverable.)
                 Assert.Throws<SqliteException>(() => Exec(c, "INSERT INTO board_cards (team, title, status, created_at, updated_at) VALUES ('w','x','stopped','t','t');"));
                 Exec(c, """
                     INSERT INTO board_cards (team, member, item, title, body, status, lane, placed, awaiting_manager, workflow, created_at, updated_at,
@@ -243,7 +244,7 @@ public class StoppedRunBoardVerifyTests
             // The app's own store and projector work on the upgraded db: a stop saves "stopped".
             var store = new BoardStore(cs);
             var card = store.Card(1)!;
-            Assert.Equal(("A", "B007", 5L, true), (card.Title, card.Item, card.Workflow!.Value, card.AwaitingManager));
+            Assert.Equal(("A", "B007", 5L, true), (card.Title, card.Item, card.Deliverable!.Value, card.AwaitingManager));
             new BoardProjector(store).Apply(Stop("Tomas", 5, 1, 1));
             Assert.Equal(("stopped", Lanes.InProgress), (store.Card(1)!.Status, store.Card(1)!.Lane));
             Assert.Throws<SqliteException>(() => Exec(db, "UPDATE board_cards SET status = 'halted' WHERE id = 1;"));

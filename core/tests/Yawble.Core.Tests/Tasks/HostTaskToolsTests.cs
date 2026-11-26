@@ -142,9 +142,9 @@ public class HostTaskToolsTests
         using (Actor.Use(Actor.Window))
             await integrations.DispatchAsync("integrations.approve", new JsonObject { ["id"] = askId, ["always"] = true }, Ct);
         using var store = f.Db.OpenStore();
-        await Wait.UntilAsync(() => store.Workflow(root.Seq).Any(m => m.Type == MessageTypes.InstructionPrefix + "Beta/Ada" && Payload.Field(m, "text")?.Contains("task build: exit") == true),
+        await Wait.UntilAsync(() => store.Deliverable(root.Seq).Any(m => m.Type == MessageTypes.InstructionPrefix + "Beta/Ada" && Payload.Field(m, "text")?.Contains("task build: exit") == true),
             "Ada woken with the result");
-        var told = store.Workflow(root.Seq).Last(m => m.Type == MessageTypes.InstructionPrefix + "Beta/Ada");
+        var told = store.Deliverable(root.Seq).Last(m => m.Type == MessageTypes.InstructionPrefix + "Beta/Ada");
         Assert.Contains("task build: exit 0", Payload.Field(told, "text"));
         Assert.Contains("hello", Payload.Field(told, "text"));
         var record = Assert.Single(tasks.Store.Runs(tasks.Store.Task(team, "build")!.Id));

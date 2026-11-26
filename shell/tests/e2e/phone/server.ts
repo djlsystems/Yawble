@@ -141,7 +141,7 @@ async function buildRendererLocked(from: string, out: string) {
   }
   // The base's tree: its vite.config.mts is not loadable from under test-results, so the same settings inline (the
   // shell's vite.config.mts at BASE_COMMIT: root, base, the Vue plugin, the Code browser alias, dedupe, the build-version
-  // define (as with no scripts/ folder: 0.0.0+dev.unknown), the two pages; the same at every base commit used so far).
+  // define (as with no workflows/ folder: 0.0.0+dev.unknown), the two pages; the same at every base commit used so far).
   // Check them again when BASE_COMMIT moves: `git diff <old> <new> -- shell/vite.config.mts`.
   const vue = (await import('@vitejs/plugin-vue')).default;
   const renderer = path.join(from, 'src', 'renderer');

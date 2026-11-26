@@ -56,7 +56,7 @@ public sealed class HostTaskService
 
     /// <param name="repoOf">The team's repository by name ("main" is the primary), or null when the team has none by that name.</param>
     /// <param name="docsRootOf">The team's documents folder, where full logs go (under task-runs/).</param>
-    /// <param name="wake">Delivers a message to the requesting agent (a PersonTell on its workflow).</param>
+    /// <param name="wake">Delivers a message to the requesting agent (a PersonTell on its deliverable).</param>
     /// <param name="readEnv">The person's environment (for the named pass-through variables); tests substitute it.</param>
     /// <param name="connections">Where the variables a task takes from a Connection are checked (at save) and read (at each start).</param>
     public HostTaskService(string connectionString, HostGit git, Func<long, string, TaskRepoInfo?> repoOf, Func<long, string> docsRootOf, Func<TaskWake, Task> wake,
@@ -132,7 +132,7 @@ public sealed class HostTaskService
     /// <c>task_run(name, reason)</c>: refused (a precondition, said in terms of what the person must fix), already waiting, asked, or
     /// started on a standing approval. Returns at once; the outcome of a run arrives as a wake-up.
     /// </summary>
-    public async Task<TaskRequestResult> RequestAsync(long teamId, string name, string reason, string member, long workflow, long causationSeq, CancellationToken ct = default)
+    public async Task<TaskRequestResult> RequestAsync(long teamId, string name, string reason, string member, long deliverable, long causationSeq, CancellationToken ct = default)
     {
         var task = _store.Task(teamId, name?.Trim() ?? "");
         if (task is null)
@@ -146,7 +146,7 @@ public sealed class HostTaskService
             && DateTimeOffset.TryParse(d.At, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at)
             && _clock.GetUtcNow() - at < TimeSpan.FromMinutes(DeclineCooldownMinutes))
         {
-            _store.Call(task, member, workflow, "deny", "declined recently", null, Actor.Current);
+            _store.Call(task, member, deliverable, "deny", "declined recently", null, Actor.Current);
             return Refused(task, 0, $"the person declined this task a moment ago{(string.IsNullOrWhiteSpace(d.Note) ? "" : $": {d.Note.Trim()}")}. "
                 + $"Do not ask again for {DeclineCooldownMinutes} minutes; carry on without it or say what you need in your report.");
         }
@@ -154,13 +154,13 @@ public sealed class HostTaskService
         var (eval, refusal) = await EvaluateAsync(task, strict: true, ct);
         if (refusal is not null)
         {
-            _store.Call(task, member, workflow, "deny", $"precondition {refusal.Precondition}", null, Actor.Current);
+            _store.Call(task, member, deliverable, "deny", $"precondition {refusal.Precondition}", null, Actor.Current);
             return Refused(task, refusal.Precondition, refusal.Message);
         }
 
         if (BusyText(task, eval!.Repo.Path) is { } busy)
         {
-            _store.Call(task, member, workflow, "deny", "precondition 8", null, Actor.Current);
+            _store.Call(task, member, deliverable, "deny", "precondition 8", null, Actor.Current);
             return Refused(task, 8, busy);
         }
 
@@ -168,33 +168,33 @@ public sealed class HostTaskService
         if (_store.PendingAsk(task.Id) is { } waiting)
             return new TaskRequestResult(RequestKind.AlreadyWaiting, $"asked: task {task.Def.Name} already waits for the person (request {waiting.Id}). Do not ask again.", waiting.Id);
 
-        if (BindingRefusal(eval, null, member, workflow, Actor.Current) is { } unbound) return Refused(task, 9, unbound);
+        if (BindingRefusal(eval, null, member, deliverable, Actor.Current) is { } unbound) return Refused(task, 9, unbound);
 
         var approval = _store.Approval(task.Id);
         if (eval.Covers(approval))
         {
             var reservation = TryReserve(task, eval.Repo.Path, out var busyNow);
             if (reservation is null) return Refused(task, 8, busyNow!);
-            var runId = await StartRunAsync(reservation, eval, null, member, workflow, causationSeq, "allow", Actor.Current, ct);
+            var runId = await StartRunAsync(reservation, eval, null, member, deliverable, causationSeq, "allow", Actor.Current, ct);
             return new TaskRequestResult(RequestKind.Started,
                 $"started: run {runId} of task {task.Def.Name} at {TaskPinning.Short(eval.Commit)} (standing approval). You will be woken with the result.", RunId: runId);
         }
 
         if (_store.AsksSince(teamId, _clock.GetUtcNow().AddHours(-1)) >= MaxAsksPerTeamPerHour)
         {
-            _store.Call(task, member, workflow, "deny", "too many requests", null, Actor.Current);
+            _store.Call(task, member, deliverable, "deny", "too many requests", null, Actor.Current);
             return Refused(task, 0, "too many task requests from this team in the last hour; say what you need in your report instead.");
         }
-        var askId = await CreateAskAsync(task, eval, approval, member, reason, workflow, causationSeq, ct);
-        _store.Call(task, member, workflow, "asked", null, null, Actor.Current);
+        var askId = await CreateAskAsync(task, eval, approval, member, reason, deliverable, causationSeq, ct);
+        _store.Call(task, member, deliverable, "asked", null, null, Actor.Current);
         return new TaskRequestResult(RequestKind.Asked,
-            $"asked: task {task.Def.Name} waits for the person (request {askId}). You will be woken with the result in this workflow. Do other work or end your turn; do not ask again.", askId);
+            $"asked: task {task.Def.Name} waits for the person (request {askId}). You will be woken with the result in this deliverable. Do other work or end your turn; do not ask again.", askId);
     }
 
     private static TaskRequestResult Refused(HostTask task, int precondition, string message) =>
         new(RequestKind.Refused, $"refused: task {task.Def.Name}: {message}", Precondition: precondition);
 
-    private async Task<long> CreateAskAsync(HostTask task, TaskEvaluation eval, ApprovalRow? approval, string member, string reason, long workflow, long causation, CancellationToken ct)
+    private async Task<long> CreateAskAsync(HostTask task, TaskEvaluation eval, ApprovalRow? approval, string member, string reason, long deliverable, long causation, CancellationToken ct)
     {
         var detail = new JsonObject
         {
@@ -207,7 +207,7 @@ public sealed class HostTaskService
         };
         if (approval is not null)
             detail["changed"] = await TaskPinning.DescribeChangeAsync(approval, eval.DefinitionJson, eval.Pins, eval.Commit, eval.DefinitionHash, eval.FilesHash, task.Def.PinMode, eval.Git, ct);
-        return _store.InsertAsk(task, member, reason, workflow, causation, eval.Commit, eval.DefinitionHash, eval.FilesHash, detail.ToJsonString());
+        return _store.InsertAsk(task, member, reason, deliverable, causation, eval.Commit, eval.DefinitionHash, eval.FilesHash, detail.ToJsonString());
     }
 
     // ------------------------------------------------------------------ the person's decision
@@ -241,14 +241,14 @@ public sealed class HostTaskService
         if (eval!.Commit != ask.CommitSha || eval.DefinitionHash != ask.DefinitionHash || eval.FilesHash != ask.FilesHash)
         {
             _store.CloseAsk(askId, "declined", "stale: the code or the definition changed while the request waited", who);
-            var fresh = await CreateAskAsync(task, eval, _store.Approval(task.Id), ask.Member, ask.Reason, ask.Workflow, ask.CausationSeq, ct);
+            var fresh = await CreateAskAsync(task, eval, _store.Approval(task.Id), ask.Member, ask.Reason, ask.Deliverable, ask.CausationSeq, ct);
             await WakeAsync(ask, $"Request {askId} for task {task.Def.Name} went stale (the base branch or the task changed before the person decided), so nothing ran. "
                 + $"A fresh request {fresh}, showing what changed, waits for the person.");
             return new TaskRequestResult(RequestKind.Asked,
                 $"stale: the base branch or the task changed since the request was shown; nothing ran. A fresh request {fresh} waits.", fresh);
         }
 
-        if (BindingRefusal(eval, askId, ask.Member, ask.Workflow, who) is { } unbound)
+        if (BindingRefusal(eval, askId, ask.Member, ask.Deliverable, who) is { } unbound)
         {
             _store.CloseAsk(askId, "declined", $"stale: {unbound}", who);
             await WakeAsync(ask, $"The person approved request {askId} for task {task.Def.Name}, but {unbound}");
@@ -263,7 +263,7 @@ public sealed class HostTaskService
             throw new ArgumentException($"request {askId} is not waiting");
         }
         if (always) _store.SetApproval(task.Id, eval.DefinitionHash, eval.FilesHash, eval.DefinitionJson, TaskPinning.FilesJson(eval.Pins.Files), eval.Commit, who);
-        var runId = await StartRunAsync(reservation, eval, askId, ask.Member, ask.Workflow, ask.CausationSeq, "approved", who, ct);
+        var runId = await StartRunAsync(reservation, eval, askId, ask.Member, ask.Deliverable, ask.CausationSeq, "approved", who, ct);
         return new TaskRequestResult(RequestKind.Started, $"started: run {runId} of task {task.Def.Name}{(always ? " (Always for this team stored)" : "")}", askId, runId);
     }
 
@@ -273,7 +273,7 @@ public sealed class HostTaskService
         if (ask is null || ask.State != "pending") throw new ArgumentException($"request {askId} is not waiting");
         var who = Who;
         _store.CloseAsk(askId, "declined", string.IsNullOrWhiteSpace(note) ? null : note.Trim(), who);
-        if (_store.TaskById(ask.TaskId) is { } task) _store.Call(task, ask.Member, ask.Workflow, "declined", null, null, who);
+        if (_store.TaskById(ask.TaskId) is { } task) _store.Call(task, ask.Member, ask.Deliverable, "declined", null, null, who);
         await WakeAsync(ask, $"The person declined your request to run task {ask.TaskName} (request {askId})"
             + (string.IsNullOrWhiteSpace(note) ? "." : $": {note.Trim()}") + " Do not try another way; carry on without it or say what you need.");
     }
@@ -426,19 +426,19 @@ public sealed class HostTaskService
     /// Null when every binding can be read now. Otherwise nothing starts: a refused run record notes which bindings (by variable and
     /// Connection name, never a value, in missing_env as MissingEnv does) and the returned text says what the person must fix.
     /// </summary>
-    private string? BindingRefusal(TaskEvaluation eval, long? askId, string? member, long workflow, Actor? who)
+    private string? BindingRefusal(TaskEvaluation eval, long? askId, string? member, long deliverable, Actor? who)
     {
         if (eval.Task.Def.EnvFromConnections.Count == 0) return null;
         var (_, problems) = TaskProcess.ReadBindings(eval.Task.Def.EnvFromConnections, _connections);
-        return problems.Count == 0 ? null : RecordBindingRefusal(eval, problems, askId, member, workflow, who).Text;
+        return problems.Count == 0 ? null : RecordBindingRefusal(eval, problems, askId, member, deliverable, who).Text;
     }
 
-    private (long Run, string Text) RecordBindingRefusal(TaskEvaluation eval, List<string> problems, long? askId, string? member, long workflow, Actor? who)
+    private (long Run, string Text) RecordBindingRefusal(TaskEvaluation eval, List<string> problems, long? askId, string? member, long deliverable, Actor? who)
     {
         var task = eval.Task;
         var run = _store.InsertRun(task, eval.Repo.Path, askId, member, eval.Commit, eval.DefinitionHash, eval.FilesHash, eval.ProgramResolved, string.Join("; ", problems), who);
         _store.FinishRun(run, "refused", null, false, null, 0, false, null, null, null, null);
-        _store.Call(task, member, workflow, "deny", "precondition 9", _store.Run(run), who);
+        _store.Call(task, member, deliverable, "deny", "precondition 9", _store.Run(run), who);
         return (run, $"nothing ran: a variable it takes from a Connection cannot be read ({string.Join("; ", problems)}). "
             + "The person must fix the Connection in Settings > Integrations > Connections, or the task.");
     }
@@ -481,7 +481,7 @@ public sealed class HostTaskService
 
     // ------------------------------------------------------------------ running
 
-    private async Task<long> StartRunAsync(Reservation reservation, TaskEvaluation eval, long? askId, string? member, long workflow, long causation, string decision,
+    private async Task<long> StartRunAsync(Reservation reservation, TaskEvaluation eval, long? askId, string? member, long deliverable, long causation, string decision,
         Actor? who, CancellationToken ct)
     {
         var task = eval.Task;
@@ -496,9 +496,9 @@ public sealed class HostTaskService
                 var why = head != eval.Commit ? "the checkout moved to another commit" : "the checkout is no longer clean";
                 var refused = _store.InsertRun(task, eval.Repo.Path, askId, member, eval.Commit, eval.DefinitionHash, eval.FilesHash, eval.ProgramResolved, null, who);
                 _store.FinishRun(refused, "refused", null, false, null, 0, false, null, null, head, dirty);
-                _store.Call(task, member, workflow, "deny", "checkout changed before start", _store.Run(refused), who);
+                _store.Call(task, member, deliverable, "deny", "checkout changed before start", _store.Run(refused), who);
                 reservation.Dispose();
-                if (member is not null) await WakeAsync(new TaskWake(task.TeamId, member, workflow, causation, $"task {task.Def.Name}: nothing ran, {why} between the decision and the start. Ask again."));
+                if (member is not null) await WakeAsync(new TaskWake(task.TeamId, member, deliverable, causation, $"task {task.Def.Name}: nothing ran, {why} between the decision and the start. Ask again."));
                 return refused;
             }
 
@@ -506,9 +506,9 @@ public sealed class HostTaskService
             var (bound, problems) = TaskProcess.ReadBindings(task.Def.EnvFromConnections, _connections);
             if (problems.Count > 0)
             {
-                var (refusedRun, text) = RecordBindingRefusal(eval, problems, askId, member, workflow, who);
+                var (refusedRun, text) = RecordBindingRefusal(eval, problems, askId, member, deliverable, who);
                 reservation.Dispose();
-                if (member is not null) await WakeAsync(new TaskWake(task.TeamId, member, workflow, causation, $"task {task.Def.Name}: {text}"));
+                if (member is not null) await WakeAsync(new TaskWake(task.TeamId, member, deliverable, causation, $"task {task.Def.Name}: {text}"));
                 return refusedRun;
             }
             var (env, missing, secrets) = TaskProcess.BuildEnvironment(task.Def.EnvNames, _readEnv);
@@ -532,7 +532,7 @@ public sealed class HostTaskService
             };
             var cts = new CancellationTokenSource();
             _liveLogs[runId] = logPath; // before the run starts: a quick one removes it when it is over
-            var done = Task.Run(() => ExecuteAsync(reservation, eval, runId, options, missing, member, workflow, causation, decision, who, cts));
+            var done = Task.Run(() => ExecuteAsync(reservation, eval, runId, options, missing, member, deliverable, causation, decision, who, cts));
             _active[runId] = (cts, done);
         }
         catch
@@ -543,7 +543,7 @@ public sealed class HostTaskService
         return runId;
     }
 
-    private async Task ExecuteAsync(Reservation reservation, TaskEvaluation eval, long runId, TaskProcessOptions options, List<string> missing, string? member, long workflow,
+    private async Task ExecuteAsync(Reservation reservation, TaskEvaluation eval, long runId, TaskProcessOptions options, List<string> missing, string? member, long deliverable,
         long causation, string decision, Actor? who, CancellationTokenSource cts)
     {
         var task = eval.Task;
@@ -564,9 +564,9 @@ public sealed class HostTaskService
             _store.FinishRun(runId, "done", result?.ExitCode, result?.TimedOut ?? false, result?.KilledBy, result?.OutputBytes, result?.Truncated ?? false,
                 result is null ? null : options.LogPath, result?.LogSha256, headAfter, dirtyAfter);
             var run = _store.Run(runId)!;
-            _store.Call(task, member, workflow, decision, null, run, who);
+            _store.Call(task, member, deliverable, decision, null, run, who);
             if (member is not null)
-                await WakeAsync(new TaskWake(task.TeamId, member, workflow, causation, WakeText(task, run, result, error, options, headAfter, dirtyAfter, missing))
+                await WakeAsync(new TaskWake(task.TeamId, member, deliverable, causation, WakeText(task, run, result, error, options, headAfter, dirtyAfter, missing))
                 {
                     Run = run, Tail = result?.Tail, Def = task.Def,
                 });
@@ -625,7 +625,7 @@ public sealed class HostTaskService
         }
     }
 
-    private async Task WakeAsync(TaskAskRow ask, string text) => await WakeAsync(new TaskWake(ask.TeamId, ask.Member, ask.Workflow, ask.CausationSeq, text));
+    private async Task WakeAsync(TaskAskRow ask, string text) => await WakeAsync(new TaskWake(ask.TeamId, ask.Member, ask.Deliverable, ask.CausationSeq, text));
 
     private async Task WakeAsync(TaskWake wake)
     {

@@ -41,7 +41,7 @@ const api = {
     const a: Record<string, () => unknown> = {
       'teams.agents': () => [agent(1, 'Manager'), agent(2, 'DeveloperAda')], 'bus.decisions': () => [], 'integrations.asks': () => [],
       'monitor.messages': () => ({ end: 0, messages: [] }), 'monitor.steps': () => ({ end: 0, pending: false, steps: [] }),
-      'agentProfiles.list': () => [], 'bus.workflows': () => [], 'teams.syncToBase': () => ({ note: null, on: true, behind: null }),
+      'agentProfiles.list': () => [], 'bus.deliverables': () => [], 'teams.syncToBase': () => ({ note: null, on: true, behind: null }),
       'terminal.banner': () => ({ memberId: params?.memberId, title: 't', state: 'idle', details: [], loosened: [], interactive: false }),
     };
     if (!a[method]) throw new Error(`unexpected ${method}`);

@@ -3,7 +3,7 @@ using Yawble.Core.Teams;
 namespace Yawble.Core.Bus;
 
 /// <summary>Whether a team is quiet enough to archive or delete, and if not, what is still working (in words).</summary>
-public sealed record TeamQuiet(bool Quiet, IReadOnlyList<string> Working, IReadOnlyList<long> OpenWorkflows);
+public sealed record TeamQuiet(bool Quiet, IReadOnlyList<string> Working, IReadOnlyList<long> OpenDeliverables);
 
 /// <summary>
 /// The person's team actions: pause and resume, archive and unarchive,
@@ -190,7 +190,7 @@ public sealed partial class BusEngine
             if (what.Count > 0) working.Add($"{m.Name} {string.Join(" and ", what)}");
         }
         var team = _store.Teams().Single(t => t.Id == teamId).Name;
-        var open = _store.WorkflowsOf(team, -1).Select(w => w.Id).Where(w => !_store.WorkflowEnded(w)).ToArray();
+        var open = _store.DeliverablesOf(team, -1).Select(w => w.Id).Where(w => !_store.DeliverableEnded(w)).ToArray();
         return new TeamQuiet(working.Count == 0, working, open);
     }
 

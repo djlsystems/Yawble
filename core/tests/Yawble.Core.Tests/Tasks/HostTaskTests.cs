@@ -77,8 +77,8 @@ internal sealed class TaskFixture : IDisposable
 
     public Task<HostTask> SaveAsync(HostTaskDef d) => Svc.SaveAsync(TeamId, d);
 
-    public Task<TaskRequestResult> Request(string name = "build", string reason = "need it", long workflow = 1) =>
-        Svc.RequestAsync(TeamId, name, reason, "Alpha/Ada", workflow, 7);
+    public Task<TaskRequestResult> Request(string name = "build", string reason = "need it", long deliverable = 1) =>
+        Svc.RequestAsync(TeamId, name, reason, "Alpha/Ada", deliverable, 7);
 
     public async Task<TaskRunRow> Finish(TaskRequestResult r)
     {

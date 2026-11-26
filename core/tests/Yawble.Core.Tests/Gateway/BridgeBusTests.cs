@@ -201,8 +201,8 @@ public class BridgeBusTests
                     foreach (var i in run.Items.Where(i => i.Type == MessageTypes.Handback)) handbacks.Add(i.Source);
                     if (handbacks.Count < 2) return;
                 }
-                var (done, refused) = await bridge.CallAsync("workflow_complete", new JsonObject { ["delivered"] = "parser and tests" });
-                lock (transcript) transcript.Add($"workflow_complete -> {(refused ? "refused" : "ok")}: {done}");
+                var (done, refused) = await bridge.CallAsync("deliverable_complete", new JsonObject { ["delivered"] = "parser and tests" });
+                lock (transcript) transcript.Add($"deliverable_complete -> {(refused ? "refused" : "ok")}: {done}");
                 return;
             }
 
@@ -233,13 +233,13 @@ public class BridgeBusTests
 
         var root = await engine.PersonTellAsync("Alpha", "Manager", "ship the parser with tests", ct: Ct);
         using var reader = f.Db.OpenStore();
-        await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "workflow.completed via the bridge", TimeSpan.FromSeconds(90));
+        await Wait.UntilAsync(() => reader.DeliverableDeclared(root.Seq), "deliverable.completed via the bridge", TimeSpan.FromSeconds(90));
         await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiescent", TimeSpan.FromSeconds(30));
 
         // Every run saw all 8 tools.
         Assert.All(toolLists, t => Assert.Equal(McpBusServer.ToolNames.Order(), t.Order()));
 
-        var log = reader.Workflow(root.Seq);
+        var log = reader.Deliverable(root.Seq);
         var bySeq = log.ToDictionary(m => m.Seq);
         Message Single(string type, string source) => Assert.Single(log, m => m.Type == type && m.Source == source);
         Message CauseOf(Message m) => bySeq[m.CausationSeq!.Value];
@@ -280,10 +280,10 @@ public class BridgeBusTests
         Assert.DoesNotContain(log, m => m.Type == "agent.instruction.Alpha/Ada" && m.Source == "Alpha/Bo");
         Assert.DoesNotContain(log, m => m.Type == "agent.instruction.Alpha/Bo" && m.Source == "Alpha/Ada");
         // The declaration, by the Manager, caused by a member's report.
-        var declared = Single(MessageTypes.WorkflowCompleted, "Alpha/Manager");
+        var declared = Single(MessageTypes.DeliverableCompleted, "Alpha/Manager");
         ChainOk(declared);
         Assert.StartsWith("Alpha/", CauseOf(declared).Source);
-        Assert.Contains(transcript, t => t.StartsWith("workflow_complete -> ok"));
+        Assert.Contains(transcript, t => t.StartsWith("deliverable_complete -> ok"));
 
         // The gateway log shows the bus traffic was authorised, and nothing was refused.
         Assert.DoesNotContain(f.Log.Read(), e => e.Kind == GatewayEventKinds.Unauthorized);
@@ -347,7 +347,7 @@ public class BridgeBusTests
 
         // The late progress never reached the bus.
         using var reader = f.Db.OpenStore();
-        Assert.DoesNotContain(reader.Workflow(root.Seq), m => m.Type == MessageTypes.Progress);
+        Assert.DoesNotContain(reader.Deliverable(root.Seq), m => m.Type == MessageTypes.Progress);
     }
 
     [Fact]

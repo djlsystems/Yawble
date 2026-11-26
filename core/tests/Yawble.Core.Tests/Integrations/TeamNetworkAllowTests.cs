@@ -318,6 +318,8 @@ public sealed class TeamNetworkAllowTests : IAsyncLifetime
             """);
 
         Yawble.Core.Storage.SchemaMigrator.Migrate(db.ConnectionString);
+        // 0041 rebuilt the table with its column of that time; 0060 (already applied here) names it deliverable.
+        Exec(db, "ALTER TABLE network_asks RENAME COLUMN workflow TO deliverable;");
 
         var asks = new NetworkAskService(db.ConnectionString, Store(new PolicyStore(db.ConnectionString)), (_, _, _, _, _) => Task.CompletedTask).Asks(pendingOnly: false);
         Assert.Equal(2, asks.Count);

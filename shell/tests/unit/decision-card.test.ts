@@ -38,7 +38,7 @@ const oldQuestion = 'Part 2 verify: build, isolation and outbound checks behaved
   + 'test run repeated, or tell me to skip it and close without the test run.';
 
 const newDecision = (over: Partial<DecisionOption> = {}): Decision => ({
-  seq: 41, from: 'Manager', workflow: 7, at: '', question: oldQuestion,
+  seq: 41, from: 'Manager', deliverable: 7, at: '', question: oldQuestion,
   summary: 'Tests can\'t run: the sandbox blocks localhost. Turn it on for this team?',
   details: 'Results:\n\n1. Build: succeeded.\n2. dotnet test (VSTest): failed.',
   options: [
@@ -161,7 +161,7 @@ describe('the decision card', () => {
   });
 
   it('the long question: the ask first, Approve and Skip (no "1. Build" buttons), findings under Details', async () => {
-    const { w, calls } = mountView({ seq: 40, from: 'Manager', workflow: 7, at: '', question: oldQuestion });
+    const { w, calls } = mountView({ seq: 40, from: 'Manager', deliverable: 7, at: '', question: oldQuestion });
     await flushPromises();
     expect(w.get('[data-test=decision-question]').text().startsWith('Do you want to turn on Allow localhost (macOS)')).toBe(true);
     expect(w.findAll('[data-test^=decision-option-]')).toHaveLength(0);

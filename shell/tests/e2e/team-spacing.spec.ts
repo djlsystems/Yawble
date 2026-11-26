@@ -1,19 +1,19 @@
-// Team spacing and the workflow node labels (the WORKFLOWS panel gone, "#id title" labels), end to end in headless
+// Team spacing and the deliverable node labels (the DELIVERABLES panel gone, "#id title" labels), end to end in headless
 // Chrome against the phone-remote fake core (remote.html, tests/e2e/phone), as monitor.spec.ts.
 //
 // The walls: 2 or 3 teams (alpha, bravo, charlie), each with 4 members (Manager + 3), a wide code map (6 folders of 4
-// files from monitor.codeEvents) and 5 open workflows (one titled "Backlog item ..."). The wall is a canvas: an init
-// script records what the scene draws (arcs, paths, texts with their font, transform and alpha), as in monitor.spec.ts.
+// files from monitor.codeEvents) and 5 open deliverables (one titled "Backlog item ..."). The wall is a canvas: an init
+// workflow records what the scene draws (arcs, paths, texts with their font, transform and alpha), as in monitor.spec.ts.
 //
 // What is measured (world px = the scene's own units, the camera's transform taken out):
 //   hub distances      - between each pair of team hubs (the hub's label "team" is drawn 22.5 above its centre).
 //   cluster gap        - the least distance between any two drawn things of different teams (member bodies and names,
-//                        hubs, workflow squares and labels, map folders and files; map things belong to their nearest
+//                        hubs, deliverable squares and labels, map folders and files; map things belong to their nearest
 //                        hub, checked by count: each team must get exactly its own 6 folders + 24 files).
 //   empty middle       - the distance from the hubs' centroid to the nearest drawn thing.
 //
 //   npx playwright test team-spacing --workers=1      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
-// Screenshots and results go to $YAWBLE_TEAM_DOCS/team-spacing and workflow-nodes.
+// Screenshots and results go to $YAWBLE_TEAM_DOCS/team-spacing and deliverable-nodes.
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -25,7 +25,7 @@ test.setTimeout(180_000);
 
 const DOCS = process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, '..', '..', 'test-results');
 const SPACING_DIR = path.join(DOCS, 'team-spacing');
-const NODES_DIR = path.join(DOCS, 'workflow-nodes');
+const NODES_DIR = path.join(DOCS, 'deliverable-nodes');
 test.beforeAll(async () => {
   test.setTimeout(600_000);
   for (const d of [SPACING_DIR, NODES_DIR]) ensureDir(path.join(d, 'screens'));
@@ -41,14 +41,14 @@ const MEMBERS: Record<string, string[]> = {
   charlie: ['Manager', 'DeveloperCy', 'TesterCal', 'ReviewerCat'],
 };
 const FOLDERS = 6, FILES = 4;
-/** Each team's 5 open workflows: the first a backlog item with a long title. */
+/** Each team's 5 open deliverables: the first a backlog item with a long title. */
 function wfsOf(ti: number): { id: number; title: string }[] {
   const base = 3848 + ti * 20;
   return [
     { id: base, title: "Backlog item B081 Remote UI: xterm link detection on phones and tablets" },
     { id: base + 1, title: 'Card 12: partial refunds for the merchant dashboard' },
     { id: base + 2, title: 'Short one' },
-    { id: base + 3, title: 'Backlog item B090 Workflow node labels' },
+    { id: base + 3, title: 'Backlog item B090 Deliverable node labels' },
     { id: base + 4, title: 'Verify the release notes for the November drop' },
   ];
 }
@@ -58,7 +58,7 @@ const titleOf = (id: number) => ALL_WFS.find((w) => w.id === id)!.title;
 /**
  * The rule cards 405 / 409 state, written out here to check what is drawn: "#id title", "Backlog item " dropped, 30 chars
  * with "…"; only "#id" when the WINDOW is phone-wide (under 760: the window, not the canvas) and zoomed out under 0.6.
- * A crowded label may also fall back to "#id" or be left out (placeWorkflowLabels): see labelCheck.
+ * A crowded label may also fall back to "#id" or be left out (placeDeliverableLabels): see labelCheck.
  */
 function expectLabel(id: number, zoom: number, windowPx: number): string {
   if (windowPx < 760 && zoom < 0.6) return `#${id}`;
@@ -75,8 +75,8 @@ class Feed {
   rows: any[] = []; events: any[] = []; wfs = new Map<number, Wf[]>();
   private seq = 100; private eid = 1;
   iso(msAgo = 0) { return new Date(Date.now() - msAgo).toISOString(); }
-  row(kind: string, team: string, member: string | null, from: string, workflow: number, text: string | null = null, msAgo = 0) {
-    this.rows.push({ seq: ++this.seq, kind, team, member, from, text, workflow, at: this.iso(msAgo) });
+  row(kind: string, team: string, member: string | null, from: string, deliverable: number, text: string | null = null, msAgo = 0) {
+    this.rows.push({ seq: ++this.seq, kind, team, member, from, text, deliverable, at: this.iso(msAgo) });
   }
   wf(teamId: number, id: number, state: Wf['state'], busy: string[], title: string) {
     const list = this.wfs.get(teamId) ?? [];
@@ -95,24 +95,24 @@ class Feed {
       const since = p?.since ? Date.parse(p.since) : -Infinity;
       return this.events.filter((e) => Date.parse(e.at) >= since && (!p?.team || e.team.toLowerCase() === String(p.team).toLowerCase()));
     }
-    if (method === 'bus.workflows') return JSON.parse(JSON.stringify(this.wfs.get(p?.teamId) ?? []));
-    // The Workflows page (a node click opens it) reads this wall's workflows, not the phone fake core's.
-    if (method === 'workflows.list') {
+    if (method === 'bus.deliverables') return JSON.parse(JSON.stringify(this.wfs.get(p?.teamId) ?? []));
+    // The Deliverables page (a node click opens it) reads this wall's deliverables, not the phone fake core's.
+    if (method === 'deliverables.list') {
       const rows = this.pageRows().filter((w) => p?.teamId == null || w.teamId === Number(p.teamId));
       const n = (f: (s: string) => boolean) => rows.filter((w) => f(w.status)).length;
       const counts = { all: rows.length, open: n((s) => s === 'running' || s === 'idle'), needsYou: 0, done: n((s) => s === 'completed'), closed: n((s) => s === 'closed'),
         running: n((s) => s === 'running'), waiting: 0, idle: n((s) => s === 'idle'), stopped: 0, completed: n((s) => s === 'completed'), expired: 0, completedToday: n((s) => s === 'completed') };
-      return { workflows: rows, counts, truncated: false, backlog: true, now: this.iso(0) };
+      return { deliverables: rows, counts, truncated: false, backlog: true, now: this.iso(0) };
     }
-    if (method === 'workflows.get') {
-      const w = this.pageRows().find((x) => x.id === Number(p?.workflow));
-      if (!w) throw Object.assign(new Error('no such workflow'), { code: 'no_such_workflow' });
-      return { workflow: w, cards: [], messages: [], spec: null, backlog: true };
+    if (method === 'deliverables.get') {
+      const w = this.pageRows().find((x) => x.id === Number(p?.deliverable));
+      if (!w) throw Object.assign(new Error('no such deliverable'), { code: 'no_such_deliverable' });
+      return { deliverable: w, cards: [], messages: [], spec: null, backlog: true };
     }
     if (method === 'network.asks' || method === 'tools.asks') return [];
     return undefined;
   }
-  /** bus.workflows' rows as the page's contract has them (workflows.list / workflows.get). */
+  /** bus.deliverables' rows as the page's contract has them (deliverables.list / deliverables.get). */
   private pageRows() {
     return [...this.wfs].flatMap(([teamId, list]) => list.map((w) => {
       const open = w.state === 'open';
@@ -140,7 +140,7 @@ function seedWall(feed: Feed, n: number) {
       feed.events.push({
         id: (feed as any).eid++, kind: 'commit', team, member: ms[(f % 3) + 1], branch: `members/${team}/x`, sha, message: `Work ${f}`,
         files: Array.from({ length: FILES }, (_, k) => ({ path: `src/${team}-mod${f}/file${k}.ts`, status: k === 0 ? 'A' : 'M' })),
-        at, recordedAt: at, workflowId: wfsOf(ti)[f % 5]!.id,
+        at, recordedAt: at, deliverableId: wfsOf(ti)[f % 5]!.id,
       });
     }
   }
@@ -213,7 +213,7 @@ function membersOf(f: Frame): { name: string; x: number; y: number; r: number; t
   }
   return out;
 }
-/** Workflow node labels: texts starting "#<id>" of a known workflow, drawn in the label tones. */
+/** Deliverable node labels: texts starting "#<id>" of a known deliverable, drawn in the label tones. */
 function wfLabels(f: Frame) {
   return f.ops.filter((o) => o.op === 'text' && !isScreen(o) && /^#\d+/.test(o.text!) && ALL_WFS.some((w) => o.text!.startsWith(`#${w.id}`) && (o.text!.length === `#${w.id}`.length || o.text![`#${w.id}`.length] === ' ')))
     .map((o) => ({ id: Number(/^#(\d+)/.exec(o.text!)![1]), text: o.text!, x: o.x!, y: o.y!, cx: o.x!, cy: o.y! - 13, font: fontPx(o), alpha: o.alpha, style: o.style, op: o }));
@@ -230,7 +230,7 @@ function mapThings(f: Frame): Pt[] {
 const wfBoxCount = (f: Frame, color?: string) => f.ops.filter((o, i) => o.op === 'fill' && o.style === 'rgba(7, 11, 20, 0.95)' && o.items?.[0]?.t === 'm' && (!color || f.ops[i + 1]?.style === color)).length;
 
 /**
- * The workflow nodes' squares (scene drawWorkflowNode: roundRect(x - 10, y - 10, 20, 20, 4), first moveTo at x - 6, y - 10),
+ * The deliverable nodes' squares (scene drawDeliverableNode: roundRect(x - 10, y - 10, 20, 20, 4), first moveTo at x - 6, y - 10),
  * each with the label drawn right after it, if any (a label may be left out, so nodes are found by their squares).
  */
 const WF_R = 10;
@@ -253,7 +253,7 @@ function squaresOf(f: Frame): Sq[] {
 
 const tipText = async (page: Page) => ((await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : '');
 
-/** Hovers every square on the wall and reads its tip: which workflow it is, and whether the tip gives "#id <whole title>". */
+/** Hovers every square on the wall and reads its tip: which deliverable it is, and whether the tip gives "#id <whole title>". */
 async function hoverAll(page: Page): Promise<{ ids: number[]; full: number[]; bySquare: (number | null)[]; misses: string[] }> {
   const box = await canvasBox(page);
   const f = await lastFrame(page);
@@ -279,7 +279,7 @@ async function hoverAll(page: Page): Promise<{ ids: number[]; full: number[]; by
   return { ids: bySquare.filter((x): x is number => x !== null), full: [...full], bySquare, misses };
 }
 
-/** The screen point of workflow id's square: by its label if drawn, else by hovering the unlabelled squares. */
+/** The screen point of deliverable id's square: by its label if drawn, else by hovering the unlabelled squares. */
 async function squareOnScreen(page: Page, id: number): Promise<Pt | null> {
   const f = await lastFrame(page);
   const sqs = squaresOf(f);
@@ -307,7 +307,7 @@ const hit = (a: WBox, b: WBox, slack = 1) => a.x < b.x + b.w - slack && b.x < a.
 
 /**
  * The label rules on one frame, in world px with the page's own text widths:
- *   overlaps   - a label over another label, any workflow square, a member's disc (r + 5) or name, or a map folder / file dot
+ *   overlaps   - a label over another label, any deliverable square, a member's disc (r + 5) or name, or a map folder / file dot
  *                (map things and folder names of the label's own team listed apart as ownMapOverlaps; by the
  *                Manager's decision those are faults too and the tests assert both).
  *   roomMissed - a label left out (or cut to "#id") although one of the scene's own spots (under, above, to a side; full,
@@ -369,7 +369,7 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
   }
   for (const p of pending) {
     if (!Number.isFinite(p.id)) {
-      // Which workflow it is: hover it.
+      // Which deliverable it is: hover it.
       const box = await canvasBox(page);
       const q = toScreen(p.s.op, p.s.x, p.s.y);
       await page.mouse.move(box.x + q.x, box.y + q.y);
@@ -398,7 +398,7 @@ async function labelCheck(page: Page, f: Frame, n: number, windowPx: number) {
 }
 const nodeFontGuess = (k: number) => Math.max(9, 8 / k);
 
-/** Each drawn workflow label's width as the page measures it (for measure's gap). */
+/** Each drawn deliverable label's width as the page measures it (for measure's gap). */
 async function labelWidthMap(page: Page, f: Frame): Promise<Map<string, number>> {
   const ls = wfLabels(f);
   const ws = await widths(page, ls.map((l) => [l.op.font!, l.text] as [string, string]));
@@ -518,7 +518,7 @@ async function snap(page: Page, file: string) {
   await page.screenshot({ path: file });
 }
 
-/** Waits until every team's hub, its 5 workflow squares and its map are drawn and the wall is at rest; returns a frame then. */
+/** Waits until every team's hub, its 5 deliverable squares and its map are drawn and the wall is at rest; returns a frame then. */
 async function settle(page: Page, n: number, timeout = 20_000): Promise<Frame> {
   await expect.poll(async () => {
     const f = await lastFrame(page);
@@ -545,7 +545,7 @@ function measure(f: Frame, n: number, lw?: Map<string, number>) {
     things[i]!.push({ x: m.x, y: m.y, r: m.r });
     things[i]!.push({ x: m.tx, y: m.ty + 5, r: m.w / 2 });
   }
-  // Squares by nearest hub (a node sits by its members, well inside its own cluster); labels by their workflow.
+  // Squares by nearest hub (a node sits by its members, well inside its own cluster); labels by their deliverable.
   for (const s of squaresOf(f)) {
     const i = s.id !== null ? names.findIndex((_, ti) => wfsOf(ti).some((w) => w.id === s.id)) : near(s);
     if (i >= 0) things[i]!.push({ x: s.x, y: s.y, r: WF_R });
@@ -620,7 +620,7 @@ for (const theme of ['dark', 'light'] as const) for (const w of [1280, 375]) for
     if (w < 760 && n === 3) expect(middleScreen, `no empty middle on screen (${m.middle} world px at zoom ${m.zoom})`).toBeLessThan(60);
     else expect(m.middle, 'no empty middle').toBeLessThan(160);
     expect(screen.every((s) => s.inside), 'every hub on the wall').toBe(true);
-    expect(await page.getByText(/^workflows$/i).count(), 'no WORKFLOWS words in the page').toBe(0);
+    expect(await page.getByText(/^deliverables$/i).count(), 'no DELIVERABLES words in the page').toBe(0);
     expect(errors).toEqual([]);
     await ctx.close();
   });
@@ -750,8 +750,8 @@ test('the spacing setting at 375 light: the phone cog shows Team spacing and mov
 // =====================================================================================================================
 // No panel; the node labels.
 
-/** A workflow node click opens the Workflows page with that workflow's pane (the old dialog is gone). */
-const wfOpened = (page: Page, id: number) => page.locator(`[data-test=workflows-view] [data-test=workflow-pane][data-id="${id}"]`);
+/** A deliverable node click opens the Deliverables page with that deliverable's pane (the old dialog is gone). */
+const wfOpened = (page: Page, id: number) => page.locator(`[data-test=deliverables-view] [data-test=deliverable-pane][data-id="${id}"]`);
 
 for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'open'], ['dark', 375, 'open'], ['light', 375, 'open'], ['dark', 1280, 'collapsed'], ['light', 1280, 'collapsed']] as const) {
   test(`labels ${theme} ${w} activity ${activity}: no panel, "#id title" as the rule, >= 8 px, overlaps, hover / click / drag`, async ({ browser }) => {
@@ -770,25 +770,25 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
     r.withTitle = labels.filter((l) => l.text.includes(' ')).length;
     r.screenPx = labels.map((l) => +(l.font * k).toFixed(2));
     r.maxLen = Math.max(...labels.map((l) => l.text.length));
-    r.panelWords = f.ops.filter((o) => o.op === 'text' && /workflows/i.test(o.text!)).map((o) => o.text);
+    r.panelWords = f.ops.filter((o) => o.op === 'text' && /deliverables/i.test(o.text!)).map((o) => o.text);
     r.check = await labelCheck(page, f, 3, w);
     await snap(page, path.join(NODES_DIR, 'screens', `labels-${tag}.png`));
-    // Every workflow keeps at least its hover title.
+    // Every deliverable keeps at least its hover title.
     const hv = await hoverAll(page);
     r.hover = { squares: hv.bySquare.length, ids: hv.ids.length, fullTitles: hv.full.length, missing: ALL_WFS.map((x) => x.id).filter((id) => !hv.full.includes(id)), misses: hv.misses };
-    expect.soft(r.check.squares, '15 workflow squares').toBe(15);
-    expect.soft(r.hover.missing, 'every workflow gives its whole title on hover').toEqual([]);
+    expect.soft(r.check.squares, '15 deliverable squares').toBe(15);
+    expect.soft(r.hover.missing, 'every deliverable gives its whole title on hover').toEqual([]);
     expect.soft(r.mismatch, 'labels follow the rule (or "#id" when crowded)').toEqual([]);
     if (w >= 760 && k >= 0.6) expect.soft(r.withTitle, 'a desktop wall at zoom >= 0.6 shows titles').toBeGreaterThan(0);
     expect.soft(Math.min(...r.screenPx), 'never under 8 px on screen').toBeGreaterThanOrEqual(7.99);
     expect.soft(r.maxLen).toBeLessThanOrEqual(30);
-    expect.soft(r.panelWords, 'no WORKFLOWS panel on the wall').toEqual([]);
+    expect.soft(r.panelWords, 'no DELIVERABLES panel on the wall').toEqual([]);
     expect.soft(r.check.overlaps, 'no label over a label, square, member disc or name, or another team\'s map').toEqual([]);
     expect.soft(r.check.roomMissed, 'no label left out or cut short when it had room').toEqual([]);
     // By the Manager's decision a label over its own team's map (folder, file dot, folder name) is a fault too.
     expect.soft(r.check.ownMapOverlaps, 'no label over its own team\'s map').toEqual([]);
 
-    // Where the panel was (260 out from the hub, away from the middle): hover and click do nothing workflow-ish.
+    // Where the panel was (260 out from the hub, away from the middle): hover and click do nothing deliverable-ish.
     const hubs = TEAMS.map((t) => hubAt(f, t)!);
     const cx = hubs.reduce((s, h) => s + h.x, 0) / 3, cy = hubs.reduce((s, h) => s + h.y, 0) / 3;
     r.panelSpot = [];
@@ -801,16 +801,16 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       await freshFrame(page); // the move seen: a tip there would show now
       const tip = (await page.locator('[data-test=monitor-tip]').count()) ? (await page.locator('[data-test=monitor-tip]').innerText()).replace(/\s+/g, ' ') : null;
       await page.mouse.down(); await page.mouse.up();
-      await freshFrame(page); // the click seen: a workflow it opened would be on its way
-      const opened = await page.locator('[data-test=workflows-view], [data-test=workflow-pane], [role=dialog]').count();
+      await freshFrame(page); // the click seen: a deliverable it opened would be on its way
+      const opened = await page.locator('[data-test=deliverables-view], [data-test=deliverable-pane], [role=dialog]').count();
       r.panelSpot.push({ x: Math.round(s.x), y: Math.round(s.y), tip, opened });
       if (opened) await page.keyboard.press('Escape');
     }
-    expect(r.panelSpot.every((p: any) => p.off || (!p.opened && !(p.tip ?? '').match(/workflow/i))), 'the old panel spot opens nothing').toBe(true);
+    expect(r.panelSpot.every((p: any) => p.off || (!p.opened && !(p.tip ?? '').match(/deliverable/i))), 'the old panel spot opens nothing').toBe(true);
     await page.mouse.move(2, 2);
 
     // Hover a backlog node: the full title. Then a drag on it opens nothing; a click opens it.
-    const target = wfsOf(1)[0]!.id; // bravo's backlog workflow
+    const target = wfsOf(1)[0]!.id; // bravo's backlog deliverable
     const node = async () => (await squareOnScreen(page, target)) ?? { x: -100, y: -100 };
     let tip = '';
     for (let i = 0; i < 5 && !tip.includes(titleOf(target)); i++) {
@@ -827,8 +827,8 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       await page.mouse.down();
       for (let i = 1; i <= 8; i++) await page.mouse.move(box.x + s.x + i * 8, box.y + s.y + i * 4);
       await page.mouse.up();
-      await freshFrame(page); // the release seen: a workflow it opened would be on its way
-      r.dragOpened = await page.locator('[data-test=workflows-view], [data-test=workflow-pane]').count();
+      await freshFrame(page); // the release seen: a deliverable it opened would be on its way
+      r.dragOpened = await page.locator('[data-test=deliverables-view], [data-test=deliverable-pane]').count();
       expect(r.dragOpened, 'a drag opens nothing').toBe(0);
     }
     let opened = 0;
@@ -838,15 +838,15 @@ for (const [theme, w, activity] of [['dark', 1280, 'open'], ['light', 1280, 'ope
       await page.mouse.move(box.x + s.x, box.y + s.y);
       await tipWhen(page, (t) => t.includes(`#${target} `), 1000);
       await page.mouse.down(); await page.mouse.up();
-      // Left the Monitor: the Workflows page shows, or the wall is gone.
-      opened = await page.waitForFunction(() => !!document.querySelector('[data-test=workflows-view]') || !document.querySelector('[data-test=monitor-canvas]'), null, { timeout: 1500 }).then(() => 1, () => 0);
+      // Left the Monitor: the Deliverables page shows, or the wall is gone.
+      opened = await page.waitForFunction(() => !!document.querySelector('[data-test=deliverables-view]') || !document.querySelector('[data-test=monitor-canvas]'), null, { timeout: 1500 }).then(() => 1, () => 0);
     }
     r.clickOpened = opened > 0;
-    expect(r.clickOpened, 'a click opens the workflow').toBe(true);
-    // On the Workflows page (no dialog), filtered to bravo (team 2), with the workflow's pane open.
-    await expect(page.locator('[data-test=workflows-view]')).toBeVisible({ timeout: 15_000 });
+    expect(r.clickOpened, 'a click opens the deliverable').toBe(true);
+    // On the Deliverables page (no dialog), filtered to bravo (team 2), with the deliverable's pane open.
+    await expect(page.locator('[data-test=deliverables-view]')).toBeVisible({ timeout: 15_000 });
     await expect(wfOpened(page, target)).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('[data-test=workflows-team-filter]')).toHaveValue('2');
+    await expect(page.locator('[data-test=deliverables-team-filter]')).toHaveValue('2');
     await expect(page.locator('[role=dialog]')).toHaveCount(0);
     await snap(page, path.join(NODES_DIR, 'screens', `click-opens-${tag}.png`));
     console.log(`nodes ${tag}:`, JSON.stringify(r));
@@ -916,11 +916,11 @@ test('labels: 1280 wide zoomed out (Activity hidden, wall over 760): titles stay
   // Titles kept: no label is cut to "#id" by the phone rule on a wide wall. A label that is "#id" or left out must have had
   // no room (roomMissed below); the rest carry their title.
   // This was "at least 10 of the 15 keep a title", which failed about half the runs with the scene right each
-  // time (no overlaps, nothing left out that had room). The workflow nodes are born at a random offset beside their member
+  // time (no overlaps, nothing left out that had room). The deliverable nodes are born at a random offset beside their member
   // (scene.ts rebuild), so the forces settle a different layout each run, and how many 30-character titles find room at
   // zoom ~0.37 went from 8 to 12. So every node is accounted for instead: it shows exactly its wide-wall title, or it is
   // "#id" or left out (and roomMissed proves it had no room). At least one title is drawn: the phone rule would cut all.
-  expect(fit.squares, 'all 15 workflow nodes drawn').toBe(ALL_WFS.length);
+  expect(fit.squares, 'all 15 deliverable nodes drawn').toBe(ALL_WFS.length);
   expect.soft(fit.withTitle + fit.idOnly.length + fit.dropped.length, `every node titled, "#id" or left out at zoom ${fit.zoom}`).toBe(fit.squares);
   expect.soft(fit.dropped.filter((id: number) => !Number.isFinite(id)), 'each left-out label\'s node named by its hover (so its room was checked)').toEqual([]);
   expect.soft(fit.wrongTitle, 'a drawn title is the wide-wall label, not a phone cut').toEqual([]);
@@ -993,7 +993,7 @@ test('labels: reduced motion: the labels and nodes do not animate (no turning ar
   await ctx.close();
 });
 
-test('labels: a workflow that completes flashes green and leaves, one closed fades; both show in Activity', async ({ browser }) => {
+test('labels: a deliverable that completes flashes green and leaves, one closed fades; both show in Activity', async ({ browser }) => {
   const { page, ctx, feed, errors } = await open(browser, { w: 1280, teams: 2 });
   await settle(page, 2);
   const done = wfsOf(0)[1]!, closed = wfsOf(1)[2]!;

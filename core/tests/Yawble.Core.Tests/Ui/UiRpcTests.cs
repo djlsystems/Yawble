@@ -69,19 +69,19 @@ public sealed class UiRpcTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TeamsWorkflowExpiry_ReadsWithTeamId_SetsWithDays_AndRefusesOutsideOneTo365()
+    public async Task TeamsDeliverableExpiry_ReadsWithTeamId_SetsWithDays_AndRefusesOutsideOneTo365()
     {
-        // teams.workflowExpiry is the shell's get-or-set, like teams.push; the default is 3.
+        // teams.deliverableExpiry is the shell's get-or-set, like teams.push; the default is 3.
         var teamId = await CreateMixedTeam();
-        Assert.Equal(3, (await Call("teams.workflowExpiry", new { teamId }))!["days"]!.GetValue<int>());
-        Assert.Equal(7, (await Call("teams.workflowExpiry", new { teamId, days = 7 }))!["days"]!.GetValue<int>());
-        Assert.Equal(7, (await Call("teams.workflowExpiry", new { teamId }))!["days"]!.GetValue<int>());
-        Assert.Equal(365, (await Call("teams.workflowExpiry", new { teamId, days = 365 }))!["days"]!.GetValue<int>());
+        Assert.Equal(3, (await Call("teams.deliverableExpiry", new { teamId }))!["days"]!.GetValue<int>());
+        Assert.Equal(7, (await Call("teams.deliverableExpiry", new { teamId, days = 7 }))!["days"]!.GetValue<int>());
+        Assert.Equal(7, (await Call("teams.deliverableExpiry", new { teamId }))!["days"]!.GetValue<int>());
+        Assert.Equal(365, (await Call("teams.deliverableExpiry", new { teamId, days = 365 }))!["days"]!.GetValue<int>());
         foreach (var bad in new object[] { 0, 366, -1, 2.5, "7" })
-            Assert.Equal("bad_request", (await Refused("teams.workflowExpiry", new { teamId, days = bad })).Code);
-        Assert.Equal(365, (await Call("teams.workflowExpiry", new { teamId }))!["days"]!.GetValue<int>());
-        Assert.Equal(365, (await Call("teams.list"))!.AsArray().Single(t => t!["id"]!.GetValue<long>() == teamId)!["workflowExpiryDays"]!.GetValue<int>());
-        Assert.Equal("unknown_method", (await Refused("teams.setWorkflowExpiry", new { teamId, workflowExpiryDays = 5 })).Code);
+            Assert.Equal("bad_request", (await Refused("teams.deliverableExpiry", new { teamId, days = bad })).Code);
+        Assert.Equal(365, (await Call("teams.deliverableExpiry", new { teamId }))!["days"]!.GetValue<int>());
+        Assert.Equal(365, (await Call("teams.list"))!.AsArray().Single(t => t!["id"]!.GetValue<long>() == teamId)!["deliverableExpiryDays"]!.GetValue<int>());
+        Assert.Equal("unknown_method", (await Refused("teams.setDeliverableExpiry", new { teamId, deliverableExpiryDays = 5 })).Code);
     }
 
     private async Task<JsonArray> Agents(long teamId) => (await Call("teams.agents", new { teamId }))!.AsArray();

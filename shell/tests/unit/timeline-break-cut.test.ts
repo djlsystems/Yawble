@@ -42,10 +42,10 @@ describe('the axis break: what it hides', () => {
 
 describe('the axis break in the dialog', () => {
   it('each row has its own break mark, the first row says what it hides, and a band across it says so', async () => {
-    const c = createFakeCore(); c.setExpiry(true); // the expiry fixtures list workflow #9, whose axis has a break
+    const c = createFakeCore(); c.setExpiry(true); // the expiry fixtures list deliverable #9, whose axis has a break
     try {
       const w = mount(TimelineDialog, { props: { api: fakeApi() }, attachTo: document.body });
-      openTimeline({ kind: 'workflow', id: 9 });
+      openTimeline({ kind: 'deliverable', id: 9 });
       await flushPromises();
       const rows = w.findAll('[data-test="timeline-row"]');
       expect(rows.length).toBeGreaterThan(0);

@@ -112,7 +112,7 @@ function askGit(focus: 'compare' | 'branch') {
           </template>
           <template v-if="c.made">
             <dt>Made by</dt>
-            <dd data-test="commit-made">{{ spaced(c.made.member) }}<template v-if="c.made.card"> · card {{ c.made.card }}</template><template v-if="c.made.workflow"> · workflow #{{ c.made.workflow }}</template></dd>
+            <dd data-test="commit-made">{{ spaced(c.made.member) }}<template v-if="c.made.card"> · card {{ c.made.card }}</template><template v-if="c.made.deliverable"> · deliverable #{{ c.made.deliverable }}</template></dd>
           </template>
           <dt>ID</dt><dd><code class="sha" data-test="commit-sha">{{ c.sha }}</code></dd>
         </dl>

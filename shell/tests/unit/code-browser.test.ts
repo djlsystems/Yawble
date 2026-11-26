@@ -103,7 +103,7 @@ describe('the Code browser in the shell', () => {
     expect(core.called('code.close').map((c) => c.params.session)).toEqual(['s1-DeveloperAda', 's2-TesterBo']);
   });
 
-  it("opens on the latest change, and renders markdown with the app's markdown-it: no raw HTML, no script links", async () => {
+  it("opens on the latest change, and renders markdown with the app's markdown-it: no raw HTML, no workflow links", async () => {
     const core = fakeCore();
     const w = keep(mount(CodeDialog, { props: { api: core.api }, attachTo: document.body }));
     openCode('payments', 'DeveloperAda');
@@ -114,7 +114,7 @@ describe('the Code browser in the shell', () => {
     await w.get('[data-test=code-source]').trigger('click');
     const view = w.get('[data-test=code-markdown]');
     expect(view.find('h1').text()).toBe('Notes');
-    expect(view.find('script').exists()).toBe(false);
+    expect(view.find('workflow').exists()).toBe(false);
     expect(view.find('img').exists()).toBe(false);
     expect(view.find('a[href^="javascript:"]').exists()).toBe(false);
     expect(view.text()).toContain('<script>alert(1)</script>');

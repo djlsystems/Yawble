@@ -171,7 +171,7 @@ public sealed class LinuxUpdateTests : IDisposable
     }
 
     [Fact]
-    public void AnInstallWithoutTheUpdateScript_DoesNotUpdateItself()
+    public void AnInstallWithoutTheUpdateWorkflow_DoesNotUpdateItself()
     {
         var prefix = Install("yawble", "install.sh");
         Assert.Null(LinuxSelfUpdate.InstallFolder(Path.Combine(prefix, "resources", "core"), _ => true));

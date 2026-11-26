@@ -12,7 +12,7 @@ namespace Yawble.Core.Tests.Board;
 
 /// <summary>
 /// "Clear done" (0037): the person hides Done cards from the board view; nothing is deleted, and everything but the
-/// board view (workflows, backlog counts, the agents' board tool, the Concierge) still sees them.
+/// board view (deliverables, backlog counts, the agents' board tool, the Concierge) still sees them.
 /// </summary>
 public class BoardClearDoneTests
 {
@@ -51,8 +51,8 @@ public class BoardClearDoneTests
         }
     }
 
-    private static CardRow Card(BoardStore s, string team, string lane, long? workflow = null) =>
-        s.AddCard(team, null, null, $"{team} {lane}", "", lane == Lanes.Done ? "done" : "queued", lane, workflow);
+    private static CardRow Card(BoardStore s, string team, string lane, long? deliverable = null) =>
+        s.AddCard(team, null, null, $"{team} {lane}", "", lane == Lanes.Done ? "done" : "queued", lane, deliverable);
 
     [Fact]
     public async Task ClearDone_HidesExactlyTheGivenDoneCards_AndListClearedReturnsThem()
@@ -152,13 +152,13 @@ public class BoardClearDoneTests
     }
 
     [Fact]
-    public async Task CardsOfWorkflow_TheBacklog_AndTheConciergeView_StillIncludeClearedCards()
+    public async Task CardsOfDeliverable_TheBacklog_AndTheConciergeView_StillIncludeClearedCards()
     {
         await using var rig = await Rig.StartAsync();
-        var card = Card(rig.Store, "payments", Lanes.Done, workflow: 42);
+        var card = Card(rig.Store, "payments", Lanes.Done, deliverable: 42);
         await rig.Call("board.clearDone", new { ids = new[] { card.Id } });
 
-        Assert.Equal(card.Id, Assert.Single(rig.Store.CardsOfWorkflow(42)).Id);
+        Assert.Equal(card.Id, Assert.Single(rig.Store.CardsOfDeliverable(42)).Id);
         Assert.Equal(card.Id, Assert.Single(rig.Store.Cards("payments")).Id);
         Assert.Equal([card.Id], await rig.Ids(new { includeCleared = true }));
     }

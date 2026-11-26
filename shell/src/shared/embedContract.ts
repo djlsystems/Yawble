@@ -7,20 +7,20 @@
 export const EMBED_VERSION = 1;
 
 /** The short icon keys: the cloud draws its own icon for a key it knows. */
-export type EmbedIcon = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'kanban' | 'documents' | 'monitor' | 'scripts' | 'logs';
+export type EmbedIcon = 'newChat' | 'concierge' | 'teams' | 'goals' | 'backlog' | 'deliverables' | 'kanban' | 'documents' | 'monitor' | 'workflows' | 'logs';
 
 /**
- * The places, in Sidebar.vue's order: New chat, Concierge, Teams, Backlog, Workflows, Kanban board, Documents, Monitor, Scripts, Logs.
+ * The places, in Sidebar.vue's order: New chat, Concierge, Teams, Goals, Deliverables, Backlog, Kanban board, Workflows, Documents, Monitor, Logs.
  * No Terminal and no Help: an agent's terminal is in its pane on the team page (and its output is never sent up), and the
  * version and help links are in Settings, which the cloud's own settings button opens.
  */
-export type EmbedPlaceId = 'newChat' | 'concierge' | 'teams' | 'backlog' | 'workflows' | 'board' | 'documents' | 'monitor' | 'scripts' | 'logs';
+export type EmbedPlaceId = 'newChat' | 'concierge' | 'teams' | 'goals' | 'backlog' | 'deliverables' | 'board' | 'documents' | 'monitor' | 'workflows' | 'logs';
 
 export interface EmbedPlace {
   id: EmbedPlaceId;
   label: string;
   icon: EmbedIcon;
-  /** A count next to the label (Teams: how many teams; Workflows: how many are open), or null for none. */
+  /** A count next to the label (Teams: how many teams; Deliverables: how many are open), or null for none. */
   badge: number | null;
   /** The screen shown now (the sidebar's highlighted place). */
   active: boolean;

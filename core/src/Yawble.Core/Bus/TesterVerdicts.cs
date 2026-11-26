@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 namespace Yawble.Core.Bus;
 
 /// <summary>
-/// What the person said yes to, so the workflow may be declared complete over a tester's FAIL on a card.
+/// What the person said yes to, so the deliverable may be declared complete over a tester's FAIL on a card.
 /// <see cref="Kind"/> is <see cref="Accepted"/> (the FAIL is accepted as is) or <see cref="WontDo"/> (the card will not be
 /// done). Stored on the needs_decision as <c>closeOverFail: { card, kind, reason }</c> and, when the person picks the yes
 /// option, on the answer as <c>closeOverFail: { card, kind, reason, decision }</c>.
@@ -30,18 +30,18 @@ public sealed record CloseOverFail(long Card, string Kind, string? Reason)
             : null;
 }
 
-/// <summary>A card closed over a FAIL, as the WorkflowCompleted payload's <c>closedOverFail</c> lists it.</summary>
+/// <summary>A card closed over a FAIL, as the DeliverableCompleted payload's <c>closedOverFail</c> lists it.</summary>
 public sealed record FailClosure(long Card, string Tester, string FailLine, string Kind, string? Reason);
 
-/// <summary>A card whose latest tester verdict in the workflow is FAIL, and the person's yes to close over it (if any).</summary>
+/// <summary>A card whose latest tester verdict in the deliverable is FAIL, and the person's yes to close over it (if any).</summary>
 public sealed record OutstandingFail(long Card, string Tester, string FailLine, long FailSeq, CloseOverFail? Yes);
 
 /// <summary>
-/// The testers' verdicts in a workflow, read from their hand-backs.
+/// The testers' verdicts in a deliverable, read from their hand-backs.
 /// <list type="bullet">
 /// <item>A hand-back's verdict is how it starts: PASS or FAIL (any case, after trimming and any leading Markdown such as
 ///   <c>**</c> or <c>#</c>; PASSED / FAILED count too). Anything else has no verdict.</item>
-/// <item>Its card is the one from the tester's latest instruction in the workflow (before the hand-back) that carries
+/// <item>Its card is the one from the tester's latest instruction in the deliverable (before the hand-back) that carries
 ///   <c>card</c> (tell's card). A hand-back with no such instruction belongs to no card.</item>
 /// <item>Testers are the members <see cref="Board.TesterRule.IsTester(MemberRow)"/> says are (as BoardProjector.TestersOf).</item>
 /// <item>A card's latest verdict counts: a later PASS (from any tester) clears an earlier FAIL.</item>
@@ -124,7 +124,7 @@ public static class TesterVerdicts
         catch (JsonException) { return null; }
     }
 
-    /// <summary>The refusal of workflow_complete while <paramref name="open"/> (FAILs without the person's yes) is outstanding.</summary>
+    /// <summary>The refusal of deliverable_complete while <paramref name="open"/> (FAILs without the person's yes) is outstanding.</summary>
     public static BusRefusal Refusal(IReadOnlyList<OutstandingFail> open)
     {
         var first = open[0];
@@ -134,7 +134,7 @@ public static class TesterVerdicts
             : "these cards' latest tests are FAILs: " + string.Join("; ", open.Select(f =>
                 $"card {f.Card} ({f.Tester[(f.Tester.IndexOf('/') + 1)..]}: \"{f.FailLine}\")"));
         return new BusRefusal("tester_fail",
-            $"workflow completion refused: {what}. A workflow is not declared complete over a tester's FAIL. Do one of these:\n" +
+            $"deliverable completion refused: {what}. A deliverable is not declared complete over a tester's FAIL. Do one of these:\n" +
             $"- fix it and have the tester verify card {first.Card} again (a later PASS clears the FAIL);\n" +
             $"- ask the person with needs_decision, card {first.Card} and kind accept-fail, saying why, e.g. \"{tester} failed card {first.Card} on X; " +
             "I think the criterion is too strict because Y: accept and close?\". When the person picks the yes, declare again;\n" +

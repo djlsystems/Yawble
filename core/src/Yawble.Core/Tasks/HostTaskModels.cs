@@ -60,7 +60,7 @@ public enum RequestKind { Refused, Asked, AlreadyWaiting, Started }
 public sealed record TaskRequestResult(RequestKind Kind, string Text, long? AskId = null, long? RunId = null, int? Precondition = null);
 
 /// <summary>The message that wakes the requesting agent once a task run, or an ask about it, is over.</summary>
-public sealed record TaskWake(long TeamId, string Member, long Workflow, long CausationSeq, string Text)
+public sealed record TaskWake(long TeamId, string Member, long Deliverable, long CausationSeq, string Text)
 {
     /// <summary>The run that ended, when one ran to its end (null: nothing ran, or the ask was declined or went stale).</summary>
     public TaskRunRow? Run { get; init; }

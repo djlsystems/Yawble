@@ -7,7 +7,7 @@ using C = Yawble.Core.Board.TimeCategories;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// The arithmetic of a card's and a workflow's time. Fixed times only: "now" is always given.
+/// The arithmetic of a card's and a deliverable's time. Fixed times only: "now" is always given.
 /// </summary>
 public class TimelineCalculatorTests
 {
@@ -174,10 +174,10 @@ public class TimelineCalculatorTests
         Assert.Equal(Min(210), reopened.Time.OverallMs);
     }
 
-    // ---------------------------------------------------------------- the workflow merge
+    // ---------------------------------------------------------------- the deliverable merge
 
     [Fact]
-    public void AWorkflowTakesTheHighestCategoryOfItsOpenCards_AndItsCategoriesAddUpToItsOverallExactly()
+    public void ADeliverableTakesTheHighestCategoryOfItsOpenCards_AndItsCategoriesAddUpToItsOverallExactly()
     {
         var now = At("14:00");
         var a = TimelineCalculator.Card(Card("10:00", [S("10:00", C.AgentWorking), S("11:00", C.WaitingOnYou), S("12:00", C.WasDone, done: true)], id: 1), now);
@@ -185,8 +185,8 @@ public class TimelineCalculatorTests
             [S("10:30", C.NotStarted, member: null), S("11:30", C.AgentWorking, member: "Bo"), S("11:45", C.Blocked, member: "Bo"),
              S("12:30", C.WasDone, done: true, member: "Bo")],
             runs: [new RunSpan("Bo", At("11:30"), At("11:30"), At("11:45"))], stalls: [Span("11:30", "11:45")], id: 2, member: "Bo"), now);
-        var w = TimelineCalculator.Workflow(new WorkflowTimelineInput(7, At("09:50"),
-            [new WorkflowEnd(At("12:40"), "completed", At("13:00")), new WorkflowEnd(At("13:30:00"), "completed")], [a, b], []), now);
+        var w = TimelineCalculator.Deliverable(new DeliverableTimelineInput(7, At("09:50"),
+            [new DeliverableEnd(At("12:40"), "completed", At("13:00")), new DeliverableEnd(At("13:30:00"), "completed")], [a, b], []), now);
 
         Assert.Equal([(C.Idle, "09:50", "10:00"), (C.AgentWorking, "10:00", "11:00"), (C.WaitingOnYou, "11:00", "12:00"), (C.Blocked, "12:00", "12:30"),
             (C.Idle, "12:30", "12:40"), (C.WasDone, "12:40", "13:00"), (C.Idle, "13:00", "13:30")],
@@ -201,10 +201,10 @@ public class TimelineCalculatorTests
     }
 
     [Fact]
-    public void ACardlessRun_TheManagersOwn_CountsTowardTheWorkflow()
+    public void ACardlessRun_TheManagersOwn_CountsTowardTheDeliverable()
     {
         var now = At("11:00");
-        var w = TimelineCalculator.Workflow(new WorkflowTimelineInput(9, At("10:00"), [], [],
+        var w = TimelineCalculator.Deliverable(new DeliverableTimelineInput(9, At("10:00"), [], [],
             [new LooseInput("Manager", [new RunSpan("Manager", At("10:00"), At("10:02"), At("10:40"))], [Span("10:20", "10:40")], [],
                 [Span("10:40", "10:50")], [], [])]), now);
         Assert.True(w.Time.Open);
@@ -219,9 +219,9 @@ public class TimelineCalculatorTests
     }
 
     [Fact]
-    public void AnExpiredWorkflowEndsAtItsLastActivity()
+    public void AnExpiredDeliverableEndsAtItsLastActivity()
     {
-        var w = TimelineCalculator.Workflow(new WorkflowTimelineInput(3, At("10:00", 14), [new WorkflowEnd(At("12:00", 14), "expired", null, At("12:00", 17))], [], []), At("13:00", 17));
+        var w = TimelineCalculator.Deliverable(new DeliverableTimelineInput(3, At("10:00", 14), [new DeliverableEnd(At("12:00", 14), "expired", null, At("12:00", 17))], [], []), At("13:00", 17));
         Assert.False(w.Time.Open);
         Assert.Equal("expired", w.Time.EndedHow);
         Assert.Equal(Min(120), w.Time.OverallMs);

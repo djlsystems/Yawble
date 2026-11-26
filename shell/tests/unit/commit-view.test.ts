@@ -16,7 +16,7 @@ const SHA = '3f9c2a1b7d4e5f60718293a4b5c6d7e8f9012345';
 const base = (over: Partial<CommitFound> = {}): CommitFound => ({
   found: true, sha: SHA, shortSha: SHA.slice(0, 7), title: 'Add partial refunds', body: 'Refunds can be partial now.\n\nCard 12.',
   author: { name: 'DeveloperAda', email: 'ada@yawble.local', date: '2026-11-18T10:00:00Z' }, committer: null,
-  isMerge: false, parents: ['1111111aaaaaaa'], made: { member: 'DeveloperAda', card: 12, workflow: 10 },
+  isMerge: false, parents: ['1111111aaaaaaa'], made: { member: 'DeveloperAda', card: 12, deliverable: 10 },
   where: { inMain: true, branches: ['team/payments'], pushed: true, tags: [] },
   files: [{ path: 'src/refund.ts', status: 'modified', added: 3, deleted: 1, binary: false }],
   codeShown: true, ...over,
@@ -167,7 +167,7 @@ describe('the Commit view', () => {
     expect(w.get('[data-test=commit-body]').text()).toContain('Refunds can be partial now.');
     expect(w.get('[data-test=commit-author]').text()).toContain('DeveloperAda');
     expect(w.find('[data-test=commit-committer]').exists()).toBe(false);
-    expect(w.get('[data-test=commit-made]').text()).toBe('Developer Ada · card 12 · workflow #10');
+    expect(w.get('[data-test=commit-made]').text()).toBe('Developer Ada · card 12 · deliverable #10');
     expect(w.get('[data-test=commit-sha]').text()).toBe(SHA);
     expect(w.find('[data-test=commit-merge]').exists()).toBe(false);
     expect(whereTexts(w)).toEqual(['In main', 'On origin']);
@@ -209,9 +209,9 @@ describe('the Commit view', () => {
     const w = await view(fakeCore({ payments: noMade as CommitFound }));
     expect(w.find('[data-test=commit-made]').exists()).toBe(false);
     expect(w.text()).not.toMatch(/undefined|null/);
-    const m = await view(fakeCore({ payments: base({ isMerge: true, parents: ['a1a1a1a', 'b2b2b2b'], made: { member: 'Manager', workflow: 7 },
+    const m = await view(fakeCore({ payments: base({ isMerge: true, parents: ['a1a1a1a', 'b2b2b2b'], made: { member: 'Manager', deliverable: 7 },
       merge: { intoBranch: 'team/payments', fromBranch: 'members/payments/developerada', fromMember: 'DeveloperAda', commitCount: 2 } }) }));
-    expect(m.get('[data-test=commit-made]').text()).toBe('Manager · workflow #7');
+    expect(m.get('[data-test=commit-made]').text()).toBe('Manager · deliverable #7');
   });
 
   it('a malformed ID: the core\'s bad_params message is shown', async () => {

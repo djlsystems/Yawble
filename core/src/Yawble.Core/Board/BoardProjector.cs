@@ -36,7 +36,7 @@ public static class Lanes
 /// <summary>
 /// Keeps the stored cards in step with the bus. Read in order, once:
 /// <list type="bullet">
-/// <item>An instruction to a member makes its card for that workflow, or puts new work on it (back to queued, To Do).
+/// <item>An instruction to a member makes its card for that deliverable, or puts new work on it (back to queued, To Do).
 ///   An instruction naming a planned card (tell's <c>card</c>) claims it for the member. A note to the Manager about a
 ///   card or a backlog item (payload <c>about</c> / <c>item</c>) makes no card.</item>
 /// <item>A member's reports move its card: progress to In Progress, blocked / a question / a failed run to Needs You,
@@ -44,8 +44,8 @@ public static class Lanes
 ///   quieter one until new work arrives. A card a person or the Manager placed keeps its lane, except for a give-up.
 ///   A run the person stopped (failure class "stopped") is not a failure: the card's status is "stopped" and it
 ///   stays in its lane; its trail says "stopped". New work re-queues it as usual.</item>
-/// <item>The workflow declared complete sends its cards to Done, except those waiting on a person, and marks the backlog
-///   item dispatched as that workflow "declared".</item>
+/// <item>The deliverable declared complete sends its cards to Done, except those waiting on a person, and marks the backlog
+///   item dispatched as that deliverable "declared".</item>
 /// <item>Anything the team's Manager sends means it has seen the person's edits: the cards stop awaiting it.</item>
 /// </list>
 /// </summary>
@@ -70,17 +70,17 @@ public sealed class BoardProjector(BoardStore store)
             if (t is not null && member is not null) Instruction(m, t, member);
             return;
         }
-        if (m.Type is MessageTypes.WorkflowCompleted or MessageTypes.WorkflowClosed or MessageTypes.WorkflowExpired)
+        if (m.Type is MessageTypes.DeliverableCompleted or MessageTypes.DeliverableClosed or MessageTypes.DeliverableExpired)
         {
-            WorkflowDone(m);
+            DeliverableDone(m);
             return;
         }
         if (team is null || sender is null) return;
         var exact = store.CardOf(team, sender, m.CorrelationId);
         var card = exact ?? store.OpenCardOf(team, sender);
         var p = Payload(m);
-        // The time of this workflow's work goes on the member's card in it, or, with none (the Manager's own runs),
-        // on the member's card-less work in the workflow. Read before the report moves the card.
+        // The time of this deliverable's work goes on the member's card in it, or, with none (the Manager's own runs),
+        // on the member's card-less work in the deliverable. Read before the report moves the card.
         var lastActivity = exact is null || m.Type != MessageTypes.Failed ? null : store.Trail(exact.Id).LastOrDefault()?.At;
         if (card is not null)
         {
@@ -124,14 +124,14 @@ public sealed class BoardProjector(BoardStore store)
     private void Time(Message m, JsonObject? p, CardRow? card, string sender, string? lastActivity)
     {
         var cardId = card?.Id;
-        long? workflow = m.CorrelationId;
+        long? deliverable = m.CorrelationId;
         switch (m.Type)
         {
             case MessageTypes.Handback:
-                store.AddMarker(cardId, workflow, sender, TimeMarkers.Handback, _at!);
+                store.AddMarker(cardId, deliverable, sender, TimeMarkers.Handback, _at!);
                 return;
             case MessageTypes.NeedsDecision:
-                store.AddMarker(cardId, workflow, sender, TimeMarkers.DecisionAsked, _at!);
+                store.AddMarker(cardId, deliverable, sender, TimeMarkers.DecisionAsked, _at!);
                 return;
             case MessageTypes.Completed or MessageTypes.Failed:
                 break;
@@ -139,13 +139,13 @@ public sealed class BoardProjector(BoardStore store)
                 return;
         }
         var stalls = Spans(p?["activity"]?["stalls"]);
-        foreach (var (start, end) in stalls) store.AddSpan(cardId, workflow, sender, "stall", start, end);
-        foreach (var (start, end) in Spans(p?["activity"]?["holds"])) store.AddSpan(cardId, workflow, sender, "hold", start, end);
+        foreach (var (start, end) in stalls) store.AddSpan(cardId, deliverable, sender, "stall", start, end);
+        foreach (var (start, end) in Spans(p?["activity"]?["holds"])) store.AddSpan(cardId, deliverable, sender, "hold", start, end);
         if (m.Type == MessageTypes.Failed && Text(p, "failureClass") == FailureClasses.Idle)
         {
             if (stalls.Count == 0 && TimelineRebuild.IdleSeconds(Text(p, "reason")) is { } n)
-                store.AddSpan(cardId, workflow, sender, "stall", TimelineRebuild.StallStart(lastActivity, _at!, n), _at!);
-            store.AddMarker(cardId, workflow, sender, TimeMarkers.WatchdogEnd, _at!);
+                store.AddSpan(cardId, deliverable, sender, "stall", TimelineRebuild.StallStart(lastActivity, _at!, n), _at!);
+            store.AddMarker(cardId, deliverable, sender, TimeMarkers.WatchdogEnd, _at!);
         }
         if (m.Type == MessageTypes.Completed && card is not null && p?["wake"]?["at"] is JsonValue w && w.TryGetValue<string>(out var wakeText)
             && DateTimeOffset.TryParseExact(wakeText, "yyyy-MM-dd HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture,
@@ -174,7 +174,7 @@ public sealed class BoardProjector(BoardStore store)
             && string.Equals(planned.Team, team, StringComparison.OrdinalIgnoreCase))
         {
             var lane = planned.Placed ? planned.Lane : Lanes.Todo;
-            store.Save(planned with { Member = member, Workflow = m.CorrelationId, Status = "queued", Lane = lane }, _at);
+            store.Save(planned with { Member = member, Deliverable = m.CorrelationId, Status = "queued", Lane = lane }, _at);
             store.Unend(planned.Id);
             store.AddTrail(planned.Id, from, "assigned", $"Assigned to {member}: {text}", _at);
             return;
@@ -183,18 +183,18 @@ public sealed class BoardProjector(BoardStore store)
         {
             // The person's word to a member that asked them something answers it.
             if (m.Source == MessageTypes.PersonSource && card.Status == "needs-decision")
-                store.AddMarker(card.Id, card.Workflow, member, TimeMarkers.DecisionAnswered, _at!);
+                store.AddMarker(card.Id, card.Deliverable, member, TimeMarkers.DecisionAnswered, _at!);
             store.Save(card with { Status = "queued", Lane = card.Placed && card.Lane != Lanes.Done ? card.Lane : Lanes.Todo }, _at);
-            store.Unend(card.Id); // new work: a card its workflow's end ended is live again
+            store.Unend(card.Id); // new work: a card its deliverable's end ended is live again
             store.AddTrail(card.Id, from, "told", text, _at);
             return;
         }
-        // Only work makes a card: the person starting a workflow, or a teammate (the Manager) telling a member. The app's
-        // own notices (the idle reminder, a wake) and the person's replies inside a workflow (an answer to a question)
-        // are not new work: they go on the trail of the workflow's cards, if it has any.
+        // Only work makes a card: the person starting a deliverable, or a teammate (the Manager) telling a member. The app's
+        // own notices (the idle reminder, a wake) and the person's replies inside a deliverable (an answer to a question)
+        // are not new work: they go on the trail of the deliverable's cards, if it has any.
         if (m.Source == MessageTypes.HostSource || (m.Source == MessageTypes.PersonSource && m.CausationSeq is not null))
         {
-            foreach (var c in store.CardsOfWorkflow(m.CorrelationId).Where(c => c.Lane != Lanes.Done).Take(1))
+            foreach (var c in store.CardsOfDeliverable(m.CorrelationId).Where(c => c.Lane != Lanes.Done).Take(1))
                 store.AddTrail(c.Id, from, m.Source == MessageTypes.HostSource ? "notice" : "told", text, _at);
             return;
         }
@@ -237,65 +237,65 @@ public sealed class BoardProjector(BoardStore store)
     public const string BoardSource = "board";
 
     /// <summary>
-    /// The workflow ended. Completed: its cards go to Done, except those waiting on a person and a tester's untested card.
+    /// The deliverable ended. Completed: its cards go to Done, except those waiting on a person and a tester's untested card.
     /// Closed (by the person) or expired (by the app): every card of it goes to Done, a waiting one too: nobody works
     /// it any more. Either way every card not ended yet records the end: when, and how (completed, closed or
-    /// expired); an expired workflow's end is its last real activity, so the expiry adds no time to a card.
+    /// expired); an expired deliverable's end is its last real activity, so the expiry adds no time to a card.
     /// </summary>
-    private void WorkflowDone(Message m)
+    private void DeliverableDone(Message m)
     {
-        var how = m.Type switch { MessageTypes.WorkflowClosed => "closed", MessageTypes.WorkflowExpired => "expired", _ => "completed" };
+        var how = m.Type switch { MessageTypes.DeliverableClosed => "closed", MessageTypes.DeliverableExpired => "expired", _ => "completed" };
         var p = Payload(m);
-        var lastActivity = m.Type == MessageTypes.WorkflowExpired && Text(p, "endedAt") is { } la ? la : null;
+        var lastActivity = m.Type == MessageTypes.DeliverableExpired && Text(p, "endedAt") is { } la ? la : null;
         // The cards the person accepted closing over a tester's FAIL go to Done whatever their status and the tester rule.
-        var overFail = m.Type == MessageTypes.WorkflowCompleted
+        var overFail = m.Type == MessageTypes.DeliverableCompleted
             ? ClosedOverFail.Read(p).GroupBy(e => e.Card).ToDictionary(g => g.Key, g => g.Last())
             : [];
         var team = Split(m.Source).Team;
-        foreach (var card in store.CardsOfWorkflow(m.CorrelationId))
+        foreach (var card in store.CardsOfDeliverable(m.CorrelationId))
         {
             if (overFail.Remove(card.Id, out var accepted))
             {
                 AcceptedOverFail(card, accepted);
                 continue;
             }
-            if (m.Type == MessageTypes.WorkflowExpired)
+            if (m.Type == MessageTypes.DeliverableExpired)
             {
                 if (card.Lane == Lanes.Done && card.EndedAt is not null) continue;
-                // The card's time ends at the workflow's last activity, not at the expiry.
+                // The card's time ends at the deliverable's last activity, not at the expiry.
                 if (card.Lane != Lanes.Done) store.Save(card with { Status = "done", Lane = Lanes.Done }, _at, lastActivity);
-                store.AddTrail(card.Id, Who(m.Source), "workflow expired", Text(p, "detail") ?? "expired: nothing happened in it for too long", _at);
-                store.AddMarker(card.Id, card.Workflow, card.Member, TimeMarkers.Expired, _at!);
+                store.AddTrail(card.Id, Who(m.Source), "deliverable expired", Text(p, "detail") ?? "expired: nothing happened in it for too long", _at);
+                store.AddMarker(card.Id, card.Deliverable, card.Member, TimeMarkers.Expired, _at!);
                 continue;
             }
-            if (m.Type == MessageTypes.WorkflowClosed && card.Lane != Lanes.Done && Lanes.Loudness(card.Status) > 0)
+            if (m.Type == MessageTypes.DeliverableClosed && card.Lane != Lanes.Done && Lanes.Loudness(card.Status) > 0)
             {
                 store.Save(card with { Status = "done", Lane = Lanes.Done }, _at);
-                store.AddTrail(card.Id, Who(m.Source), "workflow closed", Text(p, "reason") ?? "closed without being declared complete", _at);
+                store.AddTrail(card.Id, Who(m.Source), "deliverable closed", Text(p, "reason") ?? "closed without being declared complete", _at);
                 continue;
             }
             if (Lanes.Loudness(card.Status) > 0) continue;
-            // Declaring the workflow complete leaves out a tester's card the tester has not tested, and says why.
-            if (m.Type == MessageTypes.WorkflowCompleted && card.Lane != Lanes.Done
+            // Declaring the deliverable complete leaves out a tester's card the tester has not tested, and says why.
+            if (m.Type == MessageTypes.DeliverableCompleted && card.Lane != Lanes.Done
                 && TesterRule.UntestedTester(card, store.Trail(card.Id), TestersOf(card.Team)) is { } untested)
             {
-                store.AddTrail(card.Id, BoardSource, "comment", $"Left out of Done when the workflow was declared complete: {untested} has not " +
+                store.AddTrail(card.Id, BoardSource, "comment", $"Left out of Done when the deliverable was declared complete: {untested} has not " +
                     $"tested it since it was last assigned. Give it to {untested} with tell (card: {card.Id}), or move it to done with the reason in note.", _at);
                 continue;
             }
             store.Save(card with { Status = "done", Lane = Lanes.Done }, _at);
-            if (m.Type == MessageTypes.WorkflowClosed)
-                store.AddTrail(card.Id, Who(m.Source), "workflow closed", Text(Payload(m), "reason") ?? "closed without being declared complete", _at);
+            if (m.Type == MessageTypes.DeliverableClosed)
+                store.AddTrail(card.Id, Who(m.Source), "deliverable closed", Text(Payload(m), "reason") ?? "closed without being declared complete", _at);
             else
-                store.AddTrail(card.Id, Who(m.Source), "workflow done", Text(Payload(m), "delivered") ?? "the work is declared complete", _at);
+                store.AddTrail(card.Id, Who(m.Source), "deliverable done", Text(Payload(m), "delivered") ?? "the work is declared complete", _at);
         }
-        // A listed card of another workflow of the same team (claimed elsewhere since) is closed the same way.
+        // A listed card of another deliverable of the same team (claimed elsewhere since) is closed the same way.
         foreach (var accepted in overFail.Values)
             if (store.Card(accepted.Card) is { } other && (team is null || string.Equals(other.Team, team, StringComparison.OrdinalIgnoreCase)))
                 AcceptedOverFail(other, accepted);
-        var endedAt = m.Type == MessageTypes.WorkflowExpired && Text(p, "endedAt") is { } last ? last : _at!;
+        var endedAt = m.Type == MessageTypes.DeliverableExpired && Text(p, "endedAt") is { } last ? last : _at!;
         store.EndCardsOf(m.CorrelationId, how, endedAt);
-        if (m.Type == MessageTypes.WorkflowCompleted && store.ItemDispatchedAs(m.CorrelationId) is { State: "ready" } item) store.SaveItem(item with { State = "declared" });
+        if (m.Type == MessageTypes.DeliverableCompleted && store.ItemDispatchedAs(m.CorrelationId) is { State: "ready" } item) store.SaveItem(item with { State = "declared" });
     }
 
     /// <summary>

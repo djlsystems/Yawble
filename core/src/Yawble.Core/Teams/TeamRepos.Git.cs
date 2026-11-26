@@ -145,7 +145,7 @@ public sealed partial class TeamRepos
                 + "`git merge --no-edit FETCH_HEAD`. Resolve each conflict so both sides' intent survives; when a conflict is in a member's "
                 + "work and you cannot tell the right result, tell that member what to change on its branch and merge its branch again. "
                 + "Never rebase, never reset and never push. Commit the merge, check it builds and its tests pass, then call "
-                + $"`workflow_complete` with the new {s.TeamBranch} commit; the person merges it to {s.BaseBranch} from the Git dialog.";
+                + $"`deliverable_complete` with the new {s.TeamBranch} commit; the person merges it to {s.BaseBranch} from the Git dialog.";
         }, ct);
     }
 

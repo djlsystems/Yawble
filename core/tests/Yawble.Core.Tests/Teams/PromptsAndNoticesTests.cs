@@ -19,7 +19,7 @@ public class PromptsAndNoticesTests
         var manager = global::Yawble.Core.Gateway.RoleText.For("manager");
         Assert.StartsWith("# Manager", manager);
         foreach (var needle in new[] { "`status`", "`tell`", "END YOUR TURN", "handed back", "run ended", "did not hand back", "interrupted",
-                     "numbered items", "members/<team>/<name>", "never ask a member to push", "`workflow_complete`", "`hire`", "`hiring`", "FULL PATH", "already declared", "`needs_decision`",
+                     "numbered items", "members/<team>/<name>", "never ask a member to push", "`deliverable_complete`", "`hire`", "`hiring`", "FULL PATH", "already declared", "`needs_decision`",
                      "Scheduled work (trigger", "act on that job only", "paid model run",
                      "never close over a tester's FAIL", "`kind: accept-fail` or `wont-do`", "only the person's yes lets you declare over it" })
         {
@@ -29,7 +29,7 @@ public class PromptsAndNoticesTests
         Assert.StartsWith("# Member", member);
         foreach (var needle in new[] { "members/<team>/<name>", "`git commit`", "Never push", "no remote and no git credential", "`progress`", "`handback`",
                      "`blocked`", "`item` number", "`needs_decision`", "only your Manager",
-                     "Scheduled work (trigger", "do not hand back: call `workflow_complete`" })
+                     "Scheduled work (trigger", "do not hand back: call `deliverable_complete`" })
         {
             Assert.Contains(needle, member);
         }

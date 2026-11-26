@@ -12,8 +12,8 @@ const teamRows = [
   { id: 1, name: 'payments', repoPath: 'C:/repos/payments', members: 3, running: 1, queued: 1 },
   { id: 2, name: 'checkout-web-with-a-rather-long-team-name', repoPath: 'C:/repos/checkout', members: 2, running: 0, queued: 0 },
 ];
-/** Like the core's TeamsAsync (teams.list and app.overview): each team with its workflowExpiryDays (default 3). */
-const teamList = () => teamRows.map((t) => ({ ...t, workflowExpiryDays: expiryDays(t.id) }));
+/** Like the core's TeamsAsync (teams.list and app.overview): each team with its deliverableExpiryDays (default 3). */
+const teamList = () => teamRows.map((t) => ({ ...t, deliverableExpiryDays: expiryDays(t.id) }));
 
 const member = (id: number, teamId: number, team: string, name: string, role: 'manager' | 'member') =>
   ({ id, teamId, team, name, role, cli: 'claude', instructions: 'Builds things.', model: '', credential: 'default' });
@@ -29,7 +29,7 @@ const agents: Record<number, unknown[]> = {
 };
 
 /** On the core's wire contract for time: each card's stretches, back to back from its creation, as minutes; the last one
- *  of an open card runs on to now. From them the fake builds BoardCard.time, timeline.get's rows and bands, workflow #10's
+ *  of an open card runs on to now. From them the fake builds BoardCard.time, timeline.get's rows and bands, deliverable #10's
  *  summary row (the core's priority merge) and its time, so every figure adds up like the core's. */
 type Cat = 'agent-working' | 'stalled' | 'waiting-on-you' | 'waiting-for-slot' | 'waiting-on-teammate' | 'blocked' | 'scheduled' | 'not-started' | 'idle' | 'was-done';
 const Merge: Cat[] = ['agent-working', 'waiting-on-you', 'stalled', 'waiting-for-slot', 'waiting-on-teammate', 'blocked', 'scheduled', 'not-started', 'idle', 'was-done'];
@@ -69,7 +69,7 @@ const timeline = (() => {
     const row = { card: Number(id), member: c.member, title: c.title, bands: bands.map((b) => ({ category: b.category, start: at(b.s), end: b.e == null ? null : at(b.e) })) };
     cards[Number(id)] = { time, row, markers, bands };
   }
-  // Workflow #10: every card's stretches merged per moment, the higher category winning (the core's merge).
+  // Deliverable #10: every card's stretches merged per moment, the higher category winning (the core's merge).
   const edges = [...new Set(Object.values(cards).flatMap((c) => c.bands.flatMap((b) => [b.s, b.e ?? now])))].sort((a, b) => a - b);
   const summary: { category: Cat; s: number; e: number }[] = [];
   for (let i = 1; i < edges.length; i++) {
@@ -81,20 +81,20 @@ const timeline = (() => {
   }
   const wsum = new Map<Cat, number>();
   for (const b of summary) wsum.set(b.category, (wsum.get(b.category) ?? 0) + (b.e - b.s));
-  const workflow = {
+  const deliverable = {
     time: { createdAt: at(t0), startedAt: at(t0 + 10 * 60_000), endedAt: null, endedHow: null, open: true, overallMs: now - t0, rebuilt: false,
       breakdown: [...wsum].map(([category, ms]) => ({ category, ms })) },
     rows: Object.values(cards).map((c) => c.row),
     summary: summary.map((b) => ({ category: b.category, start: at(b.s), end: b.e >= now ? null : at(b.e) })),
     markers: Object.values(cards).flatMap((c) => c.markers),
   };
-  return { cards, workflow };
+  return { cards, deliverable };
 })();
 
 const lanes = [{ id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' }, { id: 'blocked', label: 'Needs You' }, { id: 'done', label: 'Done' }];
 const card = (id: number, lane: string, title: string, status: string, memberName = 'DeveloperAda') => ({
   id, team: 'payments', teamId: 1, member: memberName, item: 'B012', title, body: `${title}\n\nThe details of the card, with a long line that has to wrap on a phone screen without making it scroll sideways.`,
-  status, lane, placed: false, awaitingManager: false, workflow: 10, createdAt: iso(120), updatedAt: iso(id), trailCount: 2,
+  status, lane, placed: false, awaitingManager: false, deliverable: 10, createdAt: iso(120), updatedAt: iso(id), trailCount: 2,
 });
 const cards = [
   card(1, 'todo', 'Add partial refunds', 'queued'), card(2, 'todo', 'A very long card title that goes on and on to check the wrapping of card titles on a phone', 'queued'),
@@ -104,7 +104,7 @@ const cards = [
 
 const backlogItem = (id: number, title: string, state: string) => ({
   id, label: `B0${10 + id}`, team: null, title, body: `# ${title}\n\nWhat it is and how it is checked.`, state, archivedAt: null,
-  dispatchedTeam: state === 'declared' ? 'payments' : null, dispatchedWorkflow: state === 'declared' ? 10 : null, dispatchedAt: state === 'declared' ? iso(60) : null,
+  dispatchedTeam: state === 'declared' ? 'payments' : null, dispatchedDeliverable: state === 'declared' ? 10 : null, dispatchedAt: state === 'declared' ? iso(60) : null,
   inFlight: state === 'declared', createdAt: iso(600 + id), updatedAt: iso(100 + id), dispatchCount: state === 'declared' ? 1 : 0,
 });
 const backlog = [backlogItem(1, 'Partial refunds', 'declared'), backlogItem(2, 'Refund limits per merchant, set by the Owner in Settings', 'ready'), backlogItem(3, 'Refund report', 'pending')];
@@ -112,19 +112,19 @@ const backlog = [backlogItem(1, 'Partial refunds', 'declared'), backlogItem(2, '
 const networkAsk = {
   id: 7, at: iso(10), teamId: 1, team: 'payments', member: 'payments/DeveloperAda', memberName: 'DeveloperAda', host: 'api.nuget.org',
   reason: 'restore the NuGet packages for the build', method: 'CONNECT', pathSample: null, count: 3, lastSeen: iso(5), hint: 'NuGet: .NET packages',
-  workflow: 10, state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'],
+  deliverable: 10, state: 'pending', scope: null, decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'],
 };
 const toolAsk = {
   id: 4, at: iso(10), teamId: 1, team: 'payments', member: 'payments/TesterBen', memberName: 'TesterBen', tool: 'dotnet-sdk-10',
   displayName: '.NET SDK 10', publisher: 'Microsoft', wingetId: 'Microsoft.DotNet.SDK.10', scope: 'machine', reason: 'build and test', count: 2,
-  lastSeen: iso(5), workflow: 10, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
+  lastSeen: iso(5), deliverable: 10, state: 'pending', attempts: 0, error: null, decidedBy: null, decidedVia: null, decidedAt: null,
   canInstall: true, command: 'winget install --id Microsoft.DotNet.SDK.10 --exact --silent', choices: ['install', 'checkAgain', 'notNow'], installer: 'winget',
 };
 /** A read-write folder ask; listed only after setFolderAsks(true), so the other phone tests see no extra banner. */
 const folderAsk = {
   id: 21, at: iso(6), teamId: 1, team: 'payments', memberId: 2, member: 'payments/TesterBen', memberName: 'TesterBen', askedBy: 'payments/TesterBen',
   path: 'Z:\\smokesessions', access: 'readwrite', reason: 'read the smoke session recordings and write the results next to them', exists: true,
-  existedWhenAsked: true, state: 'pending', grantedAccess: null, decidedBy: null, decidedVia: null, decidedAt: null, note: null, workflow: 10,
+  existedWhenAsked: true, state: 'pending', grantedAccess: null, decidedBy: null, decidedVia: null, decidedAt: null, note: null, deliverable: 10,
   choices: ['readwrite', 'read', 'deny'],
 };
 /** The Manager asks for DeveloperAda (askedBy is not member); listed only with setFolderAsks(true, true). */
@@ -135,9 +135,9 @@ const managerFolderAsk = {
 const folder = { on: false, manager: false, answered: new Map<number, string>() };
 const integrationAsk = {
   id: 9, at: iso(8), integration: 'gh', teamId: 1, member: 'DeveloperAda', command: 'gh pr create --title "Partial refunds" --body-file pr.md',
-  reason: 'open the pull request for card 1', workflow: 10, repo: 'payments', action: 'pr create', canAlways: true,
+  reason: 'open the pull request for card 1', deliverable: 10, repo: 'payments', action: 'pr create', canAlways: true,
 };
-const decision = { seq: 77, from: 'Manager', question: 'What should the refund limit be: 30 days or 90 days?', workflow: 10, at: iso(4) };
+const decision = { seq: 77, from: 'Manager', question: 'What should the refund limit be: 30 days or 90 days?', deliverable: 10, at: iso(4) };
 
 const conversations = [
   { id: 'c1', title: 'Payments today', cli: 'claude', teamId: 1, team: 'payments', createdAt: iso(300), updatedAt: iso(2), running: false, unread: 1, watching: 1 },
@@ -151,7 +151,7 @@ const conversation = (id: string) => ({
     { id: 3, role: 'update', text: 'payments: card 3 is done.', at: iso(3), state: null, error: null, tools: [], cli: null, team: 'payments', kind: 'done' },
   ],
   turn: null,
-  watches: [{ id: 1, team: 'payments', workflow: 10, what: 'partial refunds', followUp: true, createdAt: iso(10), expiresAt: later(600) }],
+  watches: [{ id: 1, team: 'payments', deliverable: 10, what: 'partial refunds', followUp: true, createdAt: iso(10), expiresAt: later(600) }],
 });
 
 const col = (key: string, label: string, kind: 'time' | 'text' | 'number' = 'text') => ({ key, label, kind, filter: kind === 'text' });
@@ -161,42 +161,42 @@ const logSources = [{
 }];
 const logRows = Array.from({ length: 12 }, (_, i) => ({ _id: String(i + 1), at: iso(i * 7), member: i % 2 ? 'payments/DeveloperAda' : 'payments/Manager', event: `run ${40 - i}`, details: i === 0 ? 'a-very-long-unbroken-detail-string-'.repeat(4) : 'completed in 2m' }));
 
-const workflows = [{ id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', undeclared: false, busy: ['DeveloperAda'], ending: null, startedAt: iso(120), lastAt: iso(2), messages: 14, endedAt: null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null, time: timeline.workflow.time }];
-/** Shown with setExpiry(true): an open workflow waiting on question 3 that expires in 20 h (Needs you,
+const deliverables = [{ id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', undeclared: false, busy: ['DeveloperAda'], ending: null, startedAt: iso(120), lastAt: iso(2), messages: 14, endedAt: null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null, time: timeline.deliverable.time }];
+/** Shown with setExpiry(true): an open deliverable waiting on question 3 that expires in 20 h (Needs you,
  *  Extend), and one the app closed as expired (endedAt: its last activity, 3 days before expiredAt). */
-const expiryWorkflows = () => [
+const expiryDeliverables = () => [
   { id: 12, title: 'Refund limits per country', owner: 'Manager', state: 'open', undeclared: true, busy: [], ending: null, startedAt: iso(4000), lastAt: iso(2 * 1440 + 240), messages: 6,
     endedAt: null, expiredAt: null, expiresAt: expiry.extended.get(12) ?? later(20 * 60),
-    // Like the core: the warning text while the workflow is warned (it waits on a question and expires within a day), else null.
+    // Like the core: the warning text while the deliverable is warned (it waits on a question and expires within a day), else null.
     expiryWarning: expiry.extended.has(12) ? null : warningText(12, 3), question: 3, time: idleTime(4000, null, null) },
-  // The core's ending for an expired workflow is the detail only; the dialog adds "Expired: " itself.
+  // The core's ending for an expired deliverable is the detail only; the dialog adds "Expired: " itself.
   { id: 9, title: 'Old refund export', owner: 'Manager', state: 'expired', undeclared: false, busy: [], ending: 'no activity for 3 days', startedAt: iso(9000), lastAt: iso(4 * 1440), messages: 4,
     endedAt: iso(4 * 1440), expiredAt: iso(1440), expiresAt: null, expiryWarning: null, question: null, time: idleTime(9000, 4 * 1440, 'expired') },
 ];
-/** A quiet workflow's time: 40 minutes worked after its first message, then idle to its end (or now, open). */
+/** A quiet deliverable's time: 40 minutes worked after its first message, then idle to its end (or now, open). */
 function idleTime(createdAgo: number, endedAgo: number | null, how: string | null) {
   const overallMs = (createdAgo - (endedAgo ?? 0)) * 60_000;
   return { createdAt: iso(createdAgo), startedAt: iso(createdAgo - 5), endedAt: endedAgo == null ? null : iso(endedAgo), endedHow: how, open: endedAgo == null,
     overallMs, rebuilt: false, breakdown: [{ category: 'not-started', ms: 5 * 60_000 }, { category: 'agent-working', ms: 40 * 60_000 }, { category: 'idle', ms: overallMs - 45 * 60_000 }] };
 }
-/** timeline.get for a quiet workflow: its summary row from its breakdown, back to back (the long idle stretch is compressed on screen). */
+/** timeline.get for a quiet deliverable: its summary row from its breakdown, back to back (the long idle stretch is compressed on screen). */
 function quietTimeline(time: ReturnType<typeof idleTime>) {
   let x = Date.parse(time.createdAt);
   const summary = time.breakdown.map((b, i) => { const s = x; x += b.ms; return { category: b.category, start: new Date(s).toISOString(), end: time.open && i === time.breakdown.length - 1 ? null : new Date(x).toISOString() }; });
   return { time, rows: [], summary, markers: [{ kind: 'planned', at: time.createdAt }, ...(time.endedHow === 'expired' ? [{ kind: 'expired', at: time.endedAt! }] : [])] };
 }
 /** The core's BusEngine.WarningText. */
-const warningText = (workflow: number, question: number) => `#${workflow} will expire tomorrow; it waits on your answer to question ${question}`;
-/** The expiry fixtures on or off, the workflows extended (id -> their new expiresAt), and each team's workflowExpiryDays. */
+const warningText = (deliverable: number, question: number) => `#${deliverable} will expire tomorrow; it waits on your answer to question ${question}`;
+/** The expiry fixtures on or off, the deliverables extended (id -> their new expiresAt), and each team's deliverableExpiryDays. */
 const expiry = { on: false, extended: new Map<number, string>(), days: new Map<number, number>() };
 const expiryDays = (teamId: number) => expiry.days.get(teamId) ?? 3;
 /** The teams whose "Allow localhost (macOS)" is on (off by default; a new fake core starts with none). */
 const localhostOn = new Set<number>();
 
-/** The Workflows page's rows (workflows.list / workflows.get, as the core's contract has them), across
+/** The Deliverables page's rows (deliverables.list / deliverables.get, as the core's contract has them), across
  *  both teams: #10 running (item "B011", Ada on it), #12 waiting on you, #15 waiting for the lease, #16 idle (expires in 20 h),
  *  and ended ones: #9 expired, #14 completed today (item "B013", archived), #8 closed. */
-function workflowRows() {
+function deliverableRows() {
   const wfTime = (createdAgo: number, endedAgo: number | null, how: string | null, segs: [Cat, number][]) => {
     const overallMs = (createdAgo - (endedAgo ?? 0)) * 60_000;
     const known = segs.reduce((a, [, m]) => a + m * 60_000, 0);
@@ -208,7 +208,7 @@ function workflowRows() {
   const t1 = { team: 'payments', teamId: 1 }, t2 = { team: teamRows[1].name, teamId: 2 };
   return followExpiry([
     { ...base, ...t1, id: 10, title: 'Partial refunds', owner: 'Manager', state: 'open', status: 'running', working: true, busy: ['DeveloperAda is running'], startedAt: iso(120), lastAt: iso(1), messages: 14,
-      item: { label: 'B011', title: 'Partial refunds', archived: false }, members: [{ id: 2, name: 'DeveloperAda', state: 'running' }, { id: 3, name: 'TesterBen', state: 'queued' }], time: timeline.workflow.time },
+      item: { label: 'B011', title: 'Partial refunds', archived: false }, members: [{ id: 2, name: 'DeveloperAda', state: 'running' }, { id: 3, name: 'TesterBen', state: 'queued' }], time: timeline.deliverable.time },
     { ...base, ...t1, id: 12, title: 'Refund limits per merchant', owner: 'Manager', state: 'open', status: 'needs-you', question: 3, startedAt: iso(400), lastAt: iso(30), messages: 6,
       item: { label: 'B012', title: 'Refund limits per merchant, set by the Owner in Settings', archived: false }, time: wfTime(400, null, null, [['not-started', 5], ['agent-working', 60], ['waiting-on-you', 300]]) },
     { ...base, ...t2, id: 15, title: 'Checkout button states', owner: 'Manager', state: 'open', status: 'waiting', waitingFor: 'lease', working: true, startedAt: iso(90), lastAt: iso(4), messages: 9,
@@ -223,8 +223,8 @@ function workflowRows() {
       time: wfTime(6000, 3000, 'closed', [['not-started', 5], ['agent-working', 15]]) },
   ]);
 }
-/** The page rows follow the expiry fixtures as bus.workflows does: with setExpiry(true) #12 expires in 20 h and is warned (it waits on
- *  question 3), and an Extend (bus.workflowExtend, on or off) sets the row's new expiresAt and drops its warning. */
+/** The page rows follow the expiry fixtures as bus.deliverables does: with setExpiry(true) #12 expires in 20 h and is warned (it waits on
+ *  question 3), and an Extend (bus.deliverableExtend, on or off) sets the row's new expiresAt and drops its warning. */
 function followExpiry<T extends { id: number; state: string; question: number | null; expiresAt: string | null; expiryWarning: string | null }>(rows: T[]): T[] {
   return rows.map((w) => {
     if (w.state !== 'open') return w;
@@ -234,16 +234,16 @@ function followExpiry<T extends { id: number; state: string; question: number | 
     return w;
   });
 }
-const workflowChip: Record<string, (s: string) => boolean> = {
+const deliverableChip: Record<string, (s: string) => boolean> = {
   all: () => true, open: (s) => ['running', 'needs-you', 'waiting', 'idle', 'stopped'].includes(s), 'needs-you': (s) => s === 'needs-you', done: (s) => s === 'completed', closed: (s) => s === 'closed' || s === 'expired',
 };
-function workflowsList(p: any) {
+function deliverablesList(p: any) {
   // The contract's request: only these keys; refused as the core refuses them.
   const bad = (m: string) => Object.assign(new Error(m), { code: 'bad_params' });
   for (const k of Object.keys(p ?? {})) if (!['teamId', 'q', 'state', 'limit'].includes(k)) throw bad(`unknown parameter ${k}`);
   if (p?.limit != null && !Number.isInteger(p.limit)) throw bad('limit must be a number');
   const limit = Math.min(1000, Math.max(1, p?.limit ?? 200));
-  let rows = workflowRows();
+  let rows = deliverableRows();
   if (p?.teamId != null) {
     if (!teamRows.some((t) => t.id === Number(p.teamId))) throw Object.assign(new Error('no such team'), { code: 'no_such_team' });
     rows = rows.filter((w) => w.teamId === Number(p.teamId));
@@ -252,22 +252,22 @@ function workflowsList(p: any) {
   rows = rows.filter((w) => words.every((x) => [`#${w.id}`, String(w.id), w.title, (w.item as any)?.label ?? '', (w.item as any)?.title ?? '', w.team, w.owner, ...w.members.map((m: any) => m.name)]
     .some((f) => f.toLowerCase().includes(x))));
   const n = (f: (s: string) => boolean) => rows.filter((w) => f(w.status)).length;
-  const counts = { all: rows.length, open: n(workflowChip.open), needsYou: n(workflowChip['needs-you']), done: n(workflowChip.done), closed: n(workflowChip.closed),
+  const counts = { all: rows.length, open: n(deliverableChip.open), needsYou: n(deliverableChip['needs-you']), done: n(deliverableChip.done), closed: n(deliverableChip.closed),
     running: n((s) => s === 'running'), waiting: n((s) => s === 'waiting'), idle: n((s) => s === 'idle'), stopped: n((s) => s === 'stopped'), completed: n((s) => s === 'completed'), expired: n((s) => s === 'expired'), completedToday: n((s) => s === 'completed') };
   const st = String(p?.state ?? 'all').toLowerCase();
-  const keep = workflowChip[st] ?? (['running', 'waiting', 'idle', 'stopped', 'completed', 'expired'].includes(st) ? (s: string) => s === st : undefined);
+  const keep = deliverableChip[st] ?? (['running', 'waiting', 'idle', 'stopped', 'completed', 'expired'].includes(st) ? (s: string) => s === st : undefined);
   if (!keep) throw bad('state: not a chip or a status');
   // Newest activity first; the newest `limit` plus every open row however old.
   const matching = rows.filter((w) => keep(w.status)).sort((a, b) => Date.parse(b.lastAt) - Date.parse(a.lastAt));
   const shown = matching.filter((w, i) => i < limit || w.state === 'open');
-  return { workflows: shown, counts, truncated: shown.length < matching.length, backlog: true, now: new Date().toISOString() };
+  return { deliverables: shown, counts, truncated: shown.length < matching.length, backlog: true, now: new Date().toISOString() };
 }
-function workflowsGet(p: any) {
-  const w = workflowRows().find((x) => x.id === Number(p?.workflow));
-  if (!w) throw Object.assign(new Error('no such workflow'), { code: 'no_such_workflow' });
+function deliverablesGet(p: any) {
+  const w = deliverableRows().find((x) => x.id === Number(p?.deliverable));
+  if (!w) throw Object.assign(new Error('no such deliverable'), { code: 'no_such_deliverable' });
   const own = w.id === 10 ? cards : [];
   return {
-    workflow: w,
+    deliverable: w,
     cards: own.map((c) => ({ id: c.id, title: c.title, lane: c.lane, member: c.member, status: c.status, time: c.time })),
     messages: [
       { seq: 120, at: iso(1), kind: 'progress', from: 'DeveloperAda', member: 'DeveloperAda', text: 'Card 3: wiring the refund webhook' },
@@ -280,8 +280,8 @@ function workflowsGet(p: any) {
 }
 
 export const answers: Record<string, (p: any, access: Access) => unknown> = {
-  'workflows.list': (p) => workflowsList(p),
-  'workflows.get': (p) => workflowsGet(p),
+  'deliverables.list': (p) => deliverablesList(p),
+  'deliverables.get': (p) => deliverablesGet(p),
   'core.getInfo': (_p, access) => ({ product: 'Yawble', version: '0.0.0+dev.fake', platform: 'win32', os: 'Windows (fake)', dotnet: '10', pid: 1, sandbox: { backend: 'fake' }, schema: [], hostChecks: [], remoteAccess: access }),
   'sandbox.getAvailableBackends': () => [],
   'teams.list': () => teamList(),
@@ -301,18 +301,18 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   'companion.list': () => ({ clients: [], pairings: [{ id: 'p1', name: 'claude-code', level: 'act', code: 'K7Q2ZD', expires: later(5) }], actions: [] }),
   'companion.status': () => ({ endpoint: null, controlFile: null, binaryPath: null, claudeCommand: null }),
   'bus.decisions': (p) => !needsYou ? [] : (p?.teamId === 1 || p?.team === 'payments' || p?.teamId === undefined ? [decision] : []),
-  'bus.workflows': () => (expiry.on ? [...workflows, ...expiryWorkflows()] : workflows),
-  // Extend resets the workflow's clock to now + the team's workflowExpiryDays (its warning goes); teams.workflowExpiry
-  // reads, or sets with days. Like the core: returns the updated list item; an ended workflow is refused with already_ended.
-  'bus.workflowExtend': (p) => {
-    const id = Number(p?.workflow);
-    const w = [...workflows, ...(expiry.on ? expiryWorkflows() : [])].find((x) => x.id === id) ?? workflowRows().find((x) => x.id === id);
-    if (w && w.state !== 'open') throw Object.assign(new Error(`workflow #${id} has already ended`), { code: 'already_ended' });
+  'bus.deliverables': () => (expiry.on ? [...deliverables, ...expiryDeliverables()] : deliverables),
+  // Extend resets the deliverable's clock to now + the team's deliverableExpiryDays (its warning goes); teams.deliverableExpiry
+  // reads, or sets with days. Like the core: returns the updated list item; an ended deliverable is refused with already_ended.
+  'bus.deliverableExtend': (p) => {
+    const id = Number(p?.deliverable);
+    const w = [...deliverables, ...(expiry.on ? expiryDeliverables() : [])].find((x) => x.id === id) ?? deliverableRows().find((x) => x.id === id);
+    if (w && w.state !== 'open') throw Object.assign(new Error(`deliverable #${id} has already ended`), { code: 'already_ended' });
     const expiresAt = new Date(Date.now() + expiryDays(Number(p?.teamId ?? 1)) * 86400_000).toISOString();
     expiry.extended.set(id, expiresAt);
     return { ...(w ?? { id }), expiresAt, expiryWarning: null };
   },
-  'teams.workflowExpiry': (p, access) => {
+  'teams.deliverableExpiry': (p, access) => {
     if (p?.days != null) {
       if (access === 'read') throw Object.assign(new Error('Read-only (Visitor): refused by the fake'), { code: 'remote_refused' });
       if (!Number.isInteger(p.days) || p.days < 1 || p.days > 365) throw Object.assign(new Error('days: a whole number from 1 to 365'), { code: 'bad_request' });
@@ -331,7 +331,7 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
     return { on: localhostOn.has(id) };
   },
   'teams.agents': (p) => agents[p?.teamId ?? p?.id ?? 1] ?? [],
-  'teams.quiet': () => ({ quiet: false, working: ['DeveloperAda'], openWorkflows: [10] }),
+  'teams.quiet': () => ({ quiet: false, working: ['DeveloperAda'], openDeliverables: [10] }),
   'teams.approvals': () => [],
   'teams.repos': () => [],
   'agentProfiles.list': () => [],
@@ -345,11 +345,11 @@ export const answers: Record<string, (p: any, access: Access) => unknown> = {
   // Which IDs on a screen are commits, as the core's contract says: per ID its
   // commits; one git no longer has is none (it stays text).
   'git.commitsResolve': (p) => ({ max: 200, results: ((p?.ids ?? []) as string[]).map((id) => ({ id: id.toLowerCase(), valid: true, matches: commitsResolve(id) })) }),
-  // A card's own row, or workflow #10's rows and summary; an unknown one is refused like the core (not_found).
+  // A card's own row, or deliverable #10's rows and summary; an unknown one is refused like the core (not_found).
   'timeline.get': (p) => {
-    if (p?.workflow != null) { const quiet = (expiry.on ? expiryWorkflows() : []).find((w) => w.id === Number(p.workflow));
+    if (p?.deliverable != null) { const quiet = (expiry.on ? expiryDeliverables() : []).find((w) => w.id === Number(p.deliverable));
       if (quiet) return quietTimeline(quiet.time);
-      if (Number(p.workflow) !== 10) throw Object.assign(new Error('no such workflow'), { code: 'not_found' }); return timeline.workflow; }
+      if (Number(p.deliverable) !== 10) throw Object.assign(new Error('no such deliverable'), { code: 'not_found' }); return timeline.deliverable; }
     const c = timeline.cards[Number(p?.card)];
     if (!c) throw Object.assign(new Error('no such card'), { code: 'not_found' });
     return { time: c.time, rows: [c.row], summary: null, markers: c.markers };
@@ -489,8 +489,8 @@ function commitShow(sha: string) {
   const pick = [COMMIT_ADA, COMMIT_MERGE, COMMIT_BASE, COMMIT_FEATURE].find((c) => c.startsWith(s));
   if (!pick) return { found: false, goneReason: `Commit ${sha} was on members/payments/old-cleo (Old Cleo's branch), and git no longer has it: that branch was deleted and git has since cleaned up its commits.`, sha };
   const common = { found: true, sha: pick, shortSha: pick.slice(0, 7), codeShown: commitState.codeShown };
-  if (pick === COMMIT_ADA) return { ...common, title: 'Partial refunds: refund part of a payment', body: 'The refund takes an amount now.\n\nCard 3, workflow #10.',
-    author: person('DeveloperAda', 40), isMerge: false, parents: [COMMIT_BASE], made: { member: 'DeveloperAda', card: 3, workflow: 10 },
+  if (pick === COMMIT_ADA) return { ...common, title: 'Partial refunds: refund part of a payment', body: 'The refund takes an amount now.\n\nCard 3, deliverable #10.',
+    author: person('DeveloperAda', 40), isMerge: false, parents: [COMMIT_BASE], made: { member: 'DeveloperAda', card: 3, deliverable: 10 },
     where: { inMain: false, branches: ['team/payments', 'members/payments/developerada'], otherBranches: [], pushed: false, tags: [] },
     files: [
       { path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false },
@@ -499,7 +499,7 @@ function commitShow(sha: string) {
     ] };
   if (pick === COMMIT_MERGE) return { ...common, title: "Merge DeveloperAda's branch into team/payments", body: '', author: person('Manager', 30), committer: person('Yawble', 30),
     isMerge: true, parents: [COMMIT_BASE, COMMIT_ADA], merge: { intoBranch: 'team/payments', fromBranch: 'members/payments/developerada', fromMember: 'DeveloperAda', commitCount: 2 },
-    made: { member: 'Manager', workflow: 10 }, where: { inMain: false, branches: ['team/payments'], otherBranches: [], pushed: false, tags: [] },
+    made: { member: 'Manager', deliverable: 10 }, where: { inMain: false, branches: ['team/payments'], otherBranches: [], pushed: false, tags: [] },
     files: [{ path: 'src/payments/refunds.ts', oldPath: 'src/payments/refund.ts', status: 'renamed', added: 4, deleted: 2, binary: false }] };
   if (pick === COMMIT_FEATURE) return { ...common, title: 'Try a new receipt layout', body: '', author: person('Owner', 20), isMerge: false, parents: [COMMIT_BASE],
     where: { inMain: false, branches: [], otherBranches: ['feature/x'], pushed: false, tags: [], ...(gitPreview.deleted.has(PREVIEW_BO_BRANCH) ? { deletedFrom: PREVIEW_BO_BRANCH } : {}) },
@@ -604,10 +604,10 @@ let syncBehind = false;
 /** With false, no integration ask and no Manager decision is pending (the team page shows its members under Tell). */
 let needsYou = true;
 
-/** Methods a viewer with "read" access may not call (the fake refuses them, like the Cloud Link). Also the workflows
- *  dialog's bus.nudgeWorkflow and bus.closeWorkflow too (bus.stopWorkflow already matched "stop"), as core's
+/** Methods a viewer with "read" access may not call (the fake refuses them, like the Cloud Link). Also the deliverables
+ *  dialog's bus.nudgeDeliverable and bus.closeDeliverable too (bus.stopDeliverable already matched "stop"), as core's
  *  RemoteAccess lists them. */
-const isChange = (m: string) => /\.(send|answer|save|delete|remove|create|add|update|install|run|stop|move|rename|tellManager|approve|decline|nudgeWorkflow|closeWorkflow|workflowExtend)/.test(m);
+const isChange = (m: string) => /\.(send|answer|save|delete|remove|create|add|update|install|run|stop|move|rename|tellManager|approve|decline|nudgeDeliverable|closeDeliverable|deliverableExtend)/.test(m);
 
 export function createFakeCore() {
   const unknown = new Set<string>();
@@ -628,7 +628,7 @@ export function createFakeCore() {
     setSync(behind: boolean) { syncBehind = behind; },
     /** With false, no integration ask and no decision is pending. */
     setNeedsYou(on: boolean) { needsYou = on; },
-    /** The expiring and expired workflows listed (off: only #10), Extend forgotten, workflowExpiryDays back to 3. */
+    /** The expiring and expired deliverables listed (off: only #10), Extend forgotten, deliverableExpiryDays back to 3. */
     setExpiry(on: boolean) { expiry.on = on; expiry.extended.clear(); expiry.days.clear(); },
     /** Put the Tidy… plan back (nothing deleted or realigned). */
     resetTidy() { tidy.deleted.clear(); tidy.realigned.clear(); },

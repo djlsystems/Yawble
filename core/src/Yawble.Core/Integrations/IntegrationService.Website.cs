@@ -468,33 +468,33 @@ public sealed partial class IntegrationService
             if (reason is null) throw new ArgumentException($"this call asks the person first: give a reason ({ReasonProperty}, one line)");
             var id = Scalar(
                 """
-                INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, action)
+                INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, action)
                 VALUES ($at, $i, $t, $m, $a, $r, $w, $c, $action) RETURNING id;
                 """,
                 ("$at", Now()), ("$i", integration), ("$t", run.Member.TeamId), ("$m", run.Member.Qualified), ("$a", JsonSerializer.Serialize(callArgs)),
                 ("$r", Clip(SecretScrubber.Scrub(reason), 500)), ("$w", run.Correlation), ("$c", run.Causation), ("$action", op.Id));
             Record("asked", ruleText);
-            return new ToolReply($"asked: {api.Name}'s {op.Id} waits for the person's approval (request {id}). You will be woken with the result in this workflow. Do other work or end your turn; do not ask again.", null);
+            return new ToolReply($"asked: {api.Name}'s {op.Id} waits for the person's approval (request {id}). You will be woken with the result in this deliverable. Do other work or end your turn; do not ask again.", null);
         }
         Record(Decisions.Allow, ruleText); // recorded first: an action is never unlogged, whatever the window does
         return await SendWebsiteAsync(api, request, ct);
     }
 
-    /// <summary>One-time permission for a direct screenshot after the person approved an ask for it: (website, team, workflow) to when it ends and the request.</summary>
-    private readonly Dictionary<(long Api, long Team, long Workflow), (DateTimeOffset Until, long AskId)> _screenshotGrants = [];
+    /// <summary>One-time permission for a direct screenshot after the person approved an ask for it: (website, team, deliverable) to when it ends and the request.</summary>
+    private readonly Dictionary<(long Api, long Team, long Deliverable), (DateTimeOffset Until, long AskId)> _screenshotGrants = [];
     private readonly Lock _screenshotGate = new();
     private static readonly TimeSpan ScreenshotGrantLife = TimeSpan.FromMinutes(10);
 
     private void GrantScreenshot(AskRow ask, long apiId)
     {
-        lock (_screenshotGate) _screenshotGrants[(apiId, ask.TeamId, ask.Workflow)] = (_clock.GetUtcNow() + ScreenshotGrantLife, ask.Id);
+        lock (_screenshotGate) _screenshotGrants[(apiId, ask.TeamId, ask.Deliverable)] = (_clock.GetUtcNow() + ScreenshotGrantLife, ask.Id);
     }
 
-    private long? TakeScreenshotGrant(long apiId, long teamId, long workflow)
+    private long? TakeScreenshotGrant(long apiId, long teamId, long deliverable)
     {
         lock (_screenshotGate)
         {
-            if (!_screenshotGrants.Remove((apiId, teamId, workflow), out var g)) return null;
+            if (!_screenshotGrants.Remove((apiId, teamId, deliverable), out var g)) return null;
             return g.Until >= _clock.GetUtcNow() ? g.AskId : null;
         }
     }

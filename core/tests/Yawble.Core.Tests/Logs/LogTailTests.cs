@@ -42,8 +42,8 @@ public sealed class LogTailTests : IDisposable
         return t;
     }
 
-    private static LogTailEntry Entry(string level, string? team = "web", string? member = "DeveloperAda", string text = "something", bool workflow = false) =>
-        new("2026-11-16T10:00:00.0000000+00:00", "Runs", level, team, member, "run", text, workflow);
+    private static LogTailEntry Entry(string level, string? team = "web", string? member = "DeveloperAda", string text = "something", bool deliverable = false) =>
+        new("2026-11-16T10:00:00.0000000+00:00", "Runs", level, team, member, "run", text, deliverable);
 
     /// <summary>Every logs.tailEntry pushed so far, once the events published before now are delivered.</summary>
     private async Task<List<JsonObject>> Pushed()
@@ -66,14 +66,14 @@ public sealed class LogTailTests : IDisposable
     }
 
     [Fact]
-    public async Task Default_level_passes_warnings_errors_and_workflow_events_only()
+    public async Task Default_level_passes_warnings_errors_and_deliverable_events_only()
     {
         var tail = NewTail();
         var id = tail.Start(new LogTailFilter(), Ada);
         tail.Write(Entry(LogLevels.Error, text: "e"));
         tail.Write(Entry(LogLevels.Warning, text: "w"));
         tail.Write(Entry(LogLevels.Info, text: "i"));
-        tail.Write(Entry(LogLevels.Info, text: "handback", workflow: true));
+        tail.Write(Entry(LogLevels.Info, text: "handback", deliverable: true));
         var texts = (await Pushed()).Select(d => d["entry"]!["text"]!.GetValue<string>()).ToList();
         Assert.Equal(["e", "w", "handback"], texts);
         Assert.All(await Pushed(), d => Assert.Equal(id, d["tail"]!.GetValue<string>()));
@@ -227,7 +227,7 @@ public sealed class LogTailTests : IDisposable
     }
 
     [Fact]
-    public void The_activity_read_leaves_model_usage_out_and_reads_levels_and_workflow_events()
+    public void The_activity_read_leaves_model_usage_out_and_reads_levels_and_deliverable_events()
     {
         using var db = new TempDb();
         void Exec(string sql)
@@ -248,9 +248,9 @@ public sealed class LogTailTests : IDisposable
         var network = Assert.Single(rows, r => r.Entry.Source == "Network").Entry;
         Assert.Equal(("web", "DeveloperAda", LogLevels.Warning), (network.Team, network.Member, network.Level));
         var handback = Assert.Single(rows, r => r.Entry.Event == "agent.handback").Entry;
-        Assert.True(handback.Workflow);
+        Assert.True(handback.Deliverable);
         Assert.DoesNotContain(Secret, handback.ToJson()["text"]!.GetValue<string>());
-        Assert.False(Assert.Single(rows, r => r.Entry.Event == "agent.progress").Entry.Workflow);
+        Assert.False(Assert.Single(rows, r => r.Entry.Event == "agent.progress").Entry.Deliverable);
         Assert.Empty(new LogService(db.Dir, db.ConnectionString).TailSince("2026-11-17"));
     }
 
@@ -258,7 +258,7 @@ public sealed class LogTailTests : IDisposable
     public void The_entry_carries_no_token_cost_or_usage_field()
     {
         var json = Entry(LogLevels.Error).ToJson();
-        Assert.Equal(["at", "source", "level", "team", "member", "event", "text", "workflow"], json.Select(kv => kv.Key));
+        Assert.Equal(["at", "source", "level", "team", "member", "event", "text", "deliverable"], json.Select(kv => kv.Key));
         Assert.DoesNotContain(json, kv => new[] { "token", "cost", "usage", "price" }.Any(w => kv.Key.Contains(w, StringComparison.OrdinalIgnoreCase)));
     }
 

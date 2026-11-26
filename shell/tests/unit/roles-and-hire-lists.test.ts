@@ -271,9 +271,9 @@ describe('Team settings > Hiring', () => {
   function api(list: TeamHireRow[] | null) {
     let rows = list;
     return fakeApi({
-      'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
+      'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
       'teams.push': () => ({ on: false, origin: null }), 'teams.approvals': () => [], 'teams.syncToBase': () => ({ on: true, note: null }),
-      'teams.repos': () => ({ main: null, extras: [] }), 'teams.workflowExpiry': () => ({ days: 3 }),
+      'teams.repos': () => ({ main: null, extras: [] }), 'teams.deliverableExpiry': () => ({ days: 3 }),
       'integrations.list': () => ({ integrations: [] }), 'integrations.mcpList': () => [], 'integrations.apiList': () => [],
       'agentProfiles.list': () => [], 'agents.models': models, 'roles.list': () => ROLES,
       'teams.hireList': () => { if (!rows) throw new Error('unknown method teams.hireList'); return rows; },

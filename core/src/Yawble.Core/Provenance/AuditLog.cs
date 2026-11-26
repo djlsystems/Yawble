@@ -15,15 +15,15 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
 
     /// <summary>The parameters that say what a call was about; every other parameter is left out.</summary>
     private static readonly string[] TargetKeys =
-        ["team", "teamId", "member", "memberId", "name", "id", "card", "item", "lane", "workflow", "conversationId", "trigger", "cli", "mode", "country"];
+        ["team", "teamId", "member", "memberId", "name", "id", "card", "item", "lane", "deliverable", "conversationId", "trigger", "cli", "mode", "country"];
 
     private static readonly HashSet<string> ReadVerbs = new(StringComparer.Ordinal)
     {
         "list", "get", "status", "card", "messages", "decisions", "overview", "agents", "detect", "read", "preview", "attach",
         "banner", "input", "resize", "previewLoosen", "getInfo", "getAvailableBackends", "getPlatformSupport", "getState",
         "getGlobal", "getMember", "version",
-        // The screens' polls and lookups: what is waiting, the Monitor's steps, workflows, settings shown, catalogs.
-        "asks", "steps", "workflows", "item", "connectionAttention", "connections", "versionStatus", "models", "repos",
+        // The screens' polls and lookups: what is waiting, the Monitor's steps, deliverables, settings shown, catalogs.
+        "asks", "steps", "deliverables", "item", "connectionAttention", "connections", "versionStatus", "models", "repos",
         "mcpList", "apiList", "apiPeek", "emailList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
         "history", "check", "commandLine", "testSessions", "actionStatus", "backups", "doctor", "keepDaily", "restoreStatus",
         "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who", "catalog",
@@ -41,8 +41,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
     private static readonly Dictionary<string, string> GetOrSet = new(StringComparer.Ordinal)
     {
         ["teams.push"] = "on", ["teams.syncToBase"] = "on",
-        // { teamId } reads the team's workflowExpiryDays, { teamId, days } sets it.
-        ["teams.workflowExpiry"] = "days",
+        // { teamId } reads the team's deliverableExpiryDays, { teamId, days } sets it.
+        ["teams.deliverableExpiry"] = "days",
         // { teamId } reads "Allow localhost (macOS)", { teamId, on } sets it.
         ["teams.localhost"] = "on",
     };
@@ -77,18 +77,18 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "git.commitsResolve",
         // The commits behind a count and the Merge / Delete previews change nothing.
         "git.commitRange", "git.mergePreview", "git.mergeDiff", "git.deletePreview",
-        // The Workflows page's list of every team's workflows, and one workflow in full.
-        "workflows.list", "workflows.get",
+        // The Deliverables page's list of every team's deliverables, and one deliverable in full.
+        "deliverables.list", "deliverables.get",
         // A team's hire list as Team settings > Hiring shows it (teams.setHireList is audited).
         "teams.hireList",
         // Opening and closing the read-only Code view change nothing (a download is recorded).
         "code.open", "code.close",
-        // A script or schema exported as a file, a script member and its saved state, and one script run in full.
-        "scripts.export", "schemas.export", "scripts.memberGet", "scripts.memberState", "scripts.memberFiles", "scripts.run",
+        // A workflow or schema exported as a file, a workflow member and its saved state, and one workflow run in full.
+        "workflows.export", "schemas.export", "workflows.memberGet", "workflows.memberState", "workflows.memberFiles", "workflows.run",
         // The designer's action catalog, a document rewritten to real integration names (nothing saved) and where a schema is used.
-        "scripts.catalog", "scripts.useRealNames", "schemas.usage",
-        // Settings > Scripts read-out (tellOtherTeams); scripts.setSettings is audited.
-        "scripts.settings",
+        "workflows.catalog", "workflows.useRealNames", "schemas.usage",
+        // Settings > Workflows read-out (tellOtherTeams); workflows.setSettings is audited.
+        "workflows.settings",
     };
 
     /// <summary>A call that only reads, by its name alone.</summary>

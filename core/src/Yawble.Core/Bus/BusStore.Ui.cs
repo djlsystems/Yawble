@@ -5,7 +5,7 @@ namespace Yawble.Core.Bus;
 public sealed record MemberRow(
     long Id, long TeamId, string Team, string Name, string Role, string Cli, string Instructions, string Model, string Credential, string? HireRole = null);
 
-public sealed record TeamRow(long Id, string Name, string? RepoPath, string CreatedAt, string? PausedAt = null, string? ArchivedAt = null, int? WorkflowExpiryDays = null)
+public sealed record TeamRow(long Id, string Name, string? RepoPath, string CreatedAt, string? PausedAt = null, string? ArchivedAt = null, int? DeliverableExpiryDays = null)
 {
     public bool Paused => PausedAt is not null;
     public bool Archived => ArchivedAt is not null;
@@ -16,7 +16,7 @@ public sealed partial class BusStore
 {
     public IReadOnlyList<TeamRow> Teams()
     {
-        using var cmd = Command("SELECT t.id, t.name, s.repo_path, t.created_at, t.paused_at, t.archived_at, s.workflow_expiry_days FROM teams t LEFT JOIN team_settings s ON s.team_id = t.id ORDER BY t.id;");
+        using var cmd = Command("SELECT t.id, t.name, s.repo_path, t.created_at, t.paused_at, t.archived_at, s.deliverable_expiry_days FROM teams t LEFT JOIN team_settings s ON s.team_id = t.id ORDER BY t.id;");
         using var r = cmd.ExecuteReader();
         var list = new List<TeamRow>();
         while (r.Read())
@@ -136,7 +136,7 @@ public sealed partial class BusStore
 
     /// <summary>
     /// needs_decision messages from a team's members that the person has not answered yet. A question is answered by a
-    /// reply to it, or by anything the person told that member later in the same workflow: an answer to one question
+    /// reply to it, or by anything the person told that member later in the same deliverable: an answer to one question
     /// also settles the same question asked again earlier (a second run asking twice), and so does a reply sent with
     /// Tell instead of Answer.
     /// </summary>

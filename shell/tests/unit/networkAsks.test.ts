@@ -31,7 +31,7 @@ function fakeApi(answers: Record<string, (params: any) => unknown>, extra: Parti
 const ask = (over: Partial<NetworkAsk> = {}): NetworkAsk => ({
   id: 7, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'Alpha', member: 'Alpha/DeveloperInes', memberName: 'DeveloperInes',
   host: 'api.nuget.org', reason: null, method: 'CONNECT', pathSample: null, count: 3, lastSeen: '2026-11-13T21:05:00Z',
-  hint: 'NuGet: .NET packages (dotnet restore, dotnet test)', workflow: 12, state: 'pending', scope: null,
+  hint: 'NuGet: .NET packages (dotnet restore, dotnet test)', deliverable: 12, state: 'pending', scope: null,
   decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'], ...over,
 });
 const answered = (choice: string) => ({ ok: true, id: 7, host: 'api.nuget.org', choice, closed: [7], told: ['Alpha/Manager'] });

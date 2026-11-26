@@ -11,21 +11,21 @@ using C = Yawble.Core.Board.TimeCategories;
 namespace Yawble.Core.Tests.Board;
 
 /// <summary>
-/// Card and workflow time through the store: the projector records each card's states and markers (0047), an old card's timeline is rebuilt
-/// from its trail, and workflow 3573's trail is the reference case. Fake clocks only.
+/// Card and deliverable time through the store: the projector records each card's states and markers (0047), an old card's timeline is rebuilt
+/// from its trail, and deliverable 3573's trail is the reference case. Fake clocks only.
 /// </summary>
 public class TimelineStoreTests
 {
     private long _seq = 1000;
 
-    private Message M(string type, object payload, string source, long workflow, DateTimeOffset at, long? causation = null) =>
-        new(++_seq, type, JsonSerializer.Serialize(payload), source, workflow, causation, 0, at);
+    private Message M(string type, object payload, string source, long deliverable, DateTimeOffset at, long? causation = null) =>
+        new(++_seq, type, JsonSerializer.Serialize(payload), source, deliverable, causation, 0, at);
 
-    private Message Tell(string member, string text, long workflow, DateTimeOffset at, string from = "web/Manager", object? extra = null, long? causation = null)
+    private Message Tell(string member, string text, long deliverable, DateTimeOffset at, string from = "web/Manager", object? extra = null, long? causation = null)
     {
         var payload = new JsonObject { ["text"] = text };
         if (extra is not null) foreach (var (k, v) in JsonSerializer.SerializeToNode(extra)!.AsObject()) payload[k] = v?.DeepClone();
-        return new(++_seq, "agent.instruction.web/" + member, payload.ToJsonString(), from, workflow, causation, 0, at);
+        return new(++_seq, "agent.instruction.web/" + member, payload.ToJsonString(), from, deliverable, causation, 0, at);
     }
 
     private static (TempDb Db, BoardStore Store, BoardProjector P, ManualClock Clock) Rig(DateTimeOffset start)
@@ -200,7 +200,7 @@ public class TimelineStoreTests
     }
 
     [Fact]
-    public void TheManagersCardlessRun_GoesOnTheWorkflowsTimeline()
+    public void TheManagersCardlessRun_GoesOnTheDeliverablesTimeline()
     {
         var (db, store, p, _) = Rig(At("10:00"));
         using var __ = db;
@@ -213,7 +213,7 @@ public class TimelineStoreTests
     }
 
     [Fact]
-    public void AnExpiredWorkflowsCardsEndAtItsLastActivity()
+    public void AnExpiredDeliverablesCardsEndAtItsLastActivity()
     {
         var (db, store, p, _) = Rig(At("09:00", 14));
         using var __ = db;
@@ -221,7 +221,7 @@ public class TimelineStoreTests
         p.Apply(M(MessageTypes.Progress, new { status = "refactoring" }, "web/DeveloperAda", 21, At("09:30", 14)));
         p.Apply(M(MessageTypes.Completed, new { }, "web/DeveloperAda", 21, At("10:00", 14)));
         p.Apply(Tell("DeveloperAda", "One more thing", 21, At("10:30", 14))); // told again; nobody runs it
-        var expired = M(MessageTypes.WorkflowExpired, new
+        var expired = M(MessageTypes.DeliverableExpired, new
         {
             team = "web", reason = "expired", detail = "no activity for 3 days",
             endedAt = TimelineCalculator.Iso(At("10:30", 14)), expiredAt = TimelineCalculator.Iso(At("10:30", 17)),
@@ -237,7 +237,7 @@ public class TimelineStoreTests
 
         var root = Tell("Manager", "Refactor the module", 21, At("09:00", 14), from: "person");
         var ends = BoardTimeline.Ends([root, expired]);
-        Assert.Equal(new WorkflowEnd(At("10:30", 14), "expired", null, At("10:30", 17)), Assert.Single(ends));
+        Assert.Equal(new DeliverableEnd(At("10:30", 14), "expired", null, At("10:30", 17)), Assert.Single(ends));
     }
 
     // ---------------------------------------------------------------- the history rebuild
@@ -302,16 +302,16 @@ public class TimelineStoreTests
         Assert.Equal(2, r.Lines.Count(l => l.Marker == TimeMarkers.Handback));
     }
 
-    // ---------------------------------------------------------------- the reference case: workflow 3573
+    // ---------------------------------------------------------------- the reference case: deliverable 3573
 
     /// <summary>
-    /// Workflow 3573's trail as it stood before the board recorded timelines (rebuilt from history): a developer's card, then the tester's card, which the
+    /// Deliverable 3573's trail as it stood before the board recorded timelines (rebuilt from history): a developer's card, then the tester's card, which the
     /// Manager planned at 16:01 and gave TesterKofi at 16:54. TesterKofi's run showed no progress from 17:14 until the idle
-    /// watchdog ended it at 17:52 UTC; the Manager told it again and it handed back at 18:13; the workflow was declared
+    /// watchdog ended it at 17:52 UTC; the Manager told it again and it handed back at 18:13; the deliverable was declared
     /// complete at 18:14. About 3 h overall, 38 min of it Stalled (the tester's card), not Agent working.
     /// </summary>
     [Fact]
-    public void Workflow3573_IsAbout3hOverall_With38MinutesStalledForTheTestersCard()
+    public void Deliverable3573_IsAbout3hOverall_With38MinutesStalledForTheTestersCard()
     {
         var (db, store, _, _) = Rig(At("15:12:40"));
         using var __ = db;
@@ -324,7 +324,7 @@ public class TimelineStoreTests
             ("15:30", "DeveloperTomas", "progress", "reading the code map"),
             ("16:10", "DeveloperTomas", "progress", "tests pass"),
             ("16:41", "DeveloperTomas", "handed back", "fe233e3"),
-            ("18:14:10", "Manager", "workflow done", "the work is declared complete"),
+            ("18:14:10", "Manager", "deliverable done", "the work is declared complete"),
         }) store.AddTrail(dev.Id, source, kind, text, I(at));
         var testerCard = store.AddCard("browser", null, "B007", "Verify the code map", "", "queued", Lanes.Todo, 3573, I("16:01"));
         foreach (var (at, source, kind, text) in new[]
@@ -337,7 +337,7 @@ public class TimelineStoreTests
             ("17:57", "Manager", "told", "Your run was ended by the idle watchdog. Run the suite again with progress calls."),
             ("18:00", "TesterKofi", "progress", "running the e2e suite again"),
             ("18:13", "TesterKofi", "handed back", "verified: pass"),
-            ("18:14:10", "Manager", "workflow done", "the work is declared complete"),
+            ("18:14:10", "Manager", "deliverable done", "the work is declared complete"),
         }) store.AddTrail(testerCard.Id, source, kind, text, I(at));
         using (var c = new SqliteConnection(db.ConnectionString))
         {
@@ -362,9 +362,9 @@ public class TimelineStoreTests
             Tell("TesterKofi", "verify the code map", 3573, At("16:54")),
             M(MessageTypes.Failed, new { reason = "idle: no progress for 1800 s", failureClass = "idle" }, "browser/TesterKofi", 3573, At("17:52")),
             Tell("TesterKofi", "Run the suite again", 3573, At("17:57")),
-            M(MessageTypes.WorkflowCompleted, new { delivered = "B007 verified" }, "browser/Manager", 3573, At("18:14:10")),
+            M(MessageTypes.DeliverableCompleted, new { delivered = "B007 verified" }, "browser/Manager", 3573, At("18:14:10")),
         };
-        var w = new BoardTimeline(store).OfWorkflow(3573, thread, [], At("19:00"))!;
+        var w = new BoardTimeline(store).OfDeliverable(3573, thread, [], At("19:00"))!;
 
         Assert.False(w.Time.Open);
         Assert.Equal("completed", w.Time.EndedHow);
@@ -412,7 +412,7 @@ public class TimelineStoreTests
         Assert.Equal(["category", "start", "end"], row["bands"]![0]!.AsObject().Select(p => p.Key));
         Assert.Equal(["kind", "at", "card"], json["markers"]![0]!.AsObject().Select(p => p.Key));
 
-        var w = BoardTimeline.Json(TimelineCalculator.Workflow(new WorkflowTimelineInput(9, At("09:00"), [], [card], []), now));
+        var w = BoardTimeline.Json(TimelineCalculator.Deliverable(new DeliverableTimelineInput(9, At("09:00"), [], [card], []), now));
         Assert.Equal(["time", "rows", "summary", "markers"], w.Select(p => p.Key));
     }
 }

@@ -9,7 +9,7 @@ namespace Yawble.Core.Link;
 /// <summary>This computer: its name, the name it has on the cloud site, the build, the OS, when the core started, and its run slots.</summary>
 public sealed record OrgComputer(string Name, string? Label, string Version, string Platform, DateTimeOffset StartedAt, int SlotsUsed, int SlotsTotal, int QueuedRuns);
 
-/// <summary>An agent that is running now: who, its role, what it is doing (its card, or its workflow), since when.</summary>
+/// <summary>An agent that is running now: who, its role, what it is doing (its card, or its deliverable), since when.</summary>
 public sealed record OrgRunningAgent(string Member, string Role, string? Doing, DateTimeOffset? Since);
 
 /// <summary>One agent of a team, as the summary counts it: state running | idle | one of <see cref="Bus.WaitStates"/> (
@@ -19,17 +19,17 @@ public sealed record OrgRunningAgent(string Member, string Role, string? Doing, 
 public sealed record OrgAgent(string Member, string Role, string State, bool LastRunFailed, string? Doing = null, DateTimeOffset? Since = null,
     bool LastRunStopped = false, string? WaitsFor = null);
 
-/// <summary>A team and its agents; <paramref name="WorkflowExpiryDays"/> is its setting (an open workflow nobody works expires after it).
+/// <summary>A team and its agents; <paramref name="DeliverableExpiryDays"/> is its setting (an open deliverable nobody works expires after it).
 /// <paramref name="WaitingOnYou"/>: how many of its agents have an open needs_decision (TeamSummary.Waiting).</summary>
 public sealed record OrgTeam(string Name, bool Paused, bool Archived, IReadOnlyList<OrgAgent> Agents,
-    int WorkflowExpiryDays = Bus.BusEngine.DefaultWorkflowExpiryDays, int WaitingOnYou = 0);
+    int DeliverableExpiryDays = Bus.BusEngine.DefaultDeliverableExpiryDays, int WaitingOnYou = 0);
 
 /// <summary>
-/// A workflow. <paramref name="State"/> is one of <see cref="OrgSummary.WorkflowStates"/>; <paramref name="Item"/> is the
-/// backlog item's label when the workflow came from one. <paramref name="Time"/>: its overall time and where it went
-/// as the wire contract's <c>time</c> as on the bus.workflows item; null without a board.
+/// A deliverable. <paramref name="State"/> is one of <see cref="OrgSummary.DeliverableStates"/>; <paramref name="Item"/> is the
+/// backlog item's label when the deliverable came from one. <paramref name="Time"/>: its overall time and where it went
+/// as the wire contract's <c>time</c> as on the bus.deliverables item; null without a board.
 /// </summary>
-public sealed record OrgWorkflow(long Id, string Team, string Title, string? Item, string? ItemTitle, string State, int CardsDone, int CardsTotal,
+public sealed record OrgDeliverable(long Id, string Team, string Title, string? Item, string? ItemTitle, string State, int CardsDone, int CardsTotal,
     DateTimeOffset StartedAt, DateTimeOffset LastActivity, string? Owner, DateTimeOffset? EndedAt = null, DateTimeOffset? ExpiredAt = null,
     DateTimeOffset? ExpiresAt = null, Board.TimeSummary? Time = null);
 
@@ -40,7 +40,7 @@ public sealed record OrgAsk(string Kind, string? Team, string Title);
 public sealed record OrgProblem(string Source, string? Team, string? Member, DateTimeOffset At, string Level, string Message);
 
 /// <summary>Everything one snapshot is built from.</summary>
-public sealed record OrgSummaryFacts(OrgComputer Computer, IReadOnlyList<OrgTeam> Teams, IReadOnlyList<OrgWorkflow> Workflows,
+public sealed record OrgSummaryFacts(OrgComputer Computer, IReadOnlyList<OrgTeam> Teams, IReadOnlyList<OrgDeliverable> Deliverables,
     IReadOnlyList<OrgAsk> Asks, IReadOnlyList<OrgProblem> Problems);
 
 /// <summary>Where the facts come from: the bus, the board, the asks and the logs in the app; fakes in the tests.</summary>
@@ -50,25 +50,25 @@ public interface IOrgSummarySource
 }
 
 /// <summary>
-/// org.summary's snapshot, contract version 1 (docs/cloud-link.md): one JSON object with summaryVersion, at, and the
-/// sections computer, teams, workflows, needsYou and problems. The builder applies the contract's windows (workflows:
+/// org.summary's snapshot, contract version 2 (docs/cloud-link.md): one JSON object with summaryVersion, at, and the
+/// sections computer, teams, deliverables, needsYou and problems. The builder applies the contract's windows (deliverables:
 /// open, or ended in the last 24 h; problems: the last 20 of the last hour) and redacts every free text the way the
 /// Cloud Link's other reads do.
 /// </summary>
 public static class OrgSummary
 {
-    public const int Version = 1;
+    public const int Version = 2;
 
     /// <summary>The snapshot's sections, in order: a change push names the ones that changed.</summary>
-    public static readonly IReadOnlyList<string> Sections = ["computer", "teams", "workflows", "needsYou", "problems"];
+    public static readonly IReadOnlyList<string> Sections = ["computer", "teams", "deliverables", "needsYou", "problems"];
 
     public const string Running = "running", WaitingOnPerson = "waitingOnPerson", Blocked = "blocked", NobodyWorking = "nobodyWorking",
         Completed = "completed", Failed = "failed", Closed = "closed", Expired = "expired";
 
-    /// <summary>Every workflow state. Only completed, closed and expired are ended; the rest, failed included, are open.</summary>
-    public static readonly IReadOnlyList<string> WorkflowStates = [Running, WaitingOnPerson, Blocked, NobodyWorking, Completed, Failed, Closed, Expired];
+    /// <summary>Every deliverable state. Only completed, closed and expired are ended; the rest, failed included, are open.</summary>
+    public static readonly IReadOnlyList<string> DeliverableStates = [Running, WaitingOnPerson, Blocked, NobodyWorking, Completed, Failed, Closed, Expired];
 
-    public static readonly TimeSpan EndedWorkflowsFor = TimeSpan.FromHours(24);
+    public static readonly TimeSpan EndedDeliverablesFor = TimeSpan.FromHours(24);
     public static readonly TimeSpan ProblemsFor = TimeSpan.FromHours(1);
     public const int MaxProblems = 20;
     public const int MaxTitles = 5;
@@ -87,7 +87,7 @@ public static class OrgSummary
         ["at"] = Time(now),
         ["computer"] = ComputerOf(facts.Computer, now),
         ["teams"] = TeamsOf(facts.Teams),
-        ["workflows"] = WorkflowsOf(facts.Workflows, now),
+        ["deliverables"] = DeliverablesOf(facts.Deliverables, now),
         ["needsYou"] = NeedsYouOf(facts.Asks),
         ["problems"] = ProblemsOf(facts.Problems, now),
     };
@@ -116,7 +116,7 @@ public static class OrgSummary
             ["name"] = t.Name,
             ["paused"] = t.Paused,
             ["archived"] = t.Archived,
-            ["workflowExpiryDays"] = t.WorkflowExpiryDays,
+            ["deliverableExpiryDays"] = t.DeliverableExpiryDays,
             ["agents"] = new JsonObject
             {
                 ["total"] = t.Agents.Count,
@@ -153,8 +153,8 @@ public static class OrgSummary
 
     private static string WaitStateOf(string state) => Bus.WaitStates.All.Contains(state) ? state : Bus.WaitStates.Pending;
 
-    private static JsonArray WorkflowsOf(IReadOnlyList<OrgWorkflow> workflows, DateTimeOffset now) => new(workflows
-        .Where(w => !Ended(w.State) || now - w.LastActivity <= EndedWorkflowsFor)
+    private static JsonArray DeliverablesOf(IReadOnlyList<OrgDeliverable> deliverables, DateTimeOffset now) => new(deliverables
+        .Where(w => !Ended(w.State) || now - w.LastActivity <= EndedDeliverablesFor)
         .OrderByDescending(w => w.LastActivity).ThenByDescending(w => w.Id)
         .Select(w => (JsonNode)new JsonObject
         {
@@ -170,9 +170,9 @@ public static class OrgSummary
             // When it ended (an expired one: its last real activity, not the expiry) and when the app expired it.
             ["endedAt"] = w.EndedAt is { } e ? Time(e) : null,
             ["expiredAt"] = w.ExpiredAt is { } x ? Time(x) : null,
-            // When it expires if nothing happens, as on the bus.workflows item; null while it is worked, and once ended.
+            // When it expires if nothing happens, as on the bus.deliverables item; null while it is worked, and once ended.
             ["expiresAt"] = w.ExpiresAt is { } d ? Time(d) : null,
-            // Its overall time and where it went, as on the bus.workflows item (null without a board).
+            // Its overall time and where it went, as on the bus.deliverables item (null without a board).
             ["time"] = w.Time?.ToJson(),
         }).ToArray());
 
@@ -227,9 +227,9 @@ public static class OrgSummary
 
     private static string Comparable(string section, JsonNode? node)
     {
-        if (section == "workflows" && node is JsonArray rows)
+        if (section == "deliverables" && node is JsonArray rows)
         {
-            // An open workflow's time grows every second, like the uptime: its ms alone are not a change (the
+            // An open deliverable's time grows every second, like the uptime: its ms alone are not a change (the
             // breakdown's categories still are). The section goes out in full with the next real change.
             var flows = rows.DeepClone().AsArray();
             foreach (var time in flows.Select(r => r?["time"]).OfType<JsonObject>().Where(t => t["open"]?.GetValue<bool>() == true))

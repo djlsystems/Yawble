@@ -45,7 +45,7 @@ public class ConciergeSeamTests : IDisposable
             {
                 // As UiRpc does: the person's tell, stamped with whoever is acting now.
                 var m = await Bus.PersonTellAsync("alpha", "Manager", p!["text"]!.GetValue<string>(), null, ct);
-                return new JsonObject { ["seq"] = m.Seq, ["workflow"] = m.CorrelationId };
+                return new JsonObject { ["seq"] = m.Seq, ["deliverable"] = m.CorrelationId };
             }
             return new JsonObject();
         }

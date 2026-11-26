@@ -5,7 +5,7 @@ import path from 'node:path';
 
 // Opt-in (YAWBLE_REAL_DEMO=1): the person's flow with real agents on this machine. A new team with only a Manager is
 // created in the UI, and the Manager is told to hire a team that builds and tests a console app. Real model calls on
-// the person's accounts. The run is left going: the caller watches the database for the workflow to complete.
+// the person's accounts. The run is left going: the caller watches the database for the deliverable to complete.
 //   YAWBLE_HELLO_ROOT  the app root to use (its data/ is created); YAWBLE_INSTALL_DIR as for the demo.
 //   YAWBLE_HELLO_TEAM  the team name (default "hello").
 //   YAWBLE_HELLO_MANAGER_CLI  the Manager's CLI (default claude).
@@ -46,7 +46,7 @@ test('real hello team: a new team, its Manager hires and runs a build-and-test t
     await expect(main.locator('[data-test=team-title]')).toContainText(/[1-9]\d* running/, { timeout: 60_000 });
     await main.screenshot({ path: path.join(shots, '2-told.png') });
     // The app stays open while the team works (closing it would interrupt the runs). The caller ends the wait by
-    // creating <root>/done once the workflow is complete; a screenshot every two minutes records the progress.
+    // creating <root>/done once the deliverable is complete; a screenshot every two minutes records the progress.
     const done = path.join(root, 'done');
     const deadline = Date.now() + 75 * 60_000;
     for (let i = 3; Date.now() < deadline && !existsSync(done); i++) {

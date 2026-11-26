@@ -30,13 +30,13 @@ public sealed partial class BusEngine
     private sealed record LeaseHold(RunContext Run, string What, DateTimeOffset Since, LeaseUse Use);
 
     /// <summary>
-    /// One use of the lease, for workflow_digest: asked, given, given back. Kept in memory like the lease itself
+    /// One use of the lease, for deliverable_digest: asked, given, given back. Kept in memory like the lease itself
     /// (the newest <see cref="LeaseHistoryMax"/>), so a restart forgets them.
     /// </summary>
-    internal sealed class LeaseUse(long runId, long workflow, string member, string what, DateTimeOffset askedAt)
+    internal sealed class LeaseUse(long runId, long deliverable, string member, string what, DateTimeOffset askedAt)
     {
         public long RunId { get; } = runId;
-        public long Workflow { get; } = workflow;
+        public long Deliverable { get; } = deliverable;
         public string Member { get; } = member;
         public string What { get; } = what;
         public DateTimeOffset AskedAt { get; } = askedAt;
@@ -55,9 +55,9 @@ public sealed partial class BusEngine
         return use;
     }
 
-    /// <summary>The lease's uses in one workflow (under the gate).</summary>
-    private IReadOnlyList<Teams.DigestLease> LeaseUsesOf(long workflow) =>
-        [.. _leaseHistory.Where(u => u.Workflow == workflow).Select(u => new Teams.DigestLease(u.Member, u.What, u.AskedAt, u.GrantedAt, u.EndedAt))];
+    /// <summary>The lease's uses in one deliverable (under the gate).</summary>
+    private IReadOnlyList<Teams.DigestLease> LeaseUsesOf(long deliverable) =>
+        [.. _leaseHistory.Where(u => u.Deliverable == deliverable).Select(u => new Teams.DigestLease(u.Member, u.What, u.AskedAt, u.GrantedAt, u.EndedAt))];
 
     /// <summary>
     /// A run's waits in the lease's queue as of <paramref name="now"/> (under the gate), from asking to

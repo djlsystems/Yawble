@@ -33,7 +33,7 @@ internal static class Commands
           git prune <team> [--repo R]                                         (approved in the window)
           git push|sync <team> <branch> [--repo R]                            (approved in the window)
           git merge <team> [--repo R]                                         (approved in the window)
-          workflow close <team> <id> [--reason T]                             (approved in the window)
+          deliverable close <team> <id> [--reason T]                             (approved in the window)
           team delete <name>                                                  (approved in the window)
           backup list
           backup restore <name>                                               (approved in the window)
@@ -116,14 +116,14 @@ internal static class Commands
                 return (args[0] == "pause" ? "team_pause" : "team_resume", new JsonObject { ["team"] = p.Pos[0] });
             }
             case "git": return Git(args, g);
-            case "workflow":
+            case "deliverable":
             {
-                if (sub != "close") throw new UsageException("workflow close <team> <id> [--reason T]");
+                if (sub != "close") throw new UsageException("deliverable close <team> <id> [--reason T]");
                 var p = Parse(g, args, 2, ["--reason"], []);
-                p.Need(2, 2, "workflow close <team> <id> [--reason T]");
-                var o = new JsonObject { ["team"] = p.Pos[0], ["workflow"] = Number(p.Pos[1], "workflow") };
+                p.Need(2, 2, "deliverable close <team> <id> [--reason T]");
+                var o = new JsonObject { ["team"] = p.Pos[0], ["deliverable"] = Number(p.Pos[1], "deliverable") };
                 p.Copy(o, "--reason", "reason");
-                return ("workflow_close", o);
+                return ("deliverable_close", o);
             }
             case "backup":
             {

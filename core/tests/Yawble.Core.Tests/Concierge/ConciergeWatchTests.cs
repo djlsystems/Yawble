@@ -64,7 +64,7 @@ public class ConciergeWatchTests
             if (method != "bus.tellManager") throw new InvalidOperationException(method);
             var team = (await Bus.TeamsAsync(ct)).Single(t => t.Id == p!["teamId"]!.GetValue<long>());
             var m = await Bus.PersonTellAsync(team.Name, "Manager", p!["text"]!.GetValue<string>(), null, ct);
-            return new JsonObject { ["seq"] = m.Seq, ["workflow"] = m.CorrelationId };
+            return new JsonObject { ["seq"] = m.Seq, ["deliverable"] = m.CorrelationId };
         }
 
         public ConciergeTools Tools(string conversationId) => new(Bus, Store, UiAsync, () => null, conversationId, Clock);
@@ -87,21 +87,21 @@ public class ConciergeWatchTests
     }
 
     [Fact]
-    public async Task WhatTheConciergeDispatchedIsFollowedUp_EachEventPostedOnce_AndTheWatchEndsWithTheWorkflow()
+    public async Task WhatTheConciergeDispatchedIsFollowedUp_EachEventPostedOnce_AndTheWatchEndsWithTheDeliverable()
     {
         await using var rig = await Rig.StartAsync();
         rig.Store.Create("c1", "README for alpha", "claude", null);
         var said = await CallAsync(rig.Tools("c1"), "tell", new JsonObject { ["team"] = "alpha", ["instruction"] = "Add a README\nwith setup steps" });
-        Assert.Contains("watches this workflow", said);
+        Assert.Contains("watches this deliverable", said);
         var watch = Assert.Single(rig.Store.ActiveWatches("c1"));
         Assert.Equal(("alpha", "Add a README", false), (watch.Team, watch.What, watch.FollowUp));
-        var workflow = watch.Workflow!.Value;
+        var deliverable = watch.Deliverable!.Value;
 
-        rig.Post(MessageTypes.Progress, new { text = "writing" }, "alpha/dev", workflow);            // not something to report
-        rig.Post(MessageTypes.NeedsDecision, new { question = "MIT or Apache?" }, "alpha/dev", workflow);
+        rig.Post(MessageTypes.Progress, new { text = "writing" }, "alpha/dev", deliverable);            // not something to report
+        rig.Post(MessageTypes.NeedsDecision, new { question = "MIT or Apache?" }, "alpha/dev", deliverable);
         rig.Post(MessageTypes.Failed, new { reason = "unrelated" }, "beta/dev");                     // another team, not watched
         await rig.Service.TickAsync(Ct);
-        rig.Post(MessageTypes.WorkflowCompleted, new { delivered = "README.md added" }, "alpha/Manager", workflow);
+        rig.Post(MessageTypes.DeliverableCompleted, new { delivered = "README.md added" }, "alpha/Manager", deliverable);
         await rig.Service.TickAsync(Ct);
         await rig.Service.TickAsync(Ct);                                                              // nothing new: nothing posted
 
@@ -113,7 +113,7 @@ public class ConciergeWatchTests
         Assert.Contains("**alpha** · dev needs your decision", updates[0].Text);
         Assert.Contains("MIT or Apache?", updates[0].Text);
         Assert.Equal("**alpha** finished: README.md added", updates[1].Text);
-        Assert.Empty(rig.Store.ActiveWatches("c1"));                                                  // the workflow is done
+        Assert.Empty(rig.Store.ActiveWatches("c1"));                                                  // the deliverable is done
         Assert.Equal(all.Count, rig.Store.Get("c1")!.Unread);
         var pushes = rig.Updates();
         Assert.Equal(all.Count, pushes.Length);

@@ -9,17 +9,17 @@ import BusyLabel from './BusyLabel.vue';
 import Icon from './Icon.vue';
 import TeamStateChip from './TeamStateChip.vue';
 import TeamMembers from './TeamMembers.vue';
-import TeamWorkflows from './TeamWorkflows.vue';
+import TeamDeliverables from './TeamDeliverables.vue';
 import RunningOutline from './RunningOutline.vue';
 import TileGrip from './TileGrip.vue';
 import { usePhone } from '../phone';
-import { openWorkflowsPage } from '../workflows/page';
+import { openDeliverablesPage } from '../deliverables/page';
 
 // The Teams page: one grid of equally sized tiles (every team, then "New team"), resized together by the grip on any
 // of them (teamTileSize.ts). A tile is the header (name, state, counts), a row of icon buttons, then the recent
-// workflows, which scroll inside the tile. The tile's buttons: settings, pause/resume, archive, delete (two clicks).
+// deliverables, which scroll inside the tile. The tile's buttons: settings, pause/resume, archive, delete (two clicks).
 const props = defineProps<{ teams: TeamSummary[]; archived: TeamSummary[]; api: YawbleApi; pollMs?: number; refresh: () => Promise<void> | void }>();
-const emit = defineEmits<{ open: [teamId: number, panel?: 'workflows', workflow?: number]; settings: [team: TeamSummary]; 'new-team': [] }>();
+const emit = defineEmits<{ open: [teamId: number, panel?: 'deliverables', deliverable?: number]; settings: [team: TeamSummary]; 'new-team': [] }>();
 
 const cards = useBusy();
 const cardBusy = computed(() => cards.any());
@@ -106,7 +106,7 @@ watch(phone, () => void fit());
             <button class="tile-btn" data-test="card-delete-no" :disabled="cardBusy" @click.stop="confirmDelete = null">Cancel</button>
           </template>
         </div>
-        <TeamWorkflows :team-id="t.id" :api="api" :poll-ms="pollMs" @open="openWorkflowsPage({ teamId: t.id, workflow: $event })" />
+        <TeamDeliverables :team-id="t.id" :api="api" :poll-ms="pollMs" @open="openDeliverablesPage({ teamId: t.id, deliverable: $event })" />
         <TileGrip v-if="!phone" />
       </div>
       <template v-if="!phone"><TileGrip axis="w" /><TileGrip axis="h" /></template>

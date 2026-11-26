@@ -5,11 +5,11 @@ using Yawble.Core.Scheduling;
 namespace Yawble.Core.Bus;
 
 /// <summary>One team in the team list: its running and queued counts.</summary>
-/// <param name="WorkflowExpiryDays">The team's workflowExpiryDays: an open workflow nobody works expires after this many days.</param>
+/// <param name="DeliverableExpiryDays">The team's deliverableExpiryDays: an open deliverable nobody works expires after this many days.</param>
 /// <param name="Waiting">How many of the team's members have an open needs_decision (the rule the agent cards use,
 /// OpenDecisionByMember). The team pill says "Waiting on you" while it is above 0 and nothing runs.</param>
 public sealed record TeamSummary(long Id, string Name, string? RepoPath, int Members, int Running, int Queued, bool Paused = false, bool Archived = false,
-    int WorkflowExpiryDays = BusEngine.DefaultWorkflowExpiryDays, int Waiting = 0);
+    int DeliverableExpiryDays = BusEngine.DefaultDeliverableExpiryDays, int Waiting = 0);
 
 /// <summary>The header: global running / limit, and how many wait for a slot across all teams.</summary>
 public sealed record RunSlots(int Running, int Limit, int Queued);
@@ -23,21 +23,21 @@ public sealed record RunSlots(int Running, int Limit, int Queued);
 /// WaitState / WaitsFor: with QueuedInstructions, why they have not started (WaitStates: queued, waits-for-run with
 /// the sender's name, held, pending); null when none waits. State: running | idle | one of WaitStates: queued while
 /// the member is in the run queue, else its WaitState when work waits (waits-for-run, held, pending), else idle.
-/// RunWorkflows: the workflows (CorrelationIds) the active run's items belong to, distinct, oldest first; empty when
+/// RunDeliverables: the deliverables (CorrelationIds) the active run's items belong to, distinct, oldest first; empty when
 /// the member has no run (idle, queued, or an interactive session, which has no run items). Always on the wire as
-/// runWorkflows, an array of numbers.</summary>
+/// runDeliverables, an array of numbers.</summary>
 public sealed record AgentCard(
     MemberRow Member, string State, int? QueuePosition, int QueueLength, int QueuedInstructions, string? StatusLine,
     long? RunId, string? RunStartedAt, string? LastRunState, string? LastRunReason,
     string? Lease = null, string? LeaseWhat = null, int? LeasePosition = null,
     bool Interactive = false, string? LastRunFailureClass = null, long? DecisionId = null,
-    string? WaitState = null, string? WaitsFor = null, IReadOnlyList<long>? RunWorkflows = null)
+    string? WaitState = null, string? WaitsFor = null, IReadOnlyList<long>? RunDeliverables = null)
 {
-    /// <summary>Never null: a card built without it lists no workflows.</summary>
-    public IReadOnlyList<long> RunWorkflows { get; init; } = RunWorkflows ?? [];
+    /// <summary>Never null: a card built without it lists no deliverables.</summary>
+    public IReadOnlyList<long> RunDeliverables { get; init; } = RunDeliverables ?? [];
 
-    /// <summary>The distinct workflows of a run's items, in the order they first appear (items are oldest first).</summary>
-    internal static IReadOnlyList<long> WorkflowsOf(IReadOnlyList<Message>? items) =>
+    /// <summary>The distinct deliverables of a run's items, in the order they first appear (items are oldest first).</summary>
+    internal static IReadOnlyList<long> DeliverablesOf(IReadOnlyList<Message>? items) =>
         items is null ? [] : [.. items.Select(i => i.CorrelationId).Distinct()];
 
     /// <summary>The last run ended because the person (or the app on their behalf) stopped it: not a failure to flag.</summary>
@@ -181,7 +181,7 @@ public sealed partial class BusEngine
                 return new TeamSummary(t.Id, t.Name, t.RepoPath, ids.Count,
                     // An interactive session holds a run slot, so it counts as running.
                     _active.Values.Count(a => ids.Contains(a.Context.Member.Id)) + _sessions.Keys.Count(ids.Contains),
-                    queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived, t.WorkflowExpiryDays ?? DefaultWorkflowExpiryDays, waiting);
+                    queue.Count(q => ids.Contains(q.MemberId)), t.Paused, t.Archived, t.DeliverableExpiryDays ?? DefaultDeliverableExpiryDays, waiting);
             }).ToArray();
         }, ct);
 
@@ -221,7 +221,7 @@ public sealed partial class BusEngine
                     last?.State, last?.Reason,
                     lease?.State, lease?.What, lease?.Position,
                     HasSession(m.Id), last?.FailureClass, decision?.Seq, waitState, waitsFor,
-                    AgentCard.WorkflowsOf(active?.Context.Items));
+                    AgentCard.DeliverablesOf(active?.Context.Items));
             }).ToArray();
         }, ct);
 
@@ -254,16 +254,16 @@ public sealed partial class BusEngine
             return (end, end <= after ? (IReadOnlyList<Message>)[] : _store.MessagesAfter(after, end, types));
         }, ct);
 
-    /// <summary>One message by seq (a workflow's root instruction names the team it was given to).</summary>
+    /// <summary>One message by seq (a deliverable's root instruction names the team it was given to).</summary>
     public Task<Message?> FindMessageAsync(long seq, CancellationToken ct = default) => WithGate(() => _store.Find(seq), ct);
 
     /// <summary>A team's latest messages, oldest first (the Concierge's team_activity).</summary>
     public Task<IReadOnlyList<Message>> RecentTeamMessagesAsync(string team, int limit, CancellationToken ct = default) =>
         WithGate(() => _store.RecentTeamMessages(team, limit), ct);
 
-    /// <summary>One workflow's messages, oldest first (the board's timeline of a workflow).</summary>
-    public Task<IReadOnlyList<Message>> WorkflowThreadAsync(long correlation, CancellationToken ct = default) =>
-        WithGate(() => _store.Workflow(correlation), ct);
+    /// <summary>One deliverable's messages, oldest first (the board's timeline of a deliverable).</summary>
+    public Task<IReadOnlyList<Message>> DeliverableThreadAsync(long correlation, CancellationToken ct = default) =>
+        WithGate(() => _store.Deliverable(correlation), ct);
 
     /// <summary>The runs working now and their quiet stretches so far (live Stalled and Waiting-for-a-slot time).</summary>
     public Task<IReadOnlyList<LiveRunActivity>> LiveActivityAsync(CancellationToken ct = default) =>
@@ -271,7 +271,7 @@ public sealed partial class BusEngine
 
     /// <summary>Under the gate.</summary>
     /// <remarks>Every active run, with its lease waits from the lease's own queue (not only a run with an idle clock).
-    /// And every member in the run queue, once per workflow of its ripe undelivered work, since it joined.</remarks>
+    /// And every member in the run queue, once per deliverable of its ripe undelivered work, since it joined.</remarks>
     private IReadOnlyList<LiveRunActivity> LiveActivity(DateTimeOffset now)
     {
         List<LiveRunActivity> live = [.. _active.Values.Select(a => (a.Context, Spans: ActivityOf(a.Context, now)))

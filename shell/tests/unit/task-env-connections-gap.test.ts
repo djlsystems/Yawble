@@ -74,7 +74,7 @@ describe('task env connections: the UI reads the core JSON as sent', () => {
 describe('task env connections: the approval ask shows the bindings (spec point 2)', () => {
   it('TaskAskCard shows each env_from_connections line from the ask detail', () => {
     const ask = {
-      id: 31, at: '', integration: 'task:linux-release', teamId: 3, member: 'linux/Manager', command: 'task linux-release', reason: 'new release v1.2', workflow: 9,
+      id: 31, at: '', integration: 'task:linux-release', teamId: 3, member: 'linux/Manager', command: 'task linux-release', reason: 'new release v1.2', deliverable: 9,
       task: true, taskName: 'linux-release', commit: 'abcdef1234567890',
       detail: {
         commit: 'abcdef1234567890', program: '/usr/bin/bash', workdir: '/repo', args: ['packaging/release.sh'], timeout_s: 900, env_names: [], pin_mode: 'files',
@@ -146,7 +146,7 @@ describe('task env connections F3: each binding line on the ask', () => {
       pinned: [], warnings: [], standingApproval: false,
     };
     const askWith = (extra: object) => ({
-      id: 31, at: '', integration: 'task:linux-release', teamId: 3, member: 'linux/Manager', command: 'task linux-release', reason: 'r', workflow: 9,
+      id: 31, at: '', integration: 'task:linux-release', teamId: 3, member: 'linux/Manager', command: 'task linux-release', reason: 'r', deliverable: 9,
       task: true, taskName: 'linux-release', commit: 'abcdef1234567890', detail: { ...detail, ...extra },
     } as unknown as IntegrationAsk);
     const w = mount(TaskAskCard, { props: { ask: askWith({ env_from_connections: [SHOWN, second] }) } });

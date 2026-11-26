@@ -4,7 +4,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// The tester's replay: Ada hands back in workflow 1, its run ends, Ada at once starts a run in workflow 2
+/// The tester's replay: Ada hands back in deliverable 1, its run ends, Ada at once starts a run in deliverable 2
 /// that takes the heavy-work lease. The Manager's delivery starts right after the first run ends; nobody is "queued"
 /// unless the run queue has them. Fake runners only.
 /// </summary>
@@ -57,7 +57,7 @@ public class LeaseAfterHandBackReplayTests
         // Nobody is in the run queue, so no view says queued for a run slot.
         foreach (var s in await engine.TeamStatusAsync("Alpha", Ct)) Assert.NotEqual(WaitStates.Queued, s.WaitState);
         foreach (var wf in new[] { first, other })
-            foreach (var w in (await engine.WorkflowRowAsync(wf, Ct))?.Members ?? [])
+            foreach (var w in (await engine.DeliverableRowAsync(wf, Ct))?.Members ?? [])
                 Assert.NotEqual(WaitStates.Queued, w.State);
 
         second.SetResult();

@@ -14,7 +14,7 @@ public sealed partial class IntegrationService
         using var c = Open();
         using var tx = c.BeginTransaction();
         foreach (var a in pending)
-            Insert(a.Integration, teamName, a.Member, a.Workflow, a.Args, "cancelled", "team deleted", null, null, c, tx);
+            Insert(a.Integration, teamName, a.Member, a.Deliverable, a.Args, "cancelled", "team deleted", null, null, c, tx);
         foreach (var sql in new[]
         {
             "DELETE FROM integration_asks WHERE team_id = $t;",
@@ -60,7 +60,7 @@ public sealed partial class IntegrationService
         foreach (var a in pending)
         {
             var slash = a.Member.IndexOf('/');
-            Insert(a.Integration, slash > 0 ? a.Member[..slash] : null, a.Member, a.Workflow, a.Args, "cancelled", why, null, null, c, tx);
+            Insert(a.Integration, slash > 0 ? a.Member[..slash] : null, a.Member, a.Deliverable, a.Args, "cancelled", why, null, null, c, tx);
             Exec(c, tx, "DELETE FROM integration_asks WHERE id = $id AND state = 'pending';", ("$id", a.Id));
         }
         Exec(c, tx, delete, args);

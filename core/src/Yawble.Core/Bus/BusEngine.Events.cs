@@ -7,7 +7,7 @@ namespace Yawble.Core.Bus;
 /// <summary>
 /// Events: something a watch noticed (a new pull request, a new issue) is published on the bus as
 /// event.&lt;name&gt; for its team, and every enabled event trigger of that team whose name pattern matches tells its
-/// member the trigger's instruction with the item, as a new workflow (through the usual checks: a paused team, only
+/// member the trigger's instruction with the item, as a new deliverable (through the usual checks: a paused team, only
 /// when idle). The person's agents never poll: the watch costs no model run, and an agent runs only when there is
 /// something to do.
 /// </summary>
@@ -27,7 +27,7 @@ public sealed partial class BusEngine
                          && Yawble.Core.Integrations.CliRules.Matches(p, name)))
             {
                 var what = $"Event {name}:\n{Describe(item)}";
-                var fire = Fire(row, now, what, Scripts.Running.ScriptPayloads.EventItem(name, item));
+                var fire = Fire(row, now, what, Workflows.Running.WorkflowPayloads.EventItem(name, item));
                 _store.RecordTriggerOutcome(row.Id, fire.Outcome == "fired" ? now : null, null, fire.Outcome, fire.Reason, fire.Seq, row.MissedCount);
                 if (fire.Outcome == "fired") fired++;
             }

@@ -1,0 +1,120 @@
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Yawble.Core.Connections;
+using Yawble.Core.Integrations;
+using Yawble.Core.Workflows.Engine;
+using Yawble.Core.Workflows.Language;
+using Yawble.Core.Workflows.Running;
+using IntegrationCaller = Yawble.Core.Integrations.WorkflowCaller;
+using RunCaller = Yawble.Core.Workflows.Running.WorkflowCaller;
+
+namespace Yawble.Core.Workflows.Actions;
+
+/// <summary>
+/// The "api" kind of a workflow's <c>requires</c> (SC-2): an action is an operation of a web API (its operationId, as the API's checklist
+/// shows it), one the team allows or asks for. The catalog is every team's operations (workflows are global); a run's own catalog is its team's.
+/// </summary>
+public sealed class ApiWorkflowActionsProvider(IWorkflowApi api) : IWorkflowActionsProvider
+{
+    public const string Kind = "api";
+
+    /// <summary>A snapshot of every team's operations, read now.</summary>
+    public IWorkflowActionCatalog Catalog => new ApiWorkflowActionCatalog(api.Teams().SelectMany(api.Operations).ToList());
+
+    public IWorkflowActions For(RunCaller caller) => new ApiWorkflowActions(api, caller);
+}
+
+/// <summary>The "api" actions a set of operations offers: HasAction by operationId; changing unless every operation by that id is a GET.</summary>
+public sealed class ApiWorkflowActionCatalog(IReadOnlyList<WorkflowOperation> operations) : IWorkflowActionCatalog
+{
+    public IReadOnlyList<WorkflowOperation> Operations { get; } = operations;
+
+    public bool HasAction(string kind, string action) =>
+        kind == ApiWorkflowActionsProvider.Kind && Operations.Any(o => o.Action == action);
+
+    public bool IsChanging(string kind, string action)
+    {
+        if (kind != ApiWorkflowActionsProvider.Kind) return true;
+        var matching = Operations.Where(o => o.Action == action).ToList();
+        // an unknown action is treated as changing: a dry run must not perform what it cannot tell is harmless
+        return matching.Count == 0 || matching.Any(o => !string.Equals(o.Method, "GET", StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+/// <summary>
+/// One run's API calls: the step's <c>use</c> is the member's binding name, bound to one of the team's web APIs. The result is an
+/// ApiResponse <c>{ status, body }</c> (body parsed as JSON when the response is JSON, else the text). A refused call or a non-2xx answer
+/// fails the step; a dry run's call that was not sent gives the "would ..." text as its body with status 0.
+/// Also the run's catalog: the operations of the caller's team.
+/// </summary>
+public sealed class ApiWorkflowActions(IWorkflowApi api, RunCaller caller) : IWorkflowActions, IWorkflowActionCatalog
+{
+    /// <summary>The call log's member for a Test run (it has no member).</summary>
+    public const string TestRunMember = "workflow-test";
+
+    private const int BodyClip = 500;
+    private ApiWorkflowActionCatalog? _catalog;
+
+    private ApiWorkflowActionCatalog TeamCatalog => _catalog ??= new ApiWorkflowActionCatalog(api.Operations(caller.Team));
+
+    public bool HasAction(string kind, string action) => TeamCatalog.HasAction(kind, action);
+
+    public bool IsChanging(string kind, string action) => TeamCatalog.IsChanging(kind, action);
+
+    public async Task<JsonNode?> InvokeAsync(WorkflowActionCall call, CancellationToken ct)
+    {
+        if (call.Kind != ApiWorkflowActionsProvider.Kind) throw new WorkflowActionException($"{call.Use}: '{call.Kind}' is not an API");
+        if (!caller.Bindings.TryGetValue(call.Use, out var integration) || string.IsNullOrWhiteSpace(integration))
+            throw new WorkflowActionException($"'{call.Use}' is not bound to one of {caller.Team}'s APIs");
+        var who = new IntegrationCaller(caller.Team, caller.Member ?? TestRunMember,
+            caller.RunId.ToString(CultureInfo.InvariantCulture), caller.DryRun || call.DryRun);
+
+        WorkflowApiResult result;
+        try { result = await api.CallAsync(who, integration, call.Action, call.Args, ct); }
+        catch (WorkflowApiRefusedException e) { throw new WorkflowActionException(e.Message); }
+
+        if (!result.Sent) return Response(0, JsonValue.Create(result.Body));
+        if (result.Status == 0)
+            throw new WorkflowActionException($"{What(integration, call.Action, result)}: no answer{(result.Host is { Length: > 0 } host ? " from " + host : "")}"
+                + (result.TimeoutSeconds is { } t ? $" (waited up to {t.ToString("0.#", CultureInfo.InvariantCulture)} s)" : "") + ": " + Clip(SecretScrubber.Scrub(result.Body)));
+        if (result.Status is < 200 or > 299)
+            throw new WorkflowActionException($"{What(integration, call.Action, result)}: HTTP {result.Status}: {Clip(SecretScrubber.Scrub(result.Body))}");
+        return Response(result.Status, Body(result));
+    }
+
+    /// <summary>
+    /// what a failed call was, for the step's reason: the integration, the action, and its HTTP method and route (from the answer, else
+    /// the team's catalog), e.g. "twilio CreateMessage (POST /2010-04-01/Accounts/{AccountSid}/Messages.json)".
+    /// </summary>
+    private string What(string integration, string action, WorkflowApiResult result)
+    {
+        var op = result.Method is null || result.Route is null ? TeamCatalog.Operations.FirstOrDefault(o => o.Action == action) : null;
+        var method = (result.Method ?? op?.Method)?.ToUpperInvariant();
+        var route = result.Route ?? op?.Route;
+        var request = string.Join(' ', new[] { method, route }.Where(s => !string.IsNullOrEmpty(s)));
+        return $"{integration} {action}" + (request.Length > 0 ? $" ({request})" : "");
+    }
+
+    private static JsonObject Response(int status, JsonNode? body) => new() { ["status"] = status, ["body"] = body };
+
+    /// <summary>The body as JSON when the response says it is JSON and it parses; else the text.</summary>
+    public static JsonNode? Body(WorkflowApiResult result)
+    {
+        if (IsJson(result.ContentType) && !string.IsNullOrWhiteSpace(result.Body))
+        {
+            try { return JsonNode.Parse(result.Body); }
+            catch (JsonException) { } // cut at 64 KB, or not what it said: the text
+        }
+        return JsonValue.Create(result.Body);
+    }
+
+    private static bool IsJson(string? mediaType)
+    {
+        var m = (mediaType ?? "").Split(';')[0].Trim();
+        return m.Equals("application/json", StringComparison.OrdinalIgnoreCase) || m.EndsWith("+json", StringComparison.OrdinalIgnoreCase)
+            || m.Equals("text/json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Clip(string text) => text.Length <= BodyClip ? text : text[..BodyClip] + "...";
+}

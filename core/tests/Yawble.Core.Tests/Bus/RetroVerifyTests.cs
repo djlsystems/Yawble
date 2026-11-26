@@ -11,7 +11,7 @@ namespace Yawble.Core.Tests.Bus;
 /// <summary>
 /// The tester's checks of the retro work (dcbbb75 and f85133f) merged. The gaps the developers' own
 /// tests leave: the two cards working together (a retro run reads its lessons in its prompt, reads the digest and writes
-/// team_retros; what Team settings then says), an expired workflow gets no retro, and the digest's masking on the bus path.
+/// team_retros; what Team settings then says), an expired deliverable gets no retro, and the digest's masking on the bus path.
 /// Fakes only: scripted runs, a manual clock, no agent CLI.
 /// </summary>
 public class RetroVerifyTests
@@ -37,18 +37,18 @@ public class RetroVerifyTests
     /// <summary>
     /// The whole retro loop with both cards: two pieces of work, Ada blocked once (her reason carries a token), the Manager
     /// completes; the retro run gets the lessons in its prompt, reads the digest (no token in it) and writes team_retros.
-    /// The version and Team settings' line ("by the retro of workflow &lt;id&gt;") must name the completed workflow, the one the
-    /// retro was for, not the retro item's own workflow (spec section 4: "Lessons: n, last updated &lt;date&gt; by the retro of
-    /// workflow &lt;id&gt;"; shell TeamManageDialog prints TeamLessons.workflow there).
+    /// The version and Team settings' line ("by the retro of deliverable &lt;id&gt;") must name the completed deliverable, the one the
+    /// retro was for, not the retro item's own deliverable (spec section 4: "Lessons: n, last updated &lt;date&gt; by the retro of
+    /// deliverable &lt;id&gt;"; shell TeamManageDialog prints TeamLessons.deliverable there).
     /// </summary>
     [Fact]
-    public async Task ARetroRun_ReadsTheDigest_WritesTeamRetros_AndTheVersionNamesTheCompletedWorkflow()
+    public async Task ARetroRun_ReadsTheDigest_WritesTeamRetros_AndTheVersionNamesTheCompletedDeliverable()
     {
         using var db = new TempDb();
         var skills = new SkillCatalog(db.ConnectionString);
         string? retroPrompt = null, laterPrompt = null;
         (string Text, bool IsError)? digest = null, write = null;
-        long retroWorkflow = 0;
+        long retroDeliverable = 0;
         var handbacks = 0;
         var adaRuns = 0;
         var runner = new ScriptedRunner()
@@ -56,14 +56,14 @@ public class RetroVerifyTests
             {
                 if (run.Items.Any(m => BusStore.RetroOf(m) is not null))
                 {
-                    retroWorkflow = run.Workflow;
+                    retroDeliverable = run.Deliverable;
                     retroPrompt = TeamPrompt.For(run); // the real launcher builds the prompt; reading the lessons records the version
-                    digest = await Call(run, "workflow_digest", []);
+                    digest = await Call(run, "deliverable_digest", []);
                     write = await Call(run, "team_retros_write", new JsonObject
                     {
-                        ["text"] = "## Building and testing\n- Fetch the bundle before merging: the branch moved (2026-11-18, workflow 1)",
+                        ["text"] = "## Building and testing\n- Fetch the bundle before merging: the branch moved (2026-11-18, deliverable 1)",
                     });
-                    await run.WorkflowCompleteAsync("kept 1 lesson", ct);
+                    await run.DeliverableCompleteAsync("kept 1 lesson", ct);
                     return RunResult.Ok;
                 }
                 if (run.Items.Any(m => Payload.Field(m, "text") == "later")) { laterPrompt = TeamPrompt.For(run); return RunResult.Ok; }
@@ -74,7 +74,7 @@ public class RetroVerifyTests
                     return RunResult.Ok;
                 }
                 handbacks += run.Items.Count(m => m.Type == MessageTypes.Handback);
-                if (handbacks >= 2) await run.WorkflowCompleteAsync("both parts done", ct);
+                if (handbacks >= 2) await run.DeliverableCompleteAsync("both parts done", ct);
                 return RunResult.Ok;
             })
             .On("Alpha/Ada", async (run, ct) =>
@@ -98,13 +98,13 @@ public class RetroVerifyTests
             using var store = db.OpenStore();
             var retro = Assert.Single(Retros(store));
             Assert.Equal(root.Seq, BusStore.RetroOf(retro));
-            Assert.NotEqual(root.Seq, retroWorkflow);
+            Assert.NotEqual(root.Seq, retroDeliverable);
 
             // No lessons yet: the retro run's prompt has none.
             Assert.DoesNotContain(TeamRetros.PromptHeading, retroPrompt!);
-            // The digest is of the completed workflow, and the blocked reason's token is masked.
+            // The digest is of the completed deliverable, and the blocked reason's token is masked.
             Assert.False(digest!.Value.IsError, digest.Value.Text);
-            Assert.StartsWith($"Workflow {root.Seq} of team Alpha: completed,", digest.Value.Text);
+            Assert.StartsWith($"Deliverable {root.Seq} of team Alpha: completed,", digest.Value.Text);
             Assert.Contains("- blocked: «", digest.Value.Text);
             Assert.DoesNotContain(Token, digest.Value.Text);
             Assert.False(write!.Value.IsError, write.Value.Text);
@@ -115,30 +115,30 @@ public class RetroVerifyTests
             Assert.Contains(TeamRetros.PromptHeading, laterPrompt!);
             Assert.Contains("- Fetch the bundle before merging", laterPrompt!);
 
-            // Team settings' line: "by the retro of workflow <id>" must be the workflow the retro looked back on.
+            // Team settings' line: "by the retro of deliverable <id>" must be the deliverable the retro looked back on.
             var team = store.Teams().Single(t => t.Name == "Alpha").Id;
             var lessons = skills.Lessons(team);
             Assert.Equal(1, lessons.Count);
             Assert.Equal("Manager", lessons.Writer);
-            Assert.True(lessons.Workflow == root.Seq,
-                $"team_retros version says workflow {lessons.Workflow} (the retro item's own workflow is {retroWorkflow}); " +
-                $"the completed workflow the retro was for is {root.Seq}");
+            Assert.True(lessons.Deliverable == root.Seq,
+                $"team_retros version says deliverable {lessons.Deliverable} (the retro item's own deliverable is {retroDeliverable}); " +
+                $"the completed deliverable the retro was for is {root.Seq}");
 
-            // Settings > Skills' version history (shell versionWriter: "the retro of workflow <id>") reads the
-            // same version row, so it names the completed workflow too, and the retro item's own workflow appears nowhere.
+            // Settings > Skills' version history (shell versionWriter: "the retro of deliverable <id>") reads the
+            // same version row, so it names the completed deliverable too, and the retro item's own deliverable appears nowhere.
             var version = Assert.Single(skills.Versions(team, TeamRetros.Name));
             Assert.Equal("Manager", version.Writer);
-            Assert.Equal(root.Seq, version.Workflow);
-            Assert.NotEqual(retroWorkflow, version.Workflow);
+            Assert.Equal(root.Seq, version.Deliverable);
+            Assert.NotEqual(retroDeliverable, version.Deliverable);
         }
     }
 
-    /// <summary>Spec section 2: not for expired workflows. Two pieces of work and a failed run (eventful), then it expires.</summary>
+    /// <summary>Spec section 2: not for expired deliverables. Two pieces of work and a failed run (eventful), then it expires.</summary>
     [Fact]
-    public async Task AnExpiredWorkflow_GetsNoRetro_HoweverEventful()
+    public async Task AnExpiredDeliverable_GetsNoRetro_HoweverEventful()
     {
         using var db = new TempDb();
-        var clock = new WorkflowExpiryTests.ManualClock(new DateTimeOffset(2026, 11, 17, 9, 0, 0, TimeSpan.Zero));
+        var clock = new DeliverableExpiryTests.ManualClock(new DateTimeOffset(2026, 11, 17, 9, 0, 0, TimeSpan.Zero));
         var runner = new ScriptedRunner()
             .On("Alpha/Manager", async (run, ct) =>
             {
@@ -166,8 +166,8 @@ public class RetroVerifyTests
             await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiet after expiry");
 
             using var store = db.OpenStore();
-            Assert.Contains(store.Workflow(root.Seq), m => m.Type == MessageTypes.WorkflowExpired);
-            Assert.False(store.WorkflowDeclared(root.Seq));
+            Assert.Contains(store.Deliverable(root.Seq), m => m.Type == MessageTypes.DeliverableExpired);
+            Assert.False(store.DeliverableDeclared(root.Seq));
             Assert.Empty(Retros(store));
         }
     }

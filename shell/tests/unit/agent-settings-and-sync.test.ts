@@ -100,7 +100,7 @@ describe('the team\'s sync setting, behind-count, Sync now and the note on the t
   it('team settings carry "Bring branches up to <base> before new work", and turning it off saves it', async () => {
     let on = true;
     const { api, calls } = fakeApi({
-      'teams.quiet': () => ({ quiet: true, working: [], openWorkflows: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
+      'teams.quiet': () => ({ quiet: true, working: [], openDeliverables: [] }), 'teams.env': () => ({}), 'teams.agents': () => [],
       'teams.push': () => ({ on: false, origin: null }), 'teams.approvals': () => [],
       'teams.repos': () => ({ main: { path: 'C:/r', baseBranch: 'trunk', managed: true, origin: null, name: null }, extras: [] }),
       'teams.syncToBase': (p: any) => { if (p.on !== undefined) on = p.on; return { on, note: null, baseBranch: 'trunk', behind: null }; },

@@ -106,20 +106,20 @@ public class RemoteAccessLevelTests
     }
 
     [Fact]
-    public void TheWorkflowExpirySetting_ReadsWithoutDays_ChangesWithThem_AndExtendIsAChange()
+    public void TheDeliverableExpirySetting_ReadsWithoutDays_ChangesWithThem_AndExtendIsAChange()
     {
-        // teams.workflowExpiry is a get-or-set on "days"; bus.workflowExtend changes the workflow.
-        Assert.True(RemoteAccess.OnAllowList("teams.workflowExpiry"));
-        Assert.Null(RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1 }, allowHostTerminals: false, RemoteAccess.Read));
-        Assert.Null(RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["on"] = true }, allowHostTerminals: false, RemoteAccess.Read));
-        Assert.Equal(Visitor, RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }, allowHostTerminals: false, RemoteAccess.Read));
-        Assert.Null(RemoteAccess.Refusal("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }, allowHostTerminals: false, RemoteAccess.Full));
+        // teams.deliverableExpiry is a get-or-set on "days"; bus.deliverableExtend changes the deliverable.
+        Assert.True(RemoteAccess.OnAllowList("teams.deliverableExpiry"));
+        Assert.Null(RemoteAccess.Refusal("teams.deliverableExpiry", new JsonObject { ["teamId"] = 1 }, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Null(RemoteAccess.Refusal("teams.deliverableExpiry", new JsonObject { ["teamId"] = 1, ["on"] = true }, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Equal(Visitor, RemoteAccess.Refusal("teams.deliverableExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Null(RemoteAccess.Refusal("teams.deliverableExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }, allowHostTerminals: false, RemoteAccess.Full));
 
-        Assert.True(RemoteAccess.OnAllowList("bus.workflowExtend"));
-        Assert.Equal(RemoteAccess.Kind.Changes, RemoteAccess.Kinds["bus.workflowExtend"]);
-        Assert.Equal(Visitor, RemoteAccess.Refusal("bus.workflowExtend", new JsonObject { ["teamId"] = 1, ["workflow"] = 4 }, allowHostTerminals: false, RemoteAccess.Read));
-        Assert.Null(RemoteAccess.Refusal("bus.workflowExtend", new JsonObject { ["teamId"] = 1, ["workflow"] = 4 }, allowHostTerminals: false, RemoteAccess.Full));
-        Assert.False(RemoteAccess.Kinds.ContainsKey("teams.setWorkflowExpiry")); // the earlier name is gone
+        Assert.True(RemoteAccess.OnAllowList("bus.deliverableExtend"));
+        Assert.Equal(RemoteAccess.Kind.Changes, RemoteAccess.Kinds["bus.deliverableExtend"]);
+        Assert.Equal(Visitor, RemoteAccess.Refusal("bus.deliverableExtend", new JsonObject { ["teamId"] = 1, ["deliverable"] = 4 }, allowHostTerminals: false, RemoteAccess.Read));
+        Assert.Null(RemoteAccess.Refusal("bus.deliverableExtend", new JsonObject { ["teamId"] = 1, ["deliverable"] = 4 }, allowHostTerminals: false, RemoteAccess.Full));
+        Assert.False(RemoteAccess.Kinds.ContainsKey("teams.setDeliverableExpiry")); // the earlier name is gone
     }
 
     [Theory]

@@ -51,7 +51,7 @@ public class TeamFlowTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task TheManagerSplitsACodingTask_TwoMembersCommitOnTheirBranches_AndTheWorkflowCompletes_AndTheirBranchesArePushedButNotTrunk(bool realBridgeProcess)
+    public async Task TheManagerSplitsACodingTask_TwoMembersCommitOnTheirBranches_AndTheDeliverableCompletes_AndTheirBranchesArePushedButNotTrunk(bool realBridgeProcess)
     {
         if (realBridgeProcess) GatewayFixture.SkipUnlessRealLoopback("the real yawble-bridge processes reaching the gateway over a socket");
         await using var f = await GatewayFixture.StartAsync(realLoopback: realBridgeProcess);
@@ -94,7 +94,7 @@ public class TeamFlowTests
                     foreach (var i in run.Items.Where(i => i.Type == MessageTypes.Handback)) handbacks.Add(i.Source);
                     if (handbacks.Count < 2) return;
                 }
-                var (text, refused) = await bridge.CallAsync("workflow_complete", new JsonObject
+                var (text, refused) = await bridge.CallAsync("deliverable_complete", new JsonObject
                 {
                     ["delivered"] = "GET /health on members/alpha/ada and its test on members/alpha/ben",
                 });
@@ -163,22 +163,22 @@ public class TeamFlowTests
         using var reader = f.Db.OpenStore();
         try
         {
-            await Wait.UntilAsync(() => reader.WorkflowDeclared(root.Seq), "workflow.completed", TimeSpan.FromSeconds(120));
+            await Wait.UntilAsync(() => reader.DeliverableDeclared(root.Seq), "deliverable.completed", TimeSpan.FromSeconds(120));
         }
         catch
         {
-            // On failure, what happened: the workflow, every run's end and reason, and the core's log.
+            // On failure, what happened: the deliverable, every run's end and reason, and the core's log.
             var o = TestContext.Current.TestOutputHelper!;
-            foreach (var m in reader.Workflow(root.Seq)) o.WriteLine($"seq {m.Seq,3} {m.Source,-14} {m.Type,-28} {BatchText.TextOf(m)} {m.Payload}");
+            foreach (var m in reader.Deliverable(root.Seq)) o.WriteLine($"seq {m.Seq,3} {m.Source,-14} {m.Type,-28} {BatchText.TextOf(m)} {m.Payload}");
             foreach (var r in reader.Runs()) o.WriteLine($"run {r.Id} member {r.MemberId} {r.State}: {r.Reason}");
-            foreach (var d in declarations) o.WriteLine("workflow_complete: " + d);
+            foreach (var d in declarations) o.WriteLine("deliverable_complete: " + d);
             foreach (var line in log) o.WriteLine("core: " + line);
             throw;
         }
         await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "quiescent", TimeSpan.FromSeconds(30));
 
         // ---- the bus: causation and depth, and the declaration
-        var wf = reader.Workflow(root.Seq);
+        var wf = reader.Deliverable(root.Seq);
         var bySeq = wf.ToDictionary(m => m.Seq);
         Assert.All(wf, m => Assert.Equal(root.Seq, m.CorrelationId));
         Assert.All(wf.Where(m => m.CausationSeq is not null), m => Assert.Equal(bySeq[m.CausationSeq!.Value].Depth + 1, m.Depth));
@@ -190,7 +190,7 @@ public class TeamFlowTests
         Assert.Equal(tellAda.Seq, adaBack.CausationSeq);
         Assert.Equal(tellBen.Seq, benBack.CausationSeq);
         Assert.Equal(2, adaBack.Depth);
-        var declared = Assert.Single(wf, m => m.Type == MessageTypes.WorkflowCompleted);
+        var declared = Assert.Single(wf, m => m.Type == MessageTypes.DeliverableCompleted);
         Assert.Equal("Alpha/Manager", declared.Source);
         Assert.Contains("ok", declarations);
         Assert.All(reader.Runs(), r => Assert.Equal("completed", r.State));
@@ -257,7 +257,7 @@ public class TeamFlowTests
         var output = TestContext.Current.TestOutputHelper!;
         foreach (var m in wf) output.WriteLine($"seq {m.Seq,3} depth {m.Depth} cause {m.CausationSeq?.ToString() ?? "-",3} {m.Source,-14} {m.Type,-28} {BatchText.TextOf(m)}");
         foreach (var r in reader.Runs()) output.WriteLine($"run {r.Id} member {r.MemberId} items {r.Items} {r.State} started {r.StartedAt} ended {r.EndedAt}");
-        foreach (var d in declarations) output.WriteLine("workflow_complete: " + d);
+        foreach (var d in declarations) output.WriteLine("deliverable_complete: " + d);
         foreach (var c in connectToGitHost) output.WriteLine("CONNECT github.com:443 -> " + c);
         output.WriteLine("team repo branches:\n" + AgentGit.Host(picked, "log", "--all", "--format=%h %d %an: %s"));
         foreach (var line in log) output.WriteLine("core: " + line);

@@ -74,7 +74,7 @@ describe('host tasks tab', () => {
 
 describe('task ask card', () => {
   const ask: IntegrationAsk = {
-    id: 31, at: '', integration: 'task:e2e', teamId: 3, member: 'ops/Ada', command: 'task e2e', reason: 'check <b>my</b> change', workflow: 9, task: true, taskName: 'e2e', commit: 'abcdef1234567890',
+    id: 31, at: '', integration: 'task:e2e', teamId: 3, member: 'ops/Ada', command: 'task e2e', reason: 'check <b>my</b> change', deliverable: 9, task: true, taskName: 'e2e', commit: 'abcdef1234567890',
     detail: {
       commit: 'abcdef1234567890', program: 'C:\\npm.cmd', workdir: 'C:\\repo\\shell', args: ['run', 'test:e2e'], timeout_s: 900, env_names: [], pin_mode: 'files', pinned: ['shell/package.json'], warnings: [], standingApproval: true,
       changed: {

@@ -179,7 +179,7 @@ public sealed partial class BusStore : IDisposable
 
     public Message? Find(long seq) => Messages("WHERE seq = $s", ("$s", seq)).SingleOrDefault();
 
-    public IReadOnlyList<Message> Workflow(long correlation) => Messages("WHERE correlation_id = $c", ("$c", correlation));
+    public IReadOnlyList<Message> Deliverable(long correlation) => Messages("WHERE correlation_id = $c", ("$c", correlation));
 
     public IReadOnlyList<Message> AllMessages() => Messages("");
 
@@ -204,7 +204,7 @@ public sealed partial class BusStore : IDisposable
 
     /// <summary>The kinds of message that set a member's card status line (BusEngine's handback, blocked, report and declare).</summary>
     public static readonly IReadOnlyList<string> StatusLineTypes =
-        [MessageTypes.Handback, MessageTypes.Blocked, MessageTypes.Progress, MessageTypes.NeedsDecision, MessageTypes.WorkflowCompleted];
+        [MessageTypes.Handback, MessageTypes.Blocked, MessageTypes.Progress, MessageTypes.NeedsDecision, MessageTypes.DeliverableCompleted];
 
     /// <summary>
     /// A member's newest message of the <see cref="StatusLineTypes"/> since the member was made (so a member removed
@@ -248,18 +248,18 @@ public sealed partial class BusStore : IDisposable
         return Messages($"WHERE seq > $p AND seq <= $u AND type IN ({string.Join(",", names)})", [.. args]);
     }
 
-    /// <summary>Declared complete, closed by a person or expired: the workflow has ended (new activity reopens it).</summary>
-    public bool WorkflowEnded(long correlation) =>
+    /// <summary>Declared complete, closed by a person or expired: the deliverable has ended (new activity reopens it).</summary>
+    public bool DeliverableEnded(long correlation) =>
         Scalar<long>(
             """
             SELECT count(*) FROM messages e WHERE e.correlation_id = $c AND e.type IN ($done, $closed, $expired)
                AND NOT EXISTS (SELECT 1 FROM messages n WHERE n.correlation_id = $c AND n.seq > e.seq AND n.type LIKE 'agent.instruction.%');
             """,
-            ("$c", correlation), ("$done", MessageTypes.WorkflowCompleted), ("$closed", MessageTypes.WorkflowClosed),
-            ("$expired", MessageTypes.WorkflowExpired)) > 0;
+            ("$c", correlation), ("$done", MessageTypes.DeliverableCompleted), ("$closed", MessageTypes.DeliverableClosed),
+            ("$expired", MessageTypes.DeliverableExpired)) > 0;
 
-    /// <summary>The workflows that touched a team, newest activity first: id, first and last time, message count.</summary>
-    public IReadOnlyList<(long Id, DateTimeOffset First, DateTimeOffset Last, int Count)> WorkflowsOf(string team, int limit)
+    /// <summary>The deliverables that touched a team, newest activity first: id, first and last time, message count.</summary>
+    public IReadOnlyList<(long Id, DateTimeOffset First, DateTimeOffset Last, int Count)> DeliverablesOf(string team, int limit)
     {
         using var cmd = Command(
             """
@@ -276,11 +276,11 @@ public sealed partial class BusStore : IDisposable
         return list;
     }
 
-    /// <summary>Wakes asked for in this workflow that have not fired.</summary>
+    /// <summary>Wakes asked for in this deliverable that have not fired.</summary>
     public int OpenWakes(long correlation) =>
         (int)Scalar<long>("SELECT count(*) FROM wakes w JOIN messages m ON m.seq = w.causation_seq WHERE w.fired_seq IS NULL AND m.correlation_id = $c;", ("$c", correlation));
 
-    /// <summary>Cancels the workflow's wakes that have not fired (fired_seq 0: cancelled, never fired).</summary>
+    /// <summary>Cancels the deliverable's wakes that have not fired (fired_seq 0: cancelled, never fired).</summary>
     public int CancelWakes(long correlation)
     {
         using var cmd = Command("UPDATE wakes SET fired_seq = 0 WHERE fired_seq IS NULL AND causation_seq IN (SELECT seq FROM messages WHERE correlation_id = $c);", ("$c", correlation));
@@ -291,9 +291,9 @@ public sealed partial class BusStore : IDisposable
     public IReadOnlyList<Message> RecentOfType(string type, int limit) =>
         Messages("WHERE seq IN (SELECT seq FROM messages WHERE type = $t ORDER BY seq DESC LIMIT $n)", ("$t", type), ("$n", limit));
 
-    public bool WorkflowDeclared(long correlation) =>
+    public bool DeliverableDeclared(long correlation) =>
         Scalar<long>("SELECT count(*) FROM messages WHERE correlation_id = $c AND type = $t;",
-            ("$c", correlation), ("$t", MessageTypes.WorkflowCompleted)) > 0;
+            ("$c", correlation), ("$t", MessageTypes.DeliverableCompleted)) > 0;
 
     private List<Message> Messages(string where, params (string, object?)[] args)
     {

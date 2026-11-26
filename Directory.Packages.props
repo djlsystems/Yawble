@@ -23,7 +23,7 @@
     <PackageVersion Include="YamlDotNet" Version="16.3.0" />
     <!-- Email Connections (IMAP and SMTP) and the Email integration: Email/MailKitClientFactory.cs. MIT; cross-platform. -->
     <PackageVersion Include="MailKit" Version="5.0.0" />
-    <!-- The script code step's JavaScript engine (Scripts/Language/ScriptCode.cs): BSD-2, pure .NET, no host access unless asked for.
+    <!-- The script code step's JavaScript engine (Scripts/Language/WorkflowCode.cs): BSD-2, pure .NET, no host access unless asked for.
          Pinned to a release at least two weeks old when added (4.17.0, 2026-10-07). -->
     <PackageVersion Include="Jint" Version="4.17.0" />
   </ItemGroup>

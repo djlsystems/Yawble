@@ -69,7 +69,7 @@ public sealed class LogServiceTests : IDisposable
         Exec("INSERT INTO run_records (run_key, team, member, cli, kind, backend, end_class, exit_code, duration_ms, started_at, ended_at) VALUES ('r-1', 'web', 'DeveloperAda', 'claude', 'headless', 'wxc', 'completed', 0, 61000, @a, @a), ('r-2', 'docs', 'Manager', 'codex', 'headless', 'wxc', 'failed', 1, 1000, @b, @b);",
             ("@a", Ago(1)), ("@b", Ago(2)));
         Exec("INSERT INTO integration_calls (at, integration, team, member, args, decision, rule) VALUES (@a, 'gh', 'web', 'web/DeveloperAda', '[\"pr\",\"list\"]', 'allow', 'preset');", ("@a", Ago(1)));
-        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, state, decided_by, decided_at) VALUES (@a, 'az', 1, 'web/DeveloperAda', '[\"login\"]', 'deploy', 1, 1, 'approved', 'pat', @a), (@b, 'az', 1, 'web/DeveloperAda', '[\"group\"]', 'old but waiting', 1, 1, 'pending', NULL, NULL);",
+        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, deliverable, causation_seq, state, decided_by, decided_at) VALUES (@a, 'az', 1, 'web/DeveloperAda', '[\"login\"]', 'deploy', 1, 1, 'approved', 'pat', @a), (@b, 'az', 1, 'web/DeveloperAda', '[\"group\"]', 'old but waiting', 1, 1, 'pending', NULL, NULL);",
             ("@a", Ago(1)), ("@b", Ago(600)));
         Exec("INSERT INTO usage_events (at, run_key, member, vhost, path, status, model, input_tokens, output_tokens) VALUES (@a, 'r-1', 'web/DeveloperAda', 'model.yawble.internal', '/v1/messages', 200, 'opus', 1200, 300);", ("@a", Ago(1)));
         Exec("INSERT INTO messages (type, payload, source, depth, occurred_at, via) VALUES ('agent.instruction.web/DeveloperAda', '{\"text\":\"add the login page\"}', 'web/Manager', 0, @a, 'agent'), ('agent.handback', '{\"delivered\":\"login page on members/developerada\"}', 'web/DeveloperAda', 0, @b, 'agent'), ('agent.instruction.docs/Manager', '{\"text\":\"write the guide\"}', 'person', 0, @c, 'app');",
@@ -417,14 +417,14 @@ public sealed class LogServiceTests : IDisposable
     [Fact]
     public void TheAuditKeepsChangesOnly()
     {
-        foreach (var read in new[] { "integrations.asks", "monitor.steps", "bus.workflows", "logs.query", "backlog.item", "agents.versionStatus" })
+        foreach (var read in new[] { "integrations.asks", "monitor.steps", "bus.deliverables", "logs.query", "backlog.item", "agents.versionStatus" })
             Assert.True(AuditLog.IsReadOnly(read, null), read);
         Assert.True(AuditLog.IsReadOnly("teams.push", new JsonObject { ["teamId"] = 1 }));
         Assert.False(AuditLog.IsReadOnly("teams.push", new JsonObject { ["teamId"] = 1, ["on"] = false }));
-        // teams.workflowExpiry is audited when it sets the days, not when it reads them; an Extend is audited.
-        Assert.True(AuditLog.IsReadOnly("teams.workflowExpiry", new JsonObject { ["teamId"] = 1 }));
-        Assert.False(AuditLog.IsReadOnly("teams.workflowExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }));
-        Assert.False(AuditLog.IsReadOnly("bus.workflowExtend", new JsonObject { ["teamId"] = 1, ["workflow"] = 4 }));
+        // teams.deliverableExpiry is audited when it sets the days, not when it reads them; an Extend is audited.
+        Assert.True(AuditLog.IsReadOnly("teams.deliverableExpiry", new JsonObject { ["teamId"] = 1 }));
+        Assert.False(AuditLog.IsReadOnly("teams.deliverableExpiry", new JsonObject { ["teamId"] = 1, ["days"] = 7 }));
+        Assert.False(AuditLog.IsReadOnly("bus.deliverableExtend", new JsonObject { ["teamId"] = 1, ["deliverable"] = 4 }));
         Assert.False(AuditLog.IsReadOnly("teams.pause", null));
         Assert.False(AuditLog.IsReadOnly("logs.prune", null));
     }

@@ -5,7 +5,7 @@ using Xunit;
 namespace Yawble.Core.Tests.Bus;
 
 /// <summary>
-/// A run the host could not get ready (its agent never started) goes again instead of stranding its workflow, and a
+/// A run the host could not get ready (its agent never started) goes again instead of stranding its deliverable, and a
 /// fetch from a local repository path is tried again when only git's transport failed. Fakes only: no git, no agent CLI.
 /// </summary>
 public class NotStartedRetryTests
@@ -41,7 +41,7 @@ public class NotStartedRetryTests
         Assert.Equal(2, adaRuns.Count);
         Assert.Equal(adaRuns[0].Items.Select(i => i.Seq), adaRuns[1].Items.Select(i => i.Seq));
         using var s = db.OpenStore();
-        var thread = s.Workflow(root.Seq);
+        var thread = s.Deliverable(root.Seq);
         Assert.DoesNotContain(thread, m => m.Type == MessageTypes.Failed && m.Source == "Alpha/Ada");
         Assert.Single(thread, m => m.Type == MessageTypes.Completed && m.Source == "Alpha/Ada");
         Assert.Equal(FailureClasses.NotStarted, s.FailureClassOf(adaRuns[0].RunId));
@@ -51,7 +51,7 @@ public class NotStartedRetryTests
     [Fact]
     public async Task AManagersOwnRunThatDidNotStart_StillReachesTheManager()
     {
-        // The case that stranded a workflow: the Manager's run carrying a hand-back failed before its agent started, and
+        // The case that stranded a deliverable: the Manager's run carrying a hand-back failed before its agent started, and
         // nobody else is told about a Manager's failure.
         var managerTries = 0;
         var runner = new ScriptedRunner().On("Alpha/Manager", (_, _) => Task.FromResult(++managerTries == 1 ? NotStarted() : RunResult.Ok));
@@ -82,14 +82,14 @@ public class NotStartedRetryTests
         await Wait.UntilAsync(() =>
         {
             using var s = db.OpenStore();
-            return s.Workflow(root.Seq).Any(m => m.Type == MessageTypes.Failed && m.Source == "Alpha/Ada");
+            return s.Deliverable(root.Seq).Any(m => m.Type == MessageTypes.Failed && m.Source == "Alpha/Ada");
         }, "Ada's failure is reported");
         await Wait.UntilAsync(() => engine.IsQuiescentAsync(Ct), "the bus settles");
         await Task.Delay(200, Ct); // a fourth try would have come by now
 
         Assert.Equal(1 + Options.NotStartedRetries, tries);
         using var store = db.OpenStore();
-        var failed = Assert.Single(store.Workflow(root.Seq), m => m.Type == MessageTypes.Failed && m.Source == "Alpha/Ada");
+        var failed = Assert.Single(store.Deliverable(root.Seq), m => m.Type == MessageTypes.Failed && m.Source == "Alpha/Ada");
         Assert.Contains("\"failureClass\":\"not_started\"", failed.Payload);
         Assert.Contains("Could not read from remote repository", failed.Payload);
         Assert.Empty(store.Pending("Alpha/Ada"));

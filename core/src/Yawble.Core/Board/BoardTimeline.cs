@@ -5,27 +5,27 @@ using Yawble.Core.Bus;
 namespace Yawble.Core.Board;
 
 /// <summary>
-/// The board's times from what is stored: a card's timeline lines (0047), the workflow's runs and its messages, and the runs
+/// The board's times from what is stored: a card's timeline lines (0047), the deliverable's runs and its messages, and the runs
 /// working now (their stalls so far). <see cref="TimelineCalculator"/> does the arithmetic; this reads its inputs and
-/// writes the wire contract (<c>time</c> on BoardCard and workflow items; <c>timeline.get</c>).
+/// writes the wire contract (<c>time</c> on BoardCard and deliverable items; <c>timeline.get</c>).
 /// </summary>
 public sealed class BoardTimeline(BoardStore store)
 {
     /// <summary>
-    /// A card's timeline as of <paramref name="now"/>. <paramref name="runs"/>: the runs of its workflow as stored, when
+    /// A card's timeline as of <paramref name="now"/>. <paramref name="runs"/>: the runs of its deliverable as stored, when
     /// already read (the live run-queue waits in <paramref name="live"/> are added here).
     /// </summary>
     public CardTimeline OfCard(CardRow card, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now, IReadOnlyList<RunSpan>? runs = null)
     {
         var lines = store.Timeline(card.Id); // fills in an old card's timeline from its trail first
         var fresh = store.Card(card.Id) ?? card;
-        if (fresh.Workflow is not { } wf) return OfCard(fresh, lines, live, now, runs ?? []);
+        if (fresh.Deliverable is not { } wf) return OfCard(fresh, lines, live, now, runs ?? []);
         return OfCard(fresh, lines, live, now, WithQueued(runs ?? store.RunsOf(wf), wf, live, now));
     }
 
-    /// <summary>A card's timeline from what is already read: the card (after its rebuild), its lines and its workflow's runs.</summary>
+    /// <summary>A card's timeline from what is already read: the card (after its rebuild), its lines and its deliverable's runs.</summary>
     private static CardTimeline OfCard(CardRow fresh, IReadOnlyList<TimelineLine> lines, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now,
-        IReadOnlyList<RunSpan> workflowRuns)
+        IReadOnlyList<RunSpan> deliverableRuns)
     {
         var states = new List<TimelineState>();
         var stalls = new List<ActivitySpan>();
@@ -49,51 +49,51 @@ public sealed class BoardTimeline(BoardStore store)
                     break;
             }
         }
-        if (fresh.Workflow is { } w && fresh.Member is { } member)
-            foreach (var a in live.Where(a => a.Workflow == w && Same(a.Member, member) && Same(a.Team, fresh.Team)))
+        if (fresh.Deliverable is { } w && fresh.Member is { } member)
+            foreach (var a in live.Where(a => a.Deliverable == w && Same(a.Member, member) && Same(a.Team, fresh.Team)))
             {
                 stalls.AddRange(a.Spans.Stalls);
                 holds.AddRange(a.Spans.Holds);
             }
         var input = new CardTimelineInput(fresh.Id, fresh.Member, fresh.Title, T(fresh.CreatedAt), fresh.StartedAt is { } s ? T(s) : null,
             fresh.EndedHow, fresh.EndedAt is { } e ? T(e) : null, fresh.Rebuilt, states, stalls, holds,
-            fresh.Member is null ? [] : workflowRuns, markers);
+            fresh.Member is null ? [] : deliverableRuns, markers);
         return TimelineCalculator.Card(input, now);
     }
 
-    /// <summary>A workflow's timeline from its messages (oldest first); null when it has none.</summary>
-    public WorkflowTimeline? OfWorkflow(long workflow, IReadOnlyList<Message> thread, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
+    /// <summary>A deliverable's timeline from its messages (oldest first); null when it has none.</summary>
+    public DeliverableTimeline? OfDeliverable(long deliverable, IReadOnlyList<Message> thread, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
     {
         if (thread.Count == 0) return null;
-        var stored = store.RunsOf(workflow);
-        var cards = store.CardsOfWorkflow(workflow).OrderBy(c => c.Id).Select(c => OfCard(c, live, now, stored)).ToList();
-        return OfWorkflow(workflow, thread, WithQueued(stored, workflow, live, now), cards, store.LooseTimeline(workflow), live, now);
+        var stored = store.RunsOf(deliverable);
+        var cards = store.CardsOfDeliverable(deliverable).OrderBy(c => c.Id).Select(c => OfCard(c, live, now, stored)).ToList();
+        return OfDeliverable(deliverable, thread, WithQueued(stored, deliverable, live, now), cards, store.LooseTimeline(deliverable), live, now);
     }
 
     /// <summary>
-    /// The times of many workflows at once (the Workflows page), in a fixed number of statements however many there
-    /// are. <paramref name="threads"/>: each workflow's messages, oldest first. Workflows without messages are left out.
+    /// The times of many deliverables at once (the Deliverables page), in a fixed number of statements however many there
+    /// are. <paramref name="threads"/>: each deliverable's messages, oldest first. Deliverables without messages are left out.
     /// </summary>
     public IReadOnlyDictionary<long, TimeSummary> TimesOf(IReadOnlyDictionary<long, IReadOnlyList<Message>> threads, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
     {
         var ids = threads.Where(t => t.Value.Count > 0).Select(t => t.Key).ToList();
         var result = new Dictionary<long, TimeSummary>();
         if (ids.Count == 0) return result;
-        var lines = store.TimelinesOfWorkflows(ids); // rebuilds the old cards first, so the cards read next are current
-        var cards = store.CardsOfWorkflows(ids).Where(c => c.Workflow is not null).GroupBy(c => c.Workflow!.Value).ToDictionary(g => g.Key, g => g.OrderBy(c => c.Id).ToList());
-        var runs = store.RunsOfWorkflows(ids);
+        var lines = store.TimelinesOfDeliverables(ids); // rebuilds the old cards first, so the cards read next are current
+        var cards = store.CardsOfDeliverables(ids).Where(c => c.Deliverable is not null).GroupBy(c => c.Deliverable!.Value).ToDictionary(g => g.Key, g => g.OrderBy(c => c.Id).ToList());
+        var runs = store.RunsOfDeliverables(ids);
         var cardLines = lines.Where(l => l.CardId is not null).GroupBy(l => l.CardId!.Value).ToDictionary(g => g.Key, g => (IReadOnlyList<TimelineLine>)[.. g]);
-        var loose = lines.Where(l => l.CardId is null && l.Workflow is not null).GroupBy(l => l.Workflow!.Value).ToDictionary(g => g.Key, g => (IReadOnlyList<TimelineLine>)[.. g]);
+        var loose = lines.Where(l => l.CardId is null && l.Deliverable is not null).GroupBy(l => l.Deliverable!.Value).ToDictionary(g => g.Key, g => (IReadOnlyList<TimelineLine>)[.. g]);
         foreach (var w in ids)
         {
             var wfRuns = WithQueued(runs.GetValueOrDefault(w) ?? [], w, live, now);
             var cardTimes = (cards.GetValueOrDefault(w) ?? []).Select(c => OfCard(c, cardLines.GetValueOrDefault(c.Id) ?? [], live, now, wfRuns)).ToList();
-            result[w] = OfWorkflow(w, threads[w], wfRuns, cardTimes, loose.GetValueOrDefault(w) ?? [], live, now).Time;
+            result[w] = OfDeliverable(w, threads[w], wfRuns, cardTimes, loose.GetValueOrDefault(w) ?? [], live, now).Time;
         }
         return result;
     }
 
-    private static WorkflowTimeline OfWorkflow(long workflow, IReadOnlyList<Message> thread, IReadOnlyList<RunSpan> runs, IReadOnlyList<CardTimeline> cards,
+    private static DeliverableTimeline OfDeliverable(long deliverable, IReadOnlyList<Message> thread, IReadOnlyList<RunSpan> runs, IReadOnlyList<CardTimeline> cards,
         IReadOnlyList<TimelineLine> looseLines, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
     {
         var ends = Ends(thread);
@@ -103,27 +103,27 @@ public sealed class BoardTimeline(BoardStore store)
             .Concat(looseLines.Select(l => l.Member).OfType<string>())
             .Where(n => !withCards.Contains(n))
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
-        var loose = names.Select(n => Loose(n, workflow, thread, runs, looseLines, live, now)).ToList();
-        return TimelineCalculator.Workflow(new WorkflowTimelineInput(workflow, thread[0].OccurredAt, ends, cards, loose), now);
+        var loose = names.Select(n => Loose(n, deliverable, thread, runs, looseLines, live, now)).ToList();
+        return TimelineCalculator.Deliverable(new DeliverableTimelineInput(deliverable, thread[0].OccurredAt, ends, cards, loose), now);
     }
 
     /// <summary>
-    /// The workflow's ends in order: completed, closed or expired (an expired one ends at its last activity), each until
+    /// The deliverable's ends in order: completed, closed or expired (an expired one ends at its last activity), each until
     /// the instruction that reopened it. An end while it is ended already changes nothing.
     /// </summary>
-    public static IReadOnlyList<WorkflowEnd> Ends(IReadOnlyList<Message> thread)
+    public static IReadOnlyList<DeliverableEnd> Ends(IReadOnlyList<Message> thread)
     {
-        var ends = new List<WorkflowEnd>();
+        var ends = new List<DeliverableEnd>();
         foreach (var m in thread)
         {
             var ended = ends.Count > 0 && ends[^1].ReopenAt is null;
-            if (MessageTypes.WorkflowEnds.Contains(m.Type))
+            if (MessageTypes.DeliverableEnds.Contains(m.Type))
             {
                 if (ended) continue;
-                var how = m.Type switch { MessageTypes.WorkflowClosed => "closed", MessageTypes.WorkflowExpired => "expired", _ => "completed" };
+                var how = m.Type switch { MessageTypes.DeliverableClosed => "closed", MessageTypes.DeliverableExpired => "expired", _ => "completed" };
                 var p = Payload(m);
                 var at = how == "expired" && Str(p, "endedAt") is { } last ? T(last) : m.OccurredAt;
-                ends.Add(new WorkflowEnd(at, how, null, how == "expired" ? (Str(p, "expiredAt") is { } x ? T(x) : m.OccurredAt) : null));
+                ends.Add(new DeliverableEnd(at, how, null, how == "expired" ? (Str(p, "expiredAt") is { } x ? T(x) : m.OccurredAt) : null));
             }
             else if (ended && m.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal))
                 ends[^1] = ends[^1] with { ReopenAt = m.OccurredAt };
@@ -131,13 +131,13 @@ public sealed class BoardTimeline(BoardStore store)
         return ends;
     }
 
-    private static LooseInput Loose(string member, long workflow, IReadOnlyList<Message> thread, IReadOnlyList<RunSpan> runs,
+    private static LooseInput Loose(string member, long deliverable, IReadOnlyList<Message> thread, IReadOnlyList<RunSpan> runs,
         IReadOnlyList<TimelineLine> lines, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
     {
         var mine = lines.Where(l => Same(l.Member, member)).ToList();
         var stalls = mine.Where(l => l.Kind == "stall" && l.Until is not null).Select(l => new ActivitySpan(T(l.At), T(l.Until!))).ToList();
         var holds = mine.Where(l => l.Kind == "hold" && l.Until is not null).Select(l => new ActivitySpan(T(l.At), T(l.Until!))).ToList();
-        foreach (var a in live.Where(a => a.Workflow == workflow && Same(a.Member, member)))
+        foreach (var a in live.Where(a => a.Deliverable == deliverable && Same(a.Member, member)))
         {
             stalls.AddRange(a.Spans.Stalls);
             holds.AddRange(a.Spans.Holds);
@@ -171,8 +171,8 @@ public sealed class BoardTimeline(BoardStore store)
         ["markers"] = Markers(c.Markers),
     };
 
-    /// <summary>timeline.get for a workflow: its time, a row per card (and per card-less member), the summary row, its markers.</summary>
-    public static JsonObject Json(WorkflowTimeline w) => new()
+    /// <summary>timeline.get for a deliverable: its time, a row per card (and per card-less member), the summary row, its markers.</summary>
+    public static JsonObject Json(DeliverableTimeline w) => new()
     {
         ["time"] = w.Time.ToJson(),
         ["rows"] = new JsonArray([.. w.Rows.Select(r => Row(r.Card, r.Member, r.Title, r.Bands))]),
@@ -221,12 +221,12 @@ public sealed class BoardTimeline(BoardStore store)
     // ---------------------------------------------------------------- plumbing
 
     /// <summary>
-    /// The workflow's runs plus, for each member waiting in the run queue now for work in it, a run queued since it
+    /// The deliverable's runs plus, for each member waiting in the run queue now for work in it, a run queued since it
     /// joined and not started (started = now), so that wait is Waiting for a slot while it lasts.
     /// </summary>
-    private static IReadOnlyList<RunSpan> WithQueued(IReadOnlyList<RunSpan> runs, long workflow, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
+    private static IReadOnlyList<RunSpan> WithQueued(IReadOnlyList<RunSpan> runs, long deliverable, IReadOnlyList<LiveRunActivity> live, DateTimeOffset now)
     {
-        var queued = live.Where(a => a.Workflow == workflow && a.QueuedSince is { } q && q < now)
+        var queued = live.Where(a => a.Deliverable == deliverable && a.QueuedSince is { } q && q < now)
             .Select(a => new RunSpan(a.Member, a.QueuedSince!.Value, now, null)).ToList();
         return queued.Count == 0 ? runs : [.. runs, .. queued];
     }

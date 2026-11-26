@@ -3,8 +3,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Yawble.Core.Bus;
 using Yawble.Core.Gateway;
+using Yawble.Core.Goals;
 using Yawble.Core.Ipc;
-using Yawble.Core.Scripts;
+using Yawble.Core.Workflows;
 
 namespace Yawble.Core.Concierge;
 
@@ -47,28 +48,31 @@ public sealed class ConciergeTools(
     /// can steer through what they post) runs none of them: it may read, keep its notes and watches, and recommend.
     /// </summary>
     public static readonly IReadOnlyList<string> Acting =
-        ["tell", "answer", "team_create", "team_pause", "team_resume", "workflow_nudge", "workflow_close", "workflow_extend", "backlog_add", "team_repo_add", "team_repo_remove", "backup_now",
-         ConciergeHostTasks.RunTool, .. ScriptTools.Acting];
+        ["tell", "answer", "team_create", "team_pause", "team_resume", "deliverable_nudge", "deliverable_close", "deliverable_extend", "backlog_add", "team_repo_add", "team_repo_remove", "backup_now",
+         ConciergeHostTasks.RunTool, .. WorkflowTools.Acting, .. GoalTools.Acting];
 
     /// <summary>
     /// The tools here only for the person at this computer (as <see cref="ConciergeActions.LocalOnly"/>): a new team or
-    /// repository makes the host clone a folder or address for a sandboxed agent, closing a workflow ends work, a host
-    /// task runs a program on this computer, and a script member acts for the team. A live script run is refused by its
-    /// arguments as well (<see cref="ScriptTools.RemoteRefused"/>); a dry run stays allowed.
+    /// repository makes the host clone a folder or address for a sandboxed agent, closing a deliverable ends work, a host
+    /// task runs a program on this computer, and a workflow member acts for the team. A live workflow run is refused by its
+    /// arguments as well (<see cref="WorkflowTools.RemoteRefused"/>); a dry run stays allowed.
     /// </summary>
-    public static readonly IReadOnlyList<string> LocalOnly = ["team_create", "team_repo_add", "team_repo_remove", "workflow_close", ConciergeHostTasks.RunTool, .. ScriptTools.LocalOnly];
+    public static readonly IReadOnlyList<string> LocalOnly = ["team_create", "team_repo_add", "team_repo_remove", "deliverable_close", ConciergeHostTasks.RunTool, .. WorkflowTools.LocalOnly];
 
     public static readonly IReadOnlyList<string> ToolNames =
         ["team_list", "team_current", "team_status", "team_activity", "tell", "answer", "team_create", "notes_read", "notes_write",
-         "watch", "watch_list", "unwatch", "team_workflows", "workflow_nudge", "workflow_close", "workflow_extend", "team_pause", "team_resume",
+         "watch", "watch_list", "unwatch", "team_deliverables", "deliverable_nudge", "deliverable_close", "deliverable_extend", "team_pause", "team_resume",
          "documents_list", "documents_read", "backlog_add", "team_repos", "team_repo_add", "team_repo_remove",
-         .. ConciergeHostTasks.Names, .. ConciergeReadTools.Names, .. ScriptTools.Names];
+         .. ConciergeHostTasks.Names, .. ConciergeReadTools.Names, .. WorkflowTools.Names, .. GoalTools.Names];
 
     private readonly ConciergeReadTools _read = new(bus, ui, store.ConnectionString,
         openPrs: actions is null ? null : actions.OpenPullRequestsAsync, remote: Remote(remote));
 
-    /// <summary>The script and schema tools, onto the scripts.* / schemas.* RPC.</summary>
-    private readonly ScriptTools _scripts = new(bus, ui);
+    /// <summary>The workflow and schema tools, onto the workflows.* / schemas.* RPC.</summary>
+    private readonly WorkflowTools _workflows = new(bus, ui);
+
+    /// <summary>The goal tools, onto the goals.* RPC.</summary>
+    private readonly GoalTools _goals = new(ui);
 
     public const int NotesLimit = 16_000;
 
@@ -148,8 +152,8 @@ public sealed class ConciergeTools(
         try
         {
             if (!_turn.ByPerson && Acting.Contains(name)) throw new ArgumentException(ConciergeActions.ReviewRefusal(name));
-            if (_turn.Remote && (LocalOnly.Contains(name) || ScriptTools.RemoteRefused(name, args)))
-                throw new ArgumentException(ConciergeActions.RemoteRefusal(ScriptTools.IsLiveRun(name, args) ? name + " with dry_run false (a live run)" : name));
+            if (_turn.Remote && (LocalOnly.Contains(name) || WorkflowTools.RemoteRefused(name, args)))
+                throw new ArgumentException(ConciergeActions.RemoteRefusal(WorkflowTools.IsLiveRun(name, args) ? name + " with dry_run false (a live run)" : name));
             var text = name switch
             {
                 "team_list" => await TeamListAsync(ct),
@@ -161,19 +165,19 @@ public sealed class ConciergeTools(
                 "team_create" => await CreateAsync(args, ct),
                 "notes_read" => store.Notes() is { Length: > 0 } notes ? notes : "(no notes yet)",
                 "notes_write" => WriteNotes(Required(args, "text")),
-                "watch" => await WatchAsync(await TeamAsync(Required(args, "team"), ct), Required(args, "what"), Long(args, "workflow"),
+                "watch" => await WatchAsync(await TeamAsync(Required(args, "team"), ct), Required(args, "what"), Long(args, "deliverable"),
                     Bool(args, "follow_up"), Int(args, "hours"), ct),
                 "watch_list" => WatchList(),
                 "unwatch" => Unwatch(Long(args, "id") ?? throw new ArgumentException("'id' is required")),
-                "team_workflows" => await WorkflowsAsync(await TeamAsync(Required(args, "team"), ct), ct),
-                "workflow_nudge" => await UiText("bus.nudgeWorkflow", await TeamAsync(Required(args, "team"), ct),
-                    new JsonObject { ["workflow"] = Long(args, "workflow") ?? throw new ArgumentException("'workflow' is required"), ["note"] = Optional(args, "note") },
+                "team_deliverables" => await DeliverablesAsync(await TeamAsync(Required(args, "team"), ct), ct),
+                "deliverable_nudge" => await UiText("bus.nudgeDeliverable", await TeamAsync(Required(args, "team"), ct),
+                    new JsonObject { ["deliverable"] = Long(args, "deliverable") ?? throw new ArgumentException("'deliverable' is required"), ["note"] = Optional(args, "note") },
                     "nudged: its Manager is told to pick it up", ct),
-                "workflow_close" => await UiText("bus.closeWorkflow", await TeamAsync(Required(args, "team"), ct),
-                    new JsonObject { ["workflow"] = Long(args, "workflow") ?? throw new ArgumentException("'workflow' is required"), ["reason"] = Optional(args, "reason") },
+                "deliverable_close" => await UiText("bus.closeDeliverable", await TeamAsync(Required(args, "team"), ct),
+                    new JsonObject { ["deliverable"] = Long(args, "deliverable") ?? throw new ArgumentException("'deliverable' is required"), ["reason"] = Optional(args, "reason") },
                     "closed", ct),
-                "workflow_extend" => await UiText("bus.workflowExtend", await TeamAsync(Required(args, "team"), ct),
-                    new JsonObject { ["workflow"] = Long(args, "workflow") ?? throw new ArgumentException("'workflow' is required") },
+                "deliverable_extend" => await UiText("bus.deliverableExtend", await TeamAsync(Required(args, "team"), ct),
+                    new JsonObject { ["deliverable"] = Long(args, "deliverable") ?? throw new ArgumentException("'deliverable' is required") },
                     "extended: its idle clock starts again now", ct),
                 "team_pause" => await UiText("teams.pause", await TeamAsync(Required(args, "team"), ct), [], "paused: its work waits until it is resumed", ct),
                 "team_resume" => await UiText("teams.resume", await TeamAsync(Required(args, "team"), ct), [], "resumed", ct),
@@ -187,7 +191,8 @@ public sealed class ConciergeTools(
                 ConciergeHostTasks.ListTool => await HostTaskListAsync(args, ct),
                 ConciergeHostTasks.RunTool => await HostTaskRunAsync(args, ct),
                 ConciergeHostTasks.StatusTool => await HostTaskStatusAsync(args, ct),
-                _ when ScriptTools.Handles(name) => await ScriptToolAsync(name, args, ct),
+                _ when WorkflowTools.Handles(name) => await WorkflowToolAsync(name, args, ct),
+                _ when GoalTools.Handles(name) => await GoalToolAsync(name, args, ct),
                 _ when ConciergeReadTools.Handles(name) => await _read.CallAsync(name, args, ct),
                 _ => (actions is null ? null : await actions.TryCallAsync(name, args, ct)) ?? throw new ArgumentException($"unknown tool: {name}"),
             };
@@ -200,16 +205,28 @@ public sealed class ConciergeTools(
     }
 
     /// <summary>
-    /// One script tool. Building, checking and dry runs run at once; adding a script member and a script's first live run
+    /// One workflow tool. Building, checking and dry runs run at once; adding a workflow member and a workflow's first live run
     /// on a team go through the actions' confirmation flow (the list first, the person's yes in a later turn).
     /// </summary>
-    private async Task<string> ScriptToolAsync(string name, JsonObject args, CancellationToken ct)
+    private async Task<string> WorkflowToolAsync(string name, JsonObject args, CancellationToken ct)
     {
-        if (await _scripts.YesNeededAsync(name, args, ct) is not { } yes) return await _scripts.CallAsync(name, args, ct);
+        if (await _workflows.YesNeededAsync(name, args, ct) is not { } yes) return await _workflows.CallAsync(name, args, ct);
         if (actions is null) throw new ArgumentException($"refused: {name} needs the person's yes, and this chat cannot take one. Nothing was changed; the person can do it in the app.");
         return await actions.ConfirmAsync(name, args, yes.Plan, yes.Key, async t =>
         {
-            var done = await _scripts.CallAsync(name, args, t);
+            var done = await _workflows.CallAsync(name, args, t);
+            return done.StartsWith("ok: ", StringComparison.Ordinal) ? done[4..] : done;
+        }, ct);
+    }
+
+    /// <summary>One goal tool. goal_delete goes through the actions' confirmation flow (what it does first, the person's yes in a later turn).</summary>
+    private async Task<string> GoalToolAsync(string name, JsonObject args, CancellationToken ct)
+    {
+        if (await _goals.YesNeededAsync(name, args, ct) is not { } yes) return await _goals.CallAsync(name, args, ct);
+        if (actions is null) throw new ArgumentException($"refused: {name} needs the person's yes, and this chat cannot take one. Nothing was changed; the person can do it on the Goals page.");
+        return await actions.ConfirmAsync(name, args, yes.Plan, yes.Key, async t =>
+        {
+            var done = await _goals.CallAsync(name, args, t);
             return done.StartsWith("ok: ", StringComparison.Ordinal) ? done[4..] : done;
         }, ct);
     }
@@ -245,18 +262,18 @@ public sealed class ConciergeTools(
         return $"ok: {team.Name}: {done}.";
     }
 
-    private async Task<string> WorkflowsAsync(TeamSummary team, CancellationToken ct)
+    private async Task<string> DeliverablesAsync(TeamSummary team, CancellationToken ct)
     {
-        var list = await bus.WorkflowsAsync(team.Name, 20, ct);
-        if (list.Count == 0) return $"{team.Name} has no workflows yet.";
+        var list = await bus.DeliverablesAsync(team.Name, 20, ct);
+        if (list.Count == 0) return $"{team.Name} has no deliverables yet.";
         return string.Join(Environment.NewLine, list.Select(w =>
             $"#{w.Id} [{(w.Undeclared ? "open, nobody working it" : w.State)}] {w.Title} (owner {w.Owner}; last {w.LastAt:yyyy-MM-dd HH:mm} UTC)" +
             (w.Busy.Count > 0 ? $" - {string.Join("; ", w.Busy)}" : "") +
             (w.Ending is { } e ? $" - {w.State switch { "closed" => "closed", "expired" => "expired", _ => "delivered" }}: {e}" : "") +
             (w.State == "expired" && w.EndedAt is { } end ? $" (last activity {end:yyyy-MM-dd HH:mm} UTC; telling its team something reopens it)" : "") +
-            (w.ExpiresAt is { } at ? $" - expires {at:yyyy-MM-dd HH:mm} UTC unless something happens in it (workflow_extend resets the clock)" : "") +
+            (w.ExpiresAt is { } at ? $" - expires {at:yyyy-MM-dd HH:mm} UTC unless something happens in it (deliverable_extend resets the clock)" : "") +
             (w.ExpiryWarning is { } warn ? $" - {warn}" : "") +
-            // Its overall time and where it went (the same numbers as the Workflows list).
+            // Its overall time and where it went (the same numbers as the Deliverables list).
             (w.Time is { } time ? $" - time {Board.BoardTimeline.Describe(time)}" : "")));
     }
 
@@ -338,7 +355,7 @@ public sealed class ConciergeTools(
             var what = m.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)
                 ? $"told {m.Type[MessageTypes.InstructionPrefix.Length..]}: {Field(m, "text", "instruction")}"
                 : $"{m.Type}: {Field(m, "delivered", "status", "reason", "question", "text")}";
-            sb.AppendLine($"[{m.OccurredAt:yyyy-MM-dd HH:mm}] #{m.Seq} (workflow {m.CorrelationId}) {From(m)} {Clip(what, 400)}");
+            sb.AppendLine($"[{m.OccurredAt:yyyy-MM-dd HH:mm}] #{m.Seq} (deliverable {m.CorrelationId}) {From(m)} {Clip(what, 400)}");
         }
         return sb.ToString().TrimEnd();
     }
@@ -370,24 +387,24 @@ public sealed class ConciergeTools(
         var request = new JsonObject { ["teamId"] = team.Id, ["text"] = instruction };
         if (ForwardedImages(images) is { } forwarded) request["images"] = forwarded;
         var r = await ui("bus.tellManager", request, ct);
-        var said = $"ok: told the Manager of {team.Name} (message {r?["seq"]}, new workflow {r?["workflow"]}). It runs when a slot is free.";
-        // Every dispatch is followed up: the app watches the new workflow and posts here when it finishes, fails, is
+        var said = $"ok: told the Manager of {team.Name} (message {r?["seq"]}, new deliverable {r?["deliverable"]}). It runs when a slot is free.";
+        // Every dispatch is followed up: the app watches the new deliverable and posts here when it finishes, fails, is
         // blocked or needs a decision, so the person hears back without asking.
-        if (conversationId is null || r?["workflow"] is not JsonValue wv || !wv.TryGetValue<long>(out var workflow))
+        if (conversationId is null || r?["deliverable"] is not JsonValue wv || !wv.TryGetValue<long>(out var deliverable))
             return said + " Check on it with team_status.";
-        var since = r["seq"] is JsonValue sv && sv.TryGetValue<long>(out var seq) ? seq : workflow;
-        var w = store.AddWatch(conversationId, team.Name, workflow, Clip(FirstLine(instruction), 120), followUp, since, Now() + ConciergeWatcher.DefaultLife);
-        return said + $" The app now watches this workflow (watch {w.Id}) and posts updates in this chat when it finishes, fails, " +
+        var since = r["seq"] is JsonValue sv && sv.TryGetValue<long>(out var seq) ? seq : deliverable;
+        var w = store.AddWatch(conversationId, team.Name, deliverable, Clip(FirstLine(instruction), 120), followUp, since, Now() + ConciergeWatcher.DefaultLife);
+        return said + $" The app now watches this deliverable (watch {w.Id}) and posts updates in this chat when it finishes, fails, " +
                "is blocked or needs a decision" + (followUp ? "; you will be woken to review the outcome." : ". Tell the person so.");
     }
 
-    private async Task<string> WatchAsync(TeamSummary team, string what, long? workflow, bool followUp, int? hours, CancellationToken ct)
+    private async Task<string> WatchAsync(TeamSummary team, string what, long? deliverable, bool followUp, int? hours, CancellationToken ct)
     {
         if (conversationId is null) throw new ArgumentException("watches belong to a conversation");
         var life = TimeSpan.FromHours(Math.Clamp(hours ?? (int)ConciergeWatcher.DefaultLife.TotalHours, 1, (int)ConciergeWatcher.MaxLife.TotalHours));
-        var w = store.AddWatch(conversationId, team.Name, workflow, Clip(FirstLine(what), 120), followUp, await bus.MaxSeqAsync(ct), Now() + life);
-        var target = workflow is { } wf ? $"workflow {wf} of {team.Name}" : $"team {team.Name}";
-        return $"ok: watch {w.Id} on {target}: the app posts updates in this chat when {(workflow is null ? "any of the team's work" : "it")} " +
+        var w = store.AddWatch(conversationId, team.Name, deliverable, Clip(FirstLine(what), 120), followUp, await bus.MaxSeqAsync(ct), Now() + life);
+        var target = deliverable is { } wf ? $"deliverable {wf} of {team.Name}" : $"team {team.Name}";
+        return $"ok: watch {w.Id} on {target}: the app posts updates in this chat when {(deliverable is null ? "any of the team's work" : "it")} " +
                $"finishes, fails, is blocked or needs a decision, for {life.TotalHours:0} hours.";
     }
 
@@ -397,7 +414,7 @@ public sealed class ConciergeTools(
         var watches = store.ActiveWatches(conversationId);
         if (watches.Count == 0) return "Nothing is being watched in this conversation.";
         return string.Join("\n", watches.Select(w =>
-            $"- watch {w.Id}: {(w.Workflow is { } wf ? $"workflow {wf} of {w.Team}" : $"team {w.Team}")}: {w.What}" +
+            $"- watch {w.Id}: {(w.Deliverable is { } wf ? $"deliverable {wf} of {w.Team}" : $"team {w.Team}")}: {w.What}" +
             $"{(w.FollowUp ? " (you review each update)" : "")}; until {w.ExpiresAt}"));
     }
 
@@ -518,8 +535,8 @@ public sealed class ConciergeTools(
             ("team", "string", "The team's name.", true)),
         Tool("team_activity", "One team's latest messages: who was told what, progress, hand-backs, completions, failures.",
             ("team", "string", "The team's name.", true), ("limit", "integer", "How many messages (default 25, at most 100).", false)),
-        Tool("tell", "Give a team's Manager new work, for the person: starts a new workflow. Write the full instruction; the Manager plans it and tells its members. " +
-                     "The app then watches the workflow and posts updates in this chat (finished, failed, blocked, decision needed).",
+        Tool("tell", "Give a team's Manager new work, for the person: starts a new deliverable. Write the full instruction; the Manager plans it and tells its members. " +
+                     "The app then watches the deliverable and posts updates in this chat (finished, failed, blocked, decision needed).",
             ("team", "string", "The team's name.", true), ("instruction", "string", "The complete instruction, as the person would give it.", true),
             ("follow_up", "boolean", "true to be woken to review the outcome when an update arrives (an extra agent turn); default false: the person just sees the update.", false),
             ("images", "string", ImagesParameter, false)),
@@ -546,23 +563,23 @@ public sealed class ConciergeTools(
             ("read_only", "boolean", "true for a read-only reference; default false (writable).", false)),
         Tool("team_repo_remove", "Take a repository (not the main one) away from a team, when the person asks. Its folder on this computer is kept.",
             ("team", "string", "The team's name.", true), ("name", "string", "The repository's name (team_repos).", true)),
-        Tool("watch", "Keep tabs on a team (or one of its workflows) for the person: the app posts an update in this chat when its work finishes, fails, " +
-                      "is blocked or needs a decision. tell already watches the workflow it starts.",
+        Tool("watch", "Keep tabs on a team (or one of its deliverables) for the person: the app posts an update in this chat when its work finishes, fails, " +
+                      "is blocked or needs a decision. tell already watches the deliverable it starts.",
             ("team", "string", "The team's name.", true), ("what", "string", "What the person wants to hear about, in a few words.", true),
-            ("workflow", "integer", "Only this workflow (from team_activity); omit for the whole team.", false),
+            ("deliverable", "integer", "Only this deliverable (from team_activity); omit for the whole team.", false),
             ("follow_up", "boolean", "true to be woken to review each update (an extra agent turn); default false.", false),
             ("hours", "integer", "How long to watch (default 48, at most 168).", false)),
         Tool("watch_list", "What this conversation is watching."),
         Tool("unwatch", "Stop a watch, when the person no longer wants updates.", ("id", "integer", "The watch's number (from watch_list).", true)),
-        Tool("workflow_extend", "Extend an open workflow that is about to expire (nothing happened in it for the team's expiry days): its idle clock starts again now. When the person asks.",
-            ("team", "string", "The team's name.", true), ("workflow", "integer", "The workflow's number (team_workflows).", true)),
-        Tool("team_workflows", "One team's workflows, newest first: every open one however old (and who works them, or that nobody does, and when it expires), and the newest completed, closed and expired.",
+        Tool("deliverable_extend", "Extend an open deliverable that is about to expire (nothing happened in it for the team's expiry days): its idle clock starts again now. When the person asks.",
+            ("team", "string", "The team's name.", true), ("deliverable", "integer", "The deliverable's number (team_deliverables).", true)),
+        Tool("team_deliverables", "One team's deliverables, newest first: every open one however old (and who works them, or that nobody does, and when it expires), and the newest completed, closed and expired.",
             ("team", "string", "The team's name.", true)),
-        Tool("workflow_nudge", "Nudge an open workflow nobody is working: its Manager is told to pick it up. When the person asks, or after asking them.",
-            ("team", "string", "The team's name.", true), ("workflow", "integer", "The workflow's number (team_workflows).", true),
+        Tool("deliverable_nudge", "Nudge an open deliverable nobody is working: its Manager is told to pick it up. When the person asks, or after asking them.",
+            ("team", "string", "The team's name.", true), ("deliverable", "integer", "The deliverable's number (team_deliverables).", true),
             ("note", "string", "A note for the Manager (optional).", false)),
-        Tool("workflow_close", "Close a workflow without declaring it complete. Only when the person asks for it.",
-            ("team", "string", "The team's name.", true), ("workflow", "integer", "The workflow's number.", true),
+        Tool("deliverable_close", "Close a deliverable without declaring it complete. Only when the person asks for it.",
+            ("team", "string", "The team's name.", true), ("deliverable", "integer", "The deliverable's number.", true),
             ("reason", "string", "Why, in the person's words (optional).", false)),
         Tool("team_pause", "Pause a team: it starts no new runs; what it is told waits. Only when the person asks.",
             ("team", "string", "The team's name.", true)),
@@ -578,7 +595,8 @@ public sealed class ConciergeTools(
         Tool("notes_read", "Your notes: what you keep across conversations with the person (preferences, what was dispatched, decisions)."),
         Tool("notes_write", "Replace your notes. Keep them short and current; write after dispatching work, a decision, or learning a preference.",
             ("text", "string", "The whole new notes text (markdown).", true)),
-        .. ScriptTools.Definitions().Select(d => d!.DeepClone()),
+        .. WorkflowTools.Definitions().Select(d => d!.DeepClone()),
+        .. GoalTools.Definitions(),
     ];
 
     private const string ImagesParameter =

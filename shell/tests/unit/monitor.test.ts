@@ -8,14 +8,14 @@ import { aimsAtEverything, ClusterCore, ClusterGap, FitOnceMs, mapRoomFor, Monit
 import { clampLayout, isDefaultLayout, LayoutDefaults, LayoutFields, LayoutMax, LayoutMin, readLayout, writeLayout } from '../../src/renderer/src/monitor/layout';
 import { collapse, DefaultLimits, layoutTeamMap, MapMembersReach, MapPastMembers, mapRoomOf } from '../../src/renderer/src/monitor/codemap';
 import type { TeamSnapshot } from '../../src/renderer/src/monitor/model';
-import type { YawbleApi, WorkflowSummary } from '../../src/shared/api';
-import { workflowsRequest } from '../../src/renderer/src/workflows/page';
-import { entryTime, latestWorkflows, nodeLabelFont, NodeLabelMax, placeWorkflowLabels, workflowLabel, workflowLook, WorkflowLooks, workflowNodeLabel, WorkflowsShown } from '../../src/renderer/src/monitor/workflows';
+import type { YawbleApi, DeliverableSummary } from '../../src/shared/api';
+import { deliverablesRequest } from '../../src/renderer/src/deliverables/page';
+import { entryTime, latestDeliverables, nodeLabelFont, NodeLabelMax, placeDeliverableLabels, deliverableLabel, deliverableLook, DeliverableLooks, deliverableNodeLabel, DeliverablesShown } from '../../src/renderer/src/monitor/deliverables';
 import { readStep, stepCaption, stepDoing, type StepKind, type StepRow } from '../../src/renderer/src/monitor/steps';
 import { MaxGapMs, mergeByTime, ReplayClock, ReplayRunningMs, ReplayStates, toneOfRow, trimByTime } from '../../src/renderer/src/monitor/timeline';
 
 const row = (seq: number, kind: FeedRow['kind'], member: string | null, from: string, text: string | null = null, at = new Date().toISOString()): FeedRow =>
-  ({ seq, kind, team: 'payments', member, from, text, workflow: 1, at });
+  ({ seq, kind, team: 'payments', member, from, text, deliverable: 1, at });
 const step = (id: number, kind: StepKind, target: string | null, offsetMs = 0, member = 'DeveloperPriya'): StepRow =>
   ({ id, at: new Date(Date.now() + offsetMs).toISOString(), team: 'payments', member, run: 1, kind, tool: kind === 'run' ? 'Bash' : 'Edit', target });
 const at = (ms: number) => new Date(ms).toISOString();
@@ -134,30 +134,30 @@ describe('the Monitor model', () => {
   });
 });
 
-describe('the workflows on the wall', () => {
-  const wf = (id: number, lastAt: string, state: WorkflowSummary['state'] = 'open', busy: string[] = [], title = `Workflow ${id}`): WorkflowSummary =>
+describe('the deliverables on the wall', () => {
+  const wf = (id: number, lastAt: string, state: DeliverableSummary['state'] = 'open', busy: string[] = [], title = `Deliverable ${id}`): DeliverableSummary =>
     ({ id, title, owner: null, state, undeclared: state === 'open' && !busy.length, busy, ending: null, startedAt: lastAt, lastAt, messages: 3 });
 
   it('keeps the last five by their last entry, newest first', () => {
     const list = [1, 2, 3, 4, 5, 6, 7].map((i) => wf(i, at(Date.parse('2026-11-11T10:00:00Z') + ((i * 5) % 7) * 60_000)));
-    expect(latestWorkflows(list).map((w) => w.id)).toEqual([4, 1, 5, 2, 6]);
-    expect(latestWorkflows(list, 2)).toHaveLength(2);
-    expect(WorkflowsShown).toBe(5);
+    expect(latestDeliverables(list).map((w) => w.id)).toEqual([4, 1, 5, 2, 6]);
+    expect(latestDeliverables(list, 2)).toHaveLength(2);
+    expect(DeliverablesShown).toBe(5);
   });
 
   it('gives each state its colour, icon and words', () => {
     const t = at(Date.now());
-    expect(workflowLook(wf(1, t, 'completed'))).toMatchObject({ status: 'completed', tone: 'done', icon: 'check' });
-    expect(workflowLook(wf(1, t, 'open', ['DeveloperPriya is running']))).toMatchObject({ status: 'working', tone: 'start', icon: 'flow' });
-    expect(workflowLook(wf(1, t, 'open'))).toMatchObject({ status: 'waiting', tone: 'handback', icon: 'pause' });
-    expect(workflowLook(wf(1, t, 'closed'))).toMatchObject({ status: 'closed', tone: 'inkDim', icon: 'cross' });
-    expect(WorkflowLooks.map((l) => l.status)).toEqual(['completed', 'working', 'waiting', 'closed', 'expired']);
-    for (const l of WorkflowLooks) expect(l.label.length).toBeGreaterThan(0);
+    expect(deliverableLook(wf(1, t, 'completed'))).toMatchObject({ status: 'completed', tone: 'done', icon: 'check' });
+    expect(deliverableLook(wf(1, t, 'open', ['DeveloperPriya is running']))).toMatchObject({ status: 'working', tone: 'start', icon: 'flow' });
+    expect(deliverableLook(wf(1, t, 'open'))).toMatchObject({ status: 'waiting', tone: 'handback', icon: 'pause' });
+    expect(deliverableLook(wf(1, t, 'closed'))).toMatchObject({ status: 'closed', tone: 'inkDim', icon: 'cross' });
+    expect(DeliverableLooks.map((l) => l.status)).toEqual(['completed', 'working', 'waiting', 'closed', 'expired']);
+    for (const l of DeliverableLooks) expect(l.label.length).toBeGreaterThan(0);
   });
 
   it('labels a node with its number and a short title, and the last entry compactly', () => {
-    expect(workflowLabel(wf(12, at(0), 'open', [], 'Add a README'))).toBe('#12 Add a README');
-    const long = workflowLabel(wf(7, at(0), 'open', [], 'Rewrite the payment reconciliation job end to end'));
+    expect(deliverableLabel(wf(12, at(0), 'open', [], 'Add a README'))).toBe('#12 Add a README');
+    const long = deliverableLabel(wf(7, at(0), 'open', [], 'Rewrite the payment reconciliation job end to end'));
     expect(long.startsWith('#7 Rewrite the payment')).toBe(true);
     expect(long.endsWith('…')).toBe(true);
     expect(long.length).toBe('#7 '.length + 28);
@@ -169,46 +169,46 @@ describe('the workflows on the wall', () => {
     expect(entryTime('not a time', now)).toBe('');
   });
 
-  it('labels a workflow node "#id title", cut, with "Backlog item " dropped', () => {
-    expect(workflowNodeLabel(wf(12, at(0), 'open', [], 'Add a README'))).toBe('#12 Add a README');
-    const backlog = workflowNodeLabel(wf(3848, at(0), 'open', [], "Backlog item B008 Remote UI: xterm's link handler asks first"));
+  it('labels a deliverable node "#id title", cut, with "Backlog item " dropped', () => {
+    expect(deliverableNodeLabel(wf(12, at(0), 'open', [], 'Add a README'))).toBe('#12 Add a README');
+    const backlog = deliverableNodeLabel(wf(3848, at(0), 'open', [], "Backlog item B008 Remote UI: xterm's link handler asks first"));
     expect(backlog).toBe("#3848 B008 Remote UI: xterm's…"); // the docs' example
     expect(backlog).not.toContain('Backlog item');
     expect(backlog.endsWith('…')).toBe(true);
     expect(backlog.length).toBe(NodeLabelMax);
     expect(NodeLabelMax).toBeGreaterThanOrEqual(28);
     expect(NodeLabelMax).toBeLessThanOrEqual(32);
-    expect(workflowNodeLabel(wf(5, at(0), 'open', [], '  '))).toBe('#5');
+    expect(deliverableNodeLabel(wf(5, at(0), 'open', [], '  '))).toBe('#5');
     // A phone zoomed out: only "#id"; zoomed in, or a desktop window at any zoom (whatever its canvas), the title too.
     const t = wf(3848, at(0), 'open', [], 'Backlog item B008 Remote UI');
-    expect(workflowNodeLabel(t, { phone: true, zoom: 0.4 })).toBe('#3848');
-    expect(workflowNodeLabel(t, { phone: true, zoom: 1 })).toBe('#3848 B008 Remote UI');
-    expect(workflowNodeLabel(t, { phone: false, zoom: 0.25 })).toBe('#3848 B008 Remote UI');
-    expect(workflowNodeLabel(t, { zoom: 0.39 })).toBe('#3848 B008 Remote UI');
+    expect(deliverableNodeLabel(t, { phone: true, zoom: 0.4 })).toBe('#3848');
+    expect(deliverableNodeLabel(t, { phone: true, zoom: 1 })).toBe('#3848 B008 Remote UI');
+    expect(deliverableNodeLabel(t, { phone: false, zoom: 0.25 })).toBe('#3848 B008 Remote UI');
+    expect(deliverableNodeLabel(t, { zoom: 0.39 })).toBe('#3848 B008 Remote UI');
   });
 
-  it('places workflow labels so that none covers another or a member', () => {
+  it('places deliverable labels so that none covers another or a member', () => {
     const measure = (s: string) => s.length * 5;
     const h = 11;
     const ask = (key: string, x: number, y: number, rank: number, full = `${key} a long title here`) => ({ key, x, y, r: 10, full, short: key, rank });
     // Two nodes side by side, close: the first (by rank) keeps its place under the node; the second goes above.
-    const two = placeWorkflowLabels([ask('#2', 30, 0, 2), ask('#1', 0, 0, 1)], measure, h);
+    const two = placeDeliverableLabels([ask('#2', 30, 0, 2), ask('#1', 0, 0, 1)], measure, h);
     expect(two.get('#1')).toMatchObject({ text: '#1 a long title here', above: false });
     expect(two.get('#2')).toMatchObject({ text: '#2 a long title here', above: true });
     // A third, between them: no room above or below for the full label, so the short one, or nothing.
-    const three = placeWorkflowLabels([ask('#1', 0, 0, 1), ask('#2', 30, 0, 2), ask('#3', 15, 0, 3)], measure, h);
+    const three = placeDeliverableLabels([ask('#1', 0, 0, 1), ask('#2', 30, 0, 2), ask('#3', 15, 0, 3)], measure, h);
     expect(three.get('#3')?.text ?? null).not.toBe('#3 a long title here');
     // Far apart: every label under its node, in full.
-    const apart = placeWorkflowLabels([ask('#1', 0, 0, 1), ask('#2', 500, 0, 2)], measure, h);
+    const apart = placeDeliverableLabels([ask('#1', 0, 0, 1), ask('#2', 500, 0, 2)], measure, h);
     for (const l of apart.values()) expect(l).toMatchObject({ above: false });
     // A member's name below the node: the label goes above it.
-    const name = placeWorkflowLabels([ask('#1', 0, 0, 1)], measure, h, [{ x: -50, y: 12, w: 100, h: 13 }]);
+    const name = placeDeliverableLabels([ask('#1', 0, 0, 1)], measure, h, [{ x: -50, y: 12, w: 100, h: 13 }]);
     expect(name.get('#1')).toMatchObject({ above: true });
     // Whatever the layout, no two labels placed overlap.
     let seed = 3;
     const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
     const many = Array.from({ length: 30 }, (_, i) => ask(`#${i}`, rnd() * 300, rnd() * 200, i));
-    const placed = [...placeWorkflowLabels(many, measure, h).values()].filter((l) => l !== null);
+    const placed = [...placeDeliverableLabels(many, measure, h).values()].filter((l) => l !== null);
     expect(placed.length).toBeGreaterThan(10);
     for (const [i, a] of placed.entries()) for (const b of placed.slice(i + 1))
       expect(a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1).toBe(false);
@@ -222,16 +222,16 @@ describe('the workflows on the wall', () => {
   it('the model keeps each team\'s newest five and says when they change', () => {
     const m = new MonitorModel();
     const list = [1, 2, 3, 4, 5, 6].map((i) => wf(i, at(1_000_000 + i * 1000)));
-    m.setWorkflows('Payments', list);
-    expect(m.workflows.get(teamKey('payments'))!.map((w) => w.id)).toEqual([6, 5, 4, 3, 2]);
-    const rev = m.workflowsRev;
-    m.setWorkflows('payments', [...list].reverse());
-    expect(m.workflowsRev).toBe(rev); // nothing changed
-    m.setWorkflows('payments', [wf(9, at(2_000_000), 'completed')]);
-    expect(m.workflowsRev).toBe(rev + 1);
-    // A team that is gone takes its workflows with it.
+    m.setDeliverables('Payments', list);
+    expect(m.deliverables.get(teamKey('payments'))!.map((w) => w.id)).toEqual([6, 5, 4, 3, 2]);
+    const rev = m.deliverablesRev;
+    m.setDeliverables('payments', [...list].reverse());
+    expect(m.deliverablesRev).toBe(rev); // nothing changed
+    m.setDeliverables('payments', [wf(9, at(2_000_000), 'completed')]);
+    expect(m.deliverablesRev).toBe(rev + 1);
+    // A team that is gone takes its deliverables with it.
     m.reconcile([{ id: 2, name: 'search', members: [] }], 0);
-    expect(m.workflows.has(teamKey('payments'))).toBe(false);
+    expect(m.deliverables.has(teamKey('payments'))).toBe(false);
   });
 });
 
@@ -277,9 +277,9 @@ describe('the Monitor view', () => {
     expect(faces()).toEqual({ priya: 'running', gone: 'idle' });
     w.unmount();
   });
-  it('shows each team\'s five newest workflows live, opens the team\'s workflows from one, and hides them in a replay', async () => {
+  it('shows each team\'s five newest deliverables live, opens the team\'s deliverables from one, and hides them in a replay', async () => {
     const base = Date.now() - 3_600_000;
-    const wfs: WorkflowSummary[] = [1, 2, 3, 4, 5, 6, 7].map((i) => ({
+    const wfs: DeliverableSummary[] = [1, 2, 3, 4, 5, 6, 7].map((i) => ({
       id: i, title: `Job ${i}`, owner: null, state: i === 7 ? 'completed' : 'open', undeclared: i !== 6, busy: i === 6 ? ['DeveloperPriya is running'] : [],
       ending: null, startedAt: at(base), lastAt: at(base + i * 60_000), messages: i,
     }));
@@ -290,7 +290,7 @@ describe('the Monitor view', () => {
         if (method === 'teams.agents') return [{ member: { id: 2, teamId: 1, team: 'payments', name: 'Manager', role: 'manager', cli: 'claude' }, state: 'idle', attention: null, queuedInstructions: 0, statusLine: null }];
         if (method === 'monitor.messages') return { end: 5, messages: [row(5, 'progress', 'Manager', 'Manager', 'on it', at(Date.now() - 120_000))] };
         if (method === 'monitor.steps') return { end: 0, pending: false, steps: [] };
-        if (method === 'bus.workflows') { asked.push(params); return [...wfs].reverse(); }
+        if (method === 'bus.deliverables') { asked.push(params); return [...wfs].reverse(); }
         throw new Error(method);
       },
       onEvent: () => () => {},
@@ -298,7 +298,7 @@ describe('the Monitor view', () => {
     const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
     for (let i = 0; i < 6; i++) await flushPromises();
     expect(asked[0]).toMatchObject({ teamId: 1, limit: 5 });
-    const items = w.findAll('[data-test=monitor-workflow]');
+    const items = w.findAll('[data-test=monitor-deliverable]');
     expect(items.map((x) => x.attributes('data-id'))).toEqual(['7', '6', '5', '4', '3']);
     expect(items[0]!.text()).toContain('#7 Job 7');
     expect(items[0]!.text()).toContain('Completed');
@@ -308,30 +308,30 @@ describe('the Monitor view', () => {
     expect(w.find('[data-test=monitor-legend]').exists()).toBe(false);
     await w.get('[data-test=monitor-legend-toggle]').trigger('click');
     expect(w.get('[data-test=monitor-legend-toggle]').attributes('aria-expanded')).toBe('true');
-    const legend = w.get('[data-test=monitor-legend-workflows]').text();
+    const legend = w.get('[data-test=monitor-legend-deliverables]').text();
     for (const words of ['completed', 'being worked', 'waiting', 'closed']) expect(legend.toLowerCase()).toContain(words);
-    // Opening one opens the Workflows page at that workflow, filtered to its team (no dialog, no emit).
-    workflowsRequest.value = null;
+    // Opening one opens the Deliverables page at that deliverable, filtered to its team (no dialog, no emit).
+    deliverablesRequest.value = null;
     await items[0]!.trigger('click');
-    expect(workflowsRequest.value).toMatchObject({ teamId: 1, workflow: Number(items[0]!.attributes('data-id')) });
-    // One panel per team: its header opens the page at the team's workflows, nothing selected.
-    const headers = w.findAll('[data-test=monitor-workflows-team]');
+    expect(deliverablesRequest.value).toMatchObject({ teamId: 1, deliverable: Number(items[0]!.attributes('data-id')) });
+    // One panel per team: its header opens the page at the team's deliverables, nothing selected.
+    const headers = w.findAll('[data-test=monitor-deliverables-team]');
     expect(headers).toHaveLength(1);
     expect(headers[0]!.text()).toContain('payments');
     await headers[0]!.trigger('click');
-    expect(workflowsRequest.value).toMatchObject({ teamId: 1 });
-    expect(workflowsRequest.value?.workflow).toBeUndefined();
+    expect(deliverablesRequest.value).toMatchObject({ teamId: 1 });
+    expect(deliverablesRequest.value?.deliverable).toBeUndefined();
     expect(w.emitted('openTeam')).toBeUndefined();
-    workflowsRequest.value = null;
-    // A replay shows no workflows (the wall would be faking their history).
+    deliverablesRequest.value = null;
+    // A replay shows no deliverables (the wall would be faking their history).
     w.findComponent(Timeline).vm.$emit('seek', Date.now() - 60_000);
     await flushPromises();
     expect(w.find('[data-test=monitor-replaying]').exists()).toBe(true);
-    expect(w.findAll('[data-test=monitor-workflow]')).toHaveLength(0);
-    expect(w.find('[data-test=monitor-legend-workflows]').exists()).toBe(false);
-    expect(w.find('[data-test=monitor-legend]').exists()).toBe(true); // still open in a replay, without the workflows part
+    expect(w.findAll('[data-test=monitor-deliverable]')).toHaveLength(0);
+    expect(w.find('[data-test=monitor-legend-deliverables]').exists()).toBe(false);
+    expect(w.find('[data-test=monitor-legend]').exists()).toBe(true); // still open in a replay, without the deliverables part
     await w.get('[data-test=monitor-live]').trigger('click');
-    expect(w.findAll('[data-test=monitor-workflow]')).toHaveLength(5);
+    expect(w.findAll('[data-test=monitor-deliverable]')).toHaveLength(5);
     // The choice is remembered: a new Monitor opens with the legend shown; closing it is remembered too.
     w.unmount();
     const again = mount(MonitorView, { props: { api, pollMs: 60_000 } });
@@ -525,10 +525,10 @@ describe('Team spacing', () => {
     }
   });
 
-  /** A scene on a stub canvas with count teams of four, each with a wide code map and five open workflow nodes, settled. */
+  /** A scene on a stub canvas with count teams of four, each with a wide code map and five open deliverable nodes, settled. */
   const scenes: MonitorScene[] = [];
   afterEach(() => { for (const s of scenes.splice(0)) s.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-  /** stagger: frames run between each team's map and each team's workflows arriving (as a live wall gets them). */
+  /** stagger: frames run between each team's map and each team's deliverables arriving (as a live wall gets them). */
   function settledWall(count: number, spacing = LayoutDefaults.spacing, frames = 700, opts: { seed?: number; stagger?: number } = {}) {
     // The test runs the frames itself: the scene's own requestAnimationFrame loop must not run too.
     vi.stubGlobal('requestAnimationFrame', () => 0); vi.stubGlobal('cancelAnimationFrame', () => {});
@@ -552,7 +552,7 @@ describe('Team spacing', () => {
     m.reconcile(teams, 0);
     const t0 = Date.parse('2026-11-17T10:00:00Z');
     m.logNow = () => t0 + 60_000;
-    const wfs: WorkflowSummary[] = [1, 2, 3, 4, 5].map((id) => ({ id, title: `Workflow ${id}`, owner: null, state: 'open', undeclared: false, busy: [], ending: null, startedAt: at(t0), lastAt: at(t0 + id), messages: 2 }));
+    const wfs: DeliverableSummary[] = [1, 2, 3, 4, 5].map((id) => ({ id, title: `Deliverable ${id}`, owner: null, state: 'open', undeclared: false, busy: [], ending: null, startedAt: at(t0), lastAt: at(t0 + id), messages: 2 }));
     const frame = (scene as unknown as { frame: (t: number) => void }).frame;
     let f = 0;
     const run = (n: number) => { for (let i = 0; i < n; i++) frame(1000 + ++f * 16); };
@@ -563,7 +563,7 @@ describe('Team spacing', () => {
         for (let i = 0; i < 120; i++) m.applyStep({ id: ++id, at: at(t0 + i), team: name, member: i % 2 ? 'DeveloperTomas' : 'TesterKofi', run: 1, kind: i % 2 ? 'edit' : 'read', tool: 'Edit', target: `src/d${i % 11}/f${i}.ts` }, 1000, true);
       }
     };
-    const flows = () => { for (const name of names) { if (stagger) run(stagger); m.setWorkflows(name, wfs, 0); } };
+    const flows = () => { for (const name of names) { if (stagger) run(stagger); m.setDeliverables(name, wfs, 0); } };
     if (!stagger) { maps(); flows(); }
     scene.model = m;
     scene.setTeams(teams);
@@ -591,7 +591,7 @@ describe('Team spacing', () => {
     return cl.flatMap((a, i) => cl.slice(i + 1).map((b) => Math.min(...a.parts.flatMap((p) => b.parts.map((q) => apart(p, q))))));
   };
 
-  it('at the default, two teams\' clusters (members, workflow nodes, code map) sit close but do not overlap', () => {
+  it('at the default, two teams\' clusters (members, deliverable nodes, code map) sit close but do not overlap', () => {
     const scene = settledWall(2);
     const cl = scene.clusters();
     expect(cl).toHaveLength(2);
@@ -628,14 +628,14 @@ describe('Team spacing', () => {
     }
   }, 60_000);
 
-  it('a workflow label keeps off its own hub\'s name pill and its own team\'s map', () => {
+  it('a deliverable label keeps off its own hub\'s name pill and its own team\'s map', () => {
     for (const count of [2, 3]) {
       const scene = settledWall(count);
       const s = scene as unknown as { nodes: Map<string, { kind: string; team: string }>; mapNodes: { x: number; y: number; kind: string; team: { team: string } }[]; pillBox: (n: unknown) => { x: number; y: number; w: number; h: number } };
       const pills = [...s.nodes.values()].filter((n) => n.kind === 'team').map((n) => s.pillBox(n));
       const marks = s.mapNodes.map((m) => (m.kind === 'folder' ? { x: m.x - 6, y: m.y - 5, w: 12, h: 10 } : { x: m.x - 3.6, y: m.y - 3.6, w: 7.2, h: 7.2 }));
       const hit = (a: { x: number; y: number; w: number; h: number }, b: typeof a) => a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1;
-      const boxes = scene.workflowNodes().flatMap((n) => (n.box ? [n.box] : []));
+      const boxes = scene.deliverableNodes().flatMap((n) => (n.box ? [n.box] : []));
       expect(boxes.length).toBeGreaterThan(0);
       for (const b of boxes) {
         for (const p of pills) expect(hit(b, p)).toBe(false);
@@ -644,15 +644,15 @@ describe('Team spacing', () => {
     }
   });
 
-  it('the workflow labels on a settled wall do not overlap, and most show their title', () => {
+  it('the deliverable labels on a settled wall do not overlap, and most show their title', () => {
     for (const count of [2, 3]) {
       const scene = settledWall(count);
-      const nodes = scene.workflowNodes();
+      const nodes = scene.deliverableNodes();
       expect(nodes).toHaveLength(count * 5);
       const boxes = nodes.flatMap((n) => (n.box ? [n.box] : []));
       for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1))
         expect(a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1).toBe(false);
-      expect(nodes.filter((n) => n.label.startsWith(`#${n.id} Workflow`)).length).toBeGreaterThanOrEqual(nodes.length / 2);
+      expect(nodes.filter((n) => n.label.startsWith(`#${n.id} Deliverable`)).length).toBeGreaterThanOrEqual(nodes.length / 2);
     }
   });
 

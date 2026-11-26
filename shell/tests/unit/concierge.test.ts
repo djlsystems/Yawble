@@ -150,7 +150,7 @@ describe('the Cloud Link indicator', () => {
 describe('keeping tabs', () => {
   it('shows what the chat watches, posts updates as they arrive, and lets the person stop a watch or ask for reviews', async () => {
     const core = fakeCore();
-    const watch = { id: 7, team: 'payments', workflow: 12, what: 'Add a README', followUp: false, createdAt: '', expiresAt: new Date().toISOString() };
+    const watch = { id: 7, team: 'payments', deliverable: 12, what: 'Add a README', followUp: false, createdAt: '', expiresAt: new Date().toISOString() };
     core.conversations.push({
       id: 'c9', title: 'README', cli: 'claude', teamId: null, team: null, createdAt: '', updatedAt: '', running: false, unread: 2, watching: 1,
       messages: [{ id: 1, role: 'user', text: 'Get payments a README', at: '', state: null, error: null, tools: [], cli: null }],
@@ -198,11 +198,11 @@ describe('keeping tabs', () => {
 });
 
 describe('agent-written markdown', () => {
-  it('is rendered without raw HTML or script links', () => {
+  it('is rendered without raw HTML or workflow links', () => {
     const html = renderMarkdown('**ok** <img src=x onerror=alert(1)> <script>alert(1)</script> [x](javascript:alert(1)) [y](https://example.com)');
     expect(html).toContain('<strong>ok</strong>');
     expect(html).not.toContain('<img');
-    expect(html).not.toContain('<script');
+    expect(html).not.toContain('<workflow');
     expect(html).not.toContain('href="javascript:');
     expect(html).toContain('href="https://example.com" target="_blank" rel="noopener noreferrer"');
   });

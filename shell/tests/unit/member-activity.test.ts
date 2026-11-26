@@ -17,7 +17,7 @@ const mk = (id: number, name: string): AgentCard => ({
 }) as AgentCard;
 const at = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 const row = (seq: number, kind: string, teamName: string, member: string | null, from: string, text: string | null, ago: number) =>
-  ({ seq, kind, team: teamName, member, from, text, workflow: 1, at: at(ago) });
+  ({ seq, kind, team: teamName, member, from, text, deliverable: 1, at: at(ago) });
 
 function fakeApi(opts: { messages?: unknown; steps?: unknown } = {}) {
   const calls: string[] = [];

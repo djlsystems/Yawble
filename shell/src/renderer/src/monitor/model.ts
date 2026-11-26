@@ -1,7 +1,7 @@
-import type { WorkflowSummary } from '../../../shared/api';
+import type { DeliverableSummary } from '../../../shared/api';
 import type { MemberState } from '../faces/faces';
 import { changesFile, fileName, stepCaption, stepDoing, type StepKind, type StepRow } from './steps';
-import { latestWorkflows, openWorkflows, workflowEnds } from './workflows';
+import { latestDeliverables, openDeliverables, deliverableEnds } from './deliverables';
 import { cardOf } from './rhythm';
 import { CodeMap, codeEventKey, shortSha, type CodeEvent } from './codemap';
 
@@ -21,7 +21,7 @@ import { CodeMap, codeEventKey, shortSha, type CodeEvent } from './codemap';
 export type FeedKind = 'instruction' | 'completed' | 'failed' | 'stopped' | 'handback' | 'progress' | 'blocked' | 'decision' | 'done';
 
 export interface FeedRow {
-  seq: number; kind: FeedKind; team: string; member: string | null; from: string; text: string | null; workflow: number; at: string;
+  seq: number; kind: FeedKind; team: string; member: string | null; from: string; text: string | null; deliverable: number; at: string;
   /** A failed run's class (a run the person stopped may come as kind "failed" with class "stopped"). */
   failureClass?: string | null;
 }
@@ -46,7 +46,7 @@ export type Effect =
    * pulses as it lands. id: its need-you item's id: one item flies (and sounds) once.
    */
   | { kind: 'you'; from: string; color: Tone; label: string | null; at: number; id?: string }
-  /** A workflow node leaves: completed (a green flash, drifting away) or closed (a cross, fading). key: its node. */
+  /** A deliverable node leaves: completed (a green flash, drifting away) or closed (a cross, fading). key: its node. */
   | { kind: 'wfdone'; key: string; team: string; status: 'completed' | 'closed' | 'expired'; at: number }
   | { kind: 'burst'; node: string; color: Tone; big: boolean; at: number }
   | { kind: 'ripple'; node: string; color: Tone; at: number }
@@ -75,8 +75,8 @@ const GatherFilesMs = 90_000;
 
 export const memberKey = (team: string, member: string) => `m:${team.toLowerCase()}/${member.toLowerCase()}`;
 export const teamKey = (team: string) => `t:${team.toLowerCase()}`;
-/** A workflow node's key: one per open workflow. */
-export const workflowKey = (team: string, id: number) => `wf:${team.toLowerCase()}/${id}`;
+/** A deliverable node's key: one per open deliverable. */
+export const deliverableKey = (team: string, id: number) => `wf:${team.toLowerCase()}/${id}`;
 
 /** A command a member is running (a 'run' step), until its next step; exit when the feed knew it. */
 export interface RunMark { at: number; target: string | null; ended: number | null; exit: number | null }
@@ -151,20 +151,20 @@ export class MonitorModel {
   readonly map = new CodeMap();
   /** Log time now, for the map's idle time: the wall clock live, the replay's clock in a replay. */
   logNow: () => number = () => Date.now();
-  /** The workflow each member was last told in, by member key (its touches belong to it). */
-  private memberWorkflow = new Map<string, number>();
+  /** The deliverable each member was last told in, by member key (its touches belong to it). */
+  private memberDeliverable = new Map<string, number>();
   private prunedAt = -Infinity;
   /** What each member is doing now, by member key. */
   readonly doing = new Map<string, Doing>();
   /** Events per minute, counted over the last minute of rows. */
   private recent: number[] = [];
   private lastState = new Map<string, MemberState>();
-  /** Each team's newest workflows (live only; a replay's model has none), by team key; the rev moves when they change. */
-  readonly workflows = new Map<string, WorkflowSummary[]>();
-  workflowsRev = 0;
-  /** Each team's open workflows (the wall's workflow nodes), newest first, by team key; they move workflowsRev too. */
-  readonly openWfs = new Map<string, WorkflowSummary[]>();
-  /** The workflow nodes whose last word was "blocked" (workflowKey), until work on them goes on. */
+  /** Each team's newest deliverables (live only; a replay's model has none), by team key; the rev moves when they change. */
+  readonly deliverables = new Map<string, DeliverableSummary[]>();
+  deliverablesRev = 0;
+  /** Each team's open deliverables (the wall's deliverable nodes), newest first, by team key; they move deliverablesRev too. */
+  readonly openWfs = new Map<string, DeliverableSummary[]>();
+  /** The deliverable nodes whose last word was "blocked" (deliverableKey), until work on them goes on. */
   readonly blockedWfs = new Set<string>();
   /** The card each member was last told about, and who told it, so its hand-back returns along the same line. */
   private told = new Map<string, { from: string; card: number | null }>();
@@ -183,8 +183,8 @@ export class MonitorModel {
   reconcile(teams: TeamSnapshot[], now: number): void {
     this.teams = teams;
     const present = new Set(teams.map((t) => teamKey(t.name)));
-    for (const k of [...this.workflows.keys()]) if (!present.has(k)) { this.workflows.delete(k); this.workflowsRev++; }
-    for (const k of [...this.openWfs.keys()]) if (!present.has(k)) { this.openWfs.delete(k); this.workflowsRev++; }
+    for (const k of [...this.deliverables.keys()]) if (!present.has(k)) { this.deliverables.delete(k); this.deliverablesRev++; }
+    for (const k of [...this.openWfs.keys()]) if (!present.has(k)) { this.openWfs.delete(k); this.deliverablesRev++; }
     for (const t of teams)
       for (const m of t.members) {
         const key = memberKey(t.name, m.name);
@@ -194,24 +194,24 @@ export class MonitorModel {
       }
   }
 
-  /** Takes a team's workflows (bus.workflows): it keeps the newest few, and moves the rev only if they changed. */
-  setWorkflows(team: string, list: readonly WorkflowSummary[], now = performance.now()): void {
+  /** Takes a team's deliverables (bus.deliverables): it keeps the newest few, and moves the rev only if they changed. */
+  setDeliverables(team: string, list: readonly DeliverableSummary[], now = performance.now()): void {
     const key = teamKey(team);
-    // The open ones are the workflow nodes; one open before and ended now leaves the wall (a flash or a fade).
+    // The open ones are the deliverable nodes; one open before and ended now leaves the wall (a flash or a fade).
     const before = this.openWfs.get(key);
-    const open = openWorkflows(list);
+    const open = openDeliverables(list);
     if (before) {
-      for (const end of workflowEnds(before, list)) {
-        const wk = workflowKey(team, end.id);
+      for (const end of deliverableEnds(before, list)) {
+        const wk = deliverableKey(team, end.id);
         this.blockedWfs.delete(wk);
         this.effects.push({ kind: 'wfdone', key: wk, team: team.toLowerCase(), status: end.status, at: now });
       }
     }
     let changed = false;
     if (JSON.stringify(open) !== JSON.stringify(before ?? null)) { this.openWfs.set(key, open); changed = true; }
-    const next = latestWorkflows(list);
-    if (JSON.stringify(next) !== JSON.stringify(this.workflows.get(key) ?? null)) { this.workflows.set(key, next); changed = true; }
-    if (changed) this.workflowsRev++;
+    const next = latestDeliverables(list);
+    if (JSON.stringify(next) !== JSON.stringify(this.deliverables.get(key) ?? null)) { this.deliverables.set(key, next); changed = true; }
+    if (changed) this.deliverablesRev++;
     this.capEffects();
   }
 
@@ -302,15 +302,15 @@ export class MonitorModel {
     });
     if (this.activity.length > this.keep) for (const gone of this.activity.splice(this.keep)) this.gathered.delete(gone.key);
     const source = row.from === 'person' || row.from === 'host' ? teamKey(row.team) : memberKey(row.team, row.from);
-    // A workflow's blocked look lasts until work on it goes on (read at the start too, so the look is right at once).
-    const wk = workflowKey(row.team, row.workflow);
+    // A deliverable's blocked look lasts until work on it goes on (read at the start too, so the look is right at once).
+    const wk = deliverableKey(row.team, row.deliverable);
     if (row.kind === 'blocked') this.blockedWfs.add(wk);
     else if (row.kind !== 'decision') this.blockedWfs.delete(wk);
     // Who told a member what, so its hand-back returns along the same line with the card's number.
     if (row.kind === 'instruction' && row.member) this.told.set(target, { from: source, card: cardOf(row.text) });
-    // Which workflow a member works in, so the files its steps touch light that workflow's part of the code map.
-    if (row.kind === 'instruction' && row.member) this.memberWorkflow.set(target, row.workflow);
-    if (row.kind === 'done') this.map.endWorkflow(row.team, row.workflow);
+    // Which deliverable a member works in, so the files its steps touch light that deliverable's part of the code map.
+    if (row.kind === 'instruction' && row.member) this.memberDeliverable.set(target, row.deliverable);
+    if (row.kind === 'done') this.map.endDeliverable(row.team, row.deliverable);
     if (row.kind === 'decision' && row.member) this.questions.set(target, row.text);
     if (!live) return;
     this.recent.push(now);
@@ -380,7 +380,7 @@ export class MonitorModel {
     const node = memberKey(step.team, step.member);
     if (changesFile(step)) this.gatherFile(step);
     // The map is built from every step, played or not; only a played one pops and lights.
-    this.map.touchStep(step, this.memberWorkflow.get(node) ?? null, live ? now : null);
+    this.map.touchStep(step, this.memberDeliverable.get(node) ?? null, live ? now : null);
     if (!live) return;
     this.recent.push(now);
     const times = this.stepTimes.get(node);

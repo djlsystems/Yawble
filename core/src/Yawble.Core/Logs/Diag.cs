@@ -13,7 +13,7 @@ public sealed record DiagEntry(string Level, string Area, string Text, IReadOnly
 
 /// <summary>
 /// The core's structured Diagnostics lines: a level (<see cref="LogLevels"/>), an area ("teams", "bus", "lease",
-/// "logs"...), the text, and key=value fields with the ids the caller has (team, member, workflow, run, script, step,
+/// "logs"...), the text, and key=value fields with the ids the caller has (team, member, deliverable, run, workflow, step,
 /// action, integration, status, ms, attempt). Each line is written once to the core's Diagnostics log
 /// (<see cref="Attach"/>; not through the standard-error tee, so never twice) and echoed to standard error. A test sets
 /// <see cref="Sink"/> (or <see cref="Capture"/>, for its own flow only) and receives the entries instead. Never throws.

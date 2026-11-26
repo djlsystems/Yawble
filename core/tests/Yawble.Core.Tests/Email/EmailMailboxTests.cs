@@ -82,13 +82,13 @@ public class EmailMailboxTests
         Assert.Equal("777:2", json["id"]!.GetValue<string>());
         Assert.False(json.ContainsKey("cursor"));
         Assert.False(json.ContainsKey("body"));
-        Assert.Empty(Yawble.Core.Scripts.Language.BuiltInSchemas.EmailMessage.Validate(json));
+        Assert.Empty(Yawble.Core.Workflows.Language.BuiltInSchemas.EmailMessage.Validate(json));
 
         var result = await With(mail, m => m.ListAsync("INBOX", null, false, null, Ct));
         var resultJson = result.ToJson();
         Assert.False(resultJson["cursorReset"]!.GetValue<bool>());
         Assert.Equal(2, resultJson["messages"]!.AsArray().Count);
-        Assert.Empty(Yawble.Core.Scripts.Language.BuiltInSchemas.EmailList.Validate(resultJson, Yawble.Core.Scripts.Language.BuiltInSchemas.Find));
+        Assert.Empty(Yawble.Core.Workflows.Language.BuiltInSchemas.EmailList.Validate(resultJson, Yawble.Core.Workflows.Language.BuiltInSchemas.Find));
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public class EmailMailboxTests
     // ------------------------------------------------------------------ list after an id
 
     /// <summary>
-    /// Polls like the documented script: list after the saved id (none the first time), saving the last message's id only when there is one.
+    /// Polls like the documented workflow: list after the saved id (none the first time), saving the last message's id only when there is one.
     /// </summary>
     private static async Task<(List<string> Got, string? Last)> PollAsync(FakeMailServer mail, string? after, int max, bool unreadOnly = true, int polls = 1,
         Action<int>? between = null, DateTimeOffset? since = null)
@@ -149,7 +149,7 @@ public class EmailMailboxTests
             Assert.True(r.Messages.Count <= max);
             if (r.Messages.Count == 0) continue;
             got.AddRange(r.Messages.Select(b => b.Subject));
-            after = r.Messages[^1].ToJson()["id"]!.GetValue<string>(); // what a script saves: the written string
+            after = r.Messages[^1].ToJson()["id"]!.GetValue<string>(); // what a workflow saves: the written string
         }
         return (got, after);
     }
@@ -266,7 +266,7 @@ public class EmailMailboxTests
             var msg = batch[0];
             got.Add(msg.Subject);
             last = msg.Id;
-            // the script processes it: reads it, files it; on the first poll a new one arrives too
+            // the workflow processes it: reads it, files it; on the first poll a new one arrives too
             await With(mail, m => m.MarkReadAsync(msg.Id, "INBOX", Ct));
             await With(mail, m => m.MoveAsync(msg.Id, "Archive", "INBOX", Ct));
             if (poll == 0) Add(mail, -5, "Fourth", gmId: GmId(gmail, ref gm));

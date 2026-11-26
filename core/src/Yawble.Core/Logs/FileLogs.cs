@@ -133,8 +133,8 @@ public sealed class DiagnosticLog(string dataDir, string origin, TimeProvider? c
     public void Write(string text) => Append(text, null, LogLevels.Info, null, null, untagged: true);
 
     /// <summary>
-    /// A structured line: its level and area from the caller, its <paramref name="fields"/> (team, member, workflow, run,
-    /// script, step, action, integration, status, ms, attempt...) in a fourth column of key=value pairs
+    /// A structured line: its level and area from the caller, its <paramref name="fields"/> (team, member, deliverable, run,
+    /// workflow, step, action, integration, status, ms, attempt...) in a fourth column of key=value pairs
     /// (<see cref="DiagFields"/>), the level and area first.
     /// </summary>
     public void Write(string level, string area, string text, IReadOnlyList<(string Key, object? Value)>? fields = null)

@@ -2,7 +2,7 @@ import type { WorkerWaitState } from '../../shared/api';
 import { displayName } from './faces/faces';
 export { cardState } from './faces/faces';
 
-// What a member's not-started work waits for, in the same words on every screen (the Workflows page's Who column
+// What a member's not-started work waits for, in the same words on every screen (the Deliverables page's Who column
 // and status tip, the member pane, the team tiles). Only "queued" is a wait for a run slot; the rest never were.
 
 export const WorkerWaitStates: readonly WorkerWaitState[] = ['queued', 'waits-for-run', 'held', 'pending'];
@@ -21,7 +21,7 @@ export function waitSays(state: string, waitsFor?: string | null): string {
   }
 }
 
-/** A workflow worker's words: running, the heavy-work lease, or what its delivery waits for. */
+/** A deliverable worker's words: running, the heavy-work lease, or what its delivery waits for. */
 export function workerSays(m: { state: string; waitsFor?: string | null }): string {
   if (m.state === 'running') return 'running';
   if (m.state === 'lease') return 'waiting for the heavy-work lease';

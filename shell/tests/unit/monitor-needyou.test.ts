@@ -18,7 +18,7 @@ const member = (name: string, state: State = 'idle', statusLine: string | null =
   ({ id, name, role: 'member' as const, state, queued: 0, statusLine, cli: 'claude' });
 const team = (name: string, members: ReturnType<typeof member>[], id = 1): TeamSnapshot => ({ id, name, members });
 const row = (seq: number, kind: FeedRow['kind'], memberName: string, text: string | null = null, teamName = 'payments'): FeedRow =>
-  ({ seq, kind, team: teamName, member: memberName, from: memberName, text, workflow: 1, at: new Date().toISOString() });
+  ({ seq, kind, team: teamName, member: memberName, from: memberName, text, deliverable: 1, at: new Date().toISOString() });
 const youFx = (m: MonitorModel) => m.effects.filter((e): e is Extract<Effect, { kind: 'you' }> => e.kind === 'you');
 /** The header's count and the You node's count: the same list's length. */
 const both = (m: MonitorModel) => ({ header: m.counts().needYou, you: m.needYouItems().length });
@@ -214,7 +214,7 @@ const scenes: Fake[] = [];
 vi.mock('../../src/renderer/src/monitor/scene', async (orig) => {
   const real = await orig<typeof import('../../src/renderer/src/monitor/scene')>();
   class FakeScene {
-    model: unknown; onHover?: unknown; onPick?: unknown; onOpenWorkflow?: unknown; effects: unknown[] = []; you: { x: number; y: number; r: number } | null = null;
+    model: unknown; onHover?: unknown; onPick?: unknown; onOpenDeliverable?: unknown; effects: unknown[] = []; you: { x: number; y: number; r: number } | null = null;
     constructor() { scenes.push(this as unknown as Fake); }
     hitYouNode(x: number, y: number) { return !!this.you && Math.hypot(x - this.you.x, y - this.you.y) <= this.you.r; }
     setPinned() {} setLayout() {} setTeams() {} setPicked() {} destroy() {} fit() {} clearFiles() {}

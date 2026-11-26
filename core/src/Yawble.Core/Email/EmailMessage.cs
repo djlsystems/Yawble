@@ -14,7 +14,7 @@ public sealed record EmailAddress(string? Name, string Address)
 }
 
 /// <summary>
-/// One message as a script sees it (the built-in schema EmailMessage). <see cref="Id"/> is opaque to scripts and is
+/// One message as a workflow sees it (the built-in schema EmailMessage). <see cref="Id"/> is opaque to workflows and is
 /// list's polling cursor (<see cref="EmailMessageId"/>): it carries <see cref="Folder"/>'s UIDVALIDITY and the message's UID there, "UIDVALIDITY:UID",
 /// on Gmail "gm:X-GM-MSGID:UIDVALIDITY:UID"; it is stable while the message stays in that folder or label. <see cref="ThreadId"/>: Gmail's
 /// X-GM-THRID in decimal, otherwise the thread's first Message-ID (References, else In-Reply-To, else its own), else <see cref="Id"/>.
@@ -30,7 +30,7 @@ public sealed record EmailMessage(
     /// <summary>receivedAt as written: ISO-8601 UTC, whole seconds ("2026-11-23T09:15:00Z").</summary>
     public static string Instant(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
 
-    /// <summary>The JSON a script gets. body is present only when it was fetched (get).</summary>
+    /// <summary>The JSON a workflow gets. body is present only when it was fetched (get).</summary>
     public JsonObject ToJson()
     {
         var o = new JsonObject
@@ -100,7 +100,7 @@ public sealed record EmailList(IReadOnlyList<EmailMessage> Messages, bool Cursor
 }
 
 /// <summary>
-/// A message id as the Email integration writes it, opaque to scripts: the folder's UIDVALIDITY and the message's UID there, "UIDVALIDITY:UID";
+/// A message id as the Email integration writes it, opaque to workflows: the folder's UIDVALIDITY and the message's UID there, "UIDVALIDITY:UID";
 /// on Gmail with its X-GM-MSGID first, "gm:X-GM-MSGID:UIDVALIDITY:UID" (get, markRead, move and thread find a Gmail message by the X-GM-MSGID).
 /// The UIDVALIDITY and UID are what make it list's after.
 /// </summary>

@@ -14,8 +14,8 @@ public sealed record CommitPerson(string Name, string Email, string Date)
 /// <summary>What a merge brought in: the branch it merged into and the branch merged (null when git and the app's records cannot tell), and how many commits it brought.</summary>
 public sealed record CommitMerge(string? IntoBranch, string? FromBranch, string? FromMember, int CommitCount);
 
-/// <summary>Who made the commit, from the app's own records (the Monitor's code events, the board): the member, and its card and workflow when known.</summary>
-public sealed record CommitMade(string Member, long? Card, long? Workflow);
+/// <summary>Who made the commit, from the app's own records (the Monitor's code events, the board): the member, and its card and deliverable when known.</summary>
+public sealed record CommitMade(string Member, long? Card, long? Deliverable);
 
 /// <summary>
 /// Where the commit is: in the base branch (local or origin's); the team branch and member branches that have it;
@@ -80,7 +80,7 @@ public sealed record CommitInfo(
         {
             var m = new JsonObject { ["member"] = Made.Member };
             if (Made.Card is not null) m["card"] = Made.Card;
-            if (Made.Workflow is not null) m["workflow"] = Made.Workflow;
+            if (Made.Deliverable is not null) m["deliverable"] = Made.Deliverable;
             o["made"] = m;
         }
         var w = Where!;
@@ -148,7 +148,7 @@ public sealed record CommitFileDiff(string Path, string? OldPath, string Status,
 
 /// <summary>
 /// The commit view: any commit ID explained from plain git on the TEAM's repository (never a member's clone):
-/// what it is (message, author, merge or not, the member, card and workflow that made it from the app's records),
+/// what it is (message, author, merge or not, the member, card and deliverable that made it from the app's records),
 /// where it is (base, team branch, member branches, origin, tags) and what it changed (files and their diffs; a
 /// merge against its first parent). Reads only, outside the team's lock: nothing here moves a ref. Works the same
 /// with any remote or none (origin is only read as its remote-tracking refs, as of the last fetch).
@@ -419,7 +419,7 @@ public sealed partial class TeamRepos
     }
 
     /// <summary>The app's best record of this commit: a commit event (the member's own work) before a merge-team one, then any.</summary>
-    private sealed record RecordedEvent(string Kind, string? Member, string Branch, long? WorkflowId, string? Into);
+    private sealed record RecordedEvent(string Kind, string? Member, string Branch, long? DeliverableId, string? Into);
 
     private RecordedEvent? RecordedEventOf(string team, string sha)
     {
@@ -427,7 +427,7 @@ public sealed partial class TeamRepos
         using var cmd = c.CreateCommand();
         // A short ID matches by prefix (the IDs are stored in full, lower case).
         cmd.CommandText = """
-            SELECT kind, member, branch, workflow_id, extra FROM code_events
+            SELECT kind, member, branch, deliverable_id, extra FROM code_events
             WHERE team = $t COLLATE NOCASE AND kind IN ('commit', 'merge-team', 'branch-deleted') AND (sha = $s OR (length($s) < 40 AND substr(sha, 1, length($s)) = $s))
             ORDER BY CASE kind WHEN 'commit' THEN 0 WHEN 'merge-team' THEN 1 ELSE 2 END, CASE kind WHEN 'branch-deleted' THEN -id ELSE id END LIMIT 1;
             """;
@@ -462,16 +462,16 @@ public sealed partial class TeamRepos
     private CommitMade? MadeOf(long teamId, string team, bool isMerge, RecordedEvent? record, IReadOnlyList<string> memberBranches)
     {
         string? member = null;
-        long? workflow = null;
+        long? deliverable = null;
         if (record is { Kind: CodeEvent.Commit, Member: { } m })
         {
             member = m;
-            workflow = record.WorkflowId;
+            deliverable = record.DeliverableId;
         }
         else if (record is { Kind: CodeEvent.MergeTeam })
         {
             member = isMerge ? ManagerOf(teamId) : record.Member;
-            workflow = record.WorkflowId;
+            deliverable = record.DeliverableId;
         }
         else if (record is { Kind: CodeEvent.BranchDeleted, Member: { } dm })
         {
@@ -482,7 +482,7 @@ public sealed partial class TeamRepos
             member = MemberOfBranch(teamId, memberBranches[0]);
         }
         if (member is null) return null;
-        return new CommitMade(member, workflow is { } w ? CardOf(team, member, w) : null, workflow);
+        return new CommitMade(member, deliverable is { } w ? CardOf(team, member, w) : null, deliverable);
     }
 
     private string? ManagerOf(long teamId)
@@ -494,15 +494,15 @@ public sealed partial class TeamRepos
         return cmd.ExecuteScalar() as string;
     }
 
-    /// <summary>The member's card in that workflow (the newest), as the board keeps it.</summary>
-    private long? CardOf(string team, string member, long workflow)
+    /// <summary>The member's card in that deliverable (the newest), as the board keeps it.</summary>
+    private long? CardOf(string team, string member, long deliverable)
     {
         using var c = Open();
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id FROM board_cards WHERE team = $t COLLATE NOCASE AND member = $m COLLATE NOCASE AND workflow = $w ORDER BY id DESC LIMIT 1;";
+        cmd.CommandText = "SELECT id FROM board_cards WHERE team = $t COLLATE NOCASE AND member = $m COLLATE NOCASE AND deliverable = $w ORDER BY id DESC LIMIT 1;";
         cmd.Parameters.AddWithValue("$t", team);
         cmd.Parameters.AddWithValue("$m", member);
-        cmd.Parameters.AddWithValue("$w", workflow);
+        cmd.Parameters.AddWithValue("$w", deliverable);
         return cmd.ExecuteScalar() is long id ? id : null;
     }
 

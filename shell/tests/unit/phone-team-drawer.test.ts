@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-// On a phone (below 760 px) the team page's Documents and Workflows move from its header into the drawer,
-// under the open team's name; a tap closes the drawer and opens that team's Documents dialog, or the Workflows page
+// On a phone (below 760 px) the team page's Documents and Deliverables move from its header into the drawer,
+// under the open team's name; a tap closes the drawer and opens that team's Documents dialog, or the Deliverables page
 // filtered to the team. The desktop keeps the header
-// buttons. Also: a dialog sheet's header never shrinks over its body (the Workflows title sat on its intro text).
+// buttons. Also: a dialog sheet's header never shrinks over its body (the Deliverables title sat on its intro text).
 // A fake matchMedia gives the width; the API is a scripted fake (no core, no network).
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
@@ -13,7 +13,7 @@ import App from '../../src/renderer/src/App.vue';
 import Sidebar from '../../src/renderer/src/components/Sidebar.vue';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { applyRemoteAccess } from '../../src/renderer/src/remoteAccess';
-import { workflowsRequest } from '../../src/renderer/src/workflows/page';
+import { deliverablesRequest } from '../../src/renderer/src/deliverables/page';
 import { PHONE_BREAKPOINT, PHONE_QUERY } from '../../src/renderer/src/phone';
 import type { TeamSummary, YawbleApi } from '../../src/shared/api';
 
@@ -82,13 +82,13 @@ async function openTeamPage(w: VueWrapper) {
   expect(drawerState(w)).toBe('closed');
 }
 
-describe('the drawer on a phone: the open team\'s Documents and Workflows', () => {
+describe('the drawer on a phone: the open team\'s Documents and Deliverables', () => {
   it('shows the two items only while a team page is open, under the team\'s name, near the drawer\'s top', async () => {
     setWidth(390);
     const w = await mountApp();
     await w.get('[data-test=drawer-toggle]').trigger('click');
     expect(w.find('[data-test=drawer-team-documents]').exists()).toBe(false); // the Concierge: no team open
-    expect(w.find('[data-test=drawer-team-workflows]').exists()).toBe(false);
+    expect(w.find('[data-test=drawer-team-deliverables]').exists()).toBe(false);
     await w.get('[data-test=nav-teams]').trigger('click');
     await flushPromises();
     await w.get('[data-test=drawer-toggle]').trigger('click');
@@ -100,11 +100,11 @@ describe('the drawer on a phone: the open team\'s Documents and Workflows', () =
     const group = w.get('[data-test=drawer-team]');
     expect(group.get('.team-name').text()).toBe('Team payments');
     expect(group.get('[data-test=drawer-team-documents]').text()).toBe('Documents');
-    expect(group.get('[data-test=drawer-team-workflows]').text()).toBe('Workflows');
+    expect(group.get('[data-test=drawer-team-deliverables]').text()).toBe('Deliverables');
     // Near the top: right after New chat, before the places.
     const order = [...w.get('[data-test=sidebar]').element.querySelectorAll('[data-test]')].map((e) => e.getAttribute('data-test'));
     expect(order.indexOf('new-chat')).toBeLessThan(order.indexOf('drawer-team-documents'));
-    expect(order.indexOf('drawer-team-workflows')).toBeLessThan(order.indexOf('nav-concierge'));
+    expect(order.indexOf('drawer-team-deliverables')).toBeLessThan(order.indexOf('nav-concierge'));
 
     // Going elsewhere (the Board): the team page is gone, and so are the items.
     await w.get('[data-test=nav-board]').trigger('click');
@@ -113,7 +113,7 @@ describe('the drawer on a phone: the open team\'s Documents and Workflows', () =
     expect(w.find('[data-test=drawer-team]').exists()).toBe(false);
   });
 
-  it('a tap on Documents closes the drawer and opens the team\'s documents; Workflows the Workflows page at the team', async () => {
+  it('a tap on Documents closes the drawer and opens the team\'s documents; Deliverables the Deliverables page at the team', async () => {
     setWidth(390);
     const w = await mountApp();
     await openTeamPage(w);
@@ -128,15 +128,15 @@ describe('the drawer on a phone: the open team\'s Documents and Workflows', () =
     expect(dialogTitles()).toEqual([]);
 
     await w.get('[data-test=drawer-toggle]').trigger('click');
-    await w.get('[data-test=drawer-team-workflows]').trigger('click');
+    await w.get('[data-test=drawer-team-deliverables]').trigger('click');
     for (let i = 0; i < 6; i++) await flushPromises();
     expect(drawerState(w)).toBe('closed');
     expect(dialogTitles()).toEqual([]); // no dialog: the page
     // The page is loaded when first opened (App.vue's async component).
-    await vi.waitFor(() => expect(w.find('[data-test=workflows-view]').exists()).toBe(true));
+    await vi.waitFor(() => expect(w.find('[data-test=deliverables-view]').exists()).toBe(true));
     await flushPromises();
-    expect(w.get('[data-test=phone-title]').text()).toBe('Workflows');
-    expect((w.get('[data-test=workflows-team-filter]').element as HTMLSelectElement).value).toBe('1');
+    expect(w.get('[data-test=phone-title]').text()).toBe('Deliverables');
+    expect((w.get('[data-test=deliverables-team-filter]').element as HTMLSelectElement).value).toBe('1');
   });
 
   it('on the desktop: no team group in the sidebar; the header keeps both buttons', async () => {
@@ -146,7 +146,7 @@ describe('the drawer on a phone: the open team\'s Documents and Workflows', () =
     await flushPromises();
     expect(w.find('[data-test=drawer-team]').exists()).toBe(false);
     expect(w.find('[data-test=open-documents]').exists()).toBe(true);
-    expect(w.find('[data-test=open-workflows]').exists()).toBe(true);
+    expect(w.find('[data-test=open-deliverables]').exists()).toBe(true);
   });
 
   it('the Sidebar itself: the group needs the drawer and an open team', () => {
@@ -155,8 +155,8 @@ describe('the drawer on a phone: the open team\'s Documents and Workflows', () =
     expect(keep(mount(Sidebar, { props: { ...base, drawer: true, open: true, openTeamName: null } })).find('[data-test=drawer-team]').exists()).toBe(false);
     const w = keep(mount(Sidebar, { props: { ...base, drawer: true, open: true, openTeamName: 'payments' } }));
     w.get('[data-test=drawer-team-documents]').trigger('click');
-    w.get('[data-test=drawer-team-workflows]').trigger('click');
-    expect(Object.keys(w.emitted())).toEqual(expect.arrayContaining(['teamDocuments', 'teamWorkflows']));
+    w.get('[data-test=drawer-team-deliverables]').trigger('click');
+    expect(Object.keys(w.emitted())).toEqual(expect.arrayContaining(['teamDocuments', 'teamDeliverables']));
   });
 });
 
@@ -167,34 +167,34 @@ describe('the team page header', () => {
     return w;
   };
 
-  it('on a phone: no Documents or Workflows buttons in the header; all five are behind ⋯; the exposed openers still open the dialogs', async () => {
+  it('on a phone: no Documents or Deliverables buttons in the header; all five are behind ⋯; the exposed openers still open the dialogs', async () => {
     setWidth(390);
     const w = await mountTeam();
     expect(w.find('[data-test=open-documents]').exists()).toBe(false);
-    expect(w.find('[data-test=open-workflows]').exists()).toBe(false);
+    expect(w.find('[data-test=open-deliverables]').exists()).toBe(false);
     await w.get('[data-test=team-more]').trigger('click');
-    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-documents-menu', 'open-workflows-menu', 'open-triggers', 'open-git', 'open-manage']);
+    expect(w.findAll('[data-test=team-more-menu] [role=menuitem]').map((b) => b.attributes('data-test'))).toEqual(['open-documents-menu', 'open-deliverables-menu', 'open-triggers', 'open-git', 'open-manage']);
     await w.get('[data-test=team-more]').trigger('click');
     (w.vm as unknown as { openDocuments: () => void }).openDocuments();
     await flushPromises();
     expect(dialogTitles()).toEqual(['payments · documents']);
   });
 
-  it('on the desktop: both buttons; Documents opens its dialog, Workflows the Workflows page for the team (no dialog)', async () => {
+  it('on the desktop: both buttons; Documents opens its dialog, Deliverables the Deliverables page for the team (no dialog)', async () => {
     setWidth(1024);
     const w = await mountTeam();
     await w.get('[data-test=open-documents]').trigger('click');
     await flushPromises();
     expect(dialogTitles()).toEqual(['payments · documents']);
     await w.get('[data-test=modal-close]').trigger('click');
-    const b = w.get('[data-test=open-workflows]');
-    expect(b.text()).toBe('Workflows');
-    expect(b.attributes('title')).toMatch(/Workflows page/);
+    const b = w.get('[data-test=open-deliverables]');
+    expect(b.text()).toBe('Deliverables');
+    expect(b.attributes('title')).toMatch(/Deliverables page/);
     await b.trigger('click');
     await flushPromises();
     expect(dialogTitles()).toEqual([]);
-    expect(workflowsRequest.value).toMatchObject({ teamId: 1 });
-    expect(workflowsRequest.value?.workflow ?? null).toBeNull();
+    expect(deliverablesRequest.value).toMatchObject({ teamId: 1 });
+    expect(deliverablesRequest.value?.deliverable ?? null).toBeNull();
   });
 
   it('follows the width: the buttons go below 760 px and come back at 760 px', async () => {
@@ -202,10 +202,10 @@ describe('the team page header', () => {
     const w = await mountTeam();
     setWidth(759);
     await nextTick();
-    expect(w.find('[data-test=open-workflows]').exists()).toBe(false);
+    expect(w.find('[data-test=open-deliverables]').exists()).toBe(false);
     setWidth(760);
     await nextTick();
-    expect(w.find('[data-test=open-workflows]').exists()).toBe(true);
+    expect(w.find('[data-test=open-deliverables]').exists()).toBe(true);
   });
 });
 

@@ -12,7 +12,7 @@ const mk = (id: number, name: string, over: Partial<TeamSummary> = {}) =>
 
 function fakeApi(calls: string[] = []): YawbleApi {
   return {
-    call: async (method: string) => { calls.push(method); return (method === 'bus.workflows' ? [] : { ok: true }) as any; },
+    call: async (method: string) => { calls.push(method); return (method === 'bus.deliverables' ? [] : { ok: true }) as any; },
     onEvent: () => () => {},
   } as unknown as YawbleApi;
 }
@@ -233,13 +233,13 @@ describe('Teams list tiles: the gaps are resize handles', () => {
 describe('Teams list tiles: the button row', () => {
   beforeEach(() => { localStorage.clear(); resetTileSize(); document.body.innerHTML = ''; });
 
-  it('sits between the header and Recent workflows, one icon and one label per button', async () => {
+  it('sits between the header and Recent deliverables, one icon and one label per button', async () => {
     const w = mountList([mk(1, 'a')]);
     await flushPromises();
     const card = w.get('[data-test=team-card]');
     const kids = [...card.element.children].map((c) => c.getAttribute('data-test') ?? c.className);
     expect(kids.indexOf('team-open-a')).toBeLessThan(kids.indexOf('card-actions'));
-    expect(kids.indexOf('card-actions')).toBeLessThan(kids.indexOf('team-workflows'));
+    expect(kids.indexOf('card-actions')).toBeLessThan(kids.indexOf('team-deliverables'));
     for (const id of ['card-settings', 'card-pause', 'card-archive', 'card-delete']) {
       const b = card.get(`[data-test=${id}]`);
       expect(b.find('svg').exists()).toBe(true);

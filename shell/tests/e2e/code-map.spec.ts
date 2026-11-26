@@ -2,7 +2,7 @@
 // phone-remote fake core (remote.html, tests/e2e/phone). The fake serves monitor.messages, monitor.steps and
 // monitor.codeEvents (the core's wire shape: CodeEvent.ToJson) from a feed the test grows while the page polls.
 //
-// The wall is a canvas, so the spec reads what the scene draws: an init script wraps the monitor canvas's 2D context
+// The wall is a canvas, so the spec reads what the scene draws: an init workflow wraps the monitor canvas's 2D context
 // and keeps the last frames' arcs, paths and texts (world coordinates and the transform). A file node is a filled arc of
 // radius 3.6 (times its pop) in its touch's colour, a confirmed file wears a ring at 5.8, a file two members touched a
 // double ring (7.8 and 9.8, ink); a folder is a gradient glow of radius 16 + heat * 18 with its label in hsl(205 - heat*175);
@@ -33,9 +33,9 @@ const FILE_COLORS = [C.read, C.edit, C.create];
 // ---------------------------------------------------------------------------------------------------------------------
 // The feed behind the fake core.
 
-type Row = { seq: number; kind: string; team: string; member: string | null; from: string; text: string | null; workflow: number; at: string };
+type Row = { seq: number; kind: string; team: string; member: string | null; from: string; text: string | null; deliverable: number; at: string };
 type Step = { id: number; at: string; team: string; member: string; run: number; kind: string; tool: string; target: string | null };
-type Ev = { id: number; kind: string; team: string; member: string | null; branch: string; sha: string; message: string; files: { path: string; status: string; oldPath?: string }[]; at: string; recordedAt: string; workflowId: number | null; into?: string; branches?: string[] };
+type Ev = { id: number; kind: string; team: string; member: string | null; branch: string; sha: string; message: string; files: { path: string; status: string; oldPath?: string }[]; at: string; recordedAt: string; deliverableId: number | null; into?: string; branches?: string[] };
 
 class Feed {
   rows: Row[] = []; steps: Step[] = []; events: Ev[] = [];
@@ -45,8 +45,8 @@ class Feed {
   /** With true, monitor.codeEvents without a team is refused (the view must ask per team). */
   refuseAllTeams = false;
   iso(msAgo = 0) { return new Date(Date.now() - msAgo).toISOString(); }
-  row(kind: string, member: string | null, from: string, workflow = 10, msAgo = 0, text: string | null = null, team = TEAM) {
-    this.rows.push({ seq: ++this.seq, kind, team, member, from, text, workflow, at: this.iso(msAgo) });
+  row(kind: string, member: string | null, from: string, deliverable = 10, msAgo = 0, text: string | null = null, team = TEAM) {
+    this.rows.push({ seq: ++this.seq, kind, team, member, from, text, deliverable, at: this.iso(msAgo) });
   }
   step(member: string, kind: string, target: string | null, msAgo = 0, team = TEAM) {
     const tool = kind === 'read' ? 'Read' : kind === 'edit' ? 'Edit' : kind === 'create' ? 'Write' : 'Bash';
@@ -54,7 +54,7 @@ class Feed {
   }
   event(e: Partial<Ev> & { kind: string; sha: string }, msAgo = 0) {
     const at = this.iso(msAgo);
-    this.events.push({ id: this.eid++, team: TEAM, member: null, branch: 'members/payments/developerada', message: '', files: [], at, recordedAt: at, workflowId: 10, ...e });
+    this.events.push({ id: this.eid++, team: TEAM, member: null, branch: 'members/payments/developerada', message: '', files: [], at, recordedAt: at, deliverableId: 10, ...e });
   }
   answer(method: string, p: any): unknown | undefined {
     if (method.startsWith('monitor.')) this.calls.push({ method, params: p });
@@ -300,7 +300,7 @@ async function open(browser: Browser, o: OpenOpts = {}) {
           const card = (id: number, name: string, role: string) => ({ member: { id, teamId: t.id, team: t.name, name, role, cli: 'claude', instructions: '', model: '', credential: 'default' }, state: 'running', queuePosition: null, queueLength: 0, queuedInstructions: 0, statusLine: null, runId: 1, runStartedAt: feed.iso(60_000), lastRunState: 'completed', lastRunReason: null, attention: null, net: 'allowlist', wallTimeout: '2h', loosened: [], policyProblems: [], hasClone: true });
           return ws.send(JSON.stringify({ id: msg.id, result: [card(100 + t.id * 2, 'Manager', 'manager'), card(101 + t.id * 2, 'DeveloperZed', 'member')] }));
         }
-        if (msg.method === 'bus.workflows') return ws.send(JSON.stringify({ id: msg.id, result: [] }));
+        if (msg.method === 'bus.deliverables') return ws.send(JSON.stringify({ id: msg.id, result: [] }));
         const got = feed.answer(msg.method, msg.params);
         if (got !== undefined) return ws.send(JSON.stringify({ id: msg.id, result: got }));
       } catch (e: any) {
@@ -338,8 +338,8 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
 }
 
-/** The workflow's instructions, read at the start: the members' touches belong to workflow 10. */
-function seedWorkflow(feed: Feed, msAgo = 120_000, wf = 10) {
+/** The deliverable's instructions, read at the start: the members' touches belong to deliverable 10. */
+function seedDeliverable(feed: Feed, msAgo = 120_000, wf = 10) {
   feed.row('instruction', ADA, 'Manager', wf, msAgo, 'Card 1: partial refunds');
   feed.row('instruction', BEN, 'Manager', wf, msAgo - 1000, 'Card 2: test partial refunds');
 }
@@ -349,9 +349,9 @@ test.afterAll(() => { writeFileSync(path.join(SHOTS, 'code-map-results.json'), J
 
 // ---------------------------------------------------------------------------------------------------------------------
 
-test('map: the tree grows over a workflow, a Write pops, edits bright, reads faint, folders warmer, member lines, a two-member overlap; files go when the workflow ends', async ({ browser }) => {
+test('map: the tree grows over a deliverable, a Write pops, edits bright, reads faint, folders warmer, member lines, a two-member overlap; files go when the deliverable ends', async ({ browser }) => {
   const feed = new Feed();
-  seedWorkflow(feed);
+  seedDeliverable(feed);
   const { page, ctx, errors } = await open(browser, { feed });
   let f = await lastFrame(page);
   expect(fileDots(f), 'no map before any step').toHaveLength(0);
@@ -433,10 +433,10 @@ test('map: the tree grows over a workflow, a Write pops, edits bright, reads fai
   await unhover(page);
   await shot(page, '02-map-grown');
 
-  // 3. The workflow ends ('done' row): its files leave the map.
+  // 3. The deliverable ends ('done' row): its files leave the map.
   feed.row('done', null, 'Manager', 10, 0, 'Partial refunds delivered');
   const left = await until(page, (x) => fileDots(x).length, (n) => n === 0);
-  expect(left, 'files go when the workflow ends').toBe(0);
+  expect(left, 'files go when the deliverable ends').toBe(0);
   expect(folders(await lastFrame(page))).toHaveLength(0);
   await shot(page, '03-map-after-done');
   expect(errors).toEqual([]);
@@ -445,7 +445,7 @@ test('map: the tree grows over a workflow, a Write pops, edits bright, reads fai
 
 test('map: a large map collapses to its busiest 8 folders, "+N" per folder and "+N folders"', async ({ browser }) => {
   const feed = new Feed();
-  seedWorkflow(feed, 300_000);
+  seedDeliverable(feed, 300_000);
   // 12 folders x 10 files, read at the start (quiet), each folder busier than the next.
   for (let d = 0; d < 12; d++) for (let i = 0; i < 10; i++) for (let k = 0; k <= (11 - d) % 3; k++) feed.step(ADA, 'edit', `src/mod${String(d).padStart(2, '0')}/file${i}.ts`, 200_000 - d * 1000 - i * 10 - k);
   const { page, ctx, errors } = await open(browser, { feed });
@@ -496,7 +496,7 @@ test('map: a large map collapses to its busiest 8 folders, "+N" per folder and "
 
 test('events: a commit dot travels to the hub (hover: message + sha) and corrects the map; merge-team, landed and push draw', async ({ browser }) => {
   const feed = new Feed();
-  seedWorkflow(feed);
+  seedDeliverable(feed);
   feed.step(ADA, 'create', 'src/refund/partial.ts', 60_000);
   feed.step(ADA, 'create', 'src/refund/model.ts', 59_000); // a Write over a file the commit will call M
   feed.step(ADA, 'edit', 'src/refund/old.ts', 58_000);
@@ -584,9 +584,9 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
   await watch((last) => seen.merge.length > 3 && last.merge.length === 0); // the merge's rings have run out
   const mergeSeen = [...seen.merge];
   await shot(page, '07-merge');
-  feed.event({ kind: 'landed', member: null, branch: 'team/payments', sha: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2', message: 'Land team/payments on main', files: [{ path: 'src/refund/partial.ts', status: 'A' }], into: 'main', workflowId: null });
+  feed.event({ kind: 'landed', member: null, branch: 'team/payments', sha: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2', message: 'Land team/payments on main', files: [{ path: 'src/refund/partial.ts', status: 'A' }], into: 'main', deliverableId: null });
   await watch((last) => seen.landedRings > 0 && last.landed.length === 0);
-  feed.event({ kind: 'push', member: null, branch: 'main', sha: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2', message: 'Pushed main to origin', files: [], branches: ['main'], workflowId: null });
+  feed.event({ kind: 'push', member: null, branch: 'main', sha: 'c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2', message: 'Pushed main to origin', files: [], branches: ['main'], deliverableId: null });
   await watch((last) => seen.push > 3 && last.push === 0);
   result.bursts = { mergeRadii: [Math.min(...mergeSeen), Math.max(...mergeSeen)], landedRings: seen.landedRings, landedLw: [...new Set(seen.landedLw)], push: seen.push };
   expect(mergeSeen.length, 'the merge rings off the hub').toBeGreaterThan(3);
@@ -616,7 +616,7 @@ test('events: a commit dot travels to the hub (hover: message + sha) and correct
 test('replay: the timeline plays the map and the events in order', async ({ browser }) => {
   const feed = new Feed();
   const min = 60_000;
-  seedWorkflow(feed, 9 * min);
+  seedDeliverable(feed, 9 * min);
   feed.step(ADA, 'create', 'src/refund/partial.ts', 6.5 * min);
   feed.step(ADA, 'edit', 'src/refund/model.ts', 6 * min);
   feed.step(BEN, 'read', 'src/refund/model.ts', 5.5 * min);
@@ -671,7 +671,7 @@ test('replay: the timeline plays the map and the events in order', async ({ brow
 
 test('reduced motion (emulated): nothing travels or pops, no bursts; the map just updates', async ({ browser }) => {
   const feed = new Feed();
-  seedWorkflow(feed);
+  seedDeliverable(feed);
   const { page, ctx, errors } = await open(browser, { feed, reduced: true });
   expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
   feed.step(ADA, 'create', 'src/refund/partial.ts');
@@ -723,7 +723,7 @@ test('reduced motion (emulated): nothing travels or pops, no bursts; the map jus
 
 test('remote view: a Visitor (read access) gets the same map through monitor.* reads; per-team ask when the all-teams read is refused', async ({ browser }) => {
   const feed = new Feed();
-  seedWorkflow(feed);
+  seedDeliverable(feed);
   feed.step(ADA, 'create', 'src/refund/partial.ts', 30_000);
   feed.step(BEN, 'read', 'src/refund/partial.ts', 29_000);
   feed.event({ kind: 'commit', member: ADA, sha: '9'.repeat(40), message: 'Visitor sees this', files: [{ path: 'src/refund/partial.ts', status: 'A' }] }, 20_000);
