@@ -3,7 +3,7 @@
 // (with StepRow.exit when the test gives one), monitor.codeEvents and bus.deliverables from a feed the test changes while
 // the page polls, and patches teams.agents with the attention the test sets (a member that needs the person).
 //
-// The wall is a canvas, so the spec reads what the scene draws (the code-map spec's recorder): an init workflow wraps the
+// The wall is a canvas, so the spec reads what the scene draws (the code-map spec's recorder): an init script wraps the
 // monitor canvas's 2D context and keeps the last frames' arcs, paths and texts with their transform and alpha. What
 // the scene draws (scene.ts, rhythm.ts):
 //   a deliverable node   - a rounded square (moveTo x-r+4, y-r; r 10) filled rgba(7, 11, 20, 0.95), stroked in its tone
@@ -178,7 +178,6 @@ async function lastFrame(page: Page): Promise<Frame> {
   return page.evaluate(() => (window as any).__frames.at(-1));
 }
 /** The newest n frames (cheaper than all of them). */
-const recent = (page: Page, n = 12): Promise<Frame[]> => page.evaluate((k) => (window as any).__frames.slice(-k), n);
 const screen = (o: { m: number[] }, x: number, y: number) => ({ x: o.m[0] * x + o.m[2], y: o.m[1] * y + o.m[3] });
 const isScreen = (o: Op) => o.m[2] === 0 && o.m[3] === 0 && o.m[0] === 1;
 const near = (a: Pt, b: Pt, tol = 0.5) => Math.hypot(a.x - b.x, a.y - b.y) < tol;

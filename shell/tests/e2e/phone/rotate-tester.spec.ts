@@ -6,6 +6,7 @@
 // (phone below PHONE_BREAKPOINT, the desktop sidebar from it), and an open modal inside the viewport.
 //
 //   npx playwright test rotate-tester      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
+// Needs Playwright's WebKit browser on the computer: npx playwright install webkit
 import { devices, expect, test, type Page } from './fixtures';
 import { PHONE_BREAKPOINT } from '../../../src/renderer/src/phone';
 import { buildRenderer, builtDir, fakeRemote } from './server';
