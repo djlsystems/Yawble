@@ -15,15 +15,14 @@ using MemberRef = Yawble.Core.Bus.MemberRef;
 namespace Yawble.Core.Tests.Integrations;
 
 /// <summary>
-/// The tester's checks (Marlo 79d45d7/afb7205 + Ines 74dfd22): folder asks through the real bus, UiRpc and RpcDispatcher
-/// (the window's path), filling what FolderAskTests leaves open: request_folder answers at once with nobody answering;
-/// a repeat pushes no second change; folder.* reaches FolderAskService through RpcDispatcher, not UiRpc.Prefixes;
+/// Folder asks through the real bus, UiRpc and RpcDispatcher (the window's path): request_folder answers at once with
+/// nobody answering; a repeat pushes no second change; folder.* reaches FolderAskService through RpcDispatcher, not UiRpc.Prefixes;
 /// app.overview counts the ask in needsYou; an approval is what Member settings > Policy (policy.getMember) shows and
 /// policy.saveLoosen removes, both audited; a read-write grant of a folder already read-only moves it; a second answer is
 /// refused; every refusal (Windows and Linux rules) raises no ask, no push and no count; the Concierge's lines and the
 /// org summary's title never carry the full path. Fakes only: a temporary database, fake runners, fictional paths.
 /// </summary>
-public sealed class FolderAskVerifyTests : IAsyncLifetime
+public sealed class FolderAskRpcTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -107,10 +106,10 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
         return (o["folderAsks"]!.GetValue<int>(), o["needsYou"]!.GetValue<int>());
     }
 
-    // ------------------------------------------------------------------ P1/P2: at once, never blocks; a repeat reuses
+    // ------------------------------------------------------------------ at once, never blocks; a repeat reuses
 
     [Fact]
-    public async Task P1_RequestFolder_AnswersAtOnce_WithNobodyAnswering_AndARepeatPushesNothing()
+    public async Task RequestFolder_AnswersAtOnce_WithNobodyAnswering_AndARepeatPushesNothing()
     {
         var (_, _, ada, _) = await Team();
         var baseline = await Overview();
@@ -132,7 +131,7 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
     // ------------------------------------------------------------------ routing
 
     [Fact]
-    public async Task Routing_FolderMethods_GoThroughRpcDispatcherToFolderAskService_NotUiRpc()
+    public async Task FolderMethods_GoThroughRpcDispatcherToFolderAskService_NotUiRpc()
     {
         Assert.DoesNotContain(UiRpc.Prefixes, p => "folder.asks".StartsWith(p, StringComparison.Ordinal));
         Assert.True(FolderAskService.Handles("folder.asks"));
@@ -148,10 +147,10 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
         await Assert.ThrowsAnyAsync<Exception>(() => bare.DispatchAsAsync(Actor.Window, "folder.asks", null, Ct));
     }
 
-    // ------------------------------------------------------------------ P5: what Member settings > Policy shows, and Remove
+    // ------------------------------------------------------------------ what Member settings > Policy shows, and Remove
 
     [Fact]
-    public async Task P5_Approve_IsShownInMemberPolicy_AndRemovingItThere_TakesItAway_BothAudited()
+    public async Task AnApproval_IsShownInMemberPolicy_AndRemovingItThere_TakesItAway_BothAudited()
     {
         var (_, _, ada, ben) = await Team();
         await Ask(ada, Sessions);
@@ -184,10 +183,10 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
 
     private string ManagerName() => _bus.AllMemberRowsAsync(Ct).GetAwaiter().GetResult().Single(m => m.Role.Equals("manager", StringComparison.OrdinalIgnoreCase)).Name;
 
-    // ------------------------------------------------------------------ P6: read narrows; read-write over read-only moves it
+    // ------------------------------------------------------------------ read narrows; read-write over read-only moves it
 
     [Fact]
-    public async Task P6_ReadWriteGrant_OfAFolderAlreadyReadOnly_MovesItOffTheReadOnlyList()
+    public async Task AReadWriteGrant_OfAFolderAlreadyReadOnly_MovesItOffTheReadOnlyList()
     {
         var (_, _, ada, _) = await Team();
         await Ask(ada, Sessions, "read");
@@ -219,10 +218,10 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
         Assert.Single(_told); // the deny only
     }
 
-    // ------------------------------------------------------------------ P3: who may ask for whom, through real teams
+    // ------------------------------------------------------------------ who may ask for whom, through real teams
 
     [Fact]
-    public async Task P3_AManagerAsksForItsOwnMember_NotAnotherTeams_AndTheDenyTellsTheManager()
+    public async Task ThroughRealTeams_AManagerAsksForItsOwnMember_NotAnotherTeams_AndTheDenyTellsTheManager()
     {
         var (_, manager, _, ben) = await Team();
         var (_, _, otherAda, _) = await Team("docs");
@@ -241,7 +240,7 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
         Assert.Null((await MemberPolicy(ben.Id))["loosenApprovedAt"]?.GetValue<string>());
     }
 
-    // ------------------------------------------------------------------ P4: every refusal, no card anywhere
+    // ------------------------------------------------------------------ every refusal, no card anywhere
 
     // ~\.claude (the CLI's config) is not in this list: MemberLayouts here finds no CLI under the fake home, so its
     // install is a placeholder with no ConfigDenied. FolderAskTests covers it with a detected CLI (PolicyFixtures).
@@ -263,7 +262,7 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
 
     [Theory]
     [MemberData(nameof(WindowsRefusals))]
-    public async Task P4_EachWindowsRefusal_HasAReason_AndNoAskCountOrPush(string path, string access, string why)
+    public async Task EachWindowsRefusal_HasAReason_AndNoAskCountOrPush(string path, string access, string why)
     {
         Assert.SkipUnless(Win, "the window's layout here is this machine's OS (Windows paths)");
         var (_, _, ada, _) = await Team();
@@ -291,7 +290,7 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
     [InlineData("/proc/1", "read", "system folder")]
     [InlineData("/usr/local/data", "readwrite", "never read-write")]
     [InlineData("/var/data", "readwrite", "never read-write")]
-    public async Task P4_EachLinuxRefusal_IsSaidAtOnce_WithNoAsk(string path, string access, string why)
+    public async Task EachLinuxRefusal_IsSaidAtOnce_WithNoAsk(string path, string access, string why)
     {
         var told = new List<string>();
         var changed = 0;
@@ -311,7 +310,7 @@ public sealed class FolderAskVerifyTests : IAsyncLifetime
     [Theory]
     [InlineData("/usr/local/data")]
     [InlineData("/opt/datasets")]
-    public async Task P4_LinuxProgramFolders_MayBeAskedReadOnly(string path)
+    public async Task LinuxProgramFolders_MayBeAskedReadOnly(string path)
     {
         var asks = new FolderAskService(_db.ConnectionString, _policies,
             (_, _) => Task.FromResult(PolicyFixtures.Layout(TargetOs.Linux, AgentCli.Claude)),
