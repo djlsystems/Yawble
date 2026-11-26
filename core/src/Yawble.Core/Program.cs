@@ -104,7 +104,7 @@ catch (DatabaseNewerException e)
     return 6;
 }
 // The space of rows that pruning deleted is given back here, while nothing else has the database open and no run is
-// active: only when much of a large file is free, and only with a recent backup (made now when none is).
+// active: only when much of a large file is free, and only with a recent backup (made first when none is).
 DbCompaction.CompactIfDue(dbPath, backupService.EnsureRecent, line => Console.Error.WriteLine(line));
 // The agent CLIs are the person's own, found where they are installed, at every launch (no pinned version).
 Yawble.Core.Agents.ICliDetector clis = Yawble.Core.Agents.CliDetectorRegistry.ForThisHost();
