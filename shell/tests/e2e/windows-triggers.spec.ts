@@ -42,7 +42,8 @@ test('real triggers: create a trigger in the dialog and run it now', async () =>
     // The member's run starts, then ends: the team shows it running, then nobody running.
     await expect(main.locator('[data-test=team-title]')).toContainText('1 running', { timeout: 60_000 });
     await expect(main.locator('[data-test=team-title]')).toContainText('0 running', { timeout: 10 * 60_000 });
-    // The run's end may wake the Manager: give the pump time to admit it, then wait for it to end too.
+    // The run's end may wake the Manager: give the pump time to admit it, then wait for it to end too. Kept: whether it
+    // wakes is not shown anywhere until it runs, so this waits out the pump's admission (up to 15 s) for a run that may not come.
     await main.waitForTimeout(15_000);
     await expect(main.locator('[data-test=team-title]')).toContainText('0 running', { timeout: 10 * 60_000 });
     await main.screenshot({ path: path.join(root, 'trigger-3-done.png') });

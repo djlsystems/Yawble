@@ -18,6 +18,7 @@ import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { BASE_COMMIT, baseBuiltDir, baseShellDir, buildRenderer, builtDir, extractBaseTree, fakeRemote } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(120_000);
@@ -79,7 +80,7 @@ async function openFromTeam(page: Page, id: string) {
   }
   await b.click();
   await expect(page.locator('[role=dialog]').last()).toBeVisible();
-  await page.waitForTimeout(300);
+  await settled(page);
 }
 
 const rowInfo = (page: Page) => page.evaluate(() => {
@@ -142,7 +143,7 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
         await expect(page.locator('[data-test=manage-section-title]')).toHaveText(LABELS[i]!);
         await expect(page.locator(PANES[id]!).first()).toBeVisible();
         await expect(page.locator('[data-test=manage-tabs]')).toHaveCount(0);
-        await page.waitForTimeout(200);
+        await settled(page);
         const o = await overflow(page);
         expect.soft(o.bad, `${id}: nothing sticks out`).toEqual([]);
         expect.soft([o.docW <= o.vw, o.pageX, o.bodyX], `${id}: no sideways scroll`).toEqual([true, 0, 0]);
@@ -186,7 +187,7 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
       expect(max, 'the Environment section scrolls').toBeGreaterThan(200);
       for (const f of [0.25, 0.5, 1]) {
         await body.evaluate((b, f) => { b.scrollTop = (b.scrollHeight - b.clientHeight) * f; }, f);
-        await page.waitForTimeout(120);
+        await settled(page);
         const hn = await head();
         expect.soft(hn.top, `head top at ${f * 100}% scrolled`).toBe(h0.top);
         expect.soft(hn.h, `head height at ${f * 100}% scrolled`).toBe(h0.h);
@@ -197,7 +198,8 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
       const bb = (await body.boundingBox())!;
       await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height - 40);
       await page.mouse.wheel(0, 600);
-      await page.waitForTimeout(200);
+      await expect.poll(() => body.evaluate((b) => b.scrollTop), 'the wheel scrolled the section').toBeGreaterThan(0);
+      await settled(page);
       expect.soft((await head()).top, 'head top after a wheel scroll').toBe(h0.top);
       await shot(page, `env-scrolled-${w}x${h}.png`);
 
@@ -231,7 +233,7 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
           const item = page.locator(`[data-test=sidebar] [data-test=${id}]`).first();
           await expect(item, `${id} in the drawer`).toBeVisible();
           await item.click();
-          await page.waitForTimeout(500);
+          await settled(page);
         } else await openFromTeam(page, id);
         const sheet = page.locator('.modal.sheet').last();
         if (!(await sheet.count())) { seen[id] = 'not a Modal sheet'; continue; }

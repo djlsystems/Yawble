@@ -14,6 +14,7 @@ import path from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
 import { buildRenderer, builtDir, fakeRemote } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
@@ -48,7 +49,7 @@ async function open(browser: Browser, w: number, h: number) {
     await pane.locator('[data-test=member-view-terminal]').click();
   }
   await expect(pane.locator('[data-test=member-terminal]')).toBeVisible({ timeout: 30_000 });
-  await page.waitForTimeout(500);
+  await settled(page);
   return { page, ctx, errors };
 }
 

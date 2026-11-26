@@ -3,6 +3,7 @@ import { companionHome, removeCompanionHomes } from './companion-home';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { settled } from './settle';
 
 // The real demo on THIS machine (opt-in: YAWBLE_REAL_DEMO=1). It uses the person's own installed Claude Code and Grok
 // and their own sign-ins (the app only detects them), real sandboxes, and real model calls on the person's
@@ -77,6 +78,7 @@ test('real demo: a Claude Manager splits a task between a Claude member and a Gr
       }
       if (/Running|Queued/.test(now)) sawRunning = true;
       if (sawRunning && !/Running|Queued/.test(now)) break;
+      // This loop's own poll interval: the cards are read (and shot when they changed) every 2 s while the agents work.
       await main.waitForTimeout(2000);
     }
     await shot(main, 'workflow-done');
@@ -84,7 +86,9 @@ test('real demo: a Claude Manager splits a task between a Claude member and a Gr
     // Ben's terminal in his pane on the team page: his last run (replay).
     await main.locator('[data-test=agent-Ben] [data-test=member-view-terminal]').click();
     await main.locator('[data-test=agent-Ben] [data-test=member-terminal]').waitFor();
-    await main.waitForTimeout(3000);
+    // The replay is drawn: text in the terminal's rows.
+    await expect(main.locator('[data-test=agent-Ben] .xterm-rows')).not.toHaveText(/^\s*$/, { timeout: 30_000 });
+    await settled(main);
     await main.screenshot({ path: path.join(shots, `${String(++n).padStart(2, '0')}-terminal-ben.png`) });
 
     // What the agents committed (branches fetched back into the team's repository).

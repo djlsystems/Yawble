@@ -9,6 +9,7 @@
 import { devices, expect, test, type Page } from './fixtures';
 import { PHONE_BREAKPOINT } from '../../../src/renderer/src/phone';
 import { buildRenderer, builtDir, fakeRemote } from './server';
+import { resized, settled } from '../settle';
 
 test.use({ browserName: 'webkit', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
@@ -27,14 +28,12 @@ async function open(browser: import('@playwright/test').Browser, device: string,
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${s.url}${hash}`);
   await expect(page.locator(ready).first()).toBeVisible({ timeout: 30_000 });
-  await page.waitForTimeout(300);
+  await settled(page);
   return { ctx, page, errors };
 }
 
 async function rotate(page: Page, to: Size) {
-  await page.setViewportSize(to);
-  await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
-  await page.waitForTimeout(300);
+  await resized(page, to.width, to.height);
 }
 
 async function fits(page: Page, to: Size, step: string) {

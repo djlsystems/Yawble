@@ -114,7 +114,7 @@ for (const [label, w, h] of [['phone 390x844', 390, 844], ['iPad 820x1180', 820,
       await expectConfirm(page, 'Delete the trigger nightly-check?', 'Delete', phone);
       await page.locator('[data-test=confirm-cancel]').click();
       await expect(confirmBox(page)).toHaveCount(0);
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(300); // nothing may be sent: the time a stray call would take to reach the fake core
       expect(calls).not.toContain('triggers.delete');
       await expect(row).toBeVisible();
 
@@ -152,7 +152,10 @@ for (const [label, w, h] of [['phone 390x844', 390, 844], ['iPad 820x1180', 820,
       await page.keyboard.press('Escape');
       await expect(confirmBox(page)).toHaveCount(0);
       await expect(pane.locator('[data-test=member-more]')).toBeFocused();
-      await page.waitForTimeout(1500); // a refresh or two: still there
+      // A refresh or two of the team (TeamView polls teams.agents): the member is still there.
+      const refreshes = () => calls.filter((c) => c === 'teams.agents').length;
+      const seen = refreshes();
+      await expect.poll(() => refreshes() - seen, { message: 'two team refreshes after Escape' }).toBeGreaterThanOrEqual(2);
       expect(calls).not.toContain('members.remove');
       await expect(pane).toBeVisible();
 

@@ -9,6 +9,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeCore, type Access } from './phone/fake-core';
 import { ORIGIN, buildRenderer, builtDir } from './phone/server';
+import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
@@ -44,7 +45,7 @@ async function open(browser: Browser, access: Access = 'full', width = 1280) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${ORIGIN}/remote.html`);
   await expect(page.locator('[data-test=sidebar]')).toBeAttached({ timeout: 30_000 });
-  await page.waitForTimeout(400);
+  await settled(page);
   return { page, ctx, errors, sent };
 }
 
