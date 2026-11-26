@@ -134,13 +134,12 @@ public class SandboxRequestValidatorTests
     }
 
     [Fact]
-    public void TheLinuxGoldenFilesNoLongerMakeBwrapExitBeforeTheReadinessQuery()
+    public void TheLinuxGoldenFiles_DoNotMakeBwrapExitBeforeTheReadinessQuery()
     {
         Assert.Equal(10, LinuxGoldens.Count());
-        // The old dry run submitted the golden policy unchanged: the fictional /home/alice grants made bwrap
-        // exit at mount, once per Linux golden file - the ~10 lines of a Fedora Core.Tests run.
+        // A golden policy submitted unchanged: its fictional /home/alice grants make bwrap exit at mount, once per
+        // Linux golden file. The validator's dry run must not submit the golden file's own binds.
         var before = new FakeBubblewrap();
-        // (the old ProbeCopy changed only the command and the timeout, so the binds were the golden file's own)
         foreach (var name in LinuxGoldens) before.Run(OnThisHost(name));
         Assert.Equal(10, before.Lines);
 
