@@ -371,7 +371,7 @@ public class DecisionOptionsTests
         Assert.Empty(await rig.Decisions());
     }
 
-    // ------------------------------------------------------------------ the tester's checks
+    // ------------------------------------------------------------------ edges of the answer
 
     [Fact]
     public async Task TheShellsAnswer_TextEqualToTheReply_IsSentOnce_AndStillAppliesTheAction()
@@ -403,7 +403,7 @@ public class DecisionOptionsTests
         Assert.Empty(rig.LocalhostAudit());
     }
 
-    // ------------------------------------------------------------------ fixes from review
+    // ------------------------------------------------------------------ refused answers and the card's line
 
     [Fact]
     public async Task ARefusedAnswer_ToAnArchivedTeam_LeavesAllowLocalhostOff_AndSendsNothing()
@@ -522,8 +522,8 @@ public class DecisionOptionsTests
     [Fact]
     public async Task AnOpenQuestion_WinsOverADeclarationMadeAfterIt_InAnotherDeliverable()
     {
-        // The bug: the card's line is the member's last report, so declaring another deliverable complete after asking
-        // showed "declared complete" while the question still waited on the person.
+        // The card's line is the member's last report, and an open question outranks it: declaring another deliverable
+        // complete after asking does not show "declared complete" while the question still waits on the person.
         await using var rig = await Rig.StartAsync(LocalhostAsk());
         await rig.TellAdaAsync("ask");
         var question = Assert.Single(await rig.Decisions());
@@ -534,7 +534,7 @@ public class DecisionOptionsTests
         await Wait.UntilAsync(() => rig.Engine.IsQuiescentAsync(Ct), "quiet");
         var status = (await rig.Engine.TeamStatusAsync("Alpha", Ct)).Single(s => s.Name == "Ada");
         Assert.Null(status.DecisionId);
-        Assert.StartsWith("declared complete", status.StatusLine); // falls back as before
+        Assert.StartsWith("declared complete", status.StatusLine); // with the question answered, the last report again
     }
 
     private static async Task AssertWaiting(Rig rig, long decisionId)

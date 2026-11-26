@@ -196,7 +196,7 @@ public class FolderTriggerTests
         (fire, _) = Settle(before, s, ref at, FolderWatch.AnyChange); // a remove alone fires under any change
         Assert.Equal(["new.pdf"], fire!.Removed);
 
-        // no setting: any change, as before the setting existed
+        // no setting: any change
         var (_, d0) = FolderWatcher.Look(before, null, T0, 10);
         var (_, d1) = FolderWatcher.Look(after, d0, T0.AddSeconds(30), 10);
         var (fireDefault, _) = FolderWatcher.Look(after, d1, T0.AddSeconds(60), 10);

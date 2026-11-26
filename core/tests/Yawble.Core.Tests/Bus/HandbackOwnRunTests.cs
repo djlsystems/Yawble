@@ -41,7 +41,7 @@ public class HandbackOwnRunTests
     private static async Task<MemberStatus> Status(BusEngine engine, string name) =>
         (await engine.TeamStatusAsync("Alpha", Ct)).Single(s => s.Name == name);
 
-    // ---------------------------------------------------------------- bug 1: the hand-back's own run
+    // ---------------------------------------------------------------- the hand-back's own run
 
     [Fact]
     public async Task AHandbackWhoseRunEnded_ReachesTheManager_WithoutWaitingForTheSendersNextRunInAnotherDeliverable()
@@ -167,7 +167,7 @@ public class HandbackOwnRunTests
         Assert.Equal([MessageTypes.Handback, MessageTypes.Completed], manager.Items.Select(i => i.Type));
     }
 
-    // ---------------------------------------------------------------- bug 2: the waiting states
+    // ---------------------------------------------------------------- the waiting states
 
     [Fact]
     public async Task Queued_OnlyAMemberInTheRunQueue_IsQueuedForASlot_InEveryView()
