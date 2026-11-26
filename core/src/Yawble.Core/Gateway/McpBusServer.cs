@@ -171,7 +171,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
 
     /// <summary>
     /// hiring: with a hire list, its rows (role, description, agent, model, and whether the agent can run now) and the rule;
-    /// without one, every agent and whether it can run now, as before.
+    /// without one, every agent and whether it can run now.
     /// </summary>
     private static string HiringText(HiringOffer offer) =>
         offer.HireList.Count == 0

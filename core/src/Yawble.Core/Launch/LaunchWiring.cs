@@ -179,7 +179,7 @@ public interface IWorkflowMemberRuns
 
 /// <summary>
 /// The bus's runner, dispatching by member kind: a workflow member's run goes to the workflow engine (through
-/// <see cref="IWorkflowMemberRuns"/>), an agent's to the runner it always had (the sandbox launcher, wrapped as before),
+/// <see cref="IWorkflowMemberRuns"/>), an agent's to the wrapped sandbox launcher,
 /// unchanged. With no workflow runner set every run is an agent's.
 /// </summary>
 public sealed class WorkflowDispatchRunner(IAgentRunner agents, Func<IWorkflowMemberRuns?> workflows) : IAgentRunner

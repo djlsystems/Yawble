@@ -114,8 +114,8 @@ public sealed class RunActivity(TimeProvider clock) : Bus.IRunIdleClock
 
     /// <summary>
     /// The agent is working without calling the bus: a model request went out or its answer is streaming back. It
-    /// counts against Stalled in the time accounting, but does not reset the idle watchdog (that still waits for a
-    /// bus call, so a run that only talks to the model is stopped as before).
+    /// counts against Stalled in the time accounting, but does not reset the idle watchdog (that waits for a
+    /// bus call, so a run that only talks to the model is still stopped as idle).
     /// </summary>
     public void Saw()
     {

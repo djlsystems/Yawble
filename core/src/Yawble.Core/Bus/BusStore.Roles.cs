@@ -56,7 +56,7 @@ public sealed partial class BusStore
         return list;
     }
 
-    /// <summary>Replaces the team's hire list with <paramref name="rows"/>, in their order (none: the team hires as before).</summary>
+    /// <summary>Replaces the team's hire list with <paramref name="rows"/>, in their order (none: the team has no hire list and may hire any agent).</summary>
     public void SetHireList(long teamId, IReadOnlyList<HireListRow> rows)
     {
         Exec("DELETE FROM team_hire_list WHERE team_id = $t;", ("$t", teamId));

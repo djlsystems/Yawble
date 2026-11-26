@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Yawble.Core.Bus;
 
-/// <summary>A deliverable's expiry bookkeeping (0045_workflow_expiry.sql, renamed in 0060): the person's last Extend and its one warning.</summary>
+/// <summary>A deliverable's expiry bookkeeping (table deliverable_expiry): the person's last Extend and its one warning.</summary>
 public sealed record DeliverableExpiryRow(long Deliverable, DateTimeOffset? ExtendedAt, DateTimeOffset? WarnedFor, DateTimeOffset? WarnedAt, long? WarnedQuestion);
 
 /// <summary>Deliverable expiry: the team's setting, and the Extend and warning rows.</summary>

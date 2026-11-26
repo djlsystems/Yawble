@@ -6,7 +6,7 @@ public static class WorkflowFolders
     /// <summary>The data folder's subfolder for workflow files.</summary>
     public const string Name = "workflows";
 
-    /// <summary>The subfolder's name before migration 0060, when workflows were called scripts.</summary>
+    /// <summary>The subfolder's name in a data folder written before migration 0060.</summary>
     public const string OldName = "scripts";
 
     /// <summary>

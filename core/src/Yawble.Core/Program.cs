@@ -155,7 +155,7 @@ await using var bus = await Yawble.Core.Bus.BusHost.StartAsync(
     appDataRoot: Yawble.Core.Bus.BusHost.AppRootFor(options.DataDir!),
     skills: skillCatalog,
     availableAgents: ct => Yawble.Core.Agents.AgentReadiness.ChoicesAsync(clis, ct),
-    // Workflow members' runs go to the workflow engine, agents' to the launcher as before.
+    // Workflow members' runs go to the workflow engine, agents' to the launcher.
     wrapRunner: r => new Yawble.Core.Launch.WorkflowDispatchRunner(r, () => workflowRunner));
 busForRunner = bus;
 // The global workflow and schema libraries and the workflow runner (members' data folders under <data>/workflows). Runs the
@@ -174,7 +174,7 @@ var workflowActions = new Yawble.Core.Workflows.Actions.WorkflowActionKinds(new 
 var workflowLibrary = new Yawble.Core.Workflows.Library.WorkflowLibrary($"Data Source={dbPath}", () => workflowActions.Catalog,
     integrations: new Yawble.Core.Workflows.Library.IntegrationWorkflowDirectory($"Data Source={dbPath}", integrationsReady.Task));
 var workflowRuns = new Yawble.Core.Workflows.Running.WorkflowRunStore($"Data Source={dbPath}");
-// Workflows were called scripts before migration 0060: their members' data folders move with them, once.
+// A data folder written before migration 0060 keeps the workflow files under "scripts": that folder is moved, once.
 Yawble.Core.Workflows.Running.WorkflowFolders.MoveOldFolder(options.DataDir!);
 workflowRunner = new Yawble.Core.Workflows.Running.WorkflowRunner(workflowRuns, workflowLibrary, workflowActions,
     Yawble.Core.Workflows.Running.SeamWorkflowEngine.Instance, Path.Combine(options.DataDir!, "workflows"),

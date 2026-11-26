@@ -532,8 +532,8 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// <summary>
     /// Each member's newest unanswered needs_decision in a team, by qualified name (BusStore.OpenDecisions: in any of
     /// its deliverables). The status line is the member's last report in memory, so a deliverable_complete or a hand-back after
-    /// the question (another deliverable, or the Manager declaring) used to replace "needs decision" while the person still
-    /// owed the answer; the open question wins until it is answered.
+    /// the question (another deliverable, or the Manager declaring) would replace "needs decision" while the person still
+    /// owes the answer; the open question wins until it is answered.
     /// </summary>
     private Dictionary<string, Message> OpenDecisionByMember(string team) =>
         _store.OpenDecisions(team).GroupBy(m => m.Source, StringComparer.OrdinalIgnoreCase)

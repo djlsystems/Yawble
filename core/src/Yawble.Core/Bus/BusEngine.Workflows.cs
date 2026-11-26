@@ -33,7 +33,7 @@ public sealed partial class BusEngine
 
     /// <summary>
     /// A trigger's fire for a workflow member: the structured payload (TriggerFired, FolderChange or EventItem) goes to its
-    /// workflow run; nothing is published. Null when the member is an agent (its fire is told as before).
+    /// workflow run; nothing is published. Null when the member is an agent (its fire is told to it as a message).
     /// </summary>
     private TriggerFire? FireWorkflowMember(TriggerRow row, MemberRef member, DateTimeOffset now, JsonObject? payload)
     {

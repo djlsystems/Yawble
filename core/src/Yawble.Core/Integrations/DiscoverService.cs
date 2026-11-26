@@ -394,8 +394,8 @@ public sealed partial class DiscoverService(string connectionString, Func<IComma
     }
 
     /// <summary>
-    /// The row a stored ask is remembered under: its action re-checked with <see cref="FoundPathOf"/>'s rules (an ask saved before
-    /// them may name a group or a short guess; then null, the exact line), else FoundPathOf now.
+    /// The row a stored ask is remembered under: its action re-checked with <see cref="FoundPathOf"/>'s rules (a stored
+    /// action may name a group or a short guess; then null, the exact line), else FoundPathOf of the arguments.
     /// </summary>
     public string? ActionOf(string cliName, IReadOnlyList<string> args, string? action)
     {

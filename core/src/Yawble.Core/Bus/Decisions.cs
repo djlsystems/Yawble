@@ -124,7 +124,7 @@ public sealed record DecisionAsk(string Question, string? Summary = null, IReadO
 
     private static string? Trimmed(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
-    /// <summary>The payload stored: only the fields given (a question-only ask is <c>{"question": ...}</c>, as before options were added).</summary>
+    /// <summary>The payload stored: only the fields given (a question-only ask is <c>{"question": ...}</c>).</summary>
     public JsonObject ToPayload()
     {
         var o = new JsonObject { ["question"] = Question };
