@@ -24,13 +24,22 @@ public interface ITerminalInput
 
 /// <summary>
 /// The terminal channels: one per member ("member:&lt;id&gt;") and one per host pane
-/// ("host:&lt;kind&gt;"). Each keeps a 1 MiB replay buffer, whether or not a window is
+/// ("host:&lt;kind&gt;"). Each keeps the newest output, up to 1 MiB, as its replay, whether or not a window is
 /// open, and pushes new output and state as events. A window attaches by reading the replay, then streams.
 /// The PTY itself is not here: the launcher (or a fake) writes output in and takes input out.
+///
+/// Memory: a replay takes what its channel has printed, not 1 MiB from the start, and a channel nobody wrote to
+/// takes none. A live terminal always keeps its replay (a window that attaches late reads it). The replays of
+/// terminals that have ended are kept, so a window opened afterwards still shows what the run printed, until together
+/// they pass <see cref="EndedReplayBudget"/>: then the ones ended, or last attached to, longest ago are freed first.
+/// A freed channel keeps its byte count, so a window that is still open goes on from where it was.
 /// </summary>
 public sealed class TerminalHub(AppEvents events)
 {
     public const int ReplayBytes = 1 << 20;
+
+    /// <summary>How many bytes the replays of ended terminals may hold together (64 MiB: 64 full replays).</summary>
+    public long EndedReplayBudget { get; init; } = 64L << 20;
 
     public const string OutputEvent = "terminal.output";
     public const string StateEvent = "terminal.state";
@@ -44,6 +53,31 @@ public sealed class TerminalHub(AppEvents events)
         public TerminalSession? Session;
         public ITerminalInput? Input;
         public long Sequence; // bytes ever written: a window drops pushes it already has from the replay
+        public long Used;     // when the channel last ended or was attached to (a count, larger is later)
+
+        public bool Live => Session is { Ended: false };
+    }
+
+    private long _uses;
+
+    /// <summary>The bytes all replays hold now (tests read it).</summary>
+    internal long ReplayBytesHeld
+    {
+        get { lock (_lock) return _channels.Values.Sum(e => (long)e.Replay.Held); }
+    }
+
+    /// <summary>Under the lock: frees the replays of ended terminals, least recently used first, while they hold more than the budget.</summary>
+    private void KeepEndedWithinBudget()
+    {
+        var ended = _channels.Values.Where(e => !e.Live && e.Replay.Held > 0).ToList();
+        var held = ended.Sum(e => (long)e.Replay.Held);
+        if (held <= EndedReplayBudget) return;
+        foreach (var e in ended.OrderBy(e => e.Used))
+        {
+            held -= e.Replay.Held;
+            e.Replay.Free();
+            if (held <= EndedReplayBudget) return;
+        }
     }
 
     /// <summary>The pushes this hub publishes on (others with a session on a channel publish theirs here too).</summary>
@@ -105,6 +139,8 @@ public sealed class TerminalHub(AppEvents events)
             if (e.Session is null || e.Session.Ended) return;
             e.Session = e.Session with { Ended = true, ExitCode = exitCode, EndReason = reason, InputEnabled = false };
             e.Input = null;
+            e.Used = ++_uses;
+            KeepEndedWithinBudget();
         }
         PublishState(channel);
     }
@@ -122,6 +158,7 @@ public sealed class TerminalHub(AppEvents events)
         lock (_lock)
         {
             var e = Get(channel);
+            e.Used = ++_uses; // looked at: among the ended, it is freed last
             return new JsonObject
             {
                 ["channel"] = channel,
@@ -184,30 +221,51 @@ public sealed class TerminalHub(AppEvents events)
     }
 }
 
-/// <summary>A byte ring that keeps the newest <c>capacity</c> bytes (a channel's replay buffer).</summary>
+/// <summary>
+/// A byte ring that keeps the newest <c>capacity</c> bytes (a channel's replay buffer). It holds no memory until the
+/// first byte and grows with what is written, up to the capacity.
+/// </summary>
 public sealed class ReplayBuffer(int capacity)
 {
-    private readonly byte[] _buffer = new byte[capacity];
+    private const int FirstSize = 4096;
+
+    // Until the array has grown to the capacity the bytes lie from 0 (nothing has wrapped): _start is 0.
+    private byte[] _buffer = [];
     private int _start;
     private int _count;
 
     public int Count => _count;
 
+    /// <summary>The bytes of memory the buffer holds now (0 before the first write and after <see cref="Free"/>).</summary>
+    public int Held => _buffer.Length;
+
     public void Append(ReadOnlySpan<byte> data)
     {
+        if (data.IsEmpty) return;
         if (data.Length >= capacity)
         {
+            if (_buffer.Length < capacity) _buffer = new byte[capacity];
             data[^capacity..].CopyTo(_buffer);
             _start = 0;
             _count = capacity;
             return;
         }
-        foreach (var b in data)
+        if (_count + data.Length > _buffer.Length && _buffer.Length < capacity)
+            Array.Resize(ref _buffer, (int)Math.Min(capacity, Math.Max(Math.Max(_buffer.Length * 2L, _count + data.Length), FirstSize)));
+        var size = _buffer.Length;
+        var at = (_start + _count) % size;
+        var first = Math.Min(data.Length, size - at);
+        data[..first].CopyTo(_buffer.AsSpan(at));
+        data[first..].CopyTo(_buffer);
+        var total = _count + data.Length;
+        if (total > size)
         {
-            var at = (_start + _count) % capacity;
-            _buffer[at] = b;
-            if (_count < capacity) _count++;
-            else _start = (_start + 1) % capacity;
+            _start = (_start + (total - size)) % size; // the oldest bytes were written over
+            _count = size;
+        }
+        else
+        {
+            _count = total;
         }
     }
 
@@ -217,10 +275,18 @@ public sealed class ReplayBuffer(int capacity)
         _count = 0;
     }
 
+    /// <summary>Forgets the bytes and gives their memory back.</summary>
+    public void Free()
+    {
+        _buffer = [];
+        Clear();
+    }
+
     public byte[] ToArray()
     {
         var result = new byte[_count];
-        var first = Math.Min(_count, capacity - _start);
+        if (_count == 0) return result;
+        var first = Math.Min(_count, _buffer.Length - _start);
         Array.Copy(_buffer, _start, result, 0, first);
         Array.Copy(_buffer, 0, result, first, _count - first);
         return result;
