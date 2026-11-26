@@ -158,6 +158,73 @@ public sealed class BackupTests : IDisposable
     }
 
     [Fact]
+    public void BackupsOverTheByteBudgetLoseTheirOldestDailies_NeverTheNewestOfAKind()
+    {
+        MigratedDb();
+        var budget = long.MaxValue;
+        var svc = new BackupService(_dir, () => _now) { ByteBudget = _ => budget };
+        _now = _now.AddMinutes(1); svc.BackupNow("before-0099_x");
+        _now = _now.AddMinutes(1); svc.BackupNow("manual");
+        for (var i = 0; i < 5; i++) { _now = _now.AddMinutes(1); svc.BackupNow("daily"); }
+        var one = svc.List()[0].Size;
+        Assert.All(svc.List(), b => Assert.Equal(one, b.Size));
+
+        // Seven backups of one size; five and a half fit: the two oldest dailies go.
+        budget = 5 * one + one / 2;
+        Assert.Equal(2, svc.Prune());
+        var list = svc.List();
+        Assert.Equal(3, list.Count(b => b.Reason == "daily"));
+        Assert.Equal(_now, list[0].Time);
+        Assert.Equal(list.Count, Directory.GetFiles(Path.Combine(_dir, "backups"), "*.json").Length);
+
+        // Nothing fits: the newest daily, the manual and the before-update backups stay all the same.
+        budget = 0;
+        Assert.Equal(2, svc.Prune());
+        Assert.Equal(["daily", "manual", "before-0099_x"], svc.List().Select(b => b.Reason));
+        Assert.Equal(_now, svc.List()[0].Time);
+    }
+
+    [Fact]
+    public void TheByteBudgetIsThreeTimesTheDatabase_AndAtLeastTwoGigabytes()
+    {
+        var svc = Service();
+        Assert.Equal(BackupService.ByteBudgetFloor, svc.ByteBudget(76_000_000));
+        Assert.Equal(2L * 1024 * 1024 * 1024, BackupService.ByteBudgetFloor);
+        Assert.Equal(6_000_000_000, svc.ByteBudget(2_000_000_000));
+    }
+
+    [Fact]
+    public void ABackupThatFailsItsCheckIsDeletedAndReportedAsAFailedBackup()
+    {
+        MigratedDb();
+        var lines = new List<string>();
+        var svc = new BackupService(_dir, () => _now, log: lines.Add) { QuickCheck = _ => "row 3 missing from index ix" };
+
+        var e = Assert.Throws<InvalidOperationException>(() => svc.BackupNow());
+        Assert.Contains("failed its check", e.Message);
+        Assert.Contains("row 3 missing from index ix", e.Message);
+        Assert.Empty(Directory.GetFiles(Path.Combine(_dir, "backups")));
+
+        // The daily backup reports it the way it reports any failed backup: a log line, nothing thrown, nothing listed.
+        Assert.Null(svc.DailyIfDue());
+        Assert.Contains(lines, l => l.Contains("the daily backup failed") && l.Contains("failed its check"));
+        Assert.Empty(svc.List());
+    }
+
+    [Fact]
+    public void ANewBackupIsCheckedBeforeItGetsItsName()
+    {
+        MigratedDb();
+        var seen = new List<string>();
+        var svc = new BackupService(_dir, () => _now) { QuickCheck = file => { seen.Add(Path.GetFileName(file)); return "ok"; } };
+
+        var info = svc.BackupNow();
+
+        Assert.Equal(["~.tmp"], seen);
+        Assert.Equal("one", Marker(Path.Combine(_dir, "backups", info.Name)));
+    }
+
+    [Fact]
     public void SidecarListsConnectionsAndSecretFieldNamesButNeverValues()
     {
         MigratedDb();

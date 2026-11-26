@@ -978,6 +978,9 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 - **Backups** (Settings > General) copy the app's database:
   - daily, before an update, and on **Back up now**;
   - 7 daily backups are kept by default, plus 5 before-update and 5 manual ones.
+  - The backups together take at most three times the database's size, or 2 GB when that is more. Over that, the
+    oldest daily backups are deleted; the newest daily one and the before-update and manual ones stay.
+  - A new backup is checked before it is kept. One that fails the check is deleted, and the backup counts as failed.
 - Passwords and sign-ins are not copied. A backup records which Connections and secret fields existed, never their
   values.
 - **Restore…** returns teams, cards and messages to that moment. It is applied at the next start.
