@@ -106,10 +106,10 @@ public static class LogSources
                 new("exit", "Exit", "t.exit_code", "number"),
                 new("duration", "Seconds", "ROUND(t.duration_ms / 1000.0, 1)", "number"),
                 new("reason", "Reason", "t.reason"),
-                new("workflow", "Workflow", "sc.workflow_key || '@' || sr.workflow_version", Filter: true),
-                new("trigger", "Started by", "sr.trigger"),
-                new("failedStep", "Failed step", "sr.failed_step_id"),
-                new("workflowRun", "Workflow run", "sr.id", "number"),
+                new("workflow", "Workflow", "wf.workflow_key || '@' || wr.workflow_version", Filter: true),
+                new("trigger", "Started by", "wr.trigger"),
+                new("failedStep", "Failed step", "wr.failed_step_id"),
+                new("workflowRun", "Workflow run", "wr.id", "number"),
             ],
             "t.team = @team", "t.team = @team AND t.member = @name",
             new("run_records", "started_at", 365, "how each run before the cutoff ended. The agent's last run and the Settings > Agents run history lose those runs.")),
@@ -214,12 +214,12 @@ public static class LogSources
 
         new("workflows", "Workflow runs", "Work history",
             "Each run of a workflow member, and each Test run: its workflow (key@version), what started it (a trigger, a tell, a test), how it ended, the step it failed at and why, and how long it took. The member's Runs tab shows each run step by step.",
-            "workflow_runs t JOIN teams tm ON tm.id = t.team_id JOIN workflows sc ON sc.id = t.workflow_id LEFT JOIN members m ON m.id = t.member_id", "t.id", "t.started_at",
+            "workflow_runs t JOIN teams tm ON tm.id = t.team_id JOIN workflows wf ON wf.id = t.workflow_id LEFT JOIN members m ON m.id = t.member_id", "t.id", "t.started_at",
             [
                 new("at", "Started", "t.started_at", "time"),
                 new("team", "Team", "tm.name", Filter: true),
                 new("member", "Member", "COALESCE(m.name, CASE WHEN t.test = 1 THEN '(test run)' END)"),
-                new("workflow", "Workflow", "sc.workflow_key || '@' || t.workflow_version", Filter: true),
+                new("workflow", "Workflow", "wf.workflow_key || '@' || t.workflow_version", Filter: true),
                 new("trigger", "Started by", "t.trigger"),
                 new("status", "Status", "t.status", Filter: true),
                 new("failedStep", "Failed step", "t.failed_step_id"),
@@ -277,12 +277,12 @@ public static class LogSources
 
     /// <summary>
     /// The Runs log: run_records, and for a workflow member's run (kind 'workflow', run_key "workflow:&lt;id&gt;", WorkflowRunStore.RunKey) its
-    /// workflow run (sr) and workflow (sc), read by the run's id.
+    /// workflow run (wr) and workflow (wf), read by the run's id.
     /// </summary>
     private const string RunsFrom = """
         run_records t
-          LEFT JOIN workflow_runs sr ON t.kind = 'workflow' AND sr.id = CAST(substr(t.run_key, 10) AS INTEGER)
-          LEFT JOIN workflows sc ON sc.id = sr.workflow_id
+          LEFT JOIN workflow_runs wr ON t.kind = 'workflow' AND wr.id = CAST(substr(t.run_key, 10) AS INTEGER)
+          LEFT JOIN workflows wf ON wf.id = wr.workflow_id
         """;
 
     /// <summary>The prune time of an ask: when it was answered, or when it was raised if no answer time was kept.</summary>
@@ -338,12 +338,12 @@ public static class LogSources
         (
           SELECT COALESCE(r.ended_at, r.started_at) AS at, 'Runs' AS source, r.team || '/' || r.member AS member, 'run ' || COALESCE(r.end_class, 'running') AS event,
                  trim(COALESCE(r.cli, '') || ' ' || COALESCE(r.model, '') || ' ' || COALESCE(r.kind, '') || COALESCE(' exit ' || r.exit_code, '')
-                      || COALESCE(' ' || rsc.workflow_key || '@' || rsr.workflow_version || ' (workflow run ' || rsr.id || ', ' || rsr.trigger || ')', '')
-                      || COALESCE(' at step ' || rsr.failed_step_id, '') || COALESCE(' ' || r.reason, '')) AS details,
+                      || COALESCE(' ' || rwf.workflow_key || '@' || rwr.workflow_version || ' (workflow run ' || rwr.id || ', ' || rwr.trigger || ')', '')
+                      || COALESCE(' at step ' || rwr.failed_step_id, '') || COALESCE(' ' || r.reason, '')) AS details,
                  'r' || r.id AS rid
             FROM run_records r
-              LEFT JOIN workflow_runs rsr ON r.kind = 'workflow' AND rsr.id = CAST(substr(r.run_key, 10) AS INTEGER)
-              LEFT JOIN workflows rsc ON rsc.id = rsr.workflow_id
+              LEFT JOIN workflow_runs rwr ON r.kind = 'workflow' AND rwr.id = CAST(substr(r.run_key, 10) AS INTEGER)
+              LEFT JOIN workflows rwf ON rwf.id = rwr.workflow_id
           UNION ALL
           SELECT g.at, 'Network', g.member, g.kind, trim(COALESCE(g.method, '') || ' ' || COALESCE(g.target, g.vhost, '') || COALESCE(' ' || g.status, '') || COALESCE(' ' || g.detail, '') || CASE WHEN g.count > 1 THEN ' (' || g.count || 'x)' ELSE '' END), 'g' || g.id
             FROM gateway_events g
