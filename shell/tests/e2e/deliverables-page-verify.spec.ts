@@ -13,7 +13,6 @@ import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(90_000);
-test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
 
 const fx = (name: string) => JSON.parse(readFileSync(path.join(__dirname, '..', 'unit', 'fixtures', 'deliverables', `${name}.json`), 'utf8'));
 const ID = fx('ids') as Record<string, number | string>;
@@ -21,13 +20,19 @@ const LIST = { all: fx('list-all'), open: fx('list-open') };
 const GETS = ['get-running', 'get-dispatched', 'get-needs-you', 'get-closed-archived'].map(fx);
 const n = (k: string) => Number(ID[k]);
 
-// The real core's answers in place of the fake's canned ones (this worker only).
-answers['deliverables.list'] = (p) => structuredClone(String(p?.state ?? 'all').toLowerCase() === 'open' ? LIST.open : LIST.all);
-answers['deliverables.get'] = (p) => {
-  const g = GETS.find((d) => d.deliverable.id === Number(p?.deliverable));
-  if (!g) throw Object.assign(new Error('no such deliverable'), { code: 'no_such_deliverable' });
-  return structuredClone(g);
+// The real core's answers in place of the fake's canned ones, for this file only: the fake core's answers are shared
+// by every spec file the worker runs, so they are put back after the file's last test.
+const OVERRIDES: typeof answers = {
+  'deliverables.list': (p) => structuredClone(String(p?.state ?? 'all').toLowerCase() === 'open' ? LIST.open : LIST.all),
+  'deliverables.get': (p) => {
+    const g = GETS.find((d) => d.deliverable.id === Number(p?.deliverable));
+    if (!g) throw Object.assign(new Error('no such deliverable'), { code: 'no_such_deliverable' });
+    return structuredClone(g);
+  },
 };
+const saved = { ...answers };
+test.beforeAll(async () => { test.setTimeout(600_000); Object.assign(answers, OVERRIDES); await buildRenderer(); });
+test.afterAll(() => { for (const k of Object.keys(answers)) if (!(k in saved)) delete answers[k]; Object.assign(answers, saved); });
 
 const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'deliverables-page', 'verify') : null;
 if (shots) mkdirSync(shots, { recursive: true });

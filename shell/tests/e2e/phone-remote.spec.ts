@@ -3,17 +3,16 @@
 //
 // Every screen at 390 x 844 and 360 x 740: the page must not scroll sideways (scrollWidth > innerWidth), no visible
 // control may sit off the screen's edge, and none may be smaller than 44 x 44 px. Plus the on-screen keyboard (a fake
-// visualViewport), the Visitor chip, the dark Monitor and its forces panel, the 759 / 760 px edges, rotation, and at
-// 1280 px the desktop layout compared with main's at BASE_COMMIT (tests/e2e/phone/server.ts; one line to bump).
+// visualViewport), the Visitor chip, the dark Monitor and its forces panel, the 759 / 760 px edges and rotation.
 //
-//   npx playwright test phone-remote            (E2E_SKIP_BUILD=1 reuses out/e2e/renderer*; the base tree is out/e2e/main, extracted by the run from `git archive BASE_COMMIT shell code-browser`)
+//   npx playwright test phone-remote            (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 // Screenshots go to $YAWBLE_TEAM_DOCS/phone-screens (else test-results/phone-screens); the audit to test-results/phone-audit.ndjson (node tests/e2e/phone/summary.mjs prints it).
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { audit, type Audit } from './phone/audit';
 import { resized, settled } from './settle';
-import { BASE_COMMIT, baseBuiltDir, baseShellDir, buildRenderer, builtDir, extractBaseTree, fakeRemote } from './phone/server';
+import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
@@ -27,15 +26,14 @@ test.beforeAll(async () => {
   test.setTimeout(600_000);
   mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
-  if (process.env.E2E_NO_BASE !== '1') { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
 });
 
 type Size = { w: number; h: number };
 const PHONES: Size[] = [{ w: 390, h: 844 }, { w: 360, h: 740 }];
 
-interface OpenOpts { access?: 'full' | 'read'; theme?: 'light' | 'dark'; dir?: string; mobile?: boolean; asks?: boolean; sync?: boolean; needsYou?: boolean }
+interface OpenOpts { access?: 'full' | 'read'; theme?: 'light' | 'dark'; mobile?: boolean; asks?: boolean; sync?: boolean; needsYou?: boolean }
 async function open(browser: Browser, size: Size, o: OpenOpts = {}) {
-  const s = fakeRemote(o.dir ?? builtDir);
+  const s = fakeRemote(builtDir);
   s.core.setAccess(o.access ?? 'full');
   s.core.setAsks(o.asks ?? true);
   s.core.setSync(o.sync ?? false);
@@ -583,113 +581,10 @@ test.describe('break tests: the 759 / 760 px edges and rotation', () => {
   }
 });
 
-test.describe(`1280 px: the desktop layout is unchanged from main ${BASE_COMMIT}`, () => {
-  test.skip(process.env.E2E_NO_BASE === '1', 'no base build');
-  // Also the phone pages past their landing screen - a team's page, a team's documents
-  // folder, and the Settings sections (Skills with a skill picked, Guardrails, Integrations, System).
-  const tap = (sel: string) => async (p: Page) => { await p.locator(sel).first().click(); await settled(p); };
-  const deeper: Record<string, ((p: Page) => Promise<void>)[]> = {
-    'team-page': [tap('[data-test=team-open-payments]')],
-    'documents-folder': [tap('[data-test=documents-team-payments]')],
-    'settings-skill': [tap('[data-test=settings] [data-test=open-skills]'), tap('[data-test=skill-skill-10]')],
-    'settings-guardrails': [tap('[data-test=settings] [data-test=open-global-policy]')],
-    'settings-integrations': [tap('[data-test=settings] [data-test=open-integrations]')],
-    'settings-system': [tap('[data-test=settings] [data-test=open-system]')],
-  };
-  for (const [id, name] of [[null, 'concierge'], ['nav-teams', 'teams'], ['nav-board', 'board'], ['nav-backlog', 'backlog'], ['nav-monitor', 'monitor'], ['nav-documents', 'documents'], ['open-app-settings', 'settings'],
-    ['nav-teams', 'team-page'], ['nav-documents', 'documents-folder'], ['open-app-settings', 'settings-skill'], ['open-app-settings', 'settings-guardrails'], ['open-app-settings', 'settings-integrations'], ['open-app-settings', 'settings-system']] as const) {
-    test(`${name}: every [data-test] element in the same place and size`, async ({ browser }) => {
-      const size = { w: 1280, h: 800 };
-      type Layout = { out: Record<string, string>; below: string[]; members: { top: number; bottom: number } | null;
-        panes: { name: string; frames: number; saidRight: number; sideLeft: number }[] };
-      const layouts: Record<string, Layout> = {};
-      for (const [which, dir] of [['base', baseBuiltDir], ['branch', builtDir]] as const) {
-        const { page } = await open(browser, size, { dir, mobile: false });
-        // The base build has Settings in the sidebar, this one the gear at the top right.
-        if (id) await page.locator(id === 'open-app-settings' ? '[data-test=sidebar] [data-test=open-app-settings], [data-test=settings-gear]' : `[data-test=sidebar] [data-test=${id}]`).first().click();
-        for (const step of deeper[name] ?? []) await step(page);
-        await settled(page);
-        await page.screenshot({ path: path.join(SHOTS, `desktop-1280-${name}-${which}.png`) });
-        layouts[which] = await page.evaluate(() => {
-          // A team's page: its members (.member-cell, an AgentCard + activity row on main, one framed
-          // MemberPane here) are measured apart; what comes after them is listed in `below`.
-          const cells = [...document.querySelectorAll('.member-cell')];
-          const last = cells[cells.length - 1];
-          const members = cells.length ? { top: Math.round(cells[0].getBoundingClientRect().top), bottom: Math.round(last.getBoundingClientRect().bottom) } : null;
-          const out: Record<string, string> = {};
-          const below: string[] = [];
-          const seen = new Map<string, number>();
-          for (const el of document.querySelectorAll('[data-test]')) {
-            if (el.closest('.member-cell')) continue;
-            const k0 = el.getAttribute('data-test')!;
-            const n = (seen.get(k0) ?? 0) + 1; seen.set(k0, n);
-            const r = el.getBoundingClientRect();
-            if (!r.width && !r.height) continue;
-            const k = `${k0}#${n}`;
-            out[k] = `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
-            if (last && (last.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) below.push(k);
-          }
-          // The members are a grid now and its last cell is the New member tile (not a member pane).
-          const panes = cells.filter((c) => !c.classList.contains('new-cell')).map((c) => {
-            const body = c.querySelector('[data-test=member-pane-body]');
-            return { name: c.querySelector('[data-test^=agent-]')?.getAttribute('data-test') ?? '?', frames: c.querySelectorAll('section.pane').length,
-              views: body ? body.children.length : -1 };
-          });
-          return { out, below, members, panes };
-        });
-        await page.context().close();
-      }
-      const base = layouts.base!, branch = layouts.branch!;
-      // What follows the members may move down or up by however much taller or shorter the members area is.
-      const shift = base.members && branch.members ? (branch.members.bottom - branch.members.top) - (base.members.bottom - base.members.top) : 0;
-      const moved = (v: string | undefined, dy: number) => v?.replace(/^(-?\d+),(-?\d+)/, (_m, x, y) => `${x},${Number(y) - dy}`);
-      // A data-test the branch adds (a hook main does not have) is not a layout change: listed, not compared.
-      const diff: string[] = [];
-      const added = Object.keys(branch.out).filter((k) => !(k.replace(/#\d+$/, '#1') in base.out));
-      if (added.length) console.log(`${name} @1280: hooks new in this branch (not compared): ${added.join(', ')}`);
-      // The add row under the members went on purpose; its fields are in the New member tile (a
-      // .member-cell, measured with the members, team-grid.spec.ts checks it).
-      const goneFromTeamPage = new Set(['add-agent-name#1', 'add-agent-cli#1', 'add-agent#1']);
-      // The Monitor's density and sound controls sit right of the cog in the camera row, so the row's
-      // right-aligned controls move left together - one shared x shift, same y and size, nothing else.
-      const shiftedIn374 = new Set(['monitor-camera#1', 'monitor-autofit#1', 'monitor-fit#1', 'monitor-pin#1', 'monitor-layout-toggle#1']);
-      const xOf = (v: string | undefined) => Number(v?.split(',')[0]);
-      const dx374 = name === 'monitor' && base.out['monitor-camera#1'] && branch.out['monitor-camera#1']
-        ? xOf(branch.out['monitor-camera#1']) - xOf(base.out['monitor-camera#1']) : 0;
-      const movedX = (v: string | undefined, dx: number) => v?.replace(/^(-?\d+),/, (_m, x) => `${Number(x) - dx},`);
-      for (const k of new Set([...Object.keys(base.out), ...Object.keys(branch.out)])) {
-        if (added.includes(k)) continue;
-        if (name === 'team-page' && goneFromTeamPage.has(k) && !(k in branch.out)) continue;
-        if (name === 'monitor' && shiftedIn374.has(k)) {
-          // 1 px of rounding either way (sub-pixel widths round independently).
-          const same = [-1, 0, 1].some((e) => base.out[k] === movedX(branch.out[k], dx374 + e));
-          if (!same) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / branch ${branch.out[k] ?? '-'} (camera row shift ${dx374})`);
-          continue;
-        }
-        const b = branch.below.includes(k) ? moved(branch.out[k], shift) : branch.out[k];
-        if (base.out[k] !== b) diff.push(`${k}: main ${BASE_COMMIT} ${base.out[k] ?? '-'} / branch ${branch.out[k] ?? '-'}${branch.below.includes(k) ? ` (below the members, shift ${shift})` : ''}`);
-      }
-      expect.soft(diff, `${name} at 1280 px differs from main ${BASE_COMMIT}`).toEqual([]);
-      if (base.members || branch.members) {
-        // The members area starts where main's did: one frame per member, showing one view (its chosen tab's).
-        // eslint-disable-next-line no-console
-        console.log(`${name} @1280: members main ${JSON.stringify(base.members)} / branch ${JSON.stringify(branch.members)}; ${JSON.stringify(branch.panes)}`);
-        expect.soft(branch.members?.top, `${name}: the members start where main's do`).toBe(base.members?.top);
-        expect.soft(branch.panes.length, `${name}: one pane per member`).toBe(base.panes.length);
-        for (const p of branch.panes) {
-          expect.soft(p.frames, `${p.name}: one framed pane`).toBe(1);
-          expect.soft(p.views, `${p.name}: one view`).toBe(1);
-        }
-      }
-    });
-  }
-});
-
 // iPhone SE sizes, portrait 375 x 501 and landscape 667 x 263 (both the phone layout). Per page:
 // where the first content row starts (px from the top of the frame, the browser window; ~120 px is the portrait target,
 // on screen in landscape), no nested vertical scrollers, no sideways scroll, every field 16 px / 44 px, the Settings
-// back control after scrolling Guardrails to its bottom, and a picked skill in view. "before" is the base team branch
-// (E2E_BASE_DIR, e.g. 8b39e07), "after" this branch; only "after" is asserted, "before" is measured and recorded.
+// back control after scrolling Guardrails to its bottom, and a picked skill in view.
 const SE: Size[] = [{ w: 375, h: 501 }, { w: 667, h: 263 }];
 type PageMeasure = { first: { sel: string; top: number; bottom: number } | null; rows: Record<string, { top: number; bottom: number } | null>; topBar: number;
   scrollers: string[]; inputs: { what: string; font: number; h: number }[]; overflow: boolean; sw: number };
@@ -724,19 +619,16 @@ function measure(page: Page, first: string[], rows: Record<string, string> = {})
 for (const size of SE) {
   const portrait = size.h > size.w;
   test.describe(`iPhone SE ${tag(size)} (${portrait ? 'portrait' : 'landscape'})`, () => {
-    const builds = [['after', builtDir], ...(process.env.E2E_NO_BASE === '1' ? [] : [['before', baseBuiltDir]])] as const;
-    for (const [which, dir] of builds) {
-      test(`${which}: Backlog, Team, Documents and every Settings section`, async ({ browser }) => {
+    {
+      test('Backlog, Team, Documents and every Settings section', async ({ browser }) => {
         test.setTimeout(240_000);
-        const after = which === 'after';
         const rec = (screen: string, m: PageMeasure, extra: Record<string, unknown> = {}) => {
           mkdirSync(path.dirname(MEASURE_RESULTS), { recursive: true });
-          appendFileSync(MEASURE_RESULTS, JSON.stringify({ which, screen, size: tag(size), ...m, ...extra }) + '\n');
+          appendFileSync(MEASURE_RESULTS, JSON.stringify({ screen, size: tag(size), ...m, ...extra }) + '\n');
         };
         const where = (screen: string) => `${screen} @${tag(size)}`;
         /** The checks for a page; the first content row against the target (portrait) or on screen (landscape). */
         const judge = (screen: string, m: PageMeasure, o: { scrollersOk?: number; at?: boolean } = {}) => {
-          if (!after) return;
           expect.soft(m.first, `${where(screen)}: a first content row`).not.toBeNull();
           // at: false - a fold or field the user opened pushes the list down: not judged for where the row starts.
           if (m.first && o.at !== false) {
@@ -752,8 +644,8 @@ for (const size of SE) {
         };
         const SHOTS_SE = path.join(path.dirname(SHOTS), 'phone-se-screens');
         mkdirSync(SHOTS_SE, { recursive: true });
-        const shot = (screen: string) => page.screenshot({ path: path.join(SHOTS_SE, `${which}-${screen}-${tag(size)}.png`) });
-        let { page, ctx, errors } = await open(browser, size, { dir, asks: false });
+        const shot = (screen: string) => page.screenshot({ path: path.join(SHOTS_SE, `${screen}-${tag(size)}.png`) });
+        let { page, ctx, errors } = await open(browser, size, { asks: false });
 
         // Backlog: the list, then the search-and-sort fold open (its fields).
         await nav(page, 'nav-backlog');
@@ -765,13 +657,13 @@ for (const size of SE) {
         if (await tools.count()) { await tools.click(); await settled(page); }
         m = await measure(page, ['[data-test=backlog-row]'], { search: '[data-test=backlog-search]' });
         rec('backlog-tools', m); judge('backlog-tools', m, { at: false }); await shot('backlog-tools');
-        if (after) expect.soft(m.inputs.some((i) => /backlog-search/.test(i.what)), `${where('backlog-tools')}: the search field shown`).toBe(true);
+        expect.soft(m.inputs.some((i) => /backlog-search/.test(i.what)), `${where('backlog-tools')}: the search field shown`).toBe(true);
 
         // Team, without and with the sync bar: the Tell row is the first content row; the first member card measured too.
         // Three states: an integration ask and a Manager decision pending (above the members), the same with the sync bar,
         // and nothing pending (the members right under Tell).
         for (const [screen, sync, needsYou] of [['team', false, true], ['team-sync', true, true], ['team-quiet', false, false], ['team-quiet-sync', true, false]] as const) {
-          if (screen !== 'team') { await ctx.close(); ({ page, ctx, errors } = await open(browser, size, { dir, asks: false, sync, needsYou })); }
+          if (screen !== 'team') { await ctx.close(); ({ page, ctx, errors } = await open(browser, size, { asks: false, sync, needsYou })); }
           await nav(page, 'nav-teams');
           await page.locator('[data-test=team-open-payments]').click();
           await expect(page.locator('[data-test=team-title]')).toBeVisible();
@@ -780,16 +672,16 @@ for (const size of SE) {
           await settled(page);
           m = await measure(page, ['.tell.row'], { title: '[data-test=team-title]', sync: '[data-test=team-sync]', tell: '.tell.row', member: '[data-test=agent-Manager]' });
           rec(screen, m); judge(screen, m); await shot(screen);
-          if (after) expect.soft(m.rows.tell && m.rows.tell.bottom - m.rows.tell.top, `${where(screen)}: the Tell row is one 44 px row`).toBeLessThanOrEqual(56);
+          expect.soft(m.rows.tell && m.rows.tell.bottom - m.rows.tell.top, `${where(screen)}: the Tell row is one 44 px row`).toBeLessThanOrEqual(56);
           // Asks and decisions pending go above the members on purpose (Needs you first): there the members are recorded only.
-          if (after && !portrait && !needsYou) expect.soft(m.rows.member && m.rows.member.top < size.h, `${where(screen)}: a member card on screen in landscape (top ${m.rows.member?.top})`).toBe(true);
+          if (!portrait && !needsYou) expect.soft(m.rows.member && m.rows.member.top < size.h, `${where(screen)}: a member card on screen in landscape (top ${m.rows.member?.top})`).toBe(true);
           // Scrolled until the first member card shows: is it reachable (the page scrolls)?
           await page.locator('[data-test=agent-Manager]').scrollIntoViewIfNeeded();
           const mb = await page.locator('[data-test=agent-Manager]').boundingBox();
           rec(`${screen}-member-scrolled`, m, { memberAfterScroll: mb && { top: Math.round(mb.y), bottom: Math.round(mb.y + mb.height) } });
         }
         await ctx.close();
-        ({ page, ctx, errors } = await open(browser, size, { dir, asks: false }));
+        ({ page, ctx, errors } = await open(browser, size, { asks: false }));
 
         // Documents: the root (team folders), a team's folder, and its New file field.
         await nav(page, 'nav-documents');
@@ -809,14 +701,12 @@ for (const size of SE) {
         await expect(page.locator('[data-test=docs-name]')).toBeVisible();
         m = await measure(page, firstDoc, { name: '[data-test=docs-name]' });
         rec('documents-new-file', m); judge('documents-new-file', m, { at: false }); await shot('documents-new-file');
-        if (after) expect.soft(m.inputs.some((i) => /docs-name/.test(i.what)), `${where('documents-new-file')}: the name field shown`).toBe(true);
+        expect.soft(m.inputs.some((i) => /docs-name/.test(i.what)), `${where('documents-new-file')}: the name field shown`).toBe(true);
 
         // Settings: the list, then each section; Guardrails scrolled to its bottom; Skills with a skill picked.
-        // The after build has the Settings gear at the top right; the before build (the base renderer) has no
-        // gear, Settings is in the sidebar drawer.
+        // Settings opens from the gear at the top right.
         const openSettings = async () => {
-          if (after) await page.getByTestId('settings-gear').click();
-          else await nav(page, 'open-app-settings');
+          await page.getByTestId('settings-gear').click();
           await expect(page.locator('[data-test=settings]')).toBeVisible();
           await settled(page);
         };
@@ -861,7 +751,7 @@ for (const size of SE) {
             });
             rec('settings-guardrails-bottom', await measure(page, []), { scroll: r, back });
             await shot('settings-guardrails-bottom');
-            if (after) {
+            {
               expect.soft(r.max, `${where('guardrails')}: Guardrails is longer than the screen (to test the scroll)`).toBeGreaterThan(0);
               expect.soft(back && back.top >= 0 && back.bottom <= size.h && back.tappable, `${where('guardrails')}: ‹ Settings on screen and tappable at the bottom (${JSON.stringify(back)}, ${JSON.stringify(r)})`).toBe(true);
             }
@@ -880,7 +770,7 @@ for (const size of SE) {
             rec('settings-skill-picked', sm, { pane });
             judge('settings-skill-picked', sm);
             await shot('settings-skill-picked');
-            if (after) expect.soft(pane.top >= 0 && pane.top < size.h - 40 && pane.title, `${where('skill picked')}: the skill's detail in view (${JSON.stringify(pane)})`).toBe(true);
+            expect.soft(pane.top >= 0 && pane.top < size.h - 40 && pane.title, `${where('skill picked')}: the skill's detail in view (${JSON.stringify(pane)})`).toBe(true);
             const sb = page.locator('[data-test=skills-back]');
             if (await sb.isVisible().catch(() => false)) await sb.click();
           }

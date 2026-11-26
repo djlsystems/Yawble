@@ -23,7 +23,7 @@ test.afterEach(() => { fakeRemote(BUILT).core.setNeedsYou(true); });
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  if (!process.env.TEAM_MORE_MENU_SKIP_BUILD) await buildRenderer(undefined, BUILT);
+  if (!process.env.TEAM_MORE_MENU_SKIP_BUILD) await buildRenderer(BUILT);
 });
 
 async function teamPage(browser: Browser, w: number, h: number) {

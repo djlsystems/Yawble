@@ -185,9 +185,9 @@ test('embedded: place logs opens Logs and newTeam opens New team, as the sidebar
   const { page, frame, errors } = await openEmbedded(browser, 1280, 800);
   await navReady(page);
   await send(page, { type: 'yawble.navigate', to: { kind: 'place', id: 'logs' } });
+  // Logs is a place: it fills the page and is reported as the active place.
   await expect(frame.locator('[data-test=logs]')).toBeVisible();
-  await frame.locator('[data-test=logs]').press('Escape');
-  await expect(frame.locator('[data-test=logs]')).toHaveCount(0);
+  await expect.poll(async () => (await lastNav(page)).places.find((p: any) => p.active)?.id).toBe('logs');
   await send(page, { type: 'yawble.navigate', to: { kind: 'newTeam' } });
   await expect(frame.locator('[data-test=team-name]')).toBeVisible();
   for (const id of ['concierge', 'backlog', 'deliverables']) {
@@ -258,9 +258,9 @@ test('File > Settings opens Settings: the plain remote view and embedded, at 128
   await plain.locator('[data-test=menu-file]').click();
   await plain.locator('[data-test=menuitem-settings]').click();
   await expect(plain.locator('[data-test=settings]')).toBeVisible();
-  // The View menu has no Settings entry and never had one: File > Settings is the menu entry.
+  // The View menu lists the places and has no Settings entry: File > Settings is the menu entry.
   await plain.locator('[data-test=menu-view]').click();
-  await expect(plain.locator('[data-test=menuitem-terminal]')).toBeVisible();
+  await expect(plain.locator('[data-test="menuitem-go:logs"]')).toBeVisible();
   await expect(plain.locator('[data-test=menuitem-settings]')).toHaveCount(0);
 
   const { page, frame } = await openEmbedded(browser, 1280, 800);
@@ -268,9 +268,9 @@ test('File > Settings opens Settings: the plain remote view and embedded, at 128
   await frame.locator('[data-test=menu-view]').click();
   await expect(frame.locator('[data-test=menuitem-sidebar]')).toHaveCount(0);
   await expect(frame.locator('[data-test=menuitem-toggleTheme]')).toHaveCount(0);
-  await expect(frame.locator('[data-test=menuitem-terminal]')).toBeVisible();
+  await expect(frame.locator('[data-test="menuitem-go:logs"]')).toBeVisible();
   await frame.locator('[data-test=menu-view]').click();
-  await expect(frame.locator('[data-test=menuitem-terminal]')).toHaveCount(0);
+  await expect(frame.locator('[data-test="menuitem-go:logs"]')).toHaveCount(0);
   await frame.locator('[data-test=menu-file]').click();
   await frame.locator('[data-test=menuitem-settings]').click();
   await expect(frame.locator('[data-test=settings]')).toBeVisible();

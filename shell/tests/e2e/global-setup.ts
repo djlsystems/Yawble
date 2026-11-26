@@ -2,7 +2,7 @@
 //
 // The build itself stays lazy: the first worker whose spec calls buildRenderer() takes out/e2e/renderer.lock, builds,
 // and marks the folder with this run's id; every other worker waits on the lock, sees the mark and reuses the build.
-// So a run of only non-phone specs (monitor.spec.ts alone, say) builds nothing, and a phone run builds each folder once,
+// So a run of only non-phone specs (window.spec.ts alone, say) builds nothing, and a phone run builds each folder once,
 // whichever specs were picked on the command line (the setup is not told which files were selected).
 // E2E_SKIP_BUILD=1 still reuses any build that is there.
 //

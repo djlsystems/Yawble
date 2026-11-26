@@ -93,9 +93,14 @@ for (const [w, h] of [[1280, 800], [375, 667]] as const) {
       const time = card.locator('[data-test=overall-time]');
       await expect(time).toBeVisible();
       await expect(time).toHaveText(/^\s*\dh \d\dm \d\ds\s*$/);
-      // one quiet line in the bottom row
+      // One quiet line in the bottom row. On a phone its tap target is 44 px high and the row keeps its height.
+      const line = (await time.locator('[data-test=overall-time-value]').boundingBox())!;
+      expect(line.height, 'the overall time stays one line').toBeLessThan(20);
       const box = (await time.boundingBox())!;
-      expect(box.height, 'the overall time stays one line').toBeLessThan(20);
+      const foot = (await card.locator('.foot').boundingBox())!;
+      if (w < 760) expect(box.height, 'a 44 px tap target on a phone').toBeGreaterThanOrEqual(44);
+      else expect(box.height, 'as high as its line at a desktop width').toBeLessThan(20);
+      expect(foot.height, 'the bottom row is one line high').toBeLessThan(30);
       await time.click();
       const dlg = page.locator('[data-test=timeline-dialog]');
       await expect(dlg).toBeVisible();

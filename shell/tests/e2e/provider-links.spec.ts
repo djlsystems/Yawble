@@ -100,7 +100,7 @@ const saved: Record<string, unknown> = {};
 test.beforeAll(async () => {
   test.setTimeout(600_000);
   for (const k of Object.keys(OVERRIDES)) { saved[k] = (answers as any)[k]; (answers as any)[k] = OVERRIDES[k]; }
-  if (!process.env.PROVIDER_LINKS_SKIP_BUILD) await buildRenderer(undefined, BUILT);
+  if (!process.env.PROVIDER_LINKS_SKIP_BUILD) await buildRenderer(BUILT);
 });
 test.afterAll(() => { for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete (answers as any)[k]; else (answers as any)[k] = saved[k]; } });
 test.beforeEach(() => reset());

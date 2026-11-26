@@ -49,7 +49,7 @@ const saved: Record<string, (typeof answers)[string]> = {};
 const seen: { method: string; p: any }[] = [];
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  if (!process.env.GIT_TIDY_CORE_PLAN_SKIP_BUILD) await buildRenderer(undefined, BUILT);
+  if (!process.env.GIT_TIDY_CORE_PLAN_SKIP_BUILD) await buildRenderer(BUILT);
 });
 test.beforeEach(() => {
   seen.length = 0;

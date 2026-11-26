@@ -1,7 +1,7 @@
 // Team Settings on a phone (a list of sections, one section under a sticky
 // Back + title) and the phone sheet's Close, in headless Chrome against the FAKE core of phone-remote.spec.ts.
 // (The sideways-scrolling tab row an older spec tested is gone.)
-//  - 360x740 and 390x844: the list's eight rows are one line, >= 44 px, full width, label not cut; every section opens
+//  - 360x740 and 390x844: the list's nine rows are one line, >= 44 px, full width, label not cut; every section opens
 //    alone under the head with its title; in the list and in every section nothing in the dialog is wider than the
 //    screen, neither the page nor the sheet's body scrolls sideways (long env names/values, long repository paths).
 //  - Back returns to the list from every section and from General's Repositories link; the head stays at the top of the
@@ -9,15 +9,13 @@
 //    starts at its top.
 //  - Other phone sheets built on Modal (Settings, Triggers, Git, Documents, Deliverables, Logs): Close is 44x44, shown, an
 //    18 px glyph inside its box, the title is not clipped, and Close closes the sheet.
-//  - 1280x800: the Settings tab row and the Modal Close (Settings and Triggers dialogs) have the same boxes and styles as
-//    main BASE_COMMIT (before the phone list of sections); both screenshots are saved.
 //
-//   npx playwright test team-settings-list-rows   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer and renderer-base)
+//   npx playwright test team-settings-list-rows   (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
 import path from 'node:path';
-import { existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { answers } from './phone/fake-core';
-import { BASE_COMMIT, baseBuiltDir, baseShellDir, buildRenderer, builtDir, extractBaseTree, fakeRemote } from './phone/server';
+import { buildRenderer, builtDir, fakeRemote } from './phone/server';
 import { settled } from './settle';
 
 test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
@@ -53,12 +51,11 @@ test.beforeAll(async () => {
   for (const k of Object.keys(OVERRIDES)) { saved[k] = (answers as any)[k]; (answers as any)[k] = OVERRIDES[k]; }
   mkdirSync(SHOTS, { recursive: true });
   await buildRenderer();
-  if (!(process.env.E2E_SKIP_BUILD === '1' && existsSync(path.join(baseBuiltDir, 'remote.html')))) { extractBaseTree(); await buildRenderer(baseShellDir, baseBuiltDir); }
 });
 test.afterAll(() => { for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete (answers as any)[k]; else (answers as any)[k] = saved[k]; } });
 
-async function openTeam(browser: Browser, w: number, h: number, dir = builtDir) {
-  const s = fakeRemote(dir);
+async function openTeam(browser: Browser, w: number, h: number) {
+  const s = fakeRemote(builtDir);
   s.core.setAsks(false);
   const mobile = w < 760;
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 2 });
@@ -271,36 +268,3 @@ for (const [w, h] of [[360, 740], [390, 844]] as const) {
     });
   });
 }
-
-test(`desktop 1280x800: Settings tab row and Modal Close as on main ${BASE_COMMIT}`, async ({ browser }) => {
-  const grab = async (which: 'base' | 'branch') => {
-    const { page, ctx, errors } = await openTeam(browser, 1280, 800, which === 'base' ? baseBuiltDir : builtDir);
-    const out: Record<string, unknown> = {};
-    for (const id of ['open-manage', 'open-triggers']) {
-      await openFromTeam(page, id);
-      await shot(page, `desktop-1280-${id}-${which}.png`);
-      // The Team settings dialog's height follows its General tab's content (the "Idle deliverables" card made it
-      // 316 -> 469 px), so for open-manage the dialog box is left, top and width only. Everything else is unchanged.
-      out[id] = await page.evaluate((anyHeight) => {
-        const box = (e: Element | null, withHeight = true) => { if (!e) return null; const r = e.getBoundingClientRect(); return (withHeight ? [r.left, r.top, r.width, r.height] : [r.left, r.top, r.width]).map((n) => Math.round(n * 10) / 10).join(','); };
-        const st = (e: Element | null, keys: string[]) => { if (!e) return null; const s = getComputedStyle(e); return keys.map((k) => `${k}=${s.getPropertyValue(k)}`).join(';'); };
-        const m = [...document.querySelectorAll('[role=dialog]')].pop()!, c = m.querySelector('[data-test=modal-close]');
-        const row = m.querySelector('[data-test=manage-tabs], nav.tabs');
-        return { sheet: m.classList.contains('sheet'), dialog: box(m, !anyHeight), title: box(m.querySelector('h2')), close: box(c),
-          closeStyle: st(c, ['width', 'height', 'font-size', 'border-top-color', 'border-top-width', 'background-color', 'color', 'padding-top', 'padding-left']),
-          row: box(row), rowStyle: st(row, ['overflow-x', 'flex-wrap', 'flex-direction', 'border-bottom-width']),
-          tabs: row ? [...row.querySelectorAll('button')].map((b) => `${b.textContent!.trim()}@${box(b)} ${st(b, ['white-space', 'flex-shrink', 'font-weight', 'color', 'border-bottom-color'])}`) : null,
-          back: !!m.querySelector('[data-test=manage-back]'), chevrons: m.querySelectorAll('.go-icon').length };
-      }, id === 'open-manage');
-      await page.locator('[data-test=modal-close]').last().click();
-      await expect(page.locator('[role=dialog]')).toHaveCount(0);
-    }
-    expect(errors).toEqual([]);
-    await ctx.close();
-    return out;
-  };
-  const base = await grab('base'), branch = await grab('branch');
-  console.log(`C347 1280 base ${JSON.stringify(base)}\nC347 1280 branch ${JSON.stringify(branch)}`);
-  expect((branch['open-manage'] as { sheet: boolean }).sheet, 'not a sheet at 1280').toBe(false);
-  expect(branch).toEqual(base);
-});

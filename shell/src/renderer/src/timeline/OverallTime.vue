@@ -36,4 +36,6 @@ const open = () => openTimeline(props.target);
 .ot:hover { color: var(--ink-soft); text-decoration: underline; }
 .ot:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .ot-mark { width: 11px; height: 11px; flex: none; }
+/* A phone: a 44 px tap target. The negative margin gives the height back, so the row it sits in keeps its own. */
+.phone .ot { min-width: 44px; min-height: 44px; margin-block: -14px; justify-content: flex-end; }
 </style>

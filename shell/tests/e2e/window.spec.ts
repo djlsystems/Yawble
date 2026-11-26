@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { companionHome, removeCompanionHomes } from './companion-home';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -8,6 +8,8 @@ import path from 'node:path';
 // getAvailableBackends(), fetched from the real .NET core over the local socket / named pipe.
 // Needs: `npm run build` here and `dotnet build` of the core (or YAWBLE_CORE_PATH). On Linux without a
 // display, run under xvfb-run.
+// The app gets a data folder of its own (YAWBLE_DATA_DIR, a new temp folder) and a companion home of its own, and with
+// YAWBLE_DATA_DIR set it takes no part in the one-app-per-person lock: it runs beside an app that is open on this computer.
 test('window shows core version and getAvailableBackends() over IPC', async () => {
   const dataDir = mkdtempSync(path.join(os.tmpdir(), 'yawble-e2e-'));
   const shellDir = path.resolve(__dirname, '..', '..');
@@ -28,6 +30,8 @@ test('window shows core version and getAvailableBackends() over IPC', async () =
     await expect(version).toHaveText(/^\d+\.\d+\.\d+/, { timeout: 60_000 });
     await expect(window.locator('[data-test=sandbox-contract]')).toContainText('1.0.0 · telemetry off');
     await expect(window.locator('[data-test=sandbox-sdk]')).toContainText('1.0.1');
+    // The core that answered holds the test's own data folder (its lock file is there), not the person's.
+    expect(existsSync(path.join(dataDir, 'core.lock')), 'the core locked the temp data folder').toBe(true);
 
     const backendsJson = await window.locator('[data-test=backends-json]').textContent();
     const backends = JSON.parse(backendsJson ?? 'null');
