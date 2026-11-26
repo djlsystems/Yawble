@@ -11,6 +11,10 @@ interface Pending {
  * instance. The page that serves this bundle also serves the socket, at "rpc" next to the page; whatever is behind it
  * relays the instance core's JSON-RPC unchanged: send {id, method, params}; receive {id, result} or {id, error:{code,
  * message}}, and pushes {event, data}. Nothing here names or assumes a particular server.
+ *
+ * A call is sent at once or it fails; it is never sent after its caller heard that it failed. The calls the screens
+ * make while the page's first connection is still opening wait for it; when a connection closes, every waiting call
+ * fails and is dropped, and until the next one is open a new call fails at once (the screens ask again by themselves).
  */
 export function createRemoteApi(socketUrl: string = defaultSocketUrl()): YawbleApi {
   const pending = new Map<number, Pending>();
@@ -19,11 +23,15 @@ export function createRemoteApi(socketUrl: string = defaultSocketUrl()): YawbleA
   let nextId = 0;
   let socket: WebSocket | null = null;
   let retry = 500;
+  // True only while the page's first connection is opening: the one time a call waits for a socket.
+  let starting = true;
+  const CLOSED = 'the connection to the instance closed';
 
   const connect = () => {
     const ws = new WebSocket(socketUrl);
     socket = ws;
     ws.onopen = () => {
+      starting = false;
       retry = 500;
       for (const text of queue.splice(0)) ws.send(text);
       for (const l of listeners) l({ event: 'remote.connected', data: null });
@@ -43,7 +51,10 @@ export function createRemoteApi(socketUrl: string = defaultSocketUrl()): YawbleA
     };
     ws.onclose = (e) => {
       socket = null;
-      const why = e.reason || 'the connection to the instance closed';
+      starting = false;
+      const why = e.reason || CLOSED;
+      // Every call that waits has failed for its caller, the ones not sent yet too: none of them is sent later.
+      queue.length = 0;
       for (const w of pending.values()) w.reject(new Error(why));
       pending.clear();
       for (const l of listeners) l({ event: 'remote.disconnected', data: { reason: why } });
@@ -55,10 +66,12 @@ export function createRemoteApi(socketUrl: string = defaultSocketUrl()): YawbleA
 
   const call = <T>(method: string, params?: Record<string, unknown>): Promise<T> =>
     new Promise<T>((resolve, reject) => {
+      const open = socket?.readyState === WebSocket.OPEN;
+      if (!open && !starting) { reject(new Error(CLOSED)); return; }
       const id = ++nextId;
       pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
       const text = JSON.stringify({ id, method, params: params ? JSON.parse(JSON.stringify(params)) : null });
-      if (socket?.readyState === WebSocket.OPEN) socket.send(text);
+      if (open) socket!.send(text);
       else queue.push(text);
     });
 
