@@ -21,6 +21,15 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   return renderLink(tokens, idx, options, env, self);
 };
 
+// An image is never loaded. Agent-written text may name a file on this computer (C:/Users/...), a share
+// (\\server\share\x.png, which Windows fetches over SMB, handing the person's sign-in to that server) or a web address
+// (a tracking pixel). Every image, inline or by reference, renders as its escaped alt text in a plain span: no <img>,
+// no address. The Code browser's own filter (safeHtml.ts withoutImages) shows the same text for any other renderer.
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const alt = self.renderInlineAsText(tokens[idx].children ?? [], options, env).trim();
+  return `<span class="md-image-alt" data-test="md-image">${md.utils.escapeHtml(alt ? `[image: ${alt}]` : '[image]')}</span>`;
+};
+
 // Code blocks (commands, console output, files) get a copy button. The button is our own markup around markdown-it's
 // escaped <pre>; ChatMessage handles its click (copyCodeFrom) and copies the block's text, not its HTML.
 const COPY_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 9h11v11H9Z M5 15H4V4h11v1"/></svg>';
