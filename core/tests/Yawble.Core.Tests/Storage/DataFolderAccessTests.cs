@@ -1,3 +1,4 @@
+using Yawble.Core.Bus;
 using Yawble.Core.Companion;
 using Yawble.Core.Ipc;
 using Yawble.Core.Logs;
@@ -108,6 +109,42 @@ public sealed class DataFolderAccessTests : IDisposable
         Assert.Equal(Rwx | Wide, Mode(other));
         Assert.Equal(Rw | UnixFileMode.OtherRead, Mode(file));
         Assert.Contains("left as they are", Assert.Single(lines));
+    }
+
+    [Fact]
+    public void ACustomDataDirNamedData_InASharedFolder_LeavesTheSharedFolderAsItIs()
+    {
+        // --data-dir /srv/shared/data (or ~/data): AppRootFor gives /srv/shared (or the home), which is not Yawble's.
+        // Only the data folder is made user-only; the shared parent keeps its group and other access.
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "file modes are Linux's and macOS's");
+        var shared = Path.Combine(_root, "shared");
+        Directory.CreateDirectory(shared);
+        File.WriteAllText(Path.Combine(shared, "team-notes.txt"), "x");
+        File.SetUnixFileMode(shared, Rwx | Wide);
+        var data = Path.Combine(shared, "data");
+
+        DataFolderAccess.Secure(data, BusHost.AppRootFor(data), _ => { });
+
+        Assert.Equal(Rwx, File.GetUnixFileMode(data));
+        Assert.Equal(Rwx | Wide, File.GetUnixFileMode(shared));
+    }
+
+    [Fact]
+    public void ADataDirThatIsALinkToSomeoneElsesFolder_IsLeftAsItIs()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "file modes are Linux's and macOS's");
+        var other = Path.Combine(_root, "other");
+        Directory.CreateDirectory(other);
+        var file = Path.Combine(other, "notes.txt");
+        File.WriteAllText(file, "x");
+        File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherRead);
+        File.SetUnixFileMode(other, Rwx | Wide);
+        var link = Path.Combine(_root, "data-link");
+        Directory.CreateSymbolicLink(link, other);
+
+        Assert.Equal(0, DataFolderAccess.Secure(link, null, _ => { }));
+        Assert.Equal(Rwx | Wide, File.GetUnixFileMode(other));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherRead, File.GetUnixFileMode(file));
     }
 
     [Fact]
