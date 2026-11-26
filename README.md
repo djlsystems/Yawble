@@ -158,6 +158,14 @@ dotnet test --project bridge/tests/Yawble.Bridge.Tests
 cd shell && npm test && npm run test:e2e
 ```
 
+To see where a core test run spends its time, write a TRX result file (it holds each test's duration) and print the
+slowest tests and the total per class from it. Keep result files outside the repository:
+
+```bash
+dotnet test --project core/tests/Yawble.Core.Tests -- --report-trx --report-trx-filename core.trx --results-directory ~/yawble-runs
+pwsh scripts/test-times.ps1 ~/yawble-runs/core.trx
+```
+
 Tests that start real sandboxes skip themselves on a host whose sandbox backend is missing. Agent runs in tests use
 stand-in CLIs and fake model servers. The tests that check the CLIs installed on the machine (trait
 `Category=HostCli`) assert only the CLIs that `YAWBLE_HOSTCLI_EXPECT` lists, e.g. `claude:npm grok:native`.
