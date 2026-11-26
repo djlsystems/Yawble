@@ -305,10 +305,11 @@ public class TimelineStoreTests
     // ---------------------------------------------------------------- the reference case: deliverable 3573
 
     /// <summary>
-    /// Deliverable 3573's trail as it stood before the board recorded timelines (rebuilt from history): a developer's card, then the tester's card, which the
-    /// Manager planned at 16:01 and gave TesterKofi at 16:54. TesterKofi's run showed no progress from 17:14 until the idle
-    /// watchdog ended it at 17:52 UTC; the Manager told it again and it handed back at 18:13; the deliverable was declared
-    /// complete at 18:14. About 3 h overall, 38 min of it Stalled (the tester's card), not Agent working.
+    /// A deliverable whose cards have a trail and no timeline lines, so the timeline is rebuilt from the trail: a
+    /// developer's card, then the tester's card, which the Manager plans at 16:01 and gives the tester at 16:54. The
+    /// tester's run shows no progress from 17:14 until the idle watchdog ends it at 17:52 UTC; the Manager tells it again
+    /// and it hands back at 18:13; the deliverable is declared complete at 18:14. About 3 h overall, 38 min of it Stalled
+    /// (the tester's card), not Agent working.
     /// </summary>
     [Fact]
     public void Deliverable3573_IsAbout3hOverall_With38MinutesStalledForTheTestersCard()
