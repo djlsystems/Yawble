@@ -685,7 +685,8 @@ the ☰ menu of a member's pane opens the same table as a dialog, at that member
   from the last 24 hours (for the team and that tool under any of its names, such as dotnet-sdk-10 and dotnet-sdk-lts),
   and a host denial from the last 24 hours are kept even when pruning all of it, so the 24-hour quiet holds. Team
   messages and Board history are never pruned: the team pages, deliverables and the Monitor's replay
-  are built from them.
+  are built from them. Agent changes are never pruned either: they are the lasting record of which CLI and model
+  each agent used.
 - **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
 - Rows are redacted when they are read: known secrets and token-shaped text show as `[redacted]`. The Logs page, `logs.query` over the Cloud Link and the live tail all use the
