@@ -66,7 +66,7 @@ describe('Discuss with the Concierge', () => {
     const w = mount(CardPanel, { props: { id: 91, lanes: [{ id: 'blocked', label: 'Needs You' }], api: cardApi } });
     await flushPromises();
     // Under the title (inside .head), not beside it: the title keeps the header's full width.
-    expect(w.get('header .head [data-test=card-discuss]').exists()).toBe(true);
+    expect(w.find('header .head [data-test=card-discuss]').exists()).toBe(true);
     await w.get('[data-test=card-discuss]').trigger('click');
     const r = discussRequest.value!;
     expect(r.teamId).toBe(3);

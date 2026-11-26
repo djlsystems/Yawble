@@ -5,7 +5,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentCard, DeliverableRow, DeliverablesListAnswer, YawbleApi } from '../../src/shared/api';
+import type { AgentCard, DeliverableRow, DeliverablesListAnswer, TeamSummary, YawbleApi } from '../../src/shared/api';
 import { cardState, waitSays, workerSays } from '../../src/renderer/src/waiting';
 import { statusTip } from '../../src/renderer/src/deliverables/page';
 import { memberStateOf } from '../../src/renderer/src/faces/faces';
@@ -64,7 +64,7 @@ describe('the Deliverables page Who column', () => {
     const answer = structuredClone(real);
     answer.deliverables.find((w) => w.id === EVE)!.members = members;
     const api = { call: async (m: string) => (m === 'deliverables.list' ? structuredClone(answer) : {}) } as unknown as YawbleApi;
-    const w = mount(DeliverablesView, { props: { teams: [{ id: 1, name: 'Web' }, { id: 2, name: 'Cloud' }], api, pollMs: 600_000 }, attachTo: document.body });
+    const w = mount(DeliverablesView, { props: { teams: [{ id: 1, name: 'Web' }, { id: 2, name: 'Cloud' }] as TeamSummary[], api, pollMs: 600_000 }, attachTo: document.body });
     await flushPromises();
     const r = w.find(`[data-test=deliverables-row][data-wf="${EVE}"]`);
     return { who: r.findAll('[data-test=deliverables-who] > .face').map((f) => f.attributes('title')), tip: r.find('td.st').attributes('title') };

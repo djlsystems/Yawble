@@ -102,7 +102,7 @@ describe('Documents fills the page', () => {
     await w.get('[data-test="doc-a.md"]').trigger('click');
     await flushPromises();
     const viewer = w.get('[data-test=docs-viewer]');
-    expect(viewer.get('header.vh').exists()).toBe(true);
+    expect(viewer.find('header.vh').exists()).toBe(true);
     expect(viewer.get('.md').classes()).toContain('vbody');
     await viewer.get('[data-test=doc-edit]').trigger('click');
     expect(viewer.get('[data-test=doc-editor]').classes()).toContain('vbody');

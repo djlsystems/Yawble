@@ -130,7 +130,7 @@ describe('the Code browser in the shell', () => {
     const view = w.get('[data-test=code-markdown]');
     expect(view.find('img').exists()).toBe(false);
     expect(view.html()).not.toMatch(/\bsrc=/);
-    expect(view.findAll('[data-test=code-md-image]').map((n) => n.text())).toEqual(['[image: key]', '[image: share]', '[image: pixel]']);
+    expect(view.findAll('[data-test=md-image]').map((n) => n.text())).toEqual(['[image: key]', '[image: share]', '[image: pixel]']);
   });
 
   it('a burst of code.changed for the open file reads it again once in flight and once more, not once per event', async () => {

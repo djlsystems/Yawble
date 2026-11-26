@@ -59,7 +59,7 @@ describe('docToGraph', () => {
 
   it('every STEP_TYPES entry maps to its kind, and an unknown type is other', () => {
     for (const t of STEP_TYPES) {
-      const doc: WorkflowDocument = { start: 'a', steps: [{ id: 'a', ...t.template }] };
+      const doc: WorkflowDocument = { start: 'a', steps: [{ id: 'a', ...t.template } as NonNullable<WorkflowDocument['steps']>[number]] };
       expect(docToGraph(doc).nodes.find((n) => n.id === 'a')?.kind).toBe(t.kind);
     }
     // A type the checker does not know (an agent step is not one: a workflow tells the team instead) is other.

@@ -6,7 +6,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { DeliverableDetail, DeliverableRow, YawbleApi } from '../../src/shared/api';
+import type { DeliverableDetail, DeliverableRow, TeamSummary, YawbleApi } from '../../src/shared/api';
 import DeliverablePane from '../../src/renderer/src/deliverables/DeliverablePane.vue';
 import DeliverablesView from '../../src/renderer/src/deliverables/DeliverablesView.vue';
 import { confirmState } from '../../src/renderer/src/confirm';
@@ -70,7 +70,7 @@ describe('a pending confirm when access turns read-only', () => {
   it('through the page: applyRemoteAccess(\'read\') closes the open Stop question and nothing is sent', async () => {
     const r = busyRow();
     const f = fake(r);
-    const w = mount(DeliverablesView, { props: { teams: [{ id: r.teamId, name: r.team }], api: f.api, pollMs: 600_000 }, attachTo: document.body });
+    const w = mount(DeliverablesView, { props: { teams: [{ id: r.teamId, name: r.team }] as TeamSummary[], api: f.api, pollMs: 600_000 }, attachTo: document.body });
     await flushPromises();
     await w.find(`[data-test=deliverables-row][data-wf="${r.id}"]`).trigger('click');
     await flushPromises();

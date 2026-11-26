@@ -158,9 +158,11 @@ const jsonText = (w: VueWrapper) => (w.get('[data-test=json-text]').element as H
 const docOf = (w: VueWrapper) => JSON.parse(jsonText(w)) as WorkflowDocument;
 const stepOf = (w: VueWrapper, id: string) => docOf(w).steps!.find((s) => s.id === id)!;
 const pick = async (w: VueWrapper, id: string) => { await w.get(`.vf-node[data-id="${id}"]`).trigger('click'); await flushPromises(); };
-const expr = (w: VueWrapper | DOMWrapper<Element>, name: string) => w.get(`[data-test=expr-field][data-name="${name}"] [data-test=expr-input]`);
-async function typeIn(el: DOMWrapper<Element>, value: string) { await el.setValue(value); await flushPromises(); }
-async function changeTo(el: DOMWrapper<Element>, value: string) { await el.setValue(value); await el.trigger('change'); await flushPromises(); }
+// What get() answers: an element that is there.
+type Found = Omit<DOMWrapper<Element>, 'exists'>;
+const expr = (w: VueWrapper | Found, name: string) => w.get(`[data-test=expr-field][data-name="${name}"] [data-test=expr-input]`);
+async function typeIn(el: Found, value: string) { await el.setValue(value); await flushPromises(); }
+async function changeTo(el: Found, value: string) { await el.setValue(value); await el.trigger('change'); await flushPromises(); }
 
 beforeEach(() => { localStorage.clear(); applyRemoteAccess('full'); });
 afterEach(() => { applyRemoteAccess('full'); document.body.innerHTML = ''; });

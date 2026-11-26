@@ -9,7 +9,7 @@ import type { LogSourceInfo, YawbleApi } from '../../src/shared/api';
 const col = (key: string, label: string, kind: 'time' | 'text' | 'number' = 'text', filter = false) => ({ key, label, kind, filter });
 const base = { prunable: false, loss: null, keptBecause: 'x', defaultDays: null, retentionDays: null, team: true, member: true };
 const activity: LogSourceInfo = {
-  ...base, id: 'activity', title: 'All activity', group: 'Activity', about: 'Everything that happened.', app: true, levels: true,
+  ...base, id: 'activity', title: 'All activity', group: 'Activity', about: 'Everything that happened.', levels: true,
   columns: [col('at', 'Time', 'time'), col('source', 'Source', 'text', true), col('team', 'Team', 'text', true), col('member', 'Member'),
     col('event', 'Event'), col('details', 'Details')],
 };

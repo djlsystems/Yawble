@@ -89,7 +89,7 @@ describe('triggers dialog', () => {
     await w.find('[data-test=trigger-new]').trigger('click');
     expect(w.find('[data-test=trigger-instruction]').exists()).toBe(true);
     expect(w.find('[data-test=trigger-member]').findAll('option').map((o) => o.text())).toEqual(['Manager (manager)', 'InboxWatcher (workflow)']);
-    await w.find('[data-test=trigger-member]').findAll('option')[1].setSelected();
+    await w.find('[data-test=trigger-member]').findAll('option')[1].setValue();
     expect(w.find('[data-test=trigger-instruction]').exists()).toBe(false);
     expect(w.find('[data-test=trigger-wake-manager]').exists()).toBe(false);
     expect(w.find('[data-test=trigger-workflow-note]').text()).toContain('InboxWatcher runs its workflow on each fire');
@@ -117,7 +117,7 @@ describe('triggers dialog', () => {
     await flushPromises();
     await w.find('[data-test=trigger-new]').trigger('click');
     await w.find('[data-test=trigger-name]').setValue('hourly sweep');
-    await w.find('[data-test=trigger-member]').findAll('option')[1].setSelected(); // Ada
+    await w.find('[data-test=trigger-member]').findAll('option')[1].setValue(); // Ada
     await w.find('[data-test=trigger-every]').setValue(2);
     await w.find('[data-test=trigger-instruction]').setValue('Sweep the queue.');
     await w.find('[data-test=trigger-save]').trigger('click');

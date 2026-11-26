@@ -739,7 +739,7 @@ export interface NetworkAsk {
   domainPattern?: string | null;
 }
 /** policy.checkHosts {hosts}: each entry as the core's floor rule judges it (FloorRules.HostProblem); problem null means accepted. */
-export interface HostCheck { host: string; problem: string | null }
+export interface HostProblem { host: string; problem: string | null }
 /** One host on a team's network allow list (policy.teamHosts; core: Policy/PolicyStore.cs). addedVia: how it was added (app, cloud, ...). */
 export interface TeamHost { host: string; addedBy: string; addedVia: string | null; addedAt: string }
 /** policy.teamHosts {teamId} and policy.removeTeamHost {teamId, host}: the team's list, oldest first. */

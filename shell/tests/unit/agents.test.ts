@@ -155,7 +155,7 @@ describe('agents screen: detection', () => {
     expect(terminalPane.target).toMatchObject({ kind: 'channel', channel: 'agent-test:claude', title: 'Test · Claude Code · global policy' });
     expect(w.find('[data-test=agents-test-note]').exists()).toBe(true);
 
-    const target = terminalPane.target as { stop?: () => Promise<void> };
+    const target = terminalPane.target as unknown as { stop?: () => Promise<void> };
     await target.stop!();
     expect(calls.at(-1)).toEqual({ method: 'agents.stopTest', params: { cli: 'claude' } });
 

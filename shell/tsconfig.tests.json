@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "jsx": "preserve",
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@yawble/code-browser": ["../code-browser/src/index.ts"],
+      "vue": ["./node_modules/vue"],
+      "highlight.js": ["./node_modules/highlight.js"],
+      "highlight.js/*": ["./node_modules/highlight.js/*"]
+    }
+  },
+  "include": ["tests/unit/**/*.ts", "src/renderer/src/env.d.ts"]
+}

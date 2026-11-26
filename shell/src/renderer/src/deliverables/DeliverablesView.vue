@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import { DELIVERABLES_GET, DELIVERABLES_LIST, GOALS_LIST, type Goal, type GoalsListAnswer, type TeamSummary, type DeliverableDetail, type DeliverableRow, type DeliverablesListAnswer, type YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
 import { ago } from '../board/cards';
@@ -93,6 +94,7 @@ async function load() {
     // A team that is gone (no_such_team): back to all teams rather than an empty page.
     if ((e as { code?: string })?.code === 'no_such_team' && filters.value.teamId !== null) { filters.value = { ...filters.value, teamId: null }; return; }
     error.value = errorText(e);
+    return false;
   }
 }
 // ---- the goals every row's picker offers: one goals.list with each load (an older core without goals: none) ----
@@ -109,9 +111,9 @@ let typing: ReturnType<typeof setTimeout> | null = null;
 watch([() => filters.value.teamId, () => filters.value.chip, () => goalFilter.value?.id], () => { void load(); });
 watch(() => filters.value.q, () => { if (typing) clearTimeout(typing); typing = setTimeout(() => { typing = null; void load(); }, 200); });
 watch(filters, (f) => saveFilters(f), { deep: true });
-let timer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => { void load(); });
 // Each poll reads the goals too (one small call), so a goal made elsewhere reaches the pickers.
-onMounted(() => { void load(); timer = setInterval(() => { void load(); void loadGoals(); }, props.pollMs ?? 3000); });
+usePoll(async () => (await Promise.all([load(), loadGoals()]))[0], props.pollMs ?? 3000, { immediate: false });
 
 // ---- the hash: kept while the page is shown, cleared when it goes ----
 function writeHash() {
@@ -122,7 +124,6 @@ function writeHash() {
 }
 watch([filters, selected], writeHash, { deep: true, immediate: true });
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer);
   if (typing) clearTimeout(typing);
   try { if (isDeliverablesHash(location.hash)) history.replaceState(history.state, '', `${location.pathname}${location.search}`); } catch { /* likewise */ }
 });

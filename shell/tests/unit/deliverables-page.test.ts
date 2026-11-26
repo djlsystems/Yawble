@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ItemTime, DeliverableCounts, DeliverableDetail, DeliverableRow, DeliverablesListAnswer, YawbleApi } from '../../src/shared/api';
+import type { ItemTime, DeliverableCounts, DeliverableDetail, DeliverableRow, DeliverablesListAnswer, TeamSummary, YawbleApi } from '../../src/shared/api';
 import DeliverablesView from '../../src/renderer/src/deliverables/DeliverablesView.vue';
 import {
   backlogRequest, DefaultFilters, formatHash, highlight, inChip, loadFilters, matchesText, nextSort, parseHash, saveFilters, sortRows, statusTip,
@@ -26,7 +26,7 @@ function row(p: Partial<DeliverableRow> & Pick<DeliverableRow, 'id' | 'status'>)
   const ended = ['completed', 'closed', 'expired'].includes(p.status);
   return {
     title: `Deliverable ${p.id}`, owner: 'Manager', ownerId: 1, state: ended ? (p.status as DeliverableRow['state']) : 'open', undeclared: false, busy: [], ending: null,
-    startedAt: iso(120), lastAt: iso(5), messages: 3, endedAt: ended ? iso(30) : null, expiredAt: null, expiresAt: null, expiryWarning: null, question: null,
+    startedAt: iso(120), lastAt: iso(5), messages: 3, endedAt: ended ? iso(30) : null, expiredAt: null, expiresAt: null, question: null,
     time: time(3_600_000, !ended), team: 'payments', teamId: 1, waitingFor: null, working: p.status === 'running', item: null, members: [], ...p,
   };
 }
@@ -69,7 +69,7 @@ function fake(): Fake {
   return f;
 }
 async function page(f = fake(), props: Record<string, unknown> = {}) {
-  const w = mount(DeliverablesView, { props: { teams: [{ id: 1, name: 'payments' }, { id: 2, name: 'billing' }], api: f.api, pollMs: 600_000, ...props }, attachTo: document.body });
+  const w = mount(DeliverablesView, { props: { teams: [{ id: 1, name: 'payments' }, { id: 2, name: 'billing' }] as TeamSummary[], api: f.api, pollMs: 600_000, ...props }, attachTo: document.body });
   await flushPromises();
   return w;
 }
@@ -417,7 +417,7 @@ describe('the Deliverables page', () => {
   it('asks the core only in the contract\'s words: deliverables.list {teamId?, q?, state?, limit?}, deliverables.get {deliverable}', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const f = fake();
-    const w = mount(DeliverablesView, { props: { teams: [{ id: 1, name: 'payments' }, { id: 2, name: 'billing' }], api: f.api, pollMs: 600_000 }, attachTo: document.body });
+    const w = mount(DeliverablesView, { props: { teams: [{ id: 1, name: 'payments' }, { id: 2, name: 'billing' }] as TeamSummary[], api: f.api, pollMs: 600_000 }, attachTo: document.body });
     await flushPromisesFake();
     for (const c of ['needs-you', 'done', 'closed', 'all', 'open']) { await w.get(`[data-test=deliverables-chip-${c}]`).trigger('click'); await flushPromisesFake(); }
     await w.get('[data-test=deliverables-team-filter]').setValue('2');

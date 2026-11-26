@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import { DELIVERABLE_EXTEND, type BoardCard, type DeliverableSummary, type YawbleApi } from '../../../shared/api';
 import { expiresSoon, expiryWarningText, extendErrorText, until } from '../deliverableExpiry';
 import BusyLabel from './BusyLabel.vue';
@@ -59,9 +60,7 @@ async function extend(x: Warning) {
 }
 
 watch(() => asking.value.map(([id]) => id).join(','), () => void load());
-let timer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => { void load(); timer = setInterval(load, Math.max(props.pollMs ?? 30000, 2000)); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+usePoll(load, Math.max(props.pollMs ?? 30000, 2000));
 defineExpose({ load });
 </script>
 

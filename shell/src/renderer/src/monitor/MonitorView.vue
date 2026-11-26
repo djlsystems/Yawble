@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import { deliverableTime, type AgentCard, type NetworkAsk, type ToolAsk, type YawbleApi, type Overview, type DeliverableItem, type DeliverableSummary } from '../../../shared/api';
 import { openDeliverablesPage, deliverableItems } from '../deliverables/page';
 import { groupAsks, hostsLabel } from '../networkAskGroups';
@@ -305,7 +306,8 @@ const loaded = ref(false);
 let after = 0;
 let stepAfter = 0;
 let stepsOff = false;
-let timers: ReturnType<typeof setInterval>[] = [];
+let clockTimer: ReturnType<typeof setInterval> | null = null;
+let gone = false;
 let busy = false;
 let raf = 0;
 
@@ -554,6 +556,7 @@ function catchUp(m: MonitorModel, rs: readonly FeedRow[], ss: readonly StepRow[]
 async function tick(first = false) {
   if (busy) return;
   busy = true;
+  let ok = true;
   try {
     await snapshot();
     const fr = await feed(first);
@@ -579,12 +582,18 @@ async function tick(first = false) {
     error.value = null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
+    ok = false;
   } finally {
     busy = false;
     loaded.value = true;
     publishCounts();
   }
+  return ok; // false slows the poll down
 }
+// The mount reads first (tick(true), then the asks); both polls start after that.
+const wallPoll = usePoll(() => tick(), props.pollMs ?? 1200, { autoStart: false, immediate: false });
+// The asks' slow poll (a repeated refusal's count changes without an event), as Needs you polls them.
+const asksPoll = usePoll(() => (Date.now() - asksAt >= AsksPollMs ? loadAsks() : undefined), 1000, { autoStart: false, immediate: false });
 
 // ---------- the replay ----------
 
@@ -711,17 +720,16 @@ onMounted(async () => {
   await tick(true);
   offAsks = api.onEvent?.((e) => { if (e.event === 'network.asksChanged' || e.event === 'tools.asksChanged' || e.event === FOLDER_ASKS_CHANGED) void loadAsks(); }) ?? null;
   await loadAsks();
-  timers = [
-    setInterval(() => void tick(), props.pollMs ?? 1200),
-    // The asks' slow poll (a repeated refusal's count changes without an event), as Needs you polls them.
-    setInterval(() => { if (Date.now() - asksAt >= AsksPollMs) void loadAsks(); }, 1000),
-    setInterval(() => { clock.value = new Date().toLocaleTimeString(); now.value = Date.now(); }, 1000),
-  ];
+  if (gone) return;
+  wallPoll.start();
+  asksPoll.start();
+  clockTimer = setInterval(() => { clock.value = new Date().toLocaleTimeString(); now.value = Date.now(); }, 1000);
   clock.value = new Date().toLocaleTimeString();
   if (typeof requestAnimationFrame === 'function') raf = requestAnimationFrame(frame);
 });
 onBeforeUnmount(() => {
-  for (const t of timers) clearInterval(t);
+  gone = true;
+  if (clockTimer) clearInterval(clockTimer);
   offAsks?.();
   cancelAnimationFrame(raf);
   window.removeEventListener('keydown', onKey);

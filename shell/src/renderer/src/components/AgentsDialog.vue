@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { createPoll, type Poll } from '../usePoll';
 import { AGENT_TEST_CHANGED } from '../../../shared/api';
 import type { AgentProfileRow, AgentTestSession, AgentTestStarted, AgentVersionStatus, DetectedCli, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -80,21 +81,23 @@ async function detect(quiet = false) {
 
 // After Install: detect again every few seconds until that CLI is found signed in (or 20 minutes pass), so its card
 // changes by itself when the install and the sign-in in the terminal are done.
-let watching: ReturnType<typeof setInterval> | undefined;
+let watching: Poll | null = null;
 function watchFor(cliId: string) {
-  clearInterval(watching);
+  watching?.stop();
   const until = Date.now() + 20 * 60_000;
-  watching = setInterval(async () => {
-    if (Date.now() > until) { clearInterval(watching); return; }
+  const poll = createPoll(async () => {
+    if (Date.now() > until) { poll.stop(); return; }
     await detect(true);
     const c = clis.value?.find((d) => d.cliId === cliId);
     if (c?.found && c.signIn?.status === 'signed-in') {
-      clearInterval(watching);
+      poll.stop();
       notice.value = `${titleOf(cliId)} is installed and signed in.`;
     } else if (c?.found && notice.value?.startsWith('A terminal opened')) {
       notice.value = `${titleOf(cliId)} is installed. Sign in to it in the terminal, as its card says.`;
     }
-  }, 4000);
+  }, 4000, { immediate: false });
+  watching = poll;
+  poll.start();
 }
 
 // Back in the window (from a terminal where a CLI was installed or signed in to): detect again.
@@ -299,7 +302,7 @@ onMounted(() => {
     void loadSessions();
   }
 });
-onBeforeUnmount(() => { offChanged?.(); offChanged = null; clearInterval(watching); window.removeEventListener('focus', onFocus); });
+onBeforeUnmount(() => { offChanged?.(); offChanged = null; watching?.stop(); window.removeEventListener('focus', onFocus); });
 </script>
 
 <template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import type { AgentCard, TeamSummary, Trigger, YawbleApi } from '../../../shared/api';
 import { errorText, resolveApi, when } from '../api';
 import { readOnly, vChange } from '../remoteAccess';
@@ -44,15 +45,11 @@ async function refresh() {
     try { mine.value = (await api.call<Trigger[]>('triggers.list', { teamId: props.card.member.teamId })).filter((t) => t.memberId === at); } catch { /* the pill just stays hidden */ }
   } catch (e) {
     if (at === id.value) error.value = errorText(e);
+    return false;
   }
 }
 
-let timer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => {
-  void refresh();
-  timer = setInterval(refresh, props.pollMs ?? 5000);
-});
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+usePoll(refresh, props.pollMs ?? 5000);
 watch(id, () => { member.value = null; runs.value = []; state.value = null; void refresh(); });
 
 const variables = computed(() => Object.entries(state.value?.variables ?? {}));

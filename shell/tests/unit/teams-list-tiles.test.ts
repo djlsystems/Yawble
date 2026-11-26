@@ -369,7 +369,7 @@ describe('Teams list tiles: the button row', () => {
     await w.get('[data-test=card-delete]').trigger('click');
     expect(w.emitted('open')).toBeUndefined();
     expect(w.emitted('settings')).toHaveLength(1);
-    expect(w.get('[data-test=card-delete-yes]').exists()).toBe(true);
+    expect(w.find('[data-test=card-delete-yes]').exists()).toBe(true);
     await w.get('[data-test=team-open-a]').trigger('click');
     expect(w.emitted('open')![0]).toEqual([1]);
     w.unmount();

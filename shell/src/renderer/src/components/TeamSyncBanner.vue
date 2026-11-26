@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { discussWithConcierge, syncNotePrompt } from '../conciergeDiscuss';
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import { GIT_COMMIT_RANGE } from '../../../shared/api';
 import type { BranchSyncResult, CommitRange, CommitRow, YawbleApi, TeamGitStatus, TeamSummary, TeamSyncState } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -23,7 +24,6 @@ const cameIn = ref<{ heading: string; commits: CommitRow[]; total: number; hasOr
 // "N commits behind" opens those commits (git.commitRange with the pair teams.syncToBase gave; an older core
 // sends none and the count stays text). The same link again closes the list.
 const range = ref<{ data: CommitRange | null; error: string | null } | null>(null);
-let timer: ReturnType<typeof setInterval> | null = null;
 
 async function load() {
   try { state.value = await api.call<TeamSyncState>('teams.syncToBase', { teamId: props.team.id }); } catch { state.value = null; }
@@ -69,9 +69,8 @@ async function toggleRange() {
 const lines = (note: string) => note.split('\n').map((l) => l.trim()).filter(Boolean);
 const files = (line: string) => /conflicts in: ([^)]*)\)/.exec(line)?.[1].split(',').map((f) => f.trim()).filter(Boolean) ?? [];
 
-onMounted(() => { void load(); timer = setInterval(load, props.pollMs ?? 60000); });
+usePoll(load, props.pollMs ?? 60000);
 watch(() => props.team.id, () => { done.value = null; error.value = null; cameIn.value = null; range.value = null; void load(); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
 defineExpose({ load });
 </script>
 

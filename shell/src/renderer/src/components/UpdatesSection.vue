@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
+import { usePoll } from '../usePoll';
 import type { UpdateStatus, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import BusyLabel from './BusyLabel.vue';
@@ -13,7 +14,7 @@ const error = ref<string | null>(null);
 
 async function load() {
   try { status.value = await props.api.call<UpdateStatus>('updates.status'); }
-  catch (e) { error.value = errorText(e); }
+  catch (e) { error.value = errorText(e); return false; }
 }
 
 async function check() {
@@ -43,12 +44,8 @@ function line(s: UpdateStatus): string {
 }
 
 // The automatic check and its download change the state while this section is open: read it again every few seconds.
-let timer: ReturnType<typeof setInterval> | undefined;
-onMounted(() => {
-  void load();
-  timer = setInterval(() => { if (!checking.value) void load(); }, props.pollMs ?? 5000);
-});
-onBeforeUnmount(() => clearInterval(timer));
+onMounted(() => { void load(); });
+usePoll(() => (checking.value ? undefined : load()), props.pollMs ?? 5000, { immediate: false });
 </script>
 
 <template>

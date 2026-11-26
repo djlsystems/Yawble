@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { ref } from 'vue';
+import { usePoll } from '../usePoll';
 import type { AgentCard, YawbleApi } from '../../../shared/api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
@@ -11,13 +12,12 @@ import { hireRoleOf } from '../agentModels';
 const props = defineProps<{ teamId: number; api: YawbleApi; pollMs?: number; fallback: string }>();
 
 const cards = ref<AgentCard[] | null>(null);
-let timer: ReturnType<typeof setInterval> | null = null;
 
 async function load() {
   try {
     const got = await props.api.call<AgentCard[]>('teams.agents', { teamId: props.teamId });
     cards.value = Array.isArray(got) ? got : [];
-  } catch { /* keeps what it showed; the text fallback until the first answer */ }
+  } catch { return false; /* keeps what it showed; the text fallback until the first answer */ }
 }
 
 function tip(card: AgentCard): string {
@@ -31,8 +31,7 @@ function tip(card: AgentCard): string {
   return `${displayName(c.member.name)} · ${kind}${role ? ` · ${role}` : ''}\n${MemberStateLabel[memberStateOf(c)]}${queued}${line}`;
 }
 
-onMounted(() => { void load(); timer = setInterval(load, Math.max(5000, props.pollMs ?? 5000)); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+usePoll(load, Math.max(5000, props.pollMs ?? 5000));
 </script>
 
 <template>

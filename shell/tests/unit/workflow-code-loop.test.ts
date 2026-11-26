@@ -102,7 +102,7 @@ function chart(doc: WorkflowDocument, extra: Record<string, unknown> = {}) {
   });
   return w;
 }
-const docOf = (w: VueWrapper) => JSON.parse(w.props('modelValue') as string) as WorkflowDocument;
+const docOf = (w: VueWrapper) => JSON.parse((w.props() as { modelValue: string }).modelValue) as WorkflowDocument;
 const node = (w: VueWrapper, id: string) => w.get(`[data-test=flow-node][data-node="${id}"]`);
 
 // ---- the blocks and their nodes

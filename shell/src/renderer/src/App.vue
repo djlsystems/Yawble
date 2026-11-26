@@ -3,6 +3,7 @@ import TeamsList from './components/TeamsList.vue';
 import TeamManageDialog from './components/TeamManageDialog.vue';
 import { skillLink } from './skillLink';
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { usePoll } from './usePoll';
 import type { AgentProfileRow, ConversationSummary, DetectedCli, LinkStatus, YawbleApi, Overview, TeamSummary } from '../../shared/api';
 import { errorText, resolveApi } from './api';
 import { cliLabel } from './agentClis';
@@ -120,7 +121,6 @@ const settingsTab = ref<'general' | 'policy' | 'guardrails'>('general');
 const teamView = ref<InstanceType<typeof TeamView> | null>(null);
 // The team a new chat starts with in focus: the one the person last looked at (or none).
 const focusTeamId = ref<number | null>(null);
-let timer: ReturnType<typeof setInterval> | null = null;
 const offs: (() => void)[] = [];
 
 // The desktop window draws its own title bar: the top bar is where the window is dragged, and it leaves room for the
@@ -179,6 +179,8 @@ async function refresh() {
     error.value = errorText(e);
   }
 }
+// The first read is the mount's own (below); the poll starts after it, and slows down while the core does not answer.
+const overviewPoll = usePoll(async () => { await refresh(); return error.value === null; }, props.pollMs ?? 1000, { autoStart: false, immediate: false });
 
 async function loadConversations() {
   try {
@@ -230,11 +232,9 @@ watch(backlogRequest, (r) => { if (!r) return; view.value = 'backlog'; });
 const openDeliverables = ref<number | null>(null);
 async function loadOpenDeliverables() {
   try { openDeliverables.value = (await api.call<DeliverablesListAnswer>(DELIVERABLES_LIST, { state: 'open', limit: 1 }))?.counts?.open ?? null; }
-  catch { openDeliverables.value = null; }
+  catch { openDeliverables.value = null; return false; }
 }
-let deliverablesTimer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => { void loadOpenDeliverables(); deliverablesTimer = setInterval(loadOpenDeliverables, Math.max(5000, props.pollMs ?? 5000)); });
-onBeforeUnmount(() => { if (deliverablesTimer) clearInterval(deliverablesTimer); });
+usePoll(loadOpenDeliverables, Math.max(5000, props.pollMs ?? 5000));
 
 /**
  * A link into the remote view (remoteHash.ts): #team={id} opens that team (an unknown or malformed id leaves the view
@@ -379,7 +379,7 @@ onMounted(() => {
   void loadConversations();
   void loadAgents();
   void loadConciergeDefault(api);
-  timer = setInterval(refresh, props.pollMs ?? 1000);
+  overviewPoll.start();
   // Back in the window (an agent CLI may have been installed or signed in to meanwhile): the agents again.
   window.addEventListener('focus', loadAgentsOnFocus);
 });
@@ -400,7 +400,7 @@ watch(gitRequest, (r) => {
   const t = r ? allTeams.value.find((x) => x.name === r.team) : null;
   if (t && (view.value !== 'teams' || selected.value !== t.id)) openTeam(t.id);
 });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); window.removeEventListener('hashchange', openFromHash); });
+onBeforeUnmount(() => { for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); window.removeEventListener('hashchange', openFromHash); });
 
 // The window's own title (taskbar, Alt+Tab) follows the place; the page shows its own heading.
 watch(title, (t) => { document.title = t ? `${t} · Yawble` : 'Yawble'; }, { immediate: true });

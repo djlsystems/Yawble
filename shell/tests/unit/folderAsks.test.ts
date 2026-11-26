@@ -297,7 +297,7 @@ describe('the Board\'s Needs You lane counts folder asks', () => {
 
 describe('the member\'s pane shows its own folder asks', () => {
   const member = { id: 7, teamId: 1, team: 'Smoke-sessions', name: 'OperatorClifford', role: 'member', cli: 'claude', instructions: '', model: '', credential: 'default' } as const;
-  const card = (name = member.name): AgentCard => ({
+  const card = (name: string = member.name): AgentCard => ({
     member: { ...member, name }, state: 'idle', queuePosition: null, queueLength: 0, queuedInstructions: 0, statusLine: null, runId: null,
     runStartedAt: null, lastRunState: null, lastRunReason: null, net: 'model + bus', wallTimeout: '2 h', loosened: [], policyProblems: [],
   } as AgentCard);

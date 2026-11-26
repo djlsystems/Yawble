@@ -126,6 +126,8 @@ input, select, textarea { font: inherit; border: 1px solid var(--line); border-r
 input:disabled, textarea:disabled, select:disabled { background: var(--surface-sunken); color: var(--muted); }
 code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 .muted { color: var(--muted); }
+/* An image named in rendered markdown: its alt text, never the picture (markdown.ts). */
+.md-image-alt { color: var(--muted); font-style: italic; }
 .error { color: var(--bad); white-space: pre-wrap; }
 .warn { color: var(--warn); }
 .ok { color: var(--ok); }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { usePoll } from '../usePoll';
 import { DELIVERABLE_EXTEND, DELIVERABLES_GET, type Goal, type LaneId, type DeliverableDetail, type DeliverableRow, type YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import { ago } from '../board/cards';
@@ -46,12 +47,10 @@ async function load() {
     if (id !== props.row.id) return;
     detail.value = d;
     error.value = null;
-  } catch (e) { if (id === props.row.id) error.value = errorText(e); }
+  } catch (e) { if (id === props.row.id) error.value = errorText(e); return false; }
 }
 watch(() => props.row.id, () => { detail.value = null; specOpen.value = false; error.value = null; void load(); });
-let timer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => { void load(); timer = setInterval(load, Math.max(2000, props.pollMs ?? 5000)); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+usePoll(load, Math.max(2000, props.pollMs ?? 5000));
 
 // ---- the spec ----
 const spec = computed(() => (backlog.value && detail.value?.spec ? renderMarkdown(detail.value.spec) : null));

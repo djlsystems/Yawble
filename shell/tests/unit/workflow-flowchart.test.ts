@@ -155,7 +155,7 @@ describe('the Flowchart tab', () => {
     await flushPromises();
     expect(stepOf(w, 'mark')!.value).toBe('{vars.last.uid}');
     expect(jsonText(w)).toContain('"value": "{vars.last.uid}"');
-    expect(w.get('[data-test=editor-dirty]').exists()).toBe(true);
+    expect(w.find('[data-test=editor-dirty]').exists()).toBe(true);
     // Invalid JSON in the panel leaves the document as it was.
     await area.setValue('{ "id": ');
     await flushPromises();
@@ -366,7 +366,7 @@ describe('the Flowchart tab', () => {
     await wait(500);
     await flushPromises();
     expect(f.of('workflows.check').length).toBe(before + 1);
-    expect(node(w, 'each').get('[data-test=flow-node-badge]').exists()).toBe(true);
+    expect(node(w, 'each').find('[data-test=flow-node-badge]').exists()).toBe(true);
     expect(w.get('[data-test=check-issue][data-step=each]').text()).toContain('which is not a step');
   });
 

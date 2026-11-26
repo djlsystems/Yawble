@@ -72,7 +72,7 @@ describe('the Concierge', () => {
     // The reply streams in, then the turn ends and the kept answer replaces it.
     core.push('concierge.turn', { conversationId: 'c1', state: 'running', text: 'Looking **now**', tools: [{ name: 'team_status', detail: 'team: payments' }], error: null });
     await flushPromises();
-    expect(w.get('[data-test=composer-stop]').exists()).toBe(true);
+    expect(w.find('[data-test=composer-stop]').exists()).toBe(true);
     expect(w.html()).toContain('<strong>now</strong>');
     expect(w.text()).toContain('Checked a team');
 

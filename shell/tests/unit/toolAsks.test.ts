@@ -95,7 +95,7 @@ describe('ToolAskCard', () => {
     const { api } = fakeApi({});
     const w = mount(ToolAskCard, { props: { ask: ask({ state: 'installing', attempts: 1 }), api } });
     expect(w.attributes('data-state')).toBe('installing');
-    expect(w.get('[data-test=tool-ask-progress]').exists()).toBe(true);
+    expect(w.find('[data-test=tool-ask-progress]').exists()).toBe(true);
     expect(w.findAll('button:not(.discuss)').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
   });
 

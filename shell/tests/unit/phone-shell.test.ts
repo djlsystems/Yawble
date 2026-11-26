@@ -538,8 +538,8 @@ describe('phone e2e faults F1 to F4', () => {
     expect(src('App.vue')).not.toContain('.banners { display: contents; }');
     const w = await mountWithAsks(760);
     expect(w.get('.app').classes()).not.toContain('phone');
-    expect(w.get('[data-test=banners] [data-test=network-asks]').exists()).toBe(true);
-    expect(w.get('[data-test=banners] [data-test=tool-asks]').exists()).toBe(true);
+    expect(w.find('[data-test=banners] [data-test=network-asks]').exists()).toBe(true);
+    expect(w.find('[data-test=banners] [data-test=tool-asks]').exists()).toBe(true);
   });
 
   const sidebarProps = {

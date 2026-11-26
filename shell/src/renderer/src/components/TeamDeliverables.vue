@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { ref } from 'vue';
+import { usePoll } from '../usePoll';
 import { deliverableTime, type YawbleApi, type DeliverableSummary } from '../../../shared/api';
 import LoadingNote from './LoadingNote.vue';
 import OverallTime from '../timeline/OverallTime.vue';
@@ -16,7 +17,6 @@ const emit = defineEmits<{ open: [deliverable: number] }>();
 
 const list = ref<DeliverableSummary[] | null>(null);
 const failed = ref(false);
-let timer: ReturnType<typeof setInterval> | null = null;
 
 async function load() {
   try {
@@ -24,7 +24,7 @@ async function load() {
     list.value = latestDeliverables(Array.isArray(got) ? got : [], Infinity);
     failed.value = false;
     void loadItems();
-  } catch { failed.value = true; /* keeps what it showed */ }
+  } catch { failed.value = true; return false; /* keeps what it showed */ }
 }
 
 // Each deliverable's backlog item as a link; deliverables.list is asked again only when a new deliverable shows.
@@ -40,8 +40,7 @@ async function loadItems() {
 const tip = (w: DeliverableSummary) =>
   `${deliverableLook(w).label} · #${w.id} ${w.title}${w.busy.length ? ` · ${w.busy.join(', ')}` : w.ending ? ` · ${w.ending}` : ''}`;
 
-onMounted(() => { void load(); timer = setInterval(load, Math.max(5000, props.pollMs ?? 5000)); });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); });
+usePoll(load, Math.max(5000, props.pollMs ?? 5000));
 </script>
 
 <template>

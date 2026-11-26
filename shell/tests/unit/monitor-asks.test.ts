@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { NetworkAsk, ToolAsk, YawbleApi } from '../../src/shared/api';
 import { MonitorModel } from '../../src/renderer/src/monitor/model';
 
@@ -56,7 +56,7 @@ function api(): YawbleApi {
 const settle = async (n = 8) => { for (let i = 0; i < n; i++) await flushPromises(); };
 const emit = (event: string) => { for (const l of [...listeners]) l({ event }); };
 const mounted: VueWrapper[] = [];
-let spy: ReturnType<typeof vi.spyOn<MonitorModel, 'setAsks'>>;
+let spy: MockInstance<MonitorModel['setAsks']>;
 async function view() {
   const w = mount(MonitorView, { props: { api: api(), pollMs: 60_000 }, attachTo: document.body });
   mounted.push(w);

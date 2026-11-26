@@ -77,7 +77,7 @@ function busyOf(w: VueWrapper, sel: string) {
 }
 
 const team: TeamSummary = { id: 1, name: 'payments', repoPath: null, members: 1, running: 0, queued: 0 } as TeamSummary;
-const lanes = [{ id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' }, { id: 'blocked', label: 'Needs You' }, { id: 'done', label: 'Done' }];
+const lanes: { id: 'todo' | 'in-progress' | 'blocked' | 'done'; label: string }[] = [{ id: 'todo', label: 'To Do' }, { id: 'in-progress', label: 'In Progress' }, { id: 'blocked', label: 'Needs You' }, { id: 'done', label: 'Done' }];
 const item = (over: Partial<BacklogItem> = {}): BacklogItem => ({
   id: 7, label: 'B007', team: null, title: 'Dark mode', body: '# Dark mode', state: 'ready', archivedAt: null, dispatchedTeam: null,
   dispatchedDeliverable: null, dispatchedAt: null, inFlight: false, createdAt: '2026-11-12T10:00:00Z', updatedAt: '2026-11-12T10:00:00Z', dispatchCount: 0, ...over,
