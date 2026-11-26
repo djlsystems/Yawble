@@ -21,7 +21,7 @@ const save = (name: string, v: unknown) => { mkdirSync(OUT, { recursive: true })
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  if (!process.env.GIT_TIDY_SKIP_BUILD) await buildRenderer(undefined, BUILT);
+  if (!process.env.GIT_TIDY_SKIP_BUILD) await buildRenderer(BUILT);
 });
 test.afterEach(() => { const c = fakeRemote(BUILT).core; c.setNeedsYou(true); c.resetTidy(); });
 

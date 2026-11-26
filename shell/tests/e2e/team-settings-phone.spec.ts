@@ -1,8 +1,8 @@
 // The team Settings dialog on a phone, in a real browser (headless Chrome) against the FAKE core
 // of phone-remote.spec.ts (remote.html, canned answers). At 390x844 (an iPhone) it is laid out like the app's Settings on
-// a phone: it opens at the list of its eight sections (full-width rows, one line each, at least 44 px tall, a › chevron);
+// a phone: it opens at the list of its nine sections (full-width rows, one line each, at least 44 px tall, a › chevron);
 // a tap opens that section alone under a Back + title head; Back returns to the list. Nothing is wider than the screen.
-// The sheet's Close keeps its 44 px tap target. At 1280x800 the tab row is as before.
+// The sheet's Close keeps its 44 px tap target. At 1280x800 it is one row of tabs, one line each.
 //
 //   npx playwright test team-settings-phone      (E2E_SKIP_BUILD=1 reuses out/e2e/renderer)
 import { expect, test, type Browser, type Page } from './phone/fixtures';
@@ -25,11 +25,11 @@ const SHOTS = path.join(process.env.YAWBLE_TEAM_DOCS || path.resolve(__dirname, 
 
 test.beforeAll(async () => { test.setTimeout(600_000); mkdirSync(SHOTS, { recursive: true }); await buildRenderer(); });
 
-const IDS = ['general', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
-const LABELS = ['General', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
+const IDS = ['general', 'hiring', 'state', 'repos', 'env', 'network', 'integrations', 'reset', 'delete'];
+const LABELS = ['General', 'Hiring', 'Pause and archive', 'Repositories', 'Environment', 'Network', 'Integrations', 'Reset', 'Delete'];
 // Each section's own pane (a data-test inside it that only it has).
 const PANES: Record<string, string> = {
-  general: '[data-test=team-general]', state: '[data-test=team-approvals]', repos: '[data-test=repo-main]', env: '[data-test=env-add]',
+  general: '[data-test=team-general]', hiring: '[data-test=team-hiring]', state: '[data-test=team-approvals]', repos: '[data-test=repo-main]', env: '[data-test=env-add]',
   network: '[data-test=team-network]', integrations: '[data-test=team-integrations]', reset: '[data-test=team-reset]', delete: '[data-test=team-delete-pane]',
 };
 
@@ -91,7 +91,7 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
   expect(close && Math.round(close.width)).toBe(44);
   expect(close && Math.round(close.height)).toBe(44);
 
-  // The list: eight full-width rows in order, one line each, >= 44 px, a chevron; no pane under it.
+  // The list: nine full-width rows in order, one line each, >= 44 px, a chevron; no pane under it.
   const rows = await rowInfo(page);
   expect(rows.map((r) => r.id)).toEqual(IDS.map((t) => `manage-tab-${t}`));
   expect(rows.map((r) => r.text)).toEqual(LABELS);
@@ -144,7 +144,7 @@ test('phone 390x844: a list of sections; a tap opens one under Back; Back return
   await ctx.close();
 });
 
-test('desktop 1280x800: the tab row is as before (one row, one line each, no list)', async ({ browser }) => {
+test('desktop 1280x800: the tabs are one row, one line each, no list', async ({ browser }) => {
   const { page, ctx, errors } = await openSettings(browser, 1280, 800);
   await page.screenshot({ path: path.join(SHOTS, 'team-settings-1280x800.png') });
   await expect(page.locator('.manage')).not.toHaveAttribute('data-phone-screen', /.*/);

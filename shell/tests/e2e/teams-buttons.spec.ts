@@ -21,7 +21,7 @@ const measured = new Proxy({} as Record<string, unknown>, { set(o, k, v) { o[k a
 
 test.beforeAll(async () => {
   test.setTimeout(600_000);
-  await buildRenderer(undefined, BUILT);
+  await buildRenderer(BUILT);
 });
 
 async function teamsPage(browser: Browser, w: number, h: number, tile?: { w: number; h: number }) {
