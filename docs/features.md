@@ -972,6 +972,8 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
   Yawble again; it writes what it did to `<data>/logs/update.log`. This works for an `install.sh` install that you
   may change (the default `~/.local/opt/yawble`). A system-wide install in `/opt`, or a run from source, gets a link
   to the release page.
+- An older version of Yawble does not open data that a newer version has changed. It says so, changes nothing and
+  does not start; install the newest version to continue.
 
 ## Backups and doctor
 

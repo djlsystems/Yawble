@@ -97,6 +97,12 @@ catch (MigrationBackupException e)
     Console.Error.WriteLine("fatal: " + e.Message);
     return 3;
 }
+catch (DatabaseNewerException e)
+{
+    // The data was written by a newer version of the app: this one leaves it alone and says so.
+    Console.Error.WriteLine("fatal: " + e.Message);
+    return 6;
+}
 // The space of rows that pruning deleted is given back here, while nothing else has the database open and no run is
 // active: only when much of a large file is free, and only with a recent backup (made now when none is).
 DbCompaction.CompactIfDue(dbPath, backupService.EnsureRecent, line => Console.Error.WriteLine(line));
