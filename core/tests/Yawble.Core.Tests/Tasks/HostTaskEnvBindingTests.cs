@@ -16,6 +16,7 @@ namespace Yawble.Core.Tests.Tasks;
 /// A host task's environment variable from a Connection (GH_TOKEN for a release script). Fakes only: an in-memory credential store,
 /// the temp checkout and script of <see cref="TaskFixture"/>; no real gh and no network.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class HostTaskEnvBindingTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

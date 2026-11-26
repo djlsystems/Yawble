@@ -17,6 +17,7 @@ namespace Yawble.Core.Tests.Launch;
 /// release). This spawns from a thread that ends at once, as a retired pool thread does, and waits for the workload.
 /// </summary>
 [Collection(RealSandboxGuardrailCollection.Name)]
+[Trait("Speed", "Slow")]
 public class RealSandboxSpawnThreadTests
 {
     [Theory]

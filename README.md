@@ -158,6 +158,15 @@ dotnet test --project bridge/tests/Yawble.Bridge.Tests
 cd shell && npm test && npm run test:e2e
 ```
 
+Core test classes that start real programs other than git (the core itself through `dotnet`, the bridge programs,
+stand-in and real sandboxes, host task programs) carry the trait `Speed=Slow`. A fast run leaves them out; the full
+run is the plain command above:
+
+```bash
+dotnet test --project core/tests/Yawble.Core.Tests -- --filter-not-trait "Speed=Slow"   # fast
+dotnet test --project core/tests/Yawble.Core.Tests                                      # full
+```
+
 To see where a core test run spends its time, write a TRX result file (it holds each test's duration) and print the
 slowest tests and the total per class from it. Keep result files outside the repository:
 

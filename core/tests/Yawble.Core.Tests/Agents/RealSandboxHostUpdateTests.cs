@@ -20,6 +20,7 @@ namespace Yawble.Core.Tests.Agents;
 /// Each case records what the sandbox saw; the assertions pin the behaviour the report describes.
 /// </summary>
 [Collection(RealSandboxGuardrailCollection.Name)]
+[Trait("Speed", "Slow")]
 public class RealSandboxHostUpdateTests(ITestOutputHelper output)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

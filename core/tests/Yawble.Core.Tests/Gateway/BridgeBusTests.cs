@@ -146,6 +146,7 @@ internal sealed class BridgeProcess : IAsyncDisposable
 /// or expired token is refused. The runner here stands in for the launcher: for each admitted run it starts
 /// the run's gateway and an yawble-bridge, and plays the agent's tool calls through the bridge. No sandbox, no real CLI.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class BridgeBusTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

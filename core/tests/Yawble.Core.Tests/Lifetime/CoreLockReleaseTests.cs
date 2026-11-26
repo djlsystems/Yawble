@@ -10,6 +10,7 @@ namespace Yawble.Core.Tests.Lifetime;
 /// core (a crash) and a core that exits cleanly both leave the folder free for the next core, which then owns
 /// core.lock and core.pid.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class CoreLockReleaseTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

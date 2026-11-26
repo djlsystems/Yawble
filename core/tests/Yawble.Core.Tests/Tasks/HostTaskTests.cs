@@ -90,6 +90,7 @@ internal sealed class TaskFixture : IDisposable
     public void Dispose() => Db.Dispose();
 }
 
+[Trait("Speed", "Slow")]
 public class HostTaskTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

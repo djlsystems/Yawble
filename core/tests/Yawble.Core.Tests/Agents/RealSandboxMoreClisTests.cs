@@ -15,6 +15,7 @@ namespace Yawble.Core.Tests.Agents;
 /// </summary>
 [Collection(RealSandboxGuardrailCollection.Name)]
 [Trait("Category", "HostCli")]
+[Trait("Speed", "Slow")]
 public class RealSandboxMoreClisTests(ITestOutputHelper output)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

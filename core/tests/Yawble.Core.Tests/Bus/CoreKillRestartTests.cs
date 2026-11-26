@@ -10,6 +10,7 @@ namespace Yawble.Core.Tests.Bus;
 /// the bus with fake runners (YAWBLE_RUNNER), is killed with SIGKILL while four runs are open and two members
 /// are queued, and is then started again on the same database.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class CoreKillRestartTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

@@ -84,6 +84,7 @@ internal static class RealSandbox
 /// </summary>
 [Collection(RealSandboxCollection.Name)]
 [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+[Trait("Speed", "Slow")]
 public class RealSandboxLauncherTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

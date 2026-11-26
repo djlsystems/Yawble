@@ -14,6 +14,7 @@ namespace Yawble.Core.Tests.Launch;
 /// back, and Kill leaves no process of the tree behind.
 /// </summary>
 [Collection(RealSandboxCollection.Name)]
+[Trait("Speed", "Slow")]
 public class WxcExecPtyTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

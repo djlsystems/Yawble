@@ -22,6 +22,7 @@ namespace Yawble.Core.Tests.Concierge;
 /// description-only edit removes Always as docs/host-tasks-release.md says; where the Concierge tells the person tasks are
 /// defined.
 /// </summary>
+[Trait("Speed", "Slow")]
 public sealed class HostTaskGapTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

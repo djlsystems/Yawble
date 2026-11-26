@@ -15,6 +15,7 @@ namespace Yawble.Core.Tests.Launch;
 /// finishes, with or without -m: the app's dotnet wrapper is first on the sandbox's PATH and builds with -m:1.
 /// </summary>
 [Collection(RealSandboxGuardrailCollection.Name)]
+[Trait("Speed", "Slow")]
 public class RealSandboxDotnetBuildTests(ITestOutputHelper output)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

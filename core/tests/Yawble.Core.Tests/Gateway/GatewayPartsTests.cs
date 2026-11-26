@@ -78,6 +78,7 @@ public class GatewayPartsTests
     public void PrivateAddresses_AreRecognised(string address, bool isPrivate) =>
         Assert.Equal(isPrivate, RunGateway.IsPrivate(IPAddress.Parse(address)));
 
+    [Trait("Speed", "Slow")]
     [Fact]
     public async Task SandboxGrokAuth_PrintsTheRunTokenOnly_AndFailsWithoutOne()
     {

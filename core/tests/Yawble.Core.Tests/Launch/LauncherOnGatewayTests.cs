@@ -22,6 +22,7 @@ namespace Yawble.Core.Tests.Launch;
 /// yawble-bridge and yawble-grok-auth processes. Only the sandbox is scripted: the "sandbox" runs the bridge and makes the
 /// model calls a CLI would, through the run's gateway, with only what the compiled request gives it. No real sandbox.
 /// </summary>
+[Trait("Speed", "Slow")]
 public class LauncherOnGatewayTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

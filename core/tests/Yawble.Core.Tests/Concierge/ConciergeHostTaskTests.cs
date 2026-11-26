@@ -19,6 +19,7 @@ namespace Yawble.Core.Tests.Concierge;
 /// (the person's Run once / Always, pinned to the files); it is refused on review turns and over the Cloud Link like
 /// deliverable_close; its end is one Update in the chat it was asked from.
 /// </summary>
+[Trait("Speed", "Slow")]
 public sealed class ConciergeHostTaskTests : IAsyncLifetime
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
