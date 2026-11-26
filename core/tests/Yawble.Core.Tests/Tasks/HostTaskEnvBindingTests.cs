@@ -13,8 +13,9 @@ using Xunit;
 namespace Yawble.Core.Tests.Tasks;
 
 /// <summary>
-/// A host task's environment variable from a Connection (GH_TOKEN for a release script). Fakes only: an in-memory credential store,
-/// the temp checkout and script of <see cref="TaskFixture"/>; no real gh and no network.
+/// A host task's environment variable from a Connection (GH_TOKEN for a release script): validation, pinning, the run and
+/// its masking (short, nested and multi-line values), the Connection in use, and the Cloud Link. Fakes only: an in-memory
+/// credential store, the temp checkout and stand-in task of <see cref="TaskFixture"/>; no real gh and no network.
 /// </summary>
 [Trait("Speed", "Slow")]
 public class HostTaskEnvBindingTests
@@ -105,7 +106,7 @@ public class HostTaskEnvBindingTests
     // ------------------------------------------------------------------ 2. pinning
 
     [Fact]
-    public async Task TheBindingIsPinned_ItsValueIsNot_AndATaskWithoutBindingsKeepsItsOldHash()
+    public async Task TheBindingIsPinned_ItsValueIsNot_AndATaskWithoutBindingsHashesWithoutTheKey()
     {
         using var f = new TaskFixture(withConnections: true);
         var id = AddConnection(f);
@@ -115,7 +116,7 @@ public class HostTaskEnvBindingTests
         string H(HostTaskDef d) => TaskPinning.Definition(f.TeamId, d, p.ProgramResolved!).Hash;
         var withBinding = plain with { EnvFromConnections = [Bind(id) with { ConnectionName = ConnName }] };
 
-        Assert.DoesNotContain("env_from_connections", TaskPinning.Definition(f.TeamId, plain, p.ProgramResolved!).Json); // tasks from before Connection variables: same hash
+        Assert.DoesNotContain("env_from_connections", TaskPinning.Definition(f.TeamId, plain, p.ProgramResolved!).Json); // a task with no bindings has no such key in what is hashed
         Assert.NotEqual(H(plain), H(withBinding)); // adding
         Assert.NotEqual(H(withBinding), H(plain with { EnvFromConnections = [Bind(other) with { ConnectionName = ConnName }] })); // re-pointing the Connection
         Assert.NotEqual(H(withBinding), H(plain with { EnvFromConnections = [Bind(id, field: "other") with { ConnectionName = ConnName }] })); // another field
@@ -318,7 +319,7 @@ public class HostTaskEnvBindingTests
             Assert.Equal("forbidden", e.Code);
             Assert.Contains("on the computer itself", e.Message);
             Assert.Empty(f.Svc.Store.Tasks(f.TeamId));
-            await rpc.DispatchAsync("tasks.save", Save(null), Ct); // a task without bindings: as before
+            await rpc.DispatchAsync("tasks.save", Save(null), Ct); // a task without bindings is theirs to save
         }
 
         using (Actor.Use(Actor.Window)) await rpc.DispatchAsync("tasks.save", Save(Binding(id)), Ct); // at the computer: allowed
@@ -343,5 +344,144 @@ public class HostTaskEnvBindingTests
             return rpc.DispatchAsync("tasks.save", Save([new JsonObject { ["name"] = "GH_TOKEN", ["connectionId"] = id, ["field"] = "token", ["value"] = "x" }]), Ct);
         });
         Assert.Equal("bad_params", refusedValue.Code); // a binding never carries a value
+    }
+
+    /// <summary>The Tasks panel over the Cloud Link sends the stored bindings back as tasks.list gave them (connectionId a string): another edit stays allowed.</summary>
+    [Fact]
+    public async Task ACloudLinkEditThatSendsTheStoredBindingBackAsTasksListGaveItIsAllowed()
+    {
+        using var f = new TaskFixture(withConnections: true);
+        var id = AddConnection(f);
+        var rpc = new HostTaskRpc(f.Svc, _ => ["main"]);
+        JsonObject Save(JsonNode connectionId, int timeout) => new()
+        {
+            ["teamId"] = f.TeamId,
+            ["def"] = new JsonObject
+            {
+                ["name"] = "release", ["program"] = f.Def().Program,
+                ["args"] = new JsonArray(f.Def().Args.Select(a => (JsonNode?)a).ToArray()), ["timeoutSeconds"] = timeout,
+                ["envFromConnections"] = new JsonArray(new JsonObject { ["name"] = "GH_TOKEN", ["connectionId"] = connectionId, ["field"] = "token", ["connectionName"] = ConnName }),
+            },
+        };
+        using (Actor.Use(Actor.Window)) await rpc.DispatchAsync("tasks.save", Save(id, 60), Ct);
+        JsonNode listed;
+        using (Actor.Use(Actor.CloudViewer("remote"))) listed = (await rpc.DispatchAsync("tasks.list", new JsonObject { ["teamId"] = f.TeamId }, Ct))!;
+        var storedId = listed["tasks"]![0]!["def"]!["envFromConnections"]![0]!["connectionId"]!.DeepClone();
+        Assert.Equal(id.ToString(), storedId.GetValue<string>()); // out: a string
+
+        using (Actor.Use(Actor.CloudViewer("remote")))
+        {
+            await rpc.DispatchAsync("tasks.save", Save(storedId, 90), Ct);
+            await rpc.DispatchAsync("tasks.save", Save(id, 120), Ct); // in: a number is the same binding
+        }
+        Assert.Equal(120, f.Svc.Store.Task(f.TeamId, "release")!.Def.TimeoutSeconds);
+    }
+
+    /// <summary>A preview over the Cloud Link cannot be used to find out which Connections exist or what they are called.</summary>
+    [Fact]
+    public async Task ACloudLinkPreviewWithANewBinding_IsRefused_AndNamesNoConnection()
+    {
+        using var f = new TaskFixture(withConnections: true);
+        var id = AddConnection(f, "Secret Corp Deploy Key", "a-long-enough-token-value");
+        var rpc = new HostTaskRpc(f.Svc, _ => ["main"]);
+        JsonObject Preview(string connectionId) => new()
+        {
+            ["teamId"] = f.TeamId,
+            ["def"] = new JsonObject
+            {
+                ["name"] = "probe", ["program"] = f.Def().Program,
+                ["args"] = new JsonArray(f.Def().Args.Select(a => (JsonNode?)a).ToArray()), ["timeoutSeconds"] = 60,
+                ["envFromConnections"] = new JsonArray(new JsonObject { ["name"] = "GH_TOKEN", ["connectionId"] = connectionId, ["field"] = "nope" }),
+            },
+        };
+        using (Actor.Use(Actor.CloudViewer("remote")))
+        {
+            var e = await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("tasks.preview", Preview(id.ToString()), Ct));
+            Assert.Contains("only be defined or changed on the computer", e.Message);
+            Assert.DoesNotContain("Secret Corp Deploy Key", e.Message);
+        }
+    }
+
+    // ------------------------------------------------------------------ 7. more validation, and the ask as the shell gets it
+
+    [Fact]
+    public void ABindingNamedLikeAPassedOnNameInAnotherCaseIsRefused()
+    {
+        using var f = new TaskFixture(withConnections: true);
+        var d = f.Def("release") with { EnvNames = ["gh_token"], EnvFromConnections = [new EnvBinding("GH_TOKEN", "1", "token", "")] };
+        Assert.Contains("already passed", Assert.Throws<ArgumentException>(() => HostTaskRules.Validate(d)).Message);
+    }
+
+    [Fact]
+    public void TheConnectionIdIsStoredInOneCanonicalForm()
+    {
+        using var f = new TaskFixture(withConnections: true);
+        var id = AddConnection(f, "Release", "a-long-enough-token-value");
+        var d = f.Def("release") with { EnvFromConnections = [new EnvBinding("GH_TOKEN", "0" + id, "token", "")] };
+        var named = HostTaskRules.ValidateBindings(d, f.Conns);
+        Assert.Equal(id.ToString(), named.EnvFromConnections[0].ConnectionId);
+        Assert.Equal("Release", named.EnvFromConnections[0].ConnectionName);
+    }
+
+    /// <summary>The ask as the shell gets it (integrations asks): the binding line is in the detail, the value nowhere.</summary>
+    [Fact]
+    public async Task TheAskJsonCarriesTheBindingLineAndNoValue()
+    {
+        using var f = new TaskFixture(withConnections: true);
+        var id = AddConnection(f);
+        await f.SaveAsync(f.Def("release") with { EnvFromConnections = [new EnvBinding("GH_TOKEN", id.ToString(), "token", "")] });
+        var ask = await f.Request("release");
+        Assert.Equal(RequestKind.Asked, ask.Kind);
+        var rpc = new HostTaskRpc(f.Svc, _ => ["main"]);
+        var asks = rpc.Asks(f.TeamId);
+        var json = asks.ToJsonString();
+        Assert.Contains("env_from_connections", json);
+        Assert.Contains($"GH_TOKEN ← Connection '{ConnName}' (token)", asks[0]!["detail"]!["env_from_connections"]![0]!.GetValue<string>());
+        Assert.DoesNotContain(Token, json);
+        Assert.DoesNotContain(Token, ask.Text);
+    }
+
+    /// <summary>A reason cut to the store's cap ends in the one ellipsis character, not in mis-decoded bytes of it.</summary>
+    [Fact]
+    public void ClipEndsInAnEllipsisAndKeepsTheCap()
+    {
+        var clipped = HostTaskStore.Clip(new string('a', 600), 500);
+        Assert.Equal(500, clipped.Length);
+        Assert.EndsWith("…", clipped);
+        Assert.DoesNotContain("â", clipped);
+    }
+
+    // ------------------------------------------------------------------ 8. masking
+
+    [Fact]
+    public void ALongerSecretIsMaskedWhole_EvenWhenAShorterOneSitsInsideIt()
+    {
+        const string inner = "abcdefgh12";
+        const string outer = "prefix-abcdefgh12-suffix-token";
+        Assert.Equal("token=[redacted]", TaskProcess.Redact($"token={outer}", [inner, outer]));
+    }
+
+    [Fact]
+    public void AMultiLineValue_IsMaskedLineByLine()
+    {
+        const string key = "-----BEGIN KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nAnotherLongKeyLine0123456789\n-----END KEY-----";
+        var parts = TaskProcess.MaskedParts(key).ToList();
+        Assert.Contains("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC", parts);
+        Assert.Equal("[redacted]", TaskProcess.Redact("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC", parts));
+        Assert.Equal("[redacted]", TaskProcess.Redact("AnotherLongKeyLine0123456789", parts));
+        Assert.DoesNotContain("", parts);
+        Assert.Equal(["a-single-line-token"], TaskProcess.MaskedParts("a-single-line-token"));
+    }
+
+    [Fact]
+    public void AValueTooShortToMask_StopsTheRun_WithoutShowingIt()
+    {
+        using var f = new TaskFixture(withConnections: true);
+        var id = AddConnection(f, "Release", "short1");
+        var (values, problems) = TaskProcess.ReadBindings([new EnvBinding("GH_TOKEN", id.ToString(), "token", "Release")], f.Conns);
+        Assert.Empty(values);
+        var problem = Assert.Single(problems);
+        Assert.Contains("shorter than 8 characters", problem);
+        Assert.DoesNotContain("short1", problem);
     }
 }
