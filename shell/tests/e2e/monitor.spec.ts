@@ -390,6 +390,10 @@ async function open(browser: Browser, o: OpenOpts = {}) {
   const core = createFakeCore();
   core.setAsks(o.asks ?? false);
   core.setNeedsYou(false);
+  // Nothing else waits on the person either: the fake core's folder asks and expiring deliverables are shared with the
+  // worker's other spec files, and the You node counts them.
+  core.setFolderAsks(false);
+  core.setExpiry(false);
   core.setAccess(o.access ?? 'full');
   const extra = Array.from({ length: o.extraTeams ?? 0 }, (_, i) => ({ id: 3 + i, name: `team-${3 + i}`, repoPath: `C:/repos/t${3 + i}`, members: 2, running: 1, queued: 0 }));
   const phone = (o.w ?? 1280) < 700;

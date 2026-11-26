@@ -16,6 +16,8 @@ test.use({ channel: 'chrome', headless: true, actionTimeout: 8_000 });
 test.setTimeout(60_000);
 
 test.beforeAll(async () => { test.setTimeout(600_000); await buildRenderer(); });
+// The fake core's folder asks are shared by every spec file the worker runs: none is left pending after a test.
+test.afterEach(() => { fakeRemote(builtDir).core.setFolderAsks(false); });
 
 const shots = process.env.YAWBLE_TEAM_DOCS ? path.join(process.env.YAWBLE_TEAM_DOCS, 'folder-asks') : null;
 if (shots) mkdirSync(shots, { recursive: true });
