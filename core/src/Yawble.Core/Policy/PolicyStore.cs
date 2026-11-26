@@ -158,6 +158,21 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
         return PolicyMerger.Merge(GetGlobal(), m.Override, m.Loosen, layout, canonicalize, machineMemoryMb, TeamHostsOfMember(memberId));
     }
 
+    /// <summary>What every member of a team shares in its effective policy: the global policy and the team's network allow list.</summary>
+    public sealed record TeamShared(GlobalPolicy Global, IReadOnlyList<string> Hosts);
+
+    public TeamShared SharedOf(long teamId) => new(GetGlobal(), [.. TeamHosts(teamId).Select(h => h.Host)]);
+
+    /// <summary>
+    /// <see cref="Effective(long, RunLayout, long?)"/> for a member of the team <paramref name="shared"/> was read for:
+    /// a reader of many members of one team reads the shared part once.
+    /// </summary>
+    public MergeResult Effective(long memberId, RunLayout layout, long? machineMemoryMb, TeamShared shared)
+    {
+        var m = GetMember(memberId);
+        return PolicyMerger.Merge(shared.Global, m.Override, m.Loosen, layout, canonicalize, machineMemoryMb, shared.Hosts);
+    }
+
     // ---------------------------------------------------------------- the team's network allow list (0041)
 
     /// <summary>The team's network allow list, oldest first.</summary>
