@@ -22,7 +22,12 @@ public class SafeTreeTests : IDisposable
 
     public void Dispose() => _tmp.Dispose();
 
-    private static string Refused(Action a) => Assert.Throws<CodeBrowserException>(a) is { Code: CodeBrowserException.Refused } e ? e.Message : "wrong code";
+    private static string Refused(Action a)
+    {
+        var e = Assert.Throws<CodeBrowserException>(a);
+        Assert.Equal(CodeBrowserException.Refused, e.Code);
+        return e.Message;
+    }
 
     [Theory]
     [InlineData("..")]

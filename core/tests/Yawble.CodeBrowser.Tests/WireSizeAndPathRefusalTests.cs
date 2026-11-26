@@ -7,11 +7,11 @@ using Xunit;
 namespace Yawble.CodeBrowser.Tests;
 
 /// <summary>
-/// Edge probes: the size of the biggest answers as the Cloud Link puts them on the WebSocket
-/// (CloudLink.ServeAsync: JsonSerializer.SerializeToUtf8Bytes(message) with default options), and path refusals the
-/// other tests do not spell out (.git spellings, 8.3 short names, alternate data streams, hidden files at depth).
+/// The size of the biggest answers as the Cloud Link puts them on the WebSocket
+/// (CloudLink.ServeAsync: JsonSerializer.SerializeToUtf8Bytes(message) with default options), and the paths the
+/// service refuses (.git spellings, 8.3 short names, alternate data streams, hidden files at depth).
 /// </summary>
-public class TesterProbeTests : IAsyncDisposable
+public class WireSizeAndPathRefusalTests : IAsyncDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private const string Window = "app:me";
@@ -20,7 +20,7 @@ public class TesterProbeTests : IAsyncDisposable
     private readonly FakeHost _host;
     private readonly CodeBrowserService _service;
 
-    public TesterProbeTests()
+    public WireSizeAndPathRefusalTests()
     {
         _clone = _tmp.Sub("clone");
         _host = new FakeHost(_clone);
@@ -52,7 +52,7 @@ public class TesterProbeTests : IAsyncDisposable
         File.WriteAllBytes(full, bytes);
     }
 
-    // ------------------------------------------------------------------ wire sizes (point 5)
+    // ------------------------------------------------------------------ wire sizes
 
     [Fact]
     public async Task DownloadChunkOfRandomBytesIsAbout6MbOnTheWire()
@@ -113,7 +113,7 @@ public class TesterProbeTests : IAsyncDisposable
         Assert.True(wire < 3_000_000);
     }
 
-    // ------------------------------------------------------------------ path refusals (point 4)
+    // ------------------------------------------------------------------ path refusals
 
     [Theory]
     [InlineData(".git/config")]

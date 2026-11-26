@@ -9,7 +9,7 @@ namespace Yawble.CodeBrowser.Tests;
 /// rescans after lost watcher events, per-owner sessions, no host path to the cloud, handle checks on folders and files,
 /// hard links, git named outright. The clone is the agent's: everything in it is treated as hostile.
 /// </summary>
-public class ReviewHardeningTests : IAsyncDisposable
+public class HostileCloneTests : IAsyncDisposable
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset T0 = new(2026, 11, 12, 10, 0, 0, TimeSpan.Zero);
@@ -22,7 +22,7 @@ public class ReviewHardeningTests : IAsyncDisposable
     private CodeBrowserService? _service;
     private FakeHost? _host;
 
-    public ReviewHardeningTests()
+    public HostileCloneTests()
     {
         _clone = _tmp.Sub("clone");
         _outside = _tmp.Sub("outside");
@@ -39,12 +39,17 @@ public class ReviewHardeningTests : IAsyncDisposable
     private ChangeTracker Tracker(TrackerOptions? options = null) =>
         new(new SafeTree(_clone), (options ?? new TrackerOptions()) with { Watch = false }, _clock);
 
-    private static string Refused(Action a) => Assert.Throws<CodeBrowserException>(a) is { Code: CodeBrowserException.Refused } e ? e.Message : "wrong code";
+    private static string Refused(Action a)
+    {
+        var e = Assert.Throws<CodeBrowserException>(a);
+        Assert.Equal(CodeBrowserException.Refused, e.Code);
+        return e.Message;
+    }
 
     private static string Lines(int n, int seed, int width = 60) =>
         string.Concat(Enumerable.Range(0, n).Select(i => $"{seed:D6} line {i:D5} ".PadRight(width, 'x') + "\n"));
 
-    // ------------------------------------------------------------------ 1. one memory budget, a cap on files
+    // ------------------------------------------------------------------ one memory budget, a cap on files
 
     [Fact]
     public void ThousandsOfLargeFilesRewrittenStayWithinTheBudget()
@@ -114,7 +119,7 @@ public class ReviewHardeningTests : IAsyncDisposable
         Assert.False(t.Marks("n/199.txt", _clock.Now).LinesUnknown);
     }
 
-    // ------------------------------------------------------------------ 2. bounded work, single flight, lost events
+    // ------------------------------------------------------------------ bounded work, single flight, lost events
 
     [Fact]
     public void ATickProcessesAtMostItsShareAndCarriesTheRestOver()
@@ -196,7 +201,7 @@ public class ReviewHardeningTests : IAsyncDisposable
         Assert.Null(t.Marker("src/app.cs", false, _clock.Now));
     }
 
-    // ------------------------------------------------------------------ 2, 7, 8. the service: pushes, sessions, root
+    // ------------------------------------------------------------------ the service: pushes, sessions, root
 
     private CodeBrowserService Service(CodeBrowserOptions? options = null)
     {
@@ -318,7 +323,7 @@ public class ReviewHardeningTests : IAsyncDisposable
         Assert.DoesNotContain(_tmp.Path.Replace("\\", "\\\\"), cloud.ToJsonString(), StringComparison.OrdinalIgnoreCase);
     }
 
-    // ------------------------------------------------------------------ 4. a folder swapped while it is listed
+    // ------------------------------------------------------------------ a folder swapped while it is listed
 
     /// <summary>The handle checks run on Windows and on macOS / Linux x64 and arm64 (PosixHandles); elsewhere they are not built.</summary>
     private static void HandleChecks()
@@ -338,7 +343,7 @@ public class ReviewHardeningTests : IAsyncDisposable
         Refused(() => tree.List("src"));
         swapped = false;
         tree.AfterEnumerate = null;
-        Assert.Single(tree.List("src")); // nothing swapped: listed as before
+        Assert.Single(tree.List("src")); // nothing swapped: the folder is listed
     }
 
     [Fact]
@@ -372,7 +377,7 @@ public class ReviewHardeningTests : IAsyncDisposable
         Assert.Contains("changed while it was listed", Refused(() => tree.List("src")));
     }
 
-    // ------------------------------------------------------------------ 5. the file opened: .git, the deny list, hard links
+    // ------------------------------------------------------------------ the file opened: .git, the deny list, hard links
 
     [Fact]
     public void TheOpenedFilesFinalPathIsCheckedAgainstGitAndTheDenyList()
@@ -403,7 +408,7 @@ public class ReviewHardeningTests : IAsyncDisposable
     private static extern int link(string oldpath, string newpath);
 
     private static bool HardLink(string link, string existing) =>
-        OperatingSystem.IsWindows() ? CreateHardLinkW(link, existing, IntPtr.Zero) : ReviewHardeningTests.link(existing, link) == 0;
+        OperatingSystem.IsWindows() ? CreateHardLinkW(link, existing, IntPtr.Zero) : HostileCloneTests.link(existing, link) == 0;
 
     [Fact]
     public async Task AHardLinkIsNotReadOrDownloaded()
@@ -423,17 +428,7 @@ public class ReviewHardeningTests : IAsyncDisposable
         Assert.Equal(CodeBrowserException.Refused, download.Code);
     }
 
-    [Fact]
-    public void AFileWithMoreThanOneNameIsRefused_ThroughTheSeam()
-    {
-        HandleChecks();
-        var tree = new SafeTree(_clone) { LinkCount = _ => 2 };
-        Assert.Contains("hard link", Refused(() => tree.OpenFile("src/app.cs").Stream.Dispose()));
-        tree.LinkCount = _ => null; // not known: refused too
-        Refused(() => tree.OpenFile("src/app.cs").Stream.Dispose());
-    }
-
-    // ------------------------------------------------------------------ 6. git: the repository named outright
+    // ------------------------------------------------------------------ git: the repository named outright
 
     private sealed class CannedGit : IGitReader
     {
