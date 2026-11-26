@@ -133,6 +133,51 @@ public sealed class RepoProviderTests
         Assert.Null(RepoProviders.Link(gh, null, new WebLinkRequest(WebLinkKind.Pr, Pr: 0)));
     }
 
+    private static string? L(string? origin, WebLinkRequest req, RepoHostSetting? s = null) => RepoProviders.Link(origin, s, req);
+
+    [Fact]
+    public void SelfHostedGitLab_WithAPortAndNestedGroups()
+    {
+        const string https = "https://gitlab.corp.example:8443/platform/payments/backend/api.git";
+        Assert.Equal(RepoProviderKind.GitLab, RepoProviders.Detect(https));
+        Assert.Equal("https://gitlab.corp.example:8443/platform/payments/backend/api/-/commit/" + Sha, L(https, new(WebLinkKind.Commit, Commit: Sha)));
+        Assert.Equal("https://gitlab.corp.example:8443/platform/payments/backend/api/-/merge_requests/12", L(https, new(WebLinkKind.Pr, Pr: 12)));
+        // ssh with its own port: the site is https on the default port; the groups are kept.
+        const string ssh = "ssh://git@gitlab.corp.example:2222/platform/payments/backend/api.git";
+        Assert.Equal("https://gitlab.corp.example/platform/payments/backend/api/-/tree/members/t/ada", L(ssh, new(WebLinkKind.Branch, Branch: "members/t/ada")));
+        // scp form, nested groups
+        Assert.Equal("https://gitlab.corp.example/platform/payments/api/-/blob/" + Sha + "/src/x.cs",
+            L("git@gitlab.corp.example:platform/payments/api.git", new(WebLinkKind.File, Commit: Sha, File: "src/x.cs")));
+    }
+
+    [Fact]
+    public void AzureDevOps_VisualStudioCom_AndTheSshForms()
+    {
+        Assert.Equal("https://acme.visualstudio.com/DefaultCollection/Proj/_git/app/commit/" + Sha,
+            L("https://acme.visualstudio.com/DefaultCollection/Proj/_git/app", new(WebLinkKind.Commit, Commit: Sha)));
+        Assert.Equal("https://acme.visualstudio.com/Proj/_git/app/pullrequest/7",
+            L("acme@vs-ssh.visualstudio.com:v3/acme/Proj/app", new(WebLinkKind.Pr, Pr: 7)));
+        Assert.Equal("https://dev.azure.com/acme/Proj/_git/app?version=GBmain",
+            L("git@ssh.dev.azure.com:v3/acme/Proj/app", new(WebLinkKind.Branch, Branch: "main")));
+        // compare by commit: GC, by branch: GB
+        Assert.Equal($"https://dev.azure.com/acme/Proj/_git/app/branchCompare?baseVersion=GC{Sha}&targetVersion=GBteam%2Fx",
+            L("https://dev.azure.com/acme/Proj/_git/app", new(WebLinkKind.Compare, From: Sha, To: "team/x")));
+    }
+
+    [Fact]
+    public void ACredentialInTheOrigin_NeverReachesALink()
+    {
+        foreach (var origin in new[] { "https://pat:s3cr3tTOKEN@github.com/acme/app.git", "https://oauth2:s3cr3tTOKEN@gitlab.com/acme/app.git", "https://acme:s3cr3tTOKEN@dev.azure.com/acme/P/_git/app" })
+        {
+            var url = L(origin, new(WebLinkKind.Commit, Commit: Sha));
+            Assert.NotNull(url);
+            Assert.DoesNotContain("s3cr3tTOKEN", url);
+            Assert.DoesNotContain("@", url);
+            var patterned = L(origin, new(WebLinkKind.Commit, Commit: Sha), new RepoHostSetting(null, "{base}/c/{commit}"));
+            Assert.DoesNotContain("s3cr3tTOKEN", patterned);
+        }
+    }
+
     // ---------------------------------------------------------------- the override
 
     [Fact]
@@ -169,6 +214,50 @@ public sealed class RepoProviderTests
         Assert.Null(RepoProviders.Link(@"C:\repos\app", new RepoHostSetting(null, "{base}/c/{pr}"), Request("pr")));
     }
 
+    [Fact]
+    public void LinkPattern_BaseIsTheRepositorysWebAddress_PathIsOwnerName_EachTemplateByItsExactPlaceholders()
+    {
+        const string origin = "git@git.example.com:acme/app.git"; // no provider
+        var p = new RepoHostSetting(null,
+            "{base}/c/{commit}  https://git.example.com/{path}/b/{branch}\nhttps://x.example/{path}/f/{commit}/{file} {base}/cmp/{from}..{to} {base}/pr/{pr}");
+        Assert.Equal("https://git.example.com/acme/app/c/" + Sha, L(origin, new(WebLinkKind.Commit, Commit: Sha), p));
+        Assert.Equal("https://git.example.com/acme/app/b/members/t/ada", L(origin, new(WebLinkKind.Branch, Branch: "members/t/ada"), p));
+        Assert.Equal($"https://x.example/acme/app/f/{Sha}/src/a%20b.cs", L(origin, new(WebLinkKind.File, Commit: Sha, File: "src/a b.cs"), p));
+        Assert.Equal("https://git.example.com/acme/app/cmp/main..team/x", L(origin, new(WebLinkKind.Compare, From: "main", To: "team/x"), p));
+        Assert.Equal("https://git.example.com/acme/app/pr/9", L(origin, new(WebLinkKind.Pr, Pr: 9), p));
+
+        // Commit and branch templates only: the other kinds get none (no provider).
+        var doc = new RepoHostSetting(null, "https://git.example.com/{path}/commit/{commit} https://git.example.com/{path}/src/{branch}");
+        Assert.Equal("https://git.example.com/acme/app/commit/" + Sha, L(origin, new(WebLinkKind.Commit, Commit: Sha), doc));
+        Assert.Equal("https://git.example.com/acme/app/src/main", L(origin, new(WebLinkKind.Branch, Branch: "main"), doc));
+        Assert.Null(L(origin, new(WebLinkKind.File, Commit: Sha, File: "a"), doc));
+        Assert.Null(L(origin, new(WebLinkKind.Compare, From: "main", To: "x"), doc));
+        Assert.Null(L(origin, new(WebLinkKind.Pr, Pr: 1), doc));
+
+        // A pattern on a provider's host: kinds it does not cover keep the provider's own layout.
+        var gh = new RepoHostSetting(null, "https://mirror.example/{path}/c/{commit}");
+        Assert.Equal("https://mirror.example/acme/app/c/" + Sha, L("https://github.com/acme/app.git", new(WebLinkKind.Commit, Commit: Sha), gh));
+        Assert.Equal("https://github.com/acme/app/pull/3", L("https://github.com/acme/app.git", new(WebLinkKind.Pr, Pr: 3), gh));
+
+        // {commit} alone is commit; {commit}+{file} is file, never commit.
+        var fileOnly = new RepoHostSetting(null, "{base}/f/{commit}/{file}");
+        Assert.Null(L(origin, new(WebLinkKind.Commit, Commit: Sha), fileOnly));
+    }
+
+    [Fact]
+    public void AChosenProvider_DecidesTheKindsAPatternDoesNotCover()
+    {
+        const string plain = "git@git.example.com:acme/app.git";
+        // Chosen as none on GitHub: the pattern's kind links, the other kinds get none.
+        var chosenNone = new RepoHostSetting(RepoProviderKind.None, "https://mirror.example/{path}/c/{commit}");
+        Assert.Equal("https://mirror.example/acme/app/c/" + Sha, L("https://github.com/acme/app.git", new(WebLinkKind.Commit, Commit: Sha), chosenNone));
+        Assert.Null(L("https://github.com/acme/app.git", new(WebLinkKind.Pr, Pr: 3), chosenNone));
+        // Chosen on an unknown host: the other kinds keep the chosen provider's links.
+        var chosenGitLab = new RepoHostSetting(RepoProviderKind.GitLab, "https://mirror.example/{path}/c/{commit}");
+        Assert.Equal("https://mirror.example/acme/app/c/" + Sha, L(plain, new(WebLinkKind.Commit, Commit: Sha), chosenGitLab));
+        Assert.Equal("https://git.example.com/acme/app/-/merge_requests/4", L(plain, new(WebLinkKind.Pr, Pr: 4), chosenGitLab));
+    }
+
     [Theory]
     [InlineData("{base}/commit/{commit}", null)]
     [InlineData("https://x.example/{path}/c/{commit} https://x.example/{path}/b/{branch}", null)]
@@ -176,6 +265,15 @@ public sealed class RepoProviderTests
     [InlineData("https://x.example/{sha}", "unknown placeholder {sha}")]
     [InlineData("https://x.example/{commit}/{branch}", "fits no link")]
     [InlineData("https://x.example/{path}", "fits no link")]
+    [InlineData("https://h.example/{path}/{branch}", null)]
+    [InlineData("{base}/{path}/f/{commit}/{file}", null)]
+    [InlineData("{base}/compare/{from}...{to}", null)]
+    [InlineData("{base}/pr/{pr}", null)]
+    [InlineData("{base}/c/{from}", "fits no link")]          // {from} without {to}
+    [InlineData("{base}/{file}", "fits no link")]            // {file} without {commit}
+    [InlineData("{base}/pr/{pr}/{commit}", "fits no link")]
+    [InlineData("ftp://h.example/{commit}", "does not start with")]
+    [InlineData("{base}/{Commit}", "unknown placeholder")]
     public void APatternIsCheckedBeforeItIsSaved(string pattern, string? problem)
     {
         var said = RepoProviders.PatternProblem(pattern);
@@ -273,6 +371,57 @@ public sealed class RepoProviderTests
         Assert.Contains("not supported for Bitbucket", TeamRepos.HostView("docs", "https://bitbucket.org/a/b.git", null, _ => true).PrUnavailable);
     }
 
+    [Fact]
+    public void TheRepositoryView_SaysWhyPullRequestsAreUnavailable_NoOrigin_NoSupport_OrAMissingCli()
+    {
+        bool Installed(string _) => true;
+        bool Missing(string _) => false;
+        // Supported with the CLI installed (whether it is signed in is not checked).
+        foreach (var o in new[] { "https://github.com/a/b.git", "https://gitlab.com/a/b.git", "https://dev.azure.com/a/P/_git/b" })
+            Assert.True(TeamRepos.HostView("main", o, null, Installed).PrSupported, o);
+        var none = TeamRepos.HostView("main", null, null, Installed);
+        Assert.False(none.PrSupported);
+        Assert.Contains("no origin", none.PrUnavailable);
+        foreach (var o in new[] { "git@bitbucket.org:a/b.git", "https://gitea.com/a/b.git", "https://git.example.org/a/b.git" })
+        {
+            var v = TeamRepos.HostView("main", o, null, Installed);
+            Assert.False(v.PrSupported, o);
+            Assert.Contains("not supported for", v.PrUnavailable);
+        }
+        // The CLI is not installed on this computer: the reason names the provider's CLI.
+        foreach (var (o, cli) in new[] { ("https://github.com/a/b.git", "gh"), ("https://gitlab.com/a/b.git", "glab"), ("https://dev.azure.com/a/P/_git/b", "az") })
+        {
+            var v = TeamRepos.HostView("main", o, null, Missing);
+            Assert.False(v.PrSupported, o);
+            Assert.Contains($"made from here with {cli}, which is not installed on this computer", v.PrUnavailable);
+        }
+    }
+
+    [Fact]
+    public void PullRequestsUnavailable_NamesTheProviderOrTheHost_AndARepositoryWithNoOrigin()
+    {
+        Assert.StartsWith("pull requests are not supported for Bitbucket from here", RepoHost.PullRequestsUnavailable("main", "git@bitbucket.org:a/b.git", RepoProviderKind.Bitbucket));
+        Assert.StartsWith("pull requests are not supported for Gitea from here", RepoHost.PullRequestsUnavailable("main", "https://gitea.com/a/b.git", RepoProviderKind.Gitea));
+        Assert.StartsWith("pull requests are not supported for git.example.org from here", RepoHost.PullRequestsUnavailable("main", "https://git.example.org/a/b.git", RepoProviderKind.None));
+        Assert.Contains("has no remote (no origin)", RepoHost.PullRequestsUnavailable("main", null, RepoProviderKind.None));
+        Assert.Null(RepoHost.PullRequestsUnavailable("main", "https://gitlab.com/a/b.git", RepoProviderKind.GitLab));
+    }
+
+    /// <summary>The docs name the CLI each provider's pull requests go through and the agents' two pull-request tools.</summary>
+    [Fact]
+    public void TheDocsNameEachProvidersCli_AndThePullRequestTools()
+    {
+        var features = File.ReadAllText(Path.Combine(Gateway.Binaries.RepoRoot, "docs", "features.md"));
+        var integrations = File.ReadAllText(Path.Combine(Gateway.Binaries.RepoRoot, "docs", "connections-and-integrations.md"));
+        foreach (var cli in new[] { "`gh`", "`glab`", "`az repos`" })
+        {
+            Assert.Contains(cli, features);
+            Assert.Contains(cli, integrations);
+        }
+        Assert.Contains("`pr_open`", integrations);
+        Assert.Contains("`pr_status`", integrations);
+    }
+
     // ---------------------------------------------------------------- the Concierge's git_pr_open / git_pr_merge / team_git count
 
     [Fact]
@@ -286,7 +435,7 @@ public sealed class RepoProviderTests
         var teamId = await bus.CreateTeamAsync("alpha", "Manager", "claude", null, Ct);
         var cfg = Path.Combine(db.Dir, "empty.gitconfig");
         File.WriteAllText(cfg, "");
-        var work = Path.Combine(Path.GetTempPath(), "y446" + Guid.NewGuid().ToString("N")[..6]);
+        var work = Path.Combine(Path.GetTempPath(), "yrepo" + Guid.NewGuid().ToString("N")[..6]);
         Directory.CreateDirectory(work);
         try
         {
@@ -307,7 +456,7 @@ public sealed class RepoProviderTests
             }
             var target = new GitRepoTarget("alpha", "main", work, "main", []);
 
-            // GitHub: gh, as before.
+            // GitHub: gh.
             Assert.StartsWith("ok: opened a pull request on GitHub", await Call("git_pr_open", new() { ["team"] = "alpha", ["branch"] = "b", ["title"] = "T" }));
             Assert.Equal("pr", gh.Single()[0]);
             Assert.Equal("#1 G", (await Actions().OpenPullRequestsAsync(target, Ct))!["g"]);
@@ -359,7 +508,7 @@ public sealed class RepoProviderTests
         // The team's repository is a folder the person picked, kept short (git on Windows refuses paths over 260 characters).
         var cfg = Path.Combine(db.Dir, "empty.gitconfig");
         File.WriteAllText(cfg, "");
-        var picked = Path.Combine(Path.GetTempPath(), "y446" + Guid.NewGuid().ToString("N")[..6]);
+        var picked = Path.Combine(Path.GetTempPath(), "yrepo" + Guid.NewGuid().ToString("N")[..6]);
         Directory.CreateDirectory(picked);
         try
         {

@@ -300,7 +300,7 @@ public class RolesAndHireListTests
             results.Add(await Tool(run, "hire", new { name = "Tester" }));
             results.Add(await Tool(run, "hire", new { }));
         });
-        Assert.StartsWith("[", results[0].Text); // every agent, as before
+        Assert.StartsWith("[", results[0].Text); // every agent
         Assert.Contains("\"cli\":\"grok\",\"ready\":false", results[0].Text);
         Assert.Contains("hired DeveloperDana (codex) into team Alpha", results[1].Text);
         Assert.False(results[2].Error, results[2].Text);

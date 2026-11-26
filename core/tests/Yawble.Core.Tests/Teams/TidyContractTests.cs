@@ -26,9 +26,9 @@ public sealed class TidyContractTests
     [Fact]
     public void TidyPlanJson_UsesTheShellsFieldNames_LeavesAbsentOnesOut_AndHasNoLocalPath()
     {
-        var full = new TidyBranch("members/t/marlo", ["local", "origin", "clone:DeveloperMarlo"], TidyClasses.Moved)
+        var full = new TidyBranch("members/t/ada", ["local", "origin", "clone:DeveloperAda"], TidyClasses.Moved)
         {
-            Proof = "the team's copy has 1 commit(s)", Commits = [new TidyCommit("aa11", "Retry")], TeamSha = "5bbb", CloneSha = "e0f2", Member = "DeveloperMarlo",
+            Proof = "the team's copy has 1 commit(s)", Commits = [new TidyCommit("aa11", "Retry")], TeamSha = "5bbb", CloneSha = "e0f2", Member = "DeveloperAda",
         };
         var bare = new TidyBranch("members/t/old", ["local"], TidyClasses.Merged);
         var plan = new TeamGitTidyPlan([new TidyRepo("main", @"C:\secret\team\repo", "main", [full, bare]) { Notes = ["a clone was not read"] }]);
