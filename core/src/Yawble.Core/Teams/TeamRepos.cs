@@ -1050,11 +1050,7 @@ public sealed partial class TeamRepos
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(_connectionString);
-        c.Open();
-        using var pragma = c.CreateCommand();
-        pragma.CommandText = "PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;";
-        pragma.ExecuteNonQuery();
+        var c = Storage.Db.Open(_connectionString);
         return c;
     }
 

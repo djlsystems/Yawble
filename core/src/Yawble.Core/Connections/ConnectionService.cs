@@ -402,11 +402,7 @@ public sealed class ConnectionService
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(_cs);
-        c.Open();
-        using var fk = c.CreateCommand();
-        fk.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
-        fk.ExecuteNonQuery();
+        var c = Storage.Db.Open(_cs);
         return c;
     }
 

@@ -32,13 +32,23 @@ public sealed record BackupInfo(string Name, long Size, string Reason, DateTimeO
 /// Backups of the app's database:<data dir>/backups/yawble-&lt;UTC yyyyMMdd-HHmmss&gt;-&lt;reason&gt;.db,
 /// made with SQLite's VACUUM INTO (consistent while the app runs; never a raw copy of a WAL database), each with a
 /// sidecar .json (versions, migrations, Connections by name and secret FIELD NAMES). Secrets and website sessions are not
-/// copied. Old backups are deleted by <see cref="Prune"/>.
+/// copied. A new backup is checked (SQLite's quick_check) before it gets its name; one that fails is deleted and the
+/// backup counts as failed. Old backups are deleted by <see cref="Prune"/>.
 /// </summary>
 public sealed class BackupService
 {
     public const int KeepBeforeUpdate = 5, KeepManual = 5, DefaultKeepDaily = 7;
     public static readonly TimeSpan DailySkipWithin = TimeSpan.FromHours(20);
     public const string KeepDailySetting = "backups.keepDaily";
+
+    /// <summary>The backups together may take three times the database's size, and always at least this much.</summary>
+    public const long ByteBudgetFloor = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>How many bytes the backups together may take, from the size of the database. A seam for tests.</summary>
+    internal Func<long, long> ByteBudget { get; init; } = live => Math.Max(3 * live, ByteBudgetFloor);
+
+    /// <summary>SQLite's quick_check of a database file: "ok", or what is wrong with it. A seam for tests.</summary>
+    internal Func<string, string> QuickCheck { get; init; } = QuickCheckOf;
 
     private static readonly Regex NamePattern = new(@"^yawble-(\d{8}-\d{6})-([a-z0-9][a-z0-9_.-]*)\.db$", RegexOptions.Compiled);
     private static readonly string[] SqlSuffixes = ["", "-wal", "-shm"];
@@ -86,8 +96,7 @@ public sealed class BackupService
         _gate.Wait();
         try
         {
-            using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
+            using var connection = Db.Open(_connectionString);
             return BackupLocked(connection, reason);
         }
         finally { _gate.Release(); }
@@ -110,6 +119,9 @@ public sealed class BackupService
                 cmd.CommandText = $"VACUUM INTO '{partial.Replace("'", "''")}';";
                 cmd.ExecuteNonQuery();
             }
+            // The copy is checked before it gets a backup's name: a damaged file never sits among the backups.
+            var check = QuickCheck(partial);
+            if (check != "ok") throw new InvalidOperationException($"the new backup failed its check ({check}) and was deleted");
             File.Move(partial, target);
             UserOnlyFile.Tighten(target); // 0600 on POSIX, as everything in the data folder (DataFolderAccess)
             WriteSidecar(connection, target, when, reason);
@@ -179,8 +191,7 @@ public sealed class BackupService
     {
         try
         {
-            using var c = new SqliteConnection(_connectionString);
-            c.Open();
+            using var c = Db.Open(_connectionString);
             using var cmd = c.CreateCommand();
             cmd.CommandText = "SELECT value FROM app_meta WHERE key = $k;";
             cmd.Parameters.AddWithValue("$k", KeepDailySetting);
@@ -193,8 +204,7 @@ public sealed class BackupService
     public void SetKeepDaily(int count)
     {
         if (count < 1 || count > 365) throw new ArgumentOutOfRangeException(nameof(count), "keep between 1 and 365 daily backups");
-        using var c = new SqliteConnection(_connectionString);
-        c.Open();
+        using var c = Db.Open(_connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "INSERT INTO app_meta (key, value) VALUES ($k, $v) ON CONFLICT(key) DO UPDATE SET value = $v;";
         cmd.Parameters.AddWithValue("$k", KeepDailySetting);
@@ -202,20 +212,40 @@ public sealed class BackupService
         cmd.ExecuteNonQuery();
     }
 
-    /// <summary>Keeps the newest N of each kind (daily: the setting, before-update: 5, manual: 5; before-restore counts as before-update).</summary>
+    /// <summary>
+    /// Keeps the newest N of each kind (daily: the setting, before-update: 5, manual: 5; before-restore counts as
+    /// before-update). Then, while the backups together take more than <see cref="ByteBudget"/> allows (three times the
+    /// database, at least 2 GB), the oldest daily backup goes; the newest daily one always stays, and so do the
+    /// before-update and manual ones.
+    /// </summary>
     public int Prune(int? keepDaily = null)
     {
         var limits = new Dictionary<string, int> { ["daily"] = keepDaily ?? KeepDaily(), ["before"] = KeepBeforeUpdate, ["manual"] = KeepManual };
         var removed = 0;
+        var kept = new List<BackupInfo>();
         foreach (var group in List().GroupBy(b => Group(b.Reason)))
-            foreach (var old in group.Skip(limits[group.Key]))
-            {
-                var path = Path.Combine(BackupsDir, old.Name);
-                foreach (var s in SqlSuffixes) DeleteIfExists(path + s); // a before-restore file may have its -wal and -shm
-                DeleteIfExists(SidecarOf(path));
-                removed++;
-            }
+        {
+            kept.AddRange(group.Take(limits[group.Key]));
+            foreach (var old in group.Skip(limits[group.Key])) { Delete(old); removed++; }
+        }
+        var budget = ByteBudget(File.Exists(_dbPath) ? new FileInfo(_dbPath).Length : 0);
+        var total = kept.Sum(b => b.Size);
+        // Newest first, so the oldest is last; the first (newest) daily is never taken.
+        var dailies = kept.Where(b => Group(b.Reason) == "daily").ToList();
+        for (var i = dailies.Count - 1; i >= 1 && total > budget; i--)
+        {
+            Delete(dailies[i]);
+            total -= dailies[i].Size;
+            removed++;
+        }
         return removed;
+    }
+
+    private void Delete(BackupInfo backup)
+    {
+        var path = Path.Combine(BackupsDir, backup.Name);
+        foreach (var s in SqlSuffixes) DeleteIfExists(path + s); // a before-restore file may have its -wal and -shm
+        DeleteIfExists(SidecarOf(path));
     }
 
     /// <summary>
@@ -233,6 +263,16 @@ public sealed class BackupService
             _log($"backup: the daily backup failed: {e.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// True when a backup under 20 hours old exists, making the daily one first when it is due. False when there is
+    /// none and it could not be made.
+    /// </summary>
+    public bool EnsureRecent()
+    {
+        DailyIfDue();
+        return List().FirstOrDefault() is { } newest && _now() - newest.Time < DailySkipWithin;
     }
 
     /// <summary>First start of the day, then an hourly check, until cancelled.</summary>
@@ -289,11 +329,15 @@ public sealed class BackupService
 
     private static void CheckIntact(string file, string label)
     {
-        using var check = new SqliteConnection($"Data Source={file};Mode=ReadOnly;Pooling=False");
-        check.Open();
+        if (QuickCheckOf(file) != "ok") throw new InvalidOperationException($"{label} is damaged; the current database was left alone");
+    }
+
+    private static string QuickCheckOf(string file)
+    {
+        using var check = Db.OpenBare($"Data Source={file};Mode=ReadOnly;Pooling=False");
         using var cmd = check.CreateCommand();
         cmd.CommandText = "PRAGMA quick_check;";
-        if ((cmd.ExecuteScalar() as string) != "ok") throw new InvalidOperationException($"{label} is damaged; the current database was left alone");
+        return cmd.ExecuteScalar() as string ?? "no answer";
     }
 
     /// <summary>
@@ -327,8 +371,7 @@ public sealed class BackupService
             {
                 try
                 {
-                    using var c = new SqliteConnection(_connectionString);
-                    c.Open();
+                    using var c = Db.OpenBare(_connectionString);
                     using var cmd = c.CreateCommand();
                     cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
                     cmd.ExecuteNonQuery();

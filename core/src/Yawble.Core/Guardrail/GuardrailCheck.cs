@@ -760,8 +760,7 @@ public sealed class GuardrailCheck(SandboxLauncher launcher, string connectionSt
 
     private List<GuardrailMember> LoadMembers()
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT m.id, t.name, m.name, m.cli FROM members m JOIN teams t ON t.id = m.team_id ORDER BY m.id;";
         using var r = cmd.ExecuteReader();

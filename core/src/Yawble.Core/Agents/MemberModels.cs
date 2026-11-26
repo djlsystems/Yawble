@@ -37,8 +37,7 @@ public sealed class MemberModels(string connectionString, IAgentResolver? agents
     /// <summary>The model the member's latest run (with a reported model) used most, by output tokens.</summary>
     private (string Model, string At)? LastRunModel(string qualified)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = """
             WITH last AS (

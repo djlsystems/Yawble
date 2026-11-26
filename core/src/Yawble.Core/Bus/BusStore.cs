@@ -17,10 +17,7 @@ public sealed partial class BusStore : IDisposable
     public BusStore(string connectionString, TimeProvider? clock = null)
     {
         _clock = clock ?? TimeProvider.System;
-        _connection = new SqliteConnection(connectionString);
-        _connection.Open();
-        // Per connection, so set here and not in a migration.
-        Exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
+        _connection = Storage.Db.Open(connectionString);
     }
 
     public void Dispose() => _connection.Dispose();

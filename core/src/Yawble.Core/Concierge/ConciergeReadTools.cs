@@ -438,9 +438,8 @@ public sealed class ConciergeReadTools(
         var now = (clock ?? TimeProvider.System).GetUtcNow();
         var since = now.AddDays(-days).ToString("O", CultureInfo.InvariantCulture);
         var rows = new List<(string Team, string Member, string? Run, string Model, long In, long Out, long CacheRead, bool Unread)>();
-        using (var c = new SqliteConnection(connectionString))
+        using (var c = Storage.Db.Open(connectionString))
         {
-            c.Open();
             using var cmd = c.CreateCommand();
             cmd.CommandText = "SELECT member, run_key, model, input_tokens, output_tokens, cache_read_tokens FROM usage_events WHERE at >= $since;";
             cmd.Parameters.AddWithValue("$since", since);

@@ -26,19 +26,22 @@ public static class SchemaMigrator
     /// Brings the database up to date. When <paramref name="beforeFirstPending"/> is given, an existing database with at
     /// least one pending migration is handed to it once (with the name of the first pending migration) before anything is
     /// applied; if it throws, nothing is applied and a <see cref="MigrationBackupException"/> says why.
+    /// A database that holds a migration this build does not ship was written by a newer version of the app: nothing is
+    /// applied, nothing is backed up, and a <see cref="DatabaseNewerException"/> says so.
     /// </summary>
     public static IReadOnlyList<string> Migrate(string connectionString, Action<SqliteConnection, string>? beforeFirstPending)
     {
         var dataSource = new SqliteConnectionStringBuilder(connectionString).DataSource;
         var existed = !string.IsNullOrEmpty(dataSource) && dataSource != ":memory:" && File.Exists(dataSource) && new FileInfo(dataSource).Length > 0;
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
+        using var connection = Db.OpenBare(connectionString);
         Execute(connection, null, "PRAGMA journal_mode=WAL;");
         Execute(connection, null, "PRAGMA foreign_keys=ON;");
         Execute(connection, null,
             "CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL) STRICT;");
 
         var applied = Applied(connection);
+        var unknown = applied.Where(n => !Available.Contains(n)).Order(StringComparer.Ordinal).ToList();
+        if (unknown.Count > 0) throw new DatabaseNewerException(unknown);
         var pending = Available.Where(n => !applied.Contains(n)).ToList();
         if (existed && beforeFirstPending is not null && pending.Count > 0)
         {
@@ -115,6 +118,20 @@ public static class SchemaMigrator
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }
+}
+
+/// <summary>
+/// The database holds changes this version of the app does not know: a newer version wrote it. This version must not
+/// open it (it would read and write tables whose shape it does not know), so the start stops here.
+/// </summary>
+public sealed class DatabaseNewerException(IReadOnlyList<string> unknown) : Exception(
+    $"This is an older version of Yawble ({CoreInfo.Version}) than the one that last used your data. " +
+    "Your data was changed by a newer version, and this one cannot read it safely, so it did not start and changed nothing. " +
+    "Install the newest version of Yawble and start it again. " +
+    $"(Database changes this version does not know: {string.Join(", ", unknown)}.)")
+{
+    /// <summary>The applied migrations this build does not ship, in order.</summary>
+    public IReadOnlyList<string> Unknown { get; } = unknown;
 }
 
 /// <summary>The backup before a database update failed, so the update was not run.</summary>

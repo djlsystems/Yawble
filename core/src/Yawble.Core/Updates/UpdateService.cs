@@ -135,8 +135,7 @@ public sealed class UpdateService(
 
     public bool Auto()
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT value FROM app_meta WHERE key = @k;";
         cmd.Parameters.AddWithValue("@k", AutoSetting);
@@ -145,8 +144,7 @@ public sealed class UpdateService(
 
     public void SetAuto(bool on)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "INSERT INTO app_meta (key, value) VALUES (@k, @v) ON CONFLICT(key) DO UPDATE SET value = @v;";
         cmd.Parameters.AddWithValue("@k", AutoSetting);

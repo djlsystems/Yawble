@@ -141,8 +141,7 @@ public sealed partial class CompanionClientStore(string connectionString, TimePr
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

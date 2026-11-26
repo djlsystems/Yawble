@@ -129,8 +129,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         if ((teamId is null || hasTeam) && (memberId is null || hasMember) && ownerSql is null) return null;
         try
         {
-            using var c = new SqliteConnection(connectionString);
-            c.Open();
+            using var c = Storage.Db.OpenLog(connectionString);
             var parts = new List<string>();
             if (teamId is not null && !hasTeam && Scalar(c, "SELECT name FROM teams WHERE id = $id;", teamId.Value) is { } team)
                 parts.Add("team=" + team);
@@ -235,8 +234,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         if (names is not null) target = target is null ? names : target + " " + names;
         try
         {
-            using var c = new SqliteConnection(connectionString);
-            c.Open();
+            using var c = Storage.Db.OpenLog(connectionString);
             using var cmd = c.CreateCommand();
             cmd.CommandText = "INSERT INTO audit_log (at, via, user_name, client, method, target, outcome) VALUES ($at, $via, $user, $client, $method, $target, $outcome);";
             cmd.Parameters.AddWithValue("$at", _clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture));
@@ -258,8 +256,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
 
     public IReadOnlyList<Row> Recent(int limit = 100)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.OpenLog(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT at, via, user_name, method, target, outcome, client FROM audit_log ORDER BY id DESC LIMIT $n;";
         cmd.Parameters.AddWithValue("$n", limit);

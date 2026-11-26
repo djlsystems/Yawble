@@ -972,16 +972,23 @@ work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
   Yawble again; it writes what it did to `<data>/logs/update.log`. This works for an `install.sh` install that you
   may change (the default `~/.local/opt/yawble`). A system-wide install in `/opt`, or a run from source, gets a link
   to the release page.
+- An older version of Yawble does not open data that a newer version has changed. It says so, changes nothing and
+  does not start; install the newest version to continue.
 
 ## Backups and doctor
 
 - **Backups** (Settings > General) copy the app's database:
   - daily, before an update, and on **Back up now**;
   - 7 daily backups are kept by default, plus 5 before-update and 5 manual ones.
+  - The backups together take at most three times the database's size, or 2 GB when that is more. Over that, the
+    oldest daily backups are deleted; the newest daily one and the before-update and manual ones stay.
+  - A new backup is checked before it is kept. One that fails the check is deleted, and the backup counts as failed.
 - Passwords and sign-ins are not copied. A backup records which Connections and secret fields existed, never their
   values.
 - **Restore…** returns teams, cards and messages to that moment. It is applied at the next start.
 - Old log entries are deleted daily, by each log's retention (see [Logs](#logs)).
+  The disk space they took is given back at a later start of the app, when more than a fifth of a database file over
+  50 MB is free. A backup is made first when none is recent.
 - **Settings > Health** runs the doctor. Its checks are Database, Disk space, Sandbox, Git, Agent CLIs, Cloud Link,
   Connections, Teams and Logs.
 - Fixes it offers: open a Connection to reconnect it, remove unused credentials, sync a team that is behind, archive

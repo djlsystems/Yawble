@@ -51,8 +51,7 @@ public sealed class IntegrationWorkflowApi(string connectionString, Task<Integra
 
     private List<string> Names(string sql)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = sql;
         using var r = cmd.ExecuteReader();

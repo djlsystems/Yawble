@@ -164,8 +164,7 @@ public sealed class StepFeed(string connectionString, TimeProvider? clock = null
     private List<Run> Runs(DateTimeOffset cutoff)
     {
         var runs = new List<Run>();
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
+        using var connection = Storage.Db.Open(connectionString);
         using var cmd = connection.CreateCommand();
         // The times are all written as UTC round-trip strings, so they compare as text.
         cmd.CommandText = """

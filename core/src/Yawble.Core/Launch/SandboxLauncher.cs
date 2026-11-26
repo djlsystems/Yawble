@@ -193,8 +193,7 @@ public sealed class SqliteMemberDirectory(string connectionString, Agents.Profil
 
     private List<LaunchMember> Query(string where, params (string, object)[] args)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = $"SELECT m.id, t.name, m.name, m.cli, t.env, s.model, t.allow_localhost FROM members m JOIN teams t ON t.id = m.team_id LEFT JOIN member_settings s ON s.member_id = m.id {where} ORDER BY m.id;";
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v);

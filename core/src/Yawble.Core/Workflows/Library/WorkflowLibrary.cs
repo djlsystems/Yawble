@@ -556,11 +556,7 @@ public sealed class WorkflowLibrary : IWorkflowSchemaLookup
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(_connectionString);
-        c.Open();
-        using var fk = c.CreateCommand();
-        fk.CommandText = "PRAGMA foreign_keys=ON;";
-        fk.ExecuteNonQuery();
+        var c = Storage.Db.Open(_connectionString);
         return c;
     }
 

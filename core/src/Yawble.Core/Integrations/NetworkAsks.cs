@@ -704,8 +704,7 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

@@ -46,25 +46,60 @@ public sealed class ConciergeStore(string connectionString, TimeProvider? clock 
 
     public void SetCli(string id, string cli) => Exec("UPDATE concierge_conversations SET cli = $c WHERE id = $id;", ("$c", cli), ("$id", id));
 
+    /// <summary>Deletes a conversation with its messages and watches: all of them, or none.</summary>
     public bool Delete(string id)
     {
-        Exec("DELETE FROM concierge_watches WHERE conversation_id = $id;", ("$id", id));
-        Exec("DELETE FROM concierge_messages WHERE conversation_id = $id;", ("$id", id));
-        return Exec("DELETE FROM concierge_conversations WHERE id = $id;", ("$id", id)) > 0;
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        var deleted = 0;
+        foreach (var sql in new[]
+                 {
+                     "DELETE FROM concierge_watches WHERE conversation_id = $id;",
+                     "DELETE FROM concierge_messages WHERE conversation_id = $id;",
+                     "DELETE FROM concierge_conversations WHERE id = $id;",
+                 })
+        {
+            using var cmd = c.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = sql;
+            cmd.Parameters.AddWithValue("$id", id);
+            deleted = cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+        return deleted > 0;
     }
 
     public long AddMessage(string conversationId, string role, string text, string? state = null, string? error = null,
         IReadOnlyList<ConciergeToolUse>? tools = null, string? cli = null, string? runKey = null)
     {
+        // The message and its conversation's "last updated" time are written together: both, or neither.
         var now = Now();
-        Exec("UPDATE concierge_conversations SET updated_at = $now WHERE id = $id;", ("$now", now), ("$id", conversationId));
-        return Scalar("""
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        using (var touch = c.CreateCommand())
+        {
+            touch.Transaction = tx;
+            touch.CommandText = "UPDATE concierge_conversations SET updated_at = $now WHERE id = $id;";
+            touch.Parameters.AddWithValue("$now", now);
+            touch.Parameters.AddWithValue("$id", conversationId);
+            touch.ExecuteNonQuery();
+        }
+        using var add = c.CreateCommand();
+        add.Transaction = tx;
+        add.CommandText = """
             INSERT INTO concierge_messages (conversation_id, role, text, at, state, error, tools, cli, run_key)
             VALUES ($c, $r, $t, $at, $s, $e, $tools, $cli, $rk) RETURNING id;
-            """,
-            ("$c", conversationId), ("$r", role), ("$t", text), ("$at", now), ("$s", (object?)state ?? DBNull.Value),
-            ("$e", (object?)error ?? DBNull.Value), ("$tools", JsonSerializer.Serialize(tools ?? [], Json)),
-            ("$cli", (object?)cli ?? DBNull.Value), ("$rk", (object?)runKey ?? DBNull.Value));
+            """;
+        foreach (var (n, v) in new (string, object)[]
+                 {
+                     ("$c", conversationId), ("$r", role), ("$t", text), ("$at", now), ("$s", (object?)state ?? DBNull.Value),
+                     ("$e", (object?)error ?? DBNull.Value), ("$tools", JsonSerializer.Serialize(tools ?? [], Json)),
+                     ("$cli", (object?)cli ?? DBNull.Value), ("$rk", (object?)runKey ?? DBNull.Value),
+                 })
+            add.Parameters.AddWithValue(n, v);
+        var id = Convert.ToInt64(add.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
+        tx.Commit();
+        return id;
     }
 
     public IReadOnlyList<ConciergeMessageRow> Messages(string conversationId)
@@ -173,8 +208,7 @@ public sealed class ConciergeStore(string connectionString, TimeProvider? clock 
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 

@@ -47,7 +47,7 @@ public class Migration0048Tests
             Assert.Equal("t0|1", Scalar(db, "SELECT started_at || '|' || timeline_rebuild FROM board_cards WHERE id = 1;"));
             Assert.Equal(3L, Scalar(db, "SELECT seq FROM sqlite_sequence WHERE name = 'board_cards';"));
             Assert.Equal(4L, Scalar(db, "SELECT seq FROM sqlite_sequence WHERE name = 'board_trail';"));
-            Assert.Equal(2L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name IN ('board_cards_team', 'board_cards_member');"));
+            Assert.Equal(2L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name IN ('ix_board_cards_team_member', 'ix_board_cards_deliverable');"));
             Assert.Equal(0L, Scalar(db, "SELECT count(*) FROM sqlite_master WHERE name LIKE '%0048%';"));
 
             Exec(db, "UPDATE board_cards SET status = 'stopped' WHERE id = 1;");

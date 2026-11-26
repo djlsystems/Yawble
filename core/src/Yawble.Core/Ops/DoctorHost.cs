@@ -13,8 +13,7 @@ public sealed class DoctorHostSystem(
 {
     public string QuickCheck()
     {
-        using var c = new SqliteConnection($"Data Source={Path.Combine(dataDir, "yawble.db")}");
-        c.Open();
+        using var c = Storage.Db.Open($"Data Source={Path.Combine(dataDir, "yawble.db")}");
         using var cmd = c.CreateCommand();
         cmd.CommandText = "PRAGMA quick_check;";
         return cmd.ExecuteScalar()?.ToString() ?? "no answer";
@@ -111,8 +110,7 @@ public sealed class DoctorHostTeams(BusEngine bus, string connectionString, Time
 
     private DateTimeOffset Created(long teamId)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT created_at FROM teams WHERE id = $id;";
         cmd.Parameters.AddWithValue("$id", teamId);
@@ -125,8 +123,7 @@ public sealed class DoctorHostTeams(BusEngine bus, string connectionString, Time
         var limit = watchdog ?? TimeSpan.FromHours(3);
         var now = _clock.GetUtcNow();
         var rows = new Dictionary<long, List<StuckMember>>();
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT m.team_id, m.name, r.started_at FROM runs r JOIN members m ON m.id = r.member_id WHERE r.state = 'running';";
         using var reader = cmd.ExecuteReader();

@@ -234,7 +234,7 @@ public class StoppedRunBoardVerifyTests
             Assert.Equal(trailBefore, Dump(db, "SELECT * FROM board_trail ORDER BY id;"));
             Assert.Equal(timelineBefore, Dump(db, "SELECT * FROM board_timeline ORDER BY id;"));
             Assert.Equal(seqBefore, Dump(db, "SELECT name, seq FROM sqlite_sequence WHERE name LIKE 'board_%' ORDER BY name;"));
-            Assert.Equal(["board_cards_member", "board_cards_team", "board_trail_card"],
+            Assert.Equal(["board_trail_card", "ix_board_cards_deliverable", "ix_board_cards_team_member"],
                 Rows(db, "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('board_cards', 'board_trail') AND sql IS NOT NULL ORDER BY name;"));
             Assert.Equal(["ok"], Rows(db, "PRAGMA integrity_check;"));
             Assert.Empty(Rows(db, "PRAGMA foreign_key_check;"));

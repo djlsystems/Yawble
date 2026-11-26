@@ -73,8 +73,7 @@ public sealed class SqliteAgentUsage(string connectionString) : IAgentUsage
 
     private SqliteConnection Open()
     {
-        var c = new SqliteConnection(connectionString);
-        c.Open();
+        var c = Storage.Db.Open(connectionString);
         return c;
     }
 }

@@ -205,8 +205,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
         long id;
         lock (_lock)
         {
-            using var connection = new SqliteConnection(connectionString);
-            connection.Open();
+            using var connection = Storage.Db.OpenLog(connectionString);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO gateway_events (run_id, member, at, kind, guardrail, vhost, method, target, status, detail, count)
@@ -235,8 +234,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     {
         lock (_lock)
         {
-            using var connection = new SqliteConnection(connectionString);
-            connection.Open();
+            using var connection = Storage.Db.OpenLog(connectionString);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = "UPDATE gateway_events SET count = count + 1 WHERE id = $id;";
             cmd.Parameters.AddWithValue("$id", id);
@@ -249,13 +247,12 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     {
         lock (_lock)
         {
-            using var connection = new SqliteConnection(connectionString);
-            connection.Open();
+            using var connection = Storage.Db.OpenLog(connectionString);
             using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO usage_events (at, run_key, run_number, member, vhost, path, status, model, input_tokens, output_tokens,
-                                          cache_read_tokens, cache_write_tokens, usage)
-                VALUES ($at, $key, $run, $member, $vhost, $path, $status, $model, $in, $out, $cr, $cw, $usage);
+                                          cache_read_tokens, cache_write_tokens)
+                VALUES ($at, $key, $run, $member, $vhost, $path, $status, $model, $in, $out, $cr, $cw);
                 """;
             cmd.Parameters.AddWithValue("$at", _clock.GetUtcNow().ToString("O", CultureInfo.InvariantCulture));
             cmd.Parameters.AddWithValue("$key", (object?)runKey ?? DBNull.Value);
@@ -269,7 +266,6 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
             cmd.Parameters.AddWithValue("$out", (object?)u.OutputTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$cr", (object?)u.CacheReadTokens ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$cw", (object?)u.CacheWriteTokens ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$usage", (object?)Truncate(u.Usage, 8192) ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         }
     }
@@ -277,8 +273,7 @@ public sealed class GatewayLog(string connectionString, TimeProvider? clock = nu
     /// <summary>The events of one run (or all, when null), oldest first.</summary>
     public IReadOnlyList<GatewayEvent> Read(long? runId = null)
     {
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
+        using var connection = Storage.Db.OpenLog(connectionString);
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT run_id, member, at, kind, guardrail, vhost, method, target, status, detail, count FROM gateway_events"
             + (runId is null ? "" : " WHERE run_id = $run") + " ORDER BY id;";

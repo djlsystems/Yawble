@@ -130,8 +130,7 @@ public sealed class CredentialService
 
     private Setting? LoadSetting(string provider)
     {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
+        using var connection = Storage.Db.Open(_connectionString);
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT mode, issued_at FROM credential_settings WHERE provider = $p;";
         cmd.Parameters.AddWithValue("$p", provider);
@@ -143,8 +142,7 @@ public sealed class CredentialService
 
     private void SaveSetting(string provider, string mode, DateTimeOffset? issuedAt)
     {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
+        using var connection = Storage.Db.Open(_connectionString);
         using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             INSERT INTO credential_settings (provider, mode, issued_at, updated_at) VALUES ($p, $m, $i, $u)

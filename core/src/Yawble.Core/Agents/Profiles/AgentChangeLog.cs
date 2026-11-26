@@ -85,8 +85,7 @@ public sealed class AgentChangeLog(string connectionString, TimeProvider? clock 
     {
         var who = actor ?? Actor.Current ?? new Actor(Actor.Host, null);
         var at = _clock.GetUtcNow().UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = """
             INSERT INTO agent_changes (at, kind, subject, from_agent, to_agent, from_model, to_model, effective_model, actor_via, actor_user, how, detail)
@@ -128,8 +127,7 @@ public sealed class AgentChangeLog(string connectionString, TimeProvider? clock 
 
     private IReadOnlyList<AgentChange> Query(string where, int limit, params (string, object)[] args)
     {
-        using var c = new SqliteConnection(connectionString);
-        c.Open();
+        using var c = Storage.Db.Open(connectionString);
         using var cmd = c.CreateCommand();
         cmd.CommandText = $"SELECT {Columns} FROM agent_changes WHERE {where} ORDER BY id DESC LIMIT $limit;";
         foreach (var (n, v) in args) cmd.Parameters.AddWithValue(n, v);
