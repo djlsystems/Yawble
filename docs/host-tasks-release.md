@@ -79,8 +79,8 @@ tests only, `-TagOnly` stops after the tag.
    For a tool in another place, `packaging/windows-signing.cjs` reads `SIGNING_DLIB` (the full path of
    `Azure.CodeSigning.Dlib.dll`) and `SIGNTOOL` (the full path of `signtool.exe`). Give them to the task like any other
    variable: under **Environment variable names to pass on** when they are set in your environment, or under
-   **Environment from a Connection** from a field of a Connection. (The script still reads the old names
-   `YAWBLE_SIGNING_DLIB` and `YAWBLE_SIGNTOOL` when you build by hand, but a task can never be given a `YAWBLE_` name.)
+   **Environment from a Connection** from a field of a Connection. (Built by hand, the script also reads
+   `YAWBLE_SIGNING_DLIB` and `YAWBLE_SIGNTOOL`; a task can never be given a `YAWBLE_` name.)
 3. **The task** (team of your choice, repository `main`):
 
    | Field | Value |
